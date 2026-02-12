@@ -33,7 +33,7 @@ PIL_FONT = ImageFont.load_default()
 
 
 
-def drawText(img_arr, img_text):
+def drawText(img_arr, img_text, color=(255,255,0)):
     """ Draws text on the image represented as a numpy array.
     """
 
@@ -43,7 +43,7 @@ def drawText(img_arr, img_text):
     draw = ImageDraw.Draw(im)
 
     # Draw the text on the image, in the upper left corner
-    draw.text((0, 0), img_text, (255,255,0), font=PIL_FONT)
+    draw.text((0, 0), img_text, color, font=PIL_FONT)
     draw = ImageDraw.Draw(im)
 
     # Convert the type of the image to grayscale, with one color
@@ -99,7 +99,7 @@ class LiveViewer(multiprocessing.Process):
 
 
 
-    def updateImage(self, img, text, pause_time, banner_text=""):
+    def updateImage(self, img, text, pause_time, banner_text="", color=(255,255,0)):
         """ Update the image on the screen. 
         
         Arguments:
@@ -114,7 +114,7 @@ class LiveViewer(multiprocessing.Process):
             Nothing
         """
 
-        img = drawText(img, text)
+        img = drawText(img, text, color=color)
 
         if not banner_text:
             banner_text = "LiveViewer"
@@ -192,12 +192,19 @@ class LiveViewer(multiprocessing.Process):
         frame_interval = self.config.frame_save_aligned_interval
 
 
-        # Initialise two windows
+        # Get screen resolution
 
+        root = tkinter.Tk()
+
+        width, height = root.winfo_screenwidth(), root.winfo_screenheight()
+        print(width, height)
+
+        # Initialise two windows
 
         if self.config.live_maxpixel_enable:
             cc_w_handle = "Continuous Capture"
             cv2.namedWindow(cc_w_handle)
+
         if self.config.slideshow_enable:
             ss_w_handle = "Slideshow of detections from past 48 hours"
             cv2.namedWindow(ss_w_handle)
@@ -213,6 +220,8 @@ class LiveViewer(multiprocessing.Process):
             # When both are enabled, split the pause time between the two images
             if self.config.slideshow_enable and self.config.live_maxpixel_enable:
                 pause = self.slideshow_pause * 0.5
+                cv2.moveWindow(cc_w_handle, int(width * 0.05), int(height * 0.25))
+                cv2.moveWindow(ss_w_handle, int(width * 0.55), int(height * 0.25))
 
             # If they are different, then only one must be enabled, so give both the full pause time
             elif self.config.slideshow_enable != self.config.live_maxpixel_enable:
@@ -233,22 +242,24 @@ class LiveViewer(multiprocessing.Process):
                         full_path_to_matched_dir = os.path.join(archived_dir_path, archived_dir)
                         if not os.path.isdir(full_path_to_matched_dir):
                             continue
-                        print(f"Found and working on {archived_dir}")
-                        dir_date, dir_time = archived_dir.split("_")[1], ff_file.split("_")[2]
+
+                        dir_date, dir_time = archived_dir.split("_")[1], archived_dir.split("_")[2]
                         dir_time_object = datetime.datetime.strptime(f"{dir_date}_{dir_time}",
                                                                       "%Y%m%d_%H%M%S").replace(tzinfo=datetime.timezone.utc)
                         if (dt_now - dir_time_object).total_seconds() < 48 * 60 * 60:
                             dir_list.append(full_path_to_matched_dir)
 
-
-
-                    for root, dirs, files in os.walk(os.path.join(self.config.data_dir, self.config.archived_dir)):
-                        for ff_file in fnmatch.filter(files, f"FF_{self.config.stationID.upper()}_*_*_*_*.fits"):
-                            file_date, file_time = ff_file.split("_")[2], ff_file.split("_")[3]
-                            file_time_object = datetime.datetime.strptime(f"{file_date}_{file_time}", "%Y%m%d_%H%M%S").replace(
-                                tzinfo=datetime.timezone.utc)
-                            if (dt_now - file_time_object).total_seconds() < 48 * 60 * 60:
-                                ff_file_list.append(os.path.join(root, ff_file))
+                    dir_list.sort()
+                    print(dir_list)
+                    for dir in dir_list:
+                        print(f"Found and working on {dir}")
+                        for root, dirs, files in os.walk(os.path.join(dir)):
+                            for ff_file in fnmatch.filter(files, f"FF_{self.config.stationID.upper()}_*_*_*_*.fits"):
+                                file_date, file_time = ff_file.split("_")[2], ff_file.split("_")[3]
+                                file_time_object = datetime.datetime.strptime(f"{file_date}_{file_time}", "%Y%m%d_%H%M%S").replace(
+                                    tzinfo=datetime.timezone.utc)
+                                if (dt_now - file_time_object).total_seconds() < 48 * 60 * 60:
+                                    ff_file_list.append(os.path.join(root, ff_file))
                     ff_file_list.sort()
 
                 if not len(ff_file_list):
@@ -259,7 +270,7 @@ class LiveViewer(multiprocessing.Process):
                 if slideshow_index < len(ff_file_list):
                     ff_file_to_show = ff_file_list[slideshow_index]
                     slideshow_index += 1
-                    image_annotation = f"{os.path.basename(ff_file_to_show)} {slideshow_index}/{len(ff_file_list)}"
+                    image_annotation = f"{os.path.basename(ff_file_to_show)}  #{slideshow_index}/{len(ff_file_list)}"
 
                     # Now plot the detection.maxpixel
                     ff_data = readFF(os.path.dirname(ff_file_to_show),
@@ -325,22 +336,29 @@ class LiveViewer(multiprocessing.Process):
                             time.sleep(1)
                             size = os.path.getsize(cc_file_to_show)
 
+                        name, _ = os.path.splitext(os.path.basename(cc_file_to_show))
+                        last_char = name[-1]
 
-
+                        # Plot in black by day, and white by night
+                        if last_char == 'd':
+                            color = (0,0,0)
+                        else:
+                            color = (255,255,255)
+                        print(last_char, color)
                         # Show the file if it is the first iteration
                         if _cc_file_to_show is None:
                             if cc_file_to_show != _cc_file_to_show:
                                 img = np.array(Image.open(cc_file_to_show))
                                 if self.config.slideshow_enable:
                                     img = cv2.resize(img, (0, 0), fx=0.5, fy=0.5)
-                                self.updateImage(img, os.path.basename(cc_file_to_show), pause, cc_w_handle)
+                                self.updateImage(img, os.path.basename(cc_file_to_show), pause, cc_w_handle, color=color)
 
                         # Or if it is different from the last iteration
                         elif _cc_file_to_show != cc_file_to_show:
                             img = np.array(Image.open(cc_file_to_show))
                             if self.config.slideshow_enable:
                                 img = cv2.resize(img, (0, 0), fx=0.5, fy=0.5)
-                            self.updateImage(img, os.path.basename(cc_file_to_show), pause , cc_w_handle)
+                            self.updateImage(img, os.path.basename(cc_file_to_show), pause , cc_w_handle, color=color)
                         _cc_file_to_show = cc_file_to_show
 
                 #### Continuous capture live image work end
@@ -448,8 +466,11 @@ class LiveViewer(multiprocessing.Process):
         except Exception as e:
             print('Setting niceness failed with message:\n' + repr(e))
 
+        print(self.dir_path)
         if self.dir_path is not None:
             if os.path.exists(self.dir_path):
+                if self.dir_path.endswith(os.path.expanduser(self.config.frame_dir)):
+                    self.monitorFramesDirAndSlideshow()
                 if self.slideshow or os.path.isdir(self.dir_path):
                     self.startSlideshow()
                 elif self.image or os.path.isfile(self.dir_path):
