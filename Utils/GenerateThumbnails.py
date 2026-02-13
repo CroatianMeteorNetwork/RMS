@@ -17,7 +17,6 @@
 
 from __future__ import print_function, division, absolute_import
 
-
 """ Generates a thumbnail image of all FF files in the given directory. """
 
 import os
@@ -37,6 +36,200 @@ except ImportError:
 
 import RMS.ConfigReader as cr
 import RMS.Formats.FFfile as FFfile
+
+from RMS.Logger import getLogger
+# Get the logger from the main module
+log = getLogger("rmslogger")
+
+
+class Thumbnail:
+
+    # Class to build a thumbnail in memory one image at a time and export on request
+
+    def __init__(self, config, mosaic_type, testing=False):
+        """
+        Arguments:
+            config: [config] RMS config instance
+            mosaic_type: [mosaic_type] Mosaic type - normally detected or captured
+        """
+
+        self.thumbnail_count = 0
+        self.config = config
+        self.depth = config.thumb_stack
+        self.width = config.thumb_n_width
+        self.images_per_row = self.width * self.depth
+        self.img_index = 0
+
+
+        # Calculate the dimensions of the binned image
+        self.bin_w = int(config.width / config.thumb_bin)
+        self.bin_h = int(config.height / config.thumb_bin)
+
+        self.canvas_width = self.width * self.bin_w
+
+        # Build a row list, all the rows will be added together at the end
+        self.row_list  = []
+        self.mosaic_type = mosaic_type
+        self.header_height = 20
+        self.timestamp_height = 10
+
+        # Testing variable, to give a distinctive filename
+        self.testing = testing
+
+        log.info(f"{mosaic_type} thumbnail initialised")
+
+    def serialToCoordinates(self, img_index):
+
+        """Convert an imag index number for an image into coordinates, x,y,z
+        Z - position in the stack, X, position across a mosaic, Y, position down the mosaic
+        Z changes fastest, then X, then Y
+
+        Arguments:
+            img_index: [int] image index
+
+        Returns:
+            x: [int] X coordinate
+            y: [int] Y coordinate
+            z: [int] Z coordinate
+
+        """
+
+        y = img_index // (self.images_per_row)
+        remainder = img_index % (self.images_per_row)
+
+        x = remainder // self.depth
+        z = remainder % self.depth
+
+        return x, y, z
+
+
+    def add(self, ff, ff_name, final=False):
+        """
+        Add an ff image to the mosaic
+
+        Arguments:
+            ff: [FFfile] FFfile instance
+            ff_name: [string] FF file name - used to extract a timestamp
+
+        Keyword Arguments:
+            final: [bool] Optional, default false
+
+        """
+
+        x, y, z = self.serialToCoordinates(self.img_index)
+        if z == 0:
+
+            # If it is the first image - this is a placeholder in case any work is required
+            if self.img_index == 0:
+                pass
+
+            # If it is the first column
+            if x == 0:
+                # Create a new canvas for the row
+                self.row_image_canvas = np.zeros((self.bin_h + self.timestamp_height, self.canvas_width))
+                self.timestamp_list = []
+
+            # If it is a new stack, create a new img_stack and add the timestamp to the list
+            if z == 0:
+                self.timestamp_list.append(FFfile.filenameToDatetime(ff_name))
+                self.img_stack = np.zeros((self.bin_h, self.bin_w))
+
+
+        # Unless ff is None, do the work on the image
+        if not ff is None:
+        # Extract the image from the maxpixel
+            img = ff.maxpixel
+            img = cv2.resize(img, (self.bin_w, self.bin_h))
+
+            # And stack
+            self.img_stack = stackIfLighter(self.img_stack, img)
+            self.img_index += 1
+
+        # Once a stack is completed place the stacked image into the row image and annotate
+        if z == (self.depth - 1) or final:
+
+            # Compute image position
+            img_pos_x = x * self.bin_w
+            img_pos_y = 0 + self.timestamp_height
+
+            # Compute position of the text
+            text_x = x * self.bin_w
+            text_y = 0 * self.bin_h + (0 + 1) * self.timestamp_height - 1
+
+            # Add timestamp text
+            ts_text = self.timestamp_list[x].strftime('%H:%M:%S')
+            cv2.putText(self.row_image_canvas, ts_text, (text_x, text_y),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
+
+            self.row_image_canvas[img_pos_y: img_pos_y + self.bin_h,
+                                  img_pos_x: img_pos_x + self.bin_w] = self.img_stack
+
+        if (x == (self.width - 1) and z == (self.depth - 1)) or final:
+            # Add the completed row to the list
+            self.row_list.append(self.row_image_canvas)
+            log.info(f"Thumbnail row {len(self.row_list)} completed")
+
+
+    def export(self, dir_path):
+
+        """Export the mosaic held in memory to a file
+
+        Arguments:
+            dir_path: [string] Directory path - used for annotation as well as export
+
+        """
+
+        log.info("Starting thumbnail export")
+        # Build the body of the image
+
+        self.add(None, None, final=True)
+
+        log.info(f"Building thumbnail body from {len(self.row_list)} rows")
+        thumbnail_mosaic = np.vstack(self.row_list)
+
+        # Now make the header
+
+        self.header_row = np.zeros((self.header_height, self.canvas_width))
+        header_text = f'Station: {str(config.stationID)} Night: {os.path.basename(dir_path)}  Type: {self.mosaic_type}'
+        log.info(f"Constructing header {header_text}")
+        cv2.putText(self.header_row, header_text,
+                    (0, self.header_height // 2), \
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.4,
+                    (255, 255, 255),
+                    1)
+
+        # Stack the header above the body
+        log.info("Appending body to header")
+        mosaic_img = np.vstack([self.header_row, thumbnail_mosaic])
+
+
+        # Compute a filename and write to disc
+
+        dir_name = os.path.basename(os.path.abspath(dir_path))
+        if dir_name.startswith(self.config.stationID):
+            prefix = dir_name
+        else:
+            prefix = "{:s}_{:s}".format(self.config.stationID, dir_name)
+
+        if self.testing:
+            thumb_name = "{:s}_{:s}_on_the_fly_thumbs.jpg".format(prefix, self.mosaic_type)
+        else:
+            thumb_name = "{:s}_{:s}_thumbs.jpg".format(prefix, self.mosaic_type)
+
+        # Save the mosaic
+        log.info(f"Writing thumbnail to {thumb_name}")
+
+        if USING_IMAGEIO:
+            # Use imageio to write the image
+            imwrite(os.path.join(dir_path, thumb_name), mosaic_img, quality=80)
+        else:
+            # Use OpenCV to save the image
+            imwrite(os.path.join(dir_path, thumb_name), mosaic_img, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+
+        log.info("Thumbnail export complete")
+        return thumb_name
+
 
 
 def stackIfLighter(arr1, arr2):
@@ -244,6 +437,9 @@ if __name__ == "__main__":
     arg_parser.add_argument('-n', '--nostack', action="store_true", \
         help="""Don't stack images.""")
 
+    arg_parser.add_argument('-f', '--onthefly', action="store_true", \
+        help="""Test building on the fly.""")
+
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
@@ -256,4 +452,19 @@ if __name__ == "__main__":
     # Read the argument as a path to the night directory
     dir_path = cml_args.dir_path[0]
 
+    # Test building a thumbnail on the fly
+    if cml_args.onthefly:
+        thumbnail = Thumbnail(config, "CAPTURED", testing=True)
+
+        for f  in sorted(os.listdir(dir_path)):
+            if FFfile.validFFName(f):
+                ff = FFfile.read(dir_path, f)
+                thumbnail.add(ff, f)
+
+        thumbnail.export(os.path.expanduser(dir_path))
+
+    # Build thumbnails the conventional way
     generateThumbnails(dir_path, config, 'mosaic', no_stack=cml_args.nostack)
+
+
+

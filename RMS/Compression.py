@@ -38,7 +38,7 @@ from RMS.Routines.Image import saveImage
 import pyximport
 pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 from RMS.CompressionCy import compressFrames
-
+from Utils.GenerateThumbnails import Thumbnail
 
 # Get the logger from the main module
 log = getLogger("rmslogger")
@@ -84,7 +84,7 @@ class Compressor(multiprocessing.Process):
         self.exit = multiprocessing.Event()
 
         self.run_exited = multiprocessing.Event()
-    
+        self.thumbnail = Thumbnail(config, 'captured')
 
 
     def compress(self, frames):
@@ -154,7 +154,8 @@ class Compressor(multiprocessing.Process):
         
         # Write the FF file
         FFfile.write(ff, self.data_dir, filename_millis, fmt=self.config.ff_format)
-        
+        self.thumbnail.add(ff, filename_millis)
+
         return filename_millis, filename_micros
 
 
@@ -197,6 +198,8 @@ class Compressor(multiprocessing.Process):
             
         log.debug('Joining compression...')
 
+        log.info("Exporting thumbnail mosaic into {self.data_dir}")
+        self.thumbnail.export(self.data_dir)
 
         t_beg = time.time()
 
