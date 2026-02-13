@@ -144,6 +144,8 @@ class Thumbnail:
 
             # And stack
             self.img_stack = stackIfLighter(self.img_stack, img)
+
+            # And increment the image counter - only if we have valid ff
             self.img_index += 1
 
         # Once a stack is completed place the stacked image into the row image and annotate
