@@ -643,7 +643,10 @@ def gatherCameraInformation(config, attempts=6, delay=10, sock_timeout=3):
         sock_timeout: [float] optional, default 3, socket timeout in seconds.
 
     Return:
-        sensor type: [string] sensor type.
+        (sensor, firmware, build_date): [tuple of strings]
+            sensor: hardware/sensor identifier
+            firmware: firmware version string, or "" if not available
+            build_date: firmware build date string, or "" if not available
 
     """
 
@@ -656,15 +659,14 @@ def gatherCameraInformation(config, attempts=6, delay=10, sock_timeout=3):
                 cam.close()
                 sensor = sys_info.get('HardWare', 'Unknown')
                 fw = sys_info.get('SoftWareVersion', '')
-                if fw:
-                    return "{} FW:{}".format(sensor, fw)
-                return sensor
+                build_time = sys_info.get('BuildTime', '')
+                return (sensor, fw, build_time)
         except (socket.timeout, OSError, ConnectionError):
             # Camera may still be rebooting - ignore and retry
             pass
         time.sleep(delay)
 
-    return "Unavailable"
+    return ("Unavailable", "Unavailable", "Unavailable")
 
 def captureDirectories(captured_dir, stationID):
     """Counts the captured directories.
@@ -989,6 +991,8 @@ def retrieveObservationData(conn, config, night_directory=None, ordering=None):
                     'camera_lens','camera_fov_h','camera_fov_v',
                     'camera_pointing_alt','camera_pointing_az',
                     'camera_information',
+                    'camera_firmware_version',
+                    'camera_firmware_build_date',
                     'clock_measurement_source', 'clock_synchronized', 'clock_ahead_ms', 'clock_error_uncertainty_ms',
                     'start_time', 'duration_from_start_of_observation', 'continuous_capture',
                     'photometry_good', 'star_catalog_file',
@@ -1180,9 +1184,14 @@ def startObservationSummaryReport(config, duration, force_delete=False):
     captured_directories = captureDirectories(os.path.join(config.data_dir, config.captured_dir), config.stationID)
     addObsParam(conn, "captured_directories", captured_directories)
     try:
-        addObsParam(conn, "camera_information", gatherCameraInformation(config))
+        sensor, firmware, build_date = gatherCameraInformation(config)
+        addObsParam(conn, "camera_information", sensor)
+        addObsParam(conn, "camera_firmware_version", firmware)
+        addObsParam(conn, "camera_firmware_build_date", build_date)
     except:
         addObsParam(conn, "camera_information", "Unavailable")
+        addObsParam(conn, "camera_firmware_version", "Unavailable")
+        addObsParam(conn, "camera_firmware_build_date", "Unavailable")
 
     # Hardcoded for now, but should be calculated based on the config value
     no_of_frames_per_fits_file = 256
