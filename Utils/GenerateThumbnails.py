@@ -69,6 +69,7 @@ class Thumbnail:
 
         # Build a row list, all the rows will be added together at the end
         self.row_list  = []
+        self.timestamp_list = []
         self.mosaic_type = mosaic_type
         self.header_height = 20
         self.timestamp_height = 10
@@ -117,7 +118,7 @@ class Thumbnail:
         """
 
         x, y, z = self.serialToCoordinates(self.img_index)
-        if z == 0:
+        if z == 0 and ff is not None and ff_name is not None:
 
             # If it is the first image - this is a placeholder in case any work is required
             if self.img_index == 0:
@@ -136,7 +137,7 @@ class Thumbnail:
 
 
         # Unless ff is None, do the work on the image
-        if not ff is None:
+        if ff is not None:
         # Extract the image from the maxpixel
             img = ff.maxpixel
             img = cv2.resize(img, (self.bin_w, self.bin_h))
