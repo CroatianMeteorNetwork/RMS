@@ -633,9 +633,19 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
             # Initialize as 3-channel BGR
             img_summary = np.zeros((img_handle.ff.nrows*2, img_handle.ff.ncols*2, 3), dtype=np.uint8)
 
-            # Top-Left: Maxpixel (Auto-leveled)
+            # Top-Left: Maxpixel (Auto-leveled, same as plotLines)
+            mp_img = np.copy(maxpix_img)
+            min_lvl = np.percentile(mp_img[2:], 1)
+            max_lvl = np.percentile(mp_img[2:], 99.0)
+            if mp_img.dtype == np.uint8:
+                mp_img = Image.adjustLevels(mp_img, min_lvl, 1.0, max_lvl)
+            else:
+                # Clip and scale to 8-bit (same as plotLines for 16-bit images)
+                mp_img = np.clip(mp_img, min_lvl, max_lvl)
+                mp_img = ((mp_img - min_lvl)/(max_lvl - min_lvl)*255).astype(np.uint8)
+
             # Convert to BGR if grayscale
-            mp_bgr = maxpixel_autolevel
+            mp_bgr = mp_img
             if len(mp_bgr.shape) == 2:
                 mp_bgr = cv2.cvtColor(mp_bgr, cv2.COLOR_GRAY2BGR)
             img_summary[:img_handle.ff.nrows, 0:img_handle.ff.ncols] = mp_bgr
