@@ -622,6 +622,11 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
             if (daytime_mode is not None):
                 daytime_mode_prev = daytime_mode.value
 
+            # Record start time and original duration for remaining-time calculation
+            # after watchdog restarts (wait() resets its timer on each call)
+            capture_loop_start = RmsDateTime.utcnow()
+            original_duration = duration
+
             # Wait loop with watchdog restart capability
             watchdog_restart_count = 0
             while True:
@@ -665,12 +670,18 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
                     log.info('WATCHDOG: BufferedCapture restarted successfully, capture continuing')
 
-                    # Recalculate remaining capture duration based on current time
-                    # This prevents the duration timer from resetting to the full night length
-                    # Only needed in standard mode - continuous mode uses daytime_mode switching instead
-                    if not config.continuous_capture:
-                        _, duration = captureDuration(config.latitude, config.longitude, config.elevation)
-                        log.info('WATCHDOG: Recalculated remaining capture duration: {:.2f} hours'.format(duration/3600))
+                    # Recalculate remaining duration from the original budget, accounting
+                    # for time already elapsed.  Works for both user-specified --duration
+                    # and astronomical night durations (wait() resets its timer each call).
+                    if original_duration is not None:
+                        elapsed = (RmsDateTime.utcnow() - capture_loop_start).total_seconds()
+                        duration = original_duration - elapsed
+                        if duration <= 0:
+                            log.info('WATCHDOG: Capture duration expired during restart '
+                                     '(elapsed: {:.2f} h), stopping'.format(elapsed / 3600))
+                            break
+                        log.info('WATCHDOG: Remaining capture duration: {:.2f} h '
+                                 '(elapsed: {:.2f} h)'.format(duration / 3600, elapsed / 3600))
 
                     continue
                 else:
