@@ -427,7 +427,7 @@ class EventContainer(object):
             population: [list] population of events.
 
         Keyword arguments:
-            seed: [int] seed for random number generation, if default NOne, the seed is randomised
+            seed: [int] seed for random number generation, if default None, the seed is randomised
 
         Return:
             population: [list] population of events.
