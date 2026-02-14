@@ -508,6 +508,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
                         try:
                             bc.join(timeout=1)
                         except:
+                            # Ignore errors during cleanup of an already-dead process; failure here is non-fatal.
                             pass
 
                     # Wait a moment before restart to avoid rapid restart loops
