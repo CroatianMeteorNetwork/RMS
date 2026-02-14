@@ -21,6 +21,7 @@ import os
 import sys
 from RMS.Misc import getRmsRootDir
 from Utils.GenerateTimelapse import isFfmpegWorking
+import matplotlib.colors as mcolors
 
 # Consolidated version-specific imports and definitions
 if sys.version_info[0] == 3:
@@ -274,6 +275,7 @@ class Config:
 
 
         self.external_script_run = False
+        self.external_script_log = False
         self.auto_reprocess_external_script_run = False
         self.external_script_path = None
         self.external_function_name = "rmsExternal"
@@ -485,6 +487,9 @@ class Config:
 
         # Flag determining if uploading is enabled or not
         self.upload_enabled = True
+
+        # Flag determining if uploading splitting is enabled or not
+        self.upload_split = True
 
         # Delay upload after files are added to the queue by the given number of minutes
         self.upload_delay = 0
@@ -717,6 +722,7 @@ class Config:
 
         # colour scheme to use for showers
         self.shower_color_map = 'viridis'
+        self.sporadic_color ='gray'
 
 
         #### EGM96 vs WGS84 heights file
@@ -931,6 +937,8 @@ def parseSystem(config, parser):
     if parser.has_option(section, "external_script_run"):
         config.external_script_run = parser.getboolean(section, "external_script_run")
 
+    if parser.has_option(section, "external_script_log"):
+        config.external_script_log = parser.getboolean(section, "external_script_log")
 
     if parser.has_option(section, "auto_reprocess_external_script_run"):
         config.auto_reprocess_external_script_run = parser.getboolean(section, 
@@ -1334,6 +1342,10 @@ def parseUpload(config, parser):
     # Enable/disable upload
     if parser.has_option(section, "upload_enabled"):
         config.upload_enabled = parser.getboolean(section, "upload_enabled")
+
+    # Enable uploading images in one archive and data derived from images in another
+    if parser.has_option(section, "upload_split"):
+        config.upload_split = parser.getboolean(section, "upload_split")
 
     # Address of the upload server
     if parser.has_option(section, "hostname"):
@@ -1868,3 +1880,8 @@ def parseColors(config, parser):
 
     if parser.has_option(section, "shower_color_map"):
         config.shower_color_map = parser.get(section, "shower_color_map")
+        
+    if parser.has_option(section, "sporadic_color"):
+        config.sporadic_color = parser.get(section, "sporadic_color")
+        if config.sporadic_color not in mcolors.CSS4_COLORS:
+            config.sporadic_color = 'gray'

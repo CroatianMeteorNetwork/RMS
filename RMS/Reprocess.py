@@ -285,7 +285,8 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
             log.info("Performing single station shower association...")
             try:
                 showerAssociation(config, [os.path.join(night_data_dir, ftpdetectinfo_name)], 
-                    save_plot=True, plot_activity=True, color_map=config.shower_color_map)
+                    save_plot=True, plot_activity=True, color_map=config.shower_color_map, 
+                    sporadic_color=config.sporadic_color)
 
             except Exception as e:
                 log.debug('Shower association failed with the message:\n' + repr(e))
@@ -375,7 +376,7 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
     # Archive all fieldsums to one archive
     archiveFieldsums(night_data_dir)
 
-    # List for any extra files which will be copied to the night archive directory. Full paths have to be 
+    # List for any extra files which will be copied to the archive directories. Full paths have to be
     #   given
     extra_files = []
 
@@ -666,11 +667,11 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
     log.info('Archiving detections to ' + night_archive_dir)
     
     # Archive the detections
-    archive_name = archiveDetections(night_data_dir, night_archive_dir, ff_detected, config, 
-        extra_files=extra_files)
+    archive_name, imgdata_archive_name, metadata_archive_name = archiveDetections(night_data_dir,
+                                            night_archive_dir, ff_detected, config, extra_files=extra_files)
 
 
-    return night_archive_dir, archive_name, detector
+    return night_archive_dir, archive_name, imgdata_archive_name, metadata_archive_name, detector
 
 
 def cleanupTempArtifacts(config):
@@ -827,7 +828,8 @@ if __name__ == "__main__":
             log.info("Using all available cores for detection.")
 
     # Process the night
-    night_archive_dir, archive_name, detector = processNight(cml_args.dir_path[0], config)
+    night_archive_dir, archive_name, imgdata_archive_name, metadata_archive_name, detector =  \
+                                                    processNight(cml_args.dir_path[0], config)
 
     if cml_args.run_extl_script:
         # Run the external script
@@ -836,6 +838,10 @@ if __name__ == "__main__":
     # Upload the archive, if upload is enabled
     if config.upload_enabled:
 
+        # Add metadata archive first, so it might get uploaded first
+        files_to_add_list_unfiltered = [metadata_archive_name, imgdata_archive_name, archive_name]
+        files_to_add_list = [f for f in files_to_add_list_unfiltered if f is not None]
+
         # Init the upload manager
         log.info('Starting the upload manager...')
 
@@ -843,8 +849,8 @@ if __name__ == "__main__":
         upload_manager.start()
 
         # Add file for upload
-        log.info('Adding file to upload list: ' + archive_name)
-        upload_manager.addFiles([archive_name])
+        log.info(f'Adding files to upload list: {files_to_add_list}')
+        upload_manager.addFiles(files_to_add_list)
 
         # Stop the upload manager
         if upload_manager.is_alive():
