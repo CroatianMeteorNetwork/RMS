@@ -1644,7 +1644,7 @@ class EventMonitor(multiprocessing.Process):
                                 If None, then self.config.video_dir and self.config.frame_dir
                                 are searched.
 
-            suffix_list: [list] List of suffixes to search in the same order as search_from_list. If not passsed
+            suffix_list: [list] List of suffixes to search in the same order as search_from_list. If not passed
                                 then ['mkv', 'jpg'] are used.
             duration_list: [list] List of durations, same order as search_from_list. If not passed, then
                                 [self.config.raw_video_duration, self.config.frame_save_aligned_interval]
