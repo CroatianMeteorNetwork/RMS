@@ -507,9 +507,8 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
                         # Clean up the dead process
                         try:
                             bc.join(timeout=1)
-                        except:
-                            # Ignore errors during cleanup of an already-dead process; failure here is non-fatal.
-                            pass
+                        except Exception as e:
+                            log.warning('WATCHDOG: Error while cleaning up dead BufferedCapture process: %s', e)
 
                     # Wait a moment before restart to avoid rapid restart loops
                     time.sleep(5)
