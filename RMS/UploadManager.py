@@ -225,8 +225,8 @@ def getSSHClient(hostname,
         log.error("SSH connection timed out after {} seconds (hard timeout)".format(hard_timeout))
         try:
             ssh.close()
-        except Exception:
-            pass
+        except Exception as e:
+            log.debug("Failed to close SSH client after timeout: %s", e)
         return None
 
     if exception is not None:
