@@ -134,7 +134,7 @@ def extractDateFromLogName(config, log_name):
         log_name: [str] name of log file
 
     Return:
-        [str] iosoformat date and time extracted from log name
+        [str] isoformat date and time extracted from log name
     """
 
     log_name_fields = log_name.upper().split("_")
