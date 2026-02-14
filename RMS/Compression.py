@@ -38,7 +38,6 @@ from RMS.Routines.Image import saveImage
 import pyximport
 pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 from RMS.CompressionCy import compressFrames
-from Utils.GenerateThumbnails import Thumbnail
 
 # Get the logger from the main module
 log = getLogger("rmslogger")
@@ -84,7 +83,8 @@ class Compressor(multiprocessing.Process):
         self.exit = multiprocessing.Event()
 
         self.run_exited = multiprocessing.Event()
-        self.thumbnail = Thumbnail(config, 'captured')
+        self.thumbnail = RMS.Utils.GenerateThumbnails.Thumbnail
+
 
 
     def compress(self, frames):
@@ -242,16 +242,17 @@ class Compressor(multiprocessing.Process):
             self.join()
 
         # Return the detector and live viewer objects because they were updated in this namespace
-        return self.detector
+        return self.detector, self.thumbnail
     
 
 
-    def start(self):
+    def start(self, thumbnail):
         """ Start compression.
         """
         
         super(Compressor, self).start()
-    
+        self.thumbnail = thumbnail
+        pass
 
 
     def run(self):

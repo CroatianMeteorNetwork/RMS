@@ -118,6 +118,10 @@ class Thumbnail:
         """
 
         x, y, z = self.serialToCoordinates(self.img_index)
+        if final:
+            log.info(f"Finalising thumbnail of {self.img_index} images")
+
+        log.info(f"Adding image {self.img_index}")
         if z == 0 and ff is not None and ff_name is not None:
 
             # If it is the first image - this is a placeholder in case any work is required
@@ -185,8 +189,7 @@ class Thumbnail:
         log.info("Starting thumbnail export")
         # Build the body of the image
 
-        self.add(None, None, final=True)
-
+        log.info(f"Building mosaic of {self.img_index} images")
         log.info(f"Building thumbnail body from {len(self.row_list)} rows")
         thumbnail_mosaic = np.vstack(self.row_list)
 

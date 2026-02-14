@@ -55,6 +55,7 @@ from RMS.EventMonitor import EventMonitor
 from RMS.DownloadMask import downloadNewMask
 from RMS.Formats.ObservationSummary import startObservationSummaryReport
 from Utils.AuditConfig import compareConfigs
+from Utils.GenerateThumbnails import Thumbnail
 
 # Flag indicating that capturing should be stopped
 STOP_CAPTURE = False
@@ -616,7 +617,8 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
                 log.info(startObservationSummaryReport(config, duration, force_delete=False))
 
             # Start the compressor
-            compressor.start()
+            thumbnail = Thumbnail(config, "DETECTED", testing=True)
+            compressor.start(thumbnail)
 
             # Capture until Ctrl+C is pressed / camera switches modes
             if (daytime_mode is not None):
@@ -678,8 +680,10 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
             # Stop the compressor
             log.debug('Stopping compression...')
-            detector = compressor.stop()
+            detector, thumbnail  = compressor.stop()
             log.debug('Compression stopped')
+            thumbnail.add(None, None, final=True)
+            thumbnail.export(night_data_dir)
 
             if live_view is not None:
 
