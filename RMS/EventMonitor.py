@@ -1668,7 +1668,7 @@ class EventMonitor(multiprocessing.Process):
         if duration_list is None:
             duration_list = [self.config.raw_video_duration, self.config.frame_save_aligned_interval]
 
-        # Populate the candidate file set with al the files from the list of starting search points
+        # Populate the candidate file set with all the files from the list of starting search points
         for search_from, suffix, duration in zip(search_from_list, suffix_list, duration_list):
             candidate_file_set = set()
             search_from = os.path.join(self.config.data_dir, search_from)
