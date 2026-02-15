@@ -1,0 +1,14 @@
+[Unit]
+Description=$STATION_CODE_UPPER
+
+[Service]
+ExecStart=/bin/bash -c '~/source/RMS/Scripts/RMS_Update.sh ; source ~/vRMS/bin/activate;  python -m RMS.StartCapture -c /home/rms/source/Stations/$STATION_CODE_UPPER/.config'
+RuntimeMaxSec=48h
+RestartSec=30
+Restart=always
+WorkingDirectory=/home/$STATION_CODE_LOWER/source/RMS/
+SyslogIdentifier=$STATION_CODE_LOWER
+User=$STATION_CODE_LOWER
+
+[Install]
+WantedBy=multi-user.target
