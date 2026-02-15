@@ -1,0 +1,14 @@
+[Unit]
+Description=Uploader
+
+[Service]
+ExecStart=/bin/bash -c 'source ~/vRMS/bin/activate; ~/source/RMS/Scripts/RMS_Update.sh ; cd ~/source/RMS; python -m Tests.RsyncUploader '
+RuntimeMaxSec=48h
+RestartSec=30
+Restart=always
+WorkingDirectory=/home/rms/source/RMS/
+SyslogIdentifier=Uploader
+User=rms
+
+[Install]
+WantedBy=multi-user.target
