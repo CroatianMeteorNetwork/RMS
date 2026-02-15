@@ -30,7 +30,7 @@ from RMS.Astrometry.ApplyAstrometry import (
     rotationWrtHorizon,
 )
 from RMS.Astrometry.Conversions import date2JD, raDec2AltAz
-from RMS.Astrometry.FFTalign import alignPlatepar
+from RMS.Astrometry.NNalign import alignPlatepar
 from RMS.Formats import CALSTARS, FFfile, FTPdetectinfo, Platepar, StarCatalog
 from RMS.Formats.FTPdetectinfo import findFTPdetectinfoFile, validDefaultFTPdetectinfo
 from RMS.Math import angularSeparation
@@ -485,25 +485,24 @@ def recalibratePlateparsForFF(
                 ignore_max_stars=ignore_max_stars,
             )
 
-            # If the recalibration failed, try using FFT alignment
+            # If the recalibration failed, try using NN alignment
             if result is None:
 
-                log.info('Running FFT alignment...')
+                log.info('Running NN alignment...')
 
-                # Run FFT alignment
-                calstars_coords = np.array(star_dict_ff[jd])[:, :2]
-                calstars_coords[:, [0, 1]] = calstars_coords[:, [1, 0]]
-                test_platepar = alignPlatepar(
-                    config, prev_platepar, calstars_time, calstars_coords, show_plot=False
+                # Run NN alignment - pass full CALSTARS data so alignPlatepar can infer catalog LM
+                calstars_data = np.array(star_dict_ff[jd])
+                test_platepar, _ = alignPlatepar(
+                    config, prev_platepar, calstars_time, calstars_data, show_plot=False
                 )
 
-                # Try to recalibrate after FFT alignment
+                # Try to recalibrate after NN alignment
                 result, _ = recalibrateFF(
-                    config, test_platepar, jd, star_dict_ff, catalog_stars, lim_mag=lim_mag, 
+                    config, test_platepar, jd, star_dict_ff, catalog_stars, lim_mag=lim_mag,
                     ignore_distance_threshold=True
                 )
 
-                # If the FFT alignment failed, align the previous platepar using the smallest radius that 
+                # If the NN alignment failed, align the previous platepar using the smallest radius that
                 # matched and force save the the platepar
                 if (result is None) and (min_match_radius is not None):
                     log.info(
@@ -534,7 +533,7 @@ def recalibratePlateparsForFF(
                 working_platepar = result
 
 
-            # If the working platepar keeps failing, try using the original platepar before any FFT alignment
+            # If the working platepar keeps failing, try using the original platepar before any NN alignment
             if result is None:
                 log.info('Recalibration failed, trying to use the original platepar...')
                 result, _ = recalibrateFF(
