@@ -24,7 +24,8 @@ import datetime
 import shutil
 import RMS.ConfigReader as cr
 from RMS.Logger import getLogger
-
+import traceback
+import sys
 
 LATEST_LOG_UPLOADS_FILE_NAME = ".latestloguploads.json"
 ISO_DATE_2000 = datetime.datetime(int(2000), int(1), int(1), int(0), int(0), int(0)).isoformat()
@@ -53,7 +54,8 @@ def getTimeOfLastLogEntry(config, log_file):
     if last_log_time_string:
         try:
             last_log_entry_time_object = datetime.datetime.strptime(last_log_time_string, "%Y/%m/%d %H:%M:%S")
-        except:
+        except Exception as e:
+            log.error("".join(traceback.format_exception(*sys.exc_info())))
             last_log_entry_time_object = datetime.datetime.strptime("2000/01/01 00:00", "%Y/%m/%d %H:%M")
     else:
         last_log_entry_time_object = datetime.datetime.strptime("2000/01/01 00:00", "%Y/%m/%d %H:%M")
@@ -148,8 +150,8 @@ def extractDateFromLogName(config, log_name):
             if len(log_name_fields) > index_time:
                 dtstr = f'{log_name_fields[index_date][0:8]}_{log_name_fields[index_time][0:6]}'
                 return datetime.datetime.strptime(dtstr, '%Y%m%d_%H%M%S').isoformat()
-        except Exception:
-            pass
+        except Exception as e:
+            log.error("".join(traceback.format_exception(*sys.exc_info())))
 
     return ISO_DATE_2000
 
@@ -215,9 +217,11 @@ def makeLogArchives(config, dest_dir, update_tracker=True):
     logs_to_send_by_type = []
     for log_file_type, log_list in zip(log_type_list, log_list_of_lists):
         logs_to_send = []
-        date_for_this_log_type = datetime.datetime.fromisoformat(latest_log_uploads_dict[log_file_type])
+        if log_file_type in latest_log_uploads_dict:
+            date_for_this_log_type = datetime.datetime.fromisoformat(latest_log_uploads_dict[log_file_type])
+        else:
+            date_for_this_log_type = datetime.datetime.fromisoformat(ISO_DATE_2000)
 
-        pass
         for log_name in log_list:
             date_for_this_log_file = datetime.datetime.fromisoformat(extractDateFromLogName(config, log_name))
             if date_for_this_log_file < date_for_this_log_type:
@@ -230,7 +234,6 @@ def makeLogArchives(config, dest_dir, update_tracker=True):
                 logs_to_send.append(log_name)
         logs_to_send_by_type.append(logs_to_send)
 
-
     with tempfile.TemporaryDirectory() as temp_dir:
         os.mkdir(os.path.join(temp_dir, "logs"))
         for log_file_type, log_file_list in zip(log_type_list, logs_to_send_by_type):
@@ -241,7 +244,6 @@ def makeLogArchives(config, dest_dir, update_tracker=True):
                     shutil.copy(os.path.join(source_file_path), os.path.join(temp_dir, "logs", log_file_type))
                 else:
                     log.warning(f"Could not find log file in {source_file_path}")
-                pass
         log.info(f"Log directory structure created at {temp_dir}")
 
         archive_filename = shutil.make_archive(os.path.join(dest_dir, f"{os.path.basename(dest_dir)}_logs"), 'bztar', root_dir=temp_dir, base_dir=".")
