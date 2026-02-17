@@ -6992,6 +6992,9 @@ class PlateTool(QtWidgets.QMainWindow):
             # Intercept Escape key to return focus to image
             elif key == QtCore.Qt.Key_Escape:
                 self.img_frame.setFocus()
+                if self.star_pick_mode:
+                    # Let the event propagate to keyPressEvent for star pick handling
+                    return False
                 return True  # Consume the event
 
             # Intercept single-letter shortcuts that should work globally
