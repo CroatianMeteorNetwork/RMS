@@ -4994,10 +4994,8 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Update override_max_stars to handle the expected number of candidates.
             # max_stars limits raw candidate count (local maxima before PSF fitting),
-            # which is typically 3-5x the final detection count. Use at least what
-            # tuning used to ensure the same candidates pass through.
-            tuning_max_stars = max(2000, original_max_stars)
-            self.override_max_stars = max(tuning_max_stars, int(np.ceil(n_detected * 5 / 100) * 100))
+            # which is typically 3x the final detection count.
+            self.override_max_stars = int(np.clip(np.ceil(n_detected * 3 / 100) * 100, 400, 2000))
 
             # Update the GUI slider to reflect the new max_stars value
             # First ensure the slider range can accommodate the value
