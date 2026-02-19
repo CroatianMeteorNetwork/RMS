@@ -427,7 +427,7 @@ class EventContainer(object):
             population: [list] population of events.
 
         Keyword arguments:
-            seed: [int] seed for random number generation, if default NOne, the seed is randomised
+            seed: [int] seed for random number generation, if default None, the seed is randomised
 
         Return:
             population: [list] population of events.
@@ -1644,7 +1644,7 @@ class EventMonitor(multiprocessing.Process):
                                 If None, then self.config.video_dir and self.config.frame_dir
                                 are searched.
 
-            suffix_list: [list] List of suffixes to search in the same order as search_from_list. If not passsed
+            suffix_list: [list] List of suffixes to search in the same order as search_from_list. If not passed
                                 then ['mkv', 'jpg'] are used.
             duration_list: [list] List of durations, same order as search_from_list. If not passed, then
                                 [self.config.raw_video_duration, self.config.frame_save_aligned_interval]
@@ -1668,7 +1668,7 @@ class EventMonitor(multiprocessing.Process):
         if duration_list is None:
             duration_list = [self.config.raw_video_duration, self.config.frame_save_aligned_interval]
 
-        # Populate the candidate file set with al the files from the list of starting search points
+        # Populate the candidate file set with all the files from the list of starting search points
         for search_from, suffix, duration in zip(search_from_list, suffix_list, duration_list):
             candidate_file_set = set()
             search_from = os.path.join(self.config.data_dir, search_from)

@@ -186,8 +186,9 @@ def getSSHClient(hostname,
             # Close the client before attempting agent auth to ensure clean state
             try:
                 ssh.close()
-            except Exception:
-                pass
+            except Exception as e:
+                # Log cleanup failures at debug level; do not interrupt fallback auth.
+                log.debug("Error while closing SSH client after key auth failure: %s", e)
         else:
             # Connection successful
             log.debug("SSHClient connected successfully (key file).")
@@ -224,8 +225,8 @@ def getSSHClient(hostname,
         log.error("SSH connection timed out after {} seconds (hard timeout)".format(hard_timeout))
         try:
             ssh.close()
-        except Exception:
-            pass
+        except Exception as e:
+            log.debug("Failed to close SSH client after timeout: %s", e)
         return None
 
     if exception is not None:

@@ -83,6 +83,10 @@ def downloadNewPlatepar(config):
 
         log.info('Remote platepar renamed to: ' + dl_pp_name)
 
+    except (paramiko.SSHException, EOFError, OSError) as e:
+        log.warning('Connection error during platepar download: {}'.format(e))
+        return False
+
     finally:
         if sftp:
             log.debug("Closing SFTP channel")
