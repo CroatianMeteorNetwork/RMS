@@ -1207,6 +1207,12 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
         self._station_path_label.setWordWrap(True)
         station_vlayout.addWidget(self._station_path_label)
 
+        self._station_warning_label = QtWidgets.QLabel("")
+        self._station_warning_label.setStyleSheet("color: #e65100; font-size: 11px;")
+        self._station_warning_label.setWordWrap(True)
+        self._station_warning_label.hide()
+        station_vlayout.addWidget(self._station_warning_label)
+
         btn_row = QtWidgets.QHBoxLayout()
         folder_btn = QtWidgets.QPushButton("Open Folder...")
         file_btn = QtWidgets.QPushButton("Open File...")
@@ -1407,6 +1413,19 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
             else:
                 self._station_path_label.setText("(no data loaded)")
 
+        # Check for station ID mismatch between platepar and config
+        if pt.hasData() and hasattr(pt, 'platepar') and pt.platepar is not None:
+            pp_id = getattr(pt.platepar, 'station_code', None)
+            cfg_id = getattr(pt.config, 'stationID', None)
+            if pp_id and cfg_id and pp_id != cfg_id:
+                self._station_warning_label.setText(
+                    "Warning: platepar station '{}' does not match config '{}'".format(pp_id, cfg_id))
+                self._station_warning_label.show()
+            else:
+                self._station_warning_label.hide()
+        else:
+            self._station_warning_label.hide()
+
         # When no data is loaded, show empty state for all sections
         if not pt.hasData():
             for ftype in self.FILE_TYPES:
@@ -1504,9 +1523,10 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
                 "Platepar files (*.cal);;All files (*)")
             return path
         elif ftype == "Config":
-            path, _ = QtWidgets.QFileDialog.getOpenFileName(
-                self, "Load Config", start_dir,
-                "Config files (*.config *.cfg);;All files (*)")
+            # Use folder picker — _loadFile will find .config in the selected directory
+            path = str(QtWidgets.QFileDialog.getExistingDirectory(
+                self, "Select folder containing config", start_dir,
+                QtWidgets.QFileDialog.ShowDirsOnly))
             return path
         elif ftype == "Mask":
             path, _ = QtWidgets.QFileDialog.getOpenFileName(
@@ -1542,14 +1562,23 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
 
         elif ftype == "Config":
             if os.path.isdir(path):
-                path = os.path.join(path, ".config")
-            if os.path.isfile(path):
+                # Search for config files in the directory
+                config_files = [f for f in os.listdir(path)
+                    if f.endswith('.config') or f.endswith('.cfg')]
+                if len(config_files) == 1:
+                    path = os.path.join(path, config_files[0])
+                elif len(config_files) > 1:
+                    result = "Multiple config files found in: " + path
+                else:
+                    result = "No config file found in: " + path
+            if result is None and os.path.isfile(path):
                 try:
-                    pt.config = cr.loadConfigFromDirectory(path, os.path.dirname(path))
+                    pt.config = cr.parse(path)
+                    pt.initStarDetectionOverrides()
                     result = "Config loaded from: " + path
                 except Exception as e:
                     result = "Config load failed: " + repr(e)
-            else:
+            elif result is None:
                 result = "Config not found: " + path
 
         elif ftype == "Mask":
@@ -1595,7 +1624,9 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
 
         if result:
             print(result)
-            qmessagebox(title="Load " + ftype, message=result)
+            is_error = "failed" in result.lower() or "not found" in result.lower()
+            qmessagebox(title="Load " + ftype, message=result,
+                         message_type="error" if is_error else "info")
             self._refreshAll()
 
     # --- Save: pick multiple locations ---
@@ -1717,7 +1748,9 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
         if results:
             msg = "\n".join(results)
             print(msg)
-            qmessagebox(title="Save " + ftype, message=msg)
+            has_error = any("failed" in r.lower() for r in results)
+            qmessagebox(title="Save " + ftype, message=msg,
+                         message_type="error" if has_error else "info")
             self._refreshAll()
             pt.updateFileManagerButton()
 
