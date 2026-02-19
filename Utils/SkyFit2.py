@@ -1164,11 +1164,11 @@ if ASTRA_IMPORTED:
 class CalibrationFilesDialog(QtWidgets.QDialog):
     """Dialog showing calibration file state with per-file independent load/save controls.
 
-    Each file type (Platepar, Config, Mask, Flat) has its own Load and Save buttons.
+    Each file type (Platepar, Config, Mask, Flat, Dark) has its own Load and Save buttons.
     Load picks a single source location. Save supports writing to multiple locations at once.
     """
 
-    FILE_TYPES = ["Platepar", "Config", "Mask", "Flat"]
+    FILE_TYPES = ["Platepar", "Config", "Mask", "Flat", "Dark"]
 
     def __init__(self, plate_tool, parent=None):
         super().__init__(parent)
@@ -1486,6 +1486,26 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
         else:
             self.sections["Flat"]["save_btn"].setToolTip("")
 
+        # Dark
+        if pt.dark_source_path and pt.dark is not None:
+            self.sections["Dark"]["source_label"].setText(pt.dark_source_path)
+            self._setStatus("Dark", "Loaded")
+        elif pt.dark is not None:
+            self.sections["Dark"]["source_label"].setText("(loaded)")
+            self._setStatus("Dark", "Loaded")
+        else:
+            self.sections["Dark"]["source_label"].setText("(not loaded)")
+            self._setStatus("Dark", "Not loaded")
+
+        # Disable dark save if no source file to copy
+        dark_can_save = (pt.dark is not None and pt.dark_source_path
+                         and os.path.isfile(pt.dark_source_path))
+        self.sections["Dark"]["save_btn"].setEnabled(dark_can_save)
+        if not dark_can_save:
+            self.sections["Dark"]["save_btn"].setToolTip("No dark source file to copy")
+        else:
+            self.sections["Dark"]["save_btn"].setToolTip("")
+
     # --- Load: pick one location ---
 
     def _showLoadMenu(self, ftype, button):
@@ -1537,6 +1557,11 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
             path, _ = QtWidgets.QFileDialog.getOpenFileName(
                 self, "Load Flat", start_dir,
                 "Image files (*.png *.jpg *.bmp);;All files (*)")
+            return path
+        elif ftype == "Dark":
+            path, _ = QtWidgets.QFileDialog.getOpenFileName(
+                self, "Load Dark", start_dir,
+                "Image files (*.png *.jpg *.bmp *.nef *.cr2);;All files (*)")
             return path
         return None
 
@@ -1621,6 +1646,40 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
                         result = "Flat loaded from: " + path
                 except Exception as e:
                     result = "Flat load failed: " + repr(e)
+
+        elif ftype == "Dark":
+            if os.path.isdir(path):
+                # Search for known dark file names in the directory
+                for fname in [pt.config.dark_file, "dark.bmp", "dark.png"]:
+                    fpath = os.path.join(path, fname)
+                    if os.path.isfile(fpath):
+                        path = fpath
+                        break
+                else:
+                    result = "Dark not found in: " + path
+
+            if result is None:  # found a file
+                try:
+                    dark = loadDark(*os.path.split(path), dtype=pt.img.data.dtype,
+                                    byteswap=pt.img_handle.byteswap)
+                    dark = dark.astype(pt.img.data.dtype).T
+                    if pt.img.data.shape != dark.shape:
+                        result = "Dark size mismatch: " + path
+                    else:
+                        pt.dark = dark
+                        pt.dark_source_path = path
+                        pt.img.dark = dark
+                        pt.img_zoom.dark = dark
+                        # Apply the dark to the flat if flatbiassub is set
+                        if pt.flatbiassub and pt.flat_struct is not None:
+                            pt.flat_struct.applyDark(dark)
+                            pt.img.flat_struct = pt.flat_struct
+                            pt.img_zoom.flat_struct = pt.flat_struct
+                        pt.img.reloadImage()
+                        pt.img_zoom.reloadImage()
+                        result = "Dark loaded from: " + path
+                except Exception as e:
+                    result = "Dark load failed: " + repr(e)
 
         if result:
             print(result)
@@ -1744,6 +1803,20 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
                         results.append("Flat save to {} failed: {}".format(target_dir, repr(e)))
                 else:
                     results.append("Flat: no source file to copy.")
+
+            elif ftype == "Dark":
+                if pt.dark_source_path and os.path.isfile(pt.dark_source_path):
+                    try:
+                        dest = os.path.join(target_dir, os.path.basename(pt.dark_source_path))
+                        if os.path.realpath(pt.dark_source_path) != os.path.realpath(dest):
+                            shutil.copy2(pt.dark_source_path, dest)
+                            results.append("Dark copied to: " + dest)
+                        else:
+                            results.append("Dark: source and destination are the same, skipped.")
+                    except Exception as e:
+                        results.append("Dark save to {} failed: {}".format(target_dir, repr(e)))
+                else:
+                    results.append("Dark: no source file to copy.")
 
         if results:
             msg = "\n".join(results)
@@ -2165,6 +2238,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.platepar_modified = False
         self.mask_source_path = None
         self.flat_source_path = None
+        self.dark_source_path = None
 
         # Dark frame
         self.dark = None
@@ -2358,7 +2432,9 @@ class PlateTool(QtWidgets.QMainWindow):
             flat_file, self.flat_struct = self.loadFlat()
             if flat_file:
                 self.flat_source_path = flat_file
-            _, self.dark = self.loadDark()
+            dark_file, self.dark = self.loadDark()
+            if dark_file:
+                self.dark_source_path = dark_file
 
 
             # Set focus back on the SkyFit window
@@ -3409,7 +3485,9 @@ class PlateTool(QtWidgets.QMainWindow):
                 flat_file, self.flat_struct = self.loadFlat()
                 if flat_file:
                     self.flat_source_path = flat_file
-                _, self.dark = self.loadDark()
+                dark_file, self.dark = self.loadDark()
+                if dark_file:
+                    self.dark_source_path = dark_file
 
                 self.activateWindow()
 
@@ -8329,14 +8407,16 @@ class PlateTool(QtWidgets.QMainWindow):
         # Load the dark
         elif event.key() == QtCore.Qt.Key_D and (modifiers == QtCore.Qt.ControlModifier):
             
-            _, self.dark = self.loadDark(force_dialog=True)
+            dark_file, self.dark = self.loadDark(force_dialog=True)
+            if dark_file:
+                self.dark_source_path = dark_file
 
             # Set focus back on the SkyFit window
             self.activateWindow()
 
             # Apply the dark to the flat if the flatbiassub flag is set
             if self.flatbiassub and (self.flat_struct is not None):
-                
+
                 self.flat_struct.applyDark(self.dark)
 
                 self.img.flat_struct = self.flat_struct
