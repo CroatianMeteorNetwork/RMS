@@ -4903,9 +4903,10 @@ class PlateTool(QtWidgets.QMainWindow):
             print(f"\n  Selected intensity_threshold: {best_threshold}")
 
             # Get final stats with current detection parameters, including true positive positions
+            detection_info = {}
             n_true_pos, n_false_pos, n_detected, tp_x, tp_y = self._countTrueFalsePositives(
                 ff_name, best_threshold, best_segment, visible_cat_x, visible_cat_y,
-                return_positions=True)
+                return_positions=True, extra_info=detection_info)
 
             # Early bail-out check after Phase 2
             # If precision is very low, the calibration is likely wrong
@@ -4992,10 +4993,23 @@ class PlateTool(QtWidgets.QMainWindow):
             # Enable override mode
             self.tab.star_detection.use_override_checkbox.setChecked(True)
 
-            # Update override_max_stars to handle the expected number of candidates.
-            # max_stars limits raw candidate count (local maxima before PSF fitting),
-            # which is typically 3x the final detection count.
-            self.override_max_stars = int(np.clip(np.ceil(n_detected * 3 / 100) * 100, 400, 2000))
+            # Compute seasonal headroom: sweep the year to find peak visible star count
+            # relative to current, so max_stars accommodates the busiest sky.
+            self.status_bar.showMessage("Tuning... computing seasonal variation")
+            QtWidgets.QApplication.processEvents()
+            peak_ratio, peak_count, current_count = self._computeSeasonalStarVariation(
+                self.catalog_stars, jd)
+            seasonal_factor = max(peak_ratio, 1.2)  # At least 20% headroom
+            print(f"  Seasonal variation: {current_count} stars now, {peak_count} at peak "
+                  f"(ratio={peak_ratio:.2f}, using {seasonal_factor:.2f}x)")
+
+            # Set max_stars from the measured raw candidate count scaled by seasonal
+            # variation + 15% frame-to-frame buffer, rounded up to nearest 100,
+            # clamped to [400, 2000].
+            num_candidates = detection_info.get('num_candidates', n_detected * 3)
+            self.override_max_stars = int(np.clip(
+                np.ceil(num_candidates * seasonal_factor * 1.15 / 100) * 100, 400, 2000))
+            print(f"  Raw candidates: {num_candidates}, max_stars set to: {self.override_max_stars}")
 
             # Update the GUI slider to reflect the new max_stars value
             # First ensure the slider range can accommodate the value
@@ -5042,7 +5056,8 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
     def _countTrueFalsePositives(self, ff_name, intensity_threshold, segment_radius,
-                                  catalog_x, catalog_y, match_radius=3.0, return_positions=False):
+                                  catalog_x, catalog_y, match_radius=3.0, return_positions=False,
+                                  extra_info=None):
         """
         Count true and false positive detections.
 
@@ -5069,7 +5084,8 @@ class PlateTool(QtWidgets.QMainWindow):
             # Run star detection
             star_list = extractStarsFF(
                 self.dir_path, ff_name, config=self.config,
-                flat_struct=self.flat_struct, dark=self.dark, mask=self.mask
+                flat_struct=self.flat_struct, dark=self.dark, mask=self.mask,
+                extra_info=extra_info
             )
 
             if not star_list or len(star_list[1]) == 0:
@@ -5331,6 +5347,75 @@ class PlateTool(QtWidgets.QMainWindow):
 
         return best_threshold
 
+
+    def _computeSeasonalStarVariation(self, catalog_stars, current_jd):
+        """Compute the ratio of peak-to-current visible star count across all seasons.
+
+        Sweeps 24 evenly-spaced sidereal times (one full year) to find the maximum
+        number of catalog stars visible in the FOV for this station's pointing.
+
+        Arguments:
+            catalog_stars: [ndarray] Deep catalog array (ra, dec, mag).
+            current_jd: [float] Julian date of the current observation.
+
+        Returns:
+            (peak_ratio, peak_count, current_count): [tuple]
+                peak_ratio: peak visible stars / current visible stars.
+                peak_count: maximum visible star count across the year.
+                current_count: visible star count at the current JD.
+        """
+        pp = self.platepar
+        fov_radius = getFOVSelectionRadius(pp)
+
+        def _count_visible(jd):
+            """Count catalog stars visible in the image at a given JD."""
+            # Get RA/Dec of FOV center at this JD
+            img_time = jd2Date(jd)
+            _, ra_c, dec_c, _ = xyToRaDecPP(
+                [img_time], [pp.X_res / 2], [pp.Y_res / 2], [1], pp,
+                extinction_correction=False)
+            ra_c, dec_c = ra_c[0], dec_c[0]
+
+            # Pre-filter catalog to FOV region
+            _, subset = subsetCatalog(
+                catalog_stars, ra_c, dec_c, jd, pp.lat, pp.lon,
+                fov_radius, 99.0, remove_under_horizon=True)
+            if len(subset) == 0:
+                return 0
+
+            # Project to image coordinates
+            cat_x, cat_y, _ = getCatalogStarsImagePositions(
+                np.array(subset), jd, pp)
+            in_image = ((cat_x >= 0) & (cat_x < pp.X_res) &
+                        (cat_y >= 0) & (cat_y < pp.Y_res))
+
+            # Apply mask if available
+            if self.mask is not None and self.mask.img is not None:
+                if (self.mask.img.shape[0] == pp.Y_res and
+                        self.mask.img.shape[1] == pp.X_res):
+                    x_int = np.clip(cat_x.astype(int), 0, self.mask.img.shape[1] - 1)
+                    y_int = np.clip(cat_y.astype(int), 0, self.mask.img.shape[0] - 1)
+                    in_image = in_image & (self.mask.img[y_int, x_int] != 0)
+
+            return int(np.sum(in_image))
+
+        # Count at current JD
+        current_count = _count_visible(current_jd)
+
+        # Sweep 24 points across a full year (~15.2 days apart)
+        peak_count = current_count
+        for i in range(24):
+            sweep_jd = current_jd + i * (365.25 / 24)
+            count = _count_visible(sweep_jd)
+            if count > peak_count:
+                peak_count = count
+
+        if current_count > 0:
+            peak_ratio = peak_count / current_count
+        else:
+            peak_ratio = 2.0  # Fallback if current count is 0
+
+        return peak_ratio, peak_count, current_count
 
     def _findOptimalCatalogLM(self, jd, detected_x, detected_y, target_matches, match_radius=2.0):
         """

@@ -52,8 +52,9 @@ log = getLogger("rmslogger")
 
 
 def extractStars(img, img_median=None, mask=None, gamma=1.0, max_star_candidates=1000, border=10,
-                 neighborhood_size=10, intensity_threshold=18, 
-                 segment_radius=4, roundness_threshold=0.5, max_feature_ratio=0.8, bit_depth=8):
+                 neighborhood_size=10, intensity_threshold=18,
+                 segment_radius=4, roundness_threshold=0.5, max_feature_ratio=0.8, bit_depth=8,
+                 extra_info=None):
     """ Extracts stars on a given image by searching for local maxima and applying PSF fit for star 
         confirmation.
 
@@ -120,6 +121,10 @@ def extractStars(img, img_median=None, mask=None, gamma=1.0, max_star_candidates
 
     # Find and label the maxima
     labeled, num_objects = ndimage.label(maxima)
+
+    # Store the raw candidate count if requested
+    if extra_info is not None:
+        extra_info['num_candidates'] = num_objects
 
     # Skip the image if there are too many maxima to process
     if num_objects > max_star_candidates:
@@ -246,13 +251,14 @@ def extractStarsAuto(img, mask=None,
 
 
 def extractStarsFF(
-        ff_dir, ff_name, 
+        ff_dir, ff_name,
         flat_struct=None, dark=None, mask=None,
-        config=None, 
+        config=None,
         border=10,
-        max_global_intensity=150, 
-        neighborhood_size=10, intensity_threshold=18, 
-        segment_radius=4, roundness_threshold=0.5, max_feature_ratio=0.8
+        max_global_intensity=150,
+        neighborhood_size=10, intensity_threshold=18,
+        segment_radius=4, roundness_threshold=0.5, max_feature_ratio=0.8,
+        extra_info=None
         ):
     """ Extracts stars on a given FF bin by searching for local maxima and applying PSF fit for star 
         confirmation.
@@ -330,12 +336,13 @@ def extractStarsFF(
 
     # Find the stars in the image
     status = extractStars(
-        img, img_median=img_median, 
+        img, img_median=img_median,
         mask=mask, gamma=config.gamma,
         max_star_candidates=config.max_stars, border=border,
-        neighborhood_size=neighborhood_size, intensity_threshold=intensity_threshold, 
-        segment_radius=segment_radius, roundness_threshold=roundness_threshold, 
-        max_feature_ratio=max_feature_ratio, bit_depth=config.bit_depth
+        neighborhood_size=neighborhood_size, intensity_threshold=intensity_threshold,
+        segment_radius=segment_radius, roundness_threshold=roundness_threshold,
+        max_feature_ratio=max_feature_ratio, bit_depth=config.bit_depth,
+        extra_info=extra_info
     )
 
     # If the star extraction failed, return an empty list
