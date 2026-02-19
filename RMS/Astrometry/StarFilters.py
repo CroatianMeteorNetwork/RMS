@@ -21,7 +21,6 @@ from RMS.Astrometry.ApplyAstrometry import extinctionCorrectionTrueToApparent, r
 DEFAULT_PHOTOMETRIC_SIGMA = 2.5
 DEFAULT_BLEND_FWHM_MULT = 2.0  # Multiplier of FWHM for blending detection radius
 DEFAULT_BLEND_MAG_MARGIN = 0.3  # Margin above limiting magnitude for blend check
-DEFAULT_HIGH_FWHM_FRACTION = 0.10
 
 
 def filterPhotometricOutliers(paired_stars, platepar, jd, sigma_threshold=DEFAULT_PHOTOMETRIC_SIGMA,
@@ -212,72 +211,5 @@ def filterBlendedStars(paired_stars, catalog_stars, platepar, jd, lim_mag,
                 len(blended_indices), fwhm_mult, max_mag))
 
         return new_paired_stars, len(blended_indices)
-
-    return paired_stars, 0
-
-
-def filterHighFWHMStars(paired_stars, fraction=DEFAULT_HIGH_FWHM_FRACTION, verbose=False):
-    """
-    Filter paired_stars by removing the worst fraction of stars by FWHM.
-
-    Stars with high FWHM tend to have worse centroiding precision due to:
-    - Blended sources
-    - Extended objects (galaxies)
-    - Poor atmospheric seeing
-    - Saturation/defocus
-
-    Arguments:
-        paired_stars: [PairedStars] Paired stars object.
-
-    Keyword arguments:
-        fraction: [float] Fraction of stars to remove (0.10 = top 10% highest FWHM).
-            Default is 0.10.
-        verbose: [bool] Print filtering info. Default is False.
-
-    Returns:
-        new_paired_stars: [PairedStars] Filtered paired stars.
-        removed_count: [int] Number of stars removed.
-    """
-    if len(paired_stars) < 10:
-        return paired_stars, 0
-
-    fwhm_list = []
-    valid_indices = []
-
-    for i, (x, y, fwhm, intens_acc, obj, snr, saturated) in enumerate(paired_stars.paired_stars):
-        if hasattr(obj, 'pick_type') and obj.pick_type == "geopoint":
-            continue
-
-        if fwhm is not None and fwhm > 0:
-            fwhm_list.append(fwhm)
-            valid_indices.append(i)
-
-    if len(fwhm_list) < 10:
-        return paired_stars, 0
-
-    fwhm_array = np.array(fwhm_list)
-
-    # Calculate the FWHM threshold (remove top fraction)
-    threshold_percentile = (1.0 - fraction) * 100
-    fwhm_threshold = np.percentile(fwhm_array, threshold_percentile)
-
-    # Find indices to remove
-    high_fwhm_indices = set()
-    for idx, fwhm_val in zip(valid_indices, fwhm_array):
-        if fwhm_val > fwhm_threshold:
-            high_fwhm_indices.add(idx)
-
-    if len(high_fwhm_indices) > 0:
-        new_paired_stars = PairedStars()
-        for i, (x, y, fwhm, intens_acc, obj, snr, saturated) in enumerate(paired_stars.paired_stars):
-            if i not in high_fwhm_indices:
-                new_paired_stars.addPair(x, y, fwhm, intens_acc, obj, snr, saturated)
-
-        if verbose:
-            median_fwhm = np.median(fwhm_array)
-            print("  Removed {:d} high-FWHM stars (FWHM > {:.2f}, median={:.2f})".format(
-                len(high_fwhm_indices), fwhm_threshold, median_fwhm))
-
-        return new_paired_stars, len(high_fwhm_indices)
 
     return paired_stars, 0

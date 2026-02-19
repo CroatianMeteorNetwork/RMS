@@ -25,14 +25,13 @@ import os
 import numpy as np
 
 from RMS.Astrometry.Conversions import date2JD, jd2Date, JD2HourAngle, JD2LST
-from RMS.Astrometry.Conversions import trueRaDec2ApparentAltAz, apparentAltAz2TrueRADec
+from RMS.Astrometry.Conversions import trueRaDec2ApparentAltAz
 from RMS.Astrometry.ApplyAstrometry import rotationWrtStandardToPosAngle
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP
 from RMS.Astrometry.AstrometryNet import astrometryNetSolve
 from RMS.Astrometry.StarClasses import CatalogStar, PairedStars
 from RMS.Astrometry.StarFilters import (filterPhotometricOutliers, filterBlendedStars,
-                                         DEFAULT_PHOTOMETRIC_SIGMA, DEFAULT_BLEND_FWHM_MULT,
-                                         DEFAULT_BLEND_MAG_MARGIN)
+                                         DEFAULT_PHOTOMETRIC_SIGMA, DEFAULT_BLEND_FWHM_MULT)
 from RMS.Formats.Platepar import getCatalogStarsImagePositions
 from RMS.Formats import CALSTARS, StarCatalog
 from RMS.Formats.Platepar import Platepar
