@@ -2940,8 +2940,9 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
         self.tune_button.clicked.connect(self.sigTuneParameters.emit)
         btn_layout.addWidget(self.tune_button)
 
-        self.save_config_button = QtWidgets.QPushButton('Save to Config')
-        self.save_config_button.setToolTip('Save current star detection settings to .config file')
+        self.save_config_button = QtWidgets.QPushButton('Save Config...')
+        self.save_config_button.setToolTip('Open File Manager to save star detection settings')
+        self.save_config_button.setEnabled(False)
         self.save_config_button.clicked.connect(self.sigSaveToConfig.emit)
         btn_layout.addWidget(self.save_config_button)
 
@@ -3065,6 +3066,7 @@ class MaskWidget(QtWidgets.QWidget, ScaledSizeHelper):
     sigSaveMask = QtCore.pyqtSignal()
     sigLoadMask = QtCore.pyqtSignal()
     sigShowOverlayToggled = QtCore.pyqtSignal(bool)
+    sigUnsavedChanged = QtCore.pyqtSignal()
     sigUseFlatToggled = QtCore.pyqtSignal(bool)
 
     def __init__(self, gui):
@@ -3121,7 +3123,9 @@ class MaskWidget(QtWidgets.QWidget, ScaledSizeHelper):
         self.load_button.clicked.connect(self.sigLoadMask.emit)
         file_layout.addWidget(self.load_button)
 
-        self.save_button = QtWidgets.QPushButton('Save')
+        self.save_button = QtWidgets.QPushButton('Save Mask...')
+        self.save_button.setToolTip('Open File Manager to save mask')
+        self.save_button.setEnabled(False)
         self.save_button.clicked.connect(self.sigSaveMask.emit)
         file_layout.addWidget(self.save_button)
 
@@ -3205,6 +3209,8 @@ class MaskWidget(QtWidgets.QWidget, ScaledSizeHelper):
     def setUnsaved(self, unsaved=True):
         """Mark polygons as having unsaved changes."""
         self.unsaved = unsaved
+        self.save_button.setEnabled(unsaved)
+        self.sigUnsavedChanged.emit()
 
     def setFlatAvailable(self, available, use_by_default=True):
         """Set whether flat.bmp is available and optionally use it by default."""

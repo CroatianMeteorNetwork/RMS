@@ -13,6 +13,7 @@ import glob
 import sys
 import random
 import copy
+import shutil
 
 import cv2
 import numpy as np
@@ -1160,6 +1161,567 @@ if ASTRA_IMPORTED:
 
 
 
+class CalibrationFilesDialog(QtWidgets.QDialog):
+    """Dialog showing calibration file state with per-file independent load/save controls.
+
+    Each file type (Platepar, Config, Mask, Flat) has its own Load and Save buttons.
+    Load picks a single source location. Save supports writing to multiple locations at once.
+    """
+
+    FILE_TYPES = ["Platepar", "Config", "Mask", "Flat"]
+
+    def __init__(self, plate_tool, parent=None):
+        super().__init__(parent)
+        self.plate_tool = plate_tool
+        self.setWindowTitle("SkyFit2 - File Manager")
+        self.setMinimumWidth(580)
+
+        self._locations = []  # list of (label, resolved_path)
+        self._buildLocationList()
+        self._buildUI()
+
+    # --- UI builder ---
+
+    def _buildUI(self):
+        """Build the dialog UI."""
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setSpacing(4)
+        layout.setContentsMargins(8, 8, 8, 8)
+
+        # --- Station section with Open Folder / Open File buttons ---
+        station_group = QtWidgets.QGroupBox("Station")
+        station_vlayout = QtWidgets.QVBoxLayout(station_group)
+        station_vlayout.setContentsMargins(8, 4, 8, 4)
+        station_vlayout.setSpacing(2)
+
+        folder_label = QtWidgets.QLabel("Data folder")
+        folder_label.setStyleSheet("font-weight: bold;")
+        station_vlayout.addWidget(folder_label)
+
+        if self.plate_tool.hasData():
+            path_text = self._shortenPath(self.plate_tool.dir_path)
+        else:
+            path_text = "(no data loaded)"
+        self._station_path_label = QtWidgets.QLabel(path_text)
+        self._station_path_label.setStyleSheet("color: gray; font-size: 11px;")
+        self._station_path_label.setWordWrap(True)
+        station_vlayout.addWidget(self._station_path_label)
+
+        btn_row = QtWidgets.QHBoxLayout()
+        folder_btn = QtWidgets.QPushButton("Open Folder...")
+        file_btn = QtWidgets.QPushButton("Open File...")
+        folder_btn.setFixedWidth(120)
+        file_btn.setFixedWidth(120)
+        folder_btn.clicked.connect(self._onOpenFolder)
+        file_btn.clicked.connect(self._onOpenFile)
+        btn_row.addWidget(folder_btn)
+        btn_row.addWidget(file_btn)
+        btn_row.addStretch()
+        station_vlayout.addLayout(btn_row)
+
+        layout.addWidget(station_group)
+
+        # --- File sections ---
+        self.sections = {}
+        for ftype in self.FILE_TYPES:
+            group = self._createFileSection(ftype)
+            layout.addWidget(group)
+
+        # --- Bottom buttons ---
+        btn_layout = QtWidgets.QHBoxLayout()
+        btn_layout.addStretch()
+        close_btn = QtWidgets.QPushButton("Close")
+        close_btn.clicked.connect(self.accept)
+        btn_layout.addWidget(close_btn)
+        layout.addLayout(btn_layout)
+
+        # Refresh initial state
+        self._refreshAll()
+
+    # --- Open folder / file methods ---
+
+    def _onOpenFolder(self):
+        """Prompt to select a folder, warn about unsaved changes, and reload."""
+        pt = self.plate_tool
+
+        # Pick folder
+        dir_path = str(QtWidgets.QFileDialog.getExistingDirectory(
+            self, "Select folder with FF/image files",
+            pt.dir_path, QtWidgets.QFileDialog.ShowDirsOnly))
+        if not dir_path:
+            return
+
+        self._openPath(dir_path)
+
+    def _onOpenFile(self):
+        """Prompt to select a video file, warn about unsaved changes, and reload."""
+        pt = self.plate_tool
+
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self, "Select video file",
+            pt.dir_path,
+            "Video files (*.mp4 *.avi *.mkv *.mov);;"
+            "All files (*)")
+        if not path:
+            return
+
+        self._openPath(path)
+
+    def _openPath(self, path):
+        """Warn about unsaved changes and load the given path via changeStation."""
+        pt = self.plate_tool
+
+        # Warn about unsaved platepar (only if data is currently loaded)
+        if pt.hasData() and pt.platepar_modified:
+            reply = QtWidgets.QMessageBox.question(
+                self, "Unsaved Changes",
+                "The current platepar has unsaved changes.\nSave before changing station?",
+                QtWidgets.QMessageBox.Save | QtWidgets.QMessageBox.Discard | QtWidgets.QMessageBox.Cancel,
+                QtWidgets.QMessageBox.Save)
+            if reply == QtWidgets.QMessageBox.Cancel:
+                return
+            if reply == QtWidgets.QMessageBox.Save:
+                pt.savePlatepar()
+
+        # Reload via changeStation
+        success = pt.changeStation(path)
+
+        if success:
+            self._buildLocationList()
+            self._station_path_label.setText(self._shortenPath(pt.dir_path))
+            self._refreshAll()
+
+    # --- Location helpers ---
+
+    def _buildLocationList(self):
+        """Build deduplicated list of known locations."""
+        seen = set()
+        entries = []
+
+        def _add(label, path):
+            if path is None:
+                return
+            resolved = os.path.realpath(path)
+            if resolved not in seen:
+                seen.add(resolved)
+                entries.append((label, resolved))
+
+        pt = self.plate_tool
+        if pt.hasData():
+            _add("Data Folder", pt.dir_path)
+            _add("Config Source", pt.config.config_file_path)
+            _add("RMS Root", pt.config.rms_root_dir)
+        else:
+            _add("RMS Root", getRmsRootDir())
+
+        self._locations = entries
+
+    @staticmethod
+    def _shortenPath(path):
+        """Shorten a path for display by replacing the home directory with ~."""
+        home = os.path.expanduser("~")
+        if path.startswith(home):
+            return "~" + path[len(home):]
+        return path
+
+    def _locationMenuLabel(self, label, path):
+        return "{} - {}".format(label, self._shortenPath(path))
+
+    # --- Section UI builder ---
+
+    def _createFileSection(self, ftype):
+        """Create a group box for a single file type with independent Load/Save controls."""
+        group = QtWidgets.QGroupBox()
+        vlayout = QtWidgets.QVBoxLayout(group)
+        vlayout.setContentsMargins(8, 4, 8, 4)
+        vlayout.setSpacing(2)
+
+        # Row 1: type name + status
+        top = QtWidgets.QHBoxLayout()
+        name_label = QtWidgets.QLabel(ftype)
+        name_label.setStyleSheet("font-weight: bold;")
+        status_label = QtWidgets.QLabel("")
+        status_label.setAlignment(QtCore.Qt.AlignRight)
+        top.addWidget(name_label)
+        top.addStretch()
+        top.addWidget(status_label)
+        vlayout.addLayout(top)
+
+        # Row 2: source path
+        source_label = QtWidgets.QLabel("")
+        source_label.setStyleSheet("color: gray; font-size: 11px;")
+        source_label.setWordWrap(True)
+        vlayout.addWidget(source_label)
+
+        # Row 3: Load / Save buttons
+        btn_row = QtWidgets.QHBoxLayout()
+        load_btn = QtWidgets.QPushButton("Load \u25BE")
+        save_btn = QtWidgets.QPushButton("Save \u25BE")
+        load_btn.setFixedWidth(100)
+        save_btn.setFixedWidth(100)
+
+        load_btn.clicked.connect(lambda checked, ft=ftype: self._showLoadMenu(ft, load_btn))
+        save_btn.clicked.connect(lambda checked, ft=ftype: self._showSaveDialog(ft))
+
+        btn_row.addWidget(load_btn)
+        btn_row.addWidget(save_btn)
+        btn_row.addStretch()
+        vlayout.addLayout(btn_row)
+
+        self.sections[ftype] = {
+            'group': group,
+            'status_label': status_label,
+            'source_label': source_label,
+            'load_btn': load_btn,
+            'save_btn': save_btn,
+        }
+
+        return group
+
+    # --- Refresh state display ---
+
+    def _setStatus(self, ftype, status):
+        """Set the status label for a file type with color coding.
+
+        Status values:
+            'Loaded'     - green, file is loaded and in sync with disk
+            'Unsaved'    - amber, in-memory changes need saving
+            'Not loaded' - gray, nothing present
+        """
+        label = self.sections[ftype]['status_label']
+        label.setText(status)
+        if status == "Loaded":
+            label.setStyleSheet("color: #2e7d32; font-weight: bold;")  # green
+        elif status == "Unsaved":
+            label.setStyleSheet("color: #e65100; font-weight: bold;")  # amber
+        else:
+            label.setStyleSheet("color: gray;")
+
+    def _refreshAll(self):
+        """Refresh all sections from the current state."""
+        pt = self.plate_tool
+
+        if hasattr(self, '_station_path_label'):
+            if pt.hasData():
+                self._station_path_label.setText(self._shortenPath(pt.dir_path))
+            else:
+                self._station_path_label.setText("(no data loaded)")
+
+        # When no data is loaded, show empty state for all sections
+        if not pt.hasData():
+            for ftype in self.FILE_TYPES:
+                self._setStatus(ftype, "Not loaded")
+                self.sections[ftype]['source_label'].setText("(no data loaded)")
+                self.sections[ftype]['load_btn'].setEnabled(False)
+                self.sections[ftype]['save_btn'].setEnabled(False)
+            return
+
+        # Enable load/save buttons
+        for ftype in self.FILE_TYPES:
+            self.sections[ftype]['load_btn'].setEnabled(True)
+            self.sections[ftype]['save_btn'].setEnabled(True)
+
+        # Platepar
+        pp_source = pt.platepar_file if pt.platepar_file else "(unsaved)"
+        if pt.platepar_file and os.path.isfile(pt.platepar_file):
+            pp_status = "Unsaved" if pt.platepar_modified else "Loaded"
+        else:
+            pp_status = "Unsaved"
+        self.sections["Platepar"]["source_label"].setText(pp_source)
+        self._setStatus("Platepar", pp_status)
+
+        # Config
+        cfg_source = pt.config.config_file_name if pt.config.config_file_name else "(unknown)"
+        self.sections["Config"]["source_label"].setText(cfg_source)
+        self._setStatus("Config", "Unsaved" if pt.isConfigModified() else "Loaded")
+
+        # Mask
+        if pt.mask_source_path:
+            mask_unsaved = hasattr(pt, 'tab') and hasattr(pt.tab, 'mask') and pt.tab.mask.unsaved
+            self.sections["Mask"]["source_label"].setText(pt.mask_source_path)
+            self._setStatus("Mask", "Unsaved" if mask_unsaved else "Loaded")
+        elif hasattr(pt, 'mask_polygons') and pt.mask_polygons:
+            self.sections["Mask"]["source_label"].setText("(drawn, not saved)")
+            self._setStatus("Mask", "Unsaved")
+        else:
+            self.sections["Mask"]["source_label"].setText("(not loaded)")
+            self._setStatus("Mask", "Not loaded")
+
+        # Flat
+        if pt.flat_source_path and pt.flat_struct is not None:
+            self.sections["Flat"]["source_label"].setText(pt.flat_source_path)
+            self._setStatus("Flat", "Loaded")
+        elif pt.flat_struct is not None:
+            self.sections["Flat"]["source_label"].setText("(loaded)")
+            self._setStatus("Flat", "Loaded")
+        else:
+            self.sections["Flat"]["source_label"].setText("(not loaded)")
+            self._setStatus("Flat", "Not loaded")
+
+        # Disable flat save if no source file to copy
+        flat_can_save = (pt.flat_struct is not None and pt.flat_source_path
+                         and os.path.isfile(pt.flat_source_path))
+        self.sections["Flat"]["save_btn"].setEnabled(flat_can_save)
+        if not flat_can_save:
+            self.sections["Flat"]["save_btn"].setToolTip("No flat source file to copy")
+        else:
+            self.sections["Flat"]["save_btn"].setToolTip("")
+
+    # --- Load: pick one location ---
+
+    def _showLoadMenu(self, ftype, button):
+        """Show a popup menu with known locations + Browse for loading a single file."""
+
+        if not self.plate_tool.hasData():
+            return
+
+        menu = QtWidgets.QMenu(self)
+
+        for label, path in self._locations:
+            action = menu.addAction(self._locationMenuLabel(label, path))
+            action.setData(path)
+
+        menu.addSeparator()
+        browse_action = menu.addAction("Browse...")
+        browse_action.setData("__browse__")
+
+        chosen = menu.exec_(button.mapToGlobal(button.rect().bottomLeft()))
+        if chosen is None:
+            return
+        path = chosen.data()
+        if path == "__browse__":
+            path = self._browseForLoad(ftype)
+            if not path:
+                return
+        self._loadFile(ftype, path)
+
+    def _browseForLoad(self, ftype):
+        """Open a file browser appropriate for the given file type."""
+        start_dir = self.plate_tool.dir_path
+        if ftype == "Platepar":
+            path, _ = QtWidgets.QFileDialog.getOpenFileName(
+                self, "Load Platepar", start_dir,
+                "Platepar files (*.cal);;All files (*)")
+            return path
+        elif ftype == "Config":
+            path, _ = QtWidgets.QFileDialog.getOpenFileName(
+                self, "Load Config", start_dir,
+                "Config files (*.config *.cfg);;All files (*)")
+            return path
+        elif ftype == "Mask":
+            path, _ = QtWidgets.QFileDialog.getOpenFileName(
+                self, "Load Mask", start_dir,
+                "BMP files (*.bmp);;All files (*)")
+            return path
+        elif ftype == "Flat":
+            path, _ = QtWidgets.QFileDialog.getOpenFileName(
+                self, "Load Flat", start_dir,
+                "Image files (*.png *.jpg *.bmp);;All files (*)")
+            return path
+        return None
+
+    def _loadFile(self, ftype, path):
+        """Load a single file type from the given path (file or directory)."""
+        pt = self.plate_tool
+        result = None
+
+        if ftype == "Platepar":
+            if os.path.isdir(path):
+                path = os.path.join(path, pt.config.platepar_name)
+            if os.path.isfile(path):
+                try:
+                    # update=True only if UI is set up
+                    update = hasattr(pt, 'tab')
+                    pt.loadPlatepar(update=update, platepar_file=path)
+                    pt.platepar_modified = False
+                    result = "Platepar loaded from: " + path
+                except Exception as e:
+                    result = "Platepar load failed: " + repr(e)
+            else:
+                result = "Platepar not found: " + path
+
+        elif ftype == "Config":
+            if os.path.isdir(path):
+                path = os.path.join(path, ".config")
+            if os.path.isfile(path):
+                try:
+                    pt.config = cr.loadConfigFromDirectory(path, os.path.dirname(path))
+                    result = "Config loaded from: " + path
+                except Exception as e:
+                    result = "Config load failed: " + repr(e)
+            else:
+                result = "Config not found: " + path
+
+        elif ftype == "Mask":
+            if os.path.isdir(path):
+                path = os.path.join(path, "mask.bmp")
+            if os.path.isfile(path):
+                try:
+                    pt.loadMaskFromFile(path)
+                    result = "Mask loaded from: " + path
+                except Exception as e:
+                    result = "Mask load failed: " + repr(e)
+            else:
+                result = "Mask not found: " + path
+
+        elif ftype == "Flat":
+            if os.path.isdir(path):
+                # Search for known flat file names in the directory
+                for fname in [pt.config.flat_file, "flat.png"]:
+                    fpath = os.path.join(path, fname)
+                    if os.path.isfile(fpath):
+                        path = fpath
+                        break
+                else:
+                    result = "Flat not found in: " + path
+
+            if result is None:  # found a file
+                try:
+                    flat = loadFlat(*os.path.split(path), dtype=pt.img.data.dtype,
+                                    byteswap=pt.img_handle.byteswap)
+                    flat.flat_img = np.swapaxes(flat.flat_img, 0, 1)
+                    if pt.img.data.shape != flat.flat_img.shape:
+                        result = "Flat size mismatch: " + path
+                    else:
+                        pt.flat_struct = flat
+                        pt.flat_source_path = path
+                        pt.img.flat_struct = flat
+                        pt.img_zoom.flat_struct = flat
+                        pt.img.reloadImage()
+                        pt.img_zoom.reloadImage()
+                        result = "Flat loaded from: " + path
+                except Exception as e:
+                    result = "Flat load failed: " + repr(e)
+
+        if result:
+            print(result)
+            qmessagebox(title="Load " + ftype, message=result)
+            self._refreshAll()
+
+    # --- Save: pick multiple locations ---
+
+    def _showSaveDialog(self, ftype):
+        """Show a small dialog with checkboxes for multi-location save."""
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle("Save {} to...".format(ftype))
+        dlg.setMinimumWidth(400)
+        layout = QtWidgets.QVBoxLayout(dlg)
+
+        checkboxes = []
+        for label, path in self._locations:
+            cb = QtWidgets.QCheckBox(self._locationMenuLabel(label, path))
+            cb.setProperty("path", path)
+            layout.addWidget(cb)
+            checkboxes.append(cb)
+
+        # Browse button to add a custom location
+        browse_btn = QtWidgets.QPushButton("Add location...")
+        def on_browse():
+            path = QtWidgets.QFileDialog.getExistingDirectory(
+                dlg, "Select Directory", self.plate_tool.dir_path)
+            if not path:
+                return
+            resolved = os.path.realpath(path)
+            # If already in the list, just check it
+            for cb in checkboxes:
+                if cb.property("path") == resolved:
+                    cb.setChecked(True)
+                    return
+            # Add new checkbox
+            cb = QtWidgets.QCheckBox("Custom - {}".format(self._shortenPath(resolved)))
+            cb.setProperty("path", resolved)
+            cb.setChecked(True)
+            layout.insertWidget(len(checkboxes), cb)
+            checkboxes.append(cb)
+            # Also remember for future use in this session
+            self._locations.append(("Custom", resolved))
+
+        browse_btn.clicked.connect(on_browse)
+        layout.addWidget(browse_btn)
+
+        # OK / Cancel
+        btn_box = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel)
+        btn_box.accepted.connect(dlg.accept)
+        btn_box.rejected.connect(dlg.reject)
+        layout.addWidget(btn_box)
+
+        if dlg.exec_() == QtWidgets.QDialog.Accepted:
+            paths = [cb.property("path") for cb in checkboxes if cb.isChecked()]
+            if paths:
+                self._saveFile(ftype, paths)
+
+    def _saveFile(self, ftype, target_dirs):
+        """Save a single file type to one or more target directories."""
+        pt = self.plate_tool
+        results = []
+
+        for target_dir in target_dirs:
+            if ftype == "Platepar":
+                try:
+                    dest = os.path.join(target_dir, pt.config.platepar_name)
+                    pt.platepar.write(dest, fmt=pt.platepar_fmt, fov=computeFOVSize(pt.platepar))
+                    pt.platepar_modified = False
+                    results.append("Platepar saved to: " + dest)
+                except Exception as e:
+                    results.append("Platepar save to {} failed: {}".format(target_dir, repr(e)))
+
+            elif ftype == "Config":
+                try:
+                    src = pt.config.config_file_name
+                    dest = os.path.join(target_dir, os.path.basename(src))
+                    config_catalog_lm = max(3.0, pt.cat_lim_mag - 1.0)
+                    if os.path.realpath(src) != os.path.realpath(dest):
+                        # Copy the config to the target, then write overrides into the copy
+                        shutil.copy2(src, dest)
+                        pt._writeStarDetectionConfig(dest, config_catalog_lm)
+                        results.append("Config saved to: " + dest)
+                    else:
+                        # Same file — write overrides in-place (backup handled by _writeStarDetectionConfig)
+                        pt._writeStarDetectionConfig(dest, config_catalog_lm)
+                        # Sync in-memory config attrs
+                        pt.config.intensity_threshold = pt.override_intensity_threshold
+                        pt.config.neighborhood_size = pt.override_neighborhood_size
+                        pt.config.max_stars = pt.override_max_stars
+                        pt.config.segment_radius = pt.override_segment_radius
+                        pt.config.max_feature_ratio = pt.override_max_feature_ratio
+                        pt.config.roundness_threshold = pt.override_roundness_threshold
+                        pt._updateConfigSaveButtonState()
+                        results.append("Config saved to: " + dest)
+                except Exception as e:
+                    results.append("Config save to {} failed: {}".format(target_dir, repr(e)))
+
+            elif ftype == "Mask":
+                try:
+                    dest = os.path.join(target_dir, "mask.bmp")
+                    mask_img = pt.generateMaskImage()
+                    cv2.imwrite(dest, mask_img)
+                    results.append("Mask saved to: " + dest)
+                except Exception as e:
+                    results.append("Mask save to {} failed: {}".format(target_dir, repr(e)))
+
+            elif ftype == "Flat":
+                if pt.flat_source_path and os.path.isfile(pt.flat_source_path):
+                    try:
+                        dest = os.path.join(target_dir, os.path.basename(pt.flat_source_path))
+                        if os.path.realpath(pt.flat_source_path) != os.path.realpath(dest):
+                            shutil.copy2(pt.flat_source_path, dest)
+                            results.append("Flat copied to: " + dest)
+                        else:
+                            results.append("Flat: source and destination are the same, skipped.")
+                    except Exception as e:
+                        results.append("Flat save to {} failed: {}".format(target_dir, repr(e)))
+                else:
+                    results.append("Flat: no source file to copy.")
+
+        if results:
+            msg = "\n".join(results)
+            print(msg)
+            qmessagebox(title="Save " + ftype, message=msg)
+            self._refreshAll()
+            pt.updateFileManagerButton()
+
+
 class QFOVinputDialog(QtWidgets.QDialog):
 
     lenses = "none"
@@ -1404,15 +1966,15 @@ class GeoPoints(object):
 
 
 class PlateTool(QtWidgets.QMainWindow):
-    def __init__(self, input_path, config, beginning_time=None, fps=None, gamma=None, use_fr_files=False,
-        geo_points_input=None, startUI=True, mask=None, nobg=False, peribg=False, flipud=False,
-        flatbiassub=False, exposure_ratio=1.0, show_sattracks=False, tle_file=None):
+    def __init__(self, input_path=None, config=None, beginning_time=None, fps=None, gamma=None,
+        use_fr_files=False, geo_points_input=None, startUI=True, mask=None, nobg=False, peribg=False,
+        flipud=False, flatbiassub=False, exposure_ratio=1.0, show_sattracks=False, tle_file=None):
         """ SkyFit interactive window.
 
         Arguments:
-            input_path: [str] Absolute path to the directory containing FF or image files, or a path to a 
-                video file.
-            config: [Config struct]
+            input_path: [str] Absolute path to the directory containing FF or image files, or a path to a
+                video file. None to start empty.
+            config: [Config struct] None to use default config.
 
         Keyword arguments:
             beginning_time: [datetime] Datetime of the video beginning. Optional, only can be given for
@@ -1426,12 +1988,12 @@ class PlateTool(QtWidgets.QMainWindow):
             startUI: [bool] Start the GUI. True by default.
             mask: [str] Path to a mask file.
             nobg: [bool] Do not subtract the background for photometry. False by default.
-            peribg: [bool] Perform background subtraction using the average of the pixels adjacent to the 
+            peribg: [bool] Perform background subtraction using the average of the pixels adjacent to the
                 coloured mask instead of the avepixel. False by default.
             flipud: [bool] Flip the image upside down. False by default.
             flatbiassub: [bool] Subtract flat and bias frames. False by default.
-            exposure_ratio: [float] Exposure ratio between stars and meteors. Used for magnitude scaling of 
-                meteors observed on long exposure images with shutters. The correct exp. ratio is already 
+            exposure_ratio: [float] Exposure ratio between stars and meteors. Used for magnitude scaling of
+                meteors observed on long exposure images with shutters. The correct exp. ratio is already
                 automatically applied for DFN images. 1.0 by default.
             show_sattracks: [bool] Show satellite tracks. False by default.
             tle_file: [str] Path to a TLE file for satellite tracks.
@@ -1445,12 +2007,21 @@ class PlateTool(QtWidgets.QMainWindow):
         self.mode_list = ['skyfit', 'manualreduction']
         self.max_pixels_between_matched_stars = np.inf
         self.autopan_mode = False
-        self.input_path = input_path
-        if os.path.isfile(self.input_path):
-            self.dir_path = os.path.dirname(self.input_path)
-        else:
-            self.dir_path = self.input_path
 
+        # Handle empty construction (no input path or config)
+        if config is None:
+            config = cr.Config()
+
+        self.input_path = input_path
+        if input_path is not None:
+            if os.path.isfile(self.input_path):
+                self.dir_path = os.path.dirname(self.input_path)
+            else:
+                self.dir_path = self.input_path
+        else:
+            # Default directory for empty start
+            rms_data_dir = os.path.expanduser("~/RMS_data")
+            self.dir_path = rms_data_dir if os.path.isdir(rms_data_dir) else os.path.expanduser("~")
 
         self.config = config
 
@@ -1557,6 +2128,11 @@ class PlateTool(QtWidgets.QMainWindow):
         # Flat field
         self.flat_struct = None
 
+        # Source path tracking for calibration files dialog
+        self.platepar_modified = False
+        self.mask_source_path = None
+        self.flat_source_path = None
+
         # Dark frame
         self.dark = None
 
@@ -1625,16 +2201,6 @@ class PlateTool(QtWidgets.QMainWindow):
     
         ###################################################################################################
 
-
-        # Detect data input type and init the image handle
-        self.detectInputType(load=True, beginning_time=beginning_time, use_fr_files=self.use_fr_files)
-
-        # Update the FPS if it's forced
-        self.setFPS()
-
-
-        ###################################################################################################
-        
         # Display options
         self.show_spectral_type = False
         self.show_star_names = False
@@ -1642,30 +2208,6 @@ class PlateTool(QtWidgets.QMainWindow):
         self.label_mag_limit = 5.0
         self.show_constellations = False
         self.selected_stars_visible = True
-
-        # LOADING STARS
-
-        # Load catalog stars
-        self.catalog_stars = self.loadCatalogStars(self.config.catalog_mag_limit)
-        self.cat_lim_mag = self.config.catalog_mag_limit
-
-        # Check if the catalog exists
-        if not self.catalog_stars.any():
-
-            qmessagebox(title='Star catalog error', \
-                message='Star catalog from path ' \
-                    + os.path.join(self.config.star_catalog_path, self.config.star_catalog_file) \
-                    + 'could not be loaded!',
-                message_type="error")
-
-            sys.exit()
-
-        else:
-            print('Star catalog loaded: ', self.config.star_catalog_file)
-
-
-        self.calstars = {}
-        self.loadCalstars()
 
         # Star detection override parameters
         self.star_detection_override_enabled = False  # Use override parameters instead of CALSTARS
@@ -1689,25 +2231,87 @@ class PlateTool(QtWidgets.QMainWindow):
         self.flat_image_data = None  # Loaded flat.bmp data
         self.mask_use_flat_background = False  # Whether to show flat as background
 
+        # Flag for auto-opening the calibration dialog
+        self._show_calibration_dialog_on_start = False
+
+        if input_path is not None:
+            # --- Data-loading path (input provided) ---
+
+            # Detect data input type and init the image handle
+            self.detectInputType(load=True, beginning_time=beginning_time,
+                                 use_fr_files=self.use_fr_files)
+
+            # Update the FPS if it's forced
+            self.setFPS()
+
+            # LOADING STARS
+
+            # Load catalog stars
+            self.catalog_stars = self.loadCatalogStars(self.config.catalog_mag_limit)
+            self.cat_lim_mag = self.config.catalog_mag_limit
+
+            # Check if the catalog exists
+            if not self.catalog_stars.any():
+
+                qmessagebox(title='Star catalog error', \
+                    message='Star catalog from path ' \
+                        + os.path.join(self.config.star_catalog_path, self.config.star_catalog_file) \
+                        + 'could not be loaded!',
+                    message_type="error")
+
+                sys.exit()
+
+            else:
+                print('Star catalog loaded: ', self.config.star_catalog_file)
+
+
+            self.calstars = {}
+            self.loadCalstars()
+
+            ###################################################################
+            # PLATEPAR
+
+            # Auto-load platepar if found in data folder, otherwise create new and flag for dialog
+            pp_path = os.path.join(self.dir_path, self.config.platepar_name)
+            if os.path.isfile(pp_path):
+                self.loadPlatepar(platepar_file=pp_path)
+            else:
+                # No platepar in data folder - create a blank one
+                self.platepar = Platepar()
+                self.makeNewPlatepar()
+                self.platepar_file = os.path.join(self.dir_path, self.config.platepar_name)
+                self.first_platepar_fit = True
+                self._show_calibration_dialog_on_start = True
+
+            # Set the given gamma value to platepar
+            if gamma is not None:
+                self.platepar.gamma = gamma
+
+            # Load distortion type index
+            self.dist_type_index = self.platepar.distortion_type_list.index(self.platepar.distortion_type)
+
+            ###################################################################
+
+            print()
+
+        else:
+            # --- Empty construction (no input path) ---
+            self.img_handle = None
+            self.catalog_stars = np.empty((0, 4))
+            self.cat_lim_mag = self.config.catalog_mag_limit
+            self.calstars = {}
+
+            # Create a blank platepar with proper defaults from config
+            self.platepar = Platepar()
+            self.makeNewPlatepar()
+            self.platepar_file = os.path.join(self.dir_path, self.config.platepar_name)
+            self.first_platepar_fit = True
+
+            self.dist_type_index = self.platepar.distortion_type_list.index(
+                self.platepar.distortion_type)
+            self._show_file_manager_on_start = True
 
         ###################################################################################################
-        # PLATEPAR
-
-        # Load the platepar file
-        self.loadPlatepar()
-
-
-        # Set the given gamma value to platepar
-        if gamma is not None:
-            self.platepar.gamma = gamma
-
-
-        # Load distortion type index
-        self.dist_type_index = self.platepar.distortion_type_list.index(self.platepar.distortion_type)
-
-        ###################################################################################################
-
-        print()
 
         # INIT WINDOW
         if startUI:
@@ -1718,16 +2322,18 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Automatically load the flat and bias in UWO data mode
         if self.usingUWOData():
-            _, self.flat_struct = self.loadFlat()
+            flat_file, self.flat_struct = self.loadFlat()
+            if flat_file:
+                self.flat_source_path = flat_file
             _, self.dark = self.loadDark()
 
-                        
+
             # Set focus back on the SkyFit window
             self.activateWindow()
 
             # Apply the dark to the flat if the flatbiassub flag is set
             if self.flatbiassub and (self.flat_struct is not None):
-                
+
                 self.flat_struct.applyDark(self.dark)
 
                 self.img.flat_struct = self.flat_struct
@@ -1748,6 +2354,10 @@ class PlateTool(QtWidgets.QMainWindow):
             # Update the checkbox to reflect auto-compute state
             self.tab.settings.updateAutoComputeSatTracks()
 
+
+    def hasData(self):
+        """ Return True if image data is loaded. """
+        return self.img_handle is not None
 
     def closeEvent(self, event):
         """ Handle window close event to properly exit application. """
@@ -1787,13 +2397,6 @@ class PlateTool(QtWidgets.QMainWindow):
         self.new_platepar_action.setShortcut("Ctrl+N")  # key bindings here do not get passed to keypress
         self.new_platepar_action.triggered.connect(self.makeNewPlatepar)
 
-        self.load_platepar_action = QtWidgets.QAction("Load platepar")
-        self.load_platepar_action.setShortcut('Ctrl+P')
-        self.load_platepar_action.triggered.connect(lambda: self.loadPlatepar(update=True))
-
-        self.save_platepar_action = QtWidgets.QAction("Save platepar")
-        self.save_platepar_action.triggered.connect(self.savePlatepar)
-
         self.save_reduction_action = QtWidgets.QAction('Save state and reduction')
         self.save_reduction_action.setShortcut('Ctrl+S')
         self.save_reduction_action.triggered.connect(lambda: [self.saveState(),
@@ -1803,9 +2406,9 @@ class PlateTool(QtWidgets.QMainWindow):
         self.save_current_frame_action.setShortcut('Ctrl+W')
         self.save_current_frame_action.triggered.connect(self.saveCurrentFrame)
 
-        self.save_default_platepar_action = QtWidgets.QAction("Save default platepar...")
-        self.save_default_platepar_action.setShortcut('Ctrl+Shift+S')
-        self.save_default_platepar_action.triggered.connect(self.saveDefaultPlatepar)
+        self.calibration_files_action = QtWidgets.QAction("File Manager...")
+        self.calibration_files_action.setShortcut('Ctrl+Shift+S')
+        self.calibration_files_action.triggered.connect(self.showCalibrationFilesDialog)
 
         self.save_state_platepar_action = QtWidgets.QAction("Save state and platepar")
         self.save_state_platepar_action.triggered.connect(lambda: [self.saveState(), self.savePlatepar()])
@@ -1813,9 +2416,6 @@ class PlateTool(QtWidgets.QMainWindow):
 
         self.load_state_action = QtWidgets.QAction("Load state")
         self.load_state_action.triggered.connect(self.findLoadState)
-
-        self.station_action = QtWidgets.QAction("Change station")
-        self.station_action.triggered.connect(self.changeStation)
 
         self.toggle_info_action = QtWidgets.QAction("Toggle Info")
         self.toggle_info_action.triggered.connect(self.toggleInfo)
@@ -1842,6 +2442,11 @@ class PlateTool(QtWidgets.QMainWindow):
         self.status_bar = QtWidgets.QStatusBar()
         self.status_bar.setFont(QtGui.QFont('monospace'))
         self.setStatusBar(self.status_bar)
+
+        self.file_manager_button = QtWidgets.QPushButton('File Manager')
+        self.file_manager_button.pressed.connect(self.showCalibrationFilesDialog)
+        self.file_manager_button.setToolTip("Open File Manager (Ctrl+Shift+S)")
+        self.status_bar.addPermanentWidget(self.file_manager_button)
 
         self.skyfit_button = QtWidgets.QPushButton('SkyFit')
         self.skyfit_button.pressed.connect(lambda: self.changeMode('skyfit'))
@@ -2333,7 +2938,10 @@ class PlateTool(QtWidgets.QMainWindow):
         invert = False
 
         # Add saturation mask (R, G, B, alpha) - alpha can only be 0 or 1
-        saturation_mask_img = np.zeros_like(self.img_handle.loadChunk().maxpixel).T
+        if self.img_handle is not None:
+            saturation_mask_img = np.zeros_like(self.img_handle.loadChunk().maxpixel).T
+        else:
+            saturation_mask_img = np.zeros((self.config.width, self.config.height), dtype='uint8')
         self.saturation_mask_img = np.zeros(saturation_mask_img.shape + (4, ), dtype='uint8')
         self.saturation_mask = pg.ImageItem()
         self.saturation_mask.setImage(self.saturation_mask_img)
@@ -2401,7 +3009,10 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab = RightOptionsTab(self)
         self.tab.hist.setImageItem(self.img)
         self.tab.hist.setImages(self.img_zoom)
-        self.tab.hist.setLevels(0, 2**(8*self.img.data.itemsize) - 1)
+        if self.img.data is not None:
+            self.tab.hist.setLevels(0, 2**(8*self.img.data.itemsize) - 1)
+        else:
+            self.tab.hist.setLevels(0, 255)
 
         self.tab.settings.updateInvertColours()
         self.tab.settings.updateImageGamma()
@@ -2450,16 +3061,17 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.star_detection.sigMaxFeatureRatioChanged.connect(self.updateMaxFeatureRatio)
         self.tab.star_detection.sigRoundnessThresholdChanged.connect(self.updateRoundnessThreshold)
         self.tab.star_detection.sigTuneParameters.connect(self.tuneStarDetection)
-        self.tab.star_detection.sigSaveToConfig.connect(self.saveStarDetectionToConfig)
+        self.tab.star_detection.sigSaveToConfig.connect(lambda: self.showCalibrationFilesDialog(save_ftype="Config"))
         self.tab.star_detection.sigCatalogLMChanged.connect(self.updateCatalogLMFromStarDetection)
 
         # Mask widget signals
         self.tab.mask.sigDrawModeToggled.connect(self.toggleMaskDrawMode)
         self.tab.mask.sigClearPolygons.connect(self.clearMaskPolygons)
-        self.tab.mask.sigSaveMask.connect(self.saveMask)
+        self.tab.mask.sigSaveMask.connect(lambda: self.showCalibrationFilesDialog(save_ftype="Mask"))
         self.tab.mask.sigLoadMask.connect(self.loadMaskDialog)
         self.tab.mask.sigShowOverlayToggled.connect(self.toggleMaskOverlay)
         self.tab.mask.sigUseFlatToggled.connect(self.toggleMaskFlatBackground)
+        self.tab.mask.sigUnsavedChanged.connect(self.updateFileManagerButton)
 
         # Check for flat.bmp and setup mask tab
         self.checkAndSetupFlatForMask()
@@ -2511,15 +3123,33 @@ class PlateTool(QtWidgets.QMainWindow):
 
         self.show()
 
-        self.updateLeftLabels()
-        self.updateImageNavigationDisplay()
-        self.updateStars()
-        self.updateDistortion()
-        self.tab.param_manager.updatePlatepar()
-        self.initStarDetectionOverrides()
-        self.initMaskFromFile()
-        self.updateFindBestFrameButton()
-        self.changeMode(self.mode)
+        if self.hasData():
+            self.updateLeftLabels()
+            self.updateImageNavigationDisplay()
+            self.updateStars()
+            self.updateDistortion()
+            self.tab.param_manager.updatePlatepar()
+            self.initStarDetectionOverrides()
+            self.initMaskFromFile()
+            self.updateFindBestFrameButton()
+            self.changeMode(self.mode)
+
+            # Show calibration files dialog on start if platepar was not auto-loaded
+            if self._show_calibration_dialog_on_start:
+                self._show_calibration_dialog_on_start = False
+                self.showCalibrationFilesDialog()
+        else:
+            # Show empty-state message
+            self.label1.setText("No data loaded.\nUse File > File Manager to open a folder.")
+            self.image_navigation_slider.hide()
+            self.image_navigation_label.hide()
+
+        self.updateFileManagerButton()
+
+        # Auto-open File Manager when starting empty
+        if getattr(self, '_show_file_manager_on_start', False):
+            self._show_file_manager_on_start = False
+            QtCore.QTimer.singleShot(0, self.showCalibrationFilesDialog)
 
 
 
@@ -2572,12 +3202,10 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.view_menu.removeAction(action)
 
             self.file_menu.addActions([self.new_platepar_action,
-                                       self.load_platepar_action,
-                                       self.save_platepar_action,
-                                       self.save_default_platepar_action,
                                        self.save_state_platepar_action,
-                                       self.load_state_action,
-                                       self.station_action])
+                                       self.load_state_action])
+            self.file_menu.addSeparator()
+            self.file_menu.addAction(self.calibration_files_action)
 
             self.view_menu.addActions([self.toggle_info_action,
                                        self.toggle_zoom_window])
@@ -2610,8 +3238,9 @@ class PlateTool(QtWidgets.QMainWindow):
 
             self.file_menu.addActions([self.save_reduction_action,
                                        self.save_current_frame_action,
-                                       self.load_platepar_action,
                                        self.load_state_action])
+            self.file_menu.addSeparator()
+            self.file_menu.addAction(self.calibration_files_action)
 
             self.view_menu.addActions([self.toggle_info_action,
                                        self.toggle_zoom_window])
@@ -2639,76 +3268,156 @@ class PlateTool(QtWidgets.QMainWindow):
             self.updateGreatCircle()
 
 
-    def changeStation(self):
+    def changeStation(self, dir_path=None, config_override=None):
         """
-        Opens folder explorer window for user to select new station folder, then loads a platepar from that
-        folder, and reads the config file, updating the gui to show what it should
+        Load a new station folder and reload everything. If dir_path is None, a folder picker is shown.
+        Returns True on success, False on cancellation or failure.
+
+        Arguments:
+            dir_path: [str] Path to data folder or file. If a file, uses its parent directory.
+            config_override: [str or list] Config path override, passed to loadConfigFromDirectory.
         """
-        dir_path = str(QtWidgets.QFileDialog.getExistingDirectory(self, "Select new station folder",
-                                                              self.dir_path, QtWidgets.QFileDialog.ShowDirsOnly))
+        if dir_path is None:
+            dir_path = str(QtWidgets.QFileDialog.getExistingDirectory(self, "Select new station folder",
+                                                                  self.dir_path, QtWidgets.QFileDialog.ShowDirsOnly))
 
         if not dir_path:
-            return
+            return False
 
-        self.input_path = dir_path
-        self.dir_path = dir_path
-        self.config = cr.loadConfigFromDirectory('.', self.dir_path)
+        # If a file path was given, use the parent directory
+        if os.path.isfile(dir_path):
+            dir_path = os.path.dirname(dir_path)
 
-        # Update original catalog file and band ratios for the new station
-        self._original_catalog_file = self.config.star_catalog_file
-        self._original_band_ratios = self.config.star_catalog_band_ratios
+        prev_input_path = self.input_path
+        prev_dir_path = self.dir_path
+        prev_config = self.config
+        prev_img_handle = self.img_handle if self.hasData() else None
 
-        self.initMaskFromFile()
-        self.detectInputType()
-        self.catalog_stars = self.loadCatalogStars(self.config.catalog_mag_limit)
-        self.cat_lim_mag = self.config.catalog_mag_limit
-        self.loadCalstars()
-        self.loadPlatepar(update=True)
+        try:
+            self.input_path = dir_path
+            self.dir_path = dir_path
 
-        # Update catalog combo box selection
-        self.tab.settings.populateCatalogList()
+            # Load config - use override if provided, otherwise auto-detect from dir
+            if config_override is not None:
+                self.config = cr.loadConfigFromDirectory(config_override, self.dir_path)
+            else:
+                self.config = cr.loadConfigFromDirectory('.', self.dir_path)
 
-        # Recreate saturation mask with new image dimensions
-        saturation_mask_img = np.zeros_like(self.img_handle.loadChunk().maxpixel).T
-        self.saturation_mask_img = np.zeros(saturation_mask_img.shape + (4,), dtype='uint8')
-        self.saturation_mask.setImage(self.saturation_mask_img)
+            # Force the CV2 backend
+            self.config.media_backend = 'cv2'
 
-        self.img.changeHandle(self.img_handle)
-        self.img_zoom.changeHandle(self.img_handle)
-        self.tab.hist.setLevels(0, 2**(8*self.img.data.itemsize) - 1)
+            # Update original catalog file and band ratios for the new station
+            self._original_catalog_file = self.config.star_catalog_file
+            self._original_band_ratios = self.config.star_catalog_band_ratios
 
-        # Update view limits based on actual image dimensions
-        img_width = self.img.data.shape[0]
-        img_height = self.img.data.shape[1]
-        if img_height/img_width < self.img_frame.height()/self.img_frame.width():
-            self.img_frame.setLimits(xMin=0, xMax=img_width, yMin=None, yMax=None)
-        else:
-            self.img_frame.setLimits(xMin=None, xMax=None, yMin=0, yMax=img_height)
+            self.initMaskFromFile()
+            self.detectInputType(use_fr_files=self.use_fr_files)
 
-        self.img_frame.autoRange(padding=0)
+            if self.img_handle is None:
+                raise RuntimeError("No loadable image data found in the selected folder.")
 
-        self.paired_stars = PairedStars()
-        self.updatePairedStars()
-        self.pick_list = {}
-        self.residuals = None
-        self.updateFitResiduals()
-        self.updatePicks()
-        self.drawPhotometryColoring()
-        self.photometry()
+            # Recreate saturation mask with new image dimensions
+            saturation_mask_img = np.zeros_like(self.img_handle.loadChunk().maxpixel).T
+            self.saturation_mask_img = np.zeros(saturation_mask_img.shape + (4,), dtype='uint8')
+            self.saturation_mask.setImage(self.saturation_mask_img)
 
-        self.updateStars()
-        self.updateDistortion()
-        self.updateLeftLabels()
-        self.updateImageNavigationDisplay()
-        self.tab.debruijn.updateTable()
+            # Update ImageItems with new handle before loading platepar (which triggers drawing)
+            self.img.changeHandle(self.img_handle)
+            self.img_zoom.changeHandle(self.img_handle)
+            self.tab.hist.setLevels(0, 2**(8*self.img.data.itemsize) - 1)
+
+            self.catalog_stars = self.loadCatalogStars(self.config.catalog_mag_limit)
+            self.cat_lim_mag = self.config.catalog_mag_limit
+            self.loadCalstars()
+
+            # Auto-detect platepar in the new directory (avoid prompting the user)
+            platepar_path = os.path.join(self.dir_path, self.config.platepar_name)
+            if os.path.isfile(platepar_path):
+                self.loadPlatepar(update=True, platepar_file=platepar_path)
+            else:
+                self.loadPlatepar(update=True, platepar_file='')
+            self.platepar_modified = False
+
+            # Update catalog combo box selection
+            self.tab.settings.populateCatalogList()
+
+            # Update view limits based on actual image dimensions
+            img_width = self.img.data.shape[0]
+            img_height = self.img.data.shape[1]
+            if img_height/img_width < self.img_frame.height()/self.img_frame.width():
+                self.img_frame.setLimits(xMin=0, xMax=img_width, yMin=None, yMax=None)
+            else:
+                self.img_frame.setLimits(xMin=None, xMax=None, yMin=0, yMax=img_height)
+
+            self.img_frame.autoRange(padding=0)
+
+            self.paired_stars = PairedStars()
+            self.updatePairedStars()
+            self.pick_list = {}
+            self.residuals = None
+            self.updateFitResiduals()
+            self.updatePicks()
+            self.drawPhotometryColoring()
+            self.photometry()
+
+            self.updateStars()
+            self.updateDistortion()
+            self.updateLeftLabels()
+            self.updateImageNavigationDisplay()
+            self.tab.debruijn.updateTable()
+            self.initStarDetectionOverrides()
+            self.updateFindBestFrameButton()
+
+            # Populate menus with mode-specific actions (including F1 shortcut)
+            self.changeMode(self.mode)
+
+            # Load UWO flat/dark if applicable
+            if self.usingUWOData():
+                flat_file, self.flat_struct = self.loadFlat()
+                if flat_file:
+                    self.flat_source_path = flat_file
+                _, self.dark = self.loadDark()
+
+                self.activateWindow()
+
+                if self.flatbiassub and (self.flat_struct is not None):
+                    self.flat_struct.applyDark(self.dark)
+                    self.img.flat_struct = self.flat_struct
+                    self.img_zoom.flat_struct = self.flat_struct
+
+                self.img.dark = self.dark
+                self.img_zoom.dark = self.dark
+                self.img_zoom.flat_struct = self.flat_struct
+                self.img.flat_struct = self.flat_struct
+                self.img_zoom.reloadImage()
+                self.img.reloadImage()
+
+            # Update window title
+            self.setWindowTitle("SkyFit2 - " + os.path.basename(self.dir_path))
+
+            return True
+
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            self.input_path = prev_input_path
+            self.dir_path = prev_dir_path
+            self.config = prev_config
+            if prev_img_handle is not None:
+                self.img_handle = prev_img_handle
+            qmessagebox(title="Change Station Failed",
+                         message="Could not load station from:\n{}\n\nError: {}".format(dir_path, repr(e)),
+                         message_type="error")
+            return False
 
     def onRefractionChanged(self):
-        
+
         # Update the reference apparent alt/az, as the refraction influences the pointing
         self.platepar.updateRefAltAz()
 
         self.updateMeasurementRefractionCorrection()
 
+        self.platepar_modified = True
         self.updateStars()
         self.updateLeftLabels()
         self.tab.param_manager.updatePlatepar()
@@ -2725,33 +3434,39 @@ class PlateTool(QtWidgets.QMainWindow):
             updateAzAltGrid(self.celestial_grid, self.platepar)
 
     def onScaleChanged(self):
+        self.platepar_modified = True
         self.updateFitResiduals()
         self.updateStars()
         self.updateLeftLabels()
 
     def onFitParametersChanged(self):
+        self.platepar_modified = True
         self.updateDistortion()
         self.updateStars()
         self.updateLeftLabels()
 
     def onExtinctionChanged(self):
+        self.platepar_modified = True
         self.photometry()
         self.updateLeftLabels()
         if self.apparent_mag_corr_enabled:
             self.updateStars()
 
     def onVignettingChanged(self):
+        self.platepar_modified = True
         self.photometry()
         self.updateLeftLabels()
         if self.apparent_mag_corr_enabled:
             self.updateStars()
 
     def onAzAltChanged(self):
+        self.platepar_modified = True
         self.platepar.updateRefRADec(preserve_rotation=True)
         self.updateStars()
         self.updateLeftLabels()
 
     def onRotChanged(self):
+        self.platepar_modified = True
         self.platepar.pos_angle_ref = rotationWrtHorizonToPosAngle(self.platepar,
                                                                    self.platepar.rotation_from_horiz)
         self.updateStars()
@@ -2788,6 +3503,10 @@ class PlateTool(QtWidgets.QMainWindow):
         Return:
             [str]: formatted output string to be written in the status bar
         """
+
+        # Early return with just coordinates if no data loaded
+        if not self.hasData():
+            return "x={:7.2f}  y={:7.2f}".format(x, y)
 
         # Write image X, Y coordinates and image intensity
         if 0 <= x <= self.img.data.shape[0] - 1 and 0 <= y <= self.img.data.shape[1] - 1:
@@ -2856,8 +3575,30 @@ class PlateTool(QtWidgets.QMainWindow):
         """ Update bottom label with current mouse position """
         self.status_bar.showMessage(self.mouseOverStatus(self.mouse_x, self.mouse_y))
 
+    def updateFileManagerButton(self):
+        """Update the File Manager button style — amber when anything is unsaved."""
+        unsaved = False
+        if self.hasData():
+            if self.platepar_modified:
+                unsaved = True
+            elif self.isConfigModified():
+                unsaved = True
+            elif hasattr(self, 'tab') and hasattr(self.tab, 'mask') and self.tab.mask.unsaved:
+                unsaved = True
+
+        if unsaved:
+            self.file_manager_button.setStyleSheet(
+                "QPushButton { background-color: #e65100; color: white; font-weight: bold;"
+                " border: 1px solid #bf360c; padding: 3px 8px; border-radius: 3px; }"
+            )
+        else:
+            self.file_manager_button.setStyleSheet("")
+
     def updateLeftLabels(self):
         """ Update the two labels on the left with their information """
+
+        if not self.hasData():
+            return
 
         # Sky fit
         if self.mode == 'skyfit':
@@ -3014,6 +3755,8 @@ class PlateTool(QtWidgets.QMainWindow):
         # Update satellite marker position
         self.updateSatelliteMarker()
 
+        # Refresh File Manager button glow
+        self.updateFileManagerButton()
 
 
     def updateStars(self, only_update_catalog=False):
@@ -3023,6 +3766,9 @@ class PlateTool(QtWidgets.QMainWindow):
             only_update_catalog: [bool] If True, only the catalog stars will be updated. (default: False)
 
         """
+
+        if not self.hasData():
+            return
 
         if not only_update_catalog:
 
@@ -3678,14 +4424,17 @@ class PlateTool(QtWidgets.QMainWindow):
     def updateIntensityThreshold(self, value):
         """ Update intensity threshold override parameter. """
         self.override_intensity_threshold = value
+        self._updateConfigSaveButtonState()
 
     def updateNeighborhoodSize(self, value):
         """ Update neighborhood size override parameter. """
         self.override_neighborhood_size = value
+        self._updateConfigSaveButtonState()
 
     def updateMaxStars(self, value):
         """ Update max stars override parameter. """
         self.override_max_stars = value
+        self._updateConfigSaveButtonState()
 
     def updateGamma(self, value):
         """ Update gamma override parameter. """
@@ -3709,14 +4458,35 @@ class PlateTool(QtWidgets.QMainWindow):
     def updateSegmentRadius(self, value):
         """ Update segment radius override parameter. """
         self.override_segment_radius = value
+        self._updateConfigSaveButtonState()
 
     def updateMaxFeatureRatio(self, value):
         """ Update max feature ratio override parameter. """
         self.override_max_feature_ratio = value
+        self._updateConfigSaveButtonState()
 
     def updateRoundnessThreshold(self, value):
         """ Update roundness threshold override parameter. """
         self.override_roundness_threshold = value
+        self._updateConfigSaveButtonState()
+
+    def isConfigModified(self):
+        """Check if Star Detection overrides differ from the loaded config."""
+        cfg = self.config
+        return (
+            self.override_intensity_threshold != getattr(cfg, 'intensity_threshold', self.override_intensity_threshold)
+            or self.override_neighborhood_size != getattr(cfg, 'neighborhood_size', self.override_neighborhood_size)
+            or self.override_max_stars != getattr(cfg, 'max_stars', self.override_max_stars)
+            or self.override_segment_radius != getattr(cfg, 'segment_radius', self.override_segment_radius)
+            or abs(self.override_max_feature_ratio - getattr(cfg, 'max_feature_ratio', self.override_max_feature_ratio)) > 1e-6
+            or abs(self.override_roundness_threshold - getattr(cfg, 'roundness_threshold', self.override_roundness_threshold)) > 1e-6
+        )
+
+    def _updateConfigSaveButtonState(self):
+        """Enable/disable the Save Config button based on whether overrides differ from config."""
+        if hasattr(self, 'tab') and hasattr(self.tab, 'star_detection'):
+            self.tab.star_detection.save_config_button.setEnabled(self.isConfigModified())
+        self.updateFileManagerButton()
 
     def updateCatalogLMFromStarDetection(self, value):
         """ Update catalog limiting magnitude from Star Detection panel spinbox. """
@@ -4643,6 +5413,7 @@ class PlateTool(QtWidgets.QMainWindow):
         prev_matched, prev_catalog = 0, 0
         best_lm = coarse_lm_values[0]
         best_matches = 0
+        prev_costs = []  # track costs for knee detection
 
         for i, test_lm in enumerate(coarse_lm_values):
             n_matched, n_catalog = count_matches_at_lm(test_lm)
@@ -4659,10 +5430,15 @@ class PlateTool(QtWidgets.QMainWindow):
                 print(f"      LM={test_lm:.1f}: {n_matched}/{target_matches} ({coverage:.0%}), "
                       f"+{match_gain} matches, cost={cost:.0f} cat/match")
 
-                # Early exit: cost > 200 catalog stars per match AND >80% coverage
-                if cost > 200 and coverage > 0.80:
-                    print(f"    -> Diminishing returns at LM={test_lm:.1f}")
-                    break
+                # Detect cost knee: cost jumps dramatically relative to prior steps
+                if len(prev_costs) >= 2:
+                    median_cost = np.median(prev_costs)
+                    if cost > max(50, 10 * median_cost):
+                        print(f"    -> Cost knee at LM={test_lm:.1f} "
+                              f"(cost={cost:.0f} vs prior median={median_cost:.0f})")
+                        break
+
+                prev_costs.append(cost)
 
                 # Early exit if coverage is very high (>98%)
                 if coverage >= 0.98:
@@ -4676,8 +5452,6 @@ class PlateTool(QtWidgets.QMainWindow):
                 best_matches = n_matched
             else:
                 print(f"      LM={test_lm:.1f}: {n_matched}/{target_matches} ({coverage:.0%}), no gain")
-                # No gain - don't update best_lm, just continue to see if more stars appear
-                # But if we already have very high coverage, stop
                 if coverage >= 0.98:
                     print(f"    -> {coverage:.0%} coverage with no gain, stopping at LM={best_lm:.1f}")
                     break
@@ -4767,6 +5541,15 @@ class PlateTool(QtWidgets.QMainWindow):
         # Write to the config file
         self._writeStarDetectionConfig(config_path, config_catalog_lm)
 
+        # Sync in-memory config so isConfigModified() returns False
+        self.config.intensity_threshold = self.override_intensity_threshold
+        self.config.neighborhood_size = self.override_neighborhood_size
+        self.config.max_stars = self.override_max_stars
+        self.config.segment_radius = self.override_segment_radius
+        self.config.max_feature_ratio = self.override_max_feature_ratio
+        self.config.roundness_threshold = self.override_roundness_threshold
+        self._updateConfigSaveButtonState()
+
     def _writeStarDetectionConfig(self, config_path, catalog_mag_limit):
         """Write star detection parameters to the specified config file.
 
@@ -4774,6 +5557,15 @@ class PlateTool(QtWidgets.QMainWindow):
         Uses ': ' separator like the RMS config format.
         """
         import re
+        from datetime import datetime
+
+        # Backup existing config before overwriting
+        if os.path.exists(config_path):
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            base, ext = os.path.splitext(config_path)
+            backup_path = "{}.bak.{}{}".format(base, timestamp, ext)
+            shutil.copy2(config_path, backup_path)
+            print("Config backed up to:", backup_path)
 
         # Values to update: (section, key, value)
         updates = {
@@ -5360,6 +6152,7 @@ class PlateTool(QtWidgets.QMainWindow):
             # Mark as saved
             self.tab.mask.setUnsaved(False)
             self.tab.mask.updateStatus(len(self.mask_polygons))
+            self.updateFileManagerButton()
 
     def loadMaskDialog(self):
         """Open dialog to load a mask file."""
@@ -5378,6 +6171,8 @@ class PlateTool(QtWidgets.QMainWindow):
         if not os.path.exists(mask_path):
             print(f"Mask file not found: {mask_path}")
             return
+
+        self.mask_source_path = mask_path
 
         mask_img = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
         if mask_img is None:
@@ -5418,6 +6213,9 @@ class PlateTool(QtWidgets.QMainWindow):
 
     def updatePicks(self):
         """ Draw pick markers for manualreduction """
+
+        if not self.hasData():
+            return
 
         pick_color = pg.mkPen((255, 0, 0)) # red
         gap_color = pg.mkPen((255, 215, 0)) # gold
@@ -5557,6 +6355,9 @@ class PlateTool(QtWidgets.QMainWindow):
     def updateDistortion(self):
         """ Draw distortion guides. """
 
+        if not self.hasData():
+            return
+
         # Only draw the distortion if we have a platepar
         if self.platepar:
 
@@ -5620,6 +6421,9 @@ class PlateTool(QtWidgets.QMainWindow):
             show_plot: if true, will show a plot of the photometry
 
         """
+
+        if not self.hasData():
+            return
 
         ### Make a photometry plot
 
@@ -6474,6 +7278,10 @@ class PlateTool(QtWidgets.QMainWindow):
 
     def updateImageNavigationDisplay(self):
         """ Update the image navigation slider and label to show current position. """
+
+        if not self.hasData():
+            return
+
         # Only update if we have a multi-image handle with ff_list
         if not hasattr(self.img_handle, 'ff_list'):
             self.image_navigation_slider.hide()
@@ -7392,6 +8200,10 @@ class PlateTool(QtWidgets.QMainWindow):
                     self.closeMaskPolygon()
                     return
 
+        # When no data is loaded, block all key actions
+        if not self.hasData():
+            return
+
         # Toggle auto levels
         if event.key() == QtCore.Qt.Key_A and (modifiers == QtCore.Qt.ControlModifier):
 
@@ -7435,8 +8247,10 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Load the flat
         elif event.key() == QtCore.Qt.Key_F and (modifiers == QtCore.Qt.ControlModifier):
-            
-            _, self.flat_struct = self.loadFlat(force_dialog=True)
+
+            flat_file, self.flat_struct = self.loadFlat(force_dialog=True)
+            if flat_file:
+                self.flat_source_path = flat_file
 
             # Set focus back on the SkyFit window
             self.activateWindow()
@@ -11031,6 +11845,8 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Save the platepar file
         self.platepar.write(self.platepar_file, fmt=self.platepar_fmt, fov=computeFOVSize(self.platepar))
+        self.platepar_modified = False
+        self.updateFileManagerButton()
         print('Platepar written to:', self.platepar_file)
 
     def saveDefaultPlatepar(self):
@@ -11043,6 +11859,17 @@ class PlateTool(QtWidgets.QMainWindow):
         if file_path:
             self.platepar.write(file_path, fmt=self.platepar_fmt)
             print('Default platepar written to:', file_path)
+
+    def showCalibrationFilesDialog(self, save_ftype=None):
+        """Open the File Manager dialog, optionally auto-triggering Save for a file type."""
+        dlg = CalibrationFilesDialog(self, parent=self)
+        if save_ftype and isinstance(save_ftype, str):
+            # Show the dialog and immediately trigger the save flow for the given type
+            dlg.show()
+            dlg._showSaveDialog(save_ftype)
+            dlg.close()
+        else:
+            dlg.exec_()
 
     def saveCurrentFrame(self):
         """ Saves the current frame to disk. """
@@ -11105,7 +11932,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.platepar.station_code = self.config.stationID
 
         # Get the FOV centre if the image handle is available so the time can be extracted
-        if hasattr(self, 'img_handle'):
+        if hasattr(self, 'img_handle') and self.img_handle is not None:
 
             # Get reference RA, Dec of the image centre
             (
@@ -11139,6 +11966,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Indicate that a new platepar is being made
         self.new_platepar = True
+        self.platepar_modified = True
 
         if hasattr(self, 'tab'):
             self.tab.param_manager.updatePlatepar()
@@ -11894,6 +12722,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.platepar.fitAstrometry(jd, img_stars, catalog_stars, first_platepar_fit=self.first_platepar_fit,\
             fit_only_pointing=self.fit_only_pointing, fixed_scale=self.fixed_scale)
         self.first_platepar_fit = False
+        self.platepar_modified = True
 
         # Show platepar parameters
         print()
@@ -12920,6 +13749,9 @@ class PlateTool(QtWidgets.QMainWindow):
 
     def drawPhotometryColoring(self):
         """ Updates image to have the colouring in the current frame """
+
+        if not self.hasData():
+            return
 
         def set_region_image(image):
             self.region.setImage(image)
@@ -14129,67 +14961,8 @@ if __name__ == '__main__':
 
     app = QtWidgets.QApplication(sys.argv)
 
-    # Default directory for file dialogs: use ~/RMS_data if it exists, otherwise ~
-    rms_data_dir = os.path.expanduser("~/RMS_data")
-    default_dir = rms_data_dir if os.path.isdir(rms_data_dir) else os.path.expanduser("~")
-
-    # If no input path was provided, prompt for one
-    if cml_args.input_path is None:
-        # Ask user what type of input to select
-        msg = QtWidgets.QMessageBox()
-        msg.setWindowTitle("SkyFit2 - Select Input")
-        msg.setText("What would you like to open?")
-        folder_btn = msg.addButton("Folder (FF/images)", QtWidgets.QMessageBox.ActionRole)
-        file_btn = msg.addButton("File (video/state)", QtWidgets.QMessageBox.ActionRole)
-        cancel_btn = msg.addButton(QtWidgets.QMessageBox.Cancel)
-        msg.exec_()
-
-        input_path = None
-        if msg.clickedButton() == folder_btn:
-            input_path = QtWidgets.QFileDialog.getExistingDirectory(
-                None, "Select folder with FF/image files",
-                default_dir,
-                QtWidgets.QFileDialog.ShowDirsOnly
-            )
-        elif msg.clickedButton() == file_btn:
-            input_path, _ = QtWidgets.QFileDialog.getOpenFileName(
-                None, "Select video or state file",
-                default_dir,
-                "All supported (*.state *.mp4 *.avi *.mkv *.mov);;State files (*.state);;Video files (*.mp4 *.avi *.mkv *.mov);;All files (*)"
-            )
-
-        if not input_path:
-            print("No input path selected. Exiting.")
-            sys.exit(0)
-
-        cml_args.input_path = input_path
-
-    # If no config file was provided, prompt for one
-    if cml_args.config is None:
-        msg = QtWidgets.QMessageBox()
-        msg.setWindowTitle("SkyFit2 - Select Config")
-        msg.setText("No .config file specified.\n\nSelect the config file source:")
-        data_btn = msg.addButton("Data Folder", QtWidgets.QMessageBox.ActionRole)
-        rms_btn = msg.addButton("RMS Root", QtWidgets.QMessageBox.ActionRole)
-        browse_btn = msg.addButton("Browse...", QtWidgets.QMessageBox.ActionRole)
-        msg.exec_()
-
-        if msg.clickedButton() == data_btn:
-            # Use config from data folder (use '.' to trigger directory search)
-            cml_args.config = ['.']
-        elif msg.clickedButton() == browse_btn:
-            config_path, _ = QtWidgets.QFileDialog.getOpenFileName(
-                None, "Select config file",
-                default_dir,
-                "Config files (*.config);;All files (*)"
-            )
-            if config_path:
-                cml_args.config = [config_path]
-            else:
-                print("No config file selected. Using RMS root default.")
-
     # If the state file was given, load the state
-    if cml_args.input_path.endswith('.state'):
+    if cml_args.input_path is not None and cml_args.input_path.endswith('.state'):
 
         dir_path, state_name = os.path.split(cml_args.input_path)
         config = cr.loadConfigFromDirectory(cml_args.config, cml_args.input_path)
@@ -14230,9 +15003,9 @@ if __name__ == '__main__':
         if plate_tool.show_sattracks:
             plate_tool.loadSatelliteTracks()
 
-    else:
+    elif cml_args.input_path is not None:
 
-        # Extract the data directory path
+        # CLI provided an input path — load directly
         input_path = cml_args.input_path.replace('"', '')
         if os.path.isfile(input_path):
             dir_path = os.path.dirname(input_path)
@@ -14241,7 +15014,6 @@ if __name__ == '__main__':
 
         # Load the config file
         config = cr.loadConfigFromDirectory(cml_args.config, dir_path)
-
 
         if cml_args.mask is not None:
             print("Given a path to a mask at {}".format(cml_args.mask))
@@ -14264,12 +15036,21 @@ if __name__ == '__main__':
                 mask.width, mask.height, config.width, config.height))
             mask = None
 
-        # Init SkyFit
+        # Init SkyFit with data
         plate_tool = PlateTool(input_path, config, beginning_time=beginning_time, fps=cml_args.fps, \
             gamma=cml_args.gamma, use_fr_files=cml_args.fr, geo_points_input=cml_args.geopoints, \
             mask=mask, nobg=cml_args.nobg, peribg=cml_args.peribg, flipud=cml_args.flipud, \
             flatbiassub=cml_args.flatbiassub, exposure_ratio=cml_args.expratio, show_sattracks=cml_args.sattracks, \
             tle_file=cml_args.tle_file)
+
+    else:
+
+        # No input path — launch empty PlateTool, File Manager opens automatically
+        plate_tool = PlateTool(beginning_time=beginning_time, fps=cml_args.fps,
+            gamma=cml_args.gamma, use_fr_files=cml_args.fr, geo_points_input=cml_args.geopoints,
+            nobg=cml_args.nobg, peribg=cml_args.peribg, flipud=cml_args.flipud,
+            flatbiassub=cml_args.flatbiassub, exposure_ratio=cml_args.expratio,
+            show_sattracks=cml_args.sattracks, tle_file=cml_args.tle_file)
 
 
 
