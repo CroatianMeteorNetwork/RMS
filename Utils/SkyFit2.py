@@ -2907,17 +2907,21 @@ class PlateTool(QtWidgets.QMainWindow):
         self.pick_marker2.setZValue(5)
         self.zoom_window.addItem(self.pick_marker2)
 
+        # Platform-aware modifier label (Qt ControlModifier = Cmd on macOS)
+        self.ctrl_label = "CMD" if sys.platform == "darwin" else "CTRL"
+        ctrl = self.ctrl_label
+
         # Star pick info
         self.star_pick_info_text_str = "STAR PICKING MODE keys:\n"
         self.star_pick_info_text_str += "LEFT CLICK - Centroid star\n"
-        self.star_pick_info_text_str += "CTRL + LEFT CLICK - Manual star position\n"
+        self.star_pick_info_text_str += f"{ctrl} + LEFT CLICK - Manual star position\n"
         self.star_pick_info_text_str += "ENTER or SPACE - Accept pair\n"
-        self.star_pick_info_text_str += "CTRL + SPACE - Mark pair bad\n"
+        self.star_pick_info_text_str += f"{ctrl} + SPACE - Mark pair bad\n"
         self.star_pick_info_text_str += "SHIFT + SPACE - Jump random\n"
         self.star_pick_info_text_str += "RIGHT CLICK - Remove pair\n"
-        self.star_pick_info_text_str += "CTRL + SCROLL - Aperture radius adjust\n"
-        self.star_pick_info_text_str += "CTRL + Z - Fit stars\n"
-        self.star_pick_info_text_str += "CTRL + SHIFT + Z - Fit with initial distortion params set to 0\n"
+        self.star_pick_info_text_str += f"{ctrl} + SCROLL - Aperture radius adjust\n"
+        self.star_pick_info_text_str += f"{ctrl} + Z - Fit stars\n"
+        self.star_pick_info_text_str += f"{ctrl} + SHIFT + Z - Fit with initial distortion params set to 0\n"
         self.star_pick_info_text_str += "L - Astrometry fit plot\n"
         self.star_pick_info_text_str += "P - Photometry fit plot"
         self.star_pick_info = TextItem(self.star_pick_info_text_str, anchor=(0.0, 0.75), color=(0, 0, 0), fill=(255, 255, 255, 100))
@@ -3157,7 +3161,6 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.param_manager.sigFindBestFramePressed.connect(self.findBestFrame)
         self.tab.param_manager.sigNextStarPressed.connect(self.jumpNextStar)
         self.tab.param_manager.sigPhotometryPressed.connect(lambda: self.photometry(show_plot=True))
-        self.tab.param_manager.sigFitBandRatioPressed.connect(self.fitBandRatio)
         self.tab.param_manager.sigAstrometryPressed.connect(self.showAstrometryFitPlots)
         self.tab.param_manager.sigResetDistortionPressed.connect(self.resetDistortion)
 
@@ -3713,6 +3716,8 @@ class PlateTool(QtWidgets.QMainWindow):
         if not self.hasData():
             return
 
+        ctrl = self.ctrl_label
+
         # Sky fit
         if self.mode == 'skyfit':
             ra_centre, dec_centre = self.computeCentreRADec()
@@ -3773,7 +3778,7 @@ class PlateTool(QtWidgets.QMainWindow):
             text_str += '-----\n'
             text_str += 'F1 - Hide/show this text\n'
             text_str += 'Left/Right - Previous/next image\n'
-            text_str += 'CTRL + Left/Right - +/- 10 images\n'
+            text_str += f'{ctrl} + Left/Right - +/- 10 images\n'
             text_str += 'A/D - Azimuth\n'
             text_str += 'S/W - Altitude\n'
             text_str += 'Q/E - Position angle\n'
@@ -3791,14 +3796,14 @@ class PlateTool(QtWidgets.QMainWindow):
             text_str += '5/6 - X 1st dist. coeff.\n'
             text_str += '7/8 - Y 1st dist. coeff.\n'
             text_str += '9/0 - extinction scale\n'
-            text_str += 'CTRL + 1 - poly3+radial distortion\n'
-            text_str += 'CTRL + 2 - poly3+radial3 distortion\n'
-            text_str += 'CTRL + 3 - radial3 distortion\n'
-            text_str += 'CTRL + 4 - radial5 distortion\n'
-            text_str += 'CTRL + 5 - radial7 distortion\n'
-            text_str += 'CTRL + 6 - radial9 distortion\n'
+            text_str += f'{ctrl} + 1 - poly3+radial distortion\n'
+            text_str += f'{ctrl} + 2 - poly3+radial3 distortion\n'
+            text_str += f'{ctrl} + 3 - radial3 distortion\n'
+            text_str += f'{ctrl} + 4 - radial5 distortion\n'
+            text_str += f'{ctrl} + 5 - radial7 distortion\n'
+            text_str += f'{ctrl} + 6 - radial9 distortion\n'
             text_str += '\n'
-            text_str += 'CTRL + R - Pick stars\n'
+            text_str += f'{ctrl} + R - Pick stars\n'
             text_str += '\n'
             text_str += 'Scroll - zoom in/out\n'
             text_str += 'R/F - Lim mag\n'
@@ -3808,36 +3813,37 @@ class PlateTool(QtWidgets.QMainWindow):
             text_str += 'H - Hide/show catalog stars\n'
             text_str += 'C - Hide/show detected stars\n'
             if self.show_sattracks:
-                text_str += 'CTRL + T - Toggle satellite tracks\n'
-            text_str += 'CTRL + I - Show/hide distortion\n'
+                text_str += f'{ctrl} + T - Toggle satellite tracks\n'
+            text_str += f'{ctrl} + I - Show/hide distortion\n'
             text_str += 'U/J - Img Gamma\n'
             text_str += 'I - Invert colors\n'
             text_str += 'V - FOV centre\n'
             text_str += '\n'
-            text_str += 'CTRL + A - Auto levels\n'
-            text_str += 'CTRL + D - Load dark\n'
-            text_str += 'CTRL + F - Load flat\n'
-            text_str += 'CTRL + G - Cycle grids\n'
-            text_str += 'CTRL + U - Pan to next\n'
-            text_str += 'CTRL + O - Toggle auto pan\n'
-            text_str += 'CTRL + X - astrometry.net img upload\n'
-            text_str += 'CTRL + SHIFT + X - astrometry.net XY only\n'
+            text_str += f'{ctrl} + A - Auto levels\n'
+            text_str += f'{ctrl} + D - Load dark\n'
+            text_str += f'{ctrl} + F - Load flat\n'
+            text_str += f'{ctrl} + G - Cycle grids\n'
+            text_str += f'{ctrl} + U - Pan to next\n'
+            text_str += f'{ctrl} + O - Toggle auto pan\n'
+            text_str += f'{ctrl} + X - astrometry.net img upload\n'
+            text_str += f'{ctrl} + SHIFT + X - astrometry.net XY only\n'
+            text_str += f'{ctrl} + SHIFT + B - Fit spectral bands\n'
             text_str += 'SHIFT + Q - Quick align test (debug)\n'
             text_str += 'SHIFT + Z - Show zoomed window\n'
-            text_str += 'CTRL + N - New platepar\n'
-            text_str += 'CTRL + S - Save platepar & state'
+            text_str += f'{ctrl} + N - New platepar\n'
+            text_str += f'{ctrl} + S - Save platepar & state'
         else:
             text_str = 'Keys:\n'
             text_str += '-----------\n'
             text_str += 'F1 - Hide/show this text\n'
             text_str += 'Left/Right - Previous/next frame\n'
-            text_str += 'CTRL + Left/Right - +/- 10 frames\n'
+            text_str += f'{ctrl} + Left/Right - +/- 10 frames\n'
             text_str += 'Down/Up - +/- 25 frames\n'
             text_str += ',/. - Previous/next FR line\n'
             text_str += '\n'
-            text_str += 'CTRL + R - Pick points\n'
+            text_str += f'{ctrl} + R - Pick points\n'
             text_str += 'Left click - Centroid\n'
-            text_str += 'CTRL + Left click - Force pick\n'
+            text_str += f'{ctrl} + Left click - Force pick\n'
             text_str += 'ALT/Num0 + Left click - Mark gap (DFN)\n'
             text_str += '\n'
             text_str += 'Scroll - zoom in/out\n'
@@ -3847,14 +3853,14 @@ class PlateTool(QtWidgets.QMainWindow):
             text_str += 'U/J - Img Gamma\n'
             text_str += '\n'
             text_str += 'P - Show lightcurve\n'
-            text_str += 'CTRL + A - Auto levels\n'
-            text_str += 'CTRL + D - Load dark\n'
-            text_str += 'CTRL + F - Load flat\n'
-            text_str += 'CTRL + P - Load platepar\n'
-            text_str += 'CTRL + W - Save current frame\n'
-            text_str += 'CTRL + S - Save FTPdetectinfo\n'
+            text_str += f'{ctrl} + A - Auto levels\n'
+            text_str += f'{ctrl} + D - Load dark\n'
+            text_str += f'{ctrl} + F - Load flat\n'
+            text_str += f'{ctrl} + P - Load platepar\n'
+            text_str += f'{ctrl} + W - Save current frame\n'
+            text_str += f'{ctrl} + S - Save FTPdetectinfo\n'
             text_str += '\n'
-            text_str += 'CTRL + K - Open ASTRA GUI'
+            text_str += f'{ctrl} + K - Open ASTRA GUI'
 
         self.label2.setText(text_str)
         self.label2.setPos(self.img_frame.width() - self.label2.boundingRect().width(), \
@@ -8985,6 +8991,10 @@ class PlateTool(QtWidgets.QMainWindow):
             self.jumpNextStar(miss_this_one=True)
             self.updateBottomLabel()
 
+
+        # Fit spectral band ratios (hidden feature)
+        elif event.key() == QtCore.Qt.Key_B and modifiers == (QtCore.Qt.ControlModifier | QtCore.Qt.ShiftModifier):
+            self.fitBandRatio()
 
         # Toggle satellite tracks
         elif event.key() == QtCore.Qt.Key_T and (modifiers == QtCore.Qt.ControlModifier):

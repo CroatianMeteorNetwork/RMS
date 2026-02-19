@@ -1751,7 +1751,6 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
     sigNextStarPressed = QtCore.pyqtSignal()
     sigAstrometryPressed = QtCore.pyqtSignal()
     sigPhotometryPressed = QtCore.pyqtSignal()
-    sigFitBandRatioPressed = QtCore.pyqtSignal()
     sigResetDistortionPressed = QtCore.pyqtSignal()
 
     sigFitOnlyPointingToggled = QtCore.pyqtSignal()
@@ -1845,13 +1844,6 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         self.photometry_button.clicked.connect(self.sigPhotometryPressed.emit)
         hbox.addWidget(self.photometry_button)
         box.addLayout(hbox)
-
-        self.fit_band_ratio_button = QtWidgets.QPushButton('Fit Spectral Bands')
-        self.fit_band_ratio_button.setToolTip(
-            "Fit the optimal G:BP:RP band ratio for this camera.\n"
-            "Results are printed to the console as a config-ready string.")
-        self.fit_band_ratio_button.clicked.connect(self.sigFitBandRatioPressed.emit)
-        box.addWidget(self.fit_band_ratio_button)
 
         self.updatePairedStars()
         group = QtWidgets.QGroupBox("Calibration")
@@ -2571,7 +2563,6 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         """
         self.astrometry_button.setEnabled(len(self.gui.paired_stars) > 0)
         self.photometry_button.setEnabled(len(self.gui.paired_stars) >= 2)
-        self.fit_band_ratio_button.setEnabled(len(self.gui.paired_stars) >= 3)
         self.fit_astrometry_button.setEnabled(len(self.gui.paired_stars) >= min_fit_stars)
 
 
