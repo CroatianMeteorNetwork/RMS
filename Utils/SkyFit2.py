@@ -119,6 +119,7 @@ def computeSolarSystemMagnitude(body_name, body, sun, time):
     return mag
 import matplotlib.gridspec as gridspec
 import matplotlib.ticker as ticker
+import scipy.optimize
 try:
     import pyqtgraph as pg
     from pyqtgraph.Qt import QtWidgets, QtGui
@@ -2131,7 +2132,10 @@ class PlateTool(QtWidgets.QMainWindow):
 
         self.config = config
 
-        # Store original catalog file and band ratios for "Config Default" option
+        # Store original catalog file and band ratios for "Config Default" option.
+        # When the user switches catalogs via the dropdown, onCatalogChanged()
+        # restores these so the magnitude filter uses the same bands as on startup
+        # (rather than falling back to V-band only).
         self._original_catalog_file = self.config.star_catalog_file
         self._original_band_ratios = self.config.star_catalog_band_ratios
 
@@ -3153,6 +3157,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.param_manager.sigFindBestFramePressed.connect(self.findBestFrame)
         self.tab.param_manager.sigNextStarPressed.connect(self.jumpNextStar)
         self.tab.param_manager.sigPhotometryPressed.connect(lambda: self.photometry(show_plot=True))
+        self.tab.param_manager.sigFitBandRatioPressed.connect(self.fitBandRatio)
         self.tab.param_manager.sigAstrometryPressed.connect(self.showAstrometryFitPlots)
         self.tab.param_manager.sigResetDistortionPressed.connect(self.resetDistortion)
 
@@ -6933,6 +6938,621 @@ class PlateTool(QtWidgets.QMainWindow):
 
             fig_p.tight_layout()
             fig_p.show()
+
+
+    def fitBandRatio(self):
+        """Fit the optimal G:BP:RP band ratio that minimizes photometric residuals.
+
+        Performs a 2D grid search over G, BP, RP flux fractions (rG + rBP + rRP = 1),
+        runs photometryFit for each combination, and reports the ratio with the
+        lowest stddev. The result is printed as a config-ready string.
+        """
+
+        # Check that we have individual G/BP/RP magnitudes
+        if self.catalog_stars_bp is None or self.catalog_stars_rp is None:
+            print("Band ratio fitting requires the GMN Star Catalog with BP/RP columns.")
+            return
+        if self.catalog_stars_g is None:
+            print("Band ratio fitting requires the GMN Star Catalog with G column.")
+            return
+
+        # Check that we have enough paired stars
+        if len(self.paired_stars) < 3:
+            print("Need at least 3 paired stars for band ratio fitting.")
+            return
+
+        # Highly variable star types to exclude (same as photometry())
+        EXCLUDE_FROM_PHOTOMETRY = {
+            'Mira', 'Mira_Candidate', 'RCrBV*', 'RCrBV*_Candidate',
+            'CataclyV*', 'CataclyV*_Candidate', 'Nova', 'Nova_Candidate',
+            'IrregularV*',
+        }
+
+        # Check if BVRI magnitudes are available in the catalog
+        has_bvri_catalog = all(
+            getattr(self, 'catalog_stars_' + b, None) is not None
+            for b in ['B', 'V', 'R', 'Ic']
+        )
+
+        # Collect paired star data with individual G/BP/RP magnitudes
+        radius_list = []
+        px_intens_list = []
+        catalog_ra = []
+        catalog_dec = []
+        g_mags = []
+        bp_mags = []
+        rp_mags = []
+        snr_list = []
+        saturation_list = []
+        variable_star_list = []
+
+        # BVRI parallel lists (only for stars that also have valid BVRI)
+        b_mags = []
+        v_mags = []
+        r_mags = []
+        i_mags = []
+        bvri_indices = []  # indices into the main lists for stars with valid BVRI
+
+        for paired_star in self.paired_stars.allCoords():
+
+            img_star, catalog_star = paired_star
+            star_x, star_y, fwhm, px_intens, snr, saturated = img_star
+            star_ra, star_dec, star_mag = catalog_star
+
+            # Skip invalid intensities
+            lsp = np.log10(px_intens)
+            if np.isnan(lsp) or np.isinf(lsp):
+                continue
+
+            # Look up the closest catalog star to get individual G/BP/RP
+            ra_diff = np.abs(self.catalog_stars[:, 0] - star_ra)
+            dec_diff = np.abs(self.catalog_stars[:, 1] - star_dec)
+            dist = np.sqrt(ra_diff**2 + dec_diff**2)
+            closest_idx = np.argmin(dist)
+
+            if dist[closest_idx] > 0.01:  # Within ~36 arcsec
+                continue
+
+            g_val = self.catalog_stars_g[closest_idx]
+            bp_val = self.catalog_stars_bp[closest_idx]
+            rp_val = self.catalog_stars_rp[closest_idx]
+
+            # Skip stars with missing G, BP or RP (NaN or zero sentinel)
+            if any(np.isnan(v) or v == 0 for v in [g_val, bp_val, rp_val]):
+                continue
+
+            # Skip stars with unreliable Gaia BP/RP photometry.
+            # For very bright stars (G < ~3), Gaia detectors saturate and BP/RP
+            # values can be wildly wrong (e.g. BP = -2.87 for a G = 0.57 star).
+            # Filter on BP-RP color: physical range is about [-0.5, 5.0].
+            bp_rp = bp_val - rp_val
+            if bp_rp < -0.5 or bp_rp > 5.0:
+                continue
+
+            # Check variable star exclusion
+            is_variable = False
+            if hasattr(self, 'catalog_stars_simbad_otypes') and self.catalog_stars_simbad_otypes is not None:
+                otype = self.catalog_stars_simbad_otypes[closest_idx].strip()
+                if otype in EXCLUDE_FROM_PHOTOMETRY:
+                    is_variable = True
+
+            cur_idx = len(radius_list)
+
+            radius_list.append(np.hypot(star_x - self.platepar.X_res/2,
+                                        star_y - self.platepar.Y_res/2))
+            px_intens_list.append(px_intens)
+            catalog_ra.append(star_ra)
+            catalog_dec.append(star_dec)
+            g_mags.append(g_val)
+            bp_mags.append(bp_val)
+            rp_mags.append(rp_val)
+            snr_list.append(snr)
+            saturation_list.append(saturated)
+            variable_star_list.append(is_variable)
+
+            # Collect BVRI if available
+            if has_bvri_catalog:
+                b_val = self.catalog_stars_B[closest_idx]
+                v_val = self.catalog_stars_V[closest_idx]
+                r_val = self.catalog_stars_R[closest_idx]
+                i_val = self.catalog_stars_Ic[closest_idx]
+
+                # Only include if all four bands are valid (not NaN or zero)
+                if not any(np.isnan(v) or v == 0 for v in [b_val, v_val, r_val, i_val]):
+                    b_mags.append(b_val)
+                    v_mags.append(v_val)
+                    r_mags.append(r_val)
+                    i_mags.append(i_val)
+                    bvri_indices.append(cur_idx)
+
+        if len(px_intens_list) < 3:
+            print("Not enough paired stars with valid G/BP/RP for fitting ({:d} found).".format(
+                len(px_intens_list)))
+            return
+
+        g_mags = np.array(g_mags)
+        bp_mags = np.array(bp_mags)
+        rp_mags = np.array(rp_mags)
+
+        # Precompute fluxes
+        g_flux = np.power(10, -0.4 * g_mags)
+        bp_flux = np.power(10, -0.4 * bp_mags)
+        rp_flux = np.power(10, -0.4 * rp_mags)
+
+        # Determine fixed vignetting (same logic as photometry())
+        fixed_vignetting = None
+        if self.flat_struct is not None:
+            fixed_vignetting = 0.0
+        elif self.platepar.vignetting_fixed:
+            fixed_vignetting = self.platepar.vignetting_coeff
+
+        weights = np.clip(snr_list, 0, 10) / 10.0
+        exclude_list = [sat or var for sat, var in zip(saturation_list, variable_star_list)]
+
+        jd = date2JD(*self.img_handle.currentTime())
+
+        # 2D grid search over (rG, rBP) with rRP = 1 - rG - rBP
+        # Step size of 0.05 gives ~210 valid grid points
+        step = 0.05
+        grid_vals = np.arange(0, 1 + step/2, step)
+        best_stddev = np.inf
+        best_rg, best_rbp, best_rrp = 0, 0, 1
+
+        # Store results for heatmap
+        grid_results = {}
+
+        for rg in grid_vals:
+            for rbp in grid_vals:
+                rrp = 1.0 - rg - rbp
+                if rrp < -0.001:  # Allow tiny float error
+                    continue
+                rrp = max(rrp, 0.0)
+
+                # Compute synthetic magnitude by combining fluxes
+                total_flux = rg * g_flux + rbp * bp_flux + rrp * rp_flux
+                total_flux = np.maximum(total_flux, 1e-30)
+                test_mags = -2.5 * np.log10(total_flux)
+
+                # Apply extinction correction
+                test_mags_ext = extinctionCorrectionTrueToApparent(
+                    test_mags.tolist(), list(catalog_ra), list(catalog_dec),
+                    jd, self.platepar)
+
+                try:
+                    _, stddev, _ = photometryFit(
+                        px_intens_list, radius_list, test_mags_ext,
+                        fixed_vignetting=fixed_vignetting,
+                        weights=weights, exclude_list=exclude_list)
+
+                    grid_results[(rg, rbp)] = stddev
+
+                    if stddev < best_stddev:
+                        best_stddev = stddev
+                        best_rg, best_rbp, best_rrp = rg, rbp, rrp
+                except Exception:
+                    pass
+
+        # Compute the full photometry fit with the best ratio
+        best_total_flux = best_rg * g_flux + best_rbp * bp_flux + best_rrp * rp_flux
+        best_mags = -2.5 * np.log10(np.maximum(best_total_flux, 1e-30))
+        best_mags_ext = extinctionCorrectionTrueToApparent(
+            best_mags.tolist(), list(catalog_ra), list(catalog_dec), jd, self.platepar)
+        best_params, _, best_resids = photometryFit(
+            px_intens_list, radius_list, best_mags_ext,
+            fixed_vignetting=fixed_vignetting,
+            weights=weights, exclude_list=exclude_list)
+
+        # Also compute the full photometry fit with current band ratios for comparison
+        current_mags = np.array([self.catalog_stars[
+            np.argmin(np.sqrt((self.catalog_stars[:, 0] - ra)**2 +
+                              (self.catalog_stars[:, 1] - dec)**2)), 2]
+            for ra, dec in zip(catalog_ra, catalog_dec)])
+        current_mags_ext = extinctionCorrectionTrueToApparent(
+            current_mags.tolist(), list(catalog_ra), list(catalog_dec), jd, self.platepar)
+        try:
+            current_params, current_stddev, current_resids = photometryFit(
+                px_intens_list, radius_list, current_mags_ext,
+                fixed_vignetting=fixed_vignetting,
+                weights=weights, exclude_list=exclude_list)
+        except Exception:
+            current_stddev = np.inf
+            current_resids = np.zeros(len(px_intens_list))
+            current_params = (0, 0)
+
+        # Format the config string
+        config_str = "0.00,0.00,0.00,0.00,{:.2f},{:.2f},{:.2f}".format(
+            best_rg, best_rbp, best_rrp)
+
+        # Print results
+        print()
+        print("=" * 60)
+        print("G:BP:RP BAND RATIO FIT")
+        print("=" * 60)
+        print("  Stars used: {:d}".format(
+            sum(1 for e in exclude_list if not e)))
+        print("  Best ratio: {:.2f} G + {:.2f} BP + {:.2f} RP".format(
+            best_rg, best_rbp, best_rrp))
+        print("  Fit stddev: {:.3f} mag".format(best_stddev))
+        print("  Current:    {:.3f} mag ({:s})".format(
+            current_stddev, self.mag_band_string))
+        print()
+        print("  Config line:")
+        print("  star_catalog_band_ratios: {:s}".format(config_str))
+        print()
+
+        # Diagnostic: show stars with largest magnitude difference
+        mag_diff = np.abs(best_mags - current_mags)
+        sort_idx = np.argsort(mag_diff)[::-1]
+        n_excluded = sum(exclude_list)
+        print("  Excluded: {:d} (saturated/variable)".format(n_excluded))
+        print()
+        print("  Top 10 stars by |current - best| magnitude difference:")
+        print("  {:>6s}  {:>6s}  {:>6s}  {:>6s}  {:>6s}  {:>7s}  {:>5s}".format(
+            "curr", "G", "BP", "RP", "best", "diff", "excl"))
+        for i in sort_idx[:10]:
+            excl_str = "  *" if exclude_list[i] else ""
+            print("  {:6.2f}  {:6.2f}  {:6.2f}  {:6.2f}  {:6.2f}  {:+7.3f}{:s}".format(
+                current_mags[i], g_mags[i], bp_mags[i], rp_mags[i], best_mags[i],
+                best_mags[i] - current_mags[i], excl_str))
+
+        print("=" * 60)
+        print()
+
+        # Vignetting vs extinction interaction: 2D sweep to show how the optimal
+        # extinction scale changes as a function of fixed vignetting coefficient.
+        # This reveals the degeneracy between the two corrections.
+        current_ext_scale = self.platepar.extinction_scale
+        if abs(current_ext_scale) > 0.001:
+            # Extract scale-independent per-star extinction delta
+            ext_delta_arr = np.array(best_mags_ext) - best_mags
+            raw_ext_delta = ext_delta_arr / current_ext_scale
+
+            # Determine vignetting range: 0 to the free-fit value
+            vig_max = best_params[1]  # vignetting from the free fit
+            if vig_max < 0.0001:
+                vig_max = 0.001  # minimum range if free fit gives ~0
+            vig_steps = np.linspace(0, vig_max * 1.2, 15)
+            ext_scales = np.arange(0, 2.05, 0.05)
+
+            print("VIGNETTING vs EXTINCTION INTERACTION")
+            print("=" * 60)
+            print("  Extinction range: {:.2f} - {:.2f} mag".format(
+                np.min(raw_ext_delta), np.max(raw_ext_delta)))
+            print()
+            print("  {:>10s}  {:>10s}  {:>10s}".format(
+                "vig", "best_ext", "stddev"))
+            print("  " + "-" * 34)
+
+            best_overall_stddev = np.inf
+            best_overall_vig = 0
+            best_overall_ext = 0
+
+            for vig_val in vig_steps:
+                best_ext_stddev = np.inf
+                best_ext_scale = 0
+
+                for test_scale in ext_scales:
+                    test_mags_local = (best_mags + test_scale * raw_ext_delta).tolist()
+                    try:
+                        _, stddev, _ = photometryFit(
+                            px_intens_list, radius_list, test_mags_local,
+                            fixed_vignetting=vig_val,
+                            weights=weights, exclude_list=exclude_list)
+                        if stddev < best_ext_stddev:
+                            best_ext_stddev = stddev
+                            best_ext_scale = test_scale
+                    except Exception:
+                        pass
+
+                marker = ""
+                if best_ext_stddev < best_overall_stddev:
+                    best_overall_stddev = best_ext_stddev
+                    best_overall_vig = vig_val
+                    best_overall_ext = best_ext_scale
+
+                print("  {:10.6f}  {:10.2f}  {:10.4f}".format(
+                    vig_val, best_ext_scale, best_ext_stddev))
+
+            print("  " + "-" * 34)
+            print("  Best: vig={:.6f}, ext={:.2f}, stddev={:.4f}".format(
+                best_overall_vig, best_overall_ext, best_overall_stddev))
+            print("  Free fit:  vig={:.6f}, ext={:.2f}, stddev={:.4f}".format(
+                best_params[1], current_ext_scale, best_stddev))
+            print("=" * 60)
+            print()
+
+        # --- BVRI band ratio fit (optimizer) ---
+        has_bvri_data = len(b_mags) >= 3
+        bvri_fit_result = None  # Will hold (params, stddev, mags_ext, fit_params) if successful
+
+        if not has_bvri_catalog:
+            print("BVRI data not available in this catalog.")
+            print()
+        elif not has_bvri_data:
+            print("BVRI: fewer than 3 stars with valid B/V/R/Ic ({:d} found), skipping.".format(
+                len(b_mags)))
+            print()
+        else:
+            b_mags_arr = np.array(b_mags)
+            v_mags_arr = np.array(v_mags)
+            r_mags_arr = np.array(r_mags)
+            i_mags_arr = np.array(i_mags)
+            bvri_idx = np.array(bvri_indices)
+
+            b_flux = np.power(10, -0.4 * b_mags_arr)
+            v_flux = np.power(10, -0.4 * v_mags_arr)
+            r_flux = np.power(10, -0.4 * r_mags_arr)
+            i_flux = np.power(10, -0.4 * i_mags_arr)
+
+            # Build BVRI-specific parallel arrays (subset of the main lists)
+            px_intens_list_bvri = [px_intens_list[j] for j in bvri_idx]
+            radius_list_bvri = [radius_list[j] for j in bvri_idx]
+            catalog_ra_bvri = [catalog_ra[j] for j in bvri_idx]
+            catalog_dec_bvri = [catalog_dec[j] for j in bvri_idx]
+            weights_bvri = np.array([weights[j] for j in bvri_idx])
+            exclude_list_bvri = [exclude_list[j] for j in bvri_idx]
+
+            def bvri_objective(params):
+                rB, rV, rR = params
+                rI = 1.0 - rB - rV - rR
+                if rB < 0 or rV < 0 or rR < 0 or rI < 0:
+                    return 1e6
+                total_flux = rB*b_flux + rV*v_flux + rR*r_flux + rI*i_flux
+                total_flux = np.maximum(total_flux, 1e-30)
+                test_mags = -2.5 * np.log10(total_flux)
+                test_mags_ext = extinctionCorrectionTrueToApparent(
+                    test_mags.tolist(), list(catalog_ra_bvri), list(catalog_dec_bvri),
+                    jd, self.platepar)
+                try:
+                    _, stddev, _ = photometryFit(
+                        px_intens_list_bvri, radius_list_bvri, test_mags_ext,
+                        fixed_vignetting=fixed_vignetting,
+                        weights=weights_bvri, exclude_list=exclude_list_bvri)
+                    return stddev
+                except Exception:
+                    return 1e6
+
+            # Multiple starting points to avoid local minima
+            starts = [
+                (0.00, 1.00, 0.00),  # pure V
+                (0.25, 0.25, 0.25),  # equal BVR (I=0.25)
+                (0.00, 0.00, 1.00),  # pure R
+                (0.15, 0.30, 0.25),  # default Sony BVRI
+            ]
+            best_bvri_result = None
+            for x0 in starts:
+                res = scipy.optimize.minimize(bvri_objective, x0, method='Nelder-Mead',
+                                              options={'xatol': 0.01, 'fatol': 0.001})
+                if best_bvri_result is None or res.fun < best_bvri_result.fun:
+                    best_bvri_result = res
+
+            best_rb, best_rv, best_rr = best_bvri_result.x
+            best_ri = 1.0 - best_rb - best_rv - best_rr
+            # Clamp negatives from float noise
+            best_rb, best_rv, best_rr, best_ri = [max(0, x) for x in [best_rb, best_rv, best_rr, best_ri]]
+
+            # Compute the full photometry fit with the best BVRI ratio
+            bvri_total_flux = best_rb*b_flux + best_rv*v_flux + best_rr*r_flux + best_ri*i_flux
+            bvri_best_mags = -2.5 * np.log10(np.maximum(bvri_total_flux, 1e-30))
+            bvri_best_mags_ext = extinctionCorrectionTrueToApparent(
+                bvri_best_mags.tolist(), list(catalog_ra_bvri), list(catalog_dec_bvri),
+                jd, self.platepar)
+            try:
+                bvri_fit_params, _, bvri_resids = photometryFit(
+                    px_intens_list_bvri, radius_list_bvri, bvri_best_mags_ext,
+                    fixed_vignetting=fixed_vignetting,
+                    weights=weights_bvri, exclude_list=exclude_list_bvri)
+                bvri_fit_result = (best_bvri_result.x, best_bvri_result.fun,
+                                   bvri_best_mags_ext, bvri_fit_params)
+            except Exception:
+                bvri_fit_result = None
+
+            # Compute stddev for the current/default BVRI ratios for comparison
+            # Use config BVRI ratios if set, otherwise fall back to Sony CMOS default
+            cur_bvri = self.config.star_catalog_band_ratios  # [B, V, R, Ic, G, BP, RP]
+            cur_rb, cur_rv, cur_rr, cur_ri = cur_bvri[0], cur_bvri[1], cur_bvri[2], cur_bvri[3]
+            cur_bvri_sum = cur_rb + cur_rv + cur_rr + cur_ri
+            if cur_bvri_sum == 0:
+                # Fall back to Sony CMOS default
+                cur_rb, cur_rv, cur_rr, cur_ri = 0.15, 0.30, 0.25, 0.30
+                cur_bvri_sum = 1.0
+                cur_bvri_label = "Sony default"
+            else:
+                cur_bvri_label = "config"
+            # Normalize to sum=1 for fair comparison
+            cur_rb_n = cur_rb/cur_bvri_sum
+            cur_rv_n = cur_rv/cur_bvri_sum
+            cur_rr_n = cur_rr/cur_bvri_sum
+            cur_ri_n = cur_ri/cur_bvri_sum
+            cur_bvri_flux = cur_rb_n*b_flux + cur_rv_n*v_flux + cur_rr_n*r_flux + cur_ri_n*i_flux
+            cur_bvri_mags = -2.5 * np.log10(np.maximum(cur_bvri_flux, 1e-30))
+            cur_bvri_mags_ext = extinctionCorrectionTrueToApparent(
+                cur_bvri_mags.tolist(), list(catalog_ra_bvri), list(catalog_dec_bvri),
+                jd, self.platepar)
+            try:
+                _, cur_bvri_stddev, _ = photometryFit(
+                    px_intens_list_bvri, radius_list_bvri, cur_bvri_mags_ext,
+                    fixed_vignetting=fixed_vignetting,
+                    weights=weights_bvri, exclude_list=exclude_list_bvri)
+            except Exception:
+                cur_bvri_stddev = np.inf
+            cur_bvri_str = "{:.2f}B+{:.2f}V+{:.2f}R+{:.2f}Ic ({:s})".format(
+                cur_rb_n, cur_rv_n, cur_rr_n, cur_ri_n, cur_bvri_label)
+
+            # Print BVRI results
+            bvri_config_str = "{:.2f},{:.2f},{:.2f},{:.2f},0.00,0.00,0.00".format(
+                best_rb, best_rv, best_rr, best_ri)
+            print()
+            print("=" * 60)
+            print("B:V:R:I BAND RATIO FIT")
+            print("=" * 60)
+            print("  Stars used: {:d}".format(
+                sum(1 for e in exclude_list_bvri if not e)))
+            print("  Best ratio: {:.2f} B + {:.2f} V + {:.2f} R + {:.2f} Ic".format(
+                best_rb, best_rv, best_rr, best_ri))
+            print("  Fit stddev: {:.3f} mag".format(best_bvri_result.fun))
+            print("  Current:    {:.3f} mag ({:s})".format(
+                cur_bvri_stddev, cur_bvri_str))
+            print()
+            print("  Config line:")
+            print("  star_catalog_band_ratios: {:s}".format(bvri_config_str))
+            print("=" * 60)
+            print()
+
+        ### Comparison plot ###
+        exclude_arr = np.array(exclude_list, dtype=bool)
+        px_arr = np.array(px_intens_list)
+        radius_arr = np.array(radius_list)
+        lsp_raw = np.log10(px_arr)
+
+        # Compute vignetting-corrected LSP using the best-fit vignetting from each fit
+        current_vig = current_params[1]
+        best_vig = best_params[1]
+        lsp_corr_current = np.log10(correctVignetting(px_arr, radius_arr, current_vig))
+        lsp_corr_best = np.log10(correctVignetting(px_arr, radius_arr, best_vig))
+
+        current_mags_ext_arr = np.array(current_mags_ext)
+        best_mags_ext_arr = np.array(best_mags_ext)
+
+        n_cols = 4 if bvri_fit_result is not None else 3
+        fig = plt.figure(figsize=(4.5*n_cols, 5))
+        gs_plot = gridspec.GridSpec(1, n_cols, width_ratios=[1]*n_cols)
+
+        # --- Left panel: ternary heatmap as 2D G vs BP (RP = 1-G-BP) ---
+        ax_heat = fig.add_subplot(gs_plot[0])
+        n_grid = len(grid_vals)
+        heatmap = np.full((n_grid, n_grid), np.nan)
+        for (rg, rbp), stddev in grid_results.items():
+            ig = int(round(rg / step))
+            ibp = int(round(rbp / step))
+            if 0 <= ig < n_grid and 0 <= ibp < n_grid:
+                heatmap[ibp, ig] = stddev
+
+        im = ax_heat.imshow(heatmap, origin='lower', aspect='auto',
+                            extent=[0, 1, 0, 1], cmap='viridis_r')
+        ax_heat.plot(best_rg, best_rbp, 'r*', markersize=15, zorder=5,
+                     label="Best: {:.2f}G+{:.2f}BP+{:.2f}RP\n$\\sigma$={:.3f}".format(
+                         best_rg, best_rbp, best_rrp, best_stddev))
+        ax_heat.set_xlabel("G fraction")
+        ax_heat.set_ylabel("BP fraction")
+        ax_heat.set_title("G:BP:RP Stddev Map (RP = 1-G-BP)")
+        ax_heat.legend(fontsize=7, loc='upper right')
+        fig.colorbar(im, ax=ax_heat, label='stddev (mag)', shrink=0.8)
+
+        # Compute shared axis limits for both photometry panels
+        x_cur = -2.5 * lsp_corr_current
+        x_best = -2.5 * lsp_corr_best
+        x_min = min(np.min(x_cur), np.min(x_best)) - 1
+        x_max = max(np.max(x_cur), np.max(x_best)) + 1
+        y_min = min(np.min(current_mags_ext_arr), np.min(best_mags_ext_arr)) - 1
+        y_max = max(np.max(current_mags_ext_arr), np.max(best_mags_ext_arr)) + 1
+
+        # Fit line x range
+        x_line = np.linspace(x_min, x_max, 10)
+
+        # Helper to plot a photometry panel (matching the style of the main photometry plot)
+        def plot_photom_panel(ax, cat_mags, lsp_raw, lsp_corr, fit_params, title, ylabel):
+            incl = ~exclude_arr
+
+            # Raw points (red)
+            ax.scatter(-2.5*lsp_raw[incl], cat_mags[incl],
+                       s=5, c='r', alpha=0.5, zorder=3, label="Raw")
+
+            # Vignetting-corrected points (blue)
+            ax.scatter(-2.5*lsp_corr[incl], cat_mags[incl],
+                       s=5, c='b', alpha=0.5, zorder=3, label="Vig. corrected")
+
+            # Excluded stars
+            if np.any(exclude_arr):
+                ax.scatter(-2.5*lsp_corr[exclude_arr], cat_mags[exclude_arr],
+                           s=20, zorder=2, edgecolor='r', facecolor='none')
+
+            # Fit line (at radius=0, i.e. no vignetting)
+            photom_offset, vig_coeff = fit_params
+            fit_info = "{:+.1f}*LSP + {:.2f}".format(-2.5, photom_offset) \
+                     + "\nVig = {:.5f} rad/px".format(vig_coeff)
+            ax.plot(x_line,
+                    photomLine((10**(x_line/(-2.5)), np.zeros_like(x_line)), *fit_params),
+                    'k--', alpha=0.5, label=fit_info)
+
+            ax.legend(fontsize=7, loc='upper left')
+            ax.set_xlabel("Uncalibrated magnitude")
+            ax.set_ylabel(ylabel)
+            ax.set_title(title)
+            ax.set_xlim(x_min, x_max)
+            ax.set_ylim(y_min, y_max)
+            ax.invert_xaxis()
+            ax.invert_yaxis()
+            ax.grid(True, alpha=0.3)
+
+        # --- Center panel: current band ratios ---
+        ax_cur = fig.add_subplot(gs_plot[1])
+        plot_photom_panel(ax_cur, current_mags_ext_arr, lsp_raw, lsp_corr_current,
+                          current_params,
+                          "Current: $\\sigma$ = {:.3f} mag".format(current_stddev),
+                          "Catalog mag ({:s})".format(self.mag_band_string))
+
+        # --- Right panel: best G:BP:RP ---
+        ax_best = fig.add_subplot(gs_plot[2])
+        plot_photom_panel(ax_best, best_mags_ext_arr, lsp_raw, lsp_corr_best,
+                          best_params,
+                          "Best: $\\sigma$ = {:.3f} mag".format(best_stddev),
+                          "Catalog mag ({:.0f}G+{:.0f}BP+{:.0f}RP)".format(
+                              best_rg*100, best_rbp*100, best_rrp*100))
+
+        # --- BVRI panel (if available) ---
+        if bvri_fit_result is not None:
+            bvri_params_opt, bvri_stddev_opt, bvri_mags_ext, bvri_fit_params_phot = bvri_fit_result
+            bvri_rb, bvri_rv, bvri_rr = bvri_params_opt
+            bvri_ri = max(0, 1.0 - bvri_rb - bvri_rv - bvri_rr)
+
+            # Build BVRI-subset arrays for plotting
+            bvri_idx = np.array(bvri_indices)
+            bvri_px_arr = np.array([px_intens_list[j] for j in bvri_idx])
+            bvri_radius_arr = np.array([radius_list[j] for j in bvri_idx])
+            bvri_exclude_arr = np.array([exclude_list[j] for j in bvri_idx], dtype=bool)
+            bvri_mags_ext_arr = np.array(bvri_mags_ext)
+
+            bvri_lsp_raw = np.log10(bvri_px_arr)
+            bvri_vig = bvri_fit_params_phot[1]
+            bvri_lsp_corr = np.log10(correctVignetting(bvri_px_arr, bvri_radius_arr, bvri_vig))
+
+            ax_bvri = fig.add_subplot(gs_plot[3])
+            incl_bvri = ~bvri_exclude_arr
+
+            ax_bvri.scatter(-2.5*bvri_lsp_raw[incl_bvri], bvri_mags_ext_arr[incl_bvri],
+                            s=5, c='r', alpha=0.5, zorder=3, label="Raw")
+            ax_bvri.scatter(-2.5*bvri_lsp_corr[incl_bvri], bvri_mags_ext_arr[incl_bvri],
+                            s=5, c='b', alpha=0.5, zorder=3, label="Vig. corrected")
+            if np.any(bvri_exclude_arr):
+                ax_bvri.scatter(-2.5*bvri_lsp_corr[bvri_exclude_arr], bvri_mags_ext_arr[bvri_exclude_arr],
+                                s=20, zorder=2, edgecolor='r', facecolor='none')
+
+            photom_offset_bvri, vig_coeff_bvri = bvri_fit_params_phot
+            fit_info_bvri = "{:+.1f}*LSP + {:.2f}".format(-2.5, photom_offset_bvri) \
+                          + "\nVig = {:.5f} rad/px".format(vig_coeff_bvri)
+            ax_bvri.plot(x_line,
+                         photomLine((10**(x_line/(-2.5)), np.zeros_like(x_line)), *bvri_fit_params_phot),
+                         'k--', alpha=0.5, label=fit_info_bvri)
+
+            ax_bvri.legend(fontsize=7, loc='upper left')
+            ax_bvri.set_xlabel("Uncalibrated magnitude")
+            ax_bvri.set_ylabel("Catalog mag ({:.0f}B+{:.0f}V+{:.0f}R+{:.0f}Ic)".format(
+                bvri_rb*100, bvri_rv*100, bvri_rr*100, bvri_ri*100))
+            ax_bvri.set_title("BVRI: $\\sigma$ = {:.3f} mag".format(bvri_stddev_opt))
+            ax_bvri.set_xlim(x_min, x_max)
+            ax_bvri.set_ylim(y_min, y_max)
+            ax_bvri.invert_xaxis()
+            ax_bvri.invert_yaxis()
+            ax_bvri.grid(True, alpha=0.3)
+
+            suptitle_str = "G/BP/RP: {:s}  |  BVRI: {:s}".format(config_str, bvri_config_str)
+        else:
+            suptitle_str = "star_catalog_band_ratios: {:s}".format(config_str)
+
+        fig.suptitle(suptitle_str, fontsize=10, fontweight='bold')
+        fig.tight_layout()
+        fig.show()
 
 
     def filterPhotometricOutliers(self, sigma_threshold=2.5):
@@ -11746,7 +12366,9 @@ class PlateTool(QtWidgets.QMainWindow):
             years_from_J2000=years_from_J2000,
             lim_mag=lim_mag,
             mag_band_ratios=self.config.star_catalog_band_ratios,
-            additional_fields=['spectraltype_esphs', 'preferred_name', 'common_name', 'bayer_name', 'Simbad_OType'])
+            additional_fields=['spectraltype_esphs', 'preferred_name', 'common_name', 'bayer_name', 'Simbad_OType',
+                              'phot_g_mean_mag', 'phot_bp_mean_mag', 'phot_rp_mean_mag',
+                              'B', 'V', 'R', 'Ic'])
 
         if len(catalog_results) == 4:
             self.catalog_stars, self.mag_band_string, self.config.star_catalog_band_ratios, extras = catalog_results
@@ -11802,6 +12424,28 @@ class PlateTool(QtWidgets.QMainWindow):
             self.catalog_stars_simbad_otypes = np.array([x.decode('utf-8') for x in extras['Simbad_OType']])
         else:
             self.catalog_stars_simbad_otypes = None
+
+        # Extract individual G/BP/RP magnitudes (for band ratio fitting)
+        if 'phot_g_mean_mag' in extras:
+            self.catalog_stars_g = extras['phot_g_mean_mag'].astype(np.float64)
+        else:
+            self.catalog_stars_g = None
+        if 'phot_bp_mean_mag' in extras:
+            self.catalog_stars_bp = extras['phot_bp_mean_mag'].astype(np.float64)
+        else:
+            self.catalog_stars_bp = None
+        if 'phot_rp_mean_mag' in extras:
+            self.catalog_stars_rp = extras['phot_rp_mean_mag'].astype(np.float64)
+        else:
+            self.catalog_stars_rp = None
+
+        # Extract individual BVRI magnitudes (for band ratio fitting)
+        for band_name in ['B', 'V', 'R', 'Ic']:
+            attr = 'catalog_stars_' + band_name
+            if band_name in extras:
+                setattr(self, attr, extras[band_name].astype(np.float64))
+            else:
+                setattr(self, attr, None)
 
         # Precompute HTML strings for star labels (spectral type + name)
         # This avoids building HTML strings on every updateStars() call
