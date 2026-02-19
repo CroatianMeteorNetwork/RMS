@@ -218,7 +218,7 @@ def loadConfigFromDirectory(cml_args_config, dir_path):
 
 
         if config_file is None:
-            raise FileNotFoundError("A config file could not be found in directory: {:s}, {:s}".format(
+            raise FileNotFoundError("A config file could not be found in directory: {:s}, config arg: {}".format(
                 dir_path, cml_args_config))
 
         print('Loading config file:', config_file)
