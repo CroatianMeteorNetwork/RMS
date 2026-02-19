@@ -2631,32 +2631,34 @@ class PlateTool(QtWidgets.QMainWindow):
         self.zoom_window.invertY()
 
         # top left label
-        self.show_key_help = 1
+        self.show_key_help = 2
 
         # Create font and metrics for overlay labels
         label_font = QtGui.QFont('monospace', 8)
         label_fm = QtGui.QFontMetrics(label_font)
 
+        # top left label (hidden by default — F1 state 2)
         self.label1 = TextItem(color=(0, 0, 0), fill=(255, 255, 255, 100))
         self.label1.setFont(label_font)
         self.label1.setTextWidth(label_fm.averageCharWidth() * 35)  # ~35 chars wide
         self.label1.setZValue(1000)
         self.label1.setParentItem(self.img_frame)
+        self.label1.hide()
 
-        # bottom left label
+        # bottom left label (hidden by default — F1 state 2)
         self.label2 = TextItem(color=(0, 0, 0), fill=(255, 255, 255, 100))
         self.label2.setFont(label_font)
         self.label2.setTextWidth(label_fm.averageCharWidth() * 38)  # ~38 chars wide
         self.label2.setZValue(1000)
         self.label2.setParentItem(self.img_frame)
+        self.label2.hide()
 
-        # F1 info label
+        # F1 info label (visible by default — F1 state 0 shows hint)
         self.label_f1 = TextItem(color=(0, 0, 0), fill=(255, 255, 255, 100))
         self.label_f1.setFont(label_font)
         self.label_f1.setTextWidth(label_fm.averageCharWidth() * 20)  # ~20 chars wide
         self.label_f1.setZValue(1000)
         self.label_f1.setParentItem(self.img_frame)
-        self.label_f1.hide()
 
         self.catalog_stars_visible = True
 
@@ -3284,7 +3286,6 @@ class PlateTool(QtWidgets.QMainWindow):
             self.mode = 'skyfit'
             self.skyfit_button.setDisabled(True)
             self.manualreduction_button.setDisabled(False)
-            self.setWindowTitle('SkyFit')
 
             self.updateLeftLabels()
             self.tab.onSkyFit()
@@ -3331,7 +3332,6 @@ class PlateTool(QtWidgets.QMainWindow):
             self.mode = 'manualreduction'
             self.skyfit_button.setDisabled(False)
             self.manualreduction_button.setDisabled(True)
-            self.setWindowTitle('ManualReduction')
 
             self.img_type_flag = 'avepixel'
             self.tab.settings.updateMaxAvePixel()
@@ -3502,9 +3502,6 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.img.flat_struct = self.flat_struct
                 self.img_zoom.reloadImage()
                 self.img.reloadImage()
-
-            # Update window title
-            self.setWindowTitle("SkyFit2 - " + os.path.basename(self.dir_path))
 
             return True
 
@@ -3862,6 +3859,10 @@ class PlateTool(QtWidgets.QMainWindow):
         self.label_f1.setText("F1 - Show hotkeys")
         self.label_f1.setPos(self.img_frame.width() - self.label_f1.boundingRect().width(), \
             self.img_frame.height() - self.label_f1.boundingRect().height())
+
+        # Update window title with current image name
+        mode_label = "SkyFit" if self.mode == 'skyfit' else "ManualReduction"
+        self.setWindowTitle("{} - {}".format(mode_label, self.img_handle.name()))
 
         # Update satellite marker position
         self.updateSatelliteMarker()
