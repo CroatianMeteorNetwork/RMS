@@ -23,7 +23,7 @@ import matplotlib.pyplot as plt
 
 # Astropy imports for solar system body ephemeris
 try:
-    from astropy.coordinates import get_body, get_sun, EarthLocation, AltAz
+    from astropy.coordinates import get_body, get_sun, EarthLocation
     from astropy.time import Time
     import astropy.units as u
     ASTROPY_AVAILABLE = True
@@ -4938,7 +4938,6 @@ class PlateTool(QtWidgets.QMainWindow):
             # With high intensity threshold (bright stars only), we expect good precision.
             # If false positive ratio > 80%, the calibration is likely wrong.
             if best_fp_ratio_seg > 0.80:
-                n_detected_seg = int(best_true_pos_seg / max(1 - best_fp_ratio_seg, 0.01))
                 precision_seg = (1.0 - best_fp_ratio_seg) * 100
 
                 print(f"\n  *** TUNING ABORTED ***")
@@ -5675,75 +5674,6 @@ class PlateTool(QtWidgets.QMainWindow):
         print(f"    -> Selected LM={final_lm:.1f} with {final_matches} matches")
         return final_lm
 
-
-    def saveStarDetectionToConfig(self):
-        """Save current star detection parameters to the .config file."""
-
-        # Calculate catalog_mag_limit to save
-        # Subtract 1.0 because ApplyRecalibrate adds +1.0 margin when loading catalog
-        config_catalog_lm = self.cat_lim_mag - 1.0
-        config_catalog_lm = max(3.0, config_catalog_lm)  # Don't go below 3.0
-
-        # Build summary of values to save
-        values_summary = (
-            f"[StarExtraction]\n"
-            f"  intensity_threshold: {self.override_intensity_threshold}\n"
-            f"  segment_radius: {self.override_segment_radius}\n"
-            f"  max_stars: {self.override_max_stars}\n"
-            f"  neighborhood_size: {self.override_neighborhood_size}\n"
-            f"  max_feature_ratio: {self.override_max_feature_ratio:.2f}\n"
-            f"  roundness_threshold: {self.override_roundness_threshold:.2f}\n\n"
-            f"[Calibration]\n"
-            f"  catalog_mag_limit: {config_catalog_lm:.1f}\n"
-            f"  (current LM {self.cat_lim_mag:.1f} - 1.0, since recalibration adds +1.0 margin)"
-        )
-
-        # Show confirmation dialog with options
-        msg = QtWidgets.QMessageBox()
-        msg.setWindowTitle("Save Star Detection Settings")
-        msg.setText("Save these star detection settings to config file?")
-        msg.setInformativeText(values_summary)
-        msg.setIcon(QtWidgets.QMessageBox.Question)
-
-        # Add buttons
-        save_btn = msg.addButton("Save to Station Config", QtWidgets.QMessageBox.AcceptRole)
-        browse_btn = msg.addButton("Choose File...", QtWidgets.QMessageBox.ActionRole)
-        cancel_btn = msg.addButton(QtWidgets.QMessageBox.Cancel)
-
-        msg.setDefaultButton(save_btn)
-        msg.exec_()
-
-        clicked = msg.clickedButton()
-
-        if clicked == cancel_btn:
-            return
-
-        # Determine which file to save to
-        if clicked == browse_btn:
-            # Provide a sensible default filename based on station ID
-            default_dir = os.path.dirname(self.config.config_file_name)
-            default_name = f"{self.config.stationID}.config"
-            default_path = os.path.join(default_dir, default_name)
-            config_path, _ = QtWidgets.QFileDialog.getSaveFileName(
-                self, "Save Config File", default_path,
-                "Config Files (*.config *.cfg);;All Files (*)"
-            )
-            if not config_path:
-                return  # User cancelled file dialog
-        else:
-            config_path = self.config.config_file_name
-
-        # Write to the config file
-        self._writeStarDetectionConfig(config_path, config_catalog_lm)
-
-        # Sync in-memory config so isConfigModified() returns False
-        self.config.intensity_threshold = self.override_intensity_threshold
-        self.config.neighborhood_size = self.override_neighborhood_size
-        self.config.max_stars = self.override_max_stars
-        self.config.segment_radius = self.override_segment_radius
-        self.config.max_feature_ratio = self.override_max_feature_ratio
-        self.config.roundness_threshold = self.override_roundness_threshold
-        self._updateConfigSaveButtonState()
 
     def _writeStarDetectionConfig(self, config_path, catalog_mag_limit):
         """Write star detection parameters to the specified config file.
