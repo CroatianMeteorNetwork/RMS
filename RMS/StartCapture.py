@@ -1281,6 +1281,10 @@ if __name__ == "__main__":
 
                 ### ###
 
+            # If reboot didn't happen in continuous capture mode, reset so capture resumes normally
+            if config.continuous_capture:
+                log.warning("Reboot failed after 4 hours of attempts, resuming capture")
+                ran_once = False
 
 
         # Don't start the capture if there's less than 15 minutes left
