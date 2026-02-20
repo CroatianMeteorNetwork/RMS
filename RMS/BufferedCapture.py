@@ -234,28 +234,26 @@ class BufferedCapture(Process):
             log.info("Capture joined successfully after {} seconds".format(seconds_waited))
         else:
             log.info("Timed out after waiting {} seconds, capture thread still alive".format(seconds_waited))
-            log.info("Sending interrupt signal for graceful shutdown...")
-            
+            log.info("Terminating capture process...")
+
             try:
-                # Send SIGINT to allow child process to clean up gracefully
-                if self.pid:
-                    os.kill(self.pid, signal.SIGINT)
-                
+                # Use SIGTERM (terminate) instead of SIGINT to avoid triggering
+                # the main process SIGINT handler via process group propagation
+                self.terminate()
+
                 # Wait a few seconds for graceful shutdown
                 self.join(5)
-                
+
                 if self.is_alive():
-                    log.warning("Process still alive after interrupt, forcing termination")
-                    self.terminate()
+                    log.warning("Process still alive after terminate, sending SIGKILL...")
+                    os.kill(self.pid, signal.SIGKILL)
                 else:
-                    log.info("Process exited gracefully after interrupt")
-                    
+                    log.info("Process terminated successfully")
+
             except ProcessLookupError:
                 log.info("Process already terminated")
             except Exception as e:
-                log.error("Error during graceful shutdown: {}".format(e))
-                log.info("Falling back to terminate()")
-                self.terminate()
+                log.error("Error during termination: {}".format(e))
             
             # Always join to reap zombie (returns instantly if already dead)
             self.join()
@@ -1611,25 +1609,26 @@ class BufferedCapture(Process):
                 self.raw_frame_saver.stop()
                 self.raw_frame_saver.join(5)
                 if self.raw_frame_saver.is_alive():
-                    log.warning("RawFrameSaver still busy. Sending interrupt signal...")
+                    log.warning("RawFrameSaver still busy. Terminating...")
                     try:
-                        if self.raw_frame_saver.pid:
-                            os.kill(self.raw_frame_saver.pid, signal.SIGINT)
-                        
+                        # Use terminate (SIGTERM) instead of SIGINT to avoid triggering
+                        # the main process SIGINT handler via process group propagation
+                        self.raw_frame_saver.terminate()
+
                         # Wait for graceful shutdown
                         self.raw_frame_saver.join(3)
-                        
+
                         if self.raw_frame_saver.is_alive():
-                            log.warning("RawFrameSaver still alive after interrupt, forcing termination")
-                            self.raw_frame_saver.terminate()
+                            log.warning("RawFrameSaver still alive after terminate, sending SIGKILL...")
+                            os.kill(self.raw_frame_saver.pid, signal.SIGKILL)
                             self.raw_frame_saver.join()
                         else:
-                            log.info("RawFrameSaver exited gracefully after interrupt")
-                            
+                            log.info("RawFrameSaver terminated successfully")
+
                     except ProcessLookupError:
                         log.info("RawFrameSaver already terminated")
                     except Exception as e:
-                        log.error("Error during graceful RawFrameSaver shutdown: {}".format(e))
+                        log.error("Error during RawFrameSaver termination: {}".format(e))
                         self.raw_frame_saver.terminate()
                         self.raw_frame_saver.join()
             finally:
