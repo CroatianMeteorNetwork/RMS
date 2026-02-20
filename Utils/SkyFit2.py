@@ -3443,6 +3443,9 @@ class PlateTool(QtWidgets.QMainWindow):
             self.img_zoom.changeHandle(self.img_handle)
             self.tab.hist.setLevels(0, 2**(8*self.img.data.itemsize) - 1)
 
+            # Now that image data is available, render the mask overlay
+            self.updateMaskOverlayImage()
+
             self.catalog_stars = self.loadCatalogStars(self.config.catalog_mag_limit)
             self.cat_lim_mag = self.config.catalog_mag_limit
             self.loadCalstars()
@@ -6077,6 +6080,10 @@ class PlateTool(QtWidgets.QMainWindow):
 
         if len(self.mask_polygons) == 0:
             self.mask_overlay.hide()
+            return
+
+        # Skip if no image is loaded yet
+        if self.img.data is None:
             return
 
         # Get image dimensions - shape[0] is X, shape[1] is Y in this codebase
