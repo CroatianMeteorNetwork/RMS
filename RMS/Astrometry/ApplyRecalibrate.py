@@ -28,6 +28,7 @@ from RMS.Astrometry.ApplyAstrometry import (
     extinctionCorrectionTrueToApparent,
     photometryFitRobust,
     rotationWrtHorizon,
+    xyToRaDecPP,
 )
 from RMS.Astrometry.Conversions import date2JD, raDec2AltAz
 from RMS.Astrometry.NNalign import alignPlatepar
@@ -1052,13 +1053,22 @@ def recalibrateIndividualFFsAndApplyAstrometry(
         ff_dt = FFfile.filenameToDatetime(ff_name)
         dt_list.append(ff_dt)
 
-        # Compute the angular separation from the reference platepar
+        # Compute the angular separation from the reference platepar by projecting
+        # both FOV centres at the FF file's observation time. This correctly handles
+        # platepars with different JD reference epochs.
+        ff_time = FFfile.getMiddleTimeFF(ff_name, config.fps, ret_milliseconds=True)
+        _, ref_ra, ref_dec, _ = xyToRaDecPP(
+            [ff_time], [platepar.X_res / 2], [platepar.Y_res / 2], [1], platepar,
+            extinction_correction=False)
+        _, temp_ra, temp_dec, _ = xyToRaDecPP(
+            [ff_time], [pp_temp.X_res / 2], [pp_temp.Y_res / 2], [1], pp_temp,
+            extinction_correction=False)
         ang_dist = np.degrees(
             angularSeparation(
-                np.radians(platepar.RA_d),
-                np.radians(platepar.dec_d),
-                np.radians(pp_temp.RA_d),
-                np.radians(pp_temp.dec_d),
+                np.radians(ref_ra[0]),
+                np.radians(ref_dec[0]),
+                np.radians(temp_ra[0]),
+                np.radians(temp_dec[0]),
             )
         )
         ang_dists.append(ang_dist*60)
