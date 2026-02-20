@@ -17,6 +17,7 @@ import numpy as np
 
 from RMS.Astrometry import ApplyAstrometry
 from RMS.Astrometry.Conversions import date2JD
+from RMS.Math import angularSeparationDeg
 import RMS.ConfigReader as cr
 from RMS.Formats import CALSTARS
 from RMS.Formats.FFfile import getMiddleTimeFF
@@ -174,6 +175,31 @@ def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update
             platepar_aligned.pos_angle_ref - platepar.pos_angle_ref))
         if scale_update:
             log.info("    Scale: {:.4f} -> {:.4f}".format(platepar.F_scale, platepar_aligned.F_scale))
+
+        # Sanity check: reject if the pointing correction is too large.
+        # Compare FOV centres at the observation time so different JD references cancel out.
+        _, ra_centre_new, dec_centre_new, _ = ApplyAstrometry.xyToRaDecPP(
+            [calstars_time], [platepar.X_res / 2], [platepar.Y_res / 2], [1],
+            platepar_aligned, extinction_correction=False, precompute_pointing_corr=True)
+        ra_centre_new = ra_centre_new[0]
+        dec_centre_new = dec_centre_new[0]
+
+        pointing_shift = angularSeparationDeg(ra_centre, dec_centre, ra_centre_new, dec_centre_new)
+
+        rot_change = abs(platepar_aligned.pos_angle_ref - platepar.pos_angle_ref) % 360
+        if rot_change > 180:
+            rot_change = 360 - rot_change
+
+        max_pointing_shift = fov_radius  # degrees
+        max_rotation_shift = 30.0  # degrees
+
+        log.info("    Pointing shift: {:.2f} deg (limit {:.2f}), Rotation shift: {:.2f} deg (limit {:.2f})".format(
+            pointing_shift, max_pointing_shift, rot_change, max_rotation_shift))
+
+        if (pointing_shift > max_pointing_shift) or (rot_change > max_rotation_shift):
+            log.warning("alignPlatepar: Correction too large, rejecting fit!")
+            return platepar, config.catalog_mag_limit
+
     else:
         log.warning("alignPlatepar: Fit did not converge, returning original platepar")
         return platepar, config.catalog_mag_limit
