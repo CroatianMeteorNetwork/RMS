@@ -14,6 +14,7 @@ import sys
 import random
 import copy
 import shutil
+import configparser
 
 import cv2
 import numpy as np
@@ -1300,6 +1301,59 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
 
     # --- Location helpers ---
 
+    @staticmethod
+    def _readStationId(directory):
+        """Read stationID from .config in directory, or None on failure."""
+        config_path = os.path.join(directory, ".config")
+        if not os.path.isfile(config_path):
+            return None
+        try:
+            cp = configparser.ConfigParser()
+            cp.read(config_path)
+            return cp.get("System", "stationID").strip()
+        except Exception:
+            return None
+
+    def _detectStationFolder(self):
+        """Detect the station folder by probing known paths for a .config with matching stationID.
+
+        Probes in order:
+            1. ~/source/Stations/<stationID>/
+            2. ~/source/RMS/
+
+        Returns:
+            (label, path) tuple if a .config is found, or None.
+            Label is "Station" if IDs match, or "Station (ID: <actual_id>)" if mismatched
+            (only for ~/source/Stations/ — ~/source/RMS/ is silently skipped on mismatch).
+        """
+        pt = self.plate_tool
+        if not pt.hasData():
+            return None
+
+        current_id = getattr(pt.config, 'stationID', None)
+        if not current_id:
+            return None
+
+        home = os.path.expanduser("~")
+
+        # 1. ~/source/Stations/<stationID>/ — show even on mismatch (directory name
+        #    implies intent, warn user if .config inside disagrees)
+        stations_dir = os.path.join(home, "source", "Stations", current_id)
+        candidate_id = self._readStationId(stations_dir)
+        if candidate_id is not None:
+            if candidate_id == current_id:
+                return ("Station", stations_dir)
+            else:
+                return ("Station (ID: {})".format(candidate_id), stations_dir)
+
+        # 2. ~/source/RMS/ — only offer if the ID actually matches
+        rms_dir = os.path.join(home, "source", "RMS")
+        candidate_id = self._readStationId(rms_dir)
+        if candidate_id == current_id:
+            return ("Station", rms_dir)
+
+        return None
+
     def _buildLocationList(self):
         """Build deduplicated list of known locations."""
         seen = set()
@@ -1315,9 +1369,26 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
 
         pt = self.plate_tool
         if pt.hasData():
+            # 1. Data Folder (always first)
             _add("Data Folder", pt.dir_path)
+
+            # 2. Station folder (detected from ~/source/Stations/<id>/ or ~/source/RMS/)
+            station = self._detectStationFolder()
+            if station is not None:
+                _add(station[0], station[1])
+
+            # 3. Config Source (if different from above)
             _add("Config Source", pt.config.config_file_path)
-            _add("RMS Root", pt.config.rms_root_dir)
+
+            # 4. RMS Root (if different from above, and not a foreign station)
+            rms_root = pt.config.rms_root_dir
+            rms_root_id = self._readStationId(rms_root) if rms_root else None
+            if rms_root_id is None or rms_root_id == getattr(pt.config, 'stationID', None):
+                _add("RMS Root", rms_root)
+
+            # 5. Sticky custom locations from this session
+            for custom_path in pt._file_manager_custom_locations:
+                _add("Custom", custom_path)
         else:
             _add("RMS Root", getRmsRootDir())
 
@@ -1414,16 +1485,26 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
             else:
                 self._station_path_label.setText("(no data loaded)")
 
-        # Check for station ID mismatch between platepar and config
+        # Check for station ID mismatches (platepar vs config, and station folder)
+        warnings = []
         if pt.hasData() and hasattr(pt, 'platepar') and pt.platepar is not None:
             pp_id = getattr(pt.platepar, 'station_code', None)
             cfg_id = getattr(pt.config, 'stationID', None)
             if pp_id and cfg_id and pp_id != cfg_id:
-                self._station_warning_label.setText(
-                    "Warning: platepar station '{}' does not match config '{}'".format(pp_id, cfg_id))
-                self._station_warning_label.show()
-            else:
-                self._station_warning_label.hide()
+                warnings.append(
+                    "Platepar station '{}' does not match config '{}'".format(pp_id, cfg_id))
+
+        # Check if the detected station folder has a different stationID
+        station = self._detectStationFolder()
+        if station is not None:
+            station_label = station[0]
+            if station_label.startswith("Station (ID:"):
+                warnings.append(
+                    "Station folder has different ID: {}".format(station_label))
+
+        if warnings:
+            self._station_warning_label.setText("Warning: " + "; ".join(warnings))
+            self._station_warning_label.show()
         else:
             self._station_warning_label.hide()
 
@@ -1724,7 +1805,9 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
             cb.setChecked(True)
             layout.insertWidget(len(checkboxes), cb)
             checkboxes.append(cb)
-            # Also remember for future use in this session
+            # Persist for future use across dialog open/close within this session
+            if resolved not in self.plate_tool._file_manager_custom_locations:
+                self.plate_tool._file_manager_custom_locations.append(resolved)
             self._locations.append(("Custom", resolved))
 
         browse_btn.clicked.connect(on_browse)
@@ -2245,6 +2328,9 @@ class PlateTool(QtWidgets.QMainWindow):
         self.mask_source_path = None
         self.flat_source_path = None
         self.dark_source_path = None
+
+        # Sticky custom locations for the File Manager save dialog (survives dialog close/reopen)
+        self._file_manager_custom_locations = []
 
         # Dark frame
         self.dark = None
