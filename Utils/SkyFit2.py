@@ -13,6 +13,7 @@ import glob
 import sys
 import time
 import random
+from concurrent.futures import ThreadPoolExecutor
 import copy
 import shutil
 import configparser
@@ -4755,12 +4756,16 @@ class PlateTool(QtWidgets.QMainWindow):
 
     def redetectStars(self):
         """ Re-detect stars on current image using override parameters. """
+
+        # Skip placeholder images
+        ff_name = self.img_handle.name()
+        if ff_name is not None and "_placeholder" in ff_name:
+            print("  Skipping placeholder image")
+            return
+
         print(f"Re-detecting stars with: threshold={self.override_intensity_threshold}, "
               f"neighborhood={self.override_neighborhood_size}, segment_radius={self.override_segment_radius}, "
               f"max_stars={self.override_max_stars}, gamma={self.override_gamma:.3f}")
-
-        # Get current FF file name
-        ff_name = self.img_handle.name()
 
         # Call extractStarsFF with override parameters
         try:
@@ -4842,8 +4847,9 @@ class PlateTool(QtWidgets.QMainWindow):
         """ Re-detect stars on all images using override parameters. """
         print("Re-detecting stars on all images...")
 
-        # Get list of all FF files that exist on disk
-        ff_files = [f for f in self.calstars.keys() if os.path.isfile(os.path.join(self.dir_path, f))]
+        # Get list of all FF files that exist on disk, excluding placeholders
+        ff_files = [f for f in self.calstars.keys()
+                     if os.path.isfile(os.path.join(self.dir_path, f)) and "_placeholder" not in f]
         if not ff_files:
             print("  No FF files found on disk")
             return
@@ -4969,6 +4975,13 @@ class PlateTool(QtWidgets.QMainWindow):
         ff_name = self.img_handle.name()
         if ff_name is None:
             qmessagebox(message="No image loaded.",
+                title="Tuning Error", message_type="warning")
+            return
+
+        # Skip placeholder images
+        if "_placeholder" in ff_name:
+            qmessagebox(message="Cannot tune on a placeholder image.\n"
+                "Navigate to a real image first.",
                 title="Tuning Error", message_type="warning")
             return
 
@@ -11668,117 +11681,69 @@ class PlateTool(QtWidgets.QMainWindow):
             clicked = msg_box.clickedButton()
 
             if clicked == auto_fit_btn:
-                # Run AutoPlatepar on the best CALSTARS frame
-                self.status_bar.showMessage(f"Running auto fit on {best_ff}...")
-                QtWidgets.QApplication.processEvents()
+                if best_ff in available_images:
+                    # Image on disk - navigate to it and use the standard auto-fit
+                    # (which tries quick alignment with the existing platepar first)
+                    target_index = None
+                    for i, ff_path in enumerate(self.img_handle.ff_list):
+                        if os.path.basename(ff_path) == best_ff:
+                            target_index = i
+                            break
 
-                try:
-                    # Load tuned catalog if available for final fitting stages
-                    tuned_catalog = None
-                    if getattr(self, 'catalog_lm_tuned', False) and hasattr(self, 'tuned_cat_lim_mag'):
-                        tuned_catalog = self.loadCatalogStars(self.tuned_cat_lim_mag)
+                    if target_index is not None:
+                        current_index = self.img_handle.current_ff_index
+                        delta = target_index - current_index
+                        if delta != 0:
+                            self.nextImg(n=delta)
 
-                    # autoFitPlatepar returns (platepar, matched_stars, ff_name)
-                    result = autoFitPlatepar(
-                        self.dir_path,
-                        self.config,
-                        self.catalog_stars,
-                        ff_name=best_ff,
-                        final_catalog_stars=tuned_catalog
+                    self.autoFitAstrometryNet()
+
+                else:
+                    # Image not on disk - create placeholder, navigate to it, then fit
+                    height, width = self.config.height, self.config.width
+                    placeholder = np.full((height, width), 24, dtype=np.uint8)
+
+                    stripe_width = 40
+                    stripe_spacing = 80
+                    for i in range(-(height + width), height + width, stripe_spacing):
+                        for offset in range(stripe_width):
+                            y_coords = np.arange(height)
+                            x_coords = i + y_coords + offset
+                            valid = (x_coords >= 0) & (x_coords < width)
+                            placeholder[y_coords[valid], x_coords[valid]] = 40
+
+                    base_name = os.path.splitext(best_ff)[0]
+                    placeholder_name = f"{base_name}_placeholder.png"
+                    placeholder_path = os.path.join(self.dir_path, placeholder_name)
+
+                    img_pil = Image.fromarray(placeholder)
+                    img_pil.save(placeholder_path)
+                    print(f"Created placeholder image: {placeholder_path}")
+
+                    if best_ff in self.calstars:
+                        self.calstars[placeholder_name] = self.calstars[best_ff]
+
+                    # Refresh file list and navigate to placeholder
+                    self.img_handle = detectInputTypeFolder(
+                        self.dir_path, self.config,
+                        beginning_time=None, fps=self.fps
                     )
+                    self.img.changeHandle(self.img_handle)
 
-                    if result is None:
-                        new_platepar = None
-                    else:
-                        new_platepar, matched_stars, used_ff = result
+                    target_index = None
+                    for i, ff_path in enumerate(self.img_handle.ff_list):
+                        if os.path.basename(ff_path) == placeholder_name:
+                            target_index = i
+                            break
 
-                    if new_platepar is not None:
-                        # Determine the target frame to navigate to
-                        if best_ff in available_images:
-                            # Image exists on disk - navigate directly to it
-                            navigate_to = best_ff
-                        else:
-                            # Image not on disk - create a placeholder
-                            height, width = self.config.height, self.config.width
-                            placeholder = np.full((height, width), 24, dtype=np.uint8)
+                    if target_index is not None:
+                        current_index = self.img_handle.current_ff_index
+                        delta = target_index - current_index
+                        if delta != 0:
+                            self.nextImg(n=delta)
 
-                            # Add diagonal stripes (lighter gray)
-                            stripe_width = 40
-                            stripe_spacing = 80
-                            for i in range(-(height + width), height + width, stripe_spacing):
-                                for offset in range(stripe_width):
-                                    y_coords = np.arange(height)
-                                    x_coords = i + y_coords + offset
-                                    valid = (x_coords >= 0) & (x_coords < width)
-                                    placeholder[y_coords[valid], x_coords[valid]] = 40
-
-                            base_name = os.path.splitext(best_ff)[0]
-                            navigate_to = f"{base_name}_placeholder.png"
-                            placeholder_path = os.path.join(self.dir_path, navigate_to)
-
-                            img_pil = Image.fromarray(placeholder)
-                            img_pil.save(placeholder_path)
-                            print(f"Created placeholder image: {placeholder_path}")
-
-                            # Copy CALSTARS data to placeholder filename
-                            if best_ff in self.calstars:
-                                self.calstars[navigate_to] = self.calstars[best_ff]
-
-                            # Refresh file list to include new placeholder
-                            self.img_handle = detectInputTypeFolder(
-                                self.dir_path, self.config,
-                                beginning_time=None, fps=self.fps
-                            )
-                            self.img.changeHandle(self.img_handle)
-
-                        # Navigate to the target frame
-                        target_index = None
-                        for i, ff_path in enumerate(self.img_handle.ff_list):
-                            if os.path.basename(ff_path) == navigate_to:
-                                target_index = i
-                                break
-
-                        if target_index is not None:
-                            current_index = self.img_handle.current_ff_index
-                            delta = target_index - current_index
-                            if delta != 0:
-                                self.nextImg(n=delta)
-
-                        # Update the current platepar
-                        self.platepar = new_platepar
-                        self.tab.param_manager.updatePlatepar()
-                        self.updateDistortion()
-
-                        # Set up paired_stars from matched results
-                        if matched_stars is not None:
-                            self.paired_stars = matched_stars
-                            self.tab.param_manager.updatePairedStars(len(self.paired_stars))
-
-                        self.updateStars()
-                        self.updateLeftLabels()
-
-                        # Compute and display residuals
-                        if len(self.paired_stars) >= self.getMinFitStars():
-                            self.fitPickedStars()
-
-                        self.status_bar.showMessage(
-                            f"Auto fit complete: {navigate_to} - {len(self.paired_stars)} stars"
-                        )
-                        print(f"\nAuto fit complete on {best_ff}")
-                    else:
-                        QtWidgets.QMessageBox.warning(
-                            self, "Auto Fit Failed",
-                            f"Failed to create platepar from {best_ff}."
-                        )
-                        self.status_bar.showMessage("Auto fit failed")
-
-                except Exception as e:
-                    QtWidgets.QMessageBox.warning(
-                        self, "Auto Fit Error",
-                        f"Error during auto fit: {str(e)}"
-                    )
-                    self.status_bar.showMessage("Auto fit error")
-                    traceback.print_exc()
+                    # Use the same auto-fit path as the fit parameters panel
+                    self.autoFitAstrometryNet()
 
                 return
 
@@ -11946,7 +11911,8 @@ class PlateTool(QtWidgets.QMainWindow):
                     input_intensities = star_data[:, 2]
 
                 # Get astrometry.net solution, pass the FOV width estimate
-                solution = astrometryNetSolve(x_data=x_data, y_data=y_data, fov_w_range=fov_w_range,
+                solution = self.runInBackground(astrometryNetSolve,
+                                              x_data=x_data, y_data=y_data, fov_w_range=fov_w_range,
                                               fov_w_hint=self.config.fov_w, mask=mask,
                                               x_center=self.platepar.X_res/2, y_center=self.platepar.Y_res/2,
                                               lat=self.platepar.lat, lon=self.platepar.lon, jd=jd,
@@ -11976,7 +11942,8 @@ class PlateTool(QtWidgets.QMainWindow):
             else:
                 img_data = self.img.data
 
-            solution = astrometryNetSolve(img=img_data.T, fov_w_range=fov_w_range,
+            solution = self.runInBackground(astrometryNetSolve,
+                                          img=img_data.T, fov_w_range=fov_w_range,
                                           fov_w_hint=self.config.fov_w, mask=mask,
                                           lat=self.platepar.lat, lon=self.platepar.lon, jd=jd)
 
@@ -12470,6 +12437,34 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.paired_stars.removeGeoPoints()
 
                 self.updateStars()
+
+
+    def runInBackground(self, func, *args, **kwargs):
+        """ Run a blocking function in a background thread while keeping the UI responsive.
+
+        Use this for CPU-bound operations (astrometry solving, catalog loading, etc.)
+        that would otherwise trigger the OS 'application not responding' warning.
+
+        Note: The function must NOT access Qt widgets or shared mutable state.
+
+        Arguments:
+            func: [callable] Function to run.
+            *args, **kwargs: Arguments passed to the function.
+
+        Returns:
+            The return value of func(*args, **kwargs).
+
+        Raises:
+            Any exception raised by func.
+        """
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(func, *args, **kwargs)
+
+            while not future.done():
+                QtWidgets.QApplication.processEvents()
+                time.sleep(0.05)
+
+            return future.result()
 
 
     def loadCatalogStars(self, lim_mag):
