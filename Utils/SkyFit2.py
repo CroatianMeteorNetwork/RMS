@@ -4840,14 +4840,22 @@ class PlateTool(QtWidgets.QMainWindow):
         """ Re-detect stars on all images using override parameters. """
         print("Re-detecting stars on all images...")
 
-        # Get list of all FF files
-        ff_files = list(self.calstars.keys())
+        # Get list of all FF files that exist on disk
+        ff_files = [f for f in self.calstars.keys() if os.path.isfile(os.path.join(self.dir_path, f))]
         if not ff_files:
-            print("  No FF files found in CALSTARS")
+            print("  No FF files found on disk")
             return
 
         total = len(ff_files)
         success_count = 0
+
+        # Disable buttons during processing
+        self.tab.star_detection.redetect_all_button.setText("Re-Detecting...")
+        self.tab.star_detection.redetect_all_button.setEnabled(False)
+        self.tab.star_detection.redetect_button.setEnabled(False)
+        self.tab.star_detection.tune_button.setEnabled(False)
+        self.status_bar.showMessage(f"Re-detecting stars on {total} images...")
+        QtWidgets.QApplication.processEvents()
 
         # Save original config values
         original_intensity_threshold = getattr(self.config, 'intensity_threshold', 18)
@@ -4870,6 +4878,12 @@ class PlateTool(QtWidgets.QMainWindow):
         try:
             for i, ff_name in enumerate(ff_files):
                 print(f"  Processing {i+1}/{total}: {ff_name}")
+
+                # Update status bar periodically
+                if (i % 50 == 0) or (i == total - 1):
+                    self.status_bar.showMessage(
+                        f"Re-detecting stars... {i+1}/{total} ({success_count} successful)")
+                    QtWidgets.QApplication.processEvents()
 
                 try:
                     star_list = extractStarsFF(
@@ -4901,7 +4915,15 @@ class PlateTool(QtWidgets.QMainWindow):
             self.config.max_feature_ratio = original_max_feature_ratio
             self.config.roundness_threshold = original_roundness_threshold
 
+            # Re-enable buttons
+            self.tab.star_detection.redetect_all_button.setText("Re-Detect All")
+            self.tab.star_detection.redetect_all_button.setEnabled(True)
+            self.tab.star_detection.redetect_button.setEnabled(True)
+            self.tab.star_detection.tune_button.setEnabled(True)
+
         print(f"  Completed: {success_count}/{total} images processed")
+        self.status_bar.showMessage(
+            f"Re-detection complete: {success_count}/{total} images processed")
 
         # Enable override mode and update display
         self.star_detection_override_enabled = True
