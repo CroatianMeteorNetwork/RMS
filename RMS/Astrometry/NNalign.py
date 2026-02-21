@@ -166,18 +166,10 @@ def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update
 
     if success:
         log.info("alignPlatepar: Fit successful")
-        log.info("    RA:  {:.4f} -> {:.4f} deg (delta={:.4f})".format(
-            platepar.RA_d, platepar_aligned.RA_d, platepar_aligned.RA_d - platepar.RA_d))
-        log.info("    Dec: {:.4f} -> {:.4f} deg (delta={:.4f})".format(
-            platepar.dec_d, platepar_aligned.dec_d, platepar_aligned.dec_d - platepar.dec_d))
-        log.info("    Rot: {:.4f} -> {:.4f} deg (delta={:.4f})".format(
-            platepar.pos_angle_ref, platepar_aligned.pos_angle_ref,
-            platepar_aligned.pos_angle_ref - platepar.pos_angle_ref))
-        if scale_update:
-            log.info("    Scale: {:.4f} -> {:.4f}".format(platepar.F_scale, platepar_aligned.F_scale))
 
         # Sanity check: reject if the pointing correction is too large.
-        # Compare FOV centres at the observation time so different JD references cancel out.
+        # Compare FOV centres at the observation time so different JD references cancel out
+        # and Earth rotation is properly accounted for.
         _, ra_centre_new, dec_centre_new, _ = ApplyAstrometry.xyToRaDecPP(
             [calstars_time], [platepar.X_res / 2], [platepar.Y_res / 2], [1],
             platepar_aligned, extinction_correction=False, precompute_pointing_corr=True)
@@ -185,6 +177,17 @@ def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update
         dec_centre_new = dec_centre_new[0]
 
         pointing_shift = angularSeparationDeg(ra_centre, dec_centre, ra_centre_new, dec_centre_new)
+
+        # Log apparent sky coordinates at the observation time (not raw platepar reference coords)
+        log.info("    Apparent RA:  {:.4f} -> {:.4f} deg (delta={:.4f})".format(
+            ra_centre, ra_centre_new, ra_centre_new - ra_centre))
+        log.info("    Apparent Dec: {:.4f} -> {:.4f} deg (delta={:.4f})".format(
+            dec_centre, dec_centre_new, dec_centre_new - dec_centre))
+        log.info("    Rot: {:.4f} -> {:.4f} deg (delta={:.4f})".format(
+            platepar.pos_angle_ref, platepar_aligned.pos_angle_ref,
+            platepar_aligned.pos_angle_ref - platepar.pos_angle_ref))
+        if scale_update:
+            log.info("    Scale: {:.4f} -> {:.4f}".format(platepar.F_scale, platepar_aligned.F_scale))
 
         rot_change = abs(platepar_aligned.pos_angle_ref - platepar.pos_angle_ref) % 360
         if rot_change > 180:
