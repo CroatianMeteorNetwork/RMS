@@ -121,6 +121,7 @@ def computeSolarSystemMagnitude(body_name, body, sun, time):
 import matplotlib.gridspec as gridspec
 import matplotlib.ticker as ticker
 import scipy.optimize
+from scipy.spatial import cKDTree
 try:
     import pyqtgraph as pg
     from pyqtgraph.Qt import QtWidgets, QtGui
@@ -5335,26 +5336,20 @@ class PlateTool(QtWidgets.QMainWindow):
                     return 0, 0, 0, np.array([]), np.array([])
                 return 0, 0, 0
 
-            # Count matches: for each detected star, check if within match_radius of any catalog star
-            # Use dynamic match radius based on FWHM - wide stars have less precise centroids
-            n_true_pos = 0
-            true_pos_x = []
-            true_pos_y = []
-            for det_x, det_y, det_fwhm in zip(x_arr, y_arr, fwhm_arr):
-                # Dynamic match radius: at least 3px, or 1.5x FWHM for wide stars
-                effective_radius = max(match_radius, 1.5 * det_fwhm)
+            # Count matches using KD-tree for fast nearest-neighbor lookup
+            # Dynamic match radius based on FWHM - wide stars have less precise centroids
+            cat_tree = cKDTree(np.column_stack([catalog_x, catalog_y]))
+            det_coords = np.column_stack([x_arr, y_arr])
+            nn_dist, _ = cat_tree.query(det_coords, k=1)
 
-                # Calculate distances to all catalog stars
-                distances = np.sqrt((catalog_x - det_x)**2 + (catalog_y - det_y)**2)
-                if np.min(distances) <= effective_radius:
-                    n_true_pos += 1
-                    true_pos_x.append(det_x)
-                    true_pos_y.append(det_y)
+            effective_radii = np.maximum(match_radius, 1.5 * fwhm_arr)
+            matched = nn_dist <= effective_radii
 
+            n_true_pos = int(np.sum(matched))
             n_false_pos = n_detected - n_true_pos
 
             if return_positions:
-                return n_true_pos, n_false_pos, n_detected, np.array(true_pos_x), np.array(true_pos_y)
+                return n_true_pos, n_false_pos, n_detected, x_arr[matched], y_arr[matched]
             return n_true_pos, n_false_pos, n_detected
 
         except Exception as e:
@@ -5715,11 +5710,14 @@ class PlateTool(QtWidgets.QMainWindow):
             visible_cat_x = cat_x[in_image]
             visible_cat_y = cat_y[in_image]
 
-            n_matched = 0
-            for det_x, det_y in zip(detected_x, detected_y):
-                distances = np.sqrt((visible_cat_x - det_x)**2 + (visible_cat_y - det_y)**2)
-                if len(distances) > 0 and np.min(distances) <= match_radius:
-                    n_matched += 1
+            # Use KD-tree for fast nearest-neighbor matching
+            if len(visible_cat_x) == 0:
+                return 0, 0
+
+            cat_tree = cKDTree(np.column_stack([visible_cat_x, visible_cat_y]))
+            det_coords = np.column_stack([detected_x, detected_y])
+            nn_dist, _ = cat_tree.query(det_coords, k=1)
+            n_matched = int(np.sum(nn_dist <= match_radius))
 
             return n_matched, len(visible_cat_x)
 

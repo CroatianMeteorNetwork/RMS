@@ -82,11 +82,10 @@ def scoreFrameDistribution(star_data, img_width, img_height, n_grid=4):
     total_cells = n_grid * n_grid
 
     # Count stars per cell
+    cell_x = np.clip((x_coords / cell_width).astype(int), 0, n_grid - 1)
+    cell_y = np.clip((y_coords / cell_height).astype(int), 0, n_grid - 1)
     cell_counts = np.zeros((n_grid, n_grid), dtype=int)
-    for x, y in zip(x_coords, y_coords):
-        cell_x = min(int(x / cell_width), n_grid - 1)
-        cell_y = min(int(y / cell_height), n_grid - 1)
-        cell_counts[cell_y, cell_x] += 1
+    np.add.at(cell_counts, (cell_y, cell_x), 1)
 
     # Metrics
     cells_occupied = np.sum(cell_counts > 0)

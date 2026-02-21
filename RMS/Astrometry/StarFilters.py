@@ -178,27 +178,39 @@ def filterBlendedStars(paired_stars, catalog_stars, platepar, jd, lim_mag,
 
     blended_indices = set()
 
-    # Check each paired star's matched catalog position against other catalog stars
+    # Collect matched star data for batch projection
+    check_indices = []
+    matched_ra_list = []
+    matched_dec_list = []
+    blend_radii = []
     for i, (x, y, fwhm, intens_acc, obj, snr, saturated) in enumerate(paired_stars.paired_stars):
         if hasattr(obj, 'pick_type') and obj.pick_type == "geopoint":
             continue
+        ra, dec, mag = obj.coords()
+        check_indices.append(i)
+        matched_ra_list.append(ra)
+        matched_dec_list.append(dec)
+        blend_radii.append(fwhm_mult * fwhm)
 
-        # Compute blend radius based on this star's FWHM
-        blend_radius = fwhm_mult * fwhm
+    if len(check_indices) > 0:
+        # Batch project all matched stars to pixel coordinates in one call
+        all_matched_x, all_matched_y = raDecToXYPP(
+            np.array(matched_ra_list), np.array(matched_dec_list), jd, platepar)
+        blend_radii = np.array(blend_radii)
 
-        # Get the matched catalog star's RA/Dec and project to pixels
-        matched_ra, matched_dec, mag = obj.coords()
-        matched_x, matched_y = raDecToXYPP(np.array([matched_ra]), np.array([matched_dec]), jd, platepar)
-        matched_x, matched_y = matched_x[0], matched_y[0]
+        # Compute distance from each matched star to all bright catalog stars using broadcasting
+        # Shape: (n_matched, n_catalog)
+        dx = all_matched_x[:, np.newaxis] - catalog_x[np.newaxis, :]
+        dy = all_matched_y[:, np.newaxis] - catalog_y[np.newaxis, :]
+        dist_matrix = np.sqrt(dx**2 + dy**2)
 
-        # Compute pixel distances from matched catalog star to all bright catalog stars
-        pixel_dist = np.sqrt((matched_x - catalog_x)**2 + (matched_y - catalog_y)**2)
+        # Check for neighbors within each star's blend radius (excluding self)
+        has_neighbor = np.any(
+            (dist_matrix < blend_radii[:, np.newaxis]) & (dist_matrix > 0.1), axis=1)
 
-        # Find neighbors within radius (excluding self - use small threshold for floating point)
-        neighbor_mask = (pixel_dist < blend_radius) & (pixel_dist > 0.1)
-
-        if np.sum(neighbor_mask) > 0:
-            blended_indices.add(i)
+        for k, idx in enumerate(check_indices):
+            if has_neighbor[k]:
+                blended_indices.add(idx)
 
     if len(blended_indices) > 0:
         new_paired_stars = PairedStars()

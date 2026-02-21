@@ -28,6 +28,7 @@ import numpy as np
 import scipy.optimize as opt
 import scipy.ndimage as ndimage
 import scipy.ndimage.filters as filters
+from scipy.spatial import cKDTree
 
 # RMS imports
 import RMS.ConfigReader as cr
@@ -739,20 +740,17 @@ def fitPSF(img, img_median, x_init, y_init, gamma=1.0, segment_radius=4, roundne
         intens_arr_f = np.array(intensity_fitted)
         keep = np.ones(len(x_fitted), dtype=bool)
 
-        for i in range(len(x_fitted)):
-            if not keep[i]:
+        # Find all pairs within segment_radius using a KD-tree
+        tree = cKDTree(np.column_stack([x_arr_f, y_arr_f]))
+        pairs = tree.query_pairs(segment_radius, output_type='ndarray')
+        # Process pairs: for each duplicate pair, discard the fainter detection
+        for i, j in pairs:
+            if not keep[i] or not keep[j]:
                 continue
-            for j in range(i + 1, len(x_fitted)):
-                if not keep[j]:
-                    continue
-                dist = np.sqrt((x_arr_f[i] - x_arr_f[j])**2 + (y_arr_f[i] - y_arr_f[j])**2)
-                if dist < segment_radius:
-                    # Keep the brighter detection
-                    if intens_arr_f[j] > intens_arr_f[i]:
-                        keep[i] = False
-                        break
-                    else:
-                        keep[j] = False
+            if intens_arr_f[j] > intens_arr_f[i]:
+                keep[i] = False
+            else:
+                keep[j] = False
 
         n_dupes = np.sum(~keep)
         if n_dupes > 0:

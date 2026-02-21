@@ -138,22 +138,13 @@ class PairedStars(object):
             int: Index of the closest star.
         """
 
-        min_index = 0
-        min_dist = np.inf
-
-        picked_x = [star[0] for star in self.paired_stars]
-        picked_y = [star[1] for star in self.paired_stars]
+        picked_x = np.array([star[0] for star in self.paired_stars])
+        picked_y = np.array([star[1] for star in self.paired_stars])
 
         # Find the index of the closest catalog star to the given image coordinates
-        for i, (x, y) in enumerate(zip(picked_x, picked_y)):
+        dists = (pos_x - picked_x)**2 + (pos_y - picked_y)**2
 
-            dist = (pos_x - x)**2 + (pos_y - y)**2
-
-            if dist < min_dist:
-                min_dist = dist
-                min_index = i
-
-        return min_index
+        return int(np.argmin(dists))
 
 
     def removeClosestPair(self, pos_x, pos_y):
