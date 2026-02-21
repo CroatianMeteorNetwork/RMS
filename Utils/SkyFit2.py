@@ -1766,19 +1766,18 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
                         # Copy the config to the target, then write overrides into the copy
                         shutil.copy2(src, dest)
                         pt._writeStarDetectionConfig(dest, config_catalog_lm)
-                        results.append("Config saved to: " + dest)
                     else:
                         # Same file — write overrides in-place (backup handled by _writeStarDetectionConfig)
                         pt._writeStarDetectionConfig(dest, config_catalog_lm)
-                        # Sync in-memory config attrs
-                        pt.config.intensity_threshold = pt.override_intensity_threshold
-                        pt.config.neighborhood_size = pt.override_neighborhood_size
-                        pt.config.max_stars = pt.override_max_stars
-                        pt.config.segment_radius = pt.override_segment_radius
-                        pt.config.max_feature_ratio = pt.override_max_feature_ratio
-                        pt.config.roundness_threshold = pt.override_roundness_threshold
-                        pt._updateConfigSaveButtonState()
-                        results.append("Config saved to: " + dest)
+                    # Sync in-memory config attrs so modified state is cleared
+                    pt.config.intensity_threshold = pt.override_intensity_threshold
+                    pt.config.neighborhood_size = pt.override_neighborhood_size
+                    pt.config.max_stars = pt.override_max_stars
+                    pt.config.segment_radius = pt.override_segment_radius
+                    pt.config.max_feature_ratio = pt.override_max_feature_ratio
+                    pt.config.roundness_threshold = pt.override_roundness_threshold
+                    pt._updateConfigSaveButtonState()
+                    results.append("Config saved to: " + dest)
                 except Exception as e:
                     results.append("Config save to {} failed: {}".format(target_dir, repr(e)))
 
@@ -1787,6 +1786,9 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
                     dest = os.path.join(target_dir, "mask.bmp")
                     mask_img = pt.generateMaskImage()
                     cv2.imwrite(dest, mask_img)
+                    pt.mask_source_path = dest
+                    if hasattr(pt, 'tab') and hasattr(pt.tab, 'mask'):
+                        pt.tab.mask.setUnsaved(False)
                     results.append("Mask saved to: " + dest)
                 except Exception as e:
                     results.append("Mask save to {} failed: {}".format(target_dir, repr(e)))
