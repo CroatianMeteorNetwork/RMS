@@ -5329,9 +5329,12 @@ class PlateTool(QtWidgets.QMainWindow):
                 return 0, 0, 0
 
             ff_name_ret, x_arr, y_arr, amplitude, intensity, fwhm_arr, background, snr, saturated = star_list
+            x_arr = np.asarray(x_arr, dtype=float)
+            y_arr = np.asarray(y_arr, dtype=float)
+            fwhm_arr = np.asarray(fwhm_arr, dtype=float)
             n_detected = len(x_arr)
 
-            if n_detected == 0:
+            if n_detected == 0 or len(catalog_x) == 0:
                 if return_positions:
                     return 0, 0, 0, np.array([]), np.array([])
                 return 0, 0, 0
