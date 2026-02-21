@@ -4879,11 +4879,10 @@ class PlateTool(QtWidgets.QMainWindow):
             for i, ff_name in enumerate(ff_files):
                 print(f"  Processing {i+1}/{total}: {ff_name}")
 
-                # Update status bar periodically
-                if (i % 50 == 0) or (i == total - 1):
-                    self.status_bar.showMessage(
-                        f"Re-detecting stars... {i+1}/{total} ({success_count} successful)")
-                    QtWidgets.QApplication.processEvents()
+                # Update status bar and keep UI responsive
+                self.status_bar.showMessage(
+                    f"Re-detecting stars... {i+1}/{total} ({success_count} successful)")
+                QtWidgets.QApplication.processEvents()
 
                 try:
                     star_list = extractStarsFF(
@@ -11637,38 +11636,28 @@ class PlateTool(QtWidgets.QMainWindow):
         selected_ff = None
         selected_score = None
 
-        if best_ff_available:
-            # Best overall is available - use it directly
-            selected_ff = best_ff
-            selected_score = best_score
-        elif best_available_ff is not None:
-            # Best overall not available, but we have a best among available
-            # Ask user what to do
+        if best_available_ff is not None:
             msg_box = QtWidgets.QMessageBox(self)
             msg_box.setWindowTitle("Best Frame for Calibration")
 
             # Get star counts for display
-            n_stars_best = len(self.calstars.get(best_ff, []))
-            n_stars_available = len(self.calstars.get(best_available_ff, []))
+            n_stars_best = len(merged_calstars.get(best_ff, []))
+            n_stars_available = len(merged_calstars.get(best_available_ff, []))
 
             msg_box.setText(
-                "The frame with the best star distribution in CALSTARS\n"
-                "doesn't have a saved image file in the given directory.\n\n"
-                "You can either:\n"
-                "  • Calibrate automatically using the star data\n"
-                "    (a placeholder will be shown instead of the image)\n"
-                "  • Go to the best available image and calibrate from there"
+                "Select how to use the best frame for calibration:\n\n"
+                "  \u2022 Auto Fit: calibrate using the star data\n"
+                "    (a placeholder will be shown if no image is available)\n"
+                "  \u2022 Go to Best Image: navigate to the best available image"
             )
             msg_box.setInformativeText(
-                f"From CALSTARS:\n"
-                f"  Best frame:       {best_ff}  ({n_stars_best} stars)\n"
-                f"  Best with image:  {best_available_ff}  ({n_stars_available} stars)"
+                f"Best frame:       {best_ff}  ({n_stars_best} stars)\n"
+                f"Best with image:  {best_available_ff}  ({n_stars_available} stars)"
             )
 
-            # Add custom buttons
-            auto_fit_btn = msg_box.addButton("Auto Fit (placeholder)", QtWidgets.QMessageBox.ActionRole)
+            auto_fit_btn = msg_box.addButton("Auto Fit", QtWidgets.QMessageBox.ActionRole)
             navigate_btn = msg_box.addButton("Go to Best Image", QtWidgets.QMessageBox.ActionRole)
-            cancel_btn = msg_box.addButton(QtWidgets.QMessageBox.Cancel)
+            msg_box.addButton(QtWidgets.QMessageBox.Cancel)
 
             msg_box.setDefaultButton(auto_fit_btn)
             msg_box.exec_()
@@ -11794,8 +11783,12 @@ class PlateTool(QtWidgets.QMainWindow):
                 return
 
             elif clicked == navigate_btn:
-                selected_ff = best_available_ff
-                selected_score = best_available_score
+                if best_ff_available:
+                    selected_ff = best_ff
+                    selected_score = best_score
+                else:
+                    selected_ff = best_available_ff
+                    selected_score = best_available_score
             else:
                 self.status_bar.showMessage("Best frame search cancelled")
                 return
