@@ -11656,7 +11656,8 @@ class PlateTool(QtWidgets.QMainWindow):
                 f"Best with image:  {best_available_ff}  ({n_stars_available} stars)"
             )
 
-            auto_fit_btn = msg_box.addButton("Auto Fit", QtWidgets.QMessageBox.ActionRole)
+            auto_fit_label = "Auto Fit (placeholder)" if not best_ff_available else "Auto Fit"
+            auto_fit_btn = msg_box.addButton(auto_fit_label, QtWidgets.QMessageBox.ActionRole)
             navigate_btn = msg_box.addButton("Go to Best Image", QtWidgets.QMessageBox.ActionRole)
             msg_box.addButton(QtWidgets.QMessageBox.Cancel)
 
@@ -11691,48 +11692,48 @@ class PlateTool(QtWidgets.QMainWindow):
                         new_platepar, matched_stars, used_ff = result
 
                     if new_platepar is not None:
-                        # Create a placeholder PNG image with diagonal stripes
-                        height, width = self.config.height, self.config.width
-                        placeholder = np.full((height, width), 24, dtype=np.uint8)
+                        # Determine the target frame to navigate to
+                        if best_ff in available_images:
+                            # Image exists on disk - navigate directly to it
+                            navigate_to = best_ff
+                        else:
+                            # Image not on disk - create a placeholder
+                            height, width = self.config.height, self.config.width
+                            placeholder = np.full((height, width), 24, dtype=np.uint8)
 
-                        # Add diagonal stripes (lighter gray)
-                        stripe_width = 40
-                        stripe_spacing = 80
-                        for i in range(-(height + width), height + width, stripe_spacing):
-                            for offset in range(stripe_width):
-                                y_coords = np.arange(height)
-                                x_coords = i + y_coords + offset
-                                valid = (x_coords >= 0) & (x_coords < width)
-                                placeholder[y_coords[valid], x_coords[valid]] = 40
+                            # Add diagonal stripes (lighter gray)
+                            stripe_width = 40
+                            stripe_spacing = 80
+                            for i in range(-(height + width), height + width, stripe_spacing):
+                                for offset in range(stripe_width):
+                                    y_coords = np.arange(height)
+                                    x_coords = i + y_coords + offset
+                                    valid = (x_coords >= 0) & (x_coords < width)
+                                    placeholder[y_coords[valid], x_coords[valid]] = 40
 
-                        # Create placeholder filename based on original FF name
-                        # e.g. FF_USV003_20250416_091633_928_0628224.fits
-                        #   -> FF_USV003_20250416_091633_928_0628224_placeholder.png
-                        base_name = os.path.splitext(best_ff)[0]
-                        placeholder_name = f"{base_name}_placeholder.png"
-                        placeholder_path = os.path.join(self.dir_path, placeholder_name)
+                            base_name = os.path.splitext(best_ff)[0]
+                            navigate_to = f"{base_name}_placeholder.png"
+                            placeholder_path = os.path.join(self.dir_path, navigate_to)
 
-                        # Save the placeholder PNG
-                        img_pil = Image.fromarray(placeholder)
-                        img_pil.save(placeholder_path)
-                        print(f"Created placeholder image: {placeholder_path}")
+                            img_pil = Image.fromarray(placeholder)
+                            img_pil.save(placeholder_path)
+                            print(f"Created placeholder image: {placeholder_path}")
 
-                        # Copy CALSTARS data to placeholder filename so detected stars are shown
-                        if best_ff in self.calstars:
-                            self.calstars[placeholder_name] = self.calstars[best_ff]
+                            # Copy CALSTARS data to placeholder filename
+                            if best_ff in self.calstars:
+                                self.calstars[navigate_to] = self.calstars[best_ff]
 
-                        # Refresh the file list and navigate to the placeholder
-                        # Re-detect input type to include new file
-                        self.img_handle = detectInputTypeFolder(
-                            self.dir_path, self.config,
-                            beginning_time=None, fps=self.fps
-                        )
-                        self.img.changeHandle(self.img_handle)
+                            # Refresh file list to include new placeholder
+                            self.img_handle = detectInputTypeFolder(
+                                self.dir_path, self.config,
+                                beginning_time=None, fps=self.fps
+                            )
+                            self.img.changeHandle(self.img_handle)
 
-                        # Find and navigate to the placeholder
+                        # Navigate to the target frame
                         target_index = None
                         for i, ff_path in enumerate(self.img_handle.ff_list):
-                            if os.path.basename(ff_path) == placeholder_name:
+                            if os.path.basename(ff_path) == navigate_to:
                                 target_index = i
                                 break
 
@@ -11741,9 +11742,6 @@ class PlateTool(QtWidgets.QMainWindow):
                             delta = target_index - current_index
                             if delta != 0:
                                 self.nextImg(n=delta)
-                        else:
-                            # Fallback - just set the image directly
-                            self.img.setImage(placeholder.T)
 
                         # Update the current platepar
                         self.platepar = new_platepar
@@ -11763,7 +11761,7 @@ class PlateTool(QtWidgets.QMainWindow):
                             self.fitPickedStars()
 
                         self.status_bar.showMessage(
-                            f"Auto fit complete: {placeholder_name} - {len(self.paired_stars)} stars"
+                            f"Auto fit complete: {navigate_to} - {len(self.paired_stars)} stars"
                         )
                         print(f"\nAuto fit complete on {best_ff}")
                     else:
