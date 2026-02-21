@@ -11452,7 +11452,11 @@ class PlateTool(QtWidgets.QMainWindow):
         of detected stars. Navigates to the best frame.
         """
         # Check if we have CALSTARS data
-        if not hasattr(self, 'calstars') or self.calstars is None or len(self.calstars) == 0:
+        has_calstars = hasattr(self, 'calstars') and self.calstars and len(self.calstars) > 0
+        has_overrides = (hasattr(self, 'star_detection_override_data')
+                         and self.star_detection_override_data)
+
+        if not has_calstars and not has_overrides:
             QtWidgets.QMessageBox.warning(
                 self, "No CALSTARS Data",
                 "No CALSTARS data available. Run star detection first."
@@ -11474,6 +11478,12 @@ class PlateTool(QtWidgets.QMainWindow):
         img_width = self.config.width
         img_height = self.config.height
 
+        # Merge star data: start with original CALSTARS, override per-image
+        # where re-detected data exists
+        merged_calstars = dict(self.calstars) if has_calstars else {}
+        if has_overrides:
+            merged_calstars.update(self.star_detection_override_data)
+
         # Build set of available image filenames (basenames only), excluding placeholders
         available_images = set()
         for ff_path in self.img_handle.ff_list:
@@ -11482,9 +11492,9 @@ class PlateTool(QtWidgets.QMainWindow):
             if "_placeholder" not in basename:
                 available_images.add(basename)
 
-        # Find the best frame from all CALSTARS
+        # Find the best frame from all merged data
         best_ff, best_score, all_scores = selectBestFrame(
-            self.calstars, img_width, img_height, verbose=False
+            merged_calstars, img_width, img_height, verbose=False
         )
 
         if best_ff is None:
@@ -11499,7 +11509,7 @@ class PlateTool(QtWidgets.QMainWindow):
         best_ff_available = best_ff in available_images
 
         # Find best frame among only available images
-        calstars_available = {k: v for k, v in self.calstars.items() if k in available_images}
+        calstars_available = {k: v for k, v in merged_calstars.items() if k in available_images}
 
         if len(calstars_available) == 0:
             QtWidgets.QMessageBox.warning(
