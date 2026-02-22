@@ -26,11 +26,13 @@ from RMS.Astrometry.ApplyAstrometry import (
     applyAstrometryFTPdetectinfo,
     applyPlateparToCentroids,
     extinctionCorrectionTrueToApparent,
+    getFOVSelectionRadius,
     photometryFitRobust,
     rotationWrtHorizon,
     xyToRaDecPP,
 )
-from RMS.Astrometry.Conversions import date2JD, raDec2AltAz
+from RMS.Astrometry.CyFunctions import subsetCatalog
+from RMS.Astrometry.Conversions import date2JD, jd2Date, raDec2AltAz
 from RMS.Astrometry.NNalign import alignPlatepar
 from RMS.Formats import CALSTARS, FFfile, FTPdetectinfo, Platepar, StarCatalog
 from RMS.Formats.FTPdetectinfo import findFTPdetectinfoFile, validDefaultFTPdetectinfo
@@ -204,6 +206,25 @@ def recalibrateFF(
         )
 
     ##########
+
+    # Pre-filter catalog to FOV region. This avoids re-subsetting the full catalog (potentially
+    # 50k+ stars) on every optimizer iteration. Safe because matched stars are always well inside
+    # the FOV boundary — stars aren't detected within ~15 px of image edges and the max match
+    # radius is 10 px, so stars entering/leaving the subset boundary can never affect matching.
+    fov_radius = getFOVSelectionRadius(working_platepar)
+    _, RA_c, dec_c, _ = xyToRaDecPP(
+        [jd2Date(jd)], [working_platepar.X_res/2], [working_platepar.Y_res/2], [1],
+        working_platepar, extinction_correction=False
+    )
+    effective_lim_mag = lim_mag if lim_mag is not None else config.catalog_mag_limit
+    _, catalog_stars = subsetCatalog(
+        catalog_stars, RA_c[0], dec_c[0], jd,
+        working_platepar.lat, working_platepar.lon,
+        fov_radius, effective_lim_mag
+    )
+
+    log.info('Pre-filtered catalog to {:d} stars within {:.1f} deg FOV radius'.format(
+        len(catalog_stars), fov_radius))
 
     # Go through all radii and match the stars
     min_match_radius = None

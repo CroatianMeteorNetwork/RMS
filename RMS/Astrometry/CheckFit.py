@@ -365,20 +365,12 @@ def _calcImageResidualsAstro(params, config, platepar, catalog_stars, star_dict,
     """
 
 
-    # Make a copy of the platepar
-    pp = copy.deepcopy(platepar)
-
-    # Extract fitting parameters
-    ra_ref, dec_ref, pos_angle_ref, F_scale = params
-
-    # Set the fitting parameters to the platepar clone
-    pp.RA_d = ra_ref
-    pp.dec_d = dec_ref
-    pp.pos_angle_ref = pos_angle_ref
-    pp.F_scale = F_scale
+    # Set the fitting parameters directly on the platepar (no deep copy needed —
+    # matchStarsResiduals only reads from the platepar, never modifies it)
+    platepar.RA_d, platepar.dec_d, platepar.pos_angle_ref, platepar.F_scale = params
 
     # Match stars and calculate image residuals
-    return matchStarsResiduals(config, pp, catalog_stars, star_dict, match_radius, verbose=False)
+    return matchStarsResiduals(config, platepar, catalog_stars, star_dict, match_radius, verbose=False)
 
 
 
