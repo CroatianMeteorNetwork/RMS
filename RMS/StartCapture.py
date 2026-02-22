@@ -1205,6 +1205,8 @@ if __name__ == "__main__":
     # Automatic running and stopping the capture at sunrise and sunset
     ran_once = False
     slideshow_view = None
+    switcher_stop_event = None
+    capture_switcher = None
     while True:
 
         if config.continuous_capture:
@@ -1478,17 +1480,26 @@ if __name__ == "__main__":
 
 
         if config.continuous_capture:
-            
+
+            # Stop the previous capture mode switcher thread if it's still running
+            if switcher_stop_event is not None:
+                log.info('Stopping previous capture mode switcher thread...')
+                switcher_stop_event.set()
+                capture_switcher.join(timeout=10)
+                if capture_switcher.is_alive():
+                    log.warning('Previous capture mode switcher thread did not stop in time')
+
             # Setup shared value to communicate day/night switch between processes.
             daytime_mode = multiprocessing.Value(ctypes.c_bool, False)
             camera_mode_switch_trigger = multiprocessing.Value(ctypes.c_bool, True)
 
             # Setup the capture mode switcher on another thread
-            capture_switcher = threading.Thread(target=captureModeSwitcher, args=(config, daytime_mode, camera_mode_switch_trigger))
-            
+            switcher_stop_event = threading.Event()
+            capture_switcher = threading.Thread(target=captureModeSwitcher, args=(config, daytime_mode, camera_mode_switch_trigger, switcher_stop_event))
+
             # To make sure the capture switcher thread exits automatically at the end
             capture_switcher.daemon = True
-            
+
             capture_switcher.start()
 
             # Wait for the switcher to complete calculation and switch to correct camera mode
