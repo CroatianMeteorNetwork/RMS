@@ -1747,13 +1747,13 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
 
     sigFitPressed = QtCore.pyqtSignal()
     sigAutoFitPressed = QtCore.pyqtSignal()
+    sigQuickAlignPressed = QtCore.pyqtSignal()
     sigFindBestFramePressed = QtCore.pyqtSignal()
     sigNextStarPressed = QtCore.pyqtSignal()
     sigAstrometryPressed = QtCore.pyqtSignal()
     sigPhotometryPressed = QtCore.pyqtSignal()
     sigResetDistortionPressed = QtCore.pyqtSignal()
 
-    sigFitOnlyPointingToggled = QtCore.pyqtSignal()
     sigRefractionToggled = QtCore.pyqtSignal()
     sigEqAspectToggled = QtCore.pyqtSignal()
     sigAsymmetryCorrToggled = QtCore.pyqtSignal()
@@ -1762,7 +1762,6 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
     sigRestoreDefaultsPressed = QtCore.pyqtSignal()
 
     # Default settings for SkyFit2 Fit Parameters tab
-    DEFAULT_FIT_ONLY_POINTING = False
     DEFAULT_FIXED_SCALE = False
     DEFAULT_REFRACTION = True
     DEFAULT_EQUAL_ASPECT = True
@@ -1816,6 +1815,16 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         fit_hbox.addWidget(self.auto_fit_button)
         box.addLayout(fit_hbox)
 
+        # Quick Align button row
+        quick_align_hbox = QtWidgets.QHBoxLayout()
+        quick_align_hbox.setSpacing(self.scaledSpacing(0.25))
+        self.quick_align_button = QtWidgets.QPushButton("Re-fit Pointing")
+        self.quick_align_button.setToolTip(
+            "Re-fit pointing using existing distortion. Uses astrometry.net if needed.")
+        self.quick_align_button.clicked.connect(self.sigQuickAlignPressed.emit)
+        quick_align_hbox.addWidget(self.quick_align_button)
+        box.addLayout(quick_align_hbox)
+
         # Next Star button row
         next_star_hbox = QtWidgets.QHBoxLayout()
         next_star_hbox.setSpacing(self.scaledSpacing(0.25))
@@ -1864,10 +1873,6 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         full_layout.addWidget(self.restore_defaults_button)
 
         # check boxes
-        self.fit_only_pointing = QtWidgets.QCheckBox('Only fit pointing')
-        self.fit_only_pointing.released.connect(self.onFitOnlyPointingToggled)
-        full_layout.addWidget(self.fit_only_pointing)
-
         self.fixed_scale = QtWidgets.QCheckBox('Fixed scale')
         self.fixed_scale.released.connect(self.onFixScaleToggled)
         full_layout.addWidget(self.fixed_scale)
@@ -2081,15 +2086,9 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         self.updateRestoreDefaultsButton()
 
 
-    def onFitOnlyPointingToggled(self):
-        self.gui.fit_only_pointing = self.fit_only_pointing.isChecked()
-        self.updatePairedStars(min_fit_stars=self.gui.getMinFitStars())
-        self.updateRestoreDefaultsButton()
-        self.sigFitOnlyPointingToggled.emit()
-
     def onFixScaleToggled(self):
         self.gui.fixed_scale = self.fixed_scale.isChecked()
-        self.sigFitOnlyPointingToggled.emit()
+        self.sigFitParametersChanged.emit()
         self.updatePairedStars(min_fit_stars=self.gui.getMinFitStars())
 
         if self.gui.fixed_scale:
@@ -2455,8 +2454,7 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         """Check if current settings match the defaults."""
         pp = self.gui.platepar
         gui = self.gui
-        return (gui.fit_only_pointing == self.DEFAULT_FIT_ONLY_POINTING and
-                gui.fixed_scale == self.DEFAULT_FIXED_SCALE and
+        return (gui.fixed_scale == self.DEFAULT_FIXED_SCALE and
                 pp.refraction == self.DEFAULT_REFRACTION and
                 pp.equal_aspect == self.DEFAULT_EQUAL_ASPECT and
                 pp.asymmetry_corr == self.DEFAULT_ASYMMETRY_CORR and
@@ -2489,11 +2487,6 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         """Restore all default settings for the Fit Parameters tab."""
         pp = self.gui.platepar
         gui = self.gui
-
-        # Restore fit only pointing
-        if gui.fit_only_pointing != self.DEFAULT_FIT_ONLY_POINTING:
-            gui.fit_only_pointing = self.DEFAULT_FIT_ONLY_POINTING
-            self.fit_only_pointing.setChecked(self.DEFAULT_FIT_ONLY_POINTING)
 
         # Restore fixed scale
         if gui.fixed_scale != self.DEFAULT_FIXED_SCALE:
@@ -2596,11 +2589,36 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
             self.auto_fit_button.setText("Fitting...")
             self.auto_fit_button.setEnabled(False)
             self.fit_astrometry_button.setEnabled(False)
+            self.quick_align_button.setEnabled(False)
             # Force visual update
             self.auto_fit_button.repaint()
             self.fit_astrometry_button.repaint()
+            self.quick_align_button.repaint()
         else:
             self.auto_fit_button.setText("Auto Fit")
+            self.auto_fit_button.setEnabled(True)
+            self.quick_align_button.setEnabled(True)
+            # Re-enable fit button based on paired stars count
+            self.updatePairedStars(min_fit_stars=self.gui.getMinFitStars())
+
+    def setQuickAlignButtonBusy(self, busy):
+        """Set the Quick Align button to show busy state.
+
+        Arguments:
+            busy: [bool] If True, show busy state. If False, restore normal state.
+        """
+        if busy:
+            self.quick_align_button.setText("Aligning...")
+            self.quick_align_button.setEnabled(False)
+            self.auto_fit_button.setEnabled(False)
+            self.fit_astrometry_button.setEnabled(False)
+            # Force visual update
+            self.quick_align_button.repaint()
+            self.auto_fit_button.repaint()
+            self.fit_astrometry_button.repaint()
+        else:
+            self.quick_align_button.setText("Re-fit Pointing")
+            self.quick_align_button.setEnabled(True)
             self.auto_fit_button.setEnabled(True)
             # Re-enable fit button based on paired stars count
             self.updatePairedStars(min_fit_stars=self.gui.getMinFitStars())
