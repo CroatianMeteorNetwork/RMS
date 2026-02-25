@@ -3086,6 +3086,7 @@ class MaskWidget(QtWidgets.QWidget, ScaledSizeHelper):
     sigShowOverlayToggled = QtCore.pyqtSignal(bool)
     sigUnsavedChanged = QtCore.pyqtSignal()
     sigUseFlatToggled = QtCore.pyqtSignal(bool)
+    sigInvertMask = QtCore.pyqtSignal()
 
     def __init__(self, gui):
         QtWidgets.QWidget.__init__(self)
@@ -3130,6 +3131,13 @@ class MaskWidget(QtWidgets.QWidget, ScaledSizeHelper):
         self.clear_button = QtWidgets.QPushButton('Clear All')
         self.clear_button.clicked.connect(self.onClearAll)
         layout.addWidget(self.clear_button)
+
+        layout.addSpacing(self.scaledSpacing(0.3))
+
+        # Invert mask button
+        self.invert_button = QtWidgets.QPushButton('Invert Mask')
+        self.invert_button.clicked.connect(self.sigInvertMask.emit)
+        layout.addWidget(self.invert_button)
 
         layout.addSpacing(self.scaledSpacing(1))
 

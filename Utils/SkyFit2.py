@@ -3286,6 +3286,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.mask.sigShowOverlayToggled.connect(self.toggleMaskOverlay)
         self.tab.mask.sigUseFlatToggled.connect(self.toggleMaskFlatBackground)
         self.tab.mask.sigUnsavedChanged.connect(self.updateFileManagerButton)
+        self.tab.mask.sigInvertMask.connect(self.invertMaskPolygons)
 
         # Check for flat.bmp and setup mask tab
         self.checkAndSetupFlatForMask()
@@ -6011,6 +6012,43 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.mask.setUnsaved(True)
         self.updateMaskDisplay()
         self.tab.mask.updateStatus(0)
+
+    def invertMaskPolygons(self):
+        """ Invert the current mask polygons using the mask image. """
+
+        if self.img.data is None:
+            return
+
+        # Generate current binary mask
+        current_mask_img = self.generateMaskImage()
+
+        # Find contours of the currently unmasked regions
+        # current_mask_img has 0 for masked, 255 for unmasked. 
+        # findContours finds the contours of regions with value 255.
+        contours, _ = cv2.findContours(current_mask_img, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+
+        self.mask_polygons = []
+        self.mask_current_polygon = []
+
+        for contour in contours:
+            
+            # Approximate the contour to a polygon to reduce the number of vertices.
+            # epsilon is the maximum distance from contour to approximated contour.
+            epsilon = 0.002*cv2.arcLength(contour, True)
+            approx = cv2.approxPolyDP(contour, epsilon, True)
+            
+            # Extract the points into a flat list of (x, y) coordinate tuples
+            points = [(float(pt[0][0]), float(pt[0][1])) for pt in approx]
+            
+            # Only add to mask polygons if it has at least 3 points (a valid polygon)
+            if len(points) >= 3:
+                self.mask_polygons.append(points)
+
+        print(f"Mask inverted: {len(self.mask_polygons)} new polygon(s) created.")
+
+        self.tab.mask.setUnsaved(True)
+        self.updateMaskDisplay()
+        self.tab.mask.updateStatus(len(self.mask_polygons))
 
     def findNearestMaskVertex(self, x, y, threshold=15):
         """Find the nearest vertex to (x, y) within threshold.
