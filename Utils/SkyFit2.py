@@ -16083,7 +16083,7 @@ if __name__ == '__main__':
     if cml_args.input_path is not None and cml_args.input_path.endswith('.state'):
 
         dir_path, state_name = os.path.split(cml_args.input_path)
-        config = cr.loadConfigFromDirectory(cml_args.config, cml_args.input_path)
+        config = cr.loadConfigFromDirectory(cml_args.config if cml_args.config is not None else '.', cml_args.input_path)
 
         # Create plate_tool without calling its constructor then calling loadstate
         plate_tool = PlateTool.__new__(PlateTool)
@@ -16131,7 +16131,9 @@ if __name__ == '__main__':
             dir_path = input_path
 
         # Load the config file
-        config = cr.loadConfigFromDirectory(cml_args.config, dir_path)
+        # If no -c flag given, use '.' to auto-detect the .config in the data directory
+        # (same as changeStation does via the File Manager)
+        config = cr.loadConfigFromDirectory(cml_args.config if cml_args.config is not None else '.', dir_path)
 
         if cml_args.mask is not None:
             print("Given a path to a mask at {}".format(cml_args.mask))
