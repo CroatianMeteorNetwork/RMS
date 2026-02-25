@@ -133,7 +133,7 @@ def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update
     fov_radius = ApplyAstrometry.getFOVSelectionRadius(platepar)
 
     # Take only those stars which are inside the FOV (with margin for alignment)
-    fov_radius_margin = fov_radius * 1.5  # Larger margin for initial alignment
+    fov_radius_margin = fov_radius * 1.5
     filtered_indices, _ = subsetCatalog(catalog_stars, ra_centre, dec_centre, jd, platepar.lat,
                                         platepar.lon, fov_radius_margin, config.catalog_mag_limit)
 
@@ -161,15 +161,12 @@ def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update
     log.info("alignPlatepar: Fitting pointing with {} detected stars, {} catalog stars".format(
         len(img_stars), len(catalog_stars_fov)))
 
-    success, _ = platepar_aligned.fitPointingNN(
+    success, rmsd, inlier_fraction, inlier_rmsd = platepar_aligned.fitPointingNN(
         jd, img_stars, catalog_stars_fov, fixed_scale=(not scale_update))
 
     if success:
-        log.info("alignPlatepar: Fit successful")
 
-        # Sanity check: reject if the pointing correction is too large.
-        # Compare FOV centres at the observation time so different JD references cancel out
-        # and Earth rotation is properly accounted for.
+        # Compute pointing shift and rotation change for logging
         _, ra_centre_new, dec_centre_new, _ = ApplyAstrometry.xyToRaDecPP(
             [calstars_time], [platepar.X_res / 2], [platepar.Y_res / 2], [1],
             platepar_aligned, extinction_correction=False, precompute_pointing_corr=True)
@@ -178,7 +175,11 @@ def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update
 
         pointing_shift = angularSeparationDeg(ra_centre, dec_centre, ra_centre_new, dec_centre_new)
 
-        # Log apparent sky coordinates at the observation time (not raw platepar reference coords)
+        rot_change = abs(platepar_aligned.pos_angle_ref - platepar.pos_angle_ref) % 360
+        if rot_change > 180:
+            rot_change = 360 - rot_change
+
+        log.info("alignPlatepar: Fit successful")
         log.info("    Apparent RA:  {:.4f} -> {:.4f} deg (delta={:.4f})".format(
             ra_centre, ra_centre_new, ra_centre_new - ra_centre))
         log.info("    Apparent Dec: {:.4f} -> {:.4f} deg (delta={:.4f})".format(
@@ -188,23 +189,14 @@ def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update
             platepar_aligned.pos_angle_ref - platepar.pos_angle_ref))
         if scale_update:
             log.info("    Scale: {:.4f} -> {:.4f}".format(platepar.F_scale, platepar_aligned.F_scale))
-
-        rot_change = abs(platepar_aligned.pos_angle_ref - platepar.pos_angle_ref) % 360
-        if rot_change > 180:
-            rot_change = 360 - rot_change
-
-        max_pointing_shift = fov_radius  # degrees
-        max_rotation_shift = 30.0  # degrees
-
-        log.info("    Pointing shift: {:.2f} deg (limit {:.2f}), Rotation shift: {:.2f} deg (limit {:.2f})".format(
-            pointing_shift, max_pointing_shift, rot_change, max_rotation_shift))
-
-        if (pointing_shift > max_pointing_shift) or (rot_change > max_rotation_shift):
-            log.warning("alignPlatepar: Correction too large, rejecting fit!")
-            return platepar, config.catalog_mag_limit
+        log.info("    Pointing shift: {:.2f} deg, Rotation shift: {:.2f} deg".format(
+            pointing_shift, rot_change))
+        log.info("    Inliers: {:.1f}%, Inlier RMSD: {:.2f} px".format(
+            100*inlier_fraction, inlier_rmsd))
 
     else:
-        log.warning("alignPlatepar: Fit did not converge, returning original platepar")
+        log.warning("alignPlatepar: Fit did not converge (inliers: {:.1f}%), returning original platepar".format(
+            100*inlier_fraction))
         return platepar, config.catalog_mag_limit
 
     return platepar_aligned, config.catalog_mag_limit

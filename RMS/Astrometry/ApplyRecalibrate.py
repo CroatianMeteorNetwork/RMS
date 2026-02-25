@@ -279,12 +279,14 @@ def recalibrateFF(
         # Compute the minimization tolerance
         fatol, xatol_ang = CheckFit.computeMinimizationTolerances(config, working_platepar, len(star_dict_ff))
 
+        simplex = CheckFit.buildNelderMeadSimplex(p0, working_platepar.dec_d, mode="floor")
+
         res = scipy.optimize.minimize(
             CheckFit._calcImageResidualsAstro,
             p0,
             args=(config, working_platepar, catalog_stars, star_dict_ff, match_radius),
             method='Nelder-Mead',
-            options={'fatol': fatol, 'xatol': xatol_ang},
+            options={'fatol': fatol, 'xatol': xatol_ang, 'initial_simplex': simplex},
         )
 
         ###

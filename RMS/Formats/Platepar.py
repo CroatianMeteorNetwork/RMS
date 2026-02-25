@@ -642,9 +642,9 @@ class Platepar(object):
         if not fixed_scale:
             p0.append(abs(self.F_scale))
 
-        # Debug: show initial parameters
-        print("    fitPointingNN: BEFORE RA={:.2f} Dec={:.2f} Rot={:.2f}".format(
-            p0[0], p0[1], p0[2]))
+        # Import here to avoid circular import (CheckFit imports Platepar)
+        from RMS.Astrometry.CheckFit import buildNelderMeadSimplex
+        simplex = buildNelderMeadSimplex(p0, self.dec_d, mode="fixed", angular_step=2.0)
 
         # Fit using Nelder-Mead (robust for NN cost landscape)
         res = scipy.optimize.minimize(
@@ -652,12 +652,8 @@ class Platepar(object):
             p0,
             args=(pp_work, jd, ra_catalog, dec_catalog, img_x, img_y, fixed_scale),
             method='Nelder-Mead',
-            options={'maxiter': 5000, 'adaptive': True},
+            options={'maxiter': 5000, 'adaptive': True, 'initial_simplex': simplex},
         )
-
-        # Debug: show optimizer result
-        print("    fitPointingNN: AFTER  RA={:.2f} Dec={:.2f} Rot={:.2f}".format(
-            res.x[0], res.x[1], res.x[2]))
 
         # Check inlier fraction - more robust than RMSD which is skewed by outliers
         # Recompute NN distances with fitted parameters
@@ -669,28 +665,29 @@ class Platepar(object):
         cat_x_valid = cat_x[valid_mask]
         cat_y_valid = cat_y[valid_mask]
 
-        if len(cat_x_valid) >= 3:
-            cat_coords = np.column_stack([cat_x_valid, cat_y_valid])
-            tree = cKDTree(cat_coords)
-            img_coords = np.column_stack([img_x, img_y])
-            nn_distances, _ = tree.query(img_coords, k=1)
+        inlier_fraction = 0.0
+        inlier_rmsd = 0.0
 
-            # Count inliers (matches within threshold)
-            inlier_threshold = 5.0  # pixels
-            min_inlier_fraction = 0.5  # require 50% of detected stars to match
-            inlier_mask = nn_distances < inlier_threshold
-            n_inliers = np.sum(inlier_mask)
-            inlier_fraction = n_inliers / len(nn_distances)
+        if len(cat_x_valid) < 3:
+            return False, res.fun, 0.0, 0.0
 
-            # Compute RMSD on inliers only (more meaningful than total RMSD)
-            inlier_rmsd = np.sqrt(np.mean(nn_distances[inlier_mask] ** 2)) if n_inliers > 0 else 0
+        cat_coords = np.column_stack([cat_x_valid, cat_y_valid])
+        tree = cKDTree(cat_coords)
+        img_coords = np.column_stack([img_x, img_y])
+        nn_distances, _ = tree.query(img_coords, k=1)
 
-            print("    fitPointingNN: Inliers {}/{} ({:.1f}%) within {}px, inlier RMSD={:.2f}px".format(
-                n_inliers, len(nn_distances), 100*inlier_fraction, inlier_threshold, inlier_rmsd))
+        # Count inliers (matches within threshold)
+        inlier_threshold = 5.0  # pixels
+        min_inlier_fraction = 0.5  # require 50% of detected stars to match
+        inlier_mask = nn_distances < inlier_threshold
+        n_inliers = np.sum(inlier_mask)
+        inlier_fraction = n_inliers / len(nn_distances)
 
-            if inlier_fraction < min_inlier_fraction:
-                print("    fitPointingNN: Insufficient inliers, fit rejected")
-                return False, res.fun
+        # Compute RMSD on inliers only (more meaningful than total RMSD)
+        inlier_rmsd = np.sqrt(np.mean(nn_distances[inlier_mask] ** 2)) if n_inliers > 0 else 0.0
+
+        if inlier_fraction < min_inlier_fraction:
+            return False, res.fun, inlier_fraction, 0.0
 
         # Update fitted parameters
         self.RA_d, self.dec_d, self.pos_angle_ref = res.x[:3]
@@ -705,7 +702,7 @@ class Platepar(object):
         # Update alt/az of pointing
         self.updateRefAltAz()
 
-        return res.success, res.fun  # Return (success, rmsd_pixels)
+        return res.success, res.fun, inlier_fraction, inlier_rmsd
 
     def fitAstrometry(
         self,

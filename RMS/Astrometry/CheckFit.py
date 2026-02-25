@@ -34,6 +34,55 @@ from RMS.Astrometry.CyFunctions import matchStars, subsetCatalog
 log = getLogger("rmslogger")
 
 
+def buildNelderMeadSimplex(p0, dec_d, mode="floor", angular_step=2.0, min_step_deg=0.5):
+    """Build initial simplex for Nelder-Mead optimization of astrometric parameters.
+
+    Scipy's default simplex perturbs each parameter by 5% of its value. This gives
+    ~0 step when RA or Dec is near 0, breaking the optimizer.
+
+    Arguments:
+        p0: [list/array] Initial parameter vector. First 3 elements must be angular
+            parameters (RA, Dec, Rot). Additional parameters (e.g. scale) keep the
+            default 10% step.
+        dec_d: [float] Declination in degrees, for cos(dec) correction on the RA step.
+        mode: [str] "floor" or "fixed".
+            "floor": Keep scipy's 5% default but enforce min_step_deg minimum for
+                     angular params. Use for fine-tuning (recalibrateFF, autoCheckFit).
+            "fixed": Use angular_step for all angular params regardless of parameter
+                     values. Use for large corrections (fitPointingNN).
+        angular_step: [float] Fixed step in degrees of sky (used in "fixed" mode).
+        min_step_deg: [float] Minimum angular step in degrees (used in "floor" mode).
+
+    Return:
+        simplex: [ndarray] (N+1) x N array suitable for the initial_simplex option.
+    """
+
+    p0_arr = np.array(p0, dtype=float)
+    n = len(p0_arr)
+    simplex = np.tile(p0_arr, (n + 1, 1))
+
+    cos_dec = max(np.cos(np.radians(dec_d)), 0.1)
+
+    if mode == "fixed":
+        # Fixed angular step for all angular params
+        steps = [angular_step / cos_dec, angular_step, angular_step]
+        # Extra params (e.g. scale) get 10% step
+        for j in range(3, n):
+            steps.append(abs(p0_arr[j]) * 0.1)
+
+    else:
+        # Floor mode: scipy's 5% default with a minimum angular step enforced
+        steps = [abs(v) * 0.05 if v != 0 else 0.00025 for v in p0_arr]
+        steps[0] = max(steps[0], min_step_deg / cos_dec)   # RA
+        steps[1] = max(steps[1], min_step_deg)              # Dec
+        steps[2] = max(steps[2], min_step_deg)              # Rot
+
+    for j in range(n):
+        simplex[j + 1, j] += steps[j]
+
+    return simplex
+
+
 def computeMinimizationTolerances(config, platepar, star_dict_len):
     """ Compute tolerances for minimization. """
 
@@ -623,10 +672,12 @@ def autoCheckFit(config, platepar, calstars_data, _nn_refinement=False):
         # Initial parameters for the astrometric fit
         p0 = [platepar.RA_d, platepar.dec_d, platepar.pos_angle_ref, platepar.F_scale]
 
+        simplex = buildNelderMeadSimplex(p0, platepar.dec_d, mode="floor")
+
         # Fit the astrometric parameters
         res = scipy.optimize.minimize(_calcImageResidualsAstro, p0, args=(config, platepar, catalog_stars, \
             star_dict, match_radius), method='Nelder-Mead', \
-            options={'fatol': fatol, 'xatol': xatol_ang})
+            options={'fatol': fatol, 'xatol': xatol_ang, 'initial_simplex': simplex})
 
         log.info(res)
 
