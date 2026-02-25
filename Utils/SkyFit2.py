@@ -1912,8 +1912,8 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
             msg = "\n".join(results)
             print(msg)
             has_error = any("failed" in r.lower() for r in results)
-            qmessagebox(title="Save " + ftype, message=msg,
-                         message_type="error" if has_error else "info")
+            if has_error:
+                qmessagebox(title="Save " + ftype, message=msg, message_type="error")
             self._refreshAll()
             pt.updateFileManagerButton()
 
@@ -2612,8 +2612,11 @@ class PlateTool(QtWidgets.QMainWindow):
         self.save_current_frame_action.triggered.connect(self.saveCurrentFrame)
 
         self.calibration_files_action = QtWidgets.QAction("File Manager...")
-        self.calibration_files_action.setShortcut('Ctrl+Shift+S')
         self.calibration_files_action.triggered.connect(self.showCalibrationFilesDialog)
+
+        self.quick_save_platepar_action = QtWidgets.QAction("Save platepar to data folder")
+        self.quick_save_platepar_action.setShortcut('Ctrl+Shift+S')
+        self.quick_save_platepar_action.triggered.connect(self.savePlatepar)
 
         self.save_state_platepar_action = QtWidgets.QAction("Save state and platepar")
         self.save_state_platepar_action.triggered.connect(lambda: [self.saveState(), self.savePlatepar()])
@@ -2650,7 +2653,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         self.file_manager_button = QtWidgets.QPushButton('File Manager')
         self.file_manager_button.pressed.connect(self.showCalibrationFilesDialog)
-        self.file_manager_button.setToolTip("Open File Manager (Ctrl+Shift+S)")
+        self.file_manager_button.setToolTip("Open File Manager")
         self.status_bar.addPermanentWidget(self.file_manager_button)
 
         self.skyfit_button = QtWidgets.QPushButton('SkyFit')
@@ -3413,6 +3416,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
             self.file_menu.addActions([self.new_platepar_action,
                                        self.save_state_platepar_action,
+                                       self.quick_save_platepar_action,
                                        self.load_state_action])
             self.file_menu.addSeparator()
             self.file_menu.addAction(self.calibration_files_action)
@@ -3926,7 +3930,8 @@ class PlateTool(QtWidgets.QMainWindow):
             text_str += 'SHIFT + Q - Quick align test (debug)\n'
             text_str += 'SHIFT + Z - Show zoomed window\n'
             text_str += f'{ctrl} + N - New platepar\n'
-            text_str += f'{ctrl} + S - Save platepar & state'
+            text_str += f'{ctrl} + S - Save platepar & state\n'
+            text_str += f'{ctrl} + SHIFT + S - Save platepar to data folder'
         else:
             text_str = 'Keys:\n'
             text_str += '-----------\n'
