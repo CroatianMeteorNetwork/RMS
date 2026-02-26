@@ -373,7 +373,7 @@ if __name__ == "__main__":
             print("Clearing processed file tracker, all files will be processed")
             processed_tracker.clear()
         else:
-            processed_tracker.markProcessed(cml_args.reset_processed_files)
+            processed_tracker.setProcessed(cml_args.reset_processed_files)
             print(f"Processed file tracker updated with {cml_args.reset_processed_files}")
         exit(0) 
   
@@ -463,7 +463,7 @@ if __name__ == "__main__":
                 rtvd.addVideoFile(video_file)
 
         # Flag the file as processed
-        processed_tracker.markProcessed(video_file)
+        processed_tracker.markProcessed(os.path.basename(video_file))
 
 
     # Process a single file
@@ -475,7 +475,7 @@ if __name__ == "__main__":
         def ProcessFiles():
             # Filter files to ones not yet processed
             files = sorted(glob(os.path.join(cml_args.video_file_dir, "**","*_video.mkv"), recursive=True))
-            files = [file for file in files if not processed_tracker.isProcessed(file)]
+            files = [file for file in files if not processed_tracker.isProcessed(os.path.basename(file))]
             log.info(f'Found {len(files)} video files to process in directory: {cml_args.video_file_dir}')
             # Process each file 
             for file in files:

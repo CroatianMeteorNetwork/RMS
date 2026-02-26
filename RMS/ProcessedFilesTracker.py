@@ -50,11 +50,7 @@ class ProcessedFilesTracker():
 
     def markProcessed(self, file_path):
         if self.last_file_path is None or not self.key_func(file_path, self.last_file_path):
-            self.last_file_path = file_path
-            with open(self.tracker_file_path, 'w') as tf:
-                tf.write(file_path + '\n')
-            if self.log_func is not None:
-                self.log_func(f"Marked file {file_path} as processed.")
+            self.setProcessed(file_path)
 
     def clear(self):
         self.last_file_path = None      
@@ -63,3 +59,9 @@ class ProcessedFilesTracker():
         if self.log_func is not None:
             self.log_func("Cleared processed files tracker.")
     
+    def setProcessed(self, file_path):
+        self.last_file_path = file_path
+        with open(self.tracker_file_path, 'w') as tf:
+            tf.write(file_path + '\n')
+        if self.log_func is not None:
+            self.log_func(f"Marked file {file_path} as processed.")
