@@ -1,6 +1,17 @@
+import os
+
+# Disable numpy multithreading before numpy is imported by any module.  
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
+os.environ["MPI_NUM_THREADS"] = "1"
+
+
+
 import logging
 import multiprocessing as mp
-import os
+#import os
 import time
 import threading
 from RMS.DetectStarsAndMeteors import detectStarsAndMeteorsInVideoFile
@@ -295,24 +306,14 @@ if __name__ == "__main__":
     arg_parser.add_argument('--sync', action='store_true', help="If set, process videos synchronously (one at a time) rather than using multiple cores.")
     arg_parser.add_argument('--skip', action='store_true', help="If set, skip processing of videos and just flag them as processed.")
     arg_parser.add_argument('--continuous_wait_minutes', type=int, help="If specified, continuously monitor the video file directory for new video files to process, waiting this number of minutes between checks.")
+    arg_parser.add_argument('-reset', '--reset_processed_files', type=str, help='Reset the processed file tracker to the specified file name, '
+                            ' or "clear" to process all video files') 
+   
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
-    # The night directory must be specified.  If it ends with +, the start of night time must be specified
-    if cml_args.night_dir is None:
-        print ("--night_dir must be provided.")
-        exit(1)
-    if cml_args.night_dir.endswith('+') and cml_args.night_start_time is None:
-        print ("--night_start_time must be provided when --night_dir ends with +.")
-        exit(1)
-    # If specified the start of night time must be in "HH", "HH:MM", or "HH:MM:SS" format
-    if cml_args.night_start_time is not None:
-        try:
-            time.strptime(cml_args.night_start_time, '%H:%M:%S')
-        except ValueError:
-            print ("--night_start_time must be in HH:MM:SS format.")
-            exit(1)
+
 
     # A video file source must be provided
     if cml_args.video_file_dir is None and cml_args.video_file is None:
@@ -332,6 +333,27 @@ if __name__ == "__main__":
         if cml_args.sync or cml_args.skip or cml_args.continuous_wait_minutes is not None:
             print("--sync, --skip, and --continuous can only be set when processing a video file directory.")
             exit(1)
+ 
+    # If reseting the processed file tracker, the video file directory must be provided and the reset value must be either "clear" or a file name
+    if cml_args.reset_processed_files is not None:
+        if cml_args.video_file_dir is None:
+            print("--reset_processed_files can only be set when processing a video file directory.")
+            exit(1)
+    else:
+        # The night directory must be specified.  If it ends with +, the start of night time must be specified
+        if cml_args.night_dir is None:
+            print ("--night_dir must be provided.")
+            exit(1)
+        if cml_args.night_dir.endswith('+') and cml_args.night_start_time is None:
+            print ("--night_start_time must be provided when --night_dir ends with +.")
+            exit(1)
+        # If specified the start of night time must be in "HH", "HH:MM", or "HH:MM:SS" format
+        if cml_args.night_start_time is not None:
+            try:
+                time.strptime(cml_args.night_start_time, '%H:%M:%S')
+            except ValueError:
+                print ("--night_start_time must be in HH:MM:SS format.")
+                exit(1)
 
     # Load the config file
     config = cr.loadConfigFromDirectory(cml_args.config, os.path.abspath('.'))
@@ -345,6 +367,15 @@ if __name__ == "__main__":
 
     # Initialize a file tracker
     processed_tracker = ProcessedFilesTracker(directory=cml_args.video_file_dir, tracker_file_name="last_processed_video.txt", log_func=log.info) 
+
+    if cml_args.reset_processed_files is not None:
+        if cml_args.reset_processed_files.lower() == "clear":
+            print("Clearing processed file tracker, all files will be processed")
+            processed_tracker.clear()
+        else:
+            processed_tracker.markProcessed(cml_args.reset_processed_files)
+            print(f"Processed file tracker updated with {cml_args.reset_processed_files}")
+        exit(0) 
   
     # We have no current realtime video detector
     rtvd = None

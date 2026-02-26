@@ -55,3 +55,11 @@ class ProcessedFilesTracker():
                 tf.write(file_path + '\n')
             if self.log_func is not None:
                 self.log_func(f"Marked file {file_path} as processed.")
+
+    def clear(self):
+        self.last_file_path = None      
+        if os.path.exists(self.tracker_file_path):
+            os.remove(self.tracker_file_path)
+        if self.log_func is not None:
+            self.log_func("Cleared processed files tracker.")
+    
