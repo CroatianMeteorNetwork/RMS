@@ -1265,7 +1265,7 @@ class GeoPoints(object):
         self.dec_data = []
 
         # Compute ECI coordinates of the observer's location
-        ref_eci = geo2Cartesian(platepar.lat, platepar.lon, platepar.elev, jd)
+        ref_eci = geo2Cartesian(platepar.lat, platepar.lon, platepar.height_wgs84, jd)
 
         for name, lat, lon, elev in zip(self.names, self.lat_data, self.lon_data, self.ele_data):
 

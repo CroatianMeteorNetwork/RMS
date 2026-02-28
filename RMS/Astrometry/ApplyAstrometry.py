@@ -1009,7 +1009,7 @@ def xyHt2Geo(platepar, x, y, h):
         # Convert the apparent alt/az to geo coordinates
         lat, lon = AEGeoidH2LatLonAlt(
             np.degrees(az), np.degrees(elev), h[i], 
-            platepar.lat, platepar.lon, platepar.elev
+            platepar.lat, platepar.lon, platepar.height_wgs84
             )
         
         lat_arr[i] = lat
@@ -1037,7 +1037,7 @@ def geoHt2RaDec(platepar, jd, lat, lon, h):
 
     # Convert the target and camera coordinats into the ECI frame
     vector_target = np.array(geo2Cartesian(lat, lon, h, jd))
-    vector_station = np.array(geo2Cartesian(platepar.lat, platepar.lon, platepar.elev, jd))
+    vector_station = np.array(geo2Cartesian(platepar.lat, platepar.lon, platepar.height_wgs84, jd))
 
     # Compute the pointing vector from the station to the target
     pointing_vector = vector_target - vector_station
@@ -1421,3 +1421,38 @@ if __name__ == "__main__":
     #     np.array([date2JD(*time)]), platepar)
 
     # print('Star X, Y computed:', x_star, y_star)
+
+
+    # # TEST Roundtrip XY <> Geo <> XY
+
+    # # Load the platepar
+    # platepar = RMS.Formats.Platepar.Platepar()
+    # platepar.read("/Users/lucbusquin/Projects/RMS_data/USV003_20250405_020929_948426_detected/platepar_cmn2010.cal")
+
+    # # from RMS.Formats.FFfile import getMiddleTimeFF
+    # # from RMS.Astrometry.Conversions import date2JD, jd2Date
+    # # time = getMiddleTimeFF('FF_HR000A_20181215_015724_739_0802560.fits', 25)
+
+    # # Convert time to UT
+    # #time = jd2Date(date2JD(*time, UT_corr=platepar.UT_corr))
+
+    # # Define test pixel location
+    # x0 = 640.0
+    # y0 = 360.0
+    # h0 = 10000  # 10 km altitude
+
+    # print("\n--- Roundtrip XY <> Geo <> XY Test ---")
+    # print("Original XY:", x0, y0)
+
+    # # Step 1: xy to geo
+    # lat, lon = xyHt2Geo(platepar, x0, y0, h0)
+    # print("Converted lat/lon:", lat[0], lon[0])
+
+    # # Step 2: geo back to xy
+    # x1, y1 = geoHt2XY(platepar, lat, lon, h0)
+    # print("Back to XY:", x1[0], y1[0])
+
+    # # Step 3: compute error
+    # dx = x1[0] - x0
+    # dy = y1[0] - y0
+    # print("XY error (pixels):", np.hypot(dx, dy))
