@@ -2474,12 +2474,13 @@ class PlateTool(QtWidgets.QMainWindow):
             ###################################################################
             # PLATEPAR
 
-            # Auto-load platepar if found in data folder, otherwise create new and flag for dialog
-            pp_path = os.path.join(self.dir_path, self.config.platepar_name)
-            if os.path.isfile(pp_path):
+            # Search for platepar files and prompt user if needed
+            pp_path = self._findPlatepar()
+
+            if pp_path:
                 self.loadPlatepar(platepar_file=pp_path)
             else:
-                # No platepar in data folder - create a blank one
+                # No platepar found or user chose to create a blank one
                 self.platepar = Platepar()
                 self.makeNewPlatepar()
                 self.platepar_file = os.path.join(self.dir_path, self.config.platepar_name)
@@ -3547,9 +3548,9 @@ class PlateTool(QtWidgets.QMainWindow):
             self.cat_lim_mag = self.config.catalog_mag_limit
             self.loadCalstars()
 
-            # Auto-detect platepar in the new directory (avoid prompting the user)
-            platepar_path = os.path.join(self.dir_path, self.config.platepar_name)
-            if os.path.isfile(platepar_path):
+            # Search for platepar files in the new directory, prompt if ambiguous
+            platepar_path = self._findPlatepar()
+            if platepar_path:
                 self.loadPlatepar(update=True, platepar_file=platepar_path)
             else:
                 self.loadPlatepar(update=True, platepar_file='')
@@ -12913,6 +12914,57 @@ class PlateTool(QtWidgets.QMainWindow):
                 self._star_label_html_name[i] = f'<a href="https://simbad.cds.unistra.fr/simbad/sim-id?Ident={url_name}" style="color: #dddddd; text-decoration: none;">{display_name}</a>'
 
 
+    def _findPlatepar(self, dir_path=None):
+        """Search for a platepar file in the given directory.
+
+        If the default platepar name exists and is the only .cal file, return its path directly.
+        If the default name is missing or multiple .cal files exist, prompt the user to pick one
+        or create a new blank platepar.
+
+        Arguments:
+            dir_path: [str] Directory to search. Defaults to self.dir_path.
+
+        Return:
+            [str or None] Path to the selected platepar file, empty string if the user chose to
+                          create a new blank platepar, or None if no UI is available yet
+                          (pre-startup fallback).
+        """
+
+        if dir_path is None:
+            dir_path = self.dir_path
+
+        default_path = os.path.join(dir_path, self.config.platepar_name)
+        cal_files = sorted(glob.glob(os.path.join(dir_path, '*.cal')))
+
+        # Default name exists and is the only .cal file — use it directly
+        if os.path.isfile(default_path) and len(cal_files) == 1:
+            return default_path
+
+        # If there are .cal files but the default name is missing, or there are multiple .cal
+        # files — let the user pick
+        if cal_files:
+            items = [os.path.basename(f) for f in cal_files] + ["Create new blank platepar"]
+
+            item, ok = QtWidgets.QInputDialog.getItem(
+                self, "Select platepar",
+                "Found {:d} platepar file(s) in the folder.\n"
+                "Select which one to load:".format(len(cal_files)),
+                items, 0, False)
+
+            if ok and item != "Create new blank platepar":
+                return os.path.join(dir_path, item)
+
+            # User picked "Create new blank platepar" or cancelled
+            return ''
+
+        # No .cal files at all — let the user browse for one or create blank
+        platepar_file = QtWidgets.QFileDialog.getOpenFileName(
+            self, "No platepar found – select one or cancel for blank",
+            dir_path, "Platepar files (*.cal);;All files (*)")[0]
+
+        return platepar_file  # '' if cancelled
+
+
     def loadPlatepar(self, update=False, platepar_file=None):
         """
         Open a file dialog and ask user to open the platepar file, changing self.platepar and self.platepar_file
@@ -12934,7 +12986,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Open the file dialog no 'platepar_file' parameter was specified
         if platepar_file is None:
-            platepar_file = QtWidgets.QFileDialog.getOpenFileName(self, "Select the platepar file", 
+            platepar_file = QtWidgets.QFileDialog.getOpenFileName(self, "Select the platepar file",
                                                                   initial_file,
                                                                   "Platepar files (*.cal);;All files (*)")[0]
 
