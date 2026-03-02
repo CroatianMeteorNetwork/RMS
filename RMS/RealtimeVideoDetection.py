@@ -117,7 +117,7 @@ class RealtimeVideoDetector():
         # Find the best platepar in the night data directory to use to initialize the live recalibrator
         platepar = findBestPlatepar(self.config, self.night_data_dir)
         # Initialize a live recalibrator for calibrating measurements
-        self.live_recalibrator = LiveRecalibration(self.config, platepar, self.realtime_det_dir) 
+        self.live_recalibrator = LiveRecalibration(self.config, platepar, output_dir=self.realtime_det_dir)
 
         # Start the live recalibrator
         log.info('Starting the live recalibrator.')
