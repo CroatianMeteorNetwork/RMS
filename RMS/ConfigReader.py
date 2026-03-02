@@ -648,7 +648,7 @@ class Config:
         self.star_catalog_file = 'GMN_StarCatalog'
 
         # Catalog band ratios for Sony CMOS cameras
-        #                                   B     V     R     I   (G    BR    BR)
+        #                                   B     V     R     I    G     BP    RP
         self.star_catalog_band_ratios = [0.15, 0.30, 0.25, 0.30, 0.00, 0.0, 0.00]
 
         self.platepar_name = 'platepar_cmn2010.cal'

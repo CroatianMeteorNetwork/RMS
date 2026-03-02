@@ -318,14 +318,25 @@ def loadGMNStarCatalog(file_path,
             (rrp, catalog_data['phot_rp_mean_mag']),
         ]
 
-        # Sum weighted fluxes from all bands with nonzero ratios
+        # Sum weighted fluxes from all bands with nonzero ratios.
+        # Skip bands where magnitude is 0.0 (old sentinel for missing data) or NaN,
+        # and renormalize the remaining ratios per-star so that missing bands don't
+        # artificially brighten or dim the synthetic magnitude.
         total_flux = np.zeros(len(catalog_data), dtype=np.float64)
+        valid_ratio_sum = np.zeros(len(catalog_data), dtype=np.float64)
+
         for ratio, mags in band_mags:
             if ratio > 0:
-                total_flux += ratio * np.power(10, -0.4 * mags)
+                valid = np.isfinite(mags) & (mags != 0.0)
+                total_flux += np.where(valid, ratio * np.power(10, -0.4 * mags), 0.0)
+                valid_ratio_sum += np.where(valid, ratio, 0.0)
+
+        # Renormalize for stars with missing bands
+        valid_ratio_sum = np.maximum(valid_ratio_sum, 1e-30)
+        total_flux /= valid_ratio_sum
 
         # Convert combined flux back to magnitude
-        # Guard against zero/negative flux (shouldn't happen with valid data)
+        # Stars where ALL requested bands are missing get ~75 mag and are filtered by LM cut
         total_flux = np.maximum(total_flux, 1e-30)
         synthetic_mag = -2.5 * np.log10(total_flux)
         mag_mask = synthetic_mag <= lim_mag
@@ -434,9 +445,9 @@ def readStarCatalog(dir_path, file_name, years_from_J2000=0, lim_mag=None,
             correction.
         lim_mag: [float] Limiting magnitude. Stars fainter than this magnitude will be filtered out. None by
             default.
-        mag_band_ratios: [list] A list of relative contributions of every photometric band (BVRI) to the 
-            final camera-bandpass magnitude. The list should contain 4 numbers, one for every band: 
-                [B, V, R, I].
+        mag_band_ratios: [list] A list of relative contributions of every photometric band to the
+            final camera-bandpass magnitude. For the GMN catalog, 7 numbers: [B, V, R, I, G, BP, RP].
+            Legacy catalogs use only the first 4 elements [B, V, R, I].
         additional_fields: [list | str | None] Extra GMN column names to return, or "all".
             Passed straight through to `loadGMNStarCatalog`. Ignored for other catalog types.
     
