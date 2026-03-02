@@ -21,7 +21,7 @@ from RMS.Formats.FTPdetectinfo import readFTPdetectinfo
 from RMS.Formats.Platepar import findBestPlatepar
 from RMS.Misc import mkdirP
 from RMS.QueuedPool import QueuedPool
-from RMS.ProcessedFilesTracker import ProcessedFilesTracker
+from RMS.Routines.ProcessedFilesTracker import ProcessedFilesTracker
 
 
 # Get the logger from the main module
