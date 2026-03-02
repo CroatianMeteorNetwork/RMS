@@ -16,7 +16,6 @@
 
 from __future__ import print_function, division, absolute_import
 
-from ast import If
 import os
 import sys
 import ctypes
@@ -203,22 +202,8 @@ class BufferedCapture(Process):
         else:
             self.video_files = []
             
-            def isValid(filename):
-                # Check if the file exists and is a valid video file
-                if not os.path.isfile(filename):
-                    return False
-                if not filename.endswith(('.mkv')):  # TBD what extensions to support?
-                    return False
-                time_stamp = "_".join(os.path.basename(filename).split("_")[1:4])
-                time_stamp = time_stamp.split(".")[0]
-                try:
-                    datetime.datetime.strptime(time_stamp, "%Y%m%d_%H%M%S_%f")
-                    return True
-                except ValueError:
-                    return False
-                
             if video_file is not None:
-                if not isValid(video_file):
+                if not self.isValidVideoFile(video_file):
                     raise FileNotFoundError("Video file {} does not exist or is not a valid video file.".format(video_file))
                 self.video_files.append(video_file)
 
@@ -228,7 +213,7 @@ class BufferedCapture(Process):
                 for root, dirs, files in os.walk(video_file_source_dir):
                     for filename in files:
                         full_name = os.path.join(root, filename)
-                        if isValid(full_name):
+                        if self.isValidVideoFile(full_name):
                             self.video_files.append(full_name)
                             found = True
                 if not found:
@@ -241,6 +226,28 @@ class BufferedCapture(Process):
         self.video_file = None
         self.video_file_index = 0
         
+
+    def isValidVideoFile(self, filename):
+        """ Check if the given path is an existing video file with a parseable timestamp in its name.
+
+        Arguments:
+            filename: [str] Path to the file to validate.
+
+        Return:
+            [bool] True if the file exists, has a supported extension, and contains a valid timestamp.
+        """
+        if not os.path.isfile(filename):
+            return False
+        if not filename.endswith('.mkv'):  # TODO: expand supported extensions as needed
+            return False
+        try:
+            time_stamp = "_".join(os.path.basename(filename).split("_")[1:4])
+            time_stamp = time_stamp.split(".")[0]
+            datetime.datetime.strptime(time_stamp, "%Y%m%d_%H%M%S_%f")
+            return True
+        except (ValueError, IndexError):
+            return False
+
 
     def startCapture(self, cameraID=0):
         """ Start capture using specified camera.
