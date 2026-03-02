@@ -1844,29 +1844,48 @@ class BufferedCapture(Process):
 
 
     def createRealtimeVideoDetector(self):
-        # Initialize the realtime video detector if enabled
-        self.realtime_video_detector = RealtimeVideoDetector.createDetector(self.night_data_dir, self.config)
+        """ Create and start the real-time video detector if enabled in the configuration. 
+        
+            The detector is stored in self.realtime_video_detector and runs as a background 
+            processing pool.
+        """
+
+        self.realtime_video_detector = RealtimeVideoDetector.createDetector(
+            self.night_data_dir, self.config
+        )
+
         if self.realtime_video_detector is not None:
             self.realtime_video_detector.start()
 
 
     def releaseRealtimeVideoDetector(self):
-        # Clean up the realtime video detector if it exists
+        """ Gracefully shut down the real-time video detector.
+
+            Ensures the last captured video is submitted for processing before stopping the
+            detector and releasing its resources.
+        """
+
         if self.realtime_video_detector is not None:
-            # Process the last video captured
+
+            # Flush the last queued video file before shutting down
             self.passVideoToRealtimeDetector()
-            # Stop the detector once it has finished processing
+
+            # Stop the detector pool and wait for all queued work to finish
             self.realtime_video_detector.stop()
             del self.realtime_video_detector
             self.realtime_video_detector = None
 
 
     def passVideoToRealtimeDetector(self):
-        # Pass the last video file to the realtime video detector if it exists
-        if self.realtime_video_detector is not None:
-            if self.last_video_file is not None:
-                self.realtime_video_detector.addVideoFile(self.last_video_file)
-                self.last_video_file = None
+        """ Submit the most recently completed video file to the real-time detector for processing.
+
+            Video files are held in a one-element buffer (self.last_video_file) so that we only 
+            submit files that are known to be fully written. After submission the buffer is cleared.
+        """
+
+        if (self.realtime_video_detector is not None) and (self.last_video_file is not None):
+            self.realtime_video_detector.addVideoFile(self.last_video_file)
+            self.last_video_file = None
 
 
     def captureFrames(self):
@@ -2169,24 +2188,6 @@ class BufferedCapture(Process):
                         self.raw_frame_count = 0
                         raw_buffer_one = not raw_buffer_one
 
-            
-                # If the end of the video file was reached, stop the capture
-                # TBD No longer needed
-                if self.video_file is not None: 
-                    pass
-                    """
-                    if (frame is None) or (not self.deviceIsOpened()):
-
-                        log.info("End of video file!")
-                        log.debug("Video end status:")
-                        log.debug("Frame:" + str(frame))
-                        log.debug("Device open:" + str(self.deviceIsOpened()))
-
-                        self.exit.set()
-                        time.sleep(0.1)
-                        break
-                    """
-
 
                 # Check if frame is dropped if it has been more than 1.5 frames than the last frame
                 elif (frame_timestamp - last_frame_timestamp) >= self.time_for_drop:
@@ -2460,8 +2461,10 @@ if __name__ == "__main__":
 
     # If a video or videos is given, use them as the video source
     if cml_args.video_file or cml_args.video_file_source_dir:
+
         if cml_args.video_file_source_dir:
             print("Using video files from directory: {}".format(cml_args.video_file_source_dir))
+            
         if cml_args.video_file:
             print("Using video file: {}".format(cml_args.video_file))
 
@@ -2484,6 +2487,7 @@ if __name__ == "__main__":
                 
         # Close the device
         bc.releaseResources()
+        
         # Clean up the realtime video detector if it exists
         bc.releaseRealtimeVideoDetector()
         
