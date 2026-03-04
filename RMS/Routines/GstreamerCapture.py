@@ -221,6 +221,10 @@ class GstVideoFile():
         if self.decoder == 'nvh264dec':
 
             if self.segment_writer is None:
+
+                # Case 1: NVIDIA HW decode, no segment recording.
+                # Demux the MKV, parse H.264 NALs, decode with nvh264dec, convert to the
+                # desired raw format, and deliver frames to appsink for processing.
                 pipeline_str = (
                     "filesrc location={} ! matroskademux ! h264parse ! {} ! "
                     "videoconvert ! video/x-raw,format={} ! "
@@ -229,6 +233,12 @@ class GstVideoFile():
                     "".format(self.file_path, self.decoder, self.video_format)
                 )
             else:
+
+                # Case 2: NVIDIA HW decode + segment recording.
+                # After parsing the H.264 stream, a tee splits it into two branches:
+                #   Branch 1: software decode (avdec_h264) → raw frames → appsink for processing.
+                #   Branch 2: re-mux the still-encoded H.264 into time-segmented MKV files via 
+                #             splitmuxsink (no re-encoding needed).
                 pipeline_str = (
                     "filesrc location={} ! matroskademux name=d "
                     "d.video_0 ! h264parse ! tee name=t "
@@ -239,6 +249,10 @@ class GstVideoFile():
 
         else:
 
+            # Case 3: Generic fallback using decodebin (auto-selects the best available decoder).
+            # decodebin handles demuxing and decoding automatically, so no explicit demuxer or
+            # H.264 parser is needed. Frames are converted to the desired raw format and
+            # delivered to appsink.
             pipeline_str = (
                 "filesrc location={} ! decodebin name=dec ! "
                 "queue leaky=downstream max-size-buffers=100 ! "
