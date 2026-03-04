@@ -1,17 +1,17 @@
-import os
 
-# Disable numpy multithreading before numpy is imported by any module.  
-os.environ["OMP_NUM_THREADS"] = "1"
-os.environ["OPENBLAS_NUM_THREADS"] = "1"
-os.environ["MKL_NUM_THREADS"] = "1"
-os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
-os.environ["MPI_NUM_THREADS"] = "1"
-
+if __name__ == "__main__":
+    import os
+    # Disable numpy multithreading before numpy is imported by any module.  
+    os.environ["OMP_NUM_THREADS"] = "1"
+    os.environ["OPENBLAS_NUM_THREADS"] = "1"
+    os.environ["MKL_NUM_THREADS"] = "1"
+    os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
+    os.environ["MPI_NUM_THREADS"] = "1"
 
 
 import logging
 import multiprocessing as mp
-#import os
+import os
 import time
 import threading
 from RMS.DetectStarsAndMeteors import detectStarsAndMeteorsInVideoFile
@@ -30,12 +30,18 @@ log = logging.getLogger("logger")
 # Global live recalibrator queue allowing queued pool workers to access the queue 
 live_recalibrator_queue = mp.Queue()
 
-def init_manager():
+
+def CreateMultiProcessedQueue():
+    """ Initialize the global manager and live recalibrator queue if they have not already been initialized.
+        This is required to be able to use the live recalibrator queue in the queued pool workers without pickling issues.
+        """
     global live_recalibrator_queue
     if live_recalibrator_queue is None:
         mgr = mp.Manager()
         live_recalibrator_queue = mgr.Queue()
     return live_recalibrator_queue
+
+
 
 class RealtimeVideoDetector():
     """ Class to perform real-time video detection on video files as they are created."""
@@ -188,7 +194,7 @@ class RealtimeVideoDetector():
         """ Start the real-time video detector.
         """
         # Start the recalibrator queue consumer
-        init_manager()
+        CreateMultiProcessedQueue()
         self.live_recalibrator_queue_consumer = RealtimeVideoDetector.LiveRecalibratorQueueConsumer(self)
         self.live_recalibrator_queue_consumer.start()
 
@@ -255,7 +261,7 @@ class RealtimeVideoDetector():
         """
         
         log.info(f'Processing video file for real-time detection: {video_path}')
-        init_manager()
+        CreateMultiProcessedQueue()
 
         # Perform star and meteor detection constructing Calstars and Detectinfo files in the specified working directory
         output_dir, calstars_name, ftpdetectinfo_name = detectStarsAndMeteorsInVideoFile(video_path, self.config, output_suffix=self.suffix, output_dir=self.work_dir, write_empty=False)
