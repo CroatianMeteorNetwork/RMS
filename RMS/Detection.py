@@ -2028,7 +2028,46 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
 
             # Extract the first and only line if any
             if detected_line:
-                detected_line = detected_line[0]
+
+                # Choose the 3D line whose 2D spatial direction best matches the initial
+                # RANSAC/KHT line orientation
+                if len(detected_line) == 1:
+                    detected_line = detected_line[0]
+                else:
+                    # Compute the reference 2D direction from the initial line
+                    if line_start is not None and line_end is not None:
+                        # RANSAC: use segment endpoints
+                        ref_dx = line_end[0] - line_start[0]
+                        ref_dy = line_end[1] - line_start[1]
+                    else:
+                        # KHT: direction perpendicular to the normal (rho, theta)
+                        theta_rad = np.deg2rad(theta)
+                        ref_dx = -np.sin(theta_rad)
+                        ref_dy = np.cos(theta_rad)
+
+                    ref_len = np.sqrt(ref_dx**2 + ref_dy**2)
+                    if ref_len > 1e-9:
+                        ref_dx /= ref_len
+                        ref_dy /= ref_len
+
+                    # Find the line with the smallest angular difference
+                    best_line = detected_line[0]
+                    best_cos = -1.0
+
+                    for dl in detected_line:
+                        # dl format: [(x1,y1,z1), (x2,y2,z2), counter, quality, f_first, f_last]
+                        dx3d = dl[1][0] - dl[0][0]
+                        dy3d = dl[1][1] - dl[0][1]
+                        dl_len = np.sqrt(dx3d**2 + dy3d**2)
+                        if dl_len < 1e-9:
+                            continue
+                        # Compare 2D spatial directions (absolute dot product for antiparallel)
+                        cos_sim = abs(ref_dx * dx3d / dl_len + ref_dy * dy3d / dl_len)
+                        if cos_sim > best_cos:
+                            best_cos = cos_sim
+                            best_line = dl
+
+                    detected_line = best_line
 
                 # logDebug(detected_line)
                 
