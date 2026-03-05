@@ -184,7 +184,7 @@ class GstCaptureTest(multiprocessing.Process):
 
 
 class GstVideoFile():
-    def __init__(self, file_path, decoder='decodebin', video_format='GRAY8'):
+    def __init__(self, file_path, decoder='decodebin', video_format='GRAY8', segment_writer=None, segment_duration_sec=30):
         """ Initialize the video file stream using GStreamer. 
         
         Arguments:
@@ -199,6 +199,8 @@ class GstVideoFile():
         self.file_path = file_path
         self.decoder = decoder
         self.video_format = video_format
+        self.segment_writer = segment_writer
+        self.segment_duration_sec = segment_duration_sec
 
         self.height = None
         self.width = None
@@ -218,16 +220,39 @@ class GstVideoFile():
         # Unless nvdec is specified, use decodebin
         if self.decoder == 'nvh264dec':
 
-            pipeline_str = (
-                "filesrc location={} ! matroskademux ! h264parse ! {} ! "
-                "videoconvert ! video/x-raw,format={} ! "
-                "queue leaky=downstream max-size-buffers=100 ! "
-                "appsink emit-signals=True max-buffers=100 drop=False sync=0 name=appsink"
-                "".format(self.file_path, self.decoder, self.video_format)
-            )
+            if self.segment_writer is None:
+
+                # Case 1: NVIDIA HW decode, no segment recording.
+                # Demux the MKV, parse H.264 NALs, decode with nvh264dec, convert to the
+                # desired raw format, and deliver frames to appsink for processing.
+                pipeline_str = (
+                    "filesrc location={} ! matroskademux ! h264parse ! {} ! "
+                    "videoconvert ! video/x-raw,format={} ! "
+                    "queue leaky=downstream max-size-buffers=100 ! "
+                    "appsink emit-signals=True max-buffers=100 drop=False sync=0 name=appsink"
+                    "".format(self.file_path, self.decoder, self.video_format)
+                )
+            else:
+
+                # Case 2: NVIDIA HW decode + segment recording.
+                # After parsing the H.264 stream, a tee splits it into two branches:
+                #   Branch 1: software decode (avdec_h264) → raw frames → appsink for processing.
+                #   Branch 2: re-mux the still-encoded H.264 into time-segmented MKV files via 
+                #             splitmuxsink (no re-encoding needed).
+                pipeline_str = (
+                    "filesrc location={} ! matroskademux name=d "
+                    "d.video_0 ! h264parse ! tee name=t "
+                    "t. ! queue ! avdec_h264 ! videoconvert ! video/x-raw,format={} ! appsink emit-signals=True max-buffers=100 drop=False sync=0 name=appsink "
+                    "t. ! queue ! splitmuxsink  name=splitmuxsink0 async-finalize=true max-size-time={} muxer-factory=matroskamux"
+                    "".format(self.file_path, self.video_format, int(self.segment_duration_sec*1e9))
+                )
 
         else:
 
+            # Case 3: Generic fallback using decodebin (auto-selects the best available decoder).
+            # decodebin handles demuxing and decoding automatically, so no explicit demuxer or
+            # H.264 parser is needed. Frames are converted to the desired raw format and
+            # delivered to appsink.
             pipeline_str = (
                 "filesrc location={} ! decodebin name=dec ! "
                 "queue leaky=downstream max-size-buffers=100 ! "
@@ -236,11 +261,16 @@ class GstVideoFile():
             "".format(self.file_path, self.video_format)
             )
 
-        self.pipeline = Gst.parse_launch(pipeline_str)
-
         print("Gstreamer video pipeline:")
         print(pipeline_str)
+        sys.stdout.flush()
+ 
+        self.pipeline = Gst.parse_launch(pipeline_str)
+        if self.segment_writer is not None:
+            splitmuxsink = self.pipeline.get_by_name("splitmuxsink0")
+            splitmuxsink.connect("format-location", self.segment_writer.moveSegment)
 
+         # Start playing
         self.pipeline.set_state(Gst.State.PLAYING)
 
         return self.pipeline.get_by_name("appsink")
@@ -252,8 +282,8 @@ class GstVideoFile():
         
         self.device = self.createGSTDevice()
 
-        # Attempt to get a sample and determine the frame shape
-        sample = self.device.emit("pull-sample")
+        # Attempt to get a sample and determine the frame shape (use timed try-pull to avoid blocking)
+        sample = self.device.emit("try-pull-sample", 500 * Gst.MSECOND)
         if not sample:
             raise ValueError("Could not obtain sample.")
 
@@ -301,7 +331,8 @@ class GstVideoFile():
     def read(self):
         """ Read a frame from the video file. """
 
-        sample = self.device.emit("pull-sample")
+        # Use timed try-pull to prevent indefinite blocking at end-of-stream or pipeline stalls
+        sample = self.device.emit("try-pull-sample", 500 * Gst.MSECOND)
 
         if not sample:
             return False, None
@@ -377,8 +408,27 @@ class GstVideoFile():
 
     def release(self):
         """ Release the video file. """
+        try:
+            # Try a graceful EOS first to nudge internal threads to exit
+            bus = self.pipeline.get_bus()
+            try:
+                self.pipeline.send_event(Gst.Event.new_eos())
+                # Wait briefly for EOS or ERROR
+                if bus is not None:
+                    bus.timed_pop_filtered(2 * Gst.SECOND, Gst.MessageType.EOS | Gst.MessageType.ERROR)
+            except Exception:
+                pass
 
-        self.pipeline.set_state(Gst.State.NULL)
+            # Force to NULL and wait a short time for the state change
+            self.pipeline.set_state(Gst.State.NULL)
+            try:
+                self.pipeline.get_state(2 * Gst.SECOND)
+            except Exception:
+                pass
+
+        finally:
+            # Drop our reference so the pipeline can be garbage-collected
+            self.pipeline = None
 
     
     def get_state(self, gst_param):

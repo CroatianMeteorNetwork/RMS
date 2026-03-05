@@ -480,6 +480,15 @@ class Config:
         # Switch camera settings between day/night modes, for when continuous_capture is enabled
         self.switch_camera_modes = False
 
+        # Enable real-time detection
+        # TBD: normal detection will need a configuration item to enable/disable it.
+        # TBD: It that case, no doubt some other settings must be overridden or rejected
+        self.realtime_video_detection = False
+        self.realtime_video_detection_night_subdir = "RealtimeVideoDetection"
+        # Allow for an overrideing config for realtime video detection
+        self.realtime_video_detection_config_file = None
+        self.realtime_video_detection_config = None
+
         ##### Upload
 
         # Flag determining if uploading is enabled or not
@@ -1353,6 +1362,20 @@ def parseCapture(config, parser):
     # Load option to switch camera settings between day/night modes, for when continuous_capture is enabled
     if parser.has_option(section, "switch_camera_modes"):
         config.switch_camera_modes = parser.getboolean(section, "switch_camera_modes")
+
+    # Configure real-time detection.
+    # TBD: normal detection will need a configuration item to enable/disble it.
+    # TBD: It that case, no doubt some other settings must be overrifden or rejected 
+    if parser.has_option(section, "realtime_video_detection"):
+        config.realtime_video_detection = parser.getboolean(section, "realtime_video_detection")
+    # The subdirectory of the nightly data directory used for realtime video detection
+    if parser.has_option(section, "realtime_video_detection_night_subdir"):
+        config.realtime_video_detection_night_subdir = parser.get(section, "realtime_video_detection_night_subdir")
+    # Support having an entirely separate config file for realtime video detections
+    if parser.has_option(section, "realtime_video_detection_config_file"):
+        config.realtime_video_detection_config_file = parser.get(section, "realtime_video_detection_config_file")
+        config.realtime_video_detection_config = parse(os.path.join(config.config_file_path, config.realtime_video_detection_config_file))
+
 
 def parseUpload(config, parser):
     section = "Upload"
