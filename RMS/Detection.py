@@ -224,6 +224,264 @@ def mergeLines(line_list, min_distance, img_w, img_h, last_count=0):
 
 
 
+def mergeRansacLines(line_list, img_w, img_h, angle_thresh=15.0, dist_thresh_factor=6.0, 
+    gap_thresh_factor=8.0, last_count=0):
+    """ Merge similar RANSAC line segments across different frame windows using 3D space-time geometry.
+
+    Each line segment is treated as a 3D line in (x, y, frame*velocity) space, where velocity
+    (pixels/frame) converts the frame dimension to pixel-equivalent units. This prevents merging of 
+    collinear but temporally separated tracks (e.g. two different meteors on the same spatial line 
+    but at different times).
+
+    When frame ranges overlap, only 2D spatial geometry is used (direction angle and perpendicular
+    distance), because the frame ranges are time window boundaries — not the actual meteor duration — 
+    so velocity computed from spatial_length / frame_range would be meaningless.
+
+    When frame ranges do NOT overlap, strict 3D space-time checks are applied to prevent merging 
+    of collinear but temporally separate tracks.
+
+    Merging criteria:
+        1. Direction angles must be similar (2D when frames overlap, 3D otherwise)
+        2. Midpoint-to-line perpendicular distance must be small (2D or 3D as above)
+        3. 3D longitudinal gap must be small (segments overlap or are close in space-time)
+
+    Arguments:
+        line_list: [list] A list of [rho, theta, frame_min, frame_max, x1, y1, x2, y2] entries
+            from the RANSAC line finder.
+        img_w: [int] Image width in pixels.
+        img_h: [int] Image height in pixels.
+
+    Keyword arguments:
+        angle_thresh: [float] Maximum angular difference (degrees) between direction vectors.
+            Default 15.0.
+        dist_thresh_factor: [float] Perpendicular distance threshold as a multiple of the 
+            image diagonal / 100. Default 6.0.
+        gap_thresh_factor: [float] Maximum 3D longitudinal gap as a multiple of the image 
+            diagonal / 100. Default 8.0.
+        last_count: [int] Used for recursion, default is 0 and it should be left as is!
+
+    Return:
+        final_list: [list] Merged list of [rho, theta, frame_min, frame_max, x1, y1, x2, y2].
+    """
+
+    # Return if less than 2 lines
+    if len(line_list) < 2:
+        return line_list
+
+    # Compute thresholds based on image diagonal
+    diag = np.sqrt(img_w**2 + img_h**2)
+    perp_dist_thresh = dist_thresh_factor * diag / 100.0
+    gap_thresh = gap_thresh_factor * diag / 100.0
+
+    # Sort by frame_min for efficient processing
+    line_list = sorted(line_list, key=lambda l: l[2])
+
+    final_list = []
+    paired_indices = []
+
+    for i in range(len(line_list)):
+
+        if i in paired_indices:
+            continue
+
+        found_pair = False
+
+        rho1, theta1, fmin1, fmax1, x1a, y1a, x1b, y1b = line_list[i][:8]
+
+        # Spatial length and velocity of segment 1
+        len1_spatial = np.sqrt((x1b - x1a)**2 + (y1b - y1a)**2)
+        if len1_spatial < 1e-9:
+            final_list.append(list(line_list[i][:8]))
+            continue
+        frange1 = max(fmax1 - fmin1, 1)
+        vel1 = len1_spatial / frange1  # pixels per frame
+
+        for j in range(i + 1, len(line_list)):
+
+            if j in paired_indices:
+                continue
+
+            rho2, theta2, fmin2, fmax2, x2a, y2a, x2b, y2b = line_list[j][:8]
+
+            # Spatial length and velocity of segment 2
+            len2_spatial = np.sqrt((x2b - x2a)**2 + (y2b - y2a)**2)
+            if len2_spatial < 1e-9:
+                continue
+            frange2 = max(fmax2 - fmin2, 1)
+            vel2 = len2_spatial / frange2
+
+            # Determine if frame ranges overlap
+            frames_overlap = (fmax1 >= fmin2) and (fmin1 <= fmax2)
+
+            if frames_overlap:
+                # Frame ranges overlap: use 2D spatial checks for direction and distance
+                # (Frame ranges are window boundaries, not actual meteor duration, so velocity
+                #  from spatial_length / frame_range is meaningless for 3D direction)
+
+                # 2D spatial direction angle
+                v1_2d = np.array([x1b - x1a, y1b - y1a], dtype=np.float64)
+                v1_2d /= np.linalg.norm(v1_2d)
+                v2_2d = np.array([x2b - x2a, y2b - y2a], dtype=np.float64)
+                v2_2d_len = np.linalg.norm(v2_2d)
+                if v2_2d_len < 1e-9:
+                    continue
+                v2_2d /= v2_2d_len
+
+                cos_angle_2d = min(abs(np.dot(v1_2d, v2_2d)), 1.0)
+                angle_diff = np.degrees(np.arccos(cos_angle_2d))
+                if angle_diff > angle_thresh:
+                    continue
+
+                # 2D spatial perpendicular distance
+                mid2x = (x2a + x2b) / 2.0
+                mid2y = (y2a + y2b) / 2.0
+                perp_dist = abs(v1_2d[0] * (mid2y - y1a) - v1_2d[1] * (mid2x - x1a))
+                if perp_dist > perp_dist_thresh:
+                    continue
+
+                mid1x = (x1a + x1b) / 2.0
+                mid1y = (y1a + y1b) / 2.0
+                perp_dist2 = abs(v2_2d[0] * (mid1y - y2a) - v2_2d[1] * (mid1x - x2a))
+                if perp_dist2 > perp_dist_thresh:
+                    continue
+
+                # --- Spatial gap/containment check for overlapping time windows ---
+                # Project segment 2 onto segment 1's direction
+                t1s = 0.0
+                t1e = len1_spatial
+                t2s = (x2a - x1a) * v1_2d[0] + (y2a - y1a) * v1_2d[1]
+                t2e = (x2b - x1a) * v1_2d[0] + (y2b - y1a) * v1_2d[1]
+                t2s_proj, t2e_proj = min(t2s, t2e), max(t2s, t2e)
+
+                # Check for spatial gap
+                if t2s_proj > t1e:
+                    spatial_gap = t2s_proj - t1e
+                elif t2e_proj < t1s:
+                    spatial_gap = t1s - t2e_proj
+                else:
+                    spatial_gap = 0
+
+                # Rule 1: If there's a spatial gap during overlapping time windows, reject.
+                # If these were the same track, the overlapping detection window would have 
+                # detected them as one continuous segment, not two separate ones with a gap.
+                if spatial_gap > 0:
+                    continue
+
+            else:
+                # Frame ranges do NOT overlap: use strict 3D space-time checks
+                # This prevents merging of collinear but temporally separate tracks
+
+                # Frame scale: average velocity converts frames to pixel-equivalent units
+                frame_scale = (vel1 + vel2) / 2.0
+                if frame_scale < 1e-9:
+                    frame_scale = 1.0
+
+                # 3D points: (x, y, frame * frame_scale)
+                p1a = np.array([x1a, y1a, fmin1 * frame_scale])
+                p1b = np.array([x1b, y1b, fmax1 * frame_scale])
+                p2a = np.array([x2a, y2a, fmin2 * frame_scale])
+                p2b = np.array([x2b, y2b, fmax2 * frame_scale])
+
+                # 3D direction angle
+                d1 = p1b - p1a
+                d1_len = np.linalg.norm(d1)
+                if d1_len < 1e-9:
+                    continue
+                d1_unit = d1 / d1_len
+
+                d2 = p2b - p2a
+                d2_len = np.linalg.norm(d2)
+                if d2_len < 1e-9:
+                    continue
+                d2_unit = d2 / d2_len
+
+                cos_angle = min(abs(np.dot(d1_unit, d2_unit)), 1.0)
+                angle_diff_3d = np.degrees(np.arccos(cos_angle))
+                if angle_diff_3d > angle_thresh:
+                    continue
+
+                # 3D perpendicular distance
+                mid2 = (p2a + p2b) / 2.0
+                rel = mid2 - p1a
+                proj_along = np.dot(rel, d1_unit)
+                perp_vec = rel - proj_along * d1_unit
+                perp_dist_3d = np.linalg.norm(perp_vec)
+                if perp_dist_3d > perp_dist_thresh:
+                    continue
+
+                mid1 = (p1a + p1b) / 2.0
+                rel2 = mid1 - p2a
+                proj_along2 = np.dot(rel2, d2_unit)
+                perp_vec2 = rel2 - proj_along2 * d2_unit
+                perp_dist2_3d = np.linalg.norm(perp_vec2)
+                if perp_dist2_3d > perp_dist_thresh:
+                    continue
+
+                # 3D longitudinal gap check
+                t1_start = 0.0
+                t1_end = d1_len
+                t2_start = np.dot(p2a - p1a, d1_unit)
+                t2_end = np.dot(p2b - p1a, d1_unit)
+
+                t2_min = min(t2_start, t2_end)
+                t2_max = max(t2_start, t2_end)
+
+                if t2_min > t1_end:
+                    gap = t2_min - t1_end
+                elif t2_max < t1_start:
+                    gap = t1_start - t2_max
+                else:
+                    gap = 0
+
+                if gap > gap_thresh:
+                    continue
+
+            # --- Merge! ---
+            paired_indices.append(i)
+            paired_indices.append(j)
+
+            # Merged frame range
+            new_fmin = min(fmin1, fmin2)
+            new_fmax = max(fmax1, fmax2)
+
+            # Extend spatial endpoints using 2D projection along segment 1's spatial direction
+            vx1 = (x1b - x1a) / len1_spatial
+            vy1 = (y1b - y1a) / len1_spatial
+            t_s1 = 0.0
+            t_e1 = len1_spatial
+            t_s2 = (x2a - x1a) * vx1 + (y2a - y1a) * vy1
+            t_e2 = (x2b - x1a) * vx1 + (y2b - y1a) * vy1
+            new_t_min = min(t_s1, t_e1, t_s2, t_e2)
+            new_t_max = max(t_s1, t_e1, t_s2, t_e2)
+
+            new_x1 = x1a + vx1 * new_t_min
+            new_y1 = y1a + vy1 * new_t_min
+            new_x2 = x1a + vx1 * new_t_max
+            new_y2 = y1a + vy1 * new_t_max
+
+            # Recompute rho, theta from the new endpoints
+            new_rho, new_theta = SequentialRANSAC.getPolarLine(new_x1, new_y1, new_x2, new_y2, 
+                                                               img_w, img_h)
+
+            final_list.append([new_rho, new_theta, new_fmin, new_fmax, 
+                               new_x1, new_y1, new_x2, new_y2])
+
+            found_pair = True
+            break
+
+        # If no pair found, keep the original line
+        if not found_pair:
+            final_list.append(list(line_list[i][:8]))
+
+    # Use recursion until the number of lines stabilizes
+    if len(final_list) != last_count:
+        final_list = mergeRansacLines(final_list, img_w, img_h, angle_thresh, dist_thresh_factor,
+                                      gap_thresh_factor, len(final_list))
+
+    return final_list
+
+
+
 def merge3DLines(line_list, vect_angle_thresh, last_count=0):
     """ Merge similar lines found by the 3D detector. 
 
@@ -626,7 +884,9 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
             # d) KHT lines
             # Merge the lines on the frame for plotting purposes
             plot_lines_list = frame_lines
-            if line_finder_algorithm != 'ransac':
+            if line_finder_algorithm == 'ransac':
+                 plot_lines_list = mergeRansacLines(frame_lines, img_handle.ff.ncols, img_handle.ff.nrows)
+            else:
                  plot_lines_list = mergeLines(frame_lines, config.line_min_dist, img_handle.ff.ncols, img_handle.ff.nrows)
 
             # Fill in the summary image (2x2 grid)
@@ -1555,16 +1815,120 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
     meteor_detections = []
 
     # Only if there are some lines in the image
-    # Only if there are some lines in the image
     if len(line_list):
 
-        # Join similar lines (only if not RANSAC)
-        if config.line_finder_algorithm != 'ransac':
+        # Print and store pre-merge lines when debug is enabled
+        if debug:
+            logDebug('Lines before merging: ', len(line_list))
+            for li, line in enumerate(line_list):
+                if len(line) >= 8:
+                    logDebug('  Line {:d}: rho={:.2f}, theta={:.2f}, frames={:d}-{:d}, '
+                             'start=({:.1f}, {:.1f}), end=({:.1f}, {:.1f})'.format(
+                             li, line[0], line[1], int(line[2]), int(line[3]),
+                             line[4], line[5], line[6], line[7]))
+                else:
+                    logDebug('  Line {:d}: rho={:.2f}, theta={:.2f}, frames={:d}-{:d}'.format(
+                             li, line[0], line[1], int(line[2]), int(line[3])))
+
+        # Save pre-merge lines for plotting
+        pre_merge_lines = [list(l[:8]) if len(l) >= 8 else list(l[:4]) for l in line_list]
+
+        # Join similar lines
+        if config.line_finder_algorithm == 'ransac':
+            line_list = mergeRansacLines(line_list, img_handle.ff.ncols, img_handle.ff.nrows)
+        else:
             line_list = mergeLines(line_list, config.line_min_dist, img_handle.ff.ncols, img_handle.ff.nrows)
 
         logDebug('Time for finding lines:', time() - t1)
 
-        logDebug('Number of lines: ', len(line_list))
+        logDebug('Lines after merging: ', len(line_list))
+
+        # Print final merged line list when debug is enabled
+        if debug:
+            for li, line in enumerate(line_list):
+                if len(line) >= 8:
+                    logDebug('  Line {:d}*: rho={:.2f}, theta={:.2f}, frames={:d}-{:d}, '
+                             'start=({:.1f}, {:.1f}), end=({:.1f}, {:.1f})'.format(
+                             li, line[0], line[1], int(line[2]), int(line[3]),
+                             line[4], line[5], line[6], line[7]))
+                else:
+                    logDebug('  Line {:d}*: rho={:.2f}, theta={:.2f}, frames={:d}-{:d}'.format(
+                             li, line[0], line[1], int(line[2]), int(line[3])))
+
+            # Collect all frame ranges for consistent colormap across both plots
+            all_lines_combined = pre_merge_lines + [list(l[:8]) if len(l) >= 8 else list(l[:4]) for l in line_list]
+            all_fmin = [l[2] for l in all_lines_combined]
+            all_fmax = [l[3] for l in all_lines_combined]
+            cmap = plt.cm.plasma
+            norm = plt.Normalize(vmin=min(all_fmin), vmax=max(all_fmax))
+
+            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(18, 8))
+
+            # --- Left subplot: Before merging ---
+            ax1.set_xlim(0, img_handle.ff.ncols)
+            ax1.set_ylim(img_handle.ff.nrows, 0)
+            ax1.set_aspect('equal')
+            ax1.set_facecolor('black')
+            ax1.set_title('Before merging ({:d} lines)'.format(len(pre_merge_lines)))
+            ax1.set_xlabel('X (px)')
+            ax1.set_ylabel('Y (px)')
+
+            for li, line in enumerate(pre_merge_lines):
+                if len(line) >= 8:
+                    _, _, fmin_l, fmax_l, lx1, ly1, lx2, ly2 = line[:8]
+                    ax1.plot([lx1, lx2], [ly1, ly2], '-', color='white', linewidth=2)
+                    ax1.plot(lx1, ly1, 'o', color=cmap(norm(fmin_l)), markersize=4)
+                    ax1.plot(lx2, ly2, 's', color=cmap(norm(fmax_l)), markersize=4)
+                    mid_x, mid_y = (lx1 + lx2) / 2.0, (ly1 + ly2) / 2.0
+                    ax1.text(mid_x, mid_y, str(li), color='yellow', fontsize=9,
+                             ha='center', va='bottom', fontweight='bold')
+                else:
+                    rho_l, theta_l, fmin_l, fmax_l = line[:4]
+                    color = cmap(norm((fmin_l + fmax_l) / 2.0))
+                    theta_rad = np.deg2rad(theta_l)
+                    a, b = np.cos(theta_rad), np.sin(theta_rad)
+                    x0 = a * rho_l + img_handle.ff.ncols / 2.0
+                    y0 = b * rho_l + img_handle.ff.nrows / 2.0
+                    ax1.plot([x0 - 1000*(-b), x0 + 1000*(-b)],
+                             [y0 - 1000*a, y0 + 1000*a], '-', color=color, linewidth=1)
+                    ax1.text(x0, y0, str(li), color='yellow', fontsize=9,
+                             ha='center', va='bottom', fontweight='bold')
+
+            # --- Right subplot: After merging ---
+            ax2.set_xlim(0, img_handle.ff.ncols)
+            ax2.set_ylim(img_handle.ff.nrows, 0)
+            ax2.set_aspect('equal')
+            ax2.set_facecolor('black')
+            ax2.set_title('After merging ({:d} lines)'.format(len(line_list)))
+            ax2.set_xlabel('X (px)')
+            ax2.set_ylabel('Y (px)')
+
+            for li, line in enumerate(line_list):
+                if len(line) >= 8:
+                    _, _, fmin_l, fmax_l, lx1, ly1, lx2, ly2 = line[:8]
+                    ax2.plot([lx1, lx2], [ly1, ly2], '-', color='white', linewidth=2)
+                    ax2.plot(lx1, ly1, 'o', color=cmap(norm(fmin_l)), markersize=4)
+                    ax2.plot(lx2, ly2, 's', color=cmap(norm(fmax_l)), markersize=4)
+                    mid_x, mid_y = (lx1 + lx2) / 2.0, (ly1 + ly2) / 2.0
+                    ax2.text(mid_x, mid_y, '{:d}*'.format(li), color='cyan', fontsize=9,
+                             ha='center', va='bottom', fontweight='bold')
+                else:
+                    rho_l, theta_l, fmin_l, fmax_l = line[:4]
+                    color = cmap(norm((fmin_l + fmax_l) / 2.0))
+                    theta_rad = np.deg2rad(theta_l)
+                    a, b = np.cos(theta_rad), np.sin(theta_rad)
+                    x0 = a * rho_l + img_handle.ff.ncols / 2.0
+                    y0 = b * rho_l + img_handle.ff.nrows / 2.0
+                    ax2.plot([x0 - 1000*(-b), x0 + 1000*(-b)],
+                             [y0 - 1000*a, y0 + 1000*a], '-', color=color, linewidth=1)
+                    ax2.text(x0, y0, '{:d}*'.format(li), color='cyan', fontsize=9,
+                             ha='center', va='bottom', fontweight='bold')
+
+            sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
+            sm.set_array([])
+            #plt.colorbar(sm, ax=[ax1, ax2], label='Frame index', orientation='horizontal')
+            plt.tight_layout()
+            plt.show()
 
         # # Plot lines
         # plotLines(img_handle.ff, line_list)
@@ -1679,8 +2043,8 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                     logDebug('Rejected at initial stage due to the angular velocity: {:.2f} deg/s'.format(ang_vel))
                     continue
 
-                # # Show 3D cloud
-                # show3DCloud(img_handle.ff, xs, ys, zs, detected_line, stripe_points, config)
+                # Show 3D cloud
+                show3DCloud(img_handle.ff, xs, ys, zs, detected_line, stripe_points, config)
 
                 # Add the line to the results list
                 filtered_lines.append(detected_line)
