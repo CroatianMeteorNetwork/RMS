@@ -1,14 +1,3 @@
-
-if __name__ == "__main__":
-    import os
-    # Disable numpy multithreading before numpy is imported by any module.  
-    os.environ["OMP_NUM_THREADS"] = "1"
-    os.environ["OPENBLAS_NUM_THREADS"] = "1"
-    os.environ["MKL_NUM_THREADS"] = "1"
-    os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
-    os.environ["MPI_NUM_THREADS"] = "1"
-
-
 import logging
 import multiprocessing as mp
 import os
