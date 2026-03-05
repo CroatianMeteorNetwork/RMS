@@ -123,6 +123,7 @@ def quotaReport(capt_dir_quota, config, after=False):
     rep += ("\n")
     rep += ("               captured directories : {:7.02f}GB {:7.02f}GB {:3.0f}%\n".format(usedSpace(captured_dir), capt_dir_quota, captured_dir_pc))
     rep += ("                          log files : {:7.02f}GB {:7.02f}GB {:3.0f}%\n".format(usedSpace(log_dir),config.log_files_quota, log_files_pc))
+    rep += ("                                        ----------------------\n")
     rep += ("                 total for RMS_data : {:7.02f}GB {:7.02f}GB {:3.0f}%\n".format(usedSpace(config.data_dir), config.rms_data_quota, total_rms_data_pc))
     rep += "\n"
     rep += ("Logical partition information\n")
