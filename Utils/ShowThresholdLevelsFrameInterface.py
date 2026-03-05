@@ -194,7 +194,8 @@ if __name__ == "__main__":
     plt.colorbar(im1, ax=ax1, fraction=0.046, pad=0.04)
 
     # Top-right: k1 values
-    k1map = ax2.imshow(k1_vals, cmap='inferno', vmin=1, vmax=6,  aspect='equal')
+    vmin, vmax = np.percentile(k1_vals, [1, 99])
+    k1map = ax2.imshow(k1_vals, cmap='inferno', vmin=vmin, vmax=vmax,  aspect='equal')
     ax2.set_title("k1 values (Signal/Noise - j1)")
     
     if cml_args.fireball:
