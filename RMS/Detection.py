@@ -98,7 +98,7 @@ def getPolarLine(x1, y1, x2, y2, img_h, img_w):
 
     # Calculate polar line coordinates
     theta = -np.arctan2(dx, dy)
-    rho = (dy*x0 - dx*y0 + x2*y1 - y2*x1) / np.sqrt(dy**2 + dx**2)
+    rho = (dy*x0 - dx*y0 + x2*y1 - y2*x1)/np.sqrt(dy**2 + dx**2)
     
     # Correct for quadrant
     if rho > 0:
@@ -462,7 +462,7 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
     if frame_range is not None:
         range_start, range_end = frame_range
         # Pad the end frame up to the next time_window_size boundary
-        range_end = int(np.ceil(range_end / time_window_size) * time_window_size)
+        range_end = int(np.ceil(range_end/time_window_size)*time_window_size)
         range_end = min(range_end, img_handle.total_frames)
     else:
         range_start = 0
@@ -1122,7 +1122,7 @@ def showImage(name, img, convert_to_uint8=False):
 
     # Handle DPI scaling for accurate window size if possible
     dpi = fig.dpi
-    fig.set_size_inches(img_width / dpi, img_height / dpi, forward=True)
+    fig.set_size_inches(img_width/dpi, img_height/dpi, forward=True)
 
     # Mutable state to track exit condition across the inner function scope
     state = {'exit_program': False}
@@ -1222,10 +1222,10 @@ def showDetectionSummary(results_list, config):
 
                 # Ensure a minimum crop size so very narrow tracks are still visible
                 min_crop_size = 200
-                cx_center = (cx_min + cx_max) / 2.0
-                cy_center = (cy_min + cy_max) / 2.0
-                half_w = max((cx_max - cx_min) / 2.0 + pad, min_crop_size / 2.0)
-                half_h = max((cy_max - cy_min) / 2.0 + pad, min_crop_size / 2.0)
+                cx_center = (cx_min + cx_max)/2.0
+                cy_center = (cy_min + cy_max)/2.0
+                half_w = max((cx_max - cx_min)/2.0 + pad, min_crop_size/2.0)
+                half_h = max((cy_max - cy_min)/2.0 + pad, min_crop_size/2.0)
 
                 x_min = max(0, int(cx_center - half_w))
                 x_max = min(img_w, int(cx_center + half_w))
@@ -1241,7 +1241,7 @@ def showDetectionSummary(results_list, config):
                     max_lvl = np.percentile(crop, 99.5)
                     if max_lvl > min_lvl:
                         crop = np.clip(crop, min_lvl, max_lvl)
-                        crop = ((crop - min_lvl) / (max_lvl - min_lvl) * 255).astype(np.uint8)
+                        crop = ((crop - min_lvl)/(max_lvl - min_lvl)*255).astype(np.uint8)
                     else:
                         crop = np.zeros_like(crop, dtype=np.uint8)
 
