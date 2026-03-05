@@ -106,3 +106,6 @@ Utils/SaturationTools.c
 
 # Large GMN catalog that's too big for GitHub
 Catalogs/GMN_StarCatalog_LM12.0.bin
+
+# Skip the skyfield cache
+.skyfield_cache
