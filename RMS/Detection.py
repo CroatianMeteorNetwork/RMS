@@ -58,6 +58,7 @@ import pyximport
 pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 import RMS.Routines.MorphCy as morph
 from RMS.Routines.BinImageCy import binImage
+from RMS.Routines import SequentialRANSAC
 
 # Get the logger from the main module
 log = getLogger("logger")
@@ -97,7 +98,7 @@ def getPolarLine(x1, y1, x2, y2, img_h, img_w):
 
     # Calculate polar line coordinates
     theta = -np.arctan2(dx, dy)
-    rho = (dy*x0 - dx*y0 + x2*y1 - y2*x1) / np.sqrt(dy**2 + dx**2)
+    rho = (dy*x0 - dx*y0 + x2*y1 - y2*x1)/np.sqrt(dy**2 + dx**2)
     
     # Correct for quadrant
     if rho > 0:
@@ -382,7 +383,10 @@ def checkWhiteRatio(img_thres, ff, max_white_ratio):
 
 
 def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_white_ratio, kht_lib_path, \
-    mask=None, flat_struct=None, dark=None, debug=False):
+    mask=None, flat_struct=None, dark=None, debug=False, kht_cluster_min_size=9, kht_cluster_min_deviation=2, \
+    kht_delta=0.1, kht_kernel_min_height=0.004, kht_n_sigmas=1, kht_morph_ops=[1, 2, 3, 4, 1], \
+    line_finder_algorithm='kht', ransac_max_lines=10, ransac_min_pixels=10, ransac_distance_thresh=2.0, \
+    ransac_min_line_length=20.0, ransac_max_gap=20.0, frame_range=None):
     """ Get (rho, phi) pairs for each meteor present on the image using KHT.
         
     Arguments:
@@ -397,12 +401,30 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
 
     Keyword arguments:
         mask: [MaskStruct] Mask structure.
-        flat_struct: [FlatStruct]  Flat frame structure.
+        flat_struct: [FlatStruct] Flat frame structure.
         dark: [ndarray] Dark frame.
         debug: [bool] If True, print debug information and show debug images.
-    
+        kht_cluster_min_size: [int] Minimum cluster size for KHT.
+        kht_cluster_min_deviation: [float] Minimum cluster deviation for KHT.
+        kht_delta: [float] Delta parameter for KHT.
+        kht_kernel_min_height: [float] Minimum kernel height for KHT.
+        kht_n_sigmas: [float] Number of sigmas for KHT.
+        kht_morph_ops: [list] List of morphological operations to apply before line detection.
+        line_finder_algorithm: [str] Algorithm to use for line finding: 'kht' or 'ransac'.
+        ransac_max_lines: [int] Maximum number of lines to find with RANSAC.
+        ransac_min_pixels: [int] Minimum number of inlier pixels per line for RANSAC.
+        ransac_distance_thresh: [float] Maximum perpendicular distance (px) from the line for RANSAC
+            inlier classification.
+        ransac_min_line_length: [float] Minimum length of a line segment in pixels for RANSAC.
+        ransac_max_gap: [float] Maximum gap (px) allowed within a line segment for RANSAC.
+
+        frame_range: [tuple] Optional (start_frame, end_frame) to restrict detection to a range of frames.
+            If given, only frame chunks overlapping this range will be processed. The end frame will be 
+            padded up to the next time_window_size boundary.
+
     Return:
-        [list] a list of all found lines
+        [list] A list of all found lines. Each entry is [rho, theta, frame_min, frame_max] for KHT,
+            or [rho, theta, frame_min, frame_max, x_start, y_start, x_end, y_end] for RANSAC.
     """
 
     # Load the KHT library
@@ -436,11 +458,26 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
             return line_results
 
 
+    # Determine the frame range to process
+    if frame_range is not None:
+        range_start, range_end = frame_range
+        # Pad the end frame up to the next time_window_size boundary
+        range_end = int(np.ceil(range_end/time_window_size)*time_window_size)
+        range_end = min(range_end, img_handle.total_frames)
+    else:
+        range_start = 0
+        range_end = img_handle.total_frames
+
     # Subdivide the image by time into overlapping parts (decreases noise when searching for meteors)
     for i in range(0, int(np.ceil(img_handle.total_frames/time_slide)) - 1):
 
         frame_min = i*time_slide
         frame_max = i*time_slide + time_window_size
+
+        # Skip chunks outside the requested frame range
+        if frame_range is not None:
+            if frame_max < range_start or frame_min > range_end:
+                continue
 
 
         # If an FF file is used
@@ -472,7 +509,7 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
             img_handle = preprocessFF(img_handle, mask, flat_struct, dark)
 
             # Threshold the frame chunk
-            img_thresh = thresholdFF(img_handle.ff, k1, j1, mask=mask)
+            img_thresh = thresholdFF(img_handle.ff, k1, j1, mask=mask, mask_ave_bright=True)
 
             # Check if there are too many threshold passers, if so report that no lines were found
             if not checkWhiteRatio(img_thresh, img_handle.ff, max_white_ratio):
@@ -518,8 +555,7 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
             # 2 - bridge (Connect close pixels)
             # 3 - close (Close surrounded pixels)
             # 4 - thin (Thin all lines to 1px width)
-            # 1 - Remove lonely pixels
-        img_morph = morph.morphApply(img_thresh, [1, 2, 3, 4, 1])
+        img_morph = morph.morphApply(img_thresh, kht_morph_ops)
 
 
         # if debug:
@@ -536,25 +572,50 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
         # Predefine the line output
         lines = np.empty((max_lines, 2), np.double)
         
-        # Call the KHT line finding
-        # Parameters: cluster_min_size (px), cluster_min_deviation, delta, kernel_min_height, n_sigmas
-        length = kht.kht_wrapper(lines, img_flatten, w, h, max_lines, 9, 2, 0.1, 0.004, 1)
-        
-        # Cut the line array to the number of found lines
-        lines = lines[:length]
+        # Parameter checking to ensure types are correct
+        # ctypes needs specific types
+        kht_cluster_min_size = int(kht_cluster_min_size)
+        kht_cluster_min_deviation = float(kht_cluster_min_deviation)
+        kht_delta = float(kht_delta)
+        kht_kernel_min_height = float(kht_kernel_min_height)
+        kht_n_sigmas = float(kht_n_sigmas)
+
+        # Use line segment RANSAC instead of Kernel-based Hough Transform
+        if line_finder_algorithm == 'ransac':
+            
+            # Run Sequential RANSAC
+            ransac_lines = SequentialRANSAC.findLines(img_morph, ransac_max_lines, ransac_min_pixels, \
+                ransac_distance_thresh, ransac_min_line_length, ransac_max_gap, debug=debug)
+            
+            lines = np.array(ransac_lines)
+
+        else:
+
+            # Call the KHT line finding
+            # Parameters: cluster_min_size (px), cluster_min_deviation, delta, kernel_min_height, n_sigmas
+            length = kht.kht_wrapper(lines, img_flatten, w, h, max_lines, kht_cluster_min_size, kht_cluster_min_deviation, kht_delta, kht_kernel_min_height, kht_n_sigmas)
+            
+            # Cut the line array to the number of found lines
+            lines = lines[:length]
 
 
         # Skip further operations if there are no lines
         frame_lines = []
         if lines.any():
-            for rho, theta in lines:
-                line_results.append([rho, theta, frame_min, frame_max])
-                frame_lines.append([rho, theta, frame_min, frame_max])
-
-
-        # if debug:
-        #     if frame_lines:
-        #         plotLines(img_handle.ff, frame_lines)
+            for line in lines:
+                
+                # Check if line contains extent info (only for RANSAC)
+                if len(line) == 6:
+                     rho, theta, x1, y1, x2, y2 = line
+                     line_entry = [rho, theta, frame_min, frame_max, x1, y1, x2, y2]
+                else:
+                    # KHT returns 2 values (rho, theta)
+                    rho = line[0]
+                    theta = line[1]
+                    line_entry = [rho, theta, frame_min, frame_max]
+                
+                line_results.append(line_entry)
+                frame_lines.append(line_entry)
 
 
         if debug:
@@ -563,32 +624,65 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
             # b) Thresholded stack, 
             # c) Morphological operations result, 
             # d) KHT lines
-            img_summary = np.zeros((img_handle.ff.nrows*2, img_handle.ff.ncols*2), dtype=np.uint8)
-
             # Merge the lines on the frame for plotting purposes
-            frame_lines = mergeLines(frame_lines, config.line_min_dist, img_handle.ff.ncols, img_handle.ff.nrows)
+            plot_lines_list = frame_lines
+            if line_finder_algorithm != 'ransac':
+                 plot_lines_list = mergeLines(frame_lines, config.line_min_dist, img_handle.ff.ncols, img_handle.ff.nrows)
 
             # Fill in the summary image (2x2 grid)
-            img_summary[:img_handle.ff.nrows, 0:img_handle.ff.ncols] = maxpixel_autolevel
-            img_summary[:img_handle.ff.nrows, img_handle.ff.ncols:img_handle.ff.ncols*2] = \
-                img_thresh.astype(maxpix_img.dtype)*(2**(maxpix_img.itemsize*8) - 1)
-            img_summary[img_handle.ff.nrows:img_handle.ff.nrows*2, 0:img_handle.ff.ncols] = \
-                img_morph.astype(np.uint8)*255
+            # Initialize as 3-channel BGR
+            img_summary = np.zeros((img_handle.ff.nrows*2, img_handle.ff.ncols*2, 3), dtype=np.uint8)
+
+            # Top-Left: Maxpixel (Auto-leveled, same as plotLines)
+            mp_img = np.copy(maxpix_img)
+            min_lvl = np.percentile(mp_img[2:], 1)
+            max_lvl = np.percentile(mp_img[2:], 99.0)
+            if mp_img.dtype == np.uint8:
+                mp_img = Image.adjustLevels(mp_img, min_lvl, 1.0, max_lvl)
+            else:
+                # Clip and scale to 8-bit (same as plotLines for 16-bit images)
+                mp_img = np.clip(mp_img, min_lvl, max_lvl)
+                mp_img = ((mp_img - min_lvl)/(max_lvl - min_lvl)*255).astype(np.uint8)
+
+            # Convert to BGR if grayscale
+            mp_bgr = mp_img
+            if len(mp_bgr.shape) == 2:
+                mp_bgr = cv2.cvtColor(mp_bgr, cv2.COLOR_GRAY2BGR)
+            img_summary[:img_handle.ff.nrows, 0:img_handle.ff.ncols] = mp_bgr
+
+            # Top-Right: Thresholded
+            # Convert to BGR
+            thresh_bgr = img_thresh.astype(maxpix_img.dtype)*(2**(maxpix_img.itemsize*8) - 1)
+            if len(thresh_bgr.shape) == 2:
+                thresh_bgr = cv2.cvtColor(thresh_bgr, cv2.COLOR_GRAY2BGR)
+            img_summary[:img_handle.ff.nrows, img_handle.ff.ncols:img_handle.ff.ncols*2] = thresh_bgr
+
+            # Bottom-Left: Morph
+            # Convert to BGR
+            morph_bgr = img_morph.astype(np.uint8)*255
+            if len(morph_bgr.shape) == 2:
+                morph_bgr = cv2.cvtColor(morph_bgr, cv2.COLOR_GRAY2BGR)
+            img_summary[img_handle.ff.nrows:img_handle.ff.nrows*2, 0:img_handle.ff.ncols] = morph_bgr
+
+            # Bottom-Right: KHT/RANSAC Lines (Already BGR from plotLines)
             img_summary[img_handle.ff.nrows:img_handle.ff.nrows*2, img_handle.ff.ncols:img_handle.ff.ncols*2] = \
-                plotLines(img_handle.ff, frame_lines, show_image=False)
+                plotLines(img_handle.ff, plot_lines_list, show_image=False)
 
             showImage(str(frame_min) + "-" + str(frame_max), img_summary)
 
     return line_results
 
 
-def filterCentroids(centroids, centroid_max_deviation, max_distance):
+def filterCentroids(centroids, centroid_max_deviation, max_distance, debug=False, 
+        filter_frame_gaps=True):
     """ Check for linearity in centroid data and reject the points which are too far off. 
 
     Arguments:
-        centroids: [list] a list of [frame, X, Y, level] centroid coordinates
+        centroids: [list] a list of [frame, seq, X, Y, level, ...] centroid coordinates
         centroid_max_deviation: [float] max deviation from the fitted line, centroids above this get rejected
         max_distance: [float] max distance between 2 ends of centroid chains which connects them
+        debug: [bool] If True, show a debug plot of all centroids and rejections.
+        filter_frame_gaps: [bool] If True, filter out centroids with large frame gaps at the edges.
     
     Return:
         centroids: [list] a filtered list of centroids (see input centroids for details)
@@ -704,16 +798,25 @@ def filterCentroids(centroids, centroid_max_deviation, max_distance):
 
     # Skip centroid correction if there are not enough centroids
     if len(centroids) < 3:
+        logDebug('filterCentroids: Only {:d} centroids, skipping filtering'.format(len(centroids)))
         return centroids
 
     centroids_array = np.array(centroids).astype(np.float64)
+    logDebug('filterCentroids: Input {:d} centroids, frame range {:.1f} - {:.1f}'.format(
+        len(centroids_array), centroids_array[0,0], centroids_array[-1,0]))
 
     # Filter centroids of frame gaps
-    centroids_array = _filterFrameGaps(centroids_array)
+    if filter_frame_gaps:
+        centroids_array = _filterFrameGaps(centroids_array)
+        logDebug('filterCentroids: After frame gap filtering: {:d} centroids'.format(len(centroids_array)))
+    else:
+        logDebug('filterCentroids: Frame gap filtering disabled')
 
     # Skip centroid correction if there are not enough centroids
-    if len(centroids) < 3:
-        return centroids
+    if len(centroids_array) < 3:
+        logDebug('filterCentroids: Too few centroids after frame gap filter, returning {:d}'.format(
+            len(centroids_array)))
+        return centroids_array.tolist()
 
         
 
@@ -741,10 +844,13 @@ def filterCentroids(centroids, centroid_max_deviation, max_distance):
 
     # Calculate median deviation
     mean_deviation = np.median(point_deviations)
+    logDebug('filterCentroids: Median deviation from line: {:.3f} px'.format(mean_deviation))
 
     # Take points with satisfactory deviation
     good_centroid_indices = np.where(np.logical_not(point_deviations > mean_deviation*centroid_max_deviation + 1))
     filtered_centroids = centroids_array[good_centroid_indices].tolist()
+    logDebug('filterCentroids: After deviation filtering: {:d}/{:d} centroids kept (max_dev={:.1f})'.format(
+        len(filtered_centroids), len(centroids_array), centroid_max_deviation))
 
     # Go through all points and separate by chains of centroids (divided by max distance)
     chains = []
@@ -775,12 +881,104 @@ def filterCentroids(centroids, centroid_max_deviation, max_distance):
     # Connect broken chains
     filtered_chains = _connectBrokenChains(chains, max_distance)
 
+    # Log chain information
+    chain_lengths = [len(chain) for chain in filtered_chains]
+    logDebug('filterCentroids: Chain splitting found {:d} chains, lengths: {:s}'.format(
+        len(filtered_chains), str(chain_lengths)))
 
     # Choose the chain with the greatest length
-    chain_lengths = [len(chain) for chain in filtered_chains]
     max_chain_length = max(chain_lengths)
 
     best_chain = filtered_chains[chain_lengths.index(max_chain_length)]
+    logDebug('filterCentroids: Selected longest chain with {:d} centroids (frame {:.1f} - {:.1f})'.format(
+        len(best_chain), best_chain[0][0], best_chain[-1][0]))
+
+
+    # Debug plot showing all centroids and rejections
+    if debug:
+
+        all_centroids = np.array(centroids).astype(np.float64)
+        best_chain_arr = np.array(best_chain)
+
+        # Identify rejected centroids at each stage
+        # Frame gap rejected: in original but not in centroids_array after gap filter
+        gap_rejected_mask = np.ones(len(all_centroids), dtype=bool)
+        for ca in centroids_array:
+            dists = np.abs(all_centroids[:, 0] - ca[0]) + np.abs(all_centroids[:, 2] - ca[2])
+            match = np.argmin(dists)
+            if dists[match] < 0.01:
+                gap_rejected_mask[match] = False
+        gap_rejected = all_centroids[gap_rejected_mask]
+
+        # Deviation rejected: in centroids_array but not in filtered_centroids
+        filtered_arr = np.array(filtered_centroids)
+        dev_rejected_mask = np.ones(len(centroids_array), dtype=bool)
+        for fc in filtered_arr:
+            dists = np.abs(centroids_array[:, 0] - fc[0]) + np.abs(centroids_array[:, 2] - fc[2])
+            match = np.argmin(dists)
+            if dists[match] < 0.01:
+                dev_rejected_mask[match] = False
+        dev_rejected = centroids_array[dev_rejected_mask]
+
+        # Chain rejected: in filtered_centroids but not in best_chain
+        chain_rejected_mask = np.ones(len(filtered_arr), dtype=bool)
+        for bc in best_chain_arr:
+            dists = np.abs(filtered_arr[:, 0] - bc[0]) + np.abs(filtered_arr[:, 2] - bc[2])
+            match = np.argmin(dists)
+            if dists[match] < 0.01:
+                chain_rejected_mask[match] = False
+        chain_rejected = filtered_arr[chain_rejected_mask]
+
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
+
+        # --- X,Y spatial plot ---
+        ax1.plot(all_centroids[:, 2], all_centroids[:, 3], '.', color='lightgray', 
+                markersize=4, label='All ({:d})'.format(len(all_centroids)))
+
+        if len(gap_rejected):
+            ax1.plot(gap_rejected[:, 2], gap_rejected[:, 3], 'x', color='red', 
+                    markersize=6, label='Frame gap ({:d})'.format(len(gap_rejected)))
+        if len(dev_rejected):
+            ax1.plot(dev_rejected[:, 2], dev_rejected[:, 3], 'x', color='orange', 
+                    markersize=6, label='Deviation ({:d})'.format(len(dev_rejected)))
+        if len(chain_rejected):
+            ax1.plot(chain_rejected[:, 2], chain_rejected[:, 3], 'x', color='blue', 
+                    markersize=6, label='Other chain ({:d})'.format(len(chain_rejected)))
+
+        ax1.plot(best_chain_arr[:, 2], best_chain_arr[:, 3], 'o', color='lime', 
+                markersize=3, label='Selected ({:d})'.format(len(best_chain_arr)))
+
+        ax1.set_xlabel('X (px)')
+        ax1.set_ylabel('Y (px)')
+        ax1.set_title('Centroid Filtering - Spatial')
+        ax1.legend(fontsize=8)
+        ax1.set_aspect('equal')
+        ax1.invert_yaxis()
+
+        # --- Frame vs X/Y progression ---
+        ax2.plot(all_centroids[:, 0], all_centroids[:, 2], '.', color='lightgray', markersize=3)
+        ax2.plot(best_chain_arr[:, 0], best_chain_arr[:, 2], 'o', color='lime', markersize=3, 
+                label='X selected')
+
+        if len(gap_rejected):
+            ax2.plot(gap_rejected[:, 0], gap_rejected[:, 2], 'x', color='red', markersize=5)
+        if len(dev_rejected):
+            ax2.plot(dev_rejected[:, 0], dev_rejected[:, 2], 'x', color='orange', markersize=5)
+        if len(chain_rejected):
+            ax2.plot(chain_rejected[:, 0], chain_rejected[:, 2], 'x', color='blue', markersize=5)
+
+        # Plot fitted line
+        fr_range = np.array([centroids_array[0, 0], centroids_array[-1, 0]])
+        ax2.plot(fr_range, mX*fr_range + cX, '--', color='green', linewidth=1, label='LSQ fit')
+
+        ax2.set_xlabel('Frame')
+        ax2.set_ylabel('X (px)')
+        ax2.set_title('Frame vs X Progression')
+        ax2.legend(fontsize=8)
+
+        fig.suptitle('filterCentroids Debug', fontsize=12)
+        fig.tight_layout()
+        plt.show()
 
 
     return best_chain
@@ -924,7 +1122,7 @@ def showImage(name, img, convert_to_uint8=False):
 
     # Handle DPI scaling for accurate window size if possible
     dpi = fig.dpi
-    fig.set_size_inches(img_width / dpi, img_height / dpi, forward=True)
+    fig.set_size_inches(img_width/dpi, img_height/dpi, forward=True)
 
     # Mutable state to track exit condition across the inner function scope
     state = {'exit_program': False}
@@ -967,6 +1165,113 @@ def showAutoLevels(img):
 
 
 
+def showDetectionSummary(results_list, config):
+    """ Show a summary of all detections, 6 per figure page, using matplotlib subplots.
+
+    Each subplot shows the maxpixel image (auto-leveled) cropped around the detection, with the 
+    centroid track drawn in yellow.
+
+    Arguments:
+        results_list: [list] List of [ff_file_name, meteor_no, rho, theta, centroids, maxpixel] entries.
+            centroids columns: [frame, X, Y, level, ...] (non-asgard) or [frame, seq, X, Y, level, ...] (asgard).
+            maxpixel: [ndarray] The maxpixel image from the FF file.
+        config: [config object] Configuration object.
+    """
+
+    if not results_list:
+        print("No detections to summarize.")
+        return
+
+    # Number of detections per figure page
+    n_per_page = 6
+    n_cols = 3
+    n_rows = 2
+
+    # Group results into pages
+    for page_start in range(0, len(results_list), n_per_page):
+        page_items = results_list[page_start:page_start + n_per_page]
+
+        fig, axes = plt.subplots(n_rows, n_cols, figsize=(18, 10))
+        axes = axes.flatten()
+
+        for idx, ax in enumerate(axes):
+
+            if idx < len(page_items):
+                ff_name, meteor_no, rho, theta, centroids, maxpixel = page_items[idx]
+
+                # Extract x, y from centroids
+                # Raw format: [frame, seq, X, Y, intensity, bg_intensity, snr, saturated_count]
+                # Asgard keeps seq:     8 cols: [frame, seq, X, Y, intensity, ...]
+                # Non-asgard deletes seq: 7 cols: [frame, X, Y, intensity, ...]
+                if centroids.shape[1] >= 8:
+                    # Asgard format — seq is column 1
+                    cx = centroids[:, 2]
+                    cy = centroids[:, 3]
+                else:
+                    # Non-asgard — seq was deleted, X=col1, Y=col2
+                    cx = centroids[:, 1]
+                    cy = centroids[:, 2]
+
+                # Compute crop region around the detection with padding
+                img_h, img_w = maxpixel.shape[:2]
+                pad = 50
+
+                # Compute the bounding box of centroids
+                cx_min, cx_max = np.min(cx), np.max(cx)
+                cy_min, cy_max = np.min(cy), np.max(cy)
+
+                # Ensure a minimum crop size so very narrow tracks are still visible
+                min_crop_size = 200
+                cx_center = (cx_min + cx_max)/2.0
+                cy_center = (cy_min + cy_max)/2.0
+                half_w = max((cx_max - cx_min)/2.0 + pad, min_crop_size/2.0)
+                half_h = max((cy_max - cy_min)/2.0 + pad, min_crop_size/2.0)
+
+                x_min = max(0, int(cx_center - half_w))
+                x_max = min(img_w, int(cx_center + half_w))
+                y_min = max(0, int(cy_center - half_h))
+                y_max = min(img_h, int(cy_center + half_h))
+
+                # Crop the maxpixel image
+                crop = maxpixel[y_min:y_max, x_min:x_max].copy()
+
+                # Auto-level the crop
+                if crop.size > 0:
+                    min_lvl = np.percentile(crop, 1)
+                    max_lvl = np.percentile(crop, 99.5)
+                    if max_lvl > min_lvl:
+                        crop = np.clip(crop, min_lvl, max_lvl)
+                        crop = ((crop - min_lvl)/(max_lvl - min_lvl)*255).astype(np.uint8)
+                    else:
+                        crop = np.zeros_like(crop, dtype=np.uint8)
+
+                # Show the cropped maxpixel as background
+                ax.imshow(crop, cmap='gray', aspect='auto', 
+                          extent=[x_min, x_max, y_max, y_min])
+
+                # Draw centroid track as yellow line on top
+                ax.plot(cx, cy, '-', color='yellow', linewidth=2, alpha=0.8)
+
+                # Mark start (green) and end (red)
+                ax.plot(cx[0], cy[0], 'o', color='lime', markersize=6, zorder=5)
+                ax.plot(cx[-1], cy[-1], 's', color='red', markersize=6, zorder=5)
+
+                ax.set_title("{:s} #{:d}".format(os.path.basename(ff_name), meteor_no), fontsize=9)
+                ax.set_xlim(x_min, x_max)
+                ax.set_ylim(y_max, y_min)  # inverted y
+                ax.tick_params(labelsize=7)
+
+            else:
+                ax.axis('off')
+
+        fig.suptitle("Detection Summary (Page {:d}/{:d})".format(
+            page_start // n_per_page + 1,
+            (len(results_list) + n_per_page - 1) // n_per_page),
+            fontsize=14)
+        fig.tight_layout()
+        plt.show()
+
+
 
 def plotLines(ff, line_list, show_image=True):
     """ Plot lines on the image.
@@ -974,34 +1279,70 @@ def plotLines(ff, line_list, show_image=True):
 
     img = np.copy(ff.maxpixel)
 
-
     # Auto adjust levels
     min_lvl = np.percentile(img[2:], 1)
     max_lvl = np.percentile(img[2:], 99.0)
 
-    # Adjust levels
-    img = Image.adjustLevels(img, min_lvl, 1.0, max_lvl)
+    # If the image is 8, bit
+    if img.dtype == np.uint8:
+
+        # Adjust levels
+        img = Image.adjustLevels(img, min_lvl, 1.0, max_lvl)
+
+    else:
+        # Squish into 8-bit (clip bright values)
+        img = np.clip(img, min_lvl, max_lvl)
+        img = (img - min_lvl)/(max_lvl - min_lvl)*255
+        img = img.astype(np.uint8)
+
+
 
     hh = img.shape[0]/2.0
     hw = img.shape[1]/2.0
 
-    # Compute the maximum level value
-    max_lvl = 2**(img.itemsize*8) - 1
+    # Convert to color to support colored markers
+    if len(img.shape) == 2:
+        img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
 
-    for rho, theta, frame_min, frame_max in line_list:
-        theta = np.deg2rad(theta)
-        
-        a = np.cos(theta)
-        b = np.sin(theta)
-        x0 = a*rho
-        y0 = b*rho
+    # Compute max level for color scaling (assuming 8-bit or 16-bit)
+    # If 16-bit, colors might need scaling or we just use max_lvl
+    # cv2.line expects color to match depth.
+    # If image is 16-bit, max_lvl is 65535.
+    
+    # Create overlay for transparency
+    overlay = img.copy()
 
-        x1 = int(x0 + 1000*(-b) + hw)
-        y1 = int(y0 + 1000*(a) + hh)
-        x2 = int(x0 - 1000*(-b) + hw)
-        y2 = int(y0 - 1000*(a) + hh)
+    for line in line_list:
         
-        cv2.line(img, (x1, y1), (x2, y2), (max_lvl, 0, max_lvl), 1)
+        if len(line) >= 8:
+            # RANSAC line with extent
+            # [rho, theta, frame_min, frame_max, x1, y1, x2, y2]
+            rho, theta, _, _, x1, y1, x2, y2 = line[:8]
+            
+            # Draw segment (thick, semi-transparent)
+            # Yellow color in BGR: (0, max_lvl, max_lvl)
+            cv2.line(overlay, (int(x1), int(y1)), (int(x2), int(y2)), (0, max_lvl, max_lvl), 5)
+            
+        else:
+            # Standard infinite line (Magenta)
+            rho, theta, frame_min, frame_max = line[:4]
+            theta = np.deg2rad(theta)
+            
+            a = np.cos(theta)
+            b = np.sin(theta)
+            x0 = a*rho
+            y0 = b*rho
+
+            x1 = int(x0 + 1000*(-b) + hw)
+            y1 = int(y0 + 1000*(a) + hh)
+            x2 = int(x0 - 1000*(-b) + hw)
+            y2 = int(y0 - 1000*(a) + hh)
+            
+            cv2.line(img, (x1, y1), (x2, y2), (max_lvl, 0, max_lvl), 1)
+            
+    # Apply transparency
+    alpha = 0.5
+    cv2.addWeighted(overlay, alpha, img, 1 - alpha, 0, img)
     
     if show_image:
         showImage("KHT", img)
@@ -1068,17 +1409,18 @@ def preprocessFF(img_handle, mask, flat_struct, dark):
 
     if not img_handle.ff.calibrated:
 
-        # Apply the dark frame to maxpixel and avepixel    
+        # Apply the dark frame to maxpixel and avepixel (don't apply to stdpixel as it doesn't include the DC component anyway)
         if dark is not None:
             img_handle.ff.maxpixel = Image.applyDark(img_handle.ff.maxpixel, dark)
             img_handle.ff.avepixel = Image.applyDark(img_handle.ff.avepixel, dark)
 
 
-        # Apply the flat to maxpixel and avepixel
+        # Apply the flat to maxpixel, avepixel and stdpixel
         if flat_struct is not None:
 
             img_handle.ff.maxpixel = Image.applyFlat(img_handle.ff.maxpixel, flat_struct)
             img_handle.ff.avepixel = Image.applyFlat(img_handle.ff.avepixel, flat_struct)
+            img_handle.ff.stdpixel = Image.applyFlat(img_handle.ff.stdpixel, flat_struct)
 
 
         # Mask the FF file
@@ -1092,11 +1434,11 @@ def preprocessFF(img_handle, mask, flat_struct, dark):
 
 
 
-def thresholdAndCorrectGammaFF(img_handle, config, mask):
+def thresholdAndCorrectGammaFF(img_handle, config, mask, mask_ave_bright=True):
     """ Prepare the FF for centroid extraction by performing gamma correction. """
 
     # Threshold the FF
-    img_thres = thresholdFF(img_handle.ff, config.k1_det, config.j1_det)
+    img_thres = thresholdFF(img_handle.ff, config.k1_det, config.j1_det, mask=mask, mask_ave_bright=mask_ave_bright)
 
 
     # Gamma correct image files
@@ -1131,7 +1473,8 @@ def thresholdAndCorrectGammaFF(img_handle, config, mask):
 
 
 
-def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, asgard=False, debug=False):
+def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, asgard=False, debug=False, \
+    frame_range=None):
     """ Detect meteors on the given image. Here are the steps in the detection:
             - input image (FF bin format file) is thresholded (converted to black and white)
             - several morphological operations are applied to clean the image
@@ -1154,6 +1497,7 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
         asgard: [bool] If True, the vid file sequence number will be added in with the frame. False by 
             default, in which case only the frame number will be in the centroids.
         debug: [bool] If True, graphs for testing the detection settings will be shown. False by default.
+        frame_range: [tuple] Optional (start_frame, end_frame) to restrict detection to a range of frames.
     
     Return:
         meteor_detections: [list] a list of detected meteors, with these elements:
@@ -1196,7 +1540,13 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
     # Get lines on the image
     line_list = getLines(img_handle, config.k1_det, config.j1_det, config.time_slide, config.time_window_size, 
         config.max_lines_det, config.max_white_ratio, config.kht_lib_path, mask=mask, \
-        flat_struct=flat_struct, dark=dark, debug=debug)
+        flat_struct=flat_struct, dark=dark, debug=debug, kht_cluster_min_size=config.kht_cluster_min_size, \
+        kht_cluster_min_deviation=config.kht_cluster_min_deviation, kht_delta=config.kht_delta, \
+        kht_kernel_min_height=config.kht_kernel_min_height, kht_n_sigmas=config.kht_n_sigmas, \
+        kht_morph_ops=config.kht_morph_ops, line_finder_algorithm=config.line_finder_algorithm, \
+        ransac_max_lines=config.ransac_max_lines, ransac_min_pixels=config.ransac_min_pixels, \
+        ransac_distance_thresh=config.ransac_distance_thresh, ransac_min_line_length=config.ransac_min_line_length, \
+        ransac_max_gap=config.ransac_max_gap, frame_range=frame_range)
 
     # logDebug('List of lines:', line_list)
 
@@ -1205,14 +1555,16 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
     meteor_detections = []
 
     # Only if there are some lines in the image
+    # Only if there are some lines in the image
     if len(line_list):
 
-        # Join similar lines
-        line_list = mergeLines(line_list, config.line_min_dist, img_handle.ff.ncols, img_handle.ff.nrows)
+        # Join similar lines (only if not RANSAC)
+        if config.line_finder_algorithm != 'ransac':
+            line_list = mergeLines(line_list, config.line_min_dist, img_handle.ff.ncols, img_handle.ff.nrows)
 
         logDebug('Time for finding lines:', time() - t1)
 
-        logDebug('Number of KHT lines: ', len(line_list))
+        logDebug('Number of lines: ', len(line_list))
 
         # # Plot lines
         # plotLines(img_handle.ff, line_list)
@@ -1224,7 +1576,15 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
         # This step makes sure that there is a linear propagation of the detections in time
         for line in line_list:
 
-            rho, theta, frame_min, frame_max = line
+            line_start = None
+            line_end = None
+            
+            if len(line) >= 8:
+                rho, theta, frame_min, frame_max, x1, y1, x2, y2 = line[:8]
+                line_start = (x1, y1)
+                line_end = (x2, y2)
+            else:
+                rho, theta, frame_min, frame_max = line[:4]
 
             logDebug('\n--------------------------------')
             logDebug('    rho,  theta, frame_min, frame_max')
@@ -1266,9 +1626,12 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
             # Extract (x, y, frame) of thresholded frames, i.e. pixel and frame locations of threshold passers
             t1 = time()
             xs, ys, zs = getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, theta, \
-                mask, flat_struct, dark, debug=True)
+                mask, flat_struct, dark, debug=True, line_start=line_start, line_end=line_end)
             
             logDebug('Time for thresholding and stripe extraction: {:.3f}'.format(time() - t1))
+
+            # # Plot the extracted point cloud in 3D
+            # show3DCloud(img_handle.ff, xs, ys, zs, None, None, config)
 
             # Limit the number of points to search if too large
             if len(zs) > config.max_points_det:
@@ -1390,7 +1753,7 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                 img_handle = preprocessFF(img_handle, mask, flat_struct, dark)
 
                 img_thres, max_avg_corrected, flattened_weights, \
-                    min_patch_intensity = thresholdAndCorrectGammaFF(img_handle, config, mask)
+                    min_patch_intensity = thresholdAndCorrectGammaFF(img_handle, config, mask, mask_ave_bright=True)
 
                 logDebug('Centroiding frames {:d} - {:d} and time:'.format(frame_min, frame_max, img_handle.name()))
                 
@@ -1439,6 +1802,9 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
 
             # Calculate centroids
             centroids = []
+            skipped_no_pixels = 0
+            skipped_zero_weights = 0
+            frames_centroided = 0
             for i in range(frame_min, frame_max + 1):
 
                 t_centroid = time()
@@ -1454,6 +1820,7 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
 
                 # Skip if there are no pixels in the frame
                 if not len(frame_pixels):
+                    skipped_no_pixels += 1
                     continue
 
                 # Dilate the coordinates to encompass more pixels for photometry and centroiding
@@ -1507,6 +1874,7 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
 
                     # If the sum of the weights is zero, skip the frame
                     if max_weights_sum == 0:
+                        skipped_zero_weights += 1
                         continue
 
                     # Calculate weighted centroids
@@ -1628,14 +1996,24 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                         x_centroid, y_centroid, 
                         intensity, background_intensity, snr, saturated_count
                         ])
+                    frames_centroided += 1
+
+            logDebug('Centroiding summary: {:d} frames in range, {:d} centroided, '
+                '{:d} skipped (no pixels), {:d} skipped (zero weights)'.format(
+                frame_max - frame_min + 1, frames_centroided, skipped_no_pixels, 
+                skipped_zero_weights))
 
 
             # Filter centroids (confirm propagation)
+            n_before_filter = len(centroids)
             centroids = filterCentroids(centroids, config.centroids_max_deviation, 
-                config.centroids_max_distance)
+                config.centroids_max_distance, debug=debug, 
+                filter_frame_gaps=config.centroids_filter_frame_gaps)
 
             # Convert to numpy array for easy slicing
             centroids = np.array(centroids)
+            logDebug('After filterCentroids: {:d} -> {:d} centroids'.format(
+                n_before_filter, len(centroids)))
 
 
             logDebug('Filtering centroids close to the edge or the mask...')
@@ -1645,27 +2023,32 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
 
             # Filter out centroids that are too close to the edge or the mask
             _, valid_flags = edge_filter.filterCoordinates(centroid_xy)
+            n_before_edge = len(centroids)
             centroids = centroids[valid_flags]
+            logDebug('After edge/mask filtering: {:d} -> {:d} centroids'.format(
+                n_before_edge, len(centroids)))
 
             # Reject the solution if there are too few centroids
             if len(centroids) < config.line_minimum_frame_range_det:
-                logDebug('Rejected due to too few frames!')
+                logDebug('REJECTED: Too few centroids after filtering: {:d} < {:d} (line_minimum_frame_range_det)'.format(
+                    len(centroids), config.line_minimum_frame_range_det))
                 continue
 
             # Check that the detection has a surface brightness above the background
-            # The assumption here is that the peak of the meteor should have the intensity which is at least
-            # that of a patch of 4x4 pixels that are of the mean background brightness
             if np.max(centroids[:, 4]) < min_patch_intensity:
-                logDebug('Rejected due to too low max patch intensity:', np.max(centroids[:, 4]), ' < ', \
-                    min_patch_intensity)
+                logDebug('REJECTED: Max patch intensity too low: {:.1f} < {:.1f} (min_patch_intensity)'.format(
+                    np.max(centroids[:, 4]), min_patch_intensity))
                 continue
 
 
             # Check the detection if it has the proper angular velocity
             ang_vel, ang_vel_status = checkAngularVelocity(centroids, config)
             if not ang_vel_status:
-                logDebug('Rejected due to the angular velocity: {:.2f} deg/s'.format(ang_vel))
+                logDebug('REJECTED: Angular velocity out of range: {:.2f} deg/s'.format(ang_vel))
                 continue
+
+            logDebug('ACCEPTED: {:d} centroids, frame range {:.1f} - {:.1f}, ang_vel {:.2f} deg/s'.format(
+                len(centroids), centroids[0,0], centroids[-1,0], ang_vel))
 
 
             # If the FTPdetectinfo format is requested, exclude the sequence number column from centroids
@@ -1681,35 +2064,22 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
 
 
             
-            # # Plot centroids to image
-            # fig, (ax1, ax2) = plt.subplots(nrows=2)
-            
-            # ax1.imshow(ff.maxpixel - ff.avepixel, cmap='gray')
-            # ax1.scatter(centroids[:,1], centroids[:,2], s=5, c='r', edgecolors='none')
+            # Plot centroids to image
+            if debug:
+                fig, (ax1, ax2) = plt.subplots(nrows=2, figsize=(10, 8))
+                
+                ax1.imshow(img_handle.ff.maxpixel - img_handle.ff.avepixel, cmap='gray')
+                ax1.scatter(centroids[:,1], centroids[:,2], s=5, c='r', edgecolors='none')
+                ax1.set_title('Centroids on maxpixel - avepixel')
 
-            # # Plot lightcurve
-            # ax2.plot(centroids[:,0], centroids[:,3])
+                # Plot lightcurve
+                ax2.plot(centroids[:,0], centroids[:,3])
+                ax2.set_xlabel('Frame')
+                ax2.set_ylabel('Intensity')
+                ax2.set_title('Lightcurve')
 
-            # # # Plot relative angular velocity
-            # # ang_vels = []
-            # # fr_prev, x_prev, y_prev, _ = centroids[0]
-            # # for fr, x, y, _ in centroids[1:]:
-            # #     dx = x - x_prev
-            # #     dy = y - y_prev
-            # #     dfr = fr - fr_prev
-
-            # #     ddist = np.sqrt(dx**2 + dy**2)
-            # #     dt = dfr/config.fps
-
-            # #     ang_vels.append(ddist/dt)
-
-            # #     x_prev = x
-            # #     y_prev = y
-            # #     fr_prev = fr
-
-            # # ax2.plot(ang_vels)
-
-            # plt.show()
+                fig.tight_layout()
+                plt.show()
 
 
     # Once detection is done on this data, clear the cache for the thresholding function
@@ -1761,6 +2131,9 @@ if __name__ == "__main__":
 
     arg_parser.add_argument('-i', '--debugplots', action="store_true", \
         help="""Show graphs (calibrated image, thresholded image, detected lines) which can help adjust the detection settings. """)
+
+    arg_parser.add_argument('--frames', metavar='START,END', type=str, \
+        help="""Restrict detection to a range of frames, e.g. --frames 0,1000. The end frame will be padded up to the next chunk window boundary. """)
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
@@ -1918,6 +2291,9 @@ if __name__ == "__main__":
     # Init results list
     results_list = []
 
+    # Separate list for debug summary (includes maxpixel reference)
+    debug_summary_list = []
+
     # Open a file for results
     results_path = out_dir
     results_name = config.stationID + "_" + img_handle_main.beginning_datetime.strftime("%Y%m%d_%H%M%S_%f")
@@ -1927,6 +2303,17 @@ if __name__ == "__main__":
 
     total_meteors = 0
 
+    # Parse the optional frame range
+    frame_range = None
+    if cml_args.frames is not None:
+        try:
+            parts = cml_args.frames.split(',')
+            frame_range = (int(parts[0]), int(parts[1]))
+            print('Restricting detection to frames {:d} - {:d}'.format(frame_range[0], frame_range[1]))
+        except (ValueError, IndexError):
+            print('Error: --frames must be in the format START,END (e.g. --frames 0,1000)')
+            sys.exit(1)
+
     # Run meteor search on every file
     for img_handle in img_handle_list:
 
@@ -1935,7 +2322,7 @@ if __name__ == "__main__":
 
         # Run the meteor detection algorithm
         meteor_detections = detectMeteors(img_handle, config, flat_struct=flat_struct, dark=dark, mask=mask, \
-            debug=cml_args.debugplots, asgard=(cml_args.asgard is not None))
+            debug=cml_args.debugplots, asgard=(cml_args.asgard is not None), frame_range=frame_range)
 
         # Suppress numpy scientific notation printing
         np.set_printoptions(suppress=True)
@@ -1981,6 +2368,12 @@ if __name__ == "__main__":
 
             # Append to the results list
             results_list.append([ff_file_name, meteor_No, rho, theta, centroids])
+
+            # Store data for debug summary (includes maxpixel for image display)
+            if cml_args.debugplots:
+                debug_summary_list.append([ff_file_name, meteor_No, rho, theta, centroids, 
+                    np.copy(img_handle.ff.maxpixel)])
+
             meteor_No += 1
 
             total_meteors += 1
@@ -2089,3 +2482,7 @@ if __name__ == "__main__":
 
     print('Time for the whole directory:', time() - time_whole)
     print('Detected meteors:', total_meteors)
+
+    # Show a summary of all detections if debug plots are enabled
+    if cml_args.debugplots and debug_summary_list:
+        showDetectionSummary(debug_summary_list, config)

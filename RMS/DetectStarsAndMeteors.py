@@ -124,17 +124,11 @@ def saveResultsFrameInterface(star_list, meteor_list, img_handle, config, chunk_
     Keyword arguments:
         chunk_frames: [int] Number of frames to stacked image on which the stars will be extracted.
         output_suffix: [str] Suffix to add to the output files.
-        output_dir: [str] Directory where to save the output files if different the img_handle source directory
-        write_empty: [bool] If True, write the output files even if there are no stars or meteors detected.
 
     Return:
         [output_dir, calstars_name, ftpdetectinfo_name]: The output directory and file names
     
     """
-
-    # Construct the name of the directory to save to
-    if output_dir is None:
-        output_dir = img_handle.dir_path
 
      # Construct the name of the CALSTARS file by using the camera code and the time of the first frame
     timestamp = img_handle.beginning_datetime.strftime("%Y%m%d_%H%M%S_%f")
@@ -153,11 +147,11 @@ def saveResultsFrameInterface(star_list, meteor_list, img_handle, config, chunk_
         # Generate the name for the CALSTARS file
         calstars_name = 'CALSTARS_' + prefix + suffix + '.txt'
 
-        # Write detected stars to the CALSTARS file
-        CALSTARS.writeCALSTARS(star_list, output_dir, calstars_name, 
-                            config.stationID, config.height, config.width, chunk_frames=chunk_frames)
-        
-        log.info("Stars extracted and written to {:s}".format(calstars_name))
+    # Write detected stars to the CALSTARS file
+    CALSTARS.writeCALSTARS(star_list, img_handle.dir_path, calstars_name, 
+                        config.stationID, config.height, config.width, chunk_frames=chunk_frames)
+    
+    log.info("Stars extracted and written to {:s}".format(calstars_name))
 
     # Bypass empty outputs if requested
     if not write_empty and len(meteor_list) == 0:
@@ -193,14 +187,9 @@ def saveResultsFrameInterface(star_list, meteor_list, img_handle, config, chunk_
             # Append to the results list
             results_list.append([ff_file_name, meteor_No, rho, theta, centroids])
 
-        # Write FTPdetectinfo file
-        FTPdetectinfo.writeFTPdetectinfo(results_list, output_dir, ftpdetectinfo_name, 
-                                        img_handle.dir_path, config.stationID, config.fps)
-        log.info("FTPdetectinfo data written to {:s}".format(ftpdetectinfo_name)) 
-    
-    # Return the output directory and the names of the output files
-    return output_dir, calstars_name, ftpdetectinfo_name
-    
+    # Write FTPdetectinfo file
+    FTPdetectinfo.writeFTPdetectinfo(results_list, img_handle.dir_path, ftpdetectinfo_name, 
+                                     img_handle.dir_path, config.stationID, config.fps)
 
 
 def detectStarsAndMeteors(ff_directory, ff_name, config, flat_struct=None, dark=None, mask=None):
