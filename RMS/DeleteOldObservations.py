@@ -118,7 +118,7 @@ def quotaReport(capt_dir_quota, config, after=False):
 
     rep += ("                          bz2 files : {:7.02f}GB {:7.02f}GB {:3.0f}%\n".format(sizeBz2Files(config), config.bz2_files_quota, bz2_files_pc))
     rep += ("               archived directories : {:7.02f}GB {:7.02f}GB {:3.0f}%\n".format(sizeArchivedDirs(config), config.arch_dir_quota, arch_dir_pc))
-    rep += ("                                      --------------------\n")
+    rep += ("                                        ----------------------\n")
     rep += (" bz2 files and archived directories : {:7.02f}GB {:7.02f}GB {:3.0f}%\n".format(usedSpace(archived_dir), config.arch_dir_quota + config.bz2_files_quota, total_arch_pc))
 
     rep += ("               captured directories : {:7.02f}GB {:7.02f}GB {:3.0f}%\n".format(usedSpace(captured_dir), capt_dir_quota, captured_dir_pc))
