@@ -2094,15 +2094,23 @@ class Platepar(object):
         Keyword arguments:
             fmt: [str] Format of the platepar file. 'json' for JSON format and 'txt' for the usual CMN textual
                 format. The format is JSON by default.
-            fov: [tuple] Tuple of horizontal and vertical FOV size in degree. None by default.
+            fov: [tuple] Tuple of (fov_h, fov_v) in degrees. If given, used directly to avoid recomputation.
+                If None, FOV is computed from the current calibration.
             ret_written: [bool] If True, the JSON string of the platepar instead of writing it to disk.
         Return:
             fmt: [str] Platepar format.
         """
 
-        # If the FOV size was given, store it
+        # Update FOV — use provided value to avoid recomputation, otherwise compute from calibration
         if fov is not None:
             self.fov_h, self.fov_v = fov
+        else:
+            try:
+                # Local import to avoid circular dependency (ApplyAstrometry imports Platepar)
+                from RMS.Astrometry.ApplyAstrometry import computeFOVSize
+                self.fov_h, self.fov_v = computeFOVSize(self)
+            except Exception:
+                pass  # Keep existing values if computation fails (e.g. uncalibrated platepar)
 
         # Set JSON to be the default format
         if fmt is None:
