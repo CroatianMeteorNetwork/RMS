@@ -136,8 +136,7 @@ def quotaReport(capt_dir_quota, config, after=False):
     if usage.total > 0:
         rep += ("      partition containing RMS_data : {:7.02f}GB {:7.02f}GB {:3.0f}%\n".format(usage.used / (1024 ** 3), usage.total / (1024 ** 3) , 100 * usage.used / usage.total))
     else:
-        rep += (
-            "      partition containing RMS_data : {:7.02f}GB {:7.02f}GB\n".format(usage.used / (1024 ** 3), usage.total / (1024 ** 3)))
+        rep += ("      partition containing RMS_data : {:7.02f}GB {:7.02f}GB\n".format(usage.used / (1024 ** 3), usage.total / (1024 ** 3)))
     rep += ("--------------------------------------------------------------\n")
 
     return rep
