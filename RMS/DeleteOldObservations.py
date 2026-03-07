@@ -18,7 +18,6 @@ from RMS.CaptureDuration import captureDuration
 from RMS.ConfigReader import loadConfigFromDirectory
 from RMS.Logger import LoggingManager, getLogger
 from RMS.Misc import RmsDateTime, UTCFromTimestamp
-from pathlib import Path
 
 # Get the logger from the main module
 log = getLogger("rmslogger")
