@@ -2170,6 +2170,12 @@ class BufferedCapture(Process):
                             self.dropped_frames.value = 0
                             self.dropped_frames_timestamps.clear()
 
+                            # Reset last_frame_timestamp so the reconnection gap after a
+                            # planned transition is not counted as dropped frames. For
+                            # unexpected disconnects this is NOT reset, so those gaps are
+                            # still properly counted.
+                            last_frame_timestamp = False
+
                             # Reset PTS smoothing reset counter for new session
                             self.reset_count = -1
 
