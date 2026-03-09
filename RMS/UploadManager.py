@@ -578,7 +578,7 @@ class UploadManager(multiprocessing.Process):
 
 
 
-    def stop(self, timeout=60):
+    def stop(self, timeout=5*60):
         """ Stops the upload manager.
         
         Keyword arguments:
