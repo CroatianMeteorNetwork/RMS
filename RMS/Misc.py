@@ -90,6 +90,60 @@ def interruptibleWait(seconds):
         raise
 
 
+def runWithTimeout(func, args=(), kwargs=None, timeout=60):
+    """
+    Run a function with a hard timeout using threading.
+
+    Arguments:
+        func: The function to run.
+        args: Positional arguments to pass to the function.
+        kwargs: Keyword arguments to pass to the function.
+        timeout: Maximum time in seconds to wait for the function to complete.
+
+    Return:
+        A tuple of (success, result, exception):
+        - success: True if function completed within timeout, False if timed out
+        - result: The return value of the function (None if timed out or exception)
+        - exception: The exception raised by the function (None if no exception)
+
+    Note:
+        This function uses a daemon thread that continues running even after the timeout
+        expires. The timeout only allows the calling thread to proceed; it does not stop
+        the underlying operation. This may result in resource leaks (open sockets, file
+        descriptors) if the operation eventually completes or hangs indefinitely. Callers
+        are responsible for cleaning up any resources (e.g., closing connections) when a
+        timeout occurs.
+    """
+    if kwargs is None:
+        kwargs = {}
+
+    result = [None]
+    exception = [None]
+    completed = threading.Event()
+
+    def target():
+        try:
+            result[0] = func(*args, **kwargs)
+        except Exception as e:
+            exception[0] = e
+        finally:
+            completed.set()
+
+    thread = threading.Thread(target=target)
+    thread.daemon = True
+    thread.start()
+
+    # Wait for completion or timeout
+    completed.wait(timeout)
+
+    if completed.is_set():
+        # Function completed (possibly with exception)
+        return (True, result[0], exception[0])
+    else:
+        # Timed out
+        return (False, None, None)
+
+
 def mkdirP(path):
     """ Makes a directory and handles all errors.
     """
@@ -170,7 +224,7 @@ def walkDirsToDepth(dir_path, depth=-1):
     return final_list
 
 
-def archiveDir(source_dir, file_list, dest_dir, compress_file, delete_dest_dir=False, extra_files=None):
+def archiveDir(source_dir, file_list, dest_dir, compress_file, delete_dest_dir=False, extra_files=None, create_archive=True):
     """ Move the given file list from the source directory to the destination directory, compress the 
         destination directory and save it as a .bz2 file. BZ2 compression is used as ZIP files have a limit
         of 2GB in size.
@@ -185,10 +239,10 @@ def archiveDir(source_dir, file_list, dest_dir, compress_file, delete_dest_dir=F
         delete_dest_dir: [bool] Delete the destination directory after compression. False by default.
         extra_files: [list] A list of extra files (with fill paths) which will be be saved to the night 
             archive.
+        create_archive: [bool] Optional, default True, create a bz2 archive
 
     Return:
-        archive_name: [str] Full name of the archive.
-
+        archive_name: [str] If an archive was created, full name of the archive, else None.
     """
 
     # Make the archive directory
@@ -230,14 +284,14 @@ def archiveDir(source_dir, file_list, dest_dir, compress_file, delete_dest_dir=F
                 except Exception as e:
                     log.warning(e)
 
-
-    # Compress the archive directory
-    archive_name = shutil.make_archive(os.path.join(dest_dir, compress_file), 'bztar', dest_dir, logger=log)
+    # If create_archive is set compress the archive directory into a bz2 file
+    archive_name = None
+    if create_archive:
+        archive_name = shutil.make_archive(os.path.join(dest_dir, compress_file), 'bztar', dest_dir, logger=log)
 
     # Delete the archive directory after compression
     if delete_dest_dir:
         shutil.rmtree(dest_dir)
-
 
     return archive_name
 

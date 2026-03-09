@@ -16,8 +16,28 @@ from RMS.Logger import getLogger
 log = getLogger("rmslogger")
 
 
+def externalFunctionWrapper(func, captured_night_dir, archived_night_dir, config):
+    """ Wrapper for the external function that removes all log handlers in the external process if needed. """
+    
+    # Check if logging is loaded
+    if 'logging' in sys.modules:
+        import logging
+
+        # Remove all handlers from the root logger
+        root = logging.getLogger()
+        if root.handlers:
+            for handler in root.handlers[:]:
+                root.removeHandler(handler)
+                handler.close()
+
+    # Call the external function
+    func(captured_night_dir, archived_night_dir, config)
+
+
+
 def runExternalScript(captured_night_dir, archived_night_dir, config):
-    """ Run the external script. It's results won't be returned to the main program, the script will just be run as a separate process.
+    """ Run the external script. Its results won't be returned to the main program, the script will just be 
+        run as a separate process.
     
     Arguments:
         captured_night_dir: [str] Path to the Captured night directory.
@@ -38,7 +58,7 @@ def runExternalScript(captured_night_dir, archived_night_dir, config):
         return None
 
     # Check if the script path exists
-    if not os.path.isfile(config.external_script_path):
+    if not os.path.isfile(os.path.expanduser(config.external_script_path)):
         log.error('The script {:s} does not exist!'.format(config.external_script_path))
         return None
 
@@ -46,7 +66,7 @@ def runExternalScript(captured_night_dir, archived_night_dir, config):
     try:
 
         # Extract the name of the folder and the script
-        external_script_dir, external_script_file = os.path.split(config.external_script_path)
+        external_script_dir, external_script_file = os.path.split(os.path.expanduser(config.external_script_path))
 
         # Insert the path to the script
         sys.path.insert(0, external_script_dir)
@@ -55,13 +75,27 @@ def runExternalScript(captured_night_dir, archived_night_dir, config):
         module = importlib.import_module(external_script_file.replace('.py', '').replace('.PY', ''))
         externalFunction = getattr(module, config.external_function_name)
 
-        log.info('Starting function "{}" from external script "{}"'.format(externalFunction, module))
-
         # Call the external function in a separate process, protecting the main process from potential crashes
-        p = multiprocessing.Process(target=externalFunction, args=(captured_night_dir, archived_night_dir, config))
+        
+        # If logging is disabled, create a wrapper function which removes all log handlers in the external 
+        # process
+        if not config.external_script_log:
+            # Use the wrapper function
+            log.info('Starting function "{}" from external script "{}" with logging inhibited'.format(externalFunction, module))
+            target_function = externalFunctionWrapper
+            args = (externalFunction, captured_night_dir, archived_night_dir, config)
+
+        else:
+            log.info('Starting function "{}" from external script "{}"'.format(externalFunction, module))
+            target_function = externalFunction
+            args = (captured_night_dir, archived_night_dir, config)
+
+
+        p = multiprocessing.Process(target=target_function, args=args)
         p.start()
 
-        log.info('External script now running as a separate process')
+        if config.external_script_log:
+            log.info('External script now running as a separate process')
 
 
     except Exception as e:
