@@ -62,18 +62,19 @@ def switchCameraMode(config, daytime_mode, camera_mode_switch_trigger):
         camera_mode_switch_trigger.value = True
 
 # Function to switch capture between day and night modes
-def captureModeSwitcher(config, daytime_mode, camera_mode_switch_trigger):
+def captureModeSwitcher(config, daytime_mode, camera_mode_switch_trigger, stop_event=None):
     """ Wait and switch between day and night capture modes based on current time.
-    
+
     Arguments:
         config: [Config] config object for determining location and controlling camera settings if specified
         daytime_mode: [multiprocessing.Value] shared boolean variable to communicate the mode switch with other processes
                             True = Day time, False = Night time
+        stop_event: [threading.Event] optional event to signal this thread to exit
     """
     is_first_switch = True  # Track whether it's the initial switch
 
     try:
-        while True:
+        while not (stop_event is not None and stop_event.is_set()):
 
             # Initialize observer
             o = ephem.Observer()
@@ -160,8 +161,11 @@ def captureModeSwitcher(config, daytime_mode, camera_mode_switch_trigger):
             # Mark that the first switch has occurred
             is_first_switch = False
 
-            # Sleep until the next switch time
-            time.sleep(time_to_wait)
+            # Sleep until the next switch time (interruptible via stop_event)
+            if stop_event is not None:
+                stop_event.wait(time_to_wait)
+            else:
+                time.sleep(time_to_wait)
 
 
     except Exception as e:
