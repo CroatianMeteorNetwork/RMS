@@ -2528,7 +2528,7 @@ class EventMonitor(multiprocessing.Process):
             start_time, duration = captureDuration(self.syscon.latitude,
                                                    self.syscon.longitude,
                                                    self.syscon.elevation,
-                                                   self.syscon.continuous_capture)
+                                                   continuous_capture=self.syscon.continuous_capture)
 
             if not isinstance(start_time, bool):
 
