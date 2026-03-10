@@ -13323,15 +13323,11 @@ class PlateTool(QtWidgets.QMainWindow):
         for file_name in file_names_to_check:
             if file_name in os.listdir(self.dir_path):
                 initial_file = os.path.join(self.dir_path, file_name)
-                break            
+                break
 
         # If using UWO files, automatically load the dark file and skip the dialog
-        if not force_dialog and self.usingUWOData():
-            if initial_file is not None:
-                dark_file = initial_file
-            else:
-                # No dark/bias found in UWO mode — skip silently
-                return False, None
+        if not force_dialog and self.usingUWOData() and (initial_file is not None):
+            dark_file = initial_file
 
         else:
 
