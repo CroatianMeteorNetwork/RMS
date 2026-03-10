@@ -295,8 +295,6 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
         imgdata_archived_path = f"{archived_path}_imgdata"
         imgdata_archive_name = f"{archive_base}_imgdata"
 
-        # In all cases, generate the _detected directory and archive as a record for the station
-
         # Make the archive directory and compress into _detected.tar.bz2 if config.upload_split is False.
 
         create_detected_tar_bz2 = not config.upload_split
