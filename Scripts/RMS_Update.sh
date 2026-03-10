@@ -844,7 +844,22 @@ git_with_retry() {
         # Ensure Git Fails Properly Before Retrying
         case $cmd in
             "fetch")
-                if ! git "${git_config_args[@]}" fetch --all --prune --force --quiet $depth_arg; then
+                # Only fetch all branches when switching; otherwise fetch just the current branch
+                # to avoid downloading large objects from other branches (saves bandwidth on RPi/cellular)
+                if [ -n "$SWITCH_MODE" ]; then
+                    local fetch_result=0
+                    git "${git_config_args[@]}" fetch --all --prune --force --quiet $depth_arg || fetch_result=$?
+                else
+                    local fetch_branch="${branch:-$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")}"
+                    local fetch_remote="${remote_to_use:-$RMS_REMOTE}"
+                    local fetch_result=0
+                    if [ -n "$fetch_branch" ]; then
+                        git "${git_config_args[@]}" fetch "$fetch_remote" "$fetch_branch" --prune --force --quiet $depth_arg || fetch_result=$?
+                    else
+                        git "${git_config_args[@]}" fetch --all --prune --force --quiet $depth_arg || fetch_result=$?
+                    fi
+                fi
+                if [ $fetch_result -ne 0 ]; then
                     print_status "warning" "Git fetch failed, retrying..."
                 else
                     return 0
