@@ -2477,15 +2477,19 @@ class PlateTool(QtWidgets.QMainWindow):
             # Search for platepar files and prompt user if needed
             pp_path = self._findPlatepar()
 
+            if pp_path is None:
+                # User cancelled — abort loading
+                return False
+
             if pp_path:
                 self.loadPlatepar(platepar_file=pp_path)
             else:
-                # No platepar found or user chose to create a blank one
+                # User chose to create a blank platepar
                 self.platepar = Platepar()
                 self.makeNewPlatepar()
                 self.platepar_file = os.path.join(self.dir_path, self.config.platepar_name)
                 self.first_platepar_fit = True
-                self._show_calibration_dialog_on_start = True
+                # Don't auto-open File Manager — user explicitly chose to create a blank platepar
 
             # Set the given gamma value to platepar
             if gamma is not None:
@@ -3550,6 +3554,9 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Search for platepar files in the new directory, prompt if ambiguous
             platepar_path = self._findPlatepar()
+            if platepar_path is None:
+                # User cancelled — abort folder change
+                return False
             if platepar_path:
                 self.loadPlatepar(update=True, platepar_file=platepar_path)
             else:
@@ -12940,10 +12947,10 @@ class PlateTool(QtWidgets.QMainWindow):
         if os.path.isfile(default_path) and len(cal_files) == 1:
             return default_path
 
-        # If there are .cal files but the default name is missing, or there are multiple .cal
-        # files — let the user pick
+        # No unique default platepar — let the user pick one or create blank
         if cal_files:
-            items = [os.path.basename(f) for f in cal_files] + ["Create new blank platepar"]
+            items = [os.path.basename(f) for f in cal_files] \
+                    + ["Browse for another platepar...", "Create new blank platepar"]
 
             item, ok = QtWidgets.QInputDialog.getItem(
                 self, "Select platepar",
@@ -12951,18 +12958,39 @@ class PlateTool(QtWidgets.QMainWindow):
                 "Select which one to load:".format(len(cal_files)),
                 items, 0, False)
 
-            if ok and item != "Create new blank platepar":
-                return os.path.join(dir_path, item)
+            if not ok:
+                return None
 
-            # User picked "Create new blank platepar" or cancelled
+            if item == "Create new blank platepar":
+                return ''
+
+            if item == "Browse for another platepar...":
+                platepar_file = QtWidgets.QFileDialog.getOpenFileName(
+                    self, "Select a platepar file",
+                    dir_path, "Platepar files (*.cal);;All files (*)")[0]
+                return platepar_file if platepar_file else None
+
+            return os.path.join(dir_path, item)
+
+        # No .cal files at all — offer to browse or create blank
+        msg = QtWidgets.QMessageBox(self)
+        msg.setWindowTitle("No platepar found")
+        msg.setText("No platepar files were found in the folder.")
+        browse_btn = msg.addButton("Browse...", QtWidgets.QMessageBox.ActionRole)
+        create_btn = msg.addButton("Create new", QtWidgets.QMessageBox.ActionRole)
+        msg.addButton(QtWidgets.QMessageBox.Cancel)
+        msg.exec_()
+
+        if msg.clickedButton() == browse_btn:
+            platepar_file = QtWidgets.QFileDialog.getOpenFileName(
+                self, "Select a platepar file",
+                dir_path, "Platepar files (*.cal);;All files (*)")[0]
+            return platepar_file if platepar_file else None
+
+        if msg.clickedButton() == create_btn:
             return ''
 
-        # No .cal files at all — let the user browse for one or create blank
-        platepar_file = QtWidgets.QFileDialog.getOpenFileName(
-            self, "No platepar found – select one or cancel for blank",
-            dir_path, "Platepar files (*.cal);;All files (*)")[0]
-
-        return platepar_file  # '' if cancelled
+        return None
 
 
     def loadPlatepar(self, update=False, platepar_file=None):
