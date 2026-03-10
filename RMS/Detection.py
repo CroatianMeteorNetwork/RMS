@@ -1654,7 +1654,6 @@ def show3DCloud(ff, xs, ys, zs, detected_line=None, stripe_points=None, config=N
     # Set limits
     plt.xlim((0, ff.ncols))
     plt.ylim((0, ff.nrows))
-    ax.set_zlim((0, 255))
 
     plt.show()
 
