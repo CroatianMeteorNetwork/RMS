@@ -13326,16 +13326,20 @@ class PlateTool(QtWidgets.QMainWindow):
                 break            
 
         # If using UWO files, automatically load the dark file and skip the dialog
-        if not force_dialog and self.usingUWOData() and initial_file is not None:
-            dark_file = initial_file
+        if not force_dialog and self.usingUWOData():
+            if initial_file is not None:
+                dark_file = initial_file
+            else:
+                # No dark/bias found in UWO mode — skip silently
+                return False, None
 
         else:
-            
+
             if initial_file is None:
                 initial_file = self.dir_path
 
             # Open the file dialog to select the dark frame file
-            dark_file = QtWidgets.QFileDialog.getOpenFileName(self, "Select the dark frame file", 
+            dark_file = QtWidgets.QFileDialog.getOpenFileName(self, "Select the dark frame file",
                 initial_file, "Image files (*.png *.jpg *.bmp *.nef *.cr2);;All files (*)")[0]
 
         if not dark_file:
