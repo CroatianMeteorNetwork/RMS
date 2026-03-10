@@ -28,6 +28,7 @@ import numpy as np
 import scipy.optimize as opt
 import scipy.ndimage as ndimage
 import scipy.ndimage.filters as filters
+from scipy.spatial import cKDTree
 
 # RMS imports
 import RMS.ConfigReader as cr
@@ -52,8 +53,9 @@ log = getLogger("rmslogger")
 
 
 def extractStars(img, img_median=None, mask=None, gamma=1.0, max_star_candidates=1000, border=10,
-                 neighborhood_size=10, intensity_threshold=18, 
-                 segment_radius=4, roundness_threshold=0.5, max_feature_ratio=0.8, bit_depth=8):
+                 neighborhood_size=10, intensity_threshold=18,
+                 segment_radius=4, roundness_threshold=0.5, max_feature_ratio=0.8, bit_depth=8,
+                 extra_info=None):
     """ Extracts stars on a given image by searching for local maxima and applying PSF fit for star 
         confirmation.
 
@@ -120,6 +122,10 @@ def extractStars(img, img_median=None, mask=None, gamma=1.0, max_star_candidates
 
     # Find and label the maxima
     labeled, num_objects = ndimage.label(maxima)
+
+    # Store the raw candidate count if requested
+    if extra_info is not None:
+        extra_info['num_candidates'] = num_objects
 
     # Skip the image if there are too many maxima to process
     if num_objects > max_star_candidates:
@@ -246,13 +252,14 @@ def extractStarsAuto(img, mask=None,
 
 
 def extractStarsFF(
-        ff_dir, ff_name, 
+        ff_dir, ff_name,
         flat_struct=None, dark=None, mask=None,
-        config=None, 
+        config=None,
         border=10,
-        max_global_intensity=150, 
-        neighborhood_size=10, intensity_threshold=18, 
-        segment_radius=4, roundness_threshold=0.5, max_feature_ratio=0.8
+        max_global_intensity=150,
+        neighborhood_size=10, intensity_threshold=18,
+        segment_radius=4, roundness_threshold=0.5, max_feature_ratio=0.8,
+        extra_info=None
         ):
     """ Extracts stars on a given FF bin by searching for local maxima and applying PSF fit for star 
         confirmation.
@@ -330,12 +337,13 @@ def extractStarsFF(
 
     # Find the stars in the image
     status = extractStars(
-        img, img_median=img_median, 
+        img, img_median=img_median,
         mask=mask, gamma=config.gamma,
         max_star_candidates=config.max_stars, border=border,
-        neighborhood_size=neighborhood_size, intensity_threshold=intensity_threshold, 
-        segment_radius=segment_radius, roundness_threshold=roundness_threshold, 
-        max_feature_ratio=max_feature_ratio, bit_depth=config.bit_depth
+        neighborhood_size=neighborhood_size, intensity_threshold=intensity_threshold,
+        segment_radius=segment_radius, roundness_threshold=roundness_threshold,
+        max_feature_ratio=max_feature_ratio, bit_depth=config.bit_depth,
+        extra_info=extra_info
     )
 
     # If the star extraction failed, return an empty list
@@ -479,8 +487,10 @@ def extractStarsImgHandle(img_handle,
             )
 
 
+        # CALSTARS format: Y(0) X(1) IntensSum(2) Ampltd(3) FWHM(4) BgLvl(5) SNR(6) NSatPx(7)
+        # Note: intensity=IntensSum (integrated), amplitude=Ampltd (peak)
         star_list.append(
-            [ff_name, list(zip(y_arr, x_arr, amplitude, intensity, fwhm, background, snr, saturated_count))]
+            [ff_name, list(zip(y_arr, x_arr, intensity, amplitude, fwhm, background, snr, saturated_count))]
              )
 
         # Go to the next chunk
@@ -721,10 +731,44 @@ def fitPSF(img, img_median, x_init, y_init, gamma=1.0, segment_radius=4, roundne
         # plt.clf()
         # plt.close()
 
+    # Deduplicate detections that converged to the same position after PSF fitting.
+    # This happens when a bright star with a wide PSF produces multiple local maxima
+    # (spaced > neighborhood_size apart) whose PSF fits all converge to the same center.
+    if len(x_fitted) > 1:
+        x_arr_f = np.array(x_fitted)
+        y_arr_f = np.array(y_fitted)
+        intens_arr_f = np.array(intensity_fitted)
+        keep = np.ones(len(x_fitted), dtype=bool)
+
+        # Find all pairs within segment_radius using a KD-tree
+        tree = cKDTree(np.column_stack([x_arr_f, y_arr_f]))
+        pairs = tree.query_pairs(segment_radius, output_type='ndarray')
+        # Process pairs: for each duplicate pair, discard the fainter detection
+        for i, j in pairs:
+            if not keep[i] or not keep[j]:
+                continue
+            if intens_arr_f[j] > intens_arr_f[i]:
+                keep[i] = False
+            else:
+                keep[j] = False
+
+        n_dupes = np.sum(~keep)
+        if n_dupes > 0:
+            indices = np.where(keep)[0]
+            x_fitted = [x_fitted[i] for i in indices]
+            y_fitted = [y_fitted[i] for i in indices]
+            amplitude_fitted = [amplitude_fitted[i] for i in indices]
+            intensity_fitted = [intensity_fitted[i] for i in indices]
+            sigma_y_fitted = [sigma_y_fitted[i] for i in indices]
+            sigma_x_fitted = [sigma_x_fitted[i] for i in indices]
+            background_fitted = [background_fitted[i] for i in indices]
+            snr_fitted = [snr_fitted[i] for i in indices]
+            saturated_count_fitted = [saturated_count_fitted[i] for i in indices]
+
     return (
-            x_fitted, y_fitted, 
-            amplitude_fitted, intensity_fitted, 
-            sigma_y_fitted, sigma_x_fitted, 
+            x_fitted, y_fitted,
+            amplitude_fitted, intensity_fitted,
+            sigma_y_fitted, sigma_x_fitted,
             background_fitted, snr_fitted, saturated_count_fitted
             )
 
@@ -851,7 +895,9 @@ def extractStarsAndSave(config, ff_dir):
 
 
         # Construct the table of the star parameters
-        star_data = list(zip(y2, x2, amplitude, intensity, fwhm_data, background, snr, saturated_count))
+        # CALSTARS format: Y(0) X(1) IntensSum(2) Ampltd(3) FWHM(4) BgLvl(5) SNR(6) NSatPx(7)
+        # Note: intensity=IntensSum (integrated), amplitude=Ampltd (peak)
+        star_data = list(zip(y2, x2, intensity, amplitude, fwhm_data, background, snr, saturated_count))
 
         # Add star info to the star list
         star_list.append([ff_name, star_data])

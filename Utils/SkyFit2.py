@@ -11,15 +11,122 @@ import datetime
 import collections
 import glob
 import sys
-import traceback
+import time
 import random
+from concurrent.futures import ThreadPoolExecutor
 import copy
+import shutil
+import configparser
 
+import cv2
 import numpy as np
+from PIL import Image
+
 import matplotlib.pyplot as plt
+
+# Astropy imports for solar system body ephemeris
+try:
+    from astropy.coordinates import get_body, get_sun, EarthLocation
+    from astropy.time import Time
+    import astropy.units as u
+    ASTROPY_AVAILABLE = True
+
+    # Suppress warning when computing angular separation between different GCRS frames
+    # (topocentric body vs geocentric sun for magnitude calculations)
+    import warnings
+    from astropy.coordinates import NonRotationTransformationWarning
+    warnings.filterwarnings('ignore', category=NonRotationTransformationWarning)
+except ImportError:
+    ASTROPY_AVAILABLE = False
+
+
+def computeSolarSystemMagnitude(body_name, body, sun, time):
+    """Compute apparent magnitude of a solar system body.
+
+    Arguments:
+        body_name: [str] Name of the body ('sun', 'moon', 'jupiter', etc.)
+        body: [SkyCoord] Body position from get_body()
+        sun: [SkyCoord] Sun position from get_sun()
+        time: [Time] Observation time
+
+    Return:
+        [float] Apparent visual magnitude
+    """
+
+    # Sun - essentially constant
+    if body_name == 'sun':
+        return -26.74
+
+    # Distance from Earth in AU
+    delta = body.distance.to(u.AU).value
+
+    # Moon - varies with phase
+    if body_name == 'moon':
+        # Compute phase angle (Sun-Moon-Earth angle)
+        # Elongation is the angle between Moon and Sun as seen from Earth
+        elongation = body.separation(sun).deg
+        # Phase angle is approximately 180 - elongation for the Moon
+        phase_angle = 180 - elongation
+        # Moon's magnitude formula (simplified)
+        # Full moon is about -12.7, varies with phase
+        phase_fraction = (1 + np.cos(np.radians(phase_angle))) / 2
+        if phase_fraction > 0.001:
+            mag = -12.7 + 2.5 * np.log10(1.0 / phase_fraction)
+        else:
+            mag = 0  # New moon, essentially not visible
+        return mag
+
+    # Planets - use standard formula: V = V(1,0) + 5*log10(r*delta) + phase_correction
+    # V(1,0) values and phase coefficients from Astronomical Almanac
+
+    # Planet parameters: (V(1,0), phase_coeff1, phase_coeff2)
+    # V(1,0) is absolute magnitude at 1 AU from Sun and Earth at 0 phase
+    planet_params = {
+        'mercury': (-0.60, 0.0380, 0.000273),
+        'venus':   (-4.47, 0.0103, 0.000057),
+        'mars':    (-1.52, 0.0160, 0.0),
+        'jupiter': (-9.40, 0.0050, 0.0),
+        'saturn':  (-8.88, 0.0440, 0.0),
+        'uranus':  (-7.19, 0.0028, 0.0),
+        'neptune': (-6.87, 0.0, 0.0),
+    }
+
+    if body_name not in planet_params:
+        return 0.0
+
+    v_1_0, c1, c2 = planet_params[body_name]
+
+    # Average heliocentric distances in AU
+    avg_helio_dist = {
+        'mercury': 0.387,
+        'venus':   0.723,
+        'mars':    1.524,
+        'jupiter': 5.203,
+        'saturn':  9.537,
+        'uranus':  19.19,
+        'neptune': 30.07,
+    }
+
+    r = avg_helio_dist.get(body_name, 1.0)  # Heliocentric distance in AU
+
+    # Compute phase angle (Sun-Body-Earth angle)
+    elongation = body.separation(sun).deg
+    # Use law of cosines: cos(phase) = (r^2 + delta^2 - 1) / (2*r*delta)
+    cos_phase = (r**2 + delta**2 - 1) / (2 * r * delta)
+    cos_phase = np.clip(cos_phase, -1, 1)
+    phase_angle = np.degrees(np.arccos(cos_phase))
+
+    # Compute magnitude: V = V(1,0) + 5*log10(r*delta) + c1*phase + c2*phase^2
+    mag = v_1_0 + 5 * np.log10(r * delta) + c1 * phase_angle + c2 * phase_angle**2
+
+    return mag
 import matplotlib.gridspec as gridspec
+import matplotlib.ticker as ticker
+import scipy.optimize
+from scipy.spatial import cKDTree
 try:
     import pyqtgraph as pg
+    from pyqtgraph.Qt import QtWidgets, QtGui
 except Exception as exc:
     message = [
         "SkyFit requires PyQtGraph/PyQt5 for its GUI components, but the import failed.",
@@ -44,12 +151,16 @@ from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP, \
     rotationWrtStandard, rotationWrtStandardToPosAngle, correctVignetting, \
     extinctionCorrectionTrueToApparent, applyAstrometryFTPdetectinfo, getFOVSelectionRadius
 from RMS.Astrometry.AtmosphericExtinction import atmosphericExtinctionCorrection
+from RMS.Astrometry.StarClasses import CatalogStar, GeoPoint, PlanetPoint, PairedStars
+from RMS.Astrometry.StarFilters import filterPhotometricOutliers, filterBlendedStars
 from RMS.Astrometry.Conversions import date2JD, JD2HourAngle, trueRaDec2ApparentAltAz, \
     apparentAltAz2TrueRADec, J2000_JD, jd2Date, datetime2JD, JD2LST, geo2Cartesian, vector2RaDec, raDec2Vector
 from RMS.Astrometry.AstrometryNet import astrometryNetSolve
-from RMS.Astrometry.FFTalign import alignPlatepar
+from RMS.Astrometry.ApplyRecalibrate import recalibrateFF
+from RMS.Astrometry.AutoPlatepar import selectBestFrame, autoFitPlatepar
+from RMS.Astrometry.NNalign import alignPlatepar
 import RMS.ConfigReader as cr
-from RMS.ExtractStars import extractStarsAndSave
+from RMS.ExtractStars import extractStarsAndSave, extractStarsFF
 import RMS.Formats.CALSTARS as CALSTARS
 from RMS.Formats.Platepar import Platepar, getCatalogStarsImagePositions
 from RMS.Formats.FFfile import convertFRNameToFF, constructFFName
@@ -60,18 +171,18 @@ from RMS.Pickling import loadPickle, savePickle
 from RMS.Math import angularSeparation, RMSD, vectNorm
 from RMS.Misc import decimalDegreesToSexHours
 from RMS.Routines.AddCelestialGrid import updateRaDecGrid, updateAzAltGrid
-from RMS.Routines.CustomPyqtgraphClasses import *
+from RMS.Routines.CustomPyqtgraphClasses import ViewBox, TextItem, TextItemList, Crosshair, Plus, Cross, CursorItem, ImageItem, RightOptionsTab, qmessagebox
 from RMS.Routines.GreatCircle import fitGreatCircle, greatCircle
-from RMS.Routines.Image import signalToNoise, applyDark, applyFlat
-from RMS.Routines.MaskImage import getMaskFile
+from RMS.Routines.SphericalPolygonCheck import sphericalPolygonCheck
+from RMS.Routines.Image import loadFlat, loadDark, applyFlat, applyDark, signalToNoise, gammaCorrectionImage, adjustLevels, saveImage, loadImage
+from RMS.Routines.MaskImage import getMaskFile, MaskStructure
 from RMS.Routines import RollingShutterCorrection
-from RMS.Routines.MaskImage import getMaskFile
 from RMS.Misc import maxDistBetweenPoints, getRmsRootDir
 from Utils.KalmanFilter import KalmanFilter
 
 import pyximport
 pyximport.install(setup_args={'include_dirs': [np.get_include()]})
-from RMS.Astrometry.CyFunctions import subsetCatalog, equatorialCoordPrecession
+from RMS.Astrometry.CyFunctions import subsetCatalog, equatorialCoordPrecession, matchStars
 from RMS.Routines.SatellitePositions import SatellitePredictor, loadTLEs, loadRobustTLEs, findClosestTLEFile, SKYFIELD_AVAILABLE
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP
 from RMS.Astrometry.Conversions import datetime2JD
@@ -82,7 +193,7 @@ try:
 
     from PyQt5.QtWidgets import (
         QDialog, QLabel, QVBoxLayout, QHBoxLayout, QPushButton, QLineEdit, QGroupBox, QComboBox, QFileDialog,
-        QProgressBar, QWidget, QGridLayout
+        QProgressBar, QGridLayout
     )
     from PyQt5.QtCore import Qt, QThread, pyqtSignal, QObject
     from PyQt5 import QtCore
@@ -315,7 +426,7 @@ if ASTRA_IMPORTED:
                         h = QHBoxLayout()
                         h.addWidget(combo, 1)
                         h.addWidget(custom_edit, 1)
-                        container = QWidget()       
+                        container = QtWidgets.QWidget()
                         container.setLayout(h)      
                         layout.addWidget(container, row, col + 1)
 
@@ -1056,6 +1167,757 @@ if ASTRA_IMPORTED:
 
 
 
+class CalibrationFilesDialog(QtWidgets.QDialog):
+    """Dialog showing calibration file state with per-file independent load/save controls.
+
+    Each file type (Platepar, Config, Mask, Flat, Dark) has its own Load and Save buttons.
+    Load picks a single source location. Save supports writing to multiple locations at once.
+    """
+
+    FILE_TYPES = ["Platepar", "Config", "Mask", "Flat", "Dark"]
+
+    def __init__(self, plate_tool, parent=None):
+        super().__init__(parent)
+        self.plate_tool = plate_tool
+        self.setWindowTitle("SkyFit2 - File Manager")
+        self.setMinimumWidth(580)
+
+        self._locations = []  # list of (label, resolved_path)
+        self._buildLocationList()
+        self._buildUI()
+
+    # --- UI builder ---
+
+    def _buildUI(self):
+        """Build the dialog UI."""
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setSpacing(4)
+        layout.setContentsMargins(8, 8, 8, 8)
+
+        # --- Station section with Open Folder / Open File buttons ---
+        station_group = QtWidgets.QGroupBox("Station")
+        station_vlayout = QtWidgets.QVBoxLayout(station_group)
+        station_vlayout.setContentsMargins(8, 4, 8, 4)
+        station_vlayout.setSpacing(2)
+
+        folder_label = QtWidgets.QLabel("Data folder")
+        folder_label.setStyleSheet("font-weight: bold;")
+        station_vlayout.addWidget(folder_label)
+
+        if self.plate_tool.hasData():
+            path_text = self._shortenPath(self.plate_tool.dir_path)
+        else:
+            path_text = "(no data loaded)"
+        self._station_path_label = QtWidgets.QLabel(path_text)
+        self._station_path_label.setStyleSheet("color: gray; font-size: 11px;")
+        self._station_path_label.setWordWrap(True)
+        station_vlayout.addWidget(self._station_path_label)
+
+        self._station_warning_label = QtWidgets.QLabel("")
+        self._station_warning_label.setStyleSheet("color: #e65100; font-size: 11px;")
+        self._station_warning_label.setWordWrap(True)
+        self._station_warning_label.hide()
+        station_vlayout.addWidget(self._station_warning_label)
+
+        btn_row = QtWidgets.QHBoxLayout()
+        folder_btn = QtWidgets.QPushButton("Open Folder...")
+        file_btn = QtWidgets.QPushButton("Open File...")
+        folder_btn.setFixedWidth(120)
+        file_btn.setFixedWidth(120)
+        folder_btn.clicked.connect(self._onOpenFolder)
+        file_btn.clicked.connect(self._onOpenFile)
+        btn_row.addWidget(folder_btn)
+        btn_row.addWidget(file_btn)
+        btn_row.addStretch()
+        station_vlayout.addLayout(btn_row)
+
+        layout.addWidget(station_group)
+
+        # --- File sections ---
+        self.sections = {}
+        for ftype in self.FILE_TYPES:
+            group = self._createFileSection(ftype)
+            layout.addWidget(group)
+
+        # --- Bottom buttons ---
+        btn_layout = QtWidgets.QHBoxLayout()
+        btn_layout.addStretch()
+        close_btn = QtWidgets.QPushButton("Close")
+        close_btn.clicked.connect(self.accept)
+        btn_layout.addWidget(close_btn)
+        layout.addLayout(btn_layout)
+
+        # Refresh initial state
+        self._refreshAll()
+
+    # --- Open folder / file methods ---
+
+    def _onOpenFolder(self):
+        """Prompt to select a folder, warn about unsaved changes, and reload."""
+        pt = self.plate_tool
+
+        # Pick folder
+        dir_path = str(QtWidgets.QFileDialog.getExistingDirectory(
+            self, "Select folder with FF/image files",
+            pt.dir_path, QtWidgets.QFileDialog.ShowDirsOnly))
+        if not dir_path:
+            return
+
+        self._openPath(dir_path)
+
+    def _onOpenFile(self):
+        """Prompt to select a video file, warn about unsaved changes, and reload."""
+        pt = self.plate_tool
+
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self, "Select video file",
+            pt.dir_path,
+            "Video files (*.mp4 *.avi *.mkv *.mov);;"
+            "All files (*)")
+        if not path:
+            return
+
+        self._openPath(path)
+
+    def _openPath(self, path):
+        """Warn about unsaved changes and load the given path via changeStation."""
+        pt = self.plate_tool
+
+        # Warn about unsaved platepar (only if data is currently loaded)
+        if pt.hasData() and pt.platepar_modified:
+            reply = QtWidgets.QMessageBox.question(
+                self, "Unsaved Changes",
+                "The current platepar has unsaved changes.\nSave before changing station?",
+                QtWidgets.QMessageBox.Save | QtWidgets.QMessageBox.Discard | QtWidgets.QMessageBox.Cancel,
+                QtWidgets.QMessageBox.Save)
+            if reply == QtWidgets.QMessageBox.Cancel:
+                return
+            if reply == QtWidgets.QMessageBox.Save:
+                pt.savePlatepar()
+
+        # Reload via changeStation
+        success = pt.changeStation(path)
+
+        if success:
+            self._buildLocationList()
+            self._station_path_label.setText(self._shortenPath(pt.dir_path))
+            self._refreshAll()
+
+    # --- Location helpers ---
+
+    @staticmethod
+    def _readStationId(directory):
+        """Read stationID from .config in directory, or None on failure."""
+        config_path = os.path.join(directory, ".config")
+        if not os.path.isfile(config_path):
+            return None
+        try:
+            cp = configparser.ConfigParser()
+            cp.read(config_path)
+            return cp.get("System", "stationID").strip()
+        except Exception:
+            return None
+
+    def _detectStationFolder(self):
+        """Detect the station folder by probing known paths for a .config with matching stationID.
+
+        Probes in order:
+            1. ~/source/Stations/<stationID>/
+            2. ~/source/RMS/
+
+        Returns:
+            (label, path) tuple if a .config is found, or None.
+            Label is "Station" if IDs match, or "Station (ID: <actual_id>)" if mismatched
+            (only for ~/source/Stations/ — ~/source/RMS/ is silently skipped on mismatch).
+        """
+        pt = self.plate_tool
+        if not pt.hasData():
+            return None
+
+        current_id = getattr(pt.config, 'stationID', None)
+        if not current_id:
+            return None
+
+        home = os.path.expanduser("~")
+
+        # 1. ~/source/Stations/<stationID>/ — show even on mismatch (directory name
+        #    implies intent, warn user if .config inside disagrees)
+        stations_dir = os.path.join(home, "source", "Stations", current_id)
+        candidate_id = self._readStationId(stations_dir)
+        if candidate_id is not None:
+            if candidate_id == current_id:
+                return ("Station", stations_dir)
+            else:
+                return ("Station (ID: {})".format(candidate_id), stations_dir)
+
+        # 2. ~/source/RMS/ — only offer if the ID actually matches
+        rms_dir = os.path.join(home, "source", "RMS")
+        candidate_id = self._readStationId(rms_dir)
+        if candidate_id == current_id:
+            return ("Station", rms_dir)
+
+        return None
+
+    def _buildLocationList(self):
+        """Build deduplicated list of known locations."""
+        seen = set()
+        entries = []
+
+        def _add(label, path):
+            if path is None:
+                return
+            resolved = os.path.realpath(path)
+            if resolved not in seen:
+                seen.add(resolved)
+                entries.append((label, resolved))
+
+        pt = self.plate_tool
+        if pt.hasData():
+            # 1. Data Folder (always first)
+            _add("Data Folder", pt.dir_path)
+
+            # 2. Station folder (detected from ~/source/Stations/<id>/ or ~/source/RMS/)
+            station = self._detectStationFolder()
+            if station is not None:
+                _add(station[0], station[1])
+
+            # 3. Config Source (if different from above)
+            _add("Config Source", pt.config.config_file_path)
+
+            # 4. RMS Root (if different from above, and not a foreign station)
+            rms_root = pt.config.rms_root_dir
+            rms_root_id = self._readStationId(rms_root) if rms_root else None
+            if rms_root_id is None or rms_root_id == getattr(pt.config, 'stationID', None):
+                _add("RMS Root", rms_root)
+
+            # 5. Sticky custom locations from this session
+            for custom_path in pt._file_manager_custom_locations:
+                _add("Custom", custom_path)
+        else:
+            _add("RMS Root", getRmsRootDir())
+
+        self._locations = entries
+
+    @staticmethod
+    def _shortenPath(path):
+        """Shorten a path for display by replacing the home directory with ~."""
+        home = os.path.expanduser("~")
+        if path.startswith(home):
+            return "~" + path[len(home):]
+        return path
+
+    def _locationMenuLabel(self, label, path):
+        return "{} - {}".format(label, self._shortenPath(path))
+
+    # --- Section UI builder ---
+
+    def _createFileSection(self, ftype):
+        """Create a group box for a single file type with independent Load/Save controls."""
+        group = QtWidgets.QGroupBox()
+        vlayout = QtWidgets.QVBoxLayout(group)
+        vlayout.setContentsMargins(8, 4, 8, 4)
+        vlayout.setSpacing(2)
+
+        # Row 1: type name + status
+        top = QtWidgets.QHBoxLayout()
+        name_label = QtWidgets.QLabel(ftype)
+        name_label.setStyleSheet("font-weight: bold;")
+        status_label = QtWidgets.QLabel("")
+        status_label.setAlignment(QtCore.Qt.AlignRight)
+        top.addWidget(name_label)
+        top.addStretch()
+        top.addWidget(status_label)
+        vlayout.addLayout(top)
+
+        # Row 2: source path
+        source_label = QtWidgets.QLabel("")
+        source_label.setStyleSheet("color: gray; font-size: 11px;")
+        source_label.setWordWrap(True)
+        vlayout.addWidget(source_label)
+
+        # Row 3: Load / Save buttons
+        btn_row = QtWidgets.QHBoxLayout()
+        load_btn = QtWidgets.QPushButton("Load \u25BE")
+        save_btn = QtWidgets.QPushButton("Save \u25BE")
+        load_btn.setFixedWidth(100)
+        save_btn.setFixedWidth(100)
+
+        load_btn.clicked.connect(lambda checked, ft=ftype: self._showLoadMenu(ft, load_btn))
+        save_btn.clicked.connect(lambda checked, ft=ftype: self._showSaveDialog(ft))
+
+        btn_row.addWidget(load_btn)
+        btn_row.addWidget(save_btn)
+        btn_row.addStretch()
+        vlayout.addLayout(btn_row)
+
+        self.sections[ftype] = {
+            'group': group,
+            'status_label': status_label,
+            'source_label': source_label,
+            'load_btn': load_btn,
+            'save_btn': save_btn,
+        }
+
+        return group
+
+    # --- Refresh state display ---
+
+    def _setStatus(self, ftype, status):
+        """Set the status label for a file type with color coding.
+
+        Status values:
+            'Loaded'     - green, file is loaded and in sync with disk
+            'Unsaved'    - amber, in-memory changes need saving
+            'Not loaded' - gray, nothing present
+        """
+        label = self.sections[ftype]['status_label']
+        label.setText(status)
+        if status == "Loaded":
+            label.setStyleSheet("color: #2e7d32; font-weight: bold;")  # green
+        elif status == "Unsaved":
+            label.setStyleSheet("color: #e65100; font-weight: bold;")  # amber
+        else:
+            label.setStyleSheet("color: gray;")
+
+    def _refreshAll(self):
+        """Refresh all sections from the current state."""
+        pt = self.plate_tool
+
+        if hasattr(self, '_station_path_label'):
+            if pt.hasData():
+                self._station_path_label.setText(self._shortenPath(pt.dir_path))
+            else:
+                self._station_path_label.setText("(no data loaded)")
+
+        # Check for station ID mismatches (platepar vs config, and station folder)
+        warnings = []
+        if pt.hasData() and hasattr(pt, 'platepar') and pt.platepar is not None:
+            pp_id = getattr(pt.platepar, 'station_code', None)
+            cfg_id = getattr(pt.config, 'stationID', None)
+            if pp_id and cfg_id and pp_id != cfg_id:
+                warnings.append(
+                    "Platepar station '{}' does not match config '{}'".format(pp_id, cfg_id))
+
+        # Check if the detected station folder has a different stationID
+        station = self._detectStationFolder()
+        if station is not None:
+            station_label = station[0]
+            if station_label.startswith("Station (ID:"):
+                warnings.append(
+                    "Station folder has different ID: {}".format(station_label))
+
+        if warnings:
+            self._station_warning_label.setText("Warning: " + "; ".join(warnings))
+            self._station_warning_label.show()
+        else:
+            self._station_warning_label.hide()
+
+        # When no data is loaded, show empty state for all sections
+        if not pt.hasData():
+            for ftype in self.FILE_TYPES:
+                self._setStatus(ftype, "Not loaded")
+                self.sections[ftype]['source_label'].setText("(no data loaded)")
+                self.sections[ftype]['load_btn'].setEnabled(False)
+                self.sections[ftype]['save_btn'].setEnabled(False)
+            return
+
+        # Enable load/save buttons
+        for ftype in self.FILE_TYPES:
+            self.sections[ftype]['load_btn'].setEnabled(True)
+            self.sections[ftype]['save_btn'].setEnabled(True)
+
+        # Platepar
+        pp_source = pt.platepar_file if pt.platepar_file else "(unsaved)"
+        if pt.platepar_file and os.path.isfile(pt.platepar_file):
+            pp_status = "Unsaved" if pt.platepar_modified else "Loaded"
+        else:
+            pp_status = "Unsaved"
+        self.sections["Platepar"]["source_label"].setText(pp_source)
+        self._setStatus("Platepar", pp_status)
+
+        # Config
+        cfg_source = pt.config.config_file_name if pt.config.config_file_name else "(unknown)"
+        self.sections["Config"]["source_label"].setText(cfg_source)
+        self._setStatus("Config", "Unsaved" if pt.isConfigModified() else "Loaded")
+
+        # Mask
+        if pt.mask_source_path:
+            mask_unsaved = hasattr(pt, 'tab') and hasattr(pt.tab, 'mask') and pt.tab.mask.unsaved
+            self.sections["Mask"]["source_label"].setText(pt.mask_source_path)
+            self._setStatus("Mask", "Unsaved" if mask_unsaved else "Loaded")
+        elif hasattr(pt, 'mask_polygons') and pt.mask_polygons:
+            self.sections["Mask"]["source_label"].setText("(drawn, not saved)")
+            self._setStatus("Mask", "Unsaved")
+        else:
+            self.sections["Mask"]["source_label"].setText("(not loaded)")
+            self._setStatus("Mask", "Not loaded")
+
+        # Flat
+        if pt.flat_source_path and pt.flat_struct is not None:
+            self.sections["Flat"]["source_label"].setText(pt.flat_source_path)
+            self._setStatus("Flat", "Loaded")
+        elif pt.flat_struct is not None:
+            self.sections["Flat"]["source_label"].setText("(loaded)")
+            self._setStatus("Flat", "Loaded")
+        else:
+            self.sections["Flat"]["source_label"].setText("(not loaded)")
+            self._setStatus("Flat", "Not loaded")
+
+        # Disable flat save if no source file to copy
+        flat_can_save = (pt.flat_struct is not None and pt.flat_source_path
+                         and os.path.isfile(pt.flat_source_path))
+        self.sections["Flat"]["save_btn"].setEnabled(flat_can_save)
+        if not flat_can_save:
+            self.sections["Flat"]["save_btn"].setToolTip("No flat source file to copy")
+        else:
+            self.sections["Flat"]["save_btn"].setToolTip("")
+
+        # Dark
+        if pt.dark_source_path and pt.dark is not None:
+            self.sections["Dark"]["source_label"].setText(pt.dark_source_path)
+            self._setStatus("Dark", "Loaded")
+        elif pt.dark is not None:
+            self.sections["Dark"]["source_label"].setText("(loaded)")
+            self._setStatus("Dark", "Loaded")
+        else:
+            self.sections["Dark"]["source_label"].setText("(not loaded)")
+            self._setStatus("Dark", "Not loaded")
+
+        # Disable dark save if no source file to copy
+        dark_can_save = (pt.dark is not None and pt.dark_source_path
+                         and os.path.isfile(pt.dark_source_path))
+        self.sections["Dark"]["save_btn"].setEnabled(dark_can_save)
+        if not dark_can_save:
+            self.sections["Dark"]["save_btn"].setToolTip("No dark source file to copy")
+        else:
+            self.sections["Dark"]["save_btn"].setToolTip("")
+
+    # --- Load: pick one location ---
+
+    def _showLoadMenu(self, ftype, button):
+        """Show a popup menu with known locations + Browse for loading a single file."""
+
+        if not self.plate_tool.hasData():
+            return
+
+        menu = QtWidgets.QMenu(self)
+
+        for label, path in self._locations:
+            action = menu.addAction(self._locationMenuLabel(label, path))
+            action.setData(path)
+
+        menu.addSeparator()
+        browse_action = menu.addAction("Browse...")
+        browse_action.setData("__browse__")
+
+        chosen = menu.exec_(button.mapToGlobal(button.rect().bottomLeft()))
+        if chosen is None:
+            return
+        path = chosen.data()
+        if path == "__browse__":
+            path = self._browseForLoad(ftype)
+            if not path:
+                return
+        self._loadFile(ftype, path)
+
+    def _browseForLoad(self, ftype):
+        """Open a file browser appropriate for the given file type."""
+        start_dir = self.plate_tool.dir_path
+        if ftype == "Platepar":
+            path, _ = QtWidgets.QFileDialog.getOpenFileName(
+                self, "Load Platepar", start_dir,
+                "Platepar files (*.cal);;All files (*)")
+            return path
+        elif ftype == "Config":
+            # Use folder picker — _loadFile will find .config in the selected directory
+            path = str(QtWidgets.QFileDialog.getExistingDirectory(
+                self, "Select folder containing config", start_dir,
+                QtWidgets.QFileDialog.ShowDirsOnly))
+            return path
+        elif ftype == "Mask":
+            path, _ = QtWidgets.QFileDialog.getOpenFileName(
+                self, "Load Mask", start_dir,
+                "BMP files (*.bmp);;All files (*)")
+            return path
+        elif ftype == "Flat":
+            path, _ = QtWidgets.QFileDialog.getOpenFileName(
+                self, "Load Flat", start_dir,
+                "Image files (*.png *.jpg *.bmp);;All files (*)")
+            return path
+        elif ftype == "Dark":
+            path, _ = QtWidgets.QFileDialog.getOpenFileName(
+                self, "Load Dark", start_dir,
+                "Image files (*.png *.jpg *.bmp *.nef *.cr2);;All files (*)")
+            return path
+        return None
+
+    def _loadFile(self, ftype, path):
+        """Load a single file type from the given path (file or directory)."""
+        pt = self.plate_tool
+        result = None
+
+        if ftype == "Platepar":
+            if os.path.isdir(path):
+                path = os.path.join(path, pt.config.platepar_name)
+            if os.path.isfile(path):
+                try:
+                    # update=True only if UI is set up
+                    update = hasattr(pt, 'tab')
+                    pt.loadPlatepar(update=update, platepar_file=path)
+                    pt.platepar_modified = False
+                    result = "Platepar loaded from: " + path
+                except Exception as e:
+                    result = "Platepar load failed: " + repr(e)
+            else:
+                result = "Platepar not found: " + path
+
+        elif ftype == "Config":
+            if os.path.isdir(path):
+                # Search for config files in the directory
+                config_files = [f for f in os.listdir(path)
+                    if f.endswith('.config') or f.endswith('.cfg')]
+                if len(config_files) == 1:
+                    path = os.path.join(path, config_files[0])
+                elif len(config_files) > 1:
+                    result = "Multiple config files found in: " + path
+                else:
+                    result = "No config file found in: " + path
+            if result is None and os.path.isfile(path):
+                try:
+                    pt.config = cr.parse(path)
+                    pt.initStarDetectionOverrides()
+                    result = "Config loaded from: " + path
+                except Exception as e:
+                    result = "Config load failed: " + repr(e)
+            elif result is None:
+                result = "Config not found: " + path
+
+        elif ftype == "Mask":
+            if os.path.isdir(path):
+                path = os.path.join(path, "mask.bmp")
+            if os.path.isfile(path):
+                try:
+                    pt.loadMaskFromFile(path)
+                    result = "Mask loaded from: " + path
+                except Exception as e:
+                    result = "Mask load failed: " + repr(e)
+            else:
+                result = "Mask not found: " + path
+
+        elif ftype == "Flat":
+            if os.path.isdir(path):
+                # Search for known flat file names in the directory
+                for fname in [pt.config.flat_file, "flat.png"]:
+                    fpath = os.path.join(path, fname)
+                    if os.path.isfile(fpath):
+                        path = fpath
+                        break
+                else:
+                    result = "Flat not found in: " + path
+
+            if result is None:  # found a file
+                try:
+                    flat = loadFlat(*os.path.split(path), dtype=pt.img.data.dtype,
+                                    byteswap=pt.img_handle.byteswap)
+                    flat.flat_img = np.swapaxes(flat.flat_img, 0, 1)
+                    if pt.img.data.shape != flat.flat_img.shape:
+                        result = "Flat size mismatch: " + path
+                    else:
+                        pt.flat_struct = flat
+                        pt.flat_source_path = path
+                        pt.img.flat_struct = flat
+                        pt.img_zoom.flat_struct = flat
+                        pt.img.reloadImage()
+                        pt.img_zoom.reloadImage()
+                        result = "Flat loaded from: " + path
+                except Exception as e:
+                    result = "Flat load failed: " + repr(e)
+
+        elif ftype == "Dark":
+            if os.path.isdir(path):
+                # Search for known dark file names in the directory
+                for fname in [pt.config.dark_file, "dark.bmp", "dark.png"]:
+                    fpath = os.path.join(path, fname)
+                    if os.path.isfile(fpath):
+                        path = fpath
+                        break
+                else:
+                    result = "Dark not found in: " + path
+
+            if result is None:  # found a file
+                try:
+                    dark = loadDark(*os.path.split(path), dtype=pt.img.data.dtype,
+                                    byteswap=pt.img_handle.byteswap)
+                    dark = dark.astype(pt.img.data.dtype).T
+                    if pt.img.data.shape != dark.shape:
+                        result = "Dark size mismatch: " + path
+                    else:
+                        pt.dark = dark
+                        pt.dark_source_path = path
+                        pt.img.dark = dark
+                        pt.img_zoom.dark = dark
+                        # Apply the dark to the flat if flatbiassub is set
+                        if pt.flatbiassub and pt.flat_struct is not None:
+                            pt.flat_struct.applyDark(dark)
+                            pt.img.flat_struct = pt.flat_struct
+                            pt.img_zoom.flat_struct = pt.flat_struct
+                        pt.img.reloadImage()
+                        pt.img_zoom.reloadImage()
+                        result = "Dark loaded from: " + path
+                except Exception as e:
+                    result = "Dark load failed: " + repr(e)
+
+        if result:
+            print(result)
+            is_error = "failed" in result.lower() or "not found" in result.lower()
+            qmessagebox(title="Load " + ftype, message=result,
+                         message_type="error" if is_error else "info")
+            self._refreshAll()
+
+    # --- Save: pick multiple locations ---
+
+    def _showSaveDialog(self, ftype):
+        """Show a small dialog with checkboxes for multi-location save."""
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle("Save {} to...".format(ftype))
+        dlg.setMinimumWidth(400)
+        layout = QtWidgets.QVBoxLayout(dlg)
+
+        checkboxes = []
+        for label, path in self._locations:
+            cb = QtWidgets.QCheckBox(self._locationMenuLabel(label, path))
+            cb.setProperty("path", path)
+            layout.addWidget(cb)
+            checkboxes.append(cb)
+
+        # Browse button to add a custom location
+        browse_btn = QtWidgets.QPushButton("Add location...")
+        def on_browse():
+            path = QtWidgets.QFileDialog.getExistingDirectory(
+                dlg, "Select Directory", self.plate_tool.dir_path)
+            if not path:
+                return
+            resolved = os.path.realpath(path)
+            # If already in the list, just check it
+            for cb in checkboxes:
+                if cb.property("path") == resolved:
+                    cb.setChecked(True)
+                    return
+            # Add new checkbox
+            cb = QtWidgets.QCheckBox("Custom - {}".format(self._shortenPath(resolved)))
+            cb.setProperty("path", resolved)
+            cb.setChecked(True)
+            layout.insertWidget(len(checkboxes), cb)
+            checkboxes.append(cb)
+            # Persist for future use across dialog open/close within this session
+            if resolved not in self.plate_tool._file_manager_custom_locations:
+                self.plate_tool._file_manager_custom_locations.append(resolved)
+            self._locations.append(("Custom", resolved))
+
+        browse_btn.clicked.connect(on_browse)
+        layout.addWidget(browse_btn)
+
+        # OK / Cancel
+        btn_box = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel)
+        btn_box.accepted.connect(dlg.accept)
+        btn_box.rejected.connect(dlg.reject)
+        layout.addWidget(btn_box)
+
+        if dlg.exec_() == QtWidgets.QDialog.Accepted:
+            paths = [cb.property("path") for cb in checkboxes if cb.isChecked()]
+            if paths:
+                self._saveFile(ftype, paths)
+
+    def _saveFile(self, ftype, target_dirs):
+        """Save a single file type to one or more target directories."""
+        pt = self.plate_tool
+        results = []
+
+        for target_dir in target_dirs:
+            if ftype == "Platepar":
+                try:
+                    dest = os.path.join(target_dir, pt.config.platepar_name)
+                    pt.platepar.write(dest, fmt=pt.platepar_fmt, fov=computeFOVSize(pt.platepar))
+                    pt.platepar_modified = False
+                    results.append("Platepar saved to: " + dest)
+                except Exception as e:
+                    results.append("Platepar save to {} failed: {}".format(target_dir, repr(e)))
+
+            elif ftype == "Config":
+                try:
+                    src = pt.config.config_file_name
+                    dest = os.path.join(target_dir, os.path.basename(src))
+                    config_catalog_lm = max(3.0, pt.cat_lim_mag - 1.0)
+                    if os.path.realpath(src) != os.path.realpath(dest):
+                        # Copy the config to the target, then write overrides into the copy
+                        shutil.copy2(src, dest)
+                        pt._writeStarDetectionConfig(dest, config_catalog_lm)
+                    else:
+                        # Same file — write overrides in-place (backup handled by _writeStarDetectionConfig)
+                        pt._writeStarDetectionConfig(dest, config_catalog_lm)
+                    # Sync in-memory config attrs so modified state is cleared
+                    pt.config.intensity_threshold = pt.override_intensity_threshold
+                    pt.config.neighborhood_size = pt.override_neighborhood_size
+                    pt.config.max_stars = pt.override_max_stars
+                    pt.config.segment_radius = pt.override_segment_radius
+                    pt.config.max_feature_ratio = pt.override_max_feature_ratio
+                    pt.config.roundness_threshold = pt.override_roundness_threshold
+                    pt._updateConfigSaveButtonState()
+                    results.append("Config saved to: " + dest)
+                except Exception as e:
+                    results.append("Config save to {} failed: {}".format(target_dir, repr(e)))
+
+            elif ftype == "Mask":
+                try:
+                    dest = os.path.join(target_dir, "mask.bmp")
+                    mask_img = pt.generateMaskImage()
+                    cv2.imwrite(dest, mask_img)
+                    pt.mask_source_path = dest
+                    if hasattr(pt, 'tab') and hasattr(pt.tab, 'mask'):
+                        pt.tab.mask.setUnsaved(False)
+                    results.append("Mask saved to: " + dest)
+                except Exception as e:
+                    results.append("Mask save to {} failed: {}".format(target_dir, repr(e)))
+
+            elif ftype == "Flat":
+                if pt.flat_source_path and os.path.isfile(pt.flat_source_path):
+                    try:
+                        dest = os.path.join(target_dir, os.path.basename(pt.flat_source_path))
+                        if os.path.realpath(pt.flat_source_path) != os.path.realpath(dest):
+                            shutil.copy2(pt.flat_source_path, dest)
+                            results.append("Flat copied to: " + dest)
+                        else:
+                            results.append("Flat: source and destination are the same, skipped.")
+                    except Exception as e:
+                        results.append("Flat save to {} failed: {}".format(target_dir, repr(e)))
+                else:
+                    results.append("Flat: no source file to copy.")
+
+            elif ftype == "Dark":
+                if pt.dark_source_path and os.path.isfile(pt.dark_source_path):
+                    try:
+                        dest = os.path.join(target_dir, os.path.basename(pt.dark_source_path))
+                        if os.path.realpath(pt.dark_source_path) != os.path.realpath(dest):
+                            shutil.copy2(pt.dark_source_path, dest)
+                            results.append("Dark copied to: " + dest)
+                        else:
+                            results.append("Dark: source and destination are the same, skipped.")
+                    except Exception as e:
+                        results.append("Dark save to {} failed: {}".format(target_dir, repr(e)))
+                else:
+                    results.append("Dark: no source file to copy.")
+
+        if results:
+            msg = "\n".join(results)
+            print(msg)
+            has_error = any("failed" in r.lower() for r in results)
+            if has_error:
+                qmessagebox(title="Save " + ftype, message=msg, message_type="error")
+            self._refreshAll()
+            pt.updateFileManagerButton()
+
+
 class QFOVinputDialog(QtWidgets.QDialog):
 
     lenses = "none"
@@ -1295,167 +2157,20 @@ class GeoPoints(object):
         self.ra_data = np.array(self.ra_data)
         self.dec_data = np.array(self.dec_data)
 
-        
 
-class CatalogStar(object):
-    def __init__(self, ra, dec, mag):
-        """ Container for a catalog star. """
-
-        self.pick_type = "star"
-
-        self.ra = ra
-        self.dec = dec
-        self.mag = mag
-
-
-    def coords(self):
-        """ Return sky coordinates. """
-
-        return self.ra, self.dec, self.mag
-
-
-
-class GeoPoint(object):
-    def __init__(self, geo_points_obj, geo_point_index):
-        """ Container for a geo point. """
-
-        self.pick_type = "geopoint"
-
-        self.geo_points_obj = geo_points_obj
-        self.geo_point_index = geo_point_index
-
-
-    def coords(self):
-        """ Return sky coordinates. """
-
-        ra = self.geo_points_obj.ra_data[self.geo_point_index]
-        dec = self.geo_points_obj.dec_data[self.geo_point_index]
-        mag = 1.0
-
-        return ra, dec, mag
-
-
-
-
-class PairedStars(object):
-    def __init__(self):
-        """ Container for picked stars and geo points. """
-
-        self.paired_stars = []
-
-
-    def addPair(self, x, y, fwhm, intens_acc, obj, snr=0, saturated=False):
-        """ Add a pair between image coordinates and a star or a geo point. 
-    
-        Arguments:
-            x: [float] Image X coordinate.
-            y: [float] Image Y coordinate.
-            fwhm: [float] Full width at half maximum (px).
-            intens_acc: [float] Sum of pixel intensities.
-            obj: [object] Instance of CatalogStar or GeoPoint.
-
-        """
-
-        self.paired_stars.append([x, y, fwhm, intens_acc, obj, snr, saturated])
-
-
-    def removeGeoPoints(self):
-        """ Remove all geo points form the list of pairs. """
-
-        self.paired_stars = [entry for entry in self.paired_stars if entry[3].pick_type != "geopoint"]
-
-
-
-    def findClosestPickedStarIndex(self, pos_x, pos_y):
-        """ Finds the index of the closest picked star on the image to the given image position. """
-
-        min_index = 0
-        min_dist = np.inf
-
-        picked_x = [star[0] for star in self.paired_stars]
-        picked_y = [star[1] for star in self.paired_stars]
-
-        # Find the index of the closest catalog star to the given image coordinates
-        for i, (x, y) in enumerate(zip(picked_x, picked_y)):
-
-            dist = (pos_x - x)**2 + (pos_y - y)**2
-
-            if dist < min_dist:
-                min_dist = dist
-                min_index = i
-
-        return min_index
-
-
-    def removeClosestPair(self, pos_x, pos_y):
-        """ Remove pair closest to the given image coordinates. """
-
-        if not len(self.paired_stars):
-            return None
-
-        # Find the closest star to the coordinates
-        min_index = self.findClosestPickedStarIndex(pos_x, pos_y)
-
-        # Remove the star from the list
-        self.paired_stars.pop(min_index)
-
-
-    def imageCoords(self, draw=False):
-        """ Return a list of image coordinates of the pairs. 
-    
-        Keyword arguments:
-            draw: [bool] Add an offset of 0.5 px for drwaing using pyqtgraph.
-        """
-
-        offset = 0
-        if draw:
-            offset = 0.5
-
-        img_coords = [(x + offset, y + offset, intens_acc) for x, y, _, intens_acc, _, _, _ 
-                      in self.paired_stars]
-
-        return img_coords
-
-
-    def skyCoords(self):
-        """ Return a list of sky coordinates. """
-
-        return [obj.coords() for _, _, _, _, obj, _, _ in self.paired_stars]
-
-
-    def allCoords(self):
-        """ Return all coordiantes, image and sky in the [(x, y, intens_acc, snr), (ra, dec, mag)] list form
-            for every entry. 
-        """
-
-        return [
-            [(x, y, fwhm, intens_acc, snr, saturated), obj.coords()]
-            for x, y, fwhm, intens_acc, obj, snr, saturated in self.paired_stars
-            ]
-
-    def snr(self):
-        """ Return a list of SNR values. """
-
-        return [snr for _, _, _, _, _, snr, _ in self.paired_stars]
-
-
-    def __len__(self):
-        """ Return the total number of paired stars. """
-
-        return len(self.paired_stars)
-
+# CatalogStar, GeoPoint, and PairedStars are now imported from RMS.Astrometry.StarClasses
 
 
 class PlateTool(QtWidgets.QMainWindow):
-    def __init__(self, input_path, config, beginning_time=None, fps=None, gamma=None, use_fr_files=False,
-        geo_points_input=None, startUI=True, mask=None, nobg=False, peribg=False, flipud=False,
-        flatbiassub=False, exposure_ratio=1.0, show_sattracks=False, tle_file=None):
+    def __init__(self, input_path=None, config=None, beginning_time=None, fps=None, gamma=None,
+        use_fr_files=False, geo_points_input=None, startUI=True, mask=None, nobg=False, peribg=False,
+        flipud=False, flatbiassub=False, exposure_ratio=1.0, show_sattracks=False, tle_file=None):
         """ SkyFit interactive window.
 
         Arguments:
-            input_path: [str] Absolute path to the directory containing FF or image files, or a path to a 
-                video file.
-            config: [Config struct]
+            input_path: [str] Absolute path to the directory containing FF or image files, or a path to a
+                video file. None to start empty.
+            config: [Config struct] None to use default config.
 
         Keyword arguments:
             beginning_time: [datetime] Datetime of the video beginning. Optional, only can be given for
@@ -1469,12 +2184,12 @@ class PlateTool(QtWidgets.QMainWindow):
             startUI: [bool] Start the GUI. True by default.
             mask: [str] Path to a mask file.
             nobg: [bool] Do not subtract the background for photometry. False by default.
-            peribg: [bool] Perform background subtraction using the average of the pixels adjacent to the 
+            peribg: [bool] Perform background subtraction using the average of the pixels adjacent to the
                 coloured mask instead of the avepixel. False by default.
             flipud: [bool] Flip the image upside down. False by default.
             flatbiassub: [bool] Subtract flat and bias frames. False by default.
-            exposure_ratio: [float] Exposure ratio between stars and meteors. Used for magnitude scaling of 
-                meteors observed on long exposure images with shutters. The correct exp. ratio is already 
+            exposure_ratio: [float] Exposure ratio between stars and meteors. Used for magnitude scaling of
+                meteors observed on long exposure images with shutters. The correct exp. ratio is already
                 automatically applied for DFN images. 1.0 by default.
             show_sattracks: [bool] Show satellite tracks. False by default.
             tle_file: [str] Path to a TLE file for satellite tracks.
@@ -1488,14 +2203,30 @@ class PlateTool(QtWidgets.QMainWindow):
         self.mode_list = ['skyfit', 'manualreduction']
         self.max_pixels_between_matched_stars = np.inf
         self.autopan_mode = False
-        self.input_path = input_path
-        if os.path.isfile(self.input_path):
-            self.dir_path = os.path.dirname(self.input_path)
-        else:
-            self.dir_path = self.input_path
 
+        # Handle empty construction (no input path or config)
+        if config is None:
+            config = cr.Config()
+
+        self.input_path = input_path
+        if input_path is not None:
+            if os.path.isfile(self.input_path):
+                self.dir_path = os.path.dirname(self.input_path)
+            else:
+                self.dir_path = self.input_path
+        else:
+            # Default directory for empty start
+            rms_data_dir = os.path.expanduser("~/RMS_data")
+            self.dir_path = rms_data_dir if os.path.isdir(rms_data_dir) else os.path.expanduser("~")
 
         self.config = config
+
+        # Store original catalog file and band ratios for "Config Default" option.
+        # When the user switches catalogs via the dropdown, onCatalogChanged()
+        # restores these so the magnitude filter uses the same bands as on startup
+        # (rather than falling back to V-band only).
+        self._original_catalog_file = self.config.star_catalog_file
+        self._original_band_ratios = self.config.star_catalog_band_ratios
 
         # Force the CV2 backend when SkyFit is being used
         self.config.media_backend = 'cv2'
@@ -1560,6 +2291,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.saturated_centroid = False
         self.closest_type = None
         self.closest_cat_star_indx = None
+        self.closest_planet_indx = None
 
         # List of paired image and catalog stars
         self.pick_list = {}
@@ -1589,8 +2321,20 @@ class PlateTool(QtWidgets.QMainWindow):
         # Store the mask
         self.mask = mask
 
+        # Last directory used for loading masks (for file dialog)
+        self.last_mask_dir = None
+
         # Flat field
         self.flat_struct = None
+
+        # Source path tracking for calibration files dialog
+        self.platepar_modified = False
+        self.mask_source_path = None
+        self.flat_source_path = None
+        self.dark_source_path = None
+
+        # Sticky custom locations for the File Manager save dialog (survives dialog close/reopen)
+        self._file_manager_custom_locations = []
 
         # Dark frame
         self.dark = None
@@ -1617,6 +2361,10 @@ class PlateTool(QtWidgets.QMainWindow):
         self.photom_fit_stddev = None
         self.photom_fit_resids = None
 
+        # Figure references for toggling Astrometry/Photometry windows
+        self.fig_astrometry = None
+        self.fig_photometry = None
+
         # Compute the saturation threshold
         self.saturation_threshold = int(round(0.98*(2**self.config.bit_depth - 1)))
 
@@ -1630,9 +2378,9 @@ class PlateTool(QtWidgets.QMainWindow):
             self.astra_dialog = None
             self.astra_config_params = None
 
-        
         # Satellite tracks config
         self.show_sattracks = show_sattracks
+        self.auto_compute_sattracks = show_sattracks  # Enable auto-compute if satellite tracks requested
         self.tle_file = tle_file
         self.satellite_tracks = []
         
@@ -1656,59 +2404,122 @@ class PlateTool(QtWidgets.QMainWindow):
     
         ###################################################################################################
 
+        # Display options
+        self.show_spectral_type = False
+        self.show_star_names = False
+        self.apparent_mag_corr_enabled = False
+        self.label_mag_limit = 5.0
+        self.show_constellations = False
+        self.selected_stars_visible = True
 
-        # Detect data input type and init the image handle
-        self.detectInputType(load=True, beginning_time=beginning_time, use_fr_files=self.use_fr_files)
+        # Star detection override parameters
+        self.star_detection_override_enabled = False  # Use override parameters instead of CALSTARS
+        self.star_detection_override_data = {}  # Store re-detected stars per FF file
+        self.override_intensity_threshold = 18
+        self.override_neighborhood_size = 10
+        self.override_max_stars = 200
+        self.override_gamma = 1.0
+        self.override_segment_radius = 4
+        self.override_max_feature_ratio = 0.8
+        self.override_roundness_threshold = 0.5
+        self._original_config_gamma = None  # Store original config gamma for restoration
 
-        # Update the FPS if it's forced
-        self.setFPS()
+        # Mask drawing state
+        self.mask_draw_mode = False
+        self.mask_current_polygon = []  # Points being drawn
+        self.mask_polygons = []  # List of completed polygons
+        self.mask_dragging_vertex = None  # (polygon_idx, vertex_idx) or ('current', vertex_idx)
+
+        # Flat image for mask editing background
+        self.flat_image_data = None  # Loaded flat.bmp data
+        self.mask_use_flat_background = False  # Whether to show flat as background
+
+        # Flag for auto-opening the calibration dialog
+        self._show_calibration_dialog_on_start = False
+
+        if input_path is not None:
+            # --- Data-loading path (input provided) ---
+
+            # Detect data input type and init the image handle
+            self.detectInputType(load=True, beginning_time=beginning_time,
+                                 use_fr_files=self.use_fr_files)
+
+            # Update the FPS if it's forced
+            self.setFPS()
+
+            # LOADING STARS
+
+            # Load catalog stars
+            self.catalog_stars = self.loadCatalogStars(self.config.catalog_mag_limit)
+            self.cat_lim_mag = self.config.catalog_mag_limit
+
+            # Check if the catalog exists
+            if not self.catalog_stars.any():
+
+                qmessagebox(title='Star catalog error', \
+                    message='Star catalog from path ' \
+                        + os.path.join(self.config.star_catalog_path, self.config.star_catalog_file) \
+                        + 'could not be loaded!',
+                    message_type="error")
+
+                sys.exit()
+
+            else:
+                print('Star catalog loaded: ', self.config.star_catalog_file)
 
 
-        ###################################################################################################
+            self.calstars = {}
+            self.loadCalstars()
 
-        # LOADING STARS
+            ###################################################################
+            # PLATEPAR
 
-        # Load catalog stars
-        self.catalog_stars = self.loadCatalogStars(self.config.catalog_mag_limit)
-        self.cat_lim_mag = self.config.catalog_mag_limit
+            # Search for platepar files and prompt user if needed
+            pp_path = self._findPlatepar()
 
-        # Check if the catalog exists
-        if not self.catalog_stars.any():
+            if pp_path is None:
+                # User cancelled — abort loading
+                return False
 
-            qmessagebox(title='Star catalog error', \
-                message='Star catalog from path ' \
-                    + os.path.join(self.config.star_catalog_path, self.config.star_catalog_file) \
-                    + 'could not be loaded!',
-                message_type="error")
+            if pp_path:
+                self.loadPlatepar(platepar_file=pp_path)
+            else:
+                # User chose to create a blank platepar
+                self.platepar = Platepar()
+                self.makeNewPlatepar()
+                self.platepar_file = os.path.join(self.dir_path, self.config.platepar_name)
+                self.first_platepar_fit = True
+                # Don't auto-open File Manager — user explicitly chose to create a blank platepar
 
-            sys.exit()
+            # Set the given gamma value to platepar
+            if gamma is not None:
+                self.platepar.gamma = gamma
+
+            # Load distortion type index
+            self.dist_type_index = self.platepar.distortion_type_list.index(self.platepar.distortion_type)
+
+            ###################################################################
+
+            print()
 
         else:
-            print('Star catalog loaded: ', self.config.star_catalog_file)
+            # --- Empty construction (no input path) ---
+            self.img_handle = None
+            self.catalog_stars = np.empty((0, 4))
+            self.cat_lim_mag = self.config.catalog_mag_limit
+            self.calstars = {}
 
+            # Create a blank platepar with proper defaults from config
+            self.platepar = Platepar()
+            self.makeNewPlatepar()
+            self.platepar_file = os.path.join(self.dir_path, self.config.platepar_name)
+            self.first_platepar_fit = True
 
-        self.calstars = {}
-        self.loadCalstars()
-
-
-        ###################################################################################################
-        # PLATEPAR
-
-        # Load the platepar file
-        self.loadPlatepar()
-
-
-        # Set the given gamma value to platepar
-        if gamma is not None:
-            self.platepar.gamma = gamma
-
-
-        # Load distortion type index
-        self.dist_type_index = self.platepar.distortion_type_list.index(self.platepar.distortion_type)
+            self.dist_type_index = self.platepar.distortion_type_list.index(
+                self.platepar.distortion_type)
+            self._show_file_manager_on_start = True
 
         ###################################################################################################
-
-        print()
 
         # INIT WINDOW
         if startUI:
@@ -1719,16 +2530,20 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Automatically load the flat and bias in UWO data mode
         if self.usingUWOData():
-            _, self.flat_struct = self.loadFlat()
-            _, self.dark = self.loadDark()
+            flat_file, self.flat_struct = self.loadFlat()
+            if flat_file:
+                self.flat_source_path = flat_file
+            dark_file, self.dark = self.loadDark()
+            if dark_file:
+                self.dark_source_path = dark_file
 
-                        
+
             # Set focus back on the SkyFit window
             self.activateWindow()
 
             # Apply the dark to the flat if the flatbiassub flag is set
             if self.flatbiassub and (self.flat_struct is not None):
-                
+
                 self.flat_struct.applyDark(self.dark)
 
                 self.img.flat_struct = self.flat_struct
@@ -1746,6 +2561,18 @@ class PlateTool(QtWidgets.QMainWindow):
         # If the satellite tracks should be shown, load the TLE data and show the tracks
         if show_sattracks:
             self.loadSatelliteTracks()
+            # Update the checkbox to reflect auto-compute state
+            self.tab.settings.updateAutoComputeSatTracks()
+
+
+    def hasData(self):
+        """ Return True if image data is loaded. """
+        return self.img_handle is not None
+
+    def closeEvent(self, event):
+        """ Handle window close event to properly exit application. """
+        event.accept()
+        QtWidgets.QApplication.quit()
 
 
     def setFPS(self):
@@ -1780,13 +2607,6 @@ class PlateTool(QtWidgets.QMainWindow):
         self.new_platepar_action.setShortcut("Ctrl+N")  # key bindings here do not get passed to keypress
         self.new_platepar_action.triggered.connect(self.makeNewPlatepar)
 
-        self.load_platepar_action = QtWidgets.QAction("Load platepar")
-        self.load_platepar_action.setShortcut('Ctrl+P')
-        self.load_platepar_action.triggered.connect(lambda: self.loadPlatepar(update=True))
-
-        self.save_platepar_action = QtWidgets.QAction("Save platepar")
-        self.save_platepar_action.triggered.connect(self.savePlatepar)
-
         self.save_reduction_action = QtWidgets.QAction('Save state and reduction')
         self.save_reduction_action.setShortcut('Ctrl+S')
         self.save_reduction_action.triggered.connect(lambda: [self.saveState(),
@@ -1796,9 +2616,12 @@ class PlateTool(QtWidgets.QMainWindow):
         self.save_current_frame_action.setShortcut('Ctrl+W')
         self.save_current_frame_action.triggered.connect(self.saveCurrentFrame)
 
-        self.save_default_platepar_action = QtWidgets.QAction("Save default platepar")
-        self.save_default_platepar_action.setShortcut('Ctrl+Shift+S')
-        self.save_default_platepar_action.triggered.connect(self.saveDefaultPlatepar)
+        self.calibration_files_action = QtWidgets.QAction("File Manager...")
+        self.calibration_files_action.triggered.connect(self.showCalibrationFilesDialog)
+
+        self.quick_save_platepar_action = QtWidgets.QAction("Save platepar to data folder")
+        self.quick_save_platepar_action.setShortcut('Ctrl+Shift+S')
+        self.quick_save_platepar_action.triggered.connect(self.savePlatepar)
 
         self.save_state_platepar_action = QtWidgets.QAction("Save state and platepar")
         self.save_state_platepar_action.triggered.connect(lambda: [self.saveState(), self.savePlatepar()])
@@ -1806,9 +2629,6 @@ class PlateTool(QtWidgets.QMainWindow):
 
         self.load_state_action = QtWidgets.QAction("Load state")
         self.load_state_action.triggered.connect(self.findLoadState)
-
-        self.station_action = QtWidgets.QAction("Change station")
-        self.station_action.triggered.connect(self.changeStation)
 
         self.toggle_info_action = QtWidgets.QAction("Toggle Info")
         self.toggle_info_action.triggered.connect(self.toggleInfo)
@@ -1836,6 +2656,11 @@ class PlateTool(QtWidgets.QMainWindow):
         self.status_bar.setFont(QtGui.QFont('monospace'))
         self.setStatusBar(self.status_bar)
 
+        self.file_manager_button = QtWidgets.QPushButton('File Manager')
+        self.file_manager_button.pressed.connect(self.showCalibrationFilesDialog)
+        self.file_manager_button.setToolTip("Open File Manager")
+        self.status_bar.addPermanentWidget(self.file_manager_button)
+
         self.skyfit_button = QtWidgets.QPushButton('SkyFit')
         self.skyfit_button.pressed.connect(lambda: self.changeMode('skyfit'))
         self.manualreduction_button = QtWidgets.QPushButton('ManualReduction')
@@ -1843,8 +2668,23 @@ class PlateTool(QtWidgets.QMainWindow):
         self.status_bar.addPermanentWidget(self.skyfit_button)
         self.status_bar.addPermanentWidget(self.manualreduction_button)
 
+        # Image navigation slider (like a video timeline)
+        self.image_navigation_label = QtWidgets.QLabel('Image: 1 / 1')
+        self.image_navigation_label.setMinimumWidth(80)
+        self.status_bar.addPermanentWidget(self.image_navigation_label)
+
+        self.image_navigation_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+        self.image_navigation_slider.setMinimum(1)
+        self.image_navigation_slider.setMaximum(1)
+        self.image_navigation_slider.setValue(1)
+        self.image_navigation_slider.setMinimumWidth(200)
+        self.image_navigation_slider.setMaximumWidth(400)
+        self.image_navigation_slider.setToolTip("Drag or click to navigate through images")
+        self.image_navigation_slider.valueChanged.connect(self.jumpToImage)
+        self.status_bar.addPermanentWidget(self.image_navigation_slider)
+
         self.nextstar_button = QtWidgets.QPushButton('SkyFit')
-        self.nextstar_button.pressed.connect(lambda: self.nextstar())
+        self.nextstar_button.pressed.connect(self.jumpNextStar)
 
         ###################################################################################################
         # CENTRAL WIDGET (DISPLAY)
@@ -1852,6 +2692,11 @@ class PlateTool(QtWidgets.QMainWindow):
         # Main Image
         self.scrolls_back = 0
         self.clicked = 0
+        # Track press position for click vs drag detection (scene coords for panning compatibility)
+        self.press_scene_x = None
+        self.press_scene_y = None
+        self.press_button = None
+        self.press_modifiers = None
 
         # Init the central image window
         self.view_widget = pg.GraphicsView()
@@ -1861,6 +2706,12 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Override the scroll function
         self.img_frame.wheelEvent = self.wheelEvent
+
+        # Install event filter to catch mouse release (ViewBox doesn't receive it during panning)
+        self.view_widget.viewport().installEventFilter(self)
+
+        # Install event filter on application to catch global keyboard shortcuts
+        QtWidgets.QApplication.instance().installEventFilter(self)
 
         self.view_widget.setCentralWidget(self.img_frame)
         self.img_frame.invertY()
@@ -1884,28 +2735,34 @@ class PlateTool(QtWidgets.QMainWindow):
         self.zoom_window.invertY()
 
         # top left label
-        self.show_key_help = 1
+        self.show_key_help = 2
 
+        # Create font and metrics for overlay labels
+        label_font = QtGui.QFont('monospace', 8)
+        label_fm = QtGui.QFontMetrics(label_font)
+
+        # top left label (hidden by default — F1 state 2)
         self.label1 = TextItem(color=(0, 0, 0), fill=(255, 255, 255, 100))
-        self.label1.setFont(QtGui.QFont('monospace', 8))
-        self.label1.setTextWidth(200)
+        self.label1.setFont(label_font)
+        self.label1.setTextWidth(label_fm.averageCharWidth() * 35)  # ~35 chars wide
         self.label1.setZValue(1000)
         self.label1.setParentItem(self.img_frame)
+        self.label1.hide()
 
-        # bottom left label
+        # bottom left label (hidden by default — F1 state 2)
         self.label2 = TextItem(color=(0, 0, 0), fill=(255, 255, 255, 100))
-        self.label2.setFont(QtGui.QFont('monospace', 8))
-        self.label2.setTextWidth(200)
+        self.label2.setFont(label_font)
+        self.label2.setTextWidth(label_fm.averageCharWidth() * 38)  # ~38 chars wide
         self.label2.setZValue(1000)
         self.label2.setParentItem(self.img_frame)
+        self.label2.hide()
 
-        # F1 info label
+        # F1 info label (visible by default — F1 state 0 shows hint)
         self.label_f1 = TextItem(color=(0, 0, 0), fill=(255, 255, 255, 100))
-        self.label_f1.setFont(QtGui.QFont('monospace', 8))
-        self.label_f1.setTextWidth(100)
+        self.label_f1.setFont(label_font)
+        self.label_f1.setTextWidth(label_fm.averageCharWidth() * 20)  # ~20 chars wide
         self.label_f1.setZValue(1000)
         self.label_f1.setParentItem(self.img_frame)
-        self.label_f1.hide()
 
         self.catalog_stars_visible = True
 
@@ -1943,6 +2800,89 @@ class PlateTool(QtWidgets.QMainWindow):
         self.geo_markers2.setZValue(4)
         self.zoom_window.addItem(self.geo_markers2)
 
+        # Solar system body markers (main window) - yellow/orange color
+        self.planet_markers = pg.ScatterPlotItem()
+        self.planet_markers.setPen(pg.mkPen(color=(255, 200, 0), width=2))  # yellow-orange
+        self.planet_markers.setBrush((0, 0, 0, 0))
+        self.planet_markers.setSize(25)
+        self.planet_markers.setSymbol('o')  # circle
+        self.planet_markers.setZValue(6)
+        self.img_frame.addItem(self.planet_markers)
+
+        # Solar system body markers (zoom window)
+        self.planet_markers2 = pg.ScatterPlotItem()
+        self.planet_markers2.setPen(pg.mkPen(color=(255, 200, 0), width=2))
+        self.planet_markers2.setBrush((0, 0, 0, 0))
+        self.planet_markers2.setSize(35)
+        self.planet_markers2.setSymbol('o')
+        self.planet_markers2.setZValue(6)
+        self.zoom_window.addItem(self.planet_markers2)
+
+        # Solar system body labels
+        self.planet_labels = TextItemList()
+        self.img_frame.addItem(self.planet_labels)
+
+        # Solar system body data for calibration: [(name, x, y, ra, dec, mag), ...]
+        self.planet_data = []
+
+        # Cache for planet ephemerides (expensive astropy calls)
+        self._planet_cache_time = None  # Observation time when ephemerides were computed
+        self._planet_cache_radec = []   # List of (name, ra, dec, mag) from astropy
+
+        # astrometry.net matched star markers (main window) - cyan color
+        # These show catalog star positions that matched to input stars
+        self.astrometry_matched_markers = pg.ScatterPlotItem()
+        self.astrometry_matched_markers.setPen('c', width=2)  # cyan
+        self.astrometry_matched_markers.setBrush((0, 0, 0, 0))
+        self.astrometry_matched_markers.setSize(15)
+        self.astrometry_matched_markers.setSymbol('o')  # circle
+        self.astrometry_matched_markers.setZValue(5)
+        self.img_frame.addItem(self.astrometry_matched_markers)
+
+        # astrometry.net matched star markers (zoom window)
+        self.astrometry_matched_markers2 = pg.ScatterPlotItem()
+        self.astrometry_matched_markers2.setPen('c', width=2)
+        self.astrometry_matched_markers2.setBrush((0, 0, 0, 0))
+        self.astrometry_matched_markers2.setSize(25)
+        self.astrometry_matched_markers2.setSymbol('o')
+        self.astrometry_matched_markers2.setZValue(5)
+        self.zoom_window.addItem(self.astrometry_matched_markers2)
+
+        # astrometry.net quad star markers (main window) - magenta color
+        # These are the specific catalog stars used for the initial quad pattern matching
+        self.astrometry_quad_markers = pg.ScatterPlotItem()
+        self.astrometry_quad_markers.setPen('m', width=2)  # magenta
+        self.astrometry_quad_markers.setBrush((0, 0, 0, 0))
+        self.astrometry_quad_markers.setSize(20)
+        self.astrometry_quad_markers.setSymbol('s')  # square
+        self.astrometry_quad_markers.setZValue(5)
+        self.img_frame.addItem(self.astrometry_quad_markers)
+
+        # astrometry.net quad star markers (zoom window)
+        self.astrometry_quad_markers2 = pg.ScatterPlotItem()
+        self.astrometry_quad_markers2.setPen('m', width=2)
+        self.astrometry_quad_markers2.setBrush((0, 0, 0, 0))
+        self.astrometry_quad_markers2.setSize(30)
+        self.astrometry_quad_markers2.setSymbol('s')
+        self.astrometry_quad_markers2.setZValue(5)
+        self.zoom_window.addItem(self.astrometry_quad_markers2)
+
+        # Store astrometry.net solution info (populated when astrometry.net is run)
+        self.astrometry_solution_info = None
+        self.astrometry_stars_visible = False
+
+        # Initially hide astrometry.net markers
+        self.astrometry_matched_markers.hide()
+        self.astrometry_matched_markers2.hide()
+        self.astrometry_quad_markers.hide()
+        self.astrometry_quad_markers2.hide()
+
+        self.catalog_stars_visible = True
+        self.show_spectral_type = False
+        self.show_star_names = False
+        self.apparent_mag_corr_enabled = False
+        self.label_mag_limit = 5.0
+        self.show_constellations = False
         self.selected_stars_visible = True
         self.unsuitable_stars_visible = True
 
@@ -1998,6 +2938,22 @@ class PlateTool(QtWidgets.QMainWindow):
 
         self.unsuitable_stars_visble = True
 
+        # Distortion center marker (red cross) - main window
+        self.distortion_center_marker = pg.ScatterPlotItem()
+        self.distortion_center_marker.setPen((255, 0, 0), width=2)
+        self.distortion_center_marker.setSize(30)
+        self.distortion_center_marker.setSymbol(Plus())
+        self.distortion_center_marker.setZValue(5)
+        self.img_frame.addItem(self.distortion_center_marker)
+
+        # Distortion center marker (red cross) - zoom window
+        self.distortion_center_marker2 = pg.ScatterPlotItem()
+        self.distortion_center_marker2.setPen((255, 0, 0), width=2)
+        self.distortion_center_marker2.setSize(30)
+        self.distortion_center_marker2.setSymbol(Plus())
+        self.distortion_center_marker2.setZValue(5)
+        self.zoom_window.addItem(self.distortion_center_marker2)
+
         # calstar markers outer rings (dark green) - main window
         self.calstar_markers_outer = pg.ScatterPlotItem()
         self.calstar_markers_outer.setPen(pg.mkPen((0, 100, 0, 255), width=1.5))
@@ -2051,17 +3007,21 @@ class PlateTool(QtWidgets.QMainWindow):
         self.pick_marker2.setZValue(5)
         self.zoom_window.addItem(self.pick_marker2)
 
+        # Platform-aware modifier label (Qt ControlModifier = Cmd on macOS)
+        self.ctrl_label = "CMD" if sys.platform == "darwin" else "CTRL"
+        ctrl = self.ctrl_label
+
         # Star pick info
         self.star_pick_info_text_str = "STAR PICKING MODE keys:\n"
         self.star_pick_info_text_str += "LEFT CLICK - Centroid star\n"
-        self.star_pick_info_text_str += "CTRL + LEFT CLICK - Manual star position\n"
+        self.star_pick_info_text_str += f"{ctrl} + LEFT CLICK - Manual star position\n"
         self.star_pick_info_text_str += "ENTER or SPACE - Accept pair\n"
-        self.star_pick_info_text_str += "CTRL + SPACE - Mark pair bad\n"
+        self.star_pick_info_text_str += f"{ctrl} + SPACE - Mark pair bad\n"
         self.star_pick_info_text_str += "SHIFT + SPACE - Jump random\n"
         self.star_pick_info_text_str += "RIGHT CLICK - Remove pair\n"
-        self.star_pick_info_text_str += "CTRL + SCROLL - Aperture radius adjust\n"
-        self.star_pick_info_text_str += "CTRL + Z - Fit stars\n"
-        self.star_pick_info_text_str += "CTRL + SHIFT + Z - Fit with initial distortion params set to 0\n"
+        self.star_pick_info_text_str += f"{ctrl} + SCROLL - Aperture radius adjust\n"
+        self.star_pick_info_text_str += f"{ctrl} + Z - Fit stars\n"
+        self.star_pick_info_text_str += f"{ctrl} + SHIFT + Z - Fit with initial distortion params set to 0\n"
         self.star_pick_info_text_str += "L - Astrometry fit plot\n"
         self.star_pick_info_text_str += "P - Photometry fit plot"
         self.star_pick_info = TextItem(self.star_pick_info_text_str, anchor=(0.0, 0.75), color=(0, 0, 0), fill=(255, 255, 255, 100))
@@ -2124,14 +3084,50 @@ class PlateTool(QtWidgets.QMainWindow):
         self.stdev_text_filter = 0
         self.residual_text = TextItemList()
         self.img_frame.addItem(self.residual_text)
-        self.residual_text.setZValue(10)
+
+        # Satellite track computing status text (large, centered overlay)
+        self.sat_computing_text = TextItem('Computing satellite tracks...', 
+                                           anchor=(0.5, 0.5), 
+                                           color=(0, 0, 0), 
+                                           fill=(255, 255, 255, 200))
+        self.sat_computing_text.setFont(QtGui.QFont('Arial', 24, QtGui.QFont.Bold))
+        self.sat_computing_text.hide()
+        self.sat_computing_text.setZValue(100)  # Very high z-value to be on top
+        self.img_frame.addItem(self.sat_computing_text)
+
+        # Add spectral types text items
+        self.spectral_type_text_list = TextItemList()
+        self.img_frame.addItem(self.spectral_type_text_list)
+
+        # Plotting item for constellation lines
+        # Background (black border)
+        self.constellation_lines_bg = pg.PlotCurveItem(
+            pen=pg.mkPen((0, 0, 0, 128), width=5), connect='pairs')
+        self.constellation_lines_bg.setZValue(4)
+        self.constellation_lines_bg.hide()
+        self.img_frame.addItem(self.constellation_lines_bg)
+
+        # Foreground (white line)
+        self.constellation_lines_fg = pg.PlotCurveItem(
+            pen=pg.mkPen((255, 255, 255, 128), width=2), connect='pairs')
+        self.constellation_lines_fg.setZValue(5)
+        self.constellation_lines_fg.hide()
+        self.img_frame.addItem(self.constellation_lines_fg)
+
+        # Load constellation lines
+        constellations_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), 
+            "../share/constellation_lines.csv")
+        try:
+            self.constellation_data = np.loadtxt(constellations_path, delimiter=",")
+        except Exception as e:
+            print("Could not load constellation lines from:", constellations_path)
+            self.constellation_data = None
 
         ###################################################################################################
         # RIGHT WIDGET
 
         # If the file is being loaded, detect the input type
         if loaded_file:
-            detect_input_type = False
 
             if not hasattr(self, "img_handle"):
                 detect_input_type = True
@@ -2161,7 +3157,10 @@ class PlateTool(QtWidgets.QMainWindow):
         invert = False
 
         # Add saturation mask (R, G, B, alpha) - alpha can only be 0 or 1
-        saturation_mask_img = np.zeros_like(self.img_handle.loadChunk().maxpixel).T
+        if self.img_handle is not None:
+            saturation_mask_img = np.zeros_like(self.img_handle.loadChunk().maxpixel).T
+        else:
+            saturation_mask_img = np.zeros((self.config.width, self.config.height), dtype='uint8')
         self.saturation_mask_img = np.zeros(saturation_mask_img.shape + (4, ), dtype='uint8')
         self.saturation_mask = pg.ImageItem()
         self.saturation_mask.setImage(self.saturation_mask_img)
@@ -2195,13 +3194,48 @@ class PlateTool(QtWidgets.QMainWindow):
         self.region_zoom.setZValue(10)
         self.zoom_window.addItem(self.region_zoom)
 
+        # Mask overlay (red tint over masked areas)
+        mask_lut = np.array([[0, 0, 0, 0], [255, 0, 0, 80]], dtype=np.ubyte)
+        self.mask_overlay = pg.ImageItem(lut=mask_lut)
+        self.mask_overlay.setCompositionMode(QtGui.QPainter.CompositionMode_SourceOver)
+        self.mask_overlay.setZValue(8)
+        self.img_frame.addItem(self.mask_overlay)
+        self.mask_overlay.hide()
+
+        # Current polygon being drawn (yellow dashed line)
+        self.mask_current_line = pg.PlotCurveItem(
+            pen=pg.mkPen((255, 255, 0), width=2, style=QtCore.Qt.DashLine))
+        self.mask_current_line.setZValue(15)
+        self.img_frame.addItem(self.mask_current_line)
+
+        # Vertex markers for current polygon (yellow)
+        self.mask_vertex_markers = pg.ScatterPlotItem(
+            pen=pg.mkPen((255, 255, 255), width=1),
+            brush=pg.mkBrush(255, 255, 0, 200), size=10)
+        self.mask_vertex_markers.setZValue(16)
+        self.img_frame.addItem(self.mask_vertex_markers)
+
+        # Vertex markers for completed polygons (red/white)
+        self.mask_completed_vertex_markers = pg.ScatterPlotItem(
+            pen=pg.mkPen((255, 255, 255), width=1),
+            brush=pg.mkBrush(255, 100, 100, 200), size=8)
+        self.mask_completed_vertex_markers.setZValue(14)
+        self.img_frame.addItem(self.mask_completed_vertex_markers)
+
+        # Storage for completed polygon graphics
+        self.mask_polygon_items = []
+
         self.tab = RightOptionsTab(self)
         self.tab.hist.setImageItem(self.img)
         self.tab.hist.setImages(self.img_zoom)
-        self.tab.hist.setLevels(0, 2**(8*self.img.data.itemsize) - 1)
+        if self.img.data is not None:
+            self.tab.hist.setLevels(0, 2**(8*self.img.data.itemsize) - 1)
+        else:
+            self.tab.hist.setLevels(0, 255)
 
         self.tab.settings.updateInvertColours()
         self.tab.settings.updateImageGamma()
+        self.tab.star_detection.setCatalogLM(self.cat_lim_mag)
         if loaded_file:
             self.updatePairedStars()
 
@@ -2215,25 +3249,63 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.param_manager.sigExtinctionChanged.connect(self.onExtinctionChanged)
         self.tab.param_manager.sigVignettingChanged.connect(self.onVignettingChanged)
 
-        self.tab.param_manager.sigFitOnlyPointingToggled.connect(self.onFitParametersChanged)
         self.tab.param_manager.sigRefractionToggled.connect(self.onRefractionChanged)
         self.tab.param_manager.sigEqAspectToggled.connect(self.onFitParametersChanged)
         self.tab.param_manager.sigForceDistortionToggled.connect(self.onFitParametersChanged)
         self.tab.param_manager.sigOnVignettingFixedToggled.connect(self.onVignettingChanged)
 
         # Connect astrometry & photometry buttons to functions
-        self.tab.param_manager.sigFitPressed.connect(lambda: self.fitPickedStars())
-        self.tab.param_manager.sigNextStarPressed.connect(lambda: self.jumpNextStar())
+        self.tab.param_manager.sigFitPressed.connect(self.fitPickedStars)
+        self.tab.param_manager.sigAutoFitPressed.connect(self.autoFitAstrometryNet)
+        self.tab.param_manager.sigQuickAlignPressed.connect(self.quickAlign)
+        self.tab.param_manager.sigFindBestFramePressed.connect(self.findBestFrame)
+        self.tab.param_manager.sigNextStarPressed.connect(self.jumpNextStar)
         self.tab.param_manager.sigPhotometryPressed.connect(lambda: self.photometry(show_plot=True))
         self.tab.param_manager.sigAstrometryPressed.connect(self.showAstrometryFitPlots)
         self.tab.param_manager.sigResetDistortionPressed.connect(self.resetDistortion)
 
         self.tab.geolocation.sigLocationChanged.connect(self.onAzAltChanged)
         self.tab.geolocation.sigReloadGeoPoints.connect(self.reloadGeoPoints)
-        self.tab.geolocation.sigFitPressed.connect(lambda: self.fitPickedStars())
+        self.tab.geolocation.sigFitPressed.connect(self.fitPickedStars)
+
+        # Star detection override signals
+        self.tab.star_detection.sigRedetectStars.connect(self.redetectStars)
+        self.tab.star_detection.sigRedetectAllImages.connect(self.redetectAllImages)
+        self.tab.star_detection.sigUseOverrideToggled.connect(self.toggleStarDetectionOverride)
+        self.tab.star_detection.sigIntensityThresholdChanged.connect(self.updateIntensityThreshold)
+        self.tab.star_detection.sigNeighborhoodSizeChanged.connect(self.updateNeighborhoodSize)
+        self.tab.star_detection.sigMaxStarsChanged.connect(self.updateMaxStars)
+        self.tab.star_detection.sigGammaChanged.connect(self.updateGamma)
+        self.tab.star_detection.sigSegmentRadiusChanged.connect(self.updateSegmentRadius)
+        self.tab.star_detection.sigMaxFeatureRatioChanged.connect(self.updateMaxFeatureRatio)
+        self.tab.star_detection.sigRoundnessThresholdChanged.connect(self.updateRoundnessThreshold)
+        self.tab.star_detection.sigTuneParameters.connect(self.tuneStarDetection)
+        self.tab.star_detection.sigSaveToConfig.connect(lambda: self.showCalibrationFilesDialog(save_ftype="Config"))
+        self.tab.star_detection.sigCatalogLMChanged.connect(self.updateCatalogLMFromStarDetection)
+
+        # Mask widget signals
+        self.tab.mask.sigDrawModeToggled.connect(self.toggleMaskDrawMode)
+        self.tab.mask.sigClearPolygons.connect(self.clearMaskPolygons)
+        self.tab.mask.sigSaveMask.connect(lambda: self.showCalibrationFilesDialog(save_ftype="Mask"))
+        self.tab.mask.sigLoadMask.connect(self.loadMaskDialog)
+        self.tab.mask.sigShowOverlayToggled.connect(self.toggleMaskOverlay)
+        self.tab.mask.sigUseFlatToggled.connect(self.toggleMaskFlatBackground)
+        self.tab.mask.sigUnsavedChanged.connect(self.updateFileManagerButton)
+        self.tab.mask.sigInvertMask.connect(self.invertMaskPolygons)
+
+        # Check for flat.bmp and setup mask tab
+        self.checkAndSetupFlatForMask()
+
+        # Handle tab changes (for restoring image when leaving mask tab)
+        self.tab.sigTabChanged.connect(self.onTabChanged)
 
         self.tab.settings.sigMaxAveToggled.connect(self.toggleImageType)
         self.tab.settings.sigCatStarsToggled.connect(self.toggleShowCatStars)
+        self.tab.settings.sigSpectralTypeToggled.connect(self.toggleShowSpectralType)
+        self.tab.settings.sigStarNamesToggled.connect(self.toggleShowStarNames)
+        self.tab.settings.sigApparentMagCorrToggled.connect(self.toggleApparentMagCorr)
+        self.tab.settings.sigLabelMagLimitChanged.connect(self.onLabelMagLimitChanged)
+        self.tab.settings.sigConstellationToggled.connect(self.toggleShowConstellations)
         self.tab.settings.sigCalStarsToggled.connect(self.toggleShowCalStars)
         self.tab.settings.sigSelStarsToggled.connect(self.toggleShowSelectedStars)
         self.tab.settings.sigPicksToggled.connect(self.toggleShowPicks)
@@ -2246,6 +3318,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.settings.sigAutoPanToggled.connect(self.toggleAutoPan)
         self.tab.settings.sigSingleClickPhotometryToggled.connect(self.toggleSingleClickPhotometry)
         self.tab.settings.sigSatTracksToggled.connect(self.toggleShowSatTracks)
+        self.tab.settings.sigAutoComputeSatTracksToggled.connect(self.toggleAutoComputeSatTracks)
         self.tab.settings.sigLoadTLEPressed.connect(self.loadTLEFileDialog)
         self.tab.settings.sigClearTLEPressed.connect(self.clearTLESelection)
         self.tab.settings.sigRedrawSatTracksPressed.connect(self.redrawSatelliteTracks)
@@ -2263,17 +3336,40 @@ class PlateTool(QtWidgets.QMainWindow):
 
         self.setMinimumSize(1200, 800)
 
-        # Open in full screen
-        self.showMaximized()
-
+        # Size window to 80% of screen dimensions to avoid resize-to-fullscreen issue
+        # while still working on any screen size
+        screen = QtWidgets.QApplication.primaryScreen().availableGeometry()
+        self.resize(int(screen.width() * 0.8), int(screen.height() * 0.8))
 
         self.show()
 
-        self.updateLeftLabels()
-        self.updateStars()
-        self.updateDistortion()
-        self.tab.param_manager.updatePlatepar()
-        self.changeMode(self.mode)
+        if self.hasData():
+            self.updateLeftLabels()
+            self.updateImageNavigationDisplay()
+            self.updateStars()
+            self.updateDistortion()
+            self.tab.param_manager.updatePlatepar()
+            self.initStarDetectionOverrides()
+            self.initMaskFromFile()
+            self.updateFindBestFrameButton()
+            self.changeMode(self.mode)
+
+            # Show calibration files dialog on start if platepar was not auto-loaded
+            if self._show_calibration_dialog_on_start:
+                self._show_calibration_dialog_on_start = False
+                self.showCalibrationFilesDialog()
+        else:
+            # Show empty-state message
+            self.label1.setText("No data loaded.\nUse File > File Manager to open a folder.")
+            self.image_navigation_slider.hide()
+            self.image_navigation_label.hide()
+
+        self.updateFileManagerButton()
+
+        # Auto-open File Manager when starting empty
+        if getattr(self, '_show_file_manager_on_start', False):
+            self._show_file_manager_on_start = False
+            QtCore.QTimer.singleShot(0, self.showCalibrationFilesDialog)
 
 
 
@@ -2299,7 +3395,6 @@ class PlateTool(QtWidgets.QMainWindow):
             self.mode = 'skyfit'
             self.skyfit_button.setDisabled(True)
             self.manualreduction_button.setDisabled(False)
-            self.setWindowTitle('SkyFit')
 
             self.updateLeftLabels()
             self.tab.onSkyFit()
@@ -2326,12 +3421,11 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.view_menu.removeAction(action)
 
             self.file_menu.addActions([self.new_platepar_action,
-                                       self.load_platepar_action,
-                                       self.save_platepar_action,
-                                       self.save_default_platepar_action,
                                        self.save_state_platepar_action,
-                                       self.load_state_action,
-                                       self.station_action])
+                                       self.quick_save_platepar_action,
+                                       self.load_state_action])
+            self.file_menu.addSeparator()
+            self.file_menu.addAction(self.calibration_files_action)
 
             self.view_menu.addActions([self.toggle_info_action,
                                        self.toggle_zoom_window])
@@ -2348,7 +3442,6 @@ class PlateTool(QtWidgets.QMainWindow):
             self.mode = 'manualreduction'
             self.skyfit_button.setDisabled(False)
             self.manualreduction_button.setDisabled(True)
-            self.setWindowTitle('ManualReduction')
 
             self.img_type_flag = 'avepixel'
             self.tab.settings.updateMaxAvePixel()
@@ -2364,8 +3457,9 @@ class PlateTool(QtWidgets.QMainWindow):
 
             self.file_menu.addActions([self.save_reduction_action,
                                        self.save_current_frame_action,
-                                       self.load_platepar_action,
                                        self.load_state_action])
+            self.file_menu.addSeparator()
+            self.file_menu.addAction(self.calibration_files_action)
 
             self.view_menu.addActions([self.toggle_info_action,
                                        self.toggle_zoom_window])
@@ -2393,50 +3487,161 @@ class PlateTool(QtWidgets.QMainWindow):
             self.updateGreatCircle()
 
 
-    def changeStation(self):
+    def changeStation(self, dir_path=None, config_override=None):
         """
-        Opens folder explorer window for user to select new station folder, then loads a platepar from that
-        folder, and reads the config file, updating the gui to show what it should
+        Load a new station folder and reload everything. If dir_path is None, a folder picker is shown.
+        Returns True on success, False on cancellation or failure.
+
+        Arguments:
+            dir_path: [str] Path to data folder or file. If a file, uses its parent directory.
+            config_override: [str or list] Config path override, passed to loadConfigFromDirectory.
         """
-        dir_path = str(QtWidgets.QFileDialog.getExistingDirectory(self, "Select new station folder",
-                                                              self.dir_path, QtWidgets.QFileDialog.ShowDirsOnly))
+        if dir_path is None:
+            dir_path = str(QtWidgets.QFileDialog.getExistingDirectory(self, "Select new station folder",
+                                                                  self.dir_path, QtWidgets.QFileDialog.ShowDirsOnly))
 
         if not dir_path:
-            return
+            return False
 
-        self.dir_path = dir_path
-        self.config = cr.loadConfigFromDirectory('.', self.dir_path)
-        self.detectInputType()
-        self.catalog_stars = self.loadCatalogStars(self.config.catalog_mag_limit)
-        self.cat_lim_mag = self.config.catalog_mag_limit
-        self.loadCalstars()
-        self.loadPlatepar(update=True)
-        print()
+        # If a file path was given, use the parent directory
+        if os.path.isfile(dir_path):
+            dir_path = os.path.dirname(dir_path)
 
-        self.img.changeHandle(self.img_handle)
-        self.img_zoom.changeHandle(self.img_handle)
-        self.tab.hist.setLevels(0, 2**(8*self.img.data.itemsize) - 1)
-        self.img_frame.autoRange(padding=0)
+        prev_input_path = self.input_path
+        prev_dir_path = self.dir_path
+        prev_config = self.config
+        prev_img_handle = self.img_handle if self.hasData() else None
 
-        self.paired_stars = PairedStars()
-        self.updatePairedStars()
-        self.pick_list = {}
-        self.residuals = None
-        self.updateFitResiduals()
-        self.updatePicks()
-        self.drawPhotometryColoring()
-        self.photometry()
+        try:
+            self.input_path = dir_path
+            self.dir_path = dir_path
 
-        self.updateLeftLabels()
-        self.tab.debruijn.updateTable()
+            # Load config - use override if provided, otherwise auto-detect from dir
+            if config_override is not None:
+                self.config = cr.loadConfigFromDirectory(config_override, self.dir_path)
+            else:
+                self.config = cr.loadConfigFromDirectory('.', self.dir_path)
+
+            # Force the CV2 backend
+            self.config.media_backend = 'cv2'
+
+            # Update original catalog file and band ratios for the new station
+            self._original_catalog_file = self.config.star_catalog_file
+            self._original_band_ratios = self.config.star_catalog_band_ratios
+
+            self.initMaskFromFile()
+            self.detectInputType(use_fr_files=self.use_fr_files)
+
+            if self.img_handle is None:
+                raise RuntimeError("No loadable image data found in the selected folder.")
+
+            # Recreate saturation mask with new image dimensions
+            saturation_mask_img = np.zeros_like(self.img_handle.loadChunk().maxpixel).T
+            self.saturation_mask_img = np.zeros(saturation_mask_img.shape + (4,), dtype='uint8')
+            self.saturation_mask.setImage(self.saturation_mask_img)
+
+            # Update ImageItems with new handle before loading platepar (which triggers drawing)
+            self.img.changeHandle(self.img_handle)
+            self.img_zoom.changeHandle(self.img_handle)
+            self.tab.hist.setLevels(0, 2**(8*self.img.data.itemsize) - 1)
+
+            # Now that image data is available, render the mask overlay
+            self.updateMaskOverlayImage()
+
+            self.catalog_stars = self.loadCatalogStars(self.config.catalog_mag_limit)
+            self.cat_lim_mag = self.config.catalog_mag_limit
+            self.loadCalstars()
+
+            # Search for platepar files in the new directory, prompt if ambiguous
+            platepar_path = self._findPlatepar()
+            if platepar_path is None:
+                # User cancelled — abort folder change
+                return False
+            if platepar_path:
+                self.loadPlatepar(update=True, platepar_file=platepar_path)
+            else:
+                self.loadPlatepar(update=True, platepar_file='')
+            self.platepar_modified = False
+
+            # Update catalog combo box selection
+            self.tab.settings.populateCatalogList()
+
+            # Update view limits based on actual image dimensions
+            img_width = self.img.data.shape[0]
+            img_height = self.img.data.shape[1]
+            if img_height/img_width < self.img_frame.height()/self.img_frame.width():
+                self.img_frame.setLimits(xMin=0, xMax=img_width, yMin=None, yMax=None)
+            else:
+                self.img_frame.setLimits(xMin=None, xMax=None, yMin=0, yMax=img_height)
+
+            self.img_frame.autoRange(padding=0)
+
+            self.paired_stars = PairedStars()
+            self.updatePairedStars()
+            self.pick_list = {}
+            self.residuals = None
+            self.updateFitResiduals()
+            self.updatePicks()
+            self.drawPhotometryColoring()
+            self.photometry()
+
+            self.updateStars()
+            self.updateDistortion()
+            self.updateLeftLabels()
+            self.updateImageNavigationDisplay()
+            self.tab.debruijn.updateTable()
+            self.initStarDetectionOverrides()
+            self.updateFindBestFrameButton()
+
+            # Populate menus with mode-specific actions (including F1 shortcut)
+            self.changeMode(self.mode)
+
+            # Load UWO flat/dark if applicable
+            if self.usingUWOData():
+                flat_file, self.flat_struct = self.loadFlat()
+                if flat_file:
+                    self.flat_source_path = flat_file
+                dark_file, self.dark = self.loadDark()
+                if dark_file:
+                    self.dark_source_path = dark_file
+
+                self.activateWindow()
+
+                if self.flatbiassub and (self.flat_struct is not None):
+                    self.flat_struct.applyDark(self.dark)
+                    self.img.flat_struct = self.flat_struct
+                    self.img_zoom.flat_struct = self.flat_struct
+
+                self.img.dark = self.dark
+                self.img_zoom.dark = self.dark
+                self.img_zoom.flat_struct = self.flat_struct
+                self.img.flat_struct = self.flat_struct
+                self.img_zoom.reloadImage()
+                self.img.reloadImage()
+
+            return True
+
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            self.input_path = prev_input_path
+            self.dir_path = prev_dir_path
+            self.config = prev_config
+            if prev_img_handle is not None:
+                self.img_handle = prev_img_handle
+            qmessagebox(title="Change Station Failed",
+                         message="Could not load station from:\n{}\n\nError: {}".format(dir_path, repr(e)),
+                         message_type="error")
+            return False
 
     def onRefractionChanged(self):
-        
+
         # Update the reference apparent alt/az, as the refraction influences the pointing
         self.platepar.updateRefAltAz()
 
         self.updateMeasurementRefractionCorrection()
 
+        self.platepar_modified = True
         self.updateStars()
         self.updateLeftLabels()
         self.tab.param_manager.updatePlatepar()
@@ -2453,29 +3658,39 @@ class PlateTool(QtWidgets.QMainWindow):
             updateAzAltGrid(self.celestial_grid, self.platepar)
 
     def onScaleChanged(self):
+        self.platepar_modified = True
         self.updateFitResiduals()
         self.updateStars()
         self.updateLeftLabels()
 
     def onFitParametersChanged(self):
+        self.platepar_modified = True
         self.updateDistortion()
         self.updateStars()
         self.updateLeftLabels()
 
     def onExtinctionChanged(self):
+        self.platepar_modified = True
         self.photometry()
         self.updateLeftLabels()
+        if self.apparent_mag_corr_enabled:
+            self.updateStars()
 
     def onVignettingChanged(self):
+        self.platepar_modified = True
         self.photometry()
         self.updateLeftLabels()
+        if self.apparent_mag_corr_enabled:
+            self.updateStars()
 
     def onAzAltChanged(self):
+        self.platepar_modified = True
         self.platepar.updateRefRADec(preserve_rotation=True)
         self.updateStars()
         self.updateLeftLabels()
 
     def onRotChanged(self):
+        self.platepar_modified = True
         self.platepar.pos_angle_ref = rotationWrtHorizonToPosAngle(self.platepar,
                                                                    self.platepar.rotation_from_horiz)
         self.updateStars()
@@ -2512,6 +3727,10 @@ class PlateTool(QtWidgets.QMainWindow):
         Return:
             [str]: formatted output string to be written in the status bar
         """
+
+        # Early return with just coordinates if no data loaded
+        if not self.hasData():
+            return "x={:7.2f}  y={:7.2f}".format(x, y)
 
         # Write image X, Y coordinates and image intensity
         if 0 <= x <= self.img.data.shape[0] - 1 and 0 <= y <= self.img.data.shape[1] - 1:
@@ -2580,8 +3799,32 @@ class PlateTool(QtWidgets.QMainWindow):
         """ Update bottom label with current mouse position """
         self.status_bar.showMessage(self.mouseOverStatus(self.mouse_x, self.mouse_y))
 
+    def updateFileManagerButton(self):
+        """Update the File Manager button style — amber when anything is unsaved."""
+        unsaved = False
+        if self.hasData():
+            if self.platepar_modified:
+                unsaved = True
+            elif self.isConfigModified():
+                unsaved = True
+            elif hasattr(self, 'tab') and hasattr(self.tab, 'mask') and self.tab.mask.unsaved:
+                unsaved = True
+
+        if unsaved:
+            self.file_manager_button.setStyleSheet(
+                "QPushButton { background-color: #e65100; color: white; font-weight: bold;"
+                " border: 1px solid #bf360c; padding: 3px 8px; border-radius: 3px; }"
+            )
+        else:
+            self.file_manager_button.setStyleSheet("")
+
     def updateLeftLabels(self):
         """ Update the two labels on the left with their information """
+
+        if not self.hasData():
+            return
+
+        ctrl = self.ctrl_label
 
         # Sky fit
         if self.mode == 'skyfit':
@@ -2643,7 +3886,7 @@ class PlateTool(QtWidgets.QMainWindow):
             text_str += '-----\n'
             text_str += 'F1 - Hide/show this text\n'
             text_str += 'Left/Right - Previous/next image\n'
-            text_str += 'CTRL + Left/Right - +/- 10 images\n'
+            text_str += f'{ctrl} + Left/Right - +/- 10 images\n'
             text_str += 'A/D - Azimuth\n'
             text_str += 'S/W - Altitude\n'
             text_str += 'Q/E - Position angle\n'
@@ -2661,14 +3904,14 @@ class PlateTool(QtWidgets.QMainWindow):
             text_str += '5/6 - X 1st dist. coeff.\n'
             text_str += '7/8 - Y 1st dist. coeff.\n'
             text_str += '9/0 - extinction scale\n'
-            text_str += 'CTRL + 1 - poly3+radial distortion\n'
-            text_str += 'CTRL + 2 - poly3+radial3 distortion\n'
-            text_str += 'CTRL + 3 - radial3 distortion\n'
-            text_str += 'CTRL + 4 - radial5 distortion\n'
-            text_str += 'CTRL + 5 - radial7 distortion\n'
-            text_str += 'CTRL + 6 - radial9 distortion\n'
+            text_str += f'{ctrl} + 1 - poly3+radial distortion\n'
+            text_str += f'{ctrl} + 2 - poly3+radial3 distortion\n'
+            text_str += f'{ctrl} + 3 - radial3 distortion\n'
+            text_str += f'{ctrl} + 4 - radial5 distortion\n'
+            text_str += f'{ctrl} + 5 - radial7 distortion\n'
+            text_str += f'{ctrl} + 6 - radial9 distortion\n'
             text_str += '\n'
-            text_str += 'CTRL + R - Pick stars\n'
+            text_str += f'{ctrl} + R - Pick stars\n'
             text_str += '\n'
             text_str += 'Scroll - zoom in/out\n'
             text_str += 'R/F - Lim mag\n'
@@ -2678,35 +3921,38 @@ class PlateTool(QtWidgets.QMainWindow):
             text_str += 'H - Hide/show catalog stars\n'
             text_str += 'C - Hide/show detected stars\n'
             if self.show_sattracks:
-                text_str += 'CTRL + T - Toggle satellite tracks\n'
-            text_str += 'CTRL + I - Show/hide distortion\n'
+                text_str += f'{ctrl} + T - Toggle satellite tracks\n'
+            text_str += f'{ctrl} + I - Show/hide distortion\n'
             text_str += 'U/J - Img Gamma\n'
             text_str += 'I - Invert colors\n'
             text_str += 'V - FOV centre\n'
             text_str += '\n'
-            text_str += 'CTRL + A - Auto levels\n'
-            text_str += 'CTRL + D - Load dark\n'
-            text_str += 'CTRL + F - Load flat\n'
-            text_str += 'CTRL + G - Cycle grids\n'
-            text_str += 'CTRL + U - Pan to next\n'
-            text_str += 'CTRL + O - Toggle auto pan\n'
-            text_str += 'CTRL + X - astrometry.net img upload\n'
-            text_str += 'CTRL + SHIFT + X - astrometry.net XY only\n'
+            text_str += f'{ctrl} + A - Auto levels\n'
+            text_str += f'{ctrl} + D - Load dark\n'
+            text_str += f'{ctrl} + F - Load flat\n'
+            text_str += f'{ctrl} + G - Cycle grids\n'
+            text_str += f'{ctrl} + U - Pan to next\n'
+            text_str += f'{ctrl} + O - Toggle auto pan\n'
+            text_str += f'{ctrl} + X - astrometry.net img upload\n'
+            text_str += f'{ctrl} + SHIFT + X - astrometry.net XY only\n'
+            text_str += f'{ctrl} + SHIFT + B - Fit spectral bands\n'
+            text_str += 'SHIFT + Q - Quick align test (debug)\n'
             text_str += 'SHIFT + Z - Show zoomed window\n'
-            text_str += 'CTRL + N - New platepar\n'
-            text_str += 'CTRL + S - Save platepar & state'
+            text_str += f'{ctrl} + N - New platepar\n'
+            text_str += f'{ctrl} + S - Save platepar & state\n'
+            text_str += f'{ctrl} + SHIFT + S - Save platepar to data folder'
         else:
             text_str = 'Keys:\n'
             text_str += '-----------\n'
             text_str += 'F1 - Hide/show this text\n'
             text_str += 'Left/Right - Previous/next frame\n'
-            text_str += 'CTRL + Left/Right - +/- 10 frames\n'
+            text_str += f'{ctrl} + Left/Right - +/- 10 frames\n'
             text_str += 'Down/Up - +/- 25 frames\n'
             text_str += ',/. - Previous/next FR line\n'
             text_str += '\n'
-            text_str += 'CTRL + R - Pick points\n'
+            text_str += f'{ctrl} + R - Pick points\n'
             text_str += 'Left click - Centroid\n'
-            text_str += 'CTRL + Left click - Force pick\n'
+            text_str += f'{ctrl} + Left click - Force pick\n'
             text_str += 'ALT/Num0 + Left click - Mark gap (DFN)\n'
             text_str += '\n'
             text_str += 'Scroll - zoom in/out\n'
@@ -2716,14 +3962,14 @@ class PlateTool(QtWidgets.QMainWindow):
             text_str += 'U/J - Img Gamma\n'
             text_str += '\n'
             text_str += 'P - Show lightcurve\n'
-            text_str += 'CTRL + A - Auto levels\n'
-            text_str += 'CTRL + D - Load dark\n'
-            text_str += 'CTRL + F - Load flat\n'
-            text_str += 'CTRL + P - Load platepar\n'
-            text_str += 'CTRL + W - Save current frame\n'
-            text_str += 'CTRL + S - Save FTPdetectinfo\n'
+            text_str += f'{ctrl} + A - Auto levels\n'
+            text_str += f'{ctrl} + D - Load dark\n'
+            text_str += f'{ctrl} + F - Load flat\n'
+            text_str += f'{ctrl} + P - Load platepar\n'
+            text_str += f'{ctrl} + W - Save current frame\n'
+            text_str += f'{ctrl} + S - Save FTPdetectinfo\n'
             text_str += '\n'
-            text_str += 'CTRL + K - Open ASTRA GUI'
+            text_str += f'{ctrl} + K - Open ASTRA GUI'
 
         self.label2.setText(text_str)
         self.label2.setPos(self.img_frame.width() - self.label2.boundingRect().width(), \
@@ -2734,18 +3980,27 @@ class PlateTool(QtWidgets.QMainWindow):
         self.label_f1.setPos(self.img_frame.width() - self.label_f1.boundingRect().width(), \
             self.img_frame.height() - self.label_f1.boundingRect().height())
 
+        # Update window title with current image name
+        mode_label = "SkyFit" if self.mode == 'skyfit' else "ManualReduction"
+        self.setWindowTitle("{} - {}".format(mode_label, self.img_handle.name()))
+
         # Update satellite marker position
         self.updateSatelliteMarker()
 
+        # Refresh File Manager button glow
+        self.updateFileManagerButton()
 
 
     def updateStars(self, only_update_catalog=False):
         """ Updates only the stars, including catalog stars, calstars and paired stars.
-         
+
         Keyword arguments:
             only_update_catalog: [bool] If True, only the catalog stars will be updated. (default: False)
 
         """
+
+        if not self.hasData():
+            return
 
         if not only_update_catalog:
 
@@ -2756,6 +4011,16 @@ class PlateTool(QtWidgets.QMainWindow):
             # Draw stars detected on this image
             if self.draw_calstars:
                 self.updateCalstars()
+
+            # Update constellation lines
+            if self.show_constellations:
+                self.updateConstellations()
+            elif self.constellation_lines_bg.isVisible():
+                self.constellation_lines_bg.hide()
+                self.constellation_lines_fg.hide()
+
+            # Update solar system bodies (planets, Moon, Sun)
+            self.updatePlanets()
 
 
         # If in skyfit mode, take the time of the chunk
@@ -2819,6 +4084,25 @@ class PlateTool(QtWidgets.QMainWindow):
         self.catalog_x, self.catalog_y, catalog_mag = getCatalogStarsImagePositions(self.catalog_stars, \
                                                                                     ff_jd, self.platepar)
 
+        # Apply apparent magnitude correction if enabled
+        if self.apparent_mag_corr_enabled:
+            # Extinction: makes stars near horizon dimmer
+            ra_catalog = self.catalog_stars[:, 0]
+            dec_catalog = self.catalog_stars[:, 1]
+            catalog_mag = extinctionCorrectionTrueToApparent(
+                catalog_mag, ra_catalog, dec_catalog, ff_jd, self.platepar
+            )
+
+            # Vignetting: makes stars near image edges dimmer
+            vignetting_coeff = self.platepar.vignetting_coeff
+            if vignetting_coeff is not None and vignetting_coeff != 0.0:
+                radius = np.hypot(
+                    self.catalog_x - self.platepar.X_res / 2.0,
+                    self.catalog_y - self.platepar.Y_res / 2.0
+                )
+                cos_vr = np.clip(np.cos(vignetting_coeff * radius), 1e-6, 1.0)
+                catalog_mag = catalog_mag - 10.0 * np.log10(cos_vr)
+
         cat_stars_xy = np.c_[self.catalog_x, self.catalog_y, catalog_mag]
 
         ### Take only those stars inside the FOV  and image ###
@@ -2834,23 +4118,87 @@ class PlateTool(QtWidgets.QMainWindow):
                                                 & (cat_stars_xy[:, 1] > 0) \
                                                 & (cat_stars_xy[:, 1] < self.platepar.Y_res)
 
+        # Filter by corrected apparent magnitude if correction is enabled
+        if self.apparent_mag_corr_enabled:
+            filtered_indices_all = filtered_indices_all & (cat_stars_xy[:, 2] <= self.cat_lim_mag)
 
         # Filter out catalog image stars
         cat_stars_xy_unmasked = cat_stars_xy[filtered_indices_all]
 
+        # Track original catalog indices for precomputed HTML lookup
+        original_indices_unmasked = np.where(filtered_indices_all)[0]
+
         # Create a filtered catalog
         self.catalog_stars_filtered_unmasked = self.catalog_stars[filtered_indices_all]
 
+        # Filter spectral type
+        if hasattr(self, 'catalog_stars_spectral_type') and (self.catalog_stars_spectral_type is not None):
+            spectral_type_unmasked = self.catalog_stars_spectral_type[filtered_indices_all]
+        else:
+            spectral_type_unmasked = None
+
+        # Filter star names
+        if hasattr(self, 'catalog_stars_preferred_names') and (self.catalog_stars_preferred_names is not None):
+            star_names_unmasked = self.catalog_stars_preferred_names[filtered_indices_all]
+        else:
+            star_names_unmasked = None
+
+        # Filter common names
+        if hasattr(self, 'catalog_stars_common_names') and (self.catalog_stars_common_names is not None):
+            common_names_unmasked = self.catalog_stars_common_names[filtered_indices_all]
+        else:
+            common_names_unmasked = None
+
+
         if (self.mask is None) or (not hasattr(self.mask, 'img')):
             cat_stars_xy, self.catalog_stars_filtered = [], []
-            for star_xy, star_radec in zip(cat_stars_xy_unmasked, self.catalog_stars_filtered_unmasked):
-                    cat_stars_xy.append(star_xy)
-                    self.catalog_stars_filtered.append(star_radec)
+            self.catalog_stars_spectral_type_filtered = []
+            self.catalog_stars_preferred_names_filtered = []
+            self.catalog_stars_common_names_filtered = []
+            self._filtered_original_indices = []
+
+            # Prepare iterators
+            if spectral_type_unmasked is None:
+                spectral_type_unmasked = [None]*len(cat_stars_xy_unmasked)
+
+            if star_names_unmasked is None:
+                star_names_unmasked = [None]*len(cat_stars_xy_unmasked)
+
+            if common_names_unmasked is None:
+                common_names_unmasked = [None]*len(cat_stars_xy_unmasked)
+
+            iterator = zip(original_indices_unmasked, cat_stars_xy_unmasked, self.catalog_stars_filtered_unmasked, spectral_type_unmasked, star_names_unmasked, common_names_unmasked)
+
+            for orig_idx, star_xy, star_radec, star_spec, star_name, common_name in iterator:
+                cat_stars_xy.append(star_xy)
+                self.catalog_stars_filtered.append(star_radec)
+                self.catalog_stars_spectral_type_filtered.append(star_spec)
+                self.catalog_stars_preferred_names_filtered.append(star_name)
+                self.catalog_stars_common_names_filtered.append(common_name)
+                self._filtered_original_indices.append(orig_idx)
 
         else:
 
             cat_stars_xy, self.catalog_stars_filtered = [], []
-            for star_xy, star_radec in zip(cat_stars_xy_unmasked, self.catalog_stars_filtered_unmasked):
+            self.catalog_stars_spectral_type_filtered = []
+            self.catalog_stars_preferred_names_filtered = []
+            self.catalog_stars_common_names_filtered = []
+            self._filtered_original_indices = []
+
+            # Prepare iterators
+            if spectral_type_unmasked is None:
+                spectral_type_unmasked = [None]*len(cat_stars_xy_unmasked)
+
+            if star_names_unmasked is None:
+                star_names_unmasked = [None]*len(cat_stars_xy_unmasked)
+
+            if common_names_unmasked is None:
+                common_names_unmasked = [None]*len(cat_stars_xy_unmasked)
+
+            iterator = zip(original_indices_unmasked, cat_stars_xy_unmasked, self.catalog_stars_filtered_unmasked, spectral_type_unmasked, star_names_unmasked, common_names_unmasked)
+
+
+            for orig_idx, star_xy, star_radec, star_spec, star_name, common_name in iterator:
 
                 # Make sure that the dimensions of the mask match the image dimensions
                 if (self.mask.img.shape[0] == self.img.data.shape[0]) or \
@@ -2860,11 +4208,19 @@ class PlateTool(QtWidgets.QMainWindow):
                     if self.mask.img[int(star_xy[1]), int(star_xy[0])] != 0:
                         cat_stars_xy.append(star_xy)
                         self.catalog_stars_filtered.append(star_radec)
+                        self.catalog_stars_spectral_type_filtered.append(star_spec)
+                        self.catalog_stars_preferred_names_filtered.append(star_name)
+                        self.catalog_stars_common_names_filtered.append(common_name)
+                        self._filtered_original_indices.append(orig_idx)
 
                 # If the mask dimensions don't match the image dimensions, ignore the mask
                 else:
                     cat_stars_xy.append(star_xy)
                     self.catalog_stars_filtered.append(star_radec)
+                    self.catalog_stars_spectral_type_filtered.append(star_spec)
+                    self.catalog_stars_preferred_names_filtered.append(star_name)
+                    self.catalog_stars_common_names_filtered.append(common_name)
+                    self._filtered_original_indices.append(orig_idx)
 
         # Convert to an array in any case
         cat_stars_xy = np.array(cat_stars_xy)
@@ -2884,14 +4240,336 @@ class PlateTool(QtWidgets.QMainWindow):
                 cat_mag_faintest = np.max(catalog_mag_filtered)
 
                 # Plot catalog stars
-                size = ((4.0 + (cat_mag_faintest - catalog_mag_filtered))/2.0)**(2*2.512*0.5)
+                self.catalog_marker_size = ((4.0 + (cat_mag_faintest - catalog_mag_filtered))/2.0)**(2*2.512*0.5)
 
                 self.cat_star_markers.setData(x=self.catalog_x_filtered + 0.5, \
-                    y=self.catalog_y_filtered + 0.5, size=size)
+                    y=self.catalog_y_filtered + 0.5, size=self.catalog_marker_size)
                 self.cat_star_markers2.setData(x=self.catalog_x_filtered + 0.5, \
-                    y=self.catalog_y_filtered + 0.5, size=size)
+                    y=self.catalog_y_filtered + 0.5, size=self.catalog_marker_size)
+                
+                # Plot spectral type text and/or star names
+                self.spectral_type_text_list.clear()
+
+                # Pre-set visibility so items added will inherit correct state
+                should_show = self.catalog_stars_visible and (self.show_spectral_type or self.show_star_names)
+                self.spectral_type_text_list.setVisible(should_show)
+
+                # Check if we have any data to render
+                has_spectral_data = hasattr(self, 'catalog_stars_spectral_type_filtered') and \
+                                    (self.catalog_stars_spectral_type_filtered is not None) and \
+                                    len(self.catalog_stars_spectral_type_filtered) > 0
+                has_name_data = hasattr(self, 'catalog_stars_preferred_names_filtered') and \
+                                (self.catalog_stars_preferred_names_filtered is not None) and \
+                                len(self.catalog_stars_preferred_names_filtered) > 0
+
+                # Check if we should render anything
+                if (self.show_spectral_type or self.show_star_names) and \
+                   (has_spectral_data or has_name_data):
+
+                    # Determine the number of stars to iterate over
+                    n_stars = len(self.catalog_x_filtered)
+
+                    # Prepare iterators - use data if available, otherwise None placeholders
+                    if has_spectral_data:
+                        iter_spectral = self.catalog_stars_spectral_type_filtered
+                    else:
+                        iter_spectral = [None] * n_stars
+
+                    if has_name_data:
+                        iter_names = self.catalog_stars_preferred_names_filtered
+                    else:
+                        iter_names = [None] * n_stars
+
+                    if hasattr(self, 'catalog_stars_common_names_filtered') and \
+                       (self.catalog_stars_common_names_filtered is not None):
+                        iter_common_names = self.catalog_stars_common_names_filtered
+                    else:
+                        iter_common_names = [None] * n_stars
+
+
+                    # Sort by brightness (magnitude) so brightest stars get labels first
+                    # catalog_stars_filtered has (ra, dec, mag) - lower mag = brighter
+                    if len(self.catalog_stars_filtered) > 0:
+                        mags = np.array([s[2] for s in self.catalog_stars_filtered])
+                        brightness_order = np.argsort(mags)  # Brightest first
+                    else:
+                        brightness_order = np.arange(n_stars)
+
+                    # Keep track of placed labels using spatial grid for O(1) overlap checking
+                    # Grid cell size matches exclusion zone
+                    grid_cell_x = 50
+                    grid_cell_y = 15
+                    placed_labels_grid = {}  # Dict: (grid_x, grid_y) -> list of (x, y)
+
+                    def checkOverlap(x, y):
+                        """Check if position overlaps with any placed label. O(1) average."""
+                        gx = int(x // grid_cell_x)
+                        gy = int(y // grid_cell_y)
+                        # Check current cell and adjacent cells
+                        for dx in (-1, 0, 1):
+                            for dy in (-1, 0, 1):
+                                cell = (gx + dx, gy + dy)
+                                if cell in placed_labels_grid:
+                                    for (px, py) in placed_labels_grid[cell]:
+                                        if abs(y - py) < 15 and abs(x - px) < 50:
+                                            return True
+                        return False
+
+                    def addToGrid(x, y):
+                        """Add position to spatial grid."""
+                        cell = (int(x // grid_cell_x), int(y // grid_cell_y))
+                        if cell not in placed_labels_grid:
+                            placed_labels_grid[cell] = []
+                        placed_labels_grid[cell].append((x, y))
+
+                    # Check if we have precomputed HTML available
+                    has_precomputed_spectral = hasattr(self, '_star_label_html_spectral') and self._star_label_html_spectral
+                    has_precomputed_name = hasattr(self, '_star_label_html_name') and self._star_label_html_name
+                    has_original_indices = hasattr(self, '_filtered_original_indices') and self._filtered_original_indices
+
+                    # Initialize TextItem cache if not present
+                    if not hasattr(self, '_star_label_cache'):
+                        self._star_label_cache = {}
+
+                    # Cache key suffix: different display options produce different HTML
+                    _cache_key_suffix = (self.show_spectral_type, self.show_star_names)
+
+                    # Iterate in brightness order (brightest first), limited by magnitude
+                    for sort_idx in brightness_order:
+                        i = sort_idx
+
+                        # Skip stars fainter than the magnitude limit
+                        star_mag = mags[i] if i < len(mags) else 99.0
+                        if star_mag > self.label_mag_limit:
+                            continue
+                        spec_type = iter_spectral[i] if iter_spectral else None
+                        star_name = iter_names[i] if iter_names else None
+                        common_name = iter_common_names[i] if iter_common_names else None
+
+                        html_text = ""
+                        has_text = False
+
+                        # Get original catalog index for precomputed HTML lookup
+                        orig_idx = self._filtered_original_indices[i] if has_original_indices and i < len(self._filtered_original_indices) else None
+
+                        # Add spectral type - use precomputed HTML if available
+                        if self.show_spectral_type:
+                            if has_precomputed_spectral and orig_idx is not None and self._star_label_html_spectral[orig_idx]:
+                                html_text += self._star_label_html_spectral[orig_idx]
+                                has_text = True
+                            elif (spec_type is not None) and (len(spec_type) > 0):
+                                # Fallback to computing HTML (for catalogs loaded before this change)
+                                hex_color = "#90ee90"  # Default light green
+                                first_char = spec_type[0].upper()
+                                if 'infrared' in spec_type.lower():
+                                    hex_color = "#990000"
+                                elif first_char == 'O':
+                                    hex_color = "#9bb0ff"
+                                elif first_char == 'B':
+                                    hex_color = "#aabfff"
+                                elif first_char == 'A':
+                                    hex_color = "#cad7ff"
+                                elif first_char == 'F':
+                                    hex_color = "#f8f7ff"
+                                elif first_char == 'G':
+                                    hex_color = "#fff4ea"
+                                elif first_char == 'K':
+                                    hex_color = "#ffd2a1"
+                                elif first_char == 'M':
+                                    hex_color = "#ffcc6f"
+                                display_type = "IR" if 'infrared' in spec_type.lower() else spec_type
+                                html_text += f'<span style="color: {hex_color};">{display_type}</span>'
+                                has_text = True
+
+                        # Add star name - use precomputed HTML if available
+                        if self.show_star_names:
+                            if has_precomputed_name and orig_idx is not None and self._star_label_html_name[orig_idx]:
+                                if has_text:
+                                    html_text += "<br>"
+                                html_text += self._star_label_html_name[orig_idx]
+                                has_text = True
+                            elif (star_name is not None) and (len(star_name) > 0):
+                                if has_text:
+                                    html_text += "<br>"
+                                url_name = star_name.replace(' ', '+')
+                                display_name = common_name if common_name else star_name
+                                html_text += f'<a href="https://simbad.cds.unistra.fr/simbad/sim-id?Ident={url_name}" style="color: #dddddd; text-decoration: none;">{display_name}</a>'
+                                has_text = True
+
+                        if not has_text:
+                            continue
+
+                        # Check for overlap with existing labels using spatial grid
+                        curr_x = self.catalog_x_filtered[i]
+                        curr_y = self.catalog_y_filtered[i]
+
+                        if checkOverlap(curr_x, curr_y):
+                            continue
+
+                        addToGrid(curr_x, curr_y)
+
+                        # Check cache for existing TextItem (keyed by original index + display options)
+                        _cache_key = (orig_idx, _cache_key_suffix) if orig_idx is not None else None
+                        if _cache_key is not None and _cache_key in self._star_label_cache:
+                            # Reuse cached TextItem - just update position
+                            text_item = self._star_label_cache[_cache_key]
+                            text_item.setPos(self.catalog_x_filtered[i] - 3,
+                                             self.catalog_y_filtered[i] + 0.5)
+                        else:
+                            # Create new TextItem with HTML
+                            # Anchor (1.0, 0.5) places text right edge at anchor point
+                            # Small offset clears the marker without drifting too much on zoom
+                            text_item = TextItem(html=html_text, anchor=(1.0, 0.5))
+                            text_item.setAlign(QtCore.Qt.AlignRight)
+                            text_item.setPos(self.catalog_x_filtered[i] - 3,
+                                             self.catalog_y_filtered[i] + 0.5)
+                            # Cache for reuse
+                            if _cache_key is not None:
+                                self._star_label_cache[_cache_key] = text_item
+
+                        self.spectral_type_text_list.addTextItem(text_item)
+
             else:
                 print('No catalog stars visible!')
+
+        else:
+            # Catalog stars not visible - hide the text list
+            self.spectral_type_text_list.setVisible(False)
+
+
+    def updatePlanets(self):
+        """ Update the display of solar system bodies (planets, Moon, Sun). """
+
+        if not ASTROPY_AVAILABLE:
+            return
+
+        if not self.catalog_stars_visible:
+            self.planet_markers.setData(pos=[])
+            self.planet_markers2.setData(pos=[])
+            self.planet_labels.clear()
+            return
+
+        if self.platepar is None:
+            return
+
+        # Get observation time
+        if self.mode == 'skyfit':
+            obs_time = self.img_handle.currentTime()
+        else:
+            obs_time = self.img_handle.currentFrameTime()
+
+        ff_jd = date2JD(*obs_time)
+
+        # Check if we need to recompute ephemerides (expensive astropy calls)
+        # Only recompute when the observation time changes
+        if self._planet_cache_time != obs_time[:6]:
+            # Convert to astropy Time
+            dt = datetime.datetime(*obs_time[:6])
+            t = Time(dt)
+
+            # Observer location
+            loc = EarthLocation(lat=self.platepar.lat, lon=self.platepar.lon,
+                               height=self.platepar.elev)
+
+            # Bodies to display (name, display_name)
+            bodies = [
+                ('sun', 'Sun'),
+                ('moon', 'Moon'),
+                ('mercury', 'Mercury'),
+                ('venus', 'Venus'),
+                ('mars', 'Mars'),
+                ('jupiter', 'Jupiter'),
+                ('saturn', 'Saturn'),
+                ('uranus', 'Uranus'),
+                ('neptune', 'Neptune'),
+            ]
+
+            # Get sun position for magnitude calculations
+            sun = get_sun(t)
+
+            # Compute and cache ephemerides
+            self._planet_cache_radec = []
+            for body_name, display_name in bodies:
+                try:
+                    # Get body position (GCRS apparent coordinates)
+                    body = get_body(body_name, t, loc)
+                    ra_deg = body.ra.deg
+                    dec_deg = body.dec.deg
+
+                    # Compute apparent magnitude
+                    mag = computeSolarSystemMagnitude(body_name, body, sun, t)
+
+                    self._planet_cache_radec.append((display_name, ra_deg, dec_deg, mag))
+
+                except Exception as e:
+                    # Skip bodies that fail (e.g., if ephemeris data is missing)
+                    pass
+
+            self._planet_cache_time = obs_time[:6]
+
+        # Now compute x/y positions from cached RA/Dec (this is fast and depends on platepar)
+        planet_x = []
+        planet_y = []
+        planet_names = []
+        planet_mags = []
+        planet_ra = []
+        planet_dec = []
+
+        # Get current FOV center coordinates for filtering (apparent coordinates)
+        fov_ra, fov_dec = self.computeCentreRADec()
+
+        # Use same FOV radius as catalog filtering, with margin for edge cases
+        # Cap at 90 degrees (gnomonic projection limit)
+        fov_radius = getFOVSelectionRadius(self.platepar)
+        max_ang_sep = min(90, fov_radius * 1.5)
+
+        for display_name, ra_deg, dec_deg, mag in self._planet_cache_radec:
+            # Check angular separation from FOV center
+            # Skip bodies outside the extended FOV radius (prevents gnomonic projection wrapping)
+            ang_sep = np.degrees(angularSeparation(
+                np.radians(ra_deg), np.radians(dec_deg),
+                np.radians(fov_ra), np.radians(fov_dec)
+            ))
+            if ang_sep > max_ang_sep:
+                continue
+
+            # Convert RA/Dec to image coordinates
+            body_radec = np.array([[ra_deg, dec_deg, mag]])
+            x_arr, y_arr, _ = getCatalogStarsImagePositions(body_radec, ff_jd, self.platepar)
+
+            if len(x_arr) > 0:
+                x, y = x_arr[0], y_arr[0]
+
+                # Check if within image bounds
+                if 0 <= x < self.platepar.X_res and 0 <= y < self.platepar.Y_res:
+                    planet_x.append(x)
+                    planet_y.append(y)
+                    planet_names.append(display_name)
+                    planet_mags.append(mag)
+                    planet_ra.append(ra_deg)
+                    planet_dec.append(dec_deg)
+
+        # Store planet data for potential calibration use
+        self.planet_data = list(zip(planet_names, planet_x, planet_y, planet_ra, planet_dec, planet_mags))
+
+        # Update markers
+        if planet_x:
+            self.planet_markers.setData(x=np.array(planet_x) + 0.5,
+                                        y=np.array(planet_y) + 0.5)
+            self.planet_markers2.setData(x=np.array(planet_x) + 0.5,
+                                         y=np.array(planet_y) + 0.5)
+
+            # Update labels with name and magnitude
+            self.planet_labels.clear()
+            for i, name in enumerate(planet_names):
+                mag_str = "{:+.1f}".format(planet_mags[i])
+                label = TextItem("{} ({})".format(name, mag_str), color=(255, 200, 0), anchor=(1.0, 0.5))
+                label.setPos(planet_x[i] - 15, planet_y[i] + 0.5)
+                self.planet_labels.addTextItem(label)
+        else:
+            self.planet_markers.setData(pos=[])
+            self.planet_markers2.setData(pos=[])
+            self.planet_labels.clear()
 
 
     def updatePairedStars(self):
@@ -2928,12 +4606,14 @@ class PlateTool(QtWidgets.QMainWindow):
         # Handle using FR files
         ff_name_c = convertFRNameToFF(self.img_handle.name())
 
-        # Check if the given FF files is in the calstars list
-        if ff_name_c in self.calstars:
-
-            # Get the stars detected on this FF file
+        # Choose data source: override detections or original CALSTARS
+        star_data = None
+        if self.star_detection_override_enabled and ff_name_c in self.star_detection_override_data:
+            star_data = np.array(self.star_detection_override_data[ff_name_c])
+        elif ff_name_c in self.calstars:
             star_data = np.array(self.calstars[ff_name_c])
 
+        if star_data is not None and len(star_data) > 0:
             # Get star coordinates
             y = star_data[:, 0]
             x = star_data[:, 1]
@@ -2952,8 +4632,1909 @@ class PlateTool(QtWidgets.QMainWindow):
             self.calstar_markers_outer2.setData(pos=[])
 
 
+    def initStarDetectionOverrides(self):
+        """ Initialize star detection override parameters from config. """
+        if hasattr(self.config, 'intensity_threshold'):
+            self.override_intensity_threshold = self.config.intensity_threshold
+        if hasattr(self.config, 'neighborhood_size'):
+            self.override_neighborhood_size = self.config.neighborhood_size
+        if hasattr(self.config, 'max_stars'):
+            self.override_max_stars = self.config.max_stars
+        if hasattr(self.config, 'gamma'):
+            self.override_gamma = self.config.gamma
+        if hasattr(self.config, 'segment_radius'):
+            self.override_segment_radius = self.config.segment_radius
+        if hasattr(self.config, 'max_feature_ratio'):
+            self.override_max_feature_ratio = self.config.max_feature_ratio
+        if hasattr(self.config, 'roundness_threshold'):
+            self.override_roundness_threshold = self.config.roundness_threshold
+
+        # Update UI sliders
+        self.tab.star_detection.loadFromConfig(self.config)
+
+
+    def updateIntensityThreshold(self, value):
+        """ Update intensity threshold override parameter. """
+        self.override_intensity_threshold = value
+        self._updateConfigSaveButtonState()
+
+    def updateNeighborhoodSize(self, value):
+        """ Update neighborhood size override parameter. """
+        self.override_neighborhood_size = value
+        self._updateConfigSaveButtonState()
+
+    def updateMaxStars(self, value):
+        """ Update max stars override parameter. """
+        self.override_max_stars = value
+        self._updateConfigSaveButtonState()
+
+    def updateGamma(self, value):
+        """ Update gamma override parameter. """
+        self.override_gamma = value
+
+        # If override is enabled, also sync config.gamma and platepar.gamma
+        if self.star_detection_override_enabled:
+            self.config.gamma = value
+            if self.platepar is not None:
+                self.platepar.gamma = value
+
+        # Sync display gamma (Settings tab) with camera gamma
+        self.img.setGamma(value)
+        self.img_zoom.setGamma(value)
+        # Block signals to prevent infinite loop
+        self.tab.settings.img_gamma.blockSignals(True)
+        self.tab.settings.img_gamma.setValue(value)
+        self.tab.settings.img_gamma.blockSignals(False)
+        self.updateLeftLabels()
+
+    def updateSegmentRadius(self, value):
+        """ Update segment radius override parameter. """
+        self.override_segment_radius = value
+        self._updateConfigSaveButtonState()
+
+    def updateMaxFeatureRatio(self, value):
+        """ Update max feature ratio override parameter. """
+        self.override_max_feature_ratio = value
+        self._updateConfigSaveButtonState()
+
+    def updateRoundnessThreshold(self, value):
+        """ Update roundness threshold override parameter. """
+        self.override_roundness_threshold = value
+        self._updateConfigSaveButtonState()
+
+    def isConfigModified(self):
+        """Check if Star Detection overrides differ from the loaded config."""
+        cfg = self.config
+        return (
+            self.override_intensity_threshold != getattr(cfg, 'intensity_threshold', self.override_intensity_threshold)
+            or self.override_neighborhood_size != getattr(cfg, 'neighborhood_size', self.override_neighborhood_size)
+            or self.override_max_stars != getattr(cfg, 'max_stars', self.override_max_stars)
+            or self.override_segment_radius != getattr(cfg, 'segment_radius', self.override_segment_radius)
+            or abs(self.override_max_feature_ratio - getattr(cfg, 'max_feature_ratio', self.override_max_feature_ratio)) > 1e-6
+            or abs(self.override_roundness_threshold - getattr(cfg, 'roundness_threshold', self.override_roundness_threshold)) > 1e-6
+        )
+
+    def _updateConfigSaveButtonState(self):
+        """Enable/disable the Save Config button based on whether overrides differ from config."""
+        if hasattr(self, 'tab') and hasattr(self.tab, 'star_detection'):
+            self.tab.star_detection.save_config_button.setEnabled(self.isConfigModified())
+        self.updateFileManagerButton()
+
+    def updateCatalogLMFromStarDetection(self, value):
+        """ Update catalog limiting magnitude from Star Detection panel spinbox. """
+        self.cat_lim_mag = value
+        self.catalog_stars = self.loadCatalogStars(self.cat_lim_mag)
+
+        # Sync the Settings panel spinbox
+        self.tab.settings.lim_mag.blockSignals(True)
+        self.tab.settings.lim_mag.setValue(value)
+        self.tab.settings.lim_mag.blockSignals(False)
+
+        self.updateLeftLabels()
+        self.updateStars()
+
+
+    def toggleStarDetectionOverride(self):
+        """ Toggle between using override detections and original CALSTARS. """
+        self.star_detection_override_enabled = not self.star_detection_override_enabled
+
+        # Update both platepar.gamma and config.gamma to match the detection source
+        if self.star_detection_override_enabled:
+            # Store original config gamma before overriding
+            if self._original_config_gamma is None:
+                self._original_config_gamma = getattr(self.config, 'gamma', 1.0)
+
+            # Using override detections - use override gamma everywhere
+            if self.platepar is not None:
+                self.platepar.gamma = self.override_gamma
+            self.config.gamma = self.override_gamma
+            print(f"Switched to override detections (gamma={self.override_gamma:.3f})")
+        else:
+            # Using original CALSTARS - restore original gamma
+            if self._original_config_gamma is not None:
+                if self.platepar is not None:
+                    self.platepar.gamma = self._original_config_gamma
+                self.config.gamma = self._original_config_gamma
+                print(f"Switched to original CALSTARS (gamma={self._original_config_gamma:.3f})")
+
+        # Update the display
+        self.updateCalstars()
+
+        # Update status in UI
+        ff_name = self.img_handle.name()
+        if self.star_detection_override_enabled and ff_name in self.star_detection_override_data:
+            star_count = len(self.star_detection_override_data[ff_name])
+            self.tab.star_detection.updateStatus(True, star_count)
+        else:
+            self.tab.star_detection.updateStatus(False)
+
+
+    def redetectStars(self):
+        """ Re-detect stars on current image using override parameters. """
+
+        # Skip placeholder images
+        ff_name = self.img_handle.name()
+        if ff_name is not None and "_placeholder" in ff_name:
+            print("  Skipping placeholder image")
+            return
+
+        print(f"Re-detecting stars with: threshold={self.override_intensity_threshold}, "
+              f"neighborhood={self.override_neighborhood_size}, segment_radius={self.override_segment_radius}, "
+              f"max_stars={self.override_max_stars}, gamma={self.override_gamma:.3f}")
+
+        # Call extractStarsFF with override parameters
+        try:
+            # Temporarily modify config to use override parameters
+            original_intensity_threshold = getattr(self.config, 'intensity_threshold', 18)
+            original_neighborhood_size = getattr(self.config, 'neighborhood_size', 10)
+            original_max_stars = getattr(self.config, 'max_stars', 200)
+            original_gamma = getattr(self.config, 'gamma', 1.0)
+            original_segment_radius = getattr(self.config, 'segment_radius', 4)
+            original_max_feature_ratio = getattr(self.config, 'max_feature_ratio', 0.8)
+            original_roundness_threshold = getattr(self.config, 'roundness_threshold', 0.5)
+
+            # Set override values
+            self.config.intensity_threshold = self.override_intensity_threshold
+            self.config.neighborhood_size = self.override_neighborhood_size
+            self.config.max_stars = self.override_max_stars
+            self.config.gamma = self.override_gamma
+            self.config.segment_radius = self.override_segment_radius
+            self.config.max_feature_ratio = self.override_max_feature_ratio
+            self.config.roundness_threshold = self.override_roundness_threshold
+
+            try:
+                star_list = extractStarsFF(
+                    self.dir_path,
+                    ff_name,
+                    config=self.config,
+                    flat_struct=self.flat_struct if hasattr(self, 'flat_struct') else None,
+                    dark=self.dark if hasattr(self, 'dark') else None,
+                    mask=self.mask if hasattr(self, 'mask') else None
+                )
+            finally:
+                # Restore original config values
+                self.config.intensity_threshold = original_intensity_threshold
+                self.config.neighborhood_size = original_neighborhood_size
+                self.config.max_stars = original_max_stars
+                self.config.gamma = original_gamma
+                self.config.segment_radius = original_segment_radius
+                self.config.max_feature_ratio = original_max_feature_ratio
+                self.config.roundness_threshold = original_roundness_threshold
+
+            if star_list:
+                # extractStarsFF returns: ff_name, x_arr, y_arr, amplitude, intensity, fwhm, background, snr, saturated_count
+                ff_name_ret, x_arr, y_arr, amplitude, intensity, fwhm, background, snr, saturated_count = star_list
+
+                # Construct star data in CALSTARS format: Y(0) X(1) IntensSum(2) Ampltd(3) FWHM(4) BgLvl(5) SNR(6) NSatPx(7)
+                # Note: intensity=IntensSum (integrated), amplitude=Ampltd (peak)
+                star_data = list(zip(y_arr, x_arr, intensity, amplitude, fwhm, background, snr, saturated_count))
+
+                # Store the override detected stars
+                self.star_detection_override_data[ff_name] = star_data
+                original_count = len(self.calstars.get(ff_name, []))
+                print(f"  Detected {len(star_data)} stars (original: {original_count})")
+
+                # Enable override mode and update display
+                self.star_detection_override_enabled = True
+                self.tab.star_detection.use_override_checkbox.setChecked(True)
+
+                # Sync gamma: keep override gamma in config and platepar
+                if self._original_config_gamma is None:
+                    self._original_config_gamma = original_gamma
+                self.config.gamma = self.override_gamma
+                if self.platepar is not None:
+                    self.platepar.gamma = self.override_gamma
+                print(f"  Using override gamma={self.override_gamma:.3f} for photometry")
+
+                self.updateCalstars()
+                self.tab.star_detection.updateStatus(True, len(star_data))
+
+            else:
+                print("  No stars detected")
+                self.tab.star_detection.updateStatus(False)
+
+        except Exception as e:
+            print(f"  Error during star detection: {e}")
+            traceback.print_exc()
+
+
+    def redetectAllImages(self):
+        """ Re-detect stars on all images using override parameters. """
+        print("Re-detecting stars on all images...")
+
+        # Get list of all FF files that exist on disk, excluding placeholders
+        ff_files = [f for f in self.calstars.keys()
+                     if os.path.isfile(os.path.join(self.dir_path, f)) and "_placeholder" not in f]
+        if not ff_files:
+            print("  No FF files found on disk")
+            return
+
+        total = len(ff_files)
+        success_count = 0
+
+        # Disable buttons during processing
+        self.tab.star_detection.redetect_all_button.setText("Re-Detecting...")
+        self.tab.star_detection.redetect_all_button.setEnabled(False)
+        self.tab.star_detection.redetect_button.setEnabled(False)
+        self.tab.star_detection.tune_button.setEnabled(False)
+        self.status_bar.showMessage(f"Re-detecting stars on {total} images...")
+        QtWidgets.QApplication.processEvents()
+
+        # Save original config values
+        original_intensity_threshold = getattr(self.config, 'intensity_threshold', 18)
+        original_neighborhood_size = getattr(self.config, 'neighborhood_size', 10)
+        original_max_stars = getattr(self.config, 'max_stars', 200)
+        original_gamma = getattr(self.config, 'gamma', 1.0)
+        original_segment_radius = getattr(self.config, 'segment_radius', 4)
+        original_max_feature_ratio = getattr(self.config, 'max_feature_ratio', 0.8)
+        original_roundness_threshold = getattr(self.config, 'roundness_threshold', 0.5)
+
+        # Set override values
+        self.config.intensity_threshold = self.override_intensity_threshold
+        self.config.neighborhood_size = self.override_neighborhood_size
+        self.config.max_stars = self.override_max_stars
+        self.config.gamma = self.override_gamma
+        self.config.segment_radius = self.override_segment_radius
+        self.config.max_feature_ratio = self.override_max_feature_ratio
+        self.config.roundness_threshold = self.override_roundness_threshold
+
+        try:
+            for i, ff_name in enumerate(ff_files):
+                print(f"  Processing {i+1}/{total}: {ff_name}")
+
+                # Update status bar and keep UI responsive
+                self.status_bar.showMessage(
+                    f"Re-detecting stars... {i+1}/{total} ({success_count} successful)")
+                QtWidgets.QApplication.processEvents()
+
+                try:
+                    star_list = extractStarsFF(
+                        self.dir_path,
+                        ff_name,
+                        config=self.config,
+                        flat_struct=self.flat_struct if hasattr(self, 'flat_struct') else None,
+                        dark=self.dark if hasattr(self, 'dark') else None,
+                        mask=self.mask if hasattr(self, 'mask') else None
+                    )
+
+                    if star_list:
+                        ff_name_ret, x_arr, y_arr, amplitude, intensity, fwhm, background, snr, saturated_count = star_list
+                        # CALSTARS format: Y(0) X(1) IntensSum(2) Ampltd(3) FWHM(4) BgLvl(5) SNR(6) NSatPx(7)
+                        star_data = list(zip(y_arr, x_arr, intensity, amplitude, fwhm, background, snr, saturated_count))
+                        self.star_detection_override_data[ff_name] = star_data
+                        success_count += 1
+
+                except Exception as e:
+                    print(f"    Error: {e}")
+
+        finally:
+            # Restore original config values
+            self.config.intensity_threshold = original_intensity_threshold
+            self.config.neighborhood_size = original_neighborhood_size
+            self.config.max_stars = original_max_stars
+            self.config.gamma = original_gamma
+            self.config.segment_radius = original_segment_radius
+            self.config.max_feature_ratio = original_max_feature_ratio
+            self.config.roundness_threshold = original_roundness_threshold
+
+            # Re-enable buttons
+            self.tab.star_detection.redetect_all_button.setText("Re-Detect All")
+            self.tab.star_detection.redetect_all_button.setEnabled(True)
+            self.tab.star_detection.redetect_button.setEnabled(True)
+            self.tab.star_detection.tune_button.setEnabled(True)
+
+        print(f"  Completed: {success_count}/{total} images processed")
+        self.status_bar.showMessage(
+            f"Re-detection complete: {success_count}/{total} images processed")
+
+        # Enable override mode and update display
+        self.star_detection_override_enabled = True
+        self.tab.star_detection.use_override_checkbox.setChecked(True)
+
+        # Sync gamma: keep override gamma in config and platepar
+        if self._original_config_gamma is None:
+            self._original_config_gamma = original_gamma
+        self.config.gamma = self.override_gamma
+        if self.platepar is not None:
+            self.platepar.gamma = self.override_gamma
+        print(f"  Using override gamma={self.override_gamma:.3f} for photometry")
+
+        self.updateCalstars()
+
+        ff_name = self.img_handle.name()
+        if ff_name in self.star_detection_override_data:
+            self.tab.star_detection.updateStatus(True, len(self.star_detection_override_data[ff_name]))
+        else:
+            self.tab.star_detection.updateStatus(True)
+
+
+    def tuneStarDetection(self):
+        """
+        Auto-tune star detection parameters by sweeping intensity_threshold downward
+        and finding where false detections start to explode, then optimizing segment_radius.
+
+        Algorithm:
+        1. Use current catalog stars projected to image
+        2. Sweep intensity_threshold from 40 down to 3
+        3. Count true positives (within 2px of catalog) vs false positives
+        4. Find threshold where false positive ratio starts exploding
+        5. Sweep segment_radius 3-20 to potentially recover more bright stars
+        """
+        # Validate platepar exists
+        if self.platepar is None:
+            qmessagebox(message="A valid platepar is required for tuning.",
+                title="Tuning Error", message_type="warning")
+            return
+
+        # Get current FF file name
+        ff_name = self.img_handle.name()
+        if ff_name is None:
+            qmessagebox(message="No image loaded.",
+                title="Tuning Error", message_type="warning")
+            return
+
+        # Skip placeholder images
+        if "_placeholder" in ff_name:
+            qmessagebox(message="Cannot tune on a placeholder image.\n"
+                "Navigate to a real image first.",
+                title="Tuning Error", message_type="warning")
+            return
+
+        # Update button text and disable during tuning
+        self.tab.star_detection.tune_button.setText("Tuning...")
+        self.tab.star_detection.tune_button.setEnabled(False)
+        QtWidgets.QApplication.processEvents()
+
+        # Store original config values before try block for finally
+        original_max_stars = self.config.max_stars
+
+        try:
+            # Compute JD for the current image
+            jd = date2JD(*self.img_handle.currentTime())
+
+            # Store original config values
+            original_intensity_threshold = self.config.intensity_threshold
+            original_segment_radius = self.config.segment_radius
+
+            # Temporarily increase max_stars limit during tuning
+            self.config.max_stars = max(2000, original_max_stars)
+
+            # Load a DEEP catalog (LM 8.0) for true/false positive matching
+            # This ensures we don't miscount faint real stars as false positives
+            deep_catalog_lm = 8.0
+            deep_catalog = self.loadCatalogStars(deep_catalog_lm)
+
+            if deep_catalog is None or len(deep_catalog) == 0:
+                qmessagebox(message="No catalog stars available.",
+                    title="Tuning Error", message_type="warning")
+                return
+
+            # Filter catalog to stars actually in FOV (prevents back-projection issues)
+            # Pass lim_mag explicitly to avoid using self.cat_lim_mag which may differ
+            _, deep_catalog_fov = self.filterCatalogStarsInsideFOV(deep_catalog, lim_mag=deep_catalog_lm)
+            if len(deep_catalog_fov) == 0:
+                qmessagebox(message="No catalog stars visible in FOV.",
+                    title="Tuning Error", message_type="warning")
+                return
+
+            # Project FOV-filtered catalog to image coordinates
+            catalog_x, catalog_y, _ = getCatalogStarsImagePositions(
+                deep_catalog_fov, jd, self.platepar)
+
+            # Filter to stars within image bounds
+            in_image = ((catalog_x >= 0) & (catalog_x < self.platepar.X_res) &
+                       (catalog_y >= 0) & (catalog_y < self.platepar.Y_res))
+
+            # Apply mask filtering if mask exists
+            if self.mask is not None and self.mask.img is not None:
+                if (self.mask.img.shape[0] == self.platepar.Y_res and
+                    self.mask.img.shape[1] == self.platepar.X_res):
+                    x_int = np.clip(catalog_x.astype(int), 0, self.mask.img.shape[1] - 1)
+                    y_int = np.clip(catalog_y.astype(int), 0, self.mask.img.shape[0] - 1)
+                    not_masked = self.mask.img[y_int, x_int] != 0
+                    in_image = in_image & not_masked
+
+            # Get visible catalog star positions
+            visible_cat_x = catalog_x[in_image]
+            visible_cat_y = catalog_y[in_image]
+            n_catalog_visible = len(visible_cat_x)
+
+            print(f"\n=== Star Detection Tuning ===")
+            print(f"  Using deep catalog (LM={deep_catalog_lm}) for matching: {n_catalog_visible} stars in FOV")
+
+            if n_catalog_visible < 5:
+                qmessagebox(message=f"Only {n_catalog_visible} catalog stars visible in FOV.\n"
+                            "Need at least 5 for tuning. Try increasing catalog magnitude limit.",
+                    title="Tuning Error", message_type="warning")
+                return
+
+            # Phase 1: Determine segment_radius from FWHM of bright stars
+            #
+            # The segment_radius must be large enough to contain the stellar PSF for
+            # the Gaussian fit. The critical filter in fitPSF is:
+            #   4 * sigma_x * sigma_y / segment_radius^2 < max_feature_ratio
+            # For a round star (sigma_x ≈ sigma_y):
+            #   segment_radius > 2 * sigma / sqrt(max_feature_ratio)
+            # Since FWHM = 2.355 * sigma:
+            #   segment_radius > 0.95 * FWHM  (for max_feature_ratio = 0.8)
+            #
+            # We detect bright stars with a generous segment_radius, measure their
+            # FWHMs, then set segment_radius to accommodate the widest stars.
+            print(f"\n  Phase 1: Determining segment_radius from bright star FWHMs")
+            self.status_bar.showMessage("Tuning... measuring star FWHMs")
+            QtWidgets.QApplication.processEvents()
+
+            best_segment, best_true_pos_seg, best_fp_ratio_seg = self._findSegmentRadiusFromFWHM(
+                ff_name, visible_cat_x, visible_cat_y)
+
+            # Early bail-out check after Phase 1
+            # With high intensity threshold (bright stars only), we expect good precision.
+            # If false positive ratio > 80%, the calibration is likely wrong.
+            if best_fp_ratio_seg > 0.80:
+                precision_seg = (1.0 - best_fp_ratio_seg) * 100
+
+                print(f"\n  *** TUNING ABORTED ***")
+                print(f"  Only {best_true_pos_seg} true positive(s) with "
+                      f"{best_fp_ratio_seg:.0%} false positive ratio.")
+                print(f"  Precision: {precision_seg:.1f}% (expected >20% with bright stars)")
+                print(f"  This suggests the platepar calibration is incorrect or the image has issues.")
+                self.status_bar.showMessage("Tuning aborted: calibration appears invalid")
+                qmessagebox(
+                    message="Tuning aborted: could not find enough matching stars.\n\n"
+                            f"Only {best_true_pos_seg} star(s) matched catalog positions "
+                            f"({precision_seg:.1f}% precision).\n\n"
+                            "With bright stars only (high threshold), precision should be >20%.\n\n"
+                            "This usually means:\n"
+                            "• The platepar calibration is incorrect\n"
+                            "• The image pointing doesn't match the platepar\n"
+                            "• The image has severe issues (clouds, daylight, etc.)\n\n"
+                            "Please verify your calibration before trying again.",
+                    title="Tuning Aborted", message_type="warning")
+                return
+
+            # Phase 2: Sweep intensity threshold from high to low with best segment
+            # Continue until we see clear degradation, then analyze all results
+            print(f"\n  Phase 2: Intensity threshold sweep (segment_radius={best_segment})")
+            intensity_values = list(range(40, 2, -1))  # 40 down to 3
+
+            # Collect results - we'll analyze the full curve to find optimal point
+            results = []  # (threshold, n_true_pos, n_false_pos, n_detected)
+            max_true_pos_seen = 0
+            true_pos_plateau_count = 0
+
+            for i, intensity in enumerate(intensity_values):
+                self.status_bar.showMessage(f"Tuning... threshold sweep {intensity}")
+                QtWidgets.QApplication.processEvents()
+
+                n_true_pos, n_false_pos, n_detected = self._countTrueFalsePositives(
+                    ff_name, intensity, best_segment, visible_cat_x, visible_cat_y)
+
+                results.append((intensity, n_true_pos, n_false_pos, n_detected))
+
+                if n_detected > 0:
+                    fp_ratio = n_false_pos / n_detected
+                    print(f"    threshold={intensity:2d}: detected={n_detected:3d}, "
+                          f"true_pos={n_true_pos:3d}, false_pos={n_false_pos:3d}, fp_ratio={fp_ratio:.2f}")
+
+                    # Track if true_pos has plateaued (not increasing)
+                    if n_true_pos > max_true_pos_seen:
+                        max_true_pos_seen = n_true_pos
+                        true_pos_plateau_count = 0
+                    else:
+                        true_pos_plateau_count += 1
+
+                    # Smart exit conditions:
+                    # 1. fp_ratio > 0.7 - too much noise, unlikely to improve
+                    # 2. true_pos plateaued for 5+ steps AND fp_ratio > 0.4 - diminishing returns
+                    # 3. precision < 0.3 - mostly detecting noise
+                    precision = n_true_pos / n_detected
+                    if fp_ratio > 0.7:
+                        print(f"    -> Stopping: fp_ratio {fp_ratio:.2f} > 0.7 (too noisy)")
+                        break
+                    if true_pos_plateau_count >= 5 and fp_ratio > 0.4:
+                        print(f"    -> Stopping: true_pos plateaued for {true_pos_plateau_count} steps, fp_ratio={fp_ratio:.2f}")
+                        break
+                    if precision < 0.3:
+                        print(f"    -> Stopping: precision {precision:.2f} < 0.3 (mostly noise)")
+                        break
+                else:
+                    # No detections (too many candidates) - stop here
+                    print(f"    threshold={intensity:2d}: no detections (too many candidates)")
+                    break
+
+            # Find optimal threshold from collected results
+            best_threshold = self._findOptimalThreshold(results)
+            print(f"\n  Selected intensity_threshold: {best_threshold}")
+
+            # Get final stats with current detection parameters, including true positive positions
+            detection_info = {}
+            n_true_pos, n_false_pos, n_detected, tp_x, tp_y = self._countTrueFalsePositives(
+                ff_name, best_threshold, best_segment, visible_cat_x, visible_cat_y,
+                return_positions=True, extra_info=detection_info)
+
+            # Early bail-out check after Phase 2
+            # If precision is very low, the calibration is likely wrong
+            if n_detected > 0:
+                precision = n_true_pos / n_detected
+                # Bail out if precision < 10% - even with many detections, this means
+                # most detections are noise/artifacts, not real stars matching catalog
+                if precision < 0.10:
+                    print(f"\n  *** TUNING ABORTED ***")
+                    print(f"  Only {n_true_pos} true positive(s) out of {n_detected} detections ({precision:.1%} precision).")
+                    print(f"  This suggests the platepar calibration is incorrect or the image has issues.")
+                    self.status_bar.showMessage("Tuning aborted: calibration appears invalid")
+                    qmessagebox(
+                        message="Tuning aborted: very low detection precision.\n\n"
+                                f"Only {n_true_pos} star(s) out of {n_detected} detections "
+                                f"matched catalog positions ({precision:.1%} precision).\n\n"
+                                "Expected precision >10% for a valid calibration.\n\n"
+                                "This usually means:\n"
+                                "• The platepar calibration is incorrect\n"
+                                "• The image pointing doesn't match the platepar\n"
+                                "• The image has severe issues (clouds, daylight, etc.)\n\n"
+                                "Please verify your calibration before trying again.",
+                        title="Tuning Aborted", message_type="warning")
+                    return
+            elif n_detected == 0:
+                print(f"\n  *** TUNING ABORTED ***")
+                print(f"  No stars detected with any threshold.")
+                self.status_bar.showMessage("Tuning aborted: no stars detected")
+                qmessagebox(
+                    message="Tuning aborted: no stars could be detected.\n\n"
+                            "This may indicate:\n"
+                            "• Image is too noisy or has severe artifacts\n"
+                            "• Detection parameters are incompatible with this image\n"
+                            "• Image has no visible stars (clouds, daylight, etc.)",
+                    title="Tuning Aborted", message_type="warning")
+                return
+
+            # Phase 3: Find catalog LM that matches the detected true positives
+            print(f"\n  Phase 3: Finding catalog LM to match {n_true_pos} true positives")
+            self.status_bar.showMessage(f"Tuning... finding optimal catalog LM")
+            QtWidgets.QApplication.processEvents()
+
+            best_lm = self._findOptimalCatalogLM(jd, tp_x, tp_y, n_true_pos)
+            print(f"\n  Selected catalog LM: {best_lm:.1f}")
+
+            # Restore original config
+            self.config.intensity_threshold = original_intensity_threshold
+            self.config.segment_radius = original_segment_radius
+            self.config.max_stars = original_max_stars
+
+            # Update sliders to the optimal values
+            self.tab.star_detection.intensity_threshold_slider.setValue(best_threshold)
+            self.tab.star_detection.segment_radius_slider.setValue(best_segment)
+
+            # Update catalog LM and reload catalog
+            self.cat_lim_mag = best_lm
+            self.catalog_stars = self.loadCatalogStars(self.cat_lim_mag)
+
+            # Update both LM spinboxes (Settings and Star Detection panels)
+            self.tab.settings.updateLimMag()
+
+            # Store tuned LM for restoration after fitting (balancing may change it)
+            self.tuned_cat_lim_mag = best_lm
+            self.catalog_lm_tuned = True
+
+            # Count visible catalog stars at new LM (filter to FOV first to prevent back-projection)
+            _, catalog_in_fov = self.filterCatalogStarsInsideFOV(self.catalog_stars)
+            if catalog_in_fov is not None and len(catalog_in_fov) > 0:
+                new_cat_x, new_cat_y, _ = getCatalogStarsImagePositions(
+                    catalog_in_fov, jd, self.platepar)
+                in_image = ((new_cat_x >= 0) & (new_cat_x < self.platepar.X_res) &
+                           (new_cat_y >= 0) & (new_cat_y < self.platepar.Y_res))
+                if self.mask is not None and self.mask.img is not None:
+                    if (self.mask.img.shape[0] == self.platepar.Y_res and
+                        self.mask.img.shape[1] == self.platepar.X_res):
+                        x_int = np.clip(new_cat_x.astype(int), 0, self.mask.img.shape[1] - 1)
+                        y_int = np.clip(new_cat_y.astype(int), 0, self.mask.img.shape[0] - 1)
+                        not_masked = self.mask.img[y_int, x_int] != 0
+                        in_image = in_image & not_masked
+                n_catalog_final = np.sum(in_image)
+            else:
+                n_catalog_final = 0
+
+            # Enable override mode
+            self.tab.star_detection.use_override_checkbox.setChecked(True)
+
+            # Compute seasonal headroom: sweep the year to find peak visible star count
+            # relative to current, so max_stars accommodates the busiest sky.
+            self.status_bar.showMessage("Tuning... computing seasonal variation")
+            QtWidgets.QApplication.processEvents()
+            peak_ratio, peak_count, current_count = self._computeSeasonalStarVariation(
+                self.catalog_stars, jd)
+            seasonal_factor = max(peak_ratio, 1.2)  # At least 20% headroom
+            print(f"  Seasonal variation: {current_count} stars now, {peak_count} at peak "
+                  f"(ratio={peak_ratio:.2f}, using {seasonal_factor:.2f}x)")
+
+            # Set max_stars from the measured raw candidate count scaled by seasonal
+            # variation + 15% frame-to-frame buffer, rounded up to nearest 100,
+            # clamped to [400, 2000].
+            num_candidates = detection_info.get('num_candidates', n_detected * 3)
+            self.override_max_stars = int(np.clip(
+                np.ceil(num_candidates * seasonal_factor * 1.15 / 100) * 100, 400, 2000))
+            print(f"  Raw candidates: {num_candidates}, max_stars set to: {self.override_max_stars}")
+
+            # Update the GUI slider to reflect the new max_stars value
+            # First ensure the slider range can accommodate the value
+            current_max = self.tab.star_detection.max_stars_slider.maximum()
+            if self.override_max_stars > current_max:
+                self.tab.star_detection.max_stars_slider.setMaximum(self.override_max_stars)
+            self.tab.star_detection.max_stars_slider.setValue(self.override_max_stars)
+
+            # Trigger re-detection with the new parameters
+            self.redetectStars()
+
+            # Update catalog star display (includes catalog stars and paired stars)
+            self.updateStars()
+
+            # Show result summary
+            precision = n_true_pos / n_detected if n_detected > 0 else 0
+            result_msg = (
+                f"Optimal parameters found:\n\n"
+                f"  Intensity Threshold: {best_threshold}\n"
+                f"  Segment Radius: {best_segment}\n"
+                f"  Catalog LM: {best_lm:.1f}\n\n"
+                f"Results:\n"
+                f"  Detected stars: {n_detected}\n"
+                f"  True positives (within 2px of catalog): {n_true_pos}\n"
+                f"  False positives: {n_false_pos}\n"
+                f"  Precision: {precision:.1%}\n"
+                f"  Catalog stars in FOV: {n_catalog_final}"
+            )
+
+            self.status_bar.showMessage(
+                f"Tuning complete: {n_true_pos} matched, threshold={best_threshold}, "
+                f"radius={best_segment}, LM={best_lm:.1f}")
+
+            print(f"\n  Final: {n_true_pos} true positives, {n_false_pos} false positives, "
+                  f"precision={precision:.1%}, catalog LM={best_lm:.1f} ({n_catalog_final} stars)")
+
+            qmessagebox(message=result_msg, title="Tuning Complete", message_type="info")
+
+        finally:
+            # Restore button state and config
+            self.tab.star_detection.tune_button.setText("Tune")
+            self.tab.star_detection.tune_button.setEnabled(True)
+            self.config.max_stars = original_max_stars
+
+
+    def _countTrueFalsePositives(self, ff_name, intensity_threshold, segment_radius,
+                                  catalog_x, catalog_y, match_radius=3.0, return_positions=False,
+                                  extra_info=None):
+        """
+        Count true and false positive detections.
+
+        Arguments:
+            ff_name: [str] Name of the FF file.
+            intensity_threshold: [int] Intensity threshold for detection.
+            segment_radius: [int] Segment radius for detection.
+            catalog_x: [ndarray] X coordinates of visible catalog stars.
+            catalog_y: [ndarray] Y coordinates of visible catalog stars.
+            match_radius: [float] Maximum distance in pixels for a match.
+            return_positions: [bool] If True, also return true positive coordinates.
+
+        Returns:
+            (n_true_pos, n_false_pos, n_detected): Tuple of counts.
+            If return_positions=True: (n_true_pos, n_false_pos, n_detected, tp_x, tp_y)
+        """
+        try:
+            # Set detection parameters - must match what redetectStars uses
+            self.config.intensity_threshold = intensity_threshold
+            self.config.segment_radius = segment_radius
+            self.config.max_feature_ratio = self.override_max_feature_ratio
+            self.config.roundness_threshold = self.override_roundness_threshold
+
+            # Run star detection
+            star_list = extractStarsFF(
+                self.dir_path, ff_name, config=self.config,
+                flat_struct=self.flat_struct, dark=self.dark, mask=self.mask,
+                extra_info=extra_info
+            )
+
+            if not star_list or len(star_list[1]) == 0:
+                if return_positions:
+                    return 0, 0, 0, np.array([]), np.array([])
+                return 0, 0, 0
+
+            ff_name_ret, x_arr, y_arr, amplitude, intensity, fwhm_arr, background, snr, saturated = star_list
+            x_arr = np.asarray(x_arr, dtype=float)
+            y_arr = np.asarray(y_arr, dtype=float)
+            fwhm_arr = np.asarray(fwhm_arr, dtype=float)
+            n_detected = len(x_arr)
+
+            if n_detected == 0 or len(catalog_x) == 0:
+                if return_positions:
+                    return 0, 0, 0, np.array([]), np.array([])
+                return 0, 0, 0
+
+            # Count matches using KD-tree for fast nearest-neighbor lookup
+            # Dynamic match radius based on FWHM - wide stars have less precise centroids
+            cat_tree = cKDTree(np.column_stack([catalog_x, catalog_y]))
+            det_coords = np.column_stack([x_arr, y_arr])
+            nn_dist, _ = cat_tree.query(det_coords, k=1)
+
+            effective_radii = np.maximum(match_radius, 1.5 * fwhm_arr)
+            matched = nn_dist <= effective_radii
+
+            n_true_pos = int(np.sum(matched))
+            n_false_pos = n_detected - n_true_pos
+
+            if return_positions:
+                return n_true_pos, n_false_pos, n_detected, x_arr[matched], y_arr[matched]
+            return n_true_pos, n_false_pos, n_detected
+
+        except Exception as e:
+            print(f"    Detection error: {e}")
+            if return_positions:
+                return 0, 0, 0, np.array([]), np.array([])
+            return 0, 0, 0
+
+
+    def _findSegmentRadiusFromFWHM(self, ff_name, visible_cat_x, visible_cat_y):
+        """
+        Determine the optimal segment_radius by measuring the FWHM of bright stars.
+
+        Detects bright stars with a generous segment_radius, measures their FWHMs,
+        then sets segment_radius to accommodate the widest PSFs. The relationship is:
+            segment_radius > 2 * sigma / sqrt(max_feature_ratio)
+        where sigma = FWHM / 2.355.
+
+        Uses a multiplier of 1.5x the 90th percentile FWHM to provide margin for
+        the Gaussian fit while keeping the segment compact.
+
+        Arguments:
+            ff_name: [str] Name of the FF file.
+            visible_cat_x: [ndarray] X coordinates of visible catalog stars.
+            visible_cat_y: [ndarray] Y coordinates of visible catalog stars.
+
+        Returns:
+            (best_segment, n_true_pos, fp_ratio): Tuple of optimal segment radius,
+                true positive count and false positive ratio from validation.
+        """
+        # Use a generous segment_radius (12) and high threshold to detect bright stars
+        # segment=12 is large enough for almost any stellar PSF
+        probe_segment = 12
+        high_threshold = 25
+
+        try:
+            # Save and set config
+            orig_intensity = self.config.intensity_threshold
+            orig_segment = self.config.segment_radius
+            self.config.intensity_threshold = high_threshold
+            self.config.segment_radius = probe_segment
+            self.config.max_feature_ratio = self.override_max_feature_ratio
+            self.config.roundness_threshold = self.override_roundness_threshold
+
+            star_list = extractStarsFF(
+                self.dir_path, ff_name, config=self.config,
+                flat_struct=self.flat_struct, dark=self.dark, mask=self.mask
+            )
+
+            self.config.intensity_threshold = orig_intensity
+            self.config.segment_radius = orig_segment
+
+            if not star_list or len(star_list[1]) == 0:
+                print(f"    No bright stars detected with threshold={high_threshold}, "
+                      f"segment={probe_segment}")
+                print(f"    Using default segment_radius=4")
+                return 4, 0, 1.0
+
+            _, x_arr, y_arr, amplitude, intensity, fwhm_arr, background, snr, saturated = star_list
+            n_detected = len(x_arr)
+
+            # Identify true positives (match to catalog)
+            match_radius = 3.0
+            matched_fwhms = []
+            n_true_pos = 0
+            for det_x, det_y, det_fwhm in zip(x_arr, y_arr, fwhm_arr):
+                effective_radius = max(match_radius, 1.5 * det_fwhm)
+                distances = np.sqrt((visible_cat_x - det_x)**2 + (visible_cat_y - det_y)**2)
+                if np.min(distances) <= effective_radius:
+                    n_true_pos += 1
+                    matched_fwhms.append(det_fwhm)
+
+            n_false_pos = n_detected - n_true_pos
+            fp_ratio = n_false_pos / n_detected if n_detected > 0 else 1.0
+
+            print(f"    Probe detection (threshold={high_threshold}, segment={probe_segment}): "
+                  f"{n_detected} detected, {n_true_pos} matched catalog")
+
+            if len(matched_fwhms) < 3:
+                # Too few matched stars for reliable FWHM statistics
+                # Use all detected stars' FWHMs as fallback
+                all_fwhms = np.array(fwhm_arr)
+                if len(all_fwhms) > 0:
+                    fwhm_90 = np.percentile(all_fwhms, 90)
+                    print(f"    Few catalog matches ({len(matched_fwhms)}), "
+                          f"using all {len(all_fwhms)} detections for FWHM")
+                else:
+                    print(f"    No FWHM data available, using default segment_radius=4")
+                    return 4, n_true_pos, fp_ratio
+            else:
+                all_fwhms = np.array(matched_fwhms)
+                fwhm_90 = np.percentile(all_fwhms, 90)
+
+            fwhm_median = np.median(all_fwhms)
+            fwhm_max = np.max(all_fwhms)
+
+            # Compute segment_radius from FWHM
+            # Need: segment_radius > 2 * sigma / sqrt(max_feature_ratio)
+            # sigma = FWHM / 2.355
+            # With 1.5x margin for robust fitting:
+            max_feature_ratio = getattr(self.config, 'max_feature_ratio', 0.8)
+            sigma_90 = fwhm_90 / 2.355
+            min_segment = 2 * sigma_90 / np.sqrt(max_feature_ratio)
+            best_segment = int(np.ceil(min_segment * 1.5))
+
+            # Clamp to valid range [4, 20]
+            best_segment = max(4, min(20, best_segment))
+
+            print(f"    FWHM stats ({len(all_fwhms)} stars): "
+                  f"median={fwhm_median:.1f}, 90th={fwhm_90:.1f}, max={fwhm_max:.1f} px")
+            print(f"    min segment for 90th FWHM: {min_segment:.1f} px "
+                  f"(with 1.5x margin: {min_segment * 1.5:.1f})")
+            print(f"\n  Selected segment_radius: {best_segment} "
+                  f"(from 1.5x FWHM-derived minimum)")
+
+            return best_segment, n_true_pos, fp_ratio
+
+        except Exception as e:
+            print(f"    FWHM measurement error: {e}")
+            import traceback
+            traceback.print_exc()
+            return 4, 0, 1.0
+
+
+    def _findOptimalThreshold(self, results):
+        """
+        Find the optimal intensity threshold from sweep results using the Kneedle
+        algorithm to detect the "knee" in the false positive curve.
+
+        The Kneedle algorithm finds the point of maximum curvature in the false
+        positive curve — where noise transitions from gradual to rapid increase.
+        This is the same inflection point a human would visually identify, without
+        requiring any tunable parameters.
+
+        Algorithm:
+        1. Plot false_pos vs index (decreasing threshold)
+        2. Normalize both axes to [0, 1]
+        3. Draw a line from the first point to the last point
+        4. Find the point with maximum perpendicular distance from that line
+
+        Arguments:
+            results: List of (threshold, n_true_pos, n_false_pos, n_detected) tuples,
+                    sorted from high threshold to low.
+
+        Returns:
+            optimal_threshold: [int] The selected threshold value.
+        """
+        if not results:
+            return 20  # Default fallback
+
+        # Filter to results with detections
+        valid = [(t, tp, fp, det) for t, tp, fp, det in results if det > 0]
+        if not valid:
+            return 20
+
+        # Extract false positive counts
+        thresholds = [t for t, tp, fp, det in valid]
+        false_pos = [fp for t, tp, fp, det in valid]
+        true_pos = [tp for t, tp, fp, det in valid]
+
+        # If all false positives are 0, just pick the lowest threshold (most stars)
+        if max(false_pos) == 0:
+            best = valid[-1]
+            print(f"    -> No false positives detected, using lowest threshold")
+            print(f"    -> Selected: threshold={best[0]}, true_pos={best[1]}, "
+                  f"false_pos={best[2]}, precision=100%")
+            return best[0]
+
+        # If the curve is too short for meaningful knee detection, use the last valid point
+        if len(valid) < 3:
+            best = valid[-1]
+            prec = best[1] / best[3] if best[3] > 0 else 0
+            print(f"    -> Too few data points, using threshold={best[0]}")
+            print(f"    -> Selected: threshold={best[0]}, true_pos={best[1]}, "
+                  f"false_pos={best[2]}, precision={prec:.0%}")
+            return best[0]
+
+        # Kneedle algorithm on the false positive curve
+        x = np.arange(len(valid), dtype=float)
+        y = np.array(false_pos, dtype=float)
+
+        # Normalize to [0, 1]
+        x_range = x.max() - x.min()
+        y_range = y.max() - y.min()
+
+        if x_range == 0 or y_range == 0:
+            # Degenerate case — constant false positives
+            best = valid[-1]
+            prec = best[1] / best[3] if best[3] > 0 else 0
+            print(f"    -> Constant false positives, using threshold={best[0]}")
+            print(f"    -> Selected: threshold={best[0]}, true_pos={best[1]}, "
+                  f"false_pos={best[2]}, precision={prec:.0%}")
+            return best[0]
+
+        x_norm = (x - x.min()) / x_range
+        y_norm = (y - y.min()) / y_range
+
+        # Line from first point to last point
+        x0, y0 = x_norm[0], y_norm[0]
+        x1, y1 = x_norm[-1], y_norm[-1]
+
+        # Perpendicular distance from each point to the line
+        # Line equation: a*x + b*y + c = 0
+        a = y1 - y0
+        b = -(x1 - x0)
+        c = x1 * y0 - x0 * y1
+        denom = np.sqrt(a**2 + b**2)
+
+        distances = np.abs(a * x_norm + b * y_norm + c) / denom
+
+        # The knee is the point with maximum distance from the diagonal
+        knee_idx = np.argmax(distances)
+
+        best_threshold = thresholds[knee_idx]
+        best_tp = true_pos[knee_idx]
+        best_fp = false_pos[knee_idx]
+        best_det = valid[knee_idx][3]
+
+        prec = best_tp / best_det if best_det > 0 else 0
+        print(f"    -> Kneedle: knee at index {knee_idx}/{len(valid)-1} "
+              f"(distance={distances[knee_idx]:.3f})")
+        print(f"    -> Selected: threshold={best_threshold}, true_pos={best_tp}, "
+              f"false_pos={best_fp}, precision={prec:.0%}")
+
+        return best_threshold
+
+
+    def _computeSeasonalStarVariation(self, catalog_stars, current_jd):
+        """Compute the ratio of peak-to-current visible star count across all seasons.
+
+        Sweeps 24 evenly-spaced sidereal times (one full year) to find the maximum
+        number of catalog stars visible in the FOV for this station's pointing.
+
+        Arguments:
+            catalog_stars: [ndarray] Deep catalog array (ra, dec, mag).
+            current_jd: [float] Julian date of the current observation.
+
+        Returns:
+            (peak_ratio, peak_count, current_count): [tuple]
+                peak_ratio: peak visible stars / current visible stars.
+                peak_count: maximum visible star count across the year.
+                current_count: visible star count at the current JD.
+        """
+        pp = self.platepar
+        fov_radius = getFOVSelectionRadius(pp)
+
+        def _count_visible(jd):
+            """Count catalog stars visible in the image at a given JD."""
+            # Get RA/Dec of FOV center at this JD
+            img_time = jd2Date(jd)
+            _, ra_c, dec_c, _ = xyToRaDecPP(
+                [img_time], [pp.X_res / 2], [pp.Y_res / 2], [1], pp,
+                extinction_correction=False)
+            ra_c, dec_c = ra_c[0], dec_c[0]
+
+            # Pre-filter catalog to FOV region
+            _, subset = subsetCatalog(
+                catalog_stars, ra_c, dec_c, jd, pp.lat, pp.lon,
+                fov_radius, 99.0, remove_under_horizon=True)
+            if len(subset) == 0:
+                return 0
+
+            # Project to image coordinates
+            cat_x, cat_y, _ = getCatalogStarsImagePositions(
+                np.array(subset), jd, pp)
+            in_image = ((cat_x >= 0) & (cat_x < pp.X_res) &
+                        (cat_y >= 0) & (cat_y < pp.Y_res))
+
+            # Apply mask if available
+            if self.mask is not None and self.mask.img is not None:
+                if (self.mask.img.shape[0] == pp.Y_res and
+                        self.mask.img.shape[1] == pp.X_res):
+                    x_int = np.clip(cat_x.astype(int), 0, self.mask.img.shape[1] - 1)
+                    y_int = np.clip(cat_y.astype(int), 0, self.mask.img.shape[0] - 1)
+                    in_image = in_image & (self.mask.img[y_int, x_int] != 0)
+
+            return int(np.sum(in_image))
+
+        # Count at current JD
+        current_count = _count_visible(current_jd)
+
+        # Sweep 24 points across a full year (~15.2 days apart)
+        peak_count = current_count
+        for i in range(24):
+            sweep_jd = current_jd + i * (365.25 / 24)
+            count = _count_visible(sweep_jd)
+            if count > peak_count:
+                peak_count = count
+
+        if current_count > 0:
+            peak_ratio = peak_count / current_count
+        else:
+            peak_ratio = 2.0  # Fallback if current count is 0
+
+        return peak_ratio, peak_count, current_count
+
+    def _findOptimalCatalogLM(self, jd, detected_x, detected_y, target_matches, match_radius=2.0):
+        """
+        Find the catalog limiting magnitude where catalog stars match the detected
+        true positive positions. Uses coarse then fine search to find peak matches.
+
+        Arguments:
+            jd: [float] Julian date for the current image.
+            detected_x: [ndarray] X coordinates of detected true positive stars.
+            detected_y: [ndarray] Y coordinates of detected true positive stars.
+            target_matches: [int] Target number of matches (true positives found).
+            match_radius: [float] Match radius in pixels.
+
+        Returns:
+            optimal_lm: [float] The catalog limiting magnitude.
+        """
+        def count_matches_at_lm(test_lm):
+            """Count how many detected stars match catalog at given LM."""
+            test_catalog = self.loadCatalogStars(test_lm)
+            if test_catalog is None or len(test_catalog) == 0:
+                return 0, 0
+
+            # Filter catalog to stars actually in front of camera (prevent back-projection)
+            # Use angular distance in celestial coordinates, not self.filterCatalogStarsInsideFOV
+            # which incorrectly uses self.cat_lim_mag instead of the test catalog's LM
+            catalog_ra = test_catalog[:, 0]
+            catalog_dec = test_catalog[:, 1]
+            ra_rad = np.radians(catalog_ra)
+            dec_rad = np.radians(catalog_dec)
+            ra_center = np.radians(self.platepar.RA_d)
+            dec_center = np.radians(self.platepar.dec_d)
+
+            # Spherical angular distance from camera pointing to each catalog star
+            cos_ang_dist = (np.sin(dec_center) * np.sin(dec_rad) +
+                            np.cos(dec_center) * np.cos(dec_rad) * np.cos(ra_rad - ra_center))
+            cos_ang_dist = np.clip(cos_ang_dist, -1, 1)
+            ang_dist_deg = np.degrees(np.arccos(cos_ang_dist))
+
+            # FOV radius with margin (stars behind camera have ang_dist > 90)
+            fov_diagonal = np.sqrt(self.platepar.X_res**2 + self.platepar.Y_res**2)
+            fov_radius = (fov_diagonal / 2) * self.platepar.F_scale * 1.5
+            fov_radius = min(fov_radius, 90)
+
+            in_fov = ang_dist_deg < fov_radius
+            test_catalog = test_catalog[in_fov]
+
+            if len(test_catalog) == 0:
+                return 0, 0
+
+            cat_x, cat_y, _ = getCatalogStarsImagePositions(test_catalog, jd, self.platepar)
+
+            in_image = ((cat_x >= 0) & (cat_x < self.platepar.X_res) &
+                       (cat_y >= 0) & (cat_y < self.platepar.Y_res))
+
+            if self.mask is not None and self.mask.img is not None:
+                if (self.mask.img.shape[0] == self.platepar.Y_res and
+                    self.mask.img.shape[1] == self.platepar.X_res):
+                    x_int = np.clip(cat_x.astype(int), 0, self.mask.img.shape[1] - 1)
+                    y_int = np.clip(cat_y.astype(int), 0, self.mask.img.shape[0] - 1)
+                    not_masked = self.mask.img[y_int, x_int] != 0
+                    in_image = in_image & not_masked
+
+            visible_cat_x = cat_x[in_image]
+            visible_cat_y = cat_y[in_image]
+
+            # Use KD-tree for fast nearest-neighbor matching
+            if len(visible_cat_x) == 0:
+                return 0, 0
+
+            cat_tree = cKDTree(np.column_stack([visible_cat_x, visible_cat_y]))
+            det_coords = np.column_stack([detected_x, detected_y])
+            nn_dist, _ = cat_tree.query(det_coords, k=1)
+            n_matched = int(np.sum(nn_dist <= match_radius))
+
+            return n_matched, len(visible_cat_x)
+
+        # Coarse pass: 0.5 mag steps with early exit on diminishing returns
+        print("    Coarse pass (0.5 mag steps):")
+        coarse_lm_values = np.arange(3.0, 10.1, 0.5)
+
+        prev_matched, prev_catalog = 0, 0
+        best_lm = coarse_lm_values[0]
+        best_matches = 0
+        prev_costs = []  # track costs for knee detection
+
+        for i, test_lm in enumerate(coarse_lm_values):
+            n_matched, n_catalog = count_matches_at_lm(test_lm)
+
+            # Calculate diminishing returns metrics
+            match_gain = n_matched - prev_matched
+            catalog_gain = n_catalog - prev_catalog
+            coverage = n_matched / target_matches if target_matches > 0 else 0
+
+            if i == 0:
+                print(f"      LM={test_lm:.1f}: {n_matched}/{target_matches} matched ({n_catalog} cat stars)")
+            elif match_gain > 0:
+                cost = catalog_gain / match_gain
+                print(f"      LM={test_lm:.1f}: {n_matched}/{target_matches} ({coverage:.0%}), "
+                      f"+{match_gain} matches, cost={cost:.0f} cat/match")
+
+                # Detect cost knee: cost jumps dramatically relative to prior steps
+                if len(prev_costs) >= 2:
+                    median_cost = np.median(prev_costs)
+                    if cost > max(50, 10 * median_cost):
+                        print(f"    -> Cost knee at LM={test_lm:.1f} "
+                              f"(cost={cost:.0f} vs prior median={median_cost:.0f})")
+                        break
+
+                prev_costs.append(cost)
+
+                # Early exit if coverage is very high (>98%)
+                if coverage >= 0.98:
+                    print(f"    -> {coverage:.0%} coverage at LM={test_lm:.1f}, stopping")
+                    best_lm = test_lm
+                    best_matches = n_matched
+                    break
+
+                # Only update best when there's actual gain
+                best_lm = test_lm
+                best_matches = n_matched
+            else:
+                print(f"      LM={test_lm:.1f}: {n_matched}/{target_matches} ({coverage:.0%}), no gain")
+                if coverage >= 0.98:
+                    print(f"    -> {coverage:.0%} coverage with no gain, stopping at LM={best_lm:.1f}")
+                    break
+
+            prev_matched, prev_catalog = n_matched, n_catalog
+
+        # Fine pass: 0.1 mag steps around the found LM
+        print(f"    Fine pass (0.1 mag steps around {best_lm:.1f}):")
+        fine_lm_values = np.arange(best_lm - 0.3, best_lm + 0.4, 0.1)
+        fine_lm_values = fine_lm_values[(fine_lm_values >= 3.0) & (fine_lm_values <= 10.0)]
+
+        fine_results = []
+        for test_lm in fine_lm_values:
+            n_matched, n_catalog = count_matches_at_lm(test_lm)
+            fine_results.append((test_lm, n_matched, n_catalog))
+            print(f"      LM={test_lm:.1f}: {n_matched}/{target_matches} matched ({n_catalog} cat stars)")
+
+        # Pick the LM with best matches in the fine range
+        final_lm = best_lm
+        final_matches = best_matches
+        for test_lm, n_matched, n_catalog in fine_results:
+            if n_matched > final_matches:
+                final_lm = test_lm
+                final_matches = n_matched
+
+        print(f"    -> Selected LM={final_lm:.1f} with {final_matches} matches")
+        return final_lm
+
+
+    def _writeStarDetectionConfig(self, config_path, catalog_mag_limit):
+        """Write star detection parameters to the specified config file.
+
+        Preserves comments and formatting by doing surgical line updates.
+        Uses ': ' separator like the RMS config format.
+        """
+        import re
+        from datetime import datetime
+
+        # Backup existing config before overwriting
+        if os.path.exists(config_path):
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            base, ext = os.path.splitext(config_path)
+            backup_path = "{}.bak.{}{}".format(base, timestamp, ext)
+            shutil.copy2(config_path, backup_path)
+            print("Config backed up to:", backup_path)
+
+        # Values to update: (section, key, value)
+        updates = {
+            "StarExtraction": {
+                "intensity_threshold": str(self.override_intensity_threshold),
+                "segment_radius": str(self.override_segment_radius),
+                "max_stars": str(self.override_max_stars),
+                "neighborhood_size": str(self.override_neighborhood_size),
+                "max_feature_ratio": str(self.override_max_feature_ratio),
+                "roundness_threshold": str(self.override_roundness_threshold),
+            },
+            "Calibration": {
+                "catalog_mag_limit": f"{catalog_mag_limit:.1f}",
+            },
+        }
+
+        try:
+            # Read existing file
+            if os.path.exists(config_path):
+                with open(config_path, 'r') as f:
+                    lines = f.readlines()
+            else:
+                lines = []
+
+            # Track which updates were applied
+            applied = {section: {k: False for k in keys} for section, keys in updates.items()}
+            current_section = None
+
+            # Update existing lines
+            new_lines = []
+            for line in lines:
+                stripped = line.strip()
+
+                # Track current section
+                section_match = re.match(r'\s*\[([^\]]+)\]', stripped)
+                if section_match:
+                    current_section = section_match.group(1)
+                    new_lines.append(line)
+                    continue
+
+                # Check if this line is a key we want to update
+                updated = False
+                if current_section and ': ' in stripped and not stripped.startswith((';', '#')):
+                    key = stripped.split(': ')[0].strip()
+                    if current_section in updates and key in updates[current_section]:
+                        value = updates[current_section][key]
+                        new_lines.append(f"{key}: {value}\n")
+                        applied[current_section][key] = True
+                        updated = True
+
+                if not updated:
+                    new_lines.append(line)
+
+            # Add any missing sections/keys at the end
+            for section, keys in updates.items():
+                missing_keys = [k for k, was_applied in applied[section].items() if not was_applied]
+                if not missing_keys:
+                    continue
+
+                # Check if section exists
+                section_exists = any(f'[{section}]' in line for line in new_lines)
+                if not section_exists:
+                    new_lines.append(f"\n[{section}]\n")
+                    for key in missing_keys:
+                        new_lines.append(f"{key}: {updates[section][key]}\n")
+                else:
+                    # Find section end and insert keys
+                    insert_idx = None
+                    in_section = False
+                    for i, line in enumerate(new_lines):
+                        if f'[{section}]' in line:
+                            in_section = True
+                            insert_idx = i + 1
+                        elif in_section:
+                            if line.strip().startswith('['):
+                                break
+                            if line.strip() and not line.strip().startswith(';'):
+                                insert_idx = i + 1
+
+                    if insert_idx is not None:
+                        for key in reversed(missing_keys):
+                            new_lines.insert(insert_idx, f"{key}: {updates[section][key]}\n")
+
+            # Write back
+            with open(config_path, 'w') as f:
+                f.writelines(new_lines)
+
+            print(f"Saved star detection settings to: {config_path}")
+            print(f"  intensity_threshold: {self.override_intensity_threshold}")
+            print(f"  segment_radius: {self.override_segment_radius}")
+            print(f"  max_stars: {self.override_max_stars}")
+            print(f"  catalog_mag_limit: {catalog_mag_limit:.1f}")
+
+            qmessagebox(message=f"Star detection settings saved to:\n{config_path}",
+                       title="Settings Saved", message_type="info")
+
+        except Exception as e:
+            qmessagebox(message=f"Error saving config:\n{str(e)}",
+                       title="Save Error", message_type="warning")
+
+
+    ###################################################################################################
+    # MASK DRAWING METHODS
+    ###################################################################################################
+
+    def initMaskFromFile(self):
+        """Auto-load mask.bmp if it exists in the working directory."""
+        mask_path = os.path.join(self.dir_path, "mask.bmp")
+        if os.path.exists(mask_path):
+            self.loadMaskFromFile(mask_path)
+
+    def toggleMaskDrawMode(self):
+        """Toggle mask polygon drawing mode."""
+        self.mask_draw_mode = self.tab.mask.draw_button.isChecked()
+        if self.mask_draw_mode:
+            self.mask_current_polygon = []
+            # Disable hyperlinks on star labels so clicks go to mask drawing
+            self.spectral_type_text_list.setInteractionEnabled(False)
+        else:
+            # If there are points, close the polygon
+            if len(self.mask_current_polygon) >= 3:
+                self.mask_polygons.append(self.mask_current_polygon.copy())
+                self.tab.mask.setUnsaved(True)
+            self.mask_current_polygon = []
+            self.tab.mask.setDrawMode(False)
+            # Re-enable hyperlinks on star labels
+            self.spectral_type_text_list.setInteractionEnabled(True)
+        self.updateMaskDisplay()
+        self.tab.mask.updateStatus(len(self.mask_polygons))
+
+    def addMaskPoint(self, x, y):
+        """Add a point to the current polygon being drawn."""
+        # Get image dimensions - shape[0] is X, shape[1] is Y in this codebase
+        max_x = self.img.data.shape[0] - 1
+        max_y = self.img.data.shape[1] - 1
+
+        # Snap to edges if within threshold or outside bounds
+        snap_threshold = 15
+        if x < snap_threshold:
+            x = 0
+        elif x > max_x - snap_threshold:
+            x = max_x
+        if y < snap_threshold:
+            y = 0
+        elif y > max_y - snap_threshold:
+            y = max_y
+
+        # Clamp to valid bounds
+        x = np.clip(x, 0, max_x)
+        y = np.clip(y, 0, max_y)
+
+        self.mask_current_polygon.append((x, y))
+        self.updateMaskDisplay()
+        self.tab.mask.updateStatus(len(self.mask_polygons), len(self.mask_current_polygon))
+
+    def closeMaskPolygon(self):
+        """Close the current polygon and add it to the list."""
+        if len(self.mask_current_polygon) >= 3:
+            self.mask_polygons.append(self.mask_current_polygon.copy())
+            self.tab.mask.setUnsaved(True)
+        self.mask_current_polygon = []
+        self.mask_draw_mode = False
+        self.tab.mask.setDrawMode(False)
+        self.updateMaskDisplay()
+        self.tab.mask.updateStatus(len(self.mask_polygons))
+
+    def clearMaskPolygons(self):
+        """Clear all mask polygons."""
+        self.mask_polygons = []
+        self.mask_current_polygon = []
+        self.mask_draw_mode = False
+        self.mask_dragging_vertex = None
+        self.tab.mask.setDrawMode(False)
+        self.tab.mask.setUnsaved(True)
+        self.updateMaskDisplay()
+        self.tab.mask.updateStatus(0)
+
+    def invertMaskPolygons(self):
+        """ Invert the current mask polygons using the mask image. """
+
+        if self.img.data is None:
+            return
+
+        # Generate current binary mask
+        current_mask_img = self.generateMaskImage()
+
+        # Find contours of the currently unmasked regions
+        # current_mask_img has 0 for masked, 255 for unmasked. 
+        # findContours finds the contours of regions with value 255.
+        contours, _ = cv2.findContours(current_mask_img, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+
+        self.mask_polygons = []
+        self.mask_current_polygon = []
+
+        for contour in contours:
+            
+            # Approximate the contour to a polygon to reduce the number of vertices.
+            # epsilon is the maximum distance from contour to approximated contour.
+            epsilon = 0.002*cv2.arcLength(contour, True)
+            approx = cv2.approxPolyDP(contour, epsilon, True)
+            
+            # Extract the points into a flat list of (x, y) coordinate tuples
+            points = [(float(pt[0][0]), float(pt[0][1])) for pt in approx]
+            
+            # Only add to mask polygons if it has at least 3 points (a valid polygon)
+            if len(points) >= 3:
+                self.mask_polygons.append(points)
+
+        print(f"Mask inverted: {len(self.mask_polygons)} new polygon(s) created.")
+
+        self.tab.mask.setUnsaved(True)
+        self.updateMaskDisplay()
+        self.tab.mask.updateStatus(len(self.mask_polygons))
+
+    def findNearestMaskVertex(self, x, y, threshold=15):
+        """Find the nearest vertex to (x, y) within threshold.
+        Returns ('current', idx) for current polygon or (poly_idx, vert_idx) for completed polygons.
+        """
+        min_dist = threshold
+        result = None
+
+        # Check current polygon vertices
+        for i, (vx, vy) in enumerate(self.mask_current_polygon):
+            dist = np.hypot(x - vx, y - vy)
+            if dist < min_dist:
+                min_dist = dist
+                result = ('current', i)
+
+        # Check completed polygon vertices
+        for poly_idx, polygon in enumerate(self.mask_polygons):
+            for vert_idx, (vx, vy) in enumerate(polygon):
+                dist = np.hypot(x - vx, y - vy)
+                if dist < min_dist:
+                    min_dist = dist
+                    result = (poly_idx, vert_idx)
+
+        return result
+
+    def findNearestMaskEdge(self, x, y, threshold=15):
+        """Find the nearest edge to (x, y) within threshold.
+        Returns (poly_idx, insert_idx) where insert_idx is the index to insert a new vertex,
+        or ('current', insert_idx) for the current polygon being drawn.
+        """
+        min_dist = threshold
+        result = None
+
+        def pointToSegmentDist(px, py, x1, y1, x2, y2):
+            """Calculate distance from point (px, py) to line segment (x1,y1)-(x2,y2)."""
+            # Vector from segment start to point
+            dx, dy = px - x1, py - y1
+            # Segment vector
+            sx, sy = x2 - x1, y2 - y1
+            # Segment length squared
+            seg_len_sq = sx*sx + sy*sy
+            if seg_len_sq == 0:
+                return np.hypot(dx, dy)  # Degenerate segment
+            # Parameter t for projection onto segment (clamped to [0,1])
+            t = max(0, min(1, (dx*sx + dy*sy) / seg_len_sq))
+            # Closest point on segment
+            closest_x = x1 + t * sx
+            closest_y = y1 + t * sy
+            return np.hypot(px - closest_x, py - closest_y)
+
+        # Check current polygon edges (if has at least 2 points)
+        if len(self.mask_current_polygon) >= 2:
+            for i in range(len(self.mask_current_polygon) - 1):
+                x1, y1 = self.mask_current_polygon[i]
+                x2, y2 = self.mask_current_polygon[i + 1]
+                dist = pointToSegmentDist(x, y, x1, y1, x2, y2)
+                if dist < min_dist:
+                    min_dist = dist
+                    result = ('current', i + 1)  # Insert after vertex i
+
+        # Check completed polygon edges
+        for poly_idx, polygon in enumerate(self.mask_polygons):
+            if len(polygon) >= 2:
+                for i in range(len(polygon)):
+                    x1, y1 = polygon[i]
+                    x2, y2 = polygon[(i + 1) % len(polygon)]  # Wrap around for closed polygon
+                    dist = pointToSegmentDist(x, y, x1, y1, x2, y2)
+                    if dist < min_dist:
+                        min_dist = dist
+                        result = (poly_idx, i + 1)  # Insert after vertex i
+
+        return result
+
+    def insertMaskVertex(self, edge_ref, x, y):
+        """Insert a new vertex at position (x, y) at the specified edge location."""
+        if edge_ref[0] == 'current':
+            insert_idx = edge_ref[1]
+            self.mask_current_polygon.insert(insert_idx, (x, y))
+            self.updateMaskDisplay()
+            self.tab.mask.updateStatus(len(self.mask_polygons), len(self.mask_current_polygon))
+        else:
+            poly_idx, insert_idx = edge_ref
+            if poly_idx < len(self.mask_polygons):
+                self.mask_polygons[poly_idx].insert(insert_idx, (x, y))
+                self.tab.mask.setUnsaved(True)
+                self.updateMaskDisplay()
+                self.tab.mask.updateStatus(len(self.mask_polygons))
+
+    def deleteMaskVertex(self, vertex_ref):
+        """Delete a vertex from a polygon."""
+        if vertex_ref[0] == 'current':
+            idx = vertex_ref[1]
+            if len(self.mask_current_polygon) > 0:
+                del self.mask_current_polygon[idx]
+                self.updateMaskDisplay()
+                self.tab.mask.updateStatus(len(self.mask_polygons), len(self.mask_current_polygon))
+        else:
+            poly_idx, vert_idx = vertex_ref
+            if poly_idx < len(self.mask_polygons):
+                polygon = self.mask_polygons[poly_idx]
+                if len(polygon) > 3:
+                    # Keep polygon if it still has at least 3 vertices
+                    del polygon[vert_idx]
+                    self.tab.mask.setUnsaved(True)
+                    self.updateMaskDisplay()
+                    self.tab.mask.updateStatus(len(self.mask_polygons))
+                else:
+                    # Delete entire polygon if less than 3 vertices would remain
+                    del self.mask_polygons[poly_idx]
+                    self.tab.mask.setUnsaved(True)
+                    self.updateMaskDisplay()
+                    self.tab.mask.updateStatus(len(self.mask_polygons))
+
+    def moveMaskVertex(self, vertex_ref, new_x, new_y):
+        """Move a vertex to new position with edge snapping."""
+        # Apply edge snapping
+        max_x = self.img.data.shape[0] - 1
+        max_y = self.img.data.shape[1] - 1
+        snap_threshold = 15
+
+        if new_x < snap_threshold:
+            new_x = 0
+        elif new_x > max_x - snap_threshold:
+            new_x = max_x
+        if new_y < snap_threshold:
+            new_y = 0
+        elif new_y > max_y - snap_threshold:
+            new_y = max_y
+
+        new_x = np.clip(new_x, 0, max_x)
+        new_y = np.clip(new_y, 0, max_y)
+
+        if vertex_ref[0] == 'current':
+            idx = vertex_ref[1]
+            if idx < len(self.mask_current_polygon):
+                self.mask_current_polygon[idx] = (new_x, new_y)
+        else:
+            poly_idx, vert_idx = vertex_ref
+            if poly_idx < len(self.mask_polygons) and vert_idx < len(self.mask_polygons[poly_idx]):
+                self.mask_polygons[poly_idx][vert_idx] = (new_x, new_y)
+                self.tab.mask.setUnsaved(True)
+
+        self.updateMaskDisplay()
+        self.tab.mask.updateStatus(len(self.mask_polygons))
+
+    def updateMaskDisplay(self):
+        """Update all mask graphics items."""
+        # Update current polygon line
+        if len(self.mask_current_polygon) > 0:
+            pts = np.array(self.mask_current_polygon)
+            # Close the polygon visually
+            if len(pts) >= 3:
+                pts_closed = np.vstack([pts, pts[0]])
+                self.mask_current_line.setData(x=pts_closed[:, 0] + 0.5, y=pts_closed[:, 1] + 0.5)
+            else:
+                self.mask_current_line.setData(x=pts[:, 0] + 0.5, y=pts[:, 1] + 0.5)
+            self.mask_vertex_markers.setData(pos=pts + 0.5)
+        else:
+            self.mask_current_line.setData(x=[], y=[])
+            self.mask_vertex_markers.setData(pos=[])
+
+        # Remove old polygon items
+        for item in self.mask_polygon_items:
+            self.img_frame.removeItem(item)
+        self.mask_polygon_items = []
+
+        # Draw completed polygons and collect vertices (outlines only, overlay handles fill)
+        all_completed_vertices = []
+        for polygon in self.mask_polygons:
+            pts = np.array(polygon)
+            pts_closed = np.vstack([pts, pts[0]])
+            line = pg.PlotCurveItem(
+                x=pts_closed[:, 0] + 0.5,
+                y=pts_closed[:, 1] + 0.5,
+                pen=pg.mkPen((255, 0, 0, 200), width=2))
+            line.setZValue(12)
+            self.img_frame.addItem(line)
+            self.mask_polygon_items.append(line)
+            # Collect vertices for markers
+            all_completed_vertices.extend(polygon)
+
+        # Update completed polygon vertex markers
+        if len(all_completed_vertices) > 0:
+            verts = np.array(all_completed_vertices)
+            self.mask_completed_vertex_markers.setData(pos=verts + 0.5)
+        else:
+            self.mask_completed_vertex_markers.setData(pos=[])
+
+        # Update mask overlay
+        self.updateMaskOverlayImage()
+
+    def updateMaskOverlayImage(self):
+        """Update the mask overlay image based on polygons."""
+        if not self.tab.mask.show_overlay.isChecked():
+            self.mask_overlay.hide()
+            return
+
+        if len(self.mask_polygons) == 0:
+            self.mask_overlay.hide()
+            return
+
+        # Skip if no image is loaded yet
+        if self.img.data is None:
+            return
+
+        # Get image dimensions - shape[0] is X, shape[1] is Y in this codebase
+        img_width = self.img.data.shape[0]
+        img_height = self.img.data.shape[1]
+
+        # Create mask image (0 = clear, 1 = masked)
+        mask_img = np.zeros((img_height, img_width), dtype=np.uint8)
+
+        for polygon in self.mask_polygons:
+            pts = np.array(polygon, dtype=np.int32)
+            cv2.fillPoly(mask_img, [pts], 1)
+
+        # Transpose for pyqtgraph display
+        self.mask_overlay.setImage(mask_img.T)
+        self.mask_overlay.show()
+
+    def toggleMaskOverlay(self, visible):
+        """Toggle mask overlay visibility (includes outlines and vertices)."""
+        if visible:
+            self.updateMaskOverlayImage()
+            # Show polygon outlines
+            for item in self.mask_polygon_items:
+                item.show()
+            # Show completed vertex markers
+            self.mask_completed_vertex_markers.show()
+        else:
+            self.mask_overlay.hide()
+            # Hide polygon outlines
+            for item in self.mask_polygon_items:
+                item.hide()
+            # Hide completed vertex markers
+            self.mask_completed_vertex_markers.hide()
+
+    def loadFlatImage(self):
+        """Load flat.bmp from data directory if it exists."""
+        flat_path = os.path.join(self.dir_path, "flat.bmp")
+
+        if os.path.isfile(flat_path):
+            try:
+                flat_img = loadImage(flat_path, flatten=0)
+
+                # Convert to single channel if needed
+                if len(flat_img.shape) > 2:
+                    flat_img = flat_img[:, :, 0]
+
+                self.flat_image_data = flat_img
+                print(f"Loaded flat image: {flat_path}")
+                return True
+            except Exception as e:
+                print(f"Failed to load flat image: {e}")
+                self.flat_image_data = None
+                return False
+        else:
+            self.flat_image_data = None
+            return False
+
+    def checkAndSetupFlatForMask(self):
+        """Check for flat.bmp and setup mask tab accordingly."""
+        flat_exists = self.loadFlatImage()
+
+        # Block signal to prevent showing flat during initialization
+        self.tab.mask.use_flat.blockSignals(True)
+        self.tab.mask.setFlatAvailable(flat_exists, use_by_default=flat_exists)
+        self.tab.mask.use_flat.blockSignals(False)
+
+        if flat_exists:
+            self.mask_use_flat_background = True
+
+    def toggleMaskFlatBackground(self, use_flat):
+        """Toggle between flat.bmp and current image as mask editing background."""
+        self.mask_use_flat_background = use_flat
+
+        # Only change the image if we're currently on the mask tab
+        mask_tab_index = self.tab.indexOf(self.tab.mask)
+        if self.tab.currentIndex() != mask_tab_index:
+            return
+
+        if use_flat and self.flat_image_data is not None:
+            # Switch to flat image
+            self.img.setImage(self.flat_image_data.T)
+            print("Mask background: using flat.bmp")
+            # Hide all stars when showing flat
+            self.cat_star_markers.hide()
+            self.cat_star_markers2.hide()
+            self.geo_markers.hide()
+            self.calstar_markers.hide()
+            self.calstar_markers2.hide()
+            self.calstar_markers_outer.hide()
+            self.calstar_markers_outer2.hide()
+        else:
+            # Switch back to current image
+            self.img.loadImage(self.mode, self.img_type_flag)
+            print("Mask background: using current image")
+            # Show stars when showing current image (if enabled)
+            if self.catalog_stars_visible:
+                self.cat_star_markers.show()
+                self.cat_star_markers2.show()
+                self.geo_markers.show()
+            if self.draw_calstars:
+                self.calstar_markers.show()
+                self.calstar_markers2.show()
+                self.calstar_markers_outer.show()
+                self.calstar_markers_outer2.show()
+
+    def onTabChanged(self, old_index, new_index):
+        """Handle tab changes - restore image when leaving mask tab."""
+        # Mask tab is at index 4 (Levels=0, Fit Parameters=1, Station=2, Star Detection=3, Mask=4)
+        mask_tab_index = self.tab.indexOf(self.tab.mask)
+
+        if old_index == mask_tab_index and self.mask_use_flat_background:
+            # Leaving mask tab while flat was shown - restore current image
+            self.img.loadImage(self.mode, self.img_type_flag)
+            print("Restored current image (left mask tab)")
+
+        elif new_index == mask_tab_index and self.mask_use_flat_background and self.flat_image_data is not None:
+            # Entering mask tab with flat enabled - show flat
+            self.img.setImage(self.flat_image_data.T)
+            print("Showing flat.bmp for mask editing")
+
+        # Handle mask tab visibility
+        if new_index == mask_tab_index:
+            self.img_frame.panning_enabled = False
+
+            # Always hide picks, selected stars, residual lines, and astrometry.net markers on mask tab
+            self.pick_marker.hide()
+            self.pick_marker2.hide()
+            self.sel_cat_star_markers.hide()
+            self.sel_cat_star_markers2.hide()
+            self.residual_lines_img.hide()
+            self.residual_lines_astro.hide()
+            self.astrometry_quad_markers.hide()
+            self.astrometry_quad_markers2.hide()
+            self.astrometry_matched_markers.hide()
+            self.astrometry_matched_markers2.hide()
+            # Clear error text (TextItemList children are parented to frame, not list)
+            self.residual_text.clear()
+
+            # Hide all stars when flat is displayed
+            if self.mask_use_flat_background and self.flat_image_data is not None:
+                self.cat_star_markers.hide()
+                self.cat_star_markers2.hide()
+                self.geo_markers.hide()
+                self.calstar_markers.hide()
+                self.calstar_markers2.hide()
+                self.calstar_markers_outer.hide()
+                self.calstar_markers_outer2.hide()
+
+        elif old_index == mask_tab_index:
+            # Leaving mask tab - restore visibility based on user settings
+            self.img_frame.panning_enabled = True
+
+            if self.catalog_stars_visible:
+                self.cat_star_markers.show()
+                self.cat_star_markers2.show()
+                self.geo_markers.show()
+            if self.selected_stars_visible:
+                self.sel_cat_star_markers.show()
+                self.sel_cat_star_markers2.show()
+                self.residual_lines_img.show()
+                self.residual_lines_astro.show()
+            if self.draw_calstars:
+                self.calstar_markers.show()
+                self.calstar_markers2.show()
+                self.calstar_markers_outer.show()
+                self.calstar_markers_outer2.show()
+            if self.astrometry_stars_visible:
+                self.astrometry_quad_markers.show()
+                self.astrometry_quad_markers2.show()
+                self.astrometry_matched_markers.show()
+                self.astrometry_matched_markers2.show()
+            # Restore error text by re-running photometry
+            self.photometry()
+            # Picks only visible in manual reduction mode
+            if self.mode == 'manualreduction':
+                self.pick_marker.show()
+                self.pick_marker2.show()
+        else:
+            self.img_frame.panning_enabled = True
+
+    def generateMaskImage(self):
+        """Generate mask.bmp image from polygons."""
+        img_width = self.img.data.shape[0]
+        img_height = self.img.data.shape[1]
+
+        mask = np.full((img_height, img_width), 255, dtype=np.uint8)
+
+        for polygon in self.mask_polygons:
+            pts = np.array(polygon, dtype=np.int32)
+            cv2.fillPoly(mask, [pts], 0)
+
+        return mask
+
+    def saveMask(self):
+        """Save mask to file and update self.mask for star detection."""
+        default_path = os.path.join(self.config.config_file_path, "mask.bmp")
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, "Save Mask", default_path, "BMP Files (*.bmp);;All Files (*)")
+
+        if file_path:
+            mask_img = self.generateMaskImage()
+            cv2.imwrite(file_path, mask_img)
+            print(f"Mask saved to: {file_path}")
+
+            # Update self.mask so star detection uses the new mask
+            self.mask = MaskStructure(mask_img)
+            print("Mask updated for star detection")
+
+            # Mark as saved
+            self.tab.mask.setUnsaved(False)
+            self.tab.mask.updateStatus(len(self.mask_polygons))
+            self.updateFileManagerButton()
+
+    def loadMaskDialog(self):
+        """Open dialog to load a mask file."""
+        # Use last mask directory if set, otherwise fall back to image directory
+        default_path = self.last_mask_dir if self.last_mask_dir else self.dir_path
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Load Mask", default_path, "BMP Files (*.bmp);;All Files (*)")
+
+        if file_path:
+            # Remember the directory for next time
+            self.last_mask_dir = os.path.dirname(file_path)
+            self.loadMaskFromFile(file_path)
+
+    def loadMaskFromFile(self, mask_path):
+        """Load mask.bmp and convert masked regions to editable polygons."""
+        if not os.path.exists(mask_path):
+            print(f"Mask file not found: {mask_path}")
+            return
+
+        self.mask_source_path = mask_path
+
+        mask_img = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
+        if mask_img is None:
+            print(f"Failed to load mask: {mask_path}")
+            return
+
+        # Clear existing
+        self.mask_polygons = []
+        self.mask_current_polygon = []
+
+        # Find contours of masked (black) regions
+        inverted = cv2.bitwise_not(mask_img)
+        contours, _ = cv2.findContours(inverted, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        # Create polygon for each contour
+        for contour in contours:
+            # Simplify to reduce points
+            epsilon = 0.002 * cv2.arcLength(contour, True)
+            approx = cv2.approxPolyDP(contour, epsilon, True)
+            # Convert to list of (x, y) tuples
+            points = [(float(pt[0][0]), float(pt[0][1])) for pt in approx]
+            if len(points) >= 3:
+                self.mask_polygons.append(points)
+
+        print(f"Loaded {len(self.mask_polygons)} polygon(s) from mask")
+        self.updateMaskDisplay()
+
+        # Update self.mask so star detection uses the loaded mask
+        self.mask = MaskStructure(mask_img)
+        print("Mask updated for star detection")
+
+        # Mark as saved (loaded mask is in sync)
+        self.tab.mask.setUnsaved(False)
+        self.tab.mask.updateStatus(len(self.mask_polygons))
+
+    ###################################################################################################
+
+
     def updatePicks(self):
         """ Draw pick markers for manualreduction """
+
+        if not self.hasData():
+            return
 
         pick_color = pg.mkPen((255, 0, 0)) # red
         gap_color = pg.mkPen((255, 215, 0)) # gold
@@ -3024,7 +6605,7 @@ class PlateTool(QtWidgets.QMainWindow):
             # Plot the residuals (enlarge 100x)
             res_scale = 100
             for entry in self.residuals:
-                img_x, img_y, angle, distance, angular_distance = entry
+                img_x, img_y, angle, distance, angular_distance = entry[:5]
 
 
                 ### Limit the distance to the edge of the image ###
@@ -3093,6 +6674,9 @@ class PlateTool(QtWidgets.QMainWindow):
     def updateDistortion(self):
         """ Draw distortion guides. """
 
+        if not self.hasData():
+            return
+
         # Only draw the distortion if we have a platepar
         if self.platepar:
 
@@ -3133,6 +6717,20 @@ class PlateTool(QtWidgets.QMainWindow):
 
             self.distortion_lines.setData(x=np.array(x) + 0.5, y=np.array(y) + 0.5)
 
+            # Update distortion center marker
+            self.updateDistortionCenterMarker()
+
+
+    def updateDistortionCenterMarker(self):
+        """Update the distortion center (optical axis) marker position."""
+        if self.platepar:
+            # Get the distortion center from the platepar
+            # getDistortionCentre returns the actual center position (includes 0.5 offset from CyFunctions)
+            x_centre, y_centre = self.platepar.getDistortionCentre()
+
+            self.distortion_center_marker.setData(x=[x_centre], y=[y_centre])
+            self.distortion_center_marker2.setData(x=[x_centre], y=[y_centre])
+
 
     def photometry(self, show_plot=False):
         """
@@ -3143,7 +6741,20 @@ class PlateTool(QtWidgets.QMainWindow):
 
         """
 
+        if not self.hasData():
+            return
+
         ### Make a photometry plot
+
+        # Highly variable star types to exclude from photometric calibration
+        # These can vary by many magnitudes, making them unreliable for photometry
+        EXCLUDE_FROM_PHOTOMETRY = {
+            'Mira', 'Mira_Candidate',  # Can vary by 6-8 magnitudes
+            'RCrBV*', 'RCrBV*_Candidate',  # R CrB stars can fade by 8+ magnitudes
+            'CataclyV*', 'CataclyV*_Candidate',  # Cataclysmic variables with outbursts
+            'Nova', 'Nova_Candidate',  # Novae
+            'IrregularV*',  # Irregular variables
+        }
 
         # Extract star intensities and star magnitudes
         star_coords = []
@@ -3155,6 +6766,7 @@ class PlateTool(QtWidgets.QMainWindow):
         elevation_list = []
         snr_list = []
         saturation_list = []
+        variable_star_list = []  # Track highly variable stars to exclude from photometry
 
         for paired_star in self.paired_stars.allCoords():
 
@@ -3176,6 +6788,20 @@ class PlateTool(QtWidgets.QMainWindow):
             catalog_mags.append(star_mag)
             snr_list.append(snr)
             saturation_list.append(saturated)
+
+            # Check if this is a highly variable star that should be excluded from photometry
+            is_variable = False
+            if hasattr(self, 'catalog_stars_simbad_otypes') and self.catalog_stars_simbad_otypes is not None:
+                # Find the closest catalog star by RA/Dec to get its object type
+                ra_diff = np.abs(self.catalog_stars[:, 0] - star_ra)
+                dec_diff = np.abs(self.catalog_stars[:, 1] - star_dec)
+                dist = np.sqrt(ra_diff**2 + dec_diff**2)
+                closest_idx = np.argmin(dist)
+                if dist[closest_idx] < 0.01:  # Within ~36 arcsec
+                    otype = self.catalog_stars_simbad_otypes[closest_idx].strip()
+                    if otype in EXCLUDE_FROM_PHOTOMETRY:
+                        is_variable = True
+            variable_star_list.append(is_variable)
 
             # Compute the azimuth and elevation of the star
             _, alt = trueRaDec2ApparentAltAz(star_ra, star_dec, date2JD(*self.img_handle.currentTime()),
@@ -3219,10 +6845,11 @@ class PlateTool(QtWidgets.QMainWindow):
         # Fit the photometric offset (disable vignetting fit if a flat is used)
         # The fit is going to be weighted by the signal to noise ratio to reduce the influence of
         #  faint stars with large errors
-        # Saturated stars are excluded from the fit
+        # Saturated stars and highly variable stars are excluded from the fit
+        exclude_list = [sat or var for sat, var in zip(saturation_list, variable_star_list)]
         photom_params, self.photom_fit_stddev, self.photom_fit_resids = photometryFit(
             px_intens_list, radius_list, catalog_mags, fixed_vignetting=fixed_vignetting,
-            weights=weights, exclude_list=saturation_list)
+            weights=weights, exclude_list=exclude_list)
 
         photom_offset, vignetting_coeff = photom_params
 
@@ -3272,7 +6899,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 if self.stdev_text_filter*std <= abs(fit_diff):
 
                     # Add the photometric residual text below the star
-                    text_resid = TextItem(photom_resid_txt, anchor=(0.5, -0.5))
+                    text_resid = TextItem(photom_resid_txt, anchor=(0.5, -0.5), interaction=False)
                     text_resid.setPos(star_x, star_y)
                     text_resid.setFont(QtGui.QFont('Arial', photom_resid_size))
                     text_resid.setColor(QtGui.QColor(255, 255, 255))
@@ -3280,7 +6907,7 @@ class PlateTool(QtWidgets.QMainWindow):
                     self.residual_text.addTextItem(text_resid)
 
                     # Add the star magnitude above the star
-                    text_mag = TextItem("{:+6.2f}".format(star_mag), anchor=(0.5, 1.5))
+                    text_mag = TextItem("{:+6.2f}".format(star_mag), anchor=(0.5, 1.5), interaction=False)
                     text_mag.setPos(star_x, star_y)
                     text_mag.setFont(QtGui.QFont('Arial', 10))
                     text_mag.setColor(QtGui.QColor(0, 255, 0))
@@ -3288,7 +6915,7 @@ class PlateTool(QtWidgets.QMainWindow):
                     self.residual_text.addTextItem(text_mag)
 
                     # Add SNR to the right of the star
-                    text_snr = TextItem(snr_txt, anchor=(-0.25, 0.5))
+                    text_snr = TextItem(snr_txt, anchor=(-0.25, 0.5), interaction=False)
                     text_snr.setPos(star_x, star_y)
                     text_snr.setFont(QtGui.QFont('Arial', 8))
                     text_snr.setColor(snr_color)
@@ -3302,6 +6929,17 @@ class PlateTool(QtWidgets.QMainWindow):
         # Show the photometry fit plot
         if show_plot:
 
+            # Check if figure already exists and is open - if so, close it (toggle off)
+            if self.fig_photometry is not None:
+                try:
+                    if plt.fignum_exists(self.fig_photometry.number):
+                        plt.close(self.fig_photometry)
+                        self.fig_photometry = None
+                        return
+                except:
+                    pass
+                self.fig_photometry = None
+
             ### PLOT PHOTOMETRY FIT ###
             # Note: An almost identical code exists in Utils.CalibrationReport
 
@@ -3310,7 +6948,8 @@ class PlateTool(QtWidgets.QMainWindow):
             #                                    gridspec_kw={'height_ratios': [3, 1, 1]})
 
             # Init plot for photometry
-            fig_p = plt.figure(figsize=(10, 5))  # Adjust the figure size as needed
+            self.fig_photometry = plt.figure(figsize=(10, 5))  # Adjust the figure size as needed
+            fig_p = self.fig_photometry
 
             # Create a grid with 2 columns and 2 rows
             gs = gridspec.GridSpec(2, 2, width_ratios=[1, 1], height_ratios=[1, 1])
@@ -3490,6 +7129,871 @@ class PlateTool(QtWidgets.QMainWindow):
             fig_p.show()
 
 
+    def fitBandRatio(self):
+        """Fit the optimal G:BP:RP band ratio that minimizes photometric residuals.
+
+        Performs a 2D grid search over G, BP, RP flux fractions (rG + rBP + rRP = 1),
+        runs photometryFit for each combination, and reports the ratio with the
+        lowest stddev. The result is printed as a config-ready string.
+        """
+
+        # Check that we have individual G/BP/RP magnitudes
+        if self.catalog_stars_bp is None or self.catalog_stars_rp is None:
+            print("Band ratio fitting requires the GMN Star Catalog with BP/RP columns.")
+            return
+        if self.catalog_stars_g is None:
+            print("Band ratio fitting requires the GMN Star Catalog with G column.")
+            return
+
+        # Check that we have enough paired stars
+        if len(self.paired_stars) < 3:
+            print("Need at least 3 paired stars for band ratio fitting.")
+            return
+
+        # Highly variable star types to exclude (same as photometry())
+        EXCLUDE_FROM_PHOTOMETRY = {
+            'Mira', 'Mira_Candidate', 'RCrBV*', 'RCrBV*_Candidate',
+            'CataclyV*', 'CataclyV*_Candidate', 'Nova', 'Nova_Candidate',
+            'IrregularV*',
+        }
+
+        # Check if BVRI magnitudes are available in the catalog
+        has_bvri_catalog = all(
+            getattr(self, 'catalog_stars_' + b, None) is not None
+            for b in ['B', 'V', 'R', 'Ic']
+        )
+
+        # Collect paired star data with individual G/BP/RP magnitudes
+        radius_list = []
+        px_intens_list = []
+        catalog_ra = []
+        catalog_dec = []
+        g_mags = []
+        bp_mags = []
+        rp_mags = []
+        snr_list = []
+        saturation_list = []
+        variable_star_list = []
+
+        # BVRI parallel lists (only for stars that also have valid BVRI)
+        b_mags = []
+        v_mags = []
+        r_mags = []
+        i_mags = []
+        bvri_indices = []  # indices into the main lists for stars with valid BVRI
+
+        for paired_star in self.paired_stars.allCoords():
+
+            img_star, catalog_star = paired_star
+            star_x, star_y, fwhm, px_intens, snr, saturated = img_star
+            star_ra, star_dec, star_mag = catalog_star
+
+            # Skip invalid intensities
+            lsp = np.log10(px_intens)
+            if np.isnan(lsp) or np.isinf(lsp):
+                continue
+
+            # Look up the closest catalog star to get individual G/BP/RP
+            ra_diff = np.abs(self.catalog_stars[:, 0] - star_ra)
+            dec_diff = np.abs(self.catalog_stars[:, 1] - star_dec)
+            dist = np.sqrt(ra_diff**2 + dec_diff**2)
+            closest_idx = np.argmin(dist)
+
+            if dist[closest_idx] > 0.01:  # Within ~36 arcsec
+                continue
+
+            g_val = self.catalog_stars_g[closest_idx]
+            bp_val = self.catalog_stars_bp[closest_idx]
+            rp_val = self.catalog_stars_rp[closest_idx]
+
+            # Skip stars with missing G, BP or RP (NaN or zero sentinel)
+            if any(np.isnan(v) or v == 0 for v in [g_val, bp_val, rp_val]):
+                continue
+
+            # Skip stars with unreliable Gaia BP/RP photometry.
+            # For very bright stars (G < ~3), Gaia detectors saturate and BP/RP
+            # values can be wildly wrong (e.g. BP = -2.87 for a G = 0.57 star).
+            # Filter on BP-RP color: physical range is about [-0.5, 5.0].
+            bp_rp = bp_val - rp_val
+            if bp_rp < -0.5 or bp_rp > 5.0:
+                continue
+
+            # Check variable star exclusion
+            is_variable = False
+            if hasattr(self, 'catalog_stars_simbad_otypes') and self.catalog_stars_simbad_otypes is not None:
+                otype = self.catalog_stars_simbad_otypes[closest_idx].strip()
+                if otype in EXCLUDE_FROM_PHOTOMETRY:
+                    is_variable = True
+
+            cur_idx = len(radius_list)
+
+            radius_list.append(np.hypot(star_x - self.platepar.X_res/2,
+                                        star_y - self.platepar.Y_res/2))
+            px_intens_list.append(px_intens)
+            catalog_ra.append(star_ra)
+            catalog_dec.append(star_dec)
+            g_mags.append(g_val)
+            bp_mags.append(bp_val)
+            rp_mags.append(rp_val)
+            snr_list.append(snr)
+            saturation_list.append(saturated)
+            variable_star_list.append(is_variable)
+
+            # Collect BVRI if available
+            if has_bvri_catalog:
+                b_val = self.catalog_stars_B[closest_idx]
+                v_val = self.catalog_stars_V[closest_idx]
+                r_val = self.catalog_stars_R[closest_idx]
+                i_val = self.catalog_stars_Ic[closest_idx]
+
+                # Only include if all four bands are valid (not NaN or zero)
+                if not any(np.isnan(v) or v == 0 for v in [b_val, v_val, r_val, i_val]):
+                    b_mags.append(b_val)
+                    v_mags.append(v_val)
+                    r_mags.append(r_val)
+                    i_mags.append(i_val)
+                    bvri_indices.append(cur_idx)
+
+        if len(px_intens_list) < 3:
+            print("Not enough paired stars with valid G/BP/RP for fitting ({:d} found).".format(
+                len(px_intens_list)))
+            return
+
+        g_mags = np.array(g_mags)
+        bp_mags = np.array(bp_mags)
+        rp_mags = np.array(rp_mags)
+
+        # Precompute fluxes
+        g_flux = np.power(10, -0.4 * g_mags)
+        bp_flux = np.power(10, -0.4 * bp_mags)
+        rp_flux = np.power(10, -0.4 * rp_mags)
+
+        # Determine fixed vignetting (same logic as photometry())
+        fixed_vignetting = None
+        if self.flat_struct is not None:
+            fixed_vignetting = 0.0
+        elif self.platepar.vignetting_fixed:
+            fixed_vignetting = self.platepar.vignetting_coeff
+
+        weights = np.clip(snr_list, 0, 10) / 10.0
+        exclude_list = [sat or var for sat, var in zip(saturation_list, variable_star_list)]
+
+        jd = date2JD(*self.img_handle.currentTime())
+
+        # 2D grid search over (rG, rBP) with rRP = 1 - rG - rBP
+        # Step size of 0.05 gives ~210 valid grid points
+        step = 0.05
+        grid_vals = np.arange(0, 1 + step/2, step)
+        best_stddev = np.inf
+        best_rg, best_rbp, best_rrp = 0, 0, 1
+
+        # Store results for heatmap
+        grid_results = {}
+
+        for rg in grid_vals:
+            for rbp in grid_vals:
+                rrp = 1.0 - rg - rbp
+                if rrp < -0.001:  # Allow tiny float error
+                    continue
+                rrp = max(rrp, 0.0)
+
+                # Compute synthetic magnitude by combining fluxes
+                total_flux = rg * g_flux + rbp * bp_flux + rrp * rp_flux
+                total_flux = np.maximum(total_flux, 1e-30)
+                test_mags = -2.5 * np.log10(total_flux)
+
+                # Apply extinction correction
+                test_mags_ext = extinctionCorrectionTrueToApparent(
+                    test_mags.tolist(), list(catalog_ra), list(catalog_dec),
+                    jd, self.platepar)
+
+                try:
+                    _, stddev, _ = photometryFit(
+                        px_intens_list, radius_list, test_mags_ext,
+                        fixed_vignetting=fixed_vignetting,
+                        weights=weights, exclude_list=exclude_list)
+
+                    grid_results[(rg, rbp)] = stddev
+
+                    if stddev < best_stddev:
+                        best_stddev = stddev
+                        best_rg, best_rbp, best_rrp = rg, rbp, rrp
+                except Exception:
+                    pass
+
+        # Compute the full photometry fit with the best ratio
+        best_total_flux = best_rg * g_flux + best_rbp * bp_flux + best_rrp * rp_flux
+        best_mags = -2.5 * np.log10(np.maximum(best_total_flux, 1e-30))
+        best_mags_ext = extinctionCorrectionTrueToApparent(
+            best_mags.tolist(), list(catalog_ra), list(catalog_dec), jd, self.platepar)
+        best_params, _, best_resids = photometryFit(
+            px_intens_list, radius_list, best_mags_ext,
+            fixed_vignetting=fixed_vignetting,
+            weights=weights, exclude_list=exclude_list)
+
+        # Also compute the full photometry fit with current band ratios for comparison
+        current_mags = np.array([self.catalog_stars[
+            np.argmin(np.sqrt((self.catalog_stars[:, 0] - ra)**2 +
+                              (self.catalog_stars[:, 1] - dec)**2)), 2]
+            for ra, dec in zip(catalog_ra, catalog_dec)])
+        current_mags_ext = extinctionCorrectionTrueToApparent(
+            current_mags.tolist(), list(catalog_ra), list(catalog_dec), jd, self.platepar)
+        try:
+            current_params, current_stddev, current_resids = photometryFit(
+                px_intens_list, radius_list, current_mags_ext,
+                fixed_vignetting=fixed_vignetting,
+                weights=weights, exclude_list=exclude_list)
+        except Exception:
+            current_stddev = np.inf
+            current_resids = np.zeros(len(px_intens_list))
+            current_params = (0, 0)
+
+        # Format the config string
+        config_str = "0.00,0.00,0.00,0.00,{:.2f},{:.2f},{:.2f}".format(
+            best_rg, best_rbp, best_rrp)
+
+        # Print results
+        print()
+        print("=" * 60)
+        print("G:BP:RP BAND RATIO FIT")
+        print("=" * 60)
+        print("  Stars used: {:d}".format(
+            sum(1 for e in exclude_list if not e)))
+        print("  Best ratio: {:.2f} G + {:.2f} BP + {:.2f} RP".format(
+            best_rg, best_rbp, best_rrp))
+        print("  Fit stddev: {:.3f} mag".format(best_stddev))
+        print("  Current:    {:.3f} mag ({:s})".format(
+            current_stddev, self.mag_band_string))
+        print()
+        print("  Config line:")
+        print("  star_catalog_band_ratios: {:s}".format(config_str))
+        print()
+
+        # Diagnostic: show stars with largest magnitude difference
+        mag_diff = np.abs(best_mags - current_mags)
+        sort_idx = np.argsort(mag_diff)[::-1]
+        n_excluded = sum(exclude_list)
+        print("  Excluded: {:d} (saturated/variable)".format(n_excluded))
+        print()
+        print("  Top 10 stars by |current - best| magnitude difference:")
+        print("  {:>6s}  {:>6s}  {:>6s}  {:>6s}  {:>6s}  {:>7s}  {:>5s}".format(
+            "curr", "G", "BP", "RP", "best", "diff", "excl"))
+        for i in sort_idx[:10]:
+            excl_str = "  *" if exclude_list[i] else ""
+            print("  {:6.2f}  {:6.2f}  {:6.2f}  {:6.2f}  {:6.2f}  {:+7.3f}{:s}".format(
+                current_mags[i], g_mags[i], bp_mags[i], rp_mags[i], best_mags[i],
+                best_mags[i] - current_mags[i], excl_str))
+
+        print("=" * 60)
+        print()
+
+        # Vignetting vs extinction interaction: 2D sweep to show how the optimal
+        # extinction scale changes as a function of fixed vignetting coefficient.
+        # This reveals the degeneracy between the two corrections.
+        current_ext_scale = self.platepar.extinction_scale
+        if abs(current_ext_scale) > 0.001:
+            # Extract scale-independent per-star extinction delta
+            ext_delta_arr = np.array(best_mags_ext) - best_mags
+            raw_ext_delta = ext_delta_arr / current_ext_scale
+
+            # Determine vignetting range: 0 to the free-fit value
+            vig_max = best_params[1]  # vignetting from the free fit
+            if vig_max < 0.0001:
+                vig_max = 0.001  # minimum range if free fit gives ~0
+            vig_steps = np.linspace(0, vig_max * 1.2, 15)
+            ext_scales = np.arange(0, 2.05, 0.05)
+
+            print("VIGNETTING vs EXTINCTION INTERACTION")
+            print("=" * 60)
+            print("  Extinction range: {:.2f} - {:.2f} mag".format(
+                np.min(raw_ext_delta), np.max(raw_ext_delta)))
+            print()
+            print("  {:>10s}  {:>10s}  {:>10s}".format(
+                "vig", "best_ext", "stddev"))
+            print("  " + "-" * 34)
+
+            best_overall_stddev = np.inf
+            best_overall_vig = 0
+            best_overall_ext = 0
+
+            for vig_val in vig_steps:
+                best_ext_stddev = np.inf
+                best_ext_scale = 0
+
+                for test_scale in ext_scales:
+                    test_mags_local = (best_mags + test_scale * raw_ext_delta).tolist()
+                    try:
+                        _, stddev, _ = photometryFit(
+                            px_intens_list, radius_list, test_mags_local,
+                            fixed_vignetting=vig_val,
+                            weights=weights, exclude_list=exclude_list)
+                        if stddev < best_ext_stddev:
+                            best_ext_stddev = stddev
+                            best_ext_scale = test_scale
+                    except Exception:
+                        pass
+
+                marker = ""
+                if best_ext_stddev < best_overall_stddev:
+                    best_overall_stddev = best_ext_stddev
+                    best_overall_vig = vig_val
+                    best_overall_ext = best_ext_scale
+
+                print("  {:10.6f}  {:10.2f}  {:10.4f}".format(
+                    vig_val, best_ext_scale, best_ext_stddev))
+
+            print("  " + "-" * 34)
+            print("  Best: vig={:.6f}, ext={:.2f}, stddev={:.4f}".format(
+                best_overall_vig, best_overall_ext, best_overall_stddev))
+            print("  Free fit:  vig={:.6f}, ext={:.2f}, stddev={:.4f}".format(
+                best_params[1], current_ext_scale, best_stddev))
+            print("=" * 60)
+            print()
+
+        # --- BVRI band ratio fit (optimizer) ---
+        has_bvri_data = len(b_mags) >= 3
+        bvri_fit_result = None  # Will hold (params, stddev, mags_ext, fit_params) if successful
+
+        if not has_bvri_catalog:
+            print("BVRI data not available in this catalog.")
+            print()
+        elif not has_bvri_data:
+            print("BVRI: fewer than 3 stars with valid B/V/R/Ic ({:d} found), skipping.".format(
+                len(b_mags)))
+            print()
+        else:
+            b_mags_arr = np.array(b_mags)
+            v_mags_arr = np.array(v_mags)
+            r_mags_arr = np.array(r_mags)
+            i_mags_arr = np.array(i_mags)
+            bvri_idx = np.array(bvri_indices)
+
+            b_flux = np.power(10, -0.4 * b_mags_arr)
+            v_flux = np.power(10, -0.4 * v_mags_arr)
+            r_flux = np.power(10, -0.4 * r_mags_arr)
+            i_flux = np.power(10, -0.4 * i_mags_arr)
+
+            # Build BVRI-specific parallel arrays (subset of the main lists)
+            px_intens_list_bvri = [px_intens_list[j] for j in bvri_idx]
+            radius_list_bvri = [radius_list[j] for j in bvri_idx]
+            catalog_ra_bvri = [catalog_ra[j] for j in bvri_idx]
+            catalog_dec_bvri = [catalog_dec[j] for j in bvri_idx]
+            weights_bvri = np.array([weights[j] for j in bvri_idx])
+            exclude_list_bvri = [exclude_list[j] for j in bvri_idx]
+
+            def bvri_objective(params):
+                rB, rV, rR = params
+                rI = 1.0 - rB - rV - rR
+                if rB < 0 or rV < 0 or rR < 0 or rI < 0:
+                    return 1e6
+                total_flux = rB*b_flux + rV*v_flux + rR*r_flux + rI*i_flux
+                total_flux = np.maximum(total_flux, 1e-30)
+                test_mags = -2.5 * np.log10(total_flux)
+                test_mags_ext = extinctionCorrectionTrueToApparent(
+                    test_mags.tolist(), list(catalog_ra_bvri), list(catalog_dec_bvri),
+                    jd, self.platepar)
+                try:
+                    _, stddev, _ = photometryFit(
+                        px_intens_list_bvri, radius_list_bvri, test_mags_ext,
+                        fixed_vignetting=fixed_vignetting,
+                        weights=weights_bvri, exclude_list=exclude_list_bvri)
+                    return stddev
+                except Exception:
+                    return 1e6
+
+            # Multiple starting points to avoid local minima
+            starts = [
+                (0.00, 1.00, 0.00),  # pure V
+                (0.25, 0.25, 0.25),  # equal BVR (I=0.25)
+                (0.00, 0.00, 1.00),  # pure R
+                (0.15, 0.30, 0.25),  # default Sony BVRI
+            ]
+            best_bvri_result = None
+            for x0 in starts:
+                res = scipy.optimize.minimize(bvri_objective, x0, method='Nelder-Mead',
+                                              options={'xatol': 0.01, 'fatol': 0.001})
+                if best_bvri_result is None or res.fun < best_bvri_result.fun:
+                    best_bvri_result = res
+
+            best_rb, best_rv, best_rr = best_bvri_result.x
+            best_ri = 1.0 - best_rb - best_rv - best_rr
+            # Clamp negatives from float noise
+            best_rb, best_rv, best_rr, best_ri = [max(0, x) for x in [best_rb, best_rv, best_rr, best_ri]]
+
+            # Compute the full photometry fit with the best BVRI ratio
+            bvri_total_flux = best_rb*b_flux + best_rv*v_flux + best_rr*r_flux + best_ri*i_flux
+            bvri_best_mags = -2.5 * np.log10(np.maximum(bvri_total_flux, 1e-30))
+            bvri_best_mags_ext = extinctionCorrectionTrueToApparent(
+                bvri_best_mags.tolist(), list(catalog_ra_bvri), list(catalog_dec_bvri),
+                jd, self.platepar)
+            try:
+                bvri_fit_params, _, bvri_resids = photometryFit(
+                    px_intens_list_bvri, radius_list_bvri, bvri_best_mags_ext,
+                    fixed_vignetting=fixed_vignetting,
+                    weights=weights_bvri, exclude_list=exclude_list_bvri)
+                bvri_fit_result = (best_bvri_result.x, best_bvri_result.fun,
+                                   bvri_best_mags_ext, bvri_fit_params)
+            except Exception:
+                bvri_fit_result = None
+
+            # Compute stddev for the current/default BVRI ratios for comparison
+            # Use config BVRI ratios if set, otherwise fall back to Sony CMOS default
+            cur_bvri = self.config.star_catalog_band_ratios  # [B, V, R, Ic, G, BP, RP]
+            cur_rb, cur_rv, cur_rr, cur_ri = cur_bvri[0], cur_bvri[1], cur_bvri[2], cur_bvri[3]
+            cur_bvri_sum = cur_rb + cur_rv + cur_rr + cur_ri
+            if cur_bvri_sum == 0:
+                # Fall back to Sony CMOS default
+                cur_rb, cur_rv, cur_rr, cur_ri = 0.15, 0.30, 0.25, 0.30
+                cur_bvri_sum = 1.0
+                cur_bvri_label = "Sony default"
+            else:
+                cur_bvri_label = "config"
+            # Normalize to sum=1 for fair comparison
+            cur_rb_n = cur_rb/cur_bvri_sum
+            cur_rv_n = cur_rv/cur_bvri_sum
+            cur_rr_n = cur_rr/cur_bvri_sum
+            cur_ri_n = cur_ri/cur_bvri_sum
+            cur_bvri_flux = cur_rb_n*b_flux + cur_rv_n*v_flux + cur_rr_n*r_flux + cur_ri_n*i_flux
+            cur_bvri_mags = -2.5 * np.log10(np.maximum(cur_bvri_flux, 1e-30))
+            cur_bvri_mags_ext = extinctionCorrectionTrueToApparent(
+                cur_bvri_mags.tolist(), list(catalog_ra_bvri), list(catalog_dec_bvri),
+                jd, self.platepar)
+            try:
+                _, cur_bvri_stddev, _ = photometryFit(
+                    px_intens_list_bvri, radius_list_bvri, cur_bvri_mags_ext,
+                    fixed_vignetting=fixed_vignetting,
+                    weights=weights_bvri, exclude_list=exclude_list_bvri)
+            except Exception:
+                cur_bvri_stddev = np.inf
+            cur_bvri_str = "{:.2f}B+{:.2f}V+{:.2f}R+{:.2f}Ic ({:s})".format(
+                cur_rb_n, cur_rv_n, cur_rr_n, cur_ri_n, cur_bvri_label)
+
+            # Print BVRI results
+            bvri_config_str = "{:.2f},{:.2f},{:.2f},{:.2f},0.00,0.00,0.00".format(
+                best_rb, best_rv, best_rr, best_ri)
+            print()
+            print("=" * 60)
+            print("B:V:R:I BAND RATIO FIT")
+            print("=" * 60)
+            print("  Stars used: {:d}".format(
+                sum(1 for e in exclude_list_bvri if not e)))
+            print("  Best ratio: {:.2f} B + {:.2f} V + {:.2f} R + {:.2f} Ic".format(
+                best_rb, best_rv, best_rr, best_ri))
+            print("  Fit stddev: {:.3f} mag".format(best_bvri_result.fun))
+            print("  Current:    {:.3f} mag ({:s})".format(
+                cur_bvri_stddev, cur_bvri_str))
+            print()
+            print("  Config line:")
+            print("  star_catalog_band_ratios: {:s}".format(bvri_config_str))
+            print("=" * 60)
+            print()
+
+        ### Comparison plot ###
+        exclude_arr = np.array(exclude_list, dtype=bool)
+        px_arr = np.array(px_intens_list)
+        radius_arr = np.array(radius_list)
+        lsp_raw = np.log10(px_arr)
+
+        # Compute vignetting-corrected LSP using the best-fit vignetting from each fit
+        current_vig = current_params[1]
+        best_vig = best_params[1]
+        lsp_corr_current = np.log10(correctVignetting(px_arr, radius_arr, current_vig))
+        lsp_corr_best = np.log10(correctVignetting(px_arr, radius_arr, best_vig))
+
+        current_mags_ext_arr = np.array(current_mags_ext)
+        best_mags_ext_arr = np.array(best_mags_ext)
+
+        n_cols = 4 if bvri_fit_result is not None else 3
+        fig = plt.figure(figsize=(4.5*n_cols, 5))
+        gs_plot = gridspec.GridSpec(1, n_cols, width_ratios=[1]*n_cols)
+
+        # --- Left panel: ternary heatmap as 2D G vs BP (RP = 1-G-BP) ---
+        ax_heat = fig.add_subplot(gs_plot[0])
+        n_grid = len(grid_vals)
+        heatmap = np.full((n_grid, n_grid), np.nan)
+        for (rg, rbp), stddev in grid_results.items():
+            ig = int(round(rg / step))
+            ibp = int(round(rbp / step))
+            if 0 <= ig < n_grid and 0 <= ibp < n_grid:
+                heatmap[ibp, ig] = stddev
+
+        im = ax_heat.imshow(heatmap, origin='lower', aspect='auto',
+                            extent=[0, 1, 0, 1], cmap='viridis_r')
+        ax_heat.plot(best_rg, best_rbp, 'r*', markersize=15, zorder=5,
+                     label="Best: {:.2f}G+{:.2f}BP+{:.2f}RP\n$\\sigma$={:.3f}".format(
+                         best_rg, best_rbp, best_rrp, best_stddev))
+        ax_heat.set_xlabel("G fraction")
+        ax_heat.set_ylabel("BP fraction")
+        ax_heat.set_title("G:BP:RP Stddev Map (RP = 1-G-BP)")
+        ax_heat.legend(fontsize=7, loc='upper right')
+        fig.colorbar(im, ax=ax_heat, label='stddev (mag)', shrink=0.8)
+
+        # Compute shared axis limits for both photometry panels
+        x_cur = -2.5 * lsp_corr_current
+        x_best = -2.5 * lsp_corr_best
+        x_min = min(np.min(x_cur), np.min(x_best)) - 1
+        x_max = max(np.max(x_cur), np.max(x_best)) + 1
+        y_min = min(np.min(current_mags_ext_arr), np.min(best_mags_ext_arr)) - 1
+        y_max = max(np.max(current_mags_ext_arr), np.max(best_mags_ext_arr)) + 1
+
+        # Fit line x range
+        x_line = np.linspace(x_min, x_max, 10)
+
+        # Helper to plot a photometry panel (matching the style of the main photometry plot)
+        def plot_photom_panel(ax, cat_mags, lsp_raw, lsp_corr, fit_params, title, ylabel):
+            incl = ~exclude_arr
+
+            # Raw points (red)
+            ax.scatter(-2.5*lsp_raw[incl], cat_mags[incl],
+                       s=5, c='r', alpha=0.5, zorder=3, label="Raw")
+
+            # Vignetting-corrected points (blue)
+            ax.scatter(-2.5*lsp_corr[incl], cat_mags[incl],
+                       s=5, c='b', alpha=0.5, zorder=3, label="Vig. corrected")
+
+            # Excluded stars
+            if np.any(exclude_arr):
+                ax.scatter(-2.5*lsp_corr[exclude_arr], cat_mags[exclude_arr],
+                           s=20, zorder=2, edgecolor='r', facecolor='none')
+
+            # Fit line (at radius=0, i.e. no vignetting)
+            photom_offset, vig_coeff = fit_params
+            fit_info = "{:+.1f}*LSP + {:.2f}".format(-2.5, photom_offset) \
+                     + "\nVig = {:.5f} rad/px".format(vig_coeff)
+            ax.plot(x_line,
+                    photomLine((10**(x_line/(-2.5)), np.zeros_like(x_line)), *fit_params),
+                    'k--', alpha=0.5, label=fit_info)
+
+            ax.legend(fontsize=7, loc='upper left')
+            ax.set_xlabel("Uncalibrated magnitude")
+            ax.set_ylabel(ylabel)
+            ax.set_title(title)
+            ax.set_xlim(x_min, x_max)
+            ax.set_ylim(y_min, y_max)
+            ax.invert_xaxis()
+            ax.invert_yaxis()
+            ax.grid(True, alpha=0.3)
+
+        # --- Center panel: current band ratios ---
+        ax_cur = fig.add_subplot(gs_plot[1])
+        plot_photom_panel(ax_cur, current_mags_ext_arr, lsp_raw, lsp_corr_current,
+                          current_params,
+                          "Current: $\\sigma$ = {:.3f} mag".format(current_stddev),
+                          "Catalog mag ({:s})".format(self.mag_band_string))
+
+        # --- Right panel: best G:BP:RP ---
+        ax_best = fig.add_subplot(gs_plot[2])
+        plot_photom_panel(ax_best, best_mags_ext_arr, lsp_raw, lsp_corr_best,
+                          best_params,
+                          "Best: $\\sigma$ = {:.3f} mag".format(best_stddev),
+                          "Catalog mag ({:.0f}G+{:.0f}BP+{:.0f}RP)".format(
+                              best_rg*100, best_rbp*100, best_rrp*100))
+
+        # --- BVRI panel (if available) ---
+        if bvri_fit_result is not None:
+            bvri_params_opt, bvri_stddev_opt, bvri_mags_ext, bvri_fit_params_phot = bvri_fit_result
+            bvri_rb, bvri_rv, bvri_rr = bvri_params_opt
+            bvri_ri = max(0, 1.0 - bvri_rb - bvri_rv - bvri_rr)
+
+            # Build BVRI-subset arrays for plotting
+            bvri_idx = np.array(bvri_indices)
+            bvri_px_arr = np.array([px_intens_list[j] for j in bvri_idx])
+            bvri_radius_arr = np.array([radius_list[j] for j in bvri_idx])
+            bvri_exclude_arr = np.array([exclude_list[j] for j in bvri_idx], dtype=bool)
+            bvri_mags_ext_arr = np.array(bvri_mags_ext)
+
+            bvri_lsp_raw = np.log10(bvri_px_arr)
+            bvri_vig = bvri_fit_params_phot[1]
+            bvri_lsp_corr = np.log10(correctVignetting(bvri_px_arr, bvri_radius_arr, bvri_vig))
+
+            ax_bvri = fig.add_subplot(gs_plot[3])
+            incl_bvri = ~bvri_exclude_arr
+
+            ax_bvri.scatter(-2.5*bvri_lsp_raw[incl_bvri], bvri_mags_ext_arr[incl_bvri],
+                            s=5, c='r', alpha=0.5, zorder=3, label="Raw")
+            ax_bvri.scatter(-2.5*bvri_lsp_corr[incl_bvri], bvri_mags_ext_arr[incl_bvri],
+                            s=5, c='b', alpha=0.5, zorder=3, label="Vig. corrected")
+            if np.any(bvri_exclude_arr):
+                ax_bvri.scatter(-2.5*bvri_lsp_corr[bvri_exclude_arr], bvri_mags_ext_arr[bvri_exclude_arr],
+                                s=20, zorder=2, edgecolor='r', facecolor='none')
+
+            photom_offset_bvri, vig_coeff_bvri = bvri_fit_params_phot
+            fit_info_bvri = "{:+.1f}*LSP + {:.2f}".format(-2.5, photom_offset_bvri) \
+                          + "\nVig = {:.5f} rad/px".format(vig_coeff_bvri)
+            ax_bvri.plot(x_line,
+                         photomLine((10**(x_line/(-2.5)), np.zeros_like(x_line)), *bvri_fit_params_phot),
+                         'k--', alpha=0.5, label=fit_info_bvri)
+
+            ax_bvri.legend(fontsize=7, loc='upper left')
+            ax_bvri.set_xlabel("Uncalibrated magnitude")
+            ax_bvri.set_ylabel("Catalog mag ({:.0f}B+{:.0f}V+{:.0f}R+{:.0f}Ic)".format(
+                bvri_rb*100, bvri_rv*100, bvri_rr*100, bvri_ri*100))
+            ax_bvri.set_title("BVRI: $\\sigma$ = {:.3f} mag".format(bvri_stddev_opt))
+            ax_bvri.set_xlim(x_min, x_max)
+            ax_bvri.set_ylim(y_min, y_max)
+            ax_bvri.invert_xaxis()
+            ax_bvri.invert_yaxis()
+            ax_bvri.grid(True, alpha=0.3)
+
+            suptitle_str = "G/BP/RP: {:s}  |  BVRI: {:s}".format(config_str, bvri_config_str)
+        else:
+            suptitle_str = "star_catalog_band_ratios: {:s}".format(config_str)
+
+        fig.suptitle(suptitle_str, fontsize=10, fontweight='bold')
+        fig.tight_layout()
+        fig.show()
+
+
+    def filterPhotometricOutliers(self, sigma_threshold=2.5):
+        """
+        Filter paired_stars by removing photometric outliers.
+
+        Performs preliminary photometry and removes stars whose magnitude
+        residuals exceed sigma_threshold standard deviations.
+
+        Arguments:
+            sigma_threshold: [float] Number of standard deviations for outlier detection.
+
+        Returns:
+            int: Number of stars removed.
+        """
+        if len(self.paired_stars) < 10:
+            return 0
+
+        # Collect magnitude residuals for non-saturated stars
+        residuals = []
+        valid_indices = []
+        ra_list = []
+        dec_list = []
+
+        for i, (x, y, fwhm, intens_acc, obj, snr, saturated) in enumerate(
+                self.paired_stars.paired_stars):
+
+            # Skip saturated stars
+            if saturated:
+                continue
+
+            # Skip geo points (only process catalog stars)
+            if hasattr(obj, 'pick_type') and obj.pick_type == "geopoint":
+                continue
+
+            ra, dec, cat_mag = obj.coords()
+
+            # Skip invalid intensities
+            if intens_acc <= 0 or np.isnan(intens_acc) or np.isinf(intens_acc):
+                continue
+
+            # Compute instrumental magnitude
+            inst_mag = -2.5 * np.log10(intens_acc)
+
+            # Store for extinction correction
+            residuals.append((cat_mag, inst_mag))
+            valid_indices.append(i)
+            ra_list.append(ra)
+            dec_list.append(dec)
+
+        if len(residuals) < 5:
+            return 0
+
+        # Apply extinction correction to catalog magnitudes
+        cat_mags = np.array([r[0] for r in residuals])
+        inst_mags = np.array([r[1] for r in residuals])
+
+        cat_mags_corrected = extinctionCorrectionTrueToApparent(
+            cat_mags, ra_list, dec_list,
+            date2JD(*self.img_handle.currentTime()),
+            self.platepar)
+
+        # Compute residuals (relative - offset cancels in sigma calc)
+        mag_residuals = cat_mags_corrected - inst_mags
+
+        # Sigma clipping
+        median = np.median(mag_residuals)
+        std = np.std(mag_residuals)
+
+        if std < 0.01:  # Avoid division issues
+            return 0
+
+        # Find outliers
+        outlier_mask = np.abs(mag_residuals - median) > sigma_threshold * std
+        outlier_indices = set(valid_indices[i] for i, is_outlier
+                              in enumerate(outlier_mask) if is_outlier)
+
+        # Remove outliers from paired_stars
+        if len(outlier_indices) > 0:
+            new_paired_stars = PairedStars()
+            for i, (x, y, fwhm, intens_acc, obj, snr, saturated) in enumerate(
+                    self.paired_stars.paired_stars):
+                if i not in outlier_indices:
+                    new_paired_stars.addPair(x, y, fwhm, intens_acc, obj, snr, saturated)
+            self.paired_stars = new_paired_stars
+
+        removed_count = len(outlier_indices)
+        if removed_count > 0:
+            print(f"Removed {removed_count} photometric outliers (>{sigma_threshold} sigma)")
+
+        return removed_count
+
+
+    def filterBlendedStars(self, fwhm_mult=2.0, mag_margin=0.3):
+        """
+        Filter paired_stars by removing likely blended stars.
+
+        A star is considered blended if there are other catalog stars (brighter
+        than lim_mag + mag_margin) within fwhm_mult * FWHM pixels of the star.
+
+        Arguments:
+            fwhm_mult: [float] Multiplier of the star's FWHM for blend detection radius.
+            mag_margin: [float] Margin above limiting magnitude for catalog stars to consider.
+
+        Returns:
+            int: Number of stars removed.
+        """
+        # Get FOV-filtered catalog stars for neighbor lookup
+        # Using filtered catalog prevents false positives from stars behind the camera
+        if hasattr(self, 'catalog_stars_filtered_unmasked') and self.catalog_stars_filtered_unmasked is not None:
+            catalog_for_blend = self.catalog_stars_filtered_unmasked
+        elif hasattr(self, 'catalog_stars') and self.catalog_stars is not None:
+            catalog_for_blend = self.catalog_stars
+        else:
+            return 0
+
+        jd = date2JD(*self.img_handle.currentFrameTime())
+
+        self.paired_stars, removed_count = filterBlendedStars(
+            self.paired_stars,
+            catalog_for_blend,
+            self.platepar,
+            jd,
+            self.cat_lim_mag,
+            fwhm_mult=fwhm_mult,
+            mag_margin=mag_margin,
+            verbose=True
+        )
+
+        return removed_count
+
+
+    def balanceCatalogMagnitude(self):
+        """
+        Balance catalog magnitude limit to have ~2x more catalog stars than detected stars.
+
+        This improves NN matching by ensuring a good ratio between detected and catalog stars.
+        Updates self.cat_lim_mag and reloads catalog_stars if needed.
+
+        Returns:
+            bool: True if balancing was performed, False otherwise.
+        """
+        # Get current FF file name
+        ff_name_c = convertFRNameToFF(self.img_handle.name())
+
+        # Get detected stars count
+        n_detected = 0
+        if self.star_detection_override_enabled and ff_name_c in self.star_detection_override_data:
+            n_detected = len(self.star_detection_override_data[ff_name_c])
+        elif ff_name_c in self.calstars:
+            n_detected = len(self.calstars[ff_name_c])
+
+        if n_detected < 10:
+            return False
+
+        # Compute JD for projection
+        jd = date2JD(*self.img_handle.currentTime())
+
+        # Get current catalog stars in FOV
+        _, catalog_stars_extended = self.filterCatalogStarsInsideFOV(self.catalog_stars)
+
+        # Project to image and count stars strictly inside FOV
+        catalog_x, catalog_y, _ = getCatalogStarsImagePositions(
+            catalog_stars_extended, jd, self.platepar)
+        in_fov = (catalog_x >= 0) & (catalog_x < self.platepar.X_res) & \
+                 (catalog_y >= 0) & (catalog_y < self.platepar.Y_res)
+        n_catalog = np.sum(in_fov)
+
+        # Target: 1.5x to 2.5x detected stars
+        target_min = int(n_detected * 1.5)
+        target_max = int(n_detected * 2.5)
+
+        if target_min <= n_catalog <= target_max:
+            # Already in range
+            print("Catalog balance OK: {} catalog stars for {} detected (target {}-{})".format(
+                n_catalog, n_detected, target_min, target_max))
+            return False
+
+        print()
+        print("Balancing catalog stars ({:d}) to match detected stars ({:d})...".format(
+            n_catalog, n_detected))
+        print("  Target range: {:d} - {:d} catalog stars".format(target_min, target_max))
+
+        # Binary search for optimal magnitude limit
+        # Use actual current limit, not config default (user may have adjusted with +/-)
+        original_mag_limit = self.cat_lim_mag
+        current_mag_limit = original_mag_limit
+        mag_low, mag_high = 3.0, 12.0
+        best_mag_limit = current_mag_limit
+        best_n_catalog = n_catalog
+
+        for iteration in range(10):  # Max 10 iterations
+            if n_catalog < target_min:
+                # Need more catalog stars - increase mag limit
+                mag_low = current_mag_limit
+                current_mag_limit = (current_mag_limit + mag_high) / 2.0
+            elif n_catalog > target_max:
+                # Too many catalog stars - decrease mag limit
+                mag_high = current_mag_limit
+                current_mag_limit = (mag_low + current_mag_limit) / 2.0
+            else:
+                # In range, done
+                break
+
+            # Reload catalog with new limit
+            old_cat_lim_mag = self.cat_lim_mag
+            self.cat_lim_mag = current_mag_limit
+            temp_catalog = self.loadCatalogStars(current_mag_limit)
+            _, temp_catalog_fov = self.filterCatalogStarsInsideFOV(temp_catalog)
+            self.cat_lim_mag = old_cat_lim_mag  # Restore temporarily
+
+            # Project and filter to strict FOV
+            temp_x, temp_y, _ = getCatalogStarsImagePositions(temp_catalog_fov, jd, self.platepar)
+            in_fov = (temp_x >= 0) & (temp_x < self.platepar.X_res) & \
+                     (temp_y >= 0) & (temp_y < self.platepar.Y_res)
+            n_catalog = np.sum(in_fov)
+
+            print("    Iter {:d}: mag_limit={:.2f}, catalog_in_fov={:d}".format(
+                iteration + 1, current_mag_limit, n_catalog))
+
+            if target_min <= n_catalog <= target_max:
+                best_mag_limit = current_mag_limit
+                best_n_catalog = n_catalog
+                print("    -> In target range, done")
+                break
+
+            # Track best result so far
+            if abs(n_catalog - (target_min + target_max)/2) < abs(best_n_catalog - (target_min + target_max)/2):
+                best_mag_limit = current_mag_limit
+                best_n_catalog = n_catalog
+
+        # Apply best magnitude limit found
+        if best_mag_limit != original_mag_limit:
+            print("  Adjusted catalog mag limit: {:.1f} -> {:.1f}".format(
+                original_mag_limit, best_mag_limit))
+
+            # Permanently update cat_lim_mag and reload catalog
+            self.cat_lim_mag = best_mag_limit
+            self.config.catalog_mag_limit = best_mag_limit  # Update config so alignPlatepar sees it
+            self.catalog_stars = self.loadCatalogStars(best_mag_limit)
+
+            # Update GUI to show the balanced magnitude limit
+            self.updateLeftLabels()
+            self.tab.settings.updateLimMag()
+
+            return True
+        else:
+            print("  Could not reach target range (best: {:d} stars at mag_limit={:.1f})".format(
+                best_n_catalog, best_mag_limit))
+            return False
+
+
     def changeDistortionType(self):
         """ Change the distortion type. """
 
@@ -3564,6 +8068,29 @@ class PlateTool(QtWidgets.QMainWindow):
             self.paired_stars = PairedStars()
             self.unsuitable_stars = PairedStars()
             self.residuals = None
+
+            # Clear residual overlay from previous image
+            self.updateFitResiduals()
+            self.residual_text.clear()
+
+            # Clear satellite tracks when image changes (they're time-specific)
+            self.clearSatelliteTracks()
+            
+            # Automatically recompute if both auto-compute and satellite display are enabled
+            if self.show_sattracks and self.auto_compute_sattracks and SKYFIELD_AVAILABLE:
+                # Show computing status text (centered on image)
+                self.sat_computing_text.setPos(self.platepar.X_res / 2, self.platepar.Y_res / 2)
+                self.sat_computing_text.show()
+                
+                # Force GUI update to show the text before blocking computation
+                QtWidgets.QApplication.processEvents()
+                
+                # Load satellite tracks (this takes time)
+                self.loadSatelliteTracks()
+                
+                # Hide computing status text
+                self.sat_computing_text.hide()
+
             self.drawPhotometryColoring()
 
             self.updateStars()
@@ -3624,6 +8151,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
         self.updateLeftLabels()
+        self.updateImageNavigationDisplay()
 
 
     def showFRBox(self):
@@ -3653,6 +8181,62 @@ class PlateTool(QtWidgets.QMainWindow):
 
             else:
                 self.fr_box.hide()
+
+
+    def jumpToImage(self, image_num):
+        """ Jump directly to a specific image number (1-indexed).
+
+        Arguments:
+            image_num: [int] Target image number (1-indexed, 1 to total_images)
+        """
+        # Only works in skyfit mode with multiple images
+        if self.mode != 'skyfit':
+            return
+
+        # Check if we have a valid image handle with ff_list
+        if not hasattr(self.img_handle, 'ff_list'):
+            return
+
+        # Convert 1-indexed UI to 0-indexed internal
+        target_index = image_num - 1
+        current_index = self.img_handle.current_ff_index
+
+        # Calculate delta and navigate
+        delta = target_index - current_index
+        if delta != 0:
+            # Block signals to prevent recursive calls
+            self.image_navigation_slider.blockSignals(True)
+            self.nextImg(n=delta)
+            self.image_navigation_slider.blockSignals(False)
+
+
+    def updateImageNavigationDisplay(self):
+        """ Update the image navigation slider and label to show current position. """
+
+        if not self.hasData():
+            return
+
+        # Only update if we have a multi-image handle with ff_list
+        if not hasattr(self.img_handle, 'ff_list'):
+            self.image_navigation_slider.hide()
+            self.image_navigation_label.hide()
+            return
+
+        # Show slider for multi-image inputs
+        self.image_navigation_slider.show()
+        self.image_navigation_label.show()
+
+        # Update bounds and current value
+        total_images = len(self.img_handle.ff_list)
+        current_index = self.img_handle.current_ff_index
+
+        self.image_navigation_slider.blockSignals(True)
+        self.image_navigation_slider.setMaximum(total_images)
+        self.image_navigation_slider.setValue(current_index + 1)  # 1-indexed display
+        self.image_navigation_slider.blockSignals(False)
+
+        # Update label text
+        self.image_navigation_label.setText(f'Image: {current_index + 1} / {total_images}')
 
 
     def saveState(self):
@@ -3686,14 +8270,42 @@ class PlateTool(QtWidgets.QMainWindow):
             del dic[remove]
 
         # Explicitly remove pyqtgraph items that might not have been caught
-        if 'sat_track_curves' in dic:
-            del dic['sat_track_curves']
-        if 'sat_track_labels' in dic:
-            del dic['sat_track_labels']
-        if 'sat_track_arrows' in dic:
-            del dic['sat_track_arrows']
-        if 'sat_markers' in dic:
-            del dic['sat_markers']
+        pyqtgraph_keys = [
+            'sat_track_curves', 'sat_track_labels', 'sat_track_arrows', 'sat_markers',
+            # TextItem objects
+            'label1', 'label2', 'label_f1', 'star_pick_info',
+            # TextItemList objects
+            'planet_labels', 'residual_text', 'spectral_type_text_list',
+        ]
+        for key in pyqtgraph_keys:
+            if key in dic:
+                del dic[key]
+
+        # Remove other PlotCurveItem objects which cannot be pickled
+        # Generic scrubber for pyqtgraph/qt items
+        unpicklable_modules = ('pyqtgraph', 'PyQt5', 'RMS.Routines.CustomPyqtgraphClasses')
+        keys_to_remove = []
+        for k, v in dic.items():
+
+            # Check for direct objects
+            if hasattr(v, '__class__') and hasattr(v.__class__, '__module__'):
+                 if v.__class__.__module__.startswith(unpicklable_modules):
+                      keys_to_remove.append(k)
+                      continue
+
+            # Check for lists of objects
+            if isinstance(v, list) and v:
+                 # Check first item in list (heuristic)
+                 first = v[0]
+                 if hasattr(first, '__class__') and hasattr(first.__class__, '__module__'):
+                      if first.__class__.__module__.startswith(unpicklable_modules):
+                          keys_to_remove.append(k)
+                          continue
+
+        for k in keys_to_remove:
+            if k in dic:
+                del dic[k]
+
 
         # Save the FF file name if the input type is FF
         if self.img_handle.input_type == 'ff':
@@ -3734,6 +8346,32 @@ class PlateTool(QtWidgets.QMainWindow):
         variables = loadPickle(dir_path, state_name)
         for k, v in variables.items():
             setattr(self, k, v)
+        
+        # Init catalog_stars_spectral_type if it doesn't exist (loading old state files)
+        if not hasattr(self, 'catalog_stars_spectral_type'):
+            self.catalog_stars_spectral_type = None
+        
+        # Init catalog_stars_preferred_names if it doesn't exist
+        if not hasattr(self, 'catalog_stars_preferred_names'):
+            self.catalog_stars_preferred_names = None
+
+        # Init show_constellations if it doesn't exist
+        if not hasattr(self, 'show_constellations'):
+            self.show_constellations = False
+
+        # Init catalog_stars_common_names if it doesn't exist
+        if not hasattr(self, 'catalog_stars_common_names'):
+            self.catalog_stars_common_names = None
+
+        # Init star label cache and precomputed HTML arrays if they don't exist
+        if not hasattr(self, '_star_label_cache'):
+            self._star_label_cache = {}
+        if not hasattr(self, '_star_label_html_spectral'):
+            self._star_label_html_spectral = []
+        if not hasattr(self, '_star_label_html_name'):
+            self._star_label_html_name = []
+        if not hasattr(self, '_filtered_original_indices'):
+            self._filtered_original_indices = []
 
         # Updating old state files with new platepar variables
         if self.platepar is not None:
@@ -3967,6 +8605,9 @@ class PlateTool(QtWidgets.QMainWindow):
         # Add the missing satellite overlay variables
         if not hasattr(self, "show_sattracks"):
             self.show_sattracks = False
+        
+        if not hasattr(self, "auto_compute_sattracks"):
+            self.auto_compute_sattracks = False
         if not hasattr(self, "tle_file"):
             self.tle_file = None
         if not hasattr(self, "satellite_tracks"):
@@ -4055,8 +8696,301 @@ class PlateTool(QtWidgets.QMainWindow):
             self.setFPS()
 
 
-    def onMouseReleased(self, event):
+    def eventFilter(self, obj, event):
+        """Event filter to catch mouse release and global keyboard shortcuts."""
+
+        # Handle mouse release on view_widget viewport (ViewBox doesn't receive it during panning)
+        if event.type() == QtCore.QEvent.MouseButtonRelease:
+            # Only handle if obj is the view_widget viewport
+            if obj == self.view_widget.viewport():
+                # Convert widget coords to scene coords
+                scene_pos = self.view_widget.mapToScene(event.pos())
+                self.handleMouseRelease(event.button(), scene_pos.x(), scene_pos.y())
+            return False  # Don't consume the event
+
+        # Handle global keyboard shortcuts
+        if event.type() == QtCore.QEvent.KeyPress:
+            modifiers = event.modifiers()
+            key = event.key()
+
+            # Check if this is a shortcut we want to handle globally
+            should_intercept = False
+
+            # Intercept Ctrl+key combinations (but not when in a text input that needs Ctrl+C/V/X/A)
+            if modifiers & QtCore.Qt.ControlModifier:
+                # Don't intercept standard text editing shortcuts in text widgets
+                if isinstance(obj, (QtWidgets.QLineEdit, QtWidgets.QTextEdit, QtWidgets.QPlainTextEdit)):
+                    if key in (QtCore.Qt.Key_C, QtCore.Qt.Key_V, QtCore.Qt.Key_X, QtCore.Qt.Key_A):
+                        return False  # Let text widget handle copy/paste/cut/select-all
+                should_intercept = True
+
+            # Intercept arrow keys (for image navigation and scale adjustment)
+            elif key in (QtCore.Qt.Key_Left, QtCore.Qt.Key_Right, QtCore.Qt.Key_Up, QtCore.Qt.Key_Down):
+                # Don't intercept if focus is on a spinbox (arrows change values)
+                if not isinstance(obj, (QtWidgets.QSpinBox, QtWidgets.QDoubleSpinBox,
+                                       QtWidgets.QAbstractSpinBox)):
+                    should_intercept = True
+
+            # Intercept Escape key to return focus to image
+            elif key == QtCore.Qt.Key_Escape:
+                self.img_frame.setFocus()
+                if self.star_pick_mode:
+                    # Let the event propagate to keyPressEvent for star pick handling
+                    return False
+                return True  # Consume the event
+
+            # Intercept single-letter shortcuts that should work globally
+            # (but not when typing in text inputs or spinboxes)
+            elif key in (QtCore.Qt.Key_M, QtCore.Qt.Key_R, QtCore.Qt.Key_F, QtCore.Qt.Key_H,
+                         QtCore.Qt.Key_I, QtCore.Qt.Key_P, QtCore.Qt.Key_C, QtCore.Qt.Key_D,
+                         QtCore.Qt.Key_B, QtCore.Qt.Key_V):
+                # Don't intercept if focus is on a text/spin widget
+                # Check the widget and its parent (spinbox line edits have spinbox as parent)
+                widget = obj
+                parent = obj.parent() if obj else None
+                is_input = isinstance(widget, (QtWidgets.QLineEdit, QtWidgets.QTextEdit,
+                                              QtWidgets.QPlainTextEdit, QtWidgets.QSpinBox,
+                                              QtWidgets.QDoubleSpinBox, QtWidgets.QAbstractSpinBox))
+                is_input = is_input or isinstance(parent, (QtWidgets.QSpinBox,
+                                                           QtWidgets.QDoubleSpinBox,
+                                                           QtWidgets.QAbstractSpinBox))
+                if not is_input:
+                    should_intercept = True
+
+            if should_intercept:
+                # Forward to keyPressEvent
+                self.keyPressEvent(event)
+                return True  # Consume the event
+
+        return False  # Don't consume other events
+
+    def handleMouseRelease(self, button, scene_x, scene_y):
+        """Handle mouse release for star picking (called from eventFilter)."""
+        # Stop mask vertex dragging
+        self.mask_dragging_vertex = None
+
+        # Check if this was a click (not a drag) for star picking
+        if self.press_scene_x is not None and self.star_pick_mode:
+            # Check if mouse moved more than threshold in screen pixels
+            drag_distance = np.hypot(scene_x - self.press_scene_x, scene_y - self.press_scene_y)
+            click_threshold = 5.0  # screen pixels
+
+            if drag_distance < click_threshold:
+                # Update mouse_x/y to the actual click position before picking
+                # (press_scene_x/y come from pyqtgraph's scenePos which is reliable)
+                scene_pos = QtCore.QPointF(self.press_scene_x, self.press_scene_y)
+                view_pos = self.img_frame.mapSceneToView(scene_pos)
+                self.mouse_x = view_pos.x()
+                self.mouse_y = view_pos.y()
+                self.handleStarPick(self.press_button, self.press_modifiers)
+
+        # Clear press tracking and clicked state
+        self.press_scene_x = None
+        self.press_scene_y = None
+        self.press_button = None
+        self.press_modifiers = None
         self.clicked = 0
+
+    def onMouseReleased(self, event):
+        # Note: This may not be called during panning - handleMouseRelease via eventFilter is the main handler
+        # Keep this for non-panning scenarios and mask vertex dragging
+        self.mask_dragging_vertex = None
+
+
+    def handleStarPick(self, button, modifiers):
+        """Handle star picking on click (not drag). Called from onMouseReleased."""
+
+        # Add star pair in SkyFit
+        if self.mode == 'skyfit':
+
+            # Add star
+            if button == QtCore.Qt.LeftButton:
+
+                if self.cursor.mode == 0:
+
+                    # If CTRL is pressed, place the pick manually - NOTE: the intensity might be off then!!!
+                    if modifiers & QtCore.Qt.ControlModifier:
+                        self.x_centroid = self.mouse_x - 0.5
+                        self.y_centroid = self.mouse_y - 0.5
+
+                        # Compute the star intensity
+                        (
+                            _, _, self.star_fwhm, self.star_intensity, self.star_snr, self.star_saturated
+                        ) = self.centroid(
+                            prev_x_cent=self.x_centroid, prev_y_cent=self.y_centroid
+                            )
+                    else:
+
+                        # Check if a star centroid is available from CALSTARS, and use it first because
+                        #   the PSF fit should result in a better centroid estimate
+
+                        # Check if the closest CALSTARS star is within the radius
+
+                        calstars_centroid = False
+                        if self.img_handle is not None:
+
+                            # Handle using FR files too
+                            ff_name_c = convertFRNameToFF(self.img_handle.name())
+
+                            # Use override data if enabled, otherwise CALSTARS
+                            star_data = None
+                            if self.star_detection_override_enabled and ff_name_c in self.star_detection_override_data:
+                                star_data = np.array(self.star_detection_override_data[ff_name_c])
+                            elif ff_name_c in self.calstars:
+                                star_data = np.array(self.calstars[ff_name_c])
+
+                            if star_data is not None:
+
+                                if len(star_data):
+
+                                    # Get star coordinates
+                                    stars_x = star_data[:, 1]
+                                    stars_y = star_data[:, 0]
+
+                                    # Compute the distance from the mouse press
+                                    mouse_x = self.mouse_x - 0.5
+                                    mouse_y = self.mouse_y - 0.5
+                                    dist_arr = np.hypot(stars_x - mouse_x, stars_y - mouse_y)
+
+                                    # Find the closest distance
+                                    closest_dist_indx = np.argmin(dist_arr)
+
+                                    # If the CALSTARS entry is within the aperture radius, take that star
+                                    if dist_arr[closest_dist_indx] <= self.star_aperture_radius:
+
+                                        self.x_centroid = stars_x[closest_dist_indx]
+                                        self.y_centroid = stars_y[closest_dist_indx]
+
+                                        # Compute the star intensity
+                                        _, _, self.star_fwhm, \
+                                            self.star_intensity, self.star_snr, self.star_saturated = \
+                                            self.centroid( \
+                                            prev_x_cent=self.x_centroid, prev_y_cent=self.y_centroid)
+
+                                        calstars_centroid = True
+
+
+                        # If a CALSTARS star was not found, run a normal centroid
+                        if not calstars_centroid:
+
+                            # Perform centroiding with 2 iterations
+                            x_cent_tmp, y_cent_tmp, _, _, _, _ = self.centroid()
+
+                            # Check that the centroiding was successful
+                            if x_cent_tmp is not None:
+
+                                # Centroid the star around the pressed coordinates
+                                (
+                                    self.x_centroid, self.y_centroid, self.star_fwhm,
+                                    self.star_intensity, self.star_snr, self.star_saturated
+                                ) = self.centroid(prev_x_cent=x_cent_tmp, prev_y_cent=y_cent_tmp)
+
+                            else:
+                                return None
+
+                    # Add the centroid to the plot
+                    self.centroid_star_markers.addPoints(x=[self.x_centroid + 0.5], \
+                        y=[self.y_centroid + 0.5])
+                    self.centroid_star_markers2.addPoints(x=[self.x_centroid + 0.5], \
+                        y=[self.y_centroid + 0.5])
+
+
+                    # Find coordinates of the star or geo points closest to the clicked point
+                    x_data, y_data = self.findClickedStarOrGeoPoint(self.x_centroid, self.y_centroid)
+
+
+                    # Add a star marker to the main and zoom windows
+                    self.sel_cat_star_markers.addPoints(x=np.array(x_data) + 0.5, \
+                        y=np.array(y_data) + 0.5)
+                    self.sel_cat_star_markers2.addPoints(x=np.array(x_data) + 0.5, \
+                        y=np.array(y_data) + 0.5)
+
+                    # Switch to the mode where the catalog star is selected
+                    self.cursor.setMode(1)
+
+
+                elif self.cursor.mode == 1:
+
+                    # REMOVE marker for previously selected
+                    self.sel_cat_star_markers.setData(pos=self.paired_stars.imageCoords(draw=True))
+                    self.sel_cat_star_markers2.setData(pos=self.paired_stars.imageCoords(draw=True))
+
+
+                    # Find coordinates of the star or geo points closest to the clicked point
+                    x_data, y_data = self.findClickedStarOrGeoPoint(self.mouse_x, self.mouse_y)
+
+                    # Add the new point
+                    self.sel_cat_star_markers.addPoints(x=np.array(x_data) + 0.5, \
+                        y=np.array(y_data) + 0.5)
+                    self.sel_cat_star_markers2.addPoints(x=np.array(x_data) + 0.5, \
+                        y=np.array(y_data) + 0.5)
+
+
+            # Remove star pair on right click
+            elif button == QtCore.Qt.RightButton:
+                if self.cursor.mode == 0:
+
+                    # Remove the closest picked star from the list
+                    self.paired_stars.removeClosestPair(self.mouse_x, self.mouse_y)
+
+                    self.updatePairedStars()
+                    self.updateFitResiduals()
+                    self.photometry()
+
+        # Add centroid in manual reduction
+        else:
+            if button == QtCore.Qt.LeftButton:
+
+                if self.cursor.mode == 0:
+                    mode = 1
+
+                    if modifiers & QtCore.Qt.ControlModifier or \
+                            ((modifiers & QtCore.Qt.AltModifier or QtCore.Qt.Key_0 in self.keys_pressed) and
+                             self.img.img_handle.input_type == 'dfn'):
+
+                        self.x_centroid, self.y_centroid = self.mouse_x - 0.5, self.mouse_y - 0.5
+
+                    else:
+                        (
+                            self.x_centroid, self.y_centroid, self.star_fwhm,
+                            source_intens, self.snr_centroid, self.saturated_centroid
+                        ) = self.centroid()
+
+                        # Skip detections with non-positive intensity (matches ExtractStars behavior)
+                        if source_intens <= 0:
+                            print("Skipping detection: non-positive intensity ({:.1f})".format(source_intens))
+                            return
+
+                    if (modifiers & QtCore.Qt.AltModifier or QtCore.Qt.Key_0 in self.keys_pressed) and \
+                            self.img.img_handle.input_type == 'dfn':
+                        mode = 0
+
+                    self.addCentroid(self.img.getFrame(), self.x_centroid, self.y_centroid, mode=mode,
+                                     snr=self.snr_centroid, saturated=self.saturated_centroid)
+
+                    self.updatePicks()
+
+                    # Add photometry coloring if single-click photometry is turned on
+                    if self.single_click_photometry:
+
+                        self.changePhotometry(self.img.getFrame(), self.photometryColoring(),
+                                          add_photometry=True)
+                        self.drawPhotometryColoring()
+
+
+                elif self.cursor.mode == 2:
+                    self.changePhotometry(self.img.getFrame(), self.photometryColoring(),
+                                          add_photometry=True)
+                    self.drawPhotometryColoring()
+
+            elif button == QtCore.Qt.RightButton:
+                if self.cursor.mode == 0:
+                    self.removeCentroid(self.img.getFrame())
+                    self.updatePicks()
+                elif self.cursor.mode == 2:
+                    self.changePhotometry(self.img.getFrame(), self.photometryColoring(),
+                                          add_photometry=False)
+                    self.drawPhotometryColoring()
 
 
     def onMouseMoved(self, event):
@@ -4064,13 +8998,17 @@ class PlateTool(QtWidgets.QMainWindow):
         pos = event
 
         if self.img_frame.sceneBoundingRect().contains(pos):
-            
+
             self.img_frame.setFocus()
             mp = self.img_frame.mapSceneToView(pos)
 
             self.cursor.setCenter(mp)
             self.cursor2.setCenter(mp)
             self.mouse_x, self.mouse_y = mp.x(), mp.y()
+
+            # Handle mask vertex dragging
+            if self.mask_dragging_vertex is not None:
+                self.moveMaskVertex(self.mask_dragging_vertex, mp.x() - 0.5, mp.y() - 0.5)
 
             self.zoom()
 
@@ -4097,7 +9035,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
     def findClickedStarOrGeoPoint(self, x, y):
-        """ Find the coordinate of the star or geo point closest to the clicked point.  """
+        """ Find the coordinate of the star, geo point, or planet closest to the clicked point.  """
 
         # Select the closest catalog star to the centroid as the first guess
         self.closest_type, closest_indx = self.findClosestCatalogStarIndex(x, y)
@@ -4109,9 +9047,17 @@ class PlateTool(QtWidgets.QMainWindow):
             x_data = [self.catalog_x_filtered[self.closest_cat_star_indx]]
             y_data = [self.catalog_y_filtered[self.closest_cat_star_indx]]
 
+        elif self.closest_type == 'planet':
+
+            # Fetch the coordinates of the planet
+            self.closest_planet_indx = closest_indx
+            name, px, py, ra, dec, mag = self.planet_data[self.closest_planet_indx]
+            x_data = [px]
+            y_data = [py]
+
         else:
 
-            # Find the index among all geo points visible in the FOV of the one closest to the clicked 
+            # Find the index among all geo points visible in the FOV of the one closest to the clicked
             #   position
             self.closest_geo_point_indx = closest_indx
 
@@ -4132,191 +9078,46 @@ class PlateTool(QtWidgets.QMainWindow):
             self.clicked = 3
 
         modifiers = QtWidgets.QApplication.keyboardModifiers()
-        
-        if self.star_pick_mode:  # redundant
 
-            # Add star pair in SkyFit
-            if self.mode == 'skyfit':
+        # Store press position for click vs drag detection (used for star picking)
+        # Use scene coordinates (screen position) not view coordinates, because panning changes view coords
+        pos = event.scenePos()
+        self.press_scene_x = pos.x()
+        self.press_scene_y = pos.y()
+        self.press_button = event.button()
+        self.press_modifiers = modifiers
 
-                # Add star
-                if event.button() == QtCore.Qt.LeftButton:
+        # Handle mask drawing/editing
+        if self.mask_draw_mode or len(self.mask_polygons) > 0 or len(self.mask_current_polygon) > 0:
+            pos = event.scenePos()
+            mp = self.img_frame.mapSceneToView(pos)
+            click_x, click_y = mp.x() - 0.5, mp.y() - 0.5
 
-                    if self.cursor.mode == 0:
+            # Check if clicking near an existing vertex
+            vertex_hit = self.findNearestMaskVertex(click_x, click_y, threshold=15)
 
-                        # If CTRL is pressed, place the pick manually - NOTE: the intensity might be off then!!!
-                        if modifiers & QtCore.Qt.ControlModifier:
-                            self.x_centroid = self.mouse_x - 0.5
-                            self.y_centroid = self.mouse_y - 0.5
+            if event.button() == QtCore.Qt.LeftButton:
+                if vertex_hit is not None:
+                    # Start dragging this vertex
+                    self.mask_dragging_vertex = vertex_hit
+                    return
+                elif modifiers & QtCore.Qt.ControlModifier:
+                    # CTRL+click: insert vertex on nearest edge
+                    edge_hit = self.findNearestMaskEdge(click_x, click_y, threshold=15)
+                    if edge_hit is not None:
+                        self.insertMaskVertex(edge_hit, click_x, click_y)
+                        return
+                elif self.mask_draw_mode:
+                    # Add new point
+                    self.addMaskPoint(click_x, click_y)
+                    return
+            elif event.button() == QtCore.Qt.RightButton:
+                if vertex_hit is not None:
+                    # Delete this vertex
+                    self.deleteMaskVertex(vertex_hit)
+                    return
 
-                            # Compute the star intensity
-                            (
-                                _, _, self.star_fwhm, self.star_intensity, self.star_snr, self.star_saturated
-                            ) = self.centroid(
-                                prev_x_cent=self.x_centroid, prev_y_cent=self.y_centroid
-                                )
-                        else:
-
-                            # Check if a star centroid is available from CALSTARS, and use it first because
-                            #   the PSF fit should result in a better centroid estimate
-
-                            # Check if the closest CALSTARS star is within the radius
-
-                            calstars_centroid = False
-                            if self.img_handle is not None:
-
-                                # Handle using FR files too
-                                ff_name_c = convertFRNameToFF(self.img_handle.name())
-
-                                if ff_name_c in self.calstars:
-
-                                    # Get the stars detected on this FF file
-                                    star_data = np.array(self.calstars[ff_name_c])
-
-                                    if len(star_data):
-
-                                        # Get star coordinates
-                                        stars_x = star_data[:, 1]
-                                        stars_y = star_data[:, 0]
-
-                                        # Compute the distance from the mouse press
-                                        mouse_x = self.mouse_x - 0.5
-                                        mouse_y = self.mouse_y - 0.5
-                                        dist_arr = np.hypot(stars_x - mouse_x, stars_y - mouse_y)
-
-                                        # Find the closest distance
-                                        closest_dist_indx = np.argmin(dist_arr)
-
-                                        # If the CALSTARS entry is within the aperture radius, take that star
-                                        if dist_arr[closest_dist_indx] <= self.star_aperture_radius:
-
-                                            self.x_centroid = stars_x[closest_dist_indx]
-                                            self.y_centroid = stars_y[closest_dist_indx]
-
-                                            # Compute the star intensity
-                                            _, _, self.star_fwhm, \
-                                                self.star_intensity, self.star_snr, self.star_saturated = \
-                                                self.centroid( \
-                                                prev_x_cent=self.x_centroid, prev_y_cent=self.y_centroid)
-
-                                            calstars_centroid = True
-
-
-                            # If a CALSTARS star was not found, run a normal centroid
-                            if not calstars_centroid:
-
-                                # Perform centroiding with 2 iterations
-                                x_cent_tmp, y_cent_tmp, _, _, _, _ = self.centroid()
-
-                                # Check that the centroiding was successful
-                                if x_cent_tmp is not None:
-
-                                    # Centroid the star around the pressed coordinates
-                                    (
-                                        self.x_centroid, self.y_centroid, self.star_fwhm,
-                                        self.star_intensity, self.star_snr, self.star_saturated
-                                    ) = self.centroid(prev_x_cent=x_cent_tmp, prev_y_cent=y_cent_tmp)
-
-                                else:
-                                    return None
-
-                        # Add the centroid to the plot
-                        self.centroid_star_markers.addPoints(x=[self.x_centroid + 0.5], \
-                            y=[self.y_centroid + 0.5])
-                        self.centroid_star_markers2.addPoints(x=[self.x_centroid + 0.5], \
-                            y=[self.y_centroid + 0.5])
-
-
-                        # Find coordinates of the star or geo points closest to the clicked point
-                        x_data, y_data = self.findClickedStarOrGeoPoint(self.x_centroid, self.y_centroid)
-
-
-                        # Add a star marker to the main and zoom windows
-                        self.sel_cat_star_markers.addPoints(x=np.array(x_data) + 0.5, \
-                            y=np.array(y_data) + 0.5)
-                        self.sel_cat_star_markers2.addPoints(x=np.array(x_data) + 0.5, \
-                            y=np.array(y_data) + 0.5)
-
-                        # Switch to the mode where the catalog star is selected
-                        self.cursor.setMode(1)
-
-
-                    elif self.cursor.mode == 1:
-
-                        # REMOVE marker for previously selected
-                        self.sel_cat_star_markers.setData(pos=self.paired_stars.imageCoords(draw=True))
-                        self.sel_cat_star_markers2.setData(pos=self.paired_stars.imageCoords(draw=True))
-
-
-                        # Find coordinates of the star or geo points closest to the clicked point
-                        x_data, y_data = self.findClickedStarOrGeoPoint(self.mouse_x, self.mouse_y)
-
-                        # Add the new point
-                        self.sel_cat_star_markers.addPoints(x=np.array(x_data) + 0.5, \
-                            y=np.array(y_data) + 0.5)
-                        self.sel_cat_star_markers2.addPoints(x=np.array(x_data) + 0.5, \
-                            y=np.array(y_data) + 0.5)
-
-
-                # Remove star pair on right click
-                elif event.button() == QtCore.Qt.RightButton:
-                    if self.cursor.mode == 0:
-
-                        # Remove the closest picked star from the list
-                        self.paired_stars.removeClosestPair(self.mouse_x, self.mouse_y)
-
-                        self.updatePairedStars()
-                        self.updateFitResiduals()
-                        self.photometry()
-
-            # Add centroid in manual reduction
-            else:
-                if event.button() == QtCore.Qt.LeftButton:
-
-                    if self.cursor.mode == 0:
-                        mode = 1
-
-                        if modifiers & QtCore.Qt.ControlModifier or \
-                                ((modifiers & QtCore.Qt.AltModifier or QtCore.Qt.Key_0 in self.keys_pressed) and
-                                 self.img.img_handle.input_type == 'dfn'):
-
-                            self.x_centroid, self.y_centroid = self.mouse_x - 0.5, self.mouse_y - 0.5
-
-                        else:
-                            (
-                                self.x_centroid, self.y_centroid, self.star_fwhm,
-                                _, self.snr_centroid, self.saturated_centroid
-                            ) = self.centroid()
-
-                        if (modifiers & QtCore.Qt.AltModifier or QtCore.Qt.Key_0 in self.keys_pressed) and \
-                                self.img.img_handle.input_type == 'dfn':
-                            mode = 0
-
-                        self.addCentroid(self.img.getFrame(), self.x_centroid, self.y_centroid, mode=mode,
-                                         snr=self.snr_centroid, saturated=self.saturated_centroid)
-
-                        self.updatePicks()
-
-                        # Add photometry coloring if single-click photometry is turned on
-                        if self.single_click_photometry:
-                            
-                            self.changePhotometry(self.img.getFrame(), self.photometryColoring(),
-                                              add_photometry=True)
-                            self.drawPhotometryColoring()
-
-
-                    elif self.cursor.mode == 2:
-                        self.changePhotometry(self.img.getFrame(), self.photometryColoring(),
-                                              add_photometry=True)
-                        self.drawPhotometryColoring()
-
-                elif event.button() == QtCore.Qt.RightButton:
-                    if self.cursor.mode == 0:
-                        self.removeCentroid(self.img.getFrame())
-                        self.updatePicks()
-                    elif self.cursor.mode == 2:
-                        self.changePhotometry(self.img.getFrame(), self.photometryColoring(),
-                                              add_photometry=False)
-                        self.drawPhotometryColoring()
+        # Star picking is handled in onMouseReleased to distinguish clicks from drags (panning)
 
     def keyPressEvent(self, event):
 
@@ -4325,6 +9126,17 @@ class PlateTool(QtWidgets.QMainWindow):
         qmodifiers = QtWidgets.QApplication.queryKeyboardModifiers()
 
         self.keys_pressed.append(event.key())
+
+        # Handle mask drawing - Space or Enter to close polygon
+        if self.mask_draw_mode and len(self.mask_current_polygon) >= 3:
+            if event.key() in (QtCore.Qt.Key_Space, QtCore.Qt.Key_Return, QtCore.Qt.Key_Enter):
+                if modifiers == QtCore.Qt.NoModifier:
+                    self.closeMaskPolygon()
+                    return
+
+        # When no data is loaded, block all key actions
+        if not self.hasData():
+            return
 
         # Toggle auto levels
         if event.key() == QtCore.Qt.Key_A and (modifiers == QtCore.Qt.ControlModifier):
@@ -4335,14 +9147,16 @@ class PlateTool(QtWidgets.QMainWindow):
         # Load the dark
         elif event.key() == QtCore.Qt.Key_D and (modifiers == QtCore.Qt.ControlModifier):
             
-            _, self.dark = self.loadDark(force_dialog=True)
+            dark_file, self.dark = self.loadDark(force_dialog=True)
+            if dark_file:
+                self.dark_source_path = dark_file
 
             # Set focus back on the SkyFit window
             self.activateWindow()
 
             # Apply the dark to the flat if the flatbiassub flag is set
             if self.flatbiassub and (self.flat_struct is not None):
-                
+
                 self.flat_struct.applyDark(self.dark)
 
                 self.img.flat_struct = self.flat_struct
@@ -4361,6 +9175,10 @@ class PlateTool(QtWidgets.QMainWindow):
             self.updateBottomLabel()
 
 
+        # Fit spectral band ratios (hidden feature)
+        elif event.key() == QtCore.Qt.Key_B and modifiers == (QtCore.Qt.ControlModifier | QtCore.Qt.ShiftModifier):
+            self.fitBandRatio()
+
         # Toggle satellite tracks
         elif event.key() == QtCore.Qt.Key_T and (modifiers == QtCore.Qt.ControlModifier):
              self.toggleSatelliteTracks()
@@ -4369,8 +9187,10 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Load the flat
         elif event.key() == QtCore.Qt.Key_F and (modifiers == QtCore.Qt.ControlModifier):
-            
-            _, self.flat_struct = self.loadFlat(force_dialog=True)
+
+            flat_file, self.flat_struct = self.loadFlat(force_dialog=True)
+            if flat_file:
+                self.flat_source_path = flat_file
 
             # Set focus back on the SkyFit window
             self.activateWindow()
@@ -4492,9 +9312,21 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.tab.param_manager.updatePlatepar()
 
         # Toggle showing the catalog stars
-        elif event.key() == QtCore.Qt.Key_H:
+        elif event.key() == QtCore.Qt.Key_H and not (modifiers == QtCore.Qt.ShiftModifier):
             self.toggleShowCatStars()
             self.tab.settings.updateShowCatStars()
+
+        # Toggle showing astrometry.net matched stars (Shift+H)
+        elif event.key() == QtCore.Qt.Key_H and (modifiers == QtCore.Qt.ShiftModifier):
+            self.toggleShowAstrometryNetStars()
+            if self.astrometry_solution_info is not None:
+                matched_count = len(self.astrometry_solution_info.get('matched_pairs', []))
+                quad_count = len(self.astrometry_solution_info.get('quad_stars', []))
+                status = "shown" if self.astrometry_stars_visible else "hidden"
+                print("Astrometry.net stars {:s}: {:d} matched (cyan), {:d} quad (magenta)".format(
+                    status, matched_count, quad_count))
+            else:
+                print("No astrometry.net solution available. Run 'CTRL+X' or 'CTRL+SHIFT+X' first.")
 
         # Toggle inverting colors
         elif (event.key() == QtCore.Qt.Key_I) and not (modifiers == QtCore.Qt.ControlModifier):
@@ -4595,14 +9427,7 @@ class PlateTool(QtWidgets.QMainWindow):
                     self.platepar.resetDistortionParameters()
                     self.first_platepar_fit = True
 
-                # If the first platepar is being made, do the fit twice
-                if self.first_platepar_fit:
-                    self.fitPickedStars()
-                    self.fitPickedStars()
-
-                else:
-                    # Otherwise, only fit the once
-                    self.fitPickedStars()
+                self.fitPickedStars()
 
                 print('Plate fitted!')
 
@@ -4668,8 +9493,8 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
 
-            # Move rotation parameter
-            elif event.key() == QtCore.Qt.Key_Q:
+            # Move rotation parameter (plain Q only, not Shift+Q)
+            elif event.key() == QtCore.Qt.Key_Q and not (modifiers == QtCore.Qt.ShiftModifier):
                 self.platepar.pos_angle_ref -= self.key_increment
                 self.platepar.rotation_from_horiz = rotationWrtHorizon(self.platepar)
 
@@ -4886,7 +9711,9 @@ class PlateTool(QtWidgets.QMainWindow):
             # Force distortion centre to image centre
             elif event.key() == QtCore.Qt.Key_B:
                 if self.platepar is not None:
-                    self.platepar.force_distortion_centre = not self.platepar.force_distortion_centre
+                    # Use remapCoeffsForFlagChange to preserve distortion coefficients
+                    new_value = not self.platepar.force_distortion_centre
+                    self.platepar.remapCoeffsForFlagChange('force_distortion_centre', new_value)
 
                     self.tab.param_manager.updatePlatepar()
                     self.updateLeftLabels()
@@ -4899,9 +9726,9 @@ class PlateTool(QtWidgets.QMainWindow):
             elif event.key() == QtCore.Qt.Key_G:
 
                 if self.platepar is not None:
-
-                    self.platepar.equal_aspect = not self.platepar.equal_aspect
-                    self.platepar.resetDistortionParameters()
+                    # Use remapCoeffsForFlagChange to preserve distortion coefficients
+                    new_value = not self.platepar.equal_aspect
+                    self.platepar.remapCoeffsForFlagChange('equal_aspect', new_value)
 
                     self.tab.param_manager.updatePlatepar()
                     self.updateLeftLabels()
@@ -4914,9 +9741,9 @@ class PlateTool(QtWidgets.QMainWindow):
             elif event.key() == QtCore.Qt.Key_Y:
 
                 if self.platepar is not None:
-
-                    self.platepar.asymmetry_corr = not self.platepar.asymmetry_corr
-                    self.platepar.resetDistortionParameters()
+                    # Use remapCoeffsForFlagChange to preserve distortion coefficients
+                    new_value = not self.platepar.asymmetry_corr
+                    self.platepar.remapCoeffsForFlagChange('asymmetry_corr', new_value)
 
                     self.tab.param_manager.updatePlatepar()
                     self.updateLeftLabels()
@@ -4925,25 +9752,16 @@ class PlateTool(QtWidgets.QMainWindow):
                     self.tab.param_manager.onIndexChanged()
 
 
-            # Get initial parameters from astrometry.net
+            # Get initial parameters from astrometry.net (same as Auto Fit button)
             elif (event.key() == QtCore.Qt.Key_X) and ((modifiers == QtCore.Qt.ControlModifier) \
                 or (modifiers == (QtCore.Qt.ControlModifier | QtCore.Qt.ShiftModifier))):
 
-                print("Solving with astrometry.net")
+                # Use the same auto-fit path as the button (includes catalog balancing, quick alignment)
+                self.autoFitAstrometryNet()
 
-                upload_image = True
-
-                # If shift was pressed, only upload the detected stars
-                if modifiers == (QtCore.Qt.ControlModifier | QtCore.Qt.ShiftModifier):
-                    upload_image = False
-
-                # Estimate initial parameters using astrometry.net
-                self.getInitialParamsAstrometryNet(upload_image=upload_image)
-
-                self.updateDistortion()
-                self.updateLeftLabels()
-                self.updateStars()
-                self.tab.param_manager.updatePlatepar()
+            # Test quick align with config mag limit (Shift+Q) - simulates CheckFit/ApplyRecalibrate
+            elif (event.key() == QtCore.Qt.Key_Q) and (modifiers == QtCore.Qt.ShiftModifier):
+                self.testQuickAlignWithConfigMagLimit()
 
 
             # Toggle showing detected stars
@@ -4992,7 +9810,7 @@ class PlateTool(QtWidgets.QMainWindow):
                         self.unsuitable_star_markers2.addPoints(x=[self.current_autopan_x],
                                                                 y=[self.current_autopan_y])
 
-                    # If the catalog star or geo points has been selected, save the pair to the list
+                    # If the catalog star, planet, or geo point has been selected, save the pair to the list
                     if self.cursor.mode == 1:
 
                         # Star catalog points
@@ -5002,6 +9820,14 @@ class PlateTool(QtWidgets.QMainWindow):
 
                             # Init a catalog star pair object
                             pair_obj = CatalogStar(*selected_coords)
+
+                        # Planet points
+                        elif self.closest_type == 'planet':
+                            name, px, py, ra, dec, mag = self.planet_data[self.closest_planet_indx]
+                            self.closest_planet_indx = None
+
+                            # Init a planet point pair object
+                            pair_obj = PlanetPoint(name, ra, dec, mag)
 
                         # Geo coordinates of the selected points
                         else:
@@ -5022,7 +9848,7 @@ class PlateTool(QtWidgets.QMainWindow):
                         # Add the image/catalog pair to the list
                         if not unsuitable:
                             self.paired_stars.addPair(self.x_centroid, self.y_centroid, self.star_fwhm,
-                                    self.star_intensity, pair_obj, 
+                                    self.star_intensity, pair_obj,
                                     snr=self.star_snr, saturated=self.star_saturated)
 
                         # Switch back to centroiding mode
@@ -5840,18 +10666,18 @@ class PlateTool(QtWidgets.QMainWindow):
                 # Unzoom the image
                 if delta < 0:
 
-                    # Track number of scroll backs in the star picking mode so it resets the image after
-                    #   multiple zoomouts
-                    if self.star_pick_mode:
-                        self.scrolls_back += 1
-                    else:
-                        self.scrolls_back = 0
+                    # Check if already at full zoom-out (at limits)
+                    x_range, y_range = self.img_frame.viewRange()
+                    x_limits = self.img_frame.state['limits']['xLimits']
+                    y_limits = self.img_frame.state['limits']['yLimits']
+                    at_limits = (x_limits == [round(x, 8) for x in x_range] or
+                                 y_limits == [round(y, 8) for y in y_range])
 
-                    # Reset the zoom if scrolled back multiple times
-                    if self.scrolls_back > 1:
+                    if at_limits:
+                        # Already at full zoom - recenter the image
                         self.img_frame.autoRange(padding=0)
-
                     else:
+                        # Normal zoom out
                         self.img_frame.wheelEventModified(event, axis)
 
                 # Zoom in the image
@@ -5960,19 +10786,196 @@ class PlateTool(QtWidgets.QMainWindow):
         self.img_zoom.setLevels(self.tab.hist.getLevels())
         self.updateLeftLabels()
 
-    def toggleShowCatStars(self):
-        """ Toggle between showing catalog stars and not """
-        self.catalog_stars_visible = not self.catalog_stars_visible
-        if self.catalog_stars_visible:
-            self.cat_star_markers.show()
-            self.cat_star_markers2.show()
-            self.geo_markers.show()
-            self.geo_markers.show()
+    def updateConstellations(self):
+        """ Projects and draws constellation lines. """
+
+        if self.constellation_data is None:
+            return
+
+        # Get current JD time
+        jd = date2JD(*self.img_handle.currentTime())
+
+        # Unpack constellation data
+        from_ra, from_dec = self.constellation_data[:, 0], self.constellation_data[:, 1]
+        to_ra, to_dec = self.constellation_data[:, 2], self.constellation_data[:, 3]
+        
+        # 0. Generate FOV polygon
+        w = self.platepar.X_res
+        h = self.platepar.Y_res
+        fov_poly = []
+
+        if self.fov_poly_cache is not None and self.fov_poly_jd == jd:
+            fov_poly = self.fov_poly_cache
         else:
+            # Define edges: (x1, y1) -> (x2, y2)
+            edges = [
+                ((0, 0), (w, 0)),   # Top
+                ((w, 0), (w, h)),   # Right
+                ((w, h), (0, h)),   # Bottom
+                ((0, h), (0, 0))    # Left
+            ]
+            
+            samples_per_side = 10
+            
+            try:
+                for (x_start, y_start), (x_end, y_end) in edges:
+                    xs = np.linspace(x_start, x_end, samples_per_side, endpoint=False)
+                    ys = np.linspace(y_start, y_end, samples_per_side, endpoint=False)
+                    
+                    # Prepare inputs
+                    n = len(xs)
+                    jd_arr = [jd]*n
+                    level_arr = [1]*n
+                    
+                    _, r_arr, d_arr, _ = xyToRaDecPP(jd_arr, xs, ys, level_arr, self.platepar, jd_time=True, extinction_correction=False)
+                    
+                    for r, d in zip(r_arr, d_arr):
+                        fov_poly.append((r, d))
+                        
+                # Update cache
+                self.fov_poly_cache = fov_poly
+                self.fov_poly_jd = jd
+                
+            except Exception as e:
+                print(f"Error computing FOV polygon for constellations: {e}")
+                return
+
+        # 1. Filter using sphericalPolygonCheck
+        # Check start and end points
+        # If either is inside, keep the line
+        test_points_from = np.c_[from_ra, from_dec]
+        test_points_to = np.c_[to_ra, to_dec]
+        
+        mask_from = np.array(sphericalPolygonCheck(fov_poly, test_points_from))
+        mask_to = np.array(sphericalPolygonCheck(fov_poly, test_points_to))
+        
+        # Keep line if EITHER endpoint is inside
+        mask = mask_from | mask_to
+
+        if np.any(mask):
+            from_x, from_y = raDecToXYPP(from_ra[mask], from_dec[mask], jd, self.platepar)
+            to_x, to_y = raDecToXYPP(to_ra[mask], to_dec[mask], jd, self.platepar)
+
+            # 2. Filter based on image bounds (keep as redundant safety or remove?)
+            # Spherical check is accurate, but projection might still yield points slightly outside
+            # which is fine. The previous bounds check was mostly for the angular filter artifacts.
+            # We can relax it or remove it, but let's keep a loose one just in case.
+            
+            margin = 200 # Larger margin to allow lines entering from outside
+            in_bounds_from = (from_x > -margin) & (from_x < w + margin) & (from_y > -margin) & (from_y < h + margin)
+            in_bounds_to = (to_x > -margin) & (to_x < w + margin) & (to_y > -margin) & (to_y < h + margin)
+            mask_bounds = in_bounds_from | in_bounds_to
+            
+            from_x = from_x[mask_bounds]
+            from_y = from_y[mask_bounds]
+            to_x = to_x[mask_bounds]
+            to_y = to_y[mask_bounds]
+
+            if len(from_x) > 0:
+                # Interleave start and end points
+                pts_x = np.empty((from_x.size + to_x.size,), dtype=from_x.dtype)
+                pts_x[0::2] = from_x
+                pts_x[1::2] = to_x
+
+                pts_y = np.empty((from_y.size + to_y.size,), dtype=from_y.dtype)
+                pts_y[0::2] = from_y
+                pts_y[1::2] = to_y
+                
+                self.constellation_lines_bg.setData(pts_x, pts_y)
+                self.constellation_lines_bg.show()
+
+                self.constellation_lines_fg.setData(pts_x, pts_y)
+                self.constellation_lines_fg.show()
+            else:
+                self.constellation_lines_bg.hide()
+                self.constellation_lines_fg.hide()
+            
+        else:
+            self.constellation_lines_bg.hide()
+            self.constellation_lines_fg.hide()
+
+
+    def toggleShowCatStars(self):
+        """ Toggle showing/hiding catalog stars, planets, and related overlays. """
+        self.catalog_stars_visible = not self.catalog_stars_visible
+
+        # Hide markers if disabling
+        if not self.catalog_stars_visible:
             self.cat_star_markers.hide()
             self.cat_star_markers2.hide()
             self.geo_markers.hide()
             self.geo_markers.hide()
+            # Hide planets
+            self.planet_markers.hide()
+            self.planet_markers2.hide()
+            self.planet_labels.hide()
+
+        else:
+            self.cat_star_markers.show()
+            self.cat_star_markers2.show()
+            self.geo_markers.show()
+            self.geo_markers.show()
+            # Show planets
+            self.planet_markers.show()
+            self.planet_markers2.show()
+            self.planet_labels.show()
+
+        # Note: spectral_type_text_list visibility is handled in updateStars()
+
+        # Redraw
+        self.updateStars()
+
+        # Update the checkbox
+        self.tab.settings.updateShowCatStars()
+
+    def toggleShowSpectralType(self):
+        """ Toggle showing/hiding spectral types. """
+        self.show_spectral_type = not self.show_spectral_type
+
+        # Redraw (handles visibility)
+        self.updateStars()
+
+        # Update the checkbox
+        self.tab.settings.updateShowSpectralType()
+
+    def toggleShowStarNames(self):
+        """ Toggle showing/hiding star names. """
+        self.show_star_names = not self.show_star_names
+
+        # Redraw (handles visibility)
+        self.updateStars()
+
+        # Update the checkbox
+        self.tab.settings.updateShowStarNames()
+
+    def toggleApparentMagCorr(self):
+        """ Toggle apparent magnitude correction for catalog star display. """
+        self.apparent_mag_corr_enabled = not self.apparent_mag_corr_enabled
+        self.updateStars()
+        self.tab.settings.updateApparentMagCorr()
+
+    def onLabelMagLimitChanged(self, value):
+        """ Handle change in label magnitude limit setting. """
+        self.label_mag_limit = value
+        # Clear cache since we might show different stars now
+        self._star_label_cache = {}
+        # Redraw if labels are visible
+        if self.show_star_names or self.show_spectral_type:
+            self.updateStars()
+
+    def toggleShowConstellations(self):
+        """ Toggle showing/hiding constellation lines. """
+        self.show_constellations = not self.show_constellations
+
+        # Force update
+        if self.show_constellations:
+            self.updateConstellations()
+        else:
+            self.constellation_lines_bg.hide()
+            self.constellation_lines_fg.hide()
+
+        # Update the checkbox
+        self.tab.settings.updateShowConstellations()
 
     def toggleShowSelectedStars(self):
         """ Toggle whether to show the selected stars """
@@ -5996,9 +10999,61 @@ class PlateTool(QtWidgets.QMainWindow):
         if self.draw_calstars:
             self.calstar_markers.show()
             self.calstar_markers2.show()
+            self.calstar_markers_outer.show()
+            self.calstar_markers_outer2.show()
         else:
             self.calstar_markers.hide()
             self.calstar_markers2.hide()
+            self.calstar_markers_outer.hide()
+            self.calstar_markers_outer2.hide()
+
+    def toggleShowAstrometryNetStars(self):
+        """ Toggle whether to show astrometry.net matched stars """
+        self.astrometry_stars_visible = not self.astrometry_stars_visible
+        if self.astrometry_stars_visible:
+            self.astrometry_matched_markers.show()
+            self.astrometry_matched_markers2.show()
+            self.astrometry_quad_markers.show()
+            self.astrometry_quad_markers2.show()
+            # Update the markers with current solution info
+            self.updateAstrometryNetStarMarkers()
+        else:
+            self.astrometry_matched_markers.hide()
+            self.astrometry_matched_markers2.hide()
+            self.astrometry_quad_markers.hide()
+            self.astrometry_quad_markers2.hide()
+
+    def updateAstrometryNetStarMarkers(self):
+        """ Update the astrometry.net star markers from stored solution info """
+        if self.astrometry_solution_info is None:
+            self.astrometry_matched_markers.setData(pos=[])
+            self.astrometry_matched_markers2.setData(pos=[])
+            self.astrometry_quad_markers.setData(pos=[])
+            self.astrometry_quad_markers2.setData(pos=[])
+            return
+
+        matched_pairs = self.astrometry_solution_info.get('matched_pairs', [])
+        quad_stars = self.astrometry_solution_info.get('quad_stars', [])
+
+        # Update matched star markers (catalog positions of matched stars)
+        if matched_pairs:
+            x_matched = [p['catalog_x'] for p in matched_pairs]
+            y_matched = [p['catalog_y'] for p in matched_pairs]
+            self.astrometry_matched_markers.setData(x=x_matched, y=y_matched)
+            self.astrometry_matched_markers2.setData(x=x_matched, y=y_matched)
+        else:
+            self.astrometry_matched_markers.setData(pos=[])
+            self.astrometry_matched_markers2.setData(pos=[])
+
+        # Update quad star markers
+        if quad_stars:
+            x_quad = [s['x_pix'] for s in quad_stars]
+            y_quad = [s['y_pix'] for s in quad_stars]
+            self.astrometry_quad_markers.setData(x=x_quad, y=y_quad)
+            self.astrometry_quad_markers2.setData(x=x_quad, y=y_quad)
+        else:
+            self.astrometry_quad_markers.setData(pos=[])
+            self.astrometry_quad_markers2.setData(pos=[])
 
     def toggleSatelliteTracks(self):
         """ Toggle whether to show satellite tracks """
@@ -6006,10 +11061,10 @@ class PlateTool(QtWidgets.QMainWindow):
         if not SKYFIELD_AVAILABLE:
             print("Skyfield not available - cannot show satellite tracks.")
             return
-             
+
         self.show_sattracks = not self.show_sattracks
         print(f"Satellite tracks: {self.show_sattracks}")
-        
+
         if self.show_sattracks:
             self.loadSatelliteTracks()
         else:
@@ -6104,7 +11159,50 @@ class PlateTool(QtWidgets.QMainWindow):
 
         return ra_centre, dec_centre
 
-    def filterCatalogStarsInsideFOV(self, catalog_stars, remove_under_horizon=True, sort_declination=False):
+
+    def filterCatalogStarsByMask(self, catalog_x, catalog_y, catalog_stars=None):
+        """Filter out catalog stars that fall behind the mask.
+
+        Arguments:
+            catalog_x: [ndarray] X coordinates of catalog stars on the image.
+            catalog_y: [ndarray] Y coordinates of catalog stars on the image.
+            catalog_stars: [ndarray] Optional catalog star data (ra, dec, mag) to filter.
+                If None, only returns the mask.
+
+        Returns:
+            If catalog_stars is provided:
+                filtered_catalog_stars: [ndarray] Catalog stars not behind the mask.
+                not_masked: [ndarray] Boolean mask of stars not behind the mask.
+            If catalog_stars is None:
+                not_masked: [ndarray] Boolean mask of stars not behind the mask.
+        """
+        # If no mask, return all stars
+        if self.mask is None or not hasattr(self.mask, 'img'):
+            not_masked = np.ones(len(catalog_x), dtype=bool)
+            if catalog_stars is not None:
+                return catalog_stars, not_masked
+            return not_masked
+
+        # Check mask dimensions match image dimensions
+        if self.mask.img.shape[0] != self.platepar.Y_res or \
+           self.mask.img.shape[1] != self.platepar.X_res:
+            not_masked = np.ones(len(catalog_x), dtype=bool)
+            if catalog_stars is not None:
+                return catalog_stars, not_masked
+            return not_masked
+
+        # Vectorized mask check - clip coordinates to valid range
+        x_int = np.clip(catalog_x.astype(int), 0, self.mask.img.shape[1] - 1)
+        y_int = np.clip(catalog_y.astype(int), 0, self.mask.img.shape[0] - 1)
+        not_masked = self.mask.img[y_int, x_int] != 0
+
+        if catalog_stars is not None:
+            return catalog_stars[not_masked], not_masked
+        return not_masked
+
+
+    def filterCatalogStarsInsideFOV(self, catalog_stars, remove_under_horizon=True, sort_declination=False,
+                                      lim_mag=None):
         """ Take only catalogs stars which are inside the FOV.
 
         Arguments:
@@ -6115,6 +11213,7 @@ class PlateTool(QtWidgets.QMainWindow):
             remove_under_horizon: [bool] Remove stars below the horizon (-5 deg below).
             sort_declination: [bool] Sort the stars by descending declination. Only needs to be done for geo
                 points.
+            lim_mag: [float] Limiting magnitude for filtering. If None, uses self.cat_lim_mag.
         """
 
         if sort_declination:
@@ -6134,8 +11233,10 @@ class PlateTool(QtWidgets.QMainWindow):
         jd = date2JD(*self.img_handle.currentTime())
 
         # Take only those stars which are inside the FOV
+        # Use passed lim_mag if provided, otherwise fall back to self.cat_lim_mag
+        effective_lim_mag = lim_mag if lim_mag is not None else self.cat_lim_mag
         filtered_indices, filtered_catalog_stars = subsetCatalog(catalog_stars, ra_centre, dec_centre, \
-            jd, self.platepar.lat, self.platepar.lon, fov_radius, self.cat_lim_mag, \
+            jd, self.platepar.lat, self.platepar.lon, fov_radius, effective_lim_mag, \
             remove_under_horizon=remove_under_horizon)
 
         filtered_catalog_stars = np.array(filtered_catalog_stars)
@@ -6151,26 +11252,721 @@ class PlateTool(QtWidgets.QMainWindow):
         return filtered_indices, filtered_catalog_stars
 
 
-    def getInitialParamsAstrometryNet(self, upload_image=True):
-        """ Get the estimate of the initial astrometric parameters using astrometry.net. """
+    def tryQuickAlignment(self, pointing_only=False):
+        """ Try to align platepar using existing pointing as starting point.
+
+        Uses alignPlatepar() to refine pointing, then checks if the fit is good enough
+        by counting matched stars. If successful, performs NN-based astrometry fit.
+
+        Arguments:
+            pointing_only: [bool] If True, skip NN RANSAC distortion fitting and only refine
+                pointing. Uses simple proximity matching instead. Preserves existing distortion.
+
+        Returns:
+            success: [bool] True if quick alignment succeeded and we can skip astrometry.net
+        """
+        print()
+        print("Trying quick alignment with existing platepar...")
+        self.status_bar.showMessage("Trying quick alignment...")
+        QtWidgets.QApplication.processEvents()
+
+        # Get current FF file name
+        ff_name_c = convertFRNameToFF(self.img_handle.name())
+
+        # Use override data if enabled and available, otherwise use original CALSTARS
+        if self.star_detection_override_enabled and ff_name_c in self.star_detection_override_data:
+            detected_stars = np.array(self.star_detection_override_data[ff_name_c])
+        elif ff_name_c in self.calstars:
+            detected_stars = np.array(self.calstars[ff_name_c])
+        else:
+            print("  No detected stars available - falling back to astrometry.net")
+            return False
+
+        detected_stars = np.array(detected_stars)
+        if len(detected_stars) < 10:
+            print("  Less than 10 detected stars - falling back to astrometry.net")
+            return False
+
+        # Get detected star coordinates (note: calstars format is [y, x, ...])
+        # CALSTARS format: Y(0) X(1) IntensSum(2) Ampltd(3) FWHM(4) BgLvl(5) SNR(6) NSatPx(7)
+        det_y = detected_stars[:, 0]
+        det_x = detected_stars[:, 1]
+        # Use index 2 (IntensSum/integrated intensity) not index 3 (Ampltd/peak amplitude)
+        det_intens = detected_stars[:, 2] if detected_stars.shape[1] > 2 else np.ones(len(det_x))
+        det_fwhm = detected_stars[:, 4] if detected_stars.shape[1] > 4 else np.zeros(len(det_x))
+        det_snr = detected_stars[:, 6] if detected_stars.shape[1] > 6 else np.ones(len(det_x))
+        det_saturated = detected_stars[:, 7] if detected_stars.shape[1] > 7 else np.zeros(len(det_x))
+
+        # Get time for the current frame
+        calstars_time = list(self.img_handle.currentTime())
+
+        # Compute JD
+        jd = date2JD(*calstars_time)
+
+        # Try alignPlatepar to refine pointing
+        # Pass full CALSTARS data so alignPlatepar can infer catalog LM from intensities
+
+        # Callback to update display when catalog LM changes during balancing
+        def lm_callback(lim_mag, n_catalog, n_detected, ratio):
+            # Update catalog LM and reload catalog
+            self.cat_lim_mag = lim_mag
+            self.catalog_stars = self.loadCatalogStars(lim_mag)
+
+            # Update status bar
+            self.status_bar.showMessage("Balancing LM={:.1f}: {} catalog, {} detected, ratio={:.2f}".format(
+                lim_mag, n_catalog, n_detected, ratio))
+
+            # Redraw catalog stars
+            self.updateStars(only_update_catalog=True)
+            QtWidgets.QApplication.processEvents()
+
+        try:
+            pp_aligned, inferred_lm = alignPlatepar(self.config, self.platepar, calstars_time,
+                                                     detected_stars, lm_callback=lm_callback)
+        except Exception as e:
+            print("  alignPlatepar failed: {} - falling back to astrometry.net".format(str(e)))
+            return False
+
+        # Check if alignPlatepar returned the original platepar (same object = fit failed)
+        if pp_aligned is self.platepar:
+            print("  alignPlatepar did not converge - falling back to astrometry.net")
+            return False
+
+        # alignPlatepar succeeded - proceed to full NN fit
+        print("  alignPlatepar succeeded: RA={:.2f} Dec={:.2f}".format(
+            pp_aligned.RA_d, pp_aligned.dec_d))
+        self.platepar = pp_aligned
+
+        # Use the inferred LM from calibrated photometry for subsequent fitting
+        if inferred_lm != self.cat_lim_mag:
+            print("  Using inferred catalog LM={:.1f} (was {:.1f})".format(inferred_lm, self.cat_lim_mag))
+            self.cat_lim_mag = inferred_lm
+            self.catalog_stars = self.loadCatalogStars(inferred_lm)
+
+        # Update JD and hour angle
+        self.platepar.JD = jd
+        self.platepar.Ho = JD2HourAngle(jd)
+
+        # Save user's settings for final fit
+        user_distortion_type = self.platepar.distortion_type
+        user_equal_aspect = self.platepar.equal_aspect
+        user_asymmetry_corr = self.platepar.asymmetry_corr
+        user_force_distortion_centre = self.platepar.force_distortion_centre
+        user_refraction = self.platepar.refraction
+        user_fit_only_pointing = self.fit_only_pointing
+        user_fixed_scale = self.fixed_scale
+
+        # Filter catalog stars to those in FOV (prevents back-projection issues)
+        _, catalog_stars_fov = self.filterCatalogStarsInsideFOV(self.catalog_stars)
+
+        # Project FOV-filtered catalog to image coordinates
+        catalog_x, catalog_y, _ = getCatalogStarsImagePositions(
+            catalog_stars_fov, jd, self.platepar)
+
+        # Filter by image bounds
+        in_image = (catalog_x >= 0) & (catalog_x < self.platepar.X_res) & \
+                   (catalog_y >= 0) & (catalog_y < self.platepar.Y_res)
+        catalog_stars_filtered = catalog_stars_fov[in_image]
+        catalog_x_filtered = catalog_x[in_image]
+        catalog_y_filtered = catalog_y[in_image]
+
+        # Then filter by mask
+        catalog_stars_filtered, _ = self.filterCatalogStarsByMask(
+            catalog_x_filtered, catalog_y_filtered, catalog_stars_filtered)
+
+        if pointing_only:
+            # --- Pointing-only mode: use recalibrateFF (same as night processing) ---
+            print()
+            print("Recalibrating pointing (same path as night processing)...")
+            self.status_bar.showMessage("Recalibrating pointing...")
+            QtWidgets.QApplication.processEvents()
+
+            # Build star_dict_ff in the format recalibrateFF expects: {jd: calstars_array}
+            star_dict_ff = {jd: detected_stars}
+
+            # Run recalibrateFF — fits pointing + scale via Nelder-Mead, preserves distortion
+            result, min_match_radius = recalibrateFF(
+                self.config, self.platepar, jd, star_dict_ff, self.catalog_stars,
+                ignore_distance_threshold=True
+            )
+
+            if result is None:
+                print("  recalibrateFF failed")
+                return False
+
+            self.platepar = result
+            print("  recalibrateFF succeeded (min match radius: {:.1f} px)".format(
+                min_match_radius))
+
+            # Populate paired_stars for GUI display by projecting catalog and matching
+            cat_x_proj, cat_y_proj, _ = getCatalogStarsImagePositions(
+                catalog_stars_filtered, jd, self.platepar)
+
+            self.paired_stars = PairedStars()
+            matched_cat = set()
+            for i in range(len(det_x)):
+                distances = np.sqrt((cat_x_proj - det_x[i])**2 + (cat_y_proj - det_y[i])**2)
+                closest_idx = np.argmin(distances)
+                if distances[closest_idx] < min_match_radius and closest_idx not in matched_cat:
+                    matched_cat.add(closest_idx)
+                    cat_star = catalog_stars_filtered[closest_idx]
+                    sky_obj = CatalogStar(cat_star[0], cat_star[1], cat_star[2])
+                    self.paired_stars.addPair(
+                        det_x[i], det_y[i], det_fwhm[i], det_intens[i], sky_obj,
+                        snr=det_snr[i], saturated=det_saturated[i] > 0
+                    )
+
+            print("  Matched {} star pairs for display".format(len(self.paired_stars)))
+
+            # Reset photometry fit residuals
+            self.photom_fit_resids = None
+
+            self.status_bar.showMessage(
+                "Re-fit pointing complete: {} stars".format(len(self.paired_stars)))
+
+            return True
+
+        else:
+            # --- Full mode: NN RANSAC fit with distortion ---
+
+            # Use standard fitting settings for NN fit, but KEEP existing distortion params
+            # The aligned platepar from alignPlatepar() has good pointing AND distortion coefficients
+            # Setting reset_params=True would zero out distortion and cause RANSAC to diverge
+            # IMPORTANT: Use remapCoeffsForFlagChange() when changing flags that affect coefficient structure
+            self.platepar.refraction = True
+            self.platepar.remapCoeffsForFlagChange('equal_aspect', True)
+            self.platepar.remapCoeffsForFlagChange('asymmetry_corr', False)
+            self.platepar.remapCoeffsForFlagChange('force_distortion_centre', False)
+            self.platepar.setDistortionType("radial5-odd", reset_params=False)
+
+            # Prepare detected stars array for NN fit
+            img_stars_arr = np.column_stack([det_x, det_y, det_intens])
+
+            # Perform full NN-based fit
+            print()
+            print("NN-based fitting...")
+            print("  Starting from: RA={:.2f} Dec={:.2f} Scale={:.3f} arcmin/px".format(
+                self.platepar.RA_d, self.platepar.dec_d, 60/self.platepar.F_scale))
+            print("  Catalog stars (mask filtered): {:d}".format(len(catalog_stars_filtered)))
+            self.status_bar.showMessage("Fitting astrometry...")
+            QtWidgets.QApplication.processEvents()
+
+            try:
+                # Load tuned catalog if available for final fitting stages
+                tuned_catalog = None
+                if getattr(self, 'catalog_lm_tuned', False) and hasattr(self, 'tuned_cat_lim_mag'):
+                    tuned_catalog = self.loadCatalogStars(self.tuned_cat_lim_mag)
+
+                # Callback to update display at each RANSAC iteration (visual debugging)
+                def iteration_callback(iteration, pp_iter, outlier_mask, rmsd_arcmin):
+                    # pp_iter is a complete deepcopy with correct distortion_type, poly coeffs,
+                    # and pointing. Swap the entire platepar pointer instead of copying attributes
+                    # piecemeal (which missed distortion_type, y_poly, poly_length — causing the
+                    # display to use wrong-length coefficients with the wrong distortion model).
+                    saved_pp = self.platepar
+                    self.platepar = pp_iter
+
+                    # Update status bar with LM and iteration info
+                    n_outliers = np.sum(outlier_mask) if outlier_mask is not None else 0
+                    self.status_bar.showMessage("LM={:.1f} | RANSAC iter {}: RMSD={:.1f}', {} outliers".format(
+                        self.cat_lim_mag, iteration, rmsd_arcmin, n_outliers))
+
+                    # Redraw catalog stars and distortion center with updated platepar
+                    self.updateStars(only_update_catalog=True)
+                    self.updateDistortionCenterMarker()
+                    QtWidgets.QApplication.processEvents()
+
+                    # Restore original platepar so optimizer isn't corrupted
+                    self.platepar = saved_pp
+
+                ransac_result = self.platepar.fitAstrometry(
+                    jd, img_stars_arr, catalog_stars_filtered,
+                    first_platepar_fit=True,
+                    use_nn_cost=True,
+                    final_catalog_stars=tuned_catalog,
+                    iteration_callback=iteration_callback
+                )
+                print("  NN fit complete: RA={:.2f} Dec={:.2f} Scale={:.3f} arcmin/px".format(
+                    self.platepar.RA_d, self.platepar.dec_d, 60/self.platepar.F_scale))
+            except Exception as e:
+                print("  NN fit failed: {} - falling back to astrometry.net".format(str(e)))
+                return False
+
+            # Populate paired_stars directly from RANSAC matched pairs
+            self.paired_stars = PairedStars()
+
+            if ransac_result is not None:
+                img_stars_matched, catalog_matched = ransac_result
+                for i in range(len(img_stars_matched)):
+                    img_x, img_y, img_intens = img_stars_matched[i]
+                    cat_star = catalog_matched[i]
+                    sky_obj = CatalogStar(cat_star[0], cat_star[1], cat_star[2])
+
+                    # Look up FWHM, SNR, and saturation from detected stars
+                    fwhm, snr, saturated = 2.5, 1.0, False
+                    if len(det_x) > 0:
+                        distances = np.sqrt((det_x - img_x)**2 + (det_y - img_y)**2)
+                        closest_idx = np.argmin(distances)
+                        if distances[closest_idx] < 3.0:  # Within 3 pixels
+                            fwhm = det_fwhm[closest_idx]
+                            snr = det_snr[closest_idx]
+                            saturated = det_saturated[closest_idx] > 0
+
+                    self.paired_stars.addPair(
+                        img_x, img_y,
+                        fwhm,
+                        img_intens,
+                        sky_obj,
+                        snr=snr,
+                        saturated=saturated
+                    )
+
+            print("  Matched {} star pairs".format(len(self.paired_stars)))
+
+        # Restore user's distortion settings for final refinement fit
+        # Use remapCoeffsForFlagChange to properly handle coefficient structure changes
+        self.platepar.remapCoeffsForFlagChange('equal_aspect', user_equal_aspect)
+        self.platepar.remapCoeffsForFlagChange('asymmetry_corr', user_asymmetry_corr)
+        self.platepar.remapCoeffsForFlagChange('force_distortion_centre', user_force_distortion_centre)
+        self.platepar.refraction = user_refraction
+        self.fit_only_pointing = user_fit_only_pointing
+        self.fixed_scale = user_fixed_scale
+        # Now set distortion type which will adjust poly_length and pad coefficients
+        # Use reset_params=False to preserve the fitted coefficients, just add zeros for new terms
+        self.platepar.setDistortionType(user_distortion_type, reset_params=False)
+
+        # Filter photometric outliers before final fit
+        if len(self.paired_stars) >= 15:
+            removed = self.filterPhotometricOutliers(sigma_threshold=2.5)
+            if removed > 0:
+                print("Pairs after photometric filtering: {}".format(len(self.paired_stars)))
+
+        # Filter blended stars before final fit
+        if len(self.paired_stars) >= 15:
+            removed = self.filterBlendedStars(fwhm_mult=2.0, mag_margin=0.3)
+            if removed > 0:
+                print("Pairs after blend filtering: {}".format(len(self.paired_stars)))
+
+        # Do a final fit with user's distortion settings
+        if len(self.paired_stars) >= 10:
+            if pointing_only:
+                print("Final pointing-only fit...")
+                self.fit_only_pointing = True
+            else:
+                print("Final refinement with user settings (distortion={})...".format(user_distortion_type))
+            self.fitPickedStars()
+
+        # Restore fit_only_pointing after pointing-only fit
+        self.fit_only_pointing = user_fit_only_pointing
+
+        # Reset photometry fit residuals
+        self.photom_fit_resids = None
+
+        self.status_bar.showMessage("Quick alignment complete: {} stars".format(len(self.paired_stars)))
+
+        return True
+
+
+    def testQuickAlignWithConfigMagLimit(self):
+        """ Test quick align using config.catalog_mag_limit (simulates CheckFit/ApplyRecalibrate).
+
+        This is a diagnostic tool to test how NNalign performs with the same catalog
+        that CheckFit and ApplyRecalibrate would use.
+        """
+
+        print(flush=True)
+        print("=" * 70, flush=True)
+        print("TEST: Quick align with config.catalog_mag_limit = {:.1f}".format(
+            self.config.catalog_mag_limit), flush=True)
+        print("      (Current SkyFit2 cat_lim_mag = {:.1f})".format(self.cat_lim_mag), flush=True)
+        print("=" * 70, flush=True)
+
+        # Store original platepar values to verify it's not modified
+        orig_ra = self.platepar.RA_d
+        orig_dec = self.platepar.dec_d
+        orig_rot = self.platepar.pos_angle_ref
+        print("  BEFORE: RA={:.4f} Dec={:.4f} Rot={:.4f}".format(orig_ra, orig_dec, orig_rot), flush=True)
+
+        # Get detected stars from current image (same as tryQuickAlignment)
+        ff_name_c = self.img_handle.current_ff_file if hasattr(self.img_handle, 'current_ff_file') else None
+
+        # Use override data if enabled and available, otherwise use original CALSTARS
+        detected_stars = None
+        if self.star_detection_override_enabled and ff_name_c in self.star_detection_override_data:
+            detected_stars = np.array(self.star_detection_override_data[ff_name_c])
+        elif ff_name_c is not None and ff_name_c in self.calstars:
+            detected_stars = np.array(self.calstars[ff_name_c])
+
+        if detected_stars is None or len(detected_stars) < 5:
+            print("  Not enough detected stars ({})".format(
+                0 if detected_stars is None else len(detected_stars)), flush=True)
+            return
+
+        # Get time for current image
+        if hasattr(self.img_handle, 'currentFrameTime'):
+            calstars_time = list(self.img_handle.currentFrameTime(dt_obj=False))
+            if len(calstars_time) == 6:
+                calstars_time.append(0)
+        else:
+            calstars_time = list(jd2Date(self.img_handle.currentTime(), dt_obj=False))
+            if len(calstars_time) == 6:
+                calstars_time.append(0)
+
+        print("  Detected stars: {}".format(len(detected_stars)), flush=True)
+        print("  Image time: {}-{:02d}-{:02d} {:02d}:{:02d}:{:02d}".format(*calstars_time[:6]), flush=True)
+        sys.stdout.flush()
+
+        # Call alignPlatepar (same as CheckFit/ApplyRecalibrate would)
+        # Pass full CALSTARS data so alignPlatepar can infer catalog LM from intensities
+        print("  Calling alignPlatepar()...", flush=True)
+        sys.stdout.flush()
+
+        # Callback to update display when catalog LM changes during balancing
+        def lm_callback(lim_mag, n_catalog, n_detected, ratio):
+            # Update catalog LM and reload catalog
+            self.cat_lim_mag = lim_mag
+            self.catalog_stars = self.loadCatalogStars(lim_mag)
+
+            # Update status bar
+            self.status_bar.showMessage("Balancing LM={:.1f}: {} catalog, {} detected, ratio={:.2f}".format(
+                lim_mag, n_catalog, n_detected, ratio))
+
+            # Redraw catalog stars
+            self.updateStars(only_update_catalog=True)
+            QtWidgets.QApplication.processEvents()
+
+        try:
+            pp_aligned, inferred_lm = alignPlatepar(self.config, self.platepar, calstars_time,
+                                                     detected_stars, lm_callback=lm_callback)
+        except Exception as e:
+            print("  alignPlatepar FAILED: {}".format(str(e)), flush=True)
+            traceback.print_exc()
+            return
+
+        # Check if original platepar was modified (it shouldn't be!)
+        if self.platepar.RA_d != orig_ra or self.platepar.dec_d != orig_dec:
+            print("  WARNING: Original platepar was MODIFIED! This is a bug!", flush=True)
+            print("    RA: {:.4f} -> {:.4f}".format(orig_ra, self.platepar.RA_d), flush=True)
+            print("    Dec: {:.4f} -> {:.4f}".format(orig_dec, self.platepar.dec_d), flush=True)
+
+        # Check if platepar changed
+        if pp_aligned is self.platepar:
+            print("  alignPlatepar returned ORIGINAL platepar (fit failed or drift exceeded)", flush=True)
+            return
+
+        # Report results
+        print("  alignPlatepar result:", flush=True)
+        print("    RA:  {:.4f} -> {:.4f} deg (delta: {:.4f})".format(
+            orig_ra, pp_aligned.RA_d, pp_aligned.RA_d - orig_ra), flush=True)
+        print("    Dec: {:.4f} -> {:.4f} deg (delta: {:.4f})".format(
+            orig_dec, pp_aligned.dec_d, pp_aligned.dec_d - orig_dec), flush=True)
+        print("    Rot: {:.4f} -> {:.4f} deg (delta: {:.4f})".format(
+            orig_rot, pp_aligned.pos_angle_ref,
+            pp_aligned.pos_angle_ref - orig_rot), flush=True)
+
+        # Apply the aligned platepar to see the result visually
+        self.platepar.RA_d = pp_aligned.RA_d
+        self.platepar.dec_d = pp_aligned.dec_d
+        self.platepar.pos_angle_ref = pp_aligned.pos_angle_ref
+        self.platepar.F_scale = pp_aligned.F_scale
+        self.platepar.JD = pp_aligned.JD
+        self.platepar.Ho = pp_aligned.Ho
+        self.platepar.rotation_from_horiz = rotationWrtHorizon(self.platepar)
+        self.platepar.updateRefAltAz()
+
+        # Update display
+        self.updateStars()
+        self.updateLeftLabels()
+        self.updateDistortion()
+        self.tab.param_manager.updatePlatepar()
+
+        print("  APPLIED aligned platepar to display", flush=True)
+        print("=" * 70, flush=True)
+        print(flush=True)
+        sys.stdout.flush()
+
+
+    def findBestFrame(self):
+        """ Find the frame with the best star distribution for calibration.
+
+        Uses the CALSTARS data to score each frame based on spatial distribution
+        of detected stars. Navigates to the best frame.
+        """
+        # Check if we have CALSTARS data
+        has_calstars = hasattr(self, 'calstars') and self.calstars and len(self.calstars) > 0
+        has_overrides = (hasattr(self, 'star_detection_override_data')
+                         and self.star_detection_override_data)
+
+        if not has_calstars and not has_overrides:
+            QtWidgets.QMessageBox.warning(
+                self, "No CALSTARS Data",
+                "No CALSTARS data available. Run star detection first."
+            )
+            return
+
+        # Check if we have a multi-image handle with ff_list
+        if not hasattr(self.img_handle, 'ff_list'):
+            QtWidgets.QMessageBox.warning(
+                self, "Single Image",
+                "This feature requires multiple images (FF files)."
+            )
+            return
+
+        self.status_bar.showMessage("Finding best frame...")
+        QtWidgets.QApplication.processEvents()
+
+        # Get image dimensions from config
+        img_width = self.config.width
+        img_height = self.config.height
+
+        # Merge star data: start with original CALSTARS, override per-image
+        # where re-detected data exists
+        merged_calstars = dict(self.calstars) if has_calstars else {}
+        if has_overrides:
+            merged_calstars.update(self.star_detection_override_data)
+
+        # Build set of available image filenames (basenames only), excluding placeholders
+        available_images = set()
+        for ff_path in self.img_handle.ff_list:
+            basename = os.path.basename(ff_path)
+            # Skip placeholder images
+            if "_placeholder" not in basename:
+                available_images.add(basename)
+
+        # Find the best frame from all merged data
+        best_ff, best_score, all_scores = selectBestFrame(
+            merged_calstars, img_width, img_height, verbose=False
+        )
+
+        if best_ff is None:
+            QtWidgets.QMessageBox.warning(
+                self, "No Best Frame Found",
+                "Could not determine the best frame from CALSTARS data."
+            )
+            self.status_bar.showMessage("Best frame search failed")
+            return
+
+        # Check if best frame is available in the image list
+        best_ff_available = best_ff in available_images
+
+        # Find best frame among only available images
+        calstars_available = {k: v for k, v in merged_calstars.items() if k in available_images}
+
+        if len(calstars_available) == 0:
+            QtWidgets.QMessageBox.warning(
+                self, "No Matching Frames",
+                "None of the CALSTARS frames match the available images."
+            )
+            self.status_bar.showMessage("No matching frames")
+            return
+
+        best_available_ff, best_available_score, _ = selectBestFrame(
+            calstars_available, img_width, img_height, verbose=False
+        )
+
+        # Determine which frame to use
+        selected_ff = None
+        selected_score = None
+
+        if best_available_ff is not None:
+            msg_box = QtWidgets.QMessageBox(self)
+            msg_box.setWindowTitle("Best Frame for Calibration")
+
+            # Get star counts for display
+            n_stars_best = len(merged_calstars.get(best_ff, []))
+            n_stars_available = len(merged_calstars.get(best_available_ff, []))
+
+            msg_box.setText(
+                "Select how to use the best frame for calibration:\n\n"
+                "  \u2022 Auto Fit: calibrate using the star data\n"
+                "    (a placeholder will be shown if no image is available)\n"
+                "  \u2022 Go to Best Image: navigate to the best available image"
+            )
+            msg_box.setInformativeText(
+                f"Best frame:       {best_ff}  ({n_stars_best} stars)\n"
+                f"Best with image:  {best_available_ff}  ({n_stars_available} stars)"
+            )
+
+            auto_fit_label = "Auto Fit (placeholder)" if not best_ff_available else "Auto Fit"
+            auto_fit_btn = msg_box.addButton(auto_fit_label, QtWidgets.QMessageBox.ActionRole)
+            navigate_btn = msg_box.addButton("Go to Best Image", QtWidgets.QMessageBox.ActionRole)
+            msg_box.addButton(QtWidgets.QMessageBox.Cancel)
+
+            msg_box.setDefaultButton(auto_fit_btn)
+            msg_box.exec_()
+
+            clicked = msg_box.clickedButton()
+
+            if clicked == auto_fit_btn:
+                if best_ff in available_images:
+                    # Image on disk - navigate to it and use the standard auto-fit
+                    # (which tries quick alignment with the existing platepar first)
+                    target_index = None
+                    for i, ff_path in enumerate(self.img_handle.ff_list):
+                        if os.path.basename(ff_path) == best_ff:
+                            target_index = i
+                            break
+
+                    if target_index is not None:
+                        current_index = self.img_handle.current_ff_index
+                        delta = target_index - current_index
+                        if delta != 0:
+                            self.nextImg(n=delta)
+
+                    self.autoFitAstrometryNet()
+
+                else:
+                    # Image not on disk - create placeholder, navigate to it, then fit
+                    height, width = self.config.height, self.config.width
+                    placeholder = np.full((height, width), 24, dtype=np.uint8)
+
+                    stripe_width = 40
+                    stripe_spacing = 80
+                    for i in range(-(height + width), height + width, stripe_spacing):
+                        for offset in range(stripe_width):
+                            y_coords = np.arange(height)
+                            x_coords = i + y_coords + offset
+                            valid = (x_coords >= 0) & (x_coords < width)
+                            placeholder[y_coords[valid], x_coords[valid]] = 40
+
+                    base_name = os.path.splitext(best_ff)[0]
+                    placeholder_name = f"{base_name}_placeholder.png"
+                    placeholder_path = os.path.join(self.dir_path, placeholder_name)
+
+                    img_pil = Image.fromarray(placeholder)
+                    img_pil.save(placeholder_path)
+                    print(f"Created placeholder image: {placeholder_path}")
+
+                    if best_ff in self.calstars:
+                        self.calstars[placeholder_name] = self.calstars[best_ff]
+
+                    # Refresh file list and navigate to placeholder
+                    self.img_handle = detectInputTypeFolder(
+                        self.dir_path, self.config,
+                        beginning_time=None, fps=self.fps
+                    )
+                    self.img.changeHandle(self.img_handle)
+
+                    target_index = None
+                    for i, ff_path in enumerate(self.img_handle.ff_list):
+                        if os.path.basename(ff_path) == placeholder_name:
+                            target_index = i
+                            break
+
+                    if target_index is not None:
+                        current_index = self.img_handle.current_ff_index
+                        delta = target_index - current_index
+                        if delta != 0:
+                            self.nextImg(n=delta)
+
+                    # Use the same auto-fit path as the fit parameters panel
+                    self.autoFitAstrometryNet()
+
+                return
+
+            elif clicked == navigate_btn:
+                if best_ff_available:
+                    selected_ff = best_ff
+                    selected_score = best_score
+                else:
+                    selected_ff = best_available_ff
+                    selected_score = best_available_score
+            else:
+                self.status_bar.showMessage("Best frame search cancelled")
+                return
+        else:
+            QtWidgets.QMessageBox.warning(
+                self, "No Valid Frame",
+                "Could not find a valid frame to navigate to."
+            )
+            self.status_bar.showMessage("No valid frame found")
+            return
+
+        # Find the index of selected frame in ff_list
+        target_index = None
+        for i, ff_name in enumerate(self.img_handle.ff_list):
+            if os.path.basename(ff_name) == selected_ff or ff_name == selected_ff:
+                target_index = i
+                break
+
+        if target_index is None:
+            # Should not happen at this point, but handle gracefully
+            self.status_bar.showMessage("Error finding frame index")
+            return
+
+        # Navigate to the selected frame
+        current_index = self.img_handle.current_ff_index
+        delta = target_index - current_index
+
+        if delta != 0:
+            self.nextImg(n=delta)
+
+        # Get score details for status message
+        score_info = all_scores.get(selected_ff, {})
+        n_stars = score_info.get('quality_details', {}).get('n_stars', 0)
+
+        self.status_bar.showMessage(
+            f"Best frame: {selected_ff} (score={selected_score:.3f}, {n_stars} stars)"
+        )
+
+        print(f"\nBest frame: {selected_ff}")
+        print(f"  Score: {selected_score:.3f}")
+        print(f"  Stars: {n_stars}")
+
+
+    def _solveAstrometryNet(self, upload_image=False, wide_fov_search=False):
+        """ Solve astrometry.net to get pointing at image center.
+
+        Extracted from getInitialParamsAstrometryNet so it can be called independently.
+
+        Arguments:
+            upload_image: [bool] If True, upload the whole image to astrometry.net.
+            wide_fov_search: [bool] If True, use a wide FOV search range (2 deg to 200 deg)
+                instead of the config-based range. Used as fallback when tight search fails.
+
+        Returns:
+            solution: [tuple] (ra, dec, rot_standard, scale, fov_w, fov_h, star_data, solution_info)
+                or None if solving failed.
+        """
+
+        # Show status and process events so GUI updates
+        if wide_fov_search:
+            self.status_bar.showMessage("Solving with astrometry.net (wide FOV search)...")
+        else:
+            self.status_bar.showMessage("Solving with astrometry.net...")
+        QtWidgets.QApplication.processEvents()
 
         fail = False
         solution = None
 
         # Construct FOV width estimate
-        fov_w_range = [0.5*self.config.fov_w, 2*self.config.fov_w]
+        if wide_fov_search:
+            # Wide search range covers all common lens types (2 deg telephoto to 200 deg fisheye)
+            fov_w_range = [2, max(200, 1.5*self.config.fov_w)]
+        else:
+            # Tight search range based on config (0.75x to 1.5x)
+            fov_w_range = [0.75*self.config.fov_w, 1.5*self.config.fov_w]
 
         # Handle using FR files too
         ff_name_c = convertFRNameToFF(self.img_handle.name())
 
-        # Find and load a mask file is there is one
+        # Find and load a mask file if there is one
         mask = getMaskFile(self.dir_path, self.config)
 
-        # Check if the given FF files is in the calstars list
-        if (ff_name_c in self.calstars) and (not upload_image):
+        # Compute JD for astrometry.net matching
+        jd = date2JD(*self.img_handle.currentTime())
 
-            # Get the stars detected on this FF file
+        # Use override data if enabled and available, otherwise use original CALSTARS
+        has_star_data = False
+        star_data = None
+        if self.star_detection_override_enabled and ff_name_c in self.star_detection_override_data:
+            star_data = np.array(self.star_detection_override_data[ff_name_c])
+            has_star_data = True
+        elif ff_name_c in self.calstars:
             star_data = np.array(self.calstars[ff_name_c])
+            has_star_data = True
+
+        if has_star_data and (not upload_image):
 
             # Make sure that there are at least 10 stars
             if len(star_data) < 10:
@@ -6183,10 +11979,19 @@ class PlateTool(QtWidgets.QMainWindow):
                 y_data = star_data[:, 0]
                 x_data = star_data[:, 1]
 
+                # Get star intensities for brightness-based matching (column 2 is IntensSum)
+                input_intensities = None
+                if star_data.shape[1] > 2:
+                    input_intensities = star_data[:, 2]
+
                 # Get astrometry.net solution, pass the FOV width estimate
-                solution = astrometryNetSolve(x_data=x_data, y_data=y_data, fov_w_range=fov_w_range, 
-                                              mask=mask, 
-                                              x_center=self.platepar.X_res/2, y_center=self.platepar.Y_res/2)
+                solution = self.runInBackground(astrometryNetSolve,
+                                              x_data=x_data, y_data=y_data, fov_w_range=fov_w_range,
+                                              fov_w_hint=self.config.fov_w, mask=mask,
+                                              x_center=self.platepar.X_res/2, y_center=self.platepar.Y_res/2,
+                                              lat=self.platepar.lat, lon=self.platepar.lon, jd=jd,
+                                              input_intensities=input_intensities,
+                                              verbose=True)
 
         else:
             fail = True
@@ -6195,13 +12000,15 @@ class PlateTool(QtWidgets.QMainWindow):
         if fail or upload_image:
 
             print("Using the whole image in astrometry.net...")
+            self.status_bar.showMessage("Uploading image to astrometry.net...")
+            QtWidgets.QApplication.processEvents()
 
             # If the image is 16bit or larger, rescale and convert it to 8 bit
             if self.img.data.itemsize*8 > 8:
 
                 # Rescale the image to 8bit
                 minv, maxv = self.tab.hist.getLevels()
-                img_data = Image.adjustLevels(self.img.data, minv, self.img.gamma, maxv)
+                img_data = adjustLevels(self.img.data, minv, self.img.gamma, maxv)
                 img_data -= np.min(img_data)
                 img_data = 255*(img_data/np.max(img_data))
                 img_data = img_data.astype(np.uint8)
@@ -6209,24 +12016,258 @@ class PlateTool(QtWidgets.QMainWindow):
             else:
                 img_data = self.img.data
 
-            solution = astrometryNetSolve(img=img_data.T, fov_w_range=fov_w_range, mask=mask)
+            solution = self.runInBackground(astrometryNetSolve,
+                                          img=img_data.T, fov_w_range=fov_w_range,
+                                          fov_w_hint=self.config.fov_w, mask=mask,
+                                          lat=self.platepar.lat, lon=self.platepar.lon, jd=jd)
 
         if solution is None:
+            # If tight FOV search failed, try wide search as fallback
+            if not wide_fov_search:
+                print("Tight FOV search failed, trying wide FOV search...")
+                return self._solveAstrometryNet(upload_image=upload_image, wide_fov_search=True)
+
+            print("Astrometry.net failed to find a solution")
+            return None
+
+        return solution
+
+
+    def _applyAstrometryNetPointing(self, solution):
+        """ Apply astrometry.net pointing to existing platepar, preserving distortion.
+
+        Astrometry.net returns RA/Dec/rotation at the image center, but the platepar's
+        RA_d/dec_d is the tangent point at the distortion center. When the distortion center
+        is offset from image center, a Newton iteration corrects for the difference.
+
+        Arguments:
+            solution: [tuple] (ra, dec, rot_standard, scale, fov_w, fov_h, star_data,
+                solution_info) from _solveAstrometryNet.
+        """
+
+        ra_astnet, dec_astnet, rot_standard, scale, fov_w, fov_h, star_data, solution_info = solution
+
+        jd = date2JD(*self.img_handle.currentTime())
+        calstars_time = list(self.img_handle.currentTime())
+
+        # Set time reference and initial pointing (as if distortion center = image center)
+        # Keep existing F_scale — it's calibrated with the distortion model
+        self.platepar.JD = jd
+        self.platepar.Ho = JD2HourAngle(jd)
+
+        azim, alt = trueRaDec2ApparentAltAz(ra_astnet, dec_astnet, jd,
+                                            self.platepar.lat, self.platepar.lon)
+        self.platepar.az_centre = azim
+        self.platepar.alt_centre = alt
+        self.platepar.updateRefRADec(skip_rot_update=True)
+        self.platepar.pos_angle_ref = rotationWrtStandardToPosAngle(self.platepar, rot_standard)
+
+        # Newton iteration: correct for distortion center offset
+        # The gnomonic projection tangent point (RA_d/dec_d) should be at the distortion center,
+        # not the image center. Each iteration measures where the image center actually maps to
+        # and corrects the tangent point. Converges to <2 arcsec in 3 iterations.
+        for i in range(3):
+            _, ra_actual, dec_actual, _ = xyToRaDecPP(
+                [calstars_time], [self.platepar.X_res/2.0], [self.platepar.Y_res/2.0], [1],
+                self.platepar, extinction_correction=False
+            )
+
+            ra_err = ra_actual[0] - ra_astnet
+            dec_err = dec_actual[0] - dec_astnet
+            self.platepar.RA_d -= ra_err
+            self.platepar.dec_d -= dec_err
+
+            azim_corr, alt_corr = trueRaDec2ApparentAltAz(
+                self.platepar.RA_d, self.platepar.dec_d, jd,
+                self.platepar.lat, self.platepar.lon)
+            self.platepar.az_centre = azim_corr
+            self.platepar.alt_centre = alt_corr
+
+        # Log the result
+        dist_cx, dist_cy = self.platepar.getDistortionCentre()
+        dx = dist_cx - self.platepar.X_res/2.0
+        dy = dist_cy - self.platepar.Y_res/2.0
+        print()
+        print("Astrometry.net pointing applied (distortion preserved):")
+        print("  RA    = {:.2f} deg, Dec   = {:.2f} deg".format(
+            self.platepar.RA_d, self.platepar.dec_d))
+        print("  Azim  = {:.2f} deg, Alt   = {:.2f} deg".format(
+            self.platepar.az_centre, self.platepar.alt_centre))
+        print("  Scale = {:.3f} arcmin/px".format(60/self.platepar.F_scale))
+        print("  Distortion center offset: ({:.1f}, {:.1f}) px from image center".format(dx, dy))
+
+
+    def quickAlign(self):
+        """ Re-fit pointing using existing distortion. Uses astrometry.net if NNalign fails.
+
+        Flow: tryQuickAlignment -> if fails, astrometry.net solve -> apply pointing
+        (preserving distortion) -> tryQuickAlignment again. Does NOT fall back to full
+        recalibration — distortion is always preserved.
+        """
+
+        # Show busy state
+        self.tab.param_manager.setQuickAlignButtonBusy(True)
+        QtWidgets.QApplication.processEvents()
+
+        # Capture current catalog LM before fitting
+        user_cat_lim_mag = self.cat_lim_mag
+
+        # Balance catalog magnitude before fitting
+        self.balanceCatalogMagnitude()
+
+        # Try quick alignment with existing platepar (pointing only, no distortion fitting)
+        success = self.tryQuickAlignment(pointing_only=True)
+
+        if not success:
+            # NNalign failed — use astrometry.net to get correct pointing
+            solution = self._solveAstrometryNet(upload_image=False)
+
+            if solution is not None:
+                # Apply pointing to existing platepar (preserve distortion)
+                self._applyAstrometryNetPointing(solution)
+
+                # Try quick alignment again with corrected pointing
+                success = self.tryQuickAlignment(pointing_only=True)
+
+        # Report result
+        if success:
+            self.status_bar.showMessage("Re-fit pointing succeeded")
+        else:
+            self.status_bar.showMessage("Re-fit pointing failed — try Auto Fit for full recalibration")
+
+        # Restore the user's catalog LM
+        if self.cat_lim_mag != user_cat_lim_mag:
+            print(f"  Restoring user catalog LM: {user_cat_lim_mag:.1f}")
+            self.cat_lim_mag = user_cat_lim_mag
+            self.catalog_stars = self.loadCatalogStars(self.cat_lim_mag)
+
+        # Update the GUI
+        self.updateDistortion()
+        self.updateLeftLabels()
+        self.updateStars()
+        self.tab.param_manager.updatePlatepar()
+
+        # Restore button state
+        self.tab.param_manager.setQuickAlignButtonBusy(False)
+
+
+    def autoFitAstrometryNet(self):
+        """ Auto fit using astrometry.net. Called from Auto Fit button. """
+
+        # If there are existing matched star pairs, warn the user they will be replaced
+        if len(self.paired_stars) > 0:
+            reply = QtWidgets.QMessageBox.question(
+                self,
+                "Replace Matched Stars?",
+                "You have {} matched star pair(s) that will be replaced by auto-fit.\n\n"
+                "Do you want to continue?".format(len(self.paired_stars)),
+                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+                QtWidgets.QMessageBox.No
+            )
+            if reply != QtWidgets.QMessageBox.Yes:
+                return
+
+        # Show busy state on button
+        self.tab.param_manager.setAutoFitButtonBusy(True)
+        QtWidgets.QApplication.processEvents()
+
+        # Capture current catalog LM before fitting (user may have set this via tune or manually)
+        user_cat_lim_mag = self.cat_lim_mag
+
+        # Balance catalog magnitude before any fitting (affects both quick and full paths)
+        self.balanceCatalogMagnitude()
+
+        # First, try quick alignment with existing platepar (much faster than astrometry.net)
+        quick_fit_success = self.tryQuickAlignment()
+
+        if not quick_fit_success:
+            # Quick alignment failed — try astrometry.net to get correct pointing
+            solution = self._solveAstrometryNet(upload_image=False)
+
+            if solution is not None:
+                # Apply pointing to existing platepar (preserve distortion)
+                self._applyAstrometryNetPointing(solution)
+
+                # Try quick alignment again with corrected pointing
+                quick_fit_success = self.tryQuickAlignment()
+
+            if not quick_fit_success:
+                # Last resort: full recalibration with distortion reset
+                self.getInitialParamsAstrometryNet(upload_image=False)
+
+        # Restore the user's catalog LM (balancing may have changed it)
+        if self.cat_lim_mag != user_cat_lim_mag:
+            print(f"  Restoring user catalog LM: {user_cat_lim_mag:.1f}")
+            self.cat_lim_mag = user_cat_lim_mag
+            self.catalog_stars = self.loadCatalogStars(self.cat_lim_mag)
+
+        # Update the GUI
+        self.updateDistortion()
+        self.updateLeftLabels()
+        self.updateStars()
+        self.tab.param_manager.updatePlatepar()
+
+        # Restore button state
+        self.tab.param_manager.setAutoFitButtonBusy(False)
+
+
+    def getInitialParamsAstrometryNet(self, upload_image=True, wide_fov_search=False):
+        """ Get the estimate of the initial astrometric parameters using astrometry.net.
+
+        Arguments:
+            upload_image: [bool] If True, upload the whole image to astrometry.net.
+            wide_fov_search: [bool] If True, use a wide FOV search range (2° to 200°) instead of
+                the config-based range. Used as fallback when the tight search fails.
+        """
+
+        # Solve with astrometry.net
+        solution = self._solveAstrometryNet(upload_image=upload_image, wide_fov_search=wide_fov_search)
+
+        if solution is None:
+            self.status_bar.showMessage("Astrometry.net failed to find a solution")
             qmessagebox(title='Astrometry.net error',
                         message='Astrometry.net failed to find a solution!',
                         message_type="error")
-
             return None
-        
 
-        # Reset the lens distortion parameters
-        self.platepar.resetDistortionParameters()
+        # Update status: solution found
+        self.status_bar.showMessage("Astrometry.net solution found, processing...")
+        QtWidgets.QApplication.processEvents()
+
+        # Compute JD and FF name (needed for post-solve steps)
+        jd = date2JD(*self.img_handle.currentTime())
+        ff_name_c = convertFRNameToFF(self.img_handle.name())
+
+        # Save user's settings for the final fit
+        user_distortion_type = self.platepar.distortion_type
+        user_equal_aspect = self.platepar.equal_aspect
+        user_asymmetry_corr = self.platepar.asymmetry_corr
+        user_force_distortion_centre = self.platepar.force_distortion_centre
+        user_refraction = self.platepar.refraction
+        user_fit_only_pointing = self.fit_only_pointing
+        user_fixed_scale = self.fixed_scale
+
+        # Set intermediate fitting parameters (simple, robust settings)
+        # Use simple settings for stability with few stars during initial passes
+        self.platepar.refraction = True
+        self.platepar.equal_aspect = True
+        self.platepar.asymmetry_corr = False
+        self.platepar.force_distortion_centre = False
+
+        # Start with radial5-odd for initial fitting, reset distortion params
+        self.platepar.setDistortionType("radial5-odd", reset_params=True)
 
 
         # Extract the parameters
-        ra, dec, rot_standard, scale, fov_w, fov_h, star_data = solution
+        ra, dec, rot_standard, scale, fov_w, fov_h, star_data, solution_info = solution
 
-        jd = date2JD(*self.img_handle.currentTime())
+        # Store solution info for potential visualization
+        self.astrometry_solution_info = solution_info
+
+        # Set the platepar reference JD and compute the reference hour angle
+        # (jd was computed earlier for the astrometry.net call)
+        self.platepar.JD = jd
+        self.platepar.Ho = JD2HourAngle(jd)
 
         # Compute reference azimuth and altitude
         azim, alt = trueRaDec2ApparentAltAz(ra, dec, jd, self.platepar.lat, self.platepar.lon)
@@ -6239,6 +12280,10 @@ class PlateTool(QtWidgets.QMainWindow):
         self.platepar.updateRefRADec(skip_rot_update=True)
 
         self.platepar.pos_angle_ref = rotationWrtStandardToPosAngle(self.platepar, rot_standard)
+
+        # Rebalance catalog magnitude now that we have the correct FOV
+        # (initial balancing may have been wrong if config FOV was off)
+        self.balanceCatalogMagnitude()
 
         # Print estimated parameters
         print()
@@ -6254,37 +12299,251 @@ class PlateTool(QtWidgets.QMainWindow):
         print(' Scale = {:.3f} arcmin/px'.format(60/self.platepar.F_scale))
         print(' FOV = {:.2f} x {:.2f} deg'.format(fov_w, fov_h))
 
+        # Print solution info if available
+        if solution_info is not None:
+            quad_stars = solution_info.get('quad_stars', [])
+            logodds = solution_info.get('logodds')
+            input_count = solution_info.get('input_star_count', 0)
 
-        # If a list of detected stars is provided by the astrometry.net, use it to run FFT alignment
-        if star_data is not None:
+            if logodds is not None:
+                print(' Log odds = {:.2f}'.format(logodds))
+            print(' Input stars = {:d}'.format(input_count))
+            print(' Quad stars = {:d}'.format(len(quad_stars)))
 
+        # Update the GUI to show the astrometry.net solution before NN refinement
+        self.updateLeftLabels()
+        self.updateStars()
+        self.drawPhotometryColoring()
+        QtWidgets.QApplication.processEvents()
+
+        # Ask user if they want to continue with NN refinement
+        # Build message with optional FOV mismatch warning
+        msg = 'Astrometry.net found a solution.\n\n'
+        msg += 'RA = {:.2f} deg, Dec = {:.2f} deg\n'.format(self.platepar.RA_d, self.platepar.dec_d)
+        msg += 'Scale = {:.3f} arcmin/px\n'.format(60/self.platepar.F_scale)
+        msg += 'FOV = {:.1f} x {:.1f} deg\n'.format(fov_w, fov_h)
+
+        # Check if solved FOV differs significantly from config FOV (>50% difference)
+        fov_ratio = fov_w / self.config.fov_w if self.config.fov_w > 0 else 1.0
+        fov_mismatch = fov_ratio < 0.5 or fov_ratio > 2.0
+
+        if fov_mismatch:
+            msg += '\nWARNING: Solved FOV ({:.1f} deg) differs significantly from config FOV ({:.1f} deg). '.format(
+                fov_w, self.config.fov_w)
+            msg += 'Consider updating fov_w and fov_h in your .config file.\n'
+
+        msg += '\nContinue with NN-based refinement?'
+
+        # Use warning icon if FOV mismatch, otherwise question icon
+        if fov_mismatch:
+            msgbox = QtWidgets.QMessageBox(self)
+            msgbox.setWindowTitle('Astrometry.net Solution - FOV Mismatch')
+            msgbox.setText(msg)
+            msgbox.setIcon(QtWidgets.QMessageBox.Warning)
+            msgbox.setStandardButtons(QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
+            msgbox.setDefaultButton(QtWidgets.QMessageBox.Yes)
+            reply = msgbox.exec_()
+        else:
+            reply = QtWidgets.QMessageBox.question(self, 'Astrometry.net Solution', msg,
+                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No, QtWidgets.QMessageBox.Yes)
+
+        if reply == QtWidgets.QMessageBox.No:
+            self.status_bar.showMessage("Astrometry.net solution applied (no refinement)")
+            return self.platepar
+
+        # Match detected stars to RMS catalog and fit distortion iteratively
+        # Use RMS's own catalog (better than astrometry.net's index stars)
+        # Iterative approach: start with bright stars + wide radius, fit, then tighten
+        print()
+        print("Iterative star matching with RMS catalog...")
+        self.status_bar.showMessage("Matching stars with catalog...")
+        QtWidgets.QApplication.processEvents()
+
+        # Use the same catalog filtering as the GUI display (proven to work correctly)
+        # self.catalog_stars is the full catalog, filterCatalogStarsInsideFOV does RA/Dec filtering
+        _, catalog_stars_extended = self.filterCatalogStarsInsideFOV(self.catalog_stars)
+        print("  Catalog stars within FOV (filterCatalogStarsInsideFOV): {:d}".format(len(catalog_stars_extended)))
+
+        # Strict XY filter: project to image and keep only those inside image bounds
+        catalog_x_ext, catalog_y_ext, catalog_mag_ext = getCatalogStarsImagePositions(
+            catalog_stars_extended, jd, self.platepar)
+        in_fov_xy = (catalog_x_ext >= 0) & (catalog_x_ext < self.platepar.X_res) & \
+                    (catalog_y_ext >= 0) & (catalog_y_ext < self.platepar.Y_res)
+
+        catalog_stars = catalog_stars_extended[in_fov_xy]
+        catalog_x_fov = catalog_x_ext[in_fov_xy]
+        catalog_y_fov = catalog_y_ext[in_fov_xy]
+
+        print("  Catalog stars in strict FOV: {:d}".format(len(catalog_stars)))
+
+        # Filter out catalog stars behind the mask
+        catalog_stars, not_masked = self.filterCatalogStarsByMask(
+            catalog_x_fov, catalog_y_fov, catalog_stars)
+        print("  Catalog stars after mask filter: {:d}".format(len(catalog_stars)))
+
+        # Get detected stars - use override data if enabled, otherwise CALSTARS
+        # CALSTARS format: Y(0) X(1) IntensSum(2) Ampltd(3) FWHM(4) BgLvl(5) SNR(6) NSatPx(7)
+        detected_stars = None
+        if self.star_detection_override_enabled and ff_name_c in self.star_detection_override_data:
+            detected_stars = np.array(self.star_detection_override_data[ff_name_c])
+        elif ff_name_c in self.calstars:
+            detected_stars = np.array(self.calstars[ff_name_c])
+
+        if detected_stars is not None and len(detected_stars) > 0:
+            det_y = detected_stars[:, 0]
+            det_x = detected_stars[:, 1]
+            # Use index 2 (IntensSum/integrated intensity) not index 3 (Ampltd/peak amplitude)
+            det_intens = detected_stars[:, 2] if detected_stars.shape[1] > 2 else np.ones(len(det_x))
+            det_fwhm = detected_stars[:, 4] if detected_stars.shape[1] > 4 else np.zeros(len(det_x))
+            det_snr = detected_stars[:, 6] if detected_stars.shape[1] > 6 else np.ones(len(det_x))
+            det_saturated = detected_stars[:, 7] if detected_stars.shape[1] > 7 else np.zeros(len(det_x))
+        else:
+            print("No detected stars available for matching")
+            det_x, det_y, det_intens = np.array([]), np.array([]), np.array([])
+            det_fwhm, det_snr, det_saturated = np.array([]), np.array([]), np.array([])
+
+        print("  Detected stars: {:d}".format(len(det_x)))
+
+        # First pass: Use NN cost function to refine pointing + distortion
+        # This doesn't require explicit star matching - more robust for initial fit
+        if len(det_x) >= 10 and len(catalog_stars) >= 10:
             print()
-            print("Running FFT alignment...")
+            print("NN-based fitting (no explicit matching)...")
 
-            # Construct an array with star coordinates (x, y per row)
-            calstars_coords = np.array(star_data).T
+            # Prepare detected stars array [x, y, intensity]
+            img_stars_arr = np.column_stack([det_x, det_y, det_intens])
 
-            # Get the time of the image
-            calstars_time = self.img_handle.currentTime()
+            # Use NN cost function to fit pointing + distortion
+            # Pass extended catalog (before strict XY filter) - NN iterations re-filter
+            # dynamically as distortion improves, allowing edge stars to "appear"
+            self.platepar.setDistortionType("radial5-odd", reset_params=True)
 
-            self.platepar = alignPlatepar(
-                self.config, self.platepar, 
-                calstars_time, calstars_coords, 
-                scale_update=True, show_plot=False
+            # Load tuned catalog if available for final fitting stages
+            tuned_catalog = None
+            if getattr(self, 'catalog_lm_tuned', False) and hasattr(self, 'tuned_cat_lim_mag'):
+                tuned_catalog = self.loadCatalogStars(self.tuned_cat_lim_mag)
+
+            # Callback to update display at each RANSAC iteration (visual debugging)
+            def iteration_callback(iteration, pp_iter, outlier_mask, rmsd_arcmin):
+                # pp_iter is a complete deepcopy with correct distortion_type, poly coeffs,
+                # and pointing. Swap the entire platepar pointer instead of copying attributes
+                # piecemeal (which missed distortion_type, y_poly, poly_length).
+                saved_pp = self.platepar
+                self.platepar = pp_iter
+
+                # Update status bar with LM and iteration info
+                n_outliers = np.sum(outlier_mask) if outlier_mask is not None else 0
+                self.status_bar.showMessage("LM={:.1f} | RANSAC iter {}: RMSD={:.1f}', {} outliers".format(
+                    self.cat_lim_mag, iteration, rmsd_arcmin, n_outliers))
+
+                # Redraw catalog stars and distortion center with updated platepar
+                self.updateStars(only_update_catalog=True)
+                self.updateDistortionCenterMarker()
+                QtWidgets.QApplication.processEvents()
+
+                # Restore original platepar so optimizer isn't corrupted
+                self.platepar = saved_pp
+
+            try:
+                self.platepar.fitAstrometry(
+                    jd, img_stars_arr, catalog_stars_extended,  # Extended catalog for edge stars
+                    first_platepar_fit=True,
+                    use_nn_cost=True,
+                    final_catalog_stars=tuned_catalog,
+                    iteration_callback=iteration_callback
                 )
-            
-            self.platepar.updateRefRADec(skip_rot_update=True)
-            
+                print("  NN fit complete: RA={:.2f} Dec={:.2f} Scale={:.3f} arcmin/px".format(
+                    self.platepar.RA_d, self.platepar.dec_d, 60/self.platepar.F_scale))
+            except Exception as e:
+                print("  NN fit failed: {}".format(str(e)))
+
+            # Populate paired_stars from NN matches for visualization
+            self.paired_stars = PairedStars()
+            if self.platepar.star_list:
+                for entry in self.platepar.star_list:
+                    # star_list format: [jd, x, y, intensity, ra, dec, mag]
+                    _, x, y, intensity, ra, dec, mag = entry
+                    sky_obj = CatalogStar(ra, dec, mag)
+
+                    # Look up SNR, FWHM, and saturation from calstars by finding nearest detected star
+                    fwhm, snr, saturated = 0.0, 1.0, False
+                    if len(det_x) > 0:
+                        # Find the closest detected star to this matched star
+                        distances = np.sqrt((det_x - x)**2 + (det_y - y)**2)
+                        closest_idx = np.argmin(distances)
+                        if distances[closest_idx] < 3.0:  # Within 3 pixels
+                            fwhm = det_fwhm[closest_idx]
+                            snr = det_snr[closest_idx]
+                            saturated = det_saturated[closest_idx] > 0
+
+                    self.paired_stars.addPair(x, y, fwhm, intensity, sky_obj, snr=snr, saturated=saturated)
+                print("  Loaded {} matched pairs".format(len(self.platepar.star_list)))
+
+        # Finalize the fit with user's settings
+        if len(self.paired_stars) >= 10:
+            # Restore user's settings for the final fit
+            # Use remapCoeffsForFlagChange to properly handle coefficient structure changes
             print()
-            print('FFT aligned:')
-            print('------------------------')
-            print(' RA    = {:.2f} deg'.format(self.platepar.RA_d))
-            print(' Dec   = {:.2f} deg'.format(self.platepar.dec_d))
-            print(' Azim  = {:.2f} deg'.format(self.platepar.az_centre))
-            print(' Alt   = {:.2f} deg'.format(self.platepar.alt_centre))
-            print(' Rot horiz   = {:.2f} deg'.format(self.platepar.rotation_from_horiz))
-            print(' Pos angle   = {:.2f} deg'.format(self.platepar.pos_angle_ref))
-            print(' Scale = {:.3f} arcmin/px'.format(60/self.platepar.F_scale))
+            print("Restoring user settings: {:s}".format(user_distortion_type))
+            self.platepar.remapCoeffsForFlagChange('equal_aspect', user_equal_aspect)
+            self.platepar.remapCoeffsForFlagChange('asymmetry_corr', user_asymmetry_corr)
+            self.platepar.remapCoeffsForFlagChange('force_distortion_centre', user_force_distortion_centre)
+            self.platepar.setDistortionType(user_distortion_type, reset_params=False)
+            self.platepar.refraction = user_refraction
+            self.fit_only_pointing = user_fit_only_pointing
+            self.fixed_scale = user_fixed_scale
+
+            # Filter photometric outliers before final fit
+            if len(self.paired_stars) >= 15:
+                removed = self.filterPhotometricOutliers(sigma_threshold=2.5)
+                if removed > 0:
+                    print("Pairs after photometric filtering: {}".format(len(self.paired_stars)))
+
+            # Filter blended stars before final fit
+            if len(self.paired_stars) >= 15:
+                removed = self.filterBlendedStars(fwhm_mult=2.0, mag_margin=0.3)
+                if removed > 0:
+                    print("Pairs after blend filtering: {}".format(len(self.paired_stars)))
+
+            # Do the final fit with user's settings
+            print()
+            print("Final fit with user settings...")
+            self.status_bar.showMessage("Fitting astrometry with {:d} stars...".format(len(self.paired_stars)))
+            QtWidgets.QApplication.processEvents()
+            self.first_platepar_fit = True
+            self.fitPickedStars()
+
+            # Note: catalog LM restoration is handled by the caller (autoFitAstrometryNet)
+
+            # Update the display
+            self.updateStars()
+            self.status_bar.showMessage("Auto-fit complete: {:d} stars matched".format(len(self.paired_stars)))
+        else:
+            # Restore user's settings even if fit failed
+            self.platepar.equal_aspect = user_equal_aspect
+            self.platepar.asymmetry_corr = user_asymmetry_corr
+            self.platepar.force_distortion_centre = user_force_distortion_centre
+            self.platepar.setDistortionType(user_distortion_type, reset_params=True)
+            self.platepar.refraction = user_refraction
+            self.fit_only_pointing = user_fit_only_pointing
+            self.fixed_scale = user_fixed_scale
+
+            print("  Not enough matched stars for fitting (need >= 10)")
+            self.updateStars()
+            self.status_bar.showMessage("Auto-fit: not enough star matches")
+
+        # Show astrometry.net quad stars if available
+        if self.astrometry_solution_info is not None:
+            quad_count = len(self.astrometry_solution_info.get('quad_stars', []))
+            if quad_count > 0:
+                self.astrometry_stars_visible = True
+                self.astrometry_quad_markers.show()
+                self.astrometry_quad_markers2.show()
+                self.updateAstrometryNetStarMarkers()
+                print()
+                print("Showing astrometry.net quad stars: {:d} (magenta)".format(quad_count))
+                print("  Magenta = catalog stars used for initial geometric match")
+                print("Press Shift+H to toggle visibility")
 
 
     def getFOVcentre(self):
@@ -6293,10 +12552,10 @@ class PlateTool(QtWidgets.QMainWindow):
         # Get FOV centre
         d = QFOVinputDialog(self)
         d.loadLensTemplates(self.config, self.dir_path, self.config.width, self.config.height)
-        if d.exec_():
-             data = d.getInputs()
-        else:
-            return 0, 0, 0, "none"
+
+        # Get inputs regardless of OK or Cancel - both use same defaults if empty
+        d.exec_()
+        data = d.getInputs()
 
         self.azim_centre, self.alt_centre, rot_horizontal, lenses_template_file = data
 
@@ -6321,7 +12580,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.platepar.JD = date2JD(*img_time)
 
         # Set the reference hour angle
-        self.platepar.Ho = JD2HourAngle(self.platepar.JD)%360
+        self.platepar.Ho = JD2HourAngle(self.platepar.JD)
 
         # Convert FOV centre to RA, Dec
         ra, dec = apparentAltAz2TrueRADec(self.azim_centre, self.alt_centre, date2JD(*img_time),
@@ -6422,6 +12681,23 @@ class PlateTool(QtWidgets.QMainWindow):
         # Convert the list to a dictionary
         self.calstars = {ff_file: star_data for ff_file, star_data in calstars_list}
 
+        # Update Find Best Frame button state (disable if only one frame)
+        self.updateFindBestFrameButton()
+
+
+    def updateFindBestFrameButton(self):
+        """ Enable/disable the Find Best Frame button based on the number of frames in CALSTARS. """
+        if hasattr(self, 'tab') and hasattr(self.tab, 'param_manager'):
+            # Disable button if there's only one frame or no frames
+            enable = len(self.calstars) > 1
+            self.tab.param_manager.find_best_frame_button.setEnabled(enable)
+            if not enable:
+                self.tab.param_manager.find_best_frame_button.setToolTip(
+                    "Only one frame available - no need to find best frame")
+            else:
+                self.tab.param_manager.find_best_frame_button.setToolTip(
+                    "Find the frame with best star distribution for calibration")
+
 
     def reloadGeoPoints(self):
         """ Reload the file with geo points. """
@@ -6434,6 +12710,34 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.paired_stars.removeGeoPoints()
 
                 self.updateStars()
+
+
+    def runInBackground(self, func, *args, **kwargs):
+        """ Run a blocking function in a background thread while keeping the UI responsive.
+
+        Use this for CPU-bound operations (astrometry solving, catalog loading, etc.)
+        that would otherwise trigger the OS 'application not responding' warning.
+
+        Note: The function must NOT access Qt widgets or shared mutable state.
+
+        Arguments:
+            func: [callable] Function to run.
+            *args, **kwargs: Arguments passed to the function.
+
+        Returns:
+            The return value of func(*args, **kwargs).
+
+        Raises:
+            Any exception raised by func.
+        """
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(func, *args, **kwargs)
+
+            while not future.done():
+                QtWidgets.QApplication.processEvents()
+                time.sleep(0.05)
+
+            return future.result()
 
 
     def loadCatalogStars(self, lim_mag):
@@ -6455,13 +12759,238 @@ class PlateTool(QtWidgets.QMainWindow):
                 ).days/365.25
     
         # Load catalog stars
-        catalog_stars, self.mag_band_string, self.config.star_catalog_band_ratios = StarCatalog.readStarCatalog(
-            self.config.star_catalog_path, self.config.star_catalog_file, 
+        catalog_results = StarCatalog.readStarCatalog(
+            self.config.star_catalog_path, self.config.star_catalog_file,
             years_from_J2000=years_from_J2000,
             lim_mag=lim_mag,
-            mag_band_ratios=self.config.star_catalog_band_ratios)
+            mag_band_ratios=self.config.star_catalog_band_ratios,
+            additional_fields=['spectraltype_esphs', 'preferred_name', 'common_name', 'bayer_name', 'Simbad_OType',
+                              'phot_g_mean_mag', 'phot_bp_mean_mag', 'phot_rp_mean_mag',
+                              'B', 'V', 'R', 'Ic'])
 
-        return catalog_stars
+        if len(catalog_results) == 4:
+            self.catalog_stars, self.mag_band_string, self.config.star_catalog_band_ratios, extras = catalog_results
+        else:
+            self.catalog_stars, self.mag_band_string, self.config.star_catalog_band_ratios = catalog_results
+            extras = {}
+
+        # Extract spectral type
+        if 'spectraltype_esphs' in extras:
+            # Decode bytes to strings if necessary
+            self.catalog_stars_spectral_type = np.array([x.decode('utf-8') for x in extras['spectraltype_esphs']])
+        else:
+            self.catalog_stars_spectral_type = None
+
+        # Extract preferred name
+        if 'preferred_name' in extras:
+            # Decode bytes to strings if necessary
+            self.catalog_stars_preferred_names = np.array([x.decode('utf-8') for x in extras['preferred_name']])
+
+            # Extract bayer_name if available
+            if 'bayer_name' in extras:
+                self.catalog_stars_bayer_names = np.array([x.decode('utf-8') for x in extras['bayer_name']])
+            else:
+                self.catalog_stars_bayer_names = None
+
+            # Extract common_name if available
+            if 'common_name' in extras:
+                raw_common_names = np.array([x.decode('utf-8') for x in extras['common_name']])
+            else:
+                raw_common_names = None
+
+            # Build display names with priority: common_name > bayer_name > preferred_name
+            display_names = []
+            for i in range(len(self.catalog_stars_preferred_names)):
+                pref = self.catalog_stars_preferred_names[i].strip()
+                common = raw_common_names[i].strip() if raw_common_names is not None else ''
+                bayer = self.catalog_stars_bayer_names[i].strip() if self.catalog_stars_bayer_names is not None else ''
+
+                if common:
+                    display_names.append(common)
+                elif bayer:
+                    display_names.append(bayer)
+                else:
+                    display_names.append(pref)
+            self.catalog_stars_common_names = np.array(display_names)
+        else:
+            self.catalog_stars_preferred_names = None
+            self.catalog_stars_common_names = None
+            self.catalog_stars_bayer_names = None
+
+        # Extract Simbad object type (for photometry filtering)
+        if 'Simbad_OType' in extras:
+            self.catalog_stars_simbad_otypes = np.array([x.decode('utf-8') for x in extras['Simbad_OType']])
+        else:
+            self.catalog_stars_simbad_otypes = None
+
+        # Extract individual G/BP/RP magnitudes (for band ratio fitting)
+        if 'phot_g_mean_mag' in extras:
+            self.catalog_stars_g = extras['phot_g_mean_mag'].astype(np.float64)
+        else:
+            self.catalog_stars_g = None
+        if 'phot_bp_mean_mag' in extras:
+            self.catalog_stars_bp = extras['phot_bp_mean_mag'].astype(np.float64)
+        else:
+            self.catalog_stars_bp = None
+        if 'phot_rp_mean_mag' in extras:
+            self.catalog_stars_rp = extras['phot_rp_mean_mag'].astype(np.float64)
+        else:
+            self.catalog_stars_rp = None
+
+        # Extract individual BVRI magnitudes (for band ratio fitting)
+        for band_name in ['B', 'V', 'R', 'Ic']:
+            attr = 'catalog_stars_' + band_name
+            if band_name in extras:
+                setattr(self, attr, extras[band_name].astype(np.float64))
+            else:
+                setattr(self, attr, None)
+
+        # Precompute HTML strings for star labels (spectral type + name)
+        # This avoids building HTML strings on every updateStars() call
+        self._precomputeStarLabelHTML()
+
+        # Clear any cached TextItem objects when catalog changes
+        self._star_label_cache = {}
+
+        return self.catalog_stars
+
+
+    def _precomputeStarLabelHTML(self):
+        """Precompute HTML strings for star labels.
+
+        This precomputes:
+        - self._star_label_html_spectral: HTML for spectral type (with color)
+        - self._star_label_html_name: HTML for star name (with SIMBAD link)
+
+        These arrays are indexed by the catalog star index.
+        """
+        n_stars = len(self.catalog_stars) if self.catalog_stars is not None else 0
+
+        # Initialize arrays
+        self._star_label_html_spectral = [None] * n_stars
+        self._star_label_html_name = [None] * n_stars
+
+        if n_stars == 0:
+            return
+
+        # Precompute spectral type HTML
+        if hasattr(self, 'catalog_stars_spectral_type') and self.catalog_stars_spectral_type is not None:
+            for i, spec_type in enumerate(self.catalog_stars_spectral_type):
+                if spec_type is None or len(spec_type) == 0:
+                    continue
+
+                # Determine color based on spectral type
+                hex_color = "#90ee90"  # Default light green
+
+                first_char = spec_type[0].upper()
+                if 'infrared' in spec_type.lower():
+                    hex_color = "#990000"  # Red
+                elif first_char == 'O':
+                    hex_color = "#9bb0ff"  # Blue
+                elif first_char == 'B':
+                    hex_color = "#aabfff"  # Blue-white
+                elif first_char == 'A':
+                    hex_color = "#cad7ff"  # White-Blue
+                elif first_char == 'F':
+                    hex_color = "#f8f7ff"  # White
+                elif first_char == 'G':
+                    hex_color = "#fff4ea"  # Yellow-white
+                elif first_char == 'K':
+                    hex_color = "#ffd2a1"  # Orange
+                elif first_char == 'M':
+                    hex_color = "#ffcc6f"  # Red-orange
+
+                # Replace "infrared" with "IR"
+                display_type = "IR" if 'infrared' in spec_type.lower() else spec_type
+
+                self._star_label_html_spectral[i] = f'<span style="color: {hex_color};">{display_type}</span>'
+
+        # Precompute star name HTML
+        if hasattr(self, 'catalog_stars_preferred_names') and self.catalog_stars_preferred_names is not None:
+            common_names = getattr(self, 'catalog_stars_common_names', None)
+
+            for i, star_name in enumerate(self.catalog_stars_preferred_names):
+                if star_name is None or len(star_name.strip()) == 0:
+                    continue
+
+                # Use HD/catalog name for SIMBAD URL
+                url_name = star_name.replace(' ', '+')
+                # Use common name for display (e.g., "Sirius" instead of "HD 48915")
+                display_name = common_names[i] if common_names is not None and common_names[i] else star_name
+                # Greyish color for name, formatted as link
+                self._star_label_html_name[i] = f'<a href="https://simbad.cds.unistra.fr/simbad/sim-id?Ident={url_name}" style="color: #dddddd; text-decoration: none;">{display_name}</a>'
+
+
+    def _findPlatepar(self, dir_path=None):
+        """Search for a platepar file in the given directory.
+
+        If the default platepar name exists and is the only .cal file, return its path directly.
+        If the default name is missing or multiple .cal files exist, prompt the user to pick one
+        or create a new blank platepar.
+
+        Arguments:
+            dir_path: [str] Directory to search. Defaults to self.dir_path.
+
+        Return:
+            [str or None] Path to the selected platepar file, empty string if the user chose to
+                          create a new blank platepar, or None if no UI is available yet
+                          (pre-startup fallback).
+        """
+
+        if dir_path is None:
+            dir_path = self.dir_path
+
+        default_path = os.path.join(dir_path, self.config.platepar_name)
+        cal_files = sorted(glob.glob(os.path.join(dir_path, '*.cal')))
+
+        # Default name exists and is the only .cal file — use it directly
+        if os.path.isfile(default_path) and len(cal_files) == 1:
+            return default_path
+
+        # No unique default platepar — let the user pick one or create blank
+        if cal_files:
+            items = [os.path.basename(f) for f in cal_files] \
+                    + ["Browse for another platepar...", "Create new blank platepar"]
+
+            item, ok = QtWidgets.QInputDialog.getItem(
+                self, "Select platepar",
+                "Found {:d} platepar file(s) in the folder.\n"
+                "Select which one to load:".format(len(cal_files)),
+                items, 0, False)
+
+            if not ok:
+                return None
+
+            if item == "Create new blank platepar":
+                return ''
+
+            if item == "Browse for another platepar...":
+                platepar_file = QtWidgets.QFileDialog.getOpenFileName(
+                    self, "Select a platepar file",
+                    dir_path, "Platepar files (*.cal);;All files (*)")[0]
+                return platepar_file if platepar_file else None
+
+            return os.path.join(dir_path, item)
+
+        # No .cal files at all — offer to browse or create blank
+        msg = QtWidgets.QMessageBox(self)
+        msg.setWindowTitle("No platepar found")
+        msg.setText("No platepar files were found in the folder.")
+        browse_btn = msg.addButton("Browse...", QtWidgets.QMessageBox.ActionRole)
+        create_btn = msg.addButton("Create new", QtWidgets.QMessageBox.ActionRole)
+        msg.addButton(QtWidgets.QMessageBox.Cancel)
+        msg.exec_()
+
+        if msg.clickedButton() == browse_btn:
+            platepar_file = QtWidgets.QFileDialog.getOpenFileName(
+                self, "Select a platepar file",
+                dir_path, "Platepar files (*.cal);;All files (*)")[0]
+            return platepar_file if platepar_file else None
+
+        if msg.clickedButton() == create_btn:
+            return ''
+
+        return None
 
 
     def loadPlatepar(self, update=False, platepar_file=None):
@@ -6485,7 +13014,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Open the file dialog no 'platepar_file' parameter was specified
         if platepar_file is None:
-            platepar_file = QtWidgets.QFileDialog.getOpenFileName(self, "Select the platepar file", 
+            platepar_file = QtWidgets.QFileDialog.getOpenFileName(self, "Select the platepar file",
                                                                   initial_file,
                                                                   "Platepar files (*.cal);;All files (*)")[0]
 
@@ -6557,14 +13086,31 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Save the platepar file
         self.platepar.write(self.platepar_file, fmt=self.platepar_fmt, fov=computeFOVSize(self.platepar))
+        self.platepar_modified = False
+        self.updateFileManagerButton()
         print('Platepar written to:', self.platepar_file)
 
     def saveDefaultPlatepar(self):
-        platepar_default_path = os.path.join(self.config.config_file_path, self.config.platepar_name)
+        default_path = os.path.join(self.config.config_file_path, self.config.platepar_name)
 
-        # Save the platepar file
-        self.platepar.write(platepar_default_path, fmt=self.platepar_fmt)
-        print('Default platepar written to:', platepar_default_path)
+        file_path, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self, "Save Default Platepar", default_path,
+            "Platepar files (*.cal);;All Files (*)")
+
+        if file_path:
+            self.platepar.write(file_path, fmt=self.platepar_fmt)
+            print('Default platepar written to:', file_path)
+
+    def showCalibrationFilesDialog(self, save_ftype=None):
+        """Open the File Manager dialog, optionally auto-triggering Save for a file type."""
+        dlg = CalibrationFilesDialog(self, parent=self)
+        if save_ftype and isinstance(save_ftype, str):
+            # Show the dialog and immediately trigger the save flow for the given type
+            dlg.show()
+            dlg._showSaveDialog(save_ftype)
+            dlg.close()
+        else:
+            dlg.exec_()
 
     def saveCurrentFrame(self):
         """ Saves the current frame to disk. """
@@ -6592,7 +13138,7 @@ class PlateTool(QtWidgets.QMainWindow):
         frame_file_path = os.path.join(dir_path, frame_file_name)
 
         # Save the frame to disk
-        Image.saveImage(frame_file_path, self.img.getFrame())
+        saveImage(frame_file_path, self.img.getFrame())
 
         print('Frame {:.1f} saved to: {:s}'.format(self.img.getFrame(), frame_file_path))
 
@@ -6607,6 +13153,9 @@ class PlateTool(QtWidgets.QMainWindow):
         # Update image resolution from config
         self.platepar.X_res = self.config.width
         self.platepar.Y_res = self.config.height
+
+        # Set the default vignetting coefficient scaled for this resolution
+        self.platepar.addVignettingCoeff(use_flat=self.config.use_flat)
 
         # Set the camera gamma from the config file
         self.platepar.gamma = self.config.gamma
@@ -6624,7 +13173,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.platepar.station_code = self.config.stationID
 
         # Get the FOV centre if the image handle is available so the time can be extracted
-        if hasattr(self, 'img_handle'):
+        if hasattr(self, 'img_handle') and self.img_handle is not None:
 
             # Get reference RA, Dec of the image centre
             (
@@ -6658,6 +13207,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Indicate that a new platepar is being made
         self.new_platepar = True
+        self.platepar_modified = True
 
         if hasattr(self, 'tab'):
             self.tab.param_manager.updatePlatepar()
@@ -6721,7 +13271,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         try:
             # Load the flat, byteswap the flat if vid file is used or UWO png
-            flat = Image.loadFlat(*os.path.split(flat_file), dtype=self.img.data.dtype,
+            flat = loadFlat(*os.path.split(flat_file), dtype=self.img.data.dtype,
                       byteswap=self.img_handle.byteswap)
             flat.flat_img = np.swapaxes(flat.flat_img, 0, 1)
 
@@ -6773,19 +13323,19 @@ class PlateTool(QtWidgets.QMainWindow):
         for file_name in file_names_to_check:
             if file_name in os.listdir(self.dir_path):
                 initial_file = os.path.join(self.dir_path, file_name)
-                break            
+                break
 
         # If using UWO files, automatically load the dark file and skip the dialog
-        if not force_dialog and self.usingUWOData() and initial_file is not None:
+        if not force_dialog and self.usingUWOData() and (initial_file is not None):
             dark_file = initial_file
 
         else:
-            
+
             if initial_file is None:
                 initial_file = self.dir_path
 
             # Open the file dialog to select the dark frame file
-            dark_file = QtWidgets.QFileDialog.getOpenFileName(self, "Select the dark frame file", 
+            dark_file = QtWidgets.QFileDialog.getOpenFileName(self, "Select the dark frame file",
                 initial_file, "Image files (*.png *.jpg *.bmp *.nef *.cr2);;All files (*)")[0]
 
         if not dark_file:
@@ -6796,7 +13346,7 @@ class PlateTool(QtWidgets.QMainWindow):
         try:
 
             # Load the dark
-            dark = Image.loadDark(*os.path.split(dark_file), dtype=self.img.data.dtype, \
+            dark = loadDark(*os.path.split(dark_file), dtype=self.img.data.dtype, \
                                   byteswap=self.img_handle.byteswap)
             
             print("Dark loaded successfully!")
@@ -6942,11 +13492,24 @@ class PlateTool(QtWidgets.QMainWindow):
         if y_max > self.platepar.Y_res - 1:
             y_max = self.platepar.Y_res - 1
 
-        # Crop the image
-        img_crop_orig = self.img.data[x_min:x_max, y_min:y_max]
+        # Crop the image for centroiding
+        # In SkyFit mode: use avepixel for FF files to match calstars extraction
+        # In ManualReduction mode: use current displayed frame (individual frame data)
+        if self.mode == 'skyfit' and hasattr(self.img_handle, 'ff') and self.img_handle.ff is not None:
+            # For FF files in SkyFit mode, use avepixel (same as calstars extraction)
+            avepixel_data = self.img_handle.ff.avepixel.T
+            # Apply dark and flat if available (same processing as displayed image)
+            if self.dark is not None:
+                avepixel_data = applyDark(avepixel_data, self.dark)
+            if self.flat_struct is not None:
+                avepixel_data = applyFlat(avepixel_data, self.flat_struct)
+            img_crop_orig = avepixel_data[x_min:x_max, y_min:y_max]
+        else:
+            # For ManualReduction mode or non-FF inputs, use the current displayed image
+            img_crop_orig = self.img.data[x_min:x_max, y_min:y_max]
 
         # Perform gamma correction
-        img_crop = Image.gammaCorrectionImage(img_crop_orig, self.config.gamma, out_type=np.float32)
+        img_crop = gammaCorrectionImage(img_crop_orig, self.config.gamma, out_type=np.float32)
 
 
         ######################################################################################################
@@ -7303,7 +13866,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
     def findClosestCatalogStarIndex(self, pos_x, pos_y):
-        """ Finds the index of the closest catalog star on the image to the given image position. """
+        """ Finds the index of the closest catalog star, geo point, or planet on the image. """
 
         min_index = 0
         min_dist = np.inf
@@ -7335,6 +13898,18 @@ class PlateTool(QtWidgets.QMainWindow):
                     min_type = 'geo'
 
 
+        # If planets are visible, check them too
+        if hasattr(self, 'planet_data') and self.planet_data:
+            for i, (name, x, y, ra, dec, mag) in enumerate(self.planet_data):
+
+                dist = (pos_x - x)**2 + (pos_y - y)**2
+
+                if dist < min_dist:
+                    min_dist = dist
+                    min_index = i
+                    min_type = 'planet'
+
+
         return min_type, min_index
 
     def getMinFitStars(self):
@@ -7363,11 +13938,15 @@ class PlateTool(QtWidgets.QMainWindow):
         min_stars = self.getMinFitStars()
         if len(self.paired_stars) < min_stars:
 
-            qmessagebox(title='Number of stars', 
-                        message="At least {:d} paired stars are needed to do the fit!".format(min_stars), 
+            qmessagebox(title='Number of stars',
+                        message="At least {:d} paired stars are needed to do the fit!".format(min_stars),
                         message_type="warning")
 
             return self.platepar
+
+        # Show busy state on button
+        self.tab.param_manager.setFitButtonBusy(True)
+        QtWidgets.QApplication.processEvents()
 
         print()
         print("----------------------------------------")
@@ -7384,6 +13963,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.platepar.fitAstrometry(jd, img_stars, catalog_stars, first_platepar_fit=self.first_platepar_fit,\
             fit_only_pointing=self.fit_only_pointing, fixed_scale=self.fixed_scale)
         self.first_platepar_fit = False
+        self.platepar_modified = True
 
         # Show platepar parameters
         print()
@@ -7448,12 +14028,29 @@ class PlateTool(QtWidgets.QMainWindow):
         print(
             ' No,       Img X,       Img Y, RA cat (deg), Dec cat (deg),    Cat X,   Cat Y, RA img (deg), Dec img (deg), Err amin,  Err px, Direction,  FWHM,    Mag, -2.5*LSP, Mag err,    SNR, Saturated')
 
+        # Use zeros for photometry residuals if not available or has wrong length
+        # (e.g., after auto-fit before photometry fit, or after RANSAC removed stars)
+        if self.photom_fit_resids is not None and len(self.photom_fit_resids) == len(catalog_x):
+            photom_resids = self.photom_fit_resids
+        else:
+            photom_resids = [0.0]*len(catalog_x)
+
+        # Get all coordinates from paired stars
+        all_coords = self.paired_stars.allCoords()
+
         # Calculate the distance and the angle between each pair of image positions and catalog predictions
         for star_no, (cat_x, cat_y, cat_coords, paired_stars, mag_err) in enumerate(
-            zip(catalog_x, catalog_y, catalog_stars, self.paired_stars.allCoords(), self.photom_fit_resids)):
+            zip(catalog_x, catalog_y, catalog_stars, all_coords, photom_resids)):
 
             img_x, img_y, fwhm, sum_intens, snr, saturated = paired_stars[0]
             ra, dec, mag = cat_coords
+
+            # Compute magnitude error from SNR (same formula as used in lightcurve plots and FTPdetectinfo)
+            if snr > 0:
+                mag_err_random = 2.5*np.log10(1 + 1/snr)
+                mag_err = np.sqrt(mag_err_random**2 + self.platepar.mag_lev_stddev**2)
+            else:
+                mag_err = 0.0
 
             delta_x = cat_x - img_x
             delta_y = cat_y - img_y
@@ -7474,7 +14071,7 @@ class PlateTool(QtWidgets.QMainWindow):
             angular_distance = np.degrees(angularSeparation(np.radians(ra), np.radians(dec), \
                 np.radians(ra_img), np.radians(dec_img)))
 
-            residuals.append([img_x, img_y, angle, distance, angular_distance])
+            residuals.append([img_x, img_y, angle, distance, angular_distance, fwhm, snr, sum_intens])
 
             lsp = -2.5*np.log10(sum_intens)
 
@@ -7507,6 +14104,9 @@ class PlateTool(QtWidgets.QMainWindow):
 
         print('RMSD: {:.2f} px, {:.2f} {:s}'.format(rmsd_img, rmsd_angular, angular_error_label))
 
+        # Update RMSD display in the Fit Parameters tab
+        self.tab.param_manager.updateRMSD(rmsd_img, rmsd_angular, angular_error_label)
+
         # Update fit residuals in the station tab when geopoints are used
         if self.geo_points_obj is not None:
             self.tab.geolocation.residuals_label.setText("Residuals:\n{:.2f} px, {:.2f} {:s}".format(rmsd_img,\
@@ -7526,6 +14126,9 @@ class PlateTool(QtWidgets.QMainWindow):
         self.updateFitResiduals()
         self.tab.param_manager.updatePlatepar()
 
+        # Restore button state
+        self.tab.param_manager.setFitButtonBusy(False)
+
 
     def jumpNextStar(self, miss_this_one=False):
 
@@ -7542,11 +14145,25 @@ class PlateTool(QtWidgets.QMainWindow):
         self.updateStars()
 
     def showAstrometryFitPlots(self):
-        """ Show window with astrometry fit details. """
+        """ Show window with astrometry fit details. Toggle on/off if already open. """
 
-        # Extract paired catalog stars and image coordinates separately
-        img_stars = np.array(self.paired_stars.imageCoords())
-        catalog_stars = np.array(self.paired_stars.skyCoords())
+        # Check if figure already exists and is open - if so, close it (toggle off)
+        if self.fig_astrometry is not None:
+            try:
+                if plt.fignum_exists(self.fig_astrometry.number):
+                    plt.close(self.fig_astrometry)
+                    self.fig_astrometry = None
+                    return
+            except:
+                pass
+            self.fig_astrometry = None
+
+        # Extract paired catalog stars and image coordinates separately (with SNR and saturation)
+        all_coords = list(self.paired_stars.allCoords())
+        img_stars = np.array([img_c[:3] for img_c, _ in all_coords])  # x, y, fwhm
+        catalog_stars = np.array([sky_c for _, sky_c in all_coords])
+        snr_data = [img_c[4] for img_c, _ in all_coords]  # SNR is index 4
+        saturated_data = [img_c[5] for img_c, _ in all_coords]  # Saturated is index 5
 
         # Get the Julian date of the image that's being fit
         jd = date2JD(*self.img_handle.currentTime())
@@ -7569,6 +14186,11 @@ class PlateTool(QtWidgets.QMainWindow):
         y_residuals = []
         radius_residuals = []
         skyradius_residuals = []
+        snr_list = []
+        mag_list = []
+        saturated_list = []
+        fwhm_list = []
+        total_error_px = []  # Total error in pixels for SNR/mag/FWHM plots
 
         # Get image time and Julian date
         img_time = self.img_handle.currentTime()
@@ -7578,10 +14200,10 @@ class PlateTool(QtWidgets.QMainWindow):
         ra_centre, dec_centre = self.computeCentreRADec()
 
         # Calculate the distance and the angle between each pair of image positions and catalog predictions
-        for star_no, (cat_x, cat_y, cat_coords, img_c) in enumerate(zip(catalog_x, catalog_y, catalog_stars, \
-                                                                        img_stars)):
+        for star_no, (cat_x, cat_y, cat_coords, img_c, snr, saturated) in enumerate(zip(
+                catalog_x, catalog_y, catalog_stars, img_stars, snr_data, saturated_data)):
             # Compute image coordinates
-            img_x, img_y, _ = img_c
+            img_x, img_y, img_fwhm = img_c
             img_radius = np.hypot(img_x - self.platepar.X_res/2, img_y - self.platepar.Y_res/2)
 
             # Compute sky coordinates
@@ -7626,11 +14248,22 @@ class PlateTool(QtWidgets.QMainWindow):
             azim_residuals.append(((azim_cat - azim_img + 180)%360 - 180)*np.cos(np.radians(elev_cat)))
             elev_residuals.append(elev_cat - elev_img)
 
-        # Init astrometry fit window
-        fig_a, (
+            # Collect SNR, magnitude, saturation, FWHM data
+            snr_list.append(snr)
+            mag_list.append(cat_coords[2])  # Catalog magnitude
+            saturated_list.append(saturated)
+            fwhm_list.append(img_fwhm)
+
+            # Compute total error in pixels (distance between catalog and image positions)
+            total_error_px.append(np.hypot(cat_x - img_x, cat_y - img_y))
+
+        # Init astrometry fit window (3 rows: angular, pixel, SNR/mag/FWHM)
+        self.fig_astrometry, (
             (ax_azim, ax_elev, ax_skyradius),
-            (ax_x, ax_y, ax_radius)
-        ) = plt.subplots(ncols=3, nrows=2, facecolor=None, figsize=(12, 6))
+            (ax_x, ax_y, ax_radius),
+            (ax_snr, ax_mag, ax_fwhm)
+        ) = plt.subplots(ncols=3, nrows=3, facecolor=None, figsize=(12, 9))
+        fig_a = self.fig_astrometry
 
         # Set figure title
         try:
@@ -7721,16 +14354,81 @@ class PlateTool(QtWidgets.QMainWindow):
         ax_radius.set_ylabel("Radius error (px)")
         ax_radius.set_xlim([0, np.hypot(self.platepar.X_res/2, self.platepar.Y_res/2)])
 
+        # Plot error vs SNR
+        ax_snr.scatter(snr_list, total_error_px, s=2, c='k', zorder=3)
+
+        ax_snr.grid(alpha=0.3)
+        ax_snr.set_xlabel("S/N")
+        ax_snr.set_ylabel("Error (px)")
+        ax_snr.set_xscale('log')
+        if len(snr_list) > 0 and min(snr_list) > 0:
+            snr_min, snr_max = min(snr_list), max(snr_list)
+            snr_range = snr_max - snr_min
+            # Find nice tick spacing closest to 6 ticks using 1-2-5 sequence
+            nice_spacings = [0.1 * (10 ** p) * m for p in range(-1, 5) for m in [1, 2, 5]]
+            target_ticks = 6
+            best_spacing = nice_spacings[0]
+            best_diff = float('inf')
+            for spacing in nice_spacings:
+                num_ticks = snr_range / spacing
+                if abs(num_ticks - target_ticks) < best_diff:
+                    best_diff = abs(num_ticks - target_ticks)
+                    best_spacing = spacing
+            # Generate tick positions
+            tick_start = np.floor(snr_min / best_spacing) * best_spacing
+            tick_end = np.ceil(snr_max / best_spacing) * best_spacing
+            ticks = np.arange(tick_start, tick_end + best_spacing/2, best_spacing)
+            # Filter out zero/negative ticks for log scale
+            ticks = ticks[ticks > 0]
+            ax_snr.set_xticks(ticks)
+            ax_snr.xaxis.set_major_formatter(ticker.FuncFormatter(lambda x, _: f'{x:g}'))
+            ax_snr.xaxis.set_minor_locator(ticker.NullLocator())
+            ax_snr.set_xlim([snr_min * 0.8, snr_max * 1.2])
+
+        # Plot error vs magnitude (saturated stars in red)
+        mag_arr = np.array(mag_list)
+        sat_arr = np.array(saturated_list)
+        err_arr = np.array(total_error_px)
+
+        # Plot non-saturated stars in black
+        if np.sum(~sat_arr) > 0:
+            ax_mag.scatter(mag_arr[~sat_arr], err_arr[~sat_arr], s=2, c='k', zorder=3, label='Normal')
+        # Plot saturated stars in red
+        if np.sum(sat_arr) > 0:
+            ax_mag.scatter(mag_arr[sat_arr], err_arr[sat_arr], s=2, c='r', zorder=4, label='Saturated')
+            ax_mag.legend(loc='upper right', fontsize=8, markerscale=3)
+
+        ax_mag.grid()
+        ax_mag.set_xlabel("Magnitude")
+        ax_mag.set_ylabel("Error (px)")
+        ax_mag.invert_xaxis()  # Bright stars (low mag) on right, faint (high mag) on left
+
+        # Plot error vs FWHM
+        fwhm_arr = np.array(fwhm_list)
+        valid_fwhm = fwhm_arr > 0  # Filter out invalid FWHM values
+        if np.sum(valid_fwhm) > 0:
+            ax_fwhm.scatter(fwhm_arr[valid_fwhm], err_arr[valid_fwhm], s=2, c='k', zorder=3)
+
+        ax_fwhm.grid()
+        ax_fwhm.set_xlabel("FWHM (px)")
+        ax_fwhm.set_ylabel("Error (px)")
+        if np.sum(valid_fwhm) > 0:
+            ax_fwhm.set_xlim([0, np.max(fwhm_arr[valid_fwhm]) * 1.1])
+
         # Equalize Y limits, make them integers, and set a minimum range of 1 px
         x_max_ylim = np.max(np.abs(ax_x.get_ylim()))
         y_max_ylim = np.max(np.abs(ax_y.get_ylim()))
         radius_max_ylim = np.max(np.abs(ax_radius.get_ylim()))
-        max_ylim = np.ceil(np.max([x_max_ylim, y_max_ylim, radius_max_ylim]))
-        if max_ylim < 1:
-            max_ylim = 1.0
-        ax_x.set_ylim([-max_ylim, max_ylim])
-        ax_y.set_ylim([-max_ylim, max_ylim])
-        ax_radius.set_ylim([-max_ylim, max_ylim])
+        snr_max_ylim = np.max(total_error_px) if len(total_error_px) > 0 else 1.0
+        max_ylim_px = np.ceil(np.max([x_max_ylim, y_max_ylim, radius_max_ylim, snr_max_ylim]))
+        if max_ylim_px < 1:
+            max_ylim_px = 1.0
+        ax_x.set_ylim([-max_ylim_px, max_ylim_px])
+        ax_y.set_ylim([-max_ylim_px, max_ylim_px])
+        ax_radius.set_ylim([-max_ylim_px, max_ylim_px])
+        ax_snr.set_ylim([0, max_ylim_px])
+        ax_mag.set_ylim([0, max_ylim_px])
+        ax_fwhm.set_ylim([0, max_ylim_px])
 
         fig_a.tight_layout()
         fig_a.show()
@@ -7835,7 +14533,7 @@ class PlateTool(QtWidgets.QMainWindow):
             crop_img = masked_img[x_min:x_max, y_min:y_max]
 
             # Perform gamma correction on the colored part
-            crop_img = Image.gammaCorrectionImage(
+            crop_img = gammaCorrectionImage(
                 crop_img, self.config.gamma, 
                 bp=0, wp=(2**self.config.bit_depth - 1), 
                 out_type=np.float32
@@ -7850,7 +14548,7 @@ class PlateTool(QtWidgets.QMainWindow):
             crop_bg = masked_img_bg[x_min:x_max, y_min:y_max]
 
             # Perform gamma correction on the background
-            crop_bg = Image.gammaCorrectionImage(
+            crop_bg = gammaCorrectionImage(
                 crop_bg, self.config.gamma, 
                 bp=0, wp=(2**self.config.bit_depth - 1),
                 out_type=np.float32
@@ -7928,7 +14626,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 avepixel_crop = avepixel_masked[x_min:x_max, y_min:y_max]
 
                 # Perform gamma correction on the avepixel crop
-                avepixel_crop = Image.gammaCorrectionImage(
+                avepixel_crop = gammaCorrectionImage(
                     avepixel_crop, self.config.gamma, 
                     bp=0, wp=(2**self.config.bit_depth - 1),
                     out_type=np.float32
@@ -8293,6 +14991,9 @@ class PlateTool(QtWidgets.QMainWindow):
     def drawPhotometryColoring(self):
         """ Updates image to have the colouring in the current frame """
 
+        if not self.hasData():
+            return
+
         def set_region_image(image):
             self.region.setImage(image)
             if hasattr(self, "region_zoom"):
@@ -8545,10 +15246,10 @@ class PlateTool(QtWidgets.QMainWindow):
             else:
                 # If None returned or path was bad, fallback to standard download/cache
                 cache_dir = os.path.join(getRmsRootDir(), ".skyfield_cache")
-                sats = loadTLEs(cache_dir, max_age_hours=24)
+                sats = loadTLEs(cache_dir, max_age_hours=24, time_of_interest=t_start)
         else:
             cache_dir = os.path.join(getRmsRootDir(), ".skyfield_cache")
-            sats = loadTLEs(cache_dir, max_age_hours=24)
+            sats = loadTLEs(cache_dir, max_age_hours=24, time_of_interest=t_start)
         
         if not sats:
             return
@@ -8654,6 +15355,41 @@ class PlateTool(QtWidgets.QMainWindow):
                 return
 
         self.drawSatelliteTracks()
+
+
+    def toggleAutoComputeSatTracks(self):
+        """ Toggle whether to automatically recompute satellite tracks when image changes. """
+        
+        # Do not allow toggling if satellite tracks are not shown
+        if not self.show_sattracks:
+            return
+
+        self.auto_compute_sattracks = not self.auto_compute_sattracks
+        self.tab.settings.updateAutoComputeSatTracks()
+        print(f"Automatically compute satellite tracks: {self.auto_compute_sattracks}")
+        
+        # If enabling auto-compute and tracks aren't already loaded, load them now for current frame
+        if self.auto_compute_sattracks and not self.satellite_tracks and SKYFIELD_AVAILABLE:
+            if self.show_sattracks:  # Only load if satellite display is enabled
+                # Show computing status text (centered on image)
+                self.sat_computing_text.setPos(self.platepar.X_res / 2, self.platepar.Y_res / 2)
+                self.sat_computing_text.show()
+                
+                # Force GUI update to show the text before blocking computation
+                QtWidgets.QApplication.processEvents()
+                
+                # Load satellite tracks (this takes time)
+                self.loadSatelliteTracks()
+                
+                # Hide computing status text
+                self.sat_computing_text.hide()
+
+
+    def clearSatelliteTracks(self):
+        """ Clear satellite tracks from display and memory. """
+        
+        self.satellite_tracks = []
+        self.drawSatelliteTracks()  # Redraw (will clear since list is empty)
 
     def loadTLEFileDialog(self):
         """ Opens a file dialog to choose a TLE file and loads it. """
@@ -9372,9 +16108,10 @@ if __name__ == '__main__':
     # Init the command line arguments parser
     arg_parser = argparse.ArgumentParser(description="Tool for fitting astrometry plates and photometric calibration.")
 
-    arg_parser.add_argument('input_path', metavar='INPUT_PATH', type=str,
+    arg_parser.add_argument('input_path', metavar='INPUT_PATH', type=str, nargs='?', default=None,
                             help='Path to the folder with FF or image files, path to a video file, or to a state file.'
-                                 ' If images or videos are given, their names must be in the format: YYYYMMDD_hhmmss.uuuuuu')
+                                 ' If images or videos are given, their names must be in the format: YYYYMMDD_hhmmss.uuuuuu'
+                                 ' If not provided, a dialog will prompt for selection.')
 
     arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str,
                             help="Path to a config file which will be used instead of the default one."
@@ -9413,7 +16150,7 @@ if __name__ == '__main__':
                             help="Flip the image upside down. Only applied to images and videos.")
 
     arg_parser.add_argument('--sattracks', action="store_true", \
-                            help="Show satellite tracks overlaid on the image (requires internet to download TLEs).")
+                            help="Show satellite tracks overlaid on the image and automatically compute tracks when advancing frames (requires internet to download TLEs).")
 
     arg_parser.add_argument('--tle_file', type=str, default=None,
                             help="Path to a specific TLE file to use for satellite tracks (skips download). "
@@ -9466,10 +16203,10 @@ if __name__ == '__main__':
     app = QtWidgets.QApplication(sys.argv)
 
     # If the state file was given, load the state
-    if cml_args.input_path.endswith('.state'):
+    if cml_args.input_path is not None and cml_args.input_path.endswith('.state'):
 
         dir_path, state_name = os.path.split(cml_args.input_path)
-        config = cr.loadConfigFromDirectory(cml_args.config, cml_args.input_path)
+        config = cr.loadConfigFromDirectory(cml_args.config if cml_args.config is not None else '.', cml_args.input_path)
 
         # Create plate_tool without calling its constructor then calling loadstate
         plate_tool = PlateTool.__new__(PlateTool)
@@ -9499,6 +16236,7 @@ if __name__ == '__main__':
 
         # Initialize satellite track related attributes for loaded state
         plate_tool.show_sattracks = cml_args.sattracks
+        plate_tool.auto_compute_sattracks = cml_args.sattracks  # Auto-compute if --sattracks flag used
         plate_tool.tle_file = cml_args.tle_file
         plate_tool.satellite_tracks = []
         plate_tool.sat_track_curves = []
@@ -9506,9 +16244,9 @@ if __name__ == '__main__':
         if plate_tool.show_sattracks:
             plate_tool.loadSatelliteTracks()
 
-    else:
+    elif cml_args.input_path is not None:
 
-        # Extract the data directory path
+        # CLI provided an input path — load directly
         input_path = cml_args.input_path.replace('"', '')
         if os.path.isfile(input_path):
             dir_path = os.path.dirname(input_path)
@@ -9516,8 +16254,9 @@ if __name__ == '__main__':
             dir_path = input_path
 
         # Load the config file
-        config = cr.loadConfigFromDirectory(cml_args.config, dir_path)
-
+        # If no -c flag given, use '.' to auto-detect the .config in the data directory
+        # (same as changeStation does via the File Manager)
+        config = cr.loadConfigFromDirectory(cml_args.config if cml_args.config is not None else '.', dir_path)
 
         if cml_args.mask is not None:
             print("Given a path to a mask at {}".format(cml_args.mask))
@@ -9540,12 +16279,21 @@ if __name__ == '__main__':
                 mask.width, mask.height, config.width, config.height))
             mask = None
 
-        # Init SkyFit
+        # Init SkyFit with data
         plate_tool = PlateTool(input_path, config, beginning_time=beginning_time, fps=cml_args.fps, \
             gamma=cml_args.gamma, use_fr_files=cml_args.fr, geo_points_input=cml_args.geopoints, \
             mask=mask, nobg=cml_args.nobg, peribg=cml_args.peribg, flipud=cml_args.flipud, \
             flatbiassub=cml_args.flatbiassub, exposure_ratio=cml_args.expratio, show_sattracks=cml_args.sattracks, \
             tle_file=cml_args.tle_file)
+
+    else:
+
+        # No input path — launch empty PlateTool, File Manager opens automatically
+        plate_tool = PlateTool(beginning_time=beginning_time, fps=cml_args.fps,
+            gamma=cml_args.gamma, use_fr_files=cml_args.fr, geo_points_input=cml_args.geopoints,
+            nobg=cml_args.nobg, peribg=cml_args.peribg, flipud=cml_args.flipud,
+            flatbiassub=cml_args.flatbiassub, exposure_ratio=cml_args.expratio,
+            show_sattracks=cml_args.sattracks, tle_file=cml_args.tle_file)
 
 
 

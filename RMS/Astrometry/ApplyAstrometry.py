@@ -293,7 +293,13 @@ def photometryFit(px_intens_list, radius_list, catalog_mags, fixed_vignetting=No
         weights = np.ones(len(px_intens_list))
     else:
         # Normalize the weights to have a sum of 1
-        weights = np.array(weights)/np.sum(weights)
+        weights = np.array(weights)
+        weight_sum = np.sum(weights)
+        if weight_sum > 0:
+            weights = weights / weight_sum
+        else:
+            # Fall back to equal weights if sum is zero
+            weights = np.ones(len(px_intens_list)) / len(px_intens_list)
 
     # If the exclude list is not given, set it to an empty list
     if exclude_list is None:
@@ -452,8 +458,8 @@ def getFOVSelectionRadius(platepar):
     ur_sep = np.degrees(angularSeparation(np.radians(ra3), np.radians(dec3), np.radians(ra_mid), np.radians(dec_mid)))
     ll_sep = np.degrees(angularSeparation(np.radians(ra4), np.radians(dec4), np.radians(ra_mid), np.radians(dec_mid)))
 
-    # Take the average radius
-    fov_radius = np.mean([ul_sep, lr_sep, ur_sep, ll_sep])
+    # Take the maximum radius to include all corners
+    fov_radius = np.max([ul_sep, lr_sep, ur_sep, ll_sep])
 
     return fov_radius
 

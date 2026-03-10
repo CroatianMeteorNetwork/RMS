@@ -21,7 +21,7 @@ import scipy.optimize
 from RMS.Astrometry.ApplyAstrometry import (getFOVSelectionRadius, raDecToXYPP,
                                             rotationWrtHorizon, xyToRaDecPP)
 from RMS.Astrometry.Conversions import date2JD, jd2Date, raDec2AltAz
-from RMS.Astrometry.FFTalign import alignPlatepar
+from RMS.Astrometry.NNalign import alignPlatepar
 from RMS.Formats import CALSTARS, FFfile, Platepar, StarCatalog
 from RMS.Math import angularSeparation
 from RMS.Logger import LoggingManager, getLogger
@@ -32,6 +32,55 @@ from RMS.Astrometry.CyFunctions import matchStars, subsetCatalog
 
 # Get the logger from the main module
 log = getLogger("rmslogger")
+
+
+def buildNelderMeadSimplex(p0, dec_d, mode="floor", angular_step=2.0, min_step_deg=0.5):
+    """Build initial simplex for Nelder-Mead optimization of astrometric parameters.
+
+    Scipy's default simplex perturbs each parameter by 5% of its value. This gives
+    ~0 step when RA or Dec is near 0, breaking the optimizer.
+
+    Arguments:
+        p0: [list/array] Initial parameter vector. First 3 elements must be angular
+            parameters (RA, Dec, Rot). Additional parameters (e.g. scale) keep the
+            default 10% step.
+        dec_d: [float] Declination in degrees, for cos(dec) correction on the RA step.
+        mode: [str] "floor" or "fixed".
+            "floor": Keep scipy's 5% default but enforce min_step_deg minimum for
+                     angular params. Use for fine-tuning (recalibrateFF, autoCheckFit).
+            "fixed": Use angular_step for all angular params regardless of parameter
+                     values. Use for large corrections (fitPointingNN).
+        angular_step: [float] Fixed step in degrees of sky (used in "fixed" mode).
+        min_step_deg: [float] Minimum angular step in degrees (used in "floor" mode).
+
+    Return:
+        simplex: [ndarray] (N+1) x N array suitable for the initial_simplex option.
+    """
+
+    p0_arr = np.array(p0, dtype=float)
+    n = len(p0_arr)
+    simplex = np.tile(p0_arr, (n + 1, 1))
+
+    cos_dec = max(np.cos(np.radians(dec_d)), 0.1)
+
+    if mode == "fixed":
+        # Fixed angular step for all angular params
+        steps = [angular_step / cos_dec, angular_step, angular_step]
+        # Extra params (e.g. scale) get 10% step
+        for j in range(3, n):
+            steps.append(abs(p0_arr[j]) * 0.1)
+
+    else:
+        # Floor mode: scipy's 5% default with a minimum angular step enforced
+        steps = [abs(v) * 0.05 if v != 0 else 0.00025 for v in p0_arr]
+        steps[0] = max(steps[0], min_step_deg / cos_dec)   # RA
+        steps[1] = max(steps[1], min_step_deg)              # Dec
+        steps[2] = max(steps[2], min_step_deg)              # Rot
+
+    for j in range(n):
+        simplex[j + 1, j] += steps[j]
+
+    return simplex
 
 
 def computeMinimizationTolerances(config, platepar, star_dict_len):
@@ -365,20 +414,12 @@ def _calcImageResidualsAstro(params, config, platepar, catalog_stars, star_dict,
     """
 
 
-    # Make a copy of the platepar
-    pp = copy.deepcopy(platepar)
-
-    # Extract fitting parameters
-    ra_ref, dec_ref, pos_angle_ref, F_scale = params
-
-    # Set the fitting parameters to the platepar clone
-    pp.RA_d = ra_ref
-    pp.dec_d = dec_ref
-    pp.pos_angle_ref = pos_angle_ref
-    pp.F_scale = F_scale
+    # Set the fitting parameters directly on the platepar (no deep copy needed —
+    # matchStarsResiduals only reads from the platepar, never modifies it)
+    platepar.RA_d, platepar.dec_d, platepar.pos_angle_ref, platepar.F_scale = params
 
     # Match stars and calculate image residuals
-    return matchStarsResiduals(config, pp, catalog_stars, star_dict, match_radius, verbose=False)
+    return matchStarsResiduals(config, platepar, catalog_stars, star_dict, match_radius, verbose=False)
 
 
 
@@ -427,17 +468,17 @@ def starListToDict(config, calstars_data, max_ffs=None):
 
 
 
-def autoCheckFit(config, platepar, calstars_data, _fft_refinement=False):
+def autoCheckFit(config, platepar, calstars_data, _nn_refinement=False):
     """ Attempts to refine the astrometry fit with the given stars and and initial astrometry parameters.
     Arguments:
         config: [Config structure]
         platepar: [Platepar structure] Initial astrometry parameters.
-        calstars_list: [tuple] (list, int) 
+        calstars_list: [tuple] (list, int)
         - A list containing stars extracted from FF files.
         - An integer representing the number of frames in an FF file.
     Keyword arguments:
-        _fft_refinement: [bool] Internal flag indicating that autoCF is running the second time recursively
-            after FFT platepar adjustment.
+        _nn_refinement: [bool] Internal flag indicating that autoCF is running the second time recursively
+            after NN platepar adjustment.
 
     Return:
         (platepar, fit_status):
@@ -446,39 +487,39 @@ def autoCheckFit(config, platepar, calstars_data, _fft_refinement=False):
     """
 
 
-    def _handleFailure(config, platepar, calstars_data, catalog_stars, _fft_refinement):
-        """ Run FFT alignment before giving up on ACF. """
+    def _handleFailure(config, platepar, calstars_data, catalog_stars, _nn_refinement):
+        """ Run NN alignment before giving up on ACF. """
 
-        if not _fft_refinement:
+        if not _nn_refinement:
 
             log.info("")
             log.info("-------------------------------------------------------------------------------")
-            log.info('The initial platepar is bad, trying to refine it using FFT phase correlation...')
+            log.info('The initial platepar is bad, trying to refine it using NN alignment...')
             log.info("")
 
             calstars_list, ff_frames = calstars_data
 
-            # Prepare data for FFT image registration
+            # Prepare data for NN alignment
 
             calstars_dict = {ff_file: star_data for ff_file, star_data in calstars_list}
 
             # Extract star list from CALSTARS file from FF file with most stars
             max_len_ff = max(calstars_dict, key=lambda k: len(calstars_dict[k]))
 
-            # Take only X, Y (change order so X is first)
-            calstars_coords = np.array(calstars_dict[max_len_ff])[:, :2]
-            calstars_coords[:, [0, 1]] = calstars_coords[:, [1, 0]]
+            # Pass full CALSTARS data (y, x, intensity, ...) - alignPlatepar will extract what it needs
+            # and use intensities to infer appropriate catalog limiting magnitude
+            calstars_coords = np.array(calstars_dict[max_len_ff])
 
             # Get the time of the FF file
-            calstars_time = FFfile.getMiddleTimeFF(max_len_ff, config.fps, ret_milliseconds=True, 
+            calstars_time = FFfile.getMiddleTimeFF(max_len_ff, config.fps, ret_milliseconds=True,
                                                    ff_frames=ff_frames)
 
 
-            # Try aligning the platepar using FFT image registration
-            platepar_refined = alignPlatepar(config, platepar, calstars_time, calstars_coords)
+            # Try aligning the platepar using NN alignment
+            platepar_refined, _ = alignPlatepar(config, platepar, calstars_time, calstars_coords)
 
 
-            ### If there are still not enough stars matched, try FFT again ###
+            ### If there are still not enough stars matched, try NN again ###
             min_radius = 10
 
             # Prepare star dictionary to check the match
@@ -495,24 +536,24 @@ def autoCheckFit(config, platepar, calstars_data, _fft_refinement=False):
             if n_matched < config.min_matched_stars:
                 log.info('')
                 log.info("-------------------------------------------------------------------------------")
-                log.info('Doing a second FFT pass as the number of matched stars was too small...')
+                log.info('Doing a second NN pass as the number of matched stars was too small...')
                 log.info('')
-                platepar_refined = alignPlatepar(config, platepar_refined, calstars_time, calstars_coords)
+                platepar_refined, _ = alignPlatepar(config, platepar_refined, calstars_time, calstars_coords)
                 log.info('')
 
             ### ###
 
 
             # Redo autoCF
-            return autoCheckFit(config, platepar_refined, calstars_data, _fft_refinement=True)
+            return autoCheckFit(config, platepar_refined, calstars_data, _nn_refinement=True)
 
         else:
             log.info('Auto Check Fit failed completely, please redo the plate manually!')
             return platepar, False
 
 
-    if _fft_refinement:
-        log.info('Second ACF run with an updated platepar via FFT phase correlation...')
+    if _nn_refinement:
+        log.info('Second ACF run with an updated platepar via NN alignment...')
 
     # Extract the star data and the number of frames in the FF files
     calstars_list, ff_frames = calstars_data
@@ -614,8 +655,8 @@ def autoCheckFit(config, platepar, calstars_data, _fft_refinement=False):
         if n_matched < config.calstars_files_N:
             log.info("The total number of initially matched stars is too small! Please manually redo the plate or make sure there are enough calibration stars.")
 
-            # Try to refine the platepar with FFT phase correlation and redo the ACF
-            return _handleFailure(config, platepar, calstars_data, catalog_stars, _fft_refinement)
+            # Try to refine the platepar with NN alignment and redo the ACF
+            return _handleFailure(config, platepar, calstars_data, catalog_stars, _nn_refinement)
 
 
         # Check if the platepar is good enough and do not estimate further parameters
@@ -631,18 +672,20 @@ def autoCheckFit(config, platepar, calstars_data, _fft_refinement=False):
         # Initial parameters for the astrometric fit
         p0 = [platepar.RA_d, platepar.dec_d, platepar.pos_angle_ref, platepar.F_scale]
 
+        simplex = buildNelderMeadSimplex(p0, platepar.dec_d, mode="floor")
+
         # Fit the astrometric parameters
         res = scipy.optimize.minimize(_calcImageResidualsAstro, p0, args=(config, platepar, catalog_stars, \
             star_dict, match_radius), method='Nelder-Mead', \
-            options={'fatol': fatol, 'xatol': xatol_ang})
+            options={'fatol': fatol, 'xatol': xatol_ang, 'initial_simplex': simplex})
 
         log.info(res)
 
         # If the fit was not successful, stop further fitting
         if not res.success:
 
-            # Try to refine the platepar with FFT phase correlation and redo the ACF
-            return _handleFailure(config, platepar, calstars_data, catalog_stars, _fft_refinement)
+            # Try to refine the platepar with NN alignment and redo the ACF
+            return _handleFailure(config, platepar, calstars_data, catalog_stars, _nn_refinement)
 
 
         else:
