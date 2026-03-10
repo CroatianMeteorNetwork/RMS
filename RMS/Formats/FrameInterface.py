@@ -959,7 +959,7 @@ class InputTypeVideo(InputType):
             return frame
 
         # Init making the FF structure
-        ff_struct_fake = FFMimickInterface(self.nrows, self.ncols, np.uint8)
+        ff_struct_fake = FFMimickInterface(self.nrows, self.ncols, np.uint16)
 
         # If there are no frames to read, return an empty array
         if frames_to_read == 0 or frames_to_read == -1:
@@ -1858,7 +1858,7 @@ class InputTypeImages(object):
             return frame
 
         # Init making the FF structure
-        ff_struct_fake = FFMimickInterface(self.nrows, self.ncols, self.img_dtype)
+        ff_struct_fake = FFMimickInterface(self.nrows, self.ncols, np.uint16)
 
         self.frame_dt_list = []
 

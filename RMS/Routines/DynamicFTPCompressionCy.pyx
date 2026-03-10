@@ -65,7 +65,7 @@ cdef class FFMimickInterface:
             self.mad_buf[:, :] = 1.0
             
             # Initialize maxpixel
-            self.maxpixel[:, :] = frame.astype(np.uint16)
+            self.maxpixel[:, :] = frame
 
         else:
             self.frameProc(frame)
@@ -82,7 +82,7 @@ cdef class FFMimickInterface:
         cdef float[:, :] med_view = self.med_buf
         cdef float[:, :] mad_view = self.mad_buf
         cdef INT16_TYPE_t[:, :] frame_view = frame
-        cdef INT16_TYPE_t[:, :] max_view = self.maxpixel.astype(np.uint16)
+        cdef INT16_TYPE_t[:, :] max_view = self.maxpixel
 
         for i in range(nrows):
             for j in range(ncols):
