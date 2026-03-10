@@ -483,8 +483,8 @@ def getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, 
     if img_handle.input_type == 'ff':
 
         # Threshold the FF file
-        img_thres = Image.thresholdFF(img_handle.ff, config.k1_det, config.j1_det, mask=mask, \
-            mask_ave_bright=False)
+        img_thres, weights = Image.thresholdImgWithWeights(img_handle.ff.maxpixel, img_handle.ff.avepixel,
+            img_handle.ff.stdpixel, config.k1_det, config.j1_det, ff=True, mask=mask, mask_ave_bright=False)
 
         # Extract the thresholded image by min and max frames from FF file
         img = selectFFFrames(np.copy(img_thres), img_handle.ff, frame_min, frame_max)
@@ -496,20 +496,16 @@ def getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, 
         stripe = np.zeros(img.shape, img.dtype)
         stripe[stripe_indices] = img[stripe_indices]
 
-        # Show stripe
-        # show2("stripe", stripe*255)
-
-        # Show 3D could
-        # show3DCloud(ff, stripe)
-
         # Use findNonzeroPositions to get y and x indices of non-zero elements in stripe
         ys, xs = findNonzeroPositions(stripe)
 
         # Retrieve the frame (z) values corresponding to the non-zero positions
-        # Assuming img_handle.ff.maxframe is a numpy array with the same shape as stripe
         zs = img_handle.ff.maxframe[ys, xs]
+        
+        # Retrieve weights for the extracted points
+        ws = weights[ys, xs]
 
-        return xs, ys, zs
+        return xs, ys, zs, ws
 
 
     # If video frames are available, extract indices on all frames in the given range
@@ -518,6 +514,7 @@ def getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, 
         xs_array = []
         ys_array = []
         zs_array = []
+        ws_array = []
 
         # Track the time it takes to do specific operations
         frame_conditioning_times = []
@@ -563,7 +560,7 @@ def getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, 
             t_threshold = time()
 
             # Threshold the frame (memoized function, the frame index "fr" is used as cache key)
-            img_thres = Image.thresholdImgMemoCache(fr, fr_img, img_handle.ff.avepixel,
+            img_thres, weights = Image.thresholdImgWithWeightsMemoCache(fr, fr_img, img_handle.ff.avepixel,
                 img_handle.ff.stdpixel, config.k1_det, config.j1_det, mask=mask, mask_ave_bright=True)
             
             thresholding_times.append(time() - t_threshold)
@@ -634,48 +631,14 @@ def getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, 
                 centroiding_times.append(time() - t_centroid)
 
 
-                # if debug:
-
-                #     # Show the extracted stripe
-                #     img_stripe = np.zeros_like(stripe)
-                #     img_stripe[stripe_indices] = 1
-                #     final_stripe = np.zeros_like(stripe)
-                #     final_stripe[stripe_indices_motion] = img_stripe[stripe_indices_motion]
-
-                #     plt.imshow(final_stripe)
-                #     plt.show()
-
-
-            # if debug and centroiding:
-
-            #     print(fr)
-            #     print('mean stdpixel3:', np.mean(img_handle.ff.stdpixel))
-            #     print('mean avepixel3:', np.mean(img_handle.ff.avepixel))
-            #     print('mean frame:', np.mean(fr_img))
-            #     fig, (ax1, ax2) = plt.subplots(nrows=2, sharex=True, sharey=True)
-
-
-            #     fr_img_noavg = Image.applyDark(fr_img, img_handle.ff.avepixel)
-            #     #fr_img_noavg = fr_img
-
-            #     # Auto levels
-            #     min_lvl = np.percentile(fr_img_noavg[2:, :], 1)
-            #     max_lvl = np.percentile(fr_img_noavg[2:, :], 99.0)
-
-            #     # Adjust levels
-            #     fr_img_autolevel = Image.adjustLevels(fr_img_noavg, min_lvl, 1.0, max_lvl)
-
-            #     ax1.imshow(stripe, cmap='gray')
-            #     ax2.imshow(fr_img_autolevel, cmap='gray')
-            #     plt.show()
-
-            #     pass
-
             t_nonzero = time()
 
             # Get stripe positions (x, y)
             ys, xs = findNonzeroPositions(stripe)
             zs = np.zeros_like(xs) + fr
+            
+            # Extract weights for these positions
+            ws = weights[ys, xs]
 
             nonzero_times.append(time() - t_nonzero)
 
@@ -683,6 +646,7 @@ def getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, 
             xs_array.append(xs)
             ys_array.append(ys)
             zs_array.append(zs)
+            ws_array.append(ws)
 
 
             # if debug:
@@ -699,11 +663,13 @@ def getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, 
             xs_array = np.concatenate(xs_array)
             ys_array = np.concatenate(ys_array)
             zs_array = np.concatenate(zs_array)
+            ws_array = np.concatenate(ws_array)
 
         else:
             xs_array = np.array(xs_array)
             ys_array = np.array(ys_array)
             zs_array = np.array(zs_array)
+            ws_array = np.array(ws_array)
 
         concatenate_time = time() - t_concatenate
 
@@ -754,4 +720,4 @@ def getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, 
 
 
 
-        return xs_array, ys_array, zs_array
+        return xs_array, ys_array, zs_array, ws_array

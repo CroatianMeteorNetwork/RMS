@@ -153,7 +153,7 @@ def findLines(img, max_lines, min_pixels, distance_thresh, min_line_length, max_
     while len(points) >= min_pixels and len(found_lines) < max_lines:
         
         if consecutive_failures >= MAX_FAILURES:
-            if debug: print("RANSAC: Stopping due to consecutive failures.")
+            if debug: print("RANSAC: Stopping due to not finding any more lines.")
             break
 
         best_model = None       # (rho, theta)
