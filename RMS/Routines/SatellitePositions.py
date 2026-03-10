@@ -507,6 +507,7 @@ class SatellitePredictor:
 
                         visible_tracks.append({
                             "name": sat.name,
+                            "norad_id": sat.model.satnum,
                             "time": time_clipped,
                             "x": x_clipped,
                             "y": y_clipped,

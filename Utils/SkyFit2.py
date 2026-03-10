@@ -15568,7 +15568,19 @@ class PlateTool(QtWidgets.QMainWindow):
                 label_x = x[best_idx]
                 label_y = y[best_idx]
                 
-                text = pg.TextItem(track['name'], color=color, anchor=(0, 1))
+                # Build clickable HTML label linking to n2yo.com (same pattern as star name hyperlinks)
+                norad_id = track.get('norad_id', None)
+                r, g, b = color
+                hex_color = f"#{r:02x}{g:02x}{b:02x}"
+                if norad_id:
+                    html_text = (
+                        f'<a href="https://www.n2yo.com/satellite/?s={norad_id}" '
+                        f'style="color: {hex_color}; text-decoration: none;">'
+                        f'{track["name"]}</a>'
+                    )
+                else:
+                    html_text = f'<span style="color: {hex_color};">{track["name"]}</span>'
+                text = TextItem(html=html_text, anchor=(0, 1))
                 
                 # Increase text size by 50% and make it bold
                 font = QFont()
