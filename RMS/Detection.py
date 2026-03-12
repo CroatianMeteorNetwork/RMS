@@ -585,7 +585,7 @@ def filterCentroids(centroids, centroid_max_deviation, max_distance):
         """ Least squares fit.
         """
 
-        A = np.vstack([x, np.ones(len(x)).astype(np.float64)]).T
+        A = np.vstack([x, np.ones(len(x), dtype=np.float32)]).T
         m, c = np.linalg.lstsq(A, y, rcond=-1)[0]
 
         return m, c
@@ -684,7 +684,7 @@ def filterCentroids(centroids, centroid_max_deviation, max_distance):
     if len(centroids) < 3:
         return centroids
 
-    centroids_array = np.array(centroids).astype(np.float64)
+    centroids_array = np.array(centroids, dtype=np.float32)
 
     # Filter centroids of frame gaps
     centroids_array = _filterFrameGaps(centroids_array)
@@ -1194,7 +1194,7 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
             if len(zs) > config.max_points_det:
 
                 # Extract weights of each point
-                maxpix_elements = img_handle.ff.maxpixel[ys,xs].astype(np.float64)
+                maxpix_elements = img_handle.ff.maxpixel[ys,xs].astype(np.float32)
                 weights = maxpix_elements/np.sum(maxpix_elements)
 
                 # Random sample the point, sampling is weighted by pixel intensity
@@ -1367,10 +1367,10 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                 frame_pixels_inds = np.where(line_points[:,2] == i)
                 
                 # Get pixel positions in a given frame (pixels belonging to a found line)
-                frame_pixels = line_points[frame_pixels_inds].astype(np.int64)
+                frame_pixels = line_points[frame_pixels_inds].astype(np.int32)
 
                 # Get pixel positions in a given frame (pixels belonging to the whole stripe)
-                frame_pixels_stripe = stripe_points[np.where(stripe_points[:,2] == i)].astype(np.int64)
+                frame_pixels_stripe = stripe_points[np.where(stripe_points[:,2] == i)].astype(np.int32)
 
                 # Skip if there are no pixels in the frame
                 if not len(frame_pixels):
@@ -1431,10 +1431,10 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
 
                     # Calculate weighted centroids
                     x_weighted = half_frame_pixels[:,0]*np.transpose(max_weights)
-                    x_centroid = np.sum(x_weighted.astype(np.float64))/float(max_weights_sum)
+                    x_centroid = np.sum(x_weighted.astype(np.float32))/float(max_weights_sum)
 
                     y_weighted = half_frame_pixels[:,1]*np.transpose(max_weights)
-                    y_centroid = np.sum(y_weighted.astype(np.float64))/float(max_weights_sum)
+                    y_centroid = np.sum(y_weighted.astype(np.float32))/float(max_weights_sum)
 
 
                     # Correct the rolling shutter effect
