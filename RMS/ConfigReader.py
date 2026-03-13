@@ -1674,11 +1674,12 @@ def parseMeteorDetection(config, parser):
     # If loading KHT library fails get the OSError subclass
     except Exception as e:
         # If the file exists remove it and record that namespace may be corrupted
-        namespace_corrupted_by_bad_kht = False
+
         if os.path.exists(kht_lib_path):
             if os.path.isfile(kht_lib_path):
+                print("Warning - kht file could not be loaded, but existed - namespace may be corrupted")
                 os.unlink(kht_lib_path)
-                namespace_corrupted_by_bad_kht = True
+
 
         # Convert traceback into ASCII for logger safety
         traceback_ascii = traceback.format_exc().encode("ascii", "replace").decode("ascii")
@@ -1692,12 +1693,6 @@ def parseMeteorDetection(config, parser):
         kht_lib_path = findBinaryPath(config, config.kht_build_dir, config.kht_binary_name,
                                       config.kht_binary_extension)
         print(f"Kernel Hough Transform library found at {kht_lib_path}")
-        # This thread can never reload the library correctly because of namespace contamination - so restart
-        if namespace_corrupted_by_bad_kht:
-            os.execv(sys.executable, [sys.executable] + sys.argv)
-
-
-
 
     config.kht_lib_path = kht_lib_path
 
