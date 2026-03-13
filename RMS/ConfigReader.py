@@ -1671,7 +1671,7 @@ def parseMeteorDetection(config, parser):
         kht.kht_wrapper.restype = ctypes.c_size_t
         print("KHT loaded successfully")
 
-    # If loading KHT library fails get the OSError subclass
+    # If loading KHT library fails get the exception
     except Exception as e:
         # If the file exists remove it and record that namespace may be corrupted
 
