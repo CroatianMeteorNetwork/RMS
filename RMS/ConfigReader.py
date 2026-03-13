@@ -1652,8 +1652,8 @@ def parseMeteorDetection(config, parser):
             kht_lib_path = findBinaryPath(config, config.kht_build_dir, config.kht_binary_name,
                                           config.kht_binary_extension)
         except Exception as e:
-            print(e)
-            print(traceback.format_exc())
+            print(str(e).encode("ascii", "replace").decode("ascii"))
+            print(traceback.format_exc().encode("ascii", "replace").decode("ascii"))
 
     try:
         print(f"Attempting test load of {kht_lib_path}")
@@ -1692,7 +1692,7 @@ def parseMeteorDetection(config, parser):
         pythonSetup()
         kht_lib_path = findBinaryPath(config, config.kht_build_dir, config.kht_binary_name,
                                       config.kht_binary_extension)
-        print(f"Kernel Hough Transform library found at {kht_lib_path}")
+        print(f"Kernel Hough transform library found at {kht_lib_path}")
 
     config.kht_lib_path = kht_lib_path
 
