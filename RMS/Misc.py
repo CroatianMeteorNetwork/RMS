@@ -30,6 +30,7 @@ else:
 
 import numpy as np
 import itertools
+import fcntl
 
 from matplotlib import scale as mscale
 from matplotlib import transforms as mtransforms
@@ -1169,3 +1170,72 @@ def sphericalDomainWrapping(ra_min, ra_max, dec_min, dec_max,
     query.append([ra_min, ra_max, ra_range_min, ra_range_max])
     query.append([dec_min, dec_max, dec_range_min, dec_range_max])
     return nDimensionDomainSplit(query)
+
+
+def pythonSetup():
+    """
+    Attempts to run RMS_Update - generally to fix kht_wrapper errors.
+    Only one thread will execute RMS_Update; all others block until it finishes,
+    then return to complete its work.
+    """
+
+    update_lock = os.open("/var/lock/pythonSetup.lock", os.O_CREAT | os.O_RDWR)
+
+    try:
+        # Try non-blocking lock
+        fcntl.flock(update_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+    except BlockingIOError:
+        log.info("python setup.py already running - this thread now waiting for lock release")
+        # Block until the first caller finishes
+        fcntl.flock(update_lock, fcntl.LOCK_EX)
+        log.info("Process released")
+        os.close(update_lock)
+        return
+
+    try:
+        # We hold the lock here
+        log_text = "Executing python setup.py"
+
+        log.info(log_text)
+
+        current_working_directory = os.path.normpath(os.path.expanduser(getRmsRootDir()))
+        source_rms = os.path.normpath(os.path.expanduser("~/source/RMS"))
+
+        if current_working_directory != source_rms:
+            log.info(f"Working directory {current_working_directory} does not match {source_rms} - aborting")
+            return
+
+        path_to_setup = os.path.expanduser(os.path.join(current_working_directory, "setup.py"))
+
+        if os.path.isfile(path_to_setup):
+            command_list = ["python", path_to_setup, "install"]
+
+            log.info(f"Command list is {command_list}")
+
+            try:
+                result = subprocess.run(
+                    command_list,
+                    cwd=current_working_directory,
+                    capture_output=True,
+                    text=True
+                )
+                log.info("python setup.py install completed")
+                #log.info(result.stdout)
+                #log.info(result.stderr)
+                return
+
+            except Exception as e:
+                e_ascii = str(e).encode("ascii", "replace").decode("ascii")
+                log.warning(f"python setup.py failed: {e_ascii}")
+                tb_ascii = traceback.format_exc().encode("ascii", "replace").decode("ascii")
+                log.warning(tb_ascii)
+                return
+
+        log.info(f"Could not find setup.py in {path_to_setup}")
+
+    finally:
+        # Release the lock
+        fcntl.flock(update_lock, fcntl.LOCK_UN)
+        os.close(update_lock)
+

@@ -19,9 +19,15 @@ from __future__ import absolute_import, division, print_function
 import math
 import os
 import sys
-from RMS.Misc import getRmsRootDir
+from RMS.Misc import getRmsRootDir, pythonSetup
 from Utils.GenerateTimelapse import isFfmpegWorking
 import matplotlib.colors as mcolors
+import traceback
+
+import ctypes
+import numpy as np
+import numpy.ctypeslib as npct
+
 
 # Consolidated version-specific imports and definitions
 if sys.version_info[0] == 3:
@@ -1637,9 +1643,64 @@ def parseMeteorDetection(config, parser):
     if parser.has_option(section, "kht_binary_extension"):
         config.kht_binary_extension = parser.get(section, "kht_binary_extension")
 
-    config.kht_lib_path = findBinaryPath(config, config.kht_build_dir, config.kht_binary_name, 
+    kht_lib_path, tries_remaining = None, 2
+
+
+
+    kht_lib_path = findBinaryPath(config, config.kht_build_dir, config.kht_binary_name,
         config.kht_binary_extension)
 
+    if kht_lib_path is None:
+        try:
+            pythonSetup()
+            kht_lib_path = findBinaryPath(config, config.kht_build_dir, config.kht_binary_name,
+                                          config.kht_binary_extension)
+        except Exception as e:
+            print(e)
+            print(traceback.format_exc())
+
+    try:
+        print(f"Attempting test load of {kht_lib_path}")
+        kht = ctypes.cdll.LoadLibrary(kht_lib_path)
+        kht.kht_wrapper.argtypes = [npct.ndpointer(dtype=np.double, ndim=2),
+                                    npct.ndpointer(dtype=np.byte, ndim=1),
+                                    ctypes.c_size_t,
+                                    ctypes.c_size_t,
+                                    ctypes.c_size_t,
+                                    ctypes.c_size_t,
+                                    ctypes.c_double,
+                                    ctypes.c_double,
+                                    ctypes.c_double,
+                                    ctypes.c_double]
+        kht.kht_wrapper.restype = ctypes.c_size_t
+        print("KHT loaded successfully")
+
+    # If loading KHT library fails get the OSError subclass
+    except Exception as e:
+        # If the file exists remove it
+        if os.path.exists(kht_lib_path):
+            if os.path.isfile(kht_lib_path):
+                os.unlink(kht_lib_path)
+
+        # Convert traceback into ASCII for logger safety
+        traceback_ascii = traceback.format_exc().encode("ascii", "replace").decode("ascii")
+        # Convert e into ASCII for logger safety
+        e_ascii = str(e).encode("ascii", "replace").decode("ascii")
+        print("Unable to load KHT library")
+        print(e_ascii)
+        print(traceback_ascii)
+        print("Rebuilding kht")
+        pythonSetup()
+        kht_lib_path = findBinaryPath(config, config.kht_build_dir, config.kht_binary_name,
+                                      config.kht_binary_extension)
+        print(f"Kernel Hough Transform library found at {kht_lib_path}")
+        # This thread can never reload the library correctly because of namespace contamination - so restart
+        os.execv(sys.executable, [sys.executable] + sys.argv)
+
+
+
+
+    config.kht_lib_path = kht_lib_path
 
     if parser.has_option(section, "vect_angle_thresh"):
         config.vect_angle_thresh = parser.getint(section, "vect_angle_thresh")
