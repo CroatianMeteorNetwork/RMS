@@ -1,3 +1,6 @@
+# cython: boundscheck=True
+# cython: wraparound=True
+# cython: cdivision=False
 """ Cython functions for 3D line detection. """
 
 from __future__ import division, print_function

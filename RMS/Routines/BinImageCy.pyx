@@ -1,3 +1,7 @@
+# cython: boundscheck=True
+# cython: wraparound=True
+# cython: cdivision=False
+
 import numpy as np
 # import cv2
 

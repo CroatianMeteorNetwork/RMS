@@ -1,3 +1,6 @@
+# cython: boundscheck=True
+# cython: wraparound=True
+# cython: cdivision=False
 """ Cythonized functions for saturation correction. """
 
 
