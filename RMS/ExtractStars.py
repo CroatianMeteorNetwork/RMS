@@ -579,7 +579,7 @@ def fitPSF(img, img_median, x_init, y_init, gamma=1.0, segment_radius=4, roundne
         star_seg = img[y_min:y_max, x_min:x_max]
 
         # Create x and y indices
-        y_ind, x_ind = np.indices(star_seg.shape)
+        y_ind, x_ind = np.indices(star_seg.shape, dtype=np.int32)
 
         # Estimate saturation level from image type
         saturation = (2**bit_depth - 1)*np.ones_like(y_ind)
