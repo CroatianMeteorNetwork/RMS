@@ -31,7 +31,7 @@ cdef extern from "math.h":
 @cython.cdivision(True) # Don't check for zero division
 cdef float line3DDistance_simple(int x1, int y1, int z1, int x2, int y2, int z2, int x0, int y0, int z0):
     """ Calculate distance from line to a point in 3D using simple operations.
-    
+
     @param x1: X coordinate of first point representing line
     @param y1: Y coordinate of first point representing line
     @param z1: Z coordinate of first point representing line
@@ -41,7 +41,7 @@ cdef float line3DDistance_simple(int x1, int y1, int z1, int x2, int y2, int z2,
     @param x0: X coordinate of a point whose distance is to be calculated
     @param y0: Y coordinate of a point whose distance is to be calculated
     @param z0: Z coordinate of a point whose distance is to be calculated
-    
+
     @return: squared distance
     """
 
@@ -49,20 +49,18 @@ cdef float line3DDistance_simple(int x1, int y1, int z1, int x2, int y2, int z2,
     # np.linalg.norm(np.cross((point0 - point1), (point0 - point2))) / np.linalg.norm(point2 - point1)
 
     # Length of vector in the numerator
-    cdef int dx1 = x0 - x1
-    cdef int dy1 = y0 - y1
-    cdef int dz1 = z0 - z1
+    cdef long long dx1 = x0 - x1
+    cdef long long dy1 = y0 - y1
+    cdef long long dz1 = z0 - z1
 
-    cdef int dx2 = x0 - x2
-    cdef int dy2 = y0 - y2
-    cdef int dz2 = z0 - z2
+    cdef long long dx2 = x0 - x2
+    cdef long long dy2 = y0 - y2
+    cdef long long dz2 = z0 - z2
 
-    
-
-    cdef int n_len = (dx1*dy2 - dx2*dy1)**2 + (dx2*dz1 - dx1*dz2)**2 + (dy1*dz2 - dy2*dz1)**2
+    cdef long long n_len = (dx1*dy2 - dx2*dy1)**2 + (dx2*dz1 - dx1*dz2)**2 + (dy1*dz2 - dy2*dz1)**2
 
     # Length of denominator vector
-    cdef int d_len = (x2 - x1)**2 + (y2 - y1)**2 + (z2 - z1)**2
+    cdef long long d_len = (x2 - x1)**2 + (y2 - y1)**2 + (z2 - z1)**2
 
     cdef float result = (<float> n_len) / (<float> d_len)
 
@@ -71,20 +69,24 @@ cdef float line3DDistance_simple(int x1, int y1, int z1, int x2, int y2, int z2,
 
 
 
-cdef int point3DDistance(int x1, int y1, int z1, int x2, int y2, int z2):
+cdef long long point3DDistance(int x1, int y1, int z1, int x2, int y2, int z2):
     """ Calculate distance between two points in 3D space.
-    
+
     @param x1: X coordinate of first point
     @param y1: Y coordinate of first point
     @param z1: Z coordinate of first point
     @param x2: X coordinate of second point
     @param y2: Y coordinate of second point
     @param z2: Z coordinate of second point
-    
+
     @return: squared distance
     """
 
-    return (x2 - x1)**2 + (y2 - y1)**2 + (z2 - z1)**2
+    cdef long long dx = x2 - x1
+    cdef long long dy = y2 - y1
+    cdef long long dz = z2 - z1
+
+    return dx*dx + dy*dy + dz*dz
 
 
 
@@ -152,6 +154,7 @@ def getAllPoints(np.ndarray[UINT16_TYPE_t, ndim=2] point_list, x1, y1, z1, x2, y
         """
 
         cdef int x3, y3, z3, x_prev, y_prev, z_prev, z
+        cdef int arr_size = max_line_points.shape[0]
 
         x_prev, y_prev, z_prev = x1, y1, z1
 
@@ -169,6 +172,10 @@ def getAllPoints(np.ndarray[UINT16_TYPE_t, ndim=2] point_list, x1, y1, z1, x2, y
 
                 # Calculate the gap from the previous point and reject the solution if the point is too far
                 if point3DDistance(x_prev, y_prev, z_prev, x3, y3, z3) > gap_threshold:
+                    break
+
+                # Stop if the output array is full
+                if i >= arr_size:
                     break
 
                 max_line_points[i,0] = x3
