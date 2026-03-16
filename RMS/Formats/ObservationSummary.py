@@ -1340,9 +1340,7 @@ def finalizeObservationSummary(config, night_data_dir, platepar=None):
         addObsParam(obs_db_conn, "repository_lag_remote_days", "Not determined")
 
     # Scan log files for tracebacks during this session
-    traceback_count = countTracebacksInLogs(config)
-    if traceback_count > 0:
-        addObsParam(obs_db_conn, "traceback_count", traceback_count)
+    addObsParam(obs_db_conn, "traceback_count", countTracebacksInLogs(config))
 
     obs_db_conn.close()
 
