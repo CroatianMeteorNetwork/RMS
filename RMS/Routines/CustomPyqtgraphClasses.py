@@ -70,16 +70,16 @@ class ScaledSizeHelper:
 
 
 def qmessagebox(message="", title="Error", message_type="warning"):
-    msg = QtGui.QMessageBox()
+    msg = QtWidgets.QMessageBox()
     if message_type == "warning":
-        msg.setIcon(QtGui.QMessageBox.Warning)
+        msg.setIcon(QtWidgets.QMessageBox.Warning)
     elif message_type == "error":
-        msg.setIcon(QtGui.QMessageBox.Critical)
+        msg.setIcon(QtWidgets.QMessageBox.Critical)
     else:
-        msg.setIcon(QtGui.QMessageBox.Information)
+        msg.setIcon(QtWidgets.QMessageBox.Information)
     msg.setText(message)
     msg.setWindowTitle(title)
-    msg.setStandardButtons(QtGui.QMessageBox.Ok)
+    msg.setStandardButtons(QtWidgets.QMessageBox.Ok)
     msg.exec_()
 
 
