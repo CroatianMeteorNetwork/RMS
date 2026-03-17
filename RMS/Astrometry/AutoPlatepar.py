@@ -738,7 +738,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Auto-fit platepar from CALSTARS data")
     parser.add_argument("dir_path", help="Path to directory with CALSTARS file")
-    parser.add_argument("-c", "--config", help="Path to config file", default=None)
+    parser.add_argument("-c", "--config", nargs=1, metavar='CONFIG_PATH', type=str, help="Path to config file", default=None)
 
     # Fitting parameters (matching SkyFit2 defaults)
     parser.add_argument("--distortion", default=DEFAULT_DISTORTION_TYPE,
@@ -763,7 +763,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # Load config
-    config = cr.loadConfigFromDirectory(args.config if args.config else '.', args.dir_path)
+    config = cr.loadConfigFromDirectory(args.config if args.config is not None else '.', args.dir_path)
 
     # Load star catalog
     catalog_stars = loadCatalogStars(config, config.catalog_mag_limit)
