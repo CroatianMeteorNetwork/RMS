@@ -1773,6 +1773,37 @@ class BufferedCapture(Process):
 
             log.debug("Process-specific initialization complete")
 
+            # Prevent GStreamer and other grandchild processes from inheriting the
+            # large shared frame buffers (~506 MB each at 1080p). These buffers are
+            # only needed by BufferedCapture and Compressor; any subprocess forked
+            # from here (e.g. GStreamer NVENC encoder, RawFrameSaver) does not need
+            # them. The munmap only runs in the CHILD after fork, not here.
+            try:
+                _libc = ctypes.CDLL('libc.so.6', use_errno=True)
+                _libc.munmap.restype = ctypes.c_int
+                _libc.munmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t]
+
+                bufsToUnmap = []
+                for arr in (self.array1, self.array2):
+                    try:
+                        bufsToUnmap.append((arr.ctypes.data, arr.nbytes))
+                    except Exception:
+                        pass
+
+                if bufsToUnmap:
+                    def unmapFrameBuffersInChild():
+                        for addr, sz in bufsToUnmap:
+                            _libc.munmap(addr, sz)
+
+                    os.register_at_fork(after_in_child=unmapFrameBuffersInChild)
+                    log.debug("Registered at_fork handler to unmap {:d} frame buffers "
+                              "({:.0f} MB) in grandchild processes".format(
+                                  len(bufsToUnmap),
+                                  sum(s for _, s in bufsToUnmap) / (1024*1024)))
+
+            except Exception as e:
+                log.warning("Could not register at_fork handler for frame buffer cleanup: {}".format(e))
+
             # Main capture loop
             while not self.exit.is_set() and not self.initVideoDevice():
                 # Update heartbeat during connection attempts to show we're still alive
@@ -2186,6 +2217,25 @@ class BufferedCapture(Process):
                             # Force device re-initialization by releasing and reconnecting
                             log.info("Releasing resources to re-initialize video device with GStreamer")
                             self.releaseResources()
+
+                            # If transitioning to daytime, release the compression frame
+                            # buffers back to the OS. They are not used during the day
+                            # (frame writes are skipped in daytime mode) and would otherwise
+                            # sit in swap until nightfall. MADV_DONTNEED drops the pages
+                            # immediately; they get zero-filled on next write at no cost.
+                            if current_daytime:
+                                try:
+                                    _libc = ctypes.CDLL('libc.so.6', use_errno=True)
+                                    _libc.madvise.restype = ctypes.c_int
+                                    _libc.madvise.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int]
+                                    MADV_DONTNEED = 4
+                                    for arr in (self.array1, self.array2):
+                                        _libc.madvise(arr.ctypes.data, arr.nbytes, MADV_DONTNEED)
+                                    log.info("Released compression frame buffers ({:.0f} MB) back to OS".format(
+                                        sum(a.nbytes for a in (self.array1, self.array2)) / (1024*1024)))
+                                except Exception as e:
+                                    log.warning("Could not release frame buffers: {}".format(e))
+
                             wait_for_reconnect = True
                             break
 
