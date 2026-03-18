@@ -12668,7 +12668,11 @@ class PlateTool(QtWidgets.QMainWindow):
             else:
 
                 print("The CALSTARS file is missing, trying to generate it automatically...")
-                calstars_list = extractStarsAndSave(self.config, self.dir_path)
+                try:
+                    calstars_list = extractStarsAndSave(self.config, self.dir_path)
+                except Exception as e:
+                    print("ERROR: Star extraction failed: {:s}".format(str(e)))
+                    calstars_list = []
 
 
         else:

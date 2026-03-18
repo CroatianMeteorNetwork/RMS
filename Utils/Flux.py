@@ -1781,7 +1781,11 @@ def sensorCharacterization(config, flux_config, dir_path, meteor_data, default_f
         log.info("Rerunning star detection...")
 
         # Run star extraction again, and now FWHM will be computed
-        calstars_list = extractStarsAndSave(config, dir_path)
+        try:
+            calstars_list = extractStarsAndSave(config, dir_path)
+        except Exception as e:
+            log.error("Star extraction failed: {:s}".format(str(e)))
+            calstars_list = []
 
         # Check for a minimum of detected stars
         for ff_name, star_data in calstars_list:

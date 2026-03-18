@@ -390,7 +390,12 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
         if verbose:
             print("No CALSTARS file found, generating automatically...")
 
-        calstars_list = extractStarsAndSave(config, dir_path)
+        try:
+            calstars_list = extractStarsAndSave(config, dir_path)
+        except Exception as e:
+            if verbose:
+                print("ERROR: Failed to generate CALSTARS file: {:s}".format(str(e)))
+            return None, None, None
 
         if calstars_list is None or len(calstars_list) == 0:
             if verbose:
@@ -550,7 +555,7 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
 
         if verbose:
             print("ERROR: Astrometry.net failed to find a solution")
-        return None, None, best_ff
+        return None, [], best_ff
 
     # Extract solution
     ra, dec, rot_standard, scale, fov_w, fov_h, matched_star_data, solution_info = solution
@@ -607,7 +612,7 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
     except Exception as e:
         if verbose:
             print("ERROR: NN fitting failed: {:s}".format(str(e)))
-        return None, None, best_ff
+        return None, [], best_ff
 
     # Build paired_stars from NN fit results
     paired_stars = PairedStars()
@@ -637,7 +642,7 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
     if len(paired_stars) < 10:
         if verbose:
             print("ERROR: Not enough matched stars for final fit ({:d} < 10)".format(len(paired_stars)))
-        return None, None, best_ff
+        return None, [], best_ff
 
     # Apply star filtering (matching SkyFit2)
     if verbose:
@@ -660,7 +665,7 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
     if len(paired_stars) < 10:
         if verbose:
             print("ERROR: Not enough stars after filtering ({:d} < 10)".format(len(paired_stars)))
-        return None, None, best_ff
+        return None, [], best_ff
 
     # Apply USER's settings for final fit
     if verbose:
@@ -689,7 +694,7 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
     except Exception as e:
         if verbose:
             print("ERROR: Final fit failed: {:s}".format(str(e)))
-        return None, None, best_ff
+        return None, [], best_ff
 
     if verbose:
         # Print full residuals report (matching SkyFit2 output)
