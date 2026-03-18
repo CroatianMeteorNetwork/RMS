@@ -36,6 +36,7 @@ from RMS.Formats.Platepar import getCatalogStarsImagePositions
 from RMS.Formats import CALSTARS, StarCatalog
 from RMS.Formats.Platepar import Platepar
 from RMS.Formats.FFfile import filenameToDatetime
+from RMS.ExtractStars import extractStarsAndSave
 from RMS.Routines.MaskImage import getMaskFile
 from RMS.Math import angularSeparation, RMSD
 
@@ -387,14 +388,24 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
 
     if calstars_file is None:
         if verbose:
-            print("ERROR: No CALSTARS file found in directory")
-        return None, None, None
+            print("No CALSTARS file found, generating automatically...")
 
-    calstars_list, chunk_frames = CALSTARS.readCALSTARS(dir_path, calstars_file)
+        calstars_list = extractStarsAndSave(config, dir_path)
+
+        if calstars_list is None or len(calstars_list) == 0:
+            if verbose:
+                print("ERROR: Failed to generate CALSTARS file")
+            return None, None, None
+
+    else:
+        calstars_list, chunk_frames = CALSTARS.readCALSTARS(dir_path, calstars_file)
     calstars = {ff_file: star_data for ff_file, star_data in calstars_list}
 
     if verbose:
-        print("Loaded CALSTARS: {:s} ({:d} frames)".format(calstars_file, len(calstars)))
+        if calstars_file is not None:
+            print("Loaded CALSTARS: {:s} ({:d} frames)".format(calstars_file, len(calstars)))
+        else:
+            print("Generated CALSTARS with {:d} frames".format(len(calstars)))
 
     img_width = config.width
     img_height = config.height
@@ -626,7 +637,7 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
     if len(paired_stars) < 10:
         if verbose:
             print("ERROR: Not enough matched stars for final fit ({:d} < 10)".format(len(paired_stars)))
-        return platepar, [], best_ff
+        return None, None, best_ff
 
     # Apply star filtering (matching SkyFit2)
     if verbose:
@@ -649,7 +660,7 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
     if len(paired_stars) < 10:
         if verbose:
             print("ERROR: Not enough stars after filtering ({:d} < 10)".format(len(paired_stars)))
-        return platepar, [], best_ff
+        return None, None, best_ff
 
     # Apply USER's settings for final fit
     if verbose:
@@ -678,8 +689,7 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
     except Exception as e:
         if verbose:
             print("ERROR: Final fit failed: {:s}".format(str(e)))
-        # Return the intermediate fit result
-        return platepar, [], best_ff
+        return None, None, best_ff
 
     if verbose:
         # Print full residuals report (matching SkyFit2 output)
