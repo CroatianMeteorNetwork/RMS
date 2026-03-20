@@ -5,6 +5,10 @@ from __future__ import print_function, division, absolute_import
 import os
 import zlib
 import sys
+import argparse
+
+from RMS.Math import angularSeparationDeg
+from RMS.Logger import LoggingManager, getLogger
 
 # Import the requests library for downloading the GMN star catalog
 try:
@@ -15,10 +19,139 @@ except ImportError:
     from urllib2 import URLError, HTTPError
 
 import numpy as np
+from scipy.spatial import cKDTree
 
 from RMS.Decorators import memoizeSingle
 from RMS.Misc import RmsDateTime
-from datetime import datetime
+from datetime import datetime, timezone
+
+J2000 = datetime(2000, 1, 1, 12, 0, 0).replace(tzinfo=timezone.utc)
+
+class Catalog:
+    """
+    Load a star catalogue, build a spherical KD-tree, and expose query methods.
+    """
+
+    def __init__(self, config, catalogue_time=None, ra_col=0, dec_col=1, mag_col=2, name_col=0, lim_mag=None):
+
+        """Initialise a catalog in a spherical tree object/
+
+        Arguments:
+            config[config]: RMS config instance.
+
+        Keyword Arguments:
+            catalogue_time: Time point for the catalogue generation if none build for now.
+            ra_col: Optional, default 0 - array column with ra data in degrees.
+            dec_col: Optional, default 1 - array column with dec data in degrees.
+            mag_col: Optional, default 2 - array column of magnitude data.
+            name_col: Optional, default 3 - array column of star names.
+
+        """
+
+        self.ra_col, self.dec_col, self.mag_col = ra_col, dec_col, mag_col
+        self.name_col = name_col
+
+        if catalogue_time is None:
+            catalogue_time = datetime.now(timezone.utc)
+
+        # Compute the number of years from J2000
+        years_from_J2000 = (catalogue_time - J2000).total_seconds() / (365.25 * 24 * 3600)
+
+
+        star_catalog_status = readStarCatalog(
+            config.star_catalog_path,
+            config.star_catalog_file,
+            lim_mag=np.inf,
+            years_from_J2000=years_from_J2000,
+            mag_band_ratios=config.star_catalog_band_ratios,
+            additional_fields=['preferred_name', 'common_name', 'bayer_name'])
+
+        pass
+
+        if not star_catalog_status:
+            print("Could not load star catalogue")
+
+        catalog_stars, _, config.star_catalog_band_ratios, extras = star_catalog_status
+
+
+        # Do some cleaning on the data - this is not required at present
+        maskFinite = np.isfinite(catalog_stars[:, 0:3]).all(axis=1)
+        maskRange = (
+                (catalog_stars[:, 0] >= 0.0) & (catalog_stars[:, 0] < 360.0) &  # RA
+                (catalog_stars[:, 1] >= -90.0) & (catalog_stars[:, 1] <= 90.0)  # Dec
+        )
+
+        mask = maskFinite & maskRange
+
+        self.cat = catalog_stars[mask]
+        self.names = extras['preferred_name'][mask]
+
+        # Convert to arrays of radians
+        ra, dec = np.radians(self.cat[:, ra_col]), np.radians(self.cat[:, dec_col])
+
+        # Build tree of spherical unit vectors
+        self.tree = cKDTree(np.column_stack((np.cos(dec) * np.cos(ra), np.cos(dec) * np.sin(ra), np.sin(dec))))
+
+    def queryRaDec(self, ra_deg, dec_deg, radius_deg=0.1, n_brightest=1):
+        """
+
+
+        Arguments:
+            ra_deg: [float] right ascension degrees
+            dec_deg: [float] declination degrees
+
+        Keyword Arguments:
+            radius_deg:[float] search radius degrees default 0.1
+            n_brightest: [int] number of stars to return, ordered by increasing magnitude, default 1
+
+        Returns:
+            [list of arrays]: [names, ra ,dec ,mag ,theta] theta is angular separation (degrees)
+        """
+
+        # Normalise inputs to arrays of radians
+        ra_deg, dec_deg = np.atleast_1d(ra_deg), np.atleast_1d(dec_deg)
+        ra, dec = np.radians(ra_deg), np.radians(dec_deg)
+
+        # Build query vectors
+        query_vectors = np.column_stack((np.cos(dec) * np.cos(ra),  np.cos(dec) * np.sin(ra), np.sin(dec)))
+
+        # Euclidean chord distance for spherical radius
+        ecd = 2 * np.sin(np.radians(radius_deg) / 2)
+
+        results = []
+        for i, (qvec, ra0, dec0) in enumerate(zip(query_vectors, ra_deg, dec_deg)):
+
+            # KD-tree search
+            result_index_on_full_catalogue = np.array(self.tree.query_ball_point(qvec, ecd), dtype=int)
+
+            if len(result_index_on_full_catalogue) == 0:
+                results.append(np.empty((0, 5), dtype=object))
+                continue
+
+            # Sort by magnitude ascending - brightest stars first
+            mags = self.cat[result_index_on_full_catalogue, self.mag_col]
+            chosen = result_index_on_full_catalogue[np.argsort(mags)[:n_brightest]]
+
+            # Extract fields
+            names = self.names[chosen].astype(str)
+            ras, decs = self.cat[chosen, self.ra_col].astype(float), self.cat[chosen, self.dec_col].astype(float)
+            mags = self.cat[chosen, self.mag_col].astype(float)
+
+
+            # Angular separation
+            thetas = angularSeparationDeg(ra0, dec0, ras, decs)
+
+            # Stack result for this query
+            row = np.column_stack((names, ras, decs, mags, thetas))
+
+            results.append(row)
+
+        # If input was scalar, return a list with a single entry of an array
+        if len(ra_deg) == 1:
+            return [results[0]]
+
+        return results
+
 
 
 def downloadCatalog(url, dir_path, file_name):
@@ -339,6 +472,8 @@ def loadGMNStarCatalog(file_path,
         # Stars where ALL requested bands are missing get ~75 mag and are filtered by LM cut
         total_flux = np.maximum(total_flux, 1e-30)
         synthetic_mag = -2.5 * np.log10(total_flux)
+        if lim_mag is None:
+            lim_mag = np.inf
         mag_mask = synthetic_mag <= lim_mag
 
     else:
@@ -638,16 +773,105 @@ def readStarCatalog(dir_path, file_name, years_from_J2000=0, lim_mag=None,
 
     return star_data, mag_band_string, mag_band_ratios
 
+def testCatQueryRaDec():
 
+
+    test_star_names = np.array([
+        "Sirius", "Canopus", "Alpha Centauri", "Arcturus", "Vega",
+        "Capella", "Rigel", "Procyon", "Achernar", "Betelgeuse",
+        "Altair", "Aldebaran", "Antares", "Spica", "Fomalhaut",
+        "Deneb", "Pollux", "Castor", "Regulus", "Bellatrix"
+    ])
+
+    test_star_mag = np.array([
+        -1.46, -0.74, -0.27, -0.05, 0.03,
+        0.08, 0.18, 0.38, 0.46, 0.50,
+        0.77, 0.85, 1.06, 1.04, 1.16,
+        1.25, 1.14, 1.58, 1.35, 1.64
+    ])
+
+
+    test_star_ra_deg = np.array([
+        101.25, 96.00, 220.00, 214.00, 279.25,
+        79.00, 78.75, 114.75, 24.50, 88.75,
+        297.75, 69.00, 247.25, 201.25, 344.50,
+        310.25, 116.25, 113.75, 152.00, 81.25
+    ])
+
+    test_star_dec_deg = np.array([
+        -16.7, -52.7, -60.8, 19.2, 38.8,
+        45.9, -8.2, 5.2, -57.2, 7.4,
+        8.9, 16.5, -26.4, -11.2, -29.6,
+        45.3, 28.0, 31.9, 12.0, 6.3
+    ])
+
+    cat = Catalog(config, lim_mag=6)
+    print(serializeQueryResults(cat.queryRaDec(test_star_ra_deg, test_star_dec_deg, radius_deg=2, n_brightest=3), test_star_names, test_star_mag))
+
+
+def serializeQueryResults(results, star_names=None, star_mag=None):
+
+    output = []
+    if len(results) == 0:
+        output.append("\tNo results returned")
+        return output
+
+    last_searched_name = None
+    for i, r in enumerate(results):
+        for name, ra, dec, mag, theta in r:
+            if star_mag is not None:
+                searched_mag = star_mag[i]
+            if star_names is not None:
+                searched_name = star_names[i]
+                if last_searched_name != searched_name:
+                    output.append(f"\n\tNew search for {searched_name:20} of magnitude {float(searched_mag):4.2f}")
+                    last_searched_name = searched_name
+
+
+            output.append(
+                f"\t\tReturned name: {name:20s} RA={float(ra):8.3f}  Dec={float(dec):8.3f}  Mag={float(mag):5.2f}  Sep={float(theta):6.3f}")
+
+    return "\n".join(output) + "\n\n"
 
 
 if __name__ == "__main__":
 
     import RMS.ConfigReader as cr
 
-    # Load the configuration file
-    config = cr.parse(".config")
 
-    # Test open the file
-    print(readStarCatalog(config.star_catalog_path, config.star_catalog_file, \
-        mag_band_ratios=config.star_catalog_band_ratios))
+    ### COMMAND LINE ARGUMENTS
+
+    # Init the command line arguments parser
+    arg_parser = argparse.ArgumentParser(description=""" Test routines for catalogue""")
+
+
+    arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str, \
+        help="Path to a config file which will be used instead of the default one.")
+
+    arg_parser.add_argument('--radec', metavar='radec', nargs=3, help="""Search in radec space (degrees) RA DEC Radius""")
+
+    arg_parser.add_argument('-t', '--test', action="store_true", help="""Run tests""")
+
+    # Parse the command line arguments
+    cml_args = arg_parser.parse_args()
+
+    # Load the config file
+    config = cr.loadConfigFromDirectory(cml_args.config, os.path.abspath('.'))
+
+    #Initialize the logger
+    #log_manager = LoggingManager()
+    #log_manager.initLogging(config)
+
+
+    #Get the logger handle
+    #log = getLogger("rmslogger")
+
+    if cml_args.test:
+        test = testCatQueryRaDec()
+
+
+    if cml_args.radec is not None:
+        print(f"Querying RA={cml_args.radec[0]} DEC={cml_args.radec[1]} degrees")
+        cat = Catalog(config, lim_mag=10)
+        results = cat.queryRaDec(float(cml_args.radec[0]), float(cml_args.radec[1]), float(cml_args.radec[2]))
+        print(serializeQueryResults(results))
