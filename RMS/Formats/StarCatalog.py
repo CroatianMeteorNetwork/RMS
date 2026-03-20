@@ -6,6 +6,7 @@ import os
 import zlib
 import sys
 import argparse
+import time
 
 from RMS.Math import angularSeparationDeg
 from RMS.Logger import LoggingManager, getLogger
@@ -94,7 +95,7 @@ class Catalog:
 
     def queryRaDec(self, ra_deg, dec_deg, radius_deg=0.1, n_brightest=1):
         """
-
+        Tree search for ra dec coordinates, search is in a wrapped Euclidean space
 
         Arguments:
             ra_deg: [float] right ascension degrees
@@ -806,7 +807,7 @@ def testCatQueryRaDec():
     ])
 
     cat = Catalog(config, lim_mag=6)
-    print(serializeQueryResults(cat.queryRaDec(test_star_ra_deg, test_star_dec_deg, radius_deg=2, n_brightest=3), test_star_names, test_star_mag))
+    log.info(serializeQueryResults(cat.queryRaDec(test_star_ra_deg, test_star_dec_deg, radius_deg=2, n_brightest=3), test_star_names, test_star_mag))
 
 
 def serializeQueryResults(results, star_names=None, star_mag=None):
@@ -848,7 +849,7 @@ if __name__ == "__main__":
     arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str, \
         help="Path to a config file which will be used instead of the default one.")
 
-    arg_parser.add_argument('--radec', metavar='radec', nargs=3, help="""Search in radec space (degrees) RA DEC Radius""")
+    arg_parser.add_argument('--radec', metavar='radec', nargs=4, help="""Search in radec space (degrees) RA DEC Radius Lim Mag""")
 
     arg_parser.add_argument('-t', '--test', action="store_true", help="""Run tests""")
 
@@ -859,19 +860,23 @@ if __name__ == "__main__":
     config = cr.loadConfigFromDirectory(cml_args.config, os.path.abspath('.'))
 
     #Initialize the logger
-    #log_manager = LoggingManager()
-    #log_manager.initLogging(config)
+    log_manager = LoggingManager()
+    log_manager.initLogging(config)
 
 
     #Get the logger handle
-    #log = getLogger("rmslogger")
+    log = getLogger("rmslogger")
 
     if cml_args.test:
         test = testCatQueryRaDec()
 
 
     if cml_args.radec is not None:
-        print(f"Querying RA={cml_args.radec[0]} DEC={cml_args.radec[1]} degrees")
-        cat = Catalog(config, lim_mag=10)
-        results = cat.queryRaDec(float(cml_args.radec[0]), float(cml_args.radec[1]), float(cml_args.radec[2]))
-        print(serializeQueryResults(results))
+        ra, dec, radius = float(cml_args.radec[0]), float(cml_args.radec[1]), float(cml_args.radec[2])
+        lim_mag = float(cml_args.radec[3])
+        log.info(f"Querying RA={ra:.3f} DEC={dec:.3f} Radius={radius:.3f} degrees Limiting mag={lim_mag:.1f}")
+        cat = Catalog(config, lim_mag=float(cml_args.radec[2]))
+        results = cat.queryRaDec(ra, dec, lim_mag)
+        log.info(serializeQueryResults(results))
+        # Allow logger time to write
+        time.sleep(1)
