@@ -457,6 +457,12 @@ class ImageItem(pg.ImageItem):
             kwargs: other __init__ arguments of pg.ImageItem
         """
         self.img_handle = img_handle
+
+        if 'saturation_threshold' in kwargs:
+            self.saturation_threshold = kwargs.pop('saturation_threshold')
+        else:
+            self.saturation_threshold = None
+
         pg.ImageItem.__init__(self, image=None, **kwargs)
 
         self.saturation_mask = saturation_mask
@@ -556,24 +562,32 @@ class ImageItem(pg.ImageItem):
 
             img = args[0]
 
-            # Apply a saturation mask for 8-bit data only, if given
+            # Apply a saturation mask, if given
             if self.saturation_mask is not None:
-                if 8*img.itemsize == 8:
+                
+                # Use the saturation threshold passed from SkyFit, or fallback to config/default
+                saturation_threshold = None
+                
+                if self.saturation_threshold is not None:
+                    saturation_threshold = self.saturation_threshold
+                elif self.img_handle is not None and hasattr(self.img_handle, 'config') and hasattr(self.img_handle.config, 'bit_depth'):
+                    saturation_threshold = int(round(0.98*(2**self.img_handle.config.bit_depth - 1)))
+                else:
+                    saturation_threshold = int(round(0.98*(2**(8*img.itemsize) - 1)))
 
-                    # Assume everything with levels > 250 saturates
-                    levels250 = img > 250
+                saturates = img > saturation_threshold
 
-                    self.saturation_mask.image[:, :] = 0
-                    
-                    # Set red colour on for saturation
-                    self.saturation_mask.image[levels250, 0] = 255
-                    self.saturation_mask.image[levels250, 1] = 0
-                    self.saturation_mask.image[levels250, 2] = 0
+                self.saturation_mask.image[:, :] = 0
+                
+                # Set red colour on for saturation
+                self.saturation_mask.image[saturates, 0] = 255
+                self.saturation_mask.image[saturates, 1] = 0
+                self.saturation_mask.image[saturates, 2] = 0
 
-                    # Set alpha on to turn on the mask, just a light shading
-                    self.saturation_mask.image[levels250, 3] = 32
+                # Set alpha on to turn on the mask, just a light shading
+                self.saturation_mask.image[saturates, 3] = 32
 
-                    self.saturation_mask.setImage(self.saturation_mask.image)
+                self.saturation_mask.setImage(self.saturation_mask.image)
 
 
         super().setImage(*args, **kwargs)

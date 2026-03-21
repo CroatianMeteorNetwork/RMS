@@ -3170,7 +3170,8 @@ class PlateTool(QtWidgets.QMainWindow):
         # Add main image
         self.img_type_flag = 'avepixel'
         self.img = ImageItem(img_handle=self.img_handle, gamma=gamma, invert=invert,
-                             saturation_mask=self.saturation_mask)
+                             saturation_mask=self.saturation_mask,
+                             saturation_threshold=getattr(self, 'saturation_threshold', None))
         self.img_frame.addItem(self.img)
         self.img_frame.autoRange(padding=0)
 
@@ -6842,11 +6843,29 @@ class PlateTool(QtWidgets.QMainWindow):
         # Set the fit weights so that everyting with SNR > 10 is weighted the maximum value
         weights = np.clip(snr_list, 0, 10)/10.0
 
+        # We need at least 3 stars for a robust photometry fit.
+        # Preferably, saturated and highly variable stars are excluded from the fit.
+        # First, let's compute the total number of stars and how many remain if we exclude both.
+        total_stars = len(saturation_list)
+        exclude_both = [sat or var for sat, var in zip(saturation_list, variable_star_list)]
+        good_stars_count = total_stars - sum(exclude_both)
+        
+        if good_stars_count >= 3:
+            # We have enough stars, exclude both saturated and variable stars
+            exclude_list = exclude_both
+        else:
+            # Not enough stars. Check if we have enough by only excluding saturated stars
+            non_saturated_count = total_stars - sum(saturation_list)
+            if non_saturated_count >= 3:
+                # Include variable stars in the fit, but still exclude saturated stars
+                exclude_list = saturation_list
+            else:
+                # Still not enough. We have to include all stars to ensure the fit works
+                exclude_list = [False] * total_stars
+
         # Fit the photometric offset (disable vignetting fit if a flat is used)
         # The fit is going to be weighted by the signal to noise ratio to reduce the influence of
         #  faint stars with large errors
-        # Saturated stars and highly variable stars are excluded from the fit
-        exclude_list = [sat or var for sat, var in zip(saturation_list, variable_star_list)]
         photom_params, self.photom_fit_stddev, self.photom_fit_resids = photometryFit(
             px_intens_list, radius_list, catalog_mags, fixed_vignetting=fixed_vignetting,
             weights=weights, exclude_list=exclude_list)
