@@ -778,6 +778,19 @@ def processFramesFiles(config):
         remove_source=(config.frame_cleanup == "delete")
     )
 
+    # -- 4. prune empty directories left behind by per-block cleanup --------
+    # Per-block cleanup may fail to rmdir shared parent directories (e.g. year
+    # or day dirs) when sibling blocks still have files at the time of pruning.
+    # Walk bottom-up and remove any empty subdirectories under frame_dir.
+    if config.frame_cleanup in ('delete', 'tar'):
+        for root, dirs, files in os.walk(frame_dir, topdown=False):
+            if root == frame_dir:
+                continue
+            try:
+                os.rmdir(root)  # succeeds only if empty
+            except OSError:
+                pass
+
     return archive_paths
 
 
