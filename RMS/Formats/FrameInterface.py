@@ -1658,7 +1658,7 @@ class InputTypeImages(object):
 
 
             # Load info for FRIPON all-sky cameras
-            else:
+            elif ("PROGRAM" in self.fripon_header) and (self.fripon_header["PROGRAM"].strip() == "FreeTure"):
 
                 # Set station parameters if in the FRIPON mode
                 self.config.stationID = self.fripon_header["TELESCOP"].strip()
@@ -1676,6 +1676,10 @@ class InputTypeImages(object):
 
                 # Set magnitude limit
                 self.config.catalog_mag_limit = 3.5
+
+            # Non-FreeTrue fit file
+            else:
+                pass
 
 
 
