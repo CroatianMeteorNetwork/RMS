@@ -95,8 +95,19 @@ regex_for() {
 should_reboot() {
     if [[ "$REBOOT_MODE" == "always" ]]; then
         return 0
-    elif [[ "$REBOOT_MODE" == "if-needed" && -f /var/run/reboot-required ]]; then
-        return 0
+    elif [[ "$REBOOT_MODE" == "if-needed" ]]; then
+        # Ubuntu/Debian: flag file created by update-notifier-common or linux-base ≥4.13
+        if [[ -f /var/run/reboot-required ]]; then
+            return 0
+        fi
+        # Fallback: compare running kernel to latest installed (works on RPi OS / Debian)
+        local running latest
+        running="$(uname -r)"
+        latest="$(ls /lib/modules/ | sort -V | tail -1)"
+        if [[ -n "$latest" && "$running" != "$latest" ]]; then
+            log_message "Kernel mismatch: running $running, installed $latest"
+            return 0
+        fi
     fi
     return 1
 }
