@@ -89,6 +89,93 @@ regex_for() {
     echo '^/bin/bash[[:space:]]+.*/StartCapture\.sh[[:space:]]+'"$1"'([[:space:]]|$)'
 }
 
+# ------------------------------------------------------------
+#  should_reboot() – check if system reboot is requested
+# ------------------------------------------------------------
+should_reboot() {
+    if [[ "$REBOOT_MODE" == "always" ]]; then
+        return 0
+    elif [[ "$REBOOT_MODE" == "if-needed" && -f /var/run/reboot-required ]]; then
+        return 0
+    fi
+    return 1
+}
+
+# ------------------------------------------------------------
+#  stop_stations() – gracefully stop all running RMS stations
+# ------------------------------------------------------------
+stop_stations() {
+    if [[ ${#RunList[@]} -gt 0 ]]; then
+        log_message "Gracefully stopping ${#RunList[@]} running RMS stations: ${RunList[*]}"
+
+        # First, try graceful shutdown with SIGTERM for each station (StartCapture forwards as SIGINT)
+        for station in "${RunList[@]}"; do
+            log_message "Sending SIGTERM to all processes for station $station..."
+            pattern=$(regex_for "$station")
+            if pkill -f -TERM -- "$pattern" 2>/dev/null; then
+                log_message "Sent SIGTERM to station $station processes"
+            else
+                log_message "Warning: No processes found for station $station (may have already exited)"
+            fi
+        done
+
+        # Wait for processes to shut down gracefully (with reasonable timeout)
+        SHUTDOWN_TIMEOUT=600  # 10 minutes - adjust based on your typical shutdown time
+        WAIT_INTERVAL=5
+        elapsed=0
+
+        log_message "Waiting up to ${SHUTDOWN_TIMEOUT} seconds for graceful shutdown..."
+
+        while [[ $elapsed -lt $SHUTDOWN_TIMEOUT ]]; do
+            # Check if any station processes are still running
+            still_running=()
+            for station in "${RunList[@]}"; do
+                pattern=$(regex_for "$station")
+                if pgrep -f -- "$pattern" >/dev/null 2>&1; then
+                    still_running+=("$station")
+                fi
+            done
+
+            if [[ ${#still_running[@]} -eq 0 ]]; then
+                log_message "All station processes shut down gracefully after ${elapsed} seconds"
+                break
+            fi
+
+            log_message "Still waiting for ${#still_running[@]} stations to shutdown: ${still_running[*]} (${elapsed}s elapsed)"
+            sleep $WAIT_INTERVAL
+            elapsed=$((elapsed + WAIT_INTERVAL))
+        done
+
+        # Force kill any remaining processes if timeout reached
+        final_check=()
+        for station in "${RunList[@]}"; do
+            pattern=$(regex_for "$station")
+            if pgrep -f -- "$pattern" >/dev/null 2>&1; then
+                final_check+=("$station")
+            fi
+        done
+
+        if [[ ${#final_check[@]} -gt 0 ]]; then
+            log_message "Timeout reached. Force killing ${#final_check[@]} remaining stations: ${final_check[*]}"
+            for station in "${final_check[@]}"; do
+                log_message "Force killing all processes for station $station..."
+                pattern=$(regex_for "$station")
+                if pkill -f -KILL -- "$pattern" 2>/dev/null; then
+                    log_message "Force killed station $station processes"
+                else
+                    log_message "Warning: Could not kill processes for station $station (may have already exited)"
+                fi
+            done
+
+            # Give a moment for force kills to take effect
+            sleep 2
+        fi
+
+    else
+        log_message "No running RMS stations found"
+    fi
+}
+
 # Log script start
 log_message "GRMSUpdater.sh started with args: $*"
 
@@ -103,6 +190,7 @@ fi
 # Parse command line arguments
 FORCE_UPDATE=false
 PREFERRED_TERM="lxterminal"     # default terminal
+REBOOT_MODE="none"
 POSITIONAL_ARGS=()
 
 while [[ $# -gt 0 ]]; do
@@ -113,6 +201,14 @@ while [[ $# -gt 0 ]]; do
             ;;
         --force)
             FORCE_UPDATE=true
+            shift
+            ;;
+        --reboot-if-needed)
+            REBOOT_MODE="if-needed"
+            shift
+            ;;
+        --reboot)
+            REBOOT_MODE="always"
             shift
             ;;
         *)
@@ -181,6 +277,16 @@ else
     log_message "No DISPLAY available - GUI terminals will fail, consider using --term tmux"
 fi
 
+# Find running stations by looking for StartCapture.sh processes
+mapfile -t RunList < <(
+    pgrep -f "Scripts/MultiCamLinux/StartCapture.sh" | while read -r pid; do
+        cmdline=$(ps -p "$pid" -o args= 2>/dev/null || continue)
+        if [[ "$cmdline" =~ Scripts/MultiCamLinux/StartCapture\.sh[[:space:]]+([[:alnum:]]{6}) ]]; then
+            echo "${BASH_REMATCH[1]}"
+        fi
+    done | sort -u
+)
+
 # Check if updates are actually needed before disrupting running processes (unless --force is used)
 if [[ "$FORCE_UPDATE" != "true" ]]; then
     cd "$RMS_DIR" || { log_message "Error: RMS directory not found at $RMS_DIR"; exit 1; }
@@ -195,6 +301,18 @@ if [[ "$FORCE_UPDATE" != "true" ]]; then
         MODIFIED_FILES=$(git diff --name-only | grep -v -E '^(\.config|camera_settings\.json)$' || true)
         
         if [[ -n "$REMOTE_SHA" && "$REMOTE_SHA" == "$LOCAL_SHA" && -z "$MODIFIED_FILES" ]]; then
+            if should_reboot; then
+                if sudo -n shutdown --help >/dev/null 2>&1; then
+                    log_message "No RMS update needed, but system reboot is required"
+                    stop_stations
+                    log_message "Rebooting system..."
+                    sudo shutdown -r now
+                    exit 0
+                else
+                    log_message "WARNING: System reboot needed but sudo shutdown not available - skipping reboot"
+                    log_message "Configure /etc/sudoers.d/rms-reboot to enable passwordless shutdown"
+                fi
+            fi
             log_message "RMS is already up to date ($CURRENT_BRANCH: $LOCAL_SHA) and no tracked file modifications - no need to restart stations"
             log_message "Use --force to restart stations anyway"
             log_message "GRMSUpdater.sh completed successfully (early exit - no updates needed)"
@@ -214,86 +332,8 @@ else
     cd "$RMS_DIR" || { log_message "Error: RMS directory not found at $RMS_DIR"; exit 1; }
 fi
 
-# Find running stations by looking for StartCapture.sh processes
-mapfile -t RunList < <(
-    pgrep -f "Scripts/MultiCamLinux/StartCapture.sh" | while read -r pid; do
-        cmdline=$(ps -p "$pid" -o args= 2>/dev/null || continue)
-        if [[ "$cmdline" =~ Scripts/MultiCamLinux/StartCapture\.sh[[:space:]]+([[:alnum:]]{6}) ]]; then
-            echo "${BASH_REMATCH[1]}"
-        fi
-    done | sort -u
-)
-
-# Only stop processes if we actually need to update
-if [[ ${#RunList[@]} -gt 0 ]]; then
-    log_message "Gracefully stopping ${#RunList[@]} running RMS stations for update: ${RunList[*]}"
-    
-    # First, try graceful shutdown with SIGTERM for each station (StartCapture forwards as SIGINT)
-    for station in "${RunList[@]}"; do
-        log_message "Sending SIGTERM to all processes for station $station..."
-        pattern=$(regex_for "$station")
-        if pkill -f -TERM -- "$pattern" 2>/dev/null; then
-            log_message "Sent SIGTERM to station $station processes"
-        else
-            log_message "Warning: No processes found for station $station (may have already exited)"
-        fi
-    done
-    
-    # Wait for processes to shut down gracefully (with reasonable timeout)
-    SHUTDOWN_TIMEOUT=600  # 10 minutes - adjust based on your typical shutdown time
-    WAIT_INTERVAL=5
-    elapsed=0
-    
-    log_message "Waiting up to ${SHUTDOWN_TIMEOUT} seconds for graceful shutdown..."
-    
-    while [[ $elapsed -lt $SHUTDOWN_TIMEOUT ]]; do
-        # Check if any station processes are still running
-        still_running=()
-        for station in "${RunList[@]}"; do
-            pattern=$(regex_for "$station")
-            if pgrep -f -- "$pattern" >/dev/null 2>&1; then
-                still_running+=("$station")
-            fi
-        done
-        
-        if [[ ${#still_running[@]} -eq 0 ]]; then
-            log_message "All station processes shut down gracefully after ${elapsed} seconds"
-            break
-        fi
-        
-        log_message "Still waiting for ${#still_running[@]} stations to shutdown: ${still_running[*]} (${elapsed}s elapsed)"
-        sleep $WAIT_INTERVAL
-        elapsed=$((elapsed + WAIT_INTERVAL))
-    done
-    
-    # Force kill any remaining processes if timeout reached
-    final_check=()
-    for station in "${RunList[@]}"; do
-        pattern=$(regex_for "$station")
-        if pgrep -f -- "$pattern" >/dev/null 2>&1; then
-            final_check+=("$station")
-        fi
-    done
-    
-    if [[ ${#final_check[@]} -gt 0 ]]; then
-        log_message "Timeout reached. Force killing ${#final_check[@]} remaining stations: ${final_check[*]}"
-        for station in "${final_check[@]}"; do
-            log_message "Force killing all processes for station $station..."
-            pattern=$(regex_for "$station")
-            if pkill -f -KILL -- "$pattern" 2>/dev/null; then
-                log_message "Force killed station $station processes"
-            else
-                log_message "Warning: Could not kill processes for station $station (may have already exited)"
-            fi
-        done
-        
-        # Give a moment for force kills to take effect
-        sleep 2
-    fi
-    
-else
-    log_message "No running RMS stations found"
-fi
+# Stop running stations before update
+stop_stations
 
 # Note: When run from user cron, DISPLAY may not be set. Terminal launching will fall back to tmux if needed.
 
@@ -409,6 +449,17 @@ if "$RMS_DIR/Scripts/RMS_Update.sh" >/dev/null; then
     log_message "RMS update completed successfully"
 else
     log_message "Warning: RMS update failed, but continuing to restart stations since they were already stopped"
+fi
+
+# Check if system reboot is needed after update
+if should_reboot; then
+    log_message "Attempting system reboot after RMS update..."
+    if sudo -n shutdown -r now 2>/dev/null; then
+        exit 0
+    else
+        log_message "WARNING: Reboot failed (sudo shutdown not available) - restarting stations instead"
+        log_message "Configure /etc/sudoers.d/rms-reboot to enable passwordless shutdown"
+    fi
 fi
 
 if [[ ${#POSITIONAL_ARGS[@]} -eq 0 ]]; then
