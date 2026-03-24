@@ -185,7 +185,7 @@ def getAllPoints(np.ndarray[UINT16_TYPE_t, ndim=2] point_list, x1, y1, z1, x2, y
         return max_line_points, i
 
 
-    if max_array_size == 0:
+    if max_array_size <= 0 or max_array_size < point_list_size:
         max_array_size = point_list_size
 
     # Get all points belonging to the best line

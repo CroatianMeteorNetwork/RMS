@@ -79,7 +79,10 @@ class CoordinateFilter:
                 - np.ndarray: Boolean flags indicating which coordinates are valid.
         """
 
-        coords_int = np.array(coords).astype(np.int32)
+        coords_array = np.array(coords)
+        if coords_array.size == 0:
+            return coords_array, np.zeros(0, dtype=bool)
+        coords_int = coords_array.astype(np.int32)
 
         x_vals = coords_int[:, 0]
         y_vals = coords_int[:, 1]
@@ -92,12 +95,20 @@ class CoordinateFilter:
 
         # Check mask (only for coordinates that passed the border check)
         if self.mask_img is not None:
-            for i in range(len(valid_flags)):
-                if valid_flags[i]:
-                    y, x = y_vals[i], x_vals[i]
-                    if 0 <= y < self.mask_img.shape[0] and 0 <= x < self.mask_img.shape[1]:
-                        if self.mask_img[y, x] == 0:
-                            valid_flags[i] = False
+            xs_valid = x_vals[valid_flags]
+            ys_valid = y_vals[valid_flags]
+
+            in_bounds = (
+                (ys_valid >= 0) & (ys_valid < self.mask_img.shape[0]) &
+                (xs_valid >= 0) & (xs_valid < self.mask_img.shape[1])
+            )
+
+            mask_ok = np.ones_like(xs_valid, dtype=bool)
+            if np.any(in_bounds):
+                mask_vals = self.mask_img[ys_valid[in_bounds], xs_valid[in_bounds]]
+                mask_ok[in_bounds] = mask_vals != 0
+
+            valid_flags[valid_flags] &= mask_ok
 
         filtered_coords = coords[valid_flags]
 
@@ -933,9 +944,6 @@ def thickLine(img_h, img_w, x_cent, y_cent, length, rotation, radius):
     Return:
         photom_mask: [ndarray] Photometric mask.
     """
-
-    # Init the photom_mask array
-    photom_mask = np.zeros((img_h, img_w), dtype=np.uint8)
 
     rotation = np.radians(rotation)
 
