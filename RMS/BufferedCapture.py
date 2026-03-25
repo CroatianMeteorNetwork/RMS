@@ -1777,32 +1777,31 @@ class BufferedCapture(Process):
             # large shared frame buffers (~506 MB each at 1080p). These buffers are
             # only needed by BufferedCapture and Compressor; any subprocess forked
             # from here (e.g. GStreamer NVENC encoder, RawFrameSaver) does not need
-            # them. The munmap only runs in the CHILD after fork, not here.
+            # them. MADV_DONTFORK tells the kernel to exclude these pages from any
+            # child created via fork(), so grandchildren never see them at all.
+            # Compressor is unaffected because it forks from StartCapture, not here.
             try:
                 _libc = ctypes.CDLL('libc.so.6', use_errno=True)
-                _libc.munmap.restype = ctypes.c_int
-                _libc.munmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t]
+                _libc.madvise.restype = ctypes.c_int
+                _libc.madvise.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int]
+                MADV_DONTFORK = 10
 
-                bufsToUnmap = []
+                total_bytes = 0
                 for arr in (self.array1, self.array2):
                     try:
-                        bufsToUnmap.append((arr.ctypes.data, arr.nbytes))
+                        ret = _libc.madvise(arr.ctypes.data, arr.nbytes, MADV_DONTFORK)
+                        if ret == 0:
+                            total_bytes += arr.nbytes
                     except Exception:
                         pass
 
-                if bufsToUnmap:
-                    def unmapFrameBuffersInChild():
-                        for addr, sz in bufsToUnmap:
-                            _libc.munmap(addr, sz)
-
-                    os.register_at_fork(after_in_child=unmapFrameBuffersInChild)
-                    log.debug("Registered at_fork handler to unmap {:d} frame buffers "
-                              "({:.0f} MB) in grandchild processes".format(
-                                  len(bufsToUnmap),
-                                  sum(s for _, s in bufsToUnmap) / (1024*1024)))
+                if total_bytes:
+                    log.debug("Marked frame buffers ({:.0f} MB) as DONTFORK to prevent "
+                              "inheritance by grandchild processes".format(
+                                  total_bytes / (1024*1024)))
 
             except Exception as e:
-                log.warning("Could not register at_fork handler for frame buffer cleanup: {}".format(e))
+                log.warning("Could not set MADV_DONTFORK on frame buffers: {}".format(e))
 
             # Main capture loop
             while not self.exit.is_set() and not self.initVideoDevice():
