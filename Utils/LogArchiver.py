@@ -179,8 +179,17 @@ def getLatestLogUploads(config):
     else:
         # create a dictionary
         latest_log_uploads_dict  = dict(zip(getLogTypes(config), getEarliestDates(config)))
-        with open(latest_log_uploads_file_full_path, "w") as f:
-            json.dump(latest_log_uploads_dict, f, indent=4, sort_keys=True)
+
+    # Add any new log types that appeared since the tracker was last saved
+    current_types = getLogTypes(config)
+    current_earliest = getEarliestDates(config)
+    for log_type, earliest_date in zip(current_types, current_earliest):
+        if log_type not in latest_log_uploads_dict:
+            latest_log_uploads_dict[log_type] = earliest_date
+
+    # Save the updated tracker
+    with open(latest_log_uploads_file_full_path, "w") as f:
+        json.dump(latest_log_uploads_dict, f, indent=4, sort_keys=True)
 
     return latest_log_uploads_dict
 
