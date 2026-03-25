@@ -326,6 +326,11 @@ class Config:
         # when in GStreamer Standalone mode
         self.camera_latency = 0.05
 
+        # VENC PTS calibration port. If non-zero, RMS will connect to the camera's
+        # gettime service at this TCP port to calibrate VENC hardware timestamps.
+        # Requires rtp_patch + gettime deployed on camera. 0 = disabled (legacy mode).
+        self.venc_gettime_port = 0
+
 
         self.report_dropped_frames = False
 
@@ -1208,6 +1213,9 @@ def parseCapture(config, parser):
 
     if parser.has_option(section, "camera_latency"):
         config.camera_latency = parser.getfloat(section, "camera_latency")
+
+    if parser.has_option(section, "venc_gettime_port"):
+        config.venc_gettime_port = parser.getint(section, "venc_gettime_port")
 
     if parser.has_option(section, "ff_format"):
         config.ff_format = parser.get(section, "ff_format")

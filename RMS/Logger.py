@@ -245,12 +245,25 @@ def gstDebugLogger(category, level, file, function, line, obj, message, user_dat
         the message directly through the logging system.
     """
     # Get the main logger instance
-    logger = logging.getLogger("rmslogger") 
-    
+    logger = logging.getLogger("rmslogger")
+
     # Extract message information safely
     cat_name = category.get_name() if category else "Unknown"
     msg_str = message.get() if message else "No message"
-    
+
+    # Suppress noisy avdec_h264 warnings about sub-ms PTS jitter.
+    # These occur every ~10s from hardware PTS polling phase drift and
+    # are harmless (GStreamer caps the PTS and continues, no frames lost).
+    if "decreasing timestamp" in msg_str:
+        return True
+
+    # Suppress matroskamux "Invalid buffer timestamp" warnings.
+    # Stale shared-page VENC PTS reads produce occasional duplicate RTP
+    # timestamps that fail splitmuxsink's running-time conversion.
+    # matroskamux drops these buffers regardless; suppress the log spam.
+    if "Invalid buffer timestamp" in msg_str:
+        return True
+
     # Format and log the message
     log_msg = "{} {}:{:d}:{}: {}".format(cat_name, file, line, function, msg_str)
     logger.info(log_msg)

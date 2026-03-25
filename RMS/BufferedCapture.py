@@ -38,10 +38,12 @@ import numpy as np
 import socket
 import errno
 import json
+import logging
 
 
 from RMS.Misc import obfuscatePassword
 from RMS.Routines.GstreamerCapture import GstVideoFile, getStructureValue
+from RMS.Routines.VencCalibration import calibrate_epoch_offset
 from RMS.Formats.ObservationSummary import getObsDBConn, addObsParam
 from RMS.RawFrameSave import RawFrameSaver
 from RMS.Misc import RmsDateTime, mkdirP, UTCFromTimestamp
@@ -65,7 +67,8 @@ GST_IMPORTED = False
 try:
     import gi
     gi.require_version('Gst', '1.0')
-    from gi.repository import Gst
+    gi.require_version('GstRtp', '1.0')
+    from gi.repository import Gst, GstRtp
     GST_IMPORTED = True
 
 except ImportError as e:
@@ -95,6 +98,73 @@ class RtspProbeResult:
     TIMEOUT = "TIMEOUT"                    # Connection attempt timed out
     DNS_ERROR = "DNS_ERROR"                # Can't resolve hostname
     UNKNOWN_ERROR = "UNKNOWN_ERROR"        # Other connection errors
+
+
+class VencMetadataReader(object):
+    """Background thread that reads per-frame metadata from the camera's
+    metadata stream (port 9602).  Stores the latest values for association
+    with captured frames.  No encoder ioctls — pure TCP, ~25Hz push."""
+
+    def __init__(self, camera_ip, port=9602):
+        self.camera_ip = camera_ip
+        self.port = port
+        self._latest = {}
+        self._lock = threading.Lock()
+        self._thread = None
+        self._stop = threading.Event()
+
+    def start(self):
+        self._stop.clear()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def stop(self):
+        self._stop.set()
+        if self._thread:
+            self._thread.join(timeout=3)
+
+    @property
+    def latest(self):
+        with self._lock:
+            return dict(self._latest)
+
+    def _run(self):
+        log = logging.getLogger("logger")
+        buf = b''
+        while not self._stop.is_set():
+            try:
+                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                s.settimeout(5)
+                s.connect((self.camera_ip, self.port))
+                log.info("VencMetadata: connected to %s:%d", self.camera_ip, self.port)
+                buf = b''
+                while not self._stop.is_set():
+                    s.settimeout(2)
+                    try:
+                        data = s.recv(512)
+                    except socket.timeout:
+                        continue
+                    if not data:
+                        break
+                    buf += data
+                    while b'\n' in buf:
+                        line, buf = buf.split(b'\n', 1)
+                        parts = line.decode(errors='replace').strip().split()
+                        if len(parts) >= 6:
+                            with self._lock:
+                                self._latest = {
+                                    'pts_90k': int(parts[0]),
+                                    'exposure_us': int(parts[1]),
+                                    'analog_gain': int(parts[2]) / 1024.0,
+                                    'digital_gain': int(parts[3]) / 1024.0,
+                                    'isp_dgain': int(parts[4]) / 1024.0,
+                                    'soc_temp_c': int(parts[5]),
+                                }
+                s.close()
+            except Exception as e:
+                if not self._stop.is_set():
+                    log.debug("VencMetadata: %s, reconnecting in 5s", e)
+                    self._stop.wait(5)
 
 
 class BufferedCapture(Process):
@@ -185,6 +255,9 @@ class BufferedCapture(Process):
         # Timestamp correction between smoothed PTS and pipeline running time
         self.last_pts_correction_ns = 0
         self.last_running_time_ns = None
+
+        # Storage branch PTS guard: fix stale-PTS duplicates before splitmuxsink
+        self._storage_last_pts_ns = 0
 
         # handle for the Gst bus-poller thread
         self._bus_should_exit = False
@@ -559,31 +632,114 @@ class BufferedCapture(Process):
                     # Convert to np.ndarray
                     frame = np.ndarray(shape=self.frame_shape, buffer=map_info.data, dtype=np.uint8)
 
-                    # Smooth raw pts and calculate actual timestamp
-                    smoothed_pts = self.smoothPTS(gst_timestamp_ns)
-                    running_time_ns = None
-
-                    if self.pipeline is not None:
+                    # Deferred VENC calibration: if pre-pipeline calibration failed,
+                    # compute C now that frames are flowing and combine with
+                    # clock_base from the pad probe for sub-ms accuracy.
+                    if self.venc_epoch_offset is None \
+                            and not self._venc_post_start_calibrated \
+                            and getattr(self.config, 'venc_gettime_port', 0) > 0:
+                        self._venc_post_start_calibrated = True
                         try:
-                            clock = self.pipeline.get_clock()
-                            base_time = self.pipeline.get_base_time()
+                            from urllib.parse import urlparse
+                            device_url = self.extractRtspUrl(self.config.deviceID)
+                            camera_ip = urlparse(device_url).hostname
+                            C = calibrate_epoch_offset(
+                                camera_ip,
+                                port=self.config.venc_gettime_port,
+                                n_samples=20
+                            )
+                            if C is not None:
+                                self._venc_pts_clock_offset = C
+                                if self._rtp_clock_base is not None:
+                                    self.venc_epoch_offset = C + self._rtp_clock_base / 90000.0
+                                    log.info("Deferred VENC calibration: C=%.6f, "
+                                             "epoch_offset=%.6f", C, self.venc_epoch_offset)
+                                # Reset drift tracking for new calibration
+                                self._venc_drift_baseline_age = None
+                                self._venc_drift_total = 0.0
+                            else:
+                                log.warning("VENC calibration failed: no epoch_offset available")
+                        except Exception as e:
+                            log.warning("Deferred VENC calibration failed: {}".format(e))
 
-                            if clock is not None and base_time != Gst.CLOCK_TIME_NONE:
-                                clock_time = clock.get_time()
-                                if clock_time != Gst.CLOCK_TIME_NONE and clock_time >= base_time:
-                                    running_time_ns = clock_time - base_time
-                        except Exception as clock_exc:
-                            log.debug("Failed to query pipeline clock/base time: %s", clock_exc)
+                    if self.venc_epoch_offset is not None:
+                        # VENC PTS mode: use raw RTP timestamps (VENC hardware
+                        # sensor PTS) directly, bypassing GStreamer's clock
+                        # skew correction which adds ~0.9ms σ of jitter.
+                        # Falls back to GStreamer PTS if raw RTP unavailable.
 
-                    if running_time_ns is not None:
-                        self.last_running_time_ns = running_time_ns
-                        self.last_pts_correction_ns = smoothed_pts - running_time_ns
-                        corrected_running_time_ns = running_time_ns + self.last_pts_correction_ns
-                        timestamp = self.start_timestamp + (corrected_running_time_ns/1e9)
+                        # Accumulate drift correction separately — NOT into
+                        # epoch_offset — so FT timestamps preserve real
+                        # hardware FE_START jitter.  Drift correction is
+                        # only used for frame_age (buffer fill, drift
+                        # measurement), not for the stored timestamp.
+                        VENC_FRAME_PERIOD = 4400 * 1351 / 148.5e6
+                        self._drift_total_correction += (
+                            self._drift_freq * VENC_FRAME_PERIOD)
+
+                        # Try raw RTP timestamp (from pad probe, no GStreamer
+                        # clock skew).  Fall back to GStreamer PTS.
+                        #
+                        # Raw RTP ts includes clock_base, and epoch_offset
+                        # already includes clock_base/90000, so subtract it
+                        # to avoid double-counting.  The result is equivalent
+                        # to gst_running_time but without jitter buffer skew.
+                        rtp_ts_raw = self._rtp_ts_by_pts.pop(gst_timestamp_ns, None)
+
+                        if rtp_ts_raw is not None:
+                            self._rtp_dict_hits = getattr(self, '_rtp_dict_hits', 0) + 1
+                            elapsed_ticks = (rtp_ts_raw - self._rtp_clock_base) & 0xFFFFFFFF
+                            timestamp = self.venc_epoch_offset + elapsed_ticks / 90000.0
+                        else:
+                            self._rtp_dict_misses = getattr(self, '_rtp_dict_misses', 0) + 1
+                            timestamp = self.venc_epoch_offset + gst_timestamp_ns / 1e9
+                            if self._rtp_dict_misses <= 3 or self._rtp_dict_misses % 1000 == 0:
+                                log.info("RTP dict miss #%d: gst_pts=%d dict_size=%d",
+                                         self._rtp_dict_misses, gst_timestamp_ns,
+                                         len(self._rtp_ts_by_pts))
+
+                        if hasattr(self, '_venc_meta') and self._venc_meta is not None:
+                            meta = self._venc_meta.latest
+                            if 'exposure_us' in meta:
+                                timestamp -= meta['exposure_us'] / 1e6
+
+                        # BIG/NEAR firmware anomalies are corrected in the
+                        # pad probe (before leaky queue drops NEAR frames).
+                        # The dict contains pre-corrected RTP timestamps.
+                        # Nothing to do here — just update state.
+                        self._last_venc_gst_pts = gst_timestamp_ns
+                        self._last_venc_timestamp = timestamp
+
+                        # Store timestamp for drift measurement.
+                        self._venc_raw_timestamp = timestamp
+
                     else:
-                        self.last_running_time_ns = None
-                        self.last_pts_correction_ns = 0
-                        timestamp = self.start_timestamp + (smoothed_pts/1e9)
+                        # Legacy mode: smooth PTS via linear regression and correct
+                        # with pipeline running time.
+                        smoothed_pts = self.smoothPTS(gst_timestamp_ns)
+                        running_time_ns = None
+
+                        if self.pipeline is not None:
+                            try:
+                                clock = self.pipeline.get_clock()
+                                base_time = self.pipeline.get_base_time()
+
+                                if clock is not None and base_time != Gst.CLOCK_TIME_NONE:
+                                    clock_time = clock.get_time()
+                                    if clock_time != Gst.CLOCK_TIME_NONE and clock_time >= base_time:
+                                        running_time_ns = clock_time - base_time
+                            except Exception as clock_exc:
+                                log.debug("Failed to query pipeline clock/base time: %s", clock_exc)
+
+                        if running_time_ns is not None:
+                            self.last_running_time_ns = running_time_ns
+                            self.last_pts_correction_ns = smoothed_pts - running_time_ns
+                            corrected_running_time_ns = running_time_ns + self.last_pts_correction_ns
+                            timestamp = self.start_timestamp + (corrected_running_time_ns/1e9)
+                        else:
+                            self.last_running_time_ns = None
+                            self.last_pts_correction_ns = 0
+                            timestamp = self.start_timestamp + (smoothed_pts/1e9)
 
                 finally:
                     # Always unmap buffer to prevent memory leaks
@@ -596,6 +752,36 @@ class BufferedCapture(Process):
                     timestamp = time.time()
 
         return ret, frame, timestamp
+
+
+    def _driftFreqPath(self):
+        """Path to per-station drift frequency file."""
+        return os.path.join(self.config.config_file_path, '.drift_freq')
+
+    def _loadDriftFreq(self):
+        """Load persisted drift frequency, or return 0."""
+        try:
+            with open(self._driftFreqPath(), 'r') as f:
+                freq = float(f.read().strip())
+            # Sanity check: VENC PTS counter rate offset plus crystal
+            # drift can reach ~500 ppm.  Reject obviously corrupted values.
+            if abs(freq) > 600e-6:
+                log.warning("Ignoring corrupted drift freq: %.1f ppm from %s",
+                            freq * 1e6, self._driftFreqPath())
+                return 0.0
+            log.info("Loaded drift freq: %.1f ppm from %s",
+                     freq * 1e6, self._driftFreqPath())
+            return freq
+        except Exception:
+            return 0.0
+
+    def _saveDriftFreq(self):
+        """Persist current drift frequency estimate."""
+        try:
+            with open(self._driftFreqPath(), 'w') as f:
+                f.write("{:.10e}\n".format(self._drift_freq))
+        except Exception:
+            pass
 
 
     def extractRtspUrl(self, input_string):
@@ -665,9 +851,20 @@ class BufferedCapture(Process):
             host = parsed.hostname
             port = parsed.port or 554
 
+            # VENC cameras: probe the gettime service port instead of
+            # RTSP port. XM RTSP servers create stale sessions from bare
+            # TCP connects, blocking subsequent GStreamer connections.
+            # The gettime service (rtp_patch daemon) is safe to probe.
+            venc_port = getattr(self.config, 'venc_gettime_port', 0)
+            if venc_port > 0:
+                probe_port = venc_port
+                log.info("Using VENC gettime port %d for probe (avoiding RTSP session)", probe_port)
+            else:
+                probe_port = port
+
             last_error = None
             stop_event = getattr(self, "exit", None)
-            
+
             for attempt in range(max_attempts):
 
                 if stop_event is not None and stop_event.is_set():
@@ -689,21 +886,29 @@ class BufferedCapture(Process):
                     # Create socket with timeout
                     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                     sock.settimeout(timeout)
-                    
+
                     # Try to connect
-                    result = sock.connect_ex((host, port))
+                    result = sock.connect_ex((host, probe_port))
                     sock.close()
 
                     if result == 0:
-                        # First probe succeeded, wait 10s and verify with second probe
-                        log.info("First probe successful, waiting 10s for verification probe...")
-                        time.sleep(10)
+                        if venc_port > 0:
+                            # VENC probe: gettime daemon is up, but the RTSP
+                            # server in App may still be stabilizing after
+                            # ptrace attach/detach by rtp_patch.  Give it a
+                            # few seconds before the pipeline tries RTSP.
+                            log.info("VENC gettime service ready after {} attempts, waiting 15s for RTSP stabilization...".format(attempt + 1))
+                            time.sleep(15)
+                        else:
+                            # First probe succeeded, wait 10s and verify with second probe
+                            log.info("First probe successful, waiting 10s for verification probe...")
+                            time.sleep(10)
 
-                        # Second verification probe
-                        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                        sock.settimeout(timeout)
-                        result = sock.connect_ex((host, port))
-                        sock.close()
+                            # Second verification probe
+                            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                            sock.settimeout(timeout)
+                            result = sock.connect_ex((host, probe_port))
+                            sock.close()
 
                         if result == 0:
                             log.info("RTSP service ready after {} attempts (verified with 2 probes)".format(attempt + 1))
@@ -871,8 +1076,11 @@ class BufferedCapture(Process):
                                 running_time_ns = converted
 
                 if running_time_ns is not None:
-                    corrected_running_time_ns = running_time_ns + self.last_pts_correction_ns
-                    segment_timestamp = self.start_timestamp + (corrected_running_time_ns / 1e9)
+                    if self.venc_epoch_offset is not None:
+                        segment_timestamp = self.venc_epoch_offset + running_time_ns / 1e9
+                    else:
+                        corrected_running_time_ns = running_time_ns + self.last_pts_correction_ns
+                        segment_timestamp = self.start_timestamp + (corrected_running_time_ns / 1e9)
 
             except Exception as sample_exc:
                 log.debug("Failed to derive running time from splitmux sample: %s", sample_exc)
@@ -992,6 +1200,133 @@ class BufferedCapture(Process):
         return False
 
 
+    def _onFirstRtpBuffer(self, pad, info):
+        """Pad probe callback on depayloader sink: capture raw RTP timestamps.
+
+        First call: capture clock_base for epoch_offset calibration.
+        Subsequent calls: track per-frame RTP timestamps and detect anomalies
+        before GStreamer's jitterbuffer processing.  RTP marker bit indicates
+        the last packet of a frame — log the RTP timestamp at each new frame.
+        """
+        buf = info.get_buffer()
+        try:
+            success, rtp_buf = GstRtp.RTPBuffer.map(buf, Gst.MapFlags.READ)
+            if success:
+                rtp_ts = rtp_buf.get_timestamp()
+                marker = rtp_buf.get_marker()
+                rtp_buf.unmap()
+
+                # First packet: capture clock_base
+                if self._rtp_clock_base is None:
+                    self._rtp_clock_base = rtp_ts
+                    self._rtp_probe_last_ts = rtp_ts
+                    self._rtp_probe_anomalies = 0
+                    self._rtp_probe_frames = 0
+                    if self._venc_pts_clock_offset is not None:
+                        self.venc_epoch_offset = (self._venc_pts_clock_offset
+                                                  + self._rtp_clock_base / 90000.0)
+                        log.info("RTP clock_base=%u, epoch_offset=%.6f",
+                                 self._rtp_clock_base, self.venc_epoch_offset)
+                    else:
+                        log.info("RTP clock_base=%u (C pending)", self._rtp_clock_base)
+
+                # Track per-frame RTP timestamps (marker bit = last packet of frame)
+                if marker and rtp_ts != self._rtp_probe_last_ts:
+                    delta = (rtp_ts - self._rtp_probe_last_ts) & 0xFFFFFFFF
+                    self._rtp_probe_frames += 1
+                    if delta < 1800 or delta > 7200:  # not ~3603 ticks
+                        self._rtp_probe_anomalies += 1
+                        delta_ms = delta / 90.0
+                        log.debug("RTP_PROBE anomaly: rtp_ts=%u delta=%u (%.3fms) frame=%d",
+                                  rtp_ts, delta, delta_ms, self._rtp_probe_frames)
+
+                    # GUARD: correct firmware BIG/NEAR anomalies in the
+                    # probe (before leaky queue which drops NEAR frames).
+                    # Accumulate shift in ticks; BIG adds ~+3603, NEAR
+                    # adds ~-3601 — pairs cancel to ~+2 tick residual.
+                    # Stale (3601) is not corrected; drift handles it.
+                    guard_shift = getattr(self, '_rtp_probe_shift', 0)
+                    if delta < 1800:
+                        # NEAR: firmware race — delta far below one frame
+                        # period.  Threshold 1800 (20ms) catches all NEAR
+                        # variants; real frames are always ≥3600 ticks.
+                        guard_shift += (delta - 3603)
+                        log.debug("GUARD_PROBE NEAR d=%u shift=%d ticks", delta, guard_shift)
+                    elif delta > 5400 and delta < 9000:
+                        guard_shift += (delta - 3603)
+                        log.debug("GUARD_PROBE BIG d=%u shift=%d ticks", delta, guard_shift)
+                    self._rtp_probe_shift = guard_shift
+
+                    # Log summary every 1000 frames
+                    if self._rtp_probe_frames % 1000 == 0:
+                        hits = getattr(self, '_rtp_dict_hits', 0)
+                        misses = getattr(self, '_rtp_dict_misses', 0)
+                        total = hits + misses
+                        hit_pct = 100.0 * hits / total if total > 0 else 0
+                        log.info("RTP_PROBE: %d frames, %d anomalies (%.2f%%), "
+                                 "dict hit=%d/%d (%.1f%%), guard_shift=%d ticks",
+                                 self._rtp_probe_frames, self._rtp_probe_anomalies,
+                                 100 * self._rtp_probe_anomalies / self._rtp_probe_frames,
+                                 hits, total, hit_pct, guard_shift)
+                    self._rtp_probe_last_ts = rtp_ts
+
+                    # Store CORRECTED RTP timestamp keyed by GStreamer PTS.
+                    # The shift removes BIG/NEAR anomalies before the leaky
+                    # queue can drop the NEAR pair.  Dict keyed by PTS
+                    # survives dropped frames.
+                    corrected_rtp = (rtp_ts - guard_shift) & 0xFFFFFFFF
+                    buf_pts = buf.pts
+                    if buf_pts is not None and buf_pts != Gst.CLOCK_TIME_NONE:
+                        self._rtp_ts_by_pts[buf_pts] = corrected_rtp
+                        # Prevent unbounded growth from dropped frames
+                        if len(self._rtp_ts_by_pts) > 200:
+                            oldest = min(self._rtp_ts_by_pts)
+                            del self._rtp_ts_by_pts[oldest]
+
+        except Exception as e:
+            log.warning("Failed to read RTP timestamp: %s", e)
+        return Gst.PadProbeReturn.OK
+
+    def _storageGuardProbe(self, pad, info):
+        """Pad probe on storage branch: enforce monotonic PTS before splitmuxsink.
+
+        Stale shared-page VENC PTS reads produce occasional duplicate RTP
+        timestamps that fail splitmuxsink's running-time conversion, causing
+        matroskamux to drop buffers.  This probe enforces strictly monotonic
+        PTS/DTS so every buffer reaches the muxer with a valid timestamp.
+        """
+        buf = info.get_buffer()
+        if buf is None:
+            return Gst.PadProbeReturn.OK
+
+        # One frame period in nanoseconds: HMAX=4400, VMAX=1351, 148.5MHz
+        FRAME_NS = 40029630
+
+        pts = buf.pts
+
+        # If PTS is NONE, synthesize from last known PTS
+        if pts == Gst.CLOCK_TIME_NONE:
+            if self._storage_last_pts_ns > 0:
+                pts = self._storage_last_pts_ns + FRAME_NS
+                buf.pts = pts
+                buf.dts = pts
+                self._storage_last_pts_ns = pts
+            return Gst.PadProbeReturn.OK
+
+        if pts <= self._storage_last_pts_ns and self._storage_last_pts_ns > 0:
+            # Duplicate or backward PTS — bump forward by one frame period
+            fixed = self._storage_last_pts_ns + FRAME_NS
+            buf.pts = fixed
+            buf.dts = fixed
+            self._storage_last_pts_ns = fixed
+        else:
+            self._storage_last_pts_ns = pts
+            # Ensure DTS is set (matroskamux may require it)
+            if buf.dts == Gst.CLOCK_TIME_NONE:
+                buf.dts = pts
+
+        return Gst.PadProbeReturn.OK
+
     def _busPoller(self):
         """Poll the GStreamer bus and drain queued messages.
 
@@ -1082,20 +1417,47 @@ class BufferedCapture(Process):
 
         device_url = self.extractRtspUrl(self.config.deviceID)
 
+        # VENC PTS calibration is deferred until after the RTSP stream starts.
+        # The VENC PTS register is a 32-bit µs counter that wraps every ~71.6 min.
+        # Pre-pipeline calibration can catch PTS near a wrap boundary; by the time
+        # the RTSP stream starts (hundreds of ms later), PTS may have wrapped,
+        # putting calibration C and clock_base in different wrap cycles (~71 min
+        # epoch_offset error).  Deferred calibration runs after frames are flowing,
+        # guaranteeing calibration PTS and clock_base are in the same wrap cycle.
+        self.venc_epoch_offset = None
+        self._venc_pts_clock_offset = None  # C: PTS-to-wallclock constant
+        self._rtp_clock_base = None         # First RTP timestamp from pipeline
+        self._venc_post_start_calibrated = False
+        self._venc_drift_baseline_age = None  # Drift correction baseline
+        self._venc_drift_total = 0.0          # Cumulative correction for logging
+        if getattr(self.config, 'venc_gettime_port', 0) > 0:
+            log.info("VENC calibration will run after stream starts (deferred)")
+
+            # Start metadata stream reader (port 9602) for per-frame
+            # exposure/gain data.  Replaces SEI in-band metadata with
+            # out-of-band TCP stream — no encoder ioctls needed.
+            from urllib.parse import urlparse
+            camera_ip = urlparse(device_url).hostname
+            meta_port = getattr(self.config, 'venc_meta_port', 9602)
+            if not hasattr(self, '_venc_meta') or self._venc_meta is None:
+                self._venc_meta = VencMetadataReader(camera_ip, port=meta_port)
+                self._venc_meta.start()
+                log.info("VENC metadata reader started on port %d", meta_port)
+
         # Common timeout settings for both UDP and TCP
         # All streams need tcp-timeout since RTSP control always uses TCP
         common_timeouts = "retry=5 timeout=5000000 tcp-timeout=5000000 teardown-timeout=3000000"
         
         if self.config.protocol == 'udp':
-            protocol_str = f"protocols=udp {common_timeouts}"
+            protocol_str = f"protocols=udp udp-buffer-size=16777216 {common_timeouts}"
         else:
             protocol_str = f"protocols=tcp {common_timeouts}"
 
         # Define the source up to the point where we want to branch off
         source_to_tee = (
-            "rtspsrc name=src buffer-mode=1 {:s} "
+            "rtspsrc name=src buffer-mode=0 ntp-sync=false latency=200 {:s} "
             "location=\"{:s}\" ! "
-            "rtph264depay ! h264parse ! tee name=t"
+            "rtph264depay name=depay ! h264parse ! tee name=t"
             ).format(protocol_str, device_url)
 
         # Branch for processing
@@ -1117,7 +1479,7 @@ class BufferedCapture(Process):
             # queue2 smooths out the writes, but doesn't wait until the buffers fill up for writing
             storage_branch = (
                 "t. ! queue2 max-size-buffers=150 max-size-bytes=2097152 max-size-time=5000000000 ! "
-                "h264parse ! "
+                "h264parse name=storageparse ! "
                 "splitmuxsink name=splitmuxsink0 async-finalize=true max-size-time={:d} muxer-factory=matroskamux"
                 ).format(int(segment_duration_sec*1e9))
 
@@ -1152,12 +1514,35 @@ class BufferedCapture(Process):
                 self._bus_thread = threading.Thread(target=self._busPoller, daemon=True)
                 self._bus_thread.start()
                 
+                # Add pad probe to capture first RTP timestamp for precise
+                # PTS-to-wallclock mapping (sub-ms accuracy).
+                # Always add when VENC gettime is configured — clock_base is
+                # needed by both pre-pipeline and deferred calibration paths.
+                if getattr(self.config, 'venc_gettime_port', 0) > 0:
+                    depay = self.pipeline.get_by_name("depay")
+                    if depay:
+                        sink_pad = depay.get_static_pad("sink")
+                        sink_pad.add_probe(
+                            Gst.PadProbeType.BUFFER,
+                            self._onFirstRtpBuffer
+                        )
+
                 # If raw video saving is enabled, connect the "format-location-full" signal to the
                 # moveSegment function
                 if video_file_dir is not None:
                     
                     splitmuxsink = self.pipeline.get_by_name("splitmuxsink0")
                     splitmuxsink.connect("format-location-full", self.moveSegment)
+
+                    # Add PTS guard probe before splitmuxsink to fix
+                    # stale-PTS duplicates before they reach matroskamux
+                    storageparse = self.pipeline.get_by_name("storageparse")
+                    if storageparse:
+                        storageparse.get_static_pad("src").add_probe(
+                            Gst.PadProbeType.BUFFER,
+                            self._storageGuardProbe
+                        )
+                        log.info("Storage PTS guard probe attached to storageparse src pad")
 
                 # Transition through states
                 log.info("Starting pipeline state transitions...")
@@ -1187,7 +1572,7 @@ class BufferedCapture(Process):
                 appsink = self.pipeline.get_by_name("appsink")
                 if not appsink:
                     raise ValueError("Could not get appsink from pipeline")
-                
+
                 log.info("Pipeline successfully created and started")
                 return appsink
             
@@ -1361,9 +1746,11 @@ class BufferedCapture(Process):
 
                     # Create and start a GStreamer pipeline
                     log.info("Creating GStreamer pipeline...")
+                    venc_retry = 15 if getattr(self.config, 'venc_gettime_port', 0) > 0 else 5
                     self.device = self.createGstreamDevice(
                         self.config.gst_colorspace, gst_decoder=self.config.gst_decoder,
-                        video_file_dir=raw_video_dir, segment_duration_sec=self.config.raw_video_duration
+                        video_file_dir=raw_video_dir, segment_duration_sec=self.config.raw_video_duration,
+                        retry_interval=venc_retry
                         )
 
                     if not self.device:
@@ -1375,7 +1762,10 @@ class BufferedCapture(Process):
                     self.pts_buffer = []
 
                     # Attempt to get a sample and determine the frame shape
-                    sample = self.device.emit("try-pull-sample", 500 * Gst.MSECOND)
+                    # Use a longer timeout for the initial sample - at high bitrate (e.g. 51 Mbps
+                    # GOP=1), the pipeline needs more time for RTSP negotiation + jitter buffer
+                    # fill + first I-frame decode
+                    sample = self.device.emit("try-pull-sample", 5000 * Gst.MSECOND)
                     if not sample:
                         raise ValueError("Could not obtain sample.")
 
@@ -1473,6 +1863,11 @@ class BufferedCapture(Process):
         self._releasing_resources = True
 
         log.debug("releaseResources: Starting")
+
+        # Stop metadata reader if running
+        if hasattr(self, '_venc_meta') and self._venc_meta is not None:
+            self._venc_meta.stop()
+            self._venc_meta = None
 
         # Reset timestamp correction whenever resources are released
         self.last_pts_correction_ns = 0
@@ -1706,7 +2101,10 @@ class BufferedCapture(Process):
                     debug_env = os.environ.get("GST_DEBUG", "2")
                     Gst.debug_set_default_threshold(int(debug_env))
 
-                    # Comment out if higher than logging level 3 is needed
+                    # Route all GStreamer debug output through our Python handler
+                    # (which filters noisy warnings like "decreasing timestamp").
+                    # Remove the default stderr handler first to avoid duplicates.
+                    Gst.debug_remove_log_function(None)
                     Gst.debug_add_log_function(gstDebugLogger, None)
 
                     log.info("GStreamer logging initialized at level: {}".format(debug_env))
@@ -1718,6 +2116,13 @@ class BufferedCapture(Process):
             self.media_backend_override = False
             self.video_device_type = "cv2"
             self.time_for_drop = 1.5*(1.0/self.config.fps)
+            # VENC mode uses raw GStreamer PTS (no smoothPTS regression), which
+            # exposes real frame losses that smoothPTS hides by interpolation.
+            # At high bitrates (61Mbps), femac TX FIFO overflows cause occasional
+            # 3-8 frame losses (~120-320ms gaps). These are real network drops,
+            # not timestamp artifacts. 10x frame period threshold flags only
+            # sustained outages (>400ms = likely RTSP failure, not transient loss).
+            self.time_for_drop_venc = 10.0*(1.0/self.config.fps)
             self.device = None
             self.pipeline = None
             self.start_timestamp = 0
@@ -1725,6 +2130,24 @@ class BufferedCapture(Process):
             self.convert_to_gray = False
             self.last_pts_correction_ns = 0
             self.last_running_time_ns = None
+
+            # VENC PTS calibration: if set, bypasses smoothPTS and pipeline clock
+            # correction entirely, using hardware sensor timestamps instead.
+            self.venc_epoch_offset = None
+            self._venc_pts_clock_offset = None
+            self._rtp_clock_base = None
+            self._venc_post_start_calibrated = False
+            self._last_venc_timestamp = 0.0
+            self._last_venc_gst_pts = 0
+            self._last_gst_delta_ms = 40.0
+            self._rtp_ts_by_pts = {}
+            self._drift_freq = self._loadDriftFreq()
+            self._drift_samples = []
+            self._drift_baseline_age = None
+            self._drift_t0 = None
+            self._drift_log_accum = 0.0
+            self._drift_p_correction_per_frame = 0.0
+            self._drift_total_correction = 0.0
 
             # Initialize smoothing variables
             self.startup_flag = True
@@ -2091,33 +2514,46 @@ class BufferedCapture(Process):
 
 
                 # Check if frame is dropped if it has been more than 1.5 frames than the last frame
-                elif (frame_timestamp - last_frame_timestamp) >= self.time_for_drop:
-                    
-                    # Calculate the number of dropped frames
-                    n_dropped = int((frame_timestamp - last_frame_timestamp)*self.config.fps)
+                # Skip drop detection during first 250 frames (~10s) — GStreamer pipeline
+                # startup causes transient PTS gaps from jitterbuffer/format negotiation
+                elif total_frames > 250 and (frame_timestamp - last_frame_timestamp) >= self.time_for_drop:
 
-                    self.dropped_frames.value += n_dropped
-                    
-                    # Record timestamp for 10-minute window tracking
-                    current_time = time.time()
-                    # Add n_dropped timestamps efficiently
-                    self.dropped_frames_timestamps.extend([current_time] * n_dropped)
-                    
-                    # Clean up old timestamps efficiently (remove from left)
-                    ten_min_ago = current_time - 600
-                    while self.dropped_frames_timestamps and self.dropped_frames_timestamps[0] <= ten_min_ago:
-                        self.dropped_frames_timestamps.popleft()
-                    
-                    # Safety limit to prevent unbounded memory growth
-                    if len(self.dropped_frames_timestamps) > 20000:
-                        log.warning("Dropped frames timestamp queue exceeded safety limit, trimming to recent 10000 entries")
-                        # Keep only most recent half
-                        recent_timestamps = list(self.dropped_frames_timestamps)[-10000:]
-                        self.dropped_frames_timestamps = deque(recent_timestamps)
+                    # In VENC mode, use higher threshold to avoid false positives
+                    # from hardware PTS jitter (daemon/writeback race produces
+                    # 1-frame timestamp gaps while frames arrive on time).
+                    drop_threshold = self.time_for_drop_venc if self.venc_epoch_offset is not None else self.time_for_drop
+                    gap = frame_timestamp - last_frame_timestamp
 
-                    if self.config.report_dropped_frames:
-                        log.info("{}/{} frames dropped or late! Time for frame: {:.3f}, convert: {:.3f}, assignment: {:.3f}".format(
-                            str(n_dropped), str(self.dropped_frames.value), t_frame, t_convert, t_assignment))
+                    if gap >= drop_threshold:
+                        # Calculate the number of dropped frames
+                        n_dropped = int(gap*self.config.fps)
+
+                        self.dropped_frames.value += n_dropped
+
+                        # Record timestamp for 10-minute window tracking
+                        current_time = time.time()
+                        # Add n_dropped timestamps efficiently
+                        self.dropped_frames_timestamps.extend([current_time] * n_dropped)
+
+                        # Clean up old timestamps efficiently (remove from left)
+                        ten_min_ago = current_time - 600
+                        while self.dropped_frames_timestamps and self.dropped_frames_timestamps[0] <= ten_min_ago:
+                            self.dropped_frames_timestamps.popleft()
+
+                        # Safety limit to prevent unbounded memory growth
+                        if len(self.dropped_frames_timestamps) > 20000:
+                            log.warning("Dropped frames timestamp queue exceeded safety limit, trimming to recent 10000 entries")
+                            # Keep only most recent half
+                            recent_timestamps = list(self.dropped_frames_timestamps)[-10000:]
+                            self.dropped_frames_timestamps = deque(recent_timestamps)
+
+                        gap_ms = gap * 1000
+                        log.info("DROP: %d frames, gap=%.1fms (threshold=%.1fms), t_frame=%.3f",
+                                 n_dropped, gap_ms, drop_threshold * 1000, t_frame)
+
+                        if self.config.report_dropped_frames:
+                            log.info("{}/{} frames dropped or late! Time for frame: {:.3f}, convert: {:.3f}, assignment: {:.3f}".format(
+                                str(n_dropped), str(self.dropped_frames.value), t_frame, t_convert, t_assignment))
 
 
                 # If cv2:
@@ -2130,8 +2566,12 @@ class BufferedCapture(Process):
 
                 # If GStreamer:
                 else:
-                    # Calculate the time difference between the current time and the frame's timestamp
-                    frame_age_seconds = time.time() - frame_timestamp
+                    # Use drift-corrected VENC timestamp for age so
+                    # buffer fill and drift measurement track real time.
+                    # FT timestamps are raw VENC clock (no drift correction).
+                    age_ts = getattr(self, '_venc_raw_timestamp', None) or frame_timestamp
+                    drift_corr = getattr(self, '_drift_total_correction', 0.0)
+                    frame_age_seconds = time.time() - (age_ts + drift_corr)
                     # Update max_frame_age_seconds for this cycles
                     max_frame_age_seconds = max(max_frame_age_seconds, frame_age_seconds)
                     sum_frame_age_seconds += frame_age_seconds
@@ -2190,12 +2630,94 @@ class BufferedCapture(Process):
                         max_buffer_time = 100.0 / self.config.fps  # Theoretical max buffer time in seconds
                         buffer_fill_percent = min(100, (max_frame_age_seconds / max_buffer_time) * 100)
 
+                        # VENC clock discipline: estimate frequency offset
+                        # between VENC crystal and host clock, then apply a
+                        # continuous per-frame slew.  Like chrony: regression
+                        # gives drift rate, PI loop tracks residual offset.
+                        #
+                        # _drift_freq  = estimated freq offset (s/s, ~92 ppm)
+                        # _drift_samples = list of (elapsed_s, offset_s) pairs
+                        #
+                        # Offset = mean_age - baseline.  Positive = timestamps
+                        # behind wallclock (VENC clock slow).
+                        if self.venc_epoch_offset is not None and block_frames > 0:
+                            mean_age = sum_frame_age_seconds / block_frames
+                            now = time.time()
+
+                            if self._drift_baseline_age is None:
+                                # Delay baseline capture by 60s to skip
+                                # GStreamer startup transient (~50ms offset
+                                # settles within first minute).
+                                if not hasattr(self, '_drift_warmup_t0'):
+                                    self._drift_warmup_t0 = now
+                                elif now - self._drift_warmup_t0 >= 60:
+                                    self._drift_baseline_age = mean_age
+                                    self._drift_t0 = now
+                            else:
+                                offset = mean_age - self._drift_baseline_age
+                                elapsed = now - self._drift_t0
+
+                                # Collect sample for regression
+                                self._drift_samples.append((elapsed, offset))
+
+                                # Keep last 2 minutes of samples (shorter
+                                # window reduces phase lag → damps oscillation)
+                                max_age = 120
+                                self._drift_samples = [
+                                    (t, o) for t, o in self._drift_samples
+                                    if elapsed - t < max_age
+                                ]
+
+                                # Estimate frequency from regression (need
+                                # at least 60s of post-baseline data)
+                                if len(self._drift_samples) >= 6 and elapsed > 60:
+                                    ts_arr = [s[0] for s in self._drift_samples]
+                                    os_arr = [s[1] for s in self._drift_samples]
+                                    n = len(ts_arr)
+                                    t_mean = sum(ts_arr) / n
+                                    o_mean = sum(os_arr) / n
+                                    num = sum((t - t_mean) * (o - o_mean)
+                                              for t, o in zip(ts_arr, os_arr))
+                                    den = sum((t - t_mean) ** 2 for t in ts_arr)
+                                    if den > 0:
+                                        freq = num / den  # residual rate (s/s)
+                                        # Additive: adjust drift_freq to cancel
+                                        # the observed residual rate.
+                                        alpha = 0.05
+                                        self._drift_freq += alpha * freq
+                                        # Clamp to sanity range
+                                        self._drift_freq = max(-600e-6,
+                                            min(600e-6, self._drift_freq))
+
+                                # Log periodically
+                                self._drift_log_accum += abs(offset)
+                                if self._drift_log_accum > 0.050:
+                                    log.info("VENC clock discipline: "
+                                             "freq=%.1f ppm, offset=%.1fms, "
+                                             "drift_corr=%.3fms",
+                                             self._drift_freq * 1e6,
+                                             offset * 1000,
+                                             self._drift_total_correction * 1000)
+                                    self._drift_log_accum = 0.0
+                                    self._saveDriftFreq()
+
                         # Calculate dropped frames in last 10 minutes
                         current_time = time.time()
                         ten_min_ago = current_time - 600  # 10 minutes in seconds
                         recent_dropped = len([t for t in self.dropped_frames_timestamps if t > ten_min_ago])
 
-                        log.info(f"Buffer fill: {buffer_fill_percent:.1f}%. Dropped frames: {recent_dropped} (last 10 min), {self.dropped_frames.value} this session")
+                        meta_str = ""
+                        if hasattr(self, '_venc_meta') and self._venc_meta is not None:
+                            m = self._venc_meta.latest
+                            if m:
+                                meta_str = " | exp={}us ag={:.4f}x dg={:.4f}x ig={:.4f}x temp={}C".format(
+                                    m.get('exposure_us', 0),
+                                    m.get('analog_gain', 0),
+                                    m.get('digital_gain', 0),
+                                    m.get('isp_dgain', 0),
+                                    m.get('soc_temp_c', '?'))
+                        log.info("Buffer fill: {:.1f}%. Dropped frames: {} (last 10 min), {} this session{}".format(
+                            buffer_fill_percent, recent_dropped, self.dropped_frames.value, meta_str))
 
                 last_frame_timestamp = frame_timestamp
                 
@@ -2267,6 +2789,13 @@ class BufferedCapture(Process):
 
                 break
 
+
+            # Re-derive first_frame_timestamp from the buffer in case
+            # the stale-PTS guard corrected frame 0 retroactively.
+            if (self.config.save_frame_times
+                    and hasattr(self, 'timestamp_buffer')
+                    and len(self.timestamp_buffer) > 0):
+                first_frame_timestamp = self.timestamp_buffer[0][1]
 
             if (not wait_for_reconnect
                 and not self.daytime_mode.value
