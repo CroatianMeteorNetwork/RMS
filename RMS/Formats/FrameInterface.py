@@ -840,8 +840,12 @@ class InputTypeVideo(InputType):
         # If gstreamer is available and the media backend is set to gst, use it
         if GST_IMPORTED and (self.config.media_backend == 'gst'):
 
-            self.cap = GstVideoFile(self.file_path, decoder=self.config.gst_decoder,
-                                        video_format="BGR")
+            try:
+                self.cap = GstVideoFile(self.file_path, decoder=self.config.gst_decoder,
+                                            video_format="BGR")
+            except Exception as e:
+                log.info("Error initializing GStreamer, switching to OpenCV. Error: {}".format(e))
+                self.cap = cv2.VideoCapture(self.file_path)
 
         else:
 
