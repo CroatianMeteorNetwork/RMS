@@ -971,7 +971,7 @@ class InputTypeVideo(InputType):
             return frame
 
         # Init making the FF structure
-        ff_struct_fake = FFMimickInterface(self.nrows, self.ncols, np.uint8)
+        ff_struct_fake = FFMimickInterface(self.nrows, self.ncols, np.uint16)
 
         # If there are no frames to read, return an empty array
         if frames_to_read == 0 or frames_to_read == -1:
@@ -1159,6 +1159,8 @@ class InputTypeUWOVid(InputType):
         # Separate directory path and file name
         self.vid_path = file_path
         self.dir_path, vid_file = os.path.split(file_path)
+
+        self.file_name = vid_file
 
         self.config = config
 
@@ -1868,7 +1870,7 @@ class InputTypeImages(object):
             return frame
 
         # Init making the FF structure
-        ff_struct_fake = FFMimickInterface(self.nrows, self.ncols, self.img_dtype)
+        ff_struct_fake = FFMimickInterface(self.nrows, self.ncols, np.uint16)
 
         self.frame_dt_list = []
 
@@ -2344,7 +2346,7 @@ class InputTypeDFN(InputType):
             self.ncols = temp
             img = np.rot90(img)
 
-        self.ff = FFMimickInterface(self.nrows, self.ncols, self.img_dtype)
+        self.ff = FFMimickInterface(self.nrows, self.ncols, np.uint16)
         self.ff.addFrame(img.astype(np.uint16))
         self.ff.finish()
 

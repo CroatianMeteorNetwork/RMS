@@ -284,8 +284,31 @@ class GstVideoFile():
 
         # Attempt to get a sample and determine the frame shape (use timed try-pull to avoid blocking)
         sample = self.device.emit("try-pull-sample", 500 * Gst.MSECOND)
+
+        # If no sample was obtained, check if we can fall back to decodebin
         if not sample:
-            raise ValueError("Could not obtain sample.")
+
+            # If a non-decodebin decoder was requested, fall back to decodebin
+            if self.decoder != 'decodebin':
+                print("WARNING: Could not obtain a sample with decoder '{}', "
+                      "falling back to 'decodebin'...".format(self.decoder))
+                sys.stdout.flush()
+
+                # Clean up the failed pipeline
+                try:
+                    self.pipeline.set_state(Gst.State.NULL)
+                    self.pipeline.get_state(2 * Gst.SECOND)
+                except Exception:
+                    pass
+                self.pipeline = None
+
+                # Retry with decodebin
+                self.decoder = 'decodebin'
+                self.device = self.createGSTDevice()
+                sample = self.device.emit("try-pull-sample", 500 * Gst.MSECOND)
+
+            if not sample:
+                raise ValueError("Could not obtain sample.")
 
         buffer = sample.get_buffer()
         ret, map_info = buffer.map(Gst.MapFlags.READ)
