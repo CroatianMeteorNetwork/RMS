@@ -2275,6 +2275,7 @@ class PlateTool(QtWidgets.QMainWindow):
             
             if os.path.isfile(self.geo_points_input):
                 self.geo_points_obj = GeoPoints(self.geo_points_input)
+                print("Geo points loaded from:", self.geo_points_input)
 
             else:
                 print("The file with geo points does not exist:", self.geo_points_input)
@@ -4072,7 +4073,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Plot geo points
             if self.catalog_stars_visible:
-                geo_size = 5
+                geo_size = 20
                 self.geo_markers.setData(x=self.geo_x_filtered + 0.5, y=self.geo_y_filtered + 0.5, \
                     size=geo_size)
                 self.geo_markers2.setData(x=self.geo_x_filtered + 0.5, y=self.geo_y_filtered + 0.5, \
@@ -10924,7 +10925,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self.cat_star_markers.hide()
             self.cat_star_markers2.hide()
             self.geo_markers.hide()
-            self.geo_markers.hide()
+            self.geo_markers2.hide()
             # Hide planets
             self.planet_markers.hide()
             self.planet_markers2.hide()
@@ -10934,7 +10935,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self.cat_star_markers.show()
             self.cat_star_markers2.show()
             self.geo_markers.show()
-            self.geo_markers.show()
+            self.geo_markers2.show()
             # Show planets
             self.planet_markers.show()
             self.planet_markers2.show()
