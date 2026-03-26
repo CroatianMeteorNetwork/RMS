@@ -1990,7 +1990,7 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
             # Extract (x, y, frame) of thresholded frames, i.e. pixel and frame locations of threshold passers
             t1 = time()
             xs, ys, zs = getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, theta, \
-                mask, flat_struct, dark, debug=True, line_start=line_start, line_end=line_end)
+                mask, flat_struct, dark, debug=debug, line_start=line_start, line_end=line_end)
             
             logDebug('Time for thresholding and stripe extraction: {:.3f}'.format(time() - t1))
 
