@@ -69,6 +69,13 @@ cdef class FFMimickInterface:
             self.maxpixel[:, :] = frame
 
         else:
+            # On the second frame, jumpstart MAD from the difference between
+            # the two frames instead of climbing from 1.0 one step at a time
+            if self.nframes == 1:
+                self.mad_buf[:, :] = np.maximum(
+                    np.abs(frame.astype(np.float32) - self.med_buf), 1.0
+                )
+
             self.frameProc(frame, self.nframes)
         
         self.nframes += 1
