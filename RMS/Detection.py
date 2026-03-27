@@ -644,7 +644,7 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
     mask=None, flat_struct=None, dark=None, debug=False, kht_cluster_min_size=9, kht_cluster_min_deviation=2, \
     kht_delta=0.1, kht_kernel_min_height=0.004, kht_n_sigmas=1, kht_morph_ops=[1, 2, 3, 4, 1], \
     line_finder_algorithm='kht', ransac_max_lines=10, ransac_min_pixels=10, ransac_distance_thresh=2.0, \
-    ransac_min_line_length=20.0, ransac_max_gap=20.0, frame_range=None):
+    ransac_min_line_length=20.0, ransac_max_gap=20.0, frame_range=None, border=5):
     """ Get (rho, phi) pairs for each meteor present on the image using KHT.
         
     Arguments:
@@ -679,6 +679,7 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
         frame_range: [tuple] Optional (start_frame, end_frame) to restrict detection to a range of frames.
             If given, only frame chunks overlapping this range will be processed. The end frame will be 
             padded up to the next time_window_size boundary.
+        border: [int] Number of pixels to mask out from the border of the image.
 
     Return:
         [list] A list of all found lines. Each entry is [rho, theta, frame_min, frame_max] for KHT,
@@ -706,7 +707,7 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
     if img_handle.input_type == 'ff':
 
         # Threshold the FF
-        ff_thresh = thresholdFF(img_handle.ff, k1, j1, mask=mask)
+        ff_thresh = thresholdFF(img_handle.ff, k1, j1, mask=mask, border=border)
 
         # # Show thresholded image
         # showImage("thresholded ALL", ff_thresh, convert_to_uint8=True)
@@ -767,7 +768,7 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
             img_handle = preprocessFF(img_handle, mask, flat_struct, dark)
 
             # Threshold the frame chunk
-            img_thresh = thresholdFF(img_handle.ff, k1, j1, mask=mask, mask_ave_bright=True)
+            img_thresh = thresholdFF(img_handle.ff, k1, j1, mask=mask, mask_ave_bright=True, border=border)
 
             # Check if there are too many threshold passers, if so report that no lines were found
             if not checkWhiteRatio(img_thresh, img_handle.ff, max_white_ratio):
@@ -1697,7 +1698,7 @@ def thresholdAndCorrectGammaFF(img_handle, config, mask, mask_ave_bright=True):
     """ Prepare the FF for centroid extraction by performing gamma correction. """
 
     # Threshold the FF
-    img_thres = thresholdFF(img_handle.ff, config.k1_det, config.j1_det, mask=mask, mask_ave_bright=mask_ave_bright)
+    img_thres = thresholdFF(img_handle.ff, config.k1_det, config.j1_det, mask=mask, mask_ave_bright=mask_ave_bright, border=config.detection_border)
 
 
     # Gamma correct image files
@@ -1805,7 +1806,7 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
         kht_morph_ops=config.kht_morph_ops, line_finder_algorithm=config.line_finder_algorithm, \
         ransac_max_lines=config.ransac_max_lines, ransac_min_pixels=config.ransac_min_pixels, \
         ransac_distance_thresh=config.ransac_distance_thresh, ransac_min_line_length=config.ransac_min_line_length, \
-        ransac_max_gap=config.ransac_max_gap, frame_range=frame_range)
+        ransac_max_gap=config.ransac_max_gap, frame_range=frame_range, border=config.detection_border)
 
     # logDebug('List of lines:', line_list)
 

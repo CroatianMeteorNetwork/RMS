@@ -5,6 +5,7 @@ import time
 # Cython import
 cimport numpy as np
 cimport cython
+from libc.math cimport fabsf, fmaxf
 
 # Define numpy types
 INT16_TYPE = np.uint16
@@ -68,15 +69,19 @@ cdef class FFMimickInterface:
             self.maxpixel[:, :] = frame
 
         else:
-            self.frameProc(frame)
+            self.frameProc(frame, self.nframes)
         
         self.nframes += 1
 
-    cdef frameProc(self, np.ndarray[INT16_TYPE_t, ndim=2] frame):
+    cdef frameProc(self, np.ndarray[INT16_TYPE_t, ndim=2] frame, int nframes):
         cdef int i, j
         cdef int nrows = self.nrows
         cdef int ncols = self.ncols
-        cdef float pix_val, med_val, mad_val, diff
+        cdef float pix_val, med_val, mad_val, diff, abs_diff
+
+        # After 32 frames of warm-up, enable outlier gating to prevent bright
+        # slow-moving objects from contaminating the median/MAD estimates
+        cdef bint gating = nframes >= 32
         
         # Access raw data pointers for speed
         cdef float[:, :] med_view = self.med_buf
@@ -91,32 +96,36 @@ cdef class FFMimickInterface:
                 med_val = med_view[i, j]
                 mad_val = mad_view[i, j]
 
-                # --- 1. Update Max Pixel (Standard) ---
+                # --- 1. Update Max Pixel (Standard, always applied) ---
                 if pix_val > max_view[i, j]:
                     max_view[i, j] = <INT16_TYPE_t>pix_val
 
-                # --- 2. Update Approximate Median (Sigma-Delta) ---
-                # If pixel > median, increment median. If pixel < median, decrement.
-                # This converges to the median without sorting.
-                if pix_val > med_val:
-                    med_val += 1.0
-                elif pix_val < med_val:
-                    med_val -= 1.0
-                
-                # Write back to buffer
-                med_view[i, j] = med_val
+                # Compute deviation from the current median estimate
+                diff = pix_val - med_val
+                abs_diff = abs(diff)
 
-                # --- 3. Update Approximate MAD (Noise Estimation) ---
-                # Calculate deviation from our current median estimate
-                diff = abs(pix_val - med_val)
-                
-                # Same Sigma-Delta logic for the deviation
-                if diff > mad_val:
-                    mad_val += 1.0
-                elif diff < mad_val:
-                    mad_val -= 1.0
-                
-                mad_view[i, j] = mad_val
+                # --- 2 & 3. Update Median and MAD (Sigma-Delta) ---
+                # Skip both updates if the pixel is an outlier (> 5*MAD from median).
+                # During warm-up (first 32 frames), update unconditionally so the
+                # estimates can converge before gating kicks in.
+
+                if (not gating) or (abs_diff < 5.0*fmaxf(mad_val, 1.0)):
+
+                    # Update Approximate Median
+                    if diff > 0:
+                        med_val += 1.0
+                    elif diff < 0:
+                        med_val -= 1.0
+                    
+                    med_view[i, j] = med_val
+
+                    # Update Approximate MAD (Noise Estimation)
+                    if abs_diff > mad_val:
+                        mad_val += 1.0
+                    elif (abs_diff < mad_val) and (mad_val >= 1.0):
+                        mad_val -= 1.0
+                    
+                    mad_view[i, j] = mad_val
 
     cpdef finish(self):
         """ Finalize the arrays. """

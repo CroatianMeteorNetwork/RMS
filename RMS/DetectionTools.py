@@ -484,7 +484,7 @@ def getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, 
 
         # Threshold the FF file
         img_thres, weights = Image.thresholdImgWithWeights(img_handle.ff.maxpixel, img_handle.ff.avepixel,
-            img_handle.ff.stdpixel, config.k1_det, config.j1_det, ff=True, mask=mask, mask_ave_bright=False)
+            img_handle.ff.stdpixel, config.k1_det, config.j1_det, ff=True, mask=mask, mask_ave_bright=False, border=config.detection_border)
 
         # Extract the thresholded image by min and max frames from FF file
         img = selectFFFrames(np.copy(img_thres), img_handle.ff, frame_min, frame_max)
@@ -561,7 +561,7 @@ def getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, 
 
             # Threshold the frame (memoized function, the frame index "fr" is used as cache key)
             img_thres, weights = Image.thresholdImgWithWeightsMemoCache(fr, fr_img, img_handle.ff.avepixel,
-                img_handle.ff.stdpixel, config.k1_det, config.j1_det, mask=mask, mask_ave_bright=True)
+                img_handle.ff.stdpixel, config.k1_det, config.j1_det, mask=mask, mask_ave_bright=True, border=config.detection_border)
             
             thresholding_times.append(time() - t_threshold)
 

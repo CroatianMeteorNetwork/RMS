@@ -295,7 +295,7 @@ except ImportError:
 
 
 
-def thresholdImg(img, avepixel, stdpixel, k1, j1, ff=False, mask=None, mask_ave_bright=True):
+def thresholdImg(img, avepixel, stdpixel, k1, j1, ff=False, mask=None, mask_ave_bright=True, border=0):
     """ Threshold the image with given parameters.
     
     Arguments:
@@ -312,6 +312,7 @@ def thresholdImg(img, avepixel, stdpixel, k1, j1, ff=False, mask=None, mask_ave_
         mask: [ndarray] Mask image. None by default.
         mask_ave_bright: [bool] Mask out regions that are 5 sigma brighter in avepixel than the median.
             This gets rid of very bright stars, saturating regions, static bright parts, etc.
+        border: [int] Number of pixels to mask out from the border of the image.
     
     Return:
         [ndarray] thresholded 2D image
@@ -336,8 +337,8 @@ def thresholdImg(img, avepixel, stdpixel, k1, j1, ff=False, mask=None, mask_ave_
                 and thresholdImg._star_mask_cache_id == id(stdpixel)):
             star_mask = thresholdImg._star_mask_cache
         else:
-            # Create a mask for stars (regions that are 3 sigma brighter in stdpixel than the median)
-            star_mask = stdpixel >= np.min([np.median(stdpixel) + 3*np.std(stdpixel), np.iinfo(stdpixel.dtype).max])
+            # Create a mask for stars (regions that are 3 sigma brighter in stdpixel than the median AND 5 sigma brighter in avepixel than the median)
+            star_mask = (stdpixel >= np.min([np.median(stdpixel) + 3*np.std(stdpixel), np.iinfo(stdpixel.dtype).max])) & (avepixel >= np.min([np.median(avepixel) + 5*np.std(avepixel), np.iinfo(avepixel.dtype).max]))
 
             # Dilate the star mask
             input_type = star_mask.dtype
@@ -355,11 +356,18 @@ def thresholdImg(img, avepixel, stdpixel, k1, j1, ff=False, mask=None, mask_ave_
         if img_thresh.shape == mask.img.shape:
             img_thresh[mask.img == 0] = False
 
+    # Black out pixels near the image border
+    if border > 0:
+        img_thresh[:border, :] = 0
+        img_thresh[-border:, :] = 0
+        img_thresh[:, :border] = 0
+        img_thresh[:, -border:] = 0
+
     # The thresholded image is always 8 bit
     return img_thresh.astype(np.uint8)
 
 
-def thresholdImgWithWeights(img, avepixel, stdpixel, k1, j1, ff=False, mask=None, mask_ave_bright=True):
+def thresholdImgWithWeights(img, avepixel, stdpixel, k1, j1, ff=False, mask=None, mask_ave_bright=True, border=0):
     """ Threshold the image with given parameters and also return the signal strength weights.
     
     Arguments:
@@ -376,6 +384,7 @@ def thresholdImgWithWeights(img, avepixel, stdpixel, k1, j1, ff=False, mask=None
         mask: [ndarray] Mask image. None by default.
         mask_ave_bright: [bool] Mask out regions that are 5 sigma brighter in avepixel than the median.
             This gets rid of very bright stars, saturating regions, static bright parts, etc.
+        border: [int] Number of pixels to mask out from the border of the image.
     
     Return:
         (img_thresh, weights):
@@ -426,6 +435,13 @@ def thresholdImgWithWeights(img, avepixel, stdpixel, k1, j1, ff=False, mask=None
         if img_thresh.shape == mask.img.shape:
             img_thresh[mask.img == 0] = False
 
+    # Black out pixels near the image border
+    if border > 0:
+        img_thresh[:border, :] = 0
+        img_thresh[-border:, :] = 0
+        img_thresh[:, :border] = 0
+        img_thresh[:, -border:] = 0
+
     # The thresholded image is always 8 bit
     return img_thresh.astype(np.uint8), weights
 
@@ -440,7 +456,7 @@ thresholdImgWithWeightsMemoCache = memoizeManualKeyCache(thresholdImgWithWeights
 
 
 @memoizeSingle
-def thresholdFF(ff, k1, j1, mask=None, mask_ave_bright=False):
+def thresholdFF(ff, k1, j1, mask=None, mask_ave_bright=False, border=0):
     """ Threshold the FF with given parameters.
     
     Arguments:
@@ -454,13 +470,14 @@ def thresholdFF(ff, k1, j1, mask=None, mask_ave_bright=False):
         mask: [ndarray] Mask image. None by default.
         mask_ave_bright: [bool] Mask out regions that are 5 sigma brighter in avepixel than the mean.
             This gets rid of very bright stars, saturating regions, static bright parts, etc.
+        border: [int] Number of pixels to mask out from the border of the image.
     
     Return:
         [ndarray] thresholded 2D image
     """
 
     return thresholdImg(ff.maxpixel, ff.avepixel, ff.stdpixel, k1, j1, ff=True, mask=mask, \
-        mask_ave_bright=mask_ave_bright)
+        mask_ave_bright=mask_ave_bright, border=border)
 
 
 
