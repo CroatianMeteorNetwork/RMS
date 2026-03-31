@@ -2150,8 +2150,9 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                     continue
 
                 # Show 3D cloud with all candidate lines
-                show3DCloud(img_handle.ff, xs, ys, zs, detected_line, stripe_points, config,
-                    all_detected_lines=all_detected_lines)
+                if debug:
+                    show3DCloud(img_handle.ff, xs, ys, zs, detected_line, stripe_points, config,
+                        all_detected_lines=all_detected_lines)
 
                 # Add the line to the results list
                 filtered_lines.append(detected_line)
