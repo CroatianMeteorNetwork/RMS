@@ -148,15 +148,14 @@ if __name__ == "__main__":
     stdpixel[stdpixel == 0] = 1.0 # Avoid division by zero
 
 
-    # Mask out stars by removing all pixels from consideration where stdpixel is 5 sigma above the median stdpixel AND the avepixel is above the median avepixel
-    star_mask = (stdpixel > (np.median(stdpixel) + 5*np.std(stdpixel))) & (ff.avepixel > (np.median(ff.avepixel) + 5*np.std(ff.avepixel)))
+    # Mask out stars by removing all pixels from consideration where stdpixel is 3 sigma above the median stdpixel AND the avepixel is above the median avepixel
+    star_mask = (stdpixel > (np.median(stdpixel) + 3*np.std(stdpixel))) & (ff.avepixel > (np.median(ff.avepixel) + 2*np.std(ff.avepixel)))
 
-    # Dilate the mask by 2 pixels
+    # Dilate the mask by 3 pixels
     star_mask = scipy.ndimage.binary_dilation(star_mask, iterations=2)
 
     # Compute the stddev values
-    k1_vals = (ff.maxpixel.astype(np.float64) - ff.avepixel.astype(np.float64) \
-        - j1)/stdpixel
+    k1_vals = (ff.maxpixel.astype(np.float64) - ff.avepixel.astype(np.float64) - j1)/stdpixel
 
     # Apply the star mask to the k1 values
     k1_vals[star_mask] = 0

@@ -674,49 +674,49 @@ def getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, 
         concatenate_time = time() - t_concatenate
 
 
-        if debug:
+        # if debug:
             
-            total_tracked_time = 0
-            total_tracked_time += strip_indices_time
+        #     total_tracked_time = 0
+        #     total_tracked_time += strip_indices_time
 
-            if centroiding:
-                total_tracked_time += centroid_prep_time
+        #     if centroiding:
+        #         total_tracked_time += centroid_prep_time
 
-            print('  - Frame conditioning time:')
-            print('    - Mean:  {:.4f} +/- {:.4f} s'.format(np.mean(frame_conditioning_times), np.std(frame_conditioning_times)))
-            print('    - Total: {:.4f} s'.format(np.sum(frame_conditioning_times)))
-            total_tracked_time += np.sum(frame_conditioning_times)
+        #     print('  - Frame conditioning time:')
+        #     print('    - Mean:  {:.4f} +/- {:.4f} s'.format(np.mean(frame_conditioning_times), np.std(frame_conditioning_times)))
+        #     print('    - Total: {:.4f} s'.format(np.sum(frame_conditioning_times)))
+        #     total_tracked_time += np.sum(frame_conditioning_times)
 
-            print('  - Thresholding time:')
-            print('    - Mean:  {:.4f} +/- {:.4f} s'.format(np.mean(thresholding_times), np.std(thresholding_times)))
-            print('    - Total: {:.4f} s'.format(np.sum(thresholding_times)))
-            total_tracked_time += np.sum(thresholding_times)
+        #     print('  - Thresholding time:')
+        #     print('    - Mean:  {:.4f} +/- {:.4f} s'.format(np.mean(thresholding_times), np.std(thresholding_times)))
+        #     print('    - Total: {:.4f} s'.format(np.sum(thresholding_times)))
+        #     total_tracked_time += np.sum(thresholding_times)
 
-            print('  - Morphology time:')
-            print('    - Mean:  {:.4f} +/- {:.4f} s'.format(np.mean(morph_times), np.std(morph_times)))
-            print('    - Total: {:.4f} s'.format(np.sum(morph_times)))
-            total_tracked_time += np.sum(morph_times)
+        #     print('  - Morphology time:')
+        #     print('    - Mean:  {:.4f} +/- {:.4f} s'.format(np.mean(morph_times), np.std(morph_times)))
+        #     print('    - Total: {:.4f} s'.format(np.sum(morph_times)))
+        #     total_tracked_time += np.sum(morph_times)
 
-            print('  - Extract stripe time:')
-            print('    - Mean:  {:.4f} +/- {:.4f} s'.format(np.mean(extract_stripe_times), np.std(extract_stripe_times)))
-            print('    - Total: {:.4f} s'.format(np.sum(extract_stripe_times)))
-            total_tracked_time += np.sum(extract_stripe_times)
+        #     print('  - Extract stripe time:')
+        #     print('    - Mean:  {:.4f} +/- {:.4f} s'.format(np.mean(extract_stripe_times), np.std(extract_stripe_times)))
+        #     print('    - Total: {:.4f} s'.format(np.sum(extract_stripe_times)))
+        #     total_tracked_time += np.sum(extract_stripe_times)
             
-            if centroiding:
-                print('  - Centroiding time:')
-                print('    - Mean:  {:.4f} +/- {:.4f} s'.format(np.mean(centroiding_times), np.std(centroiding_times)))
-                print('    - Total: {:.4f} s'.format(np.sum(centroiding_times)))
-                total_tracked_time += np.sum(centroiding_times)
+        #     if centroiding:
+        #         print('  - Centroiding time:')
+        #         print('    - Mean:  {:.4f} +/- {:.4f} s'.format(np.mean(centroiding_times), np.std(centroiding_times)))
+        #         print('    - Total: {:.4f} s'.format(np.sum(centroiding_times)))
+        #         total_tracked_time += np.sum(centroiding_times)
 
-            print('  - Nonzero time:')
-            print('    - Mean:  {:.4f} +/- {:.4f} s'.format(np.mean(nonzero_times), np.std(nonzero_times)))
-            print('    - Total: {:.4f} s'.format(np.sum(nonzero_times)))
-            total_tracked_time += np.sum(nonzero_times)
+        #     print('  - Nonzero time:')
+        #     print('    - Mean:  {:.4f} +/- {:.4f} s'.format(np.mean(nonzero_times), np.std(nonzero_times)))
+        #     print('    - Total: {:.4f} s'.format(np.sum(nonzero_times)))
+        #     total_tracked_time += np.sum(nonzero_times)
 
-            print('  - Concatenate time: {:.6f} s'.format(concatenate_time))
-            total_tracked_time += concatenate_time
+        #     print('  - Concatenate time: {:.6f} s'.format(concatenate_time))
+        #     total_tracked_time += concatenate_time
 
-            print('  - TOTAL: {:.4f} s'.format(total_tracked_time))
+        #     print('  - TOTAL: {:.4f} s'.format(total_tracked_time))
 
 
 

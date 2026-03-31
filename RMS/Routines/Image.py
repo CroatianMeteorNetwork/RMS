@@ -337,12 +337,12 @@ def thresholdImg(img, avepixel, stdpixel, k1, j1, ff=False, mask=None, mask_ave_
                 and thresholdImg._star_mask_cache_id == id(stdpixel)):
             star_mask = thresholdImg._star_mask_cache
         else:
-            # Create a mask for stars (regions that are 3 sigma brighter in stdpixel than the median AND 5 sigma brighter in avepixel than the median)
-            star_mask = (stdpixel >= np.min([np.median(stdpixel) + 3*np.std(stdpixel), np.iinfo(stdpixel.dtype).max])) & (avepixel >= np.min([np.median(avepixel) + 5*np.std(avepixel), np.iinfo(avepixel.dtype).max]))
+            # Create a mask for stars (regions that are 3 sigma brighter in stdpixel than the median AND 2 sigma brighter in avepixel than the median)
+            star_mask = (stdpixel >= np.min([np.median(stdpixel) + 3*np.std(stdpixel), np.iinfo(stdpixel.dtype).max])) & (avepixel >= np.min([np.median(avepixel) + 2*np.std(avepixel), np.iinfo(avepixel.dtype).max]))
 
-            # Dilate the star mask
+            # Dilate the star mask 2x
             input_type = star_mask.dtype
-            star_mask = morph.morphApply(star_mask.astype(np.uint8), [5]).astype(input_type)
+            star_mask = morph.morphApply(star_mask.astype(np.uint8), [5, 5]).astype(input_type)
 
             # Cache (only keep one to avoid memory accumulation)
             thresholdImg._star_mask_cache = star_mask
@@ -416,12 +416,12 @@ def thresholdImgWithWeights(img, avepixel, stdpixel, k1, j1, ff=False, mask=None
                 and thresholdImg._star_mask_cache_id == id(stdpixel)):
             star_mask = thresholdImg._star_mask_cache
         else:
-            # Create a mask for stars (regions that are 3 sigma brighter in stdpixel than the median)
-            star_mask = stdpixel >= np.min([np.median(stdpixel) + 3*np.std(stdpixel), np.iinfo(stdpixel.dtype).max])
+            # Create a mask for stars (regions that are 3 sigma brighter in stdpixel than the median) and 2 sigma brighter in avepixel than the median
+            star_mask = (stdpixel >= np.min([np.median(stdpixel) + 3*np.std(stdpixel), np.iinfo(stdpixel.dtype).max])) & (avepixel >= np.min([np.median(avepixel) + 2*np.std(avepixel), np.iinfo(avepixel.dtype).max]))
 
-            # Dilate the star mask
+            # Dilate the star mask 2x
             input_type = star_mask.dtype
-            star_mask = morph.morphApply(star_mask.astype(np.uint8), [5]).astype(input_type)
+            star_mask = morph.morphApply(star_mask.astype(np.uint8), [5, 5]).astype(input_type)
 
             # Cache (only keep one to avoid memory accumulation)
             thresholdImg._star_mask_cache = star_mask

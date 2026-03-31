@@ -876,7 +876,6 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
                 line_results.append(line_entry)
                 frame_lines.append(line_entry)
 
-
         if debug:
             # Create a summary image showing: 
             # a) Raw stack,
@@ -1969,6 +1968,24 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
 
         filtered_lines = []
 
+        logDebug('\n================================')
+        logDebug('Lines to analyze: {:d}'.format(len(line_list)))
+        logDebug('================================')
+        for li, line in enumerate(line_list):
+            if len(line) >= 8:
+                rho, theta, fmin, fmax, lx1, ly1, lx2, ly2 = line[:8]
+                dx = lx2 - lx1
+                dy = ly2 - ly1
+                length = np.sqrt(dx**2 + dy**2)
+                logDebug('  Line {:d}: rho={:.2f}, theta={:.2f}, frames={:d}-{:d}, '
+                         'start=({:.2f}, {:.2f}), end=({:.2f}, {:.2f}), len={:.2f} px'.format(
+                         li, rho, theta, int(fmin), int(fmax), lx1, ly1, lx2, ly2, length))
+            else:
+                rho, theta, fmin, fmax = line[:4]
+                logDebug('  Line {:d}: rho={:.2f}, theta={:.2f}, frames={:d}-{:d}'.format(
+                         li, rho, theta, int(fmin), int(fmax)))
+        logDebug('================================')
+
         # Analyze stripes of each line
         # This step makes sure that there is a linear propagation of the detections in time
         for line in line_list:
@@ -2054,10 +2071,11 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
 
             logDebug('finding lines...')
             
-            if debug:
-                logDebug(f"Point cloud used for line search ({len(stripe_points)} points):")
-                for pt in stripe_points:
-                    logDebug(f"  {pt[0]:.2f}, {pt[1]:.2f}, {pt[2]:.2f}")
+            # # Print the point cloud used for line search
+            # if debug:
+            #     logDebug(f"Point cloud used for line search ({len(stripe_points)} points):")
+            #     for pt in stripe_points:
+            #         logDebug(f"  {pt[0]:.2f}, {pt[1]:.2f}, {pt[2]:.2f}")
 
             # Find a single line in the point cloud
             detected_line = find3DLines(stripe_points, time(), config, fireball_detection=False)
@@ -2110,7 +2128,7 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
 
                 if not ang_vel_status:
                     logDebug(detected_line)
-                    logDebug('Rejected at initial stage due to the angular velocity: {:.2f} deg/s'.format(ang_vel))
+                    logDebug('Rejected at initial stage due to the angular velocity: {:.5f} deg/s'.format(ang_vel))
                     continue
 
                 # Show 3D cloud with all candidate lines
@@ -2124,8 +2142,8 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                 logDebug('No temporal propagation found!')
 
 
-        # Merge similar lines in 3D
-        filtered_lines = merge3DLines(filtered_lines, config.vect_angle_thresh)
+        # Merge similar lines in 3D (Disabled for testing)
+        # filtered_lines = merge3DLines(filtered_lines, config.vect_angle_thresh)
 
         # logDebug('after filtering:')
         # logDebug(filtered_lines)
@@ -2136,6 +2154,36 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
 
             img_thres, max_avg_corrected, flattened_weights, \
                 min_patch_intensity = thresholdAndCorrectGammaFF(img_handle, config, mask)
+
+
+        # Before centroiding, print a summary of all lines and their parameters that are 
+        #   going to be used for centroiding
+        if debug:
+            logDebug('\n================================')
+            logDebug('Lines to be centroided: {:d}'.format(len(filtered_lines)))
+            logDebug('================================')
+            for li, dl in enumerate(filtered_lines):
+                x1, y1, f1 = dl[0]
+                x2, y2, f2 = dl[1]
+                pts_count = dl[2]
+                f_min, f_max = dl[4], dl[5]
+                df = f2 - f1
+                if abs(df) > 1e-6:
+                    dx_df = (x2 - x1)/df
+                    dy_df = (y2 - y1)/df
+                    x0 = x1 - dx_df*f1
+                    y0 = y1 - dy_df*f1
+                else:
+                    dx_df = dy_df = x0 = y0 = 0.0
+                spatial_len = np.sqrt((x2 - x1)**2 + (y2 - y1)**2)
+                logDebug('  Line {:d}:'.format(li))
+                logDebug('    Start: ({:.2f}, {:.2f}) f={:.2f}  ->  End: ({:.2f}, {:.2f}) f={:.2f}'.format(
+                    x1, y1, f1, x2, y2, f2))
+                logDebug('    Frames: {:d} - {:d} ({:d} frames), {:d} pts, {:.2f} px length'.format(
+                    f_min, f_max, f_max - f_min + 1, pts_count, spatial_len))
+                logDebug('    dx/df: {:.2f}, dy/df: {:.2f}, x0: {:.2f}, y0: {:.2f}'.format(
+                    dx_df, dy_df, x0, y0))
+            logDebug('================================')
 
 
         # Go through all detected and filtered lines and compute centroids

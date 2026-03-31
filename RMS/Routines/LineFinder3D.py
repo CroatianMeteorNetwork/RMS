@@ -71,7 +71,7 @@ def pointToLineDist3D(points, point_on_line, direction):
 
 def findLines3D(points, max_lines, min_points, dist_thresh, max_gap_frame, max_gap_spatial, 
                 min_frames=10, frame_scale=None, img_w=None, img_h=None, 
-                max_iterations=1000, debug=False):
+                max_iterations=1000, min_ang_vel_px_per_frame=None, debug=False):
     """
     Find lines in 3D point cloud (x, y, frame) using Sequential 3D RANSAC.
     
@@ -87,6 +87,9 @@ def findLines3D(points, max_lines, min_points, dist_thresh, max_gap_frame, max_g
             calculated so image diagonal equals 256 frames.
         img_w, img_h: [float] Image dimensions. Used for default frame_scale calculate.
         max_iterations: [int] Maximum RANSAC iterations per line search.
+        min_ang_vel_px_per_frame: [float] Minimum angular velocity in px/frame. Lines moving
+            slower than this are rejected but their points are still removed to avoid
+            re-finding the same slow-moving object. None to disable.
         debug: [bool] Print verbose logs.
         
     Return:
@@ -255,10 +258,25 @@ def findLines3D(points, max_lines, min_points, dist_thresh, max_gap_frame, max_g
                 # Ensure start is temporally before end
                 pt_start, pt_end = pt_end, pt_start
 
-            found_lines.append((tuple(pt_start), tuple(pt_end), points[best_segment_indices]))
-            
-            if debug:
-                print(f"Found line spanning {pt_start[2]:.1f}-{pt_end[2]:.1f} frames, with {len(best_segment_indices)} points")
+            # Check angular velocity in px/frame before accepting the line
+            df = pt_end[2] - pt_start[2]
+            if df > 1e-6:
+                spatial_dist = math.sqrt((pt_end[0] - pt_start[0])**2 + (pt_end[1] - pt_start[1])**2)
+                ang_vel_pxf = spatial_dist / df
+            else:
+                ang_vel_pxf = 0.0
+
+            # If the line is too slow, skip it but still remove points below
+            if min_ang_vel_px_per_frame is not None and ang_vel_pxf < min_ang_vel_px_per_frame:
+                if debug:
+                    print(f"Rejected slow line spanning {pt_start[2]:.1f}-{pt_end[2]:.1f} frames, "
+                          f"{len(best_segment_indices)} pts, "
+                          f"ang_vel={ang_vel_pxf:.2f} px/f < min {min_ang_vel_px_per_frame:.2f} px/f")
+            else:
+                found_lines.append((tuple(pt_start), tuple(pt_end), points[best_segment_indices]))
+                if debug:
+                    print(f"Found line spanning {pt_start[2]:.1f}-{pt_end[2]:.1f} frames, "
+                          f"{len(best_segment_indices)} pts, ang_vel={ang_vel_pxf:.2f} px/f")
                 
             # Remove points within a buffer zone around the line segment
             t_buffer = (t_max - t_min)*0.1 # 10% buffer
@@ -321,10 +339,28 @@ def selectClosestLine(found_lines, ref_line, ref_has_frames=True, weights=(1.0, 
         ref_len = np.linalg.norm(ref_vec)
         ref_dir_2d = ref_vec/ref_len if ref_len > 0 else np.array([1, 0])
 
+    if debug:
+        print("\n--- 3D Line Similarity Search ---")
+        if ref_has_frames:
+            ref_start, ref_end = np.array(ref_line[0]), np.array(ref_line[1])
+            df_ref = ref_end[2] - ref_start[2]
+            if abs(df_ref) > 1e-6:
+                mx_ref = (ref_end[0] - ref_start[0])/df_ref
+                my_ref = (ref_end[1] - ref_start[1])/df_ref
+                cx_ref = ref_start[0] - mx_ref*ref_start[2]
+                cy_ref = ref_start[1] - my_ref*ref_start[2]
+                print(f"Target line: ({ref_start[0]:.2f}, {ref_start[1]:.2f}, {ref_start[2]:.2f}) -> ({ref_end[0]:.2f}, {ref_end[1]:.2f}, {ref_end[2]:.2f})")
+                print(f"  dx/df: {mx_ref:.2f}, dy/df: {my_ref:.2f}, x0: {cx_ref:.2f}, y0: {cy_ref:.2f}")
+            else:
+                print(f"Target line: {ref_start} -> {ref_end} (Static/Zero frame span)")
+        else:
+            x1, y1, x2, y2 = ref_line
+            print(f"Target line (2D): ({x1:.2f}, {y1:.2f}) -> ({x2:.2f}, {y2:.2f})")
+
     best_line = None
     min_score = float('inf')
 
-    for line in found_lines:
+    for i, line in enumerate(found_lines):
         cand_start = np.array(line[0])
         cand_end = np.array(line[1])
         cand_mid = (cand_start + cand_end)/2.0
@@ -358,11 +394,25 @@ def selectClosestLine(found_lines, ref_line, ref_has_frames=True, weights=(1.0, 
         score = weights[0]*loc_diff + weights[1]*orient_diff*100.0 + weights[2]*frame_diff
         
         if debug:
-            print(f"  Candidate line {line}: loc_diff={loc_diff:.3f}, orient_diff={orient_diff:.4f}, frame_diff={frame_diff:.3f}, score={score:.4f}")
+            df_cand = cand_end[2] - cand_start[2]
+            if abs(df_cand) > 1e-6:
+                mx_cand = (cand_end[0] - cand_start[0])/df_cand
+                my_cand = (cand_end[1] - cand_start[1])/df_cand
+                cx_cand = cand_start[0] - mx_cand*cand_start[2]
+                cy_cand = cand_start[1] - my_cand*cand_start[2]
+                
+                print(f"  Candidate {i}: ({cand_start[0]:.2f}, {cand_start[1]:.2f}, {cand_start[2]:.2f}) -> ({cand_end[0]:.2f}, {cand_end[1]:.2f}, {cand_end[2]:.2f})")
+                print(f"    dx/df: {mx_cand:.2f}, dy/df: {my_cand:.2f}, x0: {cx_cand:.2f}, y0: {cy_cand:.2f}")
+                print(f"    loc_diff={loc_diff:.2f}, orient_diff={orient_diff:.4f}, frame_diff={frame_diff:.2f}, score={score:.2f}")
+            else:
+                print(f"  Candidate {i}: Static/Zero frame span. score={score:.2f}")
             
         if score < min_score:
             min_score = score
             best_line = line
+
+    if debug and best_line is not None:
+        print(f"--- Best Candidate Choose: {best_line[0]} -> {best_line[1]} (Score={min_score:.2f})")
 
     return best_line
 
@@ -372,6 +422,16 @@ def find3DLines(stripe_points, current_time, config, fireball_detection=False):
     Wrapper for finding 3D lines that mimics the IO format of the older Grouping3D 
     approach. Designed as a drop-in replacement for Detection logic.
     """
+    # Compute minimum angular velocity in px/frame from config
+    # ang_vel_min is in deg/s, convert to px/frame:
+    #   px/s = (deg/s) / scale, where scale = avg(fov_h/height, fov_w/width)
+    #   px/frame = px/s / fps
+    scale = (config.fov_h / float(config.height) + config.fov_w / float(config.width)) / 2.0
+    if scale > 0 and config.fps > 0:
+        min_ang_vel_px_per_frame = config.ang_vel_min / scale / config.fps
+    else:
+        min_ang_vel_px_per_frame = None
+
     lines = findLines3D(
         points=stripe_points,
         max_lines=config.ransac3d_max_lines,
@@ -384,6 +444,7 @@ def find3DLines(stripe_points, current_time, config, fireball_detection=False):
         img_w=config.width,
         img_h=config.height,
         max_iterations=config.ransac3d_iterations,
+        min_ang_vel_px_per_frame=min_ang_vel_px_per_frame,
         debug=False
     )
     
