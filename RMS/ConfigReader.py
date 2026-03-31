@@ -1677,6 +1677,9 @@ def parseMeteorDetection(config, parser):
         if TFLITE_AVAILABLE and (config.ml_filter > 0):
             config.min_patch_intensity_multiplier = 0
 
+    if parser.has_option(section, "ml_model_file"):
+        config.ml_model_file = parser.get(section, "ml_model_file")
+        config.ml_model_path = os.path.join(config.rms_root_dir, "share", config.ml_model_file)
 
     if parser.has_option(section, "detection_border"):
         config.detection_border = parser.getint(section, "detection_border")
