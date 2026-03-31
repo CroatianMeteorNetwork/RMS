@@ -272,7 +272,7 @@ def findLines3D(points, max_lines, min_points, dist_thresh, max_gap_frame, max_g
     return found_lines
 
 
-def selectClosestLine(found_lines, ref_line, ref_has_frames=True, weights=(1.0, 1.0, 1.0)):
+def selectClosestLine(found_lines, ref_line, ref_has_frames=True, weights=(1.0, 1.0, 1.0), debug=False):
     """
     Selects the best matching line from 'found_lines' against 'ref_line'.
     
@@ -346,6 +346,9 @@ def selectClosestLine(found_lines, ref_line, ref_has_frames=True, weights=(1.0, 
 
         score = weights[0]*loc_diff + weights[1]*orient_diff*100.0 + weights[2]*frame_diff
         
+        if debug:
+            print(f"  Candidate line {line}: loc_diff={loc_diff:.3f}, orient_diff={orient_diff:.4f}, frame_diff={frame_diff:.3f}, score={score:.4f}")
+            
         if score < min_score:
             min_score = score
             best_line = line

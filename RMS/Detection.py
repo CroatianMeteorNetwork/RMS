@@ -2053,6 +2053,11 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
             t1 = time()
 
             logDebug('finding lines...')
+            
+            if debug:
+                logDebug(f"Point cloud used for line search ({len(stripe_points)} points):")
+                for pt in stripe_points:
+                    logDebug(f"  {pt[0]:.2f}, {pt[1]:.2f}, {pt[2]:.2f}")
 
             # Find a single line in the point cloud
             detected_line = find3DLines(stripe_points, time(), config, fireball_detection=False)
@@ -2088,7 +2093,8 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                     detected_line = selectClosestLine(
                         detected_line, 
                         ref_line_coords, 
-                        ref_has_frames=False
+                        ref_has_frames=False,
+                        debug=debug
                     )
 
                 if debug:
