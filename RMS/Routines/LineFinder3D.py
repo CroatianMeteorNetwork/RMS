@@ -403,8 +403,8 @@ def find3DLines(stripe_points, current_time, config, fireball_detection=False):
             end_pt, 
             pts_count,
             1.0, 
-            f_min, 
-            f_max
+            int(round(f_min)), 
+            int(round(f_max))
         ]
         formatted_lines.append(formatted_line)
         
