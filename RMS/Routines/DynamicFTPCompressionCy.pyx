@@ -52,7 +52,7 @@ cdef class FFMimickInterface:
         self.stdpixel = np.zeros((nrows, ncols), dtype=dtype) # Will hold the MAD
 
         # Internal buffer for the Reservoir Sampling
-        self.res_size = 128
+        self.res_size = 256
         self.sample_buf = np.zeros((self.res_size, nrows, ncols), dtype=np.uint16)
 
 

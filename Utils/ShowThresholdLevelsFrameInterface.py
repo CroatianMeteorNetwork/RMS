@@ -152,7 +152,7 @@ if __name__ == "__main__":
     star_mask = (stdpixel > (np.median(stdpixel) + 3*np.std(stdpixel))) & (ff.avepixel > (np.median(ff.avepixel) + 2*np.std(ff.avepixel)))
 
     # Dilate the mask by 3 pixels
-    star_mask = scipy.ndimage.binary_dilation(star_mask, iterations=2)
+    star_mask = scipy.ndimage.binary_dilation(star_mask, iterations=3)
 
     # Compute the stddev values
     k1_vals = (ff.maxpixel.astype(np.float64) - ff.avepixel.astype(np.float64) - j1)/stdpixel

@@ -46,7 +46,7 @@ from RMS.Formats.FrameInterface import detectInputType
 from RMS.Formats.AST import loadAST
 from RMS.Logger import LoggingManager, getLogger
 from RMS.Misc import mkdirP
-from RMS.Routines.LineFinder3D import find3DLines, getAllPoints, selectClosestLine
+from RMS.Routines.LineFinder3D import find3DLines, getAllPoints, stitch3DLines
 from RMS.Routines.CompareLines import compareLines
 from RMS.Routines import MaskImage
 from RMS.Routines import Image
@@ -575,18 +575,26 @@ def merge3DLines(line_list, vect_angle_thresh, last_count=0):
             v2 = np.array([x22-x21, y22-y21, z22-z21])
 
 
+            # Create a vector from line points (2D - image plane only)
+            # This prevents the frame (z) component from dominating the angle calculation
+            v1_2d = v1[:2]
+            v2_2d = v2[:2]
+
             # Create a vector from the first point of the first line and the last point of the second line
-            v_both = np.array([x22 - x11, y22 - y11, z22 - z11])
+            v_both_2d = np.array([x22 - x11, y22 - y11])
 
-            # Calculate the angle between the v_both and v1
-            vect_angle1 = _vectorAngle(v1, v_both)
+            # Calculate the angle between the v_both and v1 (2D)
+            vect_angle1 = _vectorAngle(v1_2d, v_both_2d)
 
-            # Calculate the angle between the v_both and v1
-            vect_angle2 = _vectorAngle(v2, v_both)
+            # Calculate the angle between the v_both and v2 (2D)
+            vect_angle2 = _vectorAngle(v2_2d, v_both_2d)
+
+            # Calculate the direct angle between the two lines (2D)
+            vect_angle12 = _vectorAngle(v1_2d, v2_2d)
 
 
-            # Check if the vector angles are close enough to the vector that connects them
-            if (vect_angle1 < vect_angle_thresh) and (vect_angle2 < vect_angle_thresh):
+            # Check if the vector angles are close enough
+            if (vect_angle1 < vect_angle_thresh) and (vect_angle2 < vect_angle_thresh) and (vect_angle12 < vect_angle_thresh):
 
                 # Check if the frames overlap
                 if set(range(line1_fmin, line1_fmax+1)).intersection(range(line2_fmin, line2_fmax+1)):
@@ -877,6 +885,7 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
                 frame_lines.append(line_entry)
 
         if debug:
+        #if False:
             # Create a summary image showing: 
             # a) Raw stack,
             # b) Thresholded stack, 
@@ -1335,10 +1344,6 @@ def checkAngularVelocity(centroids, config):
 
 
 
-import matplotlib.pyplot as plt
-import numpy as np
-import cv2
-import sys
 
 def showImage(name, img, convert_to_uint8=False):
     """ 
@@ -2077,46 +2082,59 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
             #     for pt in stripe_points:
             #         logDebug(f"  {pt[0]:.2f}, {pt[1]:.2f}, {pt[2]:.2f}")
 
-            # Find a single line in the point cloud
-            detected_line = find3DLines(stripe_points, time(), config, fireball_detection=False)
+            # Find all lines in the point cloud
+            detected_lines = find3DLines(stripe_points, time(), config, fireball_detection=False)
 
             logDebug('time for GROUPING: {:.3f}'.format(time() - t1))
 
-            # Extract the approprite line
-            if detected_line:
+            # Extract the appropriate line(s) and stitch them together
+            if detected_lines:
 
                 if debug:
                     logDebug('All found 3D lines:')
-                    for idx_dl, dl in enumerate(detected_line):
-                        logDebug('  {:d}: {}'.format(idx_dl, dl))
+                    for idx_dl, dl in enumerate(detected_lines):
+                        dx = dl[1][0] - dl[0][0]
+                        dy = dl[1][1] - dl[0][1]
+                        df = dl[1][2] - dl[0][2]
+                        mx, my = 0.0, 0.0
+                        if abs(df) > 1e-6:
+                            mx = dx / df
+                            my = dy / df
+                        logDebug(f"  {idx_dl:2d}: ({dl[0][0]:.2f}, {dl[0][1]:.2f}, {dl[0][2]:.2f}) -> ({dl[1][0]:.2f}, {dl[1][1]:.2f}, {dl[1][2]:.2f})  dx/df: {mx:6.2f}, dy/df: {my:6.2f}  [{dl[2]:d} pts, f:{dl[4]:d}-{dl[5]:d}]")
 
-                # Save all detected lines before narrowing to the chosen one
-                all_detected_lines = list(detected_line) if isinstance(detected_line, list) else None
+                # Save all detected lines for visualization
+                all_detected_lines = list(detected_lines)
 
-                # Choose the 3D line whose direction best matches the initial 2D line
-                if len(detected_line) == 1:
-                    detected_line = detected_line[0]
-
+                # Determine the reference line coordinates (from 2D line)
+                ref_line_coords = None
+                if line_start is not None and line_end is not None:
+                    ref_line_coords = (line_start[0], line_start[1], line_end[0], line_end[1])
                 else:
-                    ref_line_coords = None
-                    if line_start is not None and line_end is not None:
-                        ref_line_coords = (line_start[0], line_start[1], line_end[0], line_end[1])
-                    else:
-                        theta_rad = np.deg2rad(theta)
-                        a, b = np.cos(theta_rad), np.sin(theta_rad)
-                        x0 = a * rho + img_handle.ff.ncols / 2.0
-                        y0 = b * rho + img_handle.ff.nrows / 2.0
-                        ref_line_coords = (x0 - 1000*(-b), y0 - 1000*a, x0 + 1000*(-b), y0 + 1000*a)
-                        
-                    detected_line = selectClosestLine(
-                        detected_line, 
-                        ref_line_coords, 
-                        ref_has_frames=False,
-                        debug=debug
-                    )
+                    theta_rad = np.deg2rad(theta)
+                    a, b = np.cos(theta_rad), np.sin(theta_rad)
+                    x0 = a * rho + img_handle.ff.ncols / 2.0
+                    y0 = b * rho + img_handle.ff.nrows / 2.0
+                    ref_line_coords = (x0 - 1000*(-b), y0 - 1000*a, x0 + 1000*(-b), y0 + 1000*a)
+                
+                # Stitch segments together to form the full meteor track
+                # Using 10deg angular threshold and configurable spatial threshold
+                img_diag = np.sqrt(config.width**2 + config.height**2)
+                frame_scale = img_diag / 256.0 if img_diag > 0 else 1.0
+                detected_line = stitch3DLines(
+                    detected_lines, 
+                    ref_line_coords, 
+                    ref_has_frames=False,
+                    frame_scale=frame_scale,
+                    dist_thresh=config.ransac3d_stitch_dist_thresh,
+                    debug=debug
+                )
+
+                if detected_line is None:
+                    logDebug('No matching 3D line found after stitching!')
+                    continue
 
                 if debug:
-                    logDebug('Chosen 3D line: {}'.format(detected_line))
+                    logDebug('Stitched 3D line: {}'.format(detected_line))
 
                 logDebug(detected_line)
                 

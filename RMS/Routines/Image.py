@@ -342,7 +342,7 @@ def thresholdImg(img, avepixel, stdpixel, k1, j1, ff=False, mask=None, mask_ave_
 
             # Dilate the star mask 2x
             input_type = star_mask.dtype
-            star_mask = morph.morphApply(star_mask.astype(np.uint8), [5, 5]).astype(input_type)
+            star_mask = morph.morphApply(star_mask.astype(np.uint8), [5, 5, 5]).astype(input_type)
 
             # Cache (only keep one to avoid memory accumulation)
             thresholdImg._star_mask_cache = star_mask
@@ -421,7 +421,7 @@ def thresholdImgWithWeights(img, avepixel, stdpixel, k1, j1, ff=False, mask=None
 
             # Dilate the star mask 2x
             input_type = star_mask.dtype
-            star_mask = morph.morphApply(star_mask.astype(np.uint8), [5, 5]).astype(input_type)
+            star_mask = morph.morphApply(star_mask.astype(np.uint8), [5, 5, 5]).astype(input_type)
 
             # Cache (only keep one to avoid memory accumulation)
             thresholdImg._star_mask_cache = star_mask

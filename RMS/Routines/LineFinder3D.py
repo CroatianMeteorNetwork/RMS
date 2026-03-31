@@ -417,6 +417,134 @@ def selectClosestLine(found_lines, ref_line, ref_has_frames=True, weights=(1.0, 
     return best_line
 
 
+def stitch3DLines(found_lines, ref_line, ref_has_frames=True, vect_angle_thresh=10.0, dist_thresh=2.0, 
+                  frame_scale=None, debug=False):
+    """
+    Selects the best matching line (seed) from RANSAC results and then 'stitches' other segments 
+    that are collinear extensions of the same track.
+    
+    Arguments:
+        found_lines: [list] List of formatted lines: [(start_pt, end_pt, pts_count, quality, f_min, f_max), ...]
+        ref_line: [tuple] The reference line (2D or 3D).
+        ref_has_frames: [bool] Whether reference line has time dimension.
+        vect_angle_thresh: [float] Maximum 3D angle (degrees) to merge extensions.
+        dist_thresh: [float] Maximum 3D distance to the infinite line to merge extensions.
+        frame_scale: [float] Normalization ratio for frame dimension. If None, calculated from first found line.
+        debug: [bool] Verbose output.
+        
+    Return:
+        stitched_line: A single merged line segment in the same format as found_lines.
+    """
+    if not found_lines:
+        return None
+
+    # 1. Find the seed line
+    seed_line = selectClosestLine(found_lines, ref_line, ref_has_frames=ref_has_frames, debug=debug)
+    if seed_line is None:
+        return None
+
+    if len(found_lines) == 1:
+        return seed_line
+
+    # Setup frame scaling for 3D distance checks
+    if frame_scale is None:
+        # Estimate frame scale if not provided
+        # Use a default 100/1 ratio if we can't estimate well
+        frame_scale = 1.0
+        for l in found_lines:
+            dx = l[1][0] - l[0][0]
+            dy = l[1][1] - l[0][1]
+            df = l[1][2] - l[0][2]
+            if abs(df) > 1:
+                frame_scale = math.sqrt(dx**2 + dy**2) / abs(df)
+                break
+
+    def get_scaled_line(line):
+        p1 = np.array(line[0])
+        p2 = np.array(line[1])
+        p1[2] *= frame_scale
+        p2[2] *= frame_scale
+        return p1, p2
+
+    seed_p1_sc, seed_p2_sc = get_scaled_line(seed_line)
+    seed_vec_sc = seed_p2_sc - seed_p1_sc
+    seed_len_sc = np.linalg.norm(seed_vec_sc)
+    seed_dir_sc = seed_vec_sc / seed_len_sc if seed_len_sc > 0 else np.array([1, 0, 0])
+
+    stitched_segments = [seed_line]
+    other_lines = [l for l in found_lines if l is not seed_line]
+    
+    if debug:
+        print(f"\n--- 3D Line Stitching (Seed: {seed_line[0]} -> {seed_line[1]}) ---")
+        print(f"  Frame scale: {frame_scale:.4f}")
+
+    for cand in other_lines:
+        cand_p1_sc, cand_p2_sc = get_scaled_line(cand)
+        cand_vec_sc = cand_p2_sc - cand_p1_sc
+        cand_len_sc = np.linalg.norm(cand_vec_sc)
+        cand_dir_sc = cand_vec_sc / cand_len_sc if cand_len_sc > 0 else np.array([1, 0, 0])
+        
+        # Check directionality (3D angle)
+        cos_theta = abs(np.dot(cand_dir_sc, seed_dir_sc))
+        angle = np.degrees(np.arccos(np.clip(cos_theta, -1.0, 1.0)))
+        
+        if angle > vect_angle_thresh:
+            if debug:
+                print(f"  Candidate {cand[0]} rejected: angle {angle:.1f} > {vect_angle_thresh}")
+            continue
+            
+        # Check distance to infinite line (using scaled coords)
+        d1 = pointToLineDist3D(cand_p1_sc.reshape(1,3), seed_p1_sc, seed_dir_sc)[0]
+        d2 = pointToLineDist3D(cand_p2_sc.reshape(1,3), seed_p1_sc, seed_dir_sc)[0]
+        
+        if d1 > dist_thresh or d2 > dist_thresh:
+            if debug:
+                print(f"  Candidate {cand[0]} rejected: dists ({d1:.1f}, {d2:.1f}) > {dist_thresh}")
+            continue
+            
+        stitched_segments.append(cand)
+        if debug:
+            print(f"  Candidate {cand[0]} -> {cand[1]} merged! (angle={angle:.1f}, dists={d1:.1f}, {d2:.1f})")
+
+    if len(stitched_segments) == 1:
+        return seed_line
+
+    # Combine all segments
+    all_starts = np.array([l[0] for l in stitched_segments])
+    all_ends = np.array([l[1] for l in stitched_segments])
+    
+    f_min = min(np.min(all_starts[:, 2]), np.min(all_ends[:, 2]))
+    f_max = max(np.max(all_starts[:, 2]), np.max(all_ends[:, 2]))
+    
+    total_pts = sum(l[2] for l in stitched_segments)
+    avg_quality = sum(l[3] for l in stitched_segments) / len(stitched_segments)
+    
+    # Use the seed's linear model to project endpoints back to unscaled space
+    # seed_dir_sc is in scaled space. We need dx/df and dy/df in unscaled space.
+    # dx = seed_vec_sc[0], dy = seed_vec_sc[1], df = seed_vec_sc[2]/frame_scale
+    seed_p1 = np.array(seed_line[0])
+    seed_p2 = np.array(seed_line[1])
+    diff = seed_p2 - seed_p1
+    
+    if abs(diff[2]) > 1e-6:
+        m_x = diff[0] / diff[2]
+        m_y = diff[1] / diff[2]
+        
+        x_min = seed_p1[0] + (f_min - seed_p1[2]) * m_x
+        y_min = seed_p1[1] + (f_min - seed_p1[2]) * m_y
+        
+        x_max = seed_p1[0] + (f_max - seed_p1[2]) * m_x
+        y_max = seed_p1[1] + (f_max - seed_p1[2]) * m_y
+        
+        new_start = (x_min, y_min, f_min)
+        new_end = (x_max, y_max, f_max)
+    else:
+        new_start = (seed_p1[0], seed_p1[1], f_min)
+        new_end = (seed_p1[0], seed_p1[1], f_max)
+
+    return [new_start, new_end, total_pts, avg_quality, int(round(f_min)), int(round(f_max))]
+
+
 def find3DLines(stripe_points, current_time, config, fireball_detection=False):
     """
     Wrapper for finding 3D lines that mimics the IO format of the older Grouping3D 

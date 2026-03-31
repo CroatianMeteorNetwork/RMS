@@ -56,12 +56,18 @@ def merge3DLines(line_list, vect_angle_thresh, last_count=0):
             line2_fmin, line2_fmax = line2[4:6]
             v2 = np.array([x22-x21, y22-y21, z22-z21])
 
-            v_both = np.array([x22 - x11, y22 - y11, z22 - z11])
+            # Create a vector from line points (2D - image plane only)
+            v1_2d = v1[:2]
+            v2_2d = v2[:2]
 
-            vect_angle1 = _vectorAngle(v1, v_both)
-            vect_angle2 = _vectorAngle(v2, v_both)
+            # Create a vector from first point of first line to last point of second line
+            v_both_2d = np.array([x22 - x11, y22 - y11])
 
-            if (vect_angle1 < vect_angle_thresh) and (vect_angle2 < vect_angle_thresh):
+            vect_angle1 = _vectorAngle(v1_2d, v_both_2d)
+            vect_angle2 = _vectorAngle(v2_2d, v_both_2d)
+            vect_angle12 = _vectorAngle(v1_2d, v2_2d)
+
+            if (vect_angle1 < vect_angle_thresh) and (vect_angle2 < vect_angle_thresh) and (vect_angle12 < vect_angle_thresh):
                 if set(range(line1_fmin, line1_fmax+1)).intersection(range(line2_fmin, line2_fmax+1)):
                     frame_min = min((line1_fmin, line2_fmin))
                     frame_max = max((line1_fmax, line2_fmax))
@@ -109,14 +115,28 @@ def test_direct_angle_analysis():
             v2 = np.array([0, spatial_px, frames], dtype=float)
             v_both = np.array([spatial_px/2, spatial_px/2, frames], dtype=float)
             
-            a12 = vec_angle(v1, v2)
-            a1b = vec_angle(v1, v_both)
-            a2b = vec_angle(v2, v_both)
-            merges = a1b < 20 and a2b < 20
-            flag = " <-- BUG!" if merges and a12 > 30 else ""
-            if flag:
-                bugs_found += 1
-            print(f"  {spatial_px:>12} {frames:>8} {a12:>14.2f} {a1b:>14.2f} {a2b:>14.2f} {str(merges):>12}{flag}")
+            # For analysis, we also need the 2D versions
+            v1_2d = v1[:2]
+            v2_2d = v2[:2]
+            vb_2d = v_both[:2]
+            
+            a12_3d = vec_angle(v1, v2)
+            a1b_3d = vec_angle(v1, v_both)
+            a2b_3d = vec_angle(v2, v_both)
+            
+            # The 2D angles used in the fixed function:
+            a12_2d = vec_angle(v1_2d, v2_2d)
+            a1b_2d = vec_angle(v1_2d, vb_2d)
+            a2b_2d = vec_angle(v2_2d, vb_2d)
+            
+            # Fixed logic: all 2D angles must be < threshold (20)
+            merges = (a1b_2d < 20) and (a2b_2d < 20) and (a12_2d < 20)
+            
+            # The bug check: if it used to merge but shouldn't have due to 2D perpendicularity
+            # (In this sweep, v1 and v2 are always perpendicular in 2D, so they should NEVER merge)
+            bug_flag = " (STILL BROKEN)" if merges else ""
+            
+            print(f"  {spatial_px:>12} {frames:>8} {a12_3d:>14.2f} {a1b_3d:>14.2f} {a2b_3d:>14.2f} {str(merges):>12}{bug_flag}")
     
     return bugs_found
 

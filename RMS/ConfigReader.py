@@ -636,6 +636,7 @@ class Config:
         self.ransac3d_max_gap_spatial = 50.0
         self.ransac3d_min_frames = 4.0
         self.ransac3d_iterations = 10
+        self.ransac3d_stitch_dist_thresh = 5.0
 
         # 3D line merging parameters
         self.vect_angle_thresh = 20 # angle similarity between 2 lines in a stripe to be merged
@@ -1733,6 +1734,9 @@ def parseMeteorDetection(config, parser):
 
     if parser.has_option(section, "ransac3d_iterations"):
         config.ransac3d_iterations = parser.getint(section, "ransac3d_iterations")
+
+    if parser.has_option(section, "ransac3d_stitch_dist_thresh"):
+        config.ransac3d_stitch_dist_thresh = parser.getfloat(section, "ransac3d_stitch_dist_thresh")
 
     if parser.has_option(section, "stripe_width"):
         config.stripe_width = parser.getint(section, "stripe_width")
