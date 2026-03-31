@@ -253,6 +253,63 @@ class TestLineFinder3D(unittest.TestCase):
             
         plot_result("Complex Dataset Analysis", points, lines)
 
+    def test_velocity_filtering(self):
+        """ Test that slow-moving clusters are rejected by angular velocity filtering """
+        # Create a stationary cluster (very slow motion)
+        stationary_pts = [
+            [100.0, 100.0, 3000.0],
+            [100.1, 100.0, 3005.0],
+            [100.0, 100.1, 3010.0],
+            [100.1, 100.1, 3015.0],
+            [100.0, 100.0, 3020.0],
+            [100.2, 100.0, 3025.0],
+            [100.0, 100.2, 3030.0],
+            [100.2, 100.2, 3035.0],
+            [100.1, 100.1, 3040.0],
+            [100.0, 100.0, 3045.0],
+        ]
+        
+        # Create a fast-moving meteor
+        meteor_pts = [
+            [200.0, 200.0, 3000.0],
+            [210.0, 210.0, 3005.0],
+            [220.0, 220.0, 3010.0],
+            [230.0, 230.0, 3015.0],
+            [240.0, 240.0, 3020.0],
+            [250.0, 250.0, 3025.0],
+            [260.0, 260.0, 3030.0],
+            [270.0, 270.0, 3035.0],
+            [280.0, 280.0, 3040.0],
+            [290.0, 290.0, 3045.0],
+        ]
+        
+        points = np.array(stationary_pts + meteor_pts)
+        
+        # Case 1: No filtering (should find both)
+        lines_no_filter = findLines3D(points, max_lines=5, min_points=5, dist_thresh=4.0, 
+                                      max_gap_frame=50, max_gap_spatial=50.0, min_frames=5,
+                                      img_w=1280, img_h=720, max_iterations=1000)
+        
+        print(f"Found {len(lines_no_filter)} lines without filtering")
+        
+        # Case 2: With filtering (should only find the fast one)
+        # diag_fov approx 72 deg, diag_px approx 1468 px. fps=25
+        # meteor speed approx 10*sqrt(2) px / 5 frames = 2.8 px/frame
+        # stationary speed approx 0.2 px / 5 frames = 0.04 px/frame
+        lines_with_filter = findLines3D(points, max_lines=5, min_points=5, dist_thresh=4.0, 
+                                        max_gap_frame=50, max_gap_spatial=50.0, min_frames=5,
+                                        img_w=1280, img_h=720, max_iterations=1000,
+                                        min_ang_vel=1.0, fov_w=64.0, fov_h=35.0, fps=25.0,
+                                        debug=True)
+                                        
+        print(f"Found {len(lines_with_filter)} lines with filtering")
+        
+        self.assertEqual(len(lines_with_filter), 1, "Should have rejected the stationary cluster")
+        
+        if '--plots' in sys.argv:
+            plot_result("Velocity Filtering Test", points, lines_with_filter)
+
+
 
 
 if __name__ == '__main__':

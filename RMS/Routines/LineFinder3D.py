@@ -71,7 +71,8 @@ def pointToLineDist3D(points, point_on_line, direction):
 
 def findLines3D(points, max_lines, min_points, dist_thresh, max_gap_frame, max_gap_spatial, 
                 min_frames=10, frame_scale=None, img_w=None, img_h=None, 
-                max_iterations=1000, debug=False):
+                max_iterations=1000, min_ang_vel=None, fov_w=None, fov_h=None, fps=None,
+                debug=False):
     """
     Find lines in 3D point cloud (x, y, frame) using Sequential 3D RANSAC.
     
@@ -121,11 +122,30 @@ def findLines3D(points, max_lines, min_points, dist_thresh, max_gap_frame, max_g
     # Internal mask: True means the point is still available to be matched
     available_mask = np.ones(len(points), dtype=bool)
 
+    # Calculate angular velocity threshold if requested
+    min_px_per_frame = 0
+    if min_ang_vel is not None and fov_w is not None and fov_h is not None and fps is not None:
+        diag_fov = np.sqrt(fov_w**2 + fov_h**2)
+        diag_px = np.sqrt(img_w**2 + img_h**2)
+        # (deg/s) -> (px/frame)
+        min_px_per_frame = (min_ang_vel / diag_fov) * diag_px / fps
+        if debug:
+            print(f"Velocity filtering enabled: min {min_ang_vel:.2f} deg/s -> {min_px_per_frame:.4f} px/frame")
+
+    # Tracking search state
+    max_search_lines = max_lines
+    total_iterations_limit = max_iterations
+    iteration_count = 0
     consecutive_failures = 0
     MAX_FAILURES = 10
 
-    while np.sum(available_mask) >= min_points and len(found_lines) < max_lines:
+    while np.sum(available_mask) >= min_points and len(found_lines) < max_search_lines:
         if consecutive_failures >= MAX_FAILURES:
+            break
+        
+        # Check overall iteration count limit across multiple lines
+        if iteration_count >= total_iterations_limit:
+            if debug: print(f"Reached total iteration limit ({total_iterations_limit})")
             break
 
         pool_indices = np.where(available_mask)[0]
@@ -135,7 +155,9 @@ def findLines3D(points, max_lines, min_points, dist_thresh, max_gap_frame, max_g
         best_inlier_count = 0
         best_segment_indices = None # Global indices of points in best segment
 
-        for i in range(max_iterations):
+        # Main RANSAC loop for the next best line
+        for _ in range(max_iterations):
+            iteration_count += 1
             if len(pts_pool) < 2:
                 break
                 
@@ -255,10 +277,26 @@ def findLines3D(points, max_lines, min_points, dist_thresh, max_gap_frame, max_g
                 # Ensure start is temporally before end
                 pt_start, pt_end = pt_end, pt_start
 
-            found_lines.append((tuple(pt_start), tuple(pt_end), points[best_segment_indices]))
+            # CALCULATE VELOCITY FILTERING
+            # Distance in pixels (XY plane)
+            dist_px = np.sqrt((pt_end[0] - pt_start[0])**2 + (pt_end[1] - pt_start[1])**2)
+            # Duration in frames
+            dt_frames = abs(pt_end[2] - pt_start[2])
             
-            if debug:
-                print(f"Found line spanning {pt_start[2]:.1f}-{pt_end[2]:.1f} frames, with {len(best_segment_indices)} points")
+            actual_px_per_frame = dist_px / dt_frames if dt_frames > 0 else 0
+            
+            if min_px_per_frame > 0 and actual_px_per_frame < min_px_per_frame:
+                if debug:
+                    print(f"REJECTED: Slow line ({actual_px_per_frame:.4f} px/frame < {min_px_per_frame:.4f} px/frame)")
+                
+                # REJECTION LOGIC: don't count, but still remove points to clean the pool
+                # Increase line budget and iteration budget
+                max_search_lines += 1
+                total_iterations_limit += 100 # Give it more room to breathe
+            else:
+                found_lines.append((tuple(pt_start), tuple(pt_end), points[best_segment_indices]))
+                if debug:
+                    print(f"Found line spanning {pt_start[2]:.1f}-{pt_end[2]:.1f} frames, with {len(best_segment_indices)} points")
                 
             # Remove points within a buffer zone around the line segment
             t_buffer = (t_max - t_min)*0.1 # 10% buffer
@@ -384,6 +422,10 @@ def find3DLines(stripe_points, current_time, config, fireball_detection=False):
         img_w=config.width,
         img_h=config.height,
         max_iterations=config.ransac3d_iterations,
+        min_ang_vel=config.ang_vel_min,
+        fov_w=config.fov_w,
+        fov_h=config.fov_h,
+        fps=config.fps,
         debug=False
     )
     
