@@ -351,3 +351,107 @@ def selectClosestLine(found_lines, ref_line, ref_has_frames=True, weights=(1.0, 
             best_line = line
 
     return best_line
+
+
+def find3DLines(stripe_points, current_time, config, fireball_detection=False):
+    """
+    Wrapper for finding 3D lines that mimics the IO format of the older Grouping3D 
+    approach. Designed as a drop-in replacement for Detection logic.
+    """
+    lines = findLines3D(
+        points=stripe_points,
+        max_lines=config.ransac_max_lines,
+        min_points=config.ransac_min_pixels,
+        dist_thresh=config.ransac_distance_thresh,
+        max_gap_frame=config.ransac_max_gap_frame_det,
+        max_gap_spatial=config.ransac_max_gap_spatial_det,
+        min_frames=config.line_minimum_frame_range_det,
+        frame_scale=None,
+        img_w=config.width,
+        img_h=config.height,
+        max_iterations=1000,
+        debug=False
+    )
+    
+    formatted_lines = []
+    
+    for line in lines:
+        start_pt, end_pt = line
+        f_min = min(start_pt[2], end_pt[2])
+        f_max = max(start_pt[2], end_pt[2])
+        
+        # Estimate points length roughly to satisfy formatting
+        pts_count = int(f_max - f_min) + 1 
+        
+        # Old DL format: [(x1,y1,z1), (x2,y2,z2), counter, quality, f_first, f_last]
+        formatted_line = [
+            start_pt, 
+            end_pt, 
+            pts_count,
+            1.0, 
+            f_min, 
+            f_max
+        ]
+        formatted_lines.append(formatted_line)
+        
+    return formatted_lines
+
+
+def getAllPoints(point_list, x1, y1, z1, x2, y2, z2, config, fireball_detection=False):
+    """
+    Drop-in replacement for Grouping3D.getAllPoints.
+    Extracts all points from point_list that fall closely on the line segment
+    defined by (x1, y1, z1) to (x2, y2, z2). 
+    """
+    points = np.asarray(point_list).astype(np.float64)
+    if len(points) == 0:
+        return np.array([])
+        
+    p1 = np.array([x1, y1, z1])
+    p2 = np.array([x2, y2, z2])
+    
+    direction = p2 - p1
+    dir_norm = np.linalg.norm(direction)
+    if dir_norm < 1e-6:
+        return np.array([])
+    direction /= dir_norm
+    
+    # Distance threshold uses RANSAC params if fake fireball
+    dist_thresh = config.ransac_distance_thresh if not fireball_detection else config.distance_threshold
+    
+    img_diag = np.sqrt(config.width**2 + config.height**2)
+    frame_scale = img_diag / 256.0
+    
+    scaled_p1 = p1.copy()
+    scaled_p1[2] *= frame_scale
+    scaled_p2 = p2.copy()
+    scaled_p2[2] *= frame_scale
+    
+    scaled_dir = scaled_p2 - scaled_p1
+    sc_dir_norm = np.linalg.norm(scaled_dir)
+    if sc_dir_norm > 0:
+        scaled_dir /= sc_dir_norm
+    else:
+        scaled_dir = np.array([1.0, 0.0, 0.0])
+        
+    scaled_pts = points.copy()
+    scaled_pts[:, 2] *= frame_scale
+    
+    dists = pointToLineDist3D(scaled_pts, scaled_p1, scaled_dir)
+    inlier_mask = dists < dist_thresh
+    
+    if np.sum(inlier_mask) == 0:
+        return np.array([])
+        
+    t_vals = np.dot(scaled_pts[inlier_mask] - scaled_p1, scaled_dir)
+    t_end = np.dot(scaled_p2 - scaled_p1, scaled_dir)
+    
+    t_min = min(0.0, t_end)
+    t_max = max(0.0, t_end)
+    
+    buffer = 5.0 * frame_scale
+    t_mask = (t_vals >= t_min - buffer) & (t_vals <= t_max + buffer)
+    
+    final_inliers = points[inlier_mask][t_mask]
+    return final_inliers
+

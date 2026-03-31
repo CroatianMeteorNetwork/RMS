@@ -46,7 +46,7 @@ from RMS.Formats.FrameInterface import detectInputType
 from RMS.Formats.AST import loadAST
 from RMS.Logger import LoggingManager, getLogger
 from RMS.Misc import mkdirP
-from RMS.Routines.Grouping3D import find3DLines, getAllPoints
+from RMS.Routines.LineFinder3D import find3DLines, getAllPoints, selectClosestLine
 from RMS.Routines.CompareLines import compareLines
 from RMS.Routines import MaskImage
 from RMS.Routines import Image
@@ -2075,87 +2075,21 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                     detected_line = detected_line[0]
 
                 else:
-
-                    # Compute the reference 3D direction from the initial line
+                    ref_line_coords = None
                     if line_start is not None and line_end is not None:
-                        ref_dx = line_end[0] - line_start[0]
-                        ref_dy = line_end[1] - line_start[1]
+                        ref_line_coords = (line_start[0], line_start[1], line_end[0], line_end[1])
                     else:
                         theta_rad = np.deg2rad(theta)
-                        ref_dx = -np.sin(theta_rad)
-                        ref_dy = np.cos(theta_rad)
-                    
-                    ref_dz = frame_max - frame_min
-
-                    ref_len = np.sqrt(ref_dx**2 + ref_dy**2 + ref_dz**2)
-                    if ref_len > 1e-9:
-                        ref_dx /= ref_len
-                        ref_dy /= ref_len
-                        ref_dz /= ref_len
-
-                    # Compute a reference midpoint in 2D image space for positional scoring
-                    if line_start is not None and line_end is not None:
-                        ref_mid_x = (line_start[0] + line_end[0]) / 2.0
-                        ref_mid_y = (line_start[1] + line_end[1]) / 2.0
-                    else:
-                        # For HT lines, the closest point on the line to image centre
-                        theta_rad = np.deg2rad(theta)
-                        ref_mid_x = rho * np.cos(theta_rad) + img_handle.ff.ncols / 2.0
-                        ref_mid_y = rho * np.sin(theta_rad) + img_handle.ff.nrows / 2.0
-
-                    img_diag = np.sqrt(float(img_handle.ff.ncols)**2 + float(img_handle.ff.nrows)**2)
-
-                    if debug:
-                        logDebug('  Reference direction: dx={:.4f}, dy={:.4f}, dz={:.4f}'.format(
-                            ref_dx, ref_dy, ref_dz))
-                        logDebug('  Reference midpoint:  x={:.1f}, y={:.1f}'.format(
-                            ref_mid_x, ref_mid_y))
-
-                    # Find the line with the best combined directional + positional match
-                    best_line = detected_line[0]
-                    best_score = -1.0
-
-                    for idx_dl, dl in enumerate(detected_line):
-                        # dl format: [(x1,y1,z1), (x2,y2,z2), counter, quality, f_first, f_last]
-                        dx3d = dl[1][0] - dl[0][0]
-                        dy3d = dl[1][1] - dl[0][1]
-                        dz3d = dl[1][2] - dl[0][2]
+                        a, b = np.cos(theta_rad), np.sin(theta_rad)
+                        x0 = a * rho + img_handle.ff.ncols / 2.0
+                        y0 = b * rho + img_handle.ff.nrows / 2.0
+                        ref_line_coords = (x0 - 1000*(-b), y0 - 1000*a, x0 + 1000*(-b), y0 + 1000*a)
                         
-                        dl_len = np.sqrt(dx3d**2 + dy3d**2 + dz3d**2)
-                        if dl_len < 1e-9:
-                            if debug:
-                                logDebug('  3D line {:d}: zero length, skipped'.format(idx_dl))
-                            continue
-                        
-                        # Direction score: cosine similarity (0 = perpendicular, 1 = parallel)
-                        cos_sim = abs(ref_dx*dx3d/dl_len + ref_dy*dy3d/dl_len + ref_dz*dz3d/dl_len)
-                        ang_diff = np.degrees(np.arccos(np.clip(cos_sim, 0, 1)))
-
-                        # Position score: 2D distance from candidate midpoint to reference midpoint
-                        cand_mid_x = (dl[0][0] + dl[1][0]) / 2.0
-                        cand_mid_y = (dl[0][1] + dl[1][1]) / 2.0
-                        pos_dist = np.sqrt((cand_mid_x - ref_mid_x)**2 + (cand_mid_y - ref_mid_y)**2)
-                        pos_score = max(0.0, 1.0 - pos_dist / img_diag)
-
-                        # Combined score: direction weighted by positional proximity
-                        # Position can reduce the score by up to 75%, breaking ties for parallel lines
-                        combined_score = cos_sim * (0.25 + 0.75 * pos_score)
-
-                        if debug:
-                            logDebug('  3D line {:d}: cos={:.4f}, ang={:.1f} deg, '
-                                'pos_dist={:.1f} px, pos_score={:.3f}, combined={:.4f}, '
-                                'pts={:d}, qual={:.1f}, ({:d},{:d},{:d})->({:d},{:d},{:d})'.format(
-                                idx_dl, cos_sim, ang_diff,
-                                pos_dist, pos_score, combined_score,
-                                dl[2], dl[3],
-                                dl[0][0], dl[0][1], dl[0][2],
-                                dl[1][0], dl[1][1], dl[1][2]))
-
-                        if combined_score > best_score:
-                            best_score = combined_score
-                            best_line = dl
-
-                    detected_line = best_line
+                    detected_line = selectClosestLine(
+                        detected_line, 
+                        ref_line_coords, 
+                        ref_has_frames=False
+                    )
 
                 if debug:
                     logDebug('Chosen 3D line: {}'.format(detected_line))
