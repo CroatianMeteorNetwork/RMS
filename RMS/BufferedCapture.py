@@ -103,7 +103,23 @@ class RtspProbeResult:
 class VencMetadataReader(object):
     """Background thread that reads per-frame metadata from the camera's
     metadata stream (port 9602).  Stores the latest values for association
-    with captured frames.  No encoder ioctls — pure TCP, ~25Hz push."""
+    with captured frames.  No encoder ioctls — pure TCP, ~25Hz push.
+
+    Format v3 (8 fields): pts_90k raw_pts_us frame_seq exp_us again dgain ispdgain temp
+    Format v2 (7 fields): pts_90k raw_pts_us exp_us again dgain ispdgain temp
+    Format v1 (6 fields): pts_90k exp_us again dgain ispdgain temp
+
+    In v3 (ring buffer mode), there is exactly one metadata line per video
+    frame — true 1:1 correspondence.  frame_seq is a monotonic counter
+    (0 means polled fallback, no ring buffer).
+
+    The raw_pts_us field gives 1µs VENC register precision for FT science
+    timestamps, bypassing the 11.1µs quantization of the 90kHz RTP pipeline.
+    A rolling lookup table maps pts_90k → raw_pts_us so video frames (which
+    carry 90kHz PTS) can be matched to their µs-precise VENC timestamp."""
+
+    # Keep last N entries in the pts lookup table (~2 min at 25fps)
+    PTS_TABLE_SIZE = 3000
 
     def __init__(self, camera_ip, port=9602):
         self.camera_ip = camera_ip
@@ -112,6 +128,11 @@ class VencMetadataReader(object):
         self._lock = threading.Lock()
         self._thread = None
         self._stop = threading.Event()
+        # Rolling lookup: pts_90k → raw_pts_us (deque for bounded size)
+        self._pts_table = deque(maxlen=self.PTS_TABLE_SIZE)
+        # Wrap tracking for raw_pts_us (32-bit µs wraps every ~71.6 min)
+        self._pts_us_prev = 0
+        self._pts_us_wraps = 0
 
     def start(self):
         self._stop.clear()
@@ -127,6 +148,28 @@ class VencMetadataReader(object):
     def latest(self):
         with self._lock:
             return dict(self._latest)
+
+    def lookup_pts_us(self, rtp_ts_32):
+        """Look up raw µs PTS for a 32-bit RTP timestamp.
+
+        Matches against the low 32 bits of the daemon's wrap-corrected PTS.
+        Tolerance of ±20 ticks handles small GUARD residual shift.
+        Returns (raw_pts_us_unwrapped, True) if found, (None, False) if not."""
+        target = rtp_ts_32 & 0xFFFFFFFF
+        with self._lock:
+            best_diff = 20  # ticks — well within one frame period (3602)
+            best_us = None
+            for p90k, p_us_unwrapped in reversed(self._pts_table):
+                p32 = p90k & 0xFFFFFFFF
+                diff = abs(p32 - target)
+                if diff > 0x7FFFFFFF:  # 32-bit wrap
+                    diff = 0x100000000 - diff
+                if diff < best_diff:
+                    best_diff = diff
+                    best_us = p_us_unwrapped
+                    if diff == 0:
+                        break
+        return (best_us, True) if best_us is not None else (None, False)
 
     def _run(self):
         log = logging.getLogger("logger")
@@ -150,7 +193,49 @@ class VencMetadataReader(object):
                     while b'\n' in buf:
                         line, buf = buf.split(b'\n', 1)
                         parts = line.decode(errors='replace').strip().split()
-                        if len(parts) >= 6:
+                        if len(parts) >= 8:
+                            # v3: pts_90k raw_pts_us frame_seq exp again dgain ispdgain temp
+                            pts_90k = int(parts[0])
+                            raw_pts_us = int(parts[1])
+                            frame_seq = int(parts[2])
+                            # Track 32-bit µs wraps (~71.6 min period)
+                            if raw_pts_us < self._pts_us_prev - 2000000000:
+                                self._pts_us_wraps += 1
+                            self._pts_us_prev = raw_pts_us
+                            pts_us_unwrapped = raw_pts_us + self._pts_us_wraps * 4294967296
+                            with self._lock:
+                                self._pts_table.append((pts_90k, pts_us_unwrapped))
+                                self._latest = {
+                                    'pts_90k': pts_90k,
+                                    'raw_pts_us': pts_us_unwrapped,
+                                    'frame_seq': frame_seq,
+                                    'exposure_us': int(parts[3]),
+                                    'analog_gain': int(parts[4]) / 1024.0,
+                                    'digital_gain': int(parts[5]) / 1024.0,
+                                    'isp_dgain': int(parts[6]) / 1024.0,
+                                    'soc_temp_c': int(parts[7]),
+                                }
+                        elif len(parts) >= 7:
+                            # v2: pts_90k raw_pts_us exp again dgain ispdgain temp
+                            pts_90k = int(parts[0])
+                            raw_pts_us = int(parts[1])
+                            if raw_pts_us < self._pts_us_prev - 2000000000:
+                                self._pts_us_wraps += 1
+                            self._pts_us_prev = raw_pts_us
+                            pts_us_unwrapped = raw_pts_us + self._pts_us_wraps * 4294967296
+                            with self._lock:
+                                self._pts_table.append((pts_90k, pts_us_unwrapped))
+                                self._latest = {
+                                    'pts_90k': pts_90k,
+                                    'raw_pts_us': pts_us_unwrapped,
+                                    'exposure_us': int(parts[2]),
+                                    'analog_gain': int(parts[3]) / 1024.0,
+                                    'digital_gain': int(parts[4]) / 1024.0,
+                                    'isp_dgain': int(parts[5]) / 1024.0,
+                                    'soc_temp_c': int(parts[6]),
+                                }
+                        elif len(parts) >= 6:
+                            # v1 format (backward compat): pts_90k exp again dgain ispdgain temp
                             with self._lock:
                                 self._latest = {
                                     'pts_90k': int(parts[0]),
@@ -164,6 +249,210 @@ class VencMetadataReader(object):
             except Exception as e:
                 if not self._stop.is_set():
                     log.debug("VencMetadata: %s, reconnecting in 5s", e)
+                    self._stop.wait(5)
+
+
+class PtsStreamReader(object):
+    """Background thread reading fresh VENC PTS from pts_stream (port 9603).
+
+    pts_stream reads the VENC PTS register via /dev/mem at each register
+    transition — guaranteed fresh, no stale race.  Each entry carries the
+    VENC µs timestamp AND the camera's NTP wallclock at that instant.
+
+    Frame association uses block-level jitter fingerprinting: after a 256-
+    frame block is captured, call align_block() with the block's RTP
+    timestamps.  Cross-correlation of the delta patterns finds the alignment,
+    and every frame gets a fresh UTC timestamp via a linear clock model.
+
+    The clock model (linear regression of venc_us → wallclock) absorbs
+    crystal drift smoothly, disciplined by the camera's NTP which tracks
+    the host's chrony/GPS PPS.
+    """
+
+    TABLE_SIZE = 12000   # ~8 min at 25fps
+    MATCH_TOL_US = 50    # per-delta correlation tolerance
+
+    def __init__(self, camera_ip, port=9603):
+        self.camera_ip = camera_ip
+        self.port = port
+        self._lock = threading.Lock()
+        self._thread = None
+        self._stop = threading.Event()
+        # Ordered entries: (venc_pts_us_unwrapped, wall_time_s)
+        self._entries = deque(maxlen=self.TABLE_SIZE)
+        self._deltas = deque(maxlen=self.TABLE_SIZE)
+        self._pts_prev = 0
+        self._wraps = 0
+        # Clock model
+        self._clock_rate = 1e-6
+        self._clock_offset = None
+        self._clock_samples = deque(maxlen=500)
+        # Stats
+        self.block_aligns = 0
+        self.block_fails = 0
+        self.drops_detected = 0
+
+    def start(self):
+        self._stop.clear()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def stop(self):
+        self._stop.set()
+        if self._thread:
+            self._thread.join(timeout=3)
+
+    def align_block(self, rtp_90k_list):
+        """Align a block of frames to pts_stream via jitter fingerprint.
+
+        Args:
+            rtp_90k_list: list of 32-bit RTP timestamps (90kHz ticks),
+                          one per frame in capture order.
+
+        Returns:
+            list of UTC timestamps (float), same length as input.
+            Frames that couldn't be aligned get None.
+        """
+        log = logging.getLogger("logger")
+        n = len(rtp_90k_list)
+        if n < 10:
+            self.block_fails += 1
+            return [None] * n
+
+        # RTP 90kHz → µs deltas (filtering wrap-safe)
+        rtp_us = [(int(t) * 100) // 9 for t in rtp_90k_list]
+        rtp_deltas = [rtp_us[i] - rtp_us[i-1] for i in range(1, n)]
+
+        # Clean deltas only (exclude stale 0ms and 80ms artifacts)
+        clean = [(i, d) for i, d in enumerate(rtp_deltas) if 30000 < d < 60000]
+        if len(clean) < 15:
+            log.warning("PtsStream: block has only %d clean deltas", len(clean))
+            self.block_fails += 1
+            return [None] * n
+
+        clean_idx = [c[0] for c in clean]
+        clean_val = [c[1] for c in clean]
+        span = clean_idx[-1]
+
+        with self._lock:
+            ref_d = list(self._deltas)
+            ref_entries = list(self._entries)
+            rate = self._clock_rate
+            offset = self._clock_offset
+
+        if len(ref_d) < span + 10 or offset is None:
+            self.block_fails += 1
+            return [None] * n
+
+        # Cross-correlate: slide RTP clean pattern over ref deltas
+        search_end = len(ref_d) - span
+        search_start = max(0, search_end - 600)
+        if search_end <= search_start:
+            self.block_fails += 1
+            return [None] * n
+
+        best_score = 0
+        best_start = 0
+        for start in range(search_start, search_end):
+            score = sum(1 for ci, cv in zip(clean_idx, clean_val)
+                        if 0 <= start + ci < len(ref_d)
+                        and abs(cv - ref_d[start + ci]) < self.MATCH_TOL_US)
+            if score > best_score:
+                best_score = score
+                best_start = start
+
+        if best_score < len(clean_val) * 0.6:
+            log.warning("PtsStream: alignment failed, score=%d/%d (%.0f%%)",
+                        best_score, len(clean_val),
+                        100.0 * best_score / len(clean_val))
+            self.block_fails += 1
+            return [None] * n
+
+        self.block_aligns += 1
+        log.info("PtsStream: block aligned, score=%d/%d (%.0f%%)",
+                 best_score, len(clean_val),
+                 100.0 * best_score / len(clean_val))
+
+        # Assign: rtp_deltas[0] ↔ ref_d[best_start] → frame 0 ↔ entry best_start
+        result = []
+        for i in range(n):
+            ri = best_start + i
+            if 0 <= ri < len(ref_entries):
+                venc_us = ref_entries[ri][0]
+                result.append(venc_us * rate + offset)
+            else:
+                result.append(None)
+
+        # Detect drops: phase jumps in delta comparison
+        for i in range(len(rtp_deltas)):
+            ri = best_start + i
+            if 0 <= ri < len(ref_d) and rtp_deltas[i] > 0:
+                phase = rtp_deltas[i] - ref_d[ri]
+                if abs(phase) > 20000:
+                    nd = round(phase / 40030)
+                    if nd > 0:
+                        self.drops_detected += nd
+                        log.warning("PtsStream: %d drop(s) at block pos %d", nd, i)
+
+        return result
+
+    def _update_clock(self):
+        """Linear regression: UTC = rate * venc_us + offset."""
+        samples = list(self._clock_samples)
+        if len(samples) < 10:
+            return
+        xs = [s[0] for s in samples]
+        ys = [s[1] for s in samples]
+        n = len(xs)
+        sx = sum(xs); sy = sum(ys)
+        sxx = sum(x * x for x in xs)
+        sxy = sum(x * y for x, y in zip(xs, ys))
+        denom = n * sxx - sx * sx
+        if abs(denom) < 1e-30:
+            return
+        self._clock_rate = (n * sxy - sx * sy) / denom
+        self._clock_offset = (sy - self._clock_rate * sx) / n
+
+    def _run(self):
+        log = logging.getLogger("logger")
+        buf = b''
+        while not self._stop.is_set():
+            try:
+                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                s.settimeout(5)
+                s.connect((self.camera_ip, self.port))
+                log.info("PtsStream: connected to %s:%d", self.camera_ip, self.port)
+                buf = b''
+                while not self._stop.is_set():
+                    s.settimeout(2)
+                    try:
+                        data = s.recv(512)
+                    except socket.timeout:
+                        continue
+                    if not data:
+                        break
+                    buf += data
+                    while b'\n' in buf:
+                        line, buf = buf.split(b'\n', 1)
+                        parts = line.decode(errors='replace').strip().split()
+                        if len(parts) >= 4:
+                            raw_us = int(parts[1])
+                            if raw_us < self._pts_prev - 2000000000:
+                                self._wraps += 1
+                            self._pts_prev = raw_us
+                            venc_us = raw_us + self._wraps * 4294967296
+                            wall_t = int(parts[2]) + int(parts[3]) / 1e6
+                            with self._lock:
+                                if self._entries:
+                                    self._deltas.append(venc_us - self._entries[-1][0])
+                                self._entries.append((venc_us, wall_t))
+                                self._clock_samples.append((venc_us, wall_t))
+                                if len(self._clock_samples) >= 10:
+                                    self._update_clock()
+                s.close()
+            except Exception as e:
+                if not self._stop.is_set():
+                    log.debug("PtsStream: %s, reconnecting in 5s", e)
                     self._stop.wait(5)
 
 
@@ -690,6 +979,22 @@ class BufferedCapture(Process):
                             self._rtp_dict_hits = getattr(self, '_rtp_dict_hits', 0) + 1
                             elapsed_ticks = (rtp_ts_raw - self._rtp_clock_base) & 0xFFFFFFFF
                             timestamp = self.venc_epoch_offset + elapsed_ticks / 90000.0
+
+                            # Collect RTP timestamp for block-level side-door alignment.
+                            # After the 256-frame block completes, align_block() will
+                            # cross-correlate these against pts_stream to assign fresh
+                            # VENC timestamps retroactively.
+                            if hasattr(self, '_pts_stream') and self._pts_stream is not None:
+                                if not hasattr(self, '_block_rtp_ts'):
+                                    self._block_rtp_ts = []
+                                self._block_rtp_ts.append(rtp_ts_raw)
+
+                            elif hasattr(self, '_venc_meta') and self._venc_meta is not None:
+                                # No pts_stream — use trampoline PTS directly
+                                pts_us, found = self._venc_meta.lookup_pts_us(rtp_ts_raw)
+                                if found:
+                                    corr = ((pts_us * 9) % 100) / 9e6
+                                    timestamp += corr
                         else:
                             self._rtp_dict_misses = getattr(self, '_rtp_dict_misses', 0) + 1
                             timestamp = self.venc_epoch_offset + gst_timestamp_ns / 1e9
@@ -1263,11 +1568,24 @@ class BufferedCapture(Process):
                         misses = getattr(self, '_rtp_dict_misses', 0)
                         total = hits + misses
                         hit_pct = 100.0 * hits / total if total > 0 else 0
+                        sd_hits = getattr(self, '_sidedoor_hits', 0)
+                        sd_misses = getattr(self, '_sidedoor_misses', 0)
+                        sd_total = sd_hits + sd_misses
+                        sd_pct = 100.0 * sd_hits / sd_total if sd_total > 0 else 0
+                        pts_str = ""
+                        if hasattr(self, '_pts_stream') and self._pts_stream is not None:
+                            ps = self._pts_stream
+                            pts_str = ", pts_blocks=%d/%d, drops=%d" % (
+                                ps.block_aligns,
+                                ps.block_aligns + ps.block_fails,
+                                ps.drops_detected)
                         log.info("RTP_PROBE: %d frames, %d anomalies (%.2f%%), "
-                                 "dict hit=%d/%d (%.1f%%), guard_shift=%d ticks",
+                                 "dict hit=%d/%d (%.1f%%), guard_shift=%d ticks, "
+                                 "sidedoor=%d/%d (%.1f%%)%s",
                                  self._rtp_probe_frames, self._rtp_probe_anomalies,
                                  100 * self._rtp_probe_anomalies / self._rtp_probe_frames,
-                                 hits, total, hit_pct, guard_shift)
+                                 hits, total, hit_pct, guard_shift,
+                                 sd_hits, sd_total, sd_pct, pts_str)
                     self._rtp_probe_last_ts = rtp_ts
 
                     # Store CORRECTED RTP timestamp keyed by GStreamer PTS.
@@ -1443,6 +1761,14 @@ class BufferedCapture(Process):
                 self._venc_meta = VencMetadataReader(camera_ip, port=meta_port)
                 self._venc_meta.start()
                 log.info("VENC metadata reader started on port %d", meta_port)
+
+            # Start PTS stream reader (port 9603) for fresh VENC hardware
+            # timestamps — independent /dev/mem reads, no stale PTS race.
+            pts_port = getattr(self.config, 'venc_pts_stream_port', 9603)
+            if not hasattr(self, '_pts_stream') or self._pts_stream is None:
+                self._pts_stream = PtsStreamReader(camera_ip, port=pts_port)
+                self._pts_stream.start()
+                log.info("PTS stream reader started on port %d", pts_port)
 
         # Common timeout settings for both UDP and TCP
         # All streams need tcp-timeout since RTSP control always uses TCP
@@ -2790,8 +3116,38 @@ class BufferedCapture(Process):
                 break
 
 
+            # Side-door block alignment: replace timestamps in the buffer
+            # with fresh VENC PTS from pts_stream via jitter fingerprinting.
+            if (hasattr(self, '_pts_stream') and self._pts_stream is not None
+                    and hasattr(self, '_block_rtp_ts') and self._block_rtp_ts
+                    and hasattr(self, 'timestamp_buffer') and self.timestamp_buffer):
+                fresh = self._pts_stream.align_block(self._block_rtp_ts)
+                if fresh is not None:
+                    replaced = 0
+                    for j in range(min(len(fresh), len(self.timestamp_buffer))):
+                        if fresh[j] is not None:
+                            fnum, _ = self.timestamp_buffer[j]
+                            # Subtract exposure to get integration start
+                            exp_corr = 0
+                            if hasattr(self, '_venc_meta') and self._venc_meta is not None:
+                                meta = self._venc_meta.latest
+                                if 'exposure_us' in meta:
+                                    exp_corr = meta['exposure_us'] / 1e6
+                            self.timestamp_buffer[j] = (fnum, fresh[j] - exp_corr)
+                            replaced += 1
+                    self._sidedoor_hits = getattr(self, '_sidedoor_hits', 0) + replaced
+                    self._sidedoor_misses = getattr(self, '_sidedoor_misses', 0) + (len(self.timestamp_buffer) - replaced)
+                    if replaced > 0:
+                        log.info("PtsStream: replaced %d/%d timestamps in block "
+                                 "(aligns=%d, fails=%d, drops=%d)",
+                                 replaced, len(self.timestamp_buffer),
+                                 self._pts_stream.block_aligns,
+                                 self._pts_stream.block_fails,
+                                 self._pts_stream.drops_detected)
+                self._block_rtp_ts.clear()
+
             # Re-derive first_frame_timestamp from the buffer in case
-            # the stale-PTS guard corrected frame 0 retroactively.
+            # the stale-PTS guard or side-door corrected frame 0.
             if (self.config.save_frame_times
                     and hasattr(self, 'timestamp_buffer')
                     and len(self.timestamp_buffer) > 0):
