@@ -35,7 +35,7 @@ def fitLine3D(points, weights=None):
         
         mean = np.average(points, axis=0, weights=weights)
         centered = points - mean
-        weighted_centered = centered * weights[:, np.newaxis]
+        weighted_centered = centered*weights[:, np.newaxis]
         cov = np.dot(weighted_centered.T, centered)
 
     # Eigen decomposition
@@ -107,7 +107,7 @@ def findLines3D(points, max_lines, min_points, dist_thresh, max_gap_frame, max_g
         img_diag = np.sqrt(img_w**2 + img_h**2)
         if img_diag == 0:
             img_diag = 256.0
-        frame_scale = img_diag / 256.0
+        frame_scale = img_diag/256.0
         
     if debug:
         print(f"findLines3D: Using frame_scale = {frame_scale:.4f}")
@@ -180,7 +180,7 @@ def findLines3D(points, max_lines, min_points, dist_thresh, max_gap_frame, max_g
             
             # Evaluate gaps in both frame (unscaled) and spatial dimensions
             # Revert frame scale for gap check
-            unscaled_frames = inlier_pts_sorted[:, 2] / frame_scale
+            unscaled_frames = inlier_pts_sorted[:, 2]/frame_scale
             frame_gaps = np.diff(unscaled_frames)
             
             spatial_xy = inlier_pts_sorted[:, :2]
@@ -222,7 +222,7 @@ def findLines3D(points, max_lines, min_points, dist_thresh, max_gap_frame, max_g
             
             # Calculate weights (linear decay based on distance)
             dists = pointToLineDist3D(segment_pts_scaled, best_model[0], best_model[1])
-            weights = np.maximum(0, 1.0 - (dists / dist_thresh))
+            weights = np.maximum(0, 1.0 - (dists/dist_thresh))
             
             # Re-fit
             mean_pt, ref_direction = fitLine3D(segment_pts_scaled, weights=weights)
@@ -231,8 +231,8 @@ def findLines3D(points, max_lines, min_points, dist_thresh, max_gap_frame, max_g
             t_vals = np.dot(segment_pts_scaled - mean_pt, ref_direction)
             t_min, t_max = np.min(t_vals), np.max(t_vals)
             
-            pt_start_scaled = mean_pt + ref_direction * t_min
-            pt_end_scaled = mean_pt + ref_direction * t_max
+            pt_start_scaled = mean_pt + ref_direction*t_min
+            pt_end_scaled = mean_pt + ref_direction*t_max
             
             # Unscale frames
             pt_start = pt_start_scaled.copy()
@@ -250,14 +250,14 @@ def findLines3D(points, max_lines, min_points, dist_thresh, max_gap_frame, max_g
                 print(f"Found line spanning {pt_start[2]:.1f}-{pt_end[2]:.1f} frames, with {len(best_segment_indices)} points")
                 
             # Remove points within a buffer zone around the line segment
-            t_buffer = (t_max - t_min) * 0.1 # 10% buffer
+            t_buffer = (t_max - t_min)*0.1 # 10% buffer
             pool_indices = np.where(available_mask)[0]
             pool_scaled = scaled_points[pool_indices]
             
             ref_dists = pointToLineDist3D(pool_scaled, mean_pt, ref_direction)
             ref_t = np.dot(pool_scaled - mean_pt, ref_direction)
             
-            to_remove_local = (ref_dists < dist_thresh * 1.5) & \
+            to_remove_local = (ref_dists < dist_thresh*1.5) & \
                               (ref_t >= t_min - t_buffer) & \
                               (ref_t <= t_max + t_buffer)
                               
@@ -292,23 +292,23 @@ def selectClosestLine(found_lines, ref_line, ref_has_frames=True, weights=(1.0, 
 
     if ref_has_frames:
         ref_start, ref_end = np.array(ref_line[0]), np.array(ref_line[1])
-        ref_mid = (ref_start + ref_end) / 2.0
+        ref_mid = (ref_start + ref_end)/2.0
         # 3D vector
         ref_vec = ref_end - ref_start
         ref_len = np.linalg.norm(ref_vec)
-        ref_dir = ref_vec / ref_len if ref_len > 0 else np.array([1, 0, 0])
+        ref_dir = ref_vec/ref_len if ref_len > 0 else np.array([1, 0, 0])
         # 2D direction for orientation metric
         ref_dir_2d = ref_vec[:2]
         ref_len_2d = np.linalg.norm(ref_dir_2d)
-        ref_dir_2d = ref_dir_2d / ref_len_2d if ref_len_2d > 0 else np.array([1, 0])
+        ref_dir_2d = ref_dir_2d/ref_len_2d if ref_len_2d > 0 else np.array([1, 0])
     else:
         x1, y1, x2, y2 = ref_line
         ref_start = np.array([x1, y1])
         ref_end = np.array([x2, y2])
-        ref_mid = (ref_start + ref_end) / 2.0
+        ref_mid = (ref_start + ref_end)/2.0
         ref_vec = ref_end - ref_start
         ref_len = np.linalg.norm(ref_vec)
-        ref_dir_2d = ref_vec / ref_len if ref_len > 0 else np.array([1, 0])
+        ref_dir_2d = ref_vec/ref_len if ref_len > 0 else np.array([1, 0])
 
     best_line = None
     min_score = float('inf')
@@ -316,15 +316,15 @@ def selectClosestLine(found_lines, ref_line, ref_has_frames=True, weights=(1.0, 
     for line in found_lines:
         cand_start = np.array(line[0])
         cand_end = np.array(line[1])
-        cand_mid = (cand_start + cand_end) / 2.0
+        cand_mid = (cand_start + cand_end)/2.0
         cand_vec = cand_end - cand_start
         
         cand_len_3d = np.linalg.norm(cand_vec)
-        cand_dir = cand_vec / cand_len_3d if cand_len_3d > 0 else np.array([1, 0, 0])
+        cand_dir = cand_vec/cand_len_3d if cand_len_3d > 0 else np.array([1, 0, 0])
         
         cand_dir_2d = cand_vec[:2]
         cand_len_2d = np.linalg.norm(cand_dir_2d)
-        cand_dir_2d = cand_dir_2d / cand_len_2d if cand_len_2d > 0 else np.array([1, 0])
+        cand_dir_2d = cand_dir_2d/cand_len_2d if cand_len_2d > 0 else np.array([1, 0])
 
         # 1. Location penalty: distance between midpoints (2D or 3D depending on ref)
         if ref_has_frames:
@@ -344,7 +344,7 @@ def selectClosestLine(found_lines, ref_line, ref_has_frames=True, weights=(1.0, 
             # Easiest is average frame distance
             frame_diff = abs(cand_mid[2] - ref_mid[2])
 
-        score = weights[0] * loc_diff + weights[1] * orient_diff * 100.0 + weights[2] * frame_diff
+        score = weights[0]*loc_diff + weights[1]*orient_diff*100.0 + weights[2]*frame_diff
         
         if score < min_score:
             min_score = score
@@ -420,7 +420,7 @@ def getAllPoints(point_list, x1, y1, z1, x2, y2, z2, config, fireball_detection=
     dist_thresh = config.ransac_distance_thresh if not fireball_detection else config.distance_threshold
     
     img_diag = np.sqrt(config.width**2 + config.height**2)
-    frame_scale = img_diag / 256.0
+    frame_scale = img_diag/256.0
     
     scaled_p1 = p1.copy()
     scaled_p1[2] *= frame_scale
@@ -449,7 +449,7 @@ def getAllPoints(point_list, x1, y1, z1, x2, y2, z2, config, fireball_detection=
     t_min = min(0.0, t_end)
     t_max = max(0.0, t_end)
     
-    buffer = 5.0 * frame_scale
+    buffer = 5.0*frame_scale
     t_mask = (t_vals >= t_min - buffer) & (t_vals <= t_max + buffer)
     
     final_inliers = points[inlier_mask][t_mask]
