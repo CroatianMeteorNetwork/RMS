@@ -622,11 +622,20 @@ class Config:
         # Sequential RANSAC parameters
         self.ransac_max_lines = 10
         self.ransac_min_pixels = 10
-        self.ransac_distance_thresh = 2.0
+        self.ransac_distance_thresh = 4.0
         self.ransac_min_line_length = 20.0
         self.ransac_max_gap = 20.0
-        self.ransac_max_gap_frame_det = 5.0
-        self.ransac_max_gap_spatial_det = 15.0
+        self.ransac_max_gap_frame_det = 30.0
+        self.ransac_max_gap_spatial_det = 50.0
+
+        # 3D Line Finder (RANSAC 3D) parameters
+        self.ransac3d_max_lines = 5
+        self.ransac3d_min_points = 10
+        self.ransac3d_distance_thresh = 4.0
+        self.ransac3d_max_gap_frame = 30.0
+        self.ransac3d_max_gap_spatial = 50.0
+        self.ransac3d_min_frames = 4.0
+        self.ransac3d_iterations = 10
 
         # 3D line merging parameters
         self.vect_angle_thresh = 20 # angle similarity between 2 lines in a stripe to be merged
@@ -1702,6 +1711,28 @@ def parseMeteorDetection(config, parser):
         
     if parser.has_option(section, "ransac_max_gap_spatial_det"):
         config.ransac_max_gap_spatial_det = parser.getfloat(section, "ransac_max_gap_spatial_det")
+
+    # 3D Line Finder (RANSAC 3D) parameters
+    if parser.has_option(section, "ransac3d_max_lines"):
+        config.ransac3d_max_lines = parser.getint(section, "ransac3d_max_lines")
+
+    if parser.has_option(section, "ransac3d_min_points"):
+        config.ransac3d_min_points = parser.getint(section, "ransac3d_min_points")
+
+    if parser.has_option(section, "ransac3d_distance_thresh"):
+        config.ransac3d_distance_thresh = parser.getfloat(section, "ransac3d_distance_thresh")
+
+    if parser.has_option(section, "ransac3d_max_gap_frame"):
+        config.ransac3d_max_gap_frame = parser.getfloat(section, "ransac3d_max_gap_frame")
+
+    if parser.has_option(section, "ransac3d_max_gap_spatial"):
+        config.ransac3d_max_gap_spatial = parser.getfloat(section, "ransac3d_max_gap_spatial")
+
+    if parser.has_option(section, "ransac3d_min_frames"):
+        config.ransac3d_min_frames = parser.getfloat(section, "ransac3d_min_frames")
+
+    if parser.has_option(section, "ransac3d_iterations"):
+        config.ransac3d_iterations = parser.getint(section, "ransac3d_iterations")
 
     if parser.has_option(section, "stripe_width"):
         config.stripe_width = parser.getint(section, "stripe_width")

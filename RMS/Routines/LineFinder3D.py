@@ -139,10 +139,17 @@ def findLines3D(points, max_lines, min_points, dist_thresh, max_gap_frame, max_g
             if len(pts_pool) < 2:
                 break
                 
-            # Randomly sample 2 points, prefer different frames
-            idx = np.random.choice(len(pts_pool), 2, replace=False)
-            p1 = pts_pool[idx[0]]
-            p2 = pts_pool[idx[1]]
+            # Randomly sample 2 points, prefer those further apart in time for stability
+            p1_idx = np.random.choice(len(pts_pool))
+            p1 = pts_pool[p1_idx]
+            
+            # Use distances in frame dimension to weight second point selection
+            dt = np.abs(pts_pool[:, 2] - p1[2])
+            if np.sum(dt) == 0:
+                continue
+            probs = dt / np.sum(dt)
+            p2_idx = np.random.choice(len(pts_pool), p=probs)
+            p2 = pts_pool[p2_idx]
             
             # Need strict difference in frames to define temporal direction
             if abs(p1[2] - p2[2]) < 1e-6:
@@ -208,8 +215,12 @@ def findLines3D(points, max_lines, min_points, dist_thresh, max_gap_frame, max_g
                 if frame_span < min_frames:
                     continue
                     
-                if seg_count > best_inlier_count:
-                    best_inlier_count = seg_count
+                # Calculate a combined score of points and frame span
+                # This prevents picking short dense clusters over long thin lines (meteors)
+                combined_score = seg_count * (1.0 + frame_span / 100.0)
+                
+                if combined_score > best_inlier_count:
+                    best_inlier_count = combined_score
                     best_model = (p1, direction)
                     best_segment_indices = inlier_global_idx_sorted[start:end]
 
@@ -244,7 +255,7 @@ def findLines3D(points, max_lines, min_points, dist_thresh, max_gap_frame, max_g
                 # Ensure start is temporally before end
                 pt_start, pt_end = pt_end, pt_start
 
-            found_lines.append((tuple(pt_start), tuple(pt_end)))
+            found_lines.append((tuple(pt_start), tuple(pt_end), points[best_segment_indices]))
             
             if debug:
                 print(f"Found line spanning {pt_start[2]:.1f}-{pt_end[2]:.1f} frames, with {len(best_segment_indices)} points")
@@ -363,23 +374,23 @@ def find3DLines(stripe_points, current_time, config, fireball_detection=False):
     """
     lines = findLines3D(
         points=stripe_points,
-        max_lines=config.ransac_max_lines,
-        min_points=config.ransac_min_pixels,
-        dist_thresh=config.ransac_distance_thresh,
-        max_gap_frame=config.ransac_max_gap_frame_det,
-        max_gap_spatial=config.ransac_max_gap_spatial_det,
-        min_frames=config.line_minimum_frame_range_det,
+        max_lines=config.ransac3d_max_lines,
+        min_points=config.ransac3d_min_points,
+        dist_thresh=config.ransac3d_distance_thresh,
+        max_gap_frame=config.ransac3d_max_gap_frame,
+        max_gap_spatial=config.ransac3d_max_gap_spatial,
+        min_frames=config.ransac3d_min_frames,
         frame_scale=None,
         img_w=config.width,
         img_h=config.height,
-        max_iterations=1000,
+        max_iterations=config.ransac3d_iterations,
         debug=False
     )
     
     formatted_lines = []
     
     for line in lines:
-        start_pt, end_pt = line
+        start_pt, end_pt, _ = line
         f_min = min(start_pt[2], end_pt[2])
         f_max = max(start_pt[2], end_pt[2])
         
@@ -419,8 +430,8 @@ def getAllPoints(point_list, x1, y1, z1, x2, y2, z2, config, fireball_detection=
         return np.array([])
     direction /= dir_norm
     
-    # Distance threshold uses RANSAC params if fake fireball
-    dist_thresh = config.ransac_distance_thresh if not fireball_detection else config.distance_threshold
+    # Distance threshold uses 3D RANSAC params if detection, otherwise standard thresh
+    dist_thresh = config.ransac3d_distance_thresh if not fireball_detection else config.distance_threshold
     
     img_diag = np.sqrt(config.width**2 + config.height**2)
     frame_scale = img_diag/256.0
