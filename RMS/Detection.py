@@ -1613,8 +1613,19 @@ def plotLines(ff, line_list, show_image=True):
 
 
 
-def show3DCloud(ff, xs, ys, zs, detected_line=None, stripe_points=None, config=None):
-    """ Shows 3D point cloud of stripe points.
+def show3DCloud(ff, xs, ys, zs, detected_line=None, stripe_points=None, config=None,
+    all_detected_lines=None):
+    """ Shows 3D point cloud of stripe points with all detected lines overlaid.
+
+    Arguments:
+        ff: [FF object] FF file object.
+        xs, ys, zs: [ndarrays] Point cloud coordinates.
+
+    Keyword arguments:
+        detected_line: [list] The chosen best-fit line. Format: [(x1,y1,z1), (x2,y2,z2), ...].
+        stripe_points: [ndarray] All stripe points (used to extract points for the chosen line).
+        config: [config object] Configuration object.
+        all_detected_lines: [list] All candidate lines from find3DLines to plot. None by default.
     """
 
     if detected_line is None:
@@ -1626,35 +1637,57 @@ def show3DCloud(ff, xs, ys, zs, detected_line=None, stripe_points=None, config=N
     fig = plt.figure()
     ax = fig.add_subplot(111, projection='3d')
 
-    ax.scatter(xs, ys, zs)
+    ax.scatter(xs, ys, zs, s=5, alpha=0.3, c='tab:blue')
 
+    # Colours for candidate lines (distinct from the chosen line's red)
+    line_colors = ['tab:orange', 'tab:green', 'tab:purple', 'tab:cyan',
+                   'tab:olive', 'tab:pink', 'tab:brown']
+
+    # Plot ALL detected lines with distinct colours and numbered labels
+    if all_detected_lines:
+        for idx_dl, dl in enumerate(all_detected_lines):
+            lx = [dl[0][0], dl[1][0]]
+            ly = [dl[0][1], dl[1][1]]
+            lz = [dl[0][2], dl[1][2]]
+
+            col = line_colors[idx_dl % len(line_colors)]
+            ax.plot(lx, ly, lz, c=col, linewidth=2, alpha=0.7)
+
+            # Label at midpoint
+            mx = (lx[0] + lx[1]) / 2.0
+            my = (ly[0] + ly[1]) / 2.0
+            mz = (lz[0] + lz[1]) / 2.0
+            ax.text(mx, my, mz, '{:d}'.format(idx_dl), color='white', fontsize=10,
+                fontweight='bold', ha='center', va='bottom',
+                bbox=dict(facecolor=col, alpha=0.7, edgecolor='none', pad=1))
+
+    # Highlight the chosen line in red and show its associated points
     if detected_line and len(stripe_points):
 
-        xs = [detected_line[0][1], detected_line[1][1]]
-        ys = [detected_line[0][0], detected_line[1][0]]
-        zs = [detected_line[0][2], detected_line[1][2]]
-        ax.plot(ys, xs, zs, c = 'r')
+        xs_l = [detected_line[0][0], detected_line[1][0]]
+        ys_l = [detected_line[0][1], detected_line[1][1]]
+        zs_l = [detected_line[0][2], detected_line[1][2]]
+        ax.plot(xs_l, ys_l, zs_l, c='r', linewidth=3, label='chosen')
 
-        x1, x2 = ys
-        y1, y2 = xs
-        z1, z2 = zs
+        x1, y1, z1 = detected_line[0][0], detected_line[0][1], detected_line[0][2]
+        x2, y2, z2 = detected_line[1][0], detected_line[1][1], detected_line[1][2]
 
-        detected_points = getAllPoints(stripe_points, x1, y1, z1, x2, y2, z2, config, 
+        detected_points = getAllPoints(stripe_points, x1, y1, z1, x2, y2, z2, config,
             fireball_detection=False)
 
         if detected_points.any():
 
             detected_points = np.array(detected_points)
 
-            xs = detected_points[:,0]
-            ys = detected_points[:,1]
-            zs = detected_points[:,2]
-
-            ax.scatter(xs, ys, zs, c = 'r', s = 40)
+            ax.scatter(detected_points[:,0], detected_points[:,1], detected_points[:,2],
+                c='r', s=40, label='chosen pts')
 
     # Set limits
-    plt.xlim((0, ff.ncols))
-    plt.ylim((0, ff.nrows))
+    ax.set_xlim((0, ff.ncols))
+    ax.set_ylim((0, ff.nrows))
+    ax.set_xlabel('X (px)')
+    ax.set_ylabel('Y (px)')
+    ax.set_zlabel('Frame')
 
     plt.show()
 
@@ -2030,57 +2063,99 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
             if detected_line:
 
                 if debug:
-                    logDebug('Input 3D lines:')
+                    logDebug('All found 3D lines:')
                     for idx_dl, dl in enumerate(detected_line):
                         logDebug('  {:d}: {}'.format(idx_dl, dl))
 
-                # Choose the 3D line whose direction best matches the initial orientation
-                if config.line_finder_algorithm != 'ransac':
-                    # Disable search for KHT line finding (only pick the first line)
+                # Save all detected lines before narrowing to the chosen one
+                all_detected_lines = list(detected_line) if isinstance(detected_line, list) else None
+
+                # Choose the 3D line whose direction best matches the initial 2D line
+                if len(detected_line) == 1:
                     detected_line = detected_line[0]
+
                 else:
-                    if len(detected_line) == 1:
-                        detected_line = detected_line[0]
+
+                    # Compute the reference 3D direction from the initial line
+                    if line_start is not None and line_end is not None:
+                        ref_dx = line_end[0] - line_start[0]
+                        ref_dy = line_end[1] - line_start[1]
                     else:
-                        # Compute the reference 3D direction from the initial line
-                        if line_start is not None and line_end is not None:
-                            # RANSAC: use segment endpoints
-                            ref_dx = line_end[0] - line_start[0]
-                            ref_dy = line_end[1] - line_start[1]
-                        else:
-                            theta_rad = np.deg2rad(theta)
-                            ref_dx = -np.sin(theta_rad)
-                            ref_dy = np.cos(theta_rad)
+                        theta_rad = np.deg2rad(theta)
+                        ref_dx = -np.sin(theta_rad)
+                        ref_dy = np.cos(theta_rad)
+                    
+                    ref_dz = frame_max - frame_min
+
+                    ref_len = np.sqrt(ref_dx**2 + ref_dy**2 + ref_dz**2)
+                    if ref_len > 1e-9:
+                        ref_dx /= ref_len
+                        ref_dy /= ref_len
+                        ref_dz /= ref_len
+
+                    # Compute a reference midpoint in 2D image space for positional scoring
+                    if line_start is not None and line_end is not None:
+                        ref_mid_x = (line_start[0] + line_end[0]) / 2.0
+                        ref_mid_y = (line_start[1] + line_end[1]) / 2.0
+                    else:
+                        # For HT lines, the closest point on the line to image centre
+                        theta_rad = np.deg2rad(theta)
+                        ref_mid_x = rho * np.cos(theta_rad) + img_handle.ff.ncols / 2.0
+                        ref_mid_y = rho * np.sin(theta_rad) + img_handle.ff.nrows / 2.0
+
+                    img_diag = np.sqrt(float(img_handle.ff.ncols)**2 + float(img_handle.ff.nrows)**2)
+
+                    if debug:
+                        logDebug('  Reference direction: dx={:.4f}, dy={:.4f}, dz={:.4f}'.format(
+                            ref_dx, ref_dy, ref_dz))
+                        logDebug('  Reference midpoint:  x={:.1f}, y={:.1f}'.format(
+                            ref_mid_x, ref_mid_y))
+
+                    # Find the line with the best combined directional + positional match
+                    best_line = detected_line[0]
+                    best_score = -1.0
+
+                    for idx_dl, dl in enumerate(detected_line):
+                        # dl format: [(x1,y1,z1), (x2,y2,z2), counter, quality, f_first, f_last]
+                        dx3d = dl[1][0] - dl[0][0]
+                        dy3d = dl[1][1] - dl[0][1]
+                        dz3d = dl[1][2] - dl[0][2]
                         
-                        ref_dz = frame_max - frame_min
+                        dl_len = np.sqrt(dx3d**2 + dy3d**2 + dz3d**2)
+                        if dl_len < 1e-9:
+                            if debug:
+                                logDebug('  3D line {:d}: zero length, skipped'.format(idx_dl))
+                            continue
+                        
+                        # Direction score: cosine similarity (0 = perpendicular, 1 = parallel)
+                        cos_sim = abs(ref_dx*dx3d/dl_len + ref_dy*dy3d/dl_len + ref_dz*dz3d/dl_len)
+                        ang_diff = np.degrees(np.arccos(np.clip(cos_sim, 0, 1)))
 
-                        ref_len = np.sqrt(ref_dx**2 + ref_dy**2 + ref_dz**2)
-                        if ref_len > 1e-9:
-                            ref_dx /= ref_len
-                            ref_dy /= ref_len
-                            ref_dz /= ref_len
+                        # Position score: 2D distance from candidate midpoint to reference midpoint
+                        cand_mid_x = (dl[0][0] + dl[1][0]) / 2.0
+                        cand_mid_y = (dl[0][1] + dl[1][1]) / 2.0
+                        pos_dist = np.sqrt((cand_mid_x - ref_mid_x)**2 + (cand_mid_y - ref_mid_y)**2)
+                        pos_score = max(0.0, 1.0 - pos_dist / img_diag)
 
-                        # Find the line with the smallest angular difference (top 3 lines only)
-                        best_line = detected_line[0]
-                        best_cos = -1.0
+                        # Combined score: direction weighted by positional proximity
+                        # Position can reduce the score by up to 75%, breaking ties for parallel lines
+                        combined_score = cos_sim * (0.25 + 0.75 * pos_score)
 
-                        for dl in detected_line[:3]:
-                            # dl format: [(x1,y1,z1), (x2,y2,z2), counter, quality, f_first, f_last]
-                            dx3d = dl[1][0] - dl[0][0]
-                            dy3d = dl[1][1] - dl[0][1]
-                            dz3d = dl[1][2] - dl[0][2]
-                            
-                            dl_len = np.sqrt(dx3d**2 + dy3d**2 + dz3d**2)
-                            if dl_len < 1e-9:
-                                continue
-                            
-                            # Compare 3D spatial directions (absolute dot product for antiparallel)
-                            cos_sim = abs(ref_dx*dx3d/dl_len + ref_dy*dy3d/dl_len + ref_dz*dz3d/dl_len)
-                            if cos_sim > best_cos:
-                                best_cos = cos_sim
-                                best_line = dl
+                        if debug:
+                            logDebug('  3D line {:d}: cos={:.4f}, ang={:.1f} deg, '
+                                'pos_dist={:.1f} px, pos_score={:.3f}, combined={:.4f}, '
+                                'pts={:d}, qual={:.1f}, ({:d},{:d},{:d})->({:d},{:d},{:d})'.format(
+                                idx_dl, cos_sim, ang_diff,
+                                pos_dist, pos_score, combined_score,
+                                dl[2], dl[3],
+                                dl[0][0], dl[0][1], dl[0][2],
+                                dl[1][0], dl[1][1], dl[1][2]))
 
-                        detected_line = best_line
+                        if combined_score > best_score:
+                            best_score = combined_score
+                            best_line = dl
+
+                    detected_line = best_line
 
                 if debug:
                     logDebug('Chosen 3D line: {}'.format(detected_line))
@@ -2098,8 +2173,9 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                     logDebug('Rejected at initial stage due to the angular velocity: {:.2f} deg/s'.format(ang_vel))
                     continue
 
-                # Show 3D cloud
-                show3DCloud(img_handle.ff, xs, ys, zs, detected_line, stripe_points, config)
+                # Show 3D cloud with all candidate lines
+                show3DCloud(img_handle.ff, xs, ys, zs, detected_line, stripe_points, config,
+                    all_detected_lines=all_detected_lines)
 
                 # Add the line to the results list
                 filtered_lines.append(detected_line)
