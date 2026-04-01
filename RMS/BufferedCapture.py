@@ -256,143 +256,136 @@ class PtsStreamReader(object):
     """Background thread reading fresh VENC PTS from pts_stream (port 9603).
 
     pts_stream reads the VENC PTS register via /dev/mem at each register
-    transition — guaranteed fresh, no stale race.  Each entry carries the
-    VENC µs timestamp AND the camera's NTP wallclock at that instant.
+    transition — guaranteed fresh, no stale race.
 
     Frame association uses block-level jitter fingerprinting: after a 256-
     frame block is captured, call align_block() with the block's RTP
     timestamps.  Cross-correlation of the delta patterns finds the alignment,
     and every frame gets a fresh UTC timestamp via a linear clock model.
 
-    The clock model (linear regression of venc_us → wallclock) absorbs
-    crystal drift smoothly, disciplined by the camera's NTP which tracks
-    the host's chrony/GPS PPS.
+    Clock model: linear regression of (venc_pts_us, host_utc) pairs from
+    periodic VencCalibration probes (gettime port 9601).  This references
+    all timestamps to the HOST's GPS/PPS-disciplined clock, bypassing
+    camera NTP entirely.  Probes run every PROBE_INTERVAL seconds in a
+    background thread.
     """
 
     TABLE_SIZE = 12000   # ~8 min at 25fps
     MATCH_TOL_US = 50    # per-delta correlation tolerance
+    PROBE_INTERVAL = 120 # seconds between VencCalibration probes
 
-    def __init__(self, camera_ip, port=9603):
+    def __init__(self, camera_ip, port=9603, gettime_port=9601):
         self.camera_ip = camera_ip
         self.port = port
+        self.gettime_port = gettime_port
         self._lock = threading.Lock()
         self._thread = None
+        self._probe_thread = None
         self._stop = threading.Event()
-        # Ordered entries: (venc_pts_us_unwrapped, wall_time_s)
+        # Ordered entries: (venc_pts_us_unwrapped,) — wallclock not stored
         self._entries = deque(maxlen=self.TABLE_SIZE)
         self._deltas = deque(maxlen=self.TABLE_SIZE)
         self._pts_prev = 0
         self._wraps = 0
-        # Clock model
+        # Clock model: UTC = venc_us * rate + offset
+        # Fed by VencCalibration probes (host GPS clock), NOT camera NTP
         self._clock_rate = 1e-6
         self._clock_offset = None
-        self._clock_samples = deque(maxlen=500)
+        self._clock_samples = deque(maxlen=200)  # (venc_pts_us, host_utc)
+        # Block continuity: carry alignment forward between blocks
+        self._next_ref_start = None  # expected ref_d index for next block
         # Stats
         self.block_aligns = 0
         self.block_fails = 0
         self.drops_detected = 0
+        self.probe_count = 0
 
     def start(self):
         self._stop.clear()
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
+        self._probe_thread = threading.Thread(target=self._run_probes, daemon=True)
+        self._probe_thread.start()
 
     def stop(self):
         self._stop.set()
         if self._thread:
             self._thread.join(timeout=3)
+        if self._probe_thread:
+            self._probe_thread.join(timeout=3)
 
     def align_block(self, rtp_90k_list):
-        """Align a block of frames to pts_stream via jitter fingerprint.
+        """Match each frame to a pts_stream entry by PTS value.
+
+        Each RTP timestamp (even stale-corrected) is within ~20µs of the
+        true VENC PTS.  pts_stream entries are ~40030µs apart.  Ratio 1300:1
+        — the match is unambiguous for every frame.  No correlation, no
+        counting, no drift over any duration.
 
         Args:
-            rtp_90k_list: list of 32-bit RTP timestamps (90kHz ticks),
-                          one per frame in capture order.
+            rtp_90k_list: list of 32-bit RTP timestamps (90kHz ticks).
 
         Returns:
             list of UTC timestamps (float), same length as input.
-            Frames that couldn't be aligned get None.
+            Frames that couldn't be matched get None.
         """
+        import bisect
         log = logging.getLogger("logger")
         n = len(rtp_90k_list)
-        if n < 10:
-            self.block_fails += 1
-            return [None] * n
-
-        # RTP 90kHz → µs deltas (filtering wrap-safe)
-        rtp_us = [(int(t) * 100) // 9 for t in rtp_90k_list]
-        rtp_deltas = [rtp_us[i] - rtp_us[i-1] for i in range(1, n)]
-
-        # Clean deltas only (exclude stale 0ms and 80ms artifacts)
-        clean = [(i, d) for i, d in enumerate(rtp_deltas) if 30000 < d < 60000]
-        if len(clean) < 15:
-            log.warning("PtsStream: block has only %d clean deltas", len(clean))
-            self.block_fails += 1
-            return [None] * n
-
-        clean_idx = [c[0] for c in clean]
-        clean_val = [c[1] for c in clean]
-        span = clean_idx[-1]
 
         with self._lock:
-            ref_d = list(self._deltas)
-            ref_entries = list(self._entries)
+            ref_pts = [e[0] for e in self._entries]
             rate = self._clock_rate
-            offset = self._clock_offset
+            clk_offset = self._clock_offset
 
-        if len(ref_d) < span + 10 or offset is None:
+        if len(ref_pts) < 50 or clk_offset is None:
             self.block_fails += 1
             return [None] * n
 
-        # Cross-correlate: slide RTP clean pattern over ref deltas
-        search_end = len(ref_d) - span
-        search_start = max(0, search_end - 600)
-        if search_end <= search_start:
-            self.block_fails += 1
-            return [None] * n
-
-        best_score = 0
-        best_start = 0
-        for start in range(search_start, search_end):
-            score = sum(1 for ci, cv in zip(clean_idx, clean_val)
-                        if 0 <= start + ci < len(ref_d)
-                        and abs(cv - ref_d[start + ci]) < self.MATCH_TOL_US)
-            if score > best_score:
-                best_score = score
-                best_start = start
-
-        if best_score < len(clean_val) * 0.6:
-            log.warning("PtsStream: alignment failed, score=%d/%d (%.0f%%)",
-                        best_score, len(clean_val),
-                        100.0 * best_score / len(clean_val))
-            self.block_fails += 1
-            return [None] * n
-
-        self.block_aligns += 1
-        log.info("PtsStream: block aligned, score=%d/%d (%.0f%%)",
-                 best_score, len(clean_val),
-                 100.0 * best_score / len(clean_val))
-
-        # Assign: rtp_deltas[0] ↔ ref_d[best_start] → frame 0 ↔ entry best_start
         result = []
-        for i in range(n):
-            ri = best_start + i
-            if 0 <= ri < len(ref_entries):
-                venc_us = ref_entries[ri][0]
-                result.append(venc_us * rate + offset)
+        matched = 0
+        last_idx = -1
+
+        for rtp_90k in rtp_90k_list:
+            rtp_us = (int(rtp_90k) * 100) // 9
+
+            # Unwrap rtp_us (32-bit) to match ref_pts (64-bit unwrapped)
+            if last_idx >= 0:
+                ref_base = ref_pts[last_idx]
+            else:
+                ref_base = ref_pts[len(ref_pts) // 2]
+            rtp_uw = rtp_us + (ref_base // 4294967296) * 4294967296
+            if rtp_uw < ref_base - 2000000000:
+                rtp_uw += 4294967296
+            elif rtp_uw > ref_base + 2000000000:
+                rtp_uw -= 4294967296
+
+            # Binary search from last match (monotonic)
+            lo = max(0, last_idx)
+            idx = bisect.bisect_left(ref_pts, rtp_uw, lo=lo)
+
+            # Closest match after last_idx
+            best_i = None
+            best_d = 20000  # 20ms max
+            for c in (idx - 1, idx, idx + 1):
+                if 0 <= c < len(ref_pts) and c > last_idx:
+                    d = abs(ref_pts[c] - rtp_uw)
+                    if d < best_d:
+                        best_d = d
+                        best_i = c
+
+            if best_i is not None:
+                result.append(ref_pts[best_i] * rate + clk_offset)
+                last_idx = best_i
+                matched += 1
             else:
                 result.append(None)
 
-        # Detect drops: phase jumps in delta comparison
-        for i in range(len(rtp_deltas)):
-            ri = best_start + i
-            if 0 <= ri < len(ref_d) and rtp_deltas[i] > 0:
-                phase = rtp_deltas[i] - ref_d[ri]
-                if abs(phase) > 20000:
-                    nd = round(phase / 40030)
-                    if nd > 0:
-                        self.drops_detected += nd
-                        log.warning("PtsStream: %d drop(s) at block pos %d", nd, i)
+        if matched > 0:
+            self.block_aligns += 1
+        else:
+            self.block_fails += 1
+        log.info("PtsStream: %d/%d frames matched by PTS value", matched, n)
 
         return result
 
@@ -414,6 +407,7 @@ class PtsStreamReader(object):
         self._clock_offset = (sy - self._clock_rate * sx) / n
 
     def _run(self):
+        """Read pts_stream entries — only VENC PTS, no wallclock used."""
         log = logging.getLogger("logger")
         buf = b''
         while not self._stop.is_set():
@@ -435,25 +429,73 @@ class PtsStreamReader(object):
                     while b'\n' in buf:
                         line, buf = buf.split(b'\n', 1)
                         parts = line.decode(errors='replace').strip().split()
-                        if len(parts) >= 4:
+                        if len(parts) >= 2:
                             raw_us = int(parts[1])
                             if raw_us < self._pts_prev - 2000000000:
                                 self._wraps += 1
                             self._pts_prev = raw_us
                             venc_us = raw_us + self._wraps * 4294967296
-                            wall_t = int(parts[2]) + int(parts[3]) / 1e6
                             with self._lock:
                                 if self._entries:
                                     self._deltas.append(venc_us - self._entries[-1][0])
-                                self._entries.append((venc_us, wall_t))
-                                self._clock_samples.append((venc_us, wall_t))
-                                if len(self._clock_samples) >= 10:
-                                    self._update_clock()
+                                if len(self._entries) == self._entries.maxlen:
+                                    pass  # deque auto-evicts
+                                self._entries.append((venc_us,))
                 s.close()
             except Exception as e:
                 if not self._stop.is_set():
                     log.debug("PtsStream: %s, reconnecting in 5s", e)
                     self._stop.wait(5)
+
+    def _run_probes(self):
+        """Periodic VencCalibration probes for host-GPS-referenced clock model."""
+        from RMS.Routines.VencCalibration import probe_clock_sample
+        log = logging.getLogger("logger")
+
+        # Initial burst: 10 quick probes to bootstrap the clock model
+        for _ in range(10):
+            if self._stop.is_set():
+                return
+            result = probe_clock_sample(self.camera_ip, self.gettime_port)
+            if result:
+                pts_us, host_utc, ow_ms = result
+                # Unwrap PTS to match _entries wrapping
+                if pts_us < self._pts_prev - 2000000000:
+                    pts_us += (self._wraps + 1) * 4294967296
+                else:
+                    pts_us += self._wraps * 4294967296
+                with self._lock:
+                    self._clock_samples.append((pts_us, host_utc))
+                    self._update_clock()
+                self.probe_count += 1
+
+        if self._clock_offset is not None:
+            log.info("PtsStream: clock model bootstrapped from %d probes "
+                     "(rate=%.3f ppm, offset=%.6f)",
+                     self.probe_count,
+                     (self._clock_rate / 1e-6 - 1) * 1e6,
+                     self._clock_offset)
+        else:
+            log.warning("PtsStream: clock model bootstrap failed after %d probes",
+                        self.probe_count)
+
+        # Steady-state: probe every PROBE_INTERVAL seconds
+        while not self._stop.is_set():
+            self._stop.wait(self.PROBE_INTERVAL)
+            if self._stop.is_set():
+                return
+            result = probe_clock_sample(self.camera_ip, self.gettime_port)
+            if result:
+                pts_us, host_utc, ow_ms = result
+                pts_us += self._wraps * 4294967296
+                with self._lock:
+                    self._clock_samples.append((pts_us, host_utc))
+                    self._update_clock()
+                self.probe_count += 1
+                log.debug("PtsStream: clock probe #%d, ow=%.2fms, "
+                          "rate=%.3f ppm",
+                          self.probe_count, ow_ms,
+                          (self._clock_rate / 1e-6 - 1) * 1e6)
 
 
 class BufferedCapture(Process):
@@ -1766,7 +1808,9 @@ class BufferedCapture(Process):
             # timestamps — independent /dev/mem reads, no stale PTS race.
             pts_port = getattr(self.config, 'venc_pts_stream_port', 9603)
             if not hasattr(self, '_pts_stream') or self._pts_stream is None:
-                self._pts_stream = PtsStreamReader(camera_ip, port=pts_port)
+                gt_port = getattr(self.config, 'venc_gettime_port', 9601)
+                self._pts_stream = PtsStreamReader(camera_ip, port=pts_port,
+                                                    gettime_port=gt_port)
                 self._pts_stream.start()
                 log.info("PTS stream reader started on port %d", pts_port)
 

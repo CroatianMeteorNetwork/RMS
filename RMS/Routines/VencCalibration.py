@@ -142,3 +142,17 @@ def calibrate_epoch_offset(ip, port=9601, n_samples=20, timeout_per_sample=5.0):
              clock_offset * 1000, ow_mean)
 
     return C
+
+
+def probe_clock_sample(ip, port=9601, timeout=5.0):
+    """Single host-referenced (venc_pts_us, host_utc) measurement.
+
+    Returns (pts_us, host_utc_float, one_way_ms) or None.
+    The host_utc is referenced to the HOST clock (chrony/GPS PPS),
+    bypassing camera NTP entirely.
+    """
+    result = _query_gettime(ip, port, timeout)
+    if result is None:
+        return None
+    cam_time, pts_90k, pts_us, host_at_snap, ow_ms = result
+    return (pts_us, host_at_snap, ow_ms)
