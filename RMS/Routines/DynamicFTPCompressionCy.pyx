@@ -46,10 +46,10 @@ cdef class FFMimickInterface:
         self.calibrated = False
         self.successful = False
 
-        # Init outputs
-        self.maxpixel = np.zeros((nrows, ncols), dtype=dtype)
-        self.avepixel = np.zeros((nrows, ncols), dtype=dtype) # Will hold the Median
-        self.stdpixel = np.zeros((nrows, ncols), dtype=dtype) # Will hold the MAD
+        # Init outputs - all internal processing done in uint16 for robustness
+        self.maxpixel = np.zeros((nrows, ncols), dtype=np.uint16)
+        self.avepixel = np.zeros((nrows, ncols), dtype=np.uint16)
+        self.stdpixel = np.zeros((nrows, ncols), dtype=np.uint16)
 
         # Internal buffer for the Reservoir Sampling
         self.res_size = 256
@@ -99,7 +99,6 @@ cdef class FFMimickInterface:
         # 1. Calculate Median (avepixel)
         # We compute this in float32 for precision during MAD calculation
         cdef np.ndarray median_float = np.median(valid_samples, axis=0).astype(np.float32)
-        self.avepixel = median_float.astype(self.dtype)
         
         # 2. Calculate Median Absolute Deviation (MAD)
         # MAD = median(|x - median|)
@@ -107,11 +106,25 @@ cdef class FFMimickInterface:
         cdef np.ndarray abs_diff = np.abs(valid_samples.astype(np.float32) - median_float)
         cdef np.ndarray mad = np.median(abs_diff, axis=0)
         
-        # Standard Deviation = MAD * 1.4826
-        self.stdpixel = (mad * 1.4826).astype(self.dtype)
-        
+        cdef np.ndarray std_float = mad * 1.4826
+
         # Safety for zero noise (Standard Deviation must be at least 1 for thresholding)
-        self.stdpixel[self.stdpixel <= 0] = 1
+        std_float[std_float <= 0] = 1
+
+        # Determine clipping bounds based on target dtype (default to uint8 range if not set)
+        cdef float min_val = 0.0
+        cdef float max_val = 65535.0
+        try:
+            info = np.iinfo(self.dtype)
+            min_val = <float>info.min
+            max_val = <float>info.max
+        except:
+            pass
+
+        # Final clipping and casting to target dtype
+        self.maxpixel = np.clip(self.maxpixel, min_val, max_val).astype(self.dtype)
+        self.avepixel = np.clip(median_float, min_val, max_val).astype(self.dtype)
+        self.stdpixel = np.clip(std_float,    min_val, max_val).astype(self.dtype)
         
         self.successful = True
         return True
