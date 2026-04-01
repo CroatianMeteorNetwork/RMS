@@ -415,30 +415,34 @@ def selectClosestLine(found_lines, ref_line, ref_has_frames=True, weights=(1.0, 
         print(f"--- Best Candidate Choose: {best_line[0]} -> {best_line[1]} (Score={min_score:.2f})")
 
     return best_line
+def fit3DLine(points, weights=None):
+    """
+    Fits a 3D line to a set of points (optionally weighted).
+    Returns (mean, direction).
+    """
+    if weights is None:
+        mean = np.mean(points, axis=0)
+        centered = points - mean
+    else:
+        mean = np.average(points, axis=0, weights=weights)
+        centered = points - mean
+        centered *= np.sqrt(weights)[:, np.newaxis]
+    
+    _, _, vt = np.linalg.svd(centered, full_matrices=False)
+    direction = vt[0]
+    return mean, direction
 
 
 def stitch3DLines(found_lines, ref_line, ref_has_frames=True, vect_angle_thresh=10.0, dist_thresh=2.0, 
                   frame_scale=None, debug=False):
     """
-    Selects the best matching line (seed) from RANSAC results and then 'stitches' other segments 
-    that are collinear extensions of the same track.
-    
-    Arguments:
-        found_lines: [list] List of formatted lines: [(start_pt, end_pt, pts_count, quality, f_min, f_max), ...]
-        ref_line: [tuple] The reference line (2D or 3D).
-        ref_has_frames: [bool] Whether reference line has time dimension.
-        vect_angle_thresh: [float] Maximum 3D angle (degrees) to merge extensions.
-        dist_thresh: [float] Maximum 3D distance to the infinite line to merge extensions.
-        frame_scale: [float] Normalization ratio for frame dimension. If None, calculated from first found line.
-        debug: [bool] Verbose output.
-        
-    Return:
-        stitched_line: A single merged line segment in the same format as found_lines.
+    Selects the best matching line (seed) and then 'stitches' other segments iteratively 
+    using a model that is re-fit after each merge for better robustness on long tracks.
     """
     if not found_lines:
         return None
 
-    # 1. Find the seed line
+    # Step 1: Find the seed line
     seed_line = selectClosestLine(found_lines, ref_line, ref_has_frames=ref_has_frames, debug=debug)
     if seed_line is None:
         return None
@@ -446,101 +450,117 @@ def stitch3DLines(found_lines, ref_line, ref_has_frames=True, vect_angle_thresh=
     if len(found_lines) == 1:
         return seed_line
 
-    # Setup frame scaling for 3D distance checks
+    # Estimate frame scaling if not provided
     if frame_scale is None:
-        # Estimate frame scale if not provided
-        # Use a default 100/1 ratio if we can't estimate well
         frame_scale = 1.0
         for l in found_lines:
-            dx = l[1][0] - l[0][0]
-            dy = l[1][1] - l[0][1]
-            df = l[1][2] - l[0][2]
+            dx, dy, df = l[1][0]-l[0][0], l[1][1]-l[0][1], l[1][2]-l[0][2]
             if abs(df) > 1:
                 frame_scale = math.sqrt(dx**2 + dy**2) / abs(df)
                 break
 
-    def get_scaled_line(line):
-        p1 = np.array(line[0])
-        p2 = np.array(line[1])
-        p1[2] *= frame_scale
-        p2[2] *= frame_scale
-        return p1, p2
-
-    seed_p1_sc, seed_p2_sc = get_scaled_line(seed_line)
-    seed_vec_sc = seed_p2_sc - seed_p1_sc
-    seed_len_sc = np.linalg.norm(seed_vec_sc)
-    seed_dir_sc = seed_vec_sc / seed_len_sc if seed_len_sc > 0 else np.array([1, 0, 0])
-
-    stitched_segments = [seed_line]
-    other_lines = [l for l in found_lines if l is not seed_line]
+    stitched = [seed_line]
+    remaining = [l for l in found_lines if l is not seed_line]
     
     if debug:
-        print(f"\n--- 3D Line Stitching (Seed: {seed_line[0]} -> {seed_line[1]}) ---")
+        print(f"\n--- 3D Line Stitching (Iterative) Seed: f:{seed_line[4]}-{seed_line[5]} ---")
         print(f"  Frame scale: {frame_scale:.4f}")
 
-    for cand in other_lines:
-        cand_p1_sc, cand_p2_sc = get_scaled_line(cand)
-        cand_vec_sc = cand_p2_sc - cand_p1_sc
-        cand_len_sc = np.linalg.norm(cand_vec_sc)
-        cand_dir_sc = cand_vec_sc / cand_len_sc if cand_len_sc > 0 else np.array([1, 0, 0])
+    while True:
+        # 2. Fit a super-line model to all currently stitched segments (in scaled 3D space)
+        # Each segment provides two points (endpoints), weighted by segment's point_count / 2
+        pts_3d = []
+        wts_3d = []
+        for s in stitched:
+            p1 = np.array(s[0])
+            p2 = np.array(s[1])
+            p1[2] *= frame_scale
+            p2[2] *= frame_scale
+            pts_3d.extend([p1, p2])
+            wts_3d.extend([s[2]/2.0, s[2]/2.0])
         
-        # Check directionality (3D angle)
-        cos_theta = abs(np.dot(cand_dir_sc, seed_dir_sc))
-        angle = np.degrees(np.arccos(np.clip(cos_theta, -1.0, 1.0)))
-        
-        if angle > vect_angle_thresh:
-            if debug:
-                print(f"  Candidate {cand[0]} rejected: angle {angle:.1f} > {vect_angle_thresh}")
-            continue
-            
-        # Check distance to infinite line (using scaled coords)
-        d1 = pointToLineDist3D(cand_p1_sc.reshape(1,3), seed_p1_sc, seed_dir_sc)[0]
-        d2 = pointToLineDist3D(cand_p2_sc.reshape(1,3), seed_p1_sc, seed_dir_sc)[0]
-        
-        if d1 > dist_thresh or d2 > dist_thresh:
-            if debug:
-                print(f"  Candidate {cand[0]} rejected: dists ({d1:.1f}, {d2:.1f}) > {dist_thresh}")
-            continue
-            
-        stitched_segments.append(cand)
-        if debug:
-            print(f"  Candidate {cand[0]} -> {cand[1]} merged! (angle={angle:.1f}, dists={d1:.1f}, {d2:.1f})")
+        super_mean, super_dir = fit3DLine(np.array(pts_3d), weights=np.array(wts_3d))
 
-    if len(stitched_segments) == 1:
-        return seed_line
+        best_cand_idx = -1
+        best_score = float('inf')
 
-    # Combine all segments
-    all_starts = np.array([l[0] for l in stitched_segments])
-    all_ends = np.array([l[1] for l in stitched_segments])
-    
+        # 3. Find the best candidate among remaining lines
+        for i, cand in enumerate(remaining):
+            c1 = np.array(cand[0])
+            c2 = np.array(cand[1])
+            c1[2] *= frame_scale
+            c2[2] *= frame_scale
+            c_vec = c2 - c1
+            c_len = np.linalg.norm(c_vec)
+            c_dir = c_vec/c_len if c_len > 0 else np.array([1, 0, 0])
+
+            # Collinearity check (3D angle)
+            cos_theta = abs(np.dot(c_dir, super_dir))
+            angle = np.degrees(np.arccos(np.clip(cos_theta, -1.0, 1.0)))
+
+            if angle > vect_angle_thresh:
+                continue
+
+            # Proximity check (Distance to infinite model line)
+            # We check both endpoints. To be inclusive for curved tracks, 
+            # we require AT LEAST ONE endpoint to be within dist_thresh AND 
+            # the overall angle to be very small.
+            d1 = pointToLineDist3D(c1.reshape(1,3), super_mean, super_dir)[0]
+            d2 = pointToLineDist3D(c2.reshape(1,3), super_mean, super_dir)[0]
+
+            # Current logic: At least one end is clearly on the line, and the segment is aligned
+            if min(d1, d2) <= dist_thresh:
+                # Use a combined score of angle and average distance to pick best candidate
+                score = angle + (d1 + d2)/dist_thresh
+                if score < best_score:
+                    best_score = score
+                    best_cand_idx = i
+                    best_dists = (d1, d2)
+                    best_angle = angle
+
+        if best_cand_idx != -1:
+            merged_line = remaining.pop(best_cand_idx)
+            stitched.append(merged_line)
+            if debug:
+                print(f"  Merged segment f:{merged_line[4]}-{merged_line[5]}! (angle={best_angle:.1f}, dists={best_dists[0]:.1f}, {best_dists[1]:.1f})")
+        else:
+            # No more segments can be merged
+            break
+
+    # 4. Final output based on the robust iterative fit
+    all_starts = np.array([l[0] for l in stitched])
+    all_ends = np.array([l[1] for l in stitched])
     f_min = min(np.min(all_starts[:, 2]), np.min(all_ends[:, 2]))
     f_max = max(np.max(all_starts[:, 2]), np.max(all_ends[:, 2]))
+    total_pts = sum(l[2] for l in stitched)
+    avg_quality = sum(l[3] for l in stitched) / len(stitched)
+
+    # Project the extremes onto the final super-line
+    pts_final = []
+    wts_final = []
+    for s in stitched:
+        p1, p2 = np.array(s[0]), np.array(s[1])
+        p1[2] *= frame_scale
+        p2[2] *= frame_scale
+        pts_final.extend([p1, p2])
+        wts_final.extend([s[2]/2.0, s[2]/2.0])
     
-    total_pts = sum(l[2] for l in stitched_segments)
-    avg_quality = sum(l[3] for l in stitched_segments) / len(stitched_segments)
-    
-    # Use the seed's linear model to project endpoints back to unscaled space
-    # seed_dir_sc is in scaled space. We need dx/df and dy/df in unscaled space.
-    # dx = seed_vec_sc[0], dy = seed_vec_sc[1], df = seed_vec_sc[2]/frame_scale
-    seed_p1 = np.array(seed_line[0])
-    seed_p2 = np.array(seed_line[1])
-    diff = seed_p2 - seed_p1
-    
-    if abs(diff[2]) > 1e-6:
-        m_x = diff[0] / diff[2]
-        m_y = diff[1] / diff[2]
+    final_mean, final_dir = fit3DLine(np.array(pts_final), weights=np.array(wts_final))
+
+    # Project frame endpoints into unscaled space
+    # (x, y, f*scale) = mean + t * dir
+    # f*scale = mean[2] + t * dir[2] => t = (f*scale - mean[2]) / dir[2]
+    if abs(final_dir[2]) > 1e-6:
+        def get_pt(f):
+            t = (f * frame_scale - final_mean[2]) / final_dir[2]
+            p = final_mean + t * final_dir
+            return (p[0], p[1], f)
         
-        x_min = seed_p1[0] + (f_min - seed_p1[2]) * m_x
-        y_min = seed_p1[1] + (f_min - seed_p1[2]) * m_y
-        
-        x_max = seed_p1[0] + (f_max - seed_p1[2]) * m_x
-        y_max = seed_p1[1] + (f_max - seed_p1[2]) * m_y
-        
-        new_start = (x_min, y_min, f_min)
-        new_end = (x_max, y_max, f_max)
+        new_start = get_pt(f_min)
+        new_end = get_pt(f_max)
     else:
-        new_start = (seed_p1[0], seed_p1[1], f_min)
-        new_end = (seed_p1[0], seed_p1[1], f_max)
+        new_start = (final_mean[0], final_mean[1], f_min)
+        new_end = (final_mean[0], final_mean[1], f_max)
 
     return [new_start, new_end, total_pts, avg_quality, int(round(f_min)), int(round(f_max))]
 
