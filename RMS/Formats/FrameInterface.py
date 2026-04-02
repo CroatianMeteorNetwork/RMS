@@ -192,6 +192,30 @@ class InputType(object):
     def currentFrameTime(self, frame_no=None, dt_obj=False):
         pass
 
+    def getTargetDtype(self, first_frame_data=None):
+        """ Determine the target dtype based on the target bit depth of the input images and the 
+            processing configuration.
+            
+        If binning with 'sum' method is used, the target dtype is forced to uint16 to prevent overflow.
+        Otherwise, it depends on the input data's bit depth.
+        """
+        
+        # Check if bit depth should be at least uint16 to handle potential overflow from sum binning
+        if hasattr(self, 'config'):
+            if self.config.detection_binning_factor > 1 and \
+                self.config.detection_binning_method == 'sum':
+                return np.uint16
+
+        # Check the bit depth of input data
+        if first_frame_data is not None:
+            if first_frame_data.dtype == np.uint8:
+                return np.uint8
+            else:
+                return np.uint16
+
+        # Standard default is uint16 for robustness
+        return np.uint16
+
 
 
 class InputTypeFRFF(InputType):
@@ -410,7 +434,11 @@ class InputTypeFRFF(InputType):
             else:
 
                 # Init an empty FF structure
-                ff = FFMimickInterface(self.nrows, self.ncols, np.uint8)
+                # For multiple FFs, determine the dtype from the first reconstructed FF
+                ref_ff = readFF(self.dir_path, ffs_to_read[0])
+                target_dtype = self.getTargetDtype(ref_ff.maxpixel)
+                
+                ff = FFMimickInterface(self.nrows, self.ncols, target_dtype)
 
                 # Store maxpixel selections, avepixels, stdpixels
                 maxpixel_list = []
@@ -958,8 +986,11 @@ class InputTypeVideo(InputType):
             frame, self.current_fr_chunk_size = self.cache[cache_id]
             return frame
 
+        # Determine target dtype (assume uint16 if not yet initialized, then update)
+        target_dtype = self.getTargetDtype()
+
         # Init making the FF structure
-        ff_struct_fake = FFMimickInterface(self.nrows, self.ncols, np.uint8)
+        ff_struct_fake = FFMimickInterface(self.nrows, self.ncols, target_dtype)
 
         # If there are no frames to read, return an empty array
         if frames_to_read == 0 or frames_to_read == -1:
@@ -968,6 +999,7 @@ class InputTypeVideo(InputType):
 
         print('Frames to read: ' + str(frames_to_read), end='')
 
+        # Load the chunk of frames
         # Load the chunk of frames
         for i in range(frames_to_read):
 
@@ -985,6 +1017,10 @@ class InputTypeVideo(InputType):
 
             # Add frame for FF processing
             ff_struct_fake.addFrame(frame.astype(np.uint16))
+
+            # Update the target dtype of the FF struct based on the first frame if needed
+            if i == 0:
+                ff_struct_fake.dtype = self.getTargetDtype(frame)
 
         
         # Print the total number of read frames in the same line
@@ -1271,8 +1307,11 @@ class InputTypeUWOVid(InputType):
         # Set the vid file pointer to the right byte
         self.vid_file.seek(first_frame*self.vidinfo.seqlen)
 
+        # Determine target dtype (assume uint16 if not yet initialized, then update)
+        target_dtype = self.getTargetDtype()
+
         # Init making the FF structure
-        ff_struct_fake = FFMimickInterface(self.nrows, self.ncols, np.uint16)
+        ff_struct_fake = FFMimickInterface(self.nrows, self.ncols, target_dtype)
 
         self.frame_chunk_unix_times = []
 
@@ -1305,7 +1344,11 @@ class InputTypeUWOVid(InputType):
                 frame = np.flipud(frame)
 
             # Add frame for FF processing (the frame should already be uint16)
-            ff_struct_fake.addFrame(frame)
+            ff_struct_fake.addFrame(frame.astype(np.uint16))
+
+            # Update the target dtype of the FF struct based on the first frame if needed
+            if i == 0:
+                ff_struct_fake.dtype = self.getTargetDtype(frame)
 
             unix_time_lst = (self.vid.ts, self.vid.tu)
             if unix_time_lst not in self.utime_frame_dict:
@@ -1860,7 +1903,9 @@ class InputTypeImages(object):
             return frame
 
         # Init making the FF structure
-        ff_struct_fake = FFMimickInterface(self.nrows, self.ncols, self.img_dtype)
+        # Update the FF struct's target dtype based on the first frame's bit depth
+        target_dtype = self.getTargetDtype(frame)
+        ff_struct_fake = FFMimickInterface(self.nrows, self.ncols, target_dtype)
 
         self.frame_dt_list = []
 
@@ -1879,6 +1924,10 @@ class InputTypeImages(object):
 
             # Add frame for FF processing
             ff_struct_fake.addFrame(frame.astype(np.uint16))
+
+            # Update the target dtype of the FF struct based on the first frame if needed
+            if i == 0:
+                ff_struct_fake.dtype = self.getTargetDtype(frame)
 
             # Add the datetime of the frame to list of the UWO png is used
             if self.uwo_png_mode or self.fripon_mode:
@@ -2231,7 +2280,8 @@ class InputTypeImages(object):
         """ Return the type of the UWO PNG image. """
 
         # Read in the magick number as a uint32
-        magicknum = np.frombuffer(img[0], dtype=np.uint32)[0]
+        # Use first 4 bytes of raw image data to handle any width pixels
+        magicknum = np.frombuffer(img.tobytes()[:4], dtype=np.uint32)[0]
 
         # Define the magick numbers for different UWO PNGs
         uwo_magick_num_list = [UWO_MAGICK_CAMO, UWO_MAGICK_EMCCD, UWO_MAGICK_ASGARD]
@@ -2336,7 +2386,8 @@ class InputTypeDFN(InputType):
             self.ncols = temp
             img = np.rot90(img)
 
-        self.ff = FFMimickInterface(self.nrows, self.ncols, self.img_dtype)
+        target_dtype = self.getTargetDtype(img)
+        self.ff = FFMimickInterface(self.nrows, self.ncols, target_dtype)
         self.ff.addFrame(img.astype(np.uint16))
         self.ff.finish()
 
