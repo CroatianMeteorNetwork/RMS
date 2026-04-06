@@ -868,8 +868,12 @@ class InputTypeVideo(InputType):
         # If gstreamer is available and the media backend is set to gst, use it
         if GST_IMPORTED and (self.config.media_backend == 'gst'):
 
-            self.cap = GstVideoFile(self.file_path, decoder=self.config.gst_decoder,
-                                        video_format="BGR")
+            try:
+                self.cap = GstVideoFile(self.file_path, decoder=self.config.gst_decoder,
+                                            video_format="BGR")
+            except Exception as e:
+                log.info("Error initializing GStreamer, switching to OpenCV. Error: {}".format(e))
+                self.cap = cv2.VideoCapture(self.file_path)
 
         else:
 
@@ -922,6 +926,18 @@ class InputTypeVideo(InputType):
             print("Memory needed: {:.2f} MB".format(memory_size_mb))
 
             self.video_frames = self.loadFullVideo()
+
+            # Update total_frames to the actual number of frames loaded, as CAP_PROP_FRAME_COUNT
+            # can over-report for some codecs/containers
+            if len(self.video_frames) != self.total_frames:
+                print("Warning: Video reported {:d} frames but only {:d} were readable.".format(
+                    self.total_frames, len(self.video_frames)))
+                self.total_frames = len(self.video_frames)
+
+                # Recompute the number of frame chunks
+                self.total_fr_chunks = self.total_frames//self.chunk_frames
+                if self.total_fr_chunks == 0:
+                    self.total_fr_chunks = 1
 
         # Load the initial chunk
         self.loadChunk()

@@ -259,12 +259,16 @@ class RealtimeVideoDetector():
         if calstars_name is None:
             log.info(f"No CALSTARS data found in {video_path}, skipping live recalibrator update.")
         else:
-            calstars, calstars_ff_frames = readCALSTARS(output_dir, calstars_name)
-            log.info(f"Extracted CALSTARS data in {calstars_name} with {len(calstars)} stars and {calstars_ff_frames} frames")
-            for ff_name, star_data in calstars:
-                # Add the CALSTARS data to the queue
-                log.info(f"Writing CALSTARS data to live calibrator queue from {calstars_name} for {ff_name} with {len(star_data)} measures")
-                live_recalibrator_queue.put( (True, (ff_name, star_data, calstars_ff_frames)) )
+            cal_star_ret = readCALSTARS(output_dir, calstars_name)
+            if cal_star_ret is False:
+                log.warning(f"Failed to read CALSTARS data from {calstars_name}, skipping live recalibrator update.")
+            else:
+                calstars, calstars_ff_frames = readCALSTARS(output_dir, calstars_name)
+                log.info(f"Extracted CALSTARS data in {calstars_name} with {len(calstars)} stars and {calstars_ff_frames} frames")
+                for ff_name, star_data in calstars:
+                    # Add the CALSTARS data to the queue
+                    log.info(f"Writing CALSTARS data to live calibrator queue from {calstars_name} for {ff_name} with {len(star_data)} measures")
+                    live_recalibrator_queue.put( (True, (ff_name, star_data, calstars_ff_frames)) )
     
         # Read the FTPDetectinfo file and pass the measures to the live recalibrator
         if ftpdetectinfo_name is None:
@@ -361,15 +365,17 @@ if __name__ == "__main__":
     log = getLogger("logger")
 
     # Initialize a file tracker
-    processed_tracker = ProcessedFilesTracker(directory=cml_args.video_file_dir, tracker_file_name="last_processed_video.txt", log_func=log.info) 
+    processed_tracker = None
+    if cml_args.video_file_dir is not None:
+        processed_tracker = ProcessedFilesTracker(directory=cml_args.video_file_dir, tracker_file_name="last_processed_video.txt", log_func=log.info) 
 
-    if cml_args.reset_processed_files is not None:
-        if cml_args.reset_processed_files.lower() == "clear":
-            print("Clearing processed file tracker, all files will be processed")
-            processed_tracker.clear()
-        else:
-            processed_tracker.setProcessed(cml_args.reset_processed_files)
-            print(f"Processed file tracker updated with {cml_args.reset_processed_files}")
+        if cml_args.reset_processed_files is not None:
+            if cml_args.reset_processed_files.lower() == "clear":
+                print("Clearing processed file tracker, all files will be processed")
+                processed_tracker.clear()
+            else:
+                processed_tracker.setProcessed(cml_args.reset_processed_files)
+                print(f"Processed file tracker updated with {cml_args.reset_processed_files}")
         exit(0) 
   
     # We have no current realtime video detector
@@ -458,7 +464,8 @@ if __name__ == "__main__":
                 rtvd.addVideoFile(video_file)
 
         # Flag the file as processed
-        processed_tracker.markProcessed(os.path.basename(video_file))
+        if processed_tracker is not None:
+            processed_tracker.markProcessed(os.path.basename(video_file))
 
 
     # Process a single file

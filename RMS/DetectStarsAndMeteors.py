@@ -153,7 +153,7 @@ def saveResultsFrameInterface(star_list, meteor_list, img_handle, config, chunk_
         # Write detected stars to the CALSTARS file
         CALSTARS.writeCALSTARS(star_list, output_dir, calstars_name, 
                             config.stationID, config.height, config.width, chunk_frames=chunk_frames)
-        
+  
         log.info("Stars extracted and written to {:s}".format(calstars_name))
 
     # Bypass empty outputs if requested
@@ -191,7 +191,7 @@ def saveResultsFrameInterface(star_list, meteor_list, img_handle, config, chunk_
             results_list.append([ff_file_name, meteor_No, rho, theta, centroids])
 
         # Write FTPdetectinfo file
-        FTPdetectinfo.writeFTPdetectinfo(results_list, output_dir, ftpdetectinfo_name, 
+        FTPdetectinfo.writeFTPdetectinfo(results_list, output_dir, ftpdetectinfo_name,
                                          output_dir, config.stationID, config.fps)
 
     return output_dir, calstars_name, ftpdetectinfo_name
