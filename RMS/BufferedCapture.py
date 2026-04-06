@@ -768,21 +768,28 @@ class BufferedCapture(Process):
             stride (int): Spacing for diagonal sampling, skipping many pixels for efficiency.
 
         Returns:
-            bool: True if all sampled channels match (or frame is single-channel), otherwise False.
+            bool or None: True if all sampled channels match (or frame is single-channel),
+                False if channels differ (color), or None if inconclusive (all pixels are
+                the same value, e.g. all white or all black).
         """
         if frame is None:
             raise ValueError("isGrayscale() called with frame=None")
-        
+
         # We don't explicitly check frame.shape first; instead we rely on an IndexError
         # if 'frame' is single-channel (which is inherently grayscale).
-        # This is faster than an extra dimension check for most BGR GMN stations 
+        # This is faster than an extra dimension check for most BGR GMN stations
 
         try:
             # If diagonal samples are not identical, frame is color
             sampled = frame[::stride, ::stride]
             is_gray = np.all(sampled[..., 0] == sampled[..., 1]) and \
                     np.all(sampled[..., 1] == sampled[..., 2])
-            
+
+            # If all sampled pixels have the same value (e.g. all white or all black),
+            # the check is inconclusive — channels match trivially
+            if is_gray and np.all(sampled[..., 0] == sampled[0, 0, 0]):
+                return None
+
         except IndexError:
              # If IndexError, frame is grayscale
             is_gray = True
@@ -1406,8 +1413,10 @@ class BufferedCapture(Process):
                     buffer.unmap(map_info)
                     
                     # Check if frame is grayscale and set flag
-                    self.convert_to_gray = self.isGrayscale(frame)
-                    log.info("Video format: {}, {}P, color: {}".format(self.config.gst_colorspace, height, 
+                    gray_result = self.isGrayscale(frame)
+                    if gray_result is not None:
+                        self.convert_to_gray = gray_result
+                    log.info("Video format: {}, {}P, color: {}".format(self.config.gst_colorspace, height,
                                                                        not self.convert_to_gray))
 
                     # Set the video device type
@@ -1721,7 +1730,7 @@ class BufferedCapture(Process):
             self.pipeline = None
             self.start_timestamp = 0
             self.frame_shape = None
-            self.convert_to_gray = False
+            self.convert_to_gray = not (self.daytime_mode.value if self.daytime_mode is not None else False)
             self.last_pts_correction_ns = 0
             self.last_running_time_ns = None
 
@@ -1901,7 +1910,9 @@ class BufferedCapture(Process):
                     # If the connection was made and the frame was retrieved, continue with the capture
                     if ret:
                         log.info('Video device reconnected successfully!')
-                        self.convert_to_gray = self.isGrayscale(frame)
+                        gray_result = self.isGrayscale(frame)
+                        if gray_result is not None:
+                            self.convert_to_gray = gray_result
                         wait_for_reconnect = False
                         break
 
@@ -1962,7 +1973,9 @@ class BufferedCapture(Process):
 
                 # Check if frame contains color information
                 if save_this_frame:
-                    self.convert_to_gray = self.isGrayscale(frame)
+                    gray_result = self.isGrayscale(frame)
+                    if gray_result is not None:
+                        self.convert_to_gray = gray_result
 
                 # Handling for grayscale conversion
                 frame = self.handleGrayscaleConversion(frame)
