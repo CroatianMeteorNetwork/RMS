@@ -1773,6 +1773,7 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
     sigAsymmetryCorrToggled = QtCore.pyqtSignal()
     sigForceDistortionToggled = QtCore.pyqtSignal()
     sigOnVignettingFixedToggled = QtCore.pyqtSignal()
+    sigFitOnlyPointingToggled = QtCore.pyqtSignal()
     sigRestoreDefaultsPressed = QtCore.pyqtSignal()
 
     # Default settings for SkyFit2 Fit Parameters tab
@@ -1887,6 +1888,10 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         full_layout.addWidget(self.restore_defaults_button)
 
         # check boxes
+        self.fit_only_pointing = QtWidgets.QCheckBox('Only fit pointing')
+        self.fit_only_pointing.released.connect(self.onFitOnlyPointingToggled)
+        full_layout.addWidget(self.fit_only_pointing)
+
         self.fixed_scale = QtWidgets.QCheckBox('Fixed scale')
         self.fixed_scale.released.connect(self.onFixScaleToggled)
         full_layout.addWidget(self.fixed_scale)
@@ -2448,6 +2453,7 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         self.vignetting_coeff.setDisabled(not self.gui.platepar.vignetting_fixed)
 
         self.refraction.setChecked(self.gui.platepar.refraction)
+        self.fit_only_pointing.setChecked(self.gui.fit_only_pointing)
         self.eqAspect.setChecked(self.gui.platepar.equal_aspect)
         self.asymmetryCorr.setChecked(self.gui.platepar.asymmetry_corr)
         self.fdistortion.setChecked(self.gui.platepar.force_distortion_centre)
@@ -2469,6 +2475,7 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         pp = self.gui.platepar
         gui = self.gui
         return (gui.fixed_scale == self.DEFAULT_FIXED_SCALE and
+                gui.fit_only_pointing == False and
                 pp.refraction == self.DEFAULT_REFRACTION and
                 pp.equal_aspect == self.DEFAULT_EQUAL_ASPECT and
                 pp.asymmetry_corr == self.DEFAULT_ASYMMETRY_CORR and
@@ -2497,6 +2504,11 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
             )
         self.restore_defaults_button.setEnabled(not at_defaults)
 
+    def onFitOnlyPointingToggled(self):
+        self.gui.fit_only_pointing = self.fit_only_pointing.isChecked()
+        self.updatePairedStars(min_fit_stars=self.gui.getMinFitStars())
+        self.sigFitOnlyPointingToggled.emit()
+
     def onRestoreDefaults(self):
         """Restore all default settings for the Fit Parameters tab."""
         pp = self.gui.platepar
@@ -2507,6 +2519,11 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
             gui.fixed_scale = self.DEFAULT_FIXED_SCALE
             self.fixed_scale.setChecked(self.DEFAULT_FIXED_SCALE)
             self.F_scale.setDisabled(self.DEFAULT_FIXED_SCALE)
+
+        # Restore fit only pointing
+        if gui.fit_only_pointing:
+            gui.fit_only_pointing = False
+            self.fit_only_pointing.setChecked(False)
 
         # Restore refraction
         if pp.refraction != self.DEFAULT_REFRACTION:
