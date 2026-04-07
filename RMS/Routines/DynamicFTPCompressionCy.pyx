@@ -32,12 +32,16 @@ cdef class FFMimickInterface:
     # Public output arrays (matching your original interface types)
     cdef public np.ndarray maxpixel, avepixel, stdpixel
 
-    def __init__(self, nrows, ncols, dtype):
+    def __init__(self, nrows, ncols, dtype, res_size=64):
         """ Structure which is used to make FF file format data. It mimicks the interface of an FF structure. 
     
         Arguments:
             nrows: [int] Number of image rows.
             ncols: [int] Number of image columns.
+            dtype: [numpy dtype] Target output data type.
+            res_size: [int] Number of frames in the reservoir sampling buffer used for background estimation.
+                Default is 64. Higher values (e.g. 256) provide better precision but significantly increase
+                memory and CPU time.
         """
         self.nrows = nrows
         self.ncols = ncols
@@ -51,8 +55,9 @@ cdef class FFMimickInterface:
         self.avepixel = np.zeros((nrows, ncols), dtype=np.uint16)
         self.stdpixel = np.zeros((nrows, ncols), dtype=np.uint16)
 
-        # Internal buffer for the Reservoir Sampling (increase for better background estimation, e.g. 256, but comes with a significant performance hit)
-        self.res_size = 64
+        # Internal buffer for the Reservoir Sampling (increase for better background estimation, 
+        # e.g. 256, but comes with a significant performance hit - approx 4x)
+        self.res_size = res_size
         self.sample_buf = np.zeros((self.res_size, nrows, ncols), dtype=np.uint16)
 
 

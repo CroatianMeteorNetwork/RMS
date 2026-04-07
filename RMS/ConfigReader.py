@@ -584,6 +584,9 @@ class Config:
         self.kht_binary_name = 'kht_module'
         self.kht_binary_extension = 'so'
 
+        # Background estimation parameters
+        self.background_reservoir_size = 64
+
         # KHT Line finding parameters
         # Minimum number of pixels required to form a valid cluster
         self.kht_cluster_min_size = 9
@@ -1636,6 +1639,10 @@ def parseMeteorDetection(config, parser):
 
     if parser.has_option(section, "kht_kernel_min_height"):
         config.kht_kernel_min_height = parser.getfloat(section, "kht_kernel_min_height")
+
+    # Load the background reservoir size
+    if parser.has_option(section, "background_reservoir_size"):
+        config.background_reservoir_size = parser.getint(section, "background_reservoir_size")
 
     if parser.has_option(section, "kht_n_sigmas"):
         config.kht_n_sigmas = parser.getfloat(section, "kht_n_sigmas")
