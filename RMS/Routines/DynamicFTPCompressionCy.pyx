@@ -51,8 +51,8 @@ cdef class FFMimickInterface:
         self.avepixel = np.zeros((nrows, ncols), dtype=np.uint16)
         self.stdpixel = np.zeros((nrows, ncols), dtype=np.uint16)
 
-        # Internal buffer for the Reservoir Sampling
-        self.res_size = 256
+        # Internal buffer for the Reservoir Sampling (increase for better background estimation, e.g. 256, but comes with a significant performance hit)
+        self.res_size = 64
         self.sample_buf = np.zeros((self.res_size, nrows, ncols), dtype=np.uint16)
 
 

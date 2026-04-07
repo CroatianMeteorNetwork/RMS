@@ -4,6 +4,7 @@
 
 from __future__ import print_function, division, absolute_import
 
+import time
 import argparse
 import os
 import sys
@@ -47,6 +48,8 @@ if __name__ == "__main__":
     arg_parser.add_argument('--dark', type=str, default=None,
         help="Path to a dark frame image file. If not given, loaded from the data directory if enabled in config.")
 
+    arg_parser.add_argument('--preloadvid', action="store_true", help="Preload the video into memory.")
+
     #############################
 
     # Parse the command line arguments
@@ -63,7 +66,7 @@ if __name__ == "__main__":
 
     # Detect input type
     # We use detection=True to apply binning if configured, as we want to see what the detector sees
-    img_handle = detectInputType(cml_args.input_path, config, detection=True)
+    img_handle = detectInputType(cml_args.input_path, config, detection=True, preload_video=cml_args.preloadvid)
 
     if img_handle is None:
         print("Could not detect input type for: {}".format(cml_args.input_path))
@@ -94,7 +97,9 @@ if __name__ == "__main__":
 
     # Load the chunk
     print("Loading {} frames starting from frame {}...".format(cml_args.nframes, cml_args.start))
+    t1 = time.time()
     ff = img_handle.loadChunk(first_frame=cml_args.start, read_nframes=cml_args.nframes)
+    print("Time to load chunk: {:.4f}s".format(time.time() - t1))
 
     if ff is None or ff.nframes == 0:
         print("No frames loaded.")
@@ -157,6 +162,9 @@ if __name__ == "__main__":
     # Compute the stddev values
     k1_vals = (ff.maxpixel.astype(np.float64) - ff.avepixel.astype(np.float64) - j1)/stdpixel
 
+    # Clip the k1 values to they can't be < 0
+    k1_vals = np.clip(k1_vals, 0, None)
+
     # Apply the star mask to the k1 values
     k1_vals[star_mask] = 0
 
@@ -183,12 +191,12 @@ if __name__ == "__main__":
     fig, ((ax0, ax1, ax2), (ax3, ax4, ax5)) = plt.subplots(nrows=2, ncols=3, sharex=True, sharey=True, figsize=(fig_width, fig_height))
 
     # Top-left: Maxpixel
-    im0 = ax0.imshow(ff.maxpixel, cmap='gray', aspect='equal', vmin=0, vmax=np.percentile(ff.maxpixel, 99.5))
+    im0 = ax0.imshow(ff.maxpixel, cmap='gray', aspect='equal', vmin=np.percentile(ff.maxpixel, 0.1), vmax=np.percentile(ff.maxpixel, 99.9))
     ax0.set_title("Maxpixel")
     plt.colorbar(im0, ax=ax0, fraction=0.046, pad=0.04)
 
     # Top-center: Max - Ave (Signal)
-    im1 = ax1.imshow(max_ave, cmap='gray', aspect='equal', vmin=0, vmax=np.percentile(max_ave, 99.5))
+    im1 = ax1.imshow(max_ave, cmap='gray', aspect='equal', vmin=np.percentile(max_ave, 0.1), vmax=np.percentile(max_ave, 99.9))
     ax1.set_title("Max - Ave (Signal)")
     plt.colorbar(im1, ax=ax1, fraction=0.046, pad=0.04)
 
@@ -203,12 +211,12 @@ if __name__ == "__main__":
         plt.colorbar(k1map, ax=ax2, label='k1_det', fraction=0.046, pad=0.04)
 
     # Bottom-left: Avepixel
-    im3 = ax3.imshow(ff.avepixel, cmap='gray', aspect='equal', vmin=np.percentile(ff.avepixel, 0.5), vmax=np.percentile(ff.avepixel, 99.5))
+    im3 = ax3.imshow(ff.avepixel, cmap='gray', aspect='equal', vmin=np.percentile(ff.avepixel, 0.1), vmax=np.percentile(ff.avepixel, 99.9))
     ax3.set_title("Avepixel")
     plt.colorbar(im3, ax=ax3, fraction=0.046, pad=0.04)
 
     # Bottom-center: Stdpixel (Noise)
-    im4 = ax4.imshow(stdpixel, cmap='gray', aspect='equal', vmin=np.percentile(stdpixel, 0.5), vmax=np.percentile(stdpixel, 99.5))
+    im4 = ax4.imshow(stdpixel, cmap='gray', aspect='equal', vmin=np.percentile(stdpixel, 0.1), vmax=np.percentile(stdpixel, 99.9))
     ax4.set_title("Stdpixel (Noise)")
     plt.colorbar(im4, ax=ax4, fraction=0.046, pad=0.04)
 
