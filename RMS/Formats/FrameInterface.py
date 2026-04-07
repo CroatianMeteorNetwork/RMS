@@ -1495,7 +1495,7 @@ class InputTypeUWOVid(InputType):
 
 
     
-class InputTypeImages(object):
+class InputTypeImages(InputType):
     def __init__(self, dir_path, config, beginning_time=None, fps=None, detection=False, flipud=False,
                  chunk_frames=64):
         """ Input file type handle for a folder with images.
@@ -1904,7 +1904,7 @@ class InputTypeImages(object):
 
         # Init making the FF structure
         # Update the FF struct's target dtype based on the first frame's bit depth
-        target_dtype = self.getTargetDtype(frame)
+        target_dtype = self.getTargetDtype()
         ff_struct_fake = FFMimickInterface(self.nrows, self.ncols, target_dtype)
 
         self.frame_dt_list = []
