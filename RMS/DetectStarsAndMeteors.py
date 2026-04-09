@@ -507,11 +507,15 @@ def detectStarsAndMeteorsInVideoFile(video_path, config, chunk_frames=None, outp
         img_handle.cap.release()
         print("Done!")
             
+    # Explicitly clear the heavy list of numpy arrays to avoid GC gen-lag
+    if hasattr(img_handle, 'video_frames'):
+        img_handle.video_frames.clear()
+
     # Delete the image handle to free up memory
     del img_handle
 
-    # Collect garbage
-    # gc.collect()
+    # Force immediate garbage collection to reclaim memory from cyclic references
+    gc.collect()
 
     # Return the output directory and the names of the output files
     return file_dir, calstars_name, ftpdetectinfo_name
