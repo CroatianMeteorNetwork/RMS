@@ -271,7 +271,7 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
 
 
 def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_dir, nproc=2,
-                     chunk_frames=128, poll_interval=2, force=False, flat_path=None,
+                     chunk_frames=128, poll_interval=2, force=False, recursive=False, flat_path=None,
                      dark_path=None):
     """ Monitor a directory for new files of the given type and process them.
 
@@ -337,7 +337,14 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
 
             # Scan the directory for matching files
             try:
-                all_files = sorted(os.listdir(input_dir))
+                if recursive:
+                    all_files = []
+                    for root, _, files in os.walk(input_dir):
+                        for f in files:
+                            all_files.append(os.path.relpath(os.path.join(root, f), input_dir))
+                    all_files = sorted(all_files)
+                else:
+                    all_files = sorted(os.listdir(input_dir))
             except OSError:
                 log.error("Cannot read directory: {}".format(input_dir))
                 time.sleep(poll_interval)
@@ -346,12 +353,13 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
             for file_name in all_files:
 
                 # Skip already processed or in-progress files (match by base name)
-                file_base = os.path.splitext(file_name)[0]
+                base_name = os.path.basename(file_name)
+                file_base = os.path.splitext(base_name)[0]
                 if file_name in processed_files or file_base in processed_files:
                     continue
 
                 # Check if the file matches the requested type
-                if not matchesFileType(file_name, file_type):
+                if not matchesFileType(base_name, file_type):
                     continue
 
                 file_path = os.path.join(input_dir, file_name)
@@ -525,6 +533,10 @@ Examples:
         help="Re-process files even if they have already been processed (done.flag exists)."
     )
 
+    arg_parser.add_argument('--recursive', '-r', action='store_true', default=False,
+        help="Recursively monitor subdirectories for files."
+    )
+
     arg_parser.add_argument('--flat', type=str, default=None,
         help="Path to a flat field image file."
     )
@@ -572,6 +584,7 @@ Examples:
         output_dir,
         nproc=cml_args.nproc,
         chunk_frames=cml_args.chunk_frames,
+        recursive=cml_args.recursive,
         force=cml_args.force,
         flat_path=cml_args.flat,
         dark_path=cml_args.dark
