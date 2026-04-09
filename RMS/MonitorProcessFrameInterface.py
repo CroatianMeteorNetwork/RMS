@@ -78,64 +78,10 @@ def matchesFileType(file_name, file_type):
     return file_name.lower().endswith('.' + file_type)
 
 
-def isFileStable(file_path, stable_time=5, poll_interval=1, max_age=30):
-    """ Check if a file is stable (finished being written).
-
-    If the file's modification time is older than max_age seconds, it is considered already stable
-    and no waiting is performed. Otherwise, poll every poll_interval seconds until the modification
-    time hasn't changed for stable_time seconds, then confirm the size is unchanged.
-
-    Arguments:
-        file_path: [str] Path to the file.
-
-    Keyword arguments:
-        stable_time: [float] Time in seconds the mtime must be unchanged. Default is 5.
-        poll_interval: [float] Time between checks in seconds. Default is 1.
-        max_age: [float] If the file's mtime is older than this many seconds, skip waiting. Default is 30.
-
-    Return:
-        [bool] True if the file is stable, False if it disappeared.
-    """
-
-    try:
-        prev_size = os.path.getsize(file_path)
-        prev_mtime = os.path.getmtime(file_path)
-    except OSError:
-        return False
-
-    # If the file hasn't been modified recently, it's already stable
-    if (time.time() - prev_mtime) > max_age:
-        return True
-
-    stable_since = time.time()
-
-    while (time.time() - stable_since) < stable_time:
-        time.sleep(poll_interval)
-
-        try:
-            curr_mtime = os.path.getmtime(file_path)
-        except OSError:
-            return False
-
-        # If the mtime changed, reset the stability timer
-        if curr_mtime != prev_mtime:
-            prev_mtime = curr_mtime
-            stable_since = time.time()
-
-    # Final size confirmation
-    try:
-        final_size = os.path.getsize(file_path)
-    except OSError:
-        return False
-
-    if final_size != prev_size and final_size != os.path.getsize(file_path):
-        return False
-
-    return True
 
 
 def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
-                flat_path=None, dark_path=None):
+                flat_path=None, dark_path=None, unique_id=None):
     """ Process a single file through the detection and recalibration pipeline.
 
     Arguments:
@@ -148,13 +94,15 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
     Keyword arguments:
         flat_path: [str] Path to a flat field file. None by default.
         dark_path: [str] Path to a dark frame file. None by default.
+        unique_id: [str] Safely flattened string to uniquely identify output directories. None by default.
 
     Return:
         [bool] True if processing succeeded, False otherwise.
     """
     
     file_name = os.path.basename(file_path)
-    file_base = os.path.splitext(file_name)[0]
+    # If a unique_id is provided, use it for the output folder structure. Otherwise use file_base.
+    file_base = unique_id if unique_id else os.path.splitext(file_name)[0]
 
     # Load the config file
     config = cr.parse(config_path)
@@ -191,9 +139,18 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
         os.makedirs(results_dir, exist_ok=True)
 
         # Initialize the logger for this process
+        orig_data_dir = config.data_dir
+        orig_log_dir = config.log_dir
+        
+        config.data_dir = output_dir
+        config.log_dir = 'logs'
+
         log_manager = LoggingManager()
-        log_manager.initLogging(config, 'monitor_', safedir=results_dir)
+        log_manager.initLogging(config, 'monitor_')
         proc_log = getLogger("logger")
+
+        config.data_dir = orig_data_dir
+        config.log_dir = orig_log_dir
 
         proc_log.info("Processing file: {}".format(file_path))
 
@@ -311,8 +268,13 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
             log.info("Found {:d} previously processed file(s), skipping.".format(
                 len(processed_files)))
 
-    # Active worker processes: {file_name: Process}
+    # Active worker processes: {unique_id: Process}
     active_workers = {}
+
+    failed_files = set()
+    stability_tracker = {}
+    stable_wait_time = 5
+    stable_max_age = 30
 
     # Flag to avoid repeating the "waiting for data" message
     waiting_for_data = False
@@ -322,18 +284,20 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
 
             # Clean up finished workers
             finished = []
-            for fname, proc in active_workers.items():
+            for uid, proc in active_workers.items():
                 if not proc.is_alive():
                     proc.join()
                     if proc.exitcode == 0:
-                        log.info("Successfully processed: {}".format(fname))
+                        log.info("Successfully processed: {}".format(uid))
+                        processed_files.add(uid)
                     else:
                         log.warning("Processing failed for: {} (exit code {:d})".format(
-                            fname, proc.exitcode))
-                    finished.append(fname)
+                            uid, proc.exitcode))
+                        failed_files.add(uid)
+                    finished.append(uid)
 
-            for fname in finished:
-                del active_workers[fname]
+            for uid in finished:
+                del active_workers[uid]
 
             # Scan the directory for matching files
             try:
@@ -352,12 +316,16 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
 
             for file_name in all_files:
 
-                # Skip already processed or in-progress files (match by base name)
-                base_name = os.path.basename(file_name)
-                file_base = os.path.splitext(base_name)[0]
-                if file_name in processed_files or file_base in processed_files:
+                # Ensure uniqueness for recursive files by including subfolder path
+                # Replace slashes to make a flat unique identifier
+                file_rel_path = os.path.relpath(os.path.join(input_dir, file_name), input_dir)
+                unique_id = os.path.splitext(file_rel_path)[0].replace(os.path.sep, '_')
+
+                # Skip already processed, failed, or currently processing files
+                if unique_id in processed_files or unique_id in failed_files or unique_id in active_workers:
                     continue
 
+                base_name = os.path.basename(file_name)
                 # Check if the file matches the requested type
                 if not matchesFileType(base_name, file_type):
                     continue
@@ -372,24 +340,45 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
                 if len(active_workers) >= nproc:
                     break
 
-                # Wait for the file to be stable (finished writing)
-                log.info("New file detected: {} - waiting for write completion...".format(file_name))
+                # Non-blocking stability check
+                try:
+                    curr_mtime = os.path.getmtime(file_path)
+                    curr_size = os.path.getsize(file_path)
+                except OSError:
+                    continue  # File disappeared or momentarily locked, try next pass
 
-                if not isFileStable(file_path):
-                    log.warning("File disappeared while waiting: {}".format(file_name))
+                # If file is older than max age, consider it stable immediately
+                if (time.time() - curr_mtime) > stable_max_age:
+                    stable = True
+                else:
+                    if file_path not in stability_tracker:
+                        log.info("New file detected: {} - waiting for write completion...".format(file_rel_path))
+                        stability_tracker[file_path] = {'mtime': curr_mtime, 'size': curr_size, 'since': time.time()}
+                        stable = False
+                    else:
+                        trk = stability_tracker[file_path]
+                        if trk['mtime'] != curr_mtime or trk['size'] != curr_size:
+                            stability_tracker[file_path] = {'mtime': curr_mtime, 'size': curr_size, 'since': time.time()}
+                            stable = False
+                        else:
+                            if (time.time() - trk['since']) >= stable_wait_time:
+                                stable = True
+                                del stability_tracker[file_path]
+                            else:
+                                stable = False
+
+                if not stable:
                     continue
 
-                # Mark as processed and start a worker process
-                processed_files.add(file_name)
-                log.info("Putting file {} on the processing queue...".format(file_name))
+                log.info("Putting file {} on the processing queue...".format(file_rel_path))
 
                 proc = multiprocessing.Process(
                     target=processFile,
                     args=(file_path, config_path, platepar_path, output_dir, chunk_frames),
-                    kwargs={'flat_path': flat_path, 'dark_path': dark_path}
+                    kwargs={'flat_path': flat_path, 'dark_path': dark_path, 'unique_id': unique_id}
                 )
                 proc.start()
-                active_workers[file_name] = proc
+                active_workers[unique_id] = proc
 
             # If no workers are active and no new files were queued, we're idle
             if not active_workers and not waiting_for_data:
@@ -566,10 +555,19 @@ Examples:
     config = cr.parse(config_path)
     print("Using config: {}".format(config_path))
 
-    # Initialize the logger
+    # Initialize the logger (set the log dir to output_dir)
+    orig_data_dir = config.data_dir
+    orig_log_dir = config.log_dir
+    
+    config.data_dir = output_dir
+    config.log_dir = 'logs'
+
     log_manager = LoggingManager()
-    log_manager.initLogging(config, 'monitor_', safedir=output_dir)
+    log_manager.initLogging(config, 'monitor_')
     log = getLogger("logger")
+
+    config.data_dir = orig_data_dir
+    config.log_dir = orig_log_dir
 
     # Find the platepar file  
     platepar_path = findPlatepar(input_dir, config, cml_args.platepar)
