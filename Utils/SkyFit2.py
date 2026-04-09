@@ -2869,6 +2869,41 @@ class PlateTool(QtWidgets.QMainWindow):
         self.astrometry_quad_markers2.setZValue(5)
         self.zoom_window.addItem(self.astrometry_quad_markers2)
 
+        # Astrometry fit plot pick highlight marker (main window)
+        self.astrometry_plot_highlight_marker = pg.ScatterPlotItem()
+        self.astrometry_plot_highlight_marker.setPen('r', width=3)  # red
+        self.astrometry_plot_highlight_marker.setBrush((0, 0, 0, 0))
+        self.astrometry_plot_highlight_marker.setSize(25)
+        self.astrometry_plot_highlight_marker.setSymbol('o')  # circle
+        self.astrometry_plot_highlight_marker.setZValue(6)
+        self.img_frame.addItem(self.astrometry_plot_highlight_marker)
+
+        # Outer highlight marker for better visibility
+        self.astrometry_plot_highlight_marker_outer = pg.ScatterPlotItem()
+        self.astrometry_plot_highlight_marker_outer.setPen('y', width=2)  # yellow
+        self.astrometry_plot_highlight_marker_outer.setBrush((0, 0, 0, 0))
+        self.astrometry_plot_highlight_marker_outer.setSize(45)
+        self.astrometry_plot_highlight_marker_outer.setSymbol('o')
+        self.astrometry_plot_highlight_marker_outer.setZValue(5.9)
+        self.img_frame.addItem(self.astrometry_plot_highlight_marker_outer)
+
+        # Astrometry fit plot pick highlight marker (zoom window)
+        self.astrometry_plot_highlight_marker2 = pg.ScatterPlotItem()
+        self.astrometry_plot_highlight_marker2.setPen('r', width=4)
+        self.astrometry_plot_highlight_marker2.setBrush((0, 0, 0, 0))
+        self.astrometry_plot_highlight_marker2.setSize(40)
+        self.astrometry_plot_highlight_marker2.setSymbol('o')
+        self.astrometry_plot_highlight_marker2.setZValue(6)
+        self.zoom_window.addItem(self.astrometry_plot_highlight_marker2)
+        
+        self.astrometry_plot_highlight_marker2_outer = pg.ScatterPlotItem()
+        self.astrometry_plot_highlight_marker2_outer.setPen('y', width=3)
+        self.astrometry_plot_highlight_marker2_outer.setBrush((0, 0, 0, 0))
+        self.astrometry_plot_highlight_marker2_outer.setSize(65)
+        self.astrometry_plot_highlight_marker2_outer.setSymbol('o')
+        self.astrometry_plot_highlight_marker2_outer.setZValue(5.9)
+        self.zoom_window.addItem(self.astrometry_plot_highlight_marker2_outer)
+
         # Store astrometry.net solution info (populated when astrometry.net is run)
         self.astrometry_solution_info = None
         self.astrometry_stars_visible = False
@@ -6735,7 +6770,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self.distortion_center_marker2.setData(x=[x_centre], y=[y_centre])
 
 
-    def photometry(self, show_plot=False):
+    def photometry(self, show_plot=False, force_update=False):
         """
         Perform the photometry on selected stars. Updates residual text above and below picked stars
 
@@ -6947,8 +6982,13 @@ class PlateTool(QtWidgets.QMainWindow):
 
             self.residual_text.update()
 
+        # Check if the photometry plot should be auto-updated
+        if (not show_plot) and (not force_update) and (self.fig_photometry is not None):
+            if plt.fignum_exists(self.fig_photometry.number):
+                force_update = True
+
         # Show the photometry fit plot
-        if show_plot:
+        if show_plot or force_update:
 
             # Check if figure already exists and is open - if so, close it (toggle off)
             if self.fig_photometry is not None:
@@ -6956,10 +6996,19 @@ class PlateTool(QtWidgets.QMainWindow):
                     if plt.fignum_exists(self.fig_photometry.number):
                         plt.close(self.fig_photometry)
                         self.fig_photometry = None
-                        return
+                        self.astrometry_plot_highlight_marker.hide()
+                        self.astrometry_plot_highlight_marker2.hide()
+                        self.astrometry_plot_highlight_marker_outer.hide()
+                        self.astrometry_plot_highlight_marker2_outer.hide()
+                        if not force_update:
+                            return
                 except:
                     pass
                 self.fig_photometry = None
+                self.astrometry_plot_highlight_marker.hide()
+                self.astrometry_plot_highlight_marker2.hide()
+                self.astrometry_plot_highlight_marker_outer.hide()
+                self.astrometry_plot_highlight_marker2_outer.hide()
 
             ### PLOT PHOTOMETRY FIT ###
             # Note: An almost identical code exists in Utils.CalibrationReport
@@ -6995,7 +7044,7 @@ class PlateTool(QtWidgets.QMainWindow):
             # Plot catalog magnitude vs. raw logsum of pixel intensities
             lsp_arr = np.log10(np.array(px_intens_list))
             ax_p.scatter(-2.5*lsp_arr, catalog_mags, s=5, c='r', zorder=3, alpha=0.5,
-                            label="Raw (extinction corrected)")
+                            label="Raw (extinction corrected)", picker=5)
 
             # Circle saturated stars in red empty circles
             saturation_label_set = False
@@ -7074,7 +7123,7 @@ class PlateTool(QtWidgets.QMainWindow):
             img_diagonal = np.hypot(self.platepar.X_res/2, self.platepar.Y_res/2)
 
             # Plot radius from centre vs. fit residual (including vignetting)
-            ax_r.scatter(radius_list, self.photom_fit_resids, s=10, c='b', alpha=0.5, zorder=3)
+            ax_r.scatter(radius_list, self.photom_fit_resids, s=10, c='b', alpha=0.5, zorder=3, picker=5)
 
             # Plot a zero line
             ax_r.plot(np.linspace(0, img_diagonal, 10), np.zeros(10), linestyle='dashed', alpha=0.5,
@@ -7112,7 +7161,7 @@ class PlateTool(QtWidgets.QMainWindow):
             ### PLOT MAG DIFFERENCE BY ELEVATION
 
             # Plot elevation vs. fit residual
-            ax_e.scatter(elevation_list, self.photom_fit_resids, s=10, c='b', alpha=0.5, zorder=3)
+            ax_e.scatter(elevation_list, self.photom_fit_resids, s=10, c='b', alpha=0.5, zorder=3, picker=5)
 
             # Compute the fit residuals without extinction
             fit_resids_noext = \
@@ -7146,8 +7195,63 @@ class PlateTool(QtWidgets.QMainWindow):
 
             ###
 
+            self.photometry_fit_x_list = [sc[0] for sc in star_coords]
+            self.photometry_fit_y_list = [sc[1] for sc in star_coords]
+
+            self.photometry_plot_highlight_artists = {
+                'ax_p': ax_p.plot([], [], 'ro', mfc='none', markersize=10, zorder=10)[0],
+                'ax_r': ax_r.plot([], [], 'ro', mfc='none', markersize=10, zorder=10)[0],
+                'ax_e': ax_e.plot([], [], 'ro', mfc='none', markersize=10, zorder=10)[0]
+            }
+
+            self.photometry_fit_data = {
+                'ax_p': (-2.5*lsp_arr, catalog_mags),
+                'ax_r': (radius_list, self.photom_fit_resids),
+                'ax_e': (elevation_list, self.photom_fit_resids),
+            }
+
+            fig_p.canvas.mpl_connect('pick_event', self.onPhotometryPlotPick)
+
             fig_p.tight_layout()
             fig_p.show()
+
+    def onPhotometryPlotPick(self, event):
+        """ Highlight a star in the main window when clicked in the photometry residuals plot. """
+        if event.mouseevent.button != 1:  # Left click only
+            return
+            
+        ind = event.ind
+        if len(ind) == 0:
+            return
+            
+        # Get the first picked index
+        star_idx = ind[0]
+        
+        if not hasattr(self, 'photometry_fit_x_list') or star_idx >= len(self.photometry_fit_x_list):
+            return
+            
+        img_x = self.photometry_fit_x_list[star_idx]
+        img_y = self.photometry_fit_y_list[star_idx]
+        
+        # Update the highlight markers (coordinates in pyqtgraph are x + 0.5, y + 0.5)
+        self.astrometry_plot_highlight_marker.setData(x=[img_x + 0.5], y=[img_y + 0.5])
+        self.astrometry_plot_highlight_marker2.setData(x=[img_x + 0.5], y=[img_y + 0.5])
+        self.astrometry_plot_highlight_marker_outer.setData(x=[img_x + 0.5], y=[img_y + 0.5])
+        self.astrometry_plot_highlight_marker2_outer.setData(x=[img_x + 0.5], y=[img_y + 0.5])
+        
+        # Ensure the markers are visible
+        self.astrometry_plot_highlight_marker.show()
+        self.astrometry_plot_highlight_marker2.show()
+        self.astrometry_plot_highlight_marker_outer.show()
+        self.astrometry_plot_highlight_marker2_outer.show()
+
+        # Update all matplotlib subplots to circle the star
+        if hasattr(self, 'photometry_fit_data') and hasattr(self, 'photometry_plot_highlight_artists'):
+            for key, (x_arr, y_arr) in self.photometry_fit_data.items():
+                if star_idx < len(x_arr) and star_idx < len(y_arr):
+                    self.photometry_plot_highlight_artists[key].set_data([x_arr[star_idx]], [y_arr[star_idx]])
+            if self.fig_photometry is not None:
+                self.fig_photometry.canvas.draw_idle()
 
 
     def fitBandRatio(self):
@@ -8953,6 +9057,11 @@ class PlateTool(QtWidgets.QMainWindow):
 
                     # Remove the closest picked star from the list
                     self.paired_stars.removeClosestPair(self.mouse_x, self.mouse_y)
+
+                    self.astrometry_plot_highlight_marker.hide()
+                    self.astrometry_plot_highlight_marker2.hide()
+                    self.astrometry_plot_highlight_marker_outer.hide()
+                    self.astrometry_plot_highlight_marker2_outer.hide()
 
                     self.updatePairedStars()
                     self.updateFitResiduals()
@@ -14154,6 +14263,15 @@ class PlateTool(QtWidgets.QMainWindow):
         # Restore button state
         self.tab.param_manager.setFitButtonBusy(False)
 
+        self.astrometry_plot_highlight_marker.hide()
+        self.astrometry_plot_highlight_marker2.hide()
+        self.astrometry_plot_highlight_marker_outer.hide()
+        self.astrometry_plot_highlight_marker2_outer.hide()
+
+        # Auto-update astrometry fit plots if already open
+        if self.fig_astrometry is not None and plt.fignum_exists(self.fig_astrometry.number):
+            self.showAstrometryFitPlots(force_update=True)
+
 
     def jumpNextStar(self, miss_this_one=False):
 
@@ -14169,7 +14287,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.updateLeftLabels()
         self.updateStars()
 
-    def showAstrometryFitPlots(self):
+    def showAstrometryFitPlots(self, force_update=False):
         """ Show window with astrometry fit details. Toggle on/off if already open. """
 
         # Check if figure already exists and is open - if so, close it (toggle off)
@@ -14178,10 +14296,19 @@ class PlateTool(QtWidgets.QMainWindow):
                 if plt.fignum_exists(self.fig_astrometry.number):
                     plt.close(self.fig_astrometry)
                     self.fig_astrometry = None
-                    return
+                    self.astrometry_plot_highlight_marker.hide()
+                    self.astrometry_plot_highlight_marker2.hide()
+                    self.astrometry_plot_highlight_marker_outer.hide()
+                    self.astrometry_plot_highlight_marker2_outer.hide()
+                    if not force_update:
+                        return
             except:
                 pass
             self.fig_astrometry = None
+            self.astrometry_plot_highlight_marker.hide()
+            self.astrometry_plot_highlight_marker2.hide()
+            self.astrometry_plot_highlight_marker_outer.hide()
+            self.astrometry_plot_highlight_marker2_outer.hide()
 
         # Extract paired catalog stars and image coordinates separately (with SNR and saturation)
         all_coords = list(self.paired_stars.allCoords())
@@ -14304,14 +14431,14 @@ class PlateTool(QtWidgets.QMainWindow):
             print("Failed to set the window title!")
 
         # Plot azimuth vs azimuth error
-        ax_azim.scatter(azim_list, 60*np.array(azim_residuals), s=2, c='k', zorder=3)
+        ax_azim.scatter(azim_list, 60*np.array(azim_residuals), s=2, c='k', zorder=3, picker=5)
 
         ax_azim.grid()
         ax_azim.set_xlabel("Azimuth (deg, +E of due N)")
         ax_azim.set_ylabel("Azimuth error (arcmin)")
 
         # Plot elevation vs elevation error
-        ax_elev.scatter(elev_list, 60*np.array(elev_residuals), s=2, c='k', zorder=3)
+        ax_elev.scatter(elev_list, 60*np.array(elev_residuals), s=2, c='k', zorder=3, picker=5)
 
         ax_elev.grid()
         ax_elev.set_xlabel("Elevation (deg)")
@@ -14323,7 +14450,7 @@ class PlateTool(QtWidgets.QMainWindow):
             ax_elev.set_xlim([0, 90])
 
         # Plot sky radius vs radius error
-        ax_skyradius.scatter(skyradius_list, 60*np.array(skyradius_residuals), s=2, c='k', zorder=3)
+        ax_skyradius.scatter(skyradius_list, 60*np.array(skyradius_residuals), s=2, c='k', zorder=3, picker=5)
 
         ax_skyradius.grid()
         ax_skyradius.set_xlabel("Radius from centre (deg)")
@@ -14356,7 +14483,7 @@ class PlateTool(QtWidgets.QMainWindow):
         ax_skyradius.set_ylim([-max_ylim, max_ylim])
 
         # Plot X vs X error
-        ax_x.scatter(x_list, x_residuals, s=2, c='k', zorder=3)
+        ax_x.scatter(x_list, x_residuals, s=2, c='k', zorder=3, picker=5)
 
         ax_x.grid()
         ax_x.set_xlabel("X (px)")
@@ -14364,7 +14491,7 @@ class PlateTool(QtWidgets.QMainWindow):
         ax_x.set_xlim([0, self.platepar.X_res])
 
         # Plot Y vs Y error
-        ax_y.scatter(y_list, y_residuals, s=2, c='k', zorder=3)
+        ax_y.scatter(y_list, y_residuals, s=2, c='k', zorder=3, picker=5)
 
         ax_y.grid()
         ax_y.set_xlabel("Y (px)")
@@ -14372,7 +14499,7 @@ class PlateTool(QtWidgets.QMainWindow):
         ax_y.set_xlim([0, self.platepar.Y_res])
 
         # Plot radius vs radius error
-        ax_radius.scatter(radius_list, radius_residuals, s=2, c='k', zorder=3)
+        ax_radius.scatter(radius_list, radius_residuals, s=2, c='k', zorder=3, picker=5)
 
         ax_radius.grid()
         ax_radius.set_xlabel("Radius (px)")
@@ -14380,7 +14507,7 @@ class PlateTool(QtWidgets.QMainWindow):
         ax_radius.set_xlim([0, np.hypot(self.platepar.X_res/2, self.platepar.Y_res/2)])
 
         # Plot error vs SNR
-        ax_snr.scatter(snr_list, total_error_px, s=2, c='k', zorder=3)
+        ax_snr.scatter(snr_list, total_error_px, s=2, c='k', zorder=3, picker=5)
 
         ax_snr.grid(alpha=0.3)
         ax_snr.set_xlabel("S/N")
@@ -14415,12 +14542,15 @@ class PlateTool(QtWidgets.QMainWindow):
         sat_arr = np.array(saturated_list)
         err_arr = np.array(total_error_px)
 
-        # Plot non-saturated stars in black
+        # Plot all stars for picking, using colors based on saturation
+        color_arr = np.where(sat_arr, 'r', 'k')
+        ax_mag.scatter(mag_arr, err_arr, s=2, c=color_arr, zorder=3, picker=5)
+
+        # Plot proxy artists for legend
         if np.sum(~sat_arr) > 0:
-            ax_mag.scatter(mag_arr[~sat_arr], err_arr[~sat_arr], s=2, c='k', zorder=3, label='Normal')
-        # Plot saturated stars in red
+            ax_mag.scatter([], [], s=2, c='k', label='Normal')
         if np.sum(sat_arr) > 0:
-            ax_mag.scatter(mag_arr[sat_arr], err_arr[sat_arr], s=2, c='r', zorder=4, label='Saturated')
+            ax_mag.scatter([], [], s=2, c='r', label='Saturated')
             ax_mag.legend(loc='upper right', fontsize=8, markerscale=3)
 
         ax_mag.grid()
@@ -14431,14 +14561,15 @@ class PlateTool(QtWidgets.QMainWindow):
         # Plot error vs FWHM
         fwhm_arr = np.array(fwhm_list)
         valid_fwhm = fwhm_arr > 0  # Filter out invalid FWHM values
-        if np.sum(valid_fwhm) > 0:
-            ax_fwhm.scatter(fwhm_arr[valid_fwhm], err_arr[valid_fwhm], s=2, c='k', zorder=3)
+        fwhm_arr[~valid_fwhm] = np.nan
+        
+        ax_fwhm.scatter(fwhm_arr, err_arr, s=2, c='k', zorder=3, picker=5)
 
         ax_fwhm.grid()
         ax_fwhm.set_xlabel("FWHM (px)")
         ax_fwhm.set_ylabel("Error (px)")
         if np.sum(valid_fwhm) > 0:
-            ax_fwhm.set_xlim([0, np.max(fwhm_arr[valid_fwhm]) * 1.1])
+            ax_fwhm.set_xlim([0, np.nanmax(fwhm_arr) * 1.1])
 
         # Equalize Y limits, make them integers, and set a minimum range of 1 px
         x_max_ylim = np.max(np.abs(ax_x.get_ylim()))
@@ -14455,8 +14586,75 @@ class PlateTool(QtWidgets.QMainWindow):
         ax_mag.set_ylim([0, max_ylim_px])
         ax_fwhm.set_ylim([0, max_ylim_px])
 
+        self.astrometry_fit_x_list = x_list
+        self.astrometry_fit_y_list = y_list
+        
+        self.plot_highlight_artists = {
+            'azim': ax_azim.plot([], [], 'ro', mfc='none', markersize=10, zorder=10)[0],
+            'elev': ax_elev.plot([], [], 'ro', mfc='none', markersize=10, zorder=10)[0],
+            'skyradius': ax_skyradius.plot([], [], 'ro', mfc='none', markersize=10, zorder=10)[0],
+            'x': ax_x.plot([], [], 'ro', mfc='none', markersize=10, zorder=10)[0],
+            'y': ax_y.plot([], [], 'ro', mfc='none', markersize=10, zorder=10)[0],
+            'radius': ax_radius.plot([], [], 'ro', mfc='none', markersize=10, zorder=10)[0],
+            'snr': ax_snr.plot([], [], 'ro', mfc='none', markersize=10, zorder=10)[0],
+            'mag': ax_mag.plot([], [], 'ro', mfc='none', markersize=10, zorder=10)[0],
+            'fwhm': ax_fwhm.plot([], [], 'ro', mfc='none', markersize=10, zorder=10)[0]
+        }
+        
+        self.astrometry_fit_data = {
+            'azim': (azim_list, 60*np.array(azim_residuals)),
+            'elev': (elev_list, 60*np.array(elev_residuals)),
+            'skyradius': (skyradius_list, 60*np.array(skyradius_residuals)),
+            'x': (x_list, x_residuals),
+            'y': (y_list, y_residuals),
+            'radius': (radius_list, radius_residuals),
+            'snr': (snr_list, total_error_px),
+            'mag': (mag_arr, err_arr),
+            'fwhm': (fwhm_arr, err_arr)
+        }
+
+        fig_a.canvas.mpl_connect('pick_event', self.onAstrometryPlotPick)
+
         fig_a.tight_layout()
         fig_a.show()
+
+    def onAstrometryPlotPick(self, event):
+        """ Highlight a star in the main window when clicked in the astrometry residuals plot. """
+        if event.mouseevent.button != 1:  # Left click only
+            return
+            
+        ind = event.ind
+        if len(ind) == 0:
+            return
+            
+        # Get the first picked index
+        star_idx = ind[0]
+        
+        if not hasattr(self, 'astrometry_fit_x_list') or star_idx >= len(self.astrometry_fit_x_list):
+            return
+            
+        img_x = self.astrometry_fit_x_list[star_idx]
+        img_y = self.astrometry_fit_y_list[star_idx]
+        
+        # Update the highlight markers (coordinates in pyqtgraph are x + 0.5, y + 0.5)
+        self.astrometry_plot_highlight_marker.setData(x=[img_x + 0.5], y=[img_y + 0.5])
+        self.astrometry_plot_highlight_marker2.setData(x=[img_x + 0.5], y=[img_y + 0.5])
+        self.astrometry_plot_highlight_marker_outer.setData(x=[img_x + 0.5], y=[img_y + 0.5])
+        self.astrometry_plot_highlight_marker2_outer.setData(x=[img_x + 0.5], y=[img_y + 0.5])
+        
+        # Ensure the markers are visible
+        self.astrometry_plot_highlight_marker.show()
+        self.astrometry_plot_highlight_marker2.show()
+        self.astrometry_plot_highlight_marker_outer.show()
+        self.astrometry_plot_highlight_marker2_outer.show()
+
+        # Update all matplotlib subplots to circle the star
+        if hasattr(self, 'astrometry_fit_data') and hasattr(self, 'plot_highlight_artists'):
+            for key, (x_arr, y_arr) in self.astrometry_fit_data.items():
+                if star_idx < len(x_arr) and star_idx < len(y_arr):
+                    self.plot_highlight_artists[key].set_data([x_arr[star_idx]], [y_arr[star_idx]])
+            if self.fig_astrometry is not None:
+                self.fig_astrometry.canvas.draw_idle()
 
 
     def computeIntensitySum(self, star_mask_coeff=3):
