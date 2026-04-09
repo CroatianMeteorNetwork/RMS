@@ -146,7 +146,8 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
         config.log_dir = 'logs'
 
         log_manager = LoggingManager()
-        log_manager.initLogging(config, 'monitor_')
+        log_prefix = 'monitor_{}_'.format(unique_id) if unique_id else 'monitor_{}_'.format(file_base)
+        log_manager.initLogging(config, log_prefix)
         proc_log = getLogger("logger")
 
         config.data_dir = orig_data_dir
