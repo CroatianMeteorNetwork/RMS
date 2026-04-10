@@ -361,10 +361,10 @@ def mergeRansacLines(line_list, img_w, img_h, angle_thresh=15.0, dist_thresh_fac
                 else:
                     spatial_gap = 0
 
-                # Rule 1: If there's a spatial gap during overlapping time windows, reject.
-                # If these were the same track, the overlapping detection window would have 
-                # detected them as one continuous segment, not two separate ones with a gap.
-                if spatial_gap > 0:
+                # Rule 1: If there's a spatial gap during overlapping time windows, reject if it's too large.
+                # Tracks broken by noise may appear as two segments in the same window, so we allow 
+                # a small gap up to gap_thresh.
+                if spatial_gap > gap_thresh:
                     continue
 
             else:
