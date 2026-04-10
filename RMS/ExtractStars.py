@@ -53,7 +53,7 @@ log = getLogger("logger")
 
 def extractStars(img, img_median=None, mask=None, gamma=1.0, max_star_candidates=1000, border=10,
                  neighborhood_size=10, intensity_threshold=18, 
-                 segment_radius=4, roundness_threshold=0.5, max_feature_ratio=0.8, bit_depth=8):
+                 segment_radius=4, roundness_threshold=0.5, max_feature_ratio=0.8, bit_depth=8, debug=False):
     """ Extracts stars on a given image by searching for local maxima and applying PSF fit for star 
         confirmation.
 
@@ -100,6 +100,10 @@ def extractStars(img, img_median=None, mask=None, gamma=1.0, max_star_candidates
     maxima = (img_convolved == img_max)
     img_min = filters.minimum_filter(img_convolved, neighborhood_size)
     diff = ((img_max - img_min) > intensity_threshold)
+    
+    if debug:
+        log.debug(f"[extractStars] Threshold passer pixels (intensity difference > {intensity_threshold}): {np.sum(diff)}")
+
     maxima[diff == 0] = 0
 
     # Apply a border mask
@@ -120,6 +124,9 @@ def extractStars(img, img_median=None, mask=None, gamma=1.0, max_star_candidates
 
     # Find and label the maxima
     labeled, num_objects = ndimage.label(maxima)
+
+    if debug:
+        log.debug(f"[extractStars] Star candidates (local maxima) to fit: {num_objects} (limit {max_star_candidates})")
 
     # Skip the image if there are too many maxima to process
     if num_objects > max_star_candidates:
@@ -164,6 +171,9 @@ def extractStars(img, img_median=None, mask=None, gamma=1.0, max_star_candidates
     sigma_y_fitted = np.array(sigma_y_fitted)
     sigma_fitted = np.sqrt(sigma_x_fitted**2 + sigma_y_fitted**2)
     fwhm = 2.355*sigma_fitted
+
+    if debug:
+        log.debug(f"[extractStars] Successfully fitted stars (survived PSF fit): {len(x_arr)}")
 
     return x_arr, y_arr, amplitude, intensity, fwhm, background, snr, saturated_count
 
@@ -355,7 +365,8 @@ def extractStarsImgHandle(img_handle,
         border=10,
         max_global_intensity=150, 
         neighborhood_size=10, intensity_threshold=18, 
-        segment_radius=4, roundness_threshold=0.5, max_feature_ratio=0.8
+        segment_radius=4, roundness_threshold=0.5, max_feature_ratio=0.8,
+        debug=False
     ):
 
     """ Extracts stars on a given image handle by searching for local maxima and applying PSF fit for star 
@@ -437,6 +448,9 @@ def extractStarsImgHandle(img_handle,
         # Calculate image mean and stddev
         img_median = np.median(avepixel)
 
+        if debug:
+            log.debug(f"[extractStarsImgHandle] Image median brightness: {img_median:.2f} (max allowed: {max_global_intensity})")
+
         # Check if the image is too bright and skip the image
         if img_median > max_global_intensity:
             print("    Image too bright, skipping chunk.")
@@ -452,7 +466,7 @@ def extractStarsImgHandle(img_handle,
             max_star_candidates=config.max_stars, border=border,
             neighborhood_size=neighborhood_size, intensity_threshold=intensity_threshold, 
             segment_radius=segment_radius, roundness_threshold=roundness_threshold, 
-            max_feature_ratio=max_feature_ratio, bit_depth=config.bit_depth
+            max_feature_ratio=max_feature_ratio, bit_depth=config.bit_depth, debug=debug
         )
 
         # If the star extraction failed, return an empty list

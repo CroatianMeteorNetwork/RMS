@@ -10,7 +10,7 @@ from RMS.DetectionTools import loadImageCalibration
 def extractStarsFrameInterface(img_handle, config, 
                                chunk_frames=128, 
                                flat_struct=None, dark=None, mask=None, 
-                               save_calstars=True):
+                               save_calstars=True, debug=False):
     """ Given an image handle, extract the stars from the image data.
 
     Arguments:
@@ -30,7 +30,7 @@ def extractStarsFrameInterface(img_handle, config,
 
     # Extract the stars on the image handle
     star_list = extractStarsImgHandle(img_handle, config=config, 
-                                      flat_struct=flat_struct, dark=dark, mask=mask)
+                                      flat_struct=flat_struct, dark=dark, mask=mask, debug=debug)
     
     if save_calstars:
 
@@ -50,7 +50,7 @@ def extractStarsFrameInterface(img_handle, config,
     return star_list
 
 def extractStarsDetectFrameInterface(data_path, config, 
-                                     chunk_frames=128, multivids=False, save_calstars=True):
+                                     chunk_frames=128, multivids=False, save_calstars=True, debug=False, preloadvid=False):
     """ Extract the stars from the image data.
     
     Arguments:
@@ -61,6 +61,8 @@ def extractStarsDetectFrameInterface(data_path, config,
         chunk_frames: [int] Number of frames to stacked image on which the stars will be extracted.
         multivids: [bool] Flag to indicate that the data path is a directory containing multiple video files.
         save_calstars: [bool] Flag to indicate if the CALSTARS file should be saved.
+        debug: [bool] Flag to indicate if verbose debug logs should be printed.
+        preloadvid: [bool] Flag to indicate if the video should be preloaded into memory.
     
     Return:
         star_list: [list] List of stars detected in the image.
@@ -99,7 +101,7 @@ def extractStarsDetectFrameInterface(data_path, config,
             
             # Extract the stars from the image handle
             star_list = extractStarsFrameInterface(img_handle, config, chunk_frames=chunk_frames,
-                flat_struct=flat_struct, dark=dark, mask=mask, save_calstars=save_calstars)
+                flat_struct=flat_struct, dark=dark, mask=mask, save_calstars=save_calstars, debug=debug)
 
 
     else:
@@ -107,7 +109,7 @@ def extractStarsDetectFrameInterface(data_path, config,
         # Detect the input type 
         #   (take 128 frames for making the FF files, applicable for videos and image sequences)
         img_handle = detectInputType(data_path, config, use_fr_files=False, detection=True, 
-                                    chunk_frames=chunk_frames)
+                                    chunk_frames=chunk_frames, preload_video=preloadvid)
         
         # Load mask, dark, flat
         mask, dark, flat_struct = loadImageCalibration(img_handle.dir_path, config, 
@@ -115,7 +117,7 @@ def extractStarsDetectFrameInterface(data_path, config,
         
         # Extract the stars from the image handle
         star_list = extractStarsFrameInterface(img_handle, config, chunk_frames=chunk_frames,
-            flat_struct=flat_struct, dark=dark, mask=mask, save_calstars=save_calstars)
+            flat_struct=flat_struct, dark=dark, mask=mask, save_calstars=save_calstars, debug=debug)
 
     return star_list
 
@@ -147,6 +149,14 @@ if __name__ == "__main__":
         help="Flag to indicate that the data path is a directory containing multiple video files."
         )
 
+    arg_parser.add_argument("--debug", action="store_true",
+        help="Print verbose debug logs."
+        )
+
+    arg_parser.add_argument("--preloadvid", action="store_true",
+        help="Preload the video into memory."
+        )
+
 
     cml_args = arg_parser.parse_args()
 
@@ -164,7 +174,8 @@ if __name__ == "__main__":
     # Extract the stars
     extractStarsDetectFrameInterface(
         cml_args.data_path, config, 
-        chunk_frames=cml_args.chunk_frames, multivids=cml_args.multivids
+        chunk_frames=cml_args.chunk_frames, multivids=cml_args.multivids, debug=cml_args.debug, 
+        preloadvid=cml_args.preloadvid
         )
 
 

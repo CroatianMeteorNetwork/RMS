@@ -537,6 +537,9 @@ if __name__ == "__main__":
     
     arg_parser.add_argument('--multivid', action='store_true', \
         help="Flag to indicate that the data path is a directory containing multiple video files.")
+
+    arg_parser.add_argument('--preloadvid', action='store_true', \
+        help="Flag to indicate that the video should be preloaded into memory.")
     
     arg_parser.add_argument('--chunk_frames', type=int, default=128, \
         help="Number of frames to use to stack an image on which the stars will be extracted. Only "
@@ -607,7 +610,7 @@ if __name__ == "__main__":
 
         # Detect the file type
         img_handle = detectInputType(cml_args.dir_path, config, skip_ff_dir=False, detection=True, 
-                                     chunk_frames=cml_args.chunk_frames)
+                                     chunk_frames=cml_args.chunk_frames, preload_video=cml_args.preloadvid)
 
         # If the directory contains FF files, run detection on them using a pool of workers
         if img_handle.input_type == 'ff':
