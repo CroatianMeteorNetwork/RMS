@@ -6,6 +6,8 @@ Optimized for speed and robustness on sparse, intermittent data.
 import numpy as np
 import math
 import random
+import logging
+log = logging.getLogger("logger")
 
 def getPolarLine(x1, y1, x2, y2, img_w, img_h):
     """ 
@@ -143,17 +145,19 @@ def findLines(img, max_lines, min_pixels, distance_thresh, min_line_length, max_
 
     found_lines = []
     
-    if debug:
-        print(f"RANSAC: Starting with {len(points)} points.")
+    log.debug(f"RANSAC: Starting with {len(points)} points.")
 
     # Safety counter to prevent infinite loops if we can't find a valid line
     consecutive_failures = 0
     MAX_FAILURES = 10
 
+    # Dynamic minimum sampling distance: max(3.0, 25% of min_line_length)
+    min_sample_dist_sq = max(3.0, min_line_length*0.25)**2
+
     while len(points) >= min_pixels and len(found_lines) < max_lines:
         
         if consecutive_failures >= MAX_FAILURES:
-            if debug: print("RANSAC: Stopping due to not finding any more lines.")
+            log.debug("RANSAC: Stopping due to not finding any more lines.")
             break
 
         best_model = None       # (rho, theta)
@@ -161,25 +165,30 @@ def findLines(img, max_lines, min_pixels, distance_thresh, min_line_length, max_
         best_segment_mask = None # Boolean mask of points belonging to the best segment
 
         # --- RANSAC Iterations ---
+        valid_pair_failures = 0
+        min_pixels_failures = 0
+
         for i in range(max_iterations):
             # 1. Sample
             if len(points) < 2: break
 
             # 1. Sample 2 random points
-            # Try up to 5 times to find a pair with good separation
+            # Try up to 50 times to find a pair with good separation
             valid_pair = False
-            for _ in range(5):
+            for _ in range(50):
                 idx = np.random.choice(len(points), 2, replace=False)
                 p1, p2 = points[idx]
 
                 # Check distance squared
-                dist_sq = (p1[0]-p2[0])**2 + (p1[1]-p2[1])**2
+                dist_sq = (p1[0] - p2[0])**2 + (p1[1] - p2[1])**2
 
-                if dist_sq > 3**2: # Minimum 3 pixels apart
+                if dist_sq > min_sample_dist_sq:
                     valid_pair = True
                     break
                     
-            if not valid_pair: continue
+            if not valid_pair:
+                valid_pair_failures += 1
+                continue
 
             # 2. Model (center-based coordinates)
             rho, theta_deg = getPolarLine(p1[0], p1[1], p2[0], p2[1], w, h)
@@ -195,6 +204,7 @@ def findLines(img, max_lines, min_pixels, distance_thresh, min_line_length, max_
             # Fast filter: check total inlier count first
             inlier_mask = dists < distance_thresh
             if np.sum(inlier_mask) < min_pixels:
+                min_pixels_failures += 1
                 continue
 
             # 4. Connectivity Check (Segments)
@@ -256,6 +266,7 @@ def findLines(img, max_lines, min_pixels, distance_thresh, min_line_length, max_
                         best_segment_mask = new_mask
 
         # --- End RANSAC Loop ---
+        log.debug(f"  RANSAC Iteration stats: valid_pair_fails={valid_pair_failures}, <min_pixels_fails={min_pixels_failures}, best_score={best_score:.1f}")
 
         if best_model is not None and best_score > min_line_length:
             consecutive_failures = 0
@@ -303,8 +314,7 @@ def findLines(img, max_lines, min_pixels, distance_thresh, min_line_length, max_
             
             found_lines.append((rho_ref, theta_ref_deg, x_start, y_start, x_end, y_end))
             
-            if debug:
-                print(f"  Found Line: rho={rho_ref:.1f}, theta={theta_ref_deg:.1f}, len={best_score:.1f}")
+            log.debug(f"  Found Line: rho={rho_ref:.1f}, theta={theta_ref_deg:.1f}, len={best_score:.1f}")
 
             # --- Removal Step ---
             # Remove points that are "covered" by this segment.
@@ -328,12 +338,11 @@ def findLines(img, max_lines, min_pixels, distance_thresh, min_line_length, max_
             
             points = points[~to_remove]
             
-            if debug:
-                print(f"  Removed {np.sum(to_remove)} points. Remaining: {len(points)}")
+            log.debug(f"  Removed {np.sum(to_remove)} points. Remaining: {len(points)}")
                 
         else:
             consecutive_failures += 1
-            if debug: print(f"  Failed to find line (Attempt {consecutive_failures}/{MAX_FAILURES})")
+            log.debug(f"  Failed to find line (Attempt {consecutive_failures}/{MAX_FAILURES})")
 
     # Final Merge Pass
     if len(found_lines) > 1:
@@ -438,7 +447,7 @@ def mergeSegments(lines, distance_thresh, angle_thresh=10.0, overlap_fraction=0.
                 L2['alive'] = False
                 merged_count += 1
                 
-    if debug and merged_count > 0:
-        print(f"MergeSegments: Merged {merged_count} segments.")
+    if merged_count > 0:
+        log.debug(f"MergeSegments: Merged {merged_count} segments.")
 
     return [item['params'] for item in pool if item['alive']]
