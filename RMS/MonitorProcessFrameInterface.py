@@ -272,7 +272,6 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
     # Active worker processes: {unique_id: Process}
     active_workers = {}
 
-    failed_files = set()
     stability_tracker = {}
     stable_wait_time = 5
     stable_max_age = 30
@@ -292,54 +291,48 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
                         log.info("Successfully processed: {}".format(uid))
                         processed_files.add(uid)
                     else:
-                        log.warning("Processing failed for: {} (exit code {:d})".format(
+                        # Do not keep a permanent failure blacklist, let them be retried
+                        log.warning("Processing failed for: {} (exit code {:d}), will retry...".format(
                             uid, proc.exitcode))
-                        failed_files.add(uid)
                     finished.append(uid)
 
             for uid in finished:
                 del active_workers[uid]
 
-            # Scan the directory for matching files
+            # 1. Get ALL files and their metadata first
+            candidate_files = []
             try:
                 if recursive:
-                    all_files = []
                     for root, _, files in os.walk(input_dir):
                         for f in files:
-                            all_files.append(os.path.relpath(os.path.join(root, f), input_dir))
-                    all_files = sorted(all_files)
+                            candidate_files.append(os.path.join(root, f))
                 else:
-                    all_files = sorted(os.listdir(input_dir))
+                    candidate_files = [os.path.join(input_dir, f) for f in os.listdir(input_dir)]
             except OSError:
                 log.error("Cannot read directory: {}".format(input_dir))
                 time.sleep(poll_interval)
                 continue
 
-            for file_name in all_files:
+            # 2. Identify which files are "Stable"
+            stable_files = []
+            for file_path in candidate_files:
+                file_name = os.path.basename(file_path)
 
-                # Ensure uniqueness for recursive files by including subfolder path
-                # Replace slashes to make a flat unique identifier
-                file_rel_path = os.path.relpath(os.path.join(input_dir, file_name), input_dir)
-                unique_id = os.path.splitext(file_rel_path)[0].replace(os.path.sep, '_')
-
-                # Skip already processed, failed, or currently processing files
-                if unique_id in processed_files or unique_id in failed_files or unique_id in active_workers:
-                    continue
-
-                base_name = os.path.basename(file_name)
                 # Check if the file matches the requested type
-                if not matchesFileType(base_name, file_type):
+                if not matchesFileType(file_name, file_type):
                     continue
 
-                file_path = os.path.join(input_dir, file_name)
-
-                # Skip directories
                 if os.path.isdir(file_path):
                     continue
 
-                # Don't exceed the worker limit
-                if len(active_workers) >= nproc:
-                    break
+                # Ensure uniqueness for recursive files by including subfolder path
+                # Replace slashes to make a flat unique identifier
+                file_rel_path = os.path.relpath(file_path, input_dir)
+                unique_id = os.path.splitext(file_rel_path)[0].replace(os.path.sep, '_')
+
+                # Skip already processed or currently processing files
+                if unique_id in processed_files or unique_id in active_workers:
+                    continue
 
                 # Non-blocking stability check
                 try:
@@ -368,8 +361,20 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
                             else:
                                 stable = False
 
-                if not stable:
-                    continue
+                if stable:
+                    stable_files.append((file_path, curr_mtime, unique_id, file_rel_path))
+
+            # 3. SORT STABLE FILES BY AGE (Oldest First)
+            stable_files.sort(key=lambda x: x[1])
+
+            # 4. Start processes for the oldest stable files until nproc is full
+            new_files_queued = False
+            for file_path, mtime, unique_id, file_rel_path in stable_files:
+                if len(active_workers) >= nproc:
+                    break
+
+                if file_path in stability_tracker:
+                    del stability_tracker[file_path]
 
                 log.info("Putting file {} on the processing queue...".format(file_rel_path))
 
@@ -380,12 +385,13 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
                 )
                 proc.start()
                 active_workers[unique_id] = proc
+                new_files_queued = True
 
             # If no workers are active and no new files were queued, we're idle
-            if not active_workers and not waiting_for_data:
+            if not active_workers and not new_files_queued and not waiting_for_data:
                 log.info("Waiting for more data...")
                 waiting_for_data = True
-            elif active_workers:
+            elif active_workers or new_files_queued:
                 waiting_for_data = False
 
             time.sleep(poll_interval)
