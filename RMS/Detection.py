@@ -235,7 +235,7 @@ def mergeRansacLines(line_list, img_w, img_h, angle_thresh=15.0, dist_thresh_fac
 
     When frame ranges overlap, only 2D spatial geometry is used (direction angle and perpendicular
     distance), because the frame ranges are time window boundaries — not the actual meteor duration — 
-    so velocity computed from spatial_length / frame_range would be meaningless.
+    so velocity computed from spatial_length/frame_range would be meaningless.
 
     When frame ranges do NOT overlap, strict 3D space-time checks are applied to prevent merging 
     of collinear but temporally separate tracks.
@@ -255,9 +255,9 @@ def mergeRansacLines(line_list, img_w, img_h, angle_thresh=15.0, dist_thresh_fac
         angle_thresh: [float] Maximum angular difference (degrees) between direction vectors.
             Default 15.0.
         dist_thresh_factor: [float] Perpendicular distance threshold as a multiple of the 
-            image diagonal / 100. Default 1.0 (approx 22px for 1080p).
+            image diagonal/100. Default 1.0 (approx 22px for 1080p).
         gap_thresh_factor: [float] Maximum 3D longitudinal gap as a multiple of the image 
-            diagonal / 100. Default 2.0 (approx 44px for 1080p).
+            diagonal/100. Default 2.0 (approx 44px for 1080p).
         last_count: [int] Used for recursion, default is 0 and it should be left as is!
 
     Return:
@@ -270,8 +270,8 @@ def mergeRansacLines(line_list, img_w, img_h, angle_thresh=15.0, dist_thresh_fac
 
     # Compute thresholds based on image diagonal
     diag = np.sqrt(img_w**2 + img_h**2)
-    perp_dist_thresh = dist_thresh_factor * diag / 100.0
-    gap_thresh = gap_thresh_factor * diag / 100.0
+    perp_dist_thresh = dist_thresh_factor*diag/100.0
+    gap_thresh = gap_thresh_factor*diag/100.0
 
     # Sort by frame_min for efficient processing
     line_list = sorted(line_list, key=lambda l: l[2])
@@ -294,7 +294,7 @@ def mergeRansacLines(line_list, img_w, img_h, angle_thresh=15.0, dist_thresh_fac
             final_list.append(list(line_list[i][:8]))
             continue
         frange1 = max(fmax1 - fmin1, 1)
-        vel1 = len1_spatial / frange1  # pixels per frame
+        vel1 = len1_spatial/frange1  # pixels per frame
 
         for j in range(i + 1, len(line_list)):
 
@@ -308,7 +308,7 @@ def mergeRansacLines(line_list, img_w, img_h, angle_thresh=15.0, dist_thresh_fac
             if len2_spatial < 1e-9:
                 continue
             frange2 = max(fmax2 - fmin2, 1)
-            vel2 = len2_spatial / frange2
+            vel2 = len2_spatial/frange2
 
             # Determine if frame ranges overlap
             frames_overlap = (fmax1 >= fmin2) and (fmin1 <= fmax2)
@@ -316,7 +316,7 @@ def mergeRansacLines(line_list, img_w, img_h, angle_thresh=15.0, dist_thresh_fac
             if frames_overlap:
                 # Frame ranges overlap: use 2D spatial checks for direction and distance
                 # (Frame ranges are window boundaries, not actual meteor duration, so velocity
-                #  from spatial_length / frame_range is meaningless for 3D direction)
+                #  from spatial_length/frame_range is meaningless for 3D direction)
 
                 # 2D spatial direction angle
                 v1_2d = np.array([x1b - x1a, y1b - y1a], dtype=np.float64)
@@ -333,15 +333,15 @@ def mergeRansacLines(line_list, img_w, img_h, angle_thresh=15.0, dist_thresh_fac
                     continue
 
                 # 2D spatial perpendicular distance
-                mid2x = (x2a + x2b) / 2.0
-                mid2y = (y2a + y2b) / 2.0
-                perp_dist = abs(v1_2d[0] * (mid2y - y1a) - v1_2d[1] * (mid2x - x1a))
+                mid2x = (x2a + x2b)/2.0
+                mid2y = (y2a + y2b)/2.0
+                perp_dist = abs(v1_2d[0]*(mid2y - y1a) - v1_2d[1]*(mid2x - x1a))
                 if perp_dist > perp_dist_thresh:
                     continue
 
-                mid1x = (x1a + x1b) / 2.0
-                mid1y = (y1a + y1b) / 2.0
-                perp_dist2 = abs(v2_2d[0] * (mid1y - y2a) - v2_2d[1] * (mid1x - x2a))
+                mid1x = (x1a + x1b)/2.0
+                mid1y = (y1a + y1b)/2.0
+                perp_dist2 = abs(v2_2d[0]*(mid1y - y2a) - v2_2d[1]*(mid1x - x2a))
                 if perp_dist2 > perp_dist_thresh:
                     continue
 
@@ -349,8 +349,8 @@ def mergeRansacLines(line_list, img_w, img_h, angle_thresh=15.0, dist_thresh_fac
                 # Project segment 2 onto segment 1's direction
                 t1s = 0.0
                 t1e = len1_spatial
-                t2s = (x2a - x1a) * v1_2d[0] + (y2a - y1a) * v1_2d[1]
-                t2e = (x2b - x1a) * v1_2d[0] + (y2b - y1a) * v1_2d[1]
+                t2s = (x2a - x1a)*v1_2d[0] + (y2a - y1a)*v1_2d[1]
+                t2e = (x2b - x1a)*v1_2d[0] + (y2b - y1a)*v1_2d[1]
                 t2s_proj, t2e_proj = min(t2s, t2e), max(t2s, t2e)
 
                 # Check for spatial gap
@@ -372,28 +372,28 @@ def mergeRansacLines(line_list, img_w, img_h, angle_thresh=15.0, dist_thresh_fac
                 # This prevents merging of collinear but temporally separate tracks
 
                 # Frame scale: average velocity converts frames to pixel-equivalent units
-                frame_scale = (vel1 + vel2) / 2.0
+                frame_scale = (vel1 + vel2)/2.0
                 if frame_scale < 1e-9:
                     frame_scale = 1.0
 
-                # 3D points: (x, y, frame * frame_scale)
-                p1a = np.array([x1a, y1a, fmin1 * frame_scale])
-                p1b = np.array([x1b, y1b, fmax1 * frame_scale])
-                p2a = np.array([x2a, y2a, fmin2 * frame_scale])
-                p2b = np.array([x2b, y2b, fmax2 * frame_scale])
+                # 3D points: (x, y, frame*frame_scale)
+                p1a = np.array([x1a, y1a, fmin1*frame_scale])
+                p1b = np.array([x1b, y1b, fmax1*frame_scale])
+                p2a = np.array([x2a, y2a, fmin2*frame_scale])
+                p2b = np.array([x2b, y2b, fmax2*frame_scale])
 
                 # 3D direction angle
                 d1 = p1b - p1a
                 d1_len = np.linalg.norm(d1)
                 if d1_len < 1e-9:
                     continue
-                d1_unit = d1 / d1_len
+                d1_unit = d1/d1_len
 
                 d2 = p2b - p2a
                 d2_len = np.linalg.norm(d2)
                 if d2_len < 1e-9:
                     continue
-                d2_unit = d2 / d2_len
+                d2_unit = d2/d2_len
 
                 cos_angle = min(abs(np.dot(d1_unit, d2_unit)), 1.0)
                 angle_diff_3d = np.degrees(np.arccos(cos_angle))
@@ -401,18 +401,18 @@ def mergeRansacLines(line_list, img_w, img_h, angle_thresh=15.0, dist_thresh_fac
                     continue
 
                 # 3D perpendicular distance
-                mid2 = (p2a + p2b) / 2.0
+                mid2 = (p2a + p2b)/2.0
                 rel = mid2 - p1a
                 proj_along = np.dot(rel, d1_unit)
-                perp_vec = rel - proj_along * d1_unit
+                perp_vec = rel - proj_along*d1_unit
                 perp_dist_3d = np.linalg.norm(perp_vec)
                 if perp_dist_3d > perp_dist_thresh:
                     continue
 
-                mid1 = (p1a + p1b) / 2.0
+                mid1 = (p1a + p1b)/2.0
                 rel2 = mid1 - p2a
                 proj_along2 = np.dot(rel2, d2_unit)
-                perp_vec2 = rel2 - proj_along2 * d2_unit
+                perp_vec2 = rel2 - proj_along2*d2_unit
                 perp_dist2_3d = np.linalg.norm(perp_vec2)
                 if perp_dist2_3d > perp_dist_thresh:
                     continue
@@ -445,19 +445,19 @@ def mergeRansacLines(line_list, img_w, img_h, angle_thresh=15.0, dist_thresh_fac
             new_fmax = max(fmax1, fmax2)
 
             # Extend spatial endpoints using 2D projection along segment 1's spatial direction
-            vx1 = (x1b - x1a) / len1_spatial
-            vy1 = (y1b - y1a) / len1_spatial
+            vx1 = (x1b - x1a)/len1_spatial
+            vy1 = (y1b - y1a)/len1_spatial
             t_s1 = 0.0
             t_e1 = len1_spatial
-            t_s2 = (x2a - x1a) * vx1 + (y2a - y1a) * vy1
-            t_e2 = (x2b - x1a) * vx1 + (y2b - y1a) * vy1
+            t_s2 = (x2a - x1a)*vx1 + (y2a - y1a)*vy1
+            t_e2 = (x2b - x1a)*vx1 + (y2b - y1a)*vy1
             new_t_min = min(t_s1, t_e1, t_s2, t_e2)
             new_t_max = max(t_s1, t_e1, t_s2, t_e2)
 
-            new_x1 = x1a + vx1 * new_t_min
-            new_y1 = y1a + vy1 * new_t_min
-            new_x2 = x1a + vx1 * new_t_max
-            new_y2 = y1a + vy1 * new_t_max
+            new_x1 = x1a + vx1*new_t_min
+            new_y1 = y1a + vy1*new_t_min
+            new_x2 = x1a + vx1*new_t_max
+            new_y2 = y1a + vy1*new_t_max
 
             # Recompute rho, theta from the new endpoints
             new_rho, new_theta = SequentialRANSAC.getPolarLine(new_x1, new_y1, new_x2, new_y2, 
@@ -482,147 +482,107 @@ def mergeRansacLines(line_list, img_w, img_h, angle_thresh=15.0, dist_thresh_fac
 
 
 
-def merge3DLines(line_list, vect_angle_thresh, last_count=0):
-    """ Merge similar lines found by the 3D detector. 
-
-        Calculate the vector between the first point of the first line and the last point of the second line, 
-        and then compares the angle difference to individual line vectors. If all vecters have angles that are 
-        close enough, merge the line. Frame ranges also have to overlap to merge the line.
+def merge3DLines(line_list, img_w, img_h, dist_thresh_factor=2.0, last_count=0):
+    """ Merge essentially duplicate 3D lines that overlap in time by verifying their kinematics.
     
     Arguments:
         line_list: [list] A list of lines found by grouping3D algorithm.
-        vect_angle_thresh: [float] Minimum angle between vectors to merge the lines.
+        img_w: [int] Image width in pixels.
+        img_h: [int] Image height in pixels.
 
     Keyword arguments:
+        dist_thresh_factor: [float] Maximum physical gap limit based on image diagonal, 
+            allows joining of closely parallel tracks.
         last_count: [int] Used for recursion, default is 0 and it should be left as is!
     
     Return:
         final_list: [list] A list of merged lines.
-
     """
-
-    def _vectorAngle(v1, v2):
-        """ Calculate an angle (in degrees) between two vectors.
-
-        Arguments:
-            v1: [ndarray] first vector
-            v2: [ndarray] second vector
-
-        Return:
-            angle: [float] angle in degrees
-        """
-
-        # Calculate angle between vectors
-        cosang = np.dot(v1, v2)
-        sinang = np.linalg.norm(np.cross(v1, v2))
-        angle = np.degrees(np.arctan2(sinang, cosang))
-
-        if angle > 180:
-            angle = abs(angle - 360)
-
-        elif angle < 0:
-            angle = abs(angle)
-
-        return angle
-
 
     # Return if less than 2 lines
     if len(line_list) < 2:
         return line_list
 
+    diag = (img_w**2 + img_h**2)**0.5
+    spatial_dist_thresh = dist_thresh_factor * diag / 100.0
+
     final_list = []
-    paired_indices = []
+    paired_indices = set()
 
-    for i, line1 in enumerate(line_list):
+    # Function to extract expected 2D spatial pos from line parameters at given frame
+    def get_pos(dl, f):
+        p1 = dl[0]
+        p2 = dl[1]
+        df = p2[2] - p1[2]
+        if abs(df) < 1e-6:
+            return [p1[0], p1[1]]
+        t = (f - p1[2]) / df
+        x = p1[0] + t * (p2[0] - p1[0])
+        y = p1[1] + t * (p2[1] - p1[1])
+        import numpy as np
+        return np.array([x, y])
 
-        # Skip if the line is already paired
+    import numpy as np
+    for i in range(len(line_list)):
         if i in paired_indices:
             continue
 
-        # Extract first point
-        x11, y11, z11 = line1[0]
-
-        # Extract second point
-        x12, y12, z12 = line1[1]
-
-        # Get frame range
-        line1_fmin, line1_fmax = line1[4:6]
-
-        # Create a vector from line points
-        v1 = np.array([x12-x11, y12-y11, z12-z11])
-
+        L1 = line_list[i]
+        L1_fmin, L1_fmax = L1[4], L1[5]
         found_pair = False
 
-        for j, line2 in enumerate(line_list[i+1:]):
-
-            # Get real j index value with respect to line_list
-            j = j + i + 1
-
-            # Skip if the line is already paired
+        for j in range(i + 1, len(line_list)):
             if j in paired_indices:
                 continue
 
-            # Extract first point
-            x21, y21, z21 = line2[0]
+            L2 = line_list[j]
+            L2_fmin, L2_fmax = L2[4], L2[5]
 
-            # Extract second point
-            x22, y22, z22 = line2[1]
+            # 1. Temporal Overlap Check
+            overlap_fmin = max(L1_fmin, L2_fmin)
+            overlap_fmax = min(L1_fmax, L2_fmax)
 
-            # Get frame range
-            line2_fmin, line2_fmax = line2[4:6]
+            if overlap_fmax >= overlap_fmin:
+                # They overlap in time. Check spatial distance during this overlapping window.
+                pos1_start = get_pos(L1, overlap_fmin)
+                pos2_start = get_pos(L2, overlap_fmin)
+                dist_start = np.linalg.norm(np.array(pos1_start) - np.array(pos2_start))
 
-            # Create a vector from line points
-            v2 = np.array([x22-x21, y22-y21, z22-z21])
+                pos1_end = get_pos(L1, overlap_fmax)
+                pos2_end = get_pos(L2, overlap_fmax)
+                dist_end = np.linalg.norm(np.array(pos1_end) - np.array(pos2_end))
 
-
-            # Create a vector from line points (2D - image plane only)
-            # This prevents the frame (z) component from dominating the angle calculation
-            v1_2d = v1[:2]
-            v2_2d = v2[:2]
-
-            # Create a vector from the first point of the first line and the last point of the second line
-            v_both_2d = np.array([x22 - x11, y22 - y11])
-
-            # Calculate the angle between the v_both and v1 (2D)
-            vect_angle1 = _vectorAngle(v1_2d, v_both_2d)
-
-            # Calculate the angle between the v_both and v2 (2D)
-            vect_angle2 = _vectorAngle(v2_2d, v_both_2d)
-
-            # Calculate the direct angle between the two lines (2D)
-            vect_angle12 = _vectorAngle(v1_2d, v2_2d)
-
-
-            # Check if the vector angles are close enough
-            if (vect_angle1 < vect_angle_thresh) and (vect_angle2 < vect_angle_thresh) and (vect_angle12 < vect_angle_thresh):
-
-                # Check if the frames overlap
-                if set(range(line1_fmin, line1_fmax+1)).intersection(range(line2_fmin, line2_fmax+1)):
-
-                    # Choose the frame range
-                    frame_min = min((line1_fmin, line2_fmin))
-                    frame_max = max((line1_fmax, line2_fmax))
-
-                    # Remove old lines
-                    paired_indices.append(i)
-                    paired_indices.append(j)
-
+                if dist_start < spatial_dist_thresh and dist_end < spatial_dist_thresh:
+                    paired_indices.add(i)
+                    paired_indices.add(j)
                     found_pair = True
-
-                    # Add merged line to the list
-                    final_list.append([line1[0], line1[1], max(line1[2], line2[2]), max(line1[3], line2[3]), frame_min, frame_max])
-
+                    
+                    # Merge L2 into L1
+                    all_points = [L1[0], L1[1], L2[0], L2[1]]
+                    # Find min f and max f points
+                    min_idx = np.argmin([p[2] for p in all_points])
+                    max_idx = np.argmax([p[2] for p in all_points])
+                    
+                    merged_line = [
+                        all_points[min_idx], 
+                        all_points[max_idx], 
+                        max(L1[2], L2[2]), 
+                        max(L1[3], L2[3]), 
+                        min(L1_fmin, L2_fmin), 
+                        max(L1_fmax, L2_fmax)
+                    ]
+                    final_list.append(merged_line)
                     break
-
-        # Add point back to the list if pair was not found
+        
         if not found_pair:
-            final_list.append(line1)
+            final_list.append(L1)
 
     # Use recursion until the number of lines stabilizes
     if len(final_list) != last_count:
-        final_list = merge3DLines(final_list, vect_angle_thresh, len(final_list))
+        final_list = merge3DLines(final_list, img_w, img_h, dist_thresh_factor, len(final_list))
 
     return final_list
+
 
 
 
@@ -1658,9 +1618,9 @@ def show3DCloud(ff, xs, ys, zs, detected_line=None, stripe_points=None, config=N
             ax.plot(lx, ly, lz, c=col, linewidth=2, alpha=0.7)
 
             # Label at midpoint
-            mx = (lx[0] + lx[1]) / 2.0
-            my = (ly[0] + ly[1]) / 2.0
-            mz = (lz[0] + lz[1]) / 2.0
+            mx = (lx[0] + lx[1])/2.0
+            my = (ly[0] + ly[1])/2.0
+            mz = (lz[0] + lz[1])/2.0
             ax.text(mx, my, mz, '{:d}'.format(idx_dl), color='white', fontsize=10,
                 fontweight='bold', ha='center', va='bottom',
                 bbox=dict(facecolor=col, alpha=0.7, edgecolor='none', pad=1))
@@ -1916,16 +1876,16 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                     ax1.plot([lx1, lx2], [ly1, ly2], '-', color='white', linewidth=2)
                     ax1.plot(lx1, ly1, 'o', color=cmap(norm(fmin_l)), markersize=4)
                     ax1.plot(lx2, ly2, 's', color=cmap(norm(fmax_l)), markersize=4)
-                    mid_x, mid_y = (lx1 + lx2) / 2.0, (ly1 + ly2) / 2.0
+                    mid_x, mid_y = (lx1 + lx2)/2.0, (ly1 + ly2)/2.0
                     ax1.text(mid_x, mid_y, str(li), color='yellow', fontsize=9,
                              ha='center', va='bottom', fontweight='bold')
                 else:
                     rho_l, theta_l, fmin_l, fmax_l = line[:4]
-                    color = cmap(norm((fmin_l + fmax_l) / 2.0))
+                    color = cmap(norm((fmin_l + fmax_l)/2.0))
                     theta_rad = np.deg2rad(theta_l)
                     a, b = np.cos(theta_rad), np.sin(theta_rad)
-                    x0 = a * rho_l + img_handle.ff.ncols / 2.0
-                    y0 = b * rho_l + img_handle.ff.nrows / 2.0
+                    x0 = a*rho_l + img_handle.ff.ncols/2.0
+                    y0 = b*rho_l + img_handle.ff.nrows/2.0
                     ax1.plot([x0 - 1000*(-b), x0 + 1000*(-b)],
                              [y0 - 1000*a, y0 + 1000*a], '-', color=color, linewidth=1)
                     ax1.text(x0, y0, str(li), color='yellow', fontsize=9,
@@ -1946,16 +1906,16 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                     ax2.plot([lx1, lx2], [ly1, ly2], '-', color='white', linewidth=2)
                     ax2.plot(lx1, ly1, 'o', color=cmap(norm(fmin_l)), markersize=4)
                     ax2.plot(lx2, ly2, 's', color=cmap(norm(fmax_l)), markersize=4)
-                    mid_x, mid_y = (lx1 + lx2) / 2.0, (ly1 + ly2) / 2.0
+                    mid_x, mid_y = (lx1 + lx2)/2.0, (ly1 + ly2)/2.0
                     ax2.text(mid_x, mid_y, '{:d}*'.format(li), color='cyan', fontsize=9,
                              ha='center', va='bottom', fontweight='bold')
                 else:
                     rho_l, theta_l, fmin_l, fmax_l = line[:4]
-                    color = cmap(norm((fmin_l + fmax_l) / 2.0))
+                    color = cmap(norm((fmin_l + fmax_l)/2.0))
                     theta_rad = np.deg2rad(theta_l)
                     a, b = np.cos(theta_rad), np.sin(theta_rad)
-                    x0 = a * rho_l + img_handle.ff.ncols / 2.0
-                    y0 = b * rho_l + img_handle.ff.nrows / 2.0
+                    x0 = a*rho_l + img_handle.ff.ncols/2.0
+                    y0 = b*rho_l + img_handle.ff.nrows/2.0
                     ax2.plot([x0 - 1000*(-b), x0 + 1000*(-b)],
                              [y0 - 1000*a, y0 + 1000*a], '-', color=color, linewidth=1)
                     ax2.text(x0, y0, '{:d}*'.format(li), color='cyan', fontsize=9,
@@ -2098,8 +2058,8 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                         df = dl[1][2] - dl[0][2]
                         mx, my = 0.0, 0.0
                         if abs(df) > 1e-6:
-                            mx = dx / df
-                            my = dy / df
+                            mx = dx/df
+                            my = dy/df
                         logDebug(f"  {idx_dl:2d}: ({dl[0][0]:.2f}, {dl[0][1]:.2f}, {dl[0][2]:.2f}) -> ({dl[1][0]:.2f}, {dl[1][1]:.2f}, {dl[1][2]:.2f})  dx/df: {mx:6.2f}, dy/df: {my:6.2f}  [{dl[2]:d} pts, f:{dl[4]:d}-{dl[5]:d}]")
 
                 # Save all detected lines for visualization
@@ -2112,14 +2072,14 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                 else:
                     theta_rad = np.deg2rad(theta)
                     a, b = np.cos(theta_rad), np.sin(theta_rad)
-                    x0 = a * rho + img_handle.ff.ncols / 2.0
-                    y0 = b * rho + img_handle.ff.nrows / 2.0
+                    x0 = a*rho + img_handle.ff.ncols/2.0
+                    y0 = b*rho + img_handle.ff.nrows/2.0
                     ref_line_coords = (x0 - 1000*(-b), y0 - 1000*a, x0 + 1000*(-b), y0 + 1000*a)
                 
                 # Stitch segments together to form the full meteor track
                 # Using 10deg angular threshold and configurable spatial threshold
                 img_diag = np.sqrt(config.width**2 + config.height**2)
-                frame_scale = img_diag / 256.0 if img_diag > 0 else 1.0
+                frame_scale = img_diag/256.0 if img_diag > 0 else 1.0
                 detected_line = stitch3DLines(
                     detected_lines, 
                     ref_line_coords, 
@@ -2161,8 +2121,8 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                 logDebug('No temporal propagation found!')
 
 
-        # Merge similar lines in 3D (Disabled for testing)
-        # filtered_lines = merge3DLines(filtered_lines, config.vect_angle_thresh)
+        # Merge similar lines in 3D
+        filtered_lines = merge3DLines(filtered_lines, img_handle.ff.ncols, img_handle.ff.nrows)
 
         # logDebug('after filtering:')
         # logDebug(filtered_lines)
@@ -2204,6 +2164,9 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                     dx_df, dy_df, x0, y0))
             logDebug('================================')
 
+            # Show a 3D plot of all detected tracks if there are more than 2
+            if len(filtered_lines) > 2:
+                show3DCloud(img_handle.ff, [], [], [], config=config, all_detected_lines=filtered_lines)
 
         # Go through all detected and filtered lines and compute centroids
         for detected_line in filtered_lines:
