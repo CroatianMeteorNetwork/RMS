@@ -646,7 +646,7 @@ class InputTypeFRFF(InputType):
         # Get the datetime of the beginning of the FF file
         if beginning:
 
-            dt = filenameToDatetime(self.name(), middle=False)
+            dt = filenameToDatetime(self.name())
 
             if dt_obj:
                 return dt

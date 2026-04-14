@@ -494,7 +494,7 @@ def extractStarsImgHandle(img_handle,
         # Print the results
         print()
         print("FF name:", ff_name)
-        print("Num frames:", img_handle.chunk_frames)
+        print("Num frames:", getattr(img_handle, 'chunk_frames', 'N/A'))
         print("Number of stars:", len(x_arr))
         for x, y, a, i, f, bg, s, satcnt in zip(x_arr, y_arr, amplitude, intensity, fwhm, background, snr, saturated_count):
             print("{:7.2f} {:7.2f} {:9d} {:6d} {:5.2f} {:6d} {:5.2f} {:6d}".format(

@@ -160,7 +160,7 @@ from RMS.Astrometry.ApplyRecalibrate import recalibrateFF
 from RMS.Astrometry.AutoPlatepar import selectBestFrame, autoFitPlatepar
 from RMS.Astrometry.NNalign import alignPlatepar
 import RMS.ConfigReader as cr
-from RMS.ExtractStars import extractStarsAndSave, extractStarsFF, extractStarsImgHandle
+from RMS.ExtractStars import extractStarsAndSave, extractStarsFF
 import RMS.Formats.CALSTARS as CALSTARS
 from RMS.Formats.Platepar import Platepar, getCatalogStarsImagePositions
 from RMS.Formats.FFfile import convertFRNameToFF, constructFFName
@@ -4820,7 +4820,6 @@ class PlateTool(QtWidgets.QMainWindow):
               f"neighborhood={self.override_neighborhood_size}, segment_radius={self.override_segment_radius}, "
               f"max_stars={self.override_max_stars}, gamma={self.override_gamma:.3f}")
 
-        # Call extractStarsImgHandle with override parameters (works on any input type)
         try:
             # Temporarily modify config to use override parameters
             original_intensity_threshold = getattr(self.config, 'intensity_threshold', 18)
@@ -4841,15 +4840,9 @@ class PlateTool(QtWidgets.QMainWindow):
             self.config.roundness_threshold = self.override_roundness_threshold
 
             try:
-                star_list = extractStarsImgHandle(
-                    self.img_handle,
-                    config=self.config,
-                    flat_struct=self.flat_struct if hasattr(self, 'flat_struct') else None,
-                    dark=self.dark if hasattr(self, 'dark') else None,
-                    mask=self.mask if hasattr(self, 'mask') else None
-                )
+                star_data = self._extractStarsCurrentImage(ff_name)
             except Exception as e:
-                print(f"  Star extraction failed: {e}")
+                print(f"  Star extraction failed: {type(e).__name__}: {e}")
                 traceback.print_exc()
                 return
             finally:
@@ -4862,16 +4855,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.config.max_feature_ratio = original_max_feature_ratio
                 self.config.roundness_threshold = original_roundness_threshold
 
-            # extractStarsImgHandle returns list of [ff_name, star_data] per chunk
-            # Combine star data from all chunks into one list
-            if star_list and not isinstance(star_list[0], list):
-                # Error return (flat list of empty lists)
-                star_list = None
-
-            if star_list:
-                star_data = []
-                for chunk_name, chunk_stars in star_list:
-                    star_data.extend(chunk_stars)
+            if star_data and len(star_data) > 0:
 
                 # Store the override detected stars
                 self.star_detection_override_data[ff_name] = star_data
@@ -4900,6 +4884,103 @@ class PlateTool(QtWidgets.QMainWindow):
         except Exception as e:
             print(f"  Error during star detection: {type(e).__name__}: {e}")
             traceback.print_exc()
+
+
+    def _extractStarsCurrentImage(self, ff_name, extra_info=None):
+        """ Extract stars from the currently displayed image. Uses extractStarsFF for FF files,
+            and extractStars (raw image) for everything else (video, images, etc.).
+
+        Arguments:
+            ff_name: [str] Name of the current file.
+
+        Keyword arguments:
+            extra_info: [dict] Optional dict to receive extra extraction info.
+
+        Return:
+            star_data: [list] List of star tuples in CALSTARS format:
+                [(y, x, intensity, amplitude, fwhm, background, snr, saturated_count), ...]
+                Empty list if no stars detected.
+        """
+
+        from RMS.ExtractStars import extractStars
+
+        if self.img_handle.input_type == 'ff':
+            # For FF files, use the dedicated FF extraction (reads from disk)
+            star_list = extractStarsFF(
+                self.dir_path,
+                ff_name,
+                config=self.config,
+                flat_struct=self.flat_struct if hasattr(self, 'flat_struct') else None,
+                dark=self.dark if hasattr(self, 'dark') else None,
+                mask=self.mask if hasattr(self, 'mask') else None,
+                extra_info=extra_info
+            )
+
+            if not star_list or len(star_list) < 2:
+                return []
+
+            # extractStarsFF returns: (ff_name, x_arr, y_arr, amplitude, intensity, fwhm, bg, snr, sat)
+            ff_name_ret, x_arr, y_arr, amplitude, intensity, fwhm, background, snr, saturated_count = star_list
+
+            # Construct CALSTARS format: Y(0) X(1) IntensSum(2) Ampltd(3) FWHM(4) BgLvl(5) SNR(6) NSatPx(7)
+            star_data = list(zip(y_arr, x_arr, intensity, amplitude, fwhm, background, snr, saturated_count))
+            return star_data
+
+        else:
+            # For video/images/etc., extract stars directly from the currently displayed avepixel
+            ff = self.img_handle.ff
+            if ff is None:
+                print("  No image data loaded")
+                return []
+
+            # Get the average pixel image (this is the currently displayed stack)
+            img = ff.avepixel.copy().astype(np.float32)
+
+            # Apply dark frame
+            if hasattr(self, 'dark') and self.dark is not None:
+                from RMS.Routines.Image import applyDark
+                img = applyDark(img, self.dark)
+
+            # Apply flat field
+            if hasattr(self, 'flat_struct') and self.flat_struct is not None:
+                from RMS.Routines.Image import applyFlat
+                img = applyFlat(img, self.flat_struct)
+
+            # Get the median
+            img_median = np.median(img)
+
+            # Check if image is too bright
+            max_global_intensity = getattr(self.config, 'max_global_intensity', 150)
+            if img_median > max_global_intensity:
+                print(f"  Image too bright (median={img_median:.1f} > {max_global_intensity})")
+                return []
+
+            # Get mask
+            mask = self.mask if hasattr(self, 'mask') else None
+
+            # Run star extraction directly on the image
+            status = extractStars(
+                img, img_median=img_median,
+                mask=mask, gamma=self.config.gamma,
+                max_star_candidates=self.config.max_stars,
+                border=getattr(self.config, 'border', 10),
+                neighborhood_size=self.config.neighborhood_size,
+                intensity_threshold=self.config.intensity_threshold,
+                segment_radius=self.config.segment_radius,
+                roundness_threshold=self.config.roundness_threshold,
+                max_feature_ratio=self.config.max_feature_ratio,
+                bit_depth=getattr(self.config, 'bit_depth', 8),
+                extra_info=extra_info
+            )
+
+            if status is False:
+                return []
+
+            x_arr, y_arr, amplitude, intensity, fwhm, background, snr, saturated_count = status
+
+            # Construct CALSTARS format
+            star_data = list(zip(y_arr, x_arr, intensity, amplitude, fwhm, background, snr, saturated_count))
+            return star_data
 
 
     def redetectAllImages(self):
@@ -5390,30 +5471,16 @@ class PlateTool(QtWidgets.QMainWindow):
             self.config.max_feature_ratio = self.override_max_feature_ratio
             self.config.roundness_threshold = self.override_roundness_threshold
 
-            # Run star detection using img_handle (works on any input type)
-            star_list = extractStarsImgHandle(
-                self.img_handle, config=self.config,
-                flat_struct=self.flat_struct, dark=self.dark, mask=self.mask
-            )
+            # Run star detection on the currently displayed image
+            star_data = self._extractStarsCurrentImage(ff_name, extra_info=extra_info)
 
-            # extractStarsImgHandle returns list of [ff_name, star_data] per chunk
-            # Combine all chunks and extract x, y, fwhm arrays
-            if not star_list or not isinstance(star_list[0], list):
-                if return_positions:
-                    return 0, 0, 0, np.array([]), np.array([])
-                return 0, 0, 0
-
-            all_star_data = []
-            for chunk_name, chunk_stars in star_list:
-                all_star_data.extend(chunk_stars)
-
-            if len(all_star_data) == 0:
+            if not star_data or len(star_data) == 0:
                 if return_positions:
                     return 0, 0, 0, np.array([]), np.array([])
                 return 0, 0, 0
 
             # CALSTARS format: Y(0) X(1) IntensSum(2) Ampltd(3) FWHM(4) BgLvl(5) SNR(6) NSatPx(7)
-            star_data_arr = np.array(all_star_data)
+            star_data_arr = np.array(star_data)
             y_arr = star_data_arr[:, 0].astype(float)
             x_arr = star_data_arr[:, 1].astype(float)
             fwhm_arr = star_data_arr[:, 4].astype(float)
@@ -5483,34 +5550,19 @@ class PlateTool(QtWidgets.QMainWindow):
             self.config.max_feature_ratio = self.override_max_feature_ratio
             self.config.roundness_threshold = self.override_roundness_threshold
 
-            star_list = extractStarsImgHandle(
-                self.img_handle, config=self.config,
-                flat_struct=self.flat_struct, dark=self.dark, mask=self.mask
-            )
+            star_data = self._extractStarsCurrentImage(ff_name)
 
             self.config.intensity_threshold = orig_intensity
             self.config.segment_radius = orig_segment
 
-            # extractStarsImgHandle returns list of [ff_name, star_data] per chunk
-            if not star_list or not isinstance(star_list[0], list):
-                print(f"    No bright stars detected with threshold={high_threshold}, "
-                      f"segment={probe_segment}")
-                print(f"    Using default segment_radius=4")
-                return 4, 0, 1.0
-
-            # Combine all chunks
-            all_star_data = []
-            for chunk_name, chunk_stars in star_list:
-                all_star_data.extend(chunk_stars)
-
-            if len(all_star_data) == 0:
+            if not star_data or len(star_data) == 0:
                 print(f"    No bright stars detected with threshold={high_threshold}, "
                       f"segment={probe_segment}")
                 print(f"    Using default segment_radius=4")
                 return 4, 0, 1.0
 
             # CALSTARS format: Y(0) X(1) IntensSum(2) Ampltd(3) FWHM(4) BgLvl(5) SNR(6) NSatPx(7)
-            star_data_arr = np.array(all_star_data)
+            star_data_arr = np.array(star_data)
             x_arr = star_data_arr[:, 1].astype(float)
             y_arr = star_data_arr[:, 0].astype(float)
             fwhm_arr = star_data_arr[:, 4].astype(float)
