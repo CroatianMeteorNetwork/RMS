@@ -61,7 +61,7 @@ from RMS.Routines.BinImageCy import binImage
 from RMS.Routines import SequentialRANSAC
 
 # Get the logger from the main module
-log = getLogger("logger")
+log = getLogger("rmslogger")
 
 
 
@@ -794,7 +794,7 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
         w, h = img_morph.shape[1], img_morph.shape[0]
 
         # Convert the image to feed it into the KHT
-        img_flatten = (img_morph.flatten().astype(np.byte)*255).astype(np.byte)
+        img_flatten = (img_morph.flatten().astype(np.int16)*255).astype(np.byte)
         
         # Predefine the line output
         lines = np.empty((max_lines, 2), np.double)
@@ -2668,7 +2668,7 @@ if __name__ == "__main__":
     log_manager.initLogging(config, 'detection_', safedir=os.path.dirname(cml_args.dir_path[0]), 
                             console_level=console_level)
 
-    log = getLogger("logger")
+    log = getLogger("rmslogger")
 
     ######
 

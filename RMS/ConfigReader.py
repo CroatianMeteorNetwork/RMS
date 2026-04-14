@@ -21,6 +21,7 @@ import os
 import sys
 from RMS.Misc import getRmsRootDir
 from Utils.GenerateTimelapse import isFfmpegWorking
+import matplotlib.colors as mcolors
 
 # Consolidated version-specific imports and definitions
 if sys.version_info[0] == 3:
@@ -198,8 +199,8 @@ def loadConfigFromDirectory(cml_args_config, dir_path):
         if cml_args_config[0] == '.':
 
             # Locate all files in the data directory that end with '.config'
-            config_files = [file_name for file_name in os.listdir(dir_path) \
-                if (file_name.endswith('.config') or file_name.endswith('dfnstation.cfg')) \
+            config_files = [file_name for file_name in os.listdir(dir_path) 
+                if (file_name.endswith('.config') or file_name.endswith('dfnstation.cfg')) 
                 and not (file_name == 'bak.config')]
 
             # If there is exactly one config file, use it
@@ -217,10 +218,8 @@ def loadConfigFromDirectory(cml_args_config, dir_path):
 
 
         if config_file is None:
-            raise FileNotFoundError("A config file could not be found in directory: {:s}, {:s}".format(
-                dir_path, cml_args_config
-                )
-            )
+            raise FileNotFoundError("A config file could not be found in directory: {:s}, config arg: {}".format(
+                dir_path, cml_args_config))
 
         print('Loading config file:', config_file)
 
@@ -276,6 +275,7 @@ class Config:
 
 
         self.external_script_run = False
+        self.external_script_log = False
         self.auto_reprocess_external_script_run = False
         self.external_script_path = None
         self.external_function_name = "rmsExternal"
@@ -429,6 +429,9 @@ class Config:
         # Enable/disable saving a live.jpg file in the data directory with the latest image
         self.live_jpg = False
 
+        # location of ffmpeg if available - default is to assume it is in the path
+        self.ffmpeg_binary = 'ffmpeg'
+
         # Toggle saving of frame time files (FT files) to times_dir
         self.save_frame_times = True
 
@@ -493,6 +496,9 @@ class Config:
 
         # Flag determining if uploading is enabled or not
         self.upload_enabled = True
+
+        # Flag determining if uploading splitting is enabled or not
+        self.upload_split = True
 
         # Delay upload after files are added to the queue by the given number of minutes
         self.upload_delay = 0
@@ -650,7 +656,7 @@ class Config:
 
         # Centroid filtering parameters
         self.centroids_max_deviation = 2 # maximum deviation of a centroid point from a LSQ fitted line (if above max, it will be rejected)
-        self.centroids_max_distance =  30 # maximum distance in pixels between centroids (used for filtering spurious centroids)
+        self.centroids_max_distance = 30 # maximum distance in pixels between centroids (used for filtering spurious centroids)
         self.centroids_filter_frame_gaps = True # filter out centroids with large frame gaps at the edges
 
         # Angular velocity filtering parameter - detections slower or faster than these angular velocities
@@ -697,10 +703,10 @@ class Config:
         self.dark_file = 'dark.bmp'
 
         self.star_catalog_path = os.path.join(self.rms_root_dir, 'Catalogs')
-        self.star_catalog_file = 'gaia_dr2_mag_11.5.npy'
+        self.star_catalog_file = 'GMN_StarCatalog'
 
         # Catalog band ratios for Sony CMOS cameras
-        #                                   B     V     R     I   (G    BR    BR)
+        #                                   B     V     R     I    G     BP    RP
         self.star_catalog_band_ratios = [0.15, 0.30, 0.25, 0.30, 0.00, 0.0, 0.00]
 
         self.platepar_name = 'platepar_cmn2010.cal'
@@ -738,8 +744,8 @@ class Config:
         self.recalibration_max_stars = 200
 
         ##### Thumbnails
-        self.thumb_bin =  4
-        self.thumb_stack   =  5
+        self.thumb_bin = 4
+        self.thumb_stack = 5
         self.thumb_n_width = 10
 
         ##### Stack
@@ -774,6 +780,7 @@ class Config:
 
         # colour scheme to use for showers
         self.shower_color_map = 'viridis'
+        self.sporadic_color ='gray'
 
 
         #### EGM96 vs WGS84 heights file
@@ -938,7 +945,7 @@ def parseDFNStation(config, parser):
     config.catalog_mag_limit = 4.5
 
     config.star_catalog_path = 'Catalogs'
-    config.star_catalog_file = 'BSC5'
+    config.star_catalog_file = 'GMN_StarCatalog'
     config.platepar_name = 'platepar_cmn2010.cal'
     config.deinterlace_order = -2
 
@@ -988,9 +995,11 @@ def parseSystem(config, parser):
     if parser.has_option(section, "external_script_run"):
         config.external_script_run = parser.getboolean(section, "external_script_run")
 
+    if parser.has_option(section, "external_script_log"):
+        config.external_script_log = parser.getboolean(section, "external_script_log")
 
     if parser.has_option(section, "auto_reprocess_external_script_run"):
-        config.auto_reprocess_external_script_run = parser.getboolean(section, \
+        config.auto_reprocess_external_script_run = parser.getboolean(section, 
             "auto_reprocess_external_script_run")
 
     if parser.has_option(section, "external_script_path"):
@@ -1049,7 +1058,7 @@ def parseCapture(config, parser):
     if parser.has_option(section, "logdays_to_keep"):
         config.logdays_to_keep = int(parser.get(section, "logdays_to_keep"))
 
-    log_level_mapping = { 0: 'CRITICAL',1: 'ERROR',2: 'WARNING',3: 'INFO',4: 'DEBUG'}
+    log_level_mapping = {0: 'CRITICAL',1: 'ERROR',2: 'WARNING',3: 'INFO',4: 'DEBUG'}
     
     if parser.has_option(section, "console_log_level"):
         config.console_log_level = parser.getint(section, "console_log_level")
@@ -1297,13 +1306,16 @@ def parseCapture(config, parser):
     if parser.has_option(section, "save_frame_times"):
         config.save_frame_times = parser.getboolean(section, "save_frame_times")
     
+    # obtain the path to a working ffmpeg, if available
+    config.ffmpeg_binary = isFfmpegWorking()
+
     # Enable/disable saving video frames - automatically off if FFmpeg is missing
-    ffmpeg_ok = isFfmpegWorking()
     if parser.has_option(section, "save_frames"):
         save_requested = parser.getboolean(section, "save_frames")
-        config.save_frames = save_requested and ffmpeg_ok
-        if save_requested and not ffmpeg_ok:
+        if save_requested and not config.ffmpeg_binary:
             print("save_frames requested but FFmpeg not available - disabling.")
+        else:
+            config.save_frames = save_requested
     else:
         config.save_frames = False
 
@@ -1383,13 +1395,16 @@ def parseCapture(config, parser):
     # TBD: It that case, no doubt some other settings must be overrifden or rejected 
     if parser.has_option(section, "realtime_video_detection"):
         config.realtime_video_detection = parser.getboolean(section, "realtime_video_detection")
+
     # The subdirectory of the nightly data directory used for realtime video detection
     if parser.has_option(section, "realtime_video_detection_night_subdir"):
         config.realtime_video_detection_night_subdir = parser.get(section, "realtime_video_detection_night_subdir")
+        
     # Support having an entirely separate config file for realtime video detections
     if parser.has_option(section, "realtime_video_detection_config_file"):
         config.realtime_video_detection_config_file = parser.get(section, "realtime_video_detection_config_file")
         config.realtime_video_detection_config = parse(os.path.join(config.config_file_path, config.realtime_video_detection_config_file))
+
 
 
 def parseUpload(config, parser):
@@ -1401,6 +1416,10 @@ def parseUpload(config, parser):
     # Enable/disable upload
     if parser.has_option(section, "upload_enabled"):
         config.upload_enabled = parser.getboolean(section, "upload_enabled")
+
+    # Enable uploading images in one archive and data derived from images in another
+    if parser.has_option(section, "upload_split"):
+        config.upload_split = parser.getboolean(section, "upload_split")
 
     # Address of the upload server
     if parser.has_option(section, "hostname"):
@@ -1660,11 +1679,11 @@ def parseMeteorDetection(config, parser):
     # If the distance is > 20 (in old configs before the scaling fix), rescale using the old function
     if config.distance_threshold_det > 20**2:
 
-        config.distance_threshold_det = normalizeParameter(config.distance_threshold_det, config, \
+        config.distance_threshold_det = normalizeParameter(config.distance_threshold_det, config, 
             binning=config.detection_binning_factor)
     else:
 
-        config.distance_threshold_det = normalizeParameterMeteor(config.distance_threshold_det, config, \
+        config.distance_threshold_det = normalizeParameterMeteor(config.distance_threshold_det, config, 
             binning=config.detection_binning_factor)
 
 
@@ -1675,11 +1694,11 @@ def parseMeteorDetection(config, parser):
     # If the gap is > 100px (in old configs before the scaling fix), rescale using the old function
     if config.gap_threshold > 100**2:
 
-        config.gap_threshold_det = normalizeParameter(config.gap_threshold_det, config, \
+        config.gap_threshold_det = normalizeParameter(config.gap_threshold_det, config, 
             binning=config.detection_binning_factor)
 
     else:
-        config.gap_threshold_det = normalizeParameterMeteor(config.gap_threshold_det, config, \
+        config.gap_threshold_det = normalizeParameterMeteor(config.gap_threshold_det, config, 
             binning=config.detection_binning_factor)
 
 
@@ -1764,7 +1783,7 @@ def parseMeteorDetection(config, parser):
     if parser.has_option(section, "kht_binary_extension"):
         config.kht_binary_extension = parser.get(section, "kht_binary_extension")
 
-    config.kht_lib_path = findBinaryPath(config, config.kht_build_dir, config.kht_binary_name, \
+    config.kht_lib_path = findBinaryPath(config, config.kht_build_dir, config.kht_binary_name, 
         config.kht_binary_extension)
 
 
@@ -2010,3 +2029,8 @@ def parseColors(config, parser):
 
     if parser.has_option(section, "shower_color_map"):
         config.shower_color_map = parser.get(section, "shower_color_map")
+        
+    if parser.has_option(section, "sporadic_color"):
+        config.sporadic_color = parser.get(section, "sporadic_color")
+        if config.sporadic_color not in mcolors.CSS4_COLORS:
+            config.sporadic_color = 'gray'

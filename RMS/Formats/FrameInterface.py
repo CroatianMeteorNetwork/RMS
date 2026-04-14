@@ -34,7 +34,7 @@ from RMS.Routines.GstreamerCapture import GstVideoFile
 from RMS.Logger import getLogger
 
 # Get the logger from the main module
-log = getLogger("logger")
+log = getLogger("rmslogger")
 
 
 # Define a single, safe messagebox function
@@ -191,6 +191,30 @@ class InputType(object):
 
     def currentFrameTime(self, frame_no=None, dt_obj=False):
         pass
+
+    def getTargetDtype(self, first_frame_data=None):
+        """ Determine the target dtype based on the target bit depth of the input images and the 
+            processing configuration.
+            
+        If binning with 'sum' method is used, the target dtype is forced to uint16 to prevent overflow.
+        Otherwise, it depends on the input data's bit depth.
+        """
+        
+        # Check if bit depth should be at least uint16 to handle potential overflow from sum binning
+        if hasattr(self, 'config'):
+            if self.config.detection_binning_factor > 1 and \
+                self.config.detection_binning_method == 'sum':
+                return np.uint16
+
+        # Check the bit depth of input data
+        if first_frame_data is not None:
+            if first_frame_data.dtype == np.uint8:
+                return np.uint8
+            else:
+                return np.uint16
+
+        # Standard default is uint16 for robustness
+        return np.uint16
 
     def getTargetDtype(self, first_frame_data=None):
         """ Determine the target dtype based on the target bit depth of the input images and the 
@@ -1016,6 +1040,7 @@ class InputTypeVideo(InputType):
         print('Frames to read: ' + str(frames_to_read), end='')
 
         # Load the chunk of frames
+        # Load the chunk of frames
         for i in range(frames_to_read):
 
             # Read a preloaded frame
@@ -1718,7 +1743,7 @@ class InputTypeImages(InputType):
 
 
             # Load info for FRIPON all-sky cameras
-            else:
+            elif ("PROGRAM" in self.fripon_header) and (self.fripon_header["PROGRAM"].strip() == "FreeTure"):
 
                 # Set station parameters if in the FRIPON mode
                 self.config.stationID = self.fripon_header["TELESCOP"].strip()
@@ -1726,9 +1751,9 @@ class InputTypeImages(InputType):
                 self.config.longitude = self.fripon_header["SITELONG"]
                 self.config.elevation = self.fripon_header["SITEELEV"] # MSL
 
-                # Set the catalog to BSC5
+                # Set the catalog to the GMN catalog
                 self.config.star_catalog_path = os.path.join(self.config.rms_root_dir, "Catalogs")
-                self.config.star_catalog_file = "BSC5"
+                self.config.star_catalog_file = "GMN_StarCatalog"
 
                 # Set approximate FOV
                 self.config.fov_h = 180
@@ -1736,6 +1761,10 @@ class InputTypeImages(InputType):
 
                 # Set magnitude limit
                 self.config.catalog_mag_limit = 3.5
+
+            # Non-FreeTrue fit file
+            else:
+                pass
 
 
 
@@ -1919,6 +1948,8 @@ class InputTypeImages(InputType):
         target_dtype = self.getTargetDtype()
 
         # Init making the FF structure
+        # Update the FF struct's target dtype based on the first frame's bit depth
+        target_dtype = self.getTargetDtype()
         ff_struct_fake = FFMimickInterface(self.nrows, self.ncols, target_dtype, res_size=self.config.background_reservoir_size)
 
         self.frame_dt_list = []
@@ -2294,7 +2325,8 @@ class InputTypeImages(InputType):
         """ Return the type of the UWO PNG image. """
 
         # Read in the magick number as a uint32
-        magicknum = np.frombuffer(img[0], dtype=np.uint32)[0]
+        # Use first 4 bytes of raw image data to handle any width pixels
+        magicknum = np.frombuffer(img.tobytes()[:4], dtype=np.uint32)[0]
 
         # Define the magick numbers for different UWO PNGs
         uwo_magick_num_list = [UWO_MAGICK_CAMO, UWO_MAGICK_EMCCD, UWO_MAGICK_ASGARD]

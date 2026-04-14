@@ -29,7 +29,7 @@ from RMS.Logger import LoggingManager, getLogger
 
 
 # Get the logger from the main module
-log = getLogger("logger")
+log = getLogger("rmslogger")
 
 
 from RMS.Astrometry.ApplyAstrometry import (
@@ -1247,6 +1247,7 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
             config.platepars_flux_recalibrated_name,
             ignore_distance_threshold=True,
             ignore_max_stars=True,
+            platepar=platepar
         )
 
     # Skip the rest if this flag is on. This is used on Python 2 systems, as the rest of the code doesn't play
@@ -1780,7 +1781,11 @@ def sensorCharacterization(config, flux_config, dir_path, meteor_data, default_f
         log.info("Rerunning star detection...")
 
         # Run star extraction again, and now FWHM will be computed
-        calstars_list = extractStarsAndSave(config, dir_path)
+        try:
+            calstars_list = extractStarsAndSave(config, dir_path)
+        except Exception as e:
+            log.error("Star extraction failed: {:s}".format(str(e)))
+            calstars_list = []
 
         # Check for a minimum of detected stars
         for ff_name, star_data in calstars_list:

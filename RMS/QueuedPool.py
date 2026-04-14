@@ -687,8 +687,8 @@ if __name__ == "__main__":
 
     # # Init logging
     # logging.basicConfig()
-    # log = getLogger('logger', level="INFO")
-     # log = getLogger('logger', level="DEBUG")
+    # log = getLogger('rmslogger', level="INFO")
+     # log = getLogger('rmslogger', level="DEBUG")
 
     log = None
 

@@ -21,7 +21,6 @@ import sys
 import traceback
 import time
 import multiprocessing
-import signal
 from math import floor
 
 import cv2
@@ -30,7 +29,7 @@ from RMS.Logger import getLogger
 from RMS.Misc import mkdirP
 
 # Get the logger from the main module
-log = getLogger("logger")
+log = getLogger("rmslogger")
 
 
 class RawFrameSaver(multiprocessing.Process):

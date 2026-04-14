@@ -287,14 +287,14 @@ def JD2HourAngle(jd):
     Arguments:
         jd: [float] Julian date.
     Return:
-        hour_angle: [float] Hour angle (deg).
+        hour_angle: [float] Hour angle (deg), normalized to [0, 360).
     """
 
     T = (jd - 2451545)/36525.0
     hour_angle = 280.46061837 + 360.98564736629*(jd - 2451545.0) + 0.000387933*T**2 \
                  - (T**3)/38710000.0
 
-    return hour_angle
+    return hour_angle % 360
 
 
 ############################

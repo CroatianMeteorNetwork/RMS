@@ -16,6 +16,9 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+# Version 2.0 major refactoring: added early update check, graceful shutdown, strict error handling, 
+# user-mode execution, comprehensive terminal support, and regex helper function
+#
 # Version 1.9 changed parsing of the current username and display number to handle various display managers
 #
 # Version 1.8 changed parsing of the current username and display number to handle username ending in a digit
@@ -46,69 +49,389 @@
 # array RunList so that after killing the instances we can then update RMS and then restart the stations.
 # Default behaviour if called with no arguments, - capture all the running RMS processes, kill them, update RMS, then start 
 # all that are configured within directory ~/source/Stations -
+#
+# NOTE: This script should be run as the capture user, not root. Add to user's crontab:
+#   crontab -e
+#   0 2 * * * /path/to/GRMSUpdater.sh --term gnome-terminal --force
+# This eliminates permission issues and follows the principle of least privilege.
 
-UserDisp=($(who | awk '$NF ~ /^\(:[0-9]+\)$/ {gsub(/[()]/,"",$NF); print $1,$NF}')) # grab the RMS username and current display number
-RunList=( $( ps -ef|grep -E -w -o '\/bin\/bash .*\/source\/RMS\/Scripts\/MultiCamLinux\/StartCapture.sh\ [[:alnum:]]{6}'| awk '{print $NF}' | sort -u )) # create an array of the running station names
+# Lock will be automatically released when script exits
 
+# Enable strict error handling
+set -Eeuo pipefail
+trap 'echo "Error: Script failed at line $LINENO"' ERR
 
-PidList=( $(ps -ef|awk '/\/bin\/bash .*\/source\/RMS\/Scripts\/MultiCamLinux\/StartCapture.sh/ {print $2}') ) 	# create an array of the running RMS processes
+# Ensure bash is used as the shell for all child processes
+# (fixes issues when script is run from cron which sets SHELL=/bin/sh)
+export SHELL=/bin/bash
 
+# Function to log messages via syslog
+log_message() {
+    local message="$1"
+    # Log to syslog and also echo for interactive runs
+    logger -t rms_updater "$message"
+    echo "$message"
+}
 
-        for Pid in "${PidList[@]}"
-                do
-		kill $Pid
-                done
+# ------------------------------------------------------------
+#  regex_for() – match ONLY the StartCapture.sh argv
+#  • anchors on argv-0 (script path) so terminals / python lines don't match
+#  • station ID must be a standalone argument (not part of a path)
+# ------------------------------------------------------------
+regex_for() {
+    # Match ONLY the actual bash script process, not terminals or wrappers
+    # ^/bin/bash        must start with /bin/bash (the actual script interpreter)
+    # [[:space:]]+      one-or-more spaces
+    # .*/StartCapture\.sh  script path
+    # [[:space:]]+      one-or-more spaces  
+    # $1                station ID
+    # ([[:space:]]|$)   end of arg or end of string
+    echo '^/bin/bash[[:space:]]+.*/StartCapture\.sh[[:space:]]+'"$1"'([[:space:]]|$)'
+}
 
-# This script when run as a crontab entry runs under root's account so we need to set some variables to allow the 
-# script to launch apps onto the users desktop -which it doesn't own. We also use this to build the full paths to any
-# files since jobs running under cron don't inherit normal users ENV variables
-# Note: this may well break if the distro used doesn't use xdm or if the user e.g. connects via xrdp....
+# Log script start
+log_message "GRMSUpdater.sh started with args: $*"
 
-export XAUTHORITY=/home/${UserDisp[0]}/.Xauthority
-export DISPLAY=${UserDisp[1]}
-
-
-if [[  -z "$1" ]] 					# called with no args
-then
-echo " ....Will restart all configured stations post-update"
-unset RunList
-	for Dir in /home/${UserDisp[0]}/source/Stations/*
-		do
-			if [[  "${Dir##*/}" != "Scripts" ]]
-			then
-			RunList+=(${Dir##*/}) 		# build an array of the configured stations
-			fi
-		done
-                /home/${UserDisp[0]}/source/RMS/Scripts/RMS_Update.sh >/dev/null
-		sleep 10
-		for Station in "${RunList[@]}"		# restart all that are configured
-        	do
-		# get the runline from this stations Desktop link
-		Delay=$(grep Exec ~/Desktop/${Station}_StartCap.desktop| sed 's/Exec=\(.*\).*\"$/\1/g'|awk '{print $(NF)}')
-		if [[ "$Delay" != "$Station" ]]
-		then
-			sleep 5
-			lxterminal --title=${Station} -e "/home/${UserDisp[0]}/source/RMS/Scripts/MultiCamLinux/StartCapture.sh ${Station} $Delay"  &
-			else
-			sleep 5
-			lxterminal --title=${Station} -e "/home/${UserDisp[0]}/source/RMS/Scripts/MultiCamLinux/StartCapture.sh ${Station}"  &
-		fi
-	 	done
-else
-
-# If called with any argument then all running RMS processes are killed and RMS updated
-# however only those only those stations that were actually running when called are restarted
-# and not all the stations that are configured. 
-# Handy if say out of 3 stations, one is not running due to a camera issue
-
-
-
-	/home/${UserDisp[0]}/source/RMS/Scripts/RMS_Update.sh >/dev/null 
-	sleep 10
-	for Station in "${RunList[@]}"
-		do
-			sleep 5
-                        lxterminal --title=${Station} -e "/home/${UserDisp[0]}/source/RMS/Scripts/MultiCamLinux/StartCapture.sh ${Station} $Delay"  &
-		done
+# Use flock to prevent multiple instances from running simultaneously
+LOCKFILE="/tmp/rms_grms_updater.lock"
+exec 200>"$LOCKFILE"
+if ! flock -n 200; then
+    log_message "Another GRMSUpdater instance is already running. Exiting."
+    exit 1
 fi
+
+# Parse command line arguments
+FORCE_UPDATE=false
+PREFERRED_TERM="lxterminal"     # default terminal
+POSITIONAL_ARGS=()
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --term)
+            PREFERRED_TERM="$2"
+            shift 2
+            ;;
+        --force)
+            FORCE_UPDATE=true
+            shift
+            ;;
+        *)
+            POSITIONAL_ARGS+=("$1")
+            shift
+            ;;
+    esac
+done
+
+# Restore positional parameters
+if [[ ${#POSITIONAL_ARGS[@]} -gt 0 ]]; then
+    set -- "${POSITIONAL_ARGS[@]}"
+else
+    set --  # Clear positional parameters
+fi
+
+# Set up path variables (running as capture user)
+USER_HOME="$HOME"
+RMS_DIR="$USER_HOME/source/RMS"
+STATIONS_DIR="$USER_HOME/source/Stations"
+
+# Export display environment for GUI applications (needed when running from cron)
+if [[ -z ${DISPLAY:-} ]]; then
+    DISPLAY=$(who | awk '/\(:[0-9]/{print $NF; exit}' | tr -d '()')
+    if [[ -n "$DISPLAY" ]]; then
+        export DISPLAY
+        log_message "Auto-detected DISPLAY=$DISPLAY"
+    else
+        log_message "Warning: Could not detect DISPLAY from 'who' output"
+    fi
+fi
+
+if [[ -n "$DISPLAY" ]]; then
+    export XAUTHORITY="$HOME/.Xauthority"
+    log_message "Using DISPLAY=$DISPLAY"
+    
+    # Set XDG_RUNTIME_DIR if not already set (needed for some terminals)
+    if [[ -z "${XDG_RUNTIME_DIR:-}" ]]; then
+        uid=$(id -u)
+        export XDG_RUNTIME_DIR="/run/user/$uid"
+        log_message "Set XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR"
+    fi
+    
+    # Set up D-Bus for gnome-terminal (when running from cron)
+    # Wrap in error handling to prevent crashes
+    if [[ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ]]; then
+        # Get UID safely
+        uid=""
+        if command -v id >/dev/null 2>&1; then
+            uid=$(id -u 2>/dev/null || echo "1000")
+        else
+            uid="1000"
+        fi
+        
+        bus_path="/run/user/${uid}/bus"
+        if [[ -e "$bus_path" ]] && [[ -S "$bus_path" ]]; then
+            export DBUS_SESSION_BUS_ADDRESS="unix:path=$bus_path"
+            log_message "Auto-set DBUS_SESSION_BUS_ADDRESS for gnome-terminal"
+        else
+            log_message "D-Bus session bus not available at $bus_path (normal in cron context)"
+        fi
+    else
+        log_message "DBUS_SESSION_BUS_ADDRESS already set: $DBUS_SESSION_BUS_ADDRESS"
+    fi
+else
+    log_message "No DISPLAY available - GUI terminals will fail, consider using --term tmux"
+fi
+
+# Check if updates are actually needed before disrupting running processes (unless --force is used)
+if [[ "$FORCE_UPDATE" != "true" ]]; then
+    cd "$RMS_DIR" || { log_message "Error: RMS directory not found at $RMS_DIR"; exit 1; }
+
+    # Get current branch and check for updates (similar to RMS_Update.sh early check)
+    CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
+    if [[ "$CURRENT_BRANCH" != "unknown" ]]; then
+        REMOTE_SHA=$(timeout 15s git ls-remote --quiet --heads origin "refs/heads/$CURRENT_BRANCH" | cut -f1)
+        LOCAL_SHA=$(git rev-parse HEAD)
+        
+        # Check for modified tracked files (excluding allowed config files)
+        MODIFIED_FILES=$(git diff --name-only | grep -v -E '^(\.config|camera_settings\.json)$' || true)
+        
+        if [[ -n "$REMOTE_SHA" && "$REMOTE_SHA" == "$LOCAL_SHA" && -z "$MODIFIED_FILES" ]]; then
+            log_message "RMS is already up to date ($CURRENT_BRANCH: $LOCAL_SHA) and no tracked file modifications - no need to restart stations"
+            log_message "Use --force to restart stations anyway"
+            log_message "GRMSUpdater.sh completed successfully (early exit - no updates needed)"
+            exit 0
+        elif [[ -n "$REMOTE_SHA" && "$REMOTE_SHA" == "$LOCAL_SHA" && -n "$MODIFIED_FILES" ]]; then
+            log_message "Repository up to date but tracked files modified:"
+            echo "$MODIFIED_FILES" | sed 's/^/  /' | while read -r line; do log_message "$line"; done
+            log_message "Proceeding with restart to restore tracked files"
+        else
+            log_message "Updates available for RMS ($CURRENT_BRANCH: $LOCAL_SHA → $REMOTE_SHA) - proceeding with restart"
+        fi
+    else
+        log_message "Warning: Could not determine current branch, proceeding with update"
+    fi
+else
+    log_message "Force update requested - proceeding with restart regardless of update status"
+    cd "$RMS_DIR" || { log_message "Error: RMS directory not found at $RMS_DIR"; exit 1; }
+fi
+
+# Find running stations by looking for StartCapture.sh processes
+mapfile -t RunList < <(
+    pgrep -f "Scripts/MultiCamLinux/StartCapture.sh" | while read -r pid; do
+        cmdline=$(ps -p "$pid" -o args= 2>/dev/null || continue)
+        if [[ "$cmdline" =~ Scripts/MultiCamLinux/StartCapture\.sh[[:space:]]+([[:alnum:]]{6}) ]]; then
+            echo "${BASH_REMATCH[1]}"
+        fi
+    done | sort -u
+)
+
+# Only stop processes if we actually need to update
+if [[ ${#RunList[@]} -gt 0 ]]; then
+    log_message "Gracefully stopping ${#RunList[@]} running RMS stations for update: ${RunList[*]}"
+    
+    # First, try graceful shutdown with SIGTERM for each station (StartCapture forwards as SIGINT)
+    for station in "${RunList[@]}"; do
+        log_message "Sending SIGTERM to all processes for station $station..."
+        pattern=$(regex_for "$station")
+        if pkill -f -TERM -- "$pattern" 2>/dev/null; then
+            log_message "Sent SIGTERM to station $station processes"
+        else
+            log_message "Warning: No processes found for station $station (may have already exited)"
+        fi
+    done
+    
+    # Wait for processes to shut down gracefully (with reasonable timeout)
+    SHUTDOWN_TIMEOUT=600  # 10 minutes - adjust based on your typical shutdown time
+    WAIT_INTERVAL=5
+    elapsed=0
+    
+    log_message "Waiting up to ${SHUTDOWN_TIMEOUT} seconds for graceful shutdown..."
+    
+    while [[ $elapsed -lt $SHUTDOWN_TIMEOUT ]]; do
+        # Check if any station processes are still running
+        still_running=()
+        for station in "${RunList[@]}"; do
+            pattern=$(regex_for "$station")
+            if pgrep -f -- "$pattern" >/dev/null 2>&1; then
+                still_running+=("$station")
+            fi
+        done
+        
+        if [[ ${#still_running[@]} -eq 0 ]]; then
+            log_message "All station processes shut down gracefully after ${elapsed} seconds"
+            break
+        fi
+        
+        log_message "Still waiting for ${#still_running[@]} stations to shutdown: ${still_running[*]} (${elapsed}s elapsed)"
+        sleep $WAIT_INTERVAL
+        elapsed=$((elapsed + WAIT_INTERVAL))
+    done
+    
+    # Force kill any remaining processes if timeout reached
+    final_check=()
+    for station in "${RunList[@]}"; do
+        pattern=$(regex_for "$station")
+        if pgrep -f -- "$pattern" >/dev/null 2>&1; then
+            final_check+=("$station")
+        fi
+    done
+    
+    if [[ ${#final_check[@]} -gt 0 ]]; then
+        log_message "Timeout reached. Force killing ${#final_check[@]} remaining stations: ${final_check[*]}"
+        for station in "${final_check[@]}"; do
+            log_message "Force killing all processes for station $station..."
+            pattern=$(regex_for "$station")
+            if pkill -f -KILL -- "$pattern" 2>/dev/null; then
+                log_message "Force killed station $station processes"
+            else
+                log_message "Warning: Could not kill processes for station $station (may have already exited)"
+            fi
+        done
+        
+        # Give a moment for force kills to take effect
+        sleep 2
+    fi
+    
+else
+    log_message "No running RMS stations found"
+fi
+
+# Note: When run from user cron, DISPLAY may not be set. Terminal launching will fall back to tmux if needed.
+
+# Helper function to launch terminal using preferred terminal
+launch_term() {                            # $1 = title, $2… = cmd+args
+    local title=$1; shift
+    local cmd pid
+    
+    # Set up debug logging
+    local LOGDIR="$USER_HOME/RMS_data/logs"
+    local LOGFILE="$LOGDIR/${title}_launcher_$(date +%F_%T).log"
+    mkdir -p "$LOGDIR"
+    
+    log_message "Launching terminal '$PREFERRED_TERM' for station $title"
+    log_message "Command: $*"
+    
+    case "$PREFERRED_TERM" in
+        lxterminal)
+            # Set SHELL to /bin/bash to fix lxterminal server mode issue
+            export SHELL=/bin/bash
+            # one quoted string after -e:
+            cmd=(lxterminal --title="$title" \
+                  -e "bash -c 'export GRMS_AUTO=1; exec \"\$@\"' _ $*")
+            ;;
+        kitty)
+            cmd=(env GRMS_AUTO=1 kitty -T "$title" "$@")
+            ;;
+        foot)
+            cmd=(env GRMS_AUTO=1 foot --app-id="$title" -e "$@")
+            ;;
+        footclient)
+            cmd=(env GRMS_AUTO=1 footclient --app-id="$title" -- "$@")
+            ;;
+        gnome-terminal)
+            # build one properly-quoted payload string
+            local payload
+            payload=$(printf '%q ' "$@")          # quote every arg
+            cmd=(gnome-terminal --title="$title" \
+                 -- bash -lc "export GRMS_AUTO=1; exec $payload")
+            ;;
+        tmux)
+            tmux has-session -t "$title" 2>/dev/null || \
+                tmux new -d -s "$title" "export GRMS_AUTO=1; exec $*"
+            return $?
+            ;;
+        *)
+            log_message "Unknown terminal '$PREFERRED_TERM'"
+            return 1
+            ;;
+    esac
+
+    # Check if we need a display for this terminal type
+    if [[ "$PREFERRED_TERM" != "tmux" && -z "$DISPLAY" ]]; then
+        log_message "Error: No DISPLAY available for GUI terminal '$PREFERRED_TERM'"
+        log_message "Try running with --term tmux or from a graphical session"
+        return 1
+    fi
+    
+    # spawn the terminal (with logging for debugging)
+    log_message "Executing: ${cmd[*]}"
+    ( exec 200>&-                     # Close the flock fd so children can't inherit it
+      setsid "${cmd[@]}" >"$LOGFILE" 2>&1
+    ) &
+    local term_pid=$!
+    log_message "Terminal PID: $term_pid"
+    
+    # wait until the real StartCapture for this station shows up (max 10s)
+    local tries=0
+    local pat="StartCapture\\.sh[[:space:]]+$title([[:space:]]|$)"
+    log_message "Waiting for process pattern: $pat"
+    
+    until pgrep -f -- "$pat" >/dev/null; do
+        (( tries++ > 20 )) && { 
+            log_message "Terminal failed for $title after 10 seconds"
+            log_message "Check log file: $LOGFILE"
+            return 1
+        }
+        sleep 0.5
+    done
+    
+    log_message "Station $title started successfully"
+    return 0
+}
+
+# -------------------------------------------------------------------
+#  restart_stations  – relaunch each station in its own lxterminal
+# -------------------------------------------------------------------
+restart_stations() {
+    local stations_to_restart=("$@")
+
+    if [[ ${#stations_to_restart[@]} -eq 0 ]]; then
+        log_message "No stations to restart"
+        return
+    fi
+
+    log_message "Restarting ${#stations_to_restart[@]} stations: ${stations_to_restart[*]}"
+
+    for station in "${stations_to_restart[@]}"; do
+        log_message "Starting station $station"
+        sleep 5   # small stagger so they don't all open at once
+
+        if ! launch_term "$station" \
+              "$RMS_DIR/Scripts/MultiCamLinux/StartCapture.sh" "$station"; then
+            log_message "Failed to start station $station – continuing"
+        fi
+    done
+}
+
+
+# Run the actual RMS update
+log_message "Running RMS update..."
+if "$RMS_DIR/Scripts/RMS_Update.sh" >/dev/null; then
+    log_message "RMS update completed successfully"
+else
+    log_message "Warning: RMS update failed, but continuing to restart stations since they were already stopped"
+fi
+
+if [[ ${#POSITIONAL_ARGS[@]} -eq 0 ]]; then
+    # Called with no args - restart all configured stations
+    log_message "Will restart all configured stations post-update"
+    
+    # Build array of all configured stations
+    mapfile -t configured_stations < <(
+        for dir in "$STATIONS_DIR"/*; do
+            if [[ -d "$dir" && "${dir##*/}" != "Scripts" ]]; then
+                echo "${dir##*/}"
+            fi
+        done
+    )
+    
+    restart_stations "${configured_stations[@]}"
+    
+else
+    # Called with argument - only restart stations that were actually running
+    log_message "Will restart only previously running stations: ${RunList[*]}"
+    restart_stations "${RunList[@]}"
+fi
+
+# Log script completion
+log_message "GRMSUpdater.sh completed successfully"
 

@@ -24,7 +24,7 @@ from RMS.Logger import getLogger
 
 
 # Get the logger from the main module
-log = getLogger("logger")
+log = getLogger("rmslogger")
 
 
 # Cython init

@@ -40,7 +40,8 @@ from RMS.Misc import RmsDateTime, mkdirP
 
 
 # Get the logger from the main module
-log = getLogger("logger")
+log = getLogger("rmslogger")
+
 
 
 def detectStarsAndMeteorsFrameInterface(
@@ -335,7 +336,9 @@ def saveDetections(detection_results, ff_dir, config, output_suffix=''):
             continue
 
         # Construct the table of the star parameters
-        star_data = zip(y2, x2, amplitude, intensity, fwhm, background, snr, saturated_count)
+        # CALSTARS format: Y(0) X(1) IntensSum(2) Ampltd(3) FWHM(4) BgLvl(5) SNR(6) NSatPx(7)
+        # Note: intensity=IntensSum (integrated), amplitude=Ampltd (peak)
+        star_data = zip(y2, x2, intensity, amplitude, fwhm, background, snr, saturated_count)
 
         # Add star info to the star list
         star_list.append([ff_name, star_data])
@@ -570,7 +573,7 @@ if __name__ == "__main__":
     ### Init the logger
     log_manager = LoggingManager()
     log_manager.initLogging(config, cml_args.prefix, safedir=cml_args.dir_path)
-    log = getLogger("logger")
+    log = getLogger("rmslogger")
 
     # Ensure the output directory exists
     if cml_args.out_dir is not None:

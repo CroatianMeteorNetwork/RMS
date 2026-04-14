@@ -13,7 +13,7 @@ from RMS.Misc import RmsDateTime
 from RMS.UploadManager import getSSHAndSFTP
 
 # Get the logger from the main module
-log = getLogger("logger")
+log = getLogger("rmslogger")
 
 
 
@@ -82,6 +82,10 @@ def downloadNewPlatepar(config):
         sftp.posix_rename(remote_platepar, dl_pp_name)
 
         log.info('Remote platepar renamed to: ' + dl_pp_name)
+
+    except (paramiko.SSHException, EOFError, OSError) as e:
+        log.warning('Connection error during platepar download: {}'.format(e))
+        return False
 
     finally:
         if sftp:

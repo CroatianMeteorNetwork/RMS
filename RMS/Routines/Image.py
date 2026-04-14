@@ -9,7 +9,6 @@ import time
 
 import numpy as np
 import scipy.misc
-import scipy.ndimage
 import cv2
 
 from PIL import Image, ImageFont, ImageDraw 
@@ -47,52 +46,69 @@ from RMS.Routines.BinImageCy import binImage as binImageCy
 class CoordinateFilter:
     def __init__(self, image_shape, mask, border):
         """
-        Initializes the CoordinateFilter with image properties and computes the distance map.
+        Initializes the CoordinateFilter with image properties for filtering coordinates
+        that are too close to the image border or inside the mask.
 
         Arguments:
             image_shape: [tuple] Shape of the image (height, width).
-            mask: [np.ndarray] Binary mask where black (0) = masked out, white (255) = clear.
-            border: [float] Distance threshold in pixels.
+            mask: [MaskStructure or None] Mask structure with .img attribute where
+                black (0) = masked out, white (255) = clear.
+            border: [float] Distance threshold in pixels from the image edge.
         """
-        self.image_shape = image_shape
-        self.mask = mask
+        self.h, self.w = image_shape
         self.border = border
 
-        h, w = image_shape
-
-        # Create a binary mask for borders
-        border_mask = np.zeros(image_shape, dtype=bool)
-
-        # Define the border mask using floating-point precision
-        y_indices, x_indices = np.indices(image_shape)
-        border_mask |= (x_indices < border) | (x_indices > (w - border))
-        border_mask |= (y_indices < border) | (y_indices > (h - border))
-
-        # Combine the border mask with the given mask
-        if mask is None:
-            self.combined_mask = border_mask
+        # Extract the mask image array from the MaskStructure object (if given)
+        if mask is not None and hasattr(mask, 'img'):
+            self.mask_img = mask.img
+        elif mask is not None and isinstance(mask, np.ndarray):
+            self.mask_img = mask
         else:
-            self.combined_mask = (mask == 0) | border_mask
-
-        # Compute Manhattan distance from the clear (non-masked) regions
-        self.distance_map = scipy.ndimage.distance_transform_cdt(~self.combined_mask, 
-                                                                metric='taxicab').astype(float)
+            self.mask_img = None
 
     def filterCoordinates(self, coords):
         """
-        Filters out coordinates based on the precomputed distance map and border thresholds.
+        Filters out coordinates that are too close to the image border or inside the mask.
 
         Arguments:
-            coords: [array-like] List of (x, y) coordinates to filter.
+            coords: [array-like] Array of (x, y) coordinates to filter, shape (N, 2).
 
         Returns:
             (filtered_coords, valid_flags):
                 - np.ndarray: Filtered array of coordinates.
                 - np.ndarray: Boolean flags indicating which coordinates are valid.
         """
-        
-        coords_test = np.array(coords).astype(int)
-        valid_flags = np.array([self.distance_map[y, x] > 0 for x, y in coords_test])
+
+        coords_array = np.array(coords)
+        if coords_array.size == 0:
+            return coords_array, np.zeros(0, dtype=bool)
+        coords_int = coords_array.astype(np.int32)
+
+        x_vals = coords_int[:, 0]
+        y_vals = coords_int[:, 1]
+
+        # Check border distance
+        valid_flags = (
+            (x_vals >= self.border) & (x_vals < self.w - self.border) &
+            (y_vals >= self.border) & (y_vals < self.h - self.border)
+        )
+
+        # Check mask (only for coordinates that passed the border check)
+        if self.mask_img is not None:
+            xs_valid = x_vals[valid_flags]
+            ys_valid = y_vals[valid_flags]
+
+            in_bounds = (
+                (ys_valid >= 0) & (ys_valid < self.mask_img.shape[0]) &
+                (xs_valid >= 0) & (xs_valid < self.mask_img.shape[1])
+            )
+
+            mask_ok = np.ones_like(xs_valid, dtype=bool)
+            if np.any(in_bounds):
+                mask_vals = self.mask_img[ys_valid[in_bounds], xs_valid[in_bounds]]
+                mask_ok[in_bounds] = mask_vals != 0
+
+            valid_flags[valid_flags] &= mask_ok
 
         filtered_coords = coords[valid_flags]
 
@@ -582,7 +598,7 @@ def applyBrightnessAndContrast(img, brightness, contrast):
     img_type = img.dtype
 
     # Convert image to float
-    img = img.astype(float)
+    img = img.astype(np.float32)
 
     # Apply brightness
     img = img + brightness
@@ -1037,9 +1053,6 @@ def thickLine(img_h, img_w, x_cent, y_cent, length, rotation, radius):
         photom_mask: [ndarray] Photometric mask.
     """
 
-    # Init the photom_mask array
-    photom_mask = np.zeros((img_h, img_w), dtype=np.uint8)
-
     rotation = np.radians(rotation)
 
     # Compute the bounding box
@@ -1050,7 +1063,7 @@ def thickLine(img_h, img_w, x_cent, y_cent, length, rotation, radius):
     x1 = math.ceil(x_cent + np.cos(rotation)*length/2.0)
 
     # Init the photom_mask array
-    photom_mask = np.zeros((img_h, img_w))
+    photom_mask = np.zeros((img_h, img_w), dtype=np.uint8)
 
 
     dx = abs(x1 - x0)

@@ -26,11 +26,14 @@ from RMS.Astrometry.ApplyAstrometry import (
     applyAstrometryFTPdetectinfo,
     applyPlateparToCentroids,
     extinctionCorrectionTrueToApparent,
+    getFOVSelectionRadius,
     photometryFitRobust,
     rotationWrtHorizon,
+    xyToRaDecPP,
 )
-from RMS.Astrometry.Conversions import date2JD, raDec2AltAz
-from RMS.Astrometry.FFTalign import alignPlatepar
+from RMS.Astrometry.CyFunctions import subsetCatalog
+from RMS.Astrometry.Conversions import date2JD, jd2Date, raDec2AltAz
+from RMS.Astrometry.NNalign import alignPlatepar
 from RMS.Formats import CALSTARS, FFfile, FTPdetectinfo, Platepar, StarCatalog
 from RMS.Formats.FTPdetectinfo import findFTPdetectinfoFile, validDefaultFTPdetectinfo
 from RMS.Math import angularSeparation
@@ -42,7 +45,8 @@ from RMS.Misc import RmsDateTime
 RECALIBRATE_NEIGHBOURHOOD_SIZE = 3
 
 # Get the logger from the main module
-log = getLogger("logger", level="INFO")
+log = getLogger("rmslogger", level="INFO")
+
 
 def loadRecalibratedPlatepar(dir_path, config, file_list=None, type='meteor'):
     """
@@ -208,6 +212,25 @@ def recalibrateFF(
 
     ##########
 
+    # Pre-filter catalog to FOV region. This avoids re-subsetting the full catalog (potentially
+    # 50k+ stars) on every optimizer iteration. Safe because matched stars are always well inside
+    # the FOV boundary — stars aren't detected within ~15 px of image edges and the max match
+    # radius is 10 px, so stars entering/leaving the subset boundary can never affect matching.
+    fov_radius = getFOVSelectionRadius(working_platepar)
+    _, RA_c, dec_c, _ = xyToRaDecPP(
+        [jd2Date(jd)], [working_platepar.X_res/2], [working_platepar.Y_res/2], [1],
+        working_platepar, extinction_correction=False
+    )
+    effective_lim_mag = lim_mag if lim_mag is not None else config.catalog_mag_limit
+    _, catalog_stars = subsetCatalog(
+        catalog_stars, RA_c[0], dec_c[0], jd,
+        working_platepar.lat, working_platepar.lon,
+        fov_radius, effective_lim_mag
+    )
+
+    log.info('Pre-filtered catalog to {:d} stars within {:.1f} deg FOV radius'.format(
+        len(catalog_stars), fov_radius))
+
     # Go through all radii and match the stars
     min_match_radius = None
     for match_radius in radius_list:
@@ -261,12 +284,14 @@ def recalibrateFF(
         # Compute the minimization tolerance
         fatol, xatol_ang = CheckFit.computeMinimizationTolerances(config, working_platepar, len(star_dict_ff))
 
+        simplex = CheckFit.buildNelderMeadSimplex(p0, working_platepar.dec_d, mode="floor")
+
         res = scipy.optimize.minimize(
             CheckFit._calcImageResidualsAstro,
             p0,
             args=(config, working_platepar, catalog_stars, star_dict_ff, match_radius),
             method='Nelder-Mead',
-            options={'fatol': fatol, 'xatol': xatol_ang},
+            options={'fatol': fatol, 'xatol': xatol_ang, 'initial_simplex': simplex},
         )
 
         ###
@@ -613,25 +638,24 @@ def recalibratePlateparsForFF(
                 ff_name=ff_name,
             )
 
-            # If the recalibration failed, try using FFT alignment
+            # If the recalibration failed, try using NN alignment
             if result is None:
 
-                log.info('Running FFT alignment...')
+                log.info('Running NN alignment...')
 
-                # Run FFT alignment
-                calstars_coords = np.array(star_dict_ff[jd])[:, :2]
-                calstars_coords[:, [0, 1]] = calstars_coords[:, [1, 0]]
-                test_platepar = alignPlatepar(
-                    config, prev_platepar, calstars_time, calstars_coords, show_plot=False
+                # Run NN alignment - pass full CALSTARS data so alignPlatepar can infer catalog LM
+                calstars_data = np.array(star_dict_ff[jd])
+                test_platepar, _ = alignPlatepar(
+                    config, prev_platepar, calstars_time, calstars_data, show_plot=False
                 )
 
-                # Try to recalibrate after FFT alignment
+                # Try to recalibrate after NN alignment
                 result, _ = recalibrateFF(
-                    config, test_platepar, jd, star_dict_ff, catalog_stars, lim_mag=lim_mag, 
+                    config, test_platepar, jd, star_dict_ff, catalog_stars, lim_mag=lim_mag,
                     ignore_distance_threshold=True, debug=debug, ff_name=ff_name
                 )
 
-                # If the FFT alignment failed, align the previous platepar using the smallest radius that 
+                # If the NN alignment failed, align the previous platepar using the smallest radius that
                 # matched and force save the the platepar
                 if (result is None) and (min_match_radius is not None):
                     log.info(
@@ -664,7 +688,7 @@ def recalibratePlateparsForFF(
                 working_platepar = result
 
 
-            # If the working platepar keeps failing, try using the original platepar before any FFT alignment
+            # If the working platepar keeps failing, try using the original platepar before any NN alignment
             if result is None:
                 log.info('Recalibration failed, trying to use the original platepar...')
                 result, _ = recalibrateFF(
@@ -719,7 +743,7 @@ def recalibratePlateparsForFF(
 
 
 def recalibrateSelectedFF(dir_path, ff_file_names, calstars_data, config, lim_mag, \
-    pp_recalib_name, ignore_distance_threshold=False, ignore_max_stars=False):
+    pp_recalib_name, ignore_distance_threshold=False, ignore_max_stars=False, platepar=None):
     """Recalibrate FF files, ignoring whether there are detections.
 
     Arguments:
@@ -736,6 +760,7 @@ def recalibrateSelectedFF(dir_path, ff_file_names, calstars_data, config, lim_ma
         ignore_distance_threshold: [bool] Don't consider the recalib as failed if the median distance
             is larger than the threshold.
         ignore_max_stars: [bool] Ignore the maximum number of image stars for recalibration.
+        platepar: [Platepar instance] Optional platepar to use as a starting point. None by default.
 
     Return:
         recalibrated_platepars: [dict] A dictionary where the keys are FF file names and values are
@@ -775,8 +800,17 @@ def recalibrateSelectedFF(dir_path, ff_file_names, calstars_data, config, lim_ma
 
     catalog_stars, _, config.star_catalog_band_ratios = star_catalog_status
     # log.info(catalog_stars)
-    prev_platepar = Platepar.Platepar()
-    prev_platepar.read(os.path.join(dir_path, config.platepar_name), use_flat=config.use_flat)
+
+    # If the platepar was not given, try to find it
+    if platepar is None:
+        prev_platepar = Platepar.findBestPlatepar(config, dir_path)
+
+    else:
+        prev_platepar = copy.deepcopy(platepar)
+
+    if prev_platepar is None:
+        log.error("recalibrateSelectedFF: Could not find a platepar file! Recalibration aborted.")
+        return {}
 
     # Update the platepar coordinates from the config file
     prev_platepar.lat = config.latitude
@@ -1177,13 +1211,22 @@ def recalibrateIndividualFFsAndApplyAstrometry(
         ff_dt = FFfile.filenameToDatetime(ff_name)
         dt_list.append(ff_dt)
 
-        # Compute the angular separation from the reference platepar
+        # Compute the angular separation from the reference platepar by projecting
+        # both FOV centres at the FF file's observation time. This correctly handles
+        # platepars with different JD reference epochs.
+        ff_time = FFfile.getMiddleTimeFF(ff_name, config.fps, ret_milliseconds=True)
+        _, ref_ra, ref_dec, _ = xyToRaDecPP(
+            [ff_time], [platepar.X_res / 2], [platepar.Y_res / 2], [1], platepar,
+            extinction_correction=False)
+        _, temp_ra, temp_dec, _ = xyToRaDecPP(
+            [ff_time], [pp_temp.X_res / 2], [pp_temp.Y_res / 2], [1], pp_temp,
+            extinction_correction=False)
         ang_dist = np.degrees(
             angularSeparation(
-                np.radians(platepar.RA_d),
-                np.radians(platepar.dec_d),
-                np.radians(pp_temp.RA_d),
-                np.radians(pp_temp.dec_d),
+                np.radians(ref_ra[0]),
+                np.radians(ref_dec[0]),
+                np.radians(temp_ra[0]),
+                np.radians(temp_dec[0]),
             )
         )
         ang_dists.append(ang_dist*60)
@@ -1433,7 +1476,7 @@ if __name__ == "__main__":
     log_manager.initLogging(config, 'recalibrate_', safedir=dir_path)
 
     # Get the logger handle
-    log = getLogger("logger", level="INFO")
+    log = getLogger("rmslogger", level="INFO")
 
     # Run the recalibration and recomputation
     applyRecalibrate(ftpdetectinfo_path, config, load_all=cml_args.all, generate_ufoorbit=(not cml_args.skipuforbit and not cml_args.all), debug=cml_args.debug)

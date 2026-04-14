@@ -1,3 +1,4 @@
+#!/bin/bash
 # This software is part of the Linux port of RMS
 # Copyright (C) 2023  Ed Harman
 # 
@@ -15,14 +16,11 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 
-#!/bin/bash
 #
 # Version 1.1   - fixed bug introduced during testing
 # Version 1.0	- initial release
 
 
-
-#!/usr/bin/bash
 
 echo -e "\n\n\nThis script automates the download and installation of RMS and configures support for multiple cameras on a generic Ubuntu-Desktop"
 echo -e "\n If you wish to proceed type y or Y at the prompt or n/N to exit"
@@ -36,7 +34,7 @@ mkdir ~/source
 cd ~/source
 sudo apt-get install -y git
 git clone https://github.com/CroatianMeteorNetwork/RMS.git
-source ~/source/RMS/Scripts/MultiCamLinux/RMSInstaller.sh
+source ~/source/RMS/Scripts/RMS_Installer.sh
 ln -s ~/source/RMS/Scripts/MultiCamLinux/icon.png ~/source/cmn_binviewer
 echo -e "\n\n\nDo you wish to configure some stations?\n"
 read -p  "Y/N: " Ans

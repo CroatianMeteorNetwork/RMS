@@ -21,7 +21,6 @@ from __future__ import print_function, absolute_import, division
 import os
 import sys
 import argparse
-import platform
 import subprocess
 import time
 
@@ -260,6 +259,7 @@ class FrameDisplay:
             self._plt.close(self._mpl_fig)
             self._mpl_ready = False
 
+
 def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format=None, hide=False,
         avg_background=False, split=False, add_timestamp=False, add_frame_number=False, append_ff_to_video=False,
          add_shower_name=False, associations={}):
@@ -304,6 +304,10 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format=N
         # Make the image square
         img_size = max(y_size, x_size)
 
+        # ffmpeg requires dimensions to be divisible by two on some platforms see issue 742
+        if img_size % 2: 
+            img_size +=1
+            
         background = np.zeros((img_size, img_size), np.uint8)
         add_timestamp = False
         add_shower_name = False
@@ -339,7 +343,11 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format=N
 
     # if the file format was mp4, lets make a video from the data
     makevideo = False
+    ffmpeg_path = config.ffmpeg_binary
     if extract_format == 'mp4':
+        if not ffmpeg_path:
+            print('ffmpeg not available, unable to create video')
+            return 
         makevideo = True
         extract_format = 'png'
 
@@ -359,7 +367,7 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format=N
         for current_line in range(fr.lines):
             for z in range(fr.frameNum[current_line]):
                 t = fr.t[current_line][z]
-                if not t in clips:
+                if t not in clips:
                     clips[t] = []
                 clips[t].append((current_line, z))
                 start = min(start, t)
@@ -505,27 +513,10 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format=N
                 saveFramesForMeteorImage(meteor_image, fr_path, add_timestamp, frame_num - 1, frameCount, video_num,
                                          extract_format, framefiles, dir_path, add_shower_name, timestamp_title, showerNameTitle)
 
-            root = os.path.dirname(__file__)
-            ffmpeg_path = os.path.join(root, "ffmpeg.exe")
-            
             mp4_path = os.path.join(dir_path, fr_path.replace('.bin', '') + '_line_{:02d}.mp4'.format(video_num))
 
-            # If running on Windows, use ffmpeg.exe
-            if platform.system() == 'Windows':
-                com = ffmpeg_path + " -y -f image2 -pattern_type sequence -framerate " + str(config.fps) + " -start_number " + str(0) + " -i " + img_patt +" " + mp4_path
-                
-
-            else:
-                software_name = "avconv"
-                if os.system(software_name + " --help > /dev/null"):
-                    software_name = "ffmpeg"
-                    # Construct the ecommand for ffmpeg           
-                    com = software_name + " -y -f image2 -pattern_type sequence -framerate " + str(config.fps) + " -start_number " + str(0) + " -i " + img_patt +" -pix_fmt yuv420p " + mp4_path
-                else:
-                    com = "cd " + dir_path + ";" \
-                        + software_name + " -v quiet -r 30 -y -start_number " + str(0) + " -i " + img_patt \
-                        + " -vcodec libx264 -pix_fmt yuv420p -crf 25 -movflags faststart -g 15 -vf \"hqdn3d=4:3:6:4.5,lutyuv=y=gammaval(0.97)\" " \
-                        + mp4_path
+            # Construct the command for ffmpeg           
+            com = ffmpeg_path + " -y -hide_banner -loglevel error -f image2 -pattern_type sequence -framerate " + str(config.fps) + " -start_number " + str(0) + " -i " + img_patt +" -pix_fmt yuv420p " + mp4_path
             
             # Print the command
             print("Command:")
@@ -557,8 +548,7 @@ def saveFramesForMeteorImage(meteorImage, frPath, addTimestamp, lastFrameNumber,
     # append frames for 1.5 second
     for frameNumber in range(frameCount):
         frameFileName = frPath.replace('.bin', '') \
-                        + "_line_{:02d}_frame_{:03d}.{:s}".format(videoNumber, lastFrameNumber + frameNumber + 1,
-                                                                  format)
+            + "_line_{:02d}_frame_{:03d}.{:s}".format(videoNumber, lastFrameNumber + frameNumber + 1, format)
         cv2.imwrite(os.path.join(folder, frameFileName), meteorImage)
         frameFiles.append(frameFileName)
 
@@ -627,9 +617,9 @@ def addTextToImage(image, title, x, y):
 
 
 
-# Resize image to fit window to screen (for images larger than 1280x720)
-# By default resize to HD (with=1280 same as for regular camera resolution)
 def resizeImageIfNeed(image, width=1280):
+    # Resize image to fit window to screen (for images larger than 1280x720)
+    # By default resize to HD (with=1280 same as for regular camera resolution)
 
     (h, w) = image.shape[:2]
     #  Resize only if image larger than required
@@ -644,6 +634,7 @@ def resizeImageIfNeed(image, width=1280):
 def getTimestampTitle(stationName, startDate, frameNumber, fps):
     timestamp = startDate + datetime.timedelta(seconds=(frameNumber/fps))
     return stationName + ' ' + (timestamp.strftime('%Y-%m-%d %H:%M:%S.%f')[:-5]) + ' UTC'
+
 
 def getStationNameAndTimestampfromFile(ff_path):
     fileName = os.path.basename(ff_path)

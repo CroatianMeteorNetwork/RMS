@@ -63,7 +63,7 @@ from RMS.Logger import LoggingManager, getLogger
 import RMS.ConfigReader as cr
 
 # Get the logger from the main module
-log = getLogger("logger")
+log = getLogger("rmslogger")
 
 
 # Suffix for unfiltered FTPdetectinfo files
@@ -633,7 +633,7 @@ if __name__ == "__main__":
     ### Init the logger
     log_manager = LoggingManager()
     log_manager.initLogging(config, 'reprocess_')
-    log = getLogger("logger")
+    log = getLogger("rmslogger")
 
     #########################
 

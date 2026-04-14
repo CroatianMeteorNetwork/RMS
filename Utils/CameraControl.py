@@ -80,7 +80,7 @@ else:
     import Utils.CameraControl27 as dvr
 
 # Get the logger from the main module
-log = getLogger("logger")
+log = getLogger("rmslogger")
 
 
 def rebootCamera(cam):
@@ -917,7 +917,7 @@ if __name__ == '__main__':
     # Initialise a logger, when running in standalone mode, to avoid DVRip's excessive debug messages
     log_manager = LoggingManager()
     log_manager.initLogging(config, log_file_prefix='camControl_')
-    log = getLogger("logger")
+    log = getLogger("rmslogger")
     if cmd not in cmd_list:
         log.info('Error: command "%s" not supported', cmd)
         exit(1)
