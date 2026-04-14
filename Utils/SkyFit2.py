@@ -160,7 +160,7 @@ from RMS.Astrometry.ApplyRecalibrate import recalibrateFF
 from RMS.Astrometry.AutoPlatepar import selectBestFrame, autoFitPlatepar
 from RMS.Astrometry.NNalign import alignPlatepar
 import RMS.ConfigReader as cr
-from RMS.ExtractStars import extractStarsAndSave, extractStarsFF
+from RMS.ExtractStars import extractStarsAndSave, extractStarsFF, extractStarsImgHandle
 import RMS.Formats.CALSTARS as CALSTARS
 from RMS.Formats.Platepar import Platepar, getCatalogStarsImagePositions
 from RMS.Formats.FFfile import convertFRNameToFF, constructFFName
@@ -4820,7 +4820,7 @@ class PlateTool(QtWidgets.QMainWindow):
               f"neighborhood={self.override_neighborhood_size}, segment_radius={self.override_segment_radius}, "
               f"max_stars={self.override_max_stars}, gamma={self.override_gamma:.3f}")
 
-        # Call extractStarsFF with override parameters
+        # Call extractStarsImgHandle with override parameters (works on any input type)
         try:
             # Temporarily modify config to use override parameters
             original_intensity_threshold = getattr(self.config, 'intensity_threshold', 18)
@@ -4841,14 +4841,17 @@ class PlateTool(QtWidgets.QMainWindow):
             self.config.roundness_threshold = self.override_roundness_threshold
 
             try:
-                star_list = extractStarsFF(
-                    self.dir_path,
-                    ff_name,
+                star_list = extractStarsImgHandle(
+                    self.img_handle,
                     config=self.config,
                     flat_struct=self.flat_struct if hasattr(self, 'flat_struct') else None,
                     dark=self.dark if hasattr(self, 'dark') else None,
                     mask=self.mask if hasattr(self, 'mask') else None
                 )
+            except Exception as e:
+                print(f"  Star extraction failed: {e}")
+                traceback.print_exc()
+                return
             finally:
                 # Restore original config values
                 self.config.intensity_threshold = original_intensity_threshold
@@ -4859,13 +4862,16 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.config.max_feature_ratio = original_max_feature_ratio
                 self.config.roundness_threshold = original_roundness_threshold
 
-            if star_list:
-                # extractStarsFF returns: ff_name, x_arr, y_arr, amplitude, intensity, fwhm, background, snr, saturated_count
-                ff_name_ret, x_arr, y_arr, amplitude, intensity, fwhm, background, snr, saturated_count = star_list
+            # extractStarsImgHandle returns list of [ff_name, star_data] per chunk
+            # Combine star data from all chunks into one list
+            if star_list and not isinstance(star_list[0], list):
+                # Error return (flat list of empty lists)
+                star_list = None
 
-                # Construct star data in CALSTARS format: Y(0) X(1) IntensSum(2) Ampltd(3) FWHM(4) BgLvl(5) SNR(6) NSatPx(7)
-                # Note: intensity=IntensSum (integrated), amplitude=Ampltd (peak)
-                star_data = list(zip(y_arr, x_arr, intensity, amplitude, fwhm, background, snr, saturated_count))
+            if star_list:
+                star_data = []
+                for chunk_name, chunk_stars in star_list:
+                    star_data.extend(chunk_stars)
 
                 # Store the override detected stars
                 self.star_detection_override_data[ff_name] = star_data
@@ -4892,7 +4898,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.tab.star_detection.updateStatus(False)
 
         except Exception as e:
-            print(f"  Error during star detection: {e}")
+            print(f"  Error during star detection: {type(e).__name__}: {e}")
             traceback.print_exc()
 
 
@@ -4963,7 +4969,8 @@ class PlateTool(QtWidgets.QMainWindow):
                         success_count += 1
 
                 except Exception as e:
-                    print(f"    Error: {e}")
+                    print(f"    Error on {ff_name}: {type(e).__name__}: {e}")
+                    traceback.print_exc()
 
         finally:
             # Restore original config values
@@ -5383,22 +5390,33 @@ class PlateTool(QtWidgets.QMainWindow):
             self.config.max_feature_ratio = self.override_max_feature_ratio
             self.config.roundness_threshold = self.override_roundness_threshold
 
-            # Run star detection
-            star_list = extractStarsFF(
-                self.dir_path, ff_name, config=self.config,
-                flat_struct=self.flat_struct, dark=self.dark, mask=self.mask,
-                extra_info=extra_info
+            # Run star detection using img_handle (works on any input type)
+            star_list = extractStarsImgHandle(
+                self.img_handle, config=self.config,
+                flat_struct=self.flat_struct, dark=self.dark, mask=self.mask
             )
 
-            if not star_list or len(star_list[1]) == 0:
+            # extractStarsImgHandle returns list of [ff_name, star_data] per chunk
+            # Combine all chunks and extract x, y, fwhm arrays
+            if not star_list or not isinstance(star_list[0], list):
                 if return_positions:
                     return 0, 0, 0, np.array([]), np.array([])
                 return 0, 0, 0
 
-            ff_name_ret, x_arr, y_arr, amplitude, intensity, fwhm_arr, background, snr, saturated = star_list
-            x_arr = np.asarray(x_arr, dtype=float)
-            y_arr = np.asarray(y_arr, dtype=float)
-            fwhm_arr = np.asarray(fwhm_arr, dtype=float)
+            all_star_data = []
+            for chunk_name, chunk_stars in star_list:
+                all_star_data.extend(chunk_stars)
+
+            if len(all_star_data) == 0:
+                if return_positions:
+                    return 0, 0, 0, np.array([]), np.array([])
+                return 0, 0, 0
+
+            # CALSTARS format: Y(0) X(1) IntensSum(2) Ampltd(3) FWHM(4) BgLvl(5) SNR(6) NSatPx(7)
+            star_data_arr = np.array(all_star_data)
+            y_arr = star_data_arr[:, 0].astype(float)
+            x_arr = star_data_arr[:, 1].astype(float)
+            fwhm_arr = star_data_arr[:, 4].astype(float)
             n_detected = len(x_arr)
 
             if n_detected == 0 or len(catalog_x) == 0:
@@ -5423,7 +5441,8 @@ class PlateTool(QtWidgets.QMainWindow):
             return n_true_pos, n_false_pos, n_detected
 
         except Exception as e:
-            print(f"    Detection error: {e}")
+            print(f"    Detection error: {type(e).__name__}: {e}")
+            traceback.print_exc()
             if return_positions:
                 return 0, 0, 0, np.array([]), np.array([])
             return 0, 0, 0
@@ -5464,21 +5483,37 @@ class PlateTool(QtWidgets.QMainWindow):
             self.config.max_feature_ratio = self.override_max_feature_ratio
             self.config.roundness_threshold = self.override_roundness_threshold
 
-            star_list = extractStarsFF(
-                self.dir_path, ff_name, config=self.config,
+            star_list = extractStarsImgHandle(
+                self.img_handle, config=self.config,
                 flat_struct=self.flat_struct, dark=self.dark, mask=self.mask
             )
 
             self.config.intensity_threshold = orig_intensity
             self.config.segment_radius = orig_segment
 
-            if not star_list or len(star_list[1]) == 0:
+            # extractStarsImgHandle returns list of [ff_name, star_data] per chunk
+            if not star_list or not isinstance(star_list[0], list):
                 print(f"    No bright stars detected with threshold={high_threshold}, "
                       f"segment={probe_segment}")
                 print(f"    Using default segment_radius=4")
                 return 4, 0, 1.0
 
-            _, x_arr, y_arr, amplitude, intensity, fwhm_arr, background, snr, saturated = star_list
+            # Combine all chunks
+            all_star_data = []
+            for chunk_name, chunk_stars in star_list:
+                all_star_data.extend(chunk_stars)
+
+            if len(all_star_data) == 0:
+                print(f"    No bright stars detected with threshold={high_threshold}, "
+                      f"segment={probe_segment}")
+                print(f"    Using default segment_radius=4")
+                return 4, 0, 1.0
+
+            # CALSTARS format: Y(0) X(1) IntensSum(2) Ampltd(3) FWHM(4) BgLvl(5) SNR(6) NSatPx(7)
+            star_data_arr = np.array(all_star_data)
+            x_arr = star_data_arr[:, 1].astype(float)
+            y_arr = star_data_arr[:, 0].astype(float)
+            fwhm_arr = star_data_arr[:, 4].astype(float)
             n_detected = len(x_arr)
 
             # Identify true positives (match to catalog)
@@ -5538,8 +5573,7 @@ class PlateTool(QtWidgets.QMainWindow):
             return best_segment, n_true_pos, fp_ratio
 
         except Exception as e:
-            print(f"    FWHM measurement error: {e}")
-            import traceback
+            print(f"    FWHM measurement error: {type(e).__name__}: {e}")
             traceback.print_exc()
             return 4, 0, 1.0
 
