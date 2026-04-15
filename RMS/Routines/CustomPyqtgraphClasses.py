@@ -2874,6 +2874,7 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
     sigSegmentRadiusChanged = QtCore.pyqtSignal(int)
     sigMaxFeatureRatioChanged = QtCore.pyqtSignal(float)
     sigRoundnessThresholdChanged = QtCore.pyqtSignal(float)
+    sigAutoRedetectOnSwitchToggled = QtCore.pyqtSignal(bool)
 
     def __init__(self, gui):
         QtWidgets.QWidget.__init__(self)
@@ -3017,6 +3018,15 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
         self.use_override_checkbox = QtWidgets.QCheckBox('Use Override Detections')
         self.use_override_checkbox.released.connect(self.sigUseOverrideToggled.emit)
         layout.addWidget(self.use_override_checkbox)
+
+        # Auto re-detect on image switch (useful for video exploration)
+        self.auto_redetect_checkbox = QtWidgets.QCheckBox('Auto Re-Detect on Switch')
+        self.auto_redetect_checkbox.setToolTip(
+            'Automatically re-detect stars when switching to a new image/chunk.\n'
+            'Useful for exploring video data where CALSTARS is not available.')
+        self.auto_redetect_checkbox.setChecked(False)
+        self.auto_redetect_checkbox.toggled.connect(self.sigAutoRedetectOnSwitchToggled.emit)
+        layout.addWidget(self.auto_redetect_checkbox)
 
         layout.addSpacing(self.scaledSpacing(0.3))
 

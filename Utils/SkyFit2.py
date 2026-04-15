@@ -3320,6 +3320,10 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.star_detection.sigTuneParameters.connect(self.tuneStarDetection)
         self.tab.star_detection.sigSaveToConfig.connect(lambda: self.showCalibrationFilesDialog(save_ftype="Config"))
         self.tab.star_detection.sigCatalogLMChanged.connect(self.updateCatalogLMFromStarDetection)
+        self.tab.star_detection.sigAutoRedetectOnSwitchToggled.connect(self.toggleAutoRedetectOnSwitch)
+
+        # Flag for auto re-detecting stars on image switch (disabled by default)
+        self.auto_redetect_on_switch = False
 
         # Mask widget signals
         self.tab.mask.sigDrawModeToggled.connect(self.toggleMaskDrawMode)
@@ -3391,6 +3395,11 @@ class PlateTool(QtWidgets.QMainWindow):
             self.initMaskFromFile()
             self.updateFindBestFrameButton()
             self.changeMode(self.mode)
+
+            # Auto-run star detection for non-FF inputs (video, images) since they have no CALSTARS
+            if self.img_handle.input_type != 'ff':
+                print("Non-FF input detected, running initial star detection...")
+                self.redetectStars()
 
             # Show calibration files dialog on start if platepar was not auto-loaded
             if self._show_calibration_dialog_on_start:
@@ -4806,6 +4815,14 @@ class PlateTool(QtWidgets.QMainWindow):
         else:
             self.tab.star_detection.updateStatus(False)
 
+
+    def toggleAutoRedetectOnSwitch(self, enabled):
+        """ Toggle auto re-detection of stars when switching images. """
+        self.auto_redetect_on_switch = enabled
+        if enabled:
+            print("Auto re-detect on image switch: ENABLED")
+        else:
+            print("Auto re-detect on image switch: DISABLED")
 
     def redetectStars(self):
         """ Re-detect stars on current image using override parameters. """
@@ -8305,6 +8322,10 @@ class PlateTool(QtWidgets.QMainWindow):
             self.drawPhotometryColoring()
 
             self.updateStars()
+
+            # Auto re-detect stars on image switch if enabled
+            if self.auto_redetect_on_switch:
+                self.redetectStars()
 
         # Manual reduction mode
         else:
@@ -12906,8 +12927,16 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
     def updateFindBestFrameButton(self):
-        """ Enable/disable the Find Best Frame button based on the number of frames in CALSTARS. """
+        """ Enable/disable the Find Best Frame button based on available data. """
         if hasattr(self, 'tab') and hasattr(self.tab, 'param_manager'):
+
+            # Disable for non-FF inputs — they don't have multi-frame CALSTARS
+            if self.img_handle.input_type != 'ff':
+                self.tab.param_manager.find_best_frame_button.setEnabled(False)
+                self.tab.param_manager.find_best_frame_button.setToolTip(
+                    "Find Best Frame is only available for FF file inputs")
+                return
+
             # Disable button if there's only one frame or no frames
             enable = len(self.calstars) > 1
             self.tab.param_manager.find_best_frame_button.setEnabled(enable)
