@@ -255,7 +255,6 @@ class GstVideoFile():
                 pipeline_str = (
                     "filesrc location={} ! matroskademux ! h264parse ! {} ! "
                     "videoconvert ! video/x-raw,format={} ! "
-                    "queue leaky=downstream max-size-buffers=100 ! "
                     "appsink emit-signals=True max-buffers=100 drop=False sync=0 name=appsink"
                     "".format(self.file_path, self.decoder, self.video_format)
                 )
@@ -282,7 +281,6 @@ class GstVideoFile():
             # delivered to appsink.
             pipeline_str = (
                 "filesrc location={} ! decodebin name=dec ! "
-                "queue leaky=downstream max-size-buffers=100 ! "
                 "videoconvert ! video/x-raw,format={} ! "
                 "appsink emit-signals=True max-buffers=100 drop=False sync=0 name=appsink"
             "".format(self.file_path, self.video_format)
@@ -436,7 +434,7 @@ class GstVideoFile():
         # Set the frame cursor to the given frame number
         if num == 1:
 
-            self.pipeline.seek_simple(Gst.Format.TIME, Gst.SeekFlags.FLUSH, int(value*self.fps*Gst.SECOND))
+            self.pipeline.seek_simple(Gst.Format.TIME, Gst.SeekFlags.FLUSH, int((value / self.fps) * Gst.SECOND))
             self.current_frame = value
             
     
