@@ -230,7 +230,7 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
 
 def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_dir, nproc=2,
                      chunk_frames=128, poll_interval=2, force=False, recursive=False, flat_path=None,
-                     dark_path=None):
+                     dark_path=None, fail_wait_time=300):
     """ Monitor a directory for new files of the given type and process them.
 
     Arguments:
@@ -247,6 +247,7 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
         force: [bool] If True, re-process files even if done.flag exists. Default is False.
         flat_path: [str] Path to a flat field file. None by default.
         dark_path: [str] Path to a dark frame file. None by default.
+        fail_wait_time: [float] Seconds to wait before retrying a failed file. Default is 300.
     """
 
     log.info("Monitoring directory: {}".format(input_dir))
@@ -256,6 +257,9 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
 
     # Track files that have been processed or are being processed
     processed_files = set()
+    
+    # Track failed files: {unique_id: {'count': int, 'last_fail_time': float}}
+    failed_files = {}
 
     # Scan the output directory for previously completed results (done.flag)
     if not force:
@@ -291,9 +295,21 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
                         log.info("Successfully processed: {}".format(uid))
                         processed_files.add(uid)
                     else:
-                        # Do not keep a permanent failure blacklist, let them be retried
-                        log.warning("Processing failed for: {} (exit code {:d}), will retry...".format(
-                            uid, proc.exitcode))
+                        if uid not in failed_files:
+                            failed_files[uid] = {'count': 1, 'last_fail_time': time.time()}
+                            log.warning("Processing failed for: {} (exit code {:d}), will retry in {:.1f} mins...".format(
+                                uid, proc.exitcode, fail_wait_time / 60.0))
+                        else:
+                            failed_files[uid]['count'] += 1
+                            if failed_files[uid]['count'] >= 2:
+                                log.error("Processing failed for: {} (exit code {:d}) twice, giving up.".format(
+                                    uid, proc.exitcode))
+                                processed_files.add(uid)
+                            else:
+                                failed_files[uid]['last_fail_time'] = time.time()
+                                log.warning("Processing failed for: {} (exit code {:d}), will retry in {:.1f} mins...".format(
+                                    uid, proc.exitcode, fail_wait_time / 60.0))
+
                     finished.append(uid)
 
             for uid in finished:
@@ -334,6 +350,11 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
                 if unique_id in processed_files or unique_id in active_workers:
                     continue
 
+                # Skip files that failed recently (wait fail_wait_time)
+                if unique_id in failed_files:
+                    if (time.time() - failed_files[unique_id]['last_fail_time']) < fail_wait_time:
+                        continue
+
                 # Non-blocking stability check
                 try:
                     curr_mtime = os.path.getmtime(file_path)
@@ -365,7 +386,15 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
                     stable_files.append((file_path, curr_mtime, unique_id, file_rel_path))
 
             # 3. SORT STABLE FILES BY AGE (Oldest First)
-            stable_files.sort(key=lambda x: x[1])
+            # If a file has failed before, use its last fail time for sorting to put it at the end of the queue
+            def get_sort_time(file_info):
+                mtime = file_info[1]
+                uid = file_info[2]
+                if uid in failed_files:
+                    return max(mtime, failed_files[uid]['last_fail_time'])
+                return mtime
+
+            stable_files.sort(key=get_sort_time)
 
             # 4. Start processes for the oldest stable files until nproc is full
             new_files_queued = False
