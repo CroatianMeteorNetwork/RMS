@@ -1783,10 +1783,21 @@ class BufferedCapture(Process):
                                             best_d, best_cw = d, e[2]
                                 if best_cw is not None:
                                     sd_ts = best_cw
-                                    # Apply exposure correction (FE_START is
-                                    # exposure start; first-row-readout is
-                                    # ~exposure later — not subtracted since
-                                    # MKV frame timing references FE_START).
+                                    # No -0.040 correction here (unlike the
+                                    # fallback path below). cam_wall is the
+                                    # sensor-side FE_START UTC looked up from
+                                    # the buffer's GStreamer PTS. GStreamer
+                                    # preserves buffer.pts across the pipeline,
+                                    # so the PTS at splitmuxsink == PTS at
+                                    # appsink for the same frame. Both sinks
+                                    # therefore end up anchored to the same
+                                    # sensor-time domain → FF filenames and
+                                    # MKV filenames stay byte-for-byte
+                                    # alignable without extra compensation.
+                                    # The legacy 1-frame bandaid only existed
+                                    # because venc_epoch_offset was wall-clock
+                                    # at first FF-delivery, 40 ms after the
+                                    # same frame reached splitmuxsink.
                         except Exception as sd_exc:
                             log.debug("MKV cam_wall lookup failed: %s", sd_exc)
 
