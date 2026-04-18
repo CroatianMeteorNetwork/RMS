@@ -448,12 +448,20 @@ def setCameraParam(cam, opts):
         cam - the camera 
         opts - array of fields, subfields and the value to set
     """
-    # these fields are stored as integers. Others are Hex strings
+    # Param.[0] fields stored as integers (not hex strings)
     intfields = [
         'AeSensitivity','Day_nfLevel','DncThr','ElecLevel','IRCUTMode',
-        'IrcutSwap','Night_nfLevel','Level','AutoGain','Gain'
+        'IrcutSwap','InfraredSwap','Night_nfLevel','Level','AutoGain','Gain'
     ]
     styleFlds = ('typedefault','type1','type2')
+
+    # ParamEx.[0] integer fields
+    paramex_intfields = [
+        'AeMeansure','AutomaticAdjustment','CorridorMode','Dis',
+        'Ldc','LowLuxMode','PreventOverExpo','SoftPhotosensitivecontrol'
+    ]
+    # ParamEx.[0] hex string fields
+    paramex_hexfields = ['ExposureTime']
 
     fld = opts[1]
     if fld == 'ClearFog':
@@ -491,16 +499,35 @@ def setCameraParam(cam, opts):
         else:
             log.info("BroadTrends option must be 'AutoGain' or 'Gain'")
 
+    elif fld == 'DayNightSwitch':
+        subfld = opts[2]
+        val = int(opts[3])
+        fldToSet = 'Camera.ParamEx.[0].' + fld
+        log.info('Set {}.{} to {}'.format(fldToSet, subfld, val))
+        cam.set_info(fldToSet, {subfld: val})
+
+    # Other ParamEx.[0] fields (int and hex)
+    elif fld in paramex_intfields:
+        val = int(opts[2])
+        log.info('Set Camera.ParamEx.[0].{} to {}'.format(fld, val))
+        cam.set_info("Camera.ParamEx.[0]", {fld: val})
+
+    elif fld in paramex_hexfields:
+        val = int(opts[2])
+        val = "0x%8.8X" % val
+        log.info('Set Camera.ParamEx.[0].{} to {}'.format(fld, val))
+        cam.set_info("Camera.ParamEx.[0]", {fld: val})
+
     # Exposuretime and gainparam have subfields
     elif fld in ('ExposureParam', 'GainParam'):
 
         subfld = opts[2]
         val = int(opts[3])
         if subfld not in intfields:
-            # the two non-int fields in ExposureParam are the exposure times. 
+            # the two non-int fields in ExposureParam are the exposure times.
             # These are stored in microseconds converted to hex strings.
-            if val < 100 or val > 80000: 
-                log.info('Exposure must be between 100 and 80000 microsecs')
+            if val < 1 or val > 80000:
+                log.info('Exposure must be between 1 and 80000 microsecs')
                 return
             val = "0x%8.8X" % (int(val))
         fldToSet = 'Camera.Param.[0].' + fld
@@ -508,7 +535,7 @@ def setCameraParam(cam, opts):
         cam.set_info(fldToSet, {subfld: val})
 
     else:
-        # other fields do not have subfields
+        # other Param.[0] fields do not have subfields
         val = int(opts[2])
         if fld not in intfields:
             val = "0x%8.8X" % val
@@ -613,6 +640,41 @@ def setAutoReboot(cam, opts):
     info["AutoRebootHour"] = hour
     log.info('Set autoreboot: %s at %s', day, hour*100)
     cam.set_info("General.AutoMaintain", info)
+
+
+def ispControl(camera_ip, cmd_line, port=9600, timeout=5):
+    """Send a command to the isp_ctl TCP daemon running on the camera.
+
+    The isp_ctl daemon listens for one text command per TCP connection,
+    sends the response, then closes. This provides true ISP manual
+    exposure/gain control that DVRIP cannot achieve.
+
+    Args:
+        camera_ip (str): Camera IP address
+        cmd_line (str): Command to send (e.g. "query", "manual -a 2048", "auto")
+        port (int): TCP port (default 9600)
+        timeout (int): Socket timeout in seconds
+
+    Returns:
+        str: Response text from isp_ctl, or None on error
+    """
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(timeout)
+        s.connect((camera_ip, port))
+        s.sendall((cmd_line + "\n").encode())
+        s.shutdown(socket.SHUT_WR)
+        chunks = []
+        while True:
+            data = s.recv(4096)
+            if not data:
+                break
+            chunks.append(data)
+        s.close()
+        return b"".join(chunks).decode(errors="replace")
+    except Exception as e:
+        log.error("isp_ctl connection to %s:%d failed: %s", camera_ip, port, e)
+        return None
 
 
 def manageCloudConnection(cam, opts):
@@ -721,6 +783,9 @@ def upgradeFirmware(cam, firmware_path, skip_confirm=False):
     log.info("Uploading firmware to camera...")
 
     try:
+        # Increase socket timeout — camera needs time to prepare flash for writing
+        old_timeout = cam.socket.gettimeout()
+        cam.socket.settimeout(30)
         result = cam.upgrade(firmware_path, packetsize=0x8000, vprint=progress_callback)
 
         if result is None:
@@ -955,6 +1020,26 @@ def dvripCall(cam, cmd, opts, camera_settings_path='./camera_settings.json'):
         upgradeFirmware(cam, firmware_path, skip_confirm)
         return
 
+    elif cmd == 'IspQuery':
+        resp = ispControl(cam.ip, "query")
+        if resp:
+            log.info(resp.rstrip())
+        return
+
+    elif cmd == 'IspManual':
+        # opts: ["-a", "2048", "-e", "500", ...]
+        resp = ispControl(cam.ip, "manual " + " ".join(opts))
+        if resp:
+            log.info(resp.rstrip())
+        return
+
+    elif cmd == 'IspAuto':
+        # opts: ["--max-again", "4096", ...] or empty for full auto
+        resp = ispControl(cam.ip, "auto " + " ".join(opts))
+        if resp:
+            log.info(resp.rstrip())
+        return
+
     # -- If we get here, command is not recognized:
     else:
         log.error("Unrecognized command '%s' in dvripCall. Options were: %s", cmd, opts)
@@ -1010,7 +1095,8 @@ if __name__ == '__main__':
         'reboot', 'GetHostname', 'GetSettings','GetDeviceInformation','GetNetConfig',
         'GetCameraParams','GetEncodeParams','SetParam','SaveSettings','LoadSettings',
         'SetColor','SetOSD','SetAutoReboot','GetIP','GetAutoReboot','CloudConnection',
-        'CameraTime','SwitchMode','UpgradeFirmware'
+        'CameraTime','SwitchMode','UpgradeFirmware',
+        'IspQuery','IspManual','IspAuto'
     ]
     opthelp = (
         'optional parameters for SetParam for example Camera ElecLevel 70 \n'
@@ -1046,12 +1132,12 @@ if __name__ == '__main__':
         help="Path to a config file which will be used instead of the default one."
     )
 
-    cml_args = parser.parse_args()
+    cml_args, extra = parser.parse_known_args()
     cmd = cml_args.command[0]
     if cml_args.options is not None:
-        opts = cml_args.options
+        opts = cml_args.options + extra
     else:
-        opts = ''
+        opts = extra if extra else ''
 
     # Load the config file
     config = cr.loadConfigFromDirectory(cml_args.config, 'notused')
