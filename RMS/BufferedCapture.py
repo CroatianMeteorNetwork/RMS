@@ -1751,12 +1751,51 @@ class BufferedCapture(Process):
                                 running_time_ns = converted
 
                 if running_time_ns is not None:
-                    if self.venc_epoch_offset is not None:
-                        # Subtract 1 frame: avdec_h264 adds 1-frame decode
-                        # latency, so appsink (FF) is 1 frame behind
-                        # splitmuxsink (MKV). Align MKV to FF domain.
+                    # Prefer side-door cam_wall for the segment's first frame
+                    # (chrony-disciplined UTC, pipeline-immune). Match the
+                    # first buffer's GStreamer PTS to a pts_stream entry via
+                    # the raw-RTP dict, then read the matched entry's cam_wall.
+                    # Falls back to venc_epoch_offset-based timestamp only if
+                    # side-door is unavailable — that path is subject to the
+                    # VencCalibration candidate-grid quantization and shifts
+                    # by up to ±40ms across RTSP reconnects.
+                    sd_ts = None
+                    if (hasattr(self, '_pts_stream') and self._pts_stream is not None
+                            and hasattr(self, '_rtp_ts_by_pts')):
+                        try:
+                            # Look up the RTP timestamp corresponding to buffer_pts
+                            _entry = self._rtp_ts_by_pts.get(buffer_pts, None)
+                            if _entry is not None:
+                                rtp_raw = _entry[0] if isinstance(_entry, tuple) else _entry
+                                ps = self._pts_stream
+                                WRAP32 = 4294967296
+                                rtp_us_mod = (int(rtp_raw) * 100 // 9) % WRAP32
+                                with ps._lock:
+                                    # Walk recent entries (bounded deque)
+                                    best_cw, best_d = None, 20000
+                                    for e in ps._entries:
+                                        if len(e) < 3 or not e[2] or e[2] <= 0:
+                                            continue
+                                        d = abs(int(e[0] % WRAP32) - int(rtp_us_mod))
+                                        if d > WRAP32 // 2:
+                                            d = WRAP32 - d
+                                        if d < best_d:
+                                            best_d, best_cw = d, e[2]
+                                if best_cw is not None:
+                                    sd_ts = best_cw
+                                    # Apply exposure correction (FE_START is
+                                    # exposure start; first-row-readout is
+                                    # ~exposure later — not subtracted since
+                                    # MKV frame timing references FE_START).
+                        except Exception as sd_exc:
+                            log.debug("MKV cam_wall lookup failed: %s", sd_exc)
+
+                    if sd_ts is not None:
+                        segment_timestamp = sd_ts
+                    elif self.venc_epoch_offset is not None:
+                        # Fallback: venc_epoch_offset path (candidate-grid biased).
+                        # -0.040 aligns MKV (post-decode) with FF (pre-decode).
                         segment_timestamp = self.venc_epoch_offset + running_time_ns / 1e9 - 0.040
-                        # Apply exposure correction (same as FF timestamps)
                         if hasattr(self, '_venc_meta') and self._venc_meta is not None:
                             meta = self._venc_meta.latest
                             if 'exposure_us' in meta:
