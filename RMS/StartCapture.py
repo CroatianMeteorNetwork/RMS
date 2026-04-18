@@ -821,6 +821,14 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
                 detection_results = []
 
+            # Correct timestamps using side-door PTS data (if available).
+            # Must run before processNight so archived files have correct names.
+            try:
+                from RMS.Routines.SidedoorCorrect import sidedoorCorrect
+                sidedoorCorrect(night_data_dir, config)
+            except Exception:
+                log.exception("Side-door timestamp correction failed")
+
             # Save detection to disk and archive detection
             night_archive_dir, archive_name, imgdata_archive_name, metadata_archive_name, _ =  \
                 processNight(night_data_dir, config, detection_results=detection_results, nodetect=nodetect)
