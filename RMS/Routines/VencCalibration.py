@@ -54,23 +54,27 @@ def _query_gettime(ip, port, timeout=5.0):
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.settimeout(timeout)
 
+        # One absolute timestamp at the start; all intervals via
+        # perf_counter (monotonic, immune to NTP adjustments).
+        t0_abs = time.time()
+        t0_pc = time.perf_counter()
+
         # Measure TCP handshake for one-way delay: connect() blocks
         # for SYN → SYN-ACK (2 × network one-way transit)
-        t0 = time.time()
         s.connect((ip, port))
-        t_connected = time.time()
+        t1_pc = time.perf_counter()
 
         # Server now polls for PTS transition, then sends response
         resp = s.recv(128).decode().strip()
-        t_after = time.time()
+        t2_pc = time.perf_counter()
         s.close()
 
         parts = resp.split()
         if len(parts) < 3:
             return None
 
-        one_way = (t_connected - t0) / 2.0
-        host_at_snap = t_after - one_way
+        one_way = (t1_pc - t0_pc) / 2.0
+        host_at_snap = t0_abs + (t2_pc - t0_pc) - one_way
 
         return (float(parts[0]), int(parts[1]), int(parts[2]),
                 host_at_snap, one_way * 1000)
