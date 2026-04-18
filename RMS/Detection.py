@@ -30,8 +30,6 @@ import cv2
 # Plotting
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
-from mpl_toolkits.mplot3d import Axes3D
-
 # RMS imports
 from RMS.Astrometry.Conversions import jd2Date, raDec2AltAz
 import RMS.ConfigReader as cr
