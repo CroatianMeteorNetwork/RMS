@@ -441,12 +441,31 @@ class PtsStreamReader(object):
                 raw_pts_out[i] = float(ref_pts[best_i])
                 matched += 1
 
+        # Fill unmatched frames by interpolating from nearest matched
+        # neighbor using exact frame period (40ms after VMAX=1350 fix).
+        # Two sources of unmatched frames:
+        #   1. First ~4 frames of a session: RTP arrived before pts_stream
+        #      received any entries (back-extrapolate from earliest match).
+        #   2. Periodic pts_stream skips (camera emits ~230 entries per 256
+        #      frames due to firmware FE_START misses every ~2s).
+        # Drift error over a 4-frame interpolation is <4µs at 100ppm.
+        interpolated = 0
+        if matched > 0:
+            matched_i = [i for i in range(n) if result[i] is not None]
+            for i in range(n):
+                if result[i] is not None:
+                    continue
+                # Nearest matched neighbor (by frame index)
+                j = min(matched_i, key=lambda m: abs(m - i))
+                result[i] = result[j] + (i - j) * self._FRAME_PERIOD
+                interpolated += 1
+
         if matched > 0:
             self.block_aligns += 1
         else:
             self.block_fails += 1
-        log.info("PtsStream: %d/%d matched (%d stale)",
-                 matched, n, n_stale)
+        log.info("PtsStream: %d/%d matched (%d stale, %d interpolated)",
+                 matched, n, n_stale, interpolated)
 
         return result, raw_pts_out, K
 
