@@ -24,8 +24,8 @@ if [ "$EUID" -ne 0 ]; then
 fi
 
 # Configuration
-RECOMMENDED_SIZE=1048576  # 1MB in bytes
-MIN_RECOMMENDED=524288    # 512KB in bytes (GStreamer requested size)
+RECOMMENDED_SIZE=16777216  # 16MB in bytes
+MIN_RECOMMENDED=1048576    # 1MB in bytes (minimum for reliable UDP streaming)
 
 # Function to convert bytes to human readable format
 human_readable() {
@@ -91,13 +91,19 @@ if [ ! -d /etc/sysctl.d ]; then
     mkdir -p /etc/sysctl.d
 fi
 
+# Remove conflicting entries from /etc/sysctl.conf (overrides drop-ins)
+if grep -q "rmem_max\|wmem_max" /etc/sysctl.conf 2>/dev/null; then
+    echo "Removing conflicting entries from /etc/sysctl.conf..."
+    sed -i '/net\.core\.rmem_max/d; /net\.core\.wmem_max/d' /etc/sysctl.conf
+fi
+
 echo "Creating sysctl drop-in file: $SYSCTL_DROP_IN"
 
 # Write the drop-in configuration file
 cat > "$SYSCTL_DROP_IN" << EOF
 # RMS UDP Buffer Configuration
 # Created by UpdateBuffers.sh on $(date)
-# Required for GStreamer UDP streaming (512KB min per camera)
+# Required for GStreamer UDP streaming (16MB per camera)
 
 net.core.rmem_max=$RECOMMENDED_SIZE
 net.core.wmem_max=$RECOMMENDED_SIZE
@@ -109,7 +115,8 @@ echo "  net.core.wmem_max=$RECOMMENDED_SIZE"
 
 # Apply changes immediately
 echo "Applying changes..."
-sysctl -p "$SYSCTL_DROP_IN" >/dev/null 2>&1
+sysctl -w net.core.rmem_max=$RECOMMENDED_SIZE >/dev/null 2>&1
+sysctl -w net.core.wmem_max=$RECOMMENDED_SIZE >/dev/null 2>&1
 
 echo -e "\nAFTER CHANGES:"
 show_settings
