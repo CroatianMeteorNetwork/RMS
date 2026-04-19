@@ -172,7 +172,12 @@ def _loadAndSplitRuns(npzFiles):
         frame_idx = 0
 
         for bi in range(bStart, bEnd):
-            f = np.load(npzFiles[bi])
+            # allow_pickle needed for older .npz files written before the
+            # save-side fix that coerces None → numeric.
+            try:
+                f = np.load(npzFiles[bi])
+            except ValueError:
+                f = np.load(npzFiles[bi], allow_pickle=True)
             gs = int(f['guard_shift'])
             rtp = f['rtp_90k']
             gf = f['guard_flags']
@@ -186,7 +191,19 @@ def _loadAndSplitRuns(npzFiles):
             guard_list.extend(gf.tolist())
 
             blockBounds.append((frame_idx, frame_idx + len(rtp)))
-            c_raw = float(f['C_raw']) if 'C_raw' in f else float(f['C'])
+
+            # Tolerate None/object-array values written by the old save
+            # path before the None→numeric coercion fix landed.
+            def _as_float(key, fallback=0.0):
+                if key not in f:
+                    return fallback
+                v = f[key]
+                try:
+                    return float(v)
+                except (ValueError, TypeError):
+                    return fallback
+
+            c_raw = _as_float('C_raw', _as_float('C', 0.0))
             exposure_us = float(f['exposure_us']) if 'exposure_us' in f else 0.0
             pllProbes.append({
                 'block_start': float(f['block_start_time']),

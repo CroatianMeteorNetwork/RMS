@@ -3735,9 +3735,15 @@ class BufferedCapture(Process):
                         ref_camwall = [e[2] if len(e) > 2 and e[2] else 0.0
                                        for e in ps._entries]
                         _C = ps._C if ps._C else 0.0
-                        _C_raw = ps._C_raw if hasattr(ps, '_C_raw') else _C
-                        _dr = ps._drift_rate
-                        _wraps = ps._wraps
+                        # ps._C_raw may be None before the first probe has
+                        # landed — coerce to a numeric fallback so savez
+                        # doesn't serialize a Python-object array (which
+                        # would then require allow_pickle=True to load).
+                        _C_raw = ps._C_raw if (
+                            hasattr(ps, '_C_raw') and ps._C_raw is not None
+                        ) else _C
+                        _dr = ps._drift_rate if ps._drift_rate is not None else 0.0
+                        _wraps = ps._wraps if ps._wraps is not None else 0
 
                     rtp_arr = _np.array(
                         [int(x) if x is not None else 0
