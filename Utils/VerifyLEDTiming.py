@@ -367,6 +367,9 @@ def verify(mkv_path, ft_dir, probe_frames=250, verbose=True):
             'T_on': T_on_derived, 'T_off': T_off,
             'on_err_ms': on_err_ms, 'off_err_ms': off_err_ms,
             'lead_row': lead_row, 'trail_row': trail_row,
+            'lead_i': lead_i if T_on is not None else None,
+            'trail_i': trail_i if T_off is not None else None,
+            'pps_utc': pps_utc,
         })
 
         if verbose:
@@ -391,7 +394,115 @@ def verify(mkv_path, ft_dir, probe_frames=250, verbose=True):
         for r in results:
             cases[r['case']] = cases.get(r['case'], 0) + 1
         print(f"Cases: {cases}")
-    return results
+    return results, frames, pulses, row_means
+
+
+def plot_results(results, frames, pulses, row_means, band, mkv_t0):
+    """GUI: for each pulse, show the actual video frame with the detected
+    transition row drawn across it, plus the computed timestamp and
+    residual vs GPS-PPS. User can eyeball whether the row-detection
+    matches where the LED edge actually is.
+    """
+    try:
+        import matplotlib
+        matplotlib.use('TkAgg')
+        import matplotlib.pyplot as plt
+    except ImportError:
+        print("matplotlib not installed; install with: pip install matplotlib",
+              file=sys.stderr)
+        return
+
+    r0, r1 = band
+    n = min(len(results), 10)
+    if n == 0:
+        print("No pulses to plot.", file=sys.stderr)
+        return
+
+    # Two columns: leading frame, trailing frame
+    fig, axes = plt.subplots(n, 2, figsize=(13, 3.2*n), squeeze=False)
+    fig.suptitle("LED leading/trailing edge detection — visual verification\n"
+                 "Green line = detected leading-edge row,  Red line = detected trailing-edge row",
+                 fontsize=11)
+
+    for row, r in enumerate(results[:n]):
+        p_idx = r['pulse']
+        lead_i = r.get('lead_i')
+        trail_i = r.get('trail_i')
+        lead_row = r.get('lead_row')
+        trail_row = r.get('trail_row')
+        case = r['case']
+        T_on = r['T_on']
+        T_off = r['T_off']
+        pps = r['pps_utc']
+        on_err = r['on_err_ms']
+        off_err = r['off_err_ms']
+
+        # Column 0: leading frame
+        ax = axes[row, 0]
+        if lead_i is not None and lead_i < len(frames):
+            ax.imshow(frames[lead_i], cmap='gray', vmin=0, vmax=255, aspect='auto')
+            if lead_row is not None:
+                ax.axhline(lead_row, color='lime', linestyle='-', linewidth=2)
+                ax.text(30, lead_row - 25, f"LEADING row r_a = {lead_row}",
+                        color='lime', fontsize=11, fontweight='bold',
+                        bbox=dict(facecolor='black', alpha=0.7, pad=2))
+            # Timestamp overlay
+            info = (f"Pulse {p_idx} LEADING\n"
+                    f"Frame idx in MKV: {lead_i}\n"
+                    f"T_on (measured)  = {T_on:.6f}\n"
+                    f"Nearest GPS PPS  = {pps}\n"
+                    f"Residual to PPS  = {on_err:+.1f} ms")
+            ax.text(0.02, 0.98, info, transform=ax.transAxes,
+                    color='yellow', fontsize=9, fontweight='bold',
+                    verticalalignment='top', family='monospace',
+                    bbox=dict(facecolor='black', alpha=0.75, pad=4))
+        else:
+            ax.text(0.5, 0.5, f"Pulse {p_idx} LEADING in VBI\n(case {case})\n"
+                              f"T_on derived from T_off: {T_on:.6f}\n"
+                              f"Residual to PPS: {on_err:+.1f} ms",
+                    transform=ax.transAxes, ha='center', va='center',
+                    color='white', fontsize=10, family='monospace',
+                    bbox=dict(facecolor='darkred', alpha=0.8, pad=6))
+            ax.set_facecolor('#222')
+        ax.set_ylabel(f"P{p_idx}", fontsize=10, fontweight='bold')
+        ax.set_yticks([0, 270, 540, 810, 1079])
+        ax.set_xticks([])
+
+        # Column 1: trailing frame
+        ax = axes[row, 1]
+        if trail_i is not None and trail_i < len(frames):
+            ax.imshow(frames[trail_i], cmap='gray', vmin=0, vmax=255, aspect='auto')
+            if trail_row is not None:
+                ax.axhline(trail_row, color='red', linestyle='-', linewidth=2)
+                ax.text(30, trail_row - 25, f"TRAILING row r_b = {trail_row}",
+                        color='red', fontsize=11, fontweight='bold',
+                        bbox=dict(facecolor='black', alpha=0.7, pad=2))
+            off_info = f"+?"
+            if T_off is not None:
+                off_info = f"{T_off:.6f}"
+            info = (f"Pulse {p_idx} TRAILING\n"
+                    f"Frame idx in MKV: {trail_i}\n"
+                    f"T_off (measured) = {off_info}\n"
+                    f"Expected (PPS+0.1): {pps + LED_PULSE_S}\n"
+                    f"Residual to PPS+100ms = {off_err:+.1f} ms" if off_err is not None else
+                    f"Trailing edge not row-resolvable")
+            ax.text(0.02, 0.98, info, transform=ax.transAxes,
+                    color='yellow', fontsize=9, fontweight='bold',
+                    verticalalignment='top', family='monospace',
+                    bbox=dict(facecolor='black', alpha=0.75, pad=4))
+        else:
+            ax.text(0.5, 0.5, f"Pulse {p_idx} TRAILING in VBI\n(case {case})",
+                    transform=ax.transAxes, ha='center', va='center',
+                    color='white', fontsize=10, family='monospace',
+                    bbox=dict(facecolor='darkred', alpha=0.8, pad=6))
+            ax.set_facecolor('#222')
+        ax.set_yticks([0, 270, 540, 810, 1079])
+        ax.set_xticks([])
+
+    plt.tight_layout()
+    plt.subplots_adjust(top=0.95)
+    print(f"Showing {n} pulses. Close the plot window to exit.", file=sys.stderr)
+    plt.show()
 
 
 def main():
@@ -400,6 +511,9 @@ def main():
     ap.add_argument('--ft-dir', required=True)
     ap.add_argument('--probe-frames', type=int, default=250)
     ap.add_argument('--quiet', action='store_true')
+    ap.add_argument('--plot', action='store_true',
+                    help='Show matplotlib GUI with leading/trailing frames + '
+                         'row profiles + detected transition rows for each pulse')
     args = ap.parse_args()
 
     if not os.path.isfile(args.mkv):
@@ -409,8 +523,16 @@ def main():
         print("FT dir not found: %s" % args.ft_dir, file=sys.stderr)
         return 2
 
-    results = verify(args.mkv, args.ft_dir,
-                     probe_frames=args.probe_frames, verbose=not args.quiet)
+    results, frames, pulses, row_means = verify(
+        args.mkv, args.ft_dir,
+        probe_frames=args.probe_frames, verbose=not args.quiet)
+
+    if args.plot and results:
+        mkv_t0 = parse_mkv_filename_ts(args.mkv)
+        band = locate_led_band(frames)
+        if band is not None:
+            plot_results(results, frames, pulses, row_means, band, mkv_t0)
+
     return 0 if results else 1
 
 
