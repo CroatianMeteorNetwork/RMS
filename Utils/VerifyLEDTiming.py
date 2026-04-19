@@ -397,11 +397,16 @@ def verify(mkv_path, ft_dir, probe_frames=250, verbose=True):
     return results, frames, pulses, row_means
 
 
-def plot_results(results, frames, pulses, row_means, band, mkv_t0):
-    """GUI: for each pulse, show the actual video frame with the detected
-    transition row drawn across it, plus the computed timestamp and
-    residual vs GPS-PPS. User can eyeball whether the row-detection
-    matches where the LED edge actually is.
+def plot_results(results, frames, pulses, row_means, band, mkv_t0, mkv_path):
+    """GUI: single-frame navigator. Shows ONE frame at a time with:
+      - the detected transition row (green=leading, red=trailing)
+      - timestamp, row number, residual to PPS
+
+    Navigation (keyboard, window must have focus):
+      ← / →         previous / next frame
+      PageUp/PageDn previous / next pulse edge (leading or trailing)
+      Home / End    first / last frame
+      q / Esc       close
     """
     try:
         import matplotlib
@@ -412,96 +417,139 @@ def plot_results(results, frames, pulses, row_means, band, mkv_t0):
               file=sys.stderr)
         return
 
-    r0, r1 = band
-    n = min(len(results), 10)
-    if n == 0:
-        print("No pulses to plot.", file=sys.stderr)
+    r0, _ = band
+    n_frames = len(frames)
+    if n_frames == 0:
         return
 
-    # Two columns: leading frame, trailing frame
-    fig, axes = plt.subplots(n, 2, figsize=(13, 3.2*n), squeeze=False)
-    fig.suptitle("LED leading/trailing edge detection — visual verification\n"
-                 "Green line = detected leading-edge row,  Red line = detected trailing-edge row",
-                 fontsize=11)
+    # Build index of "interesting" frames (leading/trailing edges) for
+    # PageUp/PageDn navigation between events.
+    edge_frames = []  # list of (frame_idx, kind, result_index)
+    for ri, r in enumerate(results):
+        if r.get('lead_i') is not None:
+            edge_frames.append((r['lead_i'], 'leading', ri))
+        if r.get('trail_i') is not None:
+            edge_frames.append((r['trail_i'], 'trailing', ri))
+    edge_frames.sort()
 
-    for row, r in enumerate(results[:n]):
-        p_idx = r['pulse']
-        lead_i = r.get('lead_i')
-        trail_i = r.get('trail_i')
-        lead_row = r.get('lead_row')
-        trail_row = r.get('trail_row')
-        case = r['case']
-        T_on = r['T_on']
-        T_off = r['T_off']
-        pps = r['pps_utc']
-        on_err = r['on_err_ms']
-        off_err = r['off_err_ms']
+    # Map frame_idx → (kind, result) for quick annotation lookup
+    frame_annot = {f: (kind, results[ri]) for f, kind, ri in edge_frames}
 
-        # Column 0: leading frame
-        ax = axes[row, 0]
-        if lead_i is not None and lead_i < len(frames):
-            ax.imshow(frames[lead_i], cmap='gray', vmin=0, vmax=255, aspect='auto')
-            if lead_row is not None:
-                ax.axhline(lead_row, color='lime', linestyle='-', linewidth=2)
-                ax.text(30, lead_row - 25, f"LEADING row r_a = {lead_row}",
-                        color='lime', fontsize=11, fontweight='bold',
-                        bbox=dict(facecolor='black', alpha=0.7, pad=2))
-            # Timestamp overlay
-            info = (f"Pulse {p_idx} LEADING\n"
-                    f"Frame idx in MKV: {lead_i}\n"
-                    f"T_on (measured)  = {T_on:.6f}\n"
-                    f"Nearest GPS PPS  = {pps}\n"
-                    f"Residual to PPS  = {on_err:+.1f} ms")
-            ax.text(0.02, 0.98, info, transform=ax.transAxes,
-                    color='yellow', fontsize=9, fontweight='bold',
-                    verticalalignment='top', family='monospace',
-                    bbox=dict(facecolor='black', alpha=0.75, pad=4))
-        else:
-            ax.text(0.5, 0.5, f"Pulse {p_idx} LEADING in VBI\n(case {case})\n"
-                              f"T_on derived from T_off: {T_on:.6f}\n"
-                              f"Residual to PPS: {on_err:+.1f} ms",
-                    transform=ax.transAxes, ha='center', va='center',
-                    color='white', fontsize=10, family='monospace',
-                    bbox=dict(facecolor='darkred', alpha=0.8, pad=6))
-            ax.set_facecolor('#222')
-        ax.set_ylabel(f"P{p_idx}", fontsize=10, fontweight='bold')
+    state = {'frame': edge_frames[0][0] if edge_frames else 0}
+
+    fig, ax = plt.subplots(figsize=(14, 8))
+    fig.canvas.manager.set_window_title(
+        f"LED verify — {os.path.basename(mkv_path)}")
+
+    def render():
+        ax.clear()
+        idx = state['frame']
+        img = frames[idx]
+        ax.imshow(img, cmap='gray', vmin=0, vmax=255, aspect='auto')
+        ax.set_title(f"MKV frame {idx} / {n_frames-1}        "
+                     f"← → to navigate,  PgUp/PgDn = next edge,  q = close",
+                     fontsize=10)
         ax.set_yticks([0, 270, 540, 810, 1079])
-        ax.set_xticks([])
+        ax.set_xlabel(f"column (1920 wide)",  fontsize=9)
 
-        # Column 1: trailing frame
-        ax = axes[row, 1]
-        if trail_i is not None and trail_i < len(frames):
-            ax.imshow(frames[trail_i], cmap='gray', vmin=0, vmax=255, aspect='auto')
-            if trail_row is not None:
-                ax.axhline(trail_row, color='red', linestyle='-', linewidth=2)
-                ax.text(30, trail_row - 25, f"TRAILING row r_b = {trail_row}",
-                        color='red', fontsize=11, fontweight='bold',
-                        bbox=dict(facecolor='black', alpha=0.7, pad=2))
-            off_info = f"+?"
-            if T_off is not None:
-                off_info = f"{T_off:.6f}"
-            info = (f"Pulse {p_idx} TRAILING\n"
-                    f"Frame idx in MKV: {trail_i}\n"
-                    f"T_off (measured) = {off_info}\n"
-                    f"Expected (PPS+0.1): {pps + LED_PULSE_S}\n"
-                    f"Residual to PPS+100ms = {off_err:+.1f} ms" if off_err is not None else
-                    f"Trailing edge not row-resolvable")
+        # Row-means plot overlay (small sparkline on right edge)
+        rm = img.mean(axis=1)
+        # Scale row_means to [0.7, 1.0] of x-range
+        xr = 1920
+        scaled = 0.7 * xr + (rm / 255.0) * 0.3 * xr
+        ax.plot(scaled, np.arange(len(rm)), color='cyan',
+                linewidth=0.8, alpha=0.7)
+        ax.text(0.72 * xr, 30, "row brightness →",
+                color='cyan', fontsize=8)
+
+        # Annotate detected edge if applicable
+        if idx in frame_annot:
+            kind, r = frame_annot[idx]
+            if kind == 'leading':
+                row_px = r['lead_row']
+                color = 'lime'
+                T_val = r['T_on']
+                T_label = "T_on "
+                edge_label = f"LEADING  r_a = {row_px}"
+                residual = r['on_err_ms']
+                residual_label = f"PPS + {residual:+.1f} ms"
+            else:
+                row_px = r['trail_row']
+                color = 'red'
+                T_val = r['T_off']
+                T_label = "T_off"
+                edge_label = f"TRAILING  r_b = {row_px}"
+                residual = r['off_err_ms']
+                residual_label = (f"(PPS+100ms) + {residual:+.1f} ms"
+                                  if residual is not None else "—")
+
+            if row_px is not None:
+                ax.axhline(row_px, color=color, linewidth=2, linestyle='-')
+                ax.text(60, row_px - 30, edge_label,
+                        color=color, fontsize=14, fontweight='bold',
+                        bbox=dict(facecolor='black', alpha=0.75, pad=3))
+
+            info = (f"Pulse {r['pulse']} — {kind.upper()}\n"
+                    f"MKV frame idx : {idx}\n"
+                    f"Row detected  : {row_px}\n"
+                    f"{T_label}        : {T_val:.6f}\n"
+                    f"Nearest PPS   : {r['pps_utc']}\n"
+                    f"Residual      : {residual_label}\n"
+                    f"Case          : {r['case']}")
             ax.text(0.02, 0.98, info, transform=ax.transAxes,
-                    color='yellow', fontsize=9, fontweight='bold',
+                    color='yellow', fontsize=11, fontweight='bold',
                     verticalalignment='top', family='monospace',
-                    bbox=dict(facecolor='black', alpha=0.75, pad=4))
+                    bbox=dict(facecolor='black', alpha=0.8, pad=6))
         else:
-            ax.text(0.5, 0.5, f"Pulse {p_idx} TRAILING in VBI\n(case {case})",
-                    transform=ax.transAxes, ha='center', va='center',
-                    color='white', fontsize=10, family='monospace',
-                    bbox=dict(facecolor='darkred', alpha=0.8, pad=6))
-            ax.set_facecolor('#222')
-        ax.set_yticks([0, 270, 540, 810, 1079])
-        ax.set_xticks([])
+            # No edge on this frame — show whether it's DARK / BRIGHT / partial
+            mn, mx = rm.min(), rm.max()
+            if mn > 150:
+                state_lbl = "BRIGHT (LED on through full exposure)"
+            elif mx < 80:
+                state_lbl = "DARK (no LED)"
+            else:
+                state_lbl = "partial (gradient — not a pulse boundary my tool recognized)"
+            ax.text(0.02, 0.98,
+                    f"MKV frame {idx}  ·  not an edge frame\n{state_lbl}\n"
+                    f"row mean range: {mn:.0f} – {mx:.0f}",
+                    transform=ax.transAxes,
+                    color='white', fontsize=11, family='monospace',
+                    verticalalignment='top',
+                    bbox=dict(facecolor='#333', alpha=0.85, pad=6))
 
-    plt.tight_layout()
-    plt.subplots_adjust(top=0.95)
-    print(f"Showing {n} pulses. Close the plot window to exit.", file=sys.stderr)
+        fig.canvas.draw_idle()
+
+    def on_key(event):
+        k = event.key
+        idx = state['frame']
+        if k in ('right',):
+            state['frame'] = min(n_frames - 1, idx + 1)
+        elif k in ('left',):
+            state['frame'] = max(0, idx - 1)
+        elif k == 'pagedown':
+            # Jump to next edge frame after current
+            nxt = next((f for f, _, _ in edge_frames if f > idx),
+                       edge_frames[-1][0] if edge_frames else idx)
+            state['frame'] = nxt
+        elif k == 'pageup':
+            prv = next((f for f, _, _ in reversed(edge_frames) if f < idx),
+                       edge_frames[0][0] if edge_frames else idx)
+            state['frame'] = prv
+        elif k == 'home':
+            state['frame'] = 0
+        elif k == 'end':
+            state['frame'] = n_frames - 1
+        elif k in ('q', 'escape'):
+            plt.close(fig)
+            return
+        else:
+            return
+        render()
+
+    fig.canvas.mpl_connect('key_press_event', on_key)
+    render()
+    print("GUI ready. Arrow keys to navigate frames, PgUp/PgDn to jump "
+          "between edge frames, q to close.", file=sys.stderr)
     plt.show()
 
 
@@ -531,7 +579,7 @@ def main():
         mkv_t0 = parse_mkv_filename_ts(args.mkv)
         band = locate_led_band(frames)
         if band is not None:
-            plot_results(results, frames, pulses, row_means, band, mkv_t0)
+            plot_results(results, frames, pulses, row_means, band, mkv_t0, args.mkv)
 
     return 0 if results else 1
 
