@@ -43,8 +43,8 @@ RUN_GAP_THRESHOLD_S = 30.0
 # Calibrated from GPS PPS LED (2026-04-04).
 PIPELINE_DELAY_FRAMES = 0
 
-# Sensor frame period: HMAX=4400 * VMAX=1351 / 148.5 MHz
-FRAME_PERIOD_S = 4400 * 1351 / 148.5e6  # 0.040029630 s
+# Sensor frame period: HMAX=4400 * VMAX=1350 / 148.5 MHz (exact 25 fps)
+FRAME_PERIOD_S = 4400 * 1350 / 148.5e6  # 0.040000000 s
 
 # VENC PTS wraps at 2^32 microseconds
 WRAP_US = 4294967296

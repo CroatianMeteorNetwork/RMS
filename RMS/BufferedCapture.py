@@ -2102,8 +2102,9 @@ class BufferedCapture(Process):
         if buf is None:
             return Gst.PadProbeReturn.OK
 
-        # One frame period in nanoseconds: HMAX=4400, VMAX=1351, 148.5MHz
-        FRAME_NS = 40029630
+        # One frame period in nanoseconds: HMAX=4400, VMAX=1350, 148.5MHz
+        # (exact 25 fps after VMAX=1350 fix; was 40029630 for VMAX=1351).
+        FRAME_NS = 40000000
 
         pts = buf.pts
 
