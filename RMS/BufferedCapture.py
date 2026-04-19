@@ -3490,10 +3490,23 @@ class BufferedCapture(Process):
 
                         self.last_daytime_mode = current_daytime
 
-                        # Calculate buffer fill percentage based on max frame age
-                        # The appsink has max-buffers=100, so at fps rate, max capacity is ~100/fps seconds
+                        # Buffer fill from direct appsink queue-depth query.
+                        # Previously derived from RTP-elapsed vs host wallclock,
+                        # which accumulated camera-crystal drift (~3000 ppm seen
+                        # on this board) into tens-of-seconds of false "age" per
+                        # hour. The actual useful metric is simply how many
+                        # frames are sitting in appsink's internal queue
+                        # waiting for us to read them.
                         max_buffer_time = 100.0 / self.config.fps  # Theoretical max buffer time in seconds
-                        buffer_fill_frames = max_frame_age_seconds * self.config.fps
+                        try:
+                            appsink_el = self.pipeline.get_by_name("appsink")
+                            if appsink_el is not None:
+                                queued = appsink_el.get_property("current-level-buffers")
+                                buffer_fill_frames = float(queued)
+                            else:
+                                buffer_fill_frames = max_frame_age_seconds * self.config.fps
+                        except Exception:
+                            buffer_fill_frames = max_frame_age_seconds * self.config.fps
 
                         # VENC clock discipline: estimate frequency offset
                         # between VENC crystal and host clock, then apply a
