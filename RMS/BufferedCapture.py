@@ -3508,6 +3508,21 @@ class BufferedCapture(Process):
                         except Exception:
                             buffer_fill_frames = max_frame_age_seconds * self.config.fps
 
+                        # Sanity: compare timestamp-derived age to queue depth.
+                        # In a healthy pipeline the most recently read frame
+                        # should have ts_age ≈ (queued+1)/fps + pipeline_delay
+                        # (~30-50 ms for camera+network). If ts_age is much
+                        # larger than that, timestamps are drifting away from
+                        # host wallclock (frames "look older" than they are).
+                        # If ts_age is negative, a frame claims to be from
+                        # the future — clock-sync problem.
+                        ts_drift_ms = None
+                        _last_ts = getattr(self, '_last_venc_timestamp', None)
+                        if _last_ts is not None:
+                            ts_age = time.time() - _last_ts
+                            expected_age = (buffer_fill_frames + 1) / self.config.fps + 0.05
+                            ts_drift_ms = (ts_age - expected_age) * 1000.0
+
                         # VENC clock discipline: estimate frequency offset
                         # between VENC crystal and host clock, then apply a
                         # continuous per-frame slew.  Like chrony: regression
@@ -3638,9 +3653,22 @@ class BufferedCapture(Process):
                                     m.get('digital_gain', 0),
                                     m.get('isp_dgain', 0),
                                     m.get('soc_temp_c', '?'))
-                        log.info("Buffer fill: {:.2f}/{:d} frames. Dropped frames: {} (last 10 min), {} this session{}".format(
+                        # Timestamp-drift tag: show ±ms of ts_age vs what
+                        # the queue depth implies. |drift| > ~500 ms means
+                        # frame timestamps don't match host wallclock and
+                        # something in the cam_wall/epoch_offset path is off.
+                        drift_str = ""
+                        if ts_drift_ms is not None:
+                            flag = ""
+                            if abs(ts_drift_ms) > 1000:
+                                flag = " ⚠DRIFT"
+                            elif abs(ts_drift_ms) > 500:
+                                flag = " ⚠"
+                            drift_str = " | ts_drift={:+.0f}ms{}".format(ts_drift_ms, flag)
+
+                        log.info("Buffer fill: {:.2f}/{:d} frames. Dropped frames: {} (last 10 min), {} this session{}{}".format(
                             buffer_fill_frames, self._appsink_max_buffers,
-                            recent_dropped, self.dropped_frames.value, meta_str))
+                            recent_dropped, self.dropped_frames.value, drift_str, meta_str))
 
                 last_frame_timestamp = frame_timestamp
                 
