@@ -178,33 +178,36 @@ def find_transition_row(row_means, direction):
     """Row where brightness rises (direction='up') or falls ('down').
     Returns row index or None if no clean transition visible.
 
-    Uses a THRESHOLD CROSSING, not argmax(diff), because on a dim or
-    slow-ramping LED the dark→bright transition spans ~20 rows and
-    each per-row step is only ~10 units — argmax(diff) catches it but
-    argmax(diff) >20 threshold rejects it. Threshold-crossing finds
-    the FIRST row whose brightness is clearly above ambient (or below
-    saturation for trailing), which is where the physical edge landed.
+    Mid-level crossing: if the row-brightness profile spans from LOW
+    to HIGH (or HIGH to LOW), the transition row is where brightness
+    crosses the halfway point. This works for both SHARP edges (1-2
+    rows span the full range) and GRADUAL ramps (20-30 rows span the
+    range) — picks the physical midpoint in both cases.
+
+    Rejects if the profile doesn't actually span a meaningful range
+    (peak-to-peak < 60) to avoid latching onto scene noise.
     """
     rm = row_means.astype(np.int32)
-    # Ambient from top 5% rows (assumed dark for leading frame).
-    n_top = max(5, len(rm) // 20)
+    lo, hi = rm.min(), rm.max()
+    span = hi - lo
+    if span < 60:
+        return None
+    mid = (lo + hi) // 2
     if direction == 'up':
-        ambient_top = rm[:n_top].mean()
-        # Find first row above ambient + significant margin
-        threshold = ambient_top + 15
-        above = np.where(rm > threshold)[0]
+        # First row whose brightness crosses from below-mid to above-mid
+        above = np.where(rm >= mid)[0]
         if len(above) == 0:
             return None
-        # Require at least 5 consecutive rows above for stability
-        return int(above[0]) if (rm.max() - ambient_top) > 30 else None
+        return int(above[0])
     else:
-        # For trailing: find first row where brightness drops from top plateau
-        top_level = rm[:n_top].mean()
-        threshold = top_level - 30
-        below = np.where(rm < threshold)[0]
+        # First row whose brightness drops from above-mid to below-mid
+        # Find where the profile transitions from "still bright at top"
+        # to "dark at bottom".  Scan from top: find last row still above
+        # mid, then return the next one (first below).
+        below = np.where(rm < mid)[0]
         if len(below) == 0:
             return None
-        return int(below[0]) if (top_level - rm.min()) > 30 else None
+        return int(below[0])
 
 
 def measure_edge(frames_row_means, frame_idx, ft_for_frame, band_r0,
