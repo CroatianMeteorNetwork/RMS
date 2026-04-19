@@ -177,16 +177,34 @@ def detect_pulses(frames, band, bright_thresh=150, dark_thresh=80):
 def find_transition_row(row_means, direction):
     """Row where brightness rises (direction='up') or falls ('down').
     Returns row index or None if no clean transition visible.
+
+    Uses a THRESHOLD CROSSING, not argmax(diff), because on a dim or
+    slow-ramping LED the dark→bright transition spans ~20 rows and
+    each per-row step is only ~10 units — argmax(diff) catches it but
+    argmax(diff) >20 threshold rejects it. Threshold-crossing finds
+    the FIRST row whose brightness is clearly above ambient (or below
+    saturation for trailing), which is where the physical edge landed.
     """
-    diffs = np.diff(row_means.astype(np.int32))
+    rm = row_means.astype(np.int32)
+    # Ambient from top 5% rows (assumed dark for leading frame).
+    n_top = max(5, len(rm) // 20)
     if direction == 'up':
-        r = int(np.argmax(diffs))
-        amplitude = diffs[r]
-        return r if amplitude > 20 else None
+        ambient_top = rm[:n_top].mean()
+        # Find first row above ambient + significant margin
+        threshold = ambient_top + 15
+        above = np.where(rm > threshold)[0]
+        if len(above) == 0:
+            return None
+        # Require at least 5 consecutive rows above for stability
+        return int(above[0]) if (rm.max() - ambient_top) > 30 else None
     else:
-        r = int(np.argmin(diffs))
-        amplitude = diffs[r]
-        return r if amplitude < -20 else None
+        # For trailing: find first row where brightness drops from top plateau
+        top_level = rm[:n_top].mean()
+        threshold = top_level - 30
+        below = np.where(rm < threshold)[0]
+        if len(below) == 0:
+            return None
+        return int(below[0]) if (top_level - rm.min()) > 30 else None
 
 
 def measure_edge(frames_row_means, frame_idx, ft_for_frame, band_r0,
@@ -220,16 +238,17 @@ def measure_edge(frames_row_means, frame_idx, ft_for_frame, band_r0,
         return None, None
     sensor_row = band_r0 + row
     fe_start = ft_for_frame
-    # cam_wall empirically corresponds to T0 (row-0 integration START)
-    # not FE_START (row-0 readout START). The two differ by one exposure
-    # duration. T_readout(r) = T0 + exposure + r × line_time.
+    # With pts_stream2 publishing cam_wall = CLOCK_REALTIME snapshot at
+    # ioctl(FE_START) return, cam_wall is the UTC of row-0 READOUT
+    # start (FE_START), NOT the row-0 integration start (T0).
+    # T_readout(r) = cam_wall + r × line_time.
+    # exposure_start(r) = T_readout(r) − exposure = cam_wall + r×LT − exp
     if direction == 'on':
-        # r_a boundary: T_on = T_readout(r_a) = T0 + exposure + r_a × LT
-        T_edge = fe_start + exposure_s + sensor_row * LINE_TIME_S
-    else:
-        # r_b boundary (partial→dark in trailing frame):
-        # T_off = exposure_start(r_b) = T0 + r_b × line_time
+        # r_a (first lit row): T_readout(r_a) = T_on
         T_edge = fe_start + sensor_row * LINE_TIME_S
+    else:
+        # r_b (first dark row after partial): exposure_start(r_b) = T_off
+        T_edge = fe_start + sensor_row * LINE_TIME_S - exposure_s
     return T_edge, sensor_row
 
 
