@@ -195,16 +195,21 @@ def measure_edge(frames_row_means, frame_idx, ft_for_frame, band_r0,
 
     direction: 'on' (leading) or 'off' (trailing).
 
-    With a bright saturating LED, the only sharp transition visible in
-    a partial frame is the **r_b** boundary (partial-LED to dark),
-    because rows near r_a are still saturated with only ~40 ms of LED
-    exposure. The r_a boundary would show inside the previous frame
-    as a saturated-to-saturated transition, invisible.
+    Leading and trailing edges expose DIFFERENT row boundaries.
 
-    r_b is the row where exposure_START equals the edge time:
-        For trailing: T_off = FE_START + r_b × line_time − exposure
-        For leading:  T_on  = FE_START + r_b × line_time − exposure
-        (symmetric; same formula)
+    LEADING (LED turns on):
+        Rows below r_a: exposure ended BEFORE LED on → dark
+        Rows above r_a: progressively more LED → saturated quickly
+        Visible transition: r_a (sharp dark → bright ramp)
+        Formula: T_on = FE_START + r_a × line_time
+
+    TRAILING (LED turns off):
+        Rows below r_a (hidden by saturation): full LED → saturated
+        Rows r_a..r_b: ramp saturated → dark
+        Rows above r_b: exposure STARTED after LED off → dark
+        With bright saturating LED the r_a→ramp region is saturated-flat
+        and the only visible sharp transition is r_b (partial → dark).
+        Formula: T_off = FE_START + r_b × line_time − exposure
 
     Returns (T_edge, sensor_row) or (None, None) if no transition found.
     """
@@ -215,9 +220,16 @@ def measure_edge(frames_row_means, frame_idx, ft_for_frame, band_r0,
         return None, None
     sensor_row = band_r0 + row
     fe_start = ft_for_frame
-    # Saturation hides r_a; what we see is r_b (exposure-start boundary).
-    # Subtract exposure_s to back-solve to the true edge time.
-    T_edge = fe_start + sensor_row * LINE_TIME_S - exposure_s
+    # cam_wall empirically corresponds to T0 (row-0 integration START)
+    # not FE_START (row-0 readout START). The two differ by one exposure
+    # duration. T_readout(r) = T0 + exposure + r × line_time.
+    if direction == 'on':
+        # r_a boundary: T_on = T_readout(r_a) = T0 + exposure + r_a × LT
+        T_edge = fe_start + exposure_s + sensor_row * LINE_TIME_S
+    else:
+        # r_b boundary (partial→dark in trailing frame):
+        # T_off = exposure_start(r_b) = T0 + r_b × line_time
+        T_edge = fe_start + sensor_row * LINE_TIME_S
     return T_edge, sensor_row
 
 
