@@ -2095,31 +2095,43 @@ class BufferedCapture(Process):
 
         Stale shared-page VENC PTS reads produce occasional duplicate RTP
         timestamps that fail splitmuxsink's running-time conversion, causing
-        matroskamux to drop buffers.  This probe enforces strictly monotonic
-        PTS/DTS so every buffer reaches the muxer with a valid timestamp.
+        matroskamux to drop buffers.  matroskamux only needs PTS to be
+        STRICTLY INCREASING — not frame-period-spaced — so we nudge equal/
+        backward PTS forward by a 1-µs tick rather than a full frame period.
+
+        Previously bumped by a full 40 ms frame period on any `pts <= last`.
+        That was a cascade: a single stale pts caused the next normal pts
+        (which happens to equal last+40ms = new last) to also trigger the
+        bump condition, leading to every subsequent frame being shifted
+        +40 ms.  Over a stream, two bumps propagated as a permanent
+        +80 ms MKV content offset vs appsink/FT — breaking moveSegment's
+        side-door lookup (key not found in `_rtp_ts_by_pts`).
+
+        Fixed: only bump on STRICT inequality `pts < last` (true backward
+        step, not equality), and the bump is 1 µs (minimum monotonic
+        increment).  A real duplicate still gets nudged, but a normal
+        next-frame with pts == last + 40 ms passes through unchanged.
         """
         buf = info.get_buffer()
         if buf is None:
             return Gst.PadProbeReturn.OK
 
-        # One frame period in nanoseconds: HMAX=4400, VMAX=1350, 148.5MHz
-        # (exact 25 fps after VMAX=1350 fix; was 40029630 for VMAX=1351).
-        FRAME_NS = 40000000
-
+        MONO_BUMP_NS = 1000  # 1 µs — enough for matroskamux monotonicity
         pts = buf.pts
 
         # If PTS is NONE, synthesize from last known PTS
         if pts == Gst.CLOCK_TIME_NONE:
             if self._storage_last_pts_ns > 0:
-                pts = self._storage_last_pts_ns + FRAME_NS
+                pts = self._storage_last_pts_ns + MONO_BUMP_NS
                 buf.pts = pts
                 buf.dts = pts
                 self._storage_last_pts_ns = pts
             return Gst.PadProbeReturn.OK
 
-        if pts <= self._storage_last_pts_ns and self._storage_last_pts_ns > 0:
-            # Duplicate or backward PTS — bump forward by one frame period
-            fixed = self._storage_last_pts_ns + FRAME_NS
+        if pts < self._storage_last_pts_ns and self._storage_last_pts_ns > 0:
+            # True backward PTS step — nudge forward by 1 µs to keep
+            # matroskamux happy without introducing frame-period offsets.
+            fixed = self._storage_last_pts_ns + MONO_BUMP_NS
             buf.pts = fixed
             buf.dts = fixed
             self._storage_last_pts_ns = fixed
