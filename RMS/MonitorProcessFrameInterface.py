@@ -347,7 +347,8 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
                 unique_id = os.path.splitext(file_name)[0]
 
                 # Skip already processed or currently processing files
-                if unique_id in processed_files or unique_id in active_workers:
+                is_processed = unique_id in processed_files or any(pb.endswith(unique_id) for pb in processed_files)
+                if is_processed or unique_id in active_workers:
                     continue
 
                 # Skip files that failed recently (wait fail_wait_time)
@@ -687,7 +688,8 @@ def monitorMultipleCameras(multicam_ini_path):
                     unique_id = os.path.splitext(file_name)[0]
 
                     # Ignore files we've already processed or are currently working on
-                    if unique_id in processed_files[cam_id] or unique_id in active_workers:
+                    is_processed = unique_id in processed_files[cam_id] or any(pb.endswith(unique_id) for pb in processed_files[cam_id])
+                    if is_processed or unique_id in active_workers:
                         continue
                     
                     # If the file recently failed, wait before retrying it
