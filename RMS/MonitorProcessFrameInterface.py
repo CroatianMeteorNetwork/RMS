@@ -22,6 +22,7 @@ import sys
 import time
 import logging
 import multiprocessing
+import configparser
 
 import RMS.ConfigReader as cr
 from RMS.Formats.FrameInterface import detectInputTypeFile, checkIfVideoFile
@@ -298,7 +299,7 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
                         if uid not in failed_files:
                             failed_files[uid] = {'count': 1, 'last_fail_time': time.time()}
                             log.warning("Processing failed for: {} (exit code {:d}), will retry in {:.1f} mins...".format(
-                                uid, proc.exitcode, fail_wait_time / 60.0))
+                                uid, proc.exitcode, fail_wait_time/60.0))
                         else:
                             failed_files[uid]['count'] += 1
                             if failed_files[uid]['count'] >= 2:
@@ -308,7 +309,7 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
                             else:
                                 failed_files[uid]['last_fail_time'] = time.time()
                                 log.warning("Processing failed for: {} (exit code {:d}), will retry in {:.1f} mins...".format(
-                                    uid, proc.exitcode, fail_wait_time / 60.0))
+                                    uid, proc.exitcode, fail_wait_time/60.0))
 
                     finished.append(uid)
 
@@ -387,14 +388,14 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
 
             # 3. SORT STABLE FILES BY AGE (Oldest First)
             # If a file has failed before, use its last fail time for sorting to put it at the end of the queue
-            def get_sort_time(file_info):
+            def getSortTime(file_info):
                 mtime = file_info[1]
                 uid = file_info[2]
                 if uid in failed_files:
                     return max(mtime, failed_files[uid]['last_fail_time'])
                 return mtime
 
-            stable_files.sort(key=get_sort_time)
+            stable_files.sort(key=getSortTime)
 
             # 4. Start processes for the oldest stable files until nproc is full
             new_files_queued = False
@@ -438,6 +439,407 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
                     log.warning("Worker for {} did not finish in time, terminating.".format(fname))
                     proc.terminate()
 
+        log.info("All workers stopped.")
+
+
+def monitorMultipleCameras(multicam_ini_path):
+    """ Monitor multiple directories for multiple cameras based on an INI config file. 
+    
+    Arguments:
+        multicam_ini_path: Path to the INI config file.
+        
+    Returns:
+        None
+
+    Example config file:
+        
+        [Global]
+        
+        # Maximum number of parallel worker processes to run across all cameras globally
+        nproc = 8
+        
+        # File extension/type to monitor for (e.g., mkv, mp4, avi, ff, vid)
+        file_type = mkv
+
+        # Whether to recursively search subdirectories for video files
+        recursive = True
+
+        # Number of frames to process per chunk for star extraction
+        chunk_frames = 128
+
+        # Time in seconds to wait before rescanning directories for new files
+        poll_interval = 2
+
+        # Set to True to re-process files even if they already have a done.flag
+        force = False
+        
+        [CA0001]
+        input_dir = /path/to/CA0001/video
+        output_dir = /path/to/CA0001/output
+        config = /path/to/CA0001/CA0001.config
+        platepar = /path/to/CA0001/platepar.cal
+        flat = /path/to/CA0001/flat.bmp
+        dark = /path/to/CA0001/dark.bmp
+        
+        [CA0002]
+        input_dir = /path/to/CA0002/video
+        output_dir = /path/to/CA0002/output
+        config = /path/to/CA0002/CA0002.config
+        platepar = /path/to/CA0002/platepar.cal
+        
+        [CA0003]
+        input_dir = /path/to/CA0003/video
+        output_dir = /path/to/CA0003/output
+        config = /path/to/CA0003/CA0003.config
+        platepar = /path/to/CA0003/platepar.cal
+    """
+
+    # Initialize the ConfigParser to read the INI configuration
+    cp = configparser.ConfigParser()
+    cp.read(multicam_ini_path)
+
+    # The [Global] section is mandatory as it contains settings applied to all cameras
+    if not cp.has_section('Global'):
+        print("ERROR: Multi-camera config must have a [Global] section.")
+        sys.exit(1)
+
+    # Extract global parameters, falling back to sensible defaults if not provided
+    nproc = cp.getint('Global', 'nproc', fallback=2)
+    file_type = cp.get('Global', 'file_type', fallback='mkv')
+    recursive = cp.getboolean('Global', 'recursive', fallback=False)
+    chunk_frames = cp.getint('Global', 'chunk_frames', fallback=128)
+    poll_interval = cp.getfloat('Global', 'poll_interval', fallback=2.0)
+    force = cp.getboolean('Global', 'force', fallback=False)
+    fail_wait_time = cp.getfloat('Global', 'fail_wait_time', fallback=300.0)
+
+    # Parse individual camera sections. Each section other than 'Global' defines a single camera.
+    cameras = []
+    for section in cp.sections():
+        if section == 'Global':
+            continue
+        
+        # Extract configuration paths and directories for this specific camera
+        cam = {
+            'id': section,
+            'input_dir': os.path.abspath(cp.get(section, 'input_dir')),
+            'output_dir': os.path.abspath(cp.get(section, 'output_dir')),
+            'config_path': os.path.abspath(cp.get(section, 'config')),
+            'platepar_path': os.path.abspath(cp.get(section, 'platepar')),
+            'flat_path': cp.get(section, 'flat', fallback=None),
+            'dark_path': cp.get(section, 'dark', fallback=None),
+        }
+        
+        # Convert optional calibration paths to absolute paths if they exist
+        if cam['flat_path']:
+            cam['flat_path'] = os.path.abspath(cam['flat_path'])
+        if cam['dark_path']:
+            cam['dark_path'] = os.path.abspath(cam['dark_path'])
+        
+        # Ensure the output directory for this camera exists before we start dumping data there
+        os.makedirs(cam['output_dir'], exist_ok=True)
+        cameras.append(cam)
+
+    if not cameras:
+        print("ERROR: No cameras defined in config.")
+        sys.exit(1)
+
+    # To initialize the global logger, we need a directory. We will use the output directory 
+    # of the first camera in the list as the primary logging location, or the current directory if missing.
+    log_dir = cameras[0]['output_dir'] if cameras else os.getcwd()
+    
+    # We parse the config of the first camera just to hijack its logging settings for our global logger
+    first_config = cr.parse(cameras[0]['config_path'])
+    orig_data_dir = first_config.data_dir
+    orig_log_dir = first_config.log_dir
+    first_config.data_dir = log_dir
+    first_config.log_dir = 'logs'
+
+    log_manager = LoggingManager()
+    log_manager.initLogging(first_config, 'monitor_multicam_')
+    
+    # Restore the original config parameters so we don't accidentally mutate the configuration
+    first_config.data_dir = orig_data_dir
+    first_config.log_dir = orig_log_dir
+
+    log = getLogger("logger")
+    log.info("Started multi-camera monitoring with {:d} cameras, nproc={:d}".format(len(cameras), nproc))
+
+    # Initialize state tracking dictionaries. Since files from different cameras might have the same name,
+    # we track these metrics per camera using nested dictionaries or sets.
+    processed_files = {cam['id']: set() for cam in cameras}
+    failed_files = {cam['id']: {} for cam in cameras}
+    stability_tracker = {cam['id']: {} for cam in cameras}
+    
+    # Files are considered "stable" (i.e., finished writing to disk) if their size/mtime hasn't 
+    # changed for `stable_wait_time` seconds, or if they are older than `stable_max_age` seconds.
+    stable_wait_time = 5
+    stable_max_age = 30
+
+    # Dictionary to keep track of currently active processing jobs
+    # Format: { unique_id : (multiprocessing.Process, camera_id) }
+    active_workers = {} 
+    
+    # Counter for how many processes each camera is currently running (used for load balancing)
+    active_count_per_cam = {cam['id']: 0 for cam in cameras}
+
+    # Pre-scan the output directories for files that have already been processed 
+    # (indicated by the presence of a 'done.flag'). We do this to avoid reprocessing old files.
+    if not force:
+        for cam in cameras:
+            for root, dirs, files in os.walk(cam['output_dir']):
+                if 'done.flag' in files:
+                    # The parent directory name is typically the original base filename
+                    completed_base = os.path.basename(root)
+                    processed_files[cam['id']].add(completed_base)
+            
+            if processed_files[cam['id']]:
+                log.info("Camera {}: Found {:d} previously processed file(s).".format(
+                    cam['id'], len(processed_files[cam['id']])))
+
+    # Keep track of the last camera that received a process slot to facilitate round-robin tiebreaking
+    last_assigned_idx = 0
+
+    try:
+        # Main monitoring loop
+        while True:
+
+            # 1. Clean up finished workers and log their completion status
+            finished = []
+
+            for uid, (proc, cam_id) in active_workers.items():
+                if not proc.is_alive():
+                    proc.join()
+                    
+                    # A worker has finished, so we free up a slot for this camera
+                    active_count_per_cam[cam_id] -= 1
+                    
+                    if proc.exitcode == 0:
+
+                        # Process exited normally
+                        log.info("Successfully processed [{}]: {}".format(cam_id, uid))
+                        processed_files[cam_id].add(uid)
+
+                    else:
+
+                        # Process failed. We implement a retry mechanism.
+                        cam_fails = failed_files[cam_id]
+                        if uid not in cam_fails:
+                            # First failure: log warning and set up for a retry
+                            cam_fails[uid] = {'count': 1, 'last_fail_time': time.time()}
+                            log.warning("Processing failed for [{}] {} (exit code {:d}), retry in {:.1f} mins...".format(
+                                cam_id, uid, proc.exitcode, fail_wait_time/60.0))
+
+                        else:
+
+                            cam_fails[uid]['count'] += 1
+
+                            if cam_fails[uid]['count'] >= 2:
+
+                                # Failed twice: give up and mark as "processed" to prevent infinite loops
+                                log.error("Processing failed for [{}] {} (exit code {:d}) twice, giving up.".format(
+                                    cam_id, uid, proc.exitcode))
+                                processed_files[cam_id].add(uid)
+
+                            else:
+
+                                # Subsequent failure tracking (should not occur with current max of 2 retries)
+                                cam_fails[uid]['last_fail_time'] = time.time()
+                                log.warning("Processing failed for [{}] {} (exit code {:d}), retry in {:.1f} mins...".format(
+                                    cam_id, uid, proc.exitcode, fail_wait_time/60.0))
+                                    
+                    finished.append(uid)
+
+            # Remove finished processes from our tracking dictionary
+            for uid in finished:
+                del active_workers[uid]
+
+            # 2. Collect all new, stable files ready to be processed for each camera
+            stable_per_cam = {}
+            for cam in cameras:
+
+                cam_id = cam['id']
+                candidate_files = []
+                
+                # Fetch all files from the input directory
+                try:
+                    if recursive:
+                        for root, _, files in os.walk(cam['input_dir']):
+                            for f in files:
+                                candidate_files.append(os.path.join(root, f))
+                    else:
+                        candidate_files = [os.path.join(cam['input_dir'], f) for f in os.listdir(cam['input_dir'])]
+                
+                except OSError:
+                    log.error("Cannot read directory for camera {}: {}".format(cam_id, cam['input_dir']))
+                    continue
+
+                cam_stable = []
+                for file_path in candidate_files:
+                    file_name = os.path.basename(file_path)
+                    
+                    # Filter out non-target files and directories
+                    if not matchesFileType(file_name, file_type):
+                        continue
+                    if os.path.isdir(file_path):
+                        continue
+                    
+                    # Generate a unique ID based on the relative path so that recursive files are distinct
+                    file_rel_path = os.path.relpath(file_path, cam['input_dir'])
+                    unique_id = os.path.splitext(file_rel_path)[0].replace(os.path.sep, '_')
+
+                    # Ignore files we've already processed or are currently working on
+                    if unique_id in processed_files[cam_id] or unique_id in active_workers:
+                        continue
+                    
+                    # If the file recently failed, wait before retrying it
+                    if unique_id in failed_files[cam_id]:
+                        if (time.time() - failed_files[cam_id][unique_id]['last_fail_time']) < fail_wait_time:
+                            continue
+
+                    # Attempt to read file metadata for stability checking
+                    try:
+                        curr_mtime = os.path.getmtime(file_path)
+                        curr_size = os.path.getsize(file_path)
+                    except OSError:
+                        # File might have been deleted or locked, we'll try again next poll
+                        continue
+
+                    # Check if the file is "stable" (fully written to disk)
+                    if (time.time() - curr_mtime) > stable_max_age:
+                        
+                        # Old files are assumed to be fully written
+                        stable = True
+
+                    else:
+
+                        cam_trk = stability_tracker[cam_id]
+                        if file_path not in cam_trk:
+                            # Start tracking a new file
+                            log.info("[{}] New file detected: {} - waiting...".format(cam_id, file_rel_path))
+                            cam_trk[file_path] = {'mtime': curr_mtime, 'size': curr_size, 'since': time.time()}
+                            stable = False
+
+                        else:
+
+                            # Verify if the file has changed since the last check
+                            trk = cam_trk[file_path]
+
+                            if trk['mtime'] != curr_mtime or trk['size'] != curr_size:
+                                # File is still being written
+                                cam_trk[file_path] = {'mtime': curr_mtime, 'size': curr_size, 'since': time.time()}
+                                stable = False
+
+                            else:
+
+                                # File hasn't changed; check if it has been unchanged for long enough
+                                if (time.time() - trk['since']) >= stable_wait_time:
+                                    stable = True
+                                    del cam_trk[file_path] # We no longer need to track its stability
+
+                                else:
+                                    stable = False
+                    
+                    if stable:
+                        cam_stable.append((file_path, curr_mtime, unique_id, file_rel_path))
+
+                # Sort stable files chronologically (oldest files are processed first)
+                def getSortTime(file_info):
+                    mtime = file_info[1]
+                    uid = file_info[2]
+                    # Failed files use their last failure time to push them to the back of the queue
+                    if uid in failed_files[cam_id]:
+                        return max(mtime, failed_files[cam_id][uid]['last_fail_time'])
+                    return mtime
+
+                cam_stable.sort(key=getSortTime)
+                if cam_stable:
+                    stable_per_cam[cam_id] = cam_stable
+
+            # 3. Load Balancing Assignment
+            # We assign available processing slots based on which camera has the fewest active workers
+            new_files_queued = False
+            
+            while len(active_workers) < nproc and stable_per_cam:
+                
+                # Identify which cameras have stable files waiting to be processed
+                available_indices = []
+                for i, cam in enumerate(cameras):
+                    if cam['id'] in stable_per_cam and len(stable_per_cam[cam['id']]) > 0:
+                        available_indices.append(i)
+                
+                # If no cameras have pending files, break out of the queuing loop
+                if not available_indices:
+                    break
+
+                # Sort available cameras based on load balancing criteria:
+                # 1. Primary sort: The current number of active workers for the camera (fewer is better).
+                # 2. Secondary sort: A round-robin distance from the last assigned camera to act as a fair tiebreaker.
+                num_cameras = len(cameras)
+                available_indices.sort(key=lambda i: (
+                    active_count_per_cam[cameras[i]['id']],
+                    (i - last_assigned_idx - 1) % num_cameras
+                ))
+
+                # Pick the most eligible camera and extract its oldest stable file
+                chosen_idx = available_indices[0]
+                chosen_cam = cameras[chosen_idx]
+                cam_id = chosen_cam['id']
+                
+                file_info = stable_per_cam[cam_id].pop(0)
+                file_path, mtime, unique_id, file_rel_path = file_info
+
+                # Stop tracking stability for this file since it's about to be processed
+                if file_path in stability_tracker[cam_id]:
+                    del stability_tracker[cam_id][file_path]
+
+                log.info("[{}] Putting file {} on queue (active processes for this cam: {})...".format(
+                    cam_id, file_rel_path, active_count_per_cam[cam_id]))
+
+                # Spawn the worker process
+                proc = multiprocessing.Process(
+                    target=processFile,
+                    args=(file_path, chosen_cam['config_path'], chosen_cam['platepar_path'], chosen_cam['output_dir'], chunk_frames),
+                    kwargs={'flat_path': chosen_cam['flat_path'], 'dark_path': chosen_cam['dark_path'], 'unique_id': unique_id}
+                )
+                proc.start()
+                
+                # Update load balancing metrics and tracking dictionaries
+                active_workers[unique_id] = (proc, cam_id)
+                active_count_per_cam[cam_id] += 1
+                new_files_queued = True
+                last_assigned_idx = chosen_idx
+
+                # If this camera has no more stable files, remove it from the pool of candidates for this polling cycle
+                if len(stable_per_cam[cam_id]) == 0:
+                    del stable_per_cam[cam_id]
+            
+            # Idle wait: If we did nothing this iteration, wait `poll_interval` before scanning the disk again
+            if not active_workers and not new_files_queued:
+                pass # Optionally log "Waiting for more data..."
+                
+            time.sleep(poll_interval)
+
+    except KeyboardInterrupt:
+        log.info("Multi-camera monitoring stopped by user.")
+
+    finally:
+
+        # Gracefully handle active workers during script termination
+        if active_workers:
+
+            log.info("Waiting for {:d} remaining task(s) to finish...".format(len(active_workers)))
+
+            for fname, (proc, cam_id) in active_workers.items():
+                
+                # Allow processes up to 300 seconds to finish what they were doing
+                proc.join(timeout=300)
+
+                if proc.is_alive():
+
+                    # Terminate processes that refuse to close or get stuck
+                    log.warning("Worker for [{}] {} did not finish in time, terminating.".format(cam_id, fname))
+                    proc.terminate()
+                    
         log.info("All workers stopped.")
 
 
@@ -525,12 +927,12 @@ Examples:
         """
     )
 
-    arg_parser.add_argument('file_type', type=str,
+    arg_parser.add_argument('file_type', type=str, nargs='?', default=None,
         help="File type to monitor for. Supported: vid, ff, mkv, mp4, avi, mov, wmv. "
              "Any other value will be treated as a file extension."
     )
 
-    arg_parser.add_argument('input_dir', type=str,
+    arg_parser.add_argument('input_dir', type=str, nargs='?', default=None,
         help="Path to the directory to monitor for new files."
     )
 
@@ -570,8 +972,25 @@ Examples:
         help="Path to a dark frame image file."
     )
 
+    arg_parser.add_argument('--multicam', '-m', type=str, default=None,
+        help="Path to an INI file containing multiple camera configurations. If provided, other arguments like input_dir are ignored."
+    )
+
     # Parse
     cml_args = arg_parser.parse_args()
+
+    if cml_args.multicam is not None:
+        multicam_path = os.path.abspath(cml_args.multicam)
+        if not os.path.isfile(multicam_path):
+            print("ERROR: Multicam config file does not exist: {}".format(multicam_path))
+            sys.exit(1)
+        monitorMultipleCameras(multicam_path)
+        sys.exit(0)
+
+    if cml_args.file_type is None or cml_args.input_dir is None:
+        print("ERROR: file_type and input_dir are required unless --multicam is used.")
+        arg_parser.print_help()
+        sys.exit(1)
 
 
     # Validate input directory
