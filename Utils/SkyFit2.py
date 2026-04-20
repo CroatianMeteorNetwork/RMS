@@ -8415,6 +8415,8 @@ class PlateTool(QtWidgets.QMainWindow):
             'label1', 'label2', 'label_f1', 'star_pick_info',
             # TextItemList objects
             'planet_labels', 'residual_text', 'spectral_type_text_list',
+            # Matplotlib objects
+            'fig_astrometry', 'plot_highlight_artists'
         ]
         for key in pyqtgraph_keys:
             if key in dic:
@@ -8436,6 +8438,15 @@ class PlateTool(QtWidgets.QMainWindow):
             if isinstance(v, list) and v:
                  # Check first item in list (heuristic)
                  first = v[0]
+                 if hasattr(first, '__class__') and hasattr(first.__class__, '__module__'):
+                      if first.__class__.__module__.startswith(unpicklable_modules):
+                          keys_to_remove.append(k)
+                          continue
+                          
+            # Check for dicts of objects
+            if isinstance(v, dict) and v:
+                 # Check first value in dict (heuristic)
+                 first = next(iter(v.values()))
                  if hasattr(first, '__class__') and hasattr(first.__class__, '__module__'):
                       if first.__class__.__module__.startswith(unpicklable_modules):
                           keys_to_remove.append(k)
