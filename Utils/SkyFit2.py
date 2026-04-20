@@ -1785,11 +1785,28 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
         layout = QtWidgets.QVBoxLayout(dlg)
 
         checkboxes = []
-        for label, path in self._locations:
+        for i, (label, path) in enumerate(self._locations):
             cb = QtWidgets.QCheckBox(self._locationMenuLabel(label, path))
             cb.setProperty("path", path)
+            if i == 0:
+                cb.setChecked(True)
             layout.addWidget(cb)
             checkboxes.append(cb)
+
+        # OK / Cancel
+        btn_box = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel)
+        btn_box.accepted.connect(dlg.accept)
+        btn_box.rejected.connect(dlg.reject)
+        ok_btn = btn_box.button(QtWidgets.QDialogButtonBox.Ok)
+
+        def updateOkButton():
+            ok_btn.setEnabled(any(cb.isChecked() for cb in checkboxes))
+
+        for cb in checkboxes:
+            cb.stateChanged.connect(updateOkButton)
+
+        updateOkButton()
 
         # Browse button to add a custom location
         browse_btn = QtWidgets.QPushButton("Add location...")
@@ -1808,21 +1825,18 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
             cb = QtWidgets.QCheckBox("Custom - {}".format(self._shortenPath(resolved)))
             cb.setProperty("path", resolved)
             cb.setChecked(True)
+            cb.stateChanged.connect(updateOkButton)
             layout.insertWidget(len(checkboxes), cb)
             checkboxes.append(cb)
             # Persist for future use across dialog open/close within this session
             if resolved not in self.plate_tool._file_manager_custom_locations:
                 self.plate_tool._file_manager_custom_locations.append(resolved)
             self._locations.append(("Custom", resolved))
+            updateOkButton()
 
         browse_btn.clicked.connect(on_browse)
         layout.addWidget(browse_btn)
 
-        # OK / Cancel
-        btn_box = QtWidgets.QDialogButtonBox(
-            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel)
-        btn_box.accepted.connect(dlg.accept)
-        btn_box.rejected.connect(dlg.reject)
         layout.addWidget(btn_box)
 
         if dlg.exec_() == QtWidgets.QDialog.Accepted:
