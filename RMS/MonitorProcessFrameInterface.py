@@ -676,6 +676,7 @@ def monitorMultipleCameras(multicam_ini_path):
                 cam_stable = []
                 for file_path in candidate_files:
                     file_name = os.path.basename(file_path)
+                    file_rel_path = os.path.relpath(file_path, cam['input_dir'])
                     
                     # Filter out non-target files and directories
                     if not matchesFileType(file_name, file_type):
