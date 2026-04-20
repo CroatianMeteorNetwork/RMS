@@ -334,6 +334,7 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
             stable_files = []
             for file_path in candidate_files:
                 file_name = os.path.basename(file_path)
+                file_rel_path = os.path.relpath(file_path, input_dir)
 
                 # Check if the file matches the requested type
                 if not matchesFileType(file_name, file_type):
