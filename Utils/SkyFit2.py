@@ -8422,7 +8422,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Remove other PlotCurveItem objects which cannot be pickled
         # Generic scrubber for pyqtgraph/qt items
-        unpicklable_modules = ('pyqtgraph', 'PyQt5', 'RMS.Routines.CustomPyqtgraphClasses')
+        unpicklable_modules = ('pyqtgraph', 'PyQt5', 'RMS.Routines.CustomPyqtgraphClasses', 'matplotlib')
         keys_to_remove = []
         for k, v in dic.items():
 
