@@ -342,10 +342,9 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
                 if os.path.isdir(file_path):
                     continue
 
-                # Ensure uniqueness for recursive files by including subfolder path
-                # Replace slashes to make a flat unique identifier
-                file_rel_path = os.path.relpath(file_path, input_dir)
-                unique_id = os.path.splitext(file_rel_path)[0].replace(os.path.sep, '_')
+                # Generate a unique ID based on the file name. RMS file names are already
+                # globally unique by design (they include the camera ID, date, and microsecond timestamp).
+                unique_id = os.path.splitext(file_name)[0]
 
                 # Skip already processed or currently processing files
                 if unique_id in processed_files or unique_id in active_workers:
@@ -683,9 +682,9 @@ def monitorMultipleCameras(multicam_ini_path):
                     if os.path.isdir(file_path):
                         continue
                     
-                    # Generate a unique ID based on the relative path so that recursive files are distinct
-                    file_rel_path = os.path.relpath(file_path, cam['input_dir'])
-                    unique_id = os.path.splitext(file_rel_path)[0].replace(os.path.sep, '_')
+                    # Generate a unique ID based on the file name. RMS file names are already
+                    # globally unique by design (they include the camera ID, date, and microsecond timestamp).
+                    unique_id = os.path.splitext(file_name)[0]
 
                     # Ignore files we've already processed or are currently working on
                     if unique_id in processed_files[cam_id] or unique_id in active_workers:
