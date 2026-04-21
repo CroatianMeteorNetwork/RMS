@@ -2899,9 +2899,9 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
 
         row = 0
         slider_data = [
-            ('Intensity Threshold', 1, 50, 18, '18', self.onIntensityThresholdChanged),
+            ('Intensity Threshold', 1, 200, 18, '18', self.onIntensityThresholdChanged),
             ('Neighborhood Size', 5, 40, 10, '10', self.onNeighborhoodSizeChanged),
-            ('Max Stars', 50, 2000, 200, '200', self.onMaxStarsChanged),
+            ('Max Stars', 50, 5000, 200, '200', self.onMaxStarsChanged),
             ('Gamma', 45, 200, 100, '1.00', self.onGammaChanged),
             ('Segment Radius', 2, 20, 4, '4', self.onSegmentRadiusChanged),
             ('Max Feature Ratio', 50, 200, 80, '0.80', self.onMaxFeatureRatioChanged),
@@ -3083,12 +3083,16 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
         self.catalog_lm_spinbox.setValue(value)
         self.catalog_lm_spinbox.blockSignals(False)
 
-    def updateStatus(self, using_override, star_count=None):
+    def updateStatus(self, using_override, star_count=None, candidate_count=None):
         """Update the status label to show current detection source."""
         pad = self.scaledSpacing(0.3)
         if using_override:
             if star_count is not None:
-                self.status_label.setText(f'Using override detection ({star_count} stars)')
+                text = f'Using override detection ({star_count} stars'
+                if candidate_count is not None:
+                    text += f', {candidate_count} candidates'
+                text += ')'
+                self.status_label.setText(text)
                 self.status_label.setStyleSheet(f"color: green; font-size: 9pt; padding: {pad}px; font-weight: bold;")
             else:
                 self.status_label.setText('Using override detection')
@@ -3610,19 +3614,6 @@ class SettingsWidget(QtWidgets.QWidget):
         self.gui.img_zoom.setGamma(gamma_value)
         self.gui.updateLeftLabels()
         self.updateImageGamma()  # gamma may be changed by setGamma
-
-        # Sync with Star Detection gamma
-        self.gui.override_gamma = gamma_value
-        if self.gui.star_detection_override_enabled:
-            self.gui.config.gamma = gamma_value
-            if self.gui.platepar is not None:
-                self.gui.platepar.gamma = gamma_value
-
-        # Update Star Detection tab slider (convert to int for slider: gamma * 100)
-        self.gui.tab.star_detection.gamma_slider.blockSignals(True)
-        self.gui.tab.star_detection.gamma_slider.setValue(int(gamma_value * 100))
-        self.gui.tab.star_detection.gamma_label.setText(f'{gamma_value:.2f}')
-        self.gui.tab.star_detection.gamma_slider.blockSignals(False)
 
     def onGridChanged(self):
         if self.grid[0].isChecked():
