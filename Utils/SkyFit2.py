@@ -3700,6 +3700,17 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
     def onGridChanged(self):
+
+        if self.platepar is None:
+            self.celestial_grid.hide()
+            return
+
+        # Hide the grid if the FOV is smaller than 5 degrees
+        fov_w, fov_h = computeFOVSize(self.platepar)
+        if (fov_w < 5) or (fov_h < 5):
+            self.celestial_grid.hide()
+            return
+
         if self.grid_visible == 0:
             self.celestial_grid.hide()
         elif self.grid_visible == 1:

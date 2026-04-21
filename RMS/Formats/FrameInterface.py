@@ -2075,6 +2075,8 @@ class InputTypeImages(InputType):
                 # Indicate that a FRIPON fit file is read
                 self.fripon_mode = True
 
+                print("FRIPON mode")
+
 
         # Loads a non-FRIPON FITS image
         elif current_img_file.lower().endswith('.fits'):
@@ -2086,8 +2088,31 @@ class InputTypeImages(InputType):
                 fits_file = fits.open(f)
                 frame = fits_file[0].data
 
+                # Print nicely formatted FITS header
+                print("\nFITS Header:")
+                print("\n" + "="*80)
+                for key, value in fits_file[0].header.items():
+                    print(f"{key}: {value}")
+                print("="*80 + "\n")
+
+                # If the fits image type is floating point, convert it to uint16
+                if np.issubdtype(frame.dtype, np.floating):
+                    
+                    # Rebalance the image so that the minimum is at 0
+                    frame = frame - np.min(frame)
+
+                    # Limit the maximum value to 65535
+                    frame = np.clip(frame, 0, 65535)
+
+                    # Cast to uint16
+                    frame = frame.astype(np.uint16)
+                    
+                
+
                 # # Flip image vertically
                 # frame = np.flipud(frame)
+
+                print("FITS mode")
 
         # Load a normal image
         else:

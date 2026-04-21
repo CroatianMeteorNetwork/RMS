@@ -2898,9 +2898,9 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
 
         row = 0
         slider_data = [
-            ('Intensity Threshold', 1, 50, 18, '18', self.onIntensityThresholdChanged),
+            ('Intensity Threshold', 1, 200, 18, '18', self.onIntensityThresholdChanged),
             ('Neighborhood Size', 5, 40, 10, '10', self.onNeighborhoodSizeChanged),
-            ('Max Stars', 50, 2000, 200, '200', self.onMaxStarsChanged),
+            ('Max Stars', 50, 5000, 200, '200', self.onMaxStarsChanged),
             ('Gamma', 45, 200, 100, '1.00', self.onGammaChanged),
             ('Segment Radius', 2, 20, 4, '4', self.onSegmentRadiusChanged),
             ('Max Feature Ratio', 50, 200, 80, '0.80', self.onMaxFeatureRatioChanged),
