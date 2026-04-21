@@ -2495,7 +2495,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
             if pp_path is None:
                 # User cancelled — abort loading
-                return False
+                sys.exit()
 
             if pp_path:
                 self.loadPlatepar(platepar_file=pp_path)
@@ -4730,13 +4730,6 @@ class PlateTool(QtWidgets.QMainWindow):
             if self.platepar is not None:
                 self.platepar.gamma = value
 
-        # Sync display gamma (Settings tab) with camera gamma
-        self.img.setGamma(value)
-        self.img_zoom.setGamma(value)
-        # Block signals to prevent infinite loop
-        self.tab.settings.img_gamma.blockSignals(True)
-        self.tab.settings.img_gamma.setValue(value)
-        self.tab.settings.img_gamma.blockSignals(False)
         self.updateLeftLabels()
 
     def updateSegmentRadius(self, value):
@@ -4834,6 +4827,9 @@ class PlateTool(QtWidgets.QMainWindow):
               f"neighborhood={self.override_neighborhood_size}, segment_radius={self.override_segment_radius}, "
               f"max_stars={self.override_max_stars}, gamma={self.override_gamma:.3f}")
 
+        # Ensure unsaved mask polygons are applied to the detection
+        self.mask = MaskStructure(self.generateMaskImage())
+
         # Call extractStarsFF with override parameters
         try:
             # Temporarily modify config to use override parameters
@@ -4854,6 +4850,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self.config.max_feature_ratio = self.override_max_feature_ratio
             self.config.roundness_threshold = self.override_roundness_threshold
 
+            extra_info = {}
             try:
                 star_list = extractStarsFF(
                     self.dir_path,
@@ -4861,7 +4858,8 @@ class PlateTool(QtWidgets.QMainWindow):
                     config=self.config,
                     flat_struct=self.flat_struct if hasattr(self, 'flat_struct') else None,
                     dark=self.dark if hasattr(self, 'dark') else None,
-                    mask=self.mask if hasattr(self, 'mask') else None
+                    mask=self.mask if hasattr(self, 'mask') else None,
+                    extra_info=extra_info
                 )
             finally:
                 # Restore original config values
@@ -4899,7 +4897,8 @@ class PlateTool(QtWidgets.QMainWindow):
                 print(f"  Using override gamma={self.override_gamma:.3f} for photometry")
 
                 self.updateCalstars()
-                self.tab.star_detection.updateStatus(True, len(star_data))
+                num_candidates = extra_info.get('num_candidates')
+                self.tab.star_detection.updateStatus(True, len(star_data), candidate_count=num_candidates)
 
             else:
                 print("  No stars detected")
@@ -4913,6 +4912,9 @@ class PlateTool(QtWidgets.QMainWindow):
     def redetectAllImages(self):
         """ Re-detect stars on all images using override parameters. """
         print("Re-detecting stars on all images...")
+
+        # Ensure unsaved mask polygons are applied to the detection
+        self.mask = MaskStructure(self.generateMaskImage())
 
         # Get list of all FF files that exist on disk, excluding placeholders
         ff_files = [f for f in self.calstars.keys()
@@ -4960,13 +4962,15 @@ class PlateTool(QtWidgets.QMainWindow):
                 QtWidgets.QApplication.processEvents()
 
                 try:
+                    extra_info = {}
                     star_list = extractStarsFF(
                         self.dir_path,
                         ff_name,
                         config=self.config,
                         flat_struct=self.flat_struct if hasattr(self, 'flat_struct') else None,
                         dark=self.dark if hasattr(self, 'dark') else None,
-                        mask=self.mask if hasattr(self, 'mask') else None
+                        mask=self.mask if hasattr(self, 'mask') else None,
+                        extra_info=extra_info
                     )
 
                     if star_list:
@@ -4974,6 +4978,12 @@ class PlateTool(QtWidgets.QMainWindow):
                         # CALSTARS format: Y(0) X(1) IntensSum(2) Ampltd(3) FWHM(4) BgLvl(5) SNR(6) NSatPx(7)
                         star_data = list(zip(y_arr, x_arr, intensity, amplitude, fwhm, background, snr, saturated_count))
                         self.star_detection_override_data[ff_name] = star_data
+                        
+                        # Store candidate count in star data if needed, or handle separately. 
+                        # For redetectAllImages, we usually just update the main status for the last one
+                        num_candidates = extra_info.get('num_candidates')
+                        self.tab.star_detection.updateStatus(True, len(star_data), candidate_count=num_candidates)
+                        
                         success_count += 1
 
                 except Exception as e:
