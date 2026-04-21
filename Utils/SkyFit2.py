@@ -1785,11 +1785,28 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
         layout = QtWidgets.QVBoxLayout(dlg)
 
         checkboxes = []
-        for label, path in self._locations:
+        for i, (label, path) in enumerate(self._locations):
             cb = QtWidgets.QCheckBox(self._locationMenuLabel(label, path))
             cb.setProperty("path", path)
+            if i == 0:
+                cb.setChecked(True)
             layout.addWidget(cb)
             checkboxes.append(cb)
+
+        # OK / Cancel
+        btn_box = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel)
+        btn_box.accepted.connect(dlg.accept)
+        btn_box.rejected.connect(dlg.reject)
+        ok_btn = btn_box.button(QtWidgets.QDialogButtonBox.Ok)
+
+        def updateOkButton():
+            ok_btn.setEnabled(any(cb.isChecked() for cb in checkboxes))
+
+        for cb in checkboxes:
+            cb.stateChanged.connect(updateOkButton)
+
+        updateOkButton()
 
         # Browse button to add a custom location
         browse_btn = QtWidgets.QPushButton("Add location...")
@@ -1808,21 +1825,18 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
             cb = QtWidgets.QCheckBox("Custom - {}".format(self._shortenPath(resolved)))
             cb.setProperty("path", resolved)
             cb.setChecked(True)
+            cb.stateChanged.connect(updateOkButton)
             layout.insertWidget(len(checkboxes), cb)
             checkboxes.append(cb)
             # Persist for future use across dialog open/close within this session
             if resolved not in self.plate_tool._file_manager_custom_locations:
                 self.plate_tool._file_manager_custom_locations.append(resolved)
             self._locations.append(("Custom", resolved))
+            updateOkButton()
 
         browse_btn.clicked.connect(on_browse)
         layout.addWidget(browse_btn)
 
-        # OK / Cancel
-        btn_box = QtWidgets.QDialogButtonBox(
-            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel)
-        btn_box.accepted.connect(dlg.accept)
-        btn_box.rejected.connect(dlg.reject)
         layout.addWidget(btn_box)
 
         if dlg.exec_() == QtWidgets.QDialog.Accepted:
@@ -8508,6 +8522,8 @@ class PlateTool(QtWidgets.QMainWindow):
             'label1', 'label2', 'label_f1', 'star_pick_info',
             # TextItemList objects
             'planet_labels', 'residual_text', 'spectral_type_text_list',
+            # Matplotlib objects
+            'fig_astrometry', 'plot_highlight_artists'
         ]
         for key in pyqtgraph_keys:
             if key in dic:
@@ -8529,6 +8545,15 @@ class PlateTool(QtWidgets.QMainWindow):
             if isinstance(v, list) and v:
                  # Check first item in list (heuristic)
                  first = v[0]
+                 if hasattr(first, '__class__') and hasattr(first.__class__, '__module__'):
+                      if first.__class__.__module__.startswith(unpicklable_modules):
+                          keys_to_remove.append(k)
+                          continue
+                          
+            # Check for dicts of objects
+            if isinstance(v, dict) and v:
+                 # Check first value in dict (heuristic)
+                 first = next(iter(v.values()))
                  if hasattr(first, '__class__') and hasattr(first.__class__, '__module__'):
                       if first.__class__.__module__.startswith(unpicklable_modules):
                           keys_to_remove.append(k)
