@@ -371,9 +371,20 @@ def recalibrateFF(
         ### PHOTOMETRY FIT ###
 
         # Get a list of matched image and catalog stars
-        image_stars, matched_catalog_stars, _ = matched_stars[jd]
+        matched_val = matched_stars[jd]
+        if not isinstance(matched_val, (list, tuple)) or len(matched_val) != 3:
+             log.error("matched_stars[jd] is not a 3-tuple! Value: {}, type: {}".format(matched_val, type(matched_val)))
+        image_stars, matched_catalog_stars, _ = matched_val
         star_intensities = image_stars[:, 2]
-        ra_catalog, dec_catalog, catalog_mags = matched_catalog_stars.T
+        # Ensure it's a numpy array with at least 3 columns for unpacking
+        matched_catalog_stars = np.array(matched_catalog_stars)
+        if matched_catalog_stars.ndim == 1 and matched_catalog_stars.size == 0:
+            matched_catalog_stars = np.empty((0, 3))
+        elif matched_catalog_stars.ndim == 2 and matched_catalog_stars.shape[1] < 3:
+            log.error("matched_catalog_stars has wrong number of columns: {}".format(matched_catalog_stars.shape[1]))
+            matched_catalog_stars = np.empty((0, 3))
+
+        ra_catalog, dec_catalog, catalog_mags = matched_catalog_stars.T[:3]
 
         # Compute apparent star magnitudes by including extinction
         corrected_catalog_mags = extinctionCorrectionTrueToApparent(
@@ -482,7 +493,16 @@ def _plotRecalibDebug(config, platepar, jd, star_dict_ff, catalog_stars, matched
     # Get catalog stars in the FOV
     _, extracted_catalog = subsetCatalog(catalog_stars, RA_c, dec_c, jd, platepar.lat, platepar.lon,
                                          fov_radius, lim_mag)
-    ra_cat, dec_cat, mag_cat = extracted_catalog.T
+    
+    # Ensure it's a numpy array with at least 3 columns for unpacking
+    extracted_catalog = np.array(extracted_catalog)
+    if extracted_catalog.ndim == 1 and extracted_catalog.size == 0:
+        extracted_catalog = np.empty((0, 3))
+    elif extracted_catalog.ndim == 2 and extracted_catalog.shape[1] < 3:
+        log.error("extracted_catalog has wrong number of columns: {}".format(extracted_catalog.shape[1]))
+        extracted_catalog = np.empty((0, 3))
+
+    ra_cat, dec_cat, mag_cat = extracted_catalog.T[:3]
 
     # Project catalog stars to image coordinates
     cat_x, cat_y = raDecToXYPP(ra_cat, dec_cat, jd, platepar)
@@ -501,7 +521,10 @@ def _plotRecalibDebug(config, platepar, jd, star_dict_ff, catalog_stars, matched
 
     # Extract matched stars
     if jd in matched_stars:
-        matched_img_stars, matched_cat_stars, dist_list = matched_stars[jd]
+        matched_val = matched_stars[jd]
+        if not isinstance(matched_val, (list, tuple)) or len(matched_val) != 3:
+             log.error("matched_stars[jd] (debug plot) is not a 3-tuple! Value: {}, type: {}".format(matched_val, type(matched_val)))
+        matched_img_stars, matched_cat_stars, dist_list = matched_val
         matched_img_y = matched_img_stars[:, 0]
         matched_img_x = matched_img_stars[:, 1]
         # Project matched catalog stars to image coordinates
@@ -798,6 +821,11 @@ def recalibrateSelectedFF(dir_path, ff_file_names, calstars_data, config, lim_ma
         log.info(os.path.join(config.star_catalog_path, config.star_catalog_file))
         return {}
 
+    if not isinstance(star_catalog_status, (tuple, list)):
+        log.error("star_catalog_status is not a tuple/list! Value: {}, type: {}".format(star_catalog_status, type(star_catalog_status)))
+    elif len(star_catalog_status) != 3:
+        log.error("star_catalog_status has wrong length! Length: {}, Value: {}".format(len(star_catalog_status), star_catalog_status))
+
     catalog_stars, _, config.star_catalog_band_ratios = star_catalog_status
     # log.info(catalog_stars)
 
@@ -922,6 +950,11 @@ def recalibrateIndividualFFsAndApplyAstrometry(
         log.info("Could not load the star catalog!")
         log.info(os.path.join(config.star_catalog_path, config.star_catalog_file))
         return {}, []
+
+    if not isinstance(star_catalog_status, (tuple, list)):
+        log.error("star_catalog_status is not a tuple/list! Value: {}, type: {}".format(star_catalog_status, type(star_catalog_status)))
+    elif len(star_catalog_status) != 3:
+        log.error("star_catalog_status has wrong length! Length: {}, Value: {}".format(len(star_catalog_status), star_catalog_status))
 
     catalog_stars, _, config.star_catalog_band_ratios = star_catalog_status
 
