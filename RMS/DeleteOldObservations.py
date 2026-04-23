@@ -58,44 +58,86 @@ def quotaReport(capt_dir_quota, config, after=False):
     frames_files_used_space = usedSpace(frames_files)
     time_files_used_space = usedSpace(time_files)
     video_files_used_space = usedSpace(video_files)
+    archived_dir_used_space = usedSpace(archived_dir)
+    captured_dir_used_space = usedSpace(captured_dir)
+    log_dir_used_space = usedSpace(log_dir)
+    data_dir_used_space = usedSpace(config.data_dir)
+    size_archived_dirs = sizeArchivedDirs(config)
+    size_bz2_files = sizeBz2Files(config)
+
     continuous_capture_used_space = frames_files_used_space + time_files_used_space + video_files_used_space
 
+    if config.log_files_quota != 0:
+        log_files_pc = 100 * log_dir_used_space / config.log_files_quota
+    else:
+        log_files_pc = 0
+
+    if config.continuous_capture_quota != 0:
+        continuous_capture_pc = 100 * continuous_capture_used_space / config.continuous_capture_quota
+    else:
+        continuous_capture_pc = 0
+
+    if config.bz2_files_quota != 0:
+        bz2_files_pc = 100 * size_bz2_files / config.bz2_files_quota
+    else:
+        bz2_files_pc = 0
+
+    if config.arch_dir_quota != 0:
+        arch_dir_pc = 100 * size_archived_dirs / config.arch_dir_quota
+    else:
+        arch_dir_pc = 0
+
+    if config.arch_dir_quota + config.bz2_files_quota != 0:
+        total_arch_pc = 100 * archived_dir_used_space / (config.arch_dir_quota + config.bz2_files_quota)
+    else:
+        total_arch_pc = 0
+
+    if config.rms_data_quota != 0:
+        total_rms_data_pc = 100 * data_dir_used_space / config.rms_data_quota
+    else:
+        total_rms_data_pc = 0
+
+    if capt_dir_quota != 0:
+        captured_dir_pc = 100 * captured_dir_used_space / capt_dir_quota
+    else:
+        captured_dir_pc = 0
+
+    usage = shutil.disk_usage(config.data_dir)
+
     rep = "\n\n"
-    rep += ("-----------------------------------------------\n")
+    rep += ("--------------------------------------------------------------\n")
     if after:
         rep += ("Directory quotas after management\n")
     else:
         rep += ("Directory quotas before management\n")
-    rep += ("-----------------------------------------------\n")
-    rep += ("Space used                              \n")
+    rep += ("--------------------------------------------------------------\n")
+    rep += ("Usage and quotas\n")
     rep += "\n"
-    rep += ("                          log files : {:7.02f}GB\n".format(usedSpace(log_dir)))
+    rep += ("                                           Used     Quota\n")
+
+
     rep += ("                       frames files : {:7.02f}GB\n".format(frames_files_used_space))
     rep += ("                         time files : {:7.02f}GB\n".format(time_files_used_space))
     rep += ("                        video files : {:7.02f}GB\n".format(video_files_used_space))
-    rep += ("       total for continuous capture : {:7.02f}GB\n".format(continuous_capture_used_space))
-
-    rep += ("                          bz2 files : {:7.02f}GB\n".format(sizeBz2Files(config)))
-    rep += ("               archived directories : {:7.02f}GB\n".format(sizeArchivedDirs(config)))
-    rep += ("                 total for archives : {:7.02f}GB\n".format(usedSpace(archived_dir)))
-
-    rep += ("               captured directories : {:7.02f}GB\n".format(usedSpace(captured_dir)))
-    rep += ("                 total for RMS_data : {:7.02f}GB\n".format(usedSpace(config.data_dir)))
-
+    rep += ("                                        ----------------------\n")
+    rep += ("       total for continuous capture : {:7.02f}GB {:7.02f}GB {:3.0f}%\n".format(continuous_capture_used_space, config.continuous_capture_quota, continuous_capture_pc))
+    rep += ("\n")
+    rep += ("                          bz2 files : {:7.02f}GB {:7.02f}GB {:3.0f}%\n".format(size_bz2_files, config.bz2_files_quota, bz2_files_pc))
+    rep += ("               archived directories : {:7.02f}GB {:7.02f}GB {:3.0f}%\n".format(size_archived_dirs, config.arch_dir_quota, arch_dir_pc))
+    rep += ("                                        ----------------------\n")
+    rep += (" bz2 files and archived directories : {:7.02f}GB {:7.02f}GB {:3.0f}%\n".format(archived_dir_used_space , config.arch_dir_quota + config.bz2_files_quota, total_arch_pc))
+    rep += ("\n")
+    rep += ("               captured directories : {:7.02f}GB {:7.02f}GB {:3.0f}%\n".format(captured_dir_used_space, capt_dir_quota, captured_dir_pc))
+    rep += ("                          log files : {:7.02f}GB {:7.02f}GB {:3.0f}%\n".format(log_dir_used_space,config.log_files_quota, log_files_pc))
+    rep += ("                                        ----------------------\n")
+    rep += ("                 total for RMS_data : {:7.02f}GB {:7.02f}GB {:3.0f}%\n".format(data_dir_used_space, config.rms_data_quota, total_rms_data_pc))
     rep += "\n"
-    rep += ("Quotas allowed                                  \n")
-
-    rep += ("           total quota for RMS_data : {:7.02f}GB\n".format(config.rms_data_quota))
-    rep += ("                     bz2 file quota : {:7.02f}GB\n".format(config.bz2_files_quota))
-    rep += ("         archived directories quota : {:7.02f}GB\n".format(config.arch_dir_quota))
-    rep += ("                    log files quota : {:7.02f}GB\n".format(config.log_files_quota))
-    rep += ("           continuous capture quota : {:7.02f}GB\n".format(config.continuous_capture_quota))
-    rep += (" quota remaining for captured files : {:7.02f}GB\n".format(capt_dir_quota))
-
-    rep += "\n"
-    rep += ("Space on drive                          \n")
-    rep += ("           Available space on drive : {:7.02f}GB\n".format(availableSpace(config.data_dir) / (1024 ** 3)))
-    rep += ("-----------------------------------------------\n")
+    rep += (" logical partition information\n")
+    if usage.total > 0:
+        rep += ("      partition containing RMS_data : {:7.02f}GB {:7.02f}GB {:3.0f}%\n".format(usage.used / (1024 ** 3), usage.total / (1024 ** 3) , 100 * usage.used / usage.total))
+    else:
+        rep += ("      partition containing RMS_data : {:7.02f}GB {:7.02f}GB\n".format(usage.used / (1024 ** 3), usage.total / (1024 ** 3)))
+    rep += ("--------------------------------------------------------------\n")
 
     return rep
 
