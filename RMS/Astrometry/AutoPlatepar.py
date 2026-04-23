@@ -210,7 +210,7 @@ def selectBestFrame(calstars, img_width, img_height, min_stars=10, max_stars=200
         }
 
         if verbose:
-            print("  {:s}: {:.3f} (dist={:.3f}, qual={:.3f}, n_stars={:d})".format(
+            print("  {:s}: {:.3f} (dist={:.3f}, qual={:.3f}, n_stars={:g})".format(
                 ff_name, combined_score, dist_score, qual_score, len(star_data)))
 
     best_ff = None
@@ -295,7 +295,7 @@ def printFitResiduals(paired_stars, platepar, jd, ff_dt):
         mag_val = mag if mag is not None else 0.0
 
         # Print residual line
-        print('{:3d}, {:11.6f}, {:11.6f}, {:>12.6f}, {:>+13.6f}, {:8.2f}, {:8.2f}, {:>12.6f}, {:>+13.6f}, {:8.2f}, {:7.2f}, {:+9.1f}, {:5.2f}, {:+6.2f}, {:8.2f}'.format(
+        print('{:3g}, {:11.6f}, {:11.6f}, {:>12.6f}, {:>+13.6f}, {:8.2f}, {:8.2f}, {:>12.6f}, {:>+13.6f}, {:8.2f}, {:7.2f}, {:+9.1f}, {:5.2f}, {:+6.2f}, {:8.2f}'.format(
             star_no + 1, img_x, img_y, ra, dec, cat_x, cat_y,
             ra_img, dec_img, 60*angular_distance, distance, np.degrees(angle),
             fwhm_val, mag_val, lsp
@@ -408,9 +408,9 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
 
     if verbose:
         if calstars_file is not None:
-            print("Loaded CALSTARS: {:s} ({:d} frames)".format(calstars_file, len(calstars)))
+            print("Loaded CALSTARS: {:s} ({:g} frames)".format(calstars_file, len(calstars)))
         else:
-            print("Generated CALSTARS with {:d} frames".format(len(calstars)))
+            print("Generated CALSTARS with {:g} frames".format(len(calstars)))
 
     img_width = config.width
     img_height = config.height
@@ -430,7 +430,7 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
         if verbose:
             print()
             print("Using specified frame: {:s}".format(best_ff))
-            print("  Stars: {:d}".format(len(calstars[best_ff])))
+            print("  Stars: {:g}".format(len(calstars[best_ff])))
     else:
         # Find the best frame automatically
         if verbose:
@@ -452,7 +452,7 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
             print()
             print("Best frame: {:s} (score={:.3f})".format(best_ff, best_score))
             details = all_scores[best_ff]
-            print("  Stars: {:d}, Coverage: {:.1f}%, Non-saturated: {:.1f}%".format(
+            print("  Stars: {:g}, Coverage: {:.1f}%, Non-saturated: {:.1f}%".format(
                 details['quality_details']['n_stars'],
                 details['distribution_details']['coverage_fraction'] * 100,
                 details['quality_details']['saturation_fraction'] * 100
@@ -518,7 +518,7 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
         print()
         search_mode = "wide" if wide_fov_search else "tight"
         print("Running astrometry.net plate solving ({:s} FOV search)...".format(search_mode))
-        print("  Stars: {:d}".format(len(x_data)))
+        print("  Stars: {:g}".format(len(x_data)))
         print("  FOV range: {:.1f} - {:.1f} deg".format(fov_w_range[0], fov_w_range[1]))
 
     # Call astrometry.net
@@ -636,12 +636,12 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
             paired_stars.addPair(img_x, img_y, fwhm, intensity, sky_obj, snr=snr, saturated=saturated)
 
         if verbose:
-            print("  Matched pairs: {:d}".format(len(paired_stars)))
+            print("  Matched pairs: {:g}".format(len(paired_stars)))
 
     # Check if we have enough stars for final fit
     if len(paired_stars) < 10:
         if verbose:
-            print("ERROR: Not enough matched stars for final fit ({:d} < 10)".format(len(paired_stars)))
+            print("ERROR: Not enough matched stars for final fit ({:g} < 10)".format(len(paired_stars)))
         return None, [], best_ff
 
     # Apply star filtering (matching SkyFit2)
@@ -659,12 +659,12 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
             fwhm_mult=fwhm_mult, verbose=verbose)
 
     if verbose:
-        print("  Stars after filtering: {:d}".format(len(paired_stars)))
+        print("  Stars after filtering: {:g}".format(len(paired_stars)))
 
     # Check again after filtering
     if len(paired_stars) < 10:
         if verbose:
-            print("ERROR: Not enough stars after filtering ({:d} < 10)".format(len(paired_stars)))
+            print("ERROR: Not enough stars after filtering ({:g} < 10)".format(len(paired_stars)))
         return None, [], best_ff
 
     # Apply USER's settings for final fit
@@ -707,7 +707,7 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
             print("  RA = {:.4f} deg".format(platepar.RA_d))
             print("  Dec = {:.4f} deg".format(platepar.dec_d))
             print("  Scale = {:.4f} arcmin/px".format(60 / platepar.F_scale))
-            print("  Matched stars: {:d}".format(len(paired_stars)))
+            print("  Matched stars: {:g}".format(len(paired_stars)))
 
     return platepar, paired_stars, best_ff
 
@@ -787,7 +787,7 @@ if __name__ == "__main__":
         print("ERROR: Could not load star catalog")
         exit(1)
 
-    print("Loaded star catalog: {:d} stars".format(len(catalog_stars)))
+    print("Loaded star catalog: {:g} stars".format(len(catalog_stars)))
 
     # Run auto-fit
     platepar, matched_stars, best_ff = autoFitPlatepar(

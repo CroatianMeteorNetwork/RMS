@@ -228,7 +228,7 @@ def recalibrateFF(
         fov_radius, effective_lim_mag
     )
 
-    log.info('Pre-filtered catalog to {:d} stars within {:.1f} deg FOV radius'.format(
+    log.info('Pre-filtered catalog to {:g} stars within {:.1f} deg FOV radius'.format(
         len(catalog_stars), fov_radius))
 
     # Go through all radii and match the stars
@@ -346,7 +346,7 @@ def recalibrateFF(
             # Keep track of the minimum match radius
             min_match_radius = match_radius
 
-            log.info('{:d}/{:d} match with avg distance {:.2f} px within radius {:.2f} px!'.format(
+            log.info('{:g}/{:g} match with avg distance {:.2f} px within radius {:.2f} px!'.format(
                 n_matched, len(star_dict_ff[jd]), dist, match_radius
             ))
 
@@ -518,11 +518,11 @@ def _plotRecalibDebug(config, platepar, jd, star_dict_ff, catalog_stars, matched
     # Plot catalog stars (blue crosses, size scaled by magnitude)
     mag_sizes = np.clip(20*(lim_mag - mag_cat_fov + 1), 5, 200)
     ax.scatter(cat_x_fov, cat_y_fov, s=mag_sizes, marker='+', c='dodgerblue', linewidths=0.8,
-              alpha=0.6, label='Catalog stars ({:d})'.format(len(cat_x_fov)))
+              alpha=0.6, label='Catalog stars ({:g})'.format(len(cat_x_fov)))
 
     # Plot calstars (green circles)
     ax.scatter(calstars_x, calstars_y, s=30, facecolors='none', edgecolors='lime', linewidths=1.0,
-              label='Detected stars ({:d})'.format(len(calstars_x)))
+              label='Detected stars ({:g})'.format(len(calstars_x)))
 
     # Plot matched stars: draw lines connecting matched pairs
     n_matched = len(matched_img_x)
@@ -531,7 +531,7 @@ def _plotRecalibDebug(config, platepar, jd, star_dict_ff, catalog_stars, matched
 
     # Plot matched image stars (red filled dots)
     ax.scatter(matched_img_x, matched_img_y, s=15, c='red', zorder=5,
-              label='Matched ({:d})'.format(n_matched))
+              label='Matched ({:g})'.format(n_matched))
 
     ax.set_xlim(0, platepar.X_res)
     ax.set_ylim(platepar.Y_res, 0)
@@ -540,7 +540,7 @@ def _plotRecalibDebug(config, platepar, jd, star_dict_ff, catalog_stars, matched
     ax.set_ylabel('Y (px)')
 
     # Title with timestamp used for star position computation
-    ax.set_title('Recalibration debug | {} | Radius={:.1f}px | Matched={:d}/{:d}'.format(
+    ax.set_title('Recalibration debug | {} | Radius={:.1f}px | Matched={:g}/{:g}'.format(
         timestamp_str, match_radius, n_matched, len(calstars_x)))
 
     # Add FF name below the image as figure text

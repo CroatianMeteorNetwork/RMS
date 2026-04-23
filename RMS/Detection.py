@@ -721,16 +721,16 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
             t1 = time()
             img_handle.loadChunk(first_frame=frame_min, read_nframes=(frame_max - frame_min + 1))
 
-            logDebug('Time to load chunk of {:d} frames: {:.2f} s'.format(frame_max - frame_min + 1, time() - t1))
+            logDebug('Time to load chunk of {:g} frames: {:.2f} s'.format(frame_max - frame_min + 1, time() - t1))
 
             # If making the synthetic FF has failed, skip it
             if not img_handle.ff.successful:
-                logDebug('Skipped frame range due to failed synthetic FF generation: frames {:d} to {:d}'.format(\
+                logDebug('Skipped frame range due to failed synthetic FF generation: frames {:g} to {:g}'.format(\
                     frame_min, frame_max))
                 continue
 
             # Print the time
-            logDebug("Frame: {:d}, Time: {:s}".format(frame_min, str(img_handle.currentTime(dt_obj=True))))
+            logDebug("Frame: {:g}, Time: {:s}".format(frame_min, str(img_handle.currentTime(dt_obj=True))))
 
             # Apply the mask, dark, flat
             img_handle = preprocessFF(img_handle, mask, flat_struct, dark)
@@ -1027,23 +1027,23 @@ def filterCentroids(centroids, centroid_max_deviation, max_distance, debug=False
 
     # Skip centroid correction if there are not enough centroids
     if len(centroids) < 3:
-        logDebug('filterCentroids: Only {:d} centroids, skipping filtering'.format(len(centroids)))
+        logDebug('filterCentroids: Only {:g} centroids, skipping filtering'.format(len(centroids)))
         return centroids
 
     centroids_array = np.array(centroids).astype(np.float64)
-    logDebug('filterCentroids: Input {:d} centroids, frame range {:.1f} - {:.1f}'.format(
+    logDebug('filterCentroids: Input {:g} centroids, frame range {:.1f} - {:.1f}'.format(
         len(centroids_array), centroids_array[0,0], centroids_array[-1,0]))
 
     # Filter centroids of frame gaps
     if filter_frame_gaps:
         centroids_array = _filterFrameGaps(centroids_array)
-        logDebug('filterCentroids: After frame gap filtering: {:d} centroids'.format(len(centroids_array)))
+        logDebug('filterCentroids: After frame gap filtering: {:g} centroids'.format(len(centroids_array)))
     else:
         logDebug('filterCentroids: Frame gap filtering disabled')
 
     # Skip centroid correction if there are not enough centroids
     if len(centroids_array) < 3:
-        logDebug('filterCentroids: Too few centroids after frame gap filter, returning {:d}'.format(
+        logDebug('filterCentroids: Too few centroids after frame gap filter, returning {:g}'.format(
             len(centroids_array)))
         return centroids_array.tolist()
 
@@ -1078,7 +1078,7 @@ def filterCentroids(centroids, centroid_max_deviation, max_distance, debug=False
     # Take points with satisfactory deviation
     good_centroid_indices = np.where(np.logical_not(point_deviations > mean_deviation*centroid_max_deviation + 1))
     filtered_centroids = centroids_array[good_centroid_indices].tolist()
-    logDebug('filterCentroids: After deviation filtering: {:d}/{:d} centroids kept (max_dev={:.1f})'.format(
+    logDebug('filterCentroids: After deviation filtering: {:g}/{:g} centroids kept (max_dev={:.1f})'.format(
         len(filtered_centroids), len(centroids_array), centroid_max_deviation))
 
     # Go through all points and separate by chains of centroids (divided by max distance)
@@ -1112,14 +1112,14 @@ def filterCentroids(centroids, centroid_max_deviation, max_distance, debug=False
 
     # Log chain information
     chain_lengths = [len(chain) for chain in filtered_chains]
-    logDebug('filterCentroids: Chain splitting found {:d} chains, lengths: {:s}'.format(
+    logDebug('filterCentroids: Chain splitting found {:g} chains, lengths: {:s}'.format(
         len(filtered_chains), str(chain_lengths)))
 
     # Choose the chain with the greatest length
     max_chain_length = max(chain_lengths)
 
     best_chain = filtered_chains[chain_lengths.index(max_chain_length)]
-    logDebug('filterCentroids: Selected longest chain with {:d} centroids (frame {:.1f} - {:.1f})'.format(
+    logDebug('filterCentroids: Selected longest chain with {:g} centroids (frame {:.1f} - {:.1f})'.format(
         len(best_chain), best_chain[0][0], best_chain[-1][0]))
 
 
@@ -1162,20 +1162,20 @@ def filterCentroids(centroids, centroid_max_deviation, max_distance, debug=False
 
         # --- X,Y spatial plot ---
         ax1.plot(all_centroids[:, 2], all_centroids[:, 3], '.', color='lightgray', 
-                markersize=4, label='All ({:d})'.format(len(all_centroids)))
+                markersize=4, label='All ({:g})'.format(len(all_centroids)))
 
         if len(gap_rejected):
             ax1.plot(gap_rejected[:, 2], gap_rejected[:, 3], 'x', color='red', 
-                    markersize=6, label='Frame gap ({:d})'.format(len(gap_rejected)))
+                    markersize=6, label='Frame gap ({:g})'.format(len(gap_rejected)))
         if len(dev_rejected):
             ax1.plot(dev_rejected[:, 2], dev_rejected[:, 3], 'x', color='orange', 
-                    markersize=6, label='Deviation ({:d})'.format(len(dev_rejected)))
+                    markersize=6, label='Deviation ({:g})'.format(len(dev_rejected)))
         if len(chain_rejected):
             ax1.plot(chain_rejected[:, 2], chain_rejected[:, 3], 'x', color='blue', 
-                    markersize=6, label='Other chain ({:d})'.format(len(chain_rejected)))
+                    markersize=6, label='Other chain ({:g})'.format(len(chain_rejected)))
 
         ax1.plot(best_chain_arr[:, 2], best_chain_arr[:, 3], 'o', color='lime', 
-                markersize=3, label='Selected ({:d})'.format(len(best_chain_arr)))
+                markersize=3, label='Selected ({:g})'.format(len(best_chain_arr)))
 
         ax1.set_xlabel('X (px)')
         ax1.set_ylabel('Y (px)')
@@ -1481,7 +1481,7 @@ def showDetectionSummary(results_list, config):
                 ax.plot(cx[0], cy[0], 'o', color='lime', markersize=6, zorder=5)
                 ax.plot(cx[-1], cy[-1], 's', color='red', markersize=6, zorder=5)
 
-                ax.set_title("{:s} #{:d}".format(os.path.basename(ff_name), meteor_no), fontsize=9)
+                ax.set_title("{:s} #{:g}".format(os.path.basename(ff_name), meteor_no), fontsize=9)
                 ax.set_xlim(x_min, x_max)
                 ax.set_ylim(y_max, y_min)  # inverted y
                 ax.tick_params(labelsize=7)
@@ -1621,7 +1621,7 @@ def show3DCloud(ff, xs, ys, zs, detected_line=None, stripe_points=None, config=N
             mx = (lx[0] + lx[1])/2.0
             my = (ly[0] + ly[1])/2.0
             mz = (lz[0] + lz[1])/2.0
-            ax.text(mx, my, mz, '{:d}'.format(idx_dl), color='white', fontsize=10,
+            ax.text(mx, my, mz, '{:g}'.format(idx_dl), color='white', fontsize=10,
                 fontweight='bold', ha='center', va='bottom',
                 bbox=dict(facecolor=col, alpha=0.7, edgecolor='none', pad=1))
 
@@ -1819,12 +1819,12 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
             logDebug('Lines before merging: ', len(line_list))
             for li, line in enumerate(line_list):
                 if len(line) >= 8:
-                    logDebug('  Line {:d}: rho={:.2f}, theta={:.2f}, frames={:d}-{:d}, '
+                    logDebug('  Line {:g}: rho={:.2f}, theta={:.2f}, frames={:g}-{:g}, '
                              'start=({:.1f}, {:.1f}), end=({:.1f}, {:.1f})'.format(
                              li, line[0], line[1], int(line[2]), int(line[3]),
                              line[4], line[5], line[6], line[7]))
                 else:
-                    logDebug('  Line {:d}: rho={:.2f}, theta={:.2f}, frames={:d}-{:d}'.format(
+                    logDebug('  Line {:g}: rho={:.2f}, theta={:.2f}, frames={:g}-{:g}'.format(
                              li, line[0], line[1], int(line[2]), int(line[3])))
 
         # Save pre-merge lines for plotting
@@ -1844,12 +1844,12 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
         if debug:
             for li, line in enumerate(line_list):
                 if len(line) >= 8:
-                    logDebug('  Line {:d}*: rho={:.2f}, theta={:.2f}, frames={:d}-{:d}, '
+                    logDebug('  Line {:g}*: rho={:.2f}, theta={:.2f}, frames={:g}-{:g}, '
                              'start=({:.1f}, {:.1f}), end=({:.1f}, {:.1f})'.format(
                              li, line[0], line[1], int(line[2]), int(line[3]),
                              line[4], line[5], line[6], line[7]))
                 else:
-                    logDebug('  Line {:d}*: rho={:.2f}, theta={:.2f}, frames={:d}-{:d}'.format(
+                    logDebug('  Line {:g}*: rho={:.2f}, theta={:.2f}, frames={:g}-{:g}'.format(
                              li, line[0], line[1], int(line[2]), int(line[3])))
 
             # Collect all frame ranges for consistent colormap across both plots
@@ -1934,7 +1934,7 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
         filtered_lines = []
 
         logDebug('\n================================')
-        logDebug('Lines to analyze: {:d}'.format(len(line_list)))
+        logDebug('Lines to analyze: {:g}'.format(len(line_list)))
         logDebug('================================')
         for li, line in enumerate(line_list):
             if len(line) >= 8:
@@ -1942,12 +1942,12 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                 dx = lx2 - lx1
                 dy = ly2 - ly1
                 length = np.sqrt(dx**2 + dy**2)
-                logDebug('  Line {:d}: rho={:.2f}, theta={:.2f}, frames={:d}-{:d}, '
+                logDebug('  Line {:g}: rho={:.2f}, theta={:.2f}, frames={:g}-{:g}, '
                          'start=({:.2f}, {:.2f}), end=({:.2f}, {:.2f}), len={:.2f} px'.format(
                          li, rho, theta, int(fmin), int(fmax), lx1, ly1, lx2, ly2, length))
             else:
                 rho, theta, fmin, fmax = line[:4]
-                logDebug('  Line {:d}: rho={:.2f}, theta={:.2f}, frames={:d}-{:d}'.format(
+                logDebug('  Line {:g}: rho={:.2f}, theta={:.2f}, frames={:g}-{:g}'.format(
                          li, rho, theta, int(fmin), int(fmax)))
         logDebug('================================')
 
@@ -1967,7 +1967,7 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
 
             logDebug('\n--------------------------------')
             logDebug('    rho,  theta, frame_min, frame_max')
-            logDebug("{:7.2f}, {:6.2f}, {:9d}, {:9d}".format(rho, theta, frame_min, frame_max))
+            logDebug("{:7.2f}, {:6.2f}, {:9g}, {:9g}".format(rho, theta, frame_min, frame_max))
 
 
             # If FF files are not used as input, reconstruct it
@@ -1977,7 +1977,7 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                 t1 = time()
                 img_handle.loadChunk(first_frame=frame_min, read_nframes=(frame_max - frame_min + 1))
 
-                logDebug('Time to load chunk of {:d} frames: {:.2f} s'.format(frame_max - frame_min + 1, time() - t1))
+                logDebug('Time to load chunk of {:g} frames: {:.2f} s'.format(frame_max - frame_min + 1, time() - t1))
 
                 # Apply mask and flat to FF
                 img_handle = preprocessFF(img_handle, mask, flat_struct, dark)
@@ -1997,7 +1997,7 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                 # plt.show()
                 # ### ###
 
-                logDebug('Checking temporal propagation at frames {:d} - {:d} and time: {:s}'.format(
+                logDebug('Checking temporal propagation at frames {:g} - {:g} and time: {:s}'.format(
                     frame_min, frame_max, img_handle.name())
                     )
                 
@@ -2060,7 +2060,7 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                         if abs(df) > 1e-6:
                             mx = dx/df
                             my = dy/df
-                        logDebug(f"  {idx_dl:2d}: ({dl[0][0]:.2f}, {dl[0][1]:.2f}, {dl[0][2]:.2f}) -> ({dl[1][0]:.2f}, {dl[1][1]:.2f}, {dl[1][2]:.2f})  dx/df: {mx:6.2f}, dy/df: {my:6.2f}  [{dl[2]:d} pts, f:{dl[4]:d}-{dl[5]:d}]")
+                        logDebug(f"  {idx_dl:2g}: ({dl[0][0]:.2f}, {dl[0][1]:.2f}, {dl[0][2]:.2f}) -> ({dl[1][0]:.2f}, {dl[1][1]:.2f}, {dl[1][2]:.2f})  dx/df: {mx:6.2f}, dy/df: {my:6.2f}  [{dl[2]:g} pts, f:{dl[4]:g}-{dl[5]:g}]")
 
                 # Save all detected lines for visualization
                 all_detected_lines = list(detected_lines)
@@ -2139,7 +2139,7 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
         #   going to be used for centroiding
         if debug:
             logDebug('\n================================')
-            logDebug('Lines to be centroided: {:d}'.format(len(filtered_lines)))
+            logDebug('Lines to be centroided: {:g}'.format(len(filtered_lines)))
             logDebug('================================')
             for li, dl in enumerate(filtered_lines):
                 x1, y1, f1 = dl[0]
@@ -2155,10 +2155,10 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                 else:
                     dx_df = dy_df = x0 = y0 = 0.0
                 spatial_len = np.sqrt((x2 - x1)**2 + (y2 - y1)**2)
-                logDebug('  Line {:d}:'.format(li))
+                logDebug('  Line {:g}:'.format(li))
                 logDebug('    Start: ({:.2f}, {:.2f}) f={:.2f}  ->  End: ({:.2f}, {:.2f}) f={:.2f}'.format(
                     x1, y1, f1, x2, y2, f2))
-                logDebug('    Frames: {:d} - {:d} ({:d} frames), {:d} pts, {:.2f} px length'.format(
+                logDebug('    Frames: {:g} - {:g} ({:g} frames), {:g} pts, {:.2f} px length'.format(
                     f_min, f_max, f_max - f_min + 1, pts_count, spatial_len))
                 logDebug('    dx/df: {:.2f}, dy/df: {:.2f}, x0: {:.2f}, y0: {:.2f}'.format(
                     dx_df, dy_df, x0, y0))
@@ -2220,7 +2220,7 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                 img_thres, max_avg_corrected, flattened_weights, \
                     min_patch_intensity = thresholdAndCorrectGammaFF(img_handle, config, mask, mask_ave_bright=True)
 
-                logDebug('Centroiding frames {:d} - {:d} and time:'.format(frame_min, frame_max, img_handle.name()))
+                logDebug('Centroiding frames {:g} - {:g} and time:'.format(frame_min, frame_max, img_handle.name()))
                 
 
 
@@ -2254,7 +2254,7 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
             # Skip if the points cover too small a frame range
             frame_range = abs(np.max(line_points[:,2]) - np.min(line_points[:,2])) + 1
             if frame_range < config.line_minimum_frame_range_det:
-                logDebug('Too small frame range! {:d} < {:d}'.format(frame_range, \
+                logDebug('Too small frame range! {:g} < {:g}'.format(frame_range, \
                     config.line_minimum_frame_range_det))
                 continue
             
@@ -2452,7 +2452,7 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                         if config.detection_binning_method == 'avg':
                             intensity *= config.detection_binning_factor**2
 
-                    logDebug("centroid: fr {:>12.3f}, x {:>7.2f}, y {:>7.2f}, intens {:d}, runtime: {:.6f} s".format(frame_no, \
+                    logDebug("centroid: fr {:>12.3f}, x {:>7.2f}, y {:>7.2f}, intens {:g}, runtime: {:.6f} s".format(frame_no, \
                         x_centroid, y_centroid, intensity, time() - t_centroid))
 
                     # Add computed centroid to the centroid list
@@ -2463,8 +2463,8 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                         ])
                     frames_centroided += 1
 
-            logDebug('Centroiding summary: {:d} frames in range, {:d} centroided, '
-                '{:d} skipped (no pixels), {:d} skipped (zero weights)'.format(
+            logDebug('Centroiding summary: {:g} frames in range, {:g} centroided, '
+                '{:g} skipped (no pixels), {:g} skipped (zero weights)'.format(
                 frame_max - frame_min + 1, frames_centroided, skipped_no_pixels, 
                 skipped_zero_weights))
 
@@ -2477,7 +2477,7 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
 
             # Convert to numpy array for easy slicing
             centroids = np.array(centroids)
-            logDebug('After filterCentroids: {:d} -> {:d} centroids'.format(
+            logDebug('After filterCentroids: {:g} -> {:g} centroids'.format(
                 n_before_filter, len(centroids)))
 
 
@@ -2490,12 +2490,12 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
             _, valid_flags = edge_filter.filterCoordinates(centroid_xy)
             n_before_edge = len(centroids)
             centroids = centroids[valid_flags]
-            logDebug('After edge/mask filtering: {:d} -> {:d} centroids'.format(
+            logDebug('After edge/mask filtering: {:g} -> {:g} centroids'.format(
                 n_before_edge, len(centroids)))
 
             # Reject the solution if there are too few centroids
             if len(centroids) < config.line_minimum_frame_range_det:
-                logDebug('REJECTED: Too few centroids after filtering: {:d} < {:d} (line_minimum_frame_range_det)'.format(
+                logDebug('REJECTED: Too few centroids after filtering: {:g} < {:g} (line_minimum_frame_range_det)'.format(
                     len(centroids), config.line_minimum_frame_range_det))
                 continue
 
@@ -2512,7 +2512,7 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                 logDebug('REJECTED: Angular velocity out of range: {:.2f} deg/s'.format(ang_vel))
                 continue
 
-            logDebug('ACCEPTED: {:d} centroids, frame range {:.1f} - {:.1f}, ang_vel {:.2f} deg/s'.format(
+            logDebug('ACCEPTED: {:g} centroids, frame range {:.1f} - {:.1f}, ang_vel {:.2f} deg/s'.format(
                 len(centroids), centroids[0,0], centroids[-1,0], ang_vel))
 
 
@@ -2775,7 +2775,7 @@ if __name__ == "__main__":
         try:
             parts = cml_args.frames.split(',')
             frame_range = (int(parts[0]), int(parts[1]))
-            print('Restricting detection to frames {:d} - {:d}'.format(frame_range[0], frame_range[1]))
+            print('Restricting detection to frames {:g} - {:g}'.format(frame_range[0], frame_range[1]))
         except (ValueError, IndexError):
             print('Error: --frames must be in the format START,END (e.g. --frames 0,1000)')
             sys.exit(1)

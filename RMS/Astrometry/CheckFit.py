@@ -300,7 +300,7 @@ def matchStarsResiduals(config, platepar, catalog_stars, star_dict, match_radius
     if verbose:
 
         log.info("")
-        log.info("Matched {:d} stars with radius of {:.1f} px".format(n_matched, match_radius))
+        log.info("Matched {:g} stars with radius of {:.1f} px".format(n_matched, match_radius))
         log.info("    Average distance = {:.3f} {:s}".format(avg_dist, unit_label))
         log.info("    Cost function    = {:.5f}".format(cost))
 
@@ -600,7 +600,7 @@ def autoCheckFit(config, platepar, calstars_data, _nn_refinement=False):
 
     # Calculate the total number of calibration stars used
     total_calstars = sum([len(star_dict[key]) for key in star_dict])
-    log.info('Total calstars: {:d}'.format(total_calstars))
+    log.info('Total calstars: {:g}'.format(total_calstars))
 
     if total_calstars < config.calstars_min_stars:
         log.info('Not enough calibration stars, need at least {}'.format(config.calstars_min_stars))
@@ -647,7 +647,7 @@ def autoCheckFit(config, platepar, calstars_data, _nn_refinement=False):
         log.info("-------------------------------------------------------------")
         log.info("Refining camera pointing with max pixel deviation = {:.1f} px".format(match_radius))
         log.info("Initial values:")
-        log.info("    Matched stars     = {:>6d}".format(n_matched))
+        log.info("    Matched stars     = {:>6g}".format(n_matched))
         log.info("    Average deviation = {:>6.2f} px".format(avg_dist))
 
 
@@ -711,7 +711,7 @@ def autoCheckFit(config, platepar, calstars_data, _nn_refinement=False):
         star_dict, min_radius, ret_nmatch=True)
 
     log.info("FINAL SOLUTION with radius {:.1} px:".format(min_radius))
-    log.info("    Matched stars     = {:>6d}".format(n_matched))
+    log.info("    Matched stars     = {:>6g}".format(n_matched))
     log.info("    Average deviation = {:>6.2f} px".format(avg_dist))
 
 
