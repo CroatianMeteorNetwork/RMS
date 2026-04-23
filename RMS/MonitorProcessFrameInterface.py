@@ -26,7 +26,7 @@ import multiprocessing
 import configparser
 
 import RMS.ConfigReader as cr
-from RMS.Formats.FrameInterface import detectInputTypeFile, checkIfVideoFile
+from RMS.Formats.FrameInterface import detectInputType
 from RMS.Formats.FFfile import validFFName
 from RMS.DetectStarsAndMeteors import (
     detectStarsAndMeteorsFrameInterface,
@@ -50,6 +50,7 @@ FILE_TYPE_MAP = {
     'avi': ['.avi'],
     'mov': ['.mov'],
     'wmv': ['.wmv'],
+    'fitsdirs': None,
 }
 
 
@@ -69,6 +70,10 @@ def matchesFileType(file_name, file_type):
     # Special handling for FF files
     if file_type == 'ff':
         return validFFName(file_name)
+
+    # Special handling for fitsdirs (matches everything, checked in monitorDirectory)
+    if file_type == 'fitsdirs':
+        return True
 
     # Check by extension
     if file_type in FILE_TYPE_MAP:
@@ -120,7 +125,7 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
     try:
 
         # Open the file as an image handle first to get the timestamp
-        img_handle = detectInputTypeFile(
+        img_handle = detectInputType(
             file_path, config, detection=True, preload_video=True, chunk_frames=chunk_frames
         )
 
@@ -316,23 +321,27 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
             for uid in finished:
                 del active_workers[uid]
 
-            # 1. Get ALL files and their metadata first
-            candidate_files = []
+            # 1. Get ALL paths and their metadata first
+            candidate_paths = []
             try:
                 if recursive:
-                    for root, _, files in os.walk(input_dir):
-                        for f in files:
-                            candidate_files.append(os.path.join(root, f))
+                    for root, dirs, files in os.walk(input_dir):
+                        if file_type == 'fitsdirs':
+                            for d in dirs:
+                                candidate_paths.append(os.path.join(root, d))
+                        else:
+                            for f in files:
+                                candidate_paths.append(os.path.join(root, f))
                 else:
-                    candidate_files = [os.path.join(input_dir, f) for f in os.listdir(input_dir)]
+                    candidate_paths = [os.path.join(input_dir, f) for f in os.listdir(input_dir)]
             except OSError:
                 log.error("Cannot read directory: {}".format(input_dir))
                 time.sleep(poll_interval)
                 continue
 
-            # 2. Identify which files are "Stable"
+            # 2. Identify which paths are "Stable"
             stable_files = []
-            for file_path in candidate_files:
+            for file_path in candidate_paths:
                 file_name = os.path.basename(file_path)
                 file_rel_path = os.path.relpath(file_path, input_dir)
 
@@ -340,11 +349,23 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
                 if not matchesFileType(file_name, file_type):
                     continue
 
-                if os.path.isdir(file_path):
-                    continue
+                if file_type == 'fitsdirs':
+                    if not os.path.isdir(file_path):
+                        continue
+                    
+                    # Ensure it contains .fits files
+                    try:
+                        fits_files = [f for f in os.listdir(file_path) if f.lower().endswith('.fits')]
+                        if not fits_files:
+                            continue
+                    except OSError:
+                        continue
 
-                # Generate a unique ID based on the file name. RMS file names are already
-                # globally unique by design (they include the camera ID, date, and microsecond timestamp).
+                else:
+                    if os.path.isdir(file_path):
+                        continue
+
+                # Generate a unique ID based on the path name.
                 unique_id = os.path.splitext(file_name)[0]
 
                 # Skip already processed or currently processing files
@@ -359,8 +380,14 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
 
                 # Non-blocking stability check
                 try:
-                    curr_mtime = os.path.getmtime(file_path)
-                    curr_size = os.path.getsize(file_path)
+                    if file_type == 'fitsdirs':
+                        # For directories, check the mtime and total size of all .fits files
+                        full_fits_paths = [os.path.join(file_path, f) for f in fits_files]
+                        curr_mtime = max(os.path.getmtime(f) for f in full_fits_paths)
+                        curr_size = sum(os.path.getsize(f) for f in full_fits_paths)
+                    else:
+                        curr_mtime = os.path.getmtime(file_path)
+                        curr_size = os.path.getsize(file_path)
                 except OSError:
                     continue  # File disappeared or momentarily locked, try next pass
 
@@ -369,7 +396,8 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
                     stable = True
                 else:
                     if file_path not in stability_tracker:
-                        log.info("New file detected: {} - waiting for write completion...".format(file_rel_path))
+                        log.info("New {} detected: {} - waiting for write completion...".format(
+                            "directory" if file_type == 'fitsdirs' else "file", file_rel_path))
                         stability_tracker[file_path] = {'mtime': curr_mtime, 'size': curr_size, 'since': time.time()}
                         stable = False
                     else:
@@ -659,34 +687,51 @@ def monitorMultipleCameras(multicam_ini_path):
             for cam in cameras:
 
                 cam_id = cam['id']
-                candidate_files = []
+                candidate_paths = []
                 
-                # Fetch all files from the input directory
+                # Fetch all paths from the input directory
                 try:
                     if recursive:
-                        for root, _, files in os.walk(cam['input_dir']):
-                            for f in files:
-                                candidate_files.append(os.path.join(root, f))
+                        for root, dirs, files in os.walk(cam['input_dir']):
+                            if file_type == 'fitsdirs':
+                                for d in dirs:
+                                    candidate_paths.append(os.path.join(root, d))
+                            else:
+                                for f in files:
+                                    candidate_paths.append(os.path.join(root, f))
                     else:
-                        candidate_files = [os.path.join(cam['input_dir'], f) for f in os.listdir(cam['input_dir'])]
+                        candidate_paths = [os.path.join(cam['input_dir'], f) for f in os.listdir(cam['input_dir'])]
                 
                 except OSError:
                     log.error("Cannot read directory for camera {}: {}".format(cam_id, cam['input_dir']))
                     continue
 
                 cam_stable = []
-                for file_path in candidate_files:
+                for file_path in candidate_paths:
                     file_name = os.path.basename(file_path)
                     file_rel_path = os.path.relpath(file_path, cam['input_dir'])
                     
                     # Filter out non-target files and directories
                     if not matchesFileType(file_name, file_type):
                         continue
-                    if os.path.isdir(file_path):
-                        continue
+
+                    if file_type == 'fitsdirs':
+                        if not os.path.isdir(file_path):
+                            continue
+                        
+                        # Ensure it contains .fits files
+                        try:
+                            fits_files = [f for f in os.listdir(file_path) if f.lower().endswith('.fits')]
+                            if not fits_files:
+                                continue
+                        except OSError:
+                            continue
+
+                    else:
+                        if os.path.isdir(file_path):
+                            continue
                     
-                    # Generate a unique ID based on the file name. RMS file names are already
-                    # globally unique by design (they include the camera ID, date, and microsecond timestamp).
+                    # Generate a unique ID based on the path name.
                     unique_id = os.path.splitext(file_name)[0]
 
                     # Ignore files we've already processed or are currently working on
@@ -699,10 +744,16 @@ def monitorMultipleCameras(multicam_ini_path):
                         if (time.time() - failed_files[cam_id][unique_id]['last_fail_time']) < fail_wait_time:
                             continue
 
-                    # Attempt to read file metadata for stability checking
+                    # Attempt to read path metadata for stability checking
                     try:
-                        curr_mtime = os.path.getmtime(file_path)
-                        curr_size = os.path.getsize(file_path)
+                        if file_type == 'fitsdirs':
+                            # For directories, check the mtime and total size of all .fits files
+                            full_fits_paths = [os.path.join(file_path, f) for f in fits_files]
+                            curr_mtime = max(os.path.getmtime(f) for f in full_fits_paths)
+                            curr_size = sum(os.path.getsize(f) for f in full_fits_paths)
+                        else:
+                            curr_mtime = os.path.getmtime(file_path)
+                            curr_size = os.path.getsize(file_path)
                     except OSError:
                         # File might have been deleted or locked, we'll try again next poll
                         continue
@@ -718,7 +769,8 @@ def monitorMultipleCameras(multicam_ini_path):
                         cam_trk = stability_tracker[cam_id]
                         if file_path not in cam_trk:
                             # Start tracking a new file
-                            log.info("[{}] New file detected: {} - waiting...".format(cam_id, file_rel_path))
+                            log.info("[{}] New {} detected: {} - waiting...".format(
+                                cam_id, "directory" if file_type == 'fitsdirs' else "file", file_rel_path))
                             cam_trk[file_path] = {'mtime': curr_mtime, 'size': curr_size, 'since': time.time()}
                             stable = False
 

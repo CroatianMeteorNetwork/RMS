@@ -262,6 +262,7 @@ class InputTypeFRFF(InputType):
         self.input_type = 'ff'
 
         self.dir_path = dir_path
+        self.file_name = os.path.basename(self.dir_path)
         self.config = config
 
         self.use_fr_files = use_fr_files
@@ -1559,6 +1560,7 @@ class InputTypeImages(InputType):
         self.input_type = 'images'
 
         self.dir_path = dir_path
+        self.file_name = os.path.basename(self.dir_path)
         self.config = config
 
         self.detection = detection
@@ -1689,15 +1691,15 @@ class InputTypeImages(InputType):
         # If during the frame loading it was deterined that the images are in the FRIPON or FITS format
         if self.fripon_mode or self.fits_mode:
 
-            if self.fripon_mode:
-                print()
-                print("FRIPON mode")
-                print()
+            # if self.fripon_mode:
+            #     print()
+            #     print("FRIPON mode")
+            #     print()
             
-            elif self.fits_mode:
-                print()
-                print("FITS mode")
-                print()
+            # elif self.fits_mode:
+            #     print()
+            #     print("FITS mode")
+            #     print()
 
             ### Sort the frames according to the fits header time ###
             
@@ -2175,8 +2177,6 @@ class InputTypeImages(InputType):
                         self.dt_frame_time = datetime.datetime.strptime(timestamp_stripped, "%Y-%m-%dT%H:%M:%S.%f")
                     except ValueError:
                         self.dt_frame_time = datetime.datetime.strptime(timestamp_stripped, "%Y-%m-%dT%H:%M:%S")
-
-                print(self.dt_frame_time)
 
                 # # Print nicely formatted FITS header
                 # print("\nFITS Header:")
