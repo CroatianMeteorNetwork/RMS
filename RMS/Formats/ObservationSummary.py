@@ -1,6 +1,6 @@
 # The MIT License
 
-# Copyright (c) 2025
+# Copyright (c) 2026
 
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -173,6 +173,19 @@ def getObservationDuration(config, start_time):
         start_time_ephem, duration_ephem, end_time_ephem = getObservationDurationNightTime(config, start_time)
 
     return start_time_ephem, duration_ephem, end_time_ephem
+
+def getUpstreamBranch():
+    """Identify the active upstream branch
+
+    Return: [str] active upstream branch
+
+    """
+    cmd = ["git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"]
+    upstream_branch  = subprocess.check_output(cmd, stderr=subprocess.STDOUT).decode().strip().splitlines()[0]
+
+    return upstream_branch
+
+
 
 def getTimeClient():
     """Attempt to identify which time service client, if any is providing a service.
@@ -929,7 +942,10 @@ def daysBehind():
     target_directory = target_directory_obj.name
     remote_urls = getRemoteUrls(os.getcwd())
     commit_repo_directory = updateCommitHistoryDirectory(remote_urls, target_directory)
-    remote_branch_of_commit = getRemoteBranchNameForCommit(commit_repo_directory, latest_local_commit)
+    remote_branch_of_commit = getUpstreamBranch()
+    if remote_branch_of_commit is None:
+        remote_branch_of_commit = getRemoteBranchNameForCommit(commit_repo_directory, latest_local_commit)
+
     if not remote_branch_of_commit is None:
         latest_remote_date = getDateOfCommit(commit_repo_directory, remote_branch_of_commit)
         days_behind = (latest_remote_date - latest_local_date).total_seconds()/(60 * 60 * 24)
@@ -977,7 +993,7 @@ def retrieveObservationData(conn, config, night_directory=None, ordering=None):
         # the two items into one.
 
         ordering = ['stationID',
-                    'commit_date', 'commit_hash', 'remote_branch', 'repository_lag_remote_days',
+                    'commit_date', 'commit_hash', 'upstream_branch', 'remote_branch', 'repository_lag_remote_days',
                     'media_backend','star_catalog_file',
                     'hardware_version',
                     'captured_directories',
@@ -1176,7 +1192,8 @@ def startObservationSummaryReport(config, duration, force_delete=False):
     captured_directories = captureDirectories(os.path.join(config.data_dir, config.captured_dir), config.stationID)
     addObsParam(conn, "captured_directories", captured_directories)
     try:
-        addObsParam(conn, "camera_information", gatherCameraInformation(config))
+        pass
+        # addObsParam(conn, "camera_information", gatherCameraInformation(config))
     except:
         addObsParam(conn, "camera_information", "Unavailable")
 
@@ -1262,9 +1279,15 @@ def finalizeObservationSummary(config, night_data_dir, platepar=None):
     addObsParam(obs_db_conn, "star_catalog_file", config.star_catalog_file)
 
     try:
+        addObsParam(obs_db_conn, "upstream_branch", getUpstreamBranch())
+    except:
+        addObsParam(obs_db_conn, "upstream_branch", None)
+
+    try:
         days_behind, remote_branch = daysBehind()
         addObsParam(obs_db_conn, "repository_lag_remote_days", days_behind)
         addObsParam(obs_db_conn, "remote_branch", os.path.basename(remote_branch))
+
     except:
         addObsParam(obs_db_conn, "repository_lag_remote_days", "Not determined")
     obs_db_conn.close()
@@ -1292,7 +1315,7 @@ if __name__ == "__main__":
     print("Start time was {}".format(start_time))
     print("Duration time was {:.2f} hours".format(duration/3600))
     print("End time was {}".format(end_time))
-
+    print("Upstream branch is  {}".format(getUpstreamBranch()))
 
 
     startObservationSummaryReport(config, 100, force_delete=False)
