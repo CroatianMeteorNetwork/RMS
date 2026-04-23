@@ -2898,6 +2898,17 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
         layout.addLayout(grid)
 
         row = 0
+        # Mapping of slider names to config attributes and their scale factor
+        config_map = {
+            'Intensity Threshold': ('intensity_threshold', 1),
+            'Neighborhood Size': ('neighborhood_size', 1),
+            'Max Stars': ('max_stars', 1),
+            'Gamma': ('gamma', 100),
+            'Segment Radius': ('segment_radius', 1),
+            'Max Feature Ratio': ('max_feature_ratio', 100),
+            'Roundness Threshold': ('roundness_threshold', 100),
+        }
+
         slider_data = [
             ('Intensity Threshold', 1, 200, 18, '18', self.onIntensityThresholdChanged),
             ('Neighborhood Size', 5, 40, 10, '10', self.onNeighborhoodSizeChanged),
@@ -2907,6 +2918,32 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
             ('Max Feature Ratio', 50, 200, 80, '0.80', self.onMaxFeatureRatioChanged),
             ('Roundness Threshold', 30, 90, 50, '0.50', self.onRoundnessThresholdChanged),
         ]
+
+        # Adjust ranges based on config if parameters exceed the limits
+        config = getattr(gui, 'config', None)
+        if config:
+            new_slider_data = []
+            for name, min_val, max_val, default, default_str, callback in slider_data:
+                
+                attr, scale = config_map.get(name, (None, 1))
+                if attr and hasattr(config, attr):
+                    cfg_val = getattr(config, attr) * scale
+                    
+                    if cfg_val < min_val:
+                        min_val = cfg_val * 0.5
+                    elif cfg_val > max_val:
+                        max_val = cfg_val * 1.5
+
+                    # Set default to config value
+                    default = cfg_val
+                    if scale == 100:
+                        default_str = "{:.2f}".format(cfg_val / 100.0)
+                    else:
+                        default_str = str(int(cfg_val))
+
+                new_slider_data.append((name, int(min_val), int(max_val), int(default), default_str, callback))
+            
+            slider_data = new_slider_data
 
         self.sliders = {}
         self.slider_labels = {}

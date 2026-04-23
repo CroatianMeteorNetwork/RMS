@@ -8742,7 +8742,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 # Add the fripon mode flag if it's missing
                 if not hasattr(self.img_handle, "fripon_mode"):
                     self.img_handle.fripon_mode = False
-                    self.img_handle.fripon_header = None
+                    self.img_handle.fits_header = None
 
             # Make sure an option is not missing
             if self.img_handle.input_type == 'images':

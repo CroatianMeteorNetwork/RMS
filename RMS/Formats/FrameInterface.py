@@ -1583,7 +1583,8 @@ class InputTypeImages(InputType):
         self.frame_dt_dict = {}
 
         self.fripon_mode = False
-        self.fripon_header = None
+        self.fits_mode = False
+        self.fits_header = None
         self.cabernet_status = False
 
         img_types = ['.png', '.jpg', '.jpeg', '.bmp', '.fit', '.fits', '.tif']
@@ -1685,12 +1686,18 @@ class InputTypeImages(InputType):
             
 
 
-        # If during the frame loading it was deterined that the images are in the FRIPON format
-        if self.fripon_mode:
+        # If during the frame loading it was deterined that the images are in the FRIPON or FITS format
+        if self.fripon_mode or self.fits_mode:
 
-            print()
-            print("FRIPON mode")
-            print()
+            if self.fripon_mode:
+                print()
+                print("FRIPON mode")
+                print()
+            
+            elif self.fits_mode:
+                print()
+                print("FITS mode")
+                print()
 
             ### Sort the frames according to the fits header time ###
             
@@ -1707,73 +1714,76 @@ class InputTypeImages(InputType):
 
             ### ###
 
-            # Set the begin time if in the FRIPON mode
+            # Set the begin time
             beginning_time = self.dt_frame_time
 
-            # Load info for CABERNET
-            if self.cabernet_status:
 
-                # Try to get the station ID if present
-                if "SITE" in self.fripon_header:
-                    self.config.stationID = self.fripon_header["SITE"].strip("'").strip()
+            if self.fripon_mode:
 
-                else:
+                # Load info for CABERNET
+                if self.cabernet_status:
 
-                    # Find comment line with station name
-                    station_comment = [line for line in self.fripon_header["COMMENT"] if "CABERNET at " in line]
+                    # Try to get the station ID if present
+                    if "SITE" in self.fits_header:
+                        self.config.stationID = self.fits_header["SITE"].strip("'").strip()
 
-                    if len(station_comment):
-                        station_id = " ".join(station_comment[0].split()[2:]).strip("'").strip()
                     else:
-                        station_id = "CABERNET-STAT"
 
-                    self.config.stationID = station_id
+                        # Find comment line with station name
+                        station_comment = [line for line in self.fits_header["COMMENT"] if "CABERNET at " in line]
 
-                self.config.latitude = np.degrees(self.fripon_header["LATITUDE"])
-                self.config.longitude = np.degrees(self.fripon_header["LONGITUD"])
-                self.config.elevation = wgs84toMSLHeight(np.radians(self.config.latitude), 
-                    np.radians(self.config.longitude), self.fripon_header["ALTITUDE"], self.config) # WGS84 in fits
+                        if len(station_comment):
+                            station_id = " ".join(station_comment[0].split()[2:]).strip("'").strip()
+                        else:
+                            station_id = "CABERNET-STAT"
 
-                # Set approximate FOV
-                self.config.fov_w = 40
-                self.config.fov_h = 27
+                        self.config.stationID = station_id
 
-                # Set magnitude limit
-                self.config.catalog_mag_limit = 6.0
+                    self.config.latitude = np.degrees(self.fits_header["LATITUDE"])
+                    self.config.longitude = np.degrees(self.fits_header["LONGITUD"])
+                    self.config.elevation = wgs84toMSLHeight(np.radians(self.config.latitude), 
+                        np.radians(self.config.longitude), self.fits_header["ALTITUDE"], self.config) # WGS84 in fits
 
+                    # Set approximate FOV
+                    self.config.fov_w = 40
+                    self.config.fov_h = 27
 
-            # Load info for FRIPON all-sky cameras
-            elif ("PROGRAM" in self.fripon_header) and (self.fripon_header["PROGRAM"].strip() == "FreeTure"):
-
-                # Set station parameters if in the FRIPON mode
-                self.config.stationID = self.fripon_header["TELESCOP"].strip()
-                self.config.latitude = self.fripon_header["SITELAT"]
-                self.config.longitude = self.fripon_header["SITELONG"]
-                self.config.elevation = self.fripon_header["SITEELEV"] # MSL
-
-                # Set the catalog to the GMN catalog
-                self.config.star_catalog_path = os.path.join(self.config.rms_root_dir, "Catalogs")
-                self.config.star_catalog_file = "GMN_StarCatalog"
-
-                # Set approximate FOV
-                self.config.fov_h = 180
-                self.config.fov_w = 200
-
-                # Set magnitude limit
-                self.config.catalog_mag_limit = 3.5
-
-            # Non-FreeTrue fit file
-            else:
-                pass
+                    # Set magnitude limit
+                    self.config.catalog_mag_limit = 6.0
 
 
+                # Load info for FRIPON all-sky cameras
+                elif ("PROGRAM" in self.fits_header) and (self.fits_header["PROGRAM"].strip() == "FreeTure"):
 
-            self.config.width = self.fripon_header["NAXIS1"]
-            self.config.height = self.fripon_header["NAXIS2"]
-            self.config.fps = self.fps
+                    # Set station parameters if in the FRIPON mode
+                    self.config.stationID = self.fits_header["TELESCOP"].strip()
+                    self.config.latitude = self.fits_header["SITELAT"]
+                    self.config.longitude = self.fits_header["SITELONG"]
+                    self.config.elevation = self.fits_header["SITEELEV"] # MSL
 
-            # Global shutter
-            self.config.deinterlace_order = -2
+                    # Set the catalog to the GMN catalog
+                    self.config.star_catalog_path = os.path.join(self.config.rms_root_dir, "Catalogs")
+                    self.config.star_catalog_file = "GMN_StarCatalog"
+
+                    # Set approximate FOV
+                    self.config.fov_h = 180
+                    self.config.fov_w = 200
+
+                    # Set magnitude limit
+                    self.config.catalog_mag_limit = 3.5
+
+                # Non-FreeTrue fit file
+                else:
+                    pass
+
+
+
+                self.config.width = self.fits_header["NAXIS1"]
+                self.config.height = self.fits_header["NAXIS2"]
+                self.config.fps = self.fps
+
+                # Global shutter
+                self.config.deinterlace_order = -2
 
             
 
@@ -1975,7 +1985,7 @@ class InputTypeImages(InputType):
                 ff_struct_fake.dtype = self.getTargetDtype(frame)
 
             # Add the datetime of the frame to list of the UWO png is used
-            if self.uwo_png_mode or self.fripon_mode:
+            if self.uwo_png_mode or self.fripon_mode or self.fits_mode:
                 self.frame_dt_list.append(self.currentFrameTime(frame_no=img_indx, dt_obj=True))
 
         self.current_fr_chunk_size = i
@@ -2057,7 +2067,7 @@ class InputTypeImages(InputType):
         # In the single image mode (but not for UWO), the frame will not change, so load it from the cache 
         #   if available
         single_image_key = "single_image"
-        if self.single_image_mode and (not self.uwo_png_mode) and (not self.fripon_mode):
+        if self.single_image_mode and (not self.uwo_png_mode) and (not self.fripon_mode) and (not self.fits_mode):
             if single_image_key in self.cache:
                 
                 # Load the frame from cache
@@ -2094,14 +2104,24 @@ class InputTypeImages(InputType):
                 head = fits_file[0].header
 
                 # Save the FRIPON header
-                self.fripon_header = head
+                self.fits_header = head
 
                 # Load the frame time
                 timestamp_stripped = head["DATE-OBS"].strip("=").strip("'").strip()
                 try:
-                    self.dt_frame_time = datetime.datetime.strptime(timestamp_stripped, "%Y-%m-%dT%H:%M:%S.%f")
+                    # Use fromisoformat to handle ISO 8601 formats (including timezone offsets)
+                    self.dt_frame_time = datetime.datetime.fromisoformat(timestamp_stripped)
+
+                    # Ensure the datetime is offset-naive UTC for consistency
+                    if self.dt_frame_time.tzinfo is not None:
+                        self.dt_frame_time = self.dt_frame_time.astimezone(datetime.timezone.utc).replace(tzinfo=None)
+
                 except ValueError:
-                    self.dt_frame_time = datetime.datetime.strptime(timestamp_stripped, "%Y-%m-%dT%H:%M:%S")
+                    # Fallback to existing strptime patterns if fromisoformat fails
+                    try:
+                        self.dt_frame_time = datetime.datetime.strptime(timestamp_stripped, "%Y-%m-%dT%H:%M:%S.%f")
+                    except ValueError:
+                        self.dt_frame_time = datetime.datetime.strptime(timestamp_stripped, "%Y-%m-%dT%H:%M:%S")
 
                 # If CABERNET is used, set a fixed FPS
                 if "COMMENT" in head:
@@ -2133,12 +2153,37 @@ class InputTypeImages(InputType):
                 fits_file = fits.open(f)
                 frame = fits_file[0].data
 
-                # Print nicely formatted FITS header
-                print("\nFITS Header:")
-                print("\n" + "="*80)
-                for key, value in fits_file[0].header.items():
-                    print(f"{key}: {value}")
-                print("="*80 + "\n")
+                # Load the header
+                header = fits_file[0].header
+
+                # Save the header
+                self.fits_header = header
+
+                # Load the frame time
+                timestamp_stripped = header["DATE-OBS"].strip("=").strip("'").strip()
+                try:
+                    # Use fromisoformat to handle ISO 8601 formats (including timezone offsets)
+                    self.dt_frame_time = datetime.datetime.fromisoformat(timestamp_stripped)
+
+                    # Ensure the datetime is offset-naive UTC for consistency
+                    if self.dt_frame_time.tzinfo is not None:
+                        self.dt_frame_time = self.dt_frame_time.astimezone(datetime.timezone.utc).replace(tzinfo=None)
+
+                except ValueError:
+                    # Fallback to existing strptime patterns if fromisoformat fails
+                    try:
+                        self.dt_frame_time = datetime.datetime.strptime(timestamp_stripped, "%Y-%m-%dT%H:%M:%S.%f")
+                    except ValueError:
+                        self.dt_frame_time = datetime.datetime.strptime(timestamp_stripped, "%Y-%m-%dT%H:%M:%S")
+
+                print(self.dt_frame_time)
+
+                # # Print nicely formatted FITS header
+                # print("\nFITS Header:")
+                # print("\n" + "="*80)
+                # for key, value in header.items():
+                #     print(f"{key}: {value}")
+                # print("="*80 + "\n")
 
                 # If the fits image type is floating point, convert it to uint16
                 if np.issubdtype(frame.dtype, np.floating):
@@ -2157,7 +2202,8 @@ class InputTypeImages(InputType):
                 # # Flip image vertically
                 # frame = np.flipud(frame)
 
-                print("FITS mode")
+                # Set the fits mode
+                self.fits_mode = True
 
         # Load a normal image
         else:
@@ -2211,7 +2257,7 @@ class InputTypeImages(InputType):
             self.dt_frame_time = frame_dt
 
 
-        if self.uwo_png_mode or self.fripon_mode:
+        if self.uwo_png_mode or self.fripon_mode or self.fits_mode:
 
             # Save the frame time of the current frame
             if fr_no not in self.frame_dt_dict:
@@ -2261,7 +2307,7 @@ class InputTypeImages(InputType):
                 time of the chunk.
         """
 
-        if self.uwo_png_mode or self.fripon_mode:
+        if self.uwo_png_mode or self.fripon_mode or self.fits_mode:
 
             # Convert datetimes to Unix times
             unix_times = [datetime2UnixTime(dt) for dt in self.frame_dt_list]
@@ -2309,7 +2355,7 @@ class InputTypeImages(InputType):
             frame_no = self.current_frame
 
         # If the UWO png or FRIPON fit is used, return the time read from the file
-        if (self.uwo_png_mode or self.fripon_mode) and (not self.cabernet_status):
+        if (self.uwo_png_mode or self.fripon_mode or self.fits_mode) and (not self.cabernet_status):
 
             # If the frame number is not given, return the time of the current frame
             if frame_no is None:
