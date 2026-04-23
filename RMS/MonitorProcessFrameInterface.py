@@ -21,6 +21,7 @@ import shutil
 import sys
 import time
 import logging
+import traceback
 import multiprocessing
 import configparser
 
@@ -223,9 +224,8 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
         return True
 
     except Exception as e:
-        proc_log.error("Error processing {}: {}".format(file_name, str(e)))
-        import traceback
         proc_log.error(traceback.format_exc())
+        proc_log.error("Error processing {}: {}".format(file_name, str(e)))
         return False
 
 
