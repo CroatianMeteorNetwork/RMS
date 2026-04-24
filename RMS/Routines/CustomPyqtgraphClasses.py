@@ -1,5 +1,14 @@
 from __future__ import division, absolute_import, unicode_literals
 
+import time
+import re
+import sys
+    
+from RMS.Astrometry.Conversions import AER2LatLonAlt
+from RMS.Formats.FFfile import reconstructFrame as reconstructFrameFF
+from RMS.Routines import Image
+from RMS.Routines.DebruijnSequence import findAllInDeBruijnSequence, generateDeBruijnSequence
+
 import pyqtgraph as pg
 import numpy as np
 from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
@@ -7,18 +16,10 @@ from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 # Import the correct version of pyqtgraph function module, depending on the version
 try:
     import pyqtgraph.fn as pgfn
-    
 except ImportError:
     import pyqtgraph.functions as pgfn
     
-from RMS.Astrometry.Conversions import AER2LatLonAlt
-from RMS.Formats.FFfile import reconstructFrame as reconstructFrameFF
-from RMS.Routines import Image
-from RMS.Routines.DebruijnSequence import findAllInDeBruijnSequence, generateDeBruijnSequence
-
-import time
-import re
-import sys
+from astropy.visualization import ZScaleInterval
 
 
 class ScaledSizeHelper:
@@ -685,18 +686,29 @@ class ImageItem(pg.ImageItem):
         if self.image is None or self.image.size == 0:
             return 0, 255
 
-        # Ignore the top 10% of the image pixel brightness (from the maximum) to avoid auto leveling on
-        #  saturated pixels
-        max_level = np.max(self.image)
-        ignore_level = (100 - ignoretopperc)*max_level/100
-        
-        img_filtered = self.image[self.image < ignore_level]
 
-        # Validation: If the image is saturated or flat, the filtered image might be empty
-        if img_filtered.size == 0:
-            return np.percentile(self.image, lower), np.percentile(self.image, upper)
+        try:
+            # Compute the levels using ZScaleInterval, a fast and accurate method for determining the 
+            #  optimal range of pixel values to display
+            interval = ZScaleInterval(n_samples=2000, contrast=0.25, max_iterations=5)
+            vmin, vmax = interval.get_limits(self.image)
+            return float(vmin), float(vmax)
 
-        return np.percentile(img_filtered, lower), np.percentile(img_filtered, upper)
+        except Exception:
+            # Fallback if ZScale fails (e.g., array of all NaNs)
+
+            # Ignore the top 10% of the image pixel brightness (from the maximum) to avoid auto leveling on
+            #  saturated pixels
+            max_level = np.max(self.image)
+            ignore_level = (100 - ignoretopperc)*max_level/100
+            
+            img_filtered = self.image[self.image < ignore_level]
+
+            # Validation: If the image is saturated or flat, the filtered image might be empty
+            if img_filtered.size == 0:
+                return np.percentile(self.image, lower), np.percentile(self.image, upper)
+
+            return np.percentile(img_filtered, lower), np.percentile(img_filtered, upper)
 
     def loadImage(self, mode, flag='avepixel'):
         """
