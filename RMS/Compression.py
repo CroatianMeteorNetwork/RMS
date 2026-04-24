@@ -238,6 +238,11 @@ class Compressor(multiprocessing.Process):
             # Always join to reap zombie (returns instantly if already dead)
             self.join()
 
+        else:
+            # Process is not alive but may not have been joined yet - reap it
+            log.debug("Compression process not alive, joining to reap resources")
+            self.join(timeout=5)
+
         # Return the detector and live viewer objects because they were updated in this namespace
         return self.detector
     
@@ -283,9 +288,9 @@ class Compressor(multiprocessing.Process):
                 if self.exit.is_set():
 
                     log.debug('Compression run exit')
-                    self.run_exited.set()
 
-                    return None
+                    self.run_exited.set()
+                    os._exit(0)
 
                 time.sleep(0.1)
 
@@ -390,7 +395,14 @@ class Compressor(multiprocessing.Process):
 
 
         log.debug('Compression run exit')
+
         time.sleep(1.0)
         self.run_exited.set()
+
+        # Force-exit the process. The forked QueuedPool Manager proxy threads
+        # hold open socket connections that survive even after dropping all
+        # Python references. os._exit() is the only reliable way to terminate
+        # the process without waiting for those threads.
+        os._exit(0)
 
 

@@ -298,6 +298,9 @@ class Config:
         # Decoder for the gstreamer media backend (e.g. decodebin, avdec_h264, nvh264dec)
         self.gst_decoder = "avdec_h264"
 
+        # Max buffers per GStreamer queue element (lower values reduce memory usage on multi-cam systems)
+        self.gst_queue_size = 100
+
         # Path to the json file containing camera settings
         self.camera_settings_path = "./camera_settings.json"
 
@@ -1160,6 +1163,9 @@ def parseCapture(config, parser):
 
     if parser.has_option(section, "gst_decoder"):
         config.gst_decoder = parser.get(section, "gst_decoder")
+
+    if parser.has_option(section, "gst_queue_size"):
+        config.gst_queue_size = parser.getint(section, "gst_queue_size")
 
     if parser.has_option(section, "camera_settings_path") and os.path.isfile(parser.get(section, "camera_settings_path")):
         config.camera_settings_path = parser.get(section, "camera_settings_path")

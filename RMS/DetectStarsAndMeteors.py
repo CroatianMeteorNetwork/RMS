@@ -442,6 +442,7 @@ def detectStarsAndMeteorsDirectory(dir_path, config, output_suffix=''):
 
     # Get the detection results from the queue
     detection_results = detector.getResults()
+    detector.shutdownManager()
 
 
     # Save detection to disk

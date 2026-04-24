@@ -1104,13 +1104,14 @@ class BufferedCapture(Process):
             ).format(protocol_str, device_url)
 
         # Branch for processing
+        queue_size = self.config.gst_queue_size
         processing_branch = (
             "t. ! queue ! {:s} ! "
-            "queue leaky=downstream max-size-buffers=100 max-size-bytes=0 max-size-time=0 ! "
+            "queue leaky=downstream max-size-buffers={:d} max-size-bytes=0 max-size-time=0 ! "
             "videoconvert ! video/x-raw,format={:s} ! "
-            "queue max-size-buffers=100 max-size-bytes=0 max-size-time=0 ! "
-            "appsink max-buffers=100 drop=true sync=0 name=appsink"
-            ).format(gst_decoder, video_format)
+            "queue max-size-buffers={:d} max-size-bytes=0 max-size-time=0 ! "
+            "appsink max-buffers={:d} drop=true sync=0 name=appsink"
+            ).format(gst_decoder, queue_size, video_format, queue_size, queue_size)
         
          # Branch for storage - if video_file_dir is not None, save the raw stream to a file
         if video_file_dir is not None:
@@ -1781,6 +1782,36 @@ class BufferedCapture(Process):
 
             log.debug("Process-specific initialization complete")
 
+            # Prevent GStreamer and other grandchild processes from inheriting the
+            # large shared frame buffers (~506 MB each at 1080p). These buffers are
+            # only needed by BufferedCapture and Compressor; any subprocess forked
+            # from here (e.g. GStreamer NVENC encoder, RawFrameSaver) does not need
+            # them. MADV_DONTFORK tells the kernel to exclude these pages from any
+            # child created via fork(), so grandchildren never see them at all.
+            # Compressor is unaffected because it forks from StartCapture, not here.
+            try:
+                _libc = ctypes.CDLL('libc.so.6', use_errno=True)
+                _libc.madvise.restype = ctypes.c_int
+                _libc.madvise.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int]
+                MADV_DONTFORK = 10
+
+                total_bytes = 0
+                for arr in (self.array1, self.array2):
+                    try:
+                        ret = _libc.madvise(arr.ctypes.data, arr.nbytes, MADV_DONTFORK)
+                        if ret == 0:
+                            total_bytes += arr.nbytes
+                    except Exception:
+                        pass
+
+                if total_bytes:
+                    log.debug("Marked frame buffers ({:.0f} MB) as DONTFORK to prevent "
+                              "inheritance by grandchild processes".format(
+                                  total_bytes / (1024*1024)))
+
+            except Exception as e:
+                log.warning("Could not set MADV_DONTFORK on frame buffers: {}".format(e))
+
             # Main capture loop
             while not self.exit.is_set() and not self.initVideoDevice():
                 # Update heartbeat during connection attempts to show we're still alive
@@ -2198,6 +2229,25 @@ class BufferedCapture(Process):
                             # Force device re-initialization by releasing and reconnecting
                             log.info("Releasing resources to re-initialize video device with GStreamer")
                             self.releaseResources()
+
+                            # If transitioning to daytime, release the compression frame
+                            # buffers back to the OS. They are not used during the day
+                            # (frame writes are skipped in daytime mode) and would otherwise
+                            # sit in swap until nightfall. MADV_DONTNEED drops the pages
+                            # immediately; they get zero-filled on next write at no cost.
+                            if current_daytime:
+                                try:
+                                    _libc = ctypes.CDLL('libc.so.6', use_errno=True)
+                                    _libc.madvise.restype = ctypes.c_int
+                                    _libc.madvise.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int]
+                                    MADV_DONTNEED = 4
+                                    for arr in (self.array1, self.array2):
+                                        _libc.madvise(arr.ctypes.data, arr.nbytes, MADV_DONTNEED)
+                                    log.info("Released compression frame buffers ({:.0f} MB) back to OS".format(
+                                        sum(a.nbytes for a in (self.array1, self.array2)) / (1024*1024)))
+                                except Exception as e:
+                                    log.warning("Could not release frame buffers: {}".format(e))
+
                             wait_for_reconnect = True
                             break
 
