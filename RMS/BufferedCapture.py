@@ -153,11 +153,13 @@ class VencMetadataReader(object):
         """Look up raw µs PTS for a 32-bit RTP timestamp.
 
         Matches against the low 32 bits of the daemon's wrap-corrected PTS.
-        Tolerance of ±20 ticks handles small GUARD residual shift.
+        Tolerance of ±100 ticks (≈1.1 ms) — handles small per-frame timing
+        offsets between trampoline ring write and host probe view.  Still
+        well within one frame period (3600 ticks).
         Returns (raw_pts_us_unwrapped, True) if found, (None, False) if not."""
         target = rtp_ts_32 & 0xFFFFFFFF
         with self._lock:
-            best_diff = 20  # ticks — well within one frame period (3602)
+            best_diff = 100  # ticks (~1.1 ms)
             best_us = None
             for p90k, p_us_unwrapped in reversed(self._pts_table):
                 p32 = p90k & 0xFFFFFFFF
@@ -250,6 +252,116 @@ class VencMetadataReader(object):
                 if not self._stop.is_set():
                     log.debug("VencMetadata: %s, reconnecting in 5s", e)
                     self._stop.wait(5)
+
+
+class RtpSniffReader(object):
+    """Reads (rtp_tick, utc) pairs that camera-side `rtp_sniff` publishes
+    on port 9604. Each entry is a raw RTP timestamp emitted by the
+    camera App, paired with CLOCK_REALTIME (chrony-disciplined UTC)
+    captured at the moment the packet left the NIC.
+
+    Host matches incoming RTP ticks against this dict by EXACT value —
+    no VENC alignment / trampoline dependency. Sub-ms accurate as long
+    as camera chrony is good.
+    """
+
+    MAX_ENTRIES = 4000  # ~3 min at 25 fps
+
+    def __init__(self, camera_ip, port=9604):
+        self.camera_ip = camera_ip
+        self.port = port
+        self._lock = threading.Lock()
+        self._thread = None
+        self._stop = threading.Event()
+        self._entries = {}       # rtp_tick → utc
+        self._order = deque(maxlen=self.MAX_ENTRIES)
+        self._connected = False
+        self._rx_count = 0
+
+    def start(self):
+        self._stop.clear()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def stop(self):
+        self._stop.set()
+
+    def lookup(self, rtp_tick):
+        """Exact match only. No fuzzy fallback — returning a neighbor's
+        UTC for a missing tick produces non-monotonic timestamps (e.g.
+        frame N reported with frame N-1's wallclock) which spikes
+        buffer-fill and triggers consumer drops."""
+        rt = int(rtp_tick) & 0xFFFFFFFF
+        with self._lock:
+            v = self._entries.get(rt)
+            self._lookup_count = getattr(self, '_lookup_count', 0) + 1
+            if v is not None:
+                self._hit_count = getattr(self, '_hit_count', 0) + 1
+                return v
+            # Periodic miss diagnostic — show keys nearest to query
+            if self._lookup_count % 500 == 0:
+                log = logging.getLogger("logger")
+                keys = list(self._entries.keys())
+                if keys:
+                    diffs = sorted([(abs(k - rt) if abs(k - rt) < (1<<31)
+                                     else (1<<32) - abs(k - rt), k)
+                                    for k in keys])[:4]
+                    nearest = ", ".join(f"{k}(Δ{d:+d})" for d, k in diffs)
+                else:
+                    nearest = "(empty)"
+                log.info("RtpSniff lookup miss: q=%u rx=%d entries=%d "
+                         "total=%d hits=%d nearest=[%s]",
+                         rt, self._rx_count, len(self._entries),
+                         self._lookup_count,
+                         getattr(self, '_hit_count', 0), nearest)
+        return None
+
+    def _run(self):
+        log = logging.getLogger("logger")
+        buf = b''
+        while not self._stop.is_set():
+            try:
+                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                s.settimeout(5)
+                s.connect((self.camera_ip, self.port))
+                self._connected = True
+                log.info("RtpSniff: connected to %s:%d", self.camera_ip, self.port)
+                buf = b''
+                while not self._stop.is_set():
+                    try:
+                        s.settimeout(2)
+                        data = s.recv(512)
+                    except socket.timeout:
+                        continue
+                    if not data:
+                        break
+                    buf += data
+                    while b'\n' in buf:
+                        line, buf = buf.split(b'\n', 1)
+                        parts = line.decode(errors='replace').strip().split()
+                        if len(parts) >= 4:
+                            try:
+                                rtp_tick = int(parts[1]) & 0xFFFFFFFF
+                                utc = int(parts[2]) + int(parts[3]) / 1e6
+                                with self._lock:
+                                    if rtp_tick not in self._entries:
+                                        self._order.append(rtp_tick)
+                                        self._entries[rtp_tick] = utc
+                                        # Evict oldest beyond capacity
+                                        while len(self._entries) > self.MAX_ENTRIES:
+                                            old = self._order.popleft()
+                                            self._entries.pop(old, None)
+                                self._rx_count += 1
+                            except Exception:
+                                pass
+            except Exception as e:
+                log.debug("RtpSniff error: %s", e)
+            self._connected = False
+            try: s.close()
+            except: pass
+            if self._stop.is_set():
+                break
+            time.sleep(5)
 
 
 class PtsStreamReader(object):
@@ -462,8 +574,24 @@ class PtsStreamReader(object):
 
         if matched > 0:
             self.block_aligns += 1
+            self._zero_match_streak = 0
         else:
             self.block_fails += 1
+            self._zero_match_streak = getattr(self, '_zero_match_streak', 0) + 1
+            # Camera-side trampoline is probably orphaned (rtp_patch not
+            # rewriting RTP ticks with VENC PTS). Three consecutive 0/N
+            # blocks = 30 s of no alignment → alert so a human can
+            # kick the camera before FT cam_walls go stale.
+            if self._zero_match_streak == 3:
+                log.error("PtsStream: %d consecutive 0-match blocks — "
+                          "camera rtp_patch trampoline is likely orphaned. "
+                          "FT cam_walls are falling back to host-side "
+                          "calibration; expect ±40 ms absolute error.",
+                          self._zero_match_streak)
+            elif self._zero_match_streak > 3 and self._zero_match_streak % 30 == 0:
+                log.error("PtsStream: still %d consecutive 0-match blocks — "
+                          "camera rtp_patch still orphaned.",
+                          self._zero_match_streak)
         log.info("PtsStream: %d/%d matched (%d stale, %d interpolated)",
                  matched, n, n_stale, interpolated)
 
@@ -1270,13 +1398,18 @@ class BufferedCapture(Process):
                         # skew correction which adds ~0.9ms σ of jitter.
                         # Falls back to GStreamer PTS if raw RTP unavailable.
 
-                        # Drift correction: disabled when cam_wall re-anchoring
-                        # is active (PtsStream with chrony handles drift at µs
-                        # level).  Only accumulate if no cam_wall available.
-                        if not (hasattr(self, '_pts_stream') and self._pts_stream is not None):
-                            VENC_FRAME_PERIOD = 4400 * 1350 / 148.5e6
-                            self._drift_total_correction += (
-                                self._drift_freq * VENC_FRAME_PERIOD)
+                        # Drift control DISABLED: was running away with
+                        # FE reanchor in feedback loop.  Sparse reanchor
+                        # hits + drift_corr accumulation produced 16-sec
+                        # drift_corr, 10000ppm clamp saturation, and
+                        # ts overshoot crashing buffer fill to 0.
+                        # Without drift_corr, ts = epoch + elapsed/90000
+                        # is xtal-paced (off by ~100 ppm from chrony,
+                        # = 0.01 ms/frame).  Acceptable for short runs.
+                        VENC_FRAME_PERIOD = 4400 * 1350 / 148.5e6
+                        # Force drift_freq=0 and drift_total_correction=0
+                        self._drift_freq = 0.0
+                        self._drift_total_correction = 0.0
 
                         # Try raw RTP timestamp (from pad probe, no GStreamer
                         # clock skew).  Fall back to GStreamer PTS.
@@ -1287,12 +1420,22 @@ class BufferedCapture(Process):
                         # to gst_running_time but without jitter buffer skew.
                         _entry = self._rtp_ts_by_pts.get(gst_timestamp_ns, None)
 
+                        # Pristine on-wire RTP tick from the probe — never
+                        # mutated by sequential validation or synthetic
+                        # +3600 fallbacks. Used for rtp_sniff lookup so the
+                        # query matches the camera's wire-captured ticks.
+                        _rtp_ts_probe = None
+                        _probe_time = None
                         if _entry is not None:
                             if isinstance(_entry, tuple):
-                                rtp_ts_raw, _frame_anomalous = _entry
+                                # (corrected_rtp, is_anomalous, probe_now?)
+                                rtp_ts_raw = _entry[0]
+                                _frame_anomalous = _entry[1] if len(_entry) > 1 else False
+                                _probe_time = _entry[2] if len(_entry) > 2 else None
                             else:
                                 rtp_ts_raw = _entry
                                 _frame_anomalous = False
+                            _rtp_ts_probe = rtp_ts_raw
                             self._rtp_dict_hits = getattr(self, '_rtp_dict_hits', 0) + 1
                             if _frame_anomalous:
                                 log.info("Side-door: anomalous frame detected at block pos %d",
@@ -1302,13 +1445,18 @@ class BufferedCapture(Process):
                             # lookups and stale duplicates.
                             if not hasattr(self, '_rtp_prev_raw'):
                                 self._rtp_prev_raw = 0
-                            if self._rtp_prev_raw != 0:
-                                expected_rtp = (self._rtp_prev_raw + 3600) & 0xFFFFFFFF
-                                fwd = (rtp_ts_raw - expected_rtp) & 0xFFFFFFFF
-                                bwd = (expected_rtp - rtp_ts_raw) & 0xFFFFFFFF
-                                off = min(fwd, bwd)
-                                if off > 3200:
-                                    rtp_ts_raw = expected_rtp
+                            # Sequential validation disabled: with the
+                            # exact-match VencMetadata path, dict values
+                            # come straight from the on-wire RTP header
+                            # via the pad probe — they're authoritative.
+                            # The old "off > 3200 → replace with prev+3600"
+                            # logic was overly aggressive: it kicked in
+                            # any time miss_count > 0 (e.g. miss-streak
+                            # of 1 frame gives off=3600), which prevented
+                            # _rtp_prev_raw from ever catching up to
+                            # real on-wire values, breaking FE reanchor
+                            # lookups that depend on _rtp_prev_raw being
+                            # a real on-wire rtp_ts.
                             # Track RTP 32-bit wraps (~13.3h cycle) for elapsed unwrap.
                             # Detect wrap: backward jump > 2^31 from previous frame.
                             if not hasattr(self, '_rtp_wrap_accum'):
@@ -1320,7 +1468,8 @@ class BufferedCapture(Process):
                             self._rtp_prev_raw = rtp_ts_raw
 
                             elapsed_ticks = ((rtp_ts_raw - self._rtp_clock_base) & 0xFFFFFFFF) + self._rtp_wrap_accum
-                            timestamp = self.venc_epoch_offset + elapsed_ticks / 90000.0
+                            timestamp = (self.venc_epoch_offset + elapsed_ticks / 90000.0
+                                         + self._drift_total_correction)
 
                             if not hasattr(self, '_block_diag'):
                                 self._block_diag = []
@@ -1347,17 +1496,21 @@ class BufferedCapture(Process):
                             if not hasattr(self, '_rtp_prev_raw'):
                                 self._rtp_prev_raw = 0
                             if self._rtp_prev_raw != 0:
+                                # Synthetic +3600 advance: keeps
+                                # _rtp_prev_raw close to real on-wire
+                                # ticks during miss streaks.  Next hit
+                                # will sync back to the real value.
                                 rtp_ts_raw = (self._rtp_prev_raw + 3600) & 0xFFFFFFFF
-                                # Synthetic +3600 shouldn't wrap within a frame,
-                                # but use accumulator for consistency
                                 if rtp_ts_raw + (1 << 31) < self._rtp_prev_raw:
                                     self._rtp_wrap_accum = getattr(self, '_rtp_wrap_accum', 0) + (1 << 32)
                                 self._rtp_prev_raw = rtp_ts_raw
                                 wrap_accum = getattr(self, '_rtp_wrap_accum', 0)
                                 elapsed_ticks = ((rtp_ts_raw - self._rtp_clock_base) & 0xFFFFFFFF) + wrap_accum
-                                timestamp = self.venc_epoch_offset + elapsed_ticks / 90000.0
+                                timestamp = (self.venc_epoch_offset + elapsed_ticks / 90000.0
+                                             + self._drift_total_correction)
                             else:
-                                timestamp = self.venc_epoch_offset + gst_timestamp_ns / 1e9
+                                timestamp = (self.venc_epoch_offset + gst_timestamp_ns / 1e9
+                                             + self._drift_total_correction)
                             if not hasattr(self, '_block_diag'):
                                 self._block_diag = []
                             self._block_diag.append({
@@ -1372,6 +1525,13 @@ class BufferedCapture(Process):
                                          self._rtp_dict_misses, gst_timestamp_ns,
                                          len(self._rtp_ts_by_pts))
 
+                        # Per-frame UTC override disabled: mixing chrony-
+                        # anchored UTC sources (rtp_sniff, pts_stream
+                        # cam_wall) with the epoch fallback on dict
+                        # misses produced non-monotonic timestamps and
+                        # burst frame drops. The epoch path computed
+                        # above stays as the per-frame timestamp.
+
                         if hasattr(self, '_venc_meta') and self._venc_meta is not None:
                             meta = self._venc_meta.latest
                             if 'exposure_us' in meta:
@@ -1381,6 +1541,59 @@ class BufferedCapture(Process):
                         self._last_venc_timestamp = timestamp
                         self._last_delivery_time = time.time()
                         self._last_delivery_rtp = getattr(self, '_rtp_prev_raw', 0)
+
+                        # PIPELINE_TRACE: log one frame per second across
+                        # every stage we can see, so we can compare the
+                        # rtp_ts and timestamps as they flow through.
+                        self._trace_n = getattr(self, '_trace_n', 0) + 1
+                        if self._trace_n % 25 == 0:
+                            now_wall = time.time()
+                            wrap_accum = getattr(self, '_rtp_wrap_accum', 0)
+                            elapsed_ticks = ((self._rtp_prev_raw - self._rtp_clock_base)
+                                             & 0xFFFFFFFF) + wrap_accum
+                            # Stage A: pts_stream's most recent (FE_START)
+                            ps_obj = getattr(self, '_pts_stream', None)
+                            ps_venc = ps_cw = ps_arrival = None
+                            if ps_obj is not None:
+                                with ps_obj._lock:
+                                    if ps_obj._entries:
+                                        e = ps_obj._entries[-1]
+                                        ps_venc = e[0]
+                                        ps_arrival = e[1]
+                                        ps_cw = e[2] if len(e) > 2 else None
+                            # Stage C: rtp_sniff's most recent (NIC TX)
+                            sn_obj = getattr(self, '_rtp_sniff', None)
+                            sn_rtp = sn_utc = None
+                            if sn_obj is not None:
+                                with sn_obj._lock:
+                                    if sn_obj._order:
+                                        sn_rtp = sn_obj._order[-1]
+                                        sn_utc = sn_obj._entries.get(sn_rtp)
+                            # Cross-stage diffs
+                            d_probe_to_appsink = (now_wall - _probe_time) * 1000.0 if _probe_time else None
+                            d_sniff_vs_pts = (sn_utc - ps_cw) * 1000.0 if (sn_utc and ps_cw) else None
+                            d_sniff_vs_now = (sn_utc - now_wall) * 1000.0 if sn_utc else None
+                            d_pts_vs_now = (ps_cw - now_wall) * 1000.0 if ps_cw else None
+                            d_ts_vs_now = (timestamp - now_wall) * 1000.0
+                            d_probe_rtp_vs_sniff = (int(self._rtp_prev_raw) - int(sn_rtp)) if sn_rtp is not None else None
+                            log.info(
+                                "PT n=%d gst_pts=%d rtp_probe=%u sniff_rtp=%s "
+                                "pts_venc=%s d_probe→appsink=%s "
+                                "ts−now=%+.1fms sniff−now=%s pts−now=%s "
+                                "sniff−pts=%s drtp(probe−sniff)=%s "
+                                "elapsed=%d epoch=%.6f hit=%s",
+                                self._trace_n, gst_timestamp_ns,
+                                self._rtp_prev_raw,
+                                sn_rtp if sn_rtp is not None else "-",
+                                ps_venc if ps_venc is not None else "-",
+                                f"{d_probe_to_appsink:+.1f}ms" if d_probe_to_appsink is not None else "-",
+                                d_ts_vs_now,
+                                f"{d_sniff_vs_now:+.1f}ms" if d_sniff_vs_now is not None else "-",
+                                f"{d_pts_vs_now:+.1f}ms" if d_pts_vs_now is not None else "-",
+                                f"{d_sniff_vs_pts:+.1f}ms" if d_sniff_vs_pts is not None else "-",
+                                d_probe_rtp_vs_sniff if d_probe_rtp_vs_sniff is not None else "-",
+                                elapsed_ticks, self.venc_epoch_offset,
+                                _entry is not None)
 
                         # Side-door RTP collection (dict hit path handled above)
                         if _entry is None and getattr(self, '_rtp_prev_raw', 0) != 0:
@@ -1750,6 +1963,25 @@ class BufferedCapture(Process):
           full_path [str]: Full path to save this new video segment to
         """
 
+        # Flush previous segment's cam_wall sidecar before the new file
+        # opens. Entries with buffer.pts < boundary go to the previous
+        # MKV; the rest stay in the buffer for the new segment.
+        if (hasattr(self, '_mkv_ts_buffer') and self._mkv_ts_buffer
+                and hasattr(self, '_mkv_current_path')
+                and self._mkv_current_path
+                and first_sample is not None):
+            try:
+                boundary_buf = first_sample.get_buffer()
+                if boundary_buf is not None and boundary_buf.pts != Gst.CLOCK_TIME_NONE:
+                    boundary_pts = int(boundary_buf.pts)
+                    prev = [e for e in self._mkv_ts_buffer if e[0] < boundary_pts]
+                    keep = [e for e in self._mkv_ts_buffer if e[0] >= boundary_pts]
+                    if prev:
+                        self._flushMkvSidecar(self._mkv_current_path, prev)
+                    self._mkv_ts_buffer = keep
+            except Exception as ex:
+                log.debug("MKV sidecar flush failed: %s", ex)
+
         segment_timestamp = None
         corrected_running_time_ns = None
 
@@ -1858,6 +2090,10 @@ class BufferedCapture(Process):
         log.info("Created new video segment #%d at: %s",
                  fragment_id, segment_full_path)
 
+        # Track current MKV path so the NEXT rotation knows where to
+        # write this segment's cam_wall sidecar.
+        self._mkv_current_path = segment_full_path
+
         # Return full path to splitmux's callback
         return segment_full_path
 
@@ -1952,6 +2188,232 @@ class BufferedCapture(Process):
             return True
         return False
 
+
+    def _onNewRtpManager(self, rtspsrc, rtpbin):
+        """Called when rtspsrc creates its internal rtpbin.
+
+        `handle-sync` lives on rtpjitterbuffer, not rtpbin itself. Hook
+        rtpbin's `new-jitterbuffer` signal to get the jitterbuffer
+        instance as soon as it's created, then attach `handle-sync` to
+        THAT. The jitterbuffer fires handle-sync on every RTCP SR it
+        receives.
+        """
+        try:
+            rtpbin.connect("new-jitterbuffer", self._onNewJitterBuffer)
+            log.info("RTCP new-jitterbuffer hook attached to rtpbin")
+        except Exception as ex:
+            log.warning("new-jitterbuffer hookup failed: %s", ex)
+
+    def _onNewJitterBuffer(self, rtpbin, jitterbuffer, session_id, ssrc):
+        """Attach both `handle-sync` (optimistic) and a raw RTCP pad probe
+        (reliable). With `ntp-sync=false` on rtspsrc the jitterbuffer may
+        never emit handle-sync, so we also sniff the RTCP sink pad and
+        parse SR packets ourselves.
+        """
+        try:
+            jitterbuffer.connect("handle-sync", self._onRtcpHandleSync)
+        except Exception as ex:
+            log.debug("handle-sync attach failed: %s", ex)
+        # Find rtpbin's RTCP recv pad for this session and attach a probe.
+        try:
+            name = "recv_rtcp_sink_%u" % int(session_id)
+            pad = rtpbin.get_static_pad(name)
+            if pad is not None:
+                pad.add_probe(Gst.PadProbeType.BUFFER, self._rtcpSrProbe)
+                log.info("RTCP raw pad probe attached on %s (session=%s ssrc=%s)",
+                         name, session_id, ssrc)
+            else:
+                log.warning("RTCP pad %s not found", name)
+        except Exception as ex:
+            log.warning("RTCP pad probe attach failed: %s", ex)
+
+    def _rtcpSrProbe(self, pad, info):
+        """Parse RTCP compound packets, extract Sender Report fields,
+        update `_rtcp_anchor` directly — bypasses jitterbuffer's
+        handle-sync which doesn't fire when `ntp-sync=false`.
+
+        RFC 3550 SR layout (bytes):
+          0  V|P|RC   |PT=200   | length (16)
+          4  SSRC (sender)
+          8  NTP ts   (8 bytes: 4 sec + 4 frac, NTP epoch)
+          16 RTP ts   (4 bytes)
+          20 packets  (4 bytes)
+          24 octets   (4 bytes)
+          ...report blocks
+        """
+        try:
+            buf = info.get_buffer()
+            if buf is None:
+                return Gst.PadProbeReturn.OK
+            ok, mi = buf.map(Gst.MapFlags.READ)
+            if not ok:
+                return Gst.PadProbeReturn.OK
+            try:
+                data = bytes(mi.data)
+            finally:
+                buf.unmap(mi)
+            import struct as _s
+            i = 0
+            host_recv_utc = time.time()
+            NTP_UTC_OFFSET_S = 2208988800
+            while i + 4 <= len(data):
+                vpt = data[i]
+                pt = data[i + 1]
+                length = _s.unpack('>H', data[i + 2:i + 4])[0]
+                pkt_bytes = (length + 1) * 4
+                if i + pkt_bytes > len(data):
+                    break
+                # PT=200 is SR
+                if pt == 200 and pkt_bytes >= 28:
+                    ntp_sec = _s.unpack('>I', data[i + 8:i + 12])[0]
+                    ntp_frac = _s.unpack('>I', data[i + 12:i + 16])[0]
+                    rtp_ts = _s.unpack('>I', data[i + 16:i + 20])[0]
+                    utc_sr = ntp_sec - NTP_UTC_OFFSET_S + ntp_frac / (1 << 32)
+                    truncated = (ntp_frac == 0)
+                    if truncated:
+                        base_sec = int(utc_sr)
+                        frac_host = host_recv_utc - int(host_recv_utc)
+                        if int(host_recv_utc) > base_sec:
+                            base_sec = int(host_recv_utc)
+                        utc_sr = base_sec + frac_host
+                    # RTP tick on the wire is 32-bit. Store raw.
+                    self._rtcp_anchor = {
+                        'rtp_ext': int(rtp_ts),
+                        'utc': float(utc_sr),
+                        'clock_rate': 90000,
+                        'host_recv': float(host_recv_utc),
+                        'truncated': bool(truncated),
+                    }
+                    self._rtcp_calibrated = True
+                    # Camera App's RTCP NTP uses its own "media time"
+                    # offset from chrony by ~800 s on this firmware
+                    # (project_submms_confirmed.md). The anchor is only
+                    # useful as a per-frame relative reference for
+                    # offline cross-check, NOT a UTC ground truth.
+                    log.info("RTCP SR: rtp=%u utc=%.6f trunc=%d",
+                             rtp_ts, utc_sr, int(truncated))
+                i += pkt_bytes
+        except Exception as ex:
+            log.debug("rtcp probe parse failed: %s", ex)
+        return Gst.PadProbeReturn.OK
+
+    def _onRtcpHandleSync(self, jitterbuffer, sync_struct):
+        """Every RTCP SR delivers a synchronization structure. Parse it
+        into (rtp_ext_tick, utc_seconds) and update our rolling anchor.
+
+        XM firmware truncates the NTP fractional field (sends NTP
+        seconds but frac=0). Detect this and substitute host receipt
+        time as the anchor wallclock — the camera is chrony-slaved to
+        the host so this is strictly better than the truncated value.
+        """
+        try:
+            # sync_struct is either a GstStructure or (structure,) tuple
+            # depending on PyGObject version.
+            s = sync_struct
+            if isinstance(s, (tuple, list)):
+                s = s[0] if s else None
+            if s is None:
+                return
+            # Available fields (rtpjitterbuffer "handle-sync"):
+            #   clock-rate      (uint)
+            #   clock-base      (uint64, RTP extended at t=base-time)
+            #   base-rtptime    (uint64, older versions)
+            #   sr-ext-rtptime  (uint64, RTP extended at SR send moment)
+            #   base-time       (uint64, pipeline running-time at clock-base)
+            #   ntpnstime       (uint64, NTP ns corresponding to sr-ext-rtptime)
+            #   running-time    (uint64, pipeline running time at SR arrival)
+            def f(key):
+                ok, val = s.get_uint64(key)
+                return val if ok else None
+            def fu(key):
+                ok, val = s.get_uint(key)
+                return val if ok else None
+            sr_rtp = f("sr-ext-rtptime")
+            ntpns = f("ntpnstime")
+            clock_rate = fu("clock-rate") or 90000
+            if sr_rtp is None or ntpns is None:
+                return
+
+            host_recv_utc = time.time()
+            # NTP epoch = 1900-01-01; UTC epoch = 1970-01-01.
+            NTP_UTC_OFFSET_S = 2208988800
+            utc_sr = ntpns / 1e9 - NTP_UTC_OFFSET_S
+
+            # Detect truncated-fraction NTP (XM firmware bug): frac bits
+            # are exactly zero. In that case substitute host receipt time
+            # (chrony-disciplined, sub-µs to UTC).
+            frac_ns = ntpns % 1_000_000_000
+            truncated = (frac_ns == 0)
+            if truncated:
+                # Keep the camera's second-of-UTC value (trustworthy if
+                # camera chrony is locked) but add host-derived fraction.
+                # Network+kernel transit from SR-send to host-recv is ~µs
+                # on LAN, so host_recv ≈ camera_send to within 1 ms.
+                # Anchor = floor(utc_sr) + frac(host_recv_utc)
+                base_sec = int(utc_sr)
+                frac_host = host_recv_utc - int(host_recv_utc)
+                # If host's integer second is ahead of camera's (possible
+                # if host received just after a second tick), use host's
+                # integer second too.
+                if int(host_recv_utc) > base_sec:
+                    base_sec = int(host_recv_utc)
+                utc_sr = base_sec + frac_host
+
+            # Store rolling anchor. 32-bit RTP tick (ext-rtptime is
+            # unwrapped; we'll wrap-reduce at lookup time).
+            self._rtcp_anchor = {
+                'rtp_ext': int(sr_rtp),
+                'utc': float(utc_sr),
+                'clock_rate': int(clock_rate),
+                'host_recv': float(host_recv_utc),
+                'truncated': bool(truncated),
+            }
+            self._rtcp_calibrated = True
+            # Cross-check: if we have a recent pts_stream cam_wall, log
+            # the disagreement so drift between the two anchors is
+            # visible in the log.
+            try:
+                ps = getattr(self, '_pts_stream', None)
+                if ps is not None:
+                    with ps._lock:
+                        last = ps._entries[-1] if ps._entries else None
+                    if last and len(last) >= 3 and last[2]:
+                        delta_ms = (last[2] - utc_sr) * 1000.0
+                        log.info("RTCP SR: rtp_ext=%d utc=%.6f "
+                                 "trunc=%d pts_stream_last_camwall=%.6f "
+                                 "Δ=%.1fms",
+                                 int(sr_rtp), utc_sr, int(truncated),
+                                 last[2], delta_ms)
+                        return
+            except Exception:
+                pass
+            log.info("RTCP SR: rtp_ext=%d utc=%.6f trunc=%d",
+                     int(sr_rtp), utc_sr, int(truncated))
+        except Exception as ex:
+            log.debug("handle-sync parse failed: %s", ex)
+
+    def rtcpMapRtpToUtc(self, rtp_tick):
+        """Map a 32-bit RTP tick to UTC using the RTCP SR anchor.
+
+        Returns None if no anchor yet. Handles 2^32 wrap of the raw tick
+        by picking the nearest-to-anchor wrap interpretation.
+        """
+        anchor = getattr(self, '_rtcp_anchor', None)
+        if anchor is None:
+            return None
+        rate = anchor['clock_rate'] or 90000
+        ext_anchor = anchor['rtp_ext']
+        # Anchor ext is unwrapped; raw tick is 32-bit. Extend by
+        # rounding to nearest anchor neighborhood.
+        raw = int(rtp_tick) & 0xFFFFFFFF
+        anchor_mod = ext_anchor & 0xFFFFFFFF
+        diff = raw - anchor_mod
+        if diff > (1 << 31):
+            diff -= (1 << 32)
+        elif diff < -(1 << 31):
+            diff += (1 << 32)
+        ext_tick = ext_anchor + diff
+        return anchor['utc'] + (ext_tick - ext_anchor) / float(rate)
 
     def _onFirstRtpBuffer(self, pad, info):
         """Pad probe callback on depayloader sink: capture raw RTP timestamps.
@@ -2076,8 +2538,13 @@ class BufferedCapture(Process):
                     corrected_rtp = (rtp_ts - guard_shift) & 0xFFFFFFFF
                     buf_pts = buf.pts
                     if buf_pts is not None and buf_pts != Gst.CLOCK_TIME_NONE:
+                        # Record probe-time wallclock alongside rtp_ts.
+                        # This lets the appsink-read trace compute the
+                        # depay→appsink latency for the same frame.
+                        probe_now = time.time()
                         self._rtp_ts_by_pts[buf_pts] = (corrected_rtp,
-                                                         is_anomalous)
+                                                         is_anomalous,
+                                                         probe_now)
                         if is_anomalous:
                             log.info("PAD_PROBE: anomaly flag stored for "
                                      "buf_pts=%d rtp=%u", buf_pts, rtp_ts)
@@ -2111,6 +2578,10 @@ class BufferedCapture(Process):
         step, not equality), and the bump is 1 µs (minimum monotonic
         increment).  A real duplicate still gets nudged, but a normal
         next-frame with pts == last + 40 ms passes through unchanged.
+
+        Also records (final_pts, cam_wall) for each buffer so the MKV
+        sidecar can pair every MKV frame with its chrony-disciplined
+        capture time.
         """
         buf = info.get_buffer()
         if buf is None:
@@ -2118,6 +2589,9 @@ class BufferedCapture(Process):
 
         MONO_BUMP_NS = 1000  # 1 µs — enough for matroskamux monotonicity
         pts = buf.pts
+        # Preserve original pts for the _rtp_ts_by_pts dict lookup; that
+        # key was set by the depay-side probe before any nudging occurred.
+        original_pts = pts
 
         # If PTS is NONE, synthesize from last known PTS
         if pts == Gst.CLOCK_TIME_NONE:
@@ -2126,6 +2600,7 @@ class BufferedCapture(Process):
                 buf.pts = pts
                 buf.dts = pts
                 self._storage_last_pts_ns = pts
+            self._recordMkvSidecarEntry(pad, buf.pts, original_pts)
             return Gst.PadProbeReturn.OK
 
         if pts < self._storage_last_pts_ns and self._storage_last_pts_ns > 0:
@@ -2141,7 +2616,139 @@ class BufferedCapture(Process):
             if buf.dts == Gst.CLOCK_TIME_NONE:
                 buf.dts = pts
 
+        self._recordMkvSidecarEntry(pad, buf.pts, original_pts)
         return Gst.PadProbeReturn.OK
+
+    def _recordMkvSidecarEntry(self, pad, final_pts, original_pts):
+        """Append (buffer_pts, running_time, cam_wall) for the MKV sidecar.
+
+        Runs for every buffer delivered to splitmuxsink — one entry per
+        MKV frame.  cam_wall is resolved from the original (pre-nudge)
+        pts via the depay-side RTP dict, then matched to pts_stream by
+        mod-2^32 RTP distance (same lookup moveSegment uses for the
+        first frame of a segment).
+
+        Entries accumulate in `_mkv_ts_buffer` and are flushed at each
+        splitmuxsink rotation.
+        """
+        if not hasattr(self, '_mkv_ts_buffer'):
+            return
+        if final_pts is None or final_pts == Gst.CLOCK_TIME_NONE:
+            return
+        if original_pts is None or original_pts == Gst.CLOCK_TIME_NONE:
+            return
+        # Diagnostic counters (reset on first call)
+        if not hasattr(self, '_mkv_sidecar_diag'):
+            self._mkv_sidecar_diag = {
+                'calls': 0, 'no_dict': 0, 'no_ps': 0,
+                'no_match': 0, 'no_seg': 0, 'appended': 0,
+                'last_log': 0.0}
+        d = self._mkv_sidecar_diag
+        d['calls'] += 1
+        try:
+            # Compute running_time — what matroskamux actually writes
+            # into the MKV as frame pts_time.
+            running_time_ns = -1
+            seg_event = pad.get_sticky_event(Gst.EventType.SEGMENT, 0)
+            if seg_event is not None:
+                segment = seg_event.parse_segment()
+                if segment is not None:
+                    rt = segment.to_running_time(Gst.Format.TIME, final_pts)
+                    if rt != Gst.CLOCK_TIME_NONE:
+                        running_time_ns = int(rt)
+                    else:
+                        d['no_seg'] += 1
+                else:
+                    d['no_seg'] += 1
+            else:
+                d['no_seg'] += 1
+
+            # Log a snapshot every 100 calls regardless of path
+            if d['calls'] % 100 == 0:
+                log.info("sidecar diag: calls=%d no_dict=%d no_ps=%d "
+                         "no_match=%d no_seg=%d appended=%d rtcp_fb=%d "
+                         "buf=%d dict_size=%d",
+                         d['calls'], d['no_dict'], d['no_ps'],
+                         d['no_match'], d['no_seg'], d['appended'],
+                         d.get('rtcp_fallback', 0),
+                         len(self._mkv_ts_buffer),
+                         len(getattr(self, '_rtp_ts_by_pts', {})))
+
+            entry = self._rtp_ts_by_pts.get(original_pts)
+            if entry is None:
+                d['no_dict'] += 1
+                return
+            rtp_raw = entry[0] if isinstance(entry, tuple) else entry
+
+            # Primary and ONLY UTC source: pts_stream cam_wall (chrony-
+            # disciplined, sub-ms per project_submms_confirmed.md).
+            # We do NOT fall back to RTCP — camera App's NTP is offset
+            # by ~800 s from real UTC.
+            cam_wall = None
+            ps = getattr(self, '_pts_stream', None)
+            if ps is not None:
+                WRAP32 = 4294967296
+                rtp_us_mod = (int(rtp_raw) * 100 // 9) % WRAP32
+                best_d = 20000
+                with ps._lock:
+                    for e in ps._entries:
+                        if len(e) < 3 or not e[2] or e[2] <= 0:
+                            continue
+                        dd = abs(int(e[0] % WRAP32) - rtp_us_mod)
+                        if dd > WRAP32 // 2:
+                            dd = WRAP32 - dd
+                        if dd < best_d:
+                            best_d = dd
+                            cam_wall = e[2]
+                if cam_wall is not None:
+                    d.setdefault('ps_primary', 0)
+                    d['ps_primary'] += 1
+            if cam_wall is None:
+                d['no_match'] += 1
+                return
+            self._mkv_ts_buffer.append(
+                (int(final_pts), int(running_time_ns), float(cam_wall),
+                 int(rtp_raw)))
+            d['appended'] += 1
+            # Cap buffer to prevent runaway growth if rotation never fires
+            # (50k entries ~ 33 min @ 25 fps).
+            if len(self._mkv_ts_buffer) > 50000:
+                self._mkv_ts_buffer = self._mkv_ts_buffer[-25000:]
+        except Exception as ex:
+            log.debug("sidecar record exception: %s", ex)
+
+    def _flushMkvSidecar(self, mkv_path, entries):
+        """Write (buffer_pts, running_time, cam_wall, raw_rtp) per buffer.
+
+        The raw RTP tick is a SECOND independent time source per frame:
+        cam_wall is derived via pts_stream (possibly biased), while
+        raw_rtp + RTCP-SR anchor gives a wholly different mapping.
+        Comparing the two offline pinpoints where any bias lives.
+
+        Header lines:
+          # rtcp_anchor <rtp_ext> <utc> <clock_rate>  (last SR seen)
+          # format buffer_pts_ns running_time_ns cam_wall_utc raw_rtp
+        """
+        if not entries or not mkv_path:
+            return
+        sidecar_path = mkv_path + '.timestamps'
+        try:
+            with open(sidecar_path, 'w') as f:
+                anchor = getattr(self, '_rtcp_anchor', None)
+                if anchor is not None:
+                    f.write("# rtcp_anchor rtp_ext={} utc={:.6f} rate={}\n".format(
+                        anchor['rtp_ext'], anchor['utc'],
+                        anchor.get('clock_rate', 90000)))
+                f.write("# format buffer_pts_ns running_time_ns cam_wall_utc raw_rtp\n")
+                for entry in entries:
+                    if len(entry) >= 4:
+                        bpts, rt, cw, rtp = entry[:4]
+                        f.write("{} {} {:.6f} {}\n".format(bpts, rt, cw, rtp))
+                    else:
+                        bpts, rt, cw = entry[:3]
+                        f.write("{} {} {:.6f} 0\n".format(bpts, rt, cw))
+        except Exception as ex:
+            log.warning("Failed to write MKV sidecar %s: %s", sidecar_path, ex)
 
     def _busPoller(self):
         """Poll the GStreamer bus and drain queued messages.
@@ -2274,6 +2881,15 @@ class BufferedCapture(Process):
                 self._pts_stream.start()
                 log.info("PTS stream reader started on port %d", pts_port)
 
+            # Start RTP sniffer reader (port 9604) — (rtp_tick, utc)
+            # pairs captured on the camera NIC, bypasses rtp_patch
+            # trampoline entirely. Exact-match lookup: rtp_tick → utc.
+            sniff_port = getattr(self.config, 'rtp_sniff_port', 9604)
+            if not hasattr(self, '_rtp_sniff') or self._rtp_sniff is None:
+                self._rtp_sniff = RtpSniffReader(camera_ip, port=sniff_port)
+                self._rtp_sniff.start()
+                log.info("RtpSniff reader started on port %d", sniff_port)
+
         # Common timeout settings for both UDP and TCP
         # All streams need tcp-timeout since RTSP control always uses TCP
         common_timeouts = "retry=5 timeout=5000000 tcp-timeout=5000000 teardown-timeout=3000000"
@@ -2358,8 +2974,19 @@ class BufferedCapture(Process):
                             self._onFirstRtpBuffer
                         )
 
-                    # RTCP SR disabled: XM firmware truncates NTP fractional
-                    # seconds. cam_wall re-anchoring via PtsStream is used instead.
+                    # RTCP SR anchor: codec-agnostic (rtp_tick ↔ UTC) via
+                    # rtpjitterbuffer's "handle-sync" signal. Independent of
+                    # rtp_patch's trampoline — serves as both a fallback when
+                    # pts_stream matching fails AND a cross-check. XM firmware
+                    # truncates NTP fractional seconds so we replace ntpnstime
+                    # with host receipt time (chrony-disciplined, sub-µs).
+                    try:
+                        rtspsrc = self.pipeline.get_by_name("src")
+                        if rtspsrc is not None:
+                            rtspsrc.connect("new-manager", self._onNewRtpManager)
+                            log.info("RTCP anchor hook attached to rtspsrc")
+                    except Exception as rtcp_exc:
+                        log.warning("RTCP anchor hook failed: %s", rtcp_exc)
 
                 # If raw video saving is enabled, connect the "format-location-full" signal to the
                 # moveSegment function
@@ -2710,6 +3337,17 @@ class BufferedCapture(Process):
         self.last_pts_correction_ns = 0
         self.last_running_time_ns = None
 
+        # Flush any remaining MKV sidecar entries to the current segment
+        # (no rotation fires on shutdown, so this catches the last file).
+        if (hasattr(self, '_mkv_ts_buffer') and self._mkv_ts_buffer
+                and hasattr(self, '_mkv_current_path')
+                and self._mkv_current_path):
+            try:
+                self._flushMkvSidecar(self._mkv_current_path, self._mkv_ts_buffer)
+            except Exception as ex:
+                log.debug("Final MKV sidecar flush failed: %s", ex)
+            self._mkv_ts_buffer = []
+
         def _timedCall(fn, timeout_s=2):
             """Run *fn()* in a daemon thread and wait *timeout_s*.
             Returns True if the call finished in time."""
@@ -2975,10 +3613,19 @@ class BufferedCapture(Process):
             self._rtp_clock_base = None
             self._venc_post_start_calibrated = False
             self._rtcp_calibrated = False
+            # Rolling RTCP SR anchor: (rtp_ext, utc) pair refreshed on
+            # every RTCP Sender Report. Serves as fallback for align_block
+            # when pts_stream matching fails (rtp_patch orphaned).
+            self._rtcp_anchor = None
             self._last_venc_timestamp = 0.0
             self._last_venc_gst_pts = 0
             self._last_gst_delta_ms = 40.0
             self._rtp_ts_by_pts = {}
+            # Per-MKV cam_wall sidecar tracking. Each buffer that reaches
+            # matroskamux is recorded with its final buffer.pts + cam_wall,
+            # flushed to <mkv_path>.timestamps at segment rotation.
+            self._mkv_ts_buffer = []
+            self._mkv_current_path = None
             self._drift_freq = self._loadDriftFreq()
             # Reset delivery tracking for fresh calibration
             self._last_delivery_time = 0
@@ -3431,12 +4078,12 @@ class BufferedCapture(Process):
 
                 # If GStreamer:
                 else:
-                    # Use drift-corrected VENC timestamp for age so
-                    # buffer fill and drift measurement track real time.
-                    # FT timestamps are raw VENC clock (no drift correction).
+                    # _venc_raw_timestamp already includes drift_corr
+                    # (applied at timestamp computation in read()).
+                    # Use it directly for age — adding drift_corr again
+                    # double-counts.
                     age_ts = getattr(self, '_venc_raw_timestamp', None) or frame_timestamp
-                    drift_corr = getattr(self, '_drift_total_correction', 0.0)
-                    frame_age_seconds = time.time() - (age_ts + drift_corr)
+                    frame_age_seconds = time.time() - age_ts
                     # Update max_frame_age_seconds for this cycles
                     max_frame_age_seconds = max(max_frame_age_seconds, frame_age_seconds)
                     sum_frame_age_seconds += frame_age_seconds
@@ -3490,38 +4137,50 @@ class BufferedCapture(Process):
 
                         self.last_daytime_mode = current_daytime
 
-                        # Buffer fill from direct appsink queue-depth query.
-                        # Previously derived from RTP-elapsed vs host wallclock,
-                        # which accumulated camera-crystal drift (~3000 ppm seen
-                        # on this board) into tens-of-seconds of false "age" per
-                        # hour. The actual useful metric is simply how many
-                        # frames are sitting in appsink's internal queue
-                        # waiting for us to read them.
-                        max_buffer_time = 100.0 / self.config.fps  # Theoretical max buffer time in seconds
-                        try:
-                            appsink_el = self.pipeline.get_by_name("appsink")
-                            if appsink_el is not None:
-                                queued = appsink_el.get_property("current-level-buffers")
-                                buffer_fill_frames = float(queued)
-                            else:
-                                buffer_fill_frames = max_frame_age_seconds * self.config.fps
-                        except Exception:
-                            buffer_fill_frames = max_frame_age_seconds * self.config.fps
-
-                        # Sanity: compare timestamp-derived age to queue depth.
-                        # In a healthy pipeline the most recently read frame
-                        # should have ts_age ≈ (queued+1)/fps + pipeline_delay
-                        # (~30-50 ms for camera+network). If ts_age is much
-                        # larger than that, timestamps are drifting away from
-                        # host wallclock (frames "look older" than they are).
-                        # If ts_age is negative, a frame claims to be from
-                        # the future — clock-sync problem.
-                        ts_drift_ms = None
+                        # Buffer fill = wall-clock age of most recently
+                        # delivered frame, in frames. Uses the side-door
+                        # cam_wall (chrony-disciplined UTC) so no crystal
+                        # drift; only real pipeline backlog shows up.
+                        #
+                        # Healthy baseline: ~1 frame (pipeline_delay ~40 ms)
+                        # Backlog: value grows linearly with queue depth
+                        #
+                        # Appsink's `current-level-buffers` proved unreliable
+                        # (reports >max-buffers sustained), so we compute
+                        # fill time-of-flight instead.
+                        max_buffer_time = 100.0 / self.config.fps
+                        ts_age = None
                         _last_ts = getattr(self, '_last_venc_timestamp', None)
                         if _last_ts is not None:
-                            ts_age = time.time() - _last_ts
-                            expected_age = (buffer_fill_frames + 1) / self.config.fps + 0.05
-                            ts_drift_ms = (ts_age - expected_age) * 1000.0
+                            now_for_fill = time.time()
+                            ts_age = now_for_fill - _last_ts
+                            buffer_fill_frames = max(0.0, ts_age * self.config.fps)
+                            # TRACE: confirm whether ts_age really is
+                            # "now − latest delivered timestamp", and
+                            # how long ago that delivery happened.
+                            ldt = getattr(self, '_last_delivery_time', None)
+                            since_delivery = (now_for_fill - ldt) if ldt else float('nan')
+                            log.info("TRACE fill: now=%.6f last_ts=%.6f "
+                                     "age=%+.1fms since_delivery=%+.1fms "
+                                     "epoch=%.6f",
+                                     now_for_fill, _last_ts, ts_age * 1000.0,
+                                     since_delivery * 1000.0,
+                                     self.venc_epoch_offset)
+                        else:
+                            buffer_fill_frames = max_frame_age_seconds * self.config.fps
+
+                        # Drift sanity: appsink queue depth should correlate
+                        # with ts_age. If they disagree by >500ms, something
+                        # is off (stale cam_wall, wrong clock, etc.).
+                        ts_drift_ms = None
+                        try:
+                            appsink_el = self.pipeline.get_by_name("appsink")
+                            if appsink_el is not None and ts_age is not None:
+                                queued = appsink_el.get_property("current-level-buffers")
+                                queue_equiv_s = float(queued) / self.config.fps
+                                ts_drift_ms = (ts_age - queue_equiv_s) * 1000.0
+                        except Exception:
+                            pass
 
                         # VENC clock discipline: estimate frequency offset
                         # between VENC crystal and host clock, then apply a
@@ -3533,8 +4192,7 @@ class BufferedCapture(Process):
                         #
                         # Offset = mean_age - baseline.  Positive = timestamps
                         # behind wallclock (VENC clock slow).
-                        if (self.venc_epoch_offset is not None and block_frames > 0
-                                and not (hasattr(self, '_pts_stream') and self._pts_stream is not None)):
+                        if (self.venc_epoch_offset is not None and block_frames > 0):
                             mean_age = sum_frame_age_seconds / block_frames
                             now = time.time()
 
@@ -3579,9 +4237,12 @@ class BufferedCapture(Process):
                                         # the observed residual rate.
                                         alpha = 0.05
                                         self._drift_freq += alpha * freq
-                                        # Clamp to sanity range
-                                        self._drift_freq = max(-600e-6,
-                                            min(600e-6, self._drift_freq))
+                                        # Clamp to sanity range — observed
+                                        # ~4500 ppm of drift between camera
+                                        # PTS counter and chrony, well above
+                                        # typical xtal drift; widen ceiling.
+                                        self._drift_freq = max(-10000e-6,
+                                            min(10000e-6, self._drift_freq))
 
                                 # Log periodically
                                 self._drift_log_accum += abs(offset)
@@ -3598,45 +4259,96 @@ class BufferedCapture(Process):
                                     if not (hasattr(self, '_pts_stream') and self._pts_stream is not None):
                                         self._saveDriftFreq()
 
-                        # Re-anchor epoch_offset from cam_wall (GetCurPTS anchor,
-                        # ±3µs).  Match by PTS value: rtp_90k * 100/9 mod 2^32
-                        # equals PtsStream venc_us mod 2^32 (±11µs quantization,
-                        # unambiguous at 40ms frame spacing).  Wrap-immune.
-                        if (hasattr(self, '_pts_stream') and self._pts_stream is not None
+                        # Re-anchor epoch_offset to FE_START via direct
+                        # exact-match lookup — pipeline-delay independent.
+                        #
+                        # VencMetadata (port 9602): rtp_ts → raw_pts_us
+                        #   The camera daemon publishes (pts_90k,
+                        #   raw_pts_us, …) per frame at FE_START.  Both
+                        #   values are FROZEN at FE_START moment; nothing
+                        #   between encoder and host can change them.
+                        #
+                        # PtsStream (port 9603): venc_us → cam_wall
+                        #   cam_wall is chrony-disciplined UTC at
+                        #   FE_START.
+                        #
+                        # Bridge: host probe rtp_ts → VencMetadata gives
+                        # raw_pts_us → PtsStream gives FE_START_utc.  No
+                        # modular arithmetic, no wrap_offset detection,
+                        # no encoder-delay window, no time-proximity.
+                        # Pipeline-delay independent.
+                        vmeta = getattr(self, '_venc_meta', None)
+                        ps_for_anchor = getattr(self, '_pts_stream', None)
+                        if (vmeta is not None and ps_for_anchor is not None
                                 and self.venc_epoch_offset is not None
                                 and self._rtp_clock_base is not None
-                                and hasattr(self, '_rtp_prev_raw') and self._rtp_prev_raw):
+                                and getattr(self, '_rtp_prev_raw', 0)):
                             try:
-                                ps = self._pts_stream
-                                WRAP32 = 4294967296
-                                rtp_us_mod = (self._rtp_prev_raw * 100 // 9) % WRAP32
-                                with ps._lock:
-                                    entries = [(e[0], e[2]) for e in ps._entries
-                                              if len(e) > 2 and e[2] and e[2] > 0]
-                                # Find entry whose venc_us mod 2^32 matches rtp_us_mod
-                                best_cw = None
-                                best_d = 20000  # max 20ms tolerance
-                                for venc_us, cw in entries:
-                                    d = abs(int(venc_us % WRAP32) - int(rtp_us_mod))
-                                    if d > WRAP32 // 2:
-                                        d = WRAP32 - d  # wrap-around distance
-                                    if d < best_d:
-                                        best_d = d
-                                        best_cw = cw
-                                if best_cw is not None:
-                                    # Unwrapped elapsed (handles overnight >13.3h)
-                                    wrap_accum = getattr(self, '_rtp_wrap_accum', 0)
-                                    elapsed = ((self._rtp_prev_raw - self._rtp_clock_base) & 0xFFFFFFFF) + wrap_accum
-                                    expected = self.venc_epoch_offset + elapsed / 90000.0
-                                    error = expected - best_cw
-                                    if abs(error) < 2.0:
-                                        self.venc_epoch_offset -= error
-                                    if abs(error) > 0.001:
-                                        log.info("cam_wall reanchor: error=%.3fms "
-                                                 "(match_d=%dus wrap_accum=%d)",
-                                                 error * 1000, best_d, wrap_accum)
+                                target_rtp = int(self._rtp_prev_raw) & 0xFFFFFFFF
+                                # Daemon now publishes on-wire pts_90k
+                                # directly (rtp_patch fix: meta_push
+                                # adds trampoline's wrap_offset to ring
+                                # entry's raw_90k).  Direct lookup, no
+                                # wrap_diff detection needed.
+                                pts_us_unwrapped, ok = vmeta.lookup_pts_us(target_rtp)
+                                if not ok:
+                                    with vmeta._lock:
+                                        n = len(vmeta._pts_table)
+                                        if n > 0:
+                                            recent = list(vmeta._pts_table)[-3:]
+                                            sample = ", ".join(
+                                                f"p90k={p[0]}" for p in recent)
+                                            best_d, best_p = 1 << 31, None
+                                            for p, _ in vmeta._pts_table:
+                                                p32 = p & 0xFFFFFFFF
+                                                d = abs(p32 - target_rtp)
+                                                if d > 0x7FFFFFFF:
+                                                    d = 0x100000000 - d
+                                                if d < best_d:
+                                                    best_d, best_p = d, p32
+                                        else:
+                                            sample = "(empty)"
+                                            best_d, best_p = -1, None
+                                    raise RuntimeError(
+                                        f"vmeta miss: target={target_rtp} "
+                                        f"closest_p90k={best_p} d={best_d} "
+                                        f"recent=[{sample}]")
+                                # Find pts_stream entry whose venc_us
+                                # matches raw_pts_us (within ±20 µs —
+                                # 90 kHz quantization is ~11.1 µs).
+                                ps_cam_wall = None
+                                ps_match_diff = None
+                                with ps_for_anchor._lock:
+                                    for e in reversed(ps_for_anchor._entries):
+                                        if len(e) < 3 or not e[2] or e[2] <= 0:
+                                            continue
+                                        d = abs(int(e[0]) - int(pts_us_unwrapped))
+                                        if d <= 20:
+                                            ps_cam_wall = e[2]
+                                            ps_match_diff = d
+                                            break
+                                if ps_cam_wall is None:
+                                    raise RuntimeError("no pts_stream entry for venc_us=%d" % pts_us_unwrapped)
+                                wrap_accum = getattr(self, '_rtp_wrap_accum', 0)
+                                elapsed = ((target_rtp - self._rtp_clock_base)
+                                           & 0xFFFFFFFF) + wrap_accum
+                                expected = (self.venc_epoch_offset + elapsed / 90000.0
+                                            + self._drift_total_correction)
+                                error = expected - ps_cam_wall
+                                # Direct match: error should be tiny
+                                # after first reanchor.  α=0.5 converges
+                                # quickly without overshoot.
+                                alpha = 0.5
+                                if abs(error) < 2.0:
+                                    self.venc_epoch_offset -= alpha * error
+                                if abs(error) > 0.001:
+                                    log.info("FE reanchor: err=%+.3fms "
+                                             "applied=%+.3fms match_d=%dus",
+                                             error * 1000,
+                                             -alpha * error * 1000,
+                                             ps_match_diff)
                             except Exception as e:
-                                log.warning("cam_wall reanchor exception: %s", e)
+                                log.info("FE reanchor: %s", e)
 
                         # Calculate dropped frames in last 10 minutes
                         current_time = time.time()
@@ -3761,6 +4473,20 @@ class BufferedCapture(Process):
                         list(self._block_rtp_ts),
                         block_start_time=first_frame_timestamp)
                     self._block_raw_pts = raw_pts_list
+
+                    # pts_stream cam_wall is our ONLY UTC source (sub-ms
+                    # vs GPS PPS per project_submms_confirmed.md).
+                    # Camera RTCP NTP is offset by ~800 s — DO NOT use
+                    # as a UTC fallback; leaves frames with cam_wall=None
+                    # instead (downstream falls back to epoch_offset).
+                    if utc_list:
+                        ps_count = sum(1 for u in utc_list if u is not None)
+                        unmatched = len(utc_list) - ps_count
+                        if unmatched:
+                            log.info("Block cam_wall: %d via pts_stream, "
+                                     "%d unmatched (will fall back to "
+                                     "epoch-based timestamps)",
+                                     ps_count, unmatched)
 
                     # Overwrite timestamp_buffer entries with aligned UTCs.
                     # Falls back to epoch-based timestamp when a frame didn't
