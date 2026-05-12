@@ -1251,15 +1251,14 @@ def parseCapture(config, parser):
     # obtain the path to a working ffmpeg, if available
     config.ffmpeg_binary = isFfmpegWorking()
 
-    # Enable/disable saving video frames - automatically off if FFmpeg is missing
-    if parser.has_option(section, "save_frames"):
-        save_requested = parser.getboolean(section, "save_frames")
-        if save_requested and not config.ffmpeg_binary:
-            print("save_frames requested but FFmpeg not available - disabling.")
-        else:
-            config.save_frames = save_requested
-    else:
+    # Enable/disable saving video frames - automatically off if FFmpeg is missing.
+    # If the option is absent from the config, fall back to the class default.
+    save_requested = parser.getboolean(section, "save_frames", fallback=config.save_frames)
+    if save_requested and not config.ffmpeg_binary:
+        print("save_frames requested but FFmpeg not available - disabling.")
         config.save_frames = False
+    else:
+        config.save_frames = save_requested
 
     if parser.has_option(section, "frame_file_type"):
         config.frame_file_type = parser.get(section, "frame_file_type")
