@@ -111,3 +111,7 @@ Catalogs/GMN_StarCatalog_LM12.0.bin
 # RMS SatellitePositions.py cache
 *.bsp
 .skyfield_cache
+
+# Agents
+.agents/
+skills-lock.json
