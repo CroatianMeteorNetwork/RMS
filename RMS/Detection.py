@@ -654,19 +654,21 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
             or [rho, theta, frame_min, frame_max, x_start, y_start, x_end, y_end] for RANSAC.
     """
 
-    # Load the KHT library
-    kht = ctypes.cdll.LoadLibrary(kht_lib_path)
-    kht.kht_wrapper.argtypes = [npct.ndpointer(dtype=np.double, ndim=2),
-                                npct.ndpointer(dtype=np.byte, ndim=1),
-                                ctypes.c_size_t,
-                                ctypes.c_size_t,
-                                ctypes.c_size_t,
-                                ctypes.c_size_t,
-                                ctypes.c_double,
-                                ctypes.c_double,
-                                ctypes.c_double,
-                                ctypes.c_double]
-    kht.kht_wrapper.restype = ctypes.c_size_t
+    # Load the KHT library only when KHT is used. RANSAC is common for video detection and does not need it.
+    kht = None
+    if line_finder_algorithm != 'ransac':
+        kht = ctypes.cdll.LoadLibrary(kht_lib_path)
+        kht.kht_wrapper.argtypes = [npct.ndpointer(dtype=np.double, ndim=2),
+                                    npct.ndpointer(dtype=np.byte, ndim=1),
+                                    ctypes.c_size_t,
+                                    ctypes.c_size_t,
+                                    ctypes.c_size_t,
+                                    ctypes.c_size_t,
+                                    ctypes.c_double,
+                                    ctypes.c_double,
+                                    ctypes.c_double,
+                                    ctypes.c_double]
+        kht.kht_wrapper.restype = ctypes.c_size_t
 
     line_results = []
 
@@ -695,8 +697,17 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
         range_start = 0
         range_end = img_handle.total_frames
 
+    # Convert the frame range bounds into sliding time window indices
+    total_windows = max(0, int(np.ceil(img_handle.total_frames/time_slide)) - 1)
+    if frame_range is not None:
+        first_window = max(0, int(np.ceil((range_start - time_window_size)/float(time_slide))))
+        last_window = min(total_windows - 1, int(np.floor(range_end/float(time_slide))))
+    else:
+        first_window = 0
+        last_window = total_windows - 1
+
     # Subdivide the image by time into overlapping parts (decreases noise when searching for meteors)
-    for i in range(0, int(np.ceil(img_handle.total_frames/time_slide)) - 1):
+    for i in range(first_window, last_window + 1):
 
         frame_min = i*time_slide
         frame_max = i*time_slide + time_window_size
@@ -2265,6 +2276,11 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
             if config.gamma != 1.0:
                 avepixel_img = Image.gammaCorrectionImage(avepixel_img, config.gamma, out_type=np.float32)
 
+            # If no per-frame calibration is needed, centroid photometry can operate only on stripe pixels.
+            # This avoids gamma-correcting and subtracting the whole frame for every centroided frame.
+            fast_frame_photometry = (img_handle.input_type != 'ff') and (dark is None) \
+                and (flat_struct is None) and (mask is None)
+
             # Calculate centroids
             centroids = []
             skipped_no_pixels = 0
@@ -2367,32 +2383,49 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                         img_handle.setFrame(int(frame_no))
                         fr_img = img_handle.loadFrame()
 
-                        # Save a raw copy on which saturation will be checked
-                        fr_img_raw = np.copy(fr_img)
-
                         # Get the frame sequence number (frame number since the beginning of the recording)
                         seq_num = img_handle.getSequenceNumber()
 
-                        # Apply dark frame
-                        if dark is not None:
-                            fr_img = Image.applyDark(fr_img, dark)
+                        stripe_y = half_frame_pixels_stripe[:, 1]
+                        stripe_x = half_frame_pixels_stripe[:, 0]
+                        fr_img_raw = fr_img
+
+                        if fast_frame_photometry:
+                            stripe_values = fr_img[stripe_y, stripe_x]
+                            if config.gamma != 1.0:
+                                stripe_values = Image.gammaCorrectionImage(
+                                    stripe_values, config.gamma, out_type=np.float32)
+                            else:
+                                stripe_values = stripe_values.astype(np.float32)
+
+                            intensity_values = stripe_values - avepixel_img[stripe_y, stripe_x]
+                            intensity_values[intensity_values < 0] = 0
+
+                        else:
+                            # Save a raw copy on which saturation will be checked
+                            fr_img_raw = np.copy(fr_img)
+
+                            # Apply dark frame
+                            if dark is not None:
+                                fr_img = Image.applyDark(fr_img, dark)
 
 
-                        # Apply the flat to frame
-                        if flat_struct is not None:
-                            fr_img = Image.applyFlat(fr_img, flat_struct)
+                            # Apply the flat to frame
+                            if flat_struct is not None:
+                                fr_img = Image.applyFlat(fr_img, flat_struct)
 
 
-                        # Mask the image
-                        if mask is not None:
-                            fr_img = MaskImage.applyMask(fr_img, mask)
+                            # Mask the image
+                            if mask is not None:
+                                fr_img = MaskImage.applyMask(fr_img, mask)
 
-                        # Apply gamma correction
-                        if config.gamma != 1.0:
-                            fr_img = Image.gammaCorrectionImage(fr_img, config.gamma, out_type=np.float32)
+                            # Apply gamma correction
+                            if config.gamma != 1.0:
+                                fr_img = Image.gammaCorrectionImage(fr_img, config.gamma, out_type=np.float32)
 
-                        # Subtract average
-                        max_avg_corrected = Image.applyDark(fr_img, avepixel_img)
+                            # Subtract average
+                            max_avg_corrected = Image.applyDark(fr_img, avepixel_img)
+                            intensity_values = max_avg_corrected[stripe_y, stripe_x]
 
                     else:
 
@@ -2401,19 +2434,18 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
 
                         # Extract the raw frame if FF file is used, used for saturation check
                         fr_img_raw = img_thres
+                        stripe_y = half_frame_pixels_stripe[:, 1]
+                        stripe_x = half_frame_pixels_stripe[:, 0]
+                        intensity_values = max_avg_corrected[stripe_y, stripe_x]
 
 
                     # Calculate intensity as the sum of threshold passer pixels on the stripe
-                    intensity_values = max_avg_corrected[half_frame_pixels_stripe[:,1], 
-                            half_frame_pixels_stripe[:,0]]
-
                     intensity = int(np.sum(intensity_values))
 
 
                     # Calculate the background intensity as the media of the pixel values on the avepixel
                     #   in the same area as the meteor
-                    background_intensity = np.median(avepixel_img[half_frame_pixels_stripe[:,1], 
-                            half_frame_pixels_stripe[:,0]])
+                    background_intensity = np.median(avepixel_img[stripe_y, stripe_x])
                     
                     
                     #### Compute the signal-to-noise ratio
@@ -2438,8 +2470,7 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
 
                     # Count the number of saturated pixels (on original, non-gamma corrected image)
                     saturated_count = np.sum(
-                        fr_img_raw[half_frame_pixels_stripe[:,1], half_frame_pixels_stripe[:,0]]
-                            >= saturation_threshold_report
+                        fr_img_raw[stripe_y, stripe_x] >= saturation_threshold_report
                         )
 
 

@@ -507,8 +507,9 @@ def getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, 
     if img_handle.input_type == 'ff':
 
         # Threshold the FF file
-        img_thres, weights = Image.thresholdImgWithWeights(img_handle.ff.maxpixel, img_handle.ff.avepixel,
-            img_handle.ff.stdpixel, config.k1_det, config.j1_det, ff=True, mask=mask, mask_ave_bright=False, border=config.detection_border)
+        img_thres = Image.thresholdImg(img_handle.ff.maxpixel, img_handle.ff.avepixel, img_handle.ff.stdpixel,
+            config.k1_det, config.j1_det, ff=True, mask=mask, mask_ave_bright=False,
+            border=config.detection_border)
 
         # Extract the thresholded image by min and max frames from FF file
         img = selectFFFrames(np.copy(img_thres), img_handle.ff, frame_min, frame_max)
@@ -525,8 +526,8 @@ def getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, 
         # Retrieve the frame (z) values corresponding to the non-zero positions
         zs = img_handle.ff.maxframe[ys, xs]
         
-        # Retrieve weights for the extracted points
-        ws = weights[ys, xs]
+        # Weights are not used by callers. Keep the return slot for API compatibility.
+        ws = np.empty_like(xs, dtype=np.float32)
 
         return xs, ys, zs, ws
 
@@ -552,7 +553,7 @@ def getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, 
 
 
             # Break the loop if outside frame size
-            if fr == (img_handle.total_frames - 1):
+            if fr >= img_handle.total_frames:
                 break
             
             t_frame_conditioning = time()
@@ -582,9 +583,12 @@ def getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, 
             
             t_threshold = time()
 
-            # Threshold the frame (memoized function, the frame index "fr" is used as cache key)
-            img_thres, weights = Image.thresholdImgWithWeightsMemoCache(fr, fr_img, img_handle.ff.avepixel,
-                img_handle.ff.stdpixel, config.k1_det, config.j1_det, mask=mask, mask_ave_bright=True, border=config.detection_border)
+            # Threshold the frame. Include the FF background arrays in the cache key because the same frame
+            # can be thresholded against different synthetic FF chunks during line checks and centroiding.
+            cache_key = (fr, id(img_handle.ff.avepixel), id(img_handle.ff.stdpixel))
+            img_thres = Image.thresholdImgMemoCache(cache_key, fr_img, img_handle.ff.avepixel,
+                img_handle.ff.stdpixel, config.k1_det, config.j1_det, mask=mask, mask_ave_bright=True,
+                border=config.detection_border)
             
             thresholding_times.append(time() - t_threshold)
 
@@ -662,8 +666,8 @@ def getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, 
 
             zs = np.zeros_like(xs) + fr
             
-            # Extract weights for these positions
-            ws = weights[ys, xs]
+            # Weights are not used by callers. Keep the return slot for API compatibility.
+            ws = np.empty_like(xs, dtype=np.float32)
 
             nonzero_times.append(time() - t_nonzero)
 
