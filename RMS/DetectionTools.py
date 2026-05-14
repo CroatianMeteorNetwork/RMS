@@ -269,6 +269,62 @@ def getStripeIndices(rho, theta, stripe_width, img_h, img_w):
     return indicesy.astype(np.uint16), indicesx.astype(np.uint16)
 
 
+def getStripeIndicesNearPoint(rho, theta, stripe_width, img_h, img_w, x_centre, y_centre, radius):
+    """Get stripe indices in a local square around a point.
+
+    This is used during centroiding where the perpendicular stripe is only needed near the predicted meteor
+    position. It avoids scanning the full frame for every centroided frame.
+
+    Arguments:
+        rho: [float] Distance of the line from the center in HT space (pixels).
+        theta: [float] Angle in degrees in HT space.
+        stripe_width: [int] Width of the stripe around the line.
+        img_h: [int] Original image height in pixels.
+        img_w: [int] Original image width in pixels.
+        x_centre: [float] X coordinate of the point near the line.
+        y_centre: [float] Y coordinate of the point near the line.
+        radius: [float] Radius of the square around the point.
+
+    Return:
+        (indicesy, indicesx): [tuple] a tuple of x and y indices of stripe pixels
+    """
+
+    # Minimum angle offset to avoid division by zero (keeping original logic)
+    angle_eps = 0.2
+    if (theta%90 < angle_eps):
+        theta = theta + angle_eps
+    theta = theta % 360
+
+    # Calculate the bounding box for the local region around the center point, constrained by image dimensions
+    radius = max(1, int(np.ceil(radius)))
+    x_min = max(0, int(np.floor(x_centre)) - radius)
+    x_max = min(img_w - 1, int(np.floor(x_centre)) + radius)
+    y_min = max(0, int(np.floor(y_centre)) - radius)
+    y_max = min(img_h - 1, int(np.floor(y_centre)) + radius)
+
+    # Return empty arrays if the bounding box is outside the image bounds
+    if (x_min > x_max) or (y_min > y_max):
+        return np.array([], dtype=np.uint16), np.array([], dtype=np.uint16)
+
+    # Generate grids of x and y coordinates for the local region and center them relative to the image center
+    ys_local = np.arange(y_min, y_max + 1)
+    xs_local = np.arange(x_min, x_max + 1)
+    y_centered = ys_local[:, None] - (img_h/2.0)
+    x_centered = xs_local[None, :] - (img_w/2.0)
+
+    # Calculate the perpendicular distance of each point in the local grid to the line (rho, theta)
+    # and find indices of points that fall within half the stripe width
+    th_rad = np.radians(theta)
+    dist = np.abs(x_centered*np.cos(th_rad) + y_centered*np.sin(th_rad) - rho)
+    indices_y_local, indices_x_local = np.nonzero(dist <= (stripe_width/2.0))
+
+    # Map the local coordinates of the valid points back to the global image coordinate system
+    indicesy = ys_local[indices_y_local]
+    indicesx = xs_local[indices_x_local]
+
+    return indicesy.astype(np.uint16), indicesx.astype(np.uint16)
+
+
 def dilateCoordinates(coords, img_h, img_w, width=1):
     """
     Dilate the given coordinates by adding neighboring coordinates.
@@ -286,7 +342,7 @@ def dilateCoordinates(coords, img_h, img_w, width=1):
 
     """
 
-        # If the width is 0, return the original coordinates
+    # If the width is 0, return the original coordinates
     if width == 0:
         return coords
 
@@ -647,7 +703,10 @@ def getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, 
                 stripe_length = 6*ang_vel
                 if stripe_length < stripe_width_factor*config.stripe_width:
                     stripe_length = stripe_width_factor*config.stripe_width
-                stripe_indices_motion = getStripeIndices(rho2, theta2, stripe_length, img_h, img_w)
+                local_radius = stripe_length + stripe_width_factor*config.stripe_width \
+                    + config.centroid_dilation + 2
+                stripe_indices_motion = getStripeIndicesNearPoint(
+                    rho2, theta2, stripe_length, img_h, img_w, x_inters, y_inters, local_radius)
 
                 stripe_values = stripe[stripe_indices_motion]
                 stripe_nonzero = stripe_values != 0
