@@ -39,6 +39,33 @@ import RMS.Routines.MorphCy as morph
 log = getLogger("rmslogger")
 
 
+_stripe_grid_cache = {}
+
+
+def getCenteredGrid(img_h, img_w):
+    """Return cached centered coordinate grids for stripe distance calculations.
+    
+    Arguments:
+        img_h: [int] Image height.
+        img_w: [int] Image width.
+
+    Return:
+        (y_grid, x_grid): [tuple of ndarrays] Centered coordinate grids.
+    """
+
+    cache_key = (int(img_h), int(img_w))
+
+    if cache_key not in _stripe_grid_cache:
+        
+        y_grid, x_grid = np.indices(cache_key)
+        _stripe_grid_cache[cache_key] = (
+            y_grid - (img_h/2.0),
+            x_grid - (img_w/2.0)
+        )
+
+    return _stripe_grid_cache[cache_key]
+
+
 def loadImageCalibration(dir_path, config, dtype=None, byteswap=False):
     """ Load the mask, dark and flat. 
     
@@ -226,11 +253,8 @@ def getStripeIndices(rho, theta, stripe_width, img_h, img_w):
     cos_th = np.cos(th_rad)
     sin_th = np.sin(th_rad)
 
-    # 1. Create a grid of (y, x) coordinates
-    # Corresponds to the -hh to hh and -hw to hw ranges in the original coordinate system
-    y_grid, x_grid = np.indices((img_h, img_w))
-    y_centered = y_grid - (img_h/2.0)
-    x_centered = x_grid - (img_w/2.0)
+    # 1. Get a grid of centered (y, x) coordinates
+    y_centered, x_centered = getCenteredGrid(img_h, img_w)
 
     # 2. Calculate perpendicular distance of every pixel from the line
     # Line equation in HT: x*cos(theta) + y*sin(theta) = rho
@@ -492,12 +516,11 @@ def getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, 
         # Remove lonely pixels
         img = morph.clean(img)
 
-        # Extract the stripe from the thresholded image
-        stripe = np.zeros(img.shape, img.dtype)
-        stripe[stripe_indices] = img[stripe_indices]
-
-        # Use findNonzeroPositions to get y and x indices of non-zero elements in stripe
-        ys, xs = findNonzeroPositions(stripe)
+        # Extract non-zero threshold passers directly from the stripe indices
+        stripe_values = img[stripe_indices]
+        stripe_nonzero = stripe_values != 0
+        ys = stripe_indices[0][stripe_nonzero]
+        xs = stripe_indices[1][stripe_nonzero]
 
         # Retrieve the frame (z) values corresponding to the non-zero positions
         zs = img_handle.ff.maxframe[ys, xs]
@@ -576,16 +599,16 @@ def getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, 
 
             t_extract_stripe = time()
 
-            # Extract the stripe from the thresholded image
-            stripe = np.zeros(img_thres.shape, img_thres.dtype)
-            stripe[stripe_indices] = img_thres[stripe_indices]
-
             extract_stripe_times.append(time() - t_extract_stripe)
 
             # Include more pixels for centroiding and photometry and mask out per frame pixels
             if centroiding:
 
                 t_centroid = time()
+
+                # Extract the stripe from the thresholded image
+                stripe = np.zeros(img_thres.shape, img_thres.dtype)
+                stripe[stripe_indices] = img_thres[stripe_indices]
                 
                 # Dilate the pixels in the stripe twice, to include more pixels for photometry
                 stripe = morph.dilate(stripe)
@@ -622,19 +645,21 @@ def getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, 
                     stripe_length = stripe_width_factor*config.stripe_width
                 stripe_indices_motion = getStripeIndices(rho2, theta2, stripe_length, img_h, img_w)
 
-                # Mark only those parts which overlap both lines, which effectively creates a mask for
-                #    photometry an centroiding, excluding other influences
-                stripe_new = np.zeros_like(stripe)
-                stripe_new[stripe_indices_motion] = stripe[stripe_indices_motion]
-                stripe = stripe_new
+                stripe_values = stripe[stripe_indices_motion]
+                stripe_nonzero = stripe_values != 0
+                ys = stripe_indices_motion[0][stripe_nonzero]
+                xs = stripe_indices_motion[1][stripe_nonzero]
 
                 centroiding_times.append(time() - t_centroid)
 
+            else:
+                stripe_values = img_thres[stripe_indices]
+                stripe_nonzero = stripe_values != 0
+                ys = stripe_indices[0][stripe_nonzero]
+                xs = stripe_indices[1][stripe_nonzero]
 
             t_nonzero = time()
 
-            # Get stripe positions (x, y)
-            ys, xs = findNonzeroPositions(stripe)
             zs = np.zeros_like(xs) + fr
             
             # Extract weights for these positions

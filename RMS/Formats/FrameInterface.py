@@ -7,6 +7,7 @@ import os
 import sys
 import copy
 import datetime
+from collections import OrderedDict
 
 
 # Rawpy for DFN images
@@ -936,7 +937,8 @@ class InputTypeVideo(InputType):
 
         self.current_frame = 0
 
-        self.cache = {}
+        self.cache = OrderedDict()
+        self.cache_size = 16 if self.preload_video else 1
 
         # List for storing the video frames if needed
         self.video_frames = []
@@ -1024,7 +1026,9 @@ class InputTypeVideo(InputType):
 
         # Check if this chunk has been cached
         if cache_id in self.cache:
-            frame, self.current_fr_chunk_size = self.cache[cache_id]
+            frame, self.current_fr_chunk_size = self.cache.pop(cache_id)
+            self.cache[cache_id] = [frame, self.current_fr_chunk_size]
+            self.ff = frame
             return frame
 
         # Determine target dtype (assume uint8 if not yet initialized, then update)
@@ -1076,10 +1080,10 @@ class InputTypeVideo(InputType):
         # Finish making the fake FF file
         ff_struct_fake.finish()
 
-        # Store the FF struct to cache to avoid recomputing
-        self.cache = {}
-
+        # Store the FF struct to cache to avoid recomputing repeated overlapping video windows.
         self.cache[cache_id] = [ff_struct_fake, self.current_fr_chunk_size]
+        while len(self.cache) > self.cache_size:
+            self.cache.popitem(last=False)
 
         # Set the computed chunk as the current FF
         self.ff = ff_struct_fake
@@ -1189,7 +1193,8 @@ class InputTypeVideo(InputType):
 
         for i in range(self.total_frames):
 
-            print('Loading frame: {:4d}/{:4d}'.format(i, self.total_frames), end='\r', flush=True)
+            if (i%100 == 0) or (i == self.total_frames - 1):
+                print('Loading frame: {:4d}/{:4d}'.format(i, self.total_frames), end='\r', flush=True)
 
             frame = self.loadVideoFrame()
 

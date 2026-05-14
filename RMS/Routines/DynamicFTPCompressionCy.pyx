@@ -130,6 +130,10 @@ cdef class FFMimickInterface:
         self.maxpixel = np.clip(self.maxpixel, min_val, max_val).astype(self.dtype)
         self.avepixel = np.clip(median_float, min_val, max_val).astype(self.dtype)
         self.stdpixel = np.clip(std_float,    min_val, max_val).astype(self.dtype)
+
+        # The sampling reservoir is only needed while building the FF statistics.
+        # Drop it so cached finished chunks do not retain all sampled frames.
+        self.sample_buf = np.empty((0, 0, 0), dtype=np.uint16)
         
         self.successful = True
         return True
