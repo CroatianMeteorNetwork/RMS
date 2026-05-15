@@ -645,8 +645,13 @@ centroid_gaussian_fit: false
 ;                 but less accurate on elongated streaks)
 ;   moving      - moving 2D Gaussian (Veres et al. 2012) integrated along the
 ;                 track direction (best for tracked slow objects and satellites)
-; For the 'moving' method, targets slower than 0.2 px/frame automatically fall
-; back to rotated_lsq.
+;   kinematic   - moving 2D Gaussian with L fixed from the RANSAC angular velocity
+;                 instead of fitted from pixel spread; tight L bounds [0.5×L, 1.5×L]
+;                 and peak+5×5 init (best for fast global-shutter meteors)
+; For 'moving' and 'kinematic': when line_speed < centroid_moving_gaussian_min_speed
+; the method falls back to rotated_lsq (with moving_gaussian_fallback=True, suppressing
+; peak+5×5 init).  When L_kinematic < centroid_moving_gaussian_sigma_init the method also
+; falls back to rotated_lsq (L << sigma → flat loss landscape, optimizer wanders).
 centroid_gaussian_fit_method: rotated_lsq
 
 ; Half-size of the Gaussian fitting patch in pixels (static methods: rotated_lsq,
@@ -665,6 +670,20 @@ centroid_gaussian_fit_max_nfev: 80
 ; Used as the starting sigma in the multi-seed optimisation; overridden per frame
 ; from stripe pixel moments when enough pixels are available.
 centroid_moving_gaussian_sigma_init: 2.0
+
+; Minimum RANSAC line speed (px/frame) for 'moving'/'kinematic' methods.  Detections
+; slower than this fall back to rotated_lsq with peak+5×5 suppressed (near-stationary
+; targets have undefined omega and avepixel cancels the peak-pixel signal).
+; Set to 0.0 to disable (use moving Gaussian for all speeds).
+centroid_moving_gaussian_min_speed: 0.2
+
+; Outlier-rejection threshold for the 'moving' and 'kinematic' Gaussian centroid methods (pixels).
+; After fitting, the result is compared to the per-frame weighted centroid (the Gaussian's own
+; starting point).  If the Gaussian drifted farther than this value the fit likely landed on a
+; spurious local minimum (background star, cosmic ray).  The fit is re-run with max_shift clamped
+; to this threshold so the spurious minimum is excluded; if the retry also fails the frame falls
+; back to the weighted centroid.  Set to 0.0 (default) to disable.
+centroid_moving_gaussian_max_deviation: 0.0
 
 ; Path for a debug CSV comparing weighted vs Gaussian centroids (disabled if omitted).
 ; Columns: source, track_index, frame, x_weighted, y_weighted, x_gaussian, y_gaussian,

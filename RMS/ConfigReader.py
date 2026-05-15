@@ -662,6 +662,9 @@ class Config:
         self.centroid_gaussian_fit_max_nfev = 80
         self.centroid_gaussian_compare_path = None
         self.centroid_moving_gaussian_sigma_init = 2.0
+        self.centroid_moving_gaussian_min_speed = 0.2
+        self.centroid_moving_gaussian_max_deviation = 0.0
+        self.centroid_moving_gaussian_diag_path = None
 
         # Centroid filtering parameters
         self.centroids_max_deviation = 2 # maximum deviation of a centroid point from a LSQ fitted line (if above max, it will be rejected)
@@ -1823,6 +1826,18 @@ def parseMeteorDetection(config, parser):
     if parser.has_option(section, "centroid_moving_gaussian_sigma_init"):
         config.centroid_moving_gaussian_sigma_init = parser.getfloat(
             section, "centroid_moving_gaussian_sigma_init")
+
+    if parser.has_option(section, "centroid_moving_gaussian_min_speed"):
+        config.centroid_moving_gaussian_min_speed = parser.getfloat(
+            section, "centroid_moving_gaussian_min_speed")
+
+    if parser.has_option(section, "centroid_moving_gaussian_max_deviation"):
+        config.centroid_moving_gaussian_max_deviation = parser.getfloat(
+            section, "centroid_moving_gaussian_max_deviation")
+
+    if parser.has_option(section, "centroid_moving_gaussian_diag_path"):
+        config.centroid_moving_gaussian_diag_path = parser.get(
+            section, "centroid_moving_gaussian_diag_path")
 
 
     if parser.has_option(section, "centroids_max_deviation"):
