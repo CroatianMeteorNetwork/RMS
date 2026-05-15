@@ -654,6 +654,15 @@ class Config:
         # Number of pixels to dilate the centroid mask beyond the thresholded image
         self.centroid_dilation = 2
 
+        # Refine meteor centroids by fitting a small 2D Gaussian around the intensity-weighted centroid
+        self.centroid_gaussian_fit = False
+        self.centroid_gaussian_fit_method = 'rotated_lsq'
+        self.centroid_gaussian_fit_radius = 4
+        self.centroid_gaussian_fit_max_shift = 2.5
+        self.centroid_gaussian_fit_max_nfev = 80
+        self.centroid_gaussian_compare_path = None
+        self.centroid_moving_gaussian_sigma_init = 2.0
+
         # Centroid filtering parameters
         self.centroids_max_deviation = 2 # maximum deviation of a centroid point from a LSQ fitted line (if above max, it will be rejected)
         self.centroids_max_distance = 30 # maximum distance in pixels between centroids (used for filtering spurious centroids)
@@ -1795,6 +1804,25 @@ def parseMeteorDetection(config, parser):
 
     if parser.has_option(section, "centroid_dilation"):
         config.centroid_dilation = parser.getint(section, "centroid_dilation")
+
+    if parser.has_option(section, "centroid_gaussian_fit"):
+        config.centroid_gaussian_fit = parser.getboolean(section, "centroid_gaussian_fit")
+
+    if parser.has_option(section, "centroid_gaussian_fit_method"):
+        config.centroid_gaussian_fit_method = parser.get(section, "centroid_gaussian_fit_method")
+
+    if parser.has_option(section, "centroid_gaussian_fit_radius"):
+        config.centroid_gaussian_fit_radius = parser.getint(section, "centroid_gaussian_fit_radius")
+
+    if parser.has_option(section, "centroid_gaussian_fit_max_shift"):
+        config.centroid_gaussian_fit_max_shift = parser.getfloat(section, "centroid_gaussian_fit_max_shift")
+
+    if parser.has_option(section, "centroid_gaussian_fit_max_nfev"):
+        config.centroid_gaussian_fit_max_nfev = parser.getint(section, "centroid_gaussian_fit_max_nfev")
+
+    if parser.has_option(section, "centroid_moving_gaussian_sigma_init"):
+        config.centroid_moving_gaussian_sigma_init = parser.getfloat(
+            section, "centroid_moving_gaussian_sigma_init")
 
 
     if parser.has_option(section, "centroids_max_deviation"):

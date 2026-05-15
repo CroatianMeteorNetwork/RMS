@@ -27,6 +27,8 @@ import logging
 import numpy as np
 import numpy.ctypeslib as npct
 import cv2
+import scipy.optimize as opt
+import scipy.special
 
 # Plotting
 import matplotlib.pyplot as plt
@@ -72,6 +74,395 @@ def logDebug(*log_str):
     log.debug(" ".join(log_str))
 
 
+def fitGaussianCentroid2DPatch(patch, x_origin, y_origin, x_init, y_init, max_shift=2.5, max_nfev=80,
+                               method='rotated_lsq'):
+    """Refine a centroid by fitting a 2D Gaussian on a small image patch.
+
+    The fit is deliberately bounded and initialized from the intensity-weighted centroid so it stays fast and
+    falls back safely when the local image patch is too weak or ill-conditioned.
+
+    Arguments:
+        patch: [np.ndarray] 2D image patch.
+        x_origin: [int] X origin of the patch.
+        y_origin: [int] Y origin of the patch.
+        x_init: [float] Initial guess for the X centroid.
+        y_init: [float] Initial guess for the Y centroid.
+        max_shift: [float] Maximum shift from the initial guess.
+        max_nfev: [int] Maximum number of iterations.
+        method: [str] Fitting method. Options:
+            'rotated_lsq' - rotated 2D Gaussian with eigendecomposition-seeded multi-start
+                (default, best for elongated meteor PSFs).
+            'axis_lsq'   - axis-aligned 2D Gaussian, single least-squares solve (faster
+                but less accurate on elongated streaks).
+
+    Return:
+        (x_centroid, y_centroid): [tuple of floats] Centroid coordinates.
+    """
+
+    if (not np.isfinite(x_init)) or (not np.isfinite(y_init)):
+        return None
+
+    patch = patch.astype(np.float32)
+    if not np.all(np.isfinite(patch)):
+        return None
+
+    y_ind, x_ind = np.indices(patch.shape, dtype=np.float32)
+
+    # Convert the global init to patch-local coordinates and reject if outside the patch.
+    xo0 = float(x_init - x_origin)
+    yo0 = float(y_init - y_origin)
+
+    if (xo0 < 0) or (xo0 > patch.shape[1] - 1) or (yo0 < 0) or (yo0 > patch.shape[0] - 1):
+        return None
+
+    # Estimate background from the 20th percentile; clip negative residuals to zero.
+    offset0 = float(np.percentile(patch, 20))
+    weights = patch - offset0
+    weights[weights < 0] = 0
+    weight_sum = float(np.sum(weights))
+    if weight_sum <= 0:
+        return None
+
+    amp0 = float(np.max(patch) - offset0)
+    if amp0 <= 0:
+        return None
+
+    # Moment-based sigma seed from the background-subtracted weights, clipped to a
+    # compact PSF-like range so the optimiser starts close to the true solution.
+    dx = x_ind - xo0
+    dy = y_ind - yo0
+    sx0 = np.sqrt(np.sum(weights*dx**2)/weight_sum)
+    sy0 = np.sqrt(np.sum(weights*dy**2)/weight_sum)
+    cov_xy = float(np.sum(weights*dx*dy)/weight_sum)
+    max_sigma = max(1.0, min(patch.shape)/2.0)
+    sx0 = float(np.clip(sx0, 0.8, max_sigma))
+    sy0 = float(np.clip(sy0, 0.8, max_sigma))
+
+    # Axis-aligned 2D Gaussian model (params: amp, xo, yo, sigma_x, sigma_y, offset).
+    def _residual_axis(params):
+        amp, xo, yo, sigma_x, sigma_y, offset = params
+        model = offset + amp*np.exp(-(((x_ind - xo)**2)/(2*sigma_x**2)
+                                      + ((y_ind - yo)**2)/(2*sigma_y**2)))
+        return (model - patch).ravel()
+
+    # Rotated 2D Gaussian model; theta is the rotation angle of the PSF major axis.
+    def _residual_rotated(params):
+        amp, xo, yo, sigma_major, sigma_minor, theta, offset = params
+        cos_t = np.cos(theta)
+        sin_t = np.sin(theta)
+        x_rel = x_ind - xo
+        y_rel = y_ind - yo
+        x_rot = x_rel*cos_t + y_rel*sin_t
+        y_rot = -x_rel*sin_t + y_rel*cos_t
+        model = offset + amp*np.exp(-((x_rot**2)/(2*sigma_major**2)
+                                      + (y_rot**2)/(2*sigma_minor**2)))
+        return (model - patch).ravel()
+
+    # Box-constrain the centroid so it cannot drift beyond max_shift from the init.
+    lo_x = max(0.0, xo0 - max_shift)
+    hi_x = min(float(patch.shape[1] - 1), xo0 + max_shift)
+    lo_y = max(0.0, yo0 - max_shift)
+    hi_y = min(float(patch.shape[0] - 1), yo0 + max_shift)
+
+    if (lo_x >= hi_x) or (lo_y >= hi_y):
+        return None
+
+    # Allow the amplitude bound to exceed the patch peak to handle PSF truncation at edges.
+    amp_upper = float(max(amp0*6, amp0 + 1.0))
+    offset_lower = float(np.min(patch))
+    offset_upper = float(np.max(patch))
+
+    if method == 'axis_lsq':
+        # Single least-squares solve; no multi-start needed for the axis-aligned model.
+        p0 = np.array([amp0, xo0, yo0, sx0, sy0, offset0], dtype=np.float64)
+        lower = [0.0, lo_x, lo_y, 0.5, 0.5, offset_lower]
+        upper = [amp_upper, hi_x, hi_y, float(max_sigma*1.5), float(max_sigma*1.5), offset_upper]
+        p0 = np.minimum(np.maximum(p0, lower), upper)
+
+        try:
+            res = opt.least_squares(_residual_axis, p0, bounds=(lower, upper), max_nfev=max_nfev, method='trf')
+        except (ValueError, RuntimeError, FloatingPointError):
+            return None
+    else:
+        # Seed sigma_major, sigma_minor, and theta from the 2×2 intensity moment covariance
+        # so the initial Gaussian already has roughly the right size and orientation.
+        cov = np.array([[sx0**2, cov_xy], [cov_xy, sy0**2]], dtype=np.float64)
+        try:
+            eig_val, eig_vec = np.linalg.eigh(cov)
+        except np.linalg.LinAlgError:
+            eig_val = np.array([sy0**2, sx0**2], dtype=np.float64)
+            eig_vec = np.array([[0.0, 1.0], [1.0, 0.0]], dtype=np.float64)
+
+        order = np.argsort(eig_val)[::-1]
+        eig_val = eig_val[order]
+        eig_vec = eig_vec[:, order]
+        sigma_major0 = float(np.clip(np.sqrt(max(eig_val[0], 0.25)), 0.8, max_sigma*1.5))
+        sigma_minor0 = float(np.clip(np.sqrt(max(eig_val[1], 0.25)), 0.5, max_sigma))
+        theta0 = float(np.arctan2(eig_vec[1, 0], eig_vec[0, 0]))
+
+        lower = [0.0, lo_x, lo_y, 0.5, 0.5, -np.pi, offset_lower]
+        upper = [amp_upper, hi_x, hi_y, float(max_sigma*2.0), float(max_sigma*1.5), np.pi, offset_upper]
+        base = np.array([amp0, xo0, yo0, sigma_major0, sigma_minor0, theta0, offset0], dtype=np.float64)
+
+        # Record cost at the moment-seeded start; any result that raises cost is rejected.
+        initial_cost = 0.5*np.sum(_residual_rotated(base)**2)
+        best_res = None
+        angle_seeds = [theta0, theta0 + np.pi/2.0, 0.0]
+        sigma_seeds = [(sigma_major0, sigma_minor0), (max(sigma_major0, 1.5), 0.8)]
+
+        # Multi-start: 3 angle × 2 sigma seeds = 6 starts; keep the minimum-cost result.
+        for theta_seed in angle_seeds:
+            theta_seed = ((theta_seed + np.pi) % (2*np.pi)) - np.pi
+            for sigma_major_seed, sigma_minor_seed in sigma_seeds:
+                p0 = base.copy()
+                p0[3] = sigma_major_seed
+                p0[4] = sigma_minor_seed
+                p0[5] = theta_seed
+                p0 = np.minimum(np.maximum(p0, lower), upper)
+                try:
+                    res_current = opt.least_squares(
+                        _residual_rotated, p0, bounds=(lower, upper), max_nfev=max_nfev, method='trf',
+                        loss='soft_l1', f_scale=max(1.0, amp0/4.0))
+                except (ValueError, RuntimeError, FloatingPointError):
+                    continue
+
+                if (best_res is None) or (res_current.cost < best_res.cost):
+                    best_res = res_current
+
+        if best_res is None:
+            return None
+
+        res = best_res
+
+    # Reject failed or degenerate fits.
+    if (method == 'axis_lsq') and (not res.success):
+        return None
+
+    # For rotated_lsq, reject if the optimiser raised cost above the moment-seeded start.
+    if (method != 'axis_lsq') and (not np.isfinite(res.cost) or (res.cost > initial_cost)):
+        return None
+
+    amp = res.x[0]
+    xo = res.x[1]
+    yo = res.x[2]
+    if (amp <= 0) or np.any(np.asarray(res.x[3:5]) <= 0):
+        return None
+
+    # Final shift guard: reject if the optimiser drifted past the allowed radius.
+    x_fit = x_origin + xo
+    y_fit = y_origin + yo
+    if np.hypot(x_fit - x_init, y_fit - y_init) > max_shift:
+        return None
+
+    return float(x_fit), float(y_fit)
+
+
+def fitGaussianCentroid2D(img, x_init, y_init, segment_radius=4, max_shift=2.5, max_nfev=80,
+                          method='rotated_lsq'):
+    """Refine a centroid by fitting a small 2D Gaussian around the initial centroid."""
+
+    if (not np.isfinite(x_init)) or (not np.isfinite(y_init)):
+        return None
+
+    nrows, ncols = img.shape
+    x0_int = int(round(x_init))
+    y0_int = int(round(y_init))
+    radius = max(2, int(segment_radius))
+
+    x_min = max(0, x0_int - radius)
+    x_max = min(ncols - 1, x0_int + radius)
+    y_min = max(0, y0_int - radius)
+    y_max = min(nrows - 1, y0_int + radius)
+
+    if (x_max - x_min + 1 < 3) or (y_max - y_min + 1 < 3):
+        return None
+
+    patch = img[y_min:y_max + 1, x_min:x_max + 1]
+
+    return fitGaussianCentroid2DPatch(
+        patch, x_min, y_min, x_init, y_init, max_shift=max_shift, max_nfev=max_nfev, method=method)
+
+
+
+
+def fitMovingGaussianCentroid2DPatch(patch, x_origin, y_origin, x_init, y_init,
+                                     omega, L_init, sigma_init=2.0,
+                                     max_shift=3.0, max_nfev=300):
+    """Refine a centroid by fitting a moving 2D Gaussian (Veres et al. 2012) on a patch.
+
+    Models the streak as Gaussian cross-track and boxcar along-track via error functions.
+    Track angle omega is fixed from line detection. Tries 9 (sigma, L) seed combinations
+    and returns the best-cost result.
+
+    Arguments:
+        patch: [ndarray] Background-subtracted image patch, shape (h, w).
+        x_origin: [float] Global X of the patch left edge.
+        y_origin: [float] Global Y of the patch top edge.
+        x_init: [float] Initial centroid X in global coords.
+        y_init: [float] Initial centroid Y in global coords.
+        omega: [float] Track angle in radians (atan2(dy, dx)).
+        L_init: [float] Initial along-track length estimate in pixels.
+
+    Keyword arguments:
+        sigma_init: [float] Initial cross-track sigma. 2.0 by default.
+        max_shift: [float] Max centroid shift from x_init/y_init. 3.0 by default.
+        max_nfev: [int] Max function evaluations per seed. 300 by default.
+
+    Return:
+        tuple or None: (x_fit, y_fit) in global coords, or None if fit failed.
+    """
+
+    if not (np.isfinite(x_init) and np.isfinite(y_init) and np.isfinite(omega)):
+        return None
+
+    patch = patch.astype(np.float32)
+    if not np.all(np.isfinite(patch)):
+        return None
+
+    # Convert the global init to patch-local coordinates and reject if outside the patch.
+    xo0 = float(x_init - x_origin)
+    yo0 = float(y_init - y_origin)
+    if xo0 < 0 or xo0 > patch.shape[1] - 1 or yo0 < 0 or yo0 > patch.shape[0] - 1:
+        return None
+
+    # Estimate background from the 20th percentile; use total above-background flux as the
+    # initial integrated amplitude (level_sum0).
+    offset0 = float(np.percentile(patch, 20))
+    amp = patch - offset0
+    amp[amp < 0] = 0
+    level_sum0 = float(np.sum(amp))
+    if level_sum0 <= 0:
+        return None
+
+    # Box-constrain the centroid to within max_shift of the initial position.
+    lo_x = max(0.0, xo0 - max_shift)
+    hi_x = min(float(patch.shape[1] - 1), xo0 + max_shift)
+    lo_y = max(0.0, yo0 - max_shift)
+    hi_y = min(float(patch.shape[0] - 1), yo0 + max_shift)
+    if lo_x >= hi_x or lo_y >= hi_y:
+        return None
+
+    # Snap L and sigma to valid ranges, then precompute the pixel coordinate grids and
+    # angle trig that are shared by every residual evaluation.
+    L_clipped = max(1.0, float(L_init))
+    sigma_clipped = max(0.5, float(sigma_init))
+
+    y_ind, x_ind = np.indices(patch.shape, dtype=np.float64)
+    cos_w = float(np.cos(omega))
+    sin_w = float(np.sin(omega))
+    _sqrt2 = np.sqrt(2.0)
+    _sqrt2pi = np.sqrt(2.0*np.pi)
+    f_scale = max(1.0, float(np.max(amp)) / 4.0)
+    _erf = scipy.special.erf
+
+    def _residual(params):
+        # Moving-Gaussian model (Veres et al. 2012): Gaussian cross-track × boxcar along-track.
+        # x_m, y_m are pixel coordinates rotated into the along-track (x_m) and cross-track
+        # (y_m) frame using the fixed track angle omega.  The along-track boxcar of length L
+        # is expressed as the difference of two error functions, giving an analytically
+        # integrated streak profile.  level_sum is the total integrated flux (not peak
+        # amplitude); the factor 1/(2*sigma*sqrt(2*pi)*L) normalises the PSF volume to 1.
+        level_sum, sigma, xo, yo, L = params
+        x_m = (x_ind - xo) * cos_w + (y_ind - yo) * sin_w
+        y_m = -(x_ind - xo) * sin_w + (y_ind - yo) * cos_w
+        model = offset0 + (level_sum / (2.0*sigma * _sqrt2pi * L)) \
+            * np.exp(-y_m**2 / (2.0*sigma**2)) \
+            * (_erf((x_m + L * 0.5) / (sigma * _sqrt2))
+               - _erf((x_m - L * 0.5) / (sigma * _sqrt2)))
+        return (model - patch).ravel()
+
+    # Parameter bounds: [level_sum, sigma, xo, yo, L].
+    # Allow level_sum up to 12× the initial estimate to handle peaked PSFs; allow L up to 3×
+    # the initial length estimate so the optimiser can lengthen a short seed.
+    lower = [0.0, 0.5, lo_x, lo_y, 0.5]
+    upper = [level_sum0*12.0, max(sigma_clipped * 4.0, 8.0), hi_x, hi_y, L_clipped * 3.0]
+
+    # 3 sigma × 3 L seeds = 9 starting points; keeps the best-cost result.
+    sigma_seeds = [sigma_clipped, max(0.5, sigma_clipped * 0.5), min(8.0, sigma_clipped * 2.0)]
+    L_seeds = [L_clipped, max(0.5, L_clipped * 0.6), min(upper[4], L_clipped * 1.5)]
+
+    best_res = None
+    best_cost = np.inf
+
+    for sigma_s in sigma_seeds:
+        for L_s in L_seeds:
+            p0 = np.clip([level_sum0, sigma_s, xo0, yo0, L_s], lower, upper)
+            try:
+                res = opt.least_squares(_residual, p0, bounds=(lower, upper),
+                                        max_nfev=max_nfev, method='trf',
+                                        loss='soft_l1', f_scale=f_scale)
+            except (ValueError, RuntimeError, FloatingPointError):
+                continue
+            if np.isfinite(res.cost) and res.cost < best_cost:
+                best_cost = res.cost
+                best_res = res
+
+    if best_res is None:
+        return None
+
+    # Reject fits with non-physical parameters.
+    level_fit, sigma_fit, xo_fit, yo_fit, L_fit = best_res.x
+    if level_fit <= 0 or sigma_fit <= 0 or L_fit <= 0:
+        return None
+
+    # Final shift guard: reject if the optimiser drifted past the allowed radius.
+    x_fit = x_origin + xo_fit
+    y_fit = y_origin + yo_fit
+    if np.hypot(x_fit - x_init, y_fit - y_init) > max_shift:
+        return None
+
+    return float(x_fit), float(y_fit)
+
+
+def fitMovingGaussianCentroid2D(img, x_init, y_init, omega, L_init,
+                                sigma_init=2.0, max_shift=3.0, max_nfev=300):
+    """Extract a track-aware patch and fit a moving Gaussian centroid.
+
+    Computes the axis-aligned bounding box of the rotated streak envelope (with
+    3-sigma cross-track padding) and passes the extracted patch to
+    fitMovingGaussianCentroid2DPatch.
+
+    Arguments:
+        img: [ndarray] Background-subtracted image, shape (H, W).
+        x_init: [float] Initial centroid X in global coords.
+        y_init: [float] Initial centroid Y in global coords.
+        omega: [float] Track angle in radians.
+        L_init: [float] Along-track length estimate in pixels.
+
+    Keyword arguments:
+        sigma_init: [float] Initial cross-track sigma. 2.0 by default.
+        max_shift: [float] Max centroid shift. 3.0 by default.
+        max_nfev: [int] Max function evaluations per seed. 300 by default.
+
+    Return:
+        tuple or None: (x_fit, y_fit) in global coords, or None if fit failed.
+    """
+
+    if not (np.isfinite(x_init) and np.isfinite(y_init) and np.isfinite(omega)):
+        return None
+
+    nrows, ncols = img.shape
+    sigma_use = max(0.5, float(sigma_init))
+    L_use = max(1.0, float(L_init))
+
+    L_half = L_use / 2.0 + 3.0*sigma_use
+    cross_half = 3.0*sigma_use
+    abs_cos = abs(np.cos(omega))
+    abs_sin = abs(np.sin(omega))
+    dx = L_half * abs_cos + cross_half * abs_sin
+    dy = L_half * abs_sin + cross_half * abs_cos
+
+    x_min = max(0, int(x_init - dx) - 1)
+    x_max = min(ncols - 1, int(x_init + dx) + 1)
+    y_min = max(0, int(y_init - dy) - 1)
+    y_max = min(nrows - 1, int(y_init + dy) + 1)
+
+    if (x_max - x_min + 1 < 3) or (y_max - y_min + 1 < 3):
+        return None
+
+    return fitMovingGaussianCentroid2DPatch(
+        img[y_min:y_max + 1, x_min:x_max + 1], x_min, y_min, x_init, y_init,
+        omega, L_init, sigma_init=sigma_init, max_shift=max_shift, max_nfev=max_nfev)
 
 
 def getPolarLine(x1, y1, x2, y2, img_h, img_w):
@@ -2180,7 +2571,7 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                 show3DCloud(img_handle.ff, [], [], [], config=config, all_detected_lines=filtered_lines)
 
         # Go through all detected and filtered lines and compute centroids
-        for detected_line in filtered_lines:
+        for detected_line_index, detected_line in enumerate(filtered_lines):
 
             # Get frame range
             frame_min = detected_line[4]
@@ -2203,6 +2594,25 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
             # Get coordinates of 2 points that describe the line
             x1, y1, z1 = detected_line[0]
             x2, y2, z2 = detected_line[1]
+
+            # Spatial track angle for moving Gaussian centroid fitting (fixed per detection)
+            moving_gaussian_omega = np.arctan2(float(y2 - y1), float(x2 - x1))
+
+            # Determine the Gaussian fitting method for this detection. For moving Gaussian
+            # configured detections, fall back to a static rotated least-squares fit when the
+            # line speed is below 0.2 px/frame. Near-stationary targets produce a degenerate
+            # moving Gaussian (undefined omega, L approaching the minimum), so the static fit
+            # gives better results. The fallback flag suppresses the per-frame peak-pixel init
+            # (which is unreliable when avepixel cancels the stationary target signal).
+            gauss_fit_method = config.centroid_gaussian_fit_method
+            moving_gaussian_fallback = False
+            if gauss_fit_method == 'moving':
+                dz_frames = abs(float(z2 - z1))
+                line_speed_px_per_frame = (
+                    np.hypot(float(x2 - x1), float(y2 - y1)) / dz_frames if dz_frames > 0 else 0.0)
+                if line_speed_px_per_frame < 0.2:
+                    gauss_fit_method = 'rotated_lsq'
+                    moving_gaussian_fallback = True
 
             # Convert Cartesian line coordinates to polar
             rho, theta = getPolarLine(x1, y1, x2, y2, img_handle.ff.nrows, img_handle.ff.ncols)
@@ -2365,6 +2775,51 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                     y_weighted = half_frame_pixels[:,1]*np.transpose(max_weights)
                     y_centroid = np.sum(y_weighted.astype(np.float64))/float(max_weights_sum)
 
+                    x_centroid_weighted = x_centroid
+                    y_centroid_weighted = y_centroid
+
+                    # Use the flattened-weights centroid as the default Gaussian fit initialisation.
+                    # For fast-moving video targets this is refined below using the per-frame peak pixel.
+                    x_gauss_init = x_centroid
+                    y_gauss_init = y_centroid
+
+                    gaussian_fit_enabled = config.centroid_gaussian_fit and (config.deinterlace_order < 0)
+                    gaussian_centroid = None
+
+
+                    # Set default moving Gaussian geometry (overridden below for the moving method)
+                    moving_L_init = max(1.0, float(config.centroid_gaussian_fit_radius) * 2.0)
+                    moving_sigma_init = config.centroid_moving_gaussian_sigma_init
+
+                    if gaussian_fit_enabled and gauss_fit_method == 'moving':
+
+                        # Project stripe pixels onto the along- and cross-track axes
+                        cos_omega = np.cos(moving_gaussian_omega)
+                        sin_omega = np.sin(moving_gaussian_omega)
+                        pixels_x = half_frame_pixels[:, 0].astype(np.float64) - x_centroid
+                        pixels_y = half_frame_pixels[:, 1].astype(np.float64) - y_centroid
+                        along_track = pixels_x * cos_omega + pixels_y * sin_omega
+                        cross_track = -pixels_x * sin_omega + pixels_y * cos_omega
+
+                        if len(along_track) >= 2:
+
+                            # Estimate trail length and cap it to the patch radius. Beyond the cap
+                            # the model gains parameters without gaining centroid information, and
+                            # the optimisation degrades.
+                            L_raw = float(np.max(along_track) - np.min(along_track))
+                            L_max = float(config.centroid_gaussian_fit_radius) * 3.0
+                            moving_L_init = max(1.0, min(L_raw, L_max))
+
+                        # Estimate cross-track sigma from pixels near the trail centre to avoid
+                        # background pixels on large patches dominating the moment calculation
+                        central_mask = np.abs(along_track) <= moving_L_init
+                        if central_mask.sum() >= 2:
+                            central_weights = max_weights.astype(np.float64)[central_mask]
+                            central_weight_sum = float(np.sum(central_weights))
+                            if central_weight_sum > 0:
+                                central_weights_norm = central_weights / central_weight_sum
+                                moving_sigma_init = float(
+                                    np.clip(np.sqrt(np.sum(central_weights_norm * cross_track[central_mask]**2)), 0.5, 5.0))
 
                     # Correct the rolling shutter effect
                     if config.deinterlace_order == -1:
@@ -2401,6 +2856,95 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                             intensity_values = stripe_values - avepixel_img[stripe_y, stripe_x]
                             intensity_values[intensity_values < 0] = 0
 
+                            # Refine the Gaussian init using the brightest stripe pixel and its
+                            # 5x5 neighbourhood centroid. This is only applied for static Gaussian
+                            # methods on fast-moving targets. It is skipped for the moving Gaussian
+                            # (which uses the flattened-weights centroid as along-track midpoint)
+                            # and for the moving-to-static fallback on near-stationary targets
+                            # (avepixel cancels the stationary source signal making the per-frame
+                            # peak noise-dominated).
+                            if gaussian_fit_enabled \
+                                    and gauss_fit_method != 'moving' \
+                                    and not moving_gaussian_fallback \
+                                    and intensity_values.size > 0 \
+                                    and np.max(intensity_values) > 0:
+
+                                # Find the peak pixel and compute a weighted centroid within a
+                                # 5x5 neighbourhood around it
+                                peak_idx = int(np.argmax(intensity_values))
+                                peak_x = int(stripe_x[peak_idx])
+                                peak_y = int(stripe_y[peak_idx])
+                                neighbor_mask = ((stripe_x >= peak_x - 2) & (stripe_x <= peak_x + 2) &
+                                                 (stripe_y >= peak_y - 2) & (stripe_y <= peak_y + 2))
+                                neighbor_weights = intensity_values[neighbor_mask].astype(np.float64)
+                                neighbor_weight_sum = float(np.sum(neighbor_weights))
+                                if neighbor_weight_sum > 0:
+                                    x_gauss_init = float(np.dot(
+                                        stripe_x[neighbor_mask].astype(np.float64), neighbor_weights)) \
+                                        / neighbor_weight_sum
+                                    y_gauss_init = float(np.dot(
+                                        stripe_y[neighbor_mask].astype(np.float64), neighbor_weights)) \
+                                        / neighbor_weight_sum
+                                else:
+                                    x_gauss_init = float(peak_x)
+                                    y_gauss_init = float(peak_y)
+
+                            if gaussian_fit_enabled:
+                                if gauss_fit_method == 'moving':
+
+                                    # Compute the axis-aligned bounding box of the rotated streak
+                                    # envelope with 3-sigma cross-track padding
+                                    sigma_padded = max(0.5, moving_sigma_init)
+                                    abs_cos_omega = abs(np.cos(moving_gaussian_omega))
+                                    abs_sin_omega = abs(np.sin(moving_gaussian_omega))
+                                    patch_half_dx = (moving_L_init / 2.0 + 3.0*sigma_padded)*abs_cos_omega \
+                                                    + 3.0*sigma_padded * abs_sin_omega
+                                    patch_half_dy = (moving_L_init / 2.0 + 3.0*sigma_padded) * abs_sin_omega \
+                                                    + 3.0*sigma_padded * abs_cos_omega
+                                    mg_x_min = max(0, int(x_gauss_init - patch_half_dx) - 1)
+                                    mg_x_max = min(fr_img.shape[1] - 1, int(x_gauss_init + patch_half_dx) + 1)
+                                    mg_y_min = max(0, int(y_gauss_init - patch_half_dy) - 1)
+                                    mg_y_max = min(fr_img.shape[0] - 1, int(y_gauss_init + patch_half_dy) + 1)
+                                    fit_patch = fr_img[mg_y_min:mg_y_max + 1, mg_x_min:mg_x_max + 1]
+                                    if config.gamma != 1.0:
+                                        fit_patch = Image.gammaCorrectionImage(
+                                            fit_patch.astype(np.float32), config.gamma, out_type=np.float32)
+                                    else:
+                                        fit_patch = fit_patch.astype(np.float32)
+                                    fit_patch = fit_patch \
+                                        - avepixel_img[mg_y_min:mg_y_max + 1, mg_x_min:mg_x_max + 1]
+                                    fit_patch[fit_patch < 0] = 0
+                                    gaussian_centroid = fitMovingGaussianCentroid2DPatch(
+                                        fit_patch, mg_x_min, mg_y_min, x_gauss_init, y_gauss_init,
+                                        moving_gaussian_omega, moving_L_init,
+                                        sigma_init=moving_sigma_init,
+                                        max_shift=config.centroid_gaussian_fit_max_shift,
+                                        max_nfev=config.centroid_gaussian_fit_max_nfev)
+                                else:
+                                    # Static Gaussian: extract a square patch centred on the
+                                    # (peak-refined) init and subtract the average frame.
+                                    fit_radius = max(2, int(config.centroid_gaussian_fit_radius))
+                                    x0_fit = int(round(x_gauss_init))
+                                    y0_fit = int(round(y_gauss_init))
+                                    x_fit_min = max(0, x0_fit - fit_radius)
+                                    x_fit_max = min(fr_img.shape[1] - 1, x0_fit + fit_radius)
+                                    y_fit_min = max(0, y0_fit - fit_radius)
+                                    y_fit_max = min(fr_img.shape[0] - 1, y0_fit + fit_radius)
+                                    fit_patch = fr_img[y_fit_min:y_fit_max + 1, x_fit_min:x_fit_max + 1]
+                                    if config.gamma != 1.0:
+                                        fit_patch = Image.gammaCorrectionImage(
+                                            fit_patch.astype(np.float32), config.gamma, out_type=np.float32)
+                                    else:
+                                        fit_patch = fit_patch.astype(np.float32)
+                                    fit_patch = fit_patch - avepixel_img[y_fit_min:y_fit_max + 1,
+                                                                          x_fit_min:x_fit_max + 1]
+                                    fit_patch[fit_patch < 0] = 0
+                                    gaussian_centroid = fitGaussianCentroid2DPatch(
+                                        fit_patch, x_fit_min, y_fit_min, x_gauss_init, y_gauss_init,
+                                        max_shift=config.centroid_gaussian_fit_max_shift,
+                                        max_nfev=config.centroid_gaussian_fit_max_nfev,
+                                        method=gauss_fit_method)
+
                         else:
                             # Save a raw copy on which saturation will be checked
                             fr_img_raw = np.copy(fr_img)
@@ -2427,6 +2971,49 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                             max_avg_corrected = Image.applyDark(fr_img, avepixel_img)
                             intensity_values = max_avg_corrected[stripe_y, stripe_x]
 
+                            # Refine the Gaussian init using the brightest stripe pixel and its
+                            # 5x5 neighbourhood centroid (see fast-path above for rationale)
+                            if gaussian_fit_enabled \
+                                    and gauss_fit_method != 'moving' \
+                                    and not moving_gaussian_fallback:
+                                stripe_weights_clipped = np.maximum(intensity_values, 0).astype(np.float64)
+                                if stripe_weights_clipped.size > 0 and np.max(stripe_weights_clipped) > 0:
+                                    peak_idx = int(np.argmax(stripe_weights_clipped))
+                                    peak_x = int(stripe_x[peak_idx])
+                                    peak_y = int(stripe_y[peak_idx])
+                                    neighbor_mask = ((stripe_x >= peak_x - 2) & (stripe_x <= peak_x + 2) &
+                                                     (stripe_y >= peak_y - 2) & (stripe_y <= peak_y + 2))
+                                    neighbor_weights = stripe_weights_clipped[neighbor_mask]
+                                    neighbor_weight_sum = float(np.sum(neighbor_weights))
+                                    if neighbor_weight_sum > 0:
+                                        x_gauss_init = float(np.dot(
+                                            stripe_x[neighbor_mask].astype(np.float64), neighbor_weights)) \
+                                            / neighbor_weight_sum
+                                        y_gauss_init = float(np.dot(
+                                            stripe_y[neighbor_mask].astype(np.float64), neighbor_weights)) \
+                                            / neighbor_weight_sum
+                                    else:
+                                        x_gauss_init = float(peak_x)
+                                        y_gauss_init = float(peak_y)
+
+                            if gaussian_fit_enabled:
+                                if gauss_fit_method == 'moving':
+                                    # Moving Gaussian on the full background-subtracted frame.
+                                    gaussian_centroid = fitMovingGaussianCentroid2D(
+                                        max_avg_corrected, x_gauss_init, y_gauss_init,
+                                        moving_gaussian_omega, moving_L_init,
+                                        sigma_init=moving_sigma_init,
+                                        max_shift=config.centroid_gaussian_fit_max_shift,
+                                        max_nfev=config.centroid_gaussian_fit_max_nfev)
+                                else:
+                                    # Static Gaussian on the full background-subtracted frame.
+                                    gaussian_centroid = fitGaussianCentroid2D(
+                                        max_avg_corrected, x_gauss_init, y_gauss_init,
+                                        segment_radius=config.centroid_gaussian_fit_radius,
+                                        max_shift=config.centroid_gaussian_fit_max_shift,
+                                        max_nfev=config.centroid_gaussian_fit_max_nfev,
+                                        method=gauss_fit_method)
+
                     else:
 
                         # If the FF file is used, set the sequence number to the current frame number
@@ -2437,7 +3024,36 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                         stripe_y = half_frame_pixels_stripe[:, 1]
                         stripe_x = half_frame_pixels_stripe[:, 0]
                         intensity_values = max_avg_corrected[stripe_y, stripe_x]
+                        if gaussian_fit_enabled:
+                            if gauss_fit_method == 'moving':
+                                # Moving Gaussian on the accumulated max-avg image (no per-frame
+                                # frames available for FF input).
+                                gaussian_centroid = fitMovingGaussianCentroid2D(
+                                    max_avg_corrected, x_gauss_init, y_gauss_init,
+                                    moving_gaussian_omega, moving_L_init,
+                                    sigma_init=moving_sigma_init,
+                                    max_shift=config.centroid_gaussian_fit_max_shift,
+                                    max_nfev=config.centroid_gaussian_fit_max_nfev)
+                            else:
+                                # Static Gaussian on the accumulated max-avg image.
+                                gaussian_centroid = fitGaussianCentroid2D(
+                                    max_avg_corrected, x_gauss_init, y_gauss_init,
+                                    segment_radius=config.centroid_gaussian_fit_radius,
+                                    max_shift=config.centroid_gaussian_fit_max_shift,
+                                    max_nfev=config.centroid_gaussian_fit_max_nfev,
+                                    method=gauss_fit_method)
 
+                    if gaussian_centroid is not None:
+                        x_centroid, y_centroid = gaussian_centroid
+
+                    gaussian_compare_path = getattr(config, 'centroid_gaussian_compare_path', None)
+                    if gaussian_compare_path and gaussian_fit_enabled:
+                        with open(gaussian_compare_path, 'a') as fh:
+                            fh.write('{:s},{:d},{:.6f},{:.6f},{:.6f},{:.6f},{:.6f},{:.6f},{:d}\n'.format(
+                                os.path.basename(img_handle.name()), detected_line_index, frame_no,
+                                x_centroid_weighted, y_centroid_weighted,
+                                x_centroid, y_centroid, intensity_values.size,
+                                int(gaussian_centroid is not None)))
 
                     # Calculate intensity as the sum of threshold passer pixels on the stripe
                     intensity = int(np.sum(intensity_values))
@@ -2582,7 +3198,6 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
     Image.thresholdImgMemoCache.clearCache()
     Image.thresholdImgWithWeightsMemoCache.clearCache()
 
-    
     return meteor_detections
 
 
@@ -2624,7 +3239,7 @@ if __name__ == "__main__":
         help="""Preload the video file into memory. This can speed up the detection process, but it requires a lot of memory. Only use for short videos. """)
 
     arg_parser.add_argument('-d', '--debug', action="store_true", \
-        help="""Show debug info on the screen. """)
+        help="""Show debug info on the screen. If Gaussian centroiding is enabled, also write a centroid comparison CSV. """)
 
     arg_parser.add_argument('-i', '--debugplots', action="store_true", \
         help="""Show graphs (calibrated image, thresholded image, detected lines) which can help adjust the detection settings. """)
@@ -2794,6 +3409,15 @@ if __name__ == "__main__":
     # Open a file for results
     results_path = out_dir
     results_name = config.stationID + "_" + img_handle_main.beginning_datetime.strftime("%Y%m%d_%H%M%S_%f")
+
+    config.centroid_gaussian_compare_path = None
+    if cml_args.debug and config.centroid_gaussian_fit:
+        config.centroid_gaussian_compare_path = os.path.join(
+            results_path, results_name + '_gaussian_centroids.csv')
+        with open(config.centroid_gaussian_compare_path, 'w') as fh:
+            fh.write('source,track_index,frame,x_weighted,y_weighted,x_gaussian,y_gaussian,n_pixels,fit_success\n')
+        log.info('Writing Gaussian centroid debug comparison to {:s}'.format(
+            config.centroid_gaussian_compare_path))
 
     if cml_args.debug:
         results_file = open(os.path.join(results_path, results_name + '_results.txt'), 'w')

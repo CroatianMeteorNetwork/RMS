@@ -633,6 +633,44 @@ frame_extension: 10
 ; and photometry
 centroid_dilation: 2
 
+; Refine meteor centroid positions by fitting a bounded 2D Gaussian on a small
+; cutout around the intensity-weighted centroid. If the fit fails, the weighted
+; centroid is kept. Only active for interlaced video (deinterlace_order < 0).
+centroid_gaussian_fit: false
+
+; Gaussian centroid fitting method. Options:
+;   rotated_lsq - rotated 2D Gaussian with eigendecomposition-seeded multi-start
+;                 (best for standard video meteors)
+;   axis_lsq    - axis-aligned 2D Gaussian, single least-squares solve (faster
+;                 but less accurate on elongated streaks)
+;   moving      - moving 2D Gaussian (Veres et al. 2012) integrated along the
+;                 track direction (best for tracked slow objects and satellites)
+; For the 'moving' method, targets slower than 0.2 px/frame automatically fall
+; back to rotated_lsq.
+centroid_gaussian_fit_method: rotated_lsq
+
+; Half-size of the Gaussian fitting patch in pixels (static methods: rotated_lsq,
+; axis_lsq).
+centroid_gaussian_fit_radius: 4
+
+; Maximum allowed centroid shift from the intensity-weighted centroid (pixels).
+; Fits that shift more than this are rejected and the weighted centroid is kept.
+centroid_gaussian_fit_max_shift: 2.5
+
+; Maximum optimizer function evaluations per seed (all methods).
+; Increase for the 'moving' method or dense frames (e.g. 200-300).
+centroid_gaussian_fit_max_nfev: 80
+
+; Initial cross-track Gaussian sigma for the 'moving' method (pixels).
+; Used as the starting sigma in the multi-seed optimisation; overridden per frame
+; from stripe pixel moments when enough pixels are available.
+centroid_moving_gaussian_sigma_init: 2.0
+
+; Path for a debug CSV comparing weighted vs Gaussian centroids (disabled if omitted).
+; Columns: source, track_index, frame, x_weighted, y_weighted, x_gaussian, y_gaussian,
+;          n_pixels, fit_success
+; centroid_gaussian_compare_path: /tmp/centroids_debug.csv
+
 ; Maximum deviation of a centroid point from a LSQ fitted line
 ; (if above max, it will be rejected)
 centroids_max_deviation: 2
