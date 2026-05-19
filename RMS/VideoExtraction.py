@@ -68,8 +68,32 @@ class Extractor(Process):
             (y, x, z): [tuple] Coordinates of points that form the fireball, where Z is the frame number.
         """
 
+        # Decontaminate stdpixel before thresholding: a bright fireball inflates stdpixel
+        # along its trail, pushing the threshold (avg + k1*std + j1) above 255. Replace
+        # stdpixel at contaminated pixels with the background median. Only copy the
+        # compressed array when contamination is present, so the no-op path is zero-cost.
+        maxpix = self.compressed[0]
+        stdpix = self.compressed[3]
+        bright_threshold = np.percentile(maxpix, 90)
+        bright_mask = maxpix >= bright_threshold
+        bg_mask = ~bright_mask
+        # Exclude masked-out pixels (camera borders/obstructions) from the background sample
+        if self.mask is not None:
+            bg_mask = bg_mask & (self.mask.img > 0)
+        if np.count_nonzero(bg_mask) > 100:
+            std_ref = float(np.median(stdpix[bg_mask]))
+        else:
+            std_ref = float(np.median(stdpix))
+        contaminated = bright_mask & (stdpix > 3*max(std_ref, 1))
+        if np.any(contaminated):
+            compressed = self.compressed.copy()
+            replacement = max(1, int(round(min(std_ref, 255))))
+            compressed[3][contaminated] = np.uint8(replacement)
+        else:
+            compressed = self.compressed
+
         # Threshold and subsample frames
-        length, x, y, z = Grouping3D.thresholdAndSubsample(self.frames, self.compressed, \
+        length, x, y, z = Grouping3D.thresholdAndSubsample(self.frames, compressed, \
             self.config.min_level, self.config.min_pixels, self.config.k1, self.config.j1, self.config.f)
 
 
@@ -302,7 +326,7 @@ class Extractor(Process):
         t = time.time()
 
         # Find the parameters of the line in the 3D point cloud
-        coeff = Grouping3D.findCoefficients(line_list)
+        coeff = Grouping3D.findCoefficients(line_list, self.config)
         log.debug("[" + self.filename + "] Time for finding coefficients: " + str(time.time() - t) + "s")
         
         if len(coeff) == 0:
