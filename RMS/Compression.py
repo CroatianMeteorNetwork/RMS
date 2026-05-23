@@ -153,7 +153,8 @@ class Compressor(multiprocessing.Process):
             ff.starttime = dt.isoformat(timespec='microseconds')
         
         # Write the FF file
-        FFfile.write(ff, self.data_dir, filename_millis, fmt=self.config.ff_format)
+        FFfile.write(ff, self.data_dir, filename_millis, fmt=self.config.ff_format,
+                     compress=self.config.hdu_compress)
         
         return filename_millis, filename_micros
 
