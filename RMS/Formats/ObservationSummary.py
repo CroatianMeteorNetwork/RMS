@@ -996,7 +996,8 @@ def retrieveObservationData(conn, config, night_directory=None, ordering=None):
                     'capture_duration_from_ephemeris', 'total_expected_fits_ephemeris', 'fits_file_shortfall_ephemeris',
                     'fits_file_shortfall_as_time_ephemeris',
                     'detections_after_ml',
-                    'media_backend','protocol_in_use','jitter_quality','dropped_frame_rate']
+                    'media_backend','protocol_in_use','jitter_quality','dropped_frame_rate',
+                    'traceback_count']
 
     # Use this print call to check the ordering
     # print("Ordering {}".format(ordering))
@@ -1202,6 +1203,76 @@ def startObservationSummaryReport(config, duration, force_delete=False):
 
     return "Opening a new observations summary"
 
+def countTracebacksInLogs(config):
+    """Count the number of tracebacks in log files from the current session.
+
+    Scans all log files in the log directory that were modified after the session's
+    start_time (from the observation database) for lines containing 'Traceback
+    (most recent call last)'.
+
+    Arguments:
+        config: [config] RMS configuration instance.
+
+    Return:
+        count: [int] Number of tracebacks found, or 0 if logs cannot be read.
+    """
+
+    log_dir = os.path.join(config.data_dir, config.log_dir)
+
+    if not os.path.isdir(log_dir):
+        return 0
+
+    # Get the session start time from the observation database to filter log files
+    try:
+        conn = getObsDBConn(config)
+        if conn is None:
+            return 0
+        cursor = conn.cursor()
+        row = cursor.execute(
+            "SELECT Value FROM records WHERE Key = 'start_time' ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        conn.close()
+        if row is None:
+            return 0
+        session_start_str = row[0]
+        # Parse the start time — handle both with and without fractional seconds
+        for fmt in ("%Y-%m-%d %H:%M:%S%z", "%Y-%m-%d %H:%M:%S"):
+            try:
+                session_start = datetime.datetime.strptime(session_start_str.replace("+00:00", ""), fmt)
+                break
+            except ValueError:
+                continue
+        else:
+            return 0
+    except Exception:
+        return 0
+
+    # Find log files modified after the session start
+    traceback_count = 0
+    log_pattern = "log_{}_".format(config.stationID)
+
+    for filename in sorted(os.listdir(log_dir)):
+        if not filename.endswith(".log") or log_pattern not in filename:
+            continue
+
+        filepath = os.path.join(log_dir, filename)
+
+        # Only consider log files modified after the session started
+        file_mtime = UTCFromTimestamp.utcfromtimestamp(os.path.getmtime(filepath))
+        if file_mtime < session_start:
+            continue
+
+        try:
+            with open(filepath, 'r', errors='replace') as f:
+                for line in f:
+                    if 'Traceback (most recent call last)' in line:
+                        traceback_count += 1
+        except Exception:
+            continue
+
+    return traceback_count
+
+
 def finalizeObservationSummary(config, night_data_dir, platepar=None):
 
     """ Enters the parameters known at the end of observation into the database.
@@ -1267,6 +1338,10 @@ def finalizeObservationSummary(config, night_data_dir, platepar=None):
         addObsParam(obs_db_conn, "remote_branch", os.path.basename(remote_branch))
     except:
         addObsParam(obs_db_conn, "repository_lag_remote_days", "Not determined")
+
+    # Scan log files for tracebacks during this session
+    addObsParam(obs_db_conn, "traceback_count", countTracebacksInLogs(config))
+
     obs_db_conn.close()
 
     writeToFile(config, getRMSStyleFileName(night_data_dir, "observation_summary.txt"), night_data_dir)
