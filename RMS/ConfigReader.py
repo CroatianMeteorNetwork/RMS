@@ -613,7 +613,8 @@ class Config:
         self.ml_filter = 0.5
 
         # Path to the ML model
-        self.ml_model_path = os.path.join(self.rms_root_dir, "share", "hyper_model.tflite")
+        self.ml_model_file = 'hyper_model.tflite'
+        self.ml_model_path = os.path.join(self.rms_root_dir, "share", self.ml_model_file)
 
         # Detection border (in pixels) - detections too close to the border of the mask will be rejected
         self.detection_border = 5
@@ -1668,15 +1669,21 @@ def parseMeteorDetection(config, parser):
     if parser.has_option(section, "min_patch_intensity_multiplier"):
         config.min_patch_intensity_multiplier = parser.getfloat(section, "min_patch_intensity_multiplier")
 
+    if parser.has_option(section, "ml_model_file"):
+        config.ml_model_file = parser.get(section, "ml_model_file")
+        config.ml_model_path = os.path.join(config.rms_root_dir, "share", config.ml_model_file)
+
     if parser.has_option(section, "ml_filter"):
         # since most of the old configs have threshold 0.85, and the current model is calibrated to 0.5,
-        # we need to rescale the value here
-        config.ml_filter = parser.getfloat(section, "ml_filter") * 0.5/0.85
+        # we need to rescale the value here - only for new model
+        if (config.ml_model_file == "hyper_model.tflite"):
+            config.ml_filter = parser.getfloat(section, "ml_filter") * 0.5/0.85
+        else:
+            config.ml_filter = parser.getfloat(section, "ml_filter")
 
         # Disable the min_patch_intensity filter if the ML filter is used and the ML library is available
         if TFLITE_AVAILABLE and (config.ml_filter > 0):
             config.min_patch_intensity_multiplier = 0
-
 
     if parser.has_option(section, "detection_border"):
         config.detection_border = parser.getint(section, "detection_border")
