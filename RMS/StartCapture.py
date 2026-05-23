@@ -827,6 +827,9 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
                 # Get the detection results from the queue
                 detection_results = detector.getResults()
 
+                # Shut down the Manager server process now that results are collected
+                detector.shutdownManager()
+
             else:
 
                 detection_results = []

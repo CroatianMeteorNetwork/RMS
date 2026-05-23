@@ -874,6 +874,7 @@ def extractStarsAndSave(config, ff_dir):
         workpool.closePool()
 
         results = workpool.getResults()
+        workpool.shutdownManager()
 
 
     # Get extraction results
