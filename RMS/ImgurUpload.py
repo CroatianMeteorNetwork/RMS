@@ -2,10 +2,6 @@
 
 from __future__ import print_function, division, absolute_import
 
-# Imgur RMS client ID
-CLIENT_ID = "ca85d1ed0b3fa85"
-
-
 import base64
 import json
 
@@ -15,6 +11,7 @@ try:
 except ImportError:
     import urllib2
     import urllib
+
 
 
 
@@ -44,7 +41,8 @@ def imgurUpload(file_path, image_data=None):
 
 
 	# Upload the image
-	headers = {'Authorization': 'Client-ID ' + CLIENT_ID}
+	client_id = os.environ.get('IMGUR_CLIENT_ID', 'ca85d1ed0b3fa85')
+	headers = {'Authorization': 'Client-ID ' + client_id}
 	data = {'image': b64_image, 'title': 'test'} # create a dictionary.
 
 	request = urllib2.Request(url="https://api.imgur.com/3/upload.json", 
