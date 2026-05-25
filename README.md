@@ -78,7 +78,7 @@ conda install -y -c conda-forge gstreamer==1.22.3 gobject-introspection gst-liba
 Next, clone this repository and install the RMS code as a package:
 
 ```bash
-git clone [https://github.com/CroatianMeteorNetwork/RMS.git](https://github.com/CroatianMeteorNetwork/RMS.git)
+git clone https://github.com/CroatianMeteorNetwork/RMS.git
 cd RMS
 pip install .
 ```
