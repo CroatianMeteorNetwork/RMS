@@ -10,6 +10,27 @@ import pickle
 from RMS.Misc import mkdirP
 
 
+class RestrictedUnpickler(pickle.Unpickler):
+    """Restricted unpickler that only allows safe built-in types."""
+
+    SAFE_BUILTINS = {
+        'builtins',
+    }
+
+    def find_class(self, module, name):
+        # Only allow safe built-in types, block everything else
+        if module not in self.SAFE_BUILTINS:
+            raise pickle.UnpicklingError(
+                "global '%s.%s' is forbidden" % (module, name)
+            )
+        return super(RestrictedUnpickler, self).find_class(module, name)
+
+
+def restricted_loads(s, **kwargs):
+    """Load a pickle with restricted unpickler for safety."""
+    return RestrictedUnpickler(s, **kwargs).load()
+
+
 
 
 def savePickle(obj, dir_path, file_name):
@@ -50,7 +71,7 @@ def loadPickle(dir_path, file_name):
 
             # Python 3
             else:
-                return pickle.load(f, encoding='latin1')
+                return restricted_loads(f, encoding='latin1')
 
         except (IOError, EOFError, TypeError, KeyError, pickle.UnpicklingError):
             
