@@ -1204,8 +1204,11 @@ class InputTypeVideo(InputType):
 
             video_frames.append(frame)
 
-        # Set the frame cursor back to the frame it was before
-        self.cap.set(1, self.current_frame)
+        # After preloading all frames into RAM, avoid seeking GStreamer back to frame 0:
+        # a flush seek on an EOS'd pipeline deadlocks GStreamer's internal threads.
+        # The cap position is irrelevant once video_frames is populated.
+        if not self.preload_video:
+            self.cap.set(1, self.current_frame)
 
         return video_frames
 

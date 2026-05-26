@@ -379,8 +379,10 @@ class GstVideoFile():
     def read(self):
         """ Read a frame from the video file. """
 
-        # Use timed try-pull to prevent indefinite blocking at end-of-stream or pipeline stalls
-        sample = self.device.emit("try-pull-sample", 500 * Gst.MSECOND)
+        # Use timed try-pull to prevent indefinite blocking at end-of-stream or pipeline stalls.
+        # 5-second timeout: long enough for I-frame decode after a flush seek, short enough to
+        # detect true EOS (pipeline sends EOS event which unblocks try-pull-sample immediately).
+        sample = self.device.emit("try-pull-sample", 5000 * Gst.MSECOND)
 
         if not sample:
             return False, None

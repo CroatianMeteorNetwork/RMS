@@ -620,6 +620,9 @@ def getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, 
             # Load the frame
             fr_img = img_handle.loadFrame()
 
+            # Skip frame if video read returned None (e.g. GStreamer timeout or past EOS)
+            if fr_img is None:
+                continue
 
             # Apply the dark frame
             if dark is not None:
