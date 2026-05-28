@@ -499,8 +499,8 @@ def setCameraParam(cam, opts):
         if subfld not in intfields:
             # the two non-int fields in ExposureParam are the exposure times. 
             # These are stored in microseconds converted to hex strings.
-            if val < 100 or val > 80000: 
-                log.info('Exposure must be between 100 and 80000 microsecs')
+            if val < 10 or val > 80000:
+                log.info('Exposure must be between 10 and 80000 microsecs')
                 return
             val = "0x%8.8X" % (int(val))
         fldToSet = 'Camera.Param.[0].' + fld
