@@ -67,8 +67,7 @@ def breakHandler(signum, frame):
     # Set the flag to stop capturing video
     STOP_CAPTURE = True
 
-    # This log entry is an adhoc fix to prevents Ctrl+C failure until the root cause is identified
-    log.info("Ctrl+C pressed. Setting STOP_CAPTURE to True")
+    log.info("SIGINT received. Setting STOP_CAPTURE to True")
 
 # Save the original event for the Ctrl+C
 ORIGINAL_BREAK_HANDLE = signal.getsignal(signal.SIGINT)
@@ -507,8 +506,8 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
                         # Clean up the dead process
                         try:
                             bc.join(timeout=1)
-                        except:
-                            pass
+                        except Exception as e:
+                            log.warning('WATCHDOG: Error while cleaning up dead BufferedCapture process: %s', e)
 
                     # Wait a moment before restart to avoid rapid restart loops
                     time.sleep(5)
@@ -622,6 +621,11 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
             if (daytime_mode is not None):
                 daytime_mode_prev = daytime_mode.value
 
+            # Record start time and original duration for remaining-time calculation
+            # after watchdog restarts (wait() resets its timer on each call)
+            capture_loop_start = RmsDateTime.utcnow()
+            original_duration = duration
+
             # Wait loop with watchdog restart capability
             watchdog_restart_count = 0
             while True:
@@ -665,12 +669,18 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
                     log.info('WATCHDOG: BufferedCapture restarted successfully, capture continuing')
 
-                    # Recalculate remaining capture duration based on current time
-                    # This prevents the duration timer from resetting to the full night length
-                    # Only needed in standard mode - continuous mode uses daytime_mode switching instead
-                    if not config.continuous_capture:
-                        _, duration = captureDuration(config.latitude, config.longitude, config.elevation)
-                        log.info('WATCHDOG: Recalculated remaining capture duration: {:.2f} hours'.format(duration/3600))
+                    # Recalculate remaining duration from the original budget, accounting
+                    # for time already elapsed.  Works for both user-specified --duration
+                    # and astronomical night durations (wait() resets its timer each call).
+                    if original_duration is not None:
+                        elapsed = (RmsDateTime.utcnow() - capture_loop_start).total_seconds()
+                        duration = original_duration - elapsed
+                        if duration <= 0:
+                            log.info('WATCHDOG: Capture duration expired during restart '
+                                     '(elapsed: {:.2f} h), stopping'.format(elapsed / 3600))
+                            break
+                        log.info('WATCHDOG: Remaining capture duration: {:.2f} h '
+                                 '(elapsed: {:.2f} h)'.format(duration / 3600, elapsed / 3600))
 
                     continue
                 else:
@@ -1195,6 +1205,8 @@ if __name__ == "__main__":
     # Automatic running and stopping the capture at sunrise and sunset
     ran_once = False
     slideshow_view = None
+    switcher_stop_event = None
+    capture_switcher = None
     while True:
 
         if config.continuous_capture:
@@ -1270,6 +1282,10 @@ if __name__ == "__main__":
 
                 ### ###
 
+            # If reboot didn't happen in continuous capture mode, reset so capture resumes normally
+            if config.continuous_capture:
+                log.warning("Reboot failed after 4 hours of attempts, resuming capture")
+                ran_once = False
 
 
         # Don't start the capture if there's less than 15 minutes left
@@ -1464,17 +1480,26 @@ if __name__ == "__main__":
 
 
         if config.continuous_capture:
-            
+
+            # Stop the previous capture mode switcher thread if it's still running
+            if switcher_stop_event is not None:
+                log.info('Stopping previous capture mode switcher thread...')
+                switcher_stop_event.set()
+                capture_switcher.join(timeout=10)
+                if capture_switcher.is_alive():
+                    log.warning('Previous capture mode switcher thread did not stop in time')
+
             # Setup shared value to communicate day/night switch between processes.
             daytime_mode = multiprocessing.Value(ctypes.c_bool, False)
             camera_mode_switch_trigger = multiprocessing.Value(ctypes.c_bool, True)
 
             # Setup the capture mode switcher on another thread
-            capture_switcher = threading.Thread(target=captureModeSwitcher, args=(config, daytime_mode, camera_mode_switch_trigger))
-            
+            switcher_stop_event = threading.Event()
+            capture_switcher = threading.Thread(target=captureModeSwitcher, args=(config, daytime_mode, camera_mode_switch_trigger, switcher_stop_event))
+
             # To make sure the capture switcher thread exits automatically at the end
             capture_switcher.daemon = True
-            
+
             capture_switcher.start()
 
             # Wait for the switcher to complete calculation and switch to correct camera mode

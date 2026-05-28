@@ -32,7 +32,6 @@ import uuid
 import random
 import string
 
-
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, correctVignetting, extinctionCorrectionApparentToTrue
 from matplotlib import pyplot as plt
 from RMS.Routines.MaskImage import loadMask
@@ -427,7 +426,7 @@ class EventContainer(object):
             population: [list] population of events.
 
         Keyword arguments:
-            seed: [int] seed for random number generation, if default NOne, the seed is randomised
+            seed: [int] seed for random number generation, if default None, the seed is randomised
 
         Return:
             population: [list] population of events.
@@ -770,7 +769,7 @@ class EventMonitor(multiprocessing.Process):
 
         log.info("EventMonitor is starting")
         log.info("Monitoring {} ".format(self.syscon.event_monitor_webpage))
-        log.info("At {:3.2f} minute intervals".format(self.syscon.event_monitor_check_interval))
+        log.info("At {:05.1f} minute intervals".format(self.syscon.event_monitor_check_interval))
         log.info("Reporting data to {}/{}".format(self.syscon.hostname, self.syscon.event_monitor_remote_dir))
 
     def createDB(self):
@@ -1644,7 +1643,7 @@ class EventMonitor(multiprocessing.Process):
                                 If None, then self.config.video_dir and self.config.frame_dir
                                 are searched.
 
-            suffix_list: [list] List of suffixes to search in the same order as search_from_list. If not passsed
+            suffix_list: [list] List of suffixes to search in the same order as search_from_list. If not passed
                                 then ['mkv', 'jpg'] are used.
             duration_list: [list] List of durations, same order as search_from_list. If not passed, then
                                 [self.config.raw_video_duration, self.config.frame_save_aligned_interval]
@@ -1668,7 +1667,7 @@ class EventMonitor(multiprocessing.Process):
         if duration_list is None:
             duration_list = [self.config.raw_video_duration, self.config.frame_save_aligned_interval]
 
-        # Populate the candidate file set with al the files from the list of starting search points
+        # Populate the candidate file set with all the files from the list of starting search points
         for search_from, suffix, duration in zip(search_from_list, suffix_list, duration_list):
             candidate_file_set = set()
             search_from = os.path.join(self.config.data_dir, search_from)
@@ -2526,24 +2525,35 @@ class EventMonitor(multiprocessing.Process):
             self.getEventsAndCheck(last_check_start_time,next_check_start_time)
             last_check_start_time = check_start_time
 
-            start_time, duration = captureDuration(self.syscon.latitude, self.syscon.longitude, self.syscon.elevation)
+            start_time, duration = captureDuration(self.syscon.latitude,
+                                                   self.syscon.longitude,
+                                                   self.syscon.elevation,
+                                                   continuous_capture=self.syscon.continuous_capture)
 
             if not isinstance(start_time, bool):
 
                 time_left_before_start = (start_time - RmsDateTime.utcnow())
                 time_left_before_start = time_left_before_start - datetime.timedelta(microseconds=time_left_before_start.microseconds)
-                time_left_before_start_minutes = int(time_left_before_start.total_seconds()/60)
+                time_left_before_start_minutes = time_left_before_start.total_seconds()/60
                 next_check_start_time = (RmsDateTime.utcnow() + datetime.timedelta(minutes=self.check_interval))
                 next_check_start_time_str = next_check_start_time.replace(microsecond=0).strftime('%H:%M:%S')
-                log.info('Next EventMonitor run : {} UTC; {:3.1f} minutes from now'.format(next_check_start_time_str, int(self.check_interval)))
+                log.info('Next EventMonitor run     : {} UTC; {:05.1f} minutes from now'.format(next_check_start_time_str,
+                                                                                         self.check_interval))
                 if time_left_before_start_minutes < 120:
-                    log.debug('Next Capture start    : {} UTC; {:3.1f} minutes from now'.format(str(start_time.strftime('%H:%M:%S')),time_left_before_start_minutes))
+                    log.info('Next night capture start  : {} UTC; {:05.1f} minutes from now'.format(str(start_time.strftime('%H:%M:%S')),
+                                                                                             time_left_before_start_minutes))
                 else:
-                    log.debug('Next Capture start    : {} UTC'.format(str(start_time.strftime('%H:%M:%S'))))
+                    log.info('Next night capture start  : {} UTC'.format(str(start_time.strftime('%H:%M:%S'))))
             else:
                 next_check_start_time = (RmsDateTime.utcnow() + datetime.timedelta(minutes=self.check_interval))
                 next_check_start_time_str = next_check_start_time.replace(microsecond=0).strftime('%H:%M:%S')
-                log.info('Next EventMonitor run : {} UTC {:3.1f} minutes from now'.format(next_check_start_time_str, self.check_interval))
+                log.info('Next EventMonitor run         : {} UTC {:05.1f} minutes from now'.format(next_check_start_time_str,
+                                                                                           self.check_interval))
+                end_time = RmsDateTime.utcnow() + datetime.timedelta(seconds=duration)
+                time_left_before_end_minutes = duration / 60
+                if time_left_before_end_minutes < 120:
+                    log.info('Night capture end         : {} UTC; {:05.1f} minutes from now'.format(str(end_time.strftime('%H:%M:%S')),
+                                                                                             time_left_before_end_minutes))
             # Wait for the next check
             self.exit.wait(60*self.check_interval)
             # Increase the check interval

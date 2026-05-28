@@ -234,28 +234,26 @@ class BufferedCapture(Process):
             log.info("Capture joined successfully after {} seconds".format(seconds_waited))
         else:
             log.info("Timed out after waiting {} seconds, capture thread still alive".format(seconds_waited))
-            log.info("Sending interrupt signal for graceful shutdown...")
-            
+            log.info("Terminating capture process...")
+
             try:
-                # Send SIGINT to allow child process to clean up gracefully
-                if self.pid:
-                    os.kill(self.pid, signal.SIGINT)
-                
+                # Use SIGTERM (terminate) instead of SIGINT to avoid triggering
+                # the main process SIGINT handler via process group propagation
+                self.terminate()
+
                 # Wait a few seconds for graceful shutdown
                 self.join(5)
-                
+
                 if self.is_alive():
-                    log.warning("Process still alive after interrupt, forcing termination")
-                    self.terminate()
+                    log.warning("Process still alive after terminate, sending SIGKILL...")
+                    os.kill(self.pid, signal.SIGKILL)
                 else:
-                    log.info("Process exited gracefully after interrupt")
-                    
+                    log.info("Process terminated successfully")
+
             except ProcessLookupError:
                 log.info("Process already terminated")
             except Exception as e:
-                log.error("Error during graceful shutdown: {}".format(e))
-                log.info("Falling back to terminate()")
-                self.terminate()
+                log.error("Error during termination: {}".format(e))
             
             # Always join to reap zombie (returns instantly if already dead)
             self.join()
@@ -770,21 +768,28 @@ class BufferedCapture(Process):
             stride (int): Spacing for diagonal sampling, skipping many pixels for efficiency.
 
         Returns:
-            bool: True if all sampled channels match (or frame is single-channel), otherwise False.
+            bool or None: True if all sampled channels match (or frame is single-channel),
+                False if channels differ (color), or None if inconclusive (all pixels are
+                the same value, e.g. all white or all black).
         """
         if frame is None:
             raise ValueError("isGrayscale() called with frame=None")
-        
+
         # We don't explicitly check frame.shape first; instead we rely on an IndexError
         # if 'frame' is single-channel (which is inherently grayscale).
-        # This is faster than an extra dimension check for most BGR GMN stations 
+        # This is faster than an extra dimension check for most BGR GMN stations
 
         try:
             # If diagonal samples are not identical, frame is color
             sampled = frame[::stride, ::stride]
             is_gray = np.all(sampled[..., 0] == sampled[..., 1]) and \
                     np.all(sampled[..., 1] == sampled[..., 2])
-            
+
+            # If all sampled pixels have the same value (e.g. all white or all black),
+            # the check is inconclusive — channels match trivially
+            if is_gray and np.all(sampled[..., 0] == sampled[0, 0, 0]):
+                return None
+
         except IndexError:
              # If IndexError, frame is grayscale
             is_gray = True
@@ -1408,8 +1413,10 @@ class BufferedCapture(Process):
                     buffer.unmap(map_info)
                     
                     # Check if frame is grayscale and set flag
-                    self.convert_to_gray = self.isGrayscale(frame)
-                    log.info("Video format: {}, {}P, color: {}".format(self.config.gst_colorspace, height, 
+                    gray_result = self.isGrayscale(frame)
+                    if gray_result is not None:
+                        self.convert_to_gray = gray_result
+                    log.info("Video format: {}, {}P, color: {}".format(self.config.gst_colorspace, height,
                                                                        not self.convert_to_gray))
 
                     # Set the video device type
@@ -1611,25 +1618,26 @@ class BufferedCapture(Process):
                 self.raw_frame_saver.stop()
                 self.raw_frame_saver.join(5)
                 if self.raw_frame_saver.is_alive():
-                    log.warning("RawFrameSaver still busy. Sending interrupt signal...")
+                    log.warning("RawFrameSaver still busy. Terminating...")
                     try:
-                        if self.raw_frame_saver.pid:
-                            os.kill(self.raw_frame_saver.pid, signal.SIGINT)
-                        
+                        # Use terminate (SIGTERM) instead of SIGINT to avoid triggering
+                        # the main process SIGINT handler via process group propagation
+                        self.raw_frame_saver.terminate()
+
                         # Wait for graceful shutdown
                         self.raw_frame_saver.join(3)
-                        
+
                         if self.raw_frame_saver.is_alive():
-                            log.warning("RawFrameSaver still alive after interrupt, forcing termination")
-                            self.raw_frame_saver.terminate()
+                            log.warning("RawFrameSaver still alive after terminate, sending SIGKILL...")
+                            os.kill(self.raw_frame_saver.pid, signal.SIGKILL)
                             self.raw_frame_saver.join()
                         else:
-                            log.info("RawFrameSaver exited gracefully after interrupt")
-                            
+                            log.info("RawFrameSaver terminated successfully")
+
                     except ProcessLookupError:
                         log.info("RawFrameSaver already terminated")
                     except Exception as e:
-                        log.error("Error during graceful RawFrameSaver shutdown: {}".format(e))
+                        log.error("Error during RawFrameSaver termination: {}".format(e))
                         self.raw_frame_saver.terminate()
                         self.raw_frame_saver.join()
             finally:
@@ -1722,7 +1730,7 @@ class BufferedCapture(Process):
             self.pipeline = None
             self.start_timestamp = 0
             self.frame_shape = None
-            self.convert_to_gray = False
+            self.convert_to_gray = not (self.daytime_mode.value if self.daytime_mode is not None else False)
             self.last_pts_correction_ns = 0
             self.last_running_time_ns = None
 
@@ -1902,7 +1910,9 @@ class BufferedCapture(Process):
                     # If the connection was made and the frame was retrieved, continue with the capture
                     if ret:
                         log.info('Video device reconnected successfully!')
-                        self.convert_to_gray = self.isGrayscale(frame)
+                        gray_result = self.isGrayscale(frame)
+                        if gray_result is not None:
+                            self.convert_to_gray = gray_result
                         wait_for_reconnect = False
                         break
 
@@ -1963,7 +1973,9 @@ class BufferedCapture(Process):
 
                 # Check if frame contains color information
                 if save_this_frame:
-                    self.convert_to_gray = self.isGrayscale(frame)
+                    gray_result = self.isGrayscale(frame)
+                    if gray_result is not None:
+                        self.convert_to_gray = gray_result
 
                 # Handling for grayscale conversion
                 frame = self.handleGrayscaleConversion(frame)
@@ -2161,7 +2173,7 @@ class BufferedCapture(Process):
                         current_daytime = self.daytime_mode.value if self.daytime_mode is not None else False
                         if self.last_daytime_mode is not None and self.last_daytime_mode != current_daytime:
                             # Transition detected (either day→night or night→day)
-                            transition_type = "Day→Night" if not current_daytime else "Night→Day"
+                            transition_type = "Day->Night" if not current_daytime else "Night->Day"
                             log.info(f"{transition_type} transition detected, resetting counters and media backend")
 
                             # Update last_daytime_mode BEFORE breaking to prevent detecting same transition again
@@ -2170,6 +2182,12 @@ class BufferedCapture(Process):
                             # Reset dropped frames counter for new session
                             self.dropped_frames.value = 0
                             self.dropped_frames_timestamps.clear()
+
+                            # Reset last_frame_timestamp so the reconnection gap after a
+                            # planned transition is not counted as dropped frames. For
+                            # unexpected disconnects this is NOT reset, so those gaps are
+                            # still properly counted.
+                            last_frame_timestamp = False
 
                             # Reset PTS smoothing reset counter for new session
                             self.reset_count = -1

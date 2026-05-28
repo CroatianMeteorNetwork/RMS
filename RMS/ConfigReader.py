@@ -218,7 +218,7 @@ def loadConfigFromDirectory(cml_args_config, dir_path):
 
 
         if config_file is None:
-            raise FileNotFoundError("A config file could not be found in directory: {:s}, {:s}".format(
+            raise FileNotFoundError("A config file could not be found in directory: {:s}, config arg: {}".format(
                 dir_path, cml_args_config))
 
         print('Loading config file:', config_file)
@@ -645,10 +645,10 @@ class Config:
         self.dark_file = 'dark.bmp'
 
         self.star_catalog_path = os.path.join(self.rms_root_dir, 'Catalogs')
-        self.star_catalog_file = 'gaia_dr2_mag_11.5.npy'
+        self.star_catalog_file = 'GMN_StarCatalog'
 
         # Catalog band ratios for Sony CMOS cameras
-        #                                   B     V     R     I   (G    BR    BR)
+        #                                   B     V     R     I    G     BP    RP
         self.star_catalog_band_ratios = [0.15, 0.30, 0.25, 0.30, 0.00, 0.0, 0.00]
 
         self.platepar_name = 'platepar_cmn2010.cal'
