@@ -3330,8 +3330,16 @@ def calstarRaDecToDict(data_dir_path, config, pp, pp_recal_json, r_target, d_tar
             radius = np.hypot(y - pp.Y_res/2, x - pp.X_res/2)
             actual_deviation_degrees = angularSeparationDeg(r_target, d_target, r, d)
             vignetting, offset = pp.vignetting_coeff, pp.mag_lev
-            if correctVignetting(intens_sum, radius, vignetting) > 0.00001:
-                mag_recalc = 0 - 2.5*np.log10(correctVignetting(intens_sum, radius, vignetting)) + offset
+            px_corr = correctVignetting(intens_sum, radius, vignetting)
+            if px_corr > 0.00001:
+                mag_recalc = -2.5*np.log10(px_corr) + offset
+                # Apply polynomial vignetting residual if calibrated
+                vp = getattr(pp, 'vignetting_poly', None)
+                if vp is not None and len(vp) >= 3:
+                    a2, a4, hd = vp
+                    if hd > 0 and (abs(a2) > 0 or abs(a4) > 0):
+                        rn = radius / hd
+                        mag_recalc -= (a2*rn**2 + a4*rn**4)
                 mag_recalc = extinctionCorrectionApparentToTrue([mag_recalc], [x], [y], j, pp)[0]
             else:
                 mag_recalc = 0

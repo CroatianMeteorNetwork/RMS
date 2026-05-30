@@ -216,6 +216,22 @@ class Platepar(object):
         # Extinction correction scaling
         self.extinction_scale = 0.6
 
+        # Polynomial vignetting residual correction [a2, a4, half_diag] on top of cos^4.
+        # half_diag is computed from X_res/Y_res and stored so that the coefficients are
+        # tied to the normalization used during fitting.
+        self.vignetting_poly = [0.0, 0.0, 0.0]
+
+        # Saturation correction for bright stars (calibration-only: uses catalog magnitudes
+        # to identify likely-saturated stars, so this correction applies during star matching
+        # but not during meteor magnitude computation where no catalog mag is available).
+        self.saturation_slope = 0.0
+        self.saturation_mag_break = 5.0
+
+        # Chromatic vignetting: position-dependent color term [ct0, ct_r2, ct_r4, pivot].
+        # Not yet wired into pipeline callers -- requires star colors from the catalog
+        # (BP-RP) which are not currently passed through the photometry fitting chain.
+        self.chromatic_vignetting = [0.0, 0.0, 0.0, 1.5]
+
         self.station_code = "None"
 
         self.star_list = None
@@ -1013,6 +1029,23 @@ class Platepar(object):
         # Add extinction scale
         if not 'extinction_scale' in self.__dict__:
             self.extinction_scale = 1.0
+
+        # Add polynomial vignetting residual correction
+        if not 'vignetting_poly' in self.__dict__:
+            self.vignetting_poly = [0.0, 0.0, 0.0]
+        elif len(self.vignetting_poly) == 2:
+            hd = np.hypot(self.X_res / 2, self.Y_res / 2) if hasattr(self, 'X_res') else 0.0
+            self.vignetting_poly = list(self.vignetting_poly) + [hd]
+
+        # Add saturation correction
+        if not 'saturation_slope' in self.__dict__:
+            self.saturation_slope = 0.0
+        if not 'saturation_mag_break' in self.__dict__:
+            self.saturation_mag_break = 5.0
+
+        # Add chromatic vignetting parameters
+        if not 'chromatic_vignetting' in self.__dict__:
+            self.chromatic_vignetting = [0.0, 0.0, 0.0, 1.5]
 
         # Add the list of calibration stars if it was not in the platepar
         if not 'star_list' in self.__dict__:

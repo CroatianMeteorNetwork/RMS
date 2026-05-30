@@ -496,10 +496,17 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
         catalog_mags = extinctionCorrectionTrueToApparent(catalog_mags, catalog_ra, catalog_dec, max_jd, \
             platepar)
 
+        # Build correction params from platepar
+        vignetting_poly = getattr(platepar, 'vignetting_poly', None)
+        sat_slope = getattr(platepar, 'saturation_slope', 0.0)
+        sat_break = getattr(platepar, 'saturation_mag_break', 5.0)
+        sat_params = (sat_slope, sat_break, catalog_mags) if sat_slope != 0 else None
+
         # Fit the photometry on automated star intensities (use the fixed vignetting coeff, use robust fit)
         photom_params, fit_stddev, fit_resid, star_intensities, radius_arr, catalog_mags = \
-            photometryFitRobust(star_intensities, radius_arr, catalog_mags, \
-            fixed_vignetting=platepar.vignetting_coeff)
+            photometryFitRobust(star_intensities, radius_arr, catalog_mags,
+            fixed_vignetting=platepar.vignetting_coeff, vignetting_poly=vignetting_poly,
+            saturation_params=sat_params)
 
 
         photom_offset, _ = photom_params

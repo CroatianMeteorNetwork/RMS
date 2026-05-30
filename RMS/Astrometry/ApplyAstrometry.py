@@ -212,17 +212,24 @@ def extinctionCorrectionApparentToTrue(mags, x_data, y_data, jd, platepar):
 
 
 
-def photomLine(input_params, photom_offset, vignetting_coeff):
+def photomLine(input_params, photom_offset, vignetting_coeff, vignetting_poly=None,
+               saturation_params=None, chromatic_params=None):
     """ Line used for photometry, the slope is fixed to -2.5, only the photometric offset is given.
+    Optionally applies polynomial vignetting residual, saturation, and chromatic vignetting corrections.
 
     Arguments:
         input_params: [tuple]
-            - px_sum: [float] sum of pixel intensities.
-            - radius: [float] Radius from the centre of the focal plane to the centroid.
+            - px_sum: [float or ndarray] sum of pixel intensities.
+            - radius: [float or ndarray] Radius from the centre of the focal plane to the centroid.
         photom_offset: [float] The photometric offset.
         vignetting_coeff: [float] Vignetting coefficient (rad/px).
+    Keyword arguments:
+        vignetting_poly: [tuple or None] (a2, a4, half_diag) polynomial residual vignetting.
+        saturation_params: [tuple or None] (slope, mag_break, catalog_mags) for saturation correction.
+        chromatic_params: [tuple or None] (ct0, ct_r2, ct_r4, pivot, half_diag, colors) for chromatic
+            vignetting correction.
     Return:
-        [float] Magnitude.
+        [float or ndarray] Magnitude.
     """
 
     px_sum, radius = input_params
@@ -231,11 +238,37 @@ def photomLine(input_params, photom_offset, vignetting_coeff):
     lsp = np.log10(correctVignetting(px_sum, radius, vignetting_coeff))
 
     # The slope is fixed to -2.5, this comes from the definition of magnitude
-    return -2.5*lsp + photom_offset
+    mag = -2.5*lsp + photom_offset
+
+    # Polynomial vignetting residual correction (applied as magnitude offset)
+    if vignetting_poly is not None:
+        a2, a4, half_diag = vignetting_poly
+        if half_diag > 0 and (abs(a2) > 0 or abs(a4) > 0):
+            rn = np.asarray(radius, dtype=np.float64) / half_diag
+            mag = mag - (a2*rn**2 + a4*rn**4)
+
+    # Saturation correction for bright stars
+    if saturation_params is not None:
+        slope, mag_break, catalog_mags = saturation_params
+        catalog_mags = np.asarray(catalog_mags, dtype=np.float64)
+        sat_corr = np.where(catalog_mags < mag_break, slope*(catalog_mags - mag_break), 0.0)
+        mag = mag - sat_corr
+
+    # Chromatic vignetting correction
+    if chromatic_params is not None:
+        ct0, ct_r2, ct_r4, pivot, half_diag, colors = chromatic_params
+        colors = np.asarray(colors, dtype=np.float64)
+        c = np.where(np.isfinite(colors), colors - pivot, 0.0)
+        rn = np.asarray(radius, dtype=np.float64) / half_diag if half_diag > 0 else 0.0
+        chrom_corr = (ct0 + ct_r2*rn**2 + ct_r4*rn**4) * c
+        mag = mag - chrom_corr
+
+    return mag
 
 
 
-def photomLineMinimize(params, px_sum, radius, catalog_mags, fixed_vignetting, weights):
+def photomLineMinimize(params, px_sum, radius, catalog_mags, fixed_vignetting, weights,
+                       vignetting_poly=None, saturation_params=None, chromatic_params=None):
     """ Modified photomLine function used for minimization. The function uses the L1 norm for minimization.
 
     Arguments:
@@ -248,6 +281,10 @@ def photomLineMinimize(params, px_sum, radius, catalog_mags, fixed_vignetting, w
         fixed_vignetting: [float] Fixed vignetting coefficient. None by default, in which case it will be
             computed.
         weights: [ndarray] Weights for the fit.
+    Keyword arguments:
+        vignetting_poly: [tuple or None] Passed to photomLine.
+        saturation_params: [tuple or None] Passed to photomLine.
+        chromatic_params: [tuple or None] Passed to photomLine.
 
     """
 
@@ -256,15 +293,19 @@ def photomLineMinimize(params, px_sum, radius, catalog_mags, fixed_vignetting, w
     if fixed_vignetting is not None:
         vignetting_coeff = fixed_vignetting
 
-    # Compute the sum of squred residuals
+    # Compute the weighted sum of absolute residuals (L1 norm)
     return np.sum(
-        weights*np.abs(catalog_mags - photomLine((px_sum, radius), photom_offset, vignetting_coeff))
+        weights*np.abs(catalog_mags - photomLine((px_sum, radius), photom_offset, vignetting_coeff,
+                                                  vignetting_poly=vignetting_poly,
+                                                  saturation_params=saturation_params,
+                                                  chromatic_params=chromatic_params))
         )
 
 
 
-def photometryFit(px_intens_list, radius_list, catalog_mags, fixed_vignetting=None, weights=None, 
-                  exclude_list=None):
+def photometryFit(px_intens_list, radius_list, catalog_mags, fixed_vignetting=None, weights=None,
+                  exclude_list=None, vignetting_poly=None, saturation_params=None,
+                  chromatic_params=None):
     """ Fit the photometry on given data.
 
     Arguments:
@@ -278,6 +319,9 @@ def photometryFit(px_intens_list, radius_list, catalog_mags, fixed_vignetting=No
         weights: [list] Weights for the fit. None by default, in which case the weights will be equal to 1.
         exclude_list: [list] A mask for excluding certain data points from the fit. None by default, in which
             case all data points will be used.
+        vignetting_poly: [tuple or None] (a2, a4, half_diag) polynomial vignetting residual correction.
+        saturation_params: [tuple or None] (slope, mag_break, catalog_mags) saturation correction.
+        chromatic_params: [tuple or None] (ct0, ct_r2, ct_r4, pivot, half_diag, colors) chromatic vignetting.
 
     Return:
         (photom_offset, fit_stddev, fit_resid):
@@ -308,10 +352,24 @@ def photometryFit(px_intens_list, radius_list, catalog_mags, fixed_vignetting=No
     catalog_mags_fit = np.array(catalog_mags)[exclude_list == 0]
     weights_fit = np.array(weights)[exclude_list == 0]
 
+    # Filter correction params for the fit subset
+    sat_fit = None
+    if saturation_params is not None:
+        slope, mag_break, sat_cat_mags = saturation_params
+        sat_cat_mags_fit = np.array(sat_cat_mags)[exclude_list == 0]
+        sat_fit = (slope, mag_break, sat_cat_mags_fit)
+
+    chrom_fit = None
+    if chromatic_params is not None:
+        ct0, ct_r2, ct_r4, pivot, half_diag, colors = chromatic_params
+        colors_fit = np.array(colors)[exclude_list == 0]
+        chrom_fit = (ct0, ct_r2, ct_r4, pivot, half_diag, colors_fit)
+
     # Fit a line to the star data, where only the intercept has to be estimated
     p0 = [10.0, 0.0]
-    res = scipy.optimize.minimize(photomLineMinimize, p0, args=(px_intens_list_fit, \
-        radius_list_fit, catalog_mags_fit, fixed_vignetting, weights_fit), method='Nelder-Mead')
+    res = scipy.optimize.minimize(photomLineMinimize, p0, args=(px_intens_list_fit,
+        radius_list_fit, catalog_mags_fit, fixed_vignetting, weights_fit,
+        vignetting_poly, sat_fit, chrom_fit), method='Nelder-Mead')
     photom_offset, vignetting_coeff = res.x
 
     # Handle the vignetting coeff
@@ -321,19 +379,21 @@ def photometryFit(px_intens_list, radius_list, catalog_mags, fixed_vignetting=No
 
     photom_params = (photom_offset, vignetting_coeff)
 
-    # Calculate the fit residuals
-    fit_resids = np.array(catalog_mags) - photomLine((np.array(px_intens_list), np.array(radius_list)), \
-        *photom_params)
-    
+    # Calculate the fit residuals (using unfiltered arrays for full residual vector)
+    fit_resids = np.array(catalog_mags) - photomLine(
+        (np.array(px_intens_list), np.array(radius_list)),
+        *photom_params, vignetting_poly=vignetting_poly,
+        saturation_params=saturation_params, chromatic_params=chromatic_params)
+
     # Compute the fit standard deviation excluding the excluded data points and including the weights
-    #fit_stddev = np.std(fit_resids[exclude_list == 0])
     fit_stddev = np.sqrt(np.sum(weights_fit*(fit_resids[exclude_list == 0])**2)/np.sum(weights_fit))
 
     return photom_params, fit_stddev, fit_resids
 
 
 
-def photometryFitRobust(px_intens_list, radius_list, catalog_mags, fixed_vignetting=None):
+def photometryFitRobust(px_intens_list, radius_list, catalog_mags, fixed_vignetting=None,
+                        vignetting_poly=None, saturation_params=None, chromatic_params=None):
     """ Fit the photometry on given data robustly by rejecting 2 sigma residuals several times.
 
     Arguments:
@@ -343,6 +403,9 @@ def photometryFitRobust(px_intens_list, radius_list, catalog_mags, fixed_vignett
     Keyword arguments:
         fixed_vignetting: [float] Fixed vignetting coefficient. None by default, in which case it will be
             computed.
+        vignetting_poly: [tuple or None] Polynomial vignetting residual correction.
+        saturation_params: [tuple or None] Saturation correction parameters.
+        chromatic_params: [tuple or None] Chromatic vignetting correction parameters.
     Return:
         (photom_offset, fit_stddev, fit_resid, px_intens_list, radius_list, catalog_mags):
             photom_params: [list]
@@ -366,8 +429,9 @@ def photometryFitRobust(px_intens_list, radius_list, catalog_mags, fixed_vignett
     for i in range(reject_iters):
 
         # Fit the photometry on automated star intensities (use the fixed vignetting coeff)
-        photom_params, fit_stddev, fit_resid = photometryFit(px_intens_list, radius_list, catalog_mags, \
-            fixed_vignetting=fixed_vignetting)
+        photom_params, fit_stddev, fit_resid = photometryFit(px_intens_list, radius_list, catalog_mags,
+            fixed_vignetting=fixed_vignetting, vignetting_poly=vignetting_poly,
+            saturation_params=saturation_params, chromatic_params=chromatic_params)
 
         # Skip the rejection in the last iteration
         if i < reject_iters - 1:
@@ -377,6 +441,14 @@ def photometryFitRobust(px_intens_list, radius_list, catalog_mags, fixed_vignett
             px_intens_list = px_intens_list[filter_indices]
             radius_list = radius_list[filter_indices]
             catalog_mags = catalog_mags[filter_indices]
+
+            # Keep per-star correction arrays in sync
+            if saturation_params is not None:
+                slope, mag_break, sat_mags = saturation_params
+                saturation_params = (slope, mag_break, np.array(sat_mags)[filter_indices])
+            if chromatic_params is not None:
+                ct0, ct_r2, ct_r4, pivot, hd, colors = chromatic_params
+                chromatic_params = (ct0, ct_r2, ct_r4, pivot, hd, np.array(colors)[filter_indices])
 
 
     return photom_params, fit_stddev, fit_resid, px_intens_list, radius_list, catalog_mags
@@ -606,7 +678,8 @@ def rotationWrtStandardToPosAngle(platepar, rot_angle):
 
 
 
-def calculateMagnitudes(px_sum_arr, radius_arr, photom_offset, vignetting_coeff):
+def calculateMagnitudes(px_sum_arr, radius_arr, photom_offset, vignetting_coeff,
+                        vignetting_poly=None):
     """ Calculate the magnitude of the data points with given magnitude calibration parameters.
 
     Arguments:
@@ -614,6 +687,8 @@ def calculateMagnitudes(px_sum_arr, radius_arr, photom_offset, vignetting_coeff)
         radius_arr: [ndarray] A list of radii from image centre (px).
         photom_offset: [float] Magnitude intercept, i.e. the photometric offset.
         vignetting_coeff: [float] Vignetting coefficient (rad/px).
+    Keyword arguments:
+        vignetting_poly: [tuple or None] (a2, a4, half_diag) polynomial vignetting residual.
     Return:
         magnitude_data: [ndarray] Apparent magnitude.
     """
@@ -633,6 +708,12 @@ def calculateMagnitudes(px_sum_arr, radius_arr, photom_offset, vignetting_coeff)
         # Save magnitude data to the output array
         magnitude_data[i] = -2.5*np.log10(px_sum_corr) + photom_offset
 
+    # Apply polynomial vignetting residual correction
+    if vignetting_poly is not None:
+        a2, a4, half_diag = vignetting_poly
+        if half_diag > 0 and (abs(a2) > 0 or abs(a4) > 0):
+            rn = np.asarray(radius_arr, dtype=np.float64) / half_diag
+            magnitude_data = magnitude_data - (a2*rn**2 + a4*rn**4)
 
     return magnitude_data
 
@@ -703,8 +784,10 @@ def xyToRaDecPP(time_data, X_data, Y_data, level_data, platepar, extinction_corr
     # Compute radii from image centre
     radius_arr = np.hypot(np.array(X_data) - platepar.X_res/2, np.array(Y_data) - platepar.Y_res/2)
 
-    # Calculate magnitudes
-    magnitude_data = calculateMagnitudes(level_data, radius_arr, platepar.mag_lev, platepar.vignetting_coeff)
+    # Calculate magnitudes (with polynomial vignetting residual if calibrated)
+    vignetting_poly = getattr(platepar, 'vignetting_poly', None)
+    magnitude_data = calculateMagnitudes(level_data, radius_arr, platepar.mag_lev,
+                                         platepar.vignetting_coeff, vignetting_poly=vignetting_poly)
 
     # Extinction correction
     if extinction_correction:

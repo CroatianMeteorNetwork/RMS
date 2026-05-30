@@ -351,12 +351,20 @@ def recalibrateFF(
             image_stars[:, 0] - working_platepar.Y_res / 2, image_stars[:, 1] - working_platepar.X_res / 2
         )
 
+        # Build correction params from platepar if available
+        vignetting_poly = getattr(working_platepar, 'vignetting_poly', None)
+        sat_slope = getattr(working_platepar, 'saturation_slope', 0.0)
+        sat_break = getattr(working_platepar, 'saturation_mag_break', 5.0)
+        sat_params = (sat_slope, sat_break, corrected_catalog_mags) if sat_slope != 0 else None
+
         # Fit the photometry on automated star intensities (use the fixed vignetting coeff, use robust fit)
         photom_params, fit_stddev, _, _, _, _ = photometryFitRobust(
             star_intensities,
             radius_arr,
             corrected_catalog_mags,
             fixed_vignetting=working_platepar.vignetting_coeff,
+            vignetting_poly=vignetting_poly,
+            saturation_params=sat_params,
         )
         photom_offset = photom_params[0]
 
