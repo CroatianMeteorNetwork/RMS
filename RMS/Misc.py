@@ -132,10 +132,11 @@ def runWithTimeout(func, args=(), kwargs=None, timeout=60, on_late_completion=No
         finally:
             completed.set()
             if timed_out[0] and on_late_completion is not None:
+                log.debug("runWithTimeout: function completed after caller timed out; running late cleanup")
                 try:
                     on_late_completion()
-                except Exception:
-                    pass
+                except Exception as e:
+                    log.debug("runWithTimeout: on_late_completion failed: %s", e)
 
     thread = threading.Thread(target=target)
     thread.daemon = True
