@@ -160,7 +160,8 @@ def getSSHClient(hostname,
     # Try key_filename first if provided
     if key_filename:
         # Use hard timeout wrapper around ssh.connect()
-        success, result, exception = runWithTimeout(doConnectWithKey, timeout=hard_timeout)
+        success, result, exception = runWithTimeout(doConnectWithKey, timeout=hard_timeout,
+                                                     on_late_completion=lambda c=ssh: c.close())
 
         if not success:
             log.error("SSH connection timed out after {} seconds (hard timeout)".format(hard_timeout))
@@ -219,7 +220,8 @@ def getSSHClient(hostname,
         return True
 
     # Use hard timeout wrapper around ssh.connect()
-    success, result, exception = runWithTimeout(doConnectWithAgent, timeout=hard_timeout)
+    success, result, exception = runWithTimeout(doConnectWithAgent, timeout=hard_timeout,
+                                                 on_late_completion=lambda c=ssh: c.close())
 
     if not success:
         log.error("SSH connection timed out after {} seconds (hard timeout)".format(hard_timeout))
@@ -262,7 +264,8 @@ def getSFTPClient(ssh, sftp_timeout=300):
     log.debug("Attempting to open SFTP connection...")
 
     # Use hard timeout wrapper around open_sftp() to prevent indefinite hangs
-    success, sftp, exception = runWithTimeout(ssh.open_sftp, timeout=sftp_timeout)
+    success, sftp, exception = runWithTimeout(ssh.open_sftp, timeout=sftp_timeout,
+                                              on_late_completion=lambda c=ssh: c.close())
 
     if not success:
         log.error("SFTP connection timed out after {} seconds".format(sftp_timeout))
