@@ -16,6 +16,8 @@
 
 
 
+from __future__ import division
+
 import math
 import time
 from multiprocessing import Process, Event
@@ -70,23 +72,31 @@ class Extractor(Process):
 
         # Decontaminate stdpixel before thresholding: a bright fireball inflates stdpixel
         # along its trail, pushing the threshold (avg + k1*std + j1) above 255. Replace
-        # stdpixel at contaminated pixels with the background median. Only copy the
-        # compressed array when contamination is present, so the no-op path is zero-cost.
+        # stdpixel at contaminated pixels with the background median. Only the stdpixel
+        # layer is copied when contamination is present, so the no-op path is zero-cost.
         maxpix = self.compressed[0]
         stdpix = self.compressed[3]
-        bright_threshold = np.percentile(maxpix, 90)
+        # O(n) partition-based percentile instead of O(n log n) full sort
+        bright_threshold = np.partition(maxpix.ravel(), -maxpix.size // 10)[-maxpix.size // 10]
         bright_mask = maxpix >= bright_threshold
         bg_mask = ~bright_mask
         # Exclude masked-out pixels (camera borders/obstructions) from the background sample
         if self.mask is not None:
-            bg_mask = bg_mask & (self.mask.img > 0)
+            mask_valid = self.mask.img > 0
+            bg_mask = bg_mask & mask_valid
+        else:
+            mask_valid = None
         if np.count_nonzero(bg_mask) > 100:
             std_ref = float(np.median(stdpix[bg_mask]))
         else:
             std_ref = float(np.median(stdpix))
         contaminated = bright_mask & (stdpix > 3*max(std_ref, 1))
+        # Also exclude masked-out pixels from the contamination set
+        if mask_valid is not None:
+            contaminated = contaminated & mask_valid
         if np.any(contaminated):
-            compressed = self.compressed.copy()
+            compressed = np.array(self.compressed)
+            compressed[3] = self.compressed[3].copy()
             replacement = max(1, int(round(min(std_ref, 255))))
             compressed[3][contaminated] = np.uint8(replacement)
         else:
