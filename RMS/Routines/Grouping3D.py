@@ -153,7 +153,8 @@ def findCoefficients(line_list, config=None):
     """
 
     # Fallback px/frame cap matches the legacy hard-coded value when no config is available
-    # (e.g. unit tests). Stations always pass a config in production.
+    # (e.g. unit tests, external callers). At default 720p/25fps/f=16 this is ~39 deg/s --
+    # tighter than the production default of 60 deg/s, so tests get conservative behavior.
     max_velocity_px = 2.0
 
     if config is not None:
@@ -165,7 +166,13 @@ def findCoefficients(line_list, config=None):
         width = getattr(config, 'width', None)
         f = getattr(config, 'f', None)
 
-        if (max_ang_vel is not None and fps and fov_h and fov_w and height and width and f):
+        # Check each required attribute individually for clearer diagnostics
+        missing = [name for name, val in [('fireball_max_ang_vel', max_ang_vel),
+                                           ('fps', fps), ('fov_h', fov_h), ('fov_w', fov_w),
+                                           ('height', height), ('width', width), ('f', f)]
+                   if not val]
+
+        if not missing:
             # deg/s -> original px/frame via the average deg/pixel scale and fps,
             # then -> subsampled px/frame via the decimation factor f (thresholdAndSubsample
             # divides x,y by f, so slopes are in subsampled coordinates).
@@ -174,8 +181,8 @@ def findCoefficients(line_list, config=None):
                 max_velocity_px = (max_ang_vel/scale)/float(fps)/float(f)
         else:
             log.warning("findCoefficients: fireball_max_ang_vel conversion skipped "
-                        "(missing fps/fov/resolution/f); using fallback %.2f px/frame",
-                        max_velocity_px)
+                        "(missing/zero: %s); using fallback %.2f px/frame",
+                        ', '.join(missing), max_velocity_px)
 
     coeff = []
 
