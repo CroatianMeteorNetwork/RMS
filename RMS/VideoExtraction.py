@@ -16,6 +16,8 @@
 
 
 
+from __future__ import division
+
 import math
 import time
 from multiprocessing import Process, Event
@@ -68,8 +70,40 @@ class Extractor(Process):
             (y, x, z): [tuple] Coordinates of points that form the fireball, where Z is the frame number.
         """
 
+        # Decontaminate stdpixel before thresholding: a bright fireball inflates stdpixel
+        # along its trail, pushing the threshold (avg + k1*std + j1) above 255. Replace
+        # stdpixel at contaminated pixels with the background median. Only the stdpixel
+        # layer is copied when contamination is present, so the no-op path is zero-cost.
+        maxpix = self.compressed[0]
+        stdpix = self.compressed[3]
+        # O(n) partition-based percentile instead of O(n log n) full sort
+        bright_threshold = np.partition(maxpix.ravel(), -maxpix.size // 10)[-maxpix.size // 10]
+        bright_mask = maxpix >= bright_threshold
+        bg_mask = ~bright_mask
+        # Exclude masked-out pixels (camera borders/obstructions) from the background sample
+        if self.mask is not None:
+            mask_valid = self.mask.img > 0
+            bg_mask = bg_mask & mask_valid
+        else:
+            mask_valid = None
+        if np.count_nonzero(bg_mask) > 100:
+            std_ref = float(np.median(stdpix[bg_mask]))
+        else:
+            std_ref = float(np.median(stdpix))
+        contaminated = bright_mask & (stdpix > 3*max(std_ref, 1))
+        # Also exclude masked-out pixels from the contamination set
+        if mask_valid is not None:
+            contaminated = contaminated & mask_valid
+        if np.any(contaminated):
+            compressed = np.array(self.compressed)
+            compressed[3] = self.compressed[3].copy()
+            replacement = max(1, int(round(min(std_ref, 255))))
+            compressed[3][contaminated] = np.uint8(replacement)
+        else:
+            compressed = self.compressed
+
         # Threshold and subsample frames
-        length, x, y, z = Grouping3D.thresholdAndSubsample(self.frames, self.compressed, \
+        length, x, y, z = Grouping3D.thresholdAndSubsample(self.frames, compressed, \
             self.config.min_level, self.config.min_pixels, self.config.k1, self.config.j1, self.config.f)
 
 
@@ -302,7 +336,7 @@ class Extractor(Process):
         t = time.time()
 
         # Find the parameters of the line in the 3D point cloud
-        coeff = Grouping3D.findCoefficients(line_list)
+        coeff = Grouping3D.findCoefficients(line_list, self.config)
         log.debug("[" + self.filename + "] Time for finding coefficients: " + str(time.time() - t) + "s")
         
         if len(coeff) == 0:

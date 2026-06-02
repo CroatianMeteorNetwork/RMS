@@ -487,9 +487,9 @@ def thresholdAndSubsample(np.ndarray[UINT8_TYPE_t, ndim=3] frames, \
             # Compute the threshold limit
             avg_std = int(float(compressed[2, y, x]) + k1*float(compressed[3, y, x])) + j1
 
-            # Make sure the threshold limit is not above the maximum possible value
-            if avg_std > 255:
-                avg_std = 255
+            # Clip threshold to 254 so that pixels at exactly max_val=254 can still pass
+            if avg_std > 254:
+                avg_std = 254
             
             if ((max_val > min_level) and (max_val >= avg_std)):
 
