@@ -628,43 +628,144 @@ class Config:
         # Line finder algorithm: 'kht' or 'ransac'
         self.line_finder_algorithm = 'kht'
 
-        # Sequential RANSAC parameters
+        ### Sequential RANSAC 2D line finder parameters ###
+
+        # Maximum number of 2D line candidates extracted
+        # from a projected time segment before post-filtering.
         self.ransac_max_lines = 10
+
+        # Minimum number of threshold pixels required for a 2D RANSAC line.
+        # Higher values reject noise; lower values allow shorter/fainter tracks.
         self.ransac_min_pixels = 10
+
+        # Maximum perpendicular pixel distance from a 2D RANSAC line for a point
+        # to be counted as an inlier.
         self.ransac_distance_thresh = 4.0
+
+        # Minimum accepted 2D line length in pixels.
         self.ransac_min_line_length = 20.0
+
+        # Maximum gap in pixels between consecutive inlier pixels along a 2D line.
         self.ransac_max_gap = 20.0
+
+        # Maximum allowed frame gap when validating 3D continuity of detections
+        # produced by the sequential 2D RANSAC path.
         self.ransac_max_gap_frame_det = 30.0
+
+        # Maximum allowed spatial gap in pixels when validating 3D continuity of
+        # detections produced by the sequential 2D RANSAC path.
         self.ransac_max_gap_spatial_det = 50.0
 
-        # 3D Line Finder (RANSAC 3D) parameters
+        ### RANSAC 3D line finder parameters ###
+
+        # 3D RANSAC: maximum number of (x, y, frame) line candidates returned
+        # from each thresholded point cloud.
         self.ransac3d_max_lines = 5
+
+        # Minimum number of threshold points required for a valid 3D RANSAC line.
         self.ransac3d_min_points = 10
+
+        # Maximum 3D distance from a candidate (x, y, frame) line for a point to
+        # be counted as an inlier. Frame is internally scaled to image pixels.
         self.ransac3d_distance_thresh = 4.0
+
+        # Maximum frame gap between neighbouring inlier points on a 3D line.
         self.ransac3d_max_gap_frame = 30.0
+
+        # Maximum spatial pixel gap between neighbouring inlier points on a 3D line.
         self.ransac3d_max_gap_spatial = 50.0
+
+        # Minimum frame span required for a valid 3D line.
         self.ransac3d_min_frames = 4.0
+
+        # Number of random line hypotheses tested per 3D RANSAC search pass.
         self.ransac3d_iterations = 10
+
+        # Maximum distance used when stitching nearby 3D line fragments with
+        # similar directions into one candidate detection.
         self.ransac3d_stitch_dist_thresh = 5.0
 
-        # 3D line merging parameters
-        self.vect_angle_thresh = 20 # angle similarity between 2 lines in a stripe to be merged
-        self.frame_extension = 3 # how many frames to check during centroiding before and after the initially determined frame range
+        ### Line postprocessing and centroid frame-range parameters ###
 
-        # Number of pixels to dilate the centroid mask beyond the thresholded image
+        # Maximum direction angle difference, in degrees, for merging line
+        # fragments found in the same stripe.
+        self.vect_angle_thresh = 20
+
+        # Number of frames added before/after the initially found line range
+        # when extracting pixels for centroiding and photometry.
+        self.frame_extension = 3
+
+        ### Centroid mask and photometry aperture parameters ###
+
+        # Number of pixels by which the thresholded stripe mask is dilated for
+        # centroid photometry on video/image inputs.
         self.centroid_dilation = 2
 
-        # Refine meteor centroids by fitting a small 2D Gaussian around the intensity-weighted centroid
+        ### Gaussian centroid refinement parameters ###
+
+        # Enable bounded Gaussian centroid refinement after the weighted centroid
+        # is computed. Disabled keeps the intensity-weighted centroid.
         self.centroid_gaussian_fit = False
+
+        # Gaussian fitting model: rotated_lsq, axis_lsq, moving, or kinematic.
         self.centroid_gaussian_fit_method = 'rotated_lsq'
+
+        # Half-size of the square patch for static Gaussian fits, in pixels.
         self.centroid_gaussian_fit_radius = 4
+
+        # Maximum allowed fitted-centroid shift from the initial centroid, in pixels.
         self.centroid_gaussian_fit_max_shift = 2.5
+
+        # Maximum optimizer function evaluations per Gaussian fit.
         self.centroid_gaussian_fit_max_nfev = 80
+
+        # Optional CSV path for weighted-vs-Gaussian centroid comparison output.
         self.centroid_gaussian_compare_path = None
+
+        # Initial cross-track sigma, in pixels, for moving/kinematic Gaussian fits.
         self.centroid_moving_gaussian_sigma_init = 2.0
+
+        # Minimum RANSAC speed, in px/frame, required to use moving/kinematic fits.
         self.centroid_moving_gaussian_min_speed = 0.2
+
+        # Maximum allowed moving/kinematic Gaussian drift from the weighted
+        # centroid before retry/fallback. Zero disables this rejection.
         self.centroid_moving_gaussian_max_deviation = 0.0
+
+        # Optional CSV path for per-frame moving/kinematic Gaussian fit diagnostics.
         self.centroid_moving_gaussian_diag_path = None
+
+        ### Centroid crop diagnostic output parameters ###
+
+        # Per-frame centroid crop diagnostics. Disabled unless a path is given.
+        self.centroid_crop_diag_path = None
+
+        # Maximum number of diagnostic frame crops to write per detection.
+        self.centroid_crop_diag_max_frames = 80
+
+        # Detection index to dump for crop diagnostics. Negative means all detections.
+        self.centroid_crop_diag_detection_index = 0
+
+        # Diagnostic sampling stride: dump every Nth centroided frame.
+        self.centroid_crop_diag_every_n = 10
+
+        ### Curved centroid pixel selector parameters ###
+
+        # Centroid-only curved motion selector. Detection still uses the 3D
+        # RANSAC line, but centroiding pixels may be selected around this curve.
+        self.centroid_curve_refine = False
+
+        # Polynomial order used for x(frame), y(frame) curve fits.
+        self.centroid_curve_order = 2
+
+        # Pixel radius around the fitted curve used to select centroiding pixels.
+        self.centroid_curve_radius = 4.0
+
+        # Minimum number of usable frame peaks needed before fitting a curve.
+        self.centroid_curve_min_frames = 8
+
+        # Robust clipping threshold, in sigma, for rejecting bad curve anchor peaks.
+        self.centroid_curve_clip_sigma = 3.0
 
         # Centroid filtering parameters
         self.centroids_max_deviation = 2 # maximum deviation of a centroid point from a LSQ fitted line (if above max, it will be rejected)
@@ -1835,10 +1936,20 @@ def parseMeteorDetection(config, parser):
         config.centroid_moving_gaussian_max_deviation = parser.getfloat(
             section, "centroid_moving_gaussian_max_deviation")
 
-    if parser.has_option(section, "centroid_moving_gaussian_diag_path"):
-        config.centroid_moving_gaussian_diag_path = parser.get(
-            section, "centroid_moving_gaussian_diag_path")
+    if parser.has_option(section, "centroid_curve_refine"):
+        config.centroid_curve_refine = parser.getboolean(section, "centroid_curve_refine")
 
+    if parser.has_option(section, "centroid_curve_order"):
+        config.centroid_curve_order = parser.getint(section, "centroid_curve_order")
+
+    if parser.has_option(section, "centroid_curve_radius"):
+        config.centroid_curve_radius = parser.getfloat(section, "centroid_curve_radius")
+
+    if parser.has_option(section, "centroid_curve_min_frames"):
+        config.centroid_curve_min_frames = parser.getint(section, "centroid_curve_min_frames")
+
+    if parser.has_option(section, "centroid_curve_clip_sigma"):
+        config.centroid_curve_clip_sigma = parser.getfloat(section, "centroid_curve_clip_sigma")
 
     if parser.has_option(section, "centroids_max_deviation"):
         config.centroids_max_deviation = parser.getfloat(section, "centroids_max_deviation")

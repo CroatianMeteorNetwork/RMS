@@ -644,7 +644,7 @@ centroid_gaussian_fit: false
 ;   axis_lsq    - axis-aligned 2D Gaussian, single least-squares solve (faster
 ;                 but less accurate on elongated streaks)
 ;   moving      - moving 2D Gaussian (Veres et al. 2012) integrated along the
-;                 track direction (best for tracked slow objects and satellites)
+;                 track direction (best for tracked slow objects)
 ;   kinematic   - moving 2D Gaussian with L fixed from the RANSAC angular velocity
 ;                 instead of fitted from pixel spread; tight L bounds [0.5×L, 1.5×L]
 ;                 and peak+5×5 init (best for fast global-shutter meteors)
@@ -685,10 +685,35 @@ centroid_moving_gaussian_min_speed: 0.2
 ; back to the weighted centroid.  Set to 0.0 (default) to disable.
 centroid_moving_gaussian_max_deviation: 0.0
 
-; Path for a debug CSV comparing weighted vs Gaussian centroids (disabled if omitted).
-; Columns: source, track_index, frame, x_weighted, y_weighted, x_gaussian, y_gaussian,
-;          n_pixels, fit_success
-; centroid_gaussian_compare_path: /tmp/centroids_debug.csv
+; =============================================================================
+; Curved centroid pixel selector parameters
+; =============================================================================
+
+; Use a fitted curved motion model to select centroiding pixels. This is a
+; centroid-only refinement: RANSAC detection, detection filtering, and photometry
+; stripe selection remain unchanged. Useful for tracked slow objects whose apparent
+; image motion is not well described by a straight (x, y, frame) line over the full track.
+centroid_curve_refine: false
+
+; Polynomial order of the centroid curve x(frame), y(frame). 2 is the default
+; quadratic model; 1 is a straight-line model; higher values are usually not
+; recommended unless the track is long and well sampled.
+centroid_curve_order: 2
+
+; Pixel radius around the fitted curve used to select centroiding pixels from
+; the existing thresholded stripe pixels. Larger values include more candidate
+; pixels; smaller values make the centroid mask tighter but can miss the target
+; if the curve fit is imperfect.
+centroid_curve_radius: 4.0
+
+; Minimum number of frames with usable stripe peaks required to fit the curve.
+; If fewer frames are available, centroiding falls back to the RANSAC line mask.
+centroid_curve_min_frames: 8
+
+; Robust sigma-clipping threshold for rejecting bad per-frame peak anchors before
+; fitting the curve. Larger values reject fewer anchors; smaller values reject
+; more aggressively. Set to 0.0 to disable clipping.
+centroid_curve_clip_sigma: 3.0
 
 ; Maximum deviation of a centroid point from a LSQ fitted line
 ; (if above max, it will be rejected)

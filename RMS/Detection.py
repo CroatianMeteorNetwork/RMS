@@ -74,6 +74,532 @@ def logDebug(*log_str):
     log.debug(" ".join(log_str))
 
 
+def _centroidCropDiagHeader():
+    """ Return the CSV header for centroid crop diagnostics.
+
+    Return:
+        [str] CSV header line.
+    """
+
+    # Keep the header centralized so the initialization path and direct-call
+    # fallback cannot drift apart.
+    return (
+        'file,detection_index,frame_no,seq_num,crop_x_min,crop_x_max,crop_y_min,crop_y_max,'
+        'x_weighted,y_weighted,x_gauss_init,y_gauss_init,x_centroid,y_centroid,'
+        'x_line_model,y_line_model,dx_centroid_line,dy_centroid_line,'
+        'line_pixel_count,stripe_pixel_count,threshold_pixel_count,positive_intensity_pixel_count,'
+        'intensity,background_intensity,snr,saturated_count,gaussian_used\n')
+
+
+def _lineModelPositionForFrame(detected_line, frame_no):
+    """ Interpolate the detected 3D line position at the given frame.
+
+    Arguments:
+        detected_line: [tuple] Two 3D points defining the detected line, in
+            (x, y, frame) coordinates.
+        frame_no: [float] Frame number at which the line position is needed.
+
+    Return:
+        (x, y): [tuple of floats] Interpolated image coordinates.
+    """
+
+    # The detected line is stored as two points in (x, y, frame) space.
+    x1, y1, z1 = detected_line[0]
+    x2, y2, z2 = detected_line[1]
+
+    # If both endpoints have the same frame coordinate, interpolation is
+    # undefined; return the first endpoint as the safest diagnostic reference.
+    dz = float(z2 - z1)
+    if abs(dz) <= 1e-9:
+        return float(x1), float(y1)
+
+    # Linearly interpolate along the frame axis to get the model position at
+    # the centroided frame.
+    t = (float(frame_no) - float(z1))/dz
+
+    return float(x1) + t*float(x2 - x1), float(y1) + t*float(y2 - y1)
+
+
+def _filterCropPoints(points, x_min, x_max, y_min, y_max):
+    """ Return crop-local x/y arrays for points inside the crop bounds.
+
+    Arguments:
+        points: [ndarray] Pixel coordinates as (x, y, frame) rows.
+        x_min, x_max, y_min, y_max: [int] Crop bounds in image coordinates.
+
+    Return:
+        (x_arr, y_arr): [tuple of ndarrays] Pixel coordinates relative to the
+            crop origin.
+    """
+
+    # Empty point sets are common when a frame has no selected pixels in a given
+    # class; return empty arrays that can be passed directly to scatter().
+    if points is None or len(points) == 0:
+        return np.array([], dtype=np.float32), np.array([], dtype=np.float32)
+
+    points = np.asarray(points)
+
+    # Keep only points inside the inclusive crop bounds.
+    mask = (
+        (points[:, 0] >= x_min) & (points[:, 0] <= x_max) &
+        (points[:, 1] >= y_min) & (points[:, 1] <= y_max))
+
+    if not np.any(mask):
+        return np.array([], dtype=np.float32), np.array([], dtype=np.float32)
+
+    # Convert image coordinates to crop-local coordinates for plotting.
+    return (
+        points[mask, 0].astype(np.float32) - float(x_min),
+        points[mask, 1].astype(np.float32) - float(y_min))
+
+
+def _imshowDiagnosticCrop(ax, crop, title):
+    """ Draw a diagnostic crop with robust contrast.
+
+    Arguments:
+        ax: [matplotlib.axes.Axes] Axis on which the crop will be drawn.
+        crop: [ndarray] 2D image crop.
+        title: [str] Panel title.
+
+    Return:
+        None
+    """
+
+    # Robust percentile contrast makes both faint and bright crops readable
+    # without a separate normalization path for every diagnostic image type.
+    crop = np.asarray(crop).astype(np.float32)
+    finite = crop[np.isfinite(crop)]
+
+    if finite.size:
+        vmin = float(np.percentile(finite, 1))
+        vmax = float(np.percentile(finite, 99))
+
+        # Avoid invalid imshow limits on constant-valued crops.
+        if vmax <= vmin:
+            vmax = vmin + 1.0
+
+    else:
+        # If the crop is all NaN/inf, draw a harmless blank scale.
+        vmin = 0.0
+        vmax = 1.0
+
+    # Diagnostics are image-inspection panels, so axes ticks are intentionally
+    # hidden and nearest-neighbour interpolation preserves pixel boundaries.
+    ax.imshow(crop, cmap='gray', origin='upper', vmin=vmin, vmax=vmax, interpolation='nearest')
+    ax.set_title(title, fontsize=9)
+    ax.set_xticks([])
+    ax.set_yticks([])
+
+
+def _drawCentroidDiagnosticOverlays(ax, x_min, x_max, y_min, y_max, detected_line,
+                                    threshold_frame_pixels, line_frame_pixels, stripe_frame_pixels,
+                                    x_weighted, y_weighted, x_gauss_init, y_gauss_init,
+                                    x_centroid, y_centroid, x_line, y_line):
+    """ Draw detector-selected pixels, centroids, and the 3D line model on a crop axis.
+
+    Arguments:
+        ax: [matplotlib.axes.Axes] Axis on which overlays will be drawn.
+        x_min, x_max, y_min, y_max: [int] Crop bounds in image coordinates.
+        detected_line: [tuple] Original detected 3D RANSAC line.
+        threshold_frame_pixels: [ndarray] Threshold pixels in the current frame.
+        line_frame_pixels: [ndarray] Pixels selected for centroiding.
+        stripe_frame_pixels: [ndarray] Broader stripe pixels used for photometry.
+        x_weighted, y_weighted: [float] Intensity-weighted centroid.
+        x_gauss_init, y_gauss_init: [float] Gaussian initial centroid.
+        x_centroid, y_centroid: [float] Final centroid.
+        x_line, y_line: [float] Original line-model position.
+
+    Return:
+        None
+    """
+
+    # Convert all diagnostic pixel classes to crop-local coordinates once, then
+    # draw them on the same image coordinate system.
+    threshold_x, threshold_y = _filterCropPoints(threshold_frame_pixels, x_min, x_max, y_min, y_max)
+    line_x, line_y = _filterCropPoints(line_frame_pixels, x_min, x_max, y_min, y_max)
+    stripe_x, stripe_y = _filterCropPoints(stripe_frame_pixels, x_min, x_max, y_min, y_max)
+
+    # Draw the original 3D RANSAC line as a reference. This may intentionally
+    # differ from curve-selected centroid pixels.
+    x1, y1 = float(detected_line[0][0]), float(detected_line[0][1])
+    x2, y2 = float(detected_line[1][0]), float(detected_line[1][1])
+    ax.plot([x1 - x_min, x2 - x_min], [y1 - y_min, y2 - y_min], '--',
+            c='white', linewidth=0.8, alpha=0.8, label='3d line')
+
+    # Cyan boxes are the broad stripe pixels used for photometry.
+    if stripe_x.size:
+        ax.scatter(stripe_x, stripe_y, s=8, marker='s', facecolors='none',
+                   edgecolors='cyan', linewidths=0.6, label='stripe')
+
+    # Orange boxes are the raw threshold pixels before centroid-mask selection.
+    if threshold_x.size:
+        ax.scatter(threshold_x, threshold_y, s=7, marker='s',
+                   c='orange', alpha=0.35, linewidths=0, label='threshold')
+
+    # Green boxes are the actual pixels used to form the weighted centroid.
+    if line_x.size:
+        ax.scatter(line_x, line_y, s=10, marker='s',
+                   c='lime', alpha=0.75, linewidths=0, label='line')
+
+    # Overlay all centroid stages so bias can be traced from seed to final pick.
+    ax.scatter([x_weighted - x_min], [y_weighted - y_min], s=55, marker='+',
+               c='yellow', linewidths=1.2, label='weighted')
+    ax.scatter([x_gauss_init - x_min], [y_gauss_init - y_min], s=45, marker='x',
+               c='magenta', linewidths=1.0, label='gauss init')
+    ax.scatter([x_centroid - x_min], [y_centroid - y_min], s=35, marker='o',
+               facecolors='none', edgecolors='red', linewidths=1.1, label='final')
+    ax.scatter([x_line - x_min], [y_line - y_min], s=35, marker='.',
+               c='white', linewidths=0, label='line model')
+
+    # Fix axes to the crop extent so empty overlays do not autoscale the panel.
+    ax.set_xlim(-0.5, x_max - x_min + 0.5)
+    ax.set_ylim(y_max - y_min + 0.5, -0.5)
+
+
+def saveCentroidCropDiagnostic(diag_path, img_name, detected_line_index, frame_no, seq_num,
+                               raw_img, bg_img, maxpixel_img, avepixel_img, stdpixel_img,
+                               threshold_img, flattened_weights_img, detected_line,
+                               threshold_frame_pixels, line_frame_pixels, stripe_frame_pixels,
+                               x_weighted, y_weighted, x_gauss_init, y_gauss_init,
+                               x_centroid, y_centroid, intensity, background_intensity,
+                               snr, saturated_count, positive_intensity_pixel_count, gaussian_used):
+    """ Write a centroid crop diagnostic CSV row and PNG panel.
+
+    Arguments:
+        diag_path: [str] Directory in which diagnostic files will be written.
+        img_name: [str] Input image/video name.
+        detected_line_index: [int] Index of the detected line being centroided.
+        frame_no: [float] Frame number being dumped.
+        seq_num: [int] Sequence number in the input stream.
+        raw_img: [ndarray] Raw frame or maxpixel image.
+        bg_img: [ndarray] Background-subtracted image used for centroiding.
+        maxpixel_img, avepixel_img, stdpixel_img: [ndarrays] FF statistics images.
+        threshold_img: [ndarray] Threshold mask image.
+        flattened_weights_img: [ndarray] Background-subtracted weights image.
+        detected_line: [tuple] Original detected 3D RANSAC line.
+        threshold_frame_pixels: [ndarray] Threshold pixels in the frame.
+        line_frame_pixels: [ndarray] Pixels selected for centroiding.
+        stripe_frame_pixels: [ndarray] Broader stripe pixels used for photometry.
+        x_weighted, y_weighted: [float] Weighted centroid.
+        x_gauss_init, y_gauss_init: [float] Gaussian initial centroid.
+        x_centroid, y_centroid: [float] Final centroid.
+        intensity: [float] Integrated intensity.
+        background_intensity: [float] Local background level.
+        snr: [float] Signal-to-noise ratio.
+        saturated_count: [int] Number of saturated pixels.
+        positive_intensity_pixel_count: [int] Count of positive-intensity pixels.
+        gaussian_used: [bool] True if the final centroid came from a Gaussian fit.
+
+    Return:
+        None
+    """
+
+    # Diagnostics are best-effort only; invalid image inputs simply skip the
+    # frame instead of affecting centroiding or detection results.
+    if raw_img is None or bg_img is None:
+        return
+
+    raw_img = np.asarray(raw_img)
+    bg_img = np.asarray(bg_img)
+
+    # The panel expects ordinary 2D image arrays. Anything else is malformed
+    # for this diagnostic and is ignored.
+    if raw_img.ndim != 2 or bg_img.ndim != 2:
+        return
+
+    mkdirP(diag_path)
+
+    # Centre the crop on the weighted centroid, not the final Gaussian centroid.
+    # This shows the exact detector-selected pixel set used to seed centroiding.
+    crop_radius = 20
+    x0 = int(round(x_weighted))
+    y0 = int(round(y_weighted))
+
+    # Clamp crop bounds to the image edge. Bounds are inclusive because all
+    # later slices use x_max + 1 and y_max + 1.
+    x_min = max(0, x0 - crop_radius)
+    x_max = min(raw_img.shape[1] - 1, x0 + crop_radius)
+    y_min = max(0, y0 - crop_radius)
+    y_max = min(raw_img.shape[0] - 1, y0 + crop_radius)
+
+    # Degenerate crops can happen only at malformed image sizes, but guard here
+    # so diagnostic generation never interrupts detection.
+    if x_max <= x_min or y_max <= y_min:
+        return
+
+    # Extract the same crop from every image product that explains centroiding:
+    # raw signal, FF statistics, threshold mask, and flattened detector weights.
+    raw_crop = raw_img[y_min:y_max + 1, x_min:x_max + 1]
+    bg_crop = bg_img[y_min:y_max + 1, x_min:x_max + 1]
+    maxpixel_crop = np.asarray(maxpixel_img)[y_min:y_max + 1, x_min:x_max + 1]
+    avepixel_crop = np.asarray(avepixel_img)[y_min:y_max + 1, x_min:x_max + 1]
+    stdpixel_crop = np.asarray(stdpixel_img)[y_min:y_max + 1, x_min:x_max + 1]
+    threshold_crop = np.asarray(threshold_img)[y_min:y_max + 1, x_min:x_max + 1]
+    weights_crop = np.asarray(flattened_weights_img)[y_min:y_max + 1, x_min:x_max + 1]
+
+    # Compute the original straight-line model position for comparison with the
+    # selected/final centroid in both the CSV and overlay.
+    x_line, y_line = _lineModelPositionForFrame(detected_line, frame_no)
+
+    # Create the CSV on demand. The caller normally initializes it once per run,
+    # but this keeps the function useful if called directly.
+    csv_path = os.path.join(diag_path, 'centroid_crop_diag.csv')
+    if not os.path.exists(csv_path):
+        with open(csv_path, 'w') as fh:
+            fh.write(_centroidCropDiagHeader())
+
+    # Keep CSV fields in the same order as _centroidCropDiagHeader(). The row
+    # records both absolute centroid positions and offsets from the line model.
+    csv_row = (
+        os.path.basename(img_name), int(detected_line_index), float(frame_no), int(seq_num),
+        x_min, x_max, y_min, y_max,
+        float(x_weighted), float(y_weighted), float(x_gauss_init), float(y_gauss_init),
+        float(x_centroid), float(y_centroid), x_line, y_line,
+        float(x_centroid) - x_line, float(y_centroid) - y_line,
+        len(line_frame_pixels), len(stripe_frame_pixels), len(threshold_frame_pixels),
+        int(positive_intensity_pixel_count), int(intensity), float(background_intensity),
+        float(snr), int(saturated_count), int(gaussian_used))
+
+    with open(csv_path, 'a') as fh:
+        fh.write(
+            '{:s},{:d},{:.3f},{:d},{:d},{:d},{:d},{:d},'
+            '{:.6f},{:.6f},{:.6f},{:.6f},{:.6f},{:.6f},'
+            '{:.6f},{:.6f},{:.6f},{:.6f},{:d},{:d},{:d},{:d},'
+            '{:d},{:.6f},{:.6f},{:d},{:d}\n'.format(*csv_row))
+
+    # Build the diagnostic panel as a compact 2x4 grid. Every panel receives
+    # the same overlays so the selected pixels can be compared across products.
+    fig, axes = plt.subplots(2, 4, figsize=(13.5, 7.0), dpi=140)
+    axes = axes.ravel()
+
+    # The last panel intentionally repeats the background-subtracted crop; it is
+    # reserved for reading the overlays without switching to another image product.
+    panels = [
+        (raw_crop, 'raw frame'),
+        (maxpixel_crop, 'maxpixel'),
+        (avepixel_crop, 'avepixel'),
+        (stdpixel_crop, 'stdpixel'),
+        (bg_crop, 'background subtracted'),
+        (weights_crop, 'flattened weights'),
+        (threshold_crop, 'threshold mask'),
+        (bg_crop, 'pixels, mask, centroids'),
+    ]
+
+    # Draw all image products with the same crop bounds and overlay geometry.
+    for ax, (crop, title) in zip(axes, panels):
+        _imshowDiagnosticCrop(ax, crop, title)
+        _drawCentroidDiagnosticOverlays(
+            ax, x_min, x_max, y_min, y_max, detected_line,
+            threshold_frame_pixels, line_frame_pixels, stripe_frame_pixels,
+            x_weighted, y_weighted, x_gauss_init, y_gauss_init,
+            x_centroid, y_centroid, x_line, y_line)
+
+    # A small legend is enough because every panel uses the same marker schema.
+    axes[-1].legend(loc='upper right', fontsize=5, framealpha=0.75)
+    fig.suptitle('det {:d} frame {:.3f}'.format(int(detected_line_index), float(frame_no)), fontsize=10)
+    fig.tight_layout()
+
+    # Include the fractional frame in the file name; replacing "." avoids
+    # ambiguous multi-extension names.
+    frame_label = '{:08.3f}'.format(float(frame_no)).replace('.', 'p')
+    png_name = 'centroid_crop_diag_det{:02d}_frame{:s}.png'.format(
+        int(detected_line_index), frame_label)
+
+    # Save and close immediately to keep long diagnostic runs from accumulating
+    # figure objects in memory.
+    fig.savefig(os.path.join(diag_path, png_name), bbox_inches='tight')
+    plt.close(fig)
+
+
+def fitCentroidCurvePixelSelector(stripe_points, flattened_weights, config):
+    """ Build a fast per-frame centroid pixel selector around a fitted motion curve.
+
+    The curve is fitted from the brightest thresholded stripe pixel in each frame.
+    This keeps the initial 3D RANSAC line for detection, but avoids using its
+    straight-line inlier tube for centroiding when the apparent motion is curved.
+
+    Arguments:
+        stripe_points: [ndarray] Thresholded stripe pixels as (x, y, frame) rows.
+        flattened_weights: [ndarray] Background-subtracted threshold weights.
+        config: [Config] RMS configuration object. Uses centroid_curve_* options.
+
+    Return:
+        selector: [dict or None] Dictionary with per-frame selected pixels,
+            fitted x/y polynomial coefficients, and diagnostic counts. None is
+            returned if too few usable frames are available or the fit fails.
+    """
+
+    if stripe_points is None or len(stripe_points) == 0:
+        return None
+
+    # Normalize config values here so the main centroid loop does not need to
+    # know about fallback/default behaviour.
+    order = max(1, int(getattr(config, 'centroid_curve_order', 2)))
+    radius = float(getattr(config, 'centroid_curve_radius', 4.0))
+    min_frames = max(order + 1, int(getattr(config, 'centroid_curve_min_frames', 8)))
+    clip_sigma = float(getattr(config, 'centroid_curve_clip_sigma', 3.0))
+
+    # A non-positive selection radius cannot define a useful centroid mask.
+    if radius <= 0:
+        return None
+
+    # Work on a float copy for fitting, but keep integer indices for looking up
+    # image weights and for the final per-frame pixel lists.
+    points = np.asarray(stripe_points).astype(np.float64)
+    if len(points) == 0:
+        return None
+
+    xs = points[:, 0].astype(np.int64)
+    ys = points[:, 1].astype(np.int64)
+    frames = points[:, 2].astype(np.int64)
+
+    # Discard any point outside the weights image before indexing into it.
+    # This protects diagnostic/experimental configs from malformed inputs.
+    valid = (
+        (xs >= 0) & (xs < flattened_weights.shape[1]) &
+        (ys >= 0) & (ys < flattened_weights.shape[0]))
+
+    if not np.any(valid):
+        return None
+
+    # Keep the filtered coordinate arrays aligned so the frame/weight lookups
+    # refer to the same rows.
+    points = points[valid]
+    xs = xs[valid]
+    ys = ys[valid]
+    frames = frames[valid]
+
+    # The flattened weights are the same positive background-subtracted values
+    # used by weighted centroiding, so they make good curve-fit peak weights.
+    weights = flattened_weights[ys, xs].astype(np.float64)
+
+    # Use one robust anchor per frame: the brightest background-subtracted stripe
+    # pixel. This keeps the fit O(N) in stripe pixels and avoids a second search.
+    peak_rows = []
+    for frame in np.unique(frames):
+
+        # Gather all stripe pixels belonging to this frame.
+        frame_inds = np.where(frames == frame)[0]
+        if len(frame_inds) == 0:
+            continue
+
+        # Skip frames whose stripe points have no positive signal after
+        # background subtraction.
+        frame_weights = weights[frame_inds]
+        if frame_weights.size == 0 or np.nanmax(frame_weights) <= 0:
+            continue
+
+        # The brightest point is used as the frame's curve anchor. Store frame,
+        # x, y, and a positive weight for the polynomial fit.
+        peak_idx = frame_inds[int(np.nanargmax(frame_weights))]
+        peak_rows.append((
+            float(frames[peak_idx]),
+            float(points[peak_idx, 0]),
+            float(points[peak_idx, 1]),
+            max(1.0, float(weights[peak_idx]))))
+
+    # Require enough independent frame anchors to constrain the requested curve.
+    if len(peak_rows) < min_frames:
+        return None
+
+    # Split anchors into separate arrays for polynomial fitting.
+    peak_rows = np.asarray(peak_rows, dtype=np.float64)
+    peak_frames = peak_rows[:, 0]
+    peak_x = peak_rows[:, 1]
+    peak_y = peak_rows[:, 2]
+    peak_weights = peak_rows[:, 3]
+
+    # Fit x(frame) and y(frame) independently. The order is clipped to the number
+    # of available anchor frames so a sparse detection can still fall back cleanly.
+    fit_order = min(order, len(peak_rows) - 1)
+    keep = np.ones(len(peak_rows), dtype=bool)
+    x_coeff = y_coeff = None
+
+    # Reject bad anchor frames using a median/MAD residual gate. This is intended
+    # for occasional noise peaks, not for changing detection membership.
+    for _ in range(3):
+
+        # If clipping removed too many anchors, leave the last valid fit in place.
+        if np.sum(keep) < fit_order + 1:
+            break
+
+        try:
+
+            # Fit x(frame) and y(frame) with sqrt-intensity weights so bright,
+            # stable peak frames influence the curve more without dominating it.
+            x_coeff = np.polyfit(peak_frames[keep], peak_x[keep], fit_order,
+                                 w=np.sqrt(peak_weights[keep]))
+            y_coeff = np.polyfit(peak_frames[keep], peak_y[keep], fit_order,
+                                 w=np.sqrt(peak_weights[keep]))
+
+        except (TypeError, ValueError, np.linalg.LinAlgError):
+            return None
+
+        # Residuals are measured in image pixels against the current curve fit.
+        pred_x = np.polyval(x_coeff, peak_frames)
+        pred_y = np.polyval(y_coeff, peak_frames)
+        resid = np.hypot(peak_x - pred_x, peak_y - pred_y)
+
+        # A zero/negative clip sigma is the documented way to disable clipping.
+        if clip_sigma <= 0:
+            break
+
+        resid_keep = resid[keep]
+
+        # Do not clip when too few residuals remain to estimate a stable scale.
+        if resid_keep.size < fit_order + 2:
+            break
+
+        # Median/MAD is used instead of mean/std because the rejected points are
+        # exactly the occasional bad peak anchors we are trying to suppress.
+        med = float(np.median(resid_keep))
+        mad = float(np.median(np.abs(resid_keep - med)))
+        scale = 1.4826*mad if mad > 0 else float(np.std(resid_keep))
+
+        if scale <= 0:
+            break
+
+        # Stop once the clipping mask stabilizes.
+        new_keep = resid <= med + clip_sigma*scale
+        if np.array_equal(new_keep, keep):
+            break
+
+        keep = new_keep
+
+    # If all fitting attempts failed, fall back to the original straight-line
+    # centroid mask by returning None.
+    if x_coeff is None or y_coeff is None:
+        return None
+
+    # Select only existing stripe pixels near the fitted curve. This changes the
+    # centroiding mask only; detection and photometry stripe pixels are unchanged.
+    pred_x_all = np.polyval(x_coeff, points[:, 2])
+    pred_y_all = np.polyval(y_coeff, points[:, 2])
+    curve_mask = ((points[:, 0] - pred_x_all)**2 + (points[:, 1] - pred_y_all)**2) <= radius*radius
+    curve_points = points[curve_mask].astype(np.int64)
+
+    if len(curve_points) == 0:
+        return None
+
+    # Pre-bucket selected points by frame so the centroid loop can do an O(1)
+    # dictionary lookup instead of filtering the whole stripe every frame.
+    points_by_frame = {}
+    for frame in np.unique(curve_points[:, 2]):
+        points_by_frame[int(frame)] = curve_points[curve_points[:, 2] == frame]
+
+    # Return fit metadata as well as pixels; the counts are written to debug
+    # logs and help confirm that the curve selector is actually being used.
+    return {
+        'points_by_frame': points_by_frame,
+        'x_coeff': x_coeff,
+        'y_coeff': y_coeff,
+        'radius': radius,
+        'peak_count': int(len(peak_rows)),
+        'kept_peak_count': int(np.sum(keep)),
+        'selected_point_count': int(len(curve_points)),
+    }
+
+
 def fitGaussianCentroid2DPatch(patch, x_origin, y_origin, x_init, y_init, max_shift=2.5, max_nfev=80,
                                method='rotated_lsq'):
     """Refine a centroid by fitting a 2D Gaussian on a small image patch.
@@ -184,7 +710,7 @@ def fitGaussianCentroid2DPatch(patch, x_origin, y_origin, x_init, y_init, max_sh
         except (ValueError, RuntimeError, FloatingPointError):
             return None
     else:
-        # Seed sigma_major, sigma_minor, and theta from the 2×2 intensity moment covariance
+        # Seed sigma_major, sigma_minor, and theta from the 2x2 intensity moment covariance
         # so the initial Gaussian already has roughly the right size and orientation.
         cov = np.array([[sx0**2, cov_xy], [cov_xy, sy0**2]], dtype=np.float64)
         try:
@@ -210,10 +736,10 @@ def fitGaussianCentroid2DPatch(patch, x_origin, y_origin, x_init, y_init, max_sh
         angle_seeds = [theta0, theta0 + np.pi/2.0, 0.0]
         sigma_seeds = [(sigma_major0, sigma_minor0), (max(sigma_major0, 1.5), 0.8)]
 
-        # Multi-start: 3 angle × 2 sigma seeds = 6 starts.
+        # Multi-start: 3 angle x 2 sigma seeds = 6 starts.
         # Seeds are ordered best-estimate first.  We exit as soon as a seed produces a
         # result that (a) beats the moment-seeded cost, (b) has physical parameters, and
-        # (c) is within max_shift of the init — this is the common case for well-exposed
+        # (c) is within max_shift of the init; this is the common case for well-exposed
         # meteors and avoids running all 6 seeds unnecessarily.
         found_valid = False
         for theta_seed in angle_seeds:
@@ -278,26 +804,50 @@ def fitGaussianCentroid2DPatch(patch, x_origin, y_origin, x_init, y_init, max_sh
 
 def fitGaussianCentroid2D(img, x_init, y_init, segment_radius=4, max_shift=2.5, max_nfev=80,
                           method='rotated_lsq'):
-    """Refine a centroid by fitting a small 2D Gaussian around the initial centroid."""
+    """ Refine a centroid by fitting a small 2D Gaussian around the initial centroid.
 
+    This wrapper extracts a bounded square patch around the current centroid and
+    delegates the actual fit to fitGaussianCentroid2DPatch.
+
+    Arguments:
+        img: [ndarray] Background-subtracted image.
+        x_init: [float] Initial centroid X in image coordinates.
+        y_init: [float] Initial centroid Y in image coordinates.
+
+    Keyword arguments:
+        segment_radius: [int] Half-size of the square patch, in pixels.
+        max_shift: [float] Maximum fitted-centroid shift from the initial pick.
+        max_nfev: [int] Maximum optimizer function evaluations.
+        method: [str] Gaussian fit method, e.g. rotated_lsq or axis_lsq.
+
+    Return:
+        (x_centroid, y_centroid): [tuple of floats or None] Refined image
+            coordinates, or None if the patch or fit is invalid.
+    """
+
+    # Invalid initial centroids cannot define a reliable extraction patch.
     if (not np.isfinite(x_init)) or (not np.isfinite(y_init)):
         return None
 
+    # Build a square image patch around the rounded initial centroid.
     nrows, ncols = img.shape
     x0_int = int(round(x_init))
     y0_int = int(round(y_init))
     radius = max(2, int(segment_radius))
 
+    # Clamp patch bounds to the image edge so edge detections still get a fit.
     x_min = max(0, x0_int - radius)
     x_max = min(ncols - 1, x0_int + radius)
     y_min = max(0, y0_int - radius)
     y_max = min(nrows - 1, y0_int + radius)
 
+    # A Gaussian fit needs at least a small 2D neighbourhood.
     if (x_max - x_min + 1 < 3) or (y_max - y_min + 1 < 3):
         return None
 
     patch = img[y_min:y_max + 1, x_min:x_max + 1]
 
+    # Keep the model-fitting code in one patch-based implementation.
     return fitGaussianCentroid2DPatch(
         patch, x_min, y_min, x_init, y_init, max_shift=max_shift, max_nfev=max_nfev, method=method)
 
@@ -327,7 +877,7 @@ def fitMovingGaussianCentroid2DPatch(patch, x_origin, y_origin, x_init, y_init,
         sigma_init: [float] Initial cross-track sigma. 2.0 by default.
         max_shift: [float] Max centroid shift from x_init/y_init. 3.0 by default.
         max_nfev: [int] Max function evaluations per seed. 300 by default.
-        L_tight: [bool] If True, use a single L seed and tight bounds [0.5×L, 2×L]
+        L_tight: [bool] If True, use a single L seed and tight bounds [0.5*L, 2*L]
             instead of 3 seeds with loose bounds. Use when L is known from angular
             velocity (kinematic method). False by default.
         return_diagnostics: [bool] If True return ((x_fit, y_fit), diag_dict) on success
@@ -386,7 +936,7 @@ def fitMovingGaussianCentroid2DPatch(patch, x_origin, y_origin, x_init, y_init,
     _erf = scipy.special.erf
 
     def _residual(params):
-        # Moving-Gaussian model (Veres et al. 2012): Gaussian cross-track × boxcar along-track.
+        # Moving-Gaussian model (Veres et al. 2012): Gaussian cross-track x boxcar along-track.
         # x_m, y_m are pixel coordinates rotated into the along-track (x_m) and cross-track
         # (y_m) frame using the fixed track angle omega.  The along-track boxcar of length L
         # is expressed as the difference of two error functions, giving an analytically
@@ -402,10 +952,10 @@ def fitMovingGaussianCentroid2DPatch(patch, x_origin, y_origin, x_init, y_init,
         return (model - patch).ravel()
 
     # Parameter bounds: [level_sum, sigma, xo, yo, L].
-    # ASTRA-inspired: tight sigma (±35% of initial) prevents the optimiser from fitting
-    # background structure instead of the streak. Tight L (±50%) keeps the streak length
+    # ASTRA-inspired: tight sigma (+/-35% of initial) prevents the optimiser from fitting
+    # background structure instead of the streak. Tight L (+/-50%) keeps the streak length
     # physically plausible. level_sum floored at 5% of initial estimate to reject dark fits.
-    # L_tight (kinematic): single seed, bounds [0.5×L, 1.5×L] pinned to angular velocity.
+    # L_tight (kinematic): single seed, bounds [0.5*L, 1.5*L] pinned to angular velocity.
     L_lower = max(0.5, L_clipped * 0.5)
     L_upper = L_clipped * 1.5
     lower = [max(1.0, level_sum0 * 0.05),
@@ -418,8 +968,8 @@ def fitMovingGaussianCentroid2DPatch(patch, x_origin, y_origin, x_init, y_init,
     upper[1] = max(upper[1], lower[1] + 0.1)
     upper[4] = max(upper[4], lower[4] + 0.5)
 
-    # Baseline cost at the nominal initial guess.  Any fit that fails to improve on this
-    # is rejected — it means the optimizer escaped to a worse local minimum.
+    # Baseline cost at the nominal initial guess. Any fit that fails to improve
+    # on this is rejected because the optimizer escaped to a worse local minimum.
     p0_nominal = np.clip([level_sum0, sigma_clipped, xo0, yo0, L_clipped], lower, upper)
     initial_cost = 0.5 * float(np.sum(_residual(p0_nominal)**2))
 
@@ -427,13 +977,13 @@ def fitMovingGaussianCentroid2DPatch(patch, x_origin, y_origin, x_init, y_init,
         L_seeds = [L_clipped]
         sigma_seeds = [sigma_clipped, max(lower[1], sigma_clipped * 0.7)]
     else:
-        # 3 sigma × 3 L seeds = 9 starting points; keeps the best-cost result.
+        # 3 sigma x 3 L seeds = 9 starting points; keeps the best-cost result.
         sigma_seeds = [sigma_clipped, max(lower[1], sigma_clipped * 0.7),
                        min(upper[1], sigma_clipped * 1.3)]
         L_seeds = [L_clipped, max(L_lower, L_clipped * 0.7), min(L_upper, L_clipped * 1.3)]
 
     # Seeds are ordered best-estimate first (sigma_clipped, L_clipped).  Exit as soon as
-    # a seed produces physical parameters within max_shift — the common case for
+    # a seed produces physical parameters within max_shift; the common case for
     # well-exposed frames.  Remaining seeds are tried only when the first fails.
     best_res = None
     best_cost = np.inf
@@ -525,13 +1075,17 @@ def fitMovingGaussianCentroid2D(img, x_init, y_init, omega, L_init,
         tuple or None: (x_fit, y_fit) in global coords, or None if fit failed.
     """
 
+    # The wrapper has no meaningful fallback if the seed centroid or track angle
+    # is invalid, so fail before extracting a patch.
     if not (np.isfinite(x_init) and np.isfinite(y_init) and np.isfinite(omega)):
         return (None, None) if return_diagnostics else None
 
+    # Normalize the dimensions used for the rotated streak envelope.
     nrows, ncols = img.shape
     sigma_use = max(0.5, float(sigma_init))
     L_use = max(1.0, float(L_init))
 
+    # Convert the rotated streak envelope into an axis-aligned bounding box.
     L_half = L_use / 2.0 + 3.0*sigma_use
     cross_half = 3.0*sigma_use
     abs_cos = abs(np.cos(omega))
@@ -539,14 +1093,17 @@ def fitMovingGaussianCentroid2D(img, x_init, y_init, omega, L_init,
     dx = L_half * abs_cos + cross_half * abs_sin
     dy = L_half * abs_sin + cross_half * abs_cos
 
+    # Clamp the extracted patch to image bounds.
     x_min = max(0, int(x_init - dx) - 1)
     x_max = min(ncols - 1, int(x_init + dx) + 1)
     y_min = max(0, int(y_init - dy) - 1)
     y_max = min(nrows - 1, int(y_init + dy) + 1)
 
+    # The moving Gaussian model needs a true 2D patch, even for edge detections.
     if (x_max - x_min + 1 < 3) or (y_max - y_min + 1 < 3):
         return (None, None) if return_diagnostics else None
 
+    # Pass the crop and its global origin to the patch fitter.
     return fitMovingGaussianCentroid2DPatch(
         img[y_min:y_max + 1, x_min:x_max + 1], x_min, y_min, x_init, y_init,
         omega, L_init, sigma_init=sigma_init, max_shift=max_shift, max_nfev=max_nfev,
@@ -713,7 +1270,7 @@ def mergeRansacLines(line_list, img_w, img_h, angle_thresh=15.0, dist_thresh_fac
     but at different times).
 
     When frame ranges overlap, only 2D spatial geometry is used (direction angle and perpendicular
-    distance), because the frame ranges are time window boundaries — not the actual meteor duration — 
+    distance), because the frame ranges are time window boundaries - not the actual meteor duration -
     so velocity computed from spatial_length/frame_range would be meaningless.
 
     When frame ranges do NOT overlap, strict 3D space-time checks are applied to prevent merging 
@@ -1792,9 +2349,6 @@ def checkAngularVelocity(centroids, config):
         return ang_vel, False
 
 
-
-
-
 def showImage(name, img, convert_to_uint8=False):
     """ 
     Show the given image using matplotlib, mimicking cv2.imshow behavior.
@@ -1919,11 +2473,11 @@ def showDetectionSummary(results_list, config):
                 # Asgard keeps seq:     8 cols: [frame, seq, X, Y, intensity, ...]
                 # Non-asgard deletes seq: 7 cols: [frame, X, Y, intensity, ...]
                 if centroids.shape[1] >= 8:
-                    # Asgard format — seq is column 1
+                    # Asgard format: seq is column 1
                     cx = centroids[:, 2]
                     cy = centroids[:, 3]
                 else:
-                    # Non-asgard — seq was deleted, X=col1, Y=col2
+                    # Non-asgard: seq was deleted, X=col1, Y=col2
                     cx = centroids[:, 1]
                     cy = centroids[:, 2]
 
@@ -2658,6 +3212,19 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
             if len(filtered_lines) > 2:
                 show3DCloud(img_handle.ff, [], [], [], config=config, all_detected_lines=filtered_lines)
 
+        # Initialise the optional centroid crop diagnostic output directory.
+        # When centroid_crop_diag_path is set, the centroid loop writes one PNG panel
+        # per sampled frame (raw / maxpixel / avepixel / bg-subtracted / weight / mask /
+        # overlay) plus one CSV row into centroid_crop_diag.csv.  The CSV is created
+        # (header only) here so that the per-frame appends inside the centroid loop do
+        # not need to check whether the file already exists.
+        centroid_crop_diag_path = getattr(config, 'centroid_crop_diag_path', None)
+        if centroid_crop_diag_path:
+            mkdirP(centroid_crop_diag_path)
+            with open(os.path.join(centroid_crop_diag_path, 'centroid_crop_diag.csv'), 'w') as diag_fh:
+                diag_fh.write(_centroidCropDiagHeader())
+            logDebug('Writing centroid crop diagnostics to {:s}'.format(centroid_crop_diag_path))
+
         # Go through all detected and filtered lines and compute centroids
         for detected_line_index, detected_line in enumerate(filtered_lines):
 
@@ -2692,12 +3259,12 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
             # overestimates L badly (reflects PSF/threshold scatter, not actual trail length).
             #
             # Two configurable fallback thresholds:
-            #   centroid_moving_gaussian_min_speed  – fall back to rotated_lsq (with
-            #       moving_gaussian_fallback=True, suppressing peak+5×5) when
+            #   centroid_moving_gaussian_min_speed  - fall back to rotated_lsq (with
+            #       moving_gaussian_fallback=True, suppressing peak+5x5) when
             #       line_speed < threshold.  Default 0.2 px/frame.  Near-stationary targets
             #       have undefined omega and avepixel cancels the per-frame peak signal, so the
             #       static Gaussian without peak init is more reliable.
-            #   centroid_moving_gaussian_sigma_init – also fall back when L_kinematic <
+            #   centroid_moving_gaussian_sigma_init - also fall back when L_kinematic <
             #       sigma_init.  At L << sigma the moving model has a flat loss landscape and
             #       the optimizer wanders; rotated_lsq converges better in this regime.
             gauss_fit_method = config.centroid_gaussian_fit_method
@@ -2792,12 +3359,44 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
             # This avoids gamma-correcting and subtracting the whole frame for every centroided frame.
             fast_frame_photometry = (img_handle.input_type != 'ff') and (dark is None) \
                 and (flat_struct is None) and (mask is None)
+            # Build the curved-track pixel selector once per detected line using the
+            # thresholded stripe pixels already extracted above.  This replaces the
+            # straight 3D-line tube with pixels selected around a polynomial curve fit
+            # through the per-frame brightest stripe pixels, improving centroid accuracy
+            # when the track curves significantly across the sensor.  Falls back to the
+            # straight-line pixel set when the fit has too few anchors or fails.
+            centroid_curve_selector = None
+            if bool(getattr(config, 'centroid_curve_refine', False)):
+                centroid_curve_selector = fitCentroidCurvePixelSelector(stripe_points, flattened_weights, config)
+                if centroid_curve_selector is not None:
+                    logDebug('Centroid curve selector: {:g} peaks ({:g} kept), {:g} selected points, radius {:.2f}'.format(
+                        centroid_curve_selector['peak_count'],
+                        centroid_curve_selector['kept_peak_count'],
+                        centroid_curve_selector['selected_point_count'],
+                        centroid_curve_selector['radius']))
+                else:
+                    logDebug('Centroid curve selector unavailable; using straight-line points')
 
-            # Calculate centroids
+            # Centroid loop accumulators
             centroids = []
             skipped_no_pixels = 0
             skipped_zero_weights = 0
             frames_centroided = 0
+
+            # Crop-diagnostic gate: active only when a path is configured and either
+            # all detections are requested (detection_index < 0) or the index matches
+            # the current detected line.  Limits are read once here so the inner loop
+            # does not call getattr on every frame.
+            centroid_crop_diag_detection_index = int(getattr(
+                config, 'centroid_crop_diag_detection_index', 0))
+            centroid_crop_diag_enabled = centroid_crop_diag_path \
+                and ((centroid_crop_diag_detection_index < 0)
+                     or (detected_line_index == centroid_crop_diag_detection_index))
+            centroid_crop_diag_max_frames = max(0, int(getattr(
+                config, 'centroid_crop_diag_max_frames', 80)))
+            centroid_crop_diag_every_n = max(1, int(getattr(
+                config, 'centroid_crop_diag_every_n', 10)))
+            centroid_crop_diag_dumped = 0
             for i in range(frame_min, frame_max + 1):
 
                 t_centroid = time()
@@ -2808,8 +3407,16 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                 # Get pixel positions in a given frame (pixels belonging to a found line)
                 frame_pixels = line_points[frame_pixels_inds].astype(np.int64)
 
+                # When available, replace the straight-line centroiding mask with
+                # pixels selected around the fitted curve for this frame.
+                if centroid_curve_selector is not None:
+                    curve_frame_pixels = centroid_curve_selector['points_by_frame'].get(int(i))
+                    if curve_frame_pixels is not None and len(curve_frame_pixels):
+                        frame_pixels = curve_frame_pixels.astype(np.int64)
+
                 # Get pixel positions in a given frame (pixels belonging to the whole stripe)
                 frame_pixels_stripe = stripe_points[np.where(stripe_points[:,2] == i)].astype(np.int64)
+                threshold_frame_pixels = frame_pixels_stripe.copy()
 
                 # Skip if there are no pixels in the frame
                 if not len(frame_pixels):
@@ -2905,7 +3512,7 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
 
                         # Use L from the RANSAC line speed (px/frame) for both moving and kinematic.
                         # Pixel-spread is unreliable: it reflects PSF+threshold scatter, not actual
-                        # trail length, and can overestimate L by 10× for short-duration streaks.
+                                # trail length, and can overestimate L by 10x for short-duration streaks.
                         moving_L_init = max(0.5, L_kinematic)
 
                         # Estimate cross-track sigma from pixels near the trail centre to avoid
@@ -3185,7 +3792,7 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                                              retry_centroid[1] - y_centroid_weighted) <= gauss_max_dev:
                                 gaussian_centroid = retry_centroid
                             else:
-                                # Retry also wandered or failed — fall back to weighted centroid.
+                                # Retry also wandered or failed; fall back to weighted centroid.
                                 gaussian_centroid = None
 
                     if gaussian_centroid is not None:
@@ -3254,7 +3861,7 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                     if intensity > 0:
 
                         # Count the number of threshold passer pixels in the stripe
-                        source_px_count = np.sum(intensity_values > 0)
+                        source_px_count = int(np.sum(intensity_values > 0))
 
                         # Compute the standard deviation of the background
                         background_std = np.mean(img_handle.ff.stdpixel[half_frame_pixels_stripe[:,1],
@@ -3264,6 +3871,7 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                         snr = signalToNoise(intensity, source_px_count, background_intensity, background_std)
 
                     else:
+                        source_px_count = 0
                         snr = 0
 
                     ###
@@ -3274,6 +3882,54 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                         fr_img_raw[stripe_y, stripe_x] >= saturation_threshold_report
                         )
 
+                    #### Write centroid crop diagnostic panel (optional) ####
+
+                    # Written after centroiding so the PNG overlay shows the final
+                    # centroid alongside the selected pixels and Gaussian init.
+                    # Sampling is controlled by centroid_crop_diag_every_n (stride over
+                    # centroided frames) and capped at centroid_crop_diag_max_frames total
+                    # panels to avoid filling disk on long tracks.
+                    if centroid_crop_diag_enabled \
+                            and centroid_crop_diag_dumped < centroid_crop_diag_max_frames \
+                            and ((frames_centroided % centroid_crop_diag_every_n) == 0):
+                        try:
+                            # Assemble the raw and background-subtracted images for the panel.
+                            # For video input with no dark/flat/mask (fast photometry path)
+                            # the background-subtracted view is reconstructed from the current
+                            # frame on the fly.  For the full-calibration path and FF files,
+                            # max_avg_corrected already contains the correct bg-subtracted image.
+                            if img_handle.input_type != 'ff':
+                                raw_diag_img = fr_img_raw
+                                if fast_frame_photometry:
+                                    if config.gamma != 1.0:
+                                        bg_diag_img = Image.gammaCorrectionImage(
+                                            fr_img.astype(np.float32), config.gamma, out_type=np.float32)
+                                    else:
+                                        bg_diag_img = fr_img.astype(np.float32)
+                                    bg_diag_img = bg_diag_img - avepixel_img
+                                    bg_diag_img[bg_diag_img < 0] = 0
+                                else:
+                                    bg_diag_img = max_avg_corrected
+                            else:
+                                # FF input: the accumulated maxpixel image serves as the
+                                # "raw" view; there are no individual frames to show.
+                                raw_diag_img = img_handle.ff.maxpixel
+                                bg_diag_img = max_avg_corrected
+
+                            saveCentroidCropDiagnostic(
+                                centroid_crop_diag_path, img_handle.name(), detected_line_index,
+                                frame_no, seq_num, raw_diag_img, bg_diag_img,
+                                img_handle.ff.maxpixel, img_handle.ff.avepixel, img_handle.ff.stdpixel,
+                                img_thres, flattened_weights, detected_line,
+                                threshold_frame_pixels, half_frame_pixels, half_frame_pixels_stripe,
+                                x_centroid_weighted, y_centroid_weighted, x_gauss_init, y_gauss_init,
+                                x_centroid, y_centroid, intensity, background_intensity, snr,
+                                saturated_count, source_px_count, gaussian_centroid is not None)
+                            centroid_crop_diag_dumped += 1
+
+                        except Exception as e:
+                            log.debug('Centroid crop diagnostic failed on frame {:.3f}: {}'.format(
+                                frame_no, repr(e)))
 
                     # Rescale the centroid position and intensity back to the pre-binned size
                     if (img_handle.input_type != 'ff') and (config.detection_binning_factor > 1):
@@ -3346,7 +4002,6 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
 
             logDebug('ACCEPTED: {:g} centroids, frame range {:.1f} - {:.1f}, ang_vel {:.2f} deg/s'.format(
                 len(centroids), centroids[0,0], centroids[-1,0], ang_vel))
-
 
             # If the FTPdetectinfo format is requested, exclude the sequence number column from centroids
             if not asgard:
@@ -3424,13 +4079,18 @@ if __name__ == "__main__":
         help="""Preload the video file into memory. This can speed up the detection process, but it requires a lot of memory. Only use for short videos. """)
 
     arg_parser.add_argument('-d', '--debug', action="store_true", \
-        help="""Show debug info on the screen. If Gaussian centroiding is enabled, also write a centroid comparison CSV. """)
+        help="Show debug info on the screen.")
 
     arg_parser.add_argument('-i', '--debugplots', action="store_true", \
         help="""Show graphs (calibrated image, thresholded image, detected lines) which can help adjust the detection settings. """)
 
     arg_parser.add_argument('--frames', metavar='START,END', type=str, \
         help="""Restrict detection to a range of frames, e.g. --frames 0,1000. The end frame will be padded up to the next chunk window boundary. """)
+
+    arg_parser.add_argument('--debugcentroids', action='store_true', \
+        help="Write centroid diagnostic output (per-frame PNG crop panels + CSV, moving Gaussian fit CSV, "
+             "weighted-vs-Gaussian comparison CSV) to the output directory. "
+             "All detections are sampled at every centroided frame.")
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
@@ -3595,14 +4255,36 @@ if __name__ == "__main__":
     results_path = out_dir
     results_name = config.stationID + "_" + img_handle_main.beginning_datetime.strftime("%Y%m%d_%H%M%S_%f")
 
+    # All centroid diagnostic outputs are gated on --debugcentroids so they
+    # never appear in routine detection runs.
     config.centroid_gaussian_compare_path = None
-    if cml_args.debug and config.centroid_gaussian_fit:
-        config.centroid_gaussian_compare_path = os.path.join(
-            results_path, results_name + '_gaussian_centroids.csv')
-        with open(config.centroid_gaussian_compare_path, 'w') as fh:
-            fh.write('source,track_index,frame,x_weighted,y_weighted,x_gaussian,y_gaussian,n_pixels,fit_success\n')
-        log.info('Writing Gaussian centroid debug comparison to {:s}'.format(
-            config.centroid_gaussian_compare_path))
+    config.centroid_crop_diag_path = None
+    config.centroid_moving_gaussian_diag_path = None
+    config.centroid_crop_diag_max_frames = 9999   # effectively unlimited
+    config.centroid_crop_diag_detection_index = -1 # all detections
+    config.centroid_crop_diag_every_n = 1          # every centroided frame
+
+    if cml_args.debugcentroids:
+        diag_subdir = os.path.join(results_path, 'centroid_diag')
+        mkdirP(diag_subdir)
+        config.centroid_crop_diag_path = diag_subdir
+
+        if config.centroid_gaussian_fit:
+            config.centroid_gaussian_compare_path = os.path.join(
+                results_path, results_name + '_gaussian_centroids.csv')
+            with open(config.centroid_gaussian_compare_path, 'w') as fh:
+                fh.write('source,track_index,frame,x_weighted,y_weighted,x_gaussian,y_gaussian,n_pixels,fit_success\n')
+
+            if config.centroid_gaussian_fit_method in ('moving', 'kinematic'):
+                config.centroid_moving_gaussian_diag_path = os.path.join(
+                    results_path, results_name + '_moving_gauss_diag.csv')
+                with open(config.centroid_moving_gaussian_diag_path, 'w') as fh:
+                    fh.write('source,track_index,frame,x_weighted,y_weighted,'
+                             'x_diag,y_diag,initial_cost,best_cost,cost_ratio,'
+                             'centroid_shift,L_at_lower,L_at_upper,'
+                             'sigma_at_lower,sigma_at_upper\n')
+
+        log.info('Writing centroid diagnostics to {:s}'.format(diag_subdir))
 
     if cml_args.debug:
         results_file = open(os.path.join(results_path, results_name + '_results.txt'), 'w')
