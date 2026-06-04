@@ -3510,10 +3510,20 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                         along_track = pixels_x * cos_omega + pixels_y * sin_omega
                         cross_track = -pixels_x * sin_omega + pixels_y * cos_omega
 
-                        # Use L from the RANSAC line speed (px/frame) for both moving and kinematic.
-                        # Pixel-spread is unreliable: it reflects PSF+threshold scatter, not actual
-                                # trail length, and can overestimate L by 10x for short-duration streaks.
-                        moving_L_init = max(0.5, L_kinematic)
+                        # Use the polynomial-curve derivative as a per-frame L estimate so
+                        # accelerating/decelerating targets get a correct streak length each frame.
+                        # Fall back to the RANSAC average when no curve fit is available.
+                        # Clip to [0.4, 2.5] × L_kinematic so endpoint noise on short tracks
+                        # cannot push the seed outside a physically reasonable range.
+                        if centroid_curve_selector is not None and L_kinematic > 0:
+                            _xd = np.polyval(np.polyder(centroid_curve_selector['x_coeff']), float(i))
+                            _yd = np.polyval(np.polyder(centroid_curve_selector['y_coeff']), float(i))
+                            _L_poly = float(np.hypot(_xd, _yd))
+                            moving_L_init = max(0.5, float(np.clip(_L_poly,
+                                                                    L_kinematic * 0.4,
+                                                                    L_kinematic * 2.5)))
+                        else:
+                            moving_L_init = max(0.5, L_kinematic)
 
                         # Estimate cross-track sigma from pixels near the trail centre to avoid
                         # background pixels on large patches dominating the moment calculation
