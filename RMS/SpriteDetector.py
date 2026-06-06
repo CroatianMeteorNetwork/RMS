@@ -1,16 +1,18 @@
+import logging
 import os
 import shutil
-from PIL import ImageDraw, Image
-import numpy as np
-import logging
-from RMS.ExtractThumbnails import get_thumbnails, apply_vignetting
+import statistics
 import tarfile
 from datetime import datetime
-import statistics
-from RMS.Routines import MaskImage
+
+import cv2
+import numpy as np
+from PIL import Image, ImageDraw
+
+from RMS.ExtractThumbnails import apply_vignetting, get_thumbnails
 from RMS.Formats.CALSTARS import readCALSTARS
 from RMS.Formats.FFfits import read as readFFfile
-import cv2
+from RMS.Routines import MaskImage
 
 try:
     from tflite_runtime.interpreter import Interpreter
@@ -26,7 +28,6 @@ except ImportError:
     except ImportError:
         TFLITE_AVAILABLE = False
 import csv
-
 
 """Some functions were adapted from the yolov5 github repository, mostly from the utils/general.py"""
 
@@ -158,7 +159,7 @@ class SpriteDetector(object):
             self.folder_path,
             os.path.basename(self.folder_path) + "_CAPTURED_thumbs.jpg",
         )
-        if os.path.exists(thumbnail_file):
+        if os.path.exists(thumbnail_file) or self.scrape_timelapse:
             self.swipe_thumbnails(thumbnail_file, vignetting_parameter)
         else:
             print(
@@ -237,7 +238,6 @@ class SpriteDetector(object):
                     MaskImage.maskImage(np.array(thumbnail), mask_resized, True)
                 )
             else:
-
                 # print("Masking image")
                 image = Image.fromarray(
                     MaskImage.maskImage(np.array(thumbnail), self.mask)
@@ -333,30 +333,38 @@ class SpriteDetector(object):
             print("Can't determine image timestamp")
             return
         print("Determined timestamp:", imgname)
+        if self.thumbnails_only:
+            print("Storing thumbnail detection")
+            self.store_detections(image, output, save, imgname)
+            return
         if self.calstars:
-            ff_stars = []
+            ff_stars = [0] * len(stack_files)
             ff_to_process = []
-            # print(self.calstars[0][0],stack_files)
+
+            # Get all files in the folder once
+            folder_files = os.listdir(self.folder_path)
+
             print("Checking number of stars for", stack_files)
-            print("Example FF name from CALSTARS:", self.calstars[0][0])
-            for ff in self.calstars:
-                # print(ff[0],len(ff[1]),stack_files)
-                for file in stack_files:
-                    if file in ff[0]:
-                        ff_stars.append(len(ff[1]))
-                        ff_to_process.append(ff[0])
-                        break
+
+            for i, file_str in enumerate(stack_files):
+                # Find the actual filename in folder_path that contains the stack_files string
+                matched_file = next((f for f in folder_files if file_str in f), None)
+                if matched_file:
+                    ff_to_process.append(matched_file)
+
+                    # Update ff_stars from calstars if it exists there
+                    for ff in self.calstars:
+                        if matched_file in ff[0]:
+                            ff_stars[i] = len(ff[1])
+                            break
+
             print("Number of stars per FF:", ff_stars)
             if ff_stars:
                 print("Median stars", statistics.median(ff_stars))
             if not ff_stars or statistics.median(ff_stars) < self.min_stars:
                 print("Not enough stars in the images")
                 return
-        # print("Keeping detection")
-        if self.thumbnails_only:
-            print("Storing thumbnail detection")
-            self.store_detections(image, output, save, imgname)
-        else:
+
             print("Analyzing fits files")
             ff_found = self.analyze_fits(ff_to_process, save)
             if not ff_found:
@@ -375,12 +383,15 @@ class SpriteDetector(object):
             except FileNotFoundError:
                 # print(f"File {ff_name} not found in {self.folder_path}. Skipping.")
                 continue
-            maxpixel_vignetting_corrected = apply_vignetting(
-                maxpixel, self.vignetting_parameter
-            ).convert("RGB")
-            prediction, image = self.get_prediction(maxpixel_vignetting_corrected)
+            # maxpixel_vignetting_corrected = apply_vignetting(
+            #    maxpixel, self.vignetting_parameter
+            # ).convert("RGB") skipping since dataset also isnt vignetting corrected
+            prediction, image = self.get_prediction(
+                Image.fromarray(maxpixel).convert("RGB")
+            )
             output = self.process_predictions(
-                prediction, ff_name  # os.path.splitext(ff_name)[0] + "_sprite"
+                prediction,
+                ff_name,  # os.path.splitext(ff_name)[0] + "_sprite"
             )
             if output.shape[0] > 0:
                 ff_names_with_detections.append(ff_name)
@@ -398,11 +409,11 @@ class SpriteDetector(object):
             for i in range(len(detections)):
                 output, image = detections[i]
                 ff_name = ff_names_with_detections[i]
-                os.makedirs(os.path.join(self.save_dir, "FFs"), exist_ok=True)
-                shutil.copy(
-                    os.path.join(self.folder_path, ff_name),
-                    os.path.join(self.save_dir, "FFs", ff_name),
-                )
+                #os.makedirs(os.path.join(self.save_dir, "FFs"), exist_ok=True)
+                #shutil.copy(
+                #    os.path.join(self.folder_path, ff_name),
+                #    os.path.join(self.save_dir, "FFs", ff_name),
+                #)
                 self.store_detections(
                     image,
                     output,
@@ -418,41 +429,73 @@ class SpriteDetector(object):
     def store_detections(self, image, output, save, imgname):
         self.mark_sprites(output, image, imgname, save)
 
-        with open(
-            os.path.join(self.save_dir, "detections.csv"), "a", newline=""
-        ) as csvfile:
+        csv_path = os.path.join(self.folder_path, f"{os.path.basename(self.folder_path)}_sprite_detections.csv")
+        file_exists = os.path.isfile(csv_path)
+
+        with open(csv_path, "a", newline="") as csvfile:
             writer = csv.writer(
                 csvfile, delimiter=";", quotechar="|", quoting=csv.QUOTE_MINIMAL
             )
-            writer.writerow(
-                [
-                    "image name",
-                    "detection type",
-                    "upper left x",
-                    "upper left y",
-                    "bottom right x",
-                    "bottom right y",
-                    "confidence",
-                    "station name",
-                    "station latitude",
-                    "station longitude",
-                    "station elevation",
-                ]
-            )
+            if not file_exists or os.stat(csv_path).st_size == 0:
+                writer.writerow(
+                    [
+                        "image name",
+                        "detection type",
+                        "upper left x",
+                        "upper left y",
+                        "bottom right x",
+                        "bottom right y",
+                        "model",
+                        "confidence",
+                        "intensity weighted x",
+                        "intensity weighted y"
+                    ]
+                )
             for i in output:
+                # Calculate weighted center of pixel intensities within the detection box
+                x1, y1, x2, y2 = (
+                    int(i[0] * self.config.width),
+                    int(i[1] * self.config.height),
+                    int(i[2] * self.config.width),
+                    int(i[3] * self.config.height),
+                )
+
+                # Ensure coordinates are within image bounds
+                x1, y1 = max(0, x1), max(0, y1)
+                x2, y2 = min(self.config.width, x2), min(self.config.height, y2)
+
+                # Extract the region of interest from the image
+                roi = np.array(image)[y1:y2, x1:x2]
+
+                # Convert to grayscale if it's RGB to get intensities
+                if roi.ndim == 3:
+                    roi_gray = np.mean(roi, axis=2)
+                else:
+                    roi_gray = roi
+
+                # Calculate weighted middle
+                total_intensity = np.sum(roi_gray)
+                if total_intensity > 0:
+                    y_indices, x_indices = np.indices(roi_gray.shape)
+                    weighted_x = x1 + np.sum(x_indices * roi_gray) / total_intensity
+                    weighted_y = y1 + np.sum(y_indices * roi_gray) / total_intensity
+                else:
+                    # Fallback to geometric center if region is pitch black
+                    weighted_x = (x1 + x2) / 2
+                    weighted_y = (y1 + y2) / 2
+
                 writer.writerow(
                     [
                         imgname,
                         "sprite",
-                        i[0] * self.config.width,
-                        i[1] * self.config.height,
-                        i[2] * self.config.width,
-                        i[3] * self.config.height,
+                        x1,
+                        y1,
+                        x2,
+                        y2,
+                        os.path.splitext(os.path.basename(self.model_path))[0],
                         i[4],
-                        self.config.stationID,
-                        self.config.latitude,
-                        self.config.longitude,
-                        self.config.elevation,
+                        weighted_x,
+                        weighted_y,
                     ]
                 )
 
@@ -530,11 +573,11 @@ class SpriteDetector(object):
         if save:
             MARKED_DIR = os.path.join(self.save_dir, "marked")
             os.makedirs(MARKED_DIR, exist_ok=True)
-            edit_image.save(f'{os.path.join(MARKED_DIR,imgname+"_marked")}.png')
+            edit_image.save(f"{os.path.join(MARKED_DIR, imgname + '_marked')}.png")
             # its useful to ahve unmarked ones since they can be used in model training
             UNMARKED_DIR = os.path.join(self.save_dir, "unmarked")
             os.makedirs(UNMARKED_DIR, exist_ok=True)
-            image.save(f'{os.path.join(UNMARKED_DIR,imgname+"_unmarked")}.png')
+            image.save(f"{os.path.join(UNMARKED_DIR, imgname + '_unmarked')}.png")
 
     def extract_timelapse_frames(self, folder_path):
         timelapse_filename = os.path.basename(folder_path) + "_timelapse.mp4"
