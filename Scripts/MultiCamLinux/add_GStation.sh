@@ -1,3 +1,4 @@
+#!/bin/bash
 # This software is part of the Linux port of RMS
 # Copyright (C) 2023  Ed Harman
 # 
@@ -13,7 +14,6 @@
 # 
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
-#!/bin/bash
 #
 # Version 1.6   - added logic to prevent running this script on a Raspberry Pi
 #                 added by Peter E., June 2024

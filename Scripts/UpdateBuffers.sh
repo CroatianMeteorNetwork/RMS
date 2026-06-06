@@ -80,38 +80,38 @@ echo "CHECKING CURRENT SETTINGS:"
 show_settings
 echo
 
-# Backup original sysctl.conf
-echo "Creating backup of current sysctl.conf..."
-cp /etc/sysctl.conf /etc/sysctl.conf.backup.$(date +%Y%m%d_%H%M%S)
+# Use drop-in file in /etc/sysctl.d/ for systemd compatibility
+# The 99- prefix ensures this loads last and won't be overridden
+# This method works on all modern Linux distributions (Debian 7+, Ubuntu 12.04+, all Raspberry Pi OS)
+SYSCTL_DROP_IN="/etc/sysctl.d/99-rms-udp-buffers.conf"
 
-# Function to add or update sysctl setting
-update_sysctl() {
-    local key=$1
-    local value=$2
-    
-    # Check if setting already exists
-    if grep -q "^${key}[[:space:]]*=" /etc/sysctl.conf; then
-        # Update existing setting
-        sed -i "s|^${key}[[:space:]]*=.*|${key}=${value}|" /etc/sysctl.conf
-        echo "Updated ${key} to ${value}"
-    else
-        # Add new setting
-        echo "${key}=${value}" >> /etc/sysctl.conf
-        echo "Added ${key}=${value}"
-    fi
-}
+# Ensure the directory exists (should always exist on supported systems)
+if [ ! -d /etc/sysctl.d ]; then
+    echo "Warning: /etc/sysctl.d not found, creating it..."
+    mkdir -p /etc/sysctl.d
+fi
 
-echo "Updating buffer size settings..."
+echo "Creating sysctl drop-in file: $SYSCTL_DROP_IN"
 
-# Update the settings
-update_sysctl "net.core.rmem_max" "$RECOMMENDED_SIZE"
-update_sysctl "net.core.wmem_max" "$RECOMMENDED_SIZE"
+# Write the drop-in configuration file
+cat > "$SYSCTL_DROP_IN" << EOF
+# RMS UDP Buffer Configuration
+# Created by UpdateBuffers.sh on $(date)
+# Required for GStreamer UDP streaming (512KB min per camera)
 
-# Apply changes
+net.core.rmem_max=$RECOMMENDED_SIZE
+net.core.wmem_max=$RECOMMENDED_SIZE
+EOF
+
+echo "Created $SYSCTL_DROP_IN with:"
+echo "  net.core.rmem_max=$RECOMMENDED_SIZE"
+echo "  net.core.wmem_max=$RECOMMENDED_SIZE"
+
+# Apply changes immediately
 echo "Applying changes..."
-sysctl -p >/dev/null 2>&1  # Suppress detailed output
+sysctl -p "$SYSCTL_DROP_IN" >/dev/null 2>&1
 
 echo -e "\nAFTER CHANGES:"
 show_settings
 
-echo -e "\nDone! A backup of your original sysctl.conf has been created."
+echo -e "\nDone! Settings will persist across reboots via $SYSCTL_DROP_IN"

@@ -32,7 +32,7 @@ from RMS.UploadManager import getSSHAndSFTP, existsRemoteDirectory, createRemote
 
 
 # Get the logger from the main module
-log = getLogger("logger")
+log = getLogger("rmslogger")
 
 
 
@@ -159,6 +159,10 @@ def downloadNewMask(config):
         sftp.posix_rename(remote_mask, dl_mask_name)
 
         log.info('Remote mask renamed to: ' + dl_mask_name)
+
+    except (paramiko.SSHException, EOFError, OSError) as e:
+        log.warning('Connection error during mask download: {}'.format(e))
+        return False
 
     finally:
         if sftp:

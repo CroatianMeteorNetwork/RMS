@@ -21,8 +21,8 @@ from __future__ import print_function, absolute_import, division
 import os
 import sys
 import argparse
-import platform
 import subprocess
+import time
 
 import cv2
 import numpy as np
@@ -34,6 +34,231 @@ from glob import glob
 from Utils.ShowerAssociation import showerAssociation
 from RMS.Formats.FTPdetectinfo import validDefaultFTPdetectinfo
 from RMS.Astrometry.Conversions import datetime2JD
+
+
+class FrameDisplay:
+    """Cross-platform frame display helper with OpenCV/Matplotlib backends."""
+
+    def __init__(self, window_name):
+        # Remember the logical window name for whichever backend we end up using.
+        self.window_name = window_name
+
+        # Default to OpenCV until we prove that GUI support is not available.
+        self.backend = 'cv2'
+
+        # Track backend-specific state so we can tear down windows cleanly.
+        self._cv2_window_created = False
+        self._mpl_ready = False
+
+        # Keyboard state is reused for both backends.
+        self._last_key = None
+
+        # Matplotlib drawing artefacts are initialised lazily when required.
+        self._mpl_im = None
+        self._mpl_fig = None
+        self._mpl_ax = None
+        self._plt = None
+
+    def _ensureCv2Window(self):
+        """Create an OpenCV window if GUI support is available."""
+
+        # If we already created the window during a previous call, there is nothing else to do.
+        if self._cv2_window_created:
+            return True
+
+        # Try to create an OpenCV window. This step fails on systems where OpenCV was compiled
+        # without GUI support (e.g. headless servers), so we guard it with a try/except.
+        try:
+            cv2.namedWindow(self.window_name, cv2.WINDOW_NORMAL)
+            self._cv2_window_created = True
+            return True
+        except cv2.error:
+            return False
+
+    def _switchToMatplotlib(self):
+        """Fallback initialisation using Matplotlib if OpenCV fails."""
+
+        # When we have already switched to Matplotlib earlier, we can immediately reuse it.
+        if self.backend == 'mpl':
+            return True
+
+        # Import Matplotlib lazily so that we only pay the import cost when OpenCV GUI support is
+        # missing. Import failures mean that we cannot display frames at all.
+        try:
+            import matplotlib.pyplot as plt
+        except ImportError:
+            return False
+
+        # Activate the Matplotlib backend in interactive mode.
+        self.backend = 'mpl'
+        self._plt = plt
+        plt.ion()
+
+        # Build a simple figure for image display. The result mimics the old OpenCV window so the
+        # rest of the viewer logic does not have to change depending on the backend.
+        self._mpl_fig, self._mpl_ax = plt.subplots()
+
+        try:
+            self._mpl_fig.canvas.manager.set_window_title(self.window_name)
+        except Exception:
+            # Some Matplotlib backends do not support named windows.
+            pass
+
+        # Remove spines/ticks so the image occupies the entire canvas.
+        self._mpl_ax.set_axis_off()
+
+        # Capture keyboard events so the rest of the viewer behaves the same.
+        self._mpl_fig.canvas.mpl_connect('key_press_event', self._onKeyPress)
+        self._mpl_ready = True
+
+        # Close any half-created OpenCV window to avoid zombie handles. This may happen when OpenCV
+        # successfully creates a window but rendering fails afterwards.
+        if self._cv2_window_created:
+            try:
+                cv2.destroyWindow(self.window_name)
+            except cv2.error:
+                pass
+            self._cv2_window_created = False
+
+        print("OpenCV imshow unavailable; using Matplotlib for display.")
+        return True
+
+    def _onKeyPress(self, event):
+        """Store the last key pressed in the Matplotlib window."""
+
+        self._last_key = event.key
+
+    def showFrame(self, image):
+        """Display a frame using the currently selected backend."""
+
+        # Attempt to show the frame using OpenCV first because that matches the historic viewer.
+        if self.backend == 'cv2':
+            # Make sure an OpenCV window exists. If creation fails we immediately switch to
+            # Matplotlib and retry the same frame.
+            if not self._ensureCv2Window():
+                if not self._switchToMatplotlib():
+                    return False
+
+                return self.showFrame(image)
+
+            try:
+                # Regular GUI-enabled builds reach this line and render the frame directly.
+                cv2.imshow(self.window_name, image)
+                return True
+            except cv2.error:
+                # Some builds create windows but fail to render frames (e.g. missing GTK backend).
+                # In that case we fall back to Matplotlib and retry so playback can continue.
+                if not self._switchToMatplotlib():
+                    return False
+
+                return self.showFrame(image)
+
+        # Matplotlib initialisation failed earlier and cannot be recovered.
+        if not self._mpl_ready and not self._switchToMatplotlib():
+            return False
+
+        # Convert BGR images to RGB because Matplotlib expects the latter, otherwise the colours
+        # will look swapped. Grayscale frames can be rendered as-is.
+        display_data = image
+        if image.ndim == 3 and image.shape[2] == 3:
+            display_data = image[:, :, ::-1]
+
+        # First Matplotlib draw creates the image artist. Subsequent draws only update the data,
+        # which is cheaper and avoids flicker.
+        if self._mpl_im is None:
+            kwargs = {}
+            if display_data.ndim == 2 or (display_data.ndim == 3 and display_data.shape[2] == 1):
+                kwargs['cmap'] = 'gray'
+                kwargs['vmin'] = 0
+                kwargs['vmax'] = 255
+
+            self._mpl_im = self._mpl_ax.imshow(display_data, **kwargs)
+        else:
+            # Update the existing artist to reflect the new frame without rebuilding the figure.
+            self._mpl_im.set_data(display_data)
+
+        # Flush the Matplotlib event queue so window contents update on screen.
+        self._mpl_fig.canvas.draw_idle()
+        self._plt.pause(0.001)
+        return True
+
+    def waitKey(self, delay_ms):
+        """Wait for keyboard input matching the behaviour of cv2.waitKey."""
+
+        # When OpenCV owns the window we simply forward to cv2.waitKey so native shortcuts work.
+        if self.backend == 'cv2':
+            return cv2.waitKey(delay_ms) & 0xFF
+
+        # Matplotlib is not initialised, which means the viewer is effectively headless.
+        if not self._mpl_ready:
+            return -1
+
+        self._last_key = None
+
+        # Match cv2.waitKey semantics: delay 0 waits indefinitely, otherwise we poll until the
+        # timeout expires. We keep the pause interval small so keyboard input feels responsive.
+        if delay_ms == 0:
+            while self._last_key is None:
+                self._plt.pause(0.05)
+        else:
+            end_time = time.time() + (delay_ms / 1000.0)
+            while time.time() < end_time and self._last_key is None:
+                remaining = end_time - time.time()
+                self._plt.pause(min(0.05, remaining))
+
+        key = self._last_key
+        self._last_key = None
+
+        # Matplotlib supplies keys as strings. For single-character inputs we convert them to ASCII
+        # codes so the rest of the viewer can stay unchanged.
+        if not key:
+            return -1
+
+        if len(key) == 1:
+            return ord(key)
+
+        return -1
+
+    def moveWindow(self, x_coord, y_coord):
+        """Relocate the active window so behaviour matches the old viewer."""
+
+        # If OpenCV created the window we use the native moveWindow helper to position it. Some
+        # headless builds raise errors here as well, so we catch them to keep playback running.
+        if self.backend == 'cv2' and self._cv2_window_created:
+            try:
+                cv2.moveWindow(self.window_name, x_coord, y_coord)
+            except cv2.error:
+                pass
+        # Matplotlib does not expose a cross-backend API for moving windows. Instead we reach into
+        # the manager and, when the underlying toolkit provides a window object, we apply the
+        # geometry change. Backends without such access simply ignore the request.
+        elif self.backend == 'mpl' and self._mpl_ready:
+            try:
+                manager = self._mpl_fig.canvas.manager
+                window = getattr(manager, 'window', None)
+                if window is not None:
+                    window.wm_geometry(f"+{x_coord}+{y_coord}")
+            except Exception:
+                pass
+
+    def destroyWindow(self):
+        """Destroy whichever window type is currently active."""
+
+        # Release native OpenCV windows if they were created so we do not leave zombie GUI handles
+        # behind when the viewer exits or switches to Matplotlib.
+        if self.backend == 'cv2' and self._cv2_window_created:
+            try:
+                cv2.destroyWindow(self.window_name)
+            except cv2.error:
+                pass
+
+            self._cv2_window_created = False
+        # When Matplotlib drives the display we close the figure to unblock the event loop and free
+        # resources. Closing a non-initialised figure would raise, so we only do this when ready.
+        elif self.backend == 'mpl' and self._mpl_ready:
+            self._plt.close(self._mpl_fig)
+            self._mpl_ready = False
+
 
 def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format=None, hide=False,
         avg_background=False, split=False, add_timestamp=False, add_frame_number=False, append_ff_to_video=False,
@@ -79,6 +304,10 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format=N
         # Make the image square
         img_size = max(y_size, x_size)
 
+        # ffmpeg requires dimensions to be divisible by two on some platforms see issue 742
+        if img_size % 2: 
+            img_size +=1
+            
         background = np.zeros((img_size, img_size), np.uint8)
         add_timestamp = False
         add_shower_name = False
@@ -91,21 +320,34 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format=N
             background = ff_file.maxpixel
         if append_ff_to_video:
             meteor_image = np.copy(ff_file.maxpixel)
-        timestampTitle = ""
         if add_timestamp:
-            timestampTitle = getTimestampTitle(ff_path)
-
+            station_name, file_timestamp = getStationNameAndTimestampfromFile(ff_path)
 
     print("Number of lines:", fr.lines)
     
+    # Track whether the first frame has already been positioned on screen.
     first_image = True
     wait_time = 2*int(1000.0/config.fps)
 
+    # Viewer state for interactive playback.
     pause_flag = False
+    display = None
+
+    # Prepare the display helper unless the caller explicitly hid the window.
+    if not hide:
+        try:
+            display = FrameDisplay(name)
+        except RuntimeError as exc:
+            print(str(exc))
+            hide = True
 
     # if the file format was mp4, lets make a video from the data
     makevideo = False
+    ffmpeg_path = config.ffmpeg_binary
     if extract_format == 'mp4':
+        if not ffmpeg_path:
+            print('ffmpeg not available, unable to create video')
+            return 
         makevideo = True
         extract_format = 'png'
 
@@ -125,7 +367,7 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format=N
         for current_line in range(fr.lines):
             for z in range(fr.frameNum[current_line]):
                 t = fr.t[current_line][z]
-                if not t in clips:
+                if t not in clips:
                     clips[t] = []
                 clips[t].append((current_line, z))
                 start = min(start, t)
@@ -197,15 +439,15 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format=N
 
             # Add timestamp
             if add_timestamp:
-                addTimestampToImage(img, timestampTitle)
+                addTimestampToImage(img, getTimestampTitle(station_name, file_timestamp, t, config.fps))
             # Add meteor shower name
             if add_shower_name:
-                addShowerNameToImage(img, showerNameTitle)
+                addShowerNameToImage(add_timestamp, img, showerNameTitle)
 
             # Save frame to disk
             if save_frames or makevideo:
                 frame_file_name = fr_path.replace('.bin', '') \
-                    + "_line_{:02d}_frame_{:03d}.{:s}".format(video_num, t, extract_format)
+                    + "_line_{:02d}_frame_{:03d}.{:s}".format(video_num, frame_num, extract_format)
                 cv2.imwrite(os.path.join(dir_path, frame_file_name), img)
                 framefiles.append(frame_file_name)
                 img_patt = os.path.join(dir_path, fr_path.replace('.bin', '')
@@ -214,19 +456,22 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format=N
             frame_num += 1
 
             if not hide:
-            
-                # Show the frame
-                try:
-                    cv2.imshow(name, resizeImageIfNeed(img))
-                except:
-                    print("imshow not available in OpenCV, Rebuild the library with Windows, GTK+ 2.x or Cocoa support. If you are on Ubuntu or Debian, install libgtk2.0-dev and pkg-config, then re-run cmake or configure script in function 'cvShowImage'")
+
+                # Resize large frames so they fit comfortably on screen.
+                display_image = resizeImageIfNeed(img)
+                # Abort preview if the backend fails so we can continue processing.
+                if not display or not display.showFrame(display_image):
+                    if display:
+                        display.destroyWindow()
+                        display = None
+                    print("Unable to display frames; continuing without preview.")
                     hide = True
                     first_image = False
                     continue
 
                 # If this is the first image, move it to the upper left corner
                 if first_image:
-                    cv2.moveWindow(name, 0, 0)
+                    display.moveWindow(0, 0)
                     first_image = False
 
 
@@ -235,14 +480,15 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format=N
                 else:
                     wait_time = 2*int(1000.0/config.fps)
 
-                # Space key: pause display. 
-                # 1: previous file. 
-                # 2: next line. 
+                # Space key: pause display.
+                # 1: previous file.
+                # 2: next line.
                 # q: Quit.
-                key = cv2.waitKey(wait_time) & 0xFF
+                key = display.waitKey(wait_time)
 
-                if key == ord("1"): 
-                    cv2.destroyWindow(name)
+                if key == ord("1"):
+                    if display:
+                        display.destroyWindow()
                     return -1
 
                 elif key == ord("2"): 
@@ -253,7 +499,7 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format=N
                     # Pause/unpause video
                     pause_flag = not pause_flag
 
-                elif key == ord("q"): 
+                elif key == ord("q"):
                     os._exit(0)
 
 
@@ -261,30 +507,16 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format=N
             if append_ff_to_video and ff_path is not None:
                 # add duration of 1.5 sec
                 frameCount = int(config.fps * 1.5)
-                saveFramesForMeteorImage(meteor_image, fr_path, add_timestamp, t, frameCount, video_num,
-                                         extract_format, framefiles, dir_path, add_shower_name, timestampTitle, showerNameTitle)
+                timestamp_title = ""
+                if add_timestamp:
+                    timestamp_title = getTimestampTitle(station_name, file_timestamp, 0, config.fps)
+                saveFramesForMeteorImage(meteor_image, fr_path, add_timestamp, frame_num - 1, frameCount, video_num,
+                                         extract_format, framefiles, dir_path, add_shower_name, timestamp_title, showerNameTitle)
 
-            root = os.path.dirname(__file__)
-            ffmpeg_path = os.path.join(root, "ffmpeg.exe")
-            
             mp4_path = os.path.join(dir_path, fr_path.replace('.bin', '') + '_line_{:02d}.mp4'.format(video_num))
 
-            # If running on Windows, use ffmpeg.exe
-            if platform.system() == 'Windows':
-                com = ffmpeg_path + " -y -f image2 -pattern_type sequence -framerate " + str(config.fps) + " -start_number " + str(first_frame) + " -i " + img_patt +" " + mp4_path
-                
-
-            else:
-                software_name = "avconv"
-                if os.system(software_name + " --help > /dev/null"):
-                    software_name = "ffmpeg"
-                    # Construct the ecommand for ffmpeg           
-                    com = software_name + " -y -f image2 -pattern_type sequence -framerate " + str(config.fps) + " -start_number " + str(first_frame) + " -i " + img_patt +" -pix_fmt yuv420p " + mp4_path
-                else:
-                    com = "cd " + dir_path + ";" \
-                        + software_name + " -v quiet -r 30 -y -start_number " + str(first_frame) + " -i " + img_patt \
-                        + " -vcodec libx264 -pix_fmt yuv420p -crf 25 -movflags faststart -g 15 -vf \"hqdn3d=4:3:6:4.5,lutyuv=y=gammaval(0.97)\" " \
-                        + mp4_path
+            # Construct the command for ffmpeg           
+            com = ffmpeg_path + " -y -hide_banner -loglevel error -f image2 -pattern_type sequence -framerate " + str(config.fps) + " -start_number " + str(0) + " -i " + img_patt +" -pix_fmt yuv420p " + mp4_path
             
             # Print the command
             print("Command:")
@@ -300,8 +532,8 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format=N
 
         video_num += 1
 
-    if not hide:
-        cv2.destroyWindow(name)
+    if not hide and display:
+        display.destroyWindow()
 
 
 def saveFramesForMeteorImage(meteorImage, frPath, addTimestamp, lastFrameNumber, frameCount, videoNumber,
@@ -312,12 +544,11 @@ def saveFramesForMeteorImage(meteorImage, frPath, addTimestamp, lastFrameNumber,
         addTimestampToImage(meteorImage, timestampTitle)
     # Add meteor shower name
     if addShowerName:
-        addShowerNameToImage(meteorImage, showerNameTitle)
+        addShowerNameToImage(addTimestamp, meteorImage, showerNameTitle)
     # append frames for 1.5 second
     for frameNumber in range(frameCount):
         frameFileName = frPath.replace('.bin', '') \
-                        + "_line_{:02d}_frame_{:03d}.{:s}".format(videoNumber, lastFrameNumber + frameNumber + 1,
-                                                                  format)
+            + "_line_{:02d}_frame_{:03d}.{:s}".format(videoNumber, lastFrameNumber + frameNumber + 1, format)
         cv2.imwrite(os.path.join(folder, frameFileName), meteorImage)
         frameFiles.append(frameFileName)
 
@@ -327,9 +558,13 @@ def addTimestampToImage(image, title):
     addTextToImage(image, title, 15, height - 20)
 
 
-def addShowerNameToImage(image, title):
+def addShowerNameToImage(withTimestamp, image, title):
     height = image.shape[0]
-    addTextToImage(image, title, 320, height - 20)
+    # if no timestamp - move to the left
+    if withTimestamp:
+        addTextToImage(image, title, 340, height - 20)
+    else:
+        addTextToImage(image, title, 15, height - 20)
 
 
 def getMeteorShowerTitle(video, frFile, ffPath, associations, fps):
@@ -382,9 +617,9 @@ def addTextToImage(image, title, x, y):
 
 
 
-# Resize image to fit window to screen (for images larger than 1280x720)
-# By default resize to HD (with=1280 same as for regular camera resolution)
 def resizeImageIfNeed(image, width=1280):
+    # Resize image to fit window to screen (for images larger than 1280x720)
+    # By default resize to HD (with=1280 same as for regular camera resolution)
 
     (h, w) = image.shape[:2]
     #  Resize only if image larger than required
@@ -396,11 +631,15 @@ def resizeImageIfNeed(image, width=1280):
         return image
 
 
-def getTimestampTitle(ff_path):
+def getTimestampTitle(stationName, startDate, frameNumber, fps):
+    timestamp = startDate + datetime.timedelta(seconds=(frameNumber/fps))
+    return stationName + ' ' + (timestamp.strftime('%Y-%m-%d %H:%M:%S.%f')[:-5]) + ' UTC'
+
+
+def getStationNameAndTimestampfromFile(ff_path):
     fileName = os.path.basename(ff_path)
     stationName = fileName.split('_')[1]
-    timestampt = FFfile.filenameToDatetime(fileName)
-    return stationName + ' ' + timestampt.strftime('%Y-%m-%d %H:%M:%S UTC')
+    return stationName, FFfile.filenameToDatetime(fileName)
 
 
 def loadShowerAssociations(folder, configuration):

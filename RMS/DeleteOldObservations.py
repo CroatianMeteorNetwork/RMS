@@ -20,7 +20,7 @@ from RMS.Logger import LoggingManager, getLogger
 from RMS.Misc import RmsDateTime, UTCFromTimestamp
 
 # Get the logger from the main module
-log = getLogger("logger")
+log = getLogger("rmslogger")
 
 
 # Python 2 doesn't have the timestamp function, so make one
@@ -287,7 +287,7 @@ def objectsToDelete(object_path, stationID, quota_gb=0, bz2=False):
         list of full paths to file system objects for deletion
     """
 
-    if quota_gb == 0 or quota_gb == None:
+    if (quota_gb == 0) or (quota_gb is None):
         log.info("Disc quota system disabled for {:s}".format(object_path))
         return []
 
@@ -1159,7 +1159,7 @@ if __name__ == '__main__':
     # Initialize the logger
     log_manager = LoggingManager()
     log_manager.initLogging(config)
-    log = getLogger("logger")
+    log = getLogger("rmslogger")
 
     if not os.path.isdir(config.data_dir):
         log.info('Data Dir not found {}'.format(config.data_dir))

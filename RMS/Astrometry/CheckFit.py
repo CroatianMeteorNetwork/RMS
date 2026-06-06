@@ -31,7 +31,7 @@ from RMS.Astrometry.CyFunctions import matchStars, subsetCatalog
 
 
 # Get the logger from the main module
-log = getLogger("logger")
+log = getLogger("rmslogger")
 
 
 def computeMinimizationTolerances(config, platepar, star_dict_len):
@@ -723,7 +723,7 @@ if __name__ == "__main__":
     log_manager.initLogging(config, 'checkfit_', safedir=dir_path)
 
     # Get the logger handle
-    log = getLogger("logger", level="INFO")
+    log = getLogger("rmslogger", level="INFO")
 
     # Get a list of files in the night folder
     file_list = os.listdir(dir_path)

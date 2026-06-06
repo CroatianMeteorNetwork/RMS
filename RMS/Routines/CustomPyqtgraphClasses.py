@@ -2120,6 +2120,10 @@ class SettingsWidget(QtWidgets.QWidget):
     sigGreatCircleToggled = QtCore.pyqtSignal()
     sigRegionToggled = QtCore.pyqtSignal()
     sigSingleClickPhotometryToggled = QtCore.pyqtSignal()
+    sigSatTracksToggled = QtCore.pyqtSignal()
+    sigLoadTLEPressed = QtCore.pyqtSignal()
+    sigClearTLEPressed = QtCore.pyqtSignal()
+    sigRedrawSatTracksPressed = QtCore.pyqtSignal()
 
     def __init__(self, gui):
         QtWidgets.QWidget.__init__(self)
@@ -2207,6 +2211,32 @@ class SettingsWidget(QtWidgets.QWidget):
         self.meas_ground_points.hide()
         vbox.addWidget(self.meas_ground_points)
 
+        vbox.addWidget(QHSeparationLine())
+
+        self.sat_tracks = QtWidgets.QCheckBox('Show Satellite Tracks')
+        self.sat_tracks.released.connect(self.sigSatTracksToggled.emit)
+        self.updateShowSatTracks()
+        # self.sat_tracks.hide() # Always show it so user can turn it on
+        vbox.addWidget(self.sat_tracks)
+
+        self.tle_label = QtWidgets.QLabel("TLE: latest downloaded")
+        self.tle_label.setWordWrap(True)
+        vbox.addWidget(self.tle_label)
+
+        self.load_tle_btn = QtWidgets.QPushButton("Load TLE File")
+        self.load_tle_btn.released.connect(self.sigLoadTLEPressed.emit)
+        vbox.addWidget(self.load_tle_btn)
+
+        self.clear_tle_btn = QtWidgets.QPushButton("Reset TLE Selection")
+        self.clear_tle_btn.released.connect(self.sigClearTLEPressed.emit)
+        vbox.addWidget(self.clear_tle_btn)
+
+        self.redraw_tracks_btn = QtWidgets.QPushButton("Redraw Satellite Tracks")
+        self.redraw_tracks_btn.released.connect(self.sigRedrawSatTracksPressed.emit)
+        vbox.addWidget(self.redraw_tracks_btn)
+
+        vbox.addWidget(QHSeparationLine())
+
 
         hbox = QtWidgets.QHBoxLayout()
         grid_group = QtWidgets.QButtonGroup()
@@ -2293,6 +2323,12 @@ class SettingsWidget(QtWidgets.QWidget):
     def updateSingleClickPhotometry(self):
         self.single_click_photometry.setChecked(self.gui.single_click_photometry)
 
+    def updateShowSatTracks(self):
+        self.sat_tracks.setChecked(self.gui.show_sattracks)
+
+    def updateTLELabel(self, text):
+        self.tle_label.setText("TLE: " + text)
+
     def updateImageGamma(self):
         self.img_gamma.setValue(self.gui.img.gamma)
 
@@ -2337,6 +2373,13 @@ class SettingsWidget(QtWidgets.QWidget):
         self.region.hide()
         self.single_click_photometry.hide()
         self.meas_ground_points.hide()
+
+        # Always show satellite options in SkyFit mode
+        self.sat_tracks.show()
+        self.tle_label.show()
+        self.load_tle_btn.show()
+        self.clear_tle_btn.show()
+        self.redraw_tracks_btn.show()
 
         self.gui.selected_stars_visible = False
         self.sigSelStarsToggled.emit()  # toggle makes it true

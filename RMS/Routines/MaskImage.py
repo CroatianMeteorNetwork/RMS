@@ -26,7 +26,7 @@ from RMS.Logger import getLogger
 from RMS.Routines.Image import loadImage
 
 # Get the logger from the main module
-log = getLogger("logger")
+log = getLogger("rmslogger")
 
 
 

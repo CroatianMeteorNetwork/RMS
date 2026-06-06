@@ -40,7 +40,7 @@ from RMS.Misc import RmsDateTime
 
 
 # Get the logger from the main module
-log = getLogger("logger")
+log = getLogger("rmslogger")
 
 
 
@@ -492,7 +492,7 @@ if __name__ == "__main__":
     log_manager = LoggingManager()
     log_manager.initLogging(config, 'detection_', safedir=cml_args.dir_path)
 
-    log = getLogger("logger")
+    log = getLogger("rmslogger")
 
     ######
 
