@@ -8650,6 +8650,58 @@ class PlateTool(QtWidgets.QMainWindow):
         return removed_count
 
 
+    def filterPositionalOutliers(self, sigma_threshold=3.0, abs_floor_px=3.0):
+        """
+        Remove paired stars whose image position is far from the catalog projection.
+
+        Run *after* a fit: re-projects each paired catalog star with the current platepar and drops
+        pairs whose positional residual is a gross outlier - typically a wrong or duplicate match
+        that survived NN/RANSAC and otherwise inflates the final RMSD. The threshold is robust
+        (median + sigma*MAD) and floored at abs_floor_px so a tight fit is never over-clipped.
+
+        Arguments:
+            sigma_threshold: [float] Robust-sigma multiplier for outlier detection.
+            abs_floor_px: [float] Minimum residual (px) to consider an outlier, protecting tight fits.
+
+        Returns:
+            int: Number of stars removed.
+        """
+        if len(self.paired_stars) < 15:
+            return 0
+
+        img_coords = np.array(self.paired_stars.imageCoords())
+        catalog_stars = np.array(self.paired_stars.skyCoords())
+        if len(catalog_stars) == 0:
+            return 0
+
+        jd = date2JD(*self.img_handle.currentTime())
+        cat_x, cat_y, _ = getCatalogStarsImagePositions(catalog_stars, jd, self.platepar)
+
+        errs = np.hypot(img_coords[:, 0] - cat_x, img_coords[:, 1] - cat_y)
+
+        # Robust threshold (MAD-based), floored so a clean fit isn't trimmed
+        med = np.median(errs)
+        mad = np.median(np.abs(errs - med))
+        robust_std = 1.4826*mad
+        thresh = max(abs_floor_px, med + sigma_threshold*robust_std)
+
+        outlier_indices = set(np.where(errs > thresh)[0].tolist())
+
+        if len(outlier_indices) > 0:
+            new_paired_stars = PairedStars()
+            for i, (x, y, fwhm, intens_acc, obj, snr, saturated) in enumerate(
+                    self.paired_stars.paired_stars):
+                if i not in outlier_indices:
+                    new_paired_stars.addPair(x, y, fwhm, intens_acc, obj, snr, saturated)
+            self.paired_stars = new_paired_stars
+
+        removed_count = len(outlier_indices)
+        if removed_count > 0:
+            print("Removed {} positional outliers (>{:.1f} px)".format(removed_count, thresh))
+
+        return removed_count
+
+
     def filterBlendedStars(self, fwhm_mult=2.0, mag_margin=0.3):
         """
         Filter paired_stars by removing likely blended stars.
@@ -12455,6 +12507,13 @@ class PlateTool(QtWidgets.QMainWindow):
                 print("Final refinement with user settings (distortion={})...".format(user_distortion_type))
             self.fitPickedStars()
 
+            # Sigma-clip gross positional mispairs that survived NN/RANSAC (a detection matched to a
+            #   wrong/duplicate catalog star inflates the RMSD), then refit once on the clean set.
+            removed = self.filterPositionalOutliers(sigma_threshold=3.0, abs_floor_px=3.0)
+            if removed > 0:
+                print("Pairs after positional filtering: {}".format(len(self.paired_stars)))
+                self.fitPickedStars()
+
         # Restore fit_only_pointing after pointing-only fit
         self.fit_only_pointing = user_fit_only_pointing
 
@@ -13411,6 +13470,12 @@ class PlateTool(QtWidgets.QMainWindow):
             QtWidgets.QApplication.processEvents()
             self.first_platepar_fit = True
             self.fitPickedStars()
+
+            # Sigma-clip gross positional mispairs that survived NN/RANSAC, then refit once
+            removed = self.filterPositionalOutliers(sigma_threshold=3.0, abs_floor_px=3.0)
+            if removed > 0:
+                print("Pairs after positional filtering: {}".format(len(self.paired_stars)))
+                self.fitPickedStars()
 
             # Note: catalog LM restoration is handled by the caller (autoFitAstrometryNet)
 
