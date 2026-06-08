@@ -3602,7 +3602,6 @@ class PlateTool(QtWidgets.QMainWindow):
             self._original_catalog_file = self.config.star_catalog_file
             self._original_band_ratios = self.config.star_catalog_band_ratios
 
-            self.initMaskFromFile()
             self.detectInputType(use_fr_files=self.use_fr_files)
 
             if self.img_handle is None:
@@ -3618,7 +3617,9 @@ class PlateTool(QtWidgets.QMainWindow):
             self.img_zoom.changeHandle(self.img_handle)
             self.tab.hist.setLevels(0, 2**(8*self.img.data.itemsize) - 1)
 
-            # Now that image data is available, render the mask overlay
+            # Now that the new image dimensions are available, load this station's mask (or clear a
+            #   previous station's mask if this one has none), then render the overlay
+            self.initMaskFromFile()
             self.updateMaskOverlayImage()
 
             self.catalog_stars = self.loadCatalogStars(self.config.catalog_mag_limit)
@@ -6095,11 +6096,19 @@ class PlateTool(QtWidgets.QMainWindow):
     ###################################################################################################
 
     def initMaskFromFile(self):
-        """Auto-load mask.bmp if it exists in the working directory."""
+        """Auto-load mask.bmp if present, else clear any mask carried over from a previous station.
 
-        # Reset brush state (critical when switching stations/directories)
+        Must be called after the new station's image handle is in place, since the mask is rendered
+        against the current image dimensions.
+        """
+
+        # Reset ALL mask state - critical when switching stations/directories. Clearing only the
+        #   paint layer (not the polygons or the rendered overlay) left the previous station's mask
+        #   visible whenever the new station had no mask file.
         if self.mask_brush_mode:
             self._exitBrushMode()
+        self.mask_polygons = []
+        self.mask_current_polygon = []
         self.mask_paint_layer = None
         self.mask_brush_stroke_history = []
         self.tab.mask.setUndoEnabled(False)
@@ -6107,6 +6116,13 @@ class PlateTool(QtWidgets.QMainWindow):
         mask_path = os.path.join(self.dir_path, "mask.bmp")
         if os.path.exists(mask_path):
             self.loadMaskFromFile(mask_path)
+        else:
+            # No mask for this station - clear any leftover overlay/outlines from the previous one
+            self.updateMaskDisplay()
+
+        # Sync the detection mask to the loaded-or-cleared state so it doesn't leak across stations
+        if self.img.data is not None:
+            self.mask = MaskStructure(self.generateMaskImage())
 
     def toggleMaskDrawMode(self):
         """Toggle mask polygon drawing mode."""
