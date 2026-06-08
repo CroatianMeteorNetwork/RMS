@@ -35,6 +35,7 @@ from RMS.Astrometry.CyFunctions import subsetCatalog
 from RMS.Astrometry.Conversions import date2JD, jd2Date, raDec2AltAz
 from RMS.Astrometry.NNalign import alignPlatepar
 from RMS.Formats import CALSTARS, FFfile, FTPdetectinfo, Platepar, StarCatalog
+from RMS.Formats.ECSV import writeECSV
 from RMS.Formats.FTPdetectinfo import findFTPdetectinfoFile, validDefaultFTPdetectinfo
 from RMS.Math import angularSeparation
 from RMS.Logger import LoggingManager, getLogger
@@ -872,9 +873,81 @@ def recalibrateSelectedFF(dir_path, ff_file_names, calstars_data, config, lim_ma
     return recalibrated_platepars
 
 
+def writeMeteorECSV(dir_path, station_id, ff_name, platepar, meteor_picks, fps, used_names, log):
+    """ Write a single recalibrated meteor detection as a GDEF ECSV file.
+
+    The per-pick UTC time is reconstructed from the FF reference time and the (fractional) frame number
+    using the given fps: time = filenameToDatetime(ff_name) + frame/fps, at full microsecond precision.
+    For inputs with accurate per-frame timestamps this recovers the true GPS time (to within the
+    FTPdetectinfo frame-field quantum, ~2 us at 32 fps).
+
+    Arguments:
+        dir_path: [str] Directory where the ECSV file will be written.
+        station_id: [str] Station/camera code.
+        ff_name: [str] FF file name (encodes the reference time and is stored as image_file in the meta).
+        platepar: [Platepar instance] Platepar applied to this detection (for the ECSV meta header).
+        meteor_picks: [ndarray] 12-column calibrated picks from applyPlateparToCentroids:
+            frame, x, y, ra, dec, az, alt, level, mag, background, snr, saturated.
+        fps: [float] Frames per second used to reconstruct the pick times.
+        used_names: [set] Set of ECSV file names already written in this run (mutated for uniqueness).
+        log: [Logger] Logger handle.
+
+    Return:
+        [str or None] Path to the written file, or None if there were no valid picks.
+    """
+
+    # Reference time encoded in the FF file name
+    dt_ref = FFfile.filenameToDatetime(ff_name)
+
+    # Build the list of picks (skip those without a valid centroid)
+    picks = []
+    for row in meteor_picks:
+
+        frame, x, y, ra, dec, azim, alt, level, mag, background, snr, saturated = row
+
+        if np.isnan(x) or np.isnan(y):
+            continue
+
+        picks.append({
+            'datetime': dt_ref + datetime.timedelta(seconds=frame/fps),
+            'ra': ra, 'dec': dec, 'azim': azim, 'alt': alt,
+            'x': x, 'y': y,
+            'intensity': level, 'background': background,
+            'saturated': saturated > 0,
+            'mag': mag, 'snr': snr,
+        })
+
+    # Nothing to write
+    if not picks:
+        return None
+
+    # Number of stars used in the astrometric calibration
+    if getattr(platepar, 'star_list', None) is not None:
+        n_stars = len(platepar.star_list)
+    else:
+        n_stars = 0
+
+    # Construct a unique file name from the time of the first pick
+    base_name = picks[0]['datetime'].strftime("%Y-%m-%dT%H_%M_%S") + '_RMS_' + station_id
+    file_name = base_name + '.ecsv'
+    collision = 1
+    while file_name in used_names:
+        collision += 1
+        file_name = '{:s}_{:d}.ecsv'.format(base_name, collision)
+    used_names.add(file_name)
+
+    ecsv_path = writeECSV(dir_path, file_name, station_id, platepar, picks,
+        mag_band_string='V', n_stars=n_stars, image_file=ff_name,
+        isodate_start_obs=dt_ref.strftime("%Y-%m-%dT%H:%M:%S.%f"))
+
+    log.info('ECSV file saved: {:s}'.format(file_name))
+
+    return ecsv_path
+
+
 def recalibrateIndividualFFsAndApplyAstrometry(
-    dir_path, ftpdetectinfo_path, calstars_data, config, platepar, 
-    generate_plot=True, load_all=False, debug=False
+    dir_path, ftpdetectinfo_path, calstars_data, config, platepar,
+    generate_plot=True, load_all=False, debug=False, ecsv_out=False
 ):
     """Recalibrate FF files with detections and apply the recalibrated platepar to those detections.
     
@@ -891,6 +964,8 @@ def recalibrateIndividualFFsAndApplyAstrometry(
         generate_plot: [bool] Generate the calibration variation plot. True by default.
         load_all: [bool] Load all FTPdetectinfo files in the directory and recalibrate them. False by default.
         debug: [bool] If True, show debug plots for each fit iteration.
+        ecsv_out: [None/bool/str] If set, dump each calibrated detection as an ECSV file. True writes to the
+            FTPdetectinfo directory; a string is used as the output directory. None disables. None by default.
 
     Return:
         (recalibrated_platepars, ftpdetectinfo_file_list): 
@@ -1008,6 +1083,16 @@ def recalibrateIndividualFFsAndApplyAstrometry(
         _, _, meteor_list = FTPdetectinfo.readFTPdetectinfo(
             dir_path, ftpdetectinfo_file, ret_input_format=True
         )
+
+        # Also read the full format to recover the per-meteor fps from the header (index 4). For inputs
+        #   with accurate per-frame timestamps this is the measured fps (e.g. 32.13), which must be used
+        #   instead of config.fps to keep the timing accurate. Both reads parse the file in the same order.
+        # The full format returns the meteor list directly; each entry is
+        #   [ff_name, cam_code, meteor_No, n_segments, fps, hnr, mle, binn, px_fm, rho, phi, meteor_meas]
+        meteor_list_full = FTPdetectinfo.readFTPdetectinfo(
+            dir_path, ftpdetectinfo_file, ret_input_format=False
+        )
+        meteor_fps_list = [entry[4] for entry in meteor_list_full]
 
         # If the list is empty, skip the file
         if not meteor_list:
@@ -1127,10 +1212,25 @@ def recalibrateIndividualFFsAndApplyAstrometry(
         
         ### Apply platepars to FTPdetectinfo ###
         meteor_output_list = []
+
+        # Track the ECSV file names used in this run to guarantee uniqueness
+        used_ecsv_names = set()
+
+        # Resolve the ECSV output directory: an explicit path if given, otherwise the FTPdetectinfo
+        #   directory. ecsv_out is None (disabled), True (use default dir), or a path string.
+        if ecsv_out:
+            ecsv_dir = ecsv_out if isinstance(ecsv_out, str) else dir_path
+            if not os.path.exists(ecsv_dir):
+                os.makedirs(ecsv_dir)
+
         log.info('Applying recalibrated platepars to meteor detections...')
-        for meteor_entry in meteor_list:
+        for meteor_index, meteor_entry in enumerate(meteor_list):
 
             ff_name, meteor_No, rho, phi, meteor_meas = meteor_entry
+
+            # Per-meteor fps from the input FTPdetectinfo header (measured fps for accurate-timestamp
+            #   inputs, config.fps otherwise). Used so the recalibrated timing stays accurate.
+            fps_meteor = meteor_fps_list[meteor_index]
 
             # Find the entry in the CALSTARS file that is closest in time to the FTPdetectinfo FF file
             time_diff_func = lambda x: abs((ftp_ff_datetime_dict[ff_name] - calstars_datetime_dict[x]).total_seconds())
@@ -1144,17 +1244,23 @@ def recalibrateIndividualFFsAndApplyAstrometry(
             # Choose the platepar that will be applied to this FF file
             if closest_calstars_ff_name in recalibrated_platepars:
                 working_platepar = recalibrated_platepars[closest_calstars_ff_name]
-            
+
             else:
                 log.info('Could not find a recalibrated platepar for: {:s}, using default platepar.'.format(ff_name))
                 working_platepar = platepar
 
             # Apply the recalibrated platepar to meteor centroids
             meteor_picks = applyPlateparToCentroids(
-                ff_name, config.fps, meteor_meas, working_platepar, add_calstatus=True
+                ff_name, fps_meteor, meteor_meas, working_platepar, add_calstatus=True
             )
 
-            meteor_output_list.append([ff_name, meteor_No, rho, phi, meteor_picks])
+            # Carry the per-meteor fps so the rewritten FTPdetectinfo header reflects the measured fps
+            meteor_output_list.append([ff_name, meteor_No, rho, phi, meteor_picks, fps_meteor])
+
+            # Dump the calibrated detection as an ECSV file
+            if ecsv_out:
+                writeMeteorECSV(ecsv_dir, config.stationID, ff_name, working_platepar, meteor_picks,
+                    fps_meteor, used_ecsv_names, log)
 
         # Calibration string to be written to the FTPdetectinfo file
         calib_str = 'Recalibrated with RMS on: ' + str(RmsDateTime.utcnow()) + ' UTC'
@@ -1362,7 +1468,7 @@ def recalibrateIndividualFFsAndApplyAstrometry(
 
 
 def applyRecalibrate(ftpdetectinfo_path, config, generate_plot=True, load_all=False, generate_ufoorbit=True,
-                     debug=False):
+                     debug=False, ecsv_out=False):
     """Recalibrate FF files with detections and apply the recalibrated platepar to those detections.
     Arguments:
         ftpdetectinfo_path: [str] Path to an FTPdetectinfo file.
@@ -1373,6 +1479,8 @@ def applyRecalibrate(ftpdetectinfo_path, config, generate_plot=True, load_all=Fa
         load_all: [bool] Load all FTPdetectinfo files in the directory and recalibrate them.
         generate_ufoorbit: [bool] Generate the UFOOrbit file. True by default.
         debug: [bool] If True, show debug plots for each fit iteration.
+        ecsv_out: [None/bool/str] If set, dump each calibrated detection as an ECSV file. True writes to the
+            FTPdetectinfo directory; a string is used as the output directory. None disables. None by default.
 
     Return:
         recalibrated_platepars: [dict] A dictionary where the keys are FF file names and values are
@@ -1428,8 +1536,8 @@ def applyRecalibrate(ftpdetectinfo_path, config, generate_plot=True, load_all=Fa
 
     # Recalibrate and apply astrometry on every FF file with detections individually
     recalibrated_platepars, ftpdetectinfo_file_list = recalibrateIndividualFFsAndApplyAstrometry(
-        dir_path, ftpdetectinfo_path, calstars_data, config, platepar, 
-        generate_plot=generate_plot, load_all=load_all, debug=debug
+        dir_path, ftpdetectinfo_path, calstars_data, config, platepar,
+        generate_plot=generate_plot, load_all=load_all, debug=debug, ecsv_out=ecsv_out
 
     )
 
@@ -1471,8 +1579,13 @@ if __name__ == "__main__":
         help="""Load all FTPdetectinfo and CALSTARS files in the directory and recalibrate them."""
     )
 
-    arg_parser.add_argument('--skipuforbit', action="store_true", 
+    arg_parser.add_argument('--skipuforbit', action="store_true",
         help="""Skip the generation of the UFOOrbit file."""
+    )
+
+    arg_parser.add_argument('--ecsvout', nargs='?', const=True, default=None, metavar='OUTPUT_DIR', type=str,
+        help="""Also dump every calibrated detection as a GDEF ECSV file (one per meteor), readable by ASTRA. """
+             """Optionally takes an output directory; defaults to the FTPdetectinfo directory."""
     )
 
     arg_parser.add_argument('-d', '--debug', action="store_true", 
@@ -1498,6 +1611,10 @@ if __name__ == "__main__":
         print('No FTPdetectinfo file in: {}'.format(ftpdetectinfo_path))
         sys.exit()
 
+    # Resolve to an absolute path so that a bare relative file name doesn't collapse the parent directory
+    #   to an empty string
+    ftpdetectinfo_path = os.path.abspath(ftpdetectinfo_path)
+
     # Extract parent directory
     dir_path = os.path.dirname(ftpdetectinfo_path)
 
@@ -1512,7 +1629,7 @@ if __name__ == "__main__":
     log = getLogger("rmslogger", level="INFO")
 
     # Run the recalibration and recomputation
-    applyRecalibrate(ftpdetectinfo_path, config, load_all=cml_args.all, generate_ufoorbit=(not cml_args.skipuforbit and not cml_args.all), debug=cml_args.debug)
+    applyRecalibrate(ftpdetectinfo_path, config, load_all=cml_args.all, generate_ufoorbit=(not cml_args.skipuforbit and not cml_args.all), debug=cml_args.debug, ecsv_out=cml_args.ecsvout)
 
     # Show the calibration report
     if cml_args.report:

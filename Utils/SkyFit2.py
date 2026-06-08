@@ -662,10 +662,14 @@ if ASTRA_IMPORTED:
 
         def selectFile(self):
             """Opens dialog to select ECSV/txt file"""
+
+            # Open the dialog in the working data directory by default
+            initial_dir = getattr(self.skyfit_instance, "dir_path", "") or ""
+
             file_path, _ = QFileDialog.getOpenFileName(
                 self,
                 "Select the ECSV or TXT file",
-                "",
+                initial_dir,
                 "ECSV or TXT files (*.ecsv *.txt);;All files (*)"
             )
             if file_path:
@@ -10872,29 +10876,46 @@ class PlateTool(QtWidgets.QMainWindow):
                             'saturated': saturated,
                         })
 
-            # Converts times into frame indices, accounting for floating-point errors
-            pick_frame_indices = []
+            # Match each pick to its nearest frame in time.
+            # Frames are tens of milliseconds apart, so the nearest frame is unambiguous even when the
+            #   pick time carries sub-millisecond noise (e.g. ECSV times reconstructed from frame/fps are
+            #   accurate only to a few microseconds). A pick is accepted if it falls within half a frame
+            #   interval of a real frame; the match is order-independent and tolerant of gaps, unlike a
+            #   sequential exact-time walk.
             frame_count = self.img_handle.total_frames
-            time_idx = 0
-            for i in range(frame_count):
-                frame_time = self.img_handle.currentFrameTime(frame_no=i, dt_obj=True)
-                time = pick_frame_times[time_idx]
-                if frame_time == time or \
-                    frame_time == time + datetime.timedelta(microseconds=1) or \
-                    frame_time == time - datetime.timedelta(microseconds=1):
-                    pick_frame_indices.append(i)
-                    time_idx += 1
-                if time_idx >= len(pick_frame_times):
-                    break
+            frame_times = [self.img_handle.currentFrameTime(frame_no=i, dt_obj=True)
+                           for i in range(frame_count)]
 
-            # if arrays are different dimensions raise error
-            if len(picks) != len(pick_frame_indices):
+            # Tolerance: half the median frame interval (defaults to 0.5 s for a single frame)
+            if frame_count > 1:
+                intervals = sorted(abs((frame_times[i + 1] - frame_times[i]).total_seconds())
+                                   for i in range(frame_count - 1))
+                tol = 0.5*intervals[len(intervals)//2]
+            else:
+                tol = 0.5
+
+            # Assign each pick to the closest frame within tolerance
+            pick_list = {}
+            unmatched = 0
+            for pick, pick_time in zip(picks, pick_frame_times):
+
+                nearest_idx = min(range(frame_count),
+                                  key=lambda k: abs((frame_times[k] - pick_time).total_seconds()))
+
+                if abs((frame_times[nearest_idx] - pick_time).total_seconds()) > tol:
+                    unmatched += 1
+                    continue
+
+                pick_list[nearest_idx] = pick
+
+            # Warn if some picks could not be matched to any frame
+            if unmatched > 0:
                 qmessagebox(title="Pick/Frame Index Mismatch",
-                            message="Mismatch between number of picks and frame indices. " \
-                            "Please check the ECSV file for frame-time mismatch errors.",
+                            message="{:d} of {:d} picks could not be matched to a frame within half a "
+                            "frame interval. Please check the ECSV file for frame-time mismatch "
+                            "errors.".format(unmatched, len(picks)),
                             message_type="error")
                 return None
-            pick_list = {frame: pick for frame, pick in zip(pick_frame_indices, picks)}
 
             return pick_list
         

@@ -3121,27 +3121,37 @@ def loadECSV(ECSV_file_path, dir_path, img_obj):
                 # Load in pick parameters, use default for other values
                 picks.append([cx, cy])
 
-    # Converts times into frame indices, accounting for floating-point errors
-    pick_frame_indices = []
+    # Match each pick to its nearest frame in time.
+    # Frames are tens of milliseconds apart, so the nearest frame is unambiguous even when the pick time
+    #   carries sub-millisecond noise (e.g. ECSV times reconstructed from frame/fps are accurate only to a
+    #   few microseconds). A pick is accepted if it falls within half a frame interval of a real frame; the
+    #   match is order-independent and tolerant of gaps, unlike a sequential exact-time walk.
     frame_count = img_obj.total_frames
-    time_idx = 0
-    for i in range(frame_count):
-        frame_time = img_obj.currentFrameTime(frame_no=i, dt_obj = True)
-        time = pick_frame_times[time_idx]
-        if frame_time == time or \
-            frame_time == time + dt.timedelta(microseconds=1) or \
-            frame_time == time - dt.timedelta(microseconds=1):
-            pick_frame_indices.append(i)
-            time_idx += 1
-        if time_idx >= len(pick_frame_times):
-            break
+    frame_times = [img_obj.currentFrameTime(frame_no=i, dt_obj=True) for i in range(frame_count)]
 
-    # Format into ASTRA pick_dict format
+    # Tolerance: half the median frame interval (defaults to 0.5 s if there is only a single frame)
+    if frame_count > 1:
+        intervals = sorted(abs((frame_times[i + 1] - frame_times[i]).total_seconds())
+                           for i in range(frame_count - 1))
+        tol = 0.5*intervals[len(intervals)//2]
+    else:
+        tol = 0.5
+
+    # Format into ASTRA pick_dict format, assigning each pick to the closest frame within tolerance
     pick_dict = {}
-    for i, fr_no in enumerate(pick_frame_indices):
-        pick_dict[fr_no] = {
-            "x_centroid" : picks[i][0],
-            "y_centroid" : picks[i][1]
+    for i, pick_time in enumerate(pick_frame_times):
+
+        # Find the frame whose time is closest to this pick
+        nearest_idx = min(range(frame_count),
+                          key=lambda k: abs((frame_times[k] - pick_time).total_seconds()))
+
+        # Reject picks that don't fall near any frame
+        if abs((frame_times[nearest_idx] - pick_time).total_seconds()) > tol:
+            continue
+
+        pick_dict[nearest_idx] = {
+            "x_centroid": picks[i][0],
+            "y_centroid": picks[i][1]
         }
 
     return pick_dict

@@ -185,9 +185,10 @@ def loadConfigFromDirectory(cml_args_config, dir_path):
             dir_path = dir_path[0]
 
 
-    # If the given path is a file, take the parent
+    # If the given path is a file, take the parent. Resolve to an absolute path first so that a bare
+    #   relative file name (e.g. 'dump.vid') yields the current directory instead of an empty string.
     if os.path.isfile(dir_path):
-        dir_path = os.path.dirname(dir_path)
+        dir_path = os.path.dirname(os.path.abspath(dir_path))
 
 
     if cml_args_config is not None:

@@ -4142,6 +4142,10 @@ if __name__ == "__main__":
 
     #########################
 
+    # Resolve input paths to absolute paths so that bare relative file names (e.g. 'dump.vid') don't
+    #   collapse to an empty directory when their parent is derived
+    cml_args.dir_path = [os.path.abspath(dir_path) for dir_path in cml_args.dir_path]
+
 
     # Load the config file
     config = cr.loadConfigFromDirectory(cml_args.config, cml_args.dir_path)
