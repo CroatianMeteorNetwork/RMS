@@ -5184,20 +5184,20 @@ class PlateTool(QtWidgets.QMainWindow):
             # Early bail-out check after Phase 1
             # With high intensity threshold (bright stars only), we expect good precision.
             # If false positive ratio > 80%, the calibration is likely wrong.
-            if best_fp_ratio_seg > 0.80:
+            if best_fp_ratio_seg > 0.50:
                 precision_seg = (1.0 - best_fp_ratio_seg) * 100
 
                 print(f"\n  *** TUNING ABORTED ***")
                 print(f"  Only {best_true_pos_seg} true positive(s) with "
                       f"{best_fp_ratio_seg:.0%} false positive ratio.")
-                print(f"  Precision: {precision_seg:.1f}% (expected >20% with bright stars)")
+                print(f"  Precision: {precision_seg:.1f}% (expected >50% with bright stars)")
                 print(f"  This suggests the platepar calibration is incorrect or the image has issues.")
                 self.status_bar.showMessage("Tuning aborted: calibration appears invalid")
                 qmessagebox(
                     message="Tuning aborted: could not find enough matching stars.\n\n"
                             f"Only {best_true_pos_seg} star(s) matched catalog positions "
                             f"({precision_seg:.1f}% precision).\n\n"
-                            "With bright stars only (high threshold), precision should be >20%.\n\n"
+                            "With bright stars only (high threshold), precision should be >50%.\n\n"
                             "This usually means:\n"
                             "• The platepar calibration is incorrect\n"
                             "• The image pointing doesn't match the platepar\n"
@@ -5270,18 +5270,20 @@ class PlateTool(QtWidgets.QMainWindow):
             # If precision is very low, the calibration is likely wrong
             if n_detected > 0:
                 precision = n_true_pos / n_detected
-                # Bail out if precision < 10% - even with many detections, this means
-                # most detections are noise/artifacts, not real stars matching catalog
-                if precision < 0.10:
+                # Bail out if precision < 50% or fewer than 8 true positives. Either means the
+                # detections are noise-dominated / too sparse to fit reliably - which on a bad or
+                # uncalibrated platepar otherwise drives Phase 3 to chase coincidental matches.
+                if (precision < 0.50) or (n_true_pos < 8):
                     print(f"\n  *** TUNING ABORTED ***")
                     print(f"  Only {n_true_pos} true positive(s) out of {n_detected} detections ({precision:.1%} precision).")
+                    print(f"  Need >=8 true positives at >=50% precision for a reliable tune.")
                     print(f"  This suggests the platepar calibration is incorrect or the image has issues.")
                     self.status_bar.showMessage("Tuning aborted: calibration appears invalid")
                     qmessagebox(
-                        message="Tuning aborted: very low detection precision.\n\n"
+                        message="Tuning aborted: detection quality too low.\n\n"
                                 f"Only {n_true_pos} star(s) out of {n_detected} detections "
                                 f"matched catalog positions ({precision:.1%} precision).\n\n"
-                                "Expected precision >10% for a valid calibration.\n\n"
+                                "A reliable tune needs at least 8 matched stars at >=50% precision.\n\n"
                                 "This usually means:\n"
                                 "• The platepar calibration is incorrect\n"
                                 "• The image pointing doesn't match the platepar\n"
@@ -5308,6 +5310,24 @@ class PlateTool(QtWidgets.QMainWindow):
             QtWidgets.QApplication.processEvents()
 
             best_lm = self._findOptimalCatalogLM(jd, tp_x, tp_y, n_true_pos)
+
+            # Success gate: _findOptimalCatalogLM returns None when no reliable LM was found (the
+            #   detections could only be matched via a spurious, over-deep catalog). Abort rather
+            #   than apply a junk LM that explodes the catalog and masquerades as a good optimum.
+            if best_lm is None:
+                print(f"\n  *** TUNING ABORTED ***")
+                print(f"  Could not find a reliable catalog LM - detections only matched via an "
+                      f"over-deep (coincidental) catalog.")
+                self.status_bar.showMessage("Tuning aborted: no reliable catalog LM")
+                qmessagebox(
+                    message="Tuning aborted: could not find a reliable catalog limiting magnitude.\n\n"
+                            "The detected stars could only be matched by resorting to an over-deep\n"
+                            "catalog (coincidental matches). This usually means the platepar pointing\n"
+                            "is off.\n\n"
+                            "Please verify your calibration before trying again.",
+                    title="Tuning Aborted", message_type="warning")
+                return
+
             print(f"\n  Selected catalog LM: {best_lm:.1f}")
 
             # Restore original config
@@ -5851,6 +5871,12 @@ class PlateTool(QtWidgets.QMainWindow):
         print("    Coarse pass (0.5 mag steps):")
         coarse_lm_values = np.arange(3.0, 10.1, 0.5)
 
+        # Guardrails so a bad/uncalibrated platepar can't drive the LM to the max chasing
+        #   coincidental matches: never explore a catalog deeper than COST_CEILING cat/match per
+        #   added match (spurious), nor larger than CATALOG_CAP stars (cause-agnostic bound).
+        COST_CEILING = 100      # catalog stars per added match above which a match is coincidental
+        CATALOG_CAP = 8000      # max catalog stars to consider during the LM search
+
         prev_matched, prev_catalog = 0, 0
         best_lm = coarse_lm_values[0]
         best_matches = 0
@@ -5858,6 +5884,12 @@ class PlateTool(QtWidgets.QMainWindow):
 
         for i, test_lm in enumerate(coarse_lm_values):
             n_matched, n_catalog = count_matches_at_lm(test_lm)
+
+            # Hard catalog-count cap: stop before pulling in an absurd catalog
+            if n_catalog > CATALOG_CAP:
+                print(f"    -> Catalog cap reached at LM={test_lm:.1f} "
+                      f"({n_catalog} > {CATALOG_CAP} stars); stopping")
+                break
 
             # Calculate diminishing returns metrics
             match_gain = n_matched - prev_matched
@@ -5870,6 +5902,14 @@ class PlateTool(QtWidgets.QMainWindow):
                 cost = catalog_gain / match_gain
                 print(f"      LM={test_lm:.1f}: {n_matched}/{target_matches} ({coverage:.0%}), "
                       f"+{match_gain} matches, cost={cost:.0f} cat/match")
+
+                # Absolute cost ceiling: a match that costs this many catalog stars is coincidental,
+                #   not real. Applied even with <2 prior costs, which is exactly the sparse-match
+                #   case (bad platepar) that the relative knee below cannot catch.
+                if cost > COST_CEILING:
+                    print(f"    -> Spurious match at LM={test_lm:.1f} "
+                          f"(cost={cost:.0f} > {COST_CEILING} cat/match); stopping")
+                    break
 
                 # Detect cost knee: cost jumps dramatically relative to prior steps
                 if len(prev_costs) >= 2:
@@ -5917,6 +5957,16 @@ class PlateTool(QtWidgets.QMainWindow):
             if n_matched > final_matches:
                 final_lm = test_lm
                 final_matches = n_matched
+
+        # Success gate: require real coverage. If even the best LM matched fewer than half the true
+        #   positives, the matches are unreliable (e.g. a bad platepar that only matched via the
+        #   over-deep catalog the guardrails above stopped) - signal failure rather than apply junk.
+        min_coverage = 0.5
+        coverage = final_matches/target_matches if target_matches > 0 else 0
+        if coverage < min_coverage:
+            print(f"    -> Best LM only matched {final_matches}/{target_matches} "
+                  f"({coverage:.0%} < {min_coverage:.0%}); no reliable catalog LM found")
+            return None
 
         print(f"    -> Selected LM={final_lm:.1f} with {final_matches} matches")
         return final_lm
