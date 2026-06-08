@@ -6582,8 +6582,19 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Composite brush paint layer on top
         if self.mask_paint_layer is not None:
-            mask_img[self.mask_paint_layer == 1] = 1   # painted → masked
-            mask_img[self.mask_paint_layer == 2] = 0   # erased  → clear
+            paint_layer = self.mask_paint_layer
+
+            # The paint layer may have been saved at a different resolution than the current image
+            #   (e.g. a mask carried over from a sensor with a different frame height). Resample it
+            #   (nearest-neighbour, to preserve the 0/1/2 labels) so loading doesn't crash.
+            if paint_layer.shape != mask_img.shape:
+                print("Mask paint layer {} != image {}; resampling to fit".format(
+                    paint_layer.shape, mask_img.shape))
+                paint_layer = cv2.resize(paint_layer, (img_width, img_height),
+                                         interpolation=cv2.INTER_NEAREST)
+
+            mask_img[paint_layer == 1] = 1   # painted → masked
+            mask_img[paint_layer == 2] = 0   # erased  → clear
 
         # Transpose to (width, height) for pyqtgraph ImageItem
         self.mask_overlay.setImage(mask_img.T)
@@ -6788,8 +6799,16 @@ class PlateTool(QtWidgets.QMainWindow):
         #   paint pixels (1) → masked (0)
         #   erase pixels  (2) → unmasked (255), overrides polygon fill
         if self.mask_paint_layer is not None:
-            mask[self.mask_paint_layer == 1] = 0
-            mask[self.mask_paint_layer == 2] = 255
+            paint_layer = self.mask_paint_layer
+
+            # Resample if the paint layer was saved at a different resolution than the current image
+            #   (nearest-neighbour preserves the 0/1/2 labels), so a stale mask doesn't crash here.
+            if paint_layer.shape != mask.shape:
+                paint_layer = cv2.resize(paint_layer, (img_width, img_height),
+                                         interpolation=cv2.INTER_NEAREST)
+
+            mask[paint_layer == 1] = 0
+            mask[paint_layer == 2] = 255
 
         return mask
 
