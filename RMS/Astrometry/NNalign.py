@@ -142,6 +142,17 @@ def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update
     log.info("alignPlatepar: LM={:.1f}, {} catalog stars in FOV, {} detected stars".format(
         config.catalog_mag_limit, len(catalog_stars_fov), len(calstars_coords)))
 
+    # Cap the catalog fed to NN matching to the brightest stars. A mis-inferred (over-deep) catalog
+    #   LM on a wide FOV can pull in 100k+ mostly-unmatchable stars and bog down the fit. The
+    #   detected stars are the brightest in the image, so the brightest catalog stars are the
+    #   matchable ones; this is a bounded, cause-agnostic guard (independent of why the LM is deep).
+    nn_catalog_cap = 8000
+    if len(catalog_stars_fov) > nn_catalog_cap:
+        log.info("alignPlatepar: Capping catalog from {} to brightest {} stars".format(
+            len(catalog_stars_fov), nn_catalog_cap))
+        brightest_idx = np.argsort(catalog_stars_fov[:, 2])[:nn_catalog_cap]
+        catalog_stars_fov = catalog_stars_fov[brightest_idx]
+
     if len(catalog_stars_fov) < 5:
         log.warning("alignPlatepar: Not enough catalog stars in FOV ({})".format(len(catalog_stars_fov)))
         return platepar, config.catalog_mag_limit

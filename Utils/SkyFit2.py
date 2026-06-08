@@ -11870,6 +11870,17 @@ class PlateTool(QtWidgets.QMainWindow):
         catalog_stars_filtered, _ = self.filterCatalogStarsByMask(
             catalog_x_filtered, catalog_y_filtered, catalog_stars_filtered)
 
+        # Cap the catalog fed to NN matching to the brightest stars. Guards against a mis-inferred
+        #   over-deep catalog LM (e.g. a wide FOV at LM 10 -> 100k+ stars) bogging down the fit. The
+        #   detected stars are the brightest in the image, so the brightest catalog stars are the
+        #   matchable ones; cause-agnostic (works regardless of why the LM came out deep).
+        nn_catalog_cap = 8000
+        if len(catalog_stars_filtered) > nn_catalog_cap:
+            print("  Capping catalog from {:d} to brightest {:d} stars for NN fit".format(
+                len(catalog_stars_filtered), nn_catalog_cap))
+            brightest_idx = np.argsort(catalog_stars_filtered[:, 2])[:nn_catalog_cap]
+            catalog_stars_filtered = catalog_stars_filtered[brightest_idx]
+
         if pointing_only:
             # --- Pointing-only mode: use recalibrateFF (same as night processing) ---
             print()
