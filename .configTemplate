@@ -715,6 +715,13 @@ centroid_curve_min_frames: 8
 ; more aggressively. Set to 0.0 to disable clipping.
 centroid_curve_clip_sigma: 3.0
 
+; Inter-track proximity exclusion radius (pixels). When two detected tracks are
+; within this distance in (x, y) at the same frame, those frames are skipped in
+; the centroid loop for both tracks to prevent centroid pull from a crossing track.
+; Set to 0 (default) to disable. A value of 3 × centroid_gaussian_fit_radius is
+; a reasonable starting point for SSA / slow-satellite work.
+centroid_track_proximity_px: 0.0
+
 ; Maximum deviation of a centroid point from a LSQ fitted line
 ; (if above max, it will be rejected)
 centroids_max_deviation: 2
