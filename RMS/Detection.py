@@ -3225,6 +3225,36 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                 diag_fh.write(_centroidCropDiagHeader())
             logDebug('Writing centroid crop diagnostics to {:s}'.format(centroid_crop_diag_path))
 
+        # Pre-compute per-track frame exclusion sets: when two detected tracks are within
+        # centroid_track_proximity_px of each other in (x, y) at a given frame, those frames
+        # are excluded from centroiding for both tracks to prevent cross-contamination.
+        # Set centroid_track_proximity_px = 0 (default) to disable.
+        _proximity_px = float(getattr(config, 'centroid_track_proximity_px', 0.0))
+        track_excluded_frames = {i: set() for i in range(len(filtered_lines))}
+        if _proximity_px > 0 and len(filtered_lines) > 1:
+            for _i, _li in enumerate(filtered_lines):
+                _fmin_i = int(_li[4])
+                _fmax_i = int(_li[5])
+                for _j, _lj in enumerate(filtered_lines):
+                    if _j <= _i:
+                        continue
+                    _fmin_j = int(_lj[4])
+                    _fmax_j = int(_lj[5])
+                    _f_lo = max(_fmin_i, _fmin_j)
+                    _f_hi = min(_fmax_i, _fmax_j)
+                    if _f_lo > _f_hi:
+                        continue
+                    for _f in range(_f_lo, _f_hi + 1):
+                        _xi, _yi = _lineModelPositionForFrame(_li, _f)
+                        _xj, _yj = _lineModelPositionForFrame(_lj, _f)
+                        if np.hypot(_xi - _xj, _yi - _yj) < _proximity_px:
+                            track_excluded_frames[_i].add(_f)
+                            track_excluded_frames[_j].add(_f)
+            _n_excl = sum(len(v) for v in track_excluded_frames.values())
+            if _n_excl:
+                logInfo('Track proximity exclusion ({:.1f} px): {:d} frame-slots masked across {:d} tracks'.format(
+                    _proximity_px, _n_excl, sum(1 for v in track_excluded_frames.values() if v)))
+
         # Go through all detected and filtered lines and compute centroids
         for detected_line_index, detected_line in enumerate(filtered_lines):
 
@@ -3399,8 +3429,13 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
             centroid_crop_diag_dumped = 0
             for i in range(frame_min, frame_max + 1):
 
+                # Skip frames where another track passes within the proximity exclusion radius.
+                if i in track_excluded_frames.get(detected_line_index, ()):
+                    skipped_no_pixels += 1
+                    continue
+
                 t_centroid = time()
-                
+
                 # Select pixel indicies belonging to a given frame
                 frame_pixels_inds = np.where(line_points[:,2] == i)
                 
