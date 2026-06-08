@@ -5958,14 +5958,15 @@ class PlateTool(QtWidgets.QMainWindow):
                 final_lm = test_lm
                 final_matches = n_matched
 
-        # Success gate: require real coverage. If even the best LM matched fewer than half the true
-        #   positives, the matches are unreliable (e.g. a bad platepar that only matched via the
-        #   over-deep catalog the guardrails above stopped) - signal failure rather than apply junk.
-        min_coverage = 0.5
-        coverage = final_matches/target_matches if target_matches > 0 else 0
-        if coverage < min_coverage:
-            print(f"    -> Best LM only matched {final_matches}/{target_matches} "
-                  f"({coverage:.0%} < {min_coverage:.0%}); no reliable catalog LM found")
+        # Success gate: a good calibration often detects many stars fainter than the cost-effective
+        #   catalog LM, so a low coverage *fraction* is normal (the faint detections legitimately
+        #   have no bright catalog counterpart). Only fail if too few real (low-cost) matches were
+        #   found in absolute terms to align on. The spurious / bad-platepar cases are already
+        #   stopped by the cost ceiling and the Phase 1/2 precision gates upstream.
+        min_matches = 5
+        if final_matches < min_matches:
+            print(f"    -> Only {final_matches} reliable matches found (< {min_matches}); "
+                  f"no reliable catalog LM")
             return None
 
         print(f"    -> Selected LM={final_lm:.1f} with {final_matches} matches")
