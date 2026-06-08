@@ -7604,24 +7604,39 @@ class PlateTool(QtWidgets.QMainWindow):
             #   over a grid of gammas (aperture fixed from the raw image) and find the gamma that
             #   makes the catalog-vs-instrumental relation linear. This avoids the power-law
             #   approximation and the re-detection confound of the residual-slope estimate above.
-            gamma_pixel, gamma_pixel_err = self.estimateGammaFromPixels(
+            gamma_pixel, gamma_pixel_err, gamma_bound = self.estimateGammaFromPixels(
                 star_coords, catalog_mags_arr, weights_arr, np.array(exclude_list))
 
             if gamma_pixel is not None:
 
-                if np.isfinite(gamma_pixel_err):
-                    pixel_label = "pixel-based $\\gamma \\approx$ {:.2f} $\\pm$ {:.2f}".format(
-                        gamma_pixel, gamma_pixel_err)
-                else:
-                    pixel_label = "pixel-based $\\gamma \\approx$ {:.2f}".format(gamma_pixel)
-                pixel_label += " (assumed {:.2f})".format(self.platepar.gamma)
-                gamma_label = pixel_label if gamma_label is None else (gamma_label + "\n" + pixel_label)
-
-                # Cameras are normally run at a standard gamma: linear (1.0) or 1/2.2. Snap the
-                #   measured value to the nearest standard (in log space) and recommend that.
+                # Cameras are only ever run at a standard gamma - linear (1.0) or 1/2.2 - and
+                #   firmware tone-curves mean the effective response isn't a clean power law, so the
+                #   estimate is a best guess whose real job is to pick the nearer standard.
                 standards = [("linear (1.00)", 1.0), ("1/2.2 (0.45)", 1.0/2.2)]
                 rec_name, rec_value = min(standards, key=lambda s: abs(np.log(gamma_pixel/s[1])))
                 already_set = abs(np.log(self.platepar.gamma/rec_value)) < 0.05
+
+                if gamma_bound is not None:
+                    # Crossing is off the searched range - report a bounded best guess, not a value
+                    cmp = "<" if gamma_bound == 'below' else ">"
+                    pixel_label = "pixel-based $\\gamma$ {} {:.1f} (assumed {:.2f})".format(
+                        cmp, gamma_pixel, self.platepar.gamma)
+                    title_str = "Pixel $\\gamma$ {} {:.1f}  $\\rightarrow$  {} (best guess)".format(
+                        cmp, gamma_pixel, rec_name)
+                    console_val = "{} {:.1f}".format(cmp, gamma_pixel)
+                else:
+                    if np.isfinite(gamma_pixel_err):
+                        pixel_label = "pixel-based $\\gamma \\approx$ {:.2f} $\\pm$ {:.2f} " \
+                            "(assumed {:.2f})".format(gamma_pixel, gamma_pixel_err, self.platepar.gamma)
+                        console_val = "{:.3f} +/- {:.3f}".format(gamma_pixel, gamma_pixel_err)
+                    else:
+                        pixel_label = "pixel-based $\\gamma \\approx$ {:.2f} (assumed {:.2f})".format(
+                            gamma_pixel, self.platepar.gamma)
+                        console_val = "{:.3f}".format(gamma_pixel)
+                    title_str = "Pixel $\\gamma$ = {:.2f}  $\\rightarrow$  {}".format(
+                        gamma_pixel, rec_name)
+
+                gamma_label = pixel_label if gamma_label is None else (gamma_label + "\n" + pixel_label)
 
                 if already_set:
                     rec_line = "gamma already at nearest standard: {}".format(rec_name)
@@ -7629,15 +7644,13 @@ class PlateTool(QtWidgets.QMainWindow):
                     rec_line = "set camera gamma to {}".format(rec_name)
 
                 # Surface the recommendation on the plot itself
-                ax_m.set_title("Pixel $\\gamma$ = {:.2f}  $\\rightarrow$  {}".format(
-                    gamma_pixel, rec_name), fontsize=9)
+                ax_m.set_title(title_str, fontsize=9)
 
                 # Concise console banner
-                err_str = " +/- {:.3f}".format(gamma_pixel_err) if np.isfinite(gamma_pixel_err) else ""
                 print()
                 print("=" * 60)
-                print("Pixel-based gamma estimate: {:.3f}{}  (assumed {:.3f})".format(
-                    gamma_pixel, err_str, self.platepar.gamma))
+                print("Pixel-based gamma estimate: {}  (assumed {:.3f})".format(
+                    console_val, self.platepar.gamma))
                 print("-> {}".format(rec_line))
                 print("=" * 60)
                 print()
@@ -7698,8 +7711,10 @@ class PlateTool(QtWidgets.QMainWindow):
             exclude_list: [ndarray] Boolean mask of stars to exclude (saturated/variable).
 
         Return:
-            (gamma_best, gamma_err): The estimated gamma and its uncertainty, or (None, None) if it
-                could not be computed.
+            (gamma_best, gamma_err, bound): The estimated gamma and its uncertainty. If the unity
+                crossing falls outside the searched grid, gamma_best is the nearest grid boundary,
+                gamma_err is NaN, and bound is 'below'/'above' (a bounded best-guess). Returns
+                (None, None, None) if it could not be computed at all.
         """
 
         catalog_mags = np.array(catalog_mags, dtype=np.float64)
@@ -7712,7 +7727,7 @@ class PlateTool(QtWidgets.QMainWindow):
             print("Pixel-based gamma: skipped (need >=5 stars over >=1 mag range; "
                   "have {:d} stars, {:.1f} mag span)".format(
                       int(np.sum(incl)), np.ptp(catalog_mags[incl]) if np.any(incl) else 0.0))
-            return None, None
+            return None, None, None
 
         # Build the raw (pre-gamma) source image, matching the extraction in centroid()
         try:
@@ -7729,7 +7744,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         except Exception as e:
             print("Pixel-based gamma: skipped (could not read source image: {})".format(e))
-            return None, None
+            return None, None, None
 
         # Iterative core-focused PSF width (sigma) from a decoded crop, given squared distances from
         #   the star centroid and a background level. <r^2> = 2*sigma^2 for a 2D Gaussian; the fit
@@ -7816,7 +7831,7 @@ class PlateTool(QtWidgets.QMainWindow):
         if np.count_nonzero(valid) < 5:
             print("Pixel-based gamma: skipped (only {:d} stars had positive sums across the "
                   "gamma grid)".format(int(np.count_nonzero(valid))))
-            return None, None
+            return None, None, None
 
         cat_valid = catalog_mags[valid]
         w_valid = weights[valid]
@@ -7847,7 +7862,7 @@ class PlateTool(QtWidgets.QMainWindow):
         good = np.isfinite(slope_grid)
         if np.count_nonzero(good) < 2:
             print("Pixel-based gamma: skipped (could not measure the slope curve)")
-            return None, None
+            return None, None, None
 
         g_good = gamma_grid[good]
         diff = slope_grid[good] - 1.0
@@ -7857,12 +7872,14 @@ class PlateTool(QtWidgets.QMainWindow):
         sign_change = np.where(np.diff(np.sign(diff)) != 0)[0]
         if len(sign_change) == 0:
             # No unity crossing within the searched range. The slope is monotonic in gamma, so the
-            #   endpoint whose slope is closest to 1 indicates which side the true gamma lies on
-            #   (direction-agnostic, regardless of whether the slope increases or decreases).
-            direction = "below" if abs(diff[0]) < abs(diff[-1]) else "above"
-            print("Pixel-based gamma: no unity crossing in [{:.1f}, {:.1f}] - true gamma is likely "
-                  "{} this range".format(g_good[0], g_good[-1], direction))
-            return None, None
+            #   endpoint whose slope is closest to 1 indicates which side the true gamma lies on.
+            #   Return that boundary as a bounded best-guess: real cameras are only ever run at
+            #   linear or 1/2.2 (and firmware tone-curves mean the effective gamma isn't a clean
+            #   power law anyway), so even an off-scale estimate still picks the nearer standard.
+            if abs(diff[0]) < abs(diff[-1]):
+                return g_good[0], np.nan, 'below'
+            else:
+                return g_good[-1], np.nan, 'above'
 
         k = sign_change[0]
         g0, g1 = g_good[k], g_good[k + 1]
@@ -7885,7 +7902,7 @@ class PlateTool(QtWidgets.QMainWindow):
         except Exception:
             pass
 
-        return gamma_best, gamma_err
+        return gamma_best, gamma_err, None
 
 
     def onPhotometryPlotPick(self, event):
