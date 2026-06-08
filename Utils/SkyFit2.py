@@ -7476,18 +7476,94 @@ class PlateTool(QtWidgets.QMainWindow):
             ### PLOT MAG DIFFERENCE BY CATALOG MAGNITUDE (gamma diagnostic)
 
             catalog_mags_arr = np.array(catalog_mags)
+            resids_arr = np.array(self.photom_fit_resids)
+            weights_arr = np.array(weights)
 
             # Plot catalog magnitude vs. fit residual
-            ax_m.scatter(catalog_mags_arr, self.photom_fit_resids, s=10, c='b', alpha=0.5,
+            ax_m.scatter(catalog_mags_arr, resids_arr, s=10, c='b', alpha=0.5,
                             zorder=3, picker=5)
 
             # Zero line
             mag_min, mag_max = np.min(catalog_mags_arr), np.max(catalog_mags_arr)
             ax_m.plot([mag_min, mag_max], [0, 0], linestyle='dashed', alpha=0.5, color='k')
 
+            # Fit a weighted line to the non-excluded stars to quantify any magnitude-dependent
+            #   trend. A non-zero slope indicates the assumed gamma is off: saturated and variable
+            #   stars are excluded so they don't fake a slope, and the fit is SNR-weighted.
+            include_mask = ~np.array(exclude_list)
+            mag_incl = catalog_mags_arr[include_mask]
+            resid_incl = resids_arr[include_mask]
+            weights_incl = weights_arr[include_mask]
+
+            gamma_label = None
+
+            # Need enough points and a magnitude spread for a meaningful slope
+            if (len(mag_incl) >= 3) and (np.ptp(mag_incl) > 0):
+
+                (slope, intercept), cov = np.polyfit(mag_incl, resid_incl, 1, w=weights_incl,
+                                                        cov=True)
+                slope_err = np.sqrt(cov[0, 0])
+
+                # The residual slope is the directly measured quantity. Its sign reliably gives the
+                #   direction of the gamma error (slope > 0 -> assumed gamma too high), while the
+                #   magnitude-to-gamma conversion from a single fit is only a crude linearization.
+                gamma_label = "slope = {:+.3f} $\\pm$ {:.3f} mag/mag".format(slope, slope_err)
+
+                # Overlay the fitted trend line
+                mag_fit_arr = np.array([mag_min, mag_max])
+                ax_m.plot(mag_fit_arr, slope*mag_fit_arr + intercept, linestyle='-', color='r',
+                            alpha=0.7, zorder=4)
+
+            # Estimate the camera gamma directly from the per-pixel data: re-sum each star's flux
+            #   over a grid of gammas (aperture fixed from the raw image) and find the gamma that
+            #   makes the catalog-vs-instrumental relation linear. This avoids the power-law
+            #   approximation and the re-detection confound of the residual-slope estimate above.
+            gamma_pixel, gamma_pixel_err = self.estimateGammaFromPixels(
+                star_coords, catalog_mags_arr, weights_arr, np.array(exclude_list))
+
+            if gamma_pixel is not None:
+
+                if np.isfinite(gamma_pixel_err):
+                    pixel_label = "pixel-based $\\gamma \\approx$ {:.2f} $\\pm$ {:.2f}".format(
+                        gamma_pixel, gamma_pixel_err)
+                else:
+                    pixel_label = "pixel-based $\\gamma \\approx$ {:.2f}".format(gamma_pixel)
+                pixel_label += " (assumed {:.2f})".format(self.platepar.gamma)
+                gamma_label = pixel_label if gamma_label is None else (gamma_label + "\n" + pixel_label)
+
+                # Cameras are normally run at a standard gamma: linear (1.0) or 1/2.2. Snap the
+                #   measured value to the nearest standard (in log space) and recommend that.
+                standards = [("linear (1.00)", 1.0), ("1/2.2 (0.45)", 1.0/2.2)]
+                rec_name, rec_value = min(standards, key=lambda s: abs(np.log(gamma_pixel/s[1])))
+                already_set = abs(np.log(self.platepar.gamma/rec_value)) < 0.05
+
+                if already_set:
+                    rec_line = "gamma already at nearest standard: {}".format(rec_name)
+                else:
+                    rec_line = "set camera gamma to {}".format(rec_name)
+
+                # Surface the recommendation on the plot itself
+                ax_m.set_title("Pixel $\\gamma$ = {:.2f}  $\\rightarrow$  {}".format(
+                    gamma_pixel, rec_name), fontsize=9)
+
+                # Concise console banner
+                err_str = " +/- {:.3f}".format(gamma_pixel_err) if np.isfinite(gamma_pixel_err) else ""
+                print()
+                print("=" * 60)
+                print("Pixel-based gamma estimate: {:.3f}{}  (assumed {:.3f})".format(
+                    gamma_pixel, err_str, self.platepar.gamma))
+                print("-> {}".format(rec_line))
+                print("=" * 60)
+                print()
+
+            if gamma_label is not None:
+                # Add an invisible handle so the text shows up in the legend box
+                ax_m.plot([], [], ' ', label=gamma_label)
+                ax_m.legend(fontsize=7)
+
             ax_m.grid()
             ax_m.set_ylabel("Fit res. (mag)")
-            ax_m.set_xlabel("Catalog mag - flat residuals indicate correct gamma")
+            ax_m.set_xlabel("Catalog magnitude")
 
             ###
 
@@ -7512,6 +7588,219 @@ class PlateTool(QtWidgets.QMainWindow):
 
             fig_p.tight_layout()
             fig_p.show()
+
+    def estimateGammaFromPixels(self, star_coords, catalog_mags, weights, exclude_list):
+        """ Estimate the camera gamma directly from the per-pixel star data.
+
+        For each matched star a fixed aperture is set from the PSF width sigma measured once on the
+        raw avepixel crop (an iterative core-focused second moment). The flux is then summed inside
+        that 3-sigma aperture over a grid of candidate gammas (decoding the crop and subtracting a
+        local background each time). The instrumental magnitude m(gamma) = -2.5*log10(sum) is
+        compared to the catalog magnitude, and the gamma that makes the catalog-vs-instrumental
+        relation linear (slope of unity) is reported.
+
+        Deriving the aperture from the raw (gamma-independent) image and holding it fixed across the
+        sweep is what makes the estimate both invariant to the detection gamma and sensitive to the
+        true gamma: the detection FWHM is measured on a gamma-corrected image and so changes with
+        the assumed gamma (the source of earlier inconsistency), while a per-gamma aperture would
+        resize to track the decoded profile and cancel the gamma signal entirely.
+
+        Arguments:
+            star_coords: [list] List of [x, y] image coordinates of the matched stars.
+            catalog_mags: [ndarray] Extinction-corrected catalog magnitudes (same order).
+            weights: [ndarray] Per-star fit weights (SNR-based).
+            exclude_list: [ndarray] Boolean mask of stars to exclude (saturated/variable).
+
+        Return:
+            (gamma_best, gamma_err): The estimated gamma and its uncertainty, or (None, None) if it
+                could not be computed.
+        """
+
+        catalog_mags = np.array(catalog_mags, dtype=np.float64)
+        weights = np.array(weights, dtype=np.float64)
+        exclude_list = np.array(exclude_list, dtype=bool)
+        incl = ~exclude_list
+
+        # Need a reasonable number of stars spanning at least ~1 mag
+        if (len(star_coords) < 5) or (not np.any(incl)) or (np.ptp(catalog_mags[incl]) < 1.0):
+            print("Pixel-based gamma: skipped (need >=5 stars over >=1 mag range; "
+                  "have {:d} stars, {:.1f} mag span)".format(
+                      int(np.sum(incl)), np.ptp(catalog_mags[incl]) if np.any(incl) else 0.0))
+            return None, None
+
+        # Build the raw (pre-gamma) source image, matching the extraction in centroid()
+        try:
+            if (self.mode == 'skyfit') and hasattr(self.img_handle, 'ff') \
+                    and (self.img_handle.ff is not None):
+
+                source_img = self.img_handle.ff.avepixel.T
+                if self.dark is not None:
+                    source_img = applyDark(source_img, self.dark)
+                if self.flat_struct is not None:
+                    source_img = applyFlat(source_img, self.flat_struct)
+            else:
+                source_img = self.img.data
+
+        except Exception as e:
+            print("Pixel-based gamma: skipped (could not read source image: {})".format(e))
+            return None, None
+
+        # Iterative core-focused PSF width (sigma) from a decoded crop, given squared distances from
+        #   the star centroid and a background level. <r^2> = 2*sigma^2 for a 2D Gaussian; the fit
+        #   region is restricted to r < 3*sigma and iterated so wings/noise don't inflate sigma.
+        def measureSigma(decoded, r2, bg):
+            net = np.clip(decoded - bg, 0, None)
+            sigma = 2.0
+            for _ in range(8):
+                m = r2 <= (3.0*sigma)**2
+                w_sum = net[m].sum()
+                if w_sum <= 0:
+                    return np.nan
+                new_sigma = np.sqrt((net[m]*r2[m]).sum()/w_sum/2.0)
+                if not np.isfinite(new_sigma) or (new_sigma <= 0):
+                    return np.nan
+                if abs(new_sigma - sigma) < 0.05:
+                    return new_sigma
+                sigma = new_sigma
+            return sigma
+
+        # Fixed, generous crop so the aperture/background never depend on the detection FWHM.
+        #   Large enough to hold 4.5*sigma for typical PSFs (sigma up to ~3 px).
+        crop_half = 14
+
+        gamma_grid = np.linspace(0.3, 2.0, 35)
+        n_stars = len(star_coords)
+        n_gamma = len(gamma_grid)
+
+        # Intensity for every star at every gamma
+        sums = np.full((n_stars, n_gamma), np.nan)
+
+        for s_idx, (star_x, star_y) in enumerate(star_coords):
+
+            if exclude_list[s_idx]:
+                continue
+
+            xi = int(round(star_x))
+            yi = int(round(star_y))
+
+            # Require a full crop (skip stars too close to the image edge to avoid truncation bias)
+            if (xi - crop_half < 0) or (yi - crop_half < 0) \
+                    or (xi + crop_half > source_img.shape[0] - 1) \
+                    or (yi + crop_half > source_img.shape[1] - 1):
+                continue
+
+            crop_orig = source_img[xi - crop_half:xi + crop_half,
+                                   yi - crop_half:yi + crop_half].astype(np.float64)
+
+            # Distances (squared) relative to the true star centroid within the crop
+            ii, jj = np.ogrid[0:crop_orig.shape[0], 0:crop_orig.shape[1]]
+            r2 = (ii + (xi - crop_half) - star_x)**2 + (jj + (yi - crop_half) - star_y)**2
+            dist = np.sqrt(r2)
+            outer_bg_mask = dist > 0.7*crop_half
+
+            # Measure the PSF width ONCE on the raw crop. The aperture is then held fixed across the
+            #   whole gamma sweep: a per-gamma aperture would resize to track the decoded profile and
+            #   cancel the very gamma signal we are trying to measure, while a fixed aperture derived
+            #   from the (gamma-independent) raw image both preserves the signal and stays invariant
+            #   to the detection gamma.
+            bg0 = np.median(crop_orig[outer_bg_mask])
+            sigma = measureSigma(crop_orig, r2, bg0)
+            if (not np.isfinite(sigma)) or (sigma <= 0):
+                continue
+
+            # Keep the aperture sane: at least ~1 px sigma, and small enough that the 4.5*sigma
+            #   background annulus stays inside the crop
+            sigma = min(max(sigma, 1.0), crop_half/4.5)
+
+            aperture_mask = dist <= 3.0*sigma
+            annulus_mask = (dist > 3.0*sigma) & (dist <= 4.5*sigma)
+            if (not np.any(aperture_mask)) or (not np.any(annulus_mask)):
+                continue
+            n_ap = np.count_nonzero(aperture_mask)
+
+            for g_idx, gamma in enumerate(gamma_grid):
+                crop_g = gammaCorrectionImage(crop_orig, gamma, out_type=np.float32)
+                bg = np.median(crop_g[annulus_mask])
+                sums[s_idx, g_idx] = np.sum(crop_g[aperture_mask]) - n_ap*bg
+
+        # Keep only stars with a positive, finite sum at every gamma so the same subset is used
+        #   throughout (negative sums occur when the background dominates a faint star)
+        valid = incl & np.all(sums > 0, axis=1) & np.all(np.isfinite(sums), axis=1)
+
+        if np.count_nonzero(valid) < 5:
+            print("Pixel-based gamma: skipped (only {:d} stars had positive sums across the "
+                  "gamma grid)".format(int(np.count_nonzero(valid))))
+            return None, None
+
+        cat_valid = catalog_mags[valid]
+        w_valid = weights[valid]
+        sums_valid = sums[valid]
+
+        if np.sum(w_valid) <= 0:
+            w_valid = np.ones_like(w_valid)
+
+        # Weighted slope of catalog mag vs. instrumental mag; a linear response gives slope 1
+        def weightedSlope(x, y, w):
+            w_sum = np.sum(w)
+            mx = np.sum(w*x)/w_sum
+            my = np.sum(w*y)/w_sum
+            var_x = np.sum(w*(x - mx)**2)/w_sum
+            if var_x <= 0:
+                return np.nan
+            return np.sum(w*(x - mx)*(y - my))/w_sum/var_x
+
+        # Slope of instrumental vs. catalog magnitude (a linear response gives slope 1). The catalog
+        #   magnitude is the (effectively error-free) regressor; regressing the other way would
+        #   attenuate the slope toward 0 because of the photometric scatter in the instrumental
+        #   magnitude, capping it below 1 so it never crosses regardless of gamma.
+        slope_grid = np.full(n_gamma, np.nan)
+        for g_idx in range(n_gamma):
+            inst_mag = -2.5*np.log10(sums_valid[:, g_idx])
+            slope_grid[g_idx] = weightedSlope(cat_valid, inst_mag, w_valid)
+
+        good = np.isfinite(slope_grid)
+        if np.count_nonzero(good) < 2:
+            print("Pixel-based gamma: skipped (could not measure the slope curve)")
+            return None, None
+
+        g_good = gamma_grid[good]
+        diff = slope_grid[good] - 1.0
+        idx_map = np.where(good)[0]
+
+        # Locate the first sign change in (slope - 1)
+        sign_change = np.where(np.diff(np.sign(diff)) != 0)[0]
+        if len(sign_change) == 0:
+            # No unity crossing within the searched range. The slope is monotonic in gamma, so the
+            #   endpoint whose slope is closest to 1 indicates which side the true gamma lies on
+            #   (direction-agnostic, regardless of whether the slope increases or decreases).
+            direction = "below" if abs(diff[0]) < abs(diff[-1]) else "above"
+            print("Pixel-based gamma: no unity crossing in [{:.1f}, {:.1f}] - true gamma is likely "
+                  "{} this range".format(g_good[0], g_good[-1], direction))
+            return None, None
+
+        k = sign_change[0]
+        g0, g1 = g_good[k], g_good[k + 1]
+        d0, d1 = diff[k], diff[k + 1]
+
+        # Linear interpolation to the unity crossing
+        gamma_best = g0 - d0*(g1 - g0)/(d1 - d0)
+        dslope_dgamma = (d1 - d0)/(g1 - g0)
+
+        # Uncertainty: slope-fit scatter propagated through the local slope-vs-gamma gradient
+        gamma_err = np.nan
+        nearest_col = idx_map[k] if abs(gamma_best - g0) <= abs(gamma_best - g1) else idx_map[k + 1]
+        try:
+            inst_mag_n = -2.5*np.log10(sums_valid[:, nearest_col])
+            _, cov = np.polyfit(cat_valid, inst_mag_n, 1, w=w_valid, cov=True)
+            slope_se = np.sqrt(cov[0, 0])
+            if np.isfinite(slope_se) and (abs(dslope_dgamma) > 1e-9):
+                gamma_err = slope_se/abs(dslope_dgamma)
+
+        except Exception:
+            pass
+
+        return gamma_best, gamma_err
+
 
     def onPhotometryPlotPick(self, event):
         """ Highlight a star in the main window when clicked in the photometry residuals plot. """

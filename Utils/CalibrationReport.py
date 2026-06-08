@@ -512,8 +512,8 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
         # Note: An almost identical code exists in RMS.Astrometry.SkyFit in the PlateTool.photometry function
 
         dpi = 130
-        fig_p, (ax_p, ax_r) = plt.subplots(nrows=2, facecolor=None, figsize=(6.0, 7.0), dpi=dpi, \
-            gridspec_kw={'height_ratios':[2, 1]})
+        fig_p, (ax_p, ax_r, ax_m) = plt.subplots(nrows=3, facecolor=None, figsize=(6.0, 8.5), dpi=dpi, \
+            gridspec_kw={'height_ratios':[2, 1, 1]})
 
         # Plot raw star intensities
         ax_p.scatter(-2.5*np.log10(star_intensities), catalog_mags, s=5, c='r', alpha=0.5, \
@@ -607,6 +607,42 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
         ax_r.set_xlabel("Radius from centre (px)")
 
         ax_r.set_xlim(0, img_diagonal)
+
+
+        ### Plot photometry vs catalog magnitude (gamma diagnostic) ###
+
+        catalog_mags_arr = np.array(catalog_mags)
+        fit_resid_arr = np.array(fit_resid)
+
+        # Plot catalog magnitude vs. fit residual
+        ax_m.scatter(catalog_mags_arr, fit_resid_arr, c='b', alpha=0.75, s=5, zorder=3)
+
+        # Plot a zero line
+        mag_min, mag_max = np.min(catalog_mags_arr), np.max(catalog_mags_arr)
+        ax_m.plot([mag_min, mag_max], [0, 0], linestyle='dashed', alpha=0.5, color='k')
+
+        # Fit a line to quantify any magnitude-dependent trend. A non-zero slope indicates the
+        #   assumed gamma is off (flat residuals = correct gamma). Outliers (incl. saturated stars)
+        #   were already rejected by the robust photometry fit above. Only the measured slope is
+        #   reported; converting it to a single gamma value is unreliable (see SkyFit2's pixel-based
+        #   estimate for an actual gamma measurement).
+        if (len(catalog_mags_arr) >= 3) and (np.ptp(catalog_mags_arr) > 0):
+
+            (slope, intercept), cov = np.polyfit(catalog_mags_arr, fit_resid_arr, 1, cov=True)
+            slope_err = np.sqrt(cov[0, 0])
+
+            gamma_label = "slope = {:+.3f} +/- {:.3f} mag/mag".format(slope, slope_err)
+
+            # Overlay the fitted trend line
+            mag_fit_arr = np.array([mag_min, mag_max])
+            ax_m.plot(mag_fit_arr, slope*mag_fit_arr + intercept, linestyle='-', color='r',
+                alpha=0.7, zorder=4, label=gamma_label)
+
+            ax_m.legend(fontsize=7)
+
+        ax_m.grid()
+        ax_m.set_ylabel("Fit residuals (mag)")
+        ax_m.set_xlabel("Catalog mag - flat residuals indicate correct gamma")
 
         ### ###
 
