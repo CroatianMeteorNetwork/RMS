@@ -4360,6 +4360,15 @@ if __name__ == "__main__":
         # Suppress numpy scientific notation printing
         np.set_printoptions(suppress=True)
 
+        # Helper: full sub-frame-accurate time of a (possibly fractional) frame number. The integer part
+        #   selects the frame whose real timestamp is read; the fractional part (rolling shutter /
+        #   deinterlace) is added as a sub-frame offset using the given fps.
+        def subframePickTime(frame, fps_val):
+            frame_int = int(frame)
+            frac = frame - frame_int
+            return img_handle.currentFrameTime(frame_no=frame_int, dt_obj=True) \
+                + datetime.timedelta(seconds=frac/fps_val)
+
         meteor_No = 1
         for meteor in meteor_detections:
 
@@ -4382,25 +4391,64 @@ if __name__ == "__main__":
             if cml_args.debug:
                 results_file.write(str(np.array(res_centroids)) + '\n')
 
+            # Measured fps to write for this meteor (None -> use the run-wide config fps)
+            meteor_fps = None
+
             # For FF files, take the existing FF name, encoding the time as FF + pick_frame
             if img_handle.input_type == 'ff':
                 ff_file_name = img_handle.name()
 
-            # For non-FF inputs, construct the FF name from the station ID and the first pick time
+            # For inputs with accurate per-frame timestamps (UWO vid/PNG, FRIPON/FITS), encode the real
+            #   frame times into the (reference time, frame number) + measured fps representation so it
+            #   round-trips to the true timestamp: frame = (actual_time - ref_time)*fps_measured, and a
+            #   reader recovers actual_time = ref_time + frame/fps_measured.
+            elif img_handle.hasAccurateTime():
+
+                # Round the measured fps to the precision actually stored in the FTPdetectinfo header
+                #   (2 decimals). The fps is only a scaling constant for the frame axis, so the per-frame
+                #   times round-trip exactly as long as the same value is used to encode the frame numbers
+                #   here and to decode them on read (the header value). Using the full-precision fps here
+                #   while the reader uses the rounded header value would introduce a drift that grows with
+                #   time from the reference (~1 ms over a 10 s event).
+                fps_meas = round(img_handle.fps, 2)
+
+                # Full sub-frame-accurate time of the first pick
+                ref_time_full = subframePickTime(centroids[0][0], fps_meas)
+
+                # Construct the FF file name from the first pick time (millisecond precision)
+                ff_file_name = FFfile.constructFFName(config.stationID, ref_time_full)
+
+                # Use the millisecond-truncated reference time that a reader will recover from the FF
+                #   name, so the round-trip is exactly consistent
+                ref_time = FFfile.filenameToDatetime(ff_file_name)
+
+                # Recompute frame numbers from the real times relative to the reference time. Operate on a
+                #   copy so the original frames are preserved for the ASGARD loop below.
+                centroids = centroids.copy()
+                for entry in centroids:
+                    entry[0] = (subframePickTime(entry[0], fps_meas) - ref_time).total_seconds()*fps_meas
+
+                meteor_fps = fps_meas
+
+            # For other non-FF inputs, construct the FF name from the station ID and the first pick time
             # To keep an accurate time, reset the frames so that the first pick is at frame 0
             else:
 
                 # Construct the FF file name from the time of the first pick
                 ff_file_name = FFfile.constructFFName(config.stationID, first_pick_time)
 
-                # Reset the frame numbers so that the first pick is at frame 0 
-                # frame[i] - int(frame[0]) to preserve the rolling shutter correction encoded as the 
+                # Reset the frame numbers so that the first pick is at frame 0
+                # frame[i] - int(frame[0]) to preserve the rolling shutter correction encoded as the
                 #   fractional part of the frame number
                 centroids[:,0] -= int(centroids[0,0])
 
 
-            # Append to the results list
-            results_list.append([ff_file_name, meteor_No, rho, theta, centroids])
+            # Append to the results list (carry the measured fps when available so the FTPdetectinfo
+            #   header reflects the true fps for this meteor)
+            if meteor_fps is not None:
+                results_list.append([ff_file_name, meteor_No, rho, theta, centroids, meteor_fps])
+            else:
+                results_list.append([ff_file_name, meteor_No, rho, theta, centroids])
 
             # Store data for debug summary (includes maxpixel for image display)
             if cml_args.debugplots:

@@ -193,14 +193,26 @@ class InputType(object):
     def currentFrameTime(self, frame_no=None, dt_obj=False):
         pass
 
+    def hasAccurateTime(self):
+        """ Indicate whether this input exposes accurate per-frame timestamps (e.g. GPS-stamped frames).
+
+        When True, currentFrameTime() returns the real time of each frame (not a fixed-fps assumption),
+        and self.fps holds the fps measured from those timestamps.
+
+        Return:
+            [bool] False by default.
+        """
+
+        return False
+
     def getTargetDtype(self, first_frame_data=None):
-        """ Determine the target dtype based on the target bit depth of the input images and the 
+        """ Determine the target dtype based on the target bit depth of the input images and the
             processing configuration.
-            
+
         If binning with 'sum' method is used, the target dtype is forced to uint16 to prevent overflow.
         Otherwise, it depends on the input data's bit depth.
         """
-        
+
         # Check if bit depth should be at least uint16 to handle potential overflow from sum binning
         if hasattr(self, 'config'):
             if self.config.detection_binning_factor > 1 and \
@@ -1543,9 +1555,14 @@ class InputTypeUWOVid(InputType):
         else:
             return (dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second, dt.microsecond/1000)
 
+    def hasAccurateTime(self):
+        """ UWO vid files carry accurate per-frame GPS timestamps. """
+
+        return True
 
 
-    
+
+
 class InputTypeImages(InputType):
     def __init__(self, dir_path, config, beginning_time=None, fps=None, detection=False, flipud=False,
                  chunk_frames=64):
@@ -2398,7 +2415,15 @@ class InputTypeImages(InputType):
 
         else:
             return (dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second, dt.microsecond/1000)
-        
+
+    def hasAccurateTime(self):
+        """ UWO PNGs and FRIPON/FITS image sequences carry accurate per-frame timestamps read from the
+            files (CABERNET uses a fixed assumed fps, so it is excluded). Mirrors the real-time branch in
+            currentFrameTime().
+        """
+
+        return (self.uwo_png_mode or self.fripon_mode or self.fits_mode) and (not self.cabernet_status)
+
 
     def getUWOMagickType(self, img):
         """ Return the type of the UWO PNG image. """

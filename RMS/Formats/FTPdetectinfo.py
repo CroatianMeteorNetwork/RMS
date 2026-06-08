@@ -100,7 +100,13 @@ def writeFTPdetectinfo(meteor_list, ff_directory, file_name, cal_directory, cam_
         for meteor in meteor_list:
 
             # Unpack the meteor data
-            ff_name, meteor_No, rho, theta, centroids = meteor
+            # A meteor may optionally carry its own fps as a trailing element, used e.g. for inputs with
+            #   accurate per-frame timestamps where the measured fps differs from the config fps
+            if len(meteor) == 6:
+                ff_name, meteor_No, rho, theta, centroids, meteor_fps = meteor
+            else:
+                ff_name, meteor_No, rho, theta, centroids = meteor
+                meteor_fps = fps
 
             ftpdetect_file.write("-------------------------------------------------------\n")
             ftpdetect_file.write(ff_name + "\n")
@@ -126,7 +132,7 @@ def writeFTPdetectinfo(meteor_list, ff_directory, file_name, cal_directory, cam_
                 str(cam_code),
                 int(meteor_No),
                 int(len(centroids)),
-                round(float(fps), 2),
+                round(float(meteor_fps), 2),
                 round(ang_vel, 1),
                 round(rho, 1),
                 round(theta, 1),
