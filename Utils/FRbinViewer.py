@@ -21,7 +21,6 @@ from __future__ import print_function, absolute_import, division
 import os
 import sys
 import argparse
-import platform
 import subprocess
 import time
 
@@ -344,7 +343,11 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format=N
 
     # if the file format was mp4, lets make a video from the data
     makevideo = False
+    ffmpeg_path = config.ffmpeg_binary
     if extract_format == 'mp4':
+        if not ffmpeg_path:
+            print('ffmpeg not available, unable to create video')
+            return 
         makevideo = True
         extract_format = 'png'
 
@@ -510,27 +513,10 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format=N
                 saveFramesForMeteorImage(meteor_image, fr_path, add_timestamp, frame_num - 1, frameCount, video_num,
                                          extract_format, framefiles, dir_path, add_shower_name, timestamp_title, showerNameTitle)
 
-            root = os.path.dirname(__file__)
-            ffmpeg_path = os.path.join(root, "ffmpeg.exe")
-            
             mp4_path = os.path.join(dir_path, fr_path.replace('.bin', '') + '_line_{:02d}.mp4'.format(video_num))
 
-            # If running on Windows, use ffmpeg.exe
-            if platform.system() == 'Windows':
-                com = ffmpeg_path + " -y -f image2 -pattern_type sequence -framerate " + str(config.fps) + " -start_number " + str(0) + " -i " + img_patt +" " + mp4_path
-                
-
-            else:
-                software_name = "avconv"
-                if os.system(software_name + " --help > /dev/null"):
-                    software_name = "ffmpeg"
-                    # Construct the ecommand for ffmpeg           
-                    com = software_name + " -y -f image2 -pattern_type sequence -framerate " + str(config.fps) + " -start_number " + str(0) + " -i " + img_patt +" -pix_fmt yuv420p " + mp4_path
-                else:
-                    com = "cd " + dir_path + ";" \
-                        + software_name + " -v quiet -r 30 -y -start_number " + str(0) + " -i " + img_patt \
-                        + " -vcodec libx264 -pix_fmt yuv420p -crf 25 -movflags faststart -g 15 -vf \"hqdn3d=4:3:6:4.5,lutyuv=y=gammaval(0.97)\" " \
-                        + mp4_path
+            # Construct the command for ffmpeg           
+            com = ffmpeg_path + " -y -hide_banner -loglevel error -f image2 -pattern_type sequence -framerate " + str(config.fps) + " -start_number " + str(0) + " -i " + img_patt +" -pix_fmt yuv420p " + mp4_path
             
             # Print the command
             print("Command:")

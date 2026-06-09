@@ -293,7 +293,13 @@ def photometryFit(px_intens_list, radius_list, catalog_mags, fixed_vignetting=No
         weights = np.ones(len(px_intens_list))
     else:
         # Normalize the weights to have a sum of 1
-        weights = np.array(weights)/np.sum(weights)
+        weights = np.array(weights)
+        weight_sum = np.sum(weights)
+        if weight_sum > 0:
+            weights = weights / weight_sum
+        else:
+            # Fall back to equal weights if sum is zero
+            weights = np.ones(len(px_intens_list)) / len(px_intens_list)
 
     # If the exclude list is not given, set it to an empty list
     if exclude_list is None:
@@ -452,8 +458,8 @@ def getFOVSelectionRadius(platepar):
     ur_sep = np.degrees(angularSeparation(np.radians(ra3), np.radians(dec3), np.radians(ra_mid), np.radians(dec_mid)))
     ll_sep = np.degrees(angularSeparation(np.radians(ra4), np.radians(dec4), np.radians(ra_mid), np.radians(dec_mid)))
 
-    # Take the average radius
-    fov_radius = np.mean([ul_sep, lr_sep, ur_sep, ll_sep])
+    # Take the maximum radius to include all corners
+    fov_radius = np.max([ul_sep, lr_sep, ur_sep, ll_sep])
 
     return fov_radius
 
@@ -484,8 +490,14 @@ def rotationWrtHorizon(platepar):
     azim_up, alt_up = cyTrueRaDec2ApparentAltAz(np.radians(ra_arr[1]), np.radians(dec_arr[1]), jd_arr[1], \
         np.radians(platepar.lat), np.radians(platepar.lon), platepar.refraction)
 
+    # Compute the azimuth difference, wrapping across the 0/360 deg boundary. Without this, a FOV centre
+    # pointing near due north (azimuth ~ 0/360 deg) puts the two sample points on opposite sides of the
+    # wrap, producing a spurious ~360 deg difference that pins the rotation near +/-180 deg and makes it
+    # insensitive to the true camera roll.
+    d_azim = (azim_up - azim_mid + np.pi)%(2*np.pi) - np.pi
+
     # Compute the rotation wrt horizon (deg)
-    rot_angle = np.degrees(np.arctan2(alt_up - alt_mid, azim_up - azim_mid))
+    rot_angle = np.degrees(np.arctan2(alt_up - alt_mid, d_azim))
 
     # Wrap output to <-180, 180] range
     if rot_angle > 180:
@@ -558,9 +570,13 @@ def rotationWrtStandard(platepar):
     ra_up = ra[1]
     dec_up = dec[1]
 
+    # Compute the RA difference, wrapping across the 0/360 deg boundary so a FOV centre near RA ~ 0 deg
+    # does not produce a spurious ~360 deg difference (same failure mode as the azimuth wrap in
+    # rotationWrtHorizon).
+    d_ra = (np.radians(ra_mid) - np.radians(ra_up) + np.pi)%(2*np.pi) - np.pi
+
     # Compute the equatorial orientation
-    rot_angle = np.degrees(np.arctan2(np.radians(dec_mid) - np.radians(dec_up), \
-        np.radians(ra_mid) - np.radians(ra_up)))
+    rot_angle = np.degrees(np.arctan2(np.radians(dec_mid) - np.radians(dec_up), d_ra))
 
     # Wrap output to 0-360 range
     rot_angle = rot_angle%360
