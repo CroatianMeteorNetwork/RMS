@@ -2018,10 +2018,10 @@ def computeFluxCorrectionsOnBins(
     else:
         meteor_ht = 1000*ref_height
 
-    # Compute the mean FWHM
-    all_ff_files = []
+    # Compute the mean FWHM (deduplicate FF files so that files with multiple meteors are not weighted more)
+    all_ff_files = set()
     for _, bin_ffs in bin_meteor_information:
-        all_ff_files += bin_ffs
+        all_ff_files.update(bin_ffs)
 
     fwhm_mean = np.mean([sensor_data[ff_name][0] for ff_name in all_ff_files])
 
@@ -2276,11 +2276,15 @@ def computeFluxCorrectionsOnBins(
 
             # Compute the mean star FWHM in the given bin
             if bin_ffs:
-                fwhm_bin_mean = np.mean([sensor_data[ff_name][0] for ff_name in bin_ffs])
+
+                # Deduplicate FF files so that files with multiple meteors are not weighted more
+                unique_bin_ffs = set(bin_ffs)
+
+                fwhm_bin_mean = np.mean([sensor_data[ff_name][0] for ff_name in unique_bin_ffs])
                 mag_lev_bin = np.mean(
                     [
                         recalibrated_platepars[ff_name].mag_lev
-                        for ff_name in bin_ffs
+                        for ff_name in unique_bin_ffs
                         if ff_name in recalibrated_platepars
                     ]
                 )
