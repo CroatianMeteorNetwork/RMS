@@ -25,18 +25,18 @@ RMSUPDATESCRIPT=~/Desktop/RMS_Update.sh
 # Function for editing the RMS config
 editRMSConfig () {
 
-  # If leafpad is not available (Raspbian Jessie), use mousepad (Raspbian Buster)
-  if [ $( command -v leafpad ) ]; then
+  # Use the first available editor (leafpad on Raspbian Jessie, mousepad on
+  # Raspbian Buster and later, gedit/gnome-text-editor on GNOME desktops)
+  local editor
+  for editor in leafpad mousepad gedit gnome-text-editor nano; do
+    if [ $( command -v $editor ) ]; then
 
-    # Open the config file
-    leafpad $RMSCONFIG  
+      # Open the config file
+      $editor $RMSCONFIG
+      return
 
-  else
-
-    # Open the config file
-    mousepad $RMSCONFIG  
-    
-  fi
+    fi
+  done
 
 }
 
@@ -122,6 +122,9 @@ echo ""
 echo "At the end of these steps the first data capture session will start."
 echo ""
 
+# Expanding the file system only applies to Raspberry Pi SD card images
+if command -v raspi-config >/dev/null 2>&1; then
+
 echo "
 0) Expanding the file system
 ----------------------------
@@ -133,12 +136,12 @@ read -n1 -r -p 'If you have flashed this SD card yourself, press ENTER.' key
 
 if [[ "$key" = "" ]]; then
     lxterminal -e "sudo raspi-config"
-    
+
     echo "
     Another window has opened where you can expand the file system.
-    
+
     Go to:
-    
+
     7 ADVANCED OPTIONS -->
       A1 EXPAND FILE SYSTEM -->
         < OK >
@@ -151,6 +154,8 @@ if [[ "$key" = "" ]]; then
 
     read -p "Press ENTER to continue..."
 fi
+
+fi  # raspi-config available
 
 echo ""
 echo ""
@@ -251,9 +256,9 @@ else
 fi
 done
 
-# Offer the conversion to the multi-camera data structure. The conversion
-# script only supports 64-bit Pi platforms, so skip this step elsewhere.
-if [[ $(uname -m) == aarch64 ]]; then
+# Offer the conversion to the multi-camera data structure, unless the
+# system already uses it
+if [[ ! -d ~/source/Stations ]]; then
 
 echo "
 5) Converting the data structure
@@ -283,29 +288,22 @@ fi
 
 if [[ "$key" = "" ]]; then
   echo ""
-  echo "Next, this script will run to convert to the recommended data structure:"
-  echo "  ~/source/RMS/Scripts/MultiCamLinux/Pi/add_Pi_Station.sh"
+  echo "Next, this script will run to convert to the recommended data structure"
+  echo "(it will show the details and ask you to confirm):"
+  echo "  ~/source/RMS/Scripts/MultiCamLinux/add_Station.sh"
   echo ""
-  echo "Note: if you have a Pi5 or similar, you can run the same script later to add more cameras."
+  echo "Note: you can run the same script later to add more cameras."
   echo ""
   sleep 2
-  read -n1 -r -p 'Press ENTER a second time to confirm the conversion, or Q to keep the legacy structure... ' key
-fi
-echo ""
-
-if [[ "$key" = "" ]]; then
-  echo ""
-  echo "Converting to the recommended data structure..."
-  echo ""
-  bash ~/source/RMS/Scripts/MultiCamLinux/Pi/add_Pi_Station.sh
+  bash ~/source/RMS/Scripts/MultiCamLinux/add_Station.sh
 else
   echo ""
   echo "You have chosen to keep the legacy data structure."
   echo "If you decide to convert in the future, run this command from a terminal:"
-  echo "  ~/source/RMS/Scripts/MultiCamLinux/Pi/add_Pi_Station.sh"
+  echo "  ~/source/RMS/Scripts/MultiCamLinux/add_Station.sh"
 fi
 
-fi  # if aarch64
+fi  # if no ~/source/Stations yet
 
 # Enable autorun. This is done only after the optional data structure
 # conversion so an interrupted conversion does not get skipped over by
