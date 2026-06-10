@@ -787,8 +787,54 @@ def removeInlineComments(cfgparser, delimiter):
 
 
 
+def findBaseConfig(path):
+    """ Find the shared base config for a per-station config file.
+
+    Station configs live in per-station folders (e.g. ~/source/Stations/XX0001/.config). When a
+    .config exists in the parent directory (e.g. ~/source/Stations/.config), it holds the settings
+    shared by all stations and the per-station file only needs to override what differs (typically
+    just the station ID and the camera device). This makes the station folder the single source of
+    camera-specific settings while everything common is maintained in one place.
+
+    Arguments:
+        path: [str] Path to the per-station config file.
+
+    Return:
+        [str or None] Path to the shared base config, or None if there isn't one.
+
+    """
+
+    # Only RMS .config files participate in layering
+    if not os.path.basename(path).endswith('.config'):
+        return None
+
+    path = os.path.abspath(os.path.expanduser(path))
+
+    # The base config is a file named exactly ".config" one directory level up
+    base_path = os.path.join(os.path.dirname(os.path.dirname(path)), '.config')
+
+    if not os.path.isfile(base_path):
+        return None
+
+    # Never layer a file onto itself
+    try:
+        if os.path.samefile(base_path, path):
+            return None
+    except OSError:
+        return None
+
+    return base_path
+
+
+
 def parse(path, strict=True):
     """ Parses config file at the given path and returns the corresponding Config object.
+
+    If the config file sits in a per-station folder and a .config exists one directory level up
+    (e.g. ~/source/Stations/.config above ~/source/Stations/XX0001/.config), the two are layered:
+    the shared base is read first and the per-station file overrides it. A station config that
+    contains all options (the historical full copy) behaves exactly as before, because every one
+    of its values shadows the base.
 
     Arguments:
         path: [str] path to file (.config or dfnstation.cfg)
@@ -801,17 +847,24 @@ def parse(path, strict=True):
 
     delimiter = ";"
 
+    # Read the shared base config first (if any), then the given config over it - later files win
+    config_files = [path]
+    base_config_path = findBaseConfig(path)
+    if base_config_path is not None:
+        config_files.insert(0, base_config_path)
+        print('Using shared base config:', base_config_path)
+
     try:
         # Python 3
         parser = RawConfigParser(inline_comment_prefixes=(delimiter), strict=strict)
 
-        parser.read(path, encoding='utf-8')
+        parser.read(config_files, encoding='utf-8')
 
     except:
         # Python 2
         parser = RawConfigParser()
 
-        parser.read(path)
+        parser.read(config_files)
 
 
     # Remove inline comments
@@ -822,6 +875,9 @@ def parse(path, strict=True):
     # Store parsed config file name
     config.config_file_name = path
     config.config_file_path = os.path.dirname(path)
+
+    # Store all files that contributed to this config (base first when layered)
+    config.loaded_config_files = config_files
 
     # Parse an RMS config file
     if os.path.basename(path).endswith('.config'):
@@ -1162,14 +1218,33 @@ def parseCapture(config, parser):
     if parser.has_option(section, "gst_decoder"):
         config.gst_decoder = parser.get(section, "gst_decoder")
 
-    if parser.has_option(section, "camera_settings_path") and os.path.isfile(parser.get(section, "camera_settings_path")):
-        config.camera_settings_path = parser.get(section, "camera_settings_path")
-    else:
-        station_specific_file = os.path.expanduser(os.path.join(config.config_file_path,'camera_settings.json'))
-        if os.path.isfile(station_specific_file):
-            config.camera_settings_path = station_specific_file
-        else:    
-            config.camera_settings_path = './camera_settings.json'
+    # Resolve the camera settings file. Resolution order:
+    #   1. An explicitly configured camera_settings_path (~ is expanded), if that file exists
+    #   2. camera_settings.json next to the station's .config (per-station override)
+    #   3. camera_settings.json one directory level up (e.g. ~/source/Stations - shared by
+    #      all stations)
+    #   4. The configured or default path as given (usually ./camera_settings.json, the copy
+    #      in the RMS root)
+    camera_settings_default = './camera_settings.json'
+
+    explicit_path = None
+    if parser.has_option(section, "camera_settings_path"):
+        explicit_path = parser.get(section, "camera_settings_path")
+
+    config_dir = os.path.abspath(os.path.expanduser(config.config_file_path or '.'))
+
+    candidates = []
+    if explicit_path and explicit_path != camera_settings_default:
+        candidates.append(os.path.expanduser(explicit_path))
+    candidates.append(os.path.join(config_dir, 'camera_settings.json'))
+    candidates.append(os.path.join(os.path.dirname(config_dir), 'camera_settings.json'))
+
+    config.camera_settings_path = explicit_path if explicit_path else camera_settings_default
+    for candidate in candidates:
+        if os.path.isfile(candidate):
+            config.camera_settings_path = candidate
+            break
+
     print(f'Camera settings file: {config.camera_settings_path}')
 
     if parser.has_option(section, "initialize_camera"):
@@ -1891,3 +1966,59 @@ def parseColors(config, parser):
         config.sporadic_color = parser.get(section, "sporadic_color")
         if config.sporadic_color not in mcolors.CSS4_COLORS:
             config.sporadic_color = 'gray'
+
+
+if __name__ == "__main__":
+
+    import argparse
+
+    arg_parser = argparse.ArgumentParser(description="Load a config file and show how it resolves. "
+        "When the config is layered (a shared .config one directory level up holds the settings "
+        "common to all stations), every explicitly set option is attributed to the file it came "
+        "from.")
+
+    arg_parser.add_argument('config_path', metavar='CONFIG_PATH', type=str,
+        help="Path to the .config file to inspect.")
+
+    cml_args = arg_parser.parse_args()
+
+    config = parse(cml_args.config_path)
+
+    print()
+    print("Files loaded (later files override earlier ones):")
+    for file_path in config.loaded_config_files:
+        print("  {:s}".format(os.path.abspath(file_path)))
+
+    print()
+    print("Station ID:           {:s}".format(config.stationID))
+    print("Data directory:       {:s}".format(config.data_dir))
+    print("Camera settings file: {:s}".format(config.camera_settings_path))
+
+    # When layered, show which file every explicitly set option comes from
+    if len(config.loaded_config_files) > 1:
+
+        delimiter = ";"
+        layers = []
+        for file_path in config.loaded_config_files:
+            layer_parser = RawConfigParser(inline_comment_prefixes=(delimiter), strict=False)
+            layer_parser.read(file_path, encoding='utf-8')
+            removeInlineComments(layer_parser, delimiter)
+            layers.append((file_path, layer_parser))
+
+        # Later layers override earlier ones, so the last writer of an option wins
+        provenance = {}
+        section_order = []
+        for file_path, layer_parser in layers:
+            for section in layer_parser.sections():
+                if section not in section_order:
+                    section_order.append(section)
+                for option, _ in layer_parser.items(section):
+                    provenance[(section, option)] = file_path
+
+        print()
+        print("Option provenance:")
+        for section in section_order:
+            print("  [{:s}]".format(section))
+            for (sec, option), file_path in provenance.items():
+                if sec == section:
+                    print("    {:28s} <- {:s}".format(option, file_path))
