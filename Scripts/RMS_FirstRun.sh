@@ -327,17 +327,17 @@ if [[ "$key" = "" ]]; then
   echo ""
   echo "Next, this script will run to convert to the recommended data structure"
   echo "(it will show the details and ask you to confirm):"
-  echo "  ~/source/RMS/Scripts/MultiCamLinux/add_Station.sh"
+  echo "  ~/source/RMS/Scripts/add_Station.sh"
   echo ""
   echo "Note: you can run the same script later to add more cameras."
   echo ""
   sleep 2
-  bash ~/source/RMS/Scripts/MultiCamLinux/add_Station.sh
+  bash ~/source/RMS/Scripts/add_Station.sh
 else
   echo ""
   echo "You have chosen to keep the legacy data structure."
   echo "If you decide to convert in the future, run this command from a terminal:"
-  echo "  ~/source/RMS/Scripts/MultiCamLinux/add_Station.sh"
+  echo "  ~/source/RMS/Scripts/add_Station.sh"
 fi
 
 fi  # if no ~/source/Stations yet
