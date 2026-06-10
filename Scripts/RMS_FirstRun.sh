@@ -304,10 +304,11 @@ The new recommended data structure keeps important camera files in a safer
 place. Converting to this multi-camera data structure is recommended for
 both single and multiple camera systems.
 
-The important files (.config, mask.bmp and platepar_cmn2010.cal) will be
-copied to ~/source/Stations/<camera_ID>, and captured data will be stored
-in ~/RMS_data/<camera_ID>, where <camera_ID> is the unique station code
-you were given by GMN. Nothing in ~/source/RMS is modified.
+Your settings become a shared base config in ~/source/Stations/.config,
+and each camera gets its own folder with a small .config (just the station
+ID and data folder), its mask.bmp and platepar_cmn2010.cal. Captured data
+will be stored in ~/RMS_data/<camera_ID>, where <camera_ID> is the unique
+station code you were given by GMN. Nothing in ~/source/RMS is modified.
 "
 sleep 1
 

@@ -67,7 +67,51 @@ term_exec() {   # $1 = window title, $2 = command
     fi
 }
 
-# Create a station directory with config, mask and launch entries.
+# Make sure the shared base config exists at ~/source/Stations/.config.
+# It is seeded from ~/source/RMS/.config (the operator's values when this
+# runs as part of a conversion, the defaults on a fresh setup), with the
+# stationID neutralized - identity belongs to the per-station overlays.
+ensure_base_config() {
+    if [[ ! -f ~/source/Stations/.config ]]; then
+        mkdir -p ~/source/Stations
+        cp ~/source/RMS/.config ~/source/Stations/.config
+        sed -i "s/^stationID:.*$/stationID: XX0001/" ~/source/Stations/.config
+        echo "Created shared base config: ~/source/Stations/.config"
+    fi
+}
+
+# Set an option in a station overlay config, placing it under the same
+# section the option has in the shared base config. Replaces the line if
+# the overlay already sets that option.
+overlay_set() {   # $1 = overlay file, $2 = option, $3 = value
+    local file="$1" key="$2" value="$3" section
+
+    section=$(awk -v key="$key" '
+        /^\[/ { s = $0; next }
+        index($0, key ":") == 1 { gsub(/[][]/, "", s); print s; exit }
+    ' ~/source/Stations/.config)
+
+    if [[ -z "$section" ]]; then
+        return 1
+    fi
+
+    if grep -q "^${key}:" "$file"; then
+        awk -v key="$key" -v line="$key: $value" \
+            'index($0, key ":") == 1 { print line; next } { print }' \
+            "$file" > "$file.tmp" && mv "$file.tmp" "$file"
+        return 0
+    fi
+
+    if ! grep -q "^\[${section}\]" "$file"; then
+        printf '\n[%s]\n' "$section" >> "$file"
+    fi
+
+    awk -v sec="[$section]" -v line="$key: $value" \
+        '{ print } $0 == sec { print line }' \
+        "$file" > "$file.tmp" && mv "$file.tmp" "$file"
+}
+
+# Create a station directory with config overlay, mask and launch entries.
 # Returns 1 if the station already exists.
 create_station() {
     local item="$1"
@@ -80,12 +124,24 @@ create_station() {
     fi
 
     echo "Creating station ${item}..."
+    ensure_base_config
     mkdir -p ~/source/Stations/${item}
     mkdir -p "${RMS_data}/${item}"
     mkdir -p ~/.config/autostart "${Desktop}"
 
-    # Copy config template
-    cp ~/source/RMS/.config ~/source/Stations/${item}
+    # Per-station overlay: only what differs from the shared base config.
+    # Any option set here overrides the value from ../.config
+    cat <<- EOF > "${config_file}"
+	; Station ${item} - only the settings that differ from the shared base
+	; config in ~/source/Stations/.config belong here. Any option set in
+	; this file overrides the base value.
+
+	[System]
+	stationID: ${item}
+
+	[Capture]
+	data_dir: ${RMS_data}/${item}
+	EOF
 
     # Copy mask file
     cp ~/source/RMS/mask.bmp ~/source/Stations/${item} 2>/dev/null
@@ -132,10 +188,6 @@ create_station() {
     gio set "${Desktop}/${item}-ShowLiveStream.desktop" metadata::trusted true 2>/dev/null
     chmod +x "${Desktop}/${item}-ShowLiveStream.desktop"
 
-    # Customise the config
-    sed -i "s/^stationID:.*$/stationID: $item/g" "${config_file}"
-    sed -i "s,^data_dir:.*$,data_dir: ${RMS_data}/${item},g" "${config_file}"
-
     return 0
 }
 
@@ -144,17 +196,16 @@ migrate_legacy() {
 
 cat <<EOF
 
-Multiple cameras are supported by giving each camera its own copies of the
-configuration files under ~/source/Stations/<station_ID>.
+Multiple cameras are supported by a layered configuration under
+~/source/Stations:
+- your current settings become the shared base config
+  ~/source/Stations/.config, used by all stations
+- each camera gets its own folder with a small .config holding only
+  what differs (the station ID and its data folder), plus its
+  mask.bmp and platepar_cmn2010.cal
 
-Your configured station ${DefStation} will get copies of:
-- .config
-- platepar_cmn2010.cal
-- mask.bmp
-in ~/source/Stations/${DefStation}
-
-Nothing in ~/source/RMS is modified, and camera_settings.json is shared
-by all stations from there.
+Your configured station ${DefStation} will be set up this way now.
+Nothing in ~/source/RMS is modified.
 
 Any previously captured data will be moved from
 ${RMS_data}
@@ -341,15 +392,19 @@ if [[ -n "${CSV_FILE}" ]]; then
 
         config_file=~/source/Stations/${item}/.config
 
-        # Apply camera_ip to device URL if column exists
+        # Apply camera_ip into this station's overlay: take the device URL
+        # from the shared base and swap the IP
         if [[ $camera_ip_col -ne -1 && -n "${VALUES[$camera_ip_col]}" ]]; then
             camera_ip="${VALUES[$camera_ip_col]}"
-            # Replace IP address in the device URL (matches IP pattern in rtsp:// URL)
-            sed -i -E "s|^(device:.*rtsp://)[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+|\1${camera_ip}|g" "${config_file}"
-            echo "  Set camera IP: ${camera_ip}"
+            base_device=$(grep '^device:' ~/source/Stations/.config | head -1 | cut -d' ' -f2-)
+            station_device=$(printf '%s' "$base_device" | sed -E "s|(rtsp://)[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+|\1${camera_ip}|")
+            if overlay_set "${config_file}" device "${station_device}"; then
+                echo "  Set camera IP: ${camera_ip}"
+            fi
         fi
 
-        # Apply any additional CSV columns that match .config keys
+        # Apply any additional CSV columns that match a .config option of the
+        # shared base - the value goes into this station's overlay
         for i in "${!HEADERS[@]}"; do
             header="${HEADERS[$i]}"
             value="${VALUES[$i]}"
@@ -358,9 +413,7 @@ if [[ -n "${CSV_FILE}" ]]; then
             [[ "$header" == "station_id" || "$header" == "stationID" || "$header" == "camera_ip" ]] && continue
             [[ -z "$value" ]] && continue
 
-            # Check if this header exists as a key in .config
-            if grep -q "^${header}:" "${config_file}"; then
-                sed -i "s|^${header}:.*$|${header}: ${value}|g" "${config_file}"
+            if overlay_set "${config_file}" "${header}" "${value}"; then
                 echo "  Set ${header}: ${value}"
             fi
         done
@@ -409,11 +462,21 @@ fi
 total=$(count_stations)
 
 if [[ $total -gt 1 ]]; then
+    # shared multi-camera settings live in the base config: scale the
+    # reserved free space with the number of stations, and disable the
+    # daily post processing reboot - it would kill the other captures
+    ensure_base_config
+    sed -i "s/^extra_space_gb:.*$/extra_space_gb: $(( total * 20 ))/g" ~/source/Stations/.config
+    sed -i "s/^\(reboot_after_processing:\).*/\1 false/g" ~/source/Stations/.config
+
+    # legacy full-copy station configs shadow the base, so update those too
     for dir in ~/source/Stations/*/; do
-        # scale the reserved free space with the number of stations
-        sed -i "s/^extra_space_gb:.*$/extra_space_gb: $(( total * 20 ))/g" "${dir}/.config"
-        # disable the daily post processing reboot, it would kill the other captures
-        sed -i "s/^\(reboot_after_processing:\).*/\1 false/g" "${dir}/.config"
+        if grep -q '^extra_space_gb:' "${dir}/.config" 2>/dev/null; then
+            sed -i "s/^extra_space_gb:.*$/extra_space_gb: $(( total * 20 ))/g" "${dir}/.config"
+        fi
+        if grep -q '^reboot_after_processing:' "${dir}/.config" 2>/dev/null; then
+            sed -i "s/^\(reboot_after_processing:\).*/\1 false/g" "${dir}/.config"
+        fi
     done
 
     # remove comment from last line of wayfire.ini to enable window cascade (Pi image)
