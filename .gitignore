@@ -116,3 +116,5 @@ Catalogs/GMN_StarCatalog_LM12.0.bin
 # Agents
 .agents/
 skills-lock.json
+# Station list for Scripts/MultiCamLinux/add_GStation.sh
+stations.csv
