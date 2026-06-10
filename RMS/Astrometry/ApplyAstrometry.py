@@ -263,7 +263,74 @@ def photomLineMinimize(params, px_sum, radius, catalog_mags, fixed_vignetting, w
 
 
 
-def photometryFit(px_intens_list, radius_list, catalog_mags, fixed_vignetting=None, weights=None, 
+def limitingMagnitude(mags, snr_arr, snr_targets=(5, 10), exclude_mask=None):
+    """ Fit log10(S/N) = a*mag + b and return limiting magnitudes at given S/N targets.
+
+        Physical basis: in the background-limited regime S/N is proportional to flux and
+        flux = 10**(-0.4*mag), so log10(S/N) is linear in magnitude.
+
+    Arguments:
+        mags: [ndarray] Apparent (vignetting + extinction corrected) magnitudes per star.
+        snr_arr: [ndarray] Signal-to-noise ratio per star.
+
+    Keyword arguments:
+        snr_targets: [tuple] S/N values at which to report the limiting magnitude.
+        exclude_mask: [ndarray of bool] True = exclude star from the fit (e.g. saturated).
+
+    Return:
+        [dict] or None if the fit cannot be performed. Keys:
+            'slope', 'intercept' : fit coefficients a, b (log10(S/N) = a*mag + b)
+            'r2'                 : coefficient of determination
+            'lm'                 : dict {snr_target: limiting_magnitude}
+            'eqn_str'            : multi-line annotation string for the plot
+    """
+
+    mags = np.array(mags, dtype=np.float64)
+    snr_arr = np.array(snr_arr, dtype=np.float64)
+
+    # Keep only finite magnitudes and positive S/N (log10 requires S/N > 0)
+    mask = np.isfinite(mags) & np.isfinite(snr_arr) & (snr_arr > 0)
+
+    # Exclude flagged stars (e.g. saturated), whose flux is capped and breaks the log-linear trend
+    if exclude_mask is not None:
+        mask &= ~np.array(exclude_mask, dtype=bool)
+
+    # Need at least 3 stars for a meaningful fit
+    if np.sum(mask) < 3:
+        return None
+
+    mags_fit = mags[mask]
+    log_snr = np.log10(snr_arr[mask])
+
+    # Fit a line: log10(S/N) = a*mag + b
+    a, b = np.polyfit(mags_fit, log_snr, 1)
+
+    # A non-negative slope is unphysical (fainter stars must have lower S/N) and makes the
+    # limiting magnitude inversion meaningless
+    if a >= 0:
+        return None
+
+    # Coefficient of determination
+    log_snr_pred = a*mags_fit + b
+    ss_res = np.sum((log_snr - log_snr_pred)**2)
+    ss_tot = np.sum((log_snr - np.mean(log_snr))**2)
+    r2 = 1.0 - ss_res/ss_tot if ss_tot > 0 else 0.0
+
+    # Invert the model so the limiting magnitude is expressed directly as a function of S/N:
+    # LM = (1/a)*log10(S/N) - b/a
+    c = 1.0/a
+    d = -b/a
+    lm = {target: c*np.log10(target) + d for target in snr_targets}
+
+    eqn_str = "LM = {:.3f} log10(S/N) + {:.2f} (R2={:.2f})".format(c, d, r2)
+    for target in snr_targets:
+        eqn_str += "\nLM = {:.2f} mag @ S/N = {:g}".format(lm[target], target)
+
+    return {'slope': a, 'intercept': b, 'r2': r2, 'lm': lm, 'eqn_str': eqn_str}
+
+
+
+def photometryFit(px_intens_list, radius_list, catalog_mags, fixed_vignetting=None, weights=None,
                   exclude_list=None):
     """ Fit the photometry on given data.
 
@@ -490,8 +557,14 @@ def rotationWrtHorizon(platepar):
     azim_up, alt_up = cyTrueRaDec2ApparentAltAz(np.radians(ra_arr[1]), np.radians(dec_arr[1]), jd_arr[1], \
         np.radians(platepar.lat), np.radians(platepar.lon), platepar.refraction)
 
+    # Compute the azimuth difference, wrapping across the 0/360 deg boundary. Without this, a FOV centre
+    # pointing near due north (azimuth ~ 0/360 deg) puts the two sample points on opposite sides of the
+    # wrap, producing a spurious ~360 deg difference that pins the rotation near +/-180 deg and makes it
+    # insensitive to the true camera roll.
+    d_azim = (azim_up - azim_mid + np.pi)%(2*np.pi) - np.pi
+
     # Compute the rotation wrt horizon (deg)
-    rot_angle = np.degrees(np.arctan2(alt_up - alt_mid, azim_up - azim_mid))
+    rot_angle = np.degrees(np.arctan2(alt_up - alt_mid, d_azim))
 
     # Wrap output to <-180, 180] range
     if rot_angle > 180:
@@ -564,9 +637,13 @@ def rotationWrtStandard(platepar):
     ra_up = ra[1]
     dec_up = dec[1]
 
+    # Compute the RA difference, wrapping across the 0/360 deg boundary so a FOV centre near RA ~ 0 deg
+    # does not produce a spurious ~360 deg difference (same failure mode as the azimuth wrap in
+    # rotationWrtHorizon).
+    d_ra = (np.radians(ra_mid) - np.radians(ra_up) + np.pi)%(2*np.pi) - np.pi
+
     # Compute the equatorial orientation
-    rot_angle = np.degrees(np.arctan2(np.radians(dec_mid) - np.radians(dec_up), \
-        np.radians(ra_mid) - np.radians(ra_up)))
+    rot_angle = np.degrees(np.arctan2(np.radians(dec_mid) - np.radians(dec_up), d_ra))
 
     # Wrap output to 0-360 range
     rot_angle = rot_angle%360

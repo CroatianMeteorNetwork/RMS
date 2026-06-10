@@ -785,7 +785,8 @@ class Config:
         self.ml_filter = 0.5
 
         # Path to the ML model
-        self.ml_model_path = os.path.join(self.rms_root_dir, "share", "hyper_model.tflite")
+        self.ml_model_file = 'hyper_model.tflite'
+        self.ml_model_path = os.path.join(self.rms_root_dir, "share", self.ml_model_file)
 
         # Detection border (in pixels) - detections too close to the border of the mask will be rejected
         self.detection_border = 5
@@ -1423,15 +1424,14 @@ def parseCapture(config, parser):
     # obtain the path to a working ffmpeg, if available
     config.ffmpeg_binary = isFfmpegWorking()
 
-    # Enable/disable saving video frames - automatically off if FFmpeg is missing
-    if parser.has_option(section, "save_frames"):
-        save_requested = parser.getboolean(section, "save_frames")
-        if save_requested and not config.ffmpeg_binary:
-            print("save_frames requested but FFmpeg not available - disabling.")
-        else:
-            config.save_frames = save_requested
-    else:
+    # Enable/disable saving video frames - automatically off if FFmpeg is missing.
+    # If the option is absent from the config, fall back to the class default.
+    save_requested = parser.getboolean(section, "save_frames", fallback=config.save_frames)
+    if save_requested and not config.ffmpeg_binary:
+        print("save_frames requested but FFmpeg not available - disabling.")
         config.save_frames = False
+    else:
+        config.save_frames = save_requested
 
     if parser.has_option(section, "frame_file_type"):
         config.frame_file_type = parser.get(section, "frame_file_type")
@@ -1972,15 +1972,21 @@ def parseMeteorDetection(config, parser):
     if parser.has_option(section, "min_patch_intensity_multiplier"):
         config.min_patch_intensity_multiplier = parser.getfloat(section, "min_patch_intensity_multiplier")
 
+    if parser.has_option(section, "ml_model_file"):
+        config.ml_model_file = parser.get(section, "ml_model_file")
+        config.ml_model_path = os.path.join(config.rms_root_dir, "share", config.ml_model_file)
+
     if parser.has_option(section, "ml_filter"):
         # since most of the old configs have threshold 0.85, and the current model is calibrated to 0.5,
-        # we need to rescale the value here
-        config.ml_filter = parser.getfloat(section, "ml_filter") * 0.5/0.85
+        # we need to rescale the value here - only for new model
+        if (config.ml_model_file == "hyper_model.tflite"):
+            config.ml_filter = parser.getfloat(section, "ml_filter") * 0.5/0.85
+        else:
+            config.ml_filter = parser.getfloat(section, "ml_filter")
 
         # Disable the min_patch_intensity filter if the ML filter is used and the ML library is available
         if TFLITE_AVAILABLE and (config.ml_filter > 0):
             config.min_patch_intensity_multiplier = 0
-
 
     if parser.has_option(section, "detection_border"):
         config.detection_border = parser.getint(section, "detection_border")

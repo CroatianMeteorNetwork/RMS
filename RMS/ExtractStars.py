@@ -101,10 +101,12 @@ def extractStars(img, img_median=None, mask=None, gamma=1.0, max_star_candidates
     img_max = filters.maximum_filter(img_convolved, neighborhood_size)
     maxima = (img_convolved == img_max)
     img_min = filters.minimum_filter(img_convolved, neighborhood_size)
-    diff = ((img_max - img_min) > intensity_threshold)
+    # Scale the threshold from the 8-bit reference range to the image bit depth
+    intensity_threshold_scaled = intensity_threshold*(2**(bit_depth - 8))
+    diff = ((img_max - img_min) > intensity_threshold_scaled)
     
     if debug:
-        log.debug(f"[extractStars] Threshold passer pixels (intensity difference > {intensity_threshold}): {np.sum(diff)}")
+        log.debug(f"[extractStars] Threshold passer pixels (intensity difference > {intensity_threshold_scaled}): {np.sum(diff)}")
 
     maxima[diff == 0] = 0
 
@@ -220,7 +222,8 @@ def extractStarsAuto(img, mask=None,
     fwhm = []
 
     # Try different intensity thresholds until the greatest number of stars is found
-    intens_thresh_list = [70, 50, 40, 30, 20, 10, 5]
+    # (the reference list is for 8-bit, scale it to the image bit depth)
+    intens_thresh_list = [t*(2**(bit_depth - 8)) for t in [70, 50, 40, 30, 20, 10, 5]]
 
     # Repeat the process until the number of returned stars falls within the range
     min_stars_detect = 50
@@ -337,8 +340,8 @@ def extractStarsFF(
     # Calculate image mean and stddev
     img_median = np.median(ff.avepixel)
 
-    # Check if the image is too bright and skip the image
-    if img_median > max_global_intensity:
+    # Check if the image is too bright and skip the image (scale the cutoff to the image bit depth)
+    if img_median > max_global_intensity*(2**(config.bit_depth - 8)):
         return error_return
 
     # Get the image data from the average pixel image
@@ -458,19 +461,19 @@ def extractStarsImgHandle(img_handle,
         img_median = np.median(avepixel)
 
         if debug:
-            log.debug(f"[extractStarsImgHandle] Image median brightness: {img_median:.2f} (max allowed: {max_global_intensity})")
+            log.debug(f"[extractStarsImgHandle] Image median brightness: {img_median:.2f} (max allowed: {max_global_intensity*(2**(config.bit_depth - 8))})")
 
-        # Check if the image is too bright and skip the image
-        if img_median > max_global_intensity:
+        # Check if the image is too bright and skip the image (scale the cutoff to the image bit depth)
+        if img_median > max_global_intensity*(2**(config.bit_depth - 8)):
             print("    Image too bright, skipping chunk.")
-            continue
+            return error_return
 
         # Get the image data from the average pixel image
         img = avepixel.astype(np.float32)
 
         # Extract stars from the average pixel image
         status = extractStars(
-            img, img_median=img_median, 
+            img, img_median=img_median,
             mask=mask, gamma=config.gamma,
             max_star_candidates=config.max_stars, border=border,
             neighborhood_size=neighborhood_size, intensity_threshold=intensity_threshold, 
@@ -663,12 +666,15 @@ def fitPSF(img, img_median, x_init, y_init, gamma=1.0, segment_radius=4, roundne
         if (star_seg_crop.shape[0] == 0) or (star_seg_crop.shape[1] == 0):
             continue
 
+        # White point for gamma correction (scales with the image bit depth)
+        gamma_wp = 2**bit_depth - 1
+
         # Gamma correct the star segment
-        star_seg_crop_corr = Image.gammaCorrectionImage(star_seg_crop.astype(np.float32), gamma, 
-                                                        out_type=np.float32)
+        star_seg_crop_corr = Image.gammaCorrectionImage(star_seg_crop.astype(np.float32), gamma,
+                                                        wp=gamma_wp, out_type=np.float32)
 
         # Correct the background for gamma
-        bg_corrected = Image.gammaCorrectionScalar(offset, gamma)
+        bg_corrected = Image.gammaCorrectionScalar(offset, gamma, wp=gamma_wp)
 
         # Subtract the background from the star segment and compute the total intensity
         intensity = np.sum(star_seg_crop_corr - bg_corrected)
@@ -683,10 +689,14 @@ def fitPSF(img, img_median, x_init, y_init, gamma=1.0, segment_radius=4, roundne
         # Compute the number of pixels inside the 3 sigma ellipse around the star
         star_px_area = np.pi*(3*sigma_x)*(3*sigma_y)
 
-        # Estimate the standard deviation of the background, which is area outside the 3 sigma ellipse
-        star_seg_crop_nan = np.copy(star_seg_crop_corr)
-        star_seg_crop_nan[crop_y_min:crop_y_max, crop_x_min:crop_x_max] = np.nan
-        bg_std = np.nanstd(star_seg_crop_nan)
+        # Estimate the standard deviation of the background from the segment area outside the star.
+        # The crop indices are in the full-segment frame, so gamma correct the full segment and
+        # NaN out the 3 sigma star region, leaving only the surrounding sky.
+        star_seg_corr = Image.gammaCorrectionImage(star_seg.astype(np.float32), gamma,
+                                                   wp=gamma_wp, out_type=np.float32)
+        star_seg_bg = np.copy(star_seg_corr)
+        star_seg_bg[crop_y_min:crop_y_max, crop_x_min:crop_x_max] = np.nan
+        bg_std = np.nanstd(star_seg_bg)
 
         # Make sure the background standard deviation is not zero
         if (bg_std <= 0) or np.isnan(bg_std):

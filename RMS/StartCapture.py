@@ -331,6 +331,8 @@ def runCapture(config, duration=None, video_file=None, video_file_source_dir=Non
     print("- Zoran Dragic (d. 2025)")
     print("- Romke Schievink (d. 2025)")
     print("- Seppe Canonaco (d. 2025)")
+    print("- Simon Lewis (d. 2026)")
+    print("- William Harvey (d. 2026)")
     print()
     print("Memento mori")
     print("Each of us, a fleeting flame")

@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 
 from RMS.Astrometry.ApplyAstrometry import computeFOVSize, xyToRaDecPP, raDecToXYPP, \
     photometryFitRobust, correctVignetting, photomLine, rotationWrtHorizon, \
-    extinctionCorrectionTrueToApparent, getFOVSelectionRadius
+    extinctionCorrectionTrueToApparent, getFOVSelectionRadius, limitingMagnitude
 from RMS.Astrometry.CheckFit import matchStarsResiduals
 from RMS.Astrometry.Conversions import date2JD, jd2Date, raDec2AltAz
 from RMS.Formats.CALSTARS import readCALSTARS
@@ -504,6 +504,14 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
 
         photom_offset, _ = photom_params
 
+        # Fit the limiting magnitude model: log10(S/N) vs the calibrated (vignetting + extinction
+        # corrected) apparent magnitude. Use the full unfiltered matched set, since image_stars
+        # still holds the S/N at column 6 (CALSTARS format) aligned with all matched stars.
+        lm_intens = image_stars[:, 2]
+        lm_radius = np.hypot(image_stars[:, 0] - img_h/2, image_stars[:, 1] - img_w/2)
+        lm_pred_mags = photomLine((lm_intens, lm_radius), photom_offset, platepar.vignetting_coeff)
+        lm_info = limitingMagnitude(lm_pred_mags, image_stars[:, 6], snr_targets=(5, 10))
+
         ### ###
 
 
@@ -543,6 +551,11 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
             + "\nVignetting coeff = {:.5f}".format(platepar.vignetting_coeff) \
             + "\nGamma = {:.2f}".format(platepar.gamma)
 
+        # Add the limiting magnitude model equation to the info string (the per-target LM values
+        # are shown by the axhline legend entries below, so only the equation is added here)
+        if lm_info is not None:
+            photometry_info += "\n" + lm_info['eqn_str'].split('\n')[0]
+
         # Plot the photometry calibration from the platepar
         logsum_arr = np.linspace(x_min_w, x_max_w, 10)
         ax_p.plot(logsum_arr, logsum_arr + platepar.mag_lev, label=photometry_info, linestyle='--', \
@@ -553,7 +566,28 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
         ax_p.plot(logsum_arr, logsum_arr + photom_offset, label=fit_info, linestyle='--', color='b',
             alpha=0.75)
 
-        ax_p.legend()
+        # Draw the limiting magnitude at the target S/N values (catalog mag is on the y-axis)
+        if lm_info is not None:
+            lm_colors = {5: 'green', 10: 'darkorange'}
+            for snr_target, lm_mag in lm_info['lm'].items():
+                ax_p.axhline(lm_mag, linestyle='dotted', alpha=0.75,
+                    color=lm_colors.get(snr_target, 'm'),
+                    label="LM = {:.2f} mag @ S/N = {:g}".format(lm_mag, snr_target))
+
+        # Split the legend so it does not crowd one corner and hide the data: the photometry
+        # calibration entries go top-left, the limiting-magnitude lines go bottom-right
+        handles, labels = ax_p.get_legend_handles_labels()
+        main_handles = [(h, l) for h, l in zip(handles, labels) if '@ S/N' not in l]
+        lm_handles = [(h, l) for h, l in zip(handles, labels) if '@ S/N' in l]
+
+        if main_handles:
+            leg_main = ax_p.legend([h for h, _ in main_handles], [l for _, l in main_handles],
+                loc='upper left', fontsize=8)
+            ax_p.add_artist(leg_main)
+
+        if lm_handles:
+            ax_p.legend([h for h, _ in lm_handles], [l for _, l in lm_handles],
+                loc='lower right', fontsize=8)
 
         ax_p.set_ylabel("Catalog magnitude ({:s})".format(mag_band_str))
         ax_p.set_xlabel("Uncalibrated magnitude")

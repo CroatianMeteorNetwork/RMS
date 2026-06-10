@@ -2742,10 +2742,14 @@ def thresholdAndCorrectGammaFF(img_handle, config, mask, mask_ave_bright=True):
     img_thres = thresholdFF(img_handle.ff, config.k1_det, config.j1_det, mask=mask, mask_ave_bright=mask_ave_bright, border=config.detection_border)
 
 
-    # Gamma correct image files
-    maxpixel_gamma_corr = Image.gammaCorrectionImage(img_handle.ff.maxpixel, config.gamma, out_type=np.float32)
-    avepixel_gamma_corr = Image.gammaCorrectionImage(img_handle.ff.avepixel, config.gamma, out_type=np.float32)
-    stdpixel_gamma_corr = Image.gammaCorrectionImage(img_handle.ff.stdpixel, config.gamma, out_type=np.float32)
+    # Gamma correct image files (white point scaled to the image bit depth)
+    gamma_wp = 2**config.bit_depth - 1
+    maxpixel_gamma_corr = Image.gammaCorrectionImage(img_handle.ff.maxpixel, config.gamma, wp=gamma_wp,
+                                                     out_type=np.float32)
+    avepixel_gamma_corr = Image.gammaCorrectionImage(img_handle.ff.avepixel, config.gamma, wp=gamma_wp,
+                                                     out_type=np.float32)
+    stdpixel_gamma_corr = Image.gammaCorrectionImage(img_handle.ff.stdpixel, config.gamma, wp=gamma_wp,
+                                                     out_type=np.float32)
 
     # Make sure there are no zeros in standard deviation
     stdpixel_gamma_corr[stdpixel_gamma_corr == 0] = 1
@@ -3383,7 +3387,8 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
             
             # Apply the gamma correction to the average pixel image if needed
             if config.gamma != 1.0:
-                avepixel_img = Image.gammaCorrectionImage(avepixel_img, config.gamma, out_type=np.float32)
+                avepixel_img = Image.gammaCorrectionImage(avepixel_img, config.gamma,
+                    wp=(2**config.bit_depth - 1), out_type=np.float32)
 
             # If no per-frame calibration is needed, centroid photometry can operate only on stripe pixels.
             # This avoids gamma-correcting and subtracting the whole frame for every centroided frame.
@@ -3714,9 +3719,10 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                             if mask is not None:
                                 fr_img = MaskImage.applyMask(fr_img, mask)
 
-                            # Apply gamma correction
-                            if config.gamma != 1.0:
-                                fr_img = Image.gammaCorrectionImage(fr_img, config.gamma, out_type=np.float32)
+                        # Apply gamma correction
+                        if config.gamma != 1.0:
+                            fr_img = Image.gammaCorrectionImage(fr_img, config.gamma,
+                                wp=(2**config.bit_depth - 1), out_type=np.float32)
 
                             # Subtract average
                             max_avg_corrected = Image.applyDark(fr_img, avepixel_img)
