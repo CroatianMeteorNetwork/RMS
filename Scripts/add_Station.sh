@@ -20,7 +20,7 @@
 # compatibility wrappers around this script.
 #
 # What it does:
-#  - relocates a legacy single-camera setup (config files in ~/source/RMS,
+#  - converts a legacy single-camera setup (config files in ~/source/RMS,
 #    data directly in ~/RMS_data) into the per-station layout under
 #    ~/source/Stations/<ID> and ~/RMS_data/<ID>
 #  - creates new stations, either interactively or in bulk from a CSV file
@@ -50,13 +50,6 @@ trim() {
 
 uppercase() {
     printf '%s' "$*" | tr '[:lower:]' '[:upper:]'
-}
-
-# Restore a pristine copy of a file in ~/source/RMS from git, or from
-# GitHub when ~/source/RMS is not a git checkout
-restore_default() {
-    ( cd ~/source/RMS && git checkout -- "$1" 2>/dev/null ) || \
-        wget -q -O ~/source/RMS/"$1" "https://raw.githubusercontent.com/CroatianMeteorNetwork/RMS/master/$1"
 }
 
 count_stations() {
@@ -146,22 +139,22 @@ create_station() {
     return 0
 }
 
-# Relocate a legacy single-camera setup into the per-station layout
+# Convert a legacy single-camera setup to the per-station layout by copying
 migrate_legacy() {
 
 cat <<EOF
 
-Multiple cameras are supported by relocating camera configuration files:
+Multiple cameras are supported by giving each camera its own copies of the
+configuration files under ~/source/Stations/<station_ID>.
+
+Your configured station ${DefStation} will get copies of:
 - .config
 - platepar_cmn2010.cal
 - mask.bmp
-- camera_settings.json
-from their default location of ~/source/RMS to the folder
-~/source/Stations/${DefStation}
+in ~/source/Stations/${DefStation}
 
-You have already configured your first station as id ${DefStation}
-Its camera specific files will now be relocated to
-~/source/Stations/${DefStation}
+Nothing in ~/source/RMS is modified, and camera_settings.json is shared
+by all stations from there.
 
 Any previously captured data will be moved from
 ${RMS_data}
@@ -169,29 +162,19 @@ to
 ${RMS_data}/${DefStation}
 EOF
 
-    read -n1 -r -p 'Press ENTER to continue with the relocation, or any other key to skip it: ' key
+    read -n1 -r -p 'Press ENTER to continue with the conversion, or any other key to skip it: ' key
     echo ""
     if [[ "$key" != "" ]]; then
-        echo "Skipping the relocation"
+        echo "Skipping the conversion"
         return
     fi
 
     create_station "${DefStation}" || return
 
+    # the .config and mask copies are made by create_station
     if [[ -e ~/source/RMS/platepar_cmn2010.cal ]]; then
-        mv ~/source/RMS/platepar_cmn2010.cal ~/source/Stations/${DefStation}/
+        cp ~/source/RMS/platepar_cmn2010.cal ~/source/Stations/${DefStation}/
     fi
-    if [[ -e ~/source/RMS/camera_settings.json ]]; then
-        mv ~/source/RMS/camera_settings.json ~/source/Stations/${DefStation}/
-        # point the station .config at the relocated camera settings file
-        sed -i "s,^camera_settings_path:.*$,camera_settings_path: ~/source/Stations/${DefStation}/camera_settings.json,g" ~/source/Stations/${DefStation}/.config
-    fi
-
-    # restore pristine default copies in ~/source/RMS, these are used as
-    # templates when additional stations are added (the user's .config is
-    # restored at the end, so stations added in this run inherit it)
-    restore_default mask.bmp
-    restore_default camera_settings.json
 
     # move any existing captured data into the station folder
     find "${RMS_data}" -mindepth 1 -maxdepth 1 ! -name "${DefStation}" -exec mv -t "${RMS_data}/${DefStation}/" {} +
@@ -210,9 +193,8 @@ EOF
         rm -f ~/Desktop/TunnelIPCamera.sh ~/Desktop/DownloadOpenVPNconfig.sh
     fi
 
-    MIGRATED=1
     echo ""
-    echo "Relocation of station ${DefStation} complete"
+    echo "Conversion of station ${DefStation} complete"
 }
 
 # ------------------------------------------------------------------ main
@@ -284,15 +266,14 @@ fi
 # Get user's desktop directory
 Desktop=$(xdg-user-dir DESKTOP 2>/dev/null || echo "$HOME/Desktop")
 
-MIGRATED=0
 DefStation=$(uppercase "$(awk '/^stationID:/ {print $2}' ~/source/RMS/.config 2>/dev/null)")
 
-# A configured legacy single-camera setup is offered relocation first
+# A configured legacy single-camera setup is offered conversion first
 if [[ ! -d ~/source/Stations && -n "$DefStation" && "$DefStation" != "XX0001" ]]; then
     migrate_legacy
 elif [[ -f ~/.rmsautorunflag && "$DefStation" == "XX0001" && ! -d ~/source/Stations ]]; then
     echo "Please run RMS_FirstRun and configure your 1st station,"
-    echo "then run add_Station again to relocate it or add more cameras."
+    echo "then run add_Station again to convert it or add more cameras."
     exit
 fi
 
@@ -515,12 +496,5 @@ echo "Done editing .config files"
 sleep 2
 EOF
 chmod +x "${Desktop}/Edit_configs"
-
-# After a relocation, replace the now station-specific .config in
-# ~/source/RMS with a pristine default. This happens last so stations
-# added in the same run used the configured one as their template.
-if [[ $MIGRATED -eq 1 ]]; then
-    restore_default .config
-fi
 
 echo -e "\nStation configuration complete"
