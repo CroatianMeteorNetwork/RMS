@@ -165,7 +165,7 @@ to
 ${RMS_data}/${DefStation}
 EOF
 
-    read -n1 -r -p 'Press ENTER to continue with the relocation, or Q to skip it: ' key
+    read -n1 -r -p 'Press ENTER to continue with the relocation, or any other key to skip it: ' key
     echo ""
     if [[ "$key" != "" ]]; then
         echo "Skipping the relocation"

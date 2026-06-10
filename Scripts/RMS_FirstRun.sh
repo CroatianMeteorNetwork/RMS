@@ -1,6 +1,6 @@
 #!/bin/bash
 
-echo "Waiting 10 seconds to init the Pi..."
+echo "Waiting a few seconds for the system to initialize..."
 echo ""
 echo "IMPORTANT: RMS will first update itself."
 echo "Do not touch any file during the update and do not close this window."
@@ -18,8 +18,10 @@ RMSCONFIG=~/source/RMS/.config
 # Auto run enable flag file
 RMSAUTORUNFILE=~/.rmsautorunflag
 
+# The StartCapture Desktop entry is a symlink that add_Station.sh retargets
+# to the multi-camera launcher after a conversion, so it is used on purpose
 RMSSTARTCAPTURE=~/Desktop/RMS_StartCapture.sh
-RMSUPDATESCRIPT=~/Desktop/RMS_Update.sh
+RMSUPDATESCRIPT=~/source/RMS/Scripts/RMS_Update.sh
 
 
 # Check that a value is a number within the given range
@@ -45,7 +47,7 @@ else
 
     # If the configuration was done, run recording
     bash $RMSSTARTCAPTURE
-    exit 1
+    exit 0
   fi
 fi
 
@@ -117,7 +119,7 @@ echo "
 0) Expanding the file system
 ----------------------------
 If you have bought a system that was already assembled, or the file system
-has already been expanded, PRESS Q to skip this step.
+has already been expanded, press any key to skip this step.
 "
 
 read -n1 -r -p 'If you have flashed this SD card yourself, press ENTER.' key
@@ -152,11 +154,13 @@ echo ""
 echo "1) Internet connection"
 echo "----------------------"
 echo "Checking if connected to the Internet..."
-if ping -c 1 $IP &> /dev/null
+# Some networks block ping, so fall back to an HTTP check of the server
+# the update needs to reach anyway
+if ping -c 1 $IP &> /dev/null || wget -q --spider --timeout=10 https://github.com
 then
   echo "Success!"
 else
-  echo "The device is not connected to the internet! Please connect the device to the Internet to proceed!" 
+  echo "The device is not connected to the internet! Please connect the device to the Internet to proceed!"
   read -p "Press ENTER to continue..."
   exit 1
 fi
@@ -167,7 +171,7 @@ echo "--------------------------------"
 echo "The default password is either 'raspberry' or 'rmsraspberry'. Please change it so nobody can connect to your Raspberry Pi and hack the computers on your network!"
 
 echo ""
-read -n1 -r -p 'Press ENTER to change the password (recommended), or Q to skip this step...' key
+read -n1 -r -p 'Press ENTER to change the password (recommended), or any other key to skip this step...' key
 
 if [[ "$key" = "" ]]; then
     passwd
@@ -178,17 +182,27 @@ echo ""
 echo "3) Generating a new SSH key"
 echo "---------------------------"
 
-read -n1 -r -p 'Press ENTER to generate the SSH key (recommended), or Q to skip this step...' key
+read -n1 -r -p 'Press ENTER to generate the SSH key (recommended), or any other key to skip this step...' key
 
 if [[ "$key" = "" ]]; then
-  echo ""
-  echo "Generating a new SSH key..."
 
-  # Generate an SSH key without a passphrase
-  yes y | ssh-keygen -t rsa -m PEM -N "" -f ~/.ssh/id_rsa >/dev/null
+  if [[ -f ~/.ssh/id_rsa ]]; then
+
+    # Never overwrite an existing key - GMN already has its public half on
+    # file, and replacing it would break the data uploads
+    echo ""
+    echo "An SSH key already exists in ~/.ssh, not overwriting it."
+
+  else
+    echo ""
+    echo "Generating a new SSH key..."
+
+    # Generate an SSH key without a passphrase
+    ssh-keygen -t rsa -m PEM -N "" -f ~/.ssh/id_rsa >/dev/null
+  fi
 
   # Link the public SSH key to desktop
-  ln -s ~/.ssh/id_rsa.pub ~/Desktop/id_rsa.pub
+  ln -sf ~/.ssh/id_rsa.pub ~/Desktop/id_rsa.pub
 
   echo ""
   echo "A file called id_rsa.pub appeared on Desktop, please send this file to Denis "
@@ -300,12 +314,12 @@ sleep 1
 # clear the input buffer
 while read -t 0.01; do :; done
 
-read -n1 -r -p 'Press ENTER to convert to the new data structure, or Q to stay with the legacy structure... ' key
+read -n1 -r -p 'Press ENTER to convert to the new data structure, or any other key to stay with the legacy structure... ' key
 if [[ "$key" != "" ]]; then
   echo ""
   echo ""
   echo "Are you sure you want to stay with the legacy structure?"
-  read -n1 -r -p 'Press Q again to confirm, or ENTER to convert to the new data structure... ' key
+  read -n1 -r -p 'Press any key to confirm, or ENTER to convert to the new data structure... ' key
   echo ""
 fi
 
