@@ -51,6 +51,14 @@ pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 log = getLogger("rmslogger")
 
 
+# Reference background noise (robust sigma, in ADU) below which the detection intensity
+# thresholds are not inflated. The base thresholds are tuned for ~8-bit sky noise; for higher
+# bit depth images the thresholds are scaled by how much noisier the background actually is
+# relative to this reference, so the detection adapts to the real signal range rather than the
+# nominal container bit depth (e.g. low-signal 16-bit EMCCD data is not over-suppressed).
+INTENS_THRESH_REF_SIGMA = 100.0
+
+
 
 def extractStars(img, img_median=None, mask=None, gamma=1.0, max_star_candidates=1000, border=10,
                  neighborhood_size=10, intensity_threshold=18,
@@ -101,8 +109,19 @@ def extractStars(img, img_median=None, mask=None, gamma=1.0, max_star_candidates
     img_max = filters.maximum_filter(img_convolved, neighborhood_size)
     maxima = (img_convolved == img_max)
     img_min = filters.minimum_filter(img_convolved, neighborhood_size)
-    # Scale the threshold from the 8-bit reference range to the image bit depth
-    intensity_threshold_scaled = intensity_threshold*(2**(bit_depth - 8))
+
+    # Scale the detection threshold to the image's actual background noise rather than the
+    # nominal container bit depth. The base thresholds are tuned for ~8-bit sky noise; for
+    # higher bit depth images they are inflated in proportion to how much noisier the background
+    # actually is, so low-signal high-bit-depth data (e.g. 16-bit EMCCD) is not over-suppressed.
+    # 8-bit images keep their original thresholds exactly.
+    if bit_depth > 8:
+        bg_sigma = 1.4826*np.median(np.abs(img.astype(np.float32) - img_median))
+        threshold_scale = max(1.0, bg_sigma/INTENS_THRESH_REF_SIGMA)
+    else:
+        threshold_scale = 1.0
+
+    intensity_threshold_scaled = intensity_threshold*threshold_scale
     diff = ((img_max - img_min) > intensity_threshold_scaled)
     
     if debug:
@@ -221,9 +240,10 @@ def extractStarsAuto(img, mask=None,
     intensity = []
     fwhm = []
 
-    # Try different intensity thresholds until the greatest number of stars is found
-    # (the reference list is for 8-bit, scale it to the image bit depth)
-    intens_thresh_list = [t*(2**(bit_depth - 8)) for t in [70, 50, 40, 30, 20, 10, 5]]
+    # Try different intensity thresholds until the greatest number of stars is found.
+    # These are the 8-bit reference thresholds; extractStars() scales them to the image's
+    # background noise internally (see INTENS_THRESH_REF_SIGMA), so they must not be scaled here.
+    intens_thresh_list = [70, 50, 40, 30, 20, 10, 5]
 
     # Repeat the process until the number of returned stars falls within the range
     min_stars_detect = 50
