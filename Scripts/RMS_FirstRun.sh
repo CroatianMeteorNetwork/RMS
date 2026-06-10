@@ -117,7 +117,9 @@ echo "  1. Connect your Pi to the Internet. "
 echo "  2. Change the default password for security reasons."
 echo "  3. Generate a new SSH key."
 echo "  4. Edit the RMS config file. "
-
+echo "  5. Convert to the multi-camera data structure (recommended)."
+echo ""
+echo "At the end of these steps the first data capture session will start."
 echo ""
 
 echo "
@@ -249,9 +251,73 @@ else
 fi
 done
 
-# Enable autorun
+# Offer the conversion to the multi-camera data structure. The conversion
+# script only supports 64-bit Pi platforms, so skip this step elsewhere.
+if [[ $(uname -m) == aarch64 ]]; then
+
+echo "
+5) Converting the data structure
+--------------------------------
+The new recommended data structure keeps important camera files in a safer
+place. Converting to this multi-camera data structure is recommended for
+both single and multiple camera systems.
+
+The important files (.config, mask.bmp, platepar_cmn2010.cal and
+camera_settings.json) will be moved to ~/source/Stations/<camera_ID>,
+and captured data will be stored in ~/RMS_data/<camera_ID>, where
+<camera_ID> is the unique station code you were given by GMN.
+"
+sleep 1
+
+# clear the input buffer
+while read -t 0.01; do :; done
+
+read -n1 -r -p 'Press ENTER to convert to the new data structure, or Q to stay with the legacy structure... ' key
+if [[ "$key" != "" ]]; then
+  echo ""
+  echo ""
+  echo "Are you sure you want to stay with the legacy structure?"
+  read -n1 -r -p 'Press Q again to confirm, or ENTER to convert to the new data structure... ' key
+  echo ""
+fi
+
+if [[ "$key" = "" ]]; then
+  echo ""
+  echo "Next, this script will run to convert to the recommended data structure:"
+  echo "  ~/source/RMS/Scripts/MultiCamLinux/Pi/add_Pi_Station.sh"
+  echo ""
+  echo "Note: if you have a Pi5 or similar, you can run the same script later to add more cameras."
+  echo ""
+  sleep 2
+  read -n1 -r -p 'Press ENTER a second time to confirm the conversion, or Q to keep the legacy structure... ' key
+fi
+echo ""
+
+if [[ "$key" = "" ]]; then
+  echo ""
+  echo "Converting to the recommended data structure..."
+  echo ""
+  bash ~/source/RMS/Scripts/MultiCamLinux/Pi/add_Pi_Station.sh
+else
+  echo ""
+  echo "You have chosen to keep the legacy data structure."
+  echo "If you decide to convert in the future, run this command from a terminal:"
+  echo "  ~/source/RMS/Scripts/MultiCamLinux/Pi/add_Pi_Station.sh"
+fi
+
+fi  # if aarch64
+
+# Enable autorun. This is done only after the optional data structure
+# conversion so an interrupted conversion does not get skipped over by
+# the autorun path on the next boot.
 echo "1" > $RMSAUTORUNFILE
 
+sleep 2
+echo ""
+echo "Configuration is done"
+echo ""
+read -n1 -r -p 'Press ENTER when you are ready to start camera data capture... '
+echo ""
 
 # If the configuration was done, run recording
 bash $RMSSTARTCAPTURE

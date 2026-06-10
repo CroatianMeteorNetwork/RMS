@@ -1,19 +1,23 @@
 #!/bin/bash
 # This software is part of the Linux port of RMS
 # Copyright (C) 2023  Ed Harman
-# 
+#
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
-# 
+#
 # This program is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 # GNU General Public License for more details.
-# 
+#
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#
+# Version 1.9	- support single camera platforms (RPi4 and older) so RMS_FirstRun
+#		  can offer migration to the Stations data structure on all systems,
+#		  also migrate camera_settings.json and all captured data
 #
 # Version 1.8	- replaced Desktop link with one that starts all captures
 #
@@ -45,11 +49,21 @@ then
     Model=$(lscpu| grep -o 'Cortex.*'|grep -o '[0-9]*')
     if [[ $Model -lt 76 ]]  # RPi5 uses Cortex A76  - use 72 for script testing on an RPi4
     then
-	echo "This platform will not support multiple cameras, an RPi5 or similar is required"
-	exit
+	echo "This platform only supports 1 camera, an RPi5 or similar is required for multiple cameras"
+	MaxStation=1
+	# quit if a camera is already configured under ~/source/Stations
+	if [[ -d ~/source/Stations ]]
+	then
+	    dircount=$(find ~/source/Stations -mindepth 1 -maxdepth 1 -type d | wc -l)
+	    if [[ $dircount -gt 0 ]]
+	    then
+		read -n1 -r -p 'You are already running a camera on this platform, press ENTER to quit now' key
+		exit
+	    fi
+	fi
     fi
 
-    DefStation=$(awk ' /stationID:/ {print toupper($2)}' ~/source/RMS/.config) # force uppercase 
+    DefStation=$(awk ' /stationID:/ {print toupper($2)}' ~/source/RMS/.config) # force uppercase
     if [[ $DefStation == XX0001  &&  ! -d ~/source/Stations/ ]]
     then
 	echo "Please run RMS_Firstrun and configure your 1st station"
@@ -61,28 +75,26 @@ then
 
 cat <<EOF
 
-Multiple cameras are supported by relocating the default camera configuration files -
+Multiple cameras are supported by relocating camera configuration files:
 - .config
 - platepar_cmn2010.cal
 - mask.bmp
-
-from their default location  of ~/source/RMS -to a folder located at -
-
-~/source/Stations/<StationID>
-
-It appears you have already configured your first station - id ${DefStation}
-so its config files will now be relocated to -
+- camera_settings.json
+from their default location of ~/source/RMS to the folder
 ~/source/Stations/${DefStation}
-Captured data from your default station are stored by default in
 
+You have already configured your first station as id ${DefStation}
+Its camera specific files will now be relocated to
+~/source/Stations/${DefStation}
+
+Any previously captured data will be moved from
 ~/RMS_data
-
-This data will be moved to -
+to
 ~/RMS_data/${DefStation}
 EOF
 
-	# First station has been configured, so move it to ~/source/Stations/<station-ID>, 
-	#  and move any captured data to ~/RMS_data/<station-ID>. 
+	# First station has been configured, so move it to ~/source/Stations/<station-ID>,
+	#  and move any captured data to ~/RMS_data/<station-ID>.
 
 	# tweak conky station title
 	sed -i 's/\(source\)\/RMS/\1\/Stations\/'"$DefStation"'/g' /home/rms/.conkyrc1
@@ -93,7 +105,7 @@ EOF
 	mkdir ~/source/Stations/${DefStation}
 	cp ~/source/RMS/.config ~/source/Stations/${DefStation}
        	cd ~/source/RMS
-	sed -i "s,data_dir.*$,data_dir: ~/RMS_data/${DefStation},g" ~/source/Stations/${DefStation}/.config
+	sed -i "s,^data_dir.*$,data_dir: ~/RMS_data/${DefStation},g" ~/source/Stations/${DefStation}/.config
 	if [[ -e ~/source/RMS/platepar_cmn2010.cal ]]
 	then
 	    mv  ~/source/RMS/platepar_cmn2010.cal ~/source/Stations/${DefStation}/
@@ -101,15 +113,26 @@ EOF
 	if  [[ -e ~/source/RMS/mask.bmp ]]
 	then
 	    mv ~/source/RMS/mask.bmp ~/source/Stations/${DefStation}/
-	#replace with copy from master
-	cd ~/source/RMS
-	wget -q https://raw.githubusercontent.com/CroatianMeteorNetwork/RMS/master/mask.bmp
 	fi
-	mkdir ~/RMS_data/${DefStation}
-	cd  ~/RMS_data/${DefStation}
-	mv ../ArchivedFiles .
-	mv ../CapturedFiles .
-	mv ../logs .
+	if  [[ -e ~/source/RMS/camera_settings.json ]]
+	then
+	    mv ~/source/RMS/camera_settings.json ~/source/Stations/${DefStation}/
+	    # point the station .config at the relocated camera settings file
+	    sed -i "s,^camera_settings_path:.*$,camera_settings_path: ~/source/Stations/${DefStation}/camera_settings.json,g" ~/source/Stations/${DefStation}/.config
+	fi
+
+	# restore pristine default copies in ~/source/RMS, these are used as
+	# templates when additional stations are added
+	cd ~/source/RMS
+	for file in mask.bmp camera_settings.json
+	do
+	    git checkout -- "$file" 2>/dev/null || \
+		wget -q -O "$file" "https://raw.githubusercontent.com/CroatianMeteorNetwork/RMS/master/$file"
+	done
+
+	# move any existing captured data into the station folder
+	mkdir -p ~/RMS_data/${DefStation}
+	find ~/RMS_data -mindepth 1 -maxdepth 1 ! -name "${DefStation}" -exec mv -t ~/RMS_data/${DefStation}/ {} +
 
 	cat <<- EOF > ~/Desktop/${DefStation}_StartCapture.desktop
 	[Desktop Entry]
@@ -139,21 +162,25 @@ EOF
 	   Desktop=`xdg-user-dir DESKTOP`
 	fi
 
-	# cleanup erroneous Desktop shortcuts 
+	# cleanup unneeded Desktop shortcuts
 	if [[ -f ~/Desktop/RMS_FirstRun.sh ]]
 	then
-	    rm  ~/Desktop/CMNbinViewer.sh ~/Desktop/RMS_ShowLiveStream.sh ~/Desktop/RMS_StartCapture.sh
-	    rm  ~/Desktop/RMS_config.txt ~/Desktop/TunnelIPCamera.sh ~/Desktop/DownloadOpenVPNconfig.sh
+	    rm -f ~/Desktop/CMNbinViewer.sh ~/Desktop/RMS_ShowLiveStream.sh
+	    rm -f ~/Desktop/RMS_StartCapture.sh ~/Desktop/RMS_config.txt
+	    rm -f ~/Desktop/TunnelIPCamera.sh ~/Desktop/DownloadOpenVPNconfig.sh
 	fi
-	
-	# remove comment from last line of wayfire.ini to enable window cascade 
-	sed -i s/#mode/mode/ ~/.config/wayfire.ini
+
+	if [[ $MaxStation != 1 ]]
+	then
+	    # remove comment from last line of wayfire.ini to enable window cascade
+	    sed -i s/#mode/mode/ ~/.config/wayfire.ini
+	fi
 
     fi	# if [[ ! -d ~/source/Stations/ ]]
 
 fi    # if [[ $(uname -m ) == aarch64 ]]
 
-# need to count the number of directories under ~/source/Stations and only 
+# need to count the number of directories under ~/source/Stations and only
 # prompt for adding the correct number of new cameras, so subtract that number
 # from MaxStation defined above
 
@@ -168,7 +195,7 @@ do
 	if [[ ${#Station[@]} ==  $Remaining ]]
 	then
 	    echo ""
-	    echo "Done, This platform has a maximum of $numdirs cameras"
+	    echo "Done, this platform supports a maximum of $MaxStation camera(s)"
 	    break
 	fi
 	read -p "Enter station ID, <cr> to end: " this_Station
@@ -181,13 +208,16 @@ do
 	# echo $Station
 done
 
-echo -e "\nNew stations to add -"
-printf '%s\n' "${Station[@]}"
-
-# check if ~/${RMS_data} exists and if not create it....
-if [[ ! -d "${RMS_data}/" ]]
+if [[ $MaxStation != 1 ]]
 then
-    mkdir ${RMS_data}
+    echo -e "\nNew stations to add -"
+    printf '%s\n' "${Station[@]}"
+fi
+
+# check if ~/RMS_data exists and if not create it....
+if [[ ! -d ~/RMS_data ]]
+then
+    mkdir ~/RMS_data
 fi
 
 No_Stations=${#Station[@]}
@@ -199,8 +229,8 @@ do
 	    exit
 	else
 	    echo "making dir Stations/${item}"
-	    mkdir ~/source/Stations/${item} 
- 	    if [[ ! -d ${RMS_data}/$item ]]
+	    mkdir ~/source/Stations/${item}
+ 	    if [[ ! -d ~/RMS_data/${item} ]]
 	    then
 		mkdir ~/RMS_data/${item}
 	    fi
@@ -239,12 +269,15 @@ do
 
 	# customise each .config
 	# set the station_id
-	sed -i  "s/D:.*$/D: $item/g" ~/source/Stations/${item}/.config 
-	# set the ${RMS_data} dir
-	sed -i "s,data_dir.*$,data_dir: ~/RMS_data/${item},g" ~/source/Stations/${item}/.config
+	sed -i  "s/D:.*$/D: $item/g" ~/source/Stations/${item}/.config
+	# set the data_dir
+	sed -i "s,^data_dir.*$,data_dir: ~/RMS_data/${item},g" ~/source/Stations/${item}/.config
 	echo -e "\n\nAdded station $item\n\n"
-	# disable daily post processing reboot
-	sed -i "s/\(reboot_after_processing:\).*/\1 false/g" ~/source/Stations/${item}/.config
+	if [[ $MaxStation != 1 ]]
+	then
+	    # disable daily post processing reboot
+	    sed -i "s/\(reboot_after_processing:\).*/\1 false/g" ~/source/Stations/${item}/.config
+	fi
 done
 
 # check if keys are  already present
@@ -268,19 +301,46 @@ then
 fi
 
 echo -e "\n\nStation configuration complete\n\n"
-user=`id -u -n`
 
 # Set up shortcut for CMNbinViewer
 cat <<- EOF > ~/Desktop/CMNbinViewer.desktop
 [Desktop Entry]
 Name=CMNbinViewer
 Type=Application
-Exec=/home/${user}/source/RMS/Scripts/CMNbinViewer_env.sh
+Exec=${HOME}/source/RMS/Scripts/CMNbinViewer_env.sh
 Hidden=false
 NoDisplay=false
-Icon=/home/${user}/source/RMS/Scripts/MultiCamLinux/icon.png
+Icon=${HOME}/source/RMS/Scripts/MultiCamLinux/icon.png
 EOF
 chmod +x ~/Desktop/CMNbinViewer.desktop
+
+# Create Desktop shortcut for editing the station .config files
+cat << 'EOF' > ~/Desktop/Edit_configs
+#!/bin/bash
+
+echo ""
+echo "One by one, each config file under ~/source/Stations will open for editing..."
+read -n1 -r -p 'Press ENTER to proceed, any other key to quit: ' key
+if [[ "${key}" != "" ]]; then
+    exit
+fi
+
+for Dir in ~/source/Stations/*/
+do
+    Station=$(basename "${Dir}")
+    echo ""
+    echo "Editing .config file for ${Station}"
+    read -n1 -r -p 'Press ENTER to edit, any other key to skip: ' key
+    if [[ "${key}" = "" ]]; then
+	mousepad ~/source/Stations/${Station}/.config
+    fi
+done
+
+echo ""
+echo "Done editing .config files"
+sleep 2
+EOF
+chmod +x ~/Desktop/Edit_configs
 
 # set the option to allow launching of desktop shortcuts
 #sed -i s/quick_exec=0/quick_exec=1/ ~/.config/libfm/libfm.conf
@@ -290,18 +350,21 @@ then
     sudo timedatectl set-timezone UTC
 fi
 
-# set the extra_space for all configured stations -
-mult=$(ls -1 /home/${USER}/source/Stations/|wc -l)
-for Dir in /home/${USER}/source/Stations/*
-    do
-	sed -i "s/extra_space_gb: .*$/extra_space_gb: $(( ${mult} * 30 ))/g" ${Dir}/.config
-done
+if [[ $MaxStation != 1 ]]
+then
+    # set the extra_space for all configured stations -
+    mult=$(ls -1 /home/${USER}/source/Stations/|wc -l)
+    for Dir in /home/${USER}/source/Stations/*
+	do
+	    sed -i "s/extra_space_gb: .*$/extra_space_gb: $(( ${mult} * 30 ))/g" ${Dir}/.config
+    done
+fi
 
 # set up so RMS_FirstRun can autostart all captures
 rm -f /home/${USER}/Desktop/RMS_StartCapture.sh
 ln -s /home/${USER}/source/RMS/Scripts/MultiCamLinux/Pi/RMS_StartCapture_MCP.sh /home/${USER}/Desktop/RMS_StartCapture.sh
 
-# get a copy of the default .config
+# replace the potentially modified .config in ~/source/RMS with a pristine default
 cd ~/source/RMS
-rm .config  #delete potentially modified .config and replace with new..
-wget -q https://raw.githubusercontent.com/CroatianMeteorNetwork/RMS/master/.config
+git checkout -- .config 2>/dev/null || \
+    wget -q -O .config https://raw.githubusercontent.com/CroatianMeteorNetwork/RMS/master/.config
