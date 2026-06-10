@@ -31,7 +31,8 @@
 # (spliced into the rtsp device URL), and any other .config key, which is
 # applied verbatim to that station's config. With no CSV argument the
 # script uses ~/source/RMS/stations.csv if present, otherwise it prompts
-# for station IDs interactively.
+# for station IDs interactively. A sample to copy and edit is provided in
+# ~/source/RMS/stations_template.csv.
 #
 # On Raspberry Pi platforms a recommended camera limit applies (1 camera,
 # or 4 on a Pi5 or later). The limit is advisory - it reflects what has
@@ -243,6 +244,7 @@ fi
 if [[ -n "${CSV_FILE}" && ! -f "${CSV_FILE}" ]]; then
     echo "Error: CSV file not found: ${CSV_FILE}"
     echo "Usage: $0 [RMS_data_path] [stations.csv]"
+    echo "A sample to copy and edit is provided in ~/source/RMS/stations_template.csv"
     exit 1
 fi
 
