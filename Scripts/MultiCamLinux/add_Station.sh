@@ -89,6 +89,7 @@ create_station() {
     echo "Creating station ${item}..."
     mkdir -p ~/source/Stations/${item}
     mkdir -p "${RMS_data}/${item}"
+    mkdir -p ~/.config/autostart "${Desktop}"
 
     # Copy config template
     cp ~/source/RMS/.config ~/source/Stations/${item}
@@ -96,11 +97,13 @@ create_station() {
     # Copy mask file
     cp ~/source/RMS/mask.bmp ~/source/Stations/${item} 2>/dev/null
 
-    # Launch entry for the station. On FirstRun-managed systems (the Pi
-    # images) captures are started by RMS_StartCapture_MCP.sh, so only a
-    # Desktop launcher is created; elsewhere the entry goes into XDG
-    # autostart with a Desktop symlink, so captures start at login.
-    if [[ -f ~/.rmsautorunflag ]]; then
+    # Launch entry for the station. On the Pi images, FirstRun runs at boot
+    # and starts captures through RMS_StartCapture_MCP.sh, so only a Desktop
+    # launcher is created there; elsewhere the entry goes into XDG autostart
+    # with a Desktop symlink, so captures start at login. (A PC may carry the
+    # autorun flag from running FirstRun, but nothing launches FirstRun at
+    # boot on a PC, hence the additional Pi check.)
+    if [[ -f ~/.rmsautorunflag && $RECOMMENDED -gt 0 ]]; then
         entry="${Desktop}/${item}_StartCapture.desktop"
     else
         entry=~/.config/autostart/${item}_StartCapture.desktop
@@ -438,12 +441,12 @@ if [[ $total -gt 1 ]]; then
     fi
 fi
 
-# On FirstRun-managed systems (the Pi images) captures are started by
-# RMS_StartCapture_MCP.sh after the boot-time update
-if [[ -f ~/.rmsautorunflag ]]; then
-    rm -f "${Desktop}/RMS_StartCapture.sh"
-    ln -s ~/source/RMS/Scripts/MultiCamLinux/Pi/RMS_StartCapture_MCP.sh "${Desktop}/RMS_StartCapture.sh"
-fi
+# Point the Desktop StartCapture entry at the multi-camera launcher, which
+# starts every configured station. The legacy entry it replaces reads
+# ~/source/RMS/.config, which after a conversion is just the template.
+# On the Pi images FirstRun also runs this launcher at boot.
+rm -f "${Desktop}/RMS_StartCapture.sh"
+ln -sf ~/source/RMS/Scripts/MultiCamLinux/Pi/RMS_StartCapture_MCP.sh "${Desktop}/RMS_StartCapture.sh"
 
 # Generate SSH keys if not present
 if [[ ! -f ~/.ssh/id_rsa ]]; then
