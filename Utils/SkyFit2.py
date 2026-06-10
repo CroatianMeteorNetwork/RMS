@@ -5019,8 +5019,10 @@ class PlateTool(QtWidgets.QMainWindow):
             # Get the median
             img_median = np.median(img)
 
-            # Check if image is too bright
-            max_global_intensity = getattr(self.config, 'max_global_intensity', 150)
+            # Check if image is too bright (scale the cutoff to the image bit depth, matching
+            # extractStarsFF/extractStarsImgHandle so high-bit-depth data is not wrongly skipped)
+            bit_depth = getattr(self.config, 'bit_depth', 8)
+            max_global_intensity = getattr(self.config, 'max_global_intensity', 150)*(2**(bit_depth - 8))
             if img_median > max_global_intensity:
                 print(f"  Image too bright (median={img_median:.1f} > {max_global_intensity})")
                 return []
@@ -5226,9 +5228,12 @@ class PlateTool(QtWidgets.QMainWindow):
             # Temporarily increase max_stars limit during tuning
             self.config.max_stars = max(2000, original_max_stars)
 
-            # Load a DEEP catalog (LM 8.0) for true/false positive matching
-            # This ensures we don't miscount faint real stars as false positives
-            deep_catalog_lm = 8.0
+            # Load a DEEP catalog for true/false positive matching, going deeper than the
+            # calibration catalog so faint real detections are not miscounted as false positives.
+            # Sensitive cameras (e.g. 16-bit EMCCD) detect well below the usual LM 8 floor, so the
+            # depth follows the configured catalog limit. A wrong platepar still aborts the tuning
+            # because the detections then match almost nothing regardless of the catalog depth.
+            deep_catalog_lm = max(8.0, self.config.catalog_mag_limit + 1.0)
             deep_catalog = self.loadCatalogStars(deep_catalog_lm)
 
             if deep_catalog is None or len(deep_catalog) == 0:
