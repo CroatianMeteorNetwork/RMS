@@ -690,7 +690,7 @@ class ImageItem(pg.ImageItem):
         try:
             # Compute the levels using ZScaleInterval, a fast and accurate method for determining the 
             #  optimal range of pixel values to display
-            interval = ZScaleInterval(n_samples=2000, contrast=0.25, max_iterations=5)
+            interval = ZScaleInterval(n_samples=2000, contrast=0.15, max_iterations=5)
             vmin, vmax = interval.get_limits(self.image)
             return float(vmin), float(vmax)
 
@@ -3137,10 +3137,9 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
         pad = self.scaledSpacing(0.3)
         if using_override:
             if star_count is not None:
-                text = f'Using override detection ({star_count} stars'
+                text = f'Using override detection:\n{star_count} stars'
                 if candidate_count is not None:
                     text += f', {candidate_count} candidates'
-                text += ')'
                 self.status_label.setText(text)
                 self.status_label.setStyleSheet(f"color: green; font-size: 9pt; padding: {pad}px; font-weight: bold;")
             else:
