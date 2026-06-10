@@ -22,22 +22,10 @@ RMSSTARTCAPTURE=~/Desktop/RMS_StartCapture.sh
 RMSUPDATESCRIPT=~/Desktop/RMS_Update.sh
 
 
-# Function for editing the RMS config
-editRMSConfig () {
-
-  # Use the first available editor (leafpad on Raspbian Jessie, mousepad on
-  # Raspbian Buster and later, gedit/gnome-text-editor on GNOME desktops)
-  local editor
-  for editor in leafpad mousepad gedit gnome-text-editor nano; do
-    if [ $( command -v $editor ) ]; then
-
-      # Open the config file
-      $editor $RMSCONFIG
-      return
-
-    fi
-  done
-
+# Check that a value is a number within the given range
+isNumberInRange () {   # $1 = value, $2 = min, $3 = max
+  [[ "$1" =~ ^-?[0-9]+(\.[0-9]+)?$ ]] || return 1
+  awk -v v="$1" -v lo="$2" -v hi="$3" 'BEGIN { exit !(v >= lo && v <= hi) }'
 }
 
 
@@ -116,7 +104,7 @@ echo "  0. Expand the file system (if you flashed this SD card yourself)."
 echo "  1. Connect your Pi to the Internet. "
 echo "  2. Change the default password for security reasons."
 echo "  3. Generate a new SSH key."
-echo "  4. Edit the RMS config file. "
+echo "  4. Enter the station ID and the geo coordinates of your camera."
 echo "  5. Convert to the multi-camera data structure (recommended)."
 echo ""
 echo "At the end of these steps the first data capture session will start."
@@ -215,46 +203,81 @@ echo "Updating to the latest version of RMS..."
 bash $RMSUPDATESCRIPT
 
 echo ""
-echo "4) Editing the configuration file"
-echo "---------------------------------"
-echo "Finally, edit the RMS configuration file."
-echo "Put in the station code/ID and the geo coordinates of your camera, save the"
-echo "file and you are good to go!"
+echo "4) Station configuration"
+echo "------------------------"
+echo "Enter the station ID and the geo coordinates of your camera."
 echo ""
 
 echo "
-If you need to make changes to the configuration file in the future, you can
-find a shortcut to it on desktop (RMS_config), or open it directly in
-$RMSCONFIG.
+If you need to change any other setting in the future, you can find a
+shortcut to the configuration file on desktop (RMS_config), or open it
+directly in $RMSCONFIG.
 "
-
-read -p "The configuration file will open for editing after you press ENTER..."
-
-
-editRMSConfig
-
-
-echo ""
-
-
 
 while true; do
 
-# Check if the config file was changed
-statID=$(grep stationID $RMSCONFIG | cut -d ":" -f 2 | xargs)
+  # Station ID
+  while true; do
+    read -p "Station ID (e.g. US01AB): " statID || exit 1
+    statID=$(echo "$statID" | xargs | tr '[:lower:]' '[:upper:]')
+    if [[ "$statID" =~ ^[A-Z]{2}[A-Z0-9]{4}$ && "$statID" != "XX0001" ]]; then
+      break
+    fi
+    echo "  A station code has 2 country letters followed by 4 characters, e.g. US01AB."
+    if [[ -n "$statID" ]]; then
+      read -n1 -r -p "  Use '$statID' anyway? Press Y to accept it, any other key to retype... " key
+      echo ""
+      if [[ "$key" = "y" || "$key" = "Y" ]]; then
+        break
+      fi
+    fi
+  done
 
+  # Latitude
+  while true; do
+    read -p "Latitude (+N, in degrees, e.g. 40.689298): " lat || exit 1
+    lat=$(echo "$lat" | xargs)
+    isNumberInRange "$lat" -90 90 && break
+    echo "  The latitude must be a number between -90 and 90."
+  done
 
-if [ "$statID" = "XX0001" ]; then
-  
-  echo "The config file was not changed!"
-  echo "Please change the station ID and the geo coordinates in the config file!"
+  # Longitude
+  while true; do
+    read -p "Longitude (+E, in degrees, NEGATIVE in the western hemisphere, e.g. -74.044479): " lon || exit 1
+    lon=$(echo "$lon" | xargs)
+    isNumberInRange "$lon" -180 180 && break
+    echo "  The longitude must be a number between -180 and 180."
+  done
 
-  editRMSConfig
+  # Elevation
+  while true; do
+    read -p "Elevation (mean sea level, in meters, NOT feet): " elev || exit 1
+    elev=$(echo "$elev" | xargs)
+    isNumberInRange "$elev" -500 9000 && break
+    echo "  The elevation must be a number in meters, e.g. 95.3."
+  done
 
-else
-  break
-fi
+  echo "
+Station ID: $statID
+Latitude:   $lat
+Longitude:  $lon
+Elevation:  $elev m
+"
+  read -n1 -r -p 'Press ENTER to save these values, or R to re-enter them... ' key
+  echo ""
+  if [[ "$key" = "" ]]; then
+    break
+  fi
+
 done
+
+# Write the values into the config file
+sed -i "s/^stationID:.*$/stationID: $statID/" $RMSCONFIG
+sed -i "s/^latitude:.*$/latitude: $lat/" $RMSCONFIG
+sed -i "s/^longitude:.*$/longitude: $lon/" $RMSCONFIG
+sed -i "s/^elevation:.*$/elevation: $elev/" $RMSCONFIG
+
+echo "Configuration saved to $RMSCONFIG"
 
 # Offer the conversion to the multi-camera data structure, unless the
 # system already uses it
