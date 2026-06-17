@@ -1496,7 +1496,28 @@ class Platepar(object):
                     dec_cat_rad = np.radians(dec_catalog)[np.newaxis, :]  # (1, M)
                     sep_matrix = angularSeparation(ra_det_rad, dec_det_rad, ra_cat_rad, dec_cat_rad)
                     nearest_indices = np.argmin(sep_matrix, axis=1)  # (N,)
-                    matched_catalog = catalog_stars_fov[nearest_indices]
+                    nearest_sep = np.min(sep_matrix, axis=1)         # (N,)
+
+                    # Enforce one-to-one matching. argmin is per-detection and non-injective, so two
+                    #   detected stars can claim the same catalog star (a duplicate) - which then
+                    #   shows up as a gross residual and inflates the RMSD. Resolve conflicts by
+                    #   keeping, for each catalog star, only the closest detection; drop the rest.
+                    keep_mask = np.zeros(len(nearest_indices), dtype=bool)
+                    seen_catalog = set()
+                    for det_i in np.argsort(nearest_sep):
+                        cat_i = int(nearest_indices[det_i])
+                        if cat_i in seen_catalog:
+                            continue
+                        seen_catalog.add(cat_i)
+                        keep_mask[det_i] = True
+
+                    n_dupes = int(np.sum(~keep_mask))
+                    if n_dupes > 0:
+                        print("    Dropped {} duplicate matches (multiple detections -> one catalog "
+                              "star)".format(n_dupes))
+
+                    img_stars_clean = img_stars_clean[keep_mask]
+                    matched_catalog = catalog_stars_fov[nearest_indices[keep_mask]]
 
                     # Restore original distortion type for final matched-pair fit
                     self.setDistortionType(original_dist_type, reset_params=False)

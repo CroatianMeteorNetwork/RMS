@@ -88,13 +88,21 @@ _pre_init_logger.setLevel(logging.INFO)
 class LoggerWriter:
     """ Used to redirect stdout/stderr to the log.
     """
-    def __init__(self, logger, level):
+    def __init__(self, logger, level, stdout_captured=True):
         self.logger = logger
         self.level = level
+        self.stdout_captured = stdout_captured
 
     def write(self, message):
-        if message.strip():
-            self.logger.log(self.level, message.strip())
+        try:
+            if message.strip():
+                self.logger.log(self.level, message.strip())
+        except Exception:
+            if not self.stdout_captured:
+                print(f'error during logging to stdout/stderr: attempted to log - {message}')
+            else:
+                # if stdout is also captured we can't emit any messages 
+                pass
 
     def flush(self):
         pass
@@ -415,9 +423,9 @@ class LoggingManager:
             main_logger.propagate = False
 
             # Redirect standard streams
-            sys.stderr = LoggerWriter(main_logger, logging.WARNING)
+            sys.stderr = LoggerWriter(main_logger, logging.WARNING, stdout_captured=config.log_stdout)
             if config.log_stdout:
-                sys.stdout = LoggerWriter(main_logger, logging.INFO)
+                sys.stdout = LoggerWriter(main_logger, logging.INFO, stdout_captured=config.log_stdout)
 
             self.is_initialized = True
             main_logger.debug("initLogging completed; queue listener started.")
