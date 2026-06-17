@@ -16,6 +16,7 @@ import random
 import copy
 
 import numpy as np
+import ephem
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 try:
@@ -1908,6 +1909,10 @@ class PlateTool(QtWidgets.QMainWindow):
         self.label_f1.hide()
 
         self.catalog_stars_visible = True
+        self.show_planet_positions = False
+        self.planets_loaded = False
+        self.planet_time = None
+        self.planet_positions = np.empty((0, 3))
 
         # catalog star markers (main window)
         self.cat_star_markers = pg.ScatterPlotItem()
@@ -2690,6 +2695,7 @@ class PlateTool(QtWidgets.QMainWindow):
             text_str += 'CTRL + G - Cycle grids\n'
             text_str += 'CTRL + U - Pan to next\n'
             text_str += 'CTRL + O - Toggle auto pan\n'
+            text_str += 'CTRL + SHIFT + P - Toggle planets\n'
             text_str += 'CTRL + X - astrometry.net img upload\n'
             text_str += 'CTRL + SHIFT + X - astrometry.net XY only\n'
             text_str += 'SHIFT + Z - Show zoomed window\n'
@@ -2816,7 +2822,18 @@ class PlateTool(QtWidgets.QMainWindow):
         ######################################################################################################
 
         # Get positions of catalog stars on the image
-        self.catalog_x, self.catalog_y, catalog_mag = getCatalogStarsImagePositions(self.catalog_stars, \
+        if self.show_planet_positions:
+            current_time = self.img_handle.currentTime(dt_obj=True)
+            if (not self.planets_loaded) or (self.planet_time != current_time):
+                self.planet_positions = self.loadPlanetPositions(current_time, lim_mag=self.cat_lim_mag)
+                self.planets_loaded = True
+                self.planet_time = current_time
+
+        catalog_for_plot = self.catalog_stars
+        if self.show_planet_positions and self.planet_positions.size > 0:
+            catalog_for_plot = np.vstack((self.catalog_stars, self.planet_positions))
+
+        self.catalog_x, self.catalog_y, catalog_mag = getCatalogStarsImagePositions(catalog_for_plot, \
                                                                                     ff_jd, self.platepar)
 
         cat_stars_xy = np.c_[self.catalog_x, self.catalog_y, catalog_mag]
@@ -2824,7 +2841,7 @@ class PlateTool(QtWidgets.QMainWindow):
         ### Take only those stars inside the FOV  and image ###
 
         # Get indices of stars inside the fov
-        filtered_indices, _ = self.filterCatalogStarsInsideFOV(self.catalog_stars)
+        filtered_indices, _ = self.filterCatalogStarsInsideFOV(catalog_for_plot, sort_declination=True)
 
         # Create a mask to filter out all stars outside the image and the FOV
         filter_indices_mask = np.zeros(len(cat_stars_xy), dtype=bool)
@@ -2839,7 +2856,7 @@ class PlateTool(QtWidgets.QMainWindow):
         cat_stars_xy_unmasked = cat_stars_xy[filtered_indices_all]
 
         # Create a filtered catalog
-        self.catalog_stars_filtered_unmasked = self.catalog_stars[filtered_indices_all]
+        self.catalog_stars_filtered_unmasked = catalog_for_plot[filtered_indices_all]
 
         if (self.mask is None) or (not hasattr(self.mask, 'img')):
             cat_stars_xy, self.catalog_stars_filtered = [], []
@@ -4473,8 +4490,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self.updateLeftLabels()
             self.tab.settings.updateImageGamma()
 
-        elif event.key() == QtCore.Qt.Key_J and not modifiers == QtCore.Qt.ControlModifier:
-
+        elif event.key() == QtCore.Qt.Key_J and modifiers == QtCore.Qt.ControlModifier:
             # Decrease image gamma by a factor of 0.9x
             self.img.updateGamma(0.9)
             if self.img_zoom:
@@ -4482,6 +4498,16 @@ class PlateTool(QtWidgets.QMainWindow):
 
             self.updateLeftLabels()
             self.tab.settings.updateImageGamma()
+
+        # Toggel showing the planet positions
+        elif (event.key() == QtCore.Qt.Key_P) and (modifiers & QtCore.Qt.ControlModifier) and (modifiers & QtCore.Qt.ShiftModifier):
+            self.show_planet_positions = not self.show_planet_positions
+            self.planets_loaded = False
+            self.planet_time = None
+            self.planet_positions = np.empty((0,3))
+
+            self.updateStars()
+            self.updateLeftLabels()
 
         # Toggle refraction
         elif event.key() == QtCore.Qt.Key_T:
@@ -6463,6 +6489,60 @@ class PlateTool(QtWidgets.QMainWindow):
 
         return catalog_stars
 
+    def loadPlanetPositions(self, observation_time, lim_mag=None):
+        """Query the current planet positions for the given observation time using PyEphem.
+
+        Arguments:
+            observation_time: [tuple or datetime] Time for ephemeris computation.
+            lim_mag: [float] Limiting magnitude; planets fainter than this are excluded.
+        
+        Returns an (N,3) ndarray with columns (ra_deg, dec_deg, mag).
+        Coordinates are astrometric J2000 (provided by PyEphem as a_ra/a_dec).
+        Magnitudes are visual apparent magnitudes from PyEphem (body.mag).
+        Toggle the overlay in the GUI with Ctrl+Shift+P.
+        """
+
+        # Create observer at station location and requested time
+        o = ephem.Observer()
+        o.lat = str(self.config.latitude)
+        o.long = str(self.config.longitude)
+        o.elevation = getattr(self.config, 'elevation', 0)
+
+        if isinstance(observation_time, tuple):
+            observation_time = datetime.datetime(*observation_time)
+        o.date = observation_time
+
+        # Planets to query
+        planet_order = [
+            ('Mercury', ephem.Mercury),
+            ('Venus', ephem.Venus),
+            ('Mars', ephem.Mars),
+            ('Jupiter', ephem.Jupiter),
+            ('Saturn', ephem.Saturn),
+            ('Uranus', ephem.Uranus),
+            ('Neptune', ephem.Neptune),
+        ]
+
+        planet_coords = []
+        for name, cls in planet_order:
+            try:
+                body = cls()
+                body.compute(o)
+                # Use astrometric J2000 coordinates to avoid double precession in getCatalogStarsImagePositions
+                ra_deg = math.degrees(float(body.a_ra))
+                dec_deg = math.degrees(float(body.a_dec))
+                mag = float(body.mag)
+                
+                # Filter by magnitude if provided
+                if (lim_mag is None) or (mag <= lim_mag):
+                    planet_coords.append([ra_deg, dec_deg, mag])
+            except Exception as e:
+                print(f'Failed to compute {name}: {e}')
+
+        if len(planet_coords) == 0:
+            return np.empty((0, 3))
+
+        return np.array(planet_coords)
 
     def loadPlatepar(self, update=False, platepar_file=None):
         """
