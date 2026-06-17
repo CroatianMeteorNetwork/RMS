@@ -961,8 +961,10 @@ def extractStarsAndSave(config, ff_dir):
     calstars_name = 'CALSTARS_' + prefix + '.txt'
 
 
-    # Write detected stars to the CALSTARS file
-    CALSTARS.writeCALSTARS(star_list, ff_dir, calstars_name, config.stationID, config.height, config.width)
+    # Write detected stars to the CALSTARS file. FF input has no per-frame timestamps, so record the
+    #   config fps for the timing reconstruction.
+    CALSTARS.writeCALSTARS(star_list, ff_dir, calstars_name, config.stationID, config.height, config.width,
+        fps=config.fps)
 
     # Delete QueuedPool backed up files
     if workpool is not None:

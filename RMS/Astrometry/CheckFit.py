@@ -20,7 +20,7 @@ import RMS.ConfigReader as cr
 import scipy.optimize
 from RMS.Astrometry.ApplyAstrometry import (getFOVSelectionRadius, raDecToXYPP,
                                             rotationWrtHorizon, xyToRaDecPP)
-from RMS.Astrometry.Conversions import date2JD, jd2Date, raDec2AltAz
+from RMS.Astrometry.Conversions import date2JD, jd2Date
 from RMS.Astrometry.NNalign import alignPlatepar
 from RMS.Formats import CALSTARS, FFfile, Platepar, StarCatalog
 from RMS.Math import angularSeparation
@@ -718,9 +718,10 @@ def autoCheckFit(config, platepar, calstars_data, _nn_refinement=False):
     # Mark the platepar to indicate that it was automatically refined with CheckFit
     platepar.auto_check_fit_refined = True
 
-    # Recompute alt/az of the FOV centre
-    platepar.az_centre, platepar.alt_centre = raDec2AltAz(platepar.RA_d, platepar.dec_d, platepar.JD, \
-        platepar.lat, platepar.lon)
+    # Recompute alt/az of the FOV centre (apparent, epoch-of-date) using the platepar's own method, so
+    #   the az/alt fields match the convention used by SkyFit/Platepar/ECSV. A plain raDec2AltAz here
+    #   lacks precession and leaves az_centre ~0.3 deg off on aged platepars.
+    platepar.updateRefAltAz()
 
     # Recompute the rotation wrt horizon
     platepar.rotation_from_horiz = rotationWrtHorizon(platepar)

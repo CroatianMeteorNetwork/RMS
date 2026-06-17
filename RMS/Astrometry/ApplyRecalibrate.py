@@ -32,7 +32,7 @@ from RMS.Astrometry.ApplyAstrometry import (
     xyToRaDecPP,
 )
 from RMS.Astrometry.CyFunctions import subsetCatalog
-from RMS.Astrometry.Conversions import date2JD, jd2Date, raDec2AltAz
+from RMS.Astrometry.Conversions import date2JD, jd2Date
 from RMS.Astrometry.NNalign import alignPlatepar
 from RMS.Formats import CALSTARS, FFfile, FTPdetectinfo, Platepar, StarCatalog
 from RMS.Formats.ECSV import writeECSV
@@ -734,14 +734,10 @@ def recalibratePlateparsForFF(
         # Store the platepar if the fit succeeded
         if result is not None:
 
-            # Recompute alt/az of the FOV centre
-            working_platepar.az_centre, working_platepar.alt_centre = raDec2AltAz(
-                working_platepar.RA_d,
-                working_platepar.dec_d,
-                working_platepar.JD,
-                working_platepar.lat,
-                working_platepar.lon,
-            )
+            # Recompute alt/az of the FOV centre (apparent, epoch-of-date) using the platepar's own
+            #   method, so the az/alt fields match the convention used by SkyFit/Platepar/ECSV. A plain
+            #   raDec2AltAz here lacks precession and leaves az_centre ~0.3 deg off on aged platepars.
+            working_platepar.updateRefAltAz()
 
             # Recompute the rotation wrt horizon
             working_platepar.rotation_from_horiz = rotationWrtHorizon(working_platepar)
@@ -947,7 +943,7 @@ def writeMeteorECSV(dir_path, station_id, ff_name, platepar, meteor_picks, fps, 
 
 def recalibrateIndividualFFsAndApplyAstrometry(
     dir_path, ftpdetectinfo_path, calstars_data, config, platepar,
-    generate_plot=True, load_all=False, debug=False, ecsv_out=False
+    generate_plot=True, load_all=False, debug=False, ecsv_out=False, calstars_fps=None
 ):
     """Recalibrate FF files with detections and apply the recalibrated platepar to those detections.
     
@@ -966,9 +962,12 @@ def recalibrateIndividualFFsAndApplyAstrometry(
         debug: [bool] If True, show debug plots for each fit iteration.
         ecsv_out: [None/bool/str] If set, dump each calibrated detection as an ECSV file. True writes to the
             FTPdetectinfo directory; a string is used as the output directory. None disables. None by default.
+        calstars_fps: [float or None] FPS read from the CALSTARS header. When given, it is used (instead of
+            config.fps) to reconstruct the FF/chunk middle times, so the timing follows the real measured
+            frame rate rather than a possibly-wrong config value. None by default (config.fps is used).
 
     Return:
-        (recalibrated_platepars, ftpdetectinfo_file_list): 
+        (recalibrated_platepars, ftpdetectinfo_file_list):
             - recalibrated_platepars: [dict] A dictionary where the keys are FF file names and values are
                 recalibrated platepar instances for every FF file.
             - ftpdetectinfo_file_list: [list] List of FTPdetectinfo files that were loaded.
@@ -979,6 +978,15 @@ def recalibrateIndividualFFsAndApplyAstrometry(
 
     # Use a copy of the platepar
     platepar = copy.deepcopy(platepar)
+
+    # If the CALSTARS header recorded the measured fps, use it for all timing reconstruction instead of
+    #   the config fps. getMiddleTimeFF() below derives the FF/chunk middle times from config.fps, and a
+    #   wrong config fps shifts those times (and hence the recalibration star matching) off the truth.
+    if calstars_fps is not None:
+        if abs(config.fps - calstars_fps) > 1e-6:
+            log.info('Using CALSTARS-recorded fps {:.6f} for timing (config fps was {:.6f})'.format(
+                calstars_fps, config.fps))
+        config.fps = calstars_fps
 
     ### Load CALSTARS data ###
 
@@ -1517,10 +1525,17 @@ def applyRecalibrate(ftpdetectinfo_path, config, generate_plot=True, load_all=Fa
 
     # Load all calstars files in the directory
     calstars_list = []
+    calstars_fps = None
     for calstars_file in calstars_file_list:
 
-        # Load the calstars file
-        calstars_list_file, chunk_frames = CALSTARS.readCALSTARS(dir_path, calstars_file)
+        # Load the calstars file (also read the fps recorded in the header, if present)
+        calstars_list_file, chunk_frames, file_fps = CALSTARS.readCALSTARS(dir_path, calstars_file,
+                                                                           return_fps=True)
+
+        # Remember the fps from the header (used to reconstruct the chunk timing from the real frame rate
+        #   instead of the possibly-wrong config fps)
+        if file_fps is not None:
+            calstars_fps = file_fps
 
         # Merge the previously loaded data with the new one
         for ff_name, star_data in calstars_list_file:
@@ -1537,8 +1552,8 @@ def applyRecalibrate(ftpdetectinfo_path, config, generate_plot=True, load_all=Fa
     # Recalibrate and apply astrometry on every FF file with detections individually
     recalibrated_platepars, ftpdetectinfo_file_list = recalibrateIndividualFFsAndApplyAstrometry(
         dir_path, ftpdetectinfo_path, calstars_data, config, platepar,
-        generate_plot=generate_plot, load_all=load_all, debug=debug, ecsv_out=ecsv_out
-
+        generate_plot=generate_plot, load_all=load_all, debug=debug, ecsv_out=ecsv_out,
+        calstars_fps=calstars_fps
     )
 
     ### Generate the updated UFOorbit file ###

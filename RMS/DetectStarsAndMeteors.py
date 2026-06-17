@@ -151,9 +151,11 @@ def saveResultsFrameInterface(star_list, meteor_list, img_handle, config, chunk_
         # Generate the name for the CALSTARS file
         calstars_name = 'CALSTARS_' + prefix + suffix + '.txt'
 
-        # Write detected stars to the CALSTARS file
-        CALSTARS.writeCALSTARS(star_list, output_dir, calstars_name, 
-                            config.stationID, config.height, config.width, chunk_frames=chunk_frames)
+        # Write detected stars to the CALSTARS file. Pass the image handle's fps (measured from real
+        #   per-frame timestamps when available) so the chunk timing does not depend on the config fps.
+        CALSTARS.writeCALSTARS(star_list, output_dir, calstars_name,
+                            config.stationID, config.height, config.width, chunk_frames=chunk_frames,
+                            fps=img_handle.fps)
   
         log.info("Stars extracted and written to {:s}".format(calstars_name))
 
@@ -377,9 +379,10 @@ def saveDetections(detection_results, ff_dir, config, output_suffix=''):
     if not os.path.exists(ff_dir):
         os.makedirs(ff_dir)
 
-    # Write detected stars to the CALSTARS file
-    CALSTARS.writeCALSTARS(star_list, ff_dir, calstars_name, config.stationID, config.height, 
-        config.width)
+    # Write detected stars to the CALSTARS file. FF input has no per-frame timestamps, so record the
+    #   config fps for the timing reconstruction.
+    CALSTARS.writeCALSTARS(star_list, ff_dir, calstars_name, config.stationID, config.height,
+        config.width, fps=config.fps)
 
     # Generate FTPdetectinfo file name
     ftpdetectinfo_name = 'FTPdetectinfo_' + os.path.basename(ff_dir) + suffix + '.txt'

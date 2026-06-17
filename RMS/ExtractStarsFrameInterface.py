@@ -41,9 +41,12 @@ def extractStarsFrameInterface(img_handle, config,
         # Generate the name for the CALSTARS file
         calstars_name = 'CALSTARS_' + prefix + '.txt'
 
-        # Write detected stars to the CALSTARS file
-        CALSTARS.writeCALSTARS(star_list, img_handle.dir_path, calstars_name, 
-                            config.stationID, config.height, config.width, chunk_frames=chunk_frames)
+        # Write detected stars to the CALSTARS file. Pass the image handle's fps (measured from real
+        #   per-frame timestamps when available) so the chunk timing is reconstructed from the actual
+        #   frame rate rather than a possibly-wrong config fps.
+        CALSTARS.writeCALSTARS(star_list, img_handle.dir_path, calstars_name,
+                            config.stationID, config.height, config.width, chunk_frames=chunk_frames,
+                            fps=img_handle.fps)
         
         print("Stars extracted and written to {:s}".format(calstars_name))
 
