@@ -1547,8 +1547,48 @@ PY
         print_status "info" "Backup files are available in: $RMSBACKUPDIR"
         exit 1
     fi
-    
-    print_status "success" "Build completed successfully"
+
+    # Verify compiled extensions are actually importable.
+    # pip install -e can exit 0 even when C/C++ compilation fails silently.
+    print_status "info" "Verifying compiled extensions..."
+    local verify_output
+    verify_output=$(python << 'VERIFY_EOF'
+import sys, importlib, re
+# Parse extension module names from setup.py without importing it
+# (importing setup.py would re-run the entire build).
+with open("setup.py") as f:
+    src = f.read()
+names = re.findall(r'Extension\(\s*["\x27]([\w.]+)["\x27]', src)
+if not names:
+    print("WARN:no extensions parsed from setup.py")
+    sys.exit(0)
+failed = []
+for name in names:
+    try:
+        importlib.import_module(name)
+    except ImportError:
+        failed.append(name)
+if failed:
+    print("FAILED:" + ",".join(failed))
+    sys.exit(1)
+print("OK:" + str(len(names)))
+VERIFY_EOF
+    )
+
+    if [ $? -ne 0 ]; then
+        # Extract the failed module names from the output
+        local failed_modules="${verify_output#FAILED:}"
+        print_status "error" "Build reported success but these compiled extensions failed to import:"
+        IFS=',' read -ra modules <<< "$failed_modules"
+        for mod in "${modules[@]}"; do
+            print_status "error" "  - $mod"
+        done
+        print_status "error" "The C/C++ compiler may have failed silently during pip install."
+        print_status "info" "Backup files are available in: $RMSBACKUPDIR"
+        exit 1
+    fi
+
+    print_status "success" "Build completed successfully (all extensions verified)"
     
     # Print the update report
     print_update_report
