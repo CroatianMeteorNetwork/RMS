@@ -3719,10 +3719,10 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                             if mask is not None:
                                 fr_img = MaskImage.applyMask(fr_img, mask)
 
-                        # Apply gamma correction
-                        if config.gamma != 1.0:
-                            fr_img = Image.gammaCorrectionImage(fr_img, config.gamma,
-                                wp=(2**config.bit_depth - 1), out_type=np.float32)
+                            # Apply gamma correction
+                            if config.gamma != 1.0:
+                                fr_img = Image.gammaCorrectionImage(fr_img, config.gamma,
+                                    wp=(2**config.bit_depth - 1), out_type=np.float32)
 
                             # Subtract average
                             max_avg_corrected = Image.applyDark(fr_img, avepixel_img)
