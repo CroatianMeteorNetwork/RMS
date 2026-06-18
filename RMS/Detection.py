@@ -1648,7 +1648,7 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
     mask=None, flat_struct=None, dark=None, debug=False, kht_cluster_min_size=9, kht_cluster_min_deviation=2, \
     kht_delta=0.1, kht_kernel_min_height=0.004, kht_n_sigmas=1, kht_morph_ops=[1, 2, 3, 4, 1], \
     line_finder_algorithm='kht', ransac_max_lines=10, ransac_min_pixels=10, ransac_distance_thresh=2.0, \
-    ransac_min_line_length=20.0, ransac_max_gap=20.0, frame_range=None, border=5):
+    ransac_min_line_length=20.0, ransac_max_gap=20.0, frame_range=None, border=5, config=None):
     """ Get (rho, phi) pairs for each meteor present on the image using KHT.
         
     Arguments:
@@ -2851,7 +2851,8 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
         kht_morph_ops=config.kht_morph_ops, line_finder_algorithm=config.line_finder_algorithm, \
         ransac_max_lines=config.ransac_max_lines, ransac_min_pixels=config.ransac_min_pixels, \
         ransac_distance_thresh=config.ransac_distance_thresh, ransac_min_line_length=config.ransac_min_line_length, \
-        ransac_max_gap=config.ransac_max_gap, frame_range=frame_range, border=config.detection_border)
+        ransac_max_gap=config.ransac_max_gap, frame_range=frame_range, border=config.detection_border, \
+        config=config)
 
     # logDebug('List of lines:', line_list)
 
@@ -3256,7 +3257,7 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                             track_excluded_frames[_j].add(_f)
             _n_excl = sum(len(v) for v in track_excluded_frames.values())
             if _n_excl:
-                logInfo('Track proximity exclusion ({:.1f} px): {:d} frame-slots masked across {:d} tracks'.format(
+                log.info('Track proximity exclusion ({:.1f} px): {:d} frame-slots masked across {:d} tracks'.format(
                     _proximity_px, _n_excl, sum(1 for v in track_excluded_frames.values() if v)))
 
         # Go through all detected and filtered lines and compute centroids
@@ -3724,53 +3725,53 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                             fr_img = Image.gammaCorrectionImage(fr_img, config.gamma,
                                 wp=(2**config.bit_depth - 1), out_type=np.float32)
 
-                            # Subtract average
-                            max_avg_corrected = Image.applyDark(fr_img, avepixel_img)
-                            intensity_values = max_avg_corrected[stripe_y, stripe_x]
+                        # Subtract average
+                        max_avg_corrected = Image.applyDark(fr_img, avepixel_img)
+                        intensity_values = max_avg_corrected[stripe_y, stripe_x]
 
-                            # Refine the Gaussian init using the brightest stripe pixel and its
-                            # 5x5 neighbourhood centroid (see fast-path above for rationale)
-                            if gaussian_fit_enabled \
-                                    and gauss_fit_method != 'moving' \
-                                    and not moving_gaussian_fallback:
-                                stripe_weights_clipped = np.maximum(intensity_values, 0).astype(np.float64)
-                                if stripe_weights_clipped.size > 0 and np.max(stripe_weights_clipped) > 0:
-                                    peak_idx = int(np.argmax(stripe_weights_clipped))
-                                    peak_x = int(stripe_x[peak_idx])
-                                    peak_y = int(stripe_y[peak_idx])
-                                    neighbor_mask = ((stripe_x >= peak_x - 2) & (stripe_x <= peak_x + 2) &
-                                                     (stripe_y >= peak_y - 2) & (stripe_y <= peak_y + 2))
-                                    neighbor_weights = stripe_weights_clipped[neighbor_mask]
-                                    neighbor_weight_sum = float(np.sum(neighbor_weights))
-                                    if neighbor_weight_sum > 0:
-                                        x_gauss_init = float(np.dot(
-                                            stripe_x[neighbor_mask].astype(np.float64), neighbor_weights)) \
-                                            / neighbor_weight_sum
-                                        y_gauss_init = float(np.dot(
-                                            stripe_y[neighbor_mask].astype(np.float64), neighbor_weights)) \
-                                            / neighbor_weight_sum
-                                    else:
-                                        x_gauss_init = float(peak_x)
-                                        y_gauss_init = float(peak_y)
-
-                            if gaussian_fit_enabled:
-                                if gauss_fit_method in ('moving', 'kinematic'):
-                                    # Moving Gaussian on the full background-subtracted frame.
-                                    gaussian_centroid = fitMovingGaussianCentroid2D(
-                                        max_avg_corrected, x_gauss_init, y_gauss_init,
-                                        moving_gaussian_omega, moving_L_init,
-                                        sigma_init=moving_sigma_init,
-                                        max_shift=config.centroid_gaussian_fit_max_shift,
-                                        max_nfev=config.centroid_gaussian_fit_max_nfev,
-                                        L_tight=(gauss_fit_method == 'kinematic'))
+                        # Refine the Gaussian init using the brightest stripe pixel and its
+                        # 5x5 neighbourhood centroid (see fast-path above for rationale)
+                        if gaussian_fit_enabled \
+                                and gauss_fit_method != 'moving' \
+                                and not moving_gaussian_fallback:
+                            stripe_weights_clipped = np.maximum(intensity_values, 0).astype(np.float64)
+                            if stripe_weights_clipped.size > 0 and np.max(stripe_weights_clipped) > 0:
+                                peak_idx = int(np.argmax(stripe_weights_clipped))
+                                peak_x = int(stripe_x[peak_idx])
+                                peak_y = int(stripe_y[peak_idx])
+                                neighbor_mask = ((stripe_x >= peak_x - 2) & (stripe_x <= peak_x + 2) &
+                                                 (stripe_y >= peak_y - 2) & (stripe_y <= peak_y + 2))
+                                neighbor_weights = stripe_weights_clipped[neighbor_mask]
+                                neighbor_weight_sum = float(np.sum(neighbor_weights))
+                                if neighbor_weight_sum > 0:
+                                    x_gauss_init = float(np.dot(
+                                        stripe_x[neighbor_mask].astype(np.float64), neighbor_weights)) \
+                                        / neighbor_weight_sum
+                                    y_gauss_init = float(np.dot(
+                                        stripe_y[neighbor_mask].astype(np.float64), neighbor_weights)) \
+                                        / neighbor_weight_sum
                                 else:
-                                    # Static Gaussian on the full background-subtracted frame.
-                                    gaussian_centroid = fitGaussianCentroid2D(
-                                        max_avg_corrected, x_gauss_init, y_gauss_init,
-                                        segment_radius=config.centroid_gaussian_fit_radius,
-                                        max_shift=config.centroid_gaussian_fit_max_shift,
-                                        max_nfev=config.centroid_gaussian_fit_max_nfev,
-                                        method=gauss_fit_method)
+                                    x_gauss_init = float(peak_x)
+                                    y_gauss_init = float(peak_y)
+
+                        if gaussian_fit_enabled:
+                            if gauss_fit_method in ('moving', 'kinematic'):
+                                # Moving Gaussian on the full background-subtracted frame.
+                                gaussian_centroid = fitMovingGaussianCentroid2D(
+                                    max_avg_corrected, x_gauss_init, y_gauss_init,
+                                    moving_gaussian_omega, moving_L_init,
+                                    sigma_init=moving_sigma_init,
+                                    max_shift=config.centroid_gaussian_fit_max_shift,
+                                    max_nfev=config.centroid_gaussian_fit_max_nfev,
+                                    L_tight=(gauss_fit_method == 'kinematic'))
+                            else:
+                                # Static Gaussian on the full background-subtracted frame.
+                                gaussian_centroid = fitGaussianCentroid2D(
+                                    max_avg_corrected, x_gauss_init, y_gauss_init,
+                                    segment_radius=config.centroid_gaussian_fit_radius,
+                                    max_shift=config.centroid_gaussian_fit_max_shift,
+                                    max_nfev=config.centroid_gaussian_fit_max_nfev,
+                                    method=gauss_fit_method)
 
                     else:
 
