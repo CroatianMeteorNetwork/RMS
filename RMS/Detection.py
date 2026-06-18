@@ -3345,7 +3345,7 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                 img_thres, max_avg_corrected, flattened_weights, \
                     min_patch_intensity = thresholdAndCorrectGammaFF(img_handle, config, mask, mask_ave_bright=True)
 
-                logDebug('Centroiding frames {:g} - {:g} and time:'.format(frame_min, frame_max, img_handle.name()))
+                logDebug('Centroiding frames {:g} - {:g}, file: {:s}'.format(frame_min, frame_max, img_handle.name()))
                 
 
 
@@ -3720,58 +3720,58 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                             if mask is not None:
                                 fr_img = MaskImage.applyMask(fr_img, mask)
 
-                        # Apply gamma correction
-                        if config.gamma != 1.0:
-                            fr_img = Image.gammaCorrectionImage(fr_img, config.gamma,
-                                wp=(2**config.bit_depth - 1), out_type=np.float32)
+                            # Apply gamma correction
+                            if config.gamma != 1.0:
+                                fr_img = Image.gammaCorrectionImage(fr_img, config.gamma,
+                                    wp=(2**config.bit_depth - 1), out_type=np.float32)
 
-                        # Subtract average
-                        max_avg_corrected = Image.applyDark(fr_img, avepixel_img)
-                        intensity_values = max_avg_corrected[stripe_y, stripe_x]
+                            # Subtract average
+                            max_avg_corrected = Image.applyDark(fr_img, avepixel_img)
+                            intensity_values = max_avg_corrected[stripe_y, stripe_x]
 
-                        # Refine the Gaussian init using the brightest stripe pixel and its
-                        # 5x5 neighbourhood centroid (see fast-path above for rationale)
-                        if gaussian_fit_enabled \
-                                and gauss_fit_method != 'moving' \
-                                and not moving_gaussian_fallback:
-                            stripe_weights_clipped = np.maximum(intensity_values, 0).astype(np.float64)
-                            if stripe_weights_clipped.size > 0 and np.max(stripe_weights_clipped) > 0:
-                                peak_idx = int(np.argmax(stripe_weights_clipped))
-                                peak_x = int(stripe_x[peak_idx])
-                                peak_y = int(stripe_y[peak_idx])
-                                neighbor_mask = ((stripe_x >= peak_x - 2) & (stripe_x <= peak_x + 2) &
-                                                 (stripe_y >= peak_y - 2) & (stripe_y <= peak_y + 2))
-                                neighbor_weights = stripe_weights_clipped[neighbor_mask]
-                                neighbor_weight_sum = float(np.sum(neighbor_weights))
-                                if neighbor_weight_sum > 0:
-                                    x_gauss_init = float(np.dot(
-                                        stripe_x[neighbor_mask].astype(np.float64), neighbor_weights)) \
-                                        / neighbor_weight_sum
-                                    y_gauss_init = float(np.dot(
-                                        stripe_y[neighbor_mask].astype(np.float64), neighbor_weights)) \
-                                        / neighbor_weight_sum
+                            # Refine the Gaussian init using the brightest stripe pixel and its
+                            # 5x5 neighbourhood centroid (see fast-path above for rationale)
+                            if gaussian_fit_enabled \
+                                    and gauss_fit_method != 'moving' \
+                                    and not moving_gaussian_fallback:
+                                stripe_weights_clipped = np.maximum(intensity_values, 0).astype(np.float64)
+                                if stripe_weights_clipped.size > 0 and np.max(stripe_weights_clipped) > 0:
+                                    peak_idx = int(np.argmax(stripe_weights_clipped))
+                                    peak_x = int(stripe_x[peak_idx])
+                                    peak_y = int(stripe_y[peak_idx])
+                                    neighbor_mask = ((stripe_x >= peak_x - 2) & (stripe_x <= peak_x + 2) &
+                                                     (stripe_y >= peak_y - 2) & (stripe_y <= peak_y + 2))
+                                    neighbor_weights = stripe_weights_clipped[neighbor_mask]
+                                    neighbor_weight_sum = float(np.sum(neighbor_weights))
+                                    if neighbor_weight_sum > 0:
+                                        x_gauss_init = float(np.dot(
+                                            stripe_x[neighbor_mask].astype(np.float64), neighbor_weights)) \
+                                            / neighbor_weight_sum
+                                        y_gauss_init = float(np.dot(
+                                            stripe_y[neighbor_mask].astype(np.float64), neighbor_weights)) \
+                                            / neighbor_weight_sum
+                                    else:
+                                        x_gauss_init = float(peak_x)
+                                        y_gauss_init = float(peak_y)
+
+                            if gaussian_fit_enabled:
+                                if gauss_fit_method in ('moving', 'kinematic'):
+                                    # Moving Gaussian on the full background-subtracted frame.
+                                    gaussian_centroid = fitMovingGaussianCentroid2D(
+                                        max_avg_corrected, x_gauss_init, y_gauss_init,
+                                        moving_gaussian_omega, moving_L_init,
+                                        sigma_init=moving_sigma_init,
+                                        max_shift=config.centroid_gaussian_fit_max_shift,
+                                        max_nfev=config.centroid_gaussian_fit_max_nfev,
+                                        L_tight=(gauss_fit_method == 'kinematic'))
                                 else:
-                                    x_gauss_init = float(peak_x)
-                                    y_gauss_init = float(peak_y)
-
-                        if gaussian_fit_enabled:
-                            if gauss_fit_method in ('moving', 'kinematic'):
-                                # Moving Gaussian on the full background-subtracted frame.
-                                gaussian_centroid = fitMovingGaussianCentroid2D(
-                                    max_avg_corrected, x_gauss_init, y_gauss_init,
-                                    moving_gaussian_omega, moving_L_init,
-                                    sigma_init=moving_sigma_init,
-                                    max_shift=config.centroid_gaussian_fit_max_shift,
-                                    max_nfev=config.centroid_gaussian_fit_max_nfev,
-                                    L_tight=(gauss_fit_method == 'kinematic'))
-                            else:
-                                # Static Gaussian on the full background-subtracted frame.
-                                gaussian_centroid = fitGaussianCentroid2D(
-                                    max_avg_corrected, x_gauss_init, y_gauss_init,
-                                    segment_radius=config.centroid_gaussian_fit_radius,
-                                    max_shift=config.centroid_gaussian_fit_max_shift,
-                                    max_nfev=config.centroid_gaussian_fit_max_nfev,
-                                    method=gauss_fit_method)
+                                    # Static Gaussian on the full background-subtracted frame.
+                                    gaussian_centroid = fitGaussianCentroid2D(
+                                        max_avg_corrected, x_gauss_init, y_gauss_init,
+                                        segment_radius=config.centroid_gaussian_fit_radius,
+                                        max_shift=config.centroid_gaussian_fit_max_shift,
+                                        max_nfev=config.centroid_gaussian_fit_max_nfev,
+                                        method=gauss_fit_method)
 
                     else:
 
