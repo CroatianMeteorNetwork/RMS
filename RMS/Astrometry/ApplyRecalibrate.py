@@ -1270,8 +1270,6 @@ def recalibrateIndividualFFsAndApplyAstrometry(
                 writeMeteorECSV(ecsv_dir, config.stationID, ff_name, working_platepar, meteor_picks,
                     fps_meteor, used_ecsv_names, log)
 
-            meteor_No += 1
-
         # Calibration string to be written to the FTPdetectinfo file
         calib_str = 'Recalibrated with RMS on: ' + str(RmsDateTime.utcnow()) + ' UTC'
 

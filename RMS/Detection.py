@@ -1648,7 +1648,7 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
     mask=None, flat_struct=None, dark=None, debug=False, kht_cluster_min_size=9, kht_cluster_min_deviation=2, \
     kht_delta=0.1, kht_kernel_min_height=0.004, kht_n_sigmas=1, kht_morph_ops=[1, 2, 3, 4, 1], \
     line_finder_algorithm='kht', ransac_max_lines=10, ransac_min_pixels=10, ransac_distance_thresh=2.0, \
-    ransac_min_line_length=20.0, ransac_max_gap=20.0, frame_range=None, border=5):
+    ransac_min_line_length=20.0, ransac_max_gap=20.0, frame_range=None, border=5, config=None):
     """ Get (rho, phi) pairs for each meteor present on the image using KHT.
         
     Arguments:
@@ -2851,7 +2851,8 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
         kht_morph_ops=config.kht_morph_ops, line_finder_algorithm=config.line_finder_algorithm, \
         ransac_max_lines=config.ransac_max_lines, ransac_min_pixels=config.ransac_min_pixels, \
         ransac_distance_thresh=config.ransac_distance_thresh, ransac_min_line_length=config.ransac_min_line_length, \
-        ransac_max_gap=config.ransac_max_gap, frame_range=frame_range, border=config.detection_border)
+        ransac_max_gap=config.ransac_max_gap, frame_range=frame_range, border=config.detection_border, \
+        config=config)
 
     # logDebug('List of lines:', line_list)
 
@@ -3256,7 +3257,7 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                             track_excluded_frames[_j].add(_f)
             _n_excl = sum(len(v) for v in track_excluded_frames.values())
             if _n_excl:
-                logInfo('Track proximity exclusion ({:.1f} px): {:d} frame-slots masked across {:d} tracks'.format(
+                log.info('Track proximity exclusion ({:.1f} px): {:d} frame-slots masked across {:d} tracks'.format(
                     _proximity_px, _n_excl, sum(1 for v in track_excluded_frames.values() if v)))
 
         # Go through all detected and filtered lines and compute centroids
@@ -3344,7 +3345,7 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                 img_thres, max_avg_corrected, flattened_weights, \
                     min_patch_intensity = thresholdAndCorrectGammaFF(img_handle, config, mask, mask_ave_bright=True)
 
-                logDebug('Centroiding frames {:g} - {:g} and time:'.format(frame_min, frame_max, img_handle.name()))
+                logDebug('Centroiding frames {:g} - {:g}, file: {:s}'.format(frame_min, frame_max, img_handle.name()))
                 
 
 
