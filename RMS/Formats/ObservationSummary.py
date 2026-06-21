@@ -189,7 +189,13 @@ def addRequiredColumns(conn, d):
         Nothing.
     """
 
+    # If d has not yet been initialised, return to prevent interating over None
+    if d is None:
+        log.info("Not adding columns for an empty obseration summary dictionary")
+        return
+
     existing = getColumns(conn)
+
     for key in d:
         # SQLite cannot bind identifiers in DDL, so guard against anything that is not a plain
         # column name before interpolating it into the ALTER TABLE statement.
@@ -215,6 +221,10 @@ def storeDictInDB(conn, d, debug=False):
 
     # Ensure schema is up to date
     addRequiredColumns(conn, d)
+
+    if d is None:
+        log.info("Not storing an empty observation summary in the database")
+        return
 
     # Normalise booleans safely (TEXT columns expect strings)
     clean = {
