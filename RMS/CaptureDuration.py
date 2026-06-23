@@ -113,8 +113,9 @@ def captureDuration(lat, lon, elevation, current_time=None, continuous_capture=N
             except ephem.NeverUpError:
                 # The search stepped from polar day straight into polar night without pinning a
                 # discrete sunset (happens at the exact pole, where the crossing is instantaneous).
-                # Night has arrived, so capture immediately for the maximum allowed time.
-                return True, 3600*max_hours
+                # o.date is now the start of the dark period, which may be months in the future, so
+                # schedule the capture to start then rather than immediately during polar day.
+                return o.date.datetime(), 3600*max_hours
 
         # No sunset found within the search window: capture immediately for the maximum allowed
         # time instead of crashing.
