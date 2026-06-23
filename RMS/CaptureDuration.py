@@ -88,13 +88,17 @@ def captureDuration(lat, lon, elevation, current_time=None, continuous_capture=N
         duration = 3600*max_hours
         return start_time, duration
     
-    # If the day last more than 24, then the start of the capture is at the next sunset (which may be in days)
+    # If the day lasts more than 24 hours (polar day), the next sunset may be days or even
+    # months away. The start of the capture is then at the next sunset.
     except ephem.AlwaysUpError:
 
-        # Search in 1 hour increments until the next sunset is found (search for a maximum of 6 months)
+        # Search in 1 hour increments until the next sunset is found. The window covers ~13 months
+        # so that a full polar day at the exact poles (where day/night each last ~6 months) is
+        # always spanned.
         print("Searching for the next sunset...")
-        for i in range(0, 6*30*24):
-            
+        next_set = None
+        for i in range(0, 13*30*24):
+
             # Increment the time by 1 hour
             o.date = o.date.datetime() + datetime.timedelta(hours=1)
 
@@ -103,14 +107,36 @@ def captureDuration(lat, lon, elevation, current_time=None, continuous_capture=N
                 break
 
             except ephem.AlwaysUpError:
-                print("Still day at ", o.date.datetime(), "...")
-                pass
+                # Still polar day, keep searching forwards
+                continue
 
-        # Compute the next sunrise
-        next_rise = o.next_rising(s, start=next_set).datetime()
+            except ephem.NeverUpError:
+                # The search stepped from polar day straight into polar night without pinning a
+                # discrete sunset (happens at the exact pole, where the crossing is instantaneous).
+                # Night has arrived, so capture immediately for the maximum allowed time.
+                return True, 3600*max_hours
+
+        # No sunset found within the search window: capture immediately for the maximum allowed
+        # time instead of crashing.
+        if next_set is None:
+            return True, 3600*max_hours
+
+        # Compute the next sunrise after that sunset. If no discrete sunrise can be pinned (polar
+        # transitions at extreme latitudes), fall back to the maximum allowed duration.
+        try:
+            next_rise = o.next_rising(s, start=next_set).datetime()
+        except (ephem.AlwaysUpError, ephem.NeverUpError):
+            return next_set, 3600*max_hours
 
         # Compute the total capture duration
         duration = (next_rise - next_set).total_seconds()
+
+        # At very high latitudes the first night after a polar day can be very long (up to ~6
+        # months at the exact pole). Cap it to the maximum allowed time, matching the polar-night
+        # (NeverUpError) branch above.
+        max_duration = 3600*max_hours
+        if duration > max_duration:
+            duration = max_duration
 
         return next_set, duration
         

@@ -811,8 +811,16 @@ def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration
         o.elevation = config.elevation
         sun = ephem.Sun()
 
-        sunrise = o.previous_rising(sun, start=ephem.now())
-        noon_time = o.next_transit(sun, start=sunrise).datetime()
+        try:
+            sunrise = o.previous_rising(sun, start=ephem.now())
+            noon_time = o.next_transit(sun, start=sunrise).datetime()
+
+        except (ephem.NeverUpError, ephem.AlwaysUpError):
+            # Polar night/day: the Sun never crosses the horizon, so there is no
+            # rising/transit. captureDuration() below handles polar conditions
+            # itself, so fall back to the current time as the reference point.
+            log.warning("Polar day/night: no Sun rising/transit; using current time for disk estimate")
+            noon_time = RmsDateTime.utcnow()
 
         # if ct.hour > 12:
         #     noon_time += datetime.timedelta(days=1)
