@@ -189,13 +189,12 @@ def addRequiredColumns(conn, d):
         Nothing.
     """
 
-    # If d has not yet been initialised, return to prevent interating over None
+    # If d has not yet been initialised, return to prevent iterating over None
     if d is None:
-        log.info("Not adding columns for an empty obseration summary dictionary")
+        log.info("Not adding columns for an empty observation summary dictionary")
         return
 
     existing = getColumns(conn)
-
     for key in d:
         # SQLite cannot bind identifiers in DDL, so guard against anything that is not a plain
         # column name before interpolating it into the ALTER TABLE statement.
@@ -219,12 +218,13 @@ def storeDictInDB(conn, d, debug=False):
         Nothing.
     """
 
-    # Ensure schema is up to date
-    addRequiredColumns(conn, d)
-
+    # Nothing to store if the dict was never initialised
     if d is None:
         log.info("Not storing an empty observation summary in the database")
         return
+
+    # Ensure schema is up to date
+    addRequiredColumns(conn, d)
 
     # Normalise booleans safely (TEXT columns expect strings)
     clean = {
@@ -1530,11 +1530,19 @@ def getObservationSummaryDict(data_dir, final=False, config=None):
             with open(observation_summary_json_path, "r") as f:
                 try:
                     d = json.load(f)
+
+                    # A file containing e.g. the literal "null" parses fine but yields a
+                    # non-dict (None); reject it so it is recovered like a corrupt file
+                    # rather than being returned and crashing every downstream consumer.
+                    if not isinstance(d, dict):
+                        raise ValueError("observation summary JSON is not a dict (got {})".format(
+                            type(d).__name__))
+
                     log.info(f"Loaded {os.path.basename(observation_summary_json_path)}")
 
                 except:
-                    # Don't silently delete - back up the unparseable file so data is not lost,
-                    # then start fresh.
+                    # Don't silently delete - back up the unparseable/invalid file so data is
+                    # not lost, then start fresh.
                     corrupt_path = observation_summary_json_path + ".corrupt"
                     try:
                         os.replace(observation_summary_json_path, corrupt_path)
