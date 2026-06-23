@@ -329,12 +329,25 @@ def getObservationDurationContinuous(config, start_time):
 
     # Is this start time during night time capture hours
     s.compute()
-    while o.next_setting(s).datetime() < o.next_rising(s).datetime():
-        if DEBUG_PRINT:
-            print("{} is not at night time".format(start_time))
-        start_time +=datetime.timedelta(minutes=1)
-        o.date = start_time
-        s.compute()
+
+    # Bound the search so it can never spin (during polar night/day captureDuration
+    # never finds a concrete boundary), mirroring getObservationDurationNightTime.
+    max_advance_minutes = 24*60
+    advanced = 0
+    try:
+        while o.next_setting(s).datetime() < o.next_rising(s).datetime() and advanced < max_advance_minutes:
+            if DEBUG_PRINT:
+                print("{} is not at night time".format(start_time))
+            start_time += datetime.timedelta(minutes=1)
+            advanced += 1
+            o.date = start_time
+            s.compute()
+
+    except (ephem.AlwaysUpError, ephem.NeverUpError):
+        # Polar day/night: the Sun never sets/rises, so the start time cannot be
+        # refined. The duration block below falls back to duration=0.
+        log.warning("Polar day/night: no Sun setting/rising; cannot refine continuous-capture start time")
+
     if DEBUG_PRINT:
         print("Advanced time to {}".format(o.date))
 
