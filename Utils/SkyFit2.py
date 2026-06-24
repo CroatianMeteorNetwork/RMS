@@ -176,7 +176,7 @@ from RMS.Routines.AddCelestialGrid import updateRaDecGrid, updateAzAltGrid
 from RMS.Routines.CustomPyqtgraphClasses import ViewBox, TextItem, TextItemList, Crosshair, Plus, Cross, CursorItem, BrushCursorItem, ImageItem, RightOptionsTab, qmessagebox
 from RMS.Routines.GreatCircle import fitGreatCircle, greatCircle
 from RMS.Routines.SphericalPolygonCheck import sphericalPolygonCheck
-from RMS.Routines.Image import loadFlat, loadDark, applyFlat, applyDark, signalToNoise, gammaCorrectionImage, adjustLevels, saveImage, loadImage
+from RMS.Routines.Image import loadFlat, loadDark, applyFlat, applyDark, signalToNoise, sigmaClippedStd, gammaCorrectionImage, adjustLevels, saveImage, loadImage
 from RMS.Routines.MaskImage import getMaskFile, MaskStructure
 from RMS.Routines import RollingShutterCorrection
 from RMS.Misc import maxDistBetweenPoints, getRmsRootDir
@@ -7435,10 +7435,14 @@ class PlateTool(QtWidgets.QMainWindow):
         # a median over m samples equals that of a mean of m*2/pi frames.
         ff = getattr(self.img_handle, 'ff', None)
         n_total = getattr(ff, 'nframes', None)
-        res_size = getattr(ff, 'res_size', None)   # only FFMimickInterface has this
         n_frames = n_total
         n_eff = n_total
-        if (n_total is not None) and res_size:
+
+        # Detect the FFMimickInterface by class: its res_size is a private cdef not exposed to
+        # Python on older builds, so read it from the object if visible, else fall back to the
+        # config value it was built from (FrameInterface always passes background_reservoir_size).
+        if (n_total is not None) and (type(ff).__name__ == 'FFMimickInterface'):
+            res_size = getattr(ff, 'res_size', None) or self.config.background_reservoir_size
             n_frames = min(n_total, res_size)
             n_eff = n_frames*2.0/np.pi
 
@@ -7753,10 +7757,20 @@ class PlateTool(QtWidgets.QMainWindow):
                 # Colors set so the yellower line (higher S/N, brighter LM) is on the left and the
                 # greener line (lower S/N, fainter LM) is on the right
                 lm_colors = {5: 'green', 10: 'darkorange'}
+                lm_err = self.limiting_mag_info.get('lm_err', {})
+                lm_extrap = self.limiting_mag_info.get('lm_extrapolated', {})
                 for snr_target, lm_mag in self.limiting_mag_info['lm'].items():
-                    ax_m.axvline(lm_mag, linestyle='dashed', alpha=0.8,
-                                    color=lm_colors.get(snr_target, 'm'),
-                                    label="LM = {:.2f} mag @ S/N = {:g}".format(lm_mag, snr_target))
+                    lbl = "LM = {:.2f}".format(lm_mag)
+                    err = lm_err.get(snr_target)
+                    if err is not None:
+                        lbl += " ± {:.2f}".format(err)
+                    lbl += " mag @ S/N = {:g}".format(snr_target)
+                    if lm_extrap.get(snr_target):
+                        lbl += " (extrap)"
+                    # Extrapolated LMs are drawn dotted to distinguish them from interpolated ones
+                    ax_m.axvline(lm_mag,
+                                    linestyle=('dotted' if lm_extrap.get(snr_target) else 'dashed'),
+                                    alpha=0.8, color=lm_colors.get(snr_target, 'm'), label=lbl)
 
                 # Show the model equation so users can compute the LM for any S/N, plus the
                 # single-frame LM correction (when the measurement image stacks >1 frame)
@@ -14447,8 +14461,9 @@ class PlateTool(QtWidgets.QMainWindow):
         # Compute the median of the pixels in the aperture mask as the background
         bg_median = np.median(img_crop[annulus_mask == 1])
 
-        # Compute the standard deviation of the pixels in the aperture mask
-        bg_std = np.std(img_crop[annulus_mask == 1])
+        # Robust background std (sigma-clipped) so a neighbouring star or hot pixel leaking
+        # into the annulus does not inflate the noise and corrupt the SNR
+        bg_std = sigmaClippedStd(img_crop[annulus_mask == 1])
 
 
         ######################################################################################################
@@ -15674,8 +15689,9 @@ class PlateTool(QtWidgets.QMainWindow):
 
             ### Measure the SNR of the pick ###
 
-            # Compute the standard deviation of the background
-            background_stddev = np.ma.std(crop_bg)
+            # Robust (sigma-clipped) standard deviation of the background, resistant to
+            # neighbouring sources or hot pixels in the background crop
+            background_stddev = sigmaClippedStd(np.ma.compressed(crop_bg))
 
             # Count the number of pixels in the photometric area
             source_px_count = np.ma.sum(~crop_img.mask)

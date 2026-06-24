@@ -27,7 +27,9 @@ cdef class FFMimickInterface:
     
     # Stored frames for Reservoir Sampling (to estimate robust background)
     cdef np.ndarray sample_buf
-    cdef int res_size
+    # Public so consumers (e.g. SkyFit photometry) can read the reservoir size that bounds
+    # how many frames actually contribute to the avepixel median.
+    cdef public int res_size
     
     # Public output arrays (matching your original interface types)
     cdef public np.ndarray maxpixel, avepixel, stdpixel

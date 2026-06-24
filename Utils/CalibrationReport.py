@@ -569,10 +569,18 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
         # Draw the limiting magnitude at the target S/N values (catalog mag is on the y-axis)
         if lm_info is not None:
             lm_colors = {5: 'green', 10: 'darkorange'}
+            lm_err = lm_info.get('lm_err', {})
+            lm_extrap = lm_info.get('lm_extrapolated', {})
             for snr_target, lm_mag in lm_info['lm'].items():
+                lbl = "LM = {:.2f}".format(lm_mag)
+                err = lm_err.get(snr_target)
+                if err is not None:
+                    lbl += " ± {:.2f}".format(err)
+                lbl += " mag @ S/N = {:g}".format(snr_target)
+                if lm_extrap.get(snr_target):
+                    lbl += " (extrap)"
                 ax_p.axhline(lm_mag, linestyle='dotted', alpha=0.75,
-                    color=lm_colors.get(snr_target, 'm'),
-                    label="LM = {:.2f} mag @ S/N = {:g}".format(lm_mag, snr_target))
+                    color=lm_colors.get(snr_target, 'm'), label=lbl)
 
         # Split the legend so it does not crowd one corner and hide the data: the photometry
         # calibration entries go top-left, the limiting-magnitude lines go bottom-right
