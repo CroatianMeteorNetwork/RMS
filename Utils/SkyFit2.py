@@ -5355,14 +5355,16 @@ class PlateTool(QtWidgets.QMainWindow):
             self.config.segment_radius = original_segment_radius
             self.config.max_stars = original_max_stars
 
-            # Update sliders to the optimal values. Raise the threshold slider's maximum
-            # first if needed: its default max (200) is an 8-bit-era value, so a high-bit
-            # -depth tuned threshold would otherwise be silently clamped, leaving the
-            # re-detect running at the wrong (clamped) threshold. Mirrors the max_stars
-            # slider handling below.
+            # Update sliders to the optimal values. The threshold slider's default max (200)
+            # is an arbitrary pre-existing ceiling (the 8-bit threshold range is nominally
+            # 0-255, with realistic values in the tens), so on high-bit-depth data the tuned
+            # threshold can exceed it and be silently clamped (leaving the re-detect at the
+            # wrong threshold). Raise the max with headroom *above* the tuned value so the user
+            # can still override upward. Scale the headroom to the tuned value itself, since a
+            # reasonable ceiling differs greatly between 8-bit and 16-bit. Never lower the
+            # existing max, so 8-bit keeps its default 200.
             thr_slider = self.tab.star_detection.intensity_threshold_slider
-            if best_threshold > thr_slider.maximum():
-                thr_slider.setMaximum(int(best_threshold))
+            thr_slider.setMaximum(max(thr_slider.maximum(), int(best_threshold*3)))
             thr_slider.setValue(int(best_threshold))
             self.tab.star_detection.segment_radius_slider.setValue(best_segment)
 
