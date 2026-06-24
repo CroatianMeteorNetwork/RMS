@@ -3083,6 +3083,19 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
     def loadFromConfig(self, config):
         """Initialize sliders from config values."""
         if hasattr(config, 'intensity_threshold'):
+            # Give the threshold slider a bit-depth-appropriate maximum before setting the
+            # value, otherwise a high-bit-depth config threshold is silently clamped to the
+            # pre-existing default slider max (200, an arbitrary ceiling -- the 8-bit threshold
+            # range is nominally 0-255, with realistic values in the tens) at load, and the
+            # user has no headroom to adjust up without first running auto-tune. Raw-ADU
+            # thresholds scale with bit depth (~tens at 8-bit, hundreds-to-thousands at 16-bit),
+            # so use a gentle per-2-bit doubling (8->200, 12->800, 16->3200) and ensure headroom
+            # over the configured value. Never lower the existing max, so 8-bit keeps its 200.
+            bit_depth = getattr(config, 'bit_depth', 8)
+            bitdepth_default_max = 200*2**max(0, (bit_depth - 8)//2)
+            thr_max = max(self.intensity_threshold_slider.maximum(), bitdepth_default_max,
+                          int(config.intensity_threshold*3))
+            self.intensity_threshold_slider.setMaximum(thr_max)
             self.intensity_threshold_slider.setValue(config.intensity_threshold)
         if hasattr(config, 'neighborhood_size'):
             self.neighborhood_size_slider.setValue(config.neighborhood_size)
