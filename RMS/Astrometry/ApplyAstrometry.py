@@ -263,7 +263,8 @@ def photomLineMinimize(params, px_sum, radius, catalog_mags, fixed_vignetting, w
 
 
 
-def limitingMagnitude(mags, snr_arr, snr_targets=(5, 10), exclude_mask=None, n_frames=None):
+def limitingMagnitude(mags, snr_arr, snr_targets=(5, 10), exclude_mask=None, n_frames=None,
+                      n_eff=None):
     """ Fit log10(S/N) = a*mag + b and return limiting magnitudes at given S/N targets.
 
         Physical basis: in the background-limited regime S/N is proportional to flux and
@@ -276,11 +277,15 @@ def limitingMagnitude(mags, snr_arr, snr_targets=(5, 10), exclude_mask=None, n_f
     Keyword arguments:
         snr_targets: [tuple] S/N values at which to report the limiting magnitude.
         exclude_mask: [ndarray of bool] True = exclude star from the fit (e.g. saturated).
-        n_frames: [int] Number of frames stacked/averaged into the measurement image. If
-            given and > 1, a single-frame correction is reported: the measurement image
-            averages n_frames frames, so its background noise is ~sqrt(n_frames) lower and
-            the LM is correspondingly deeper than a single frame by
-             delta_lm = 2.5*log10(sqrt(n_frames)) mag. None by default (no correction).
+        n_frames: [int] Number of frames stacked into the measurement image (the displayed
+            stack depth, shown as "N=...fr"). If given and > 1, a single-frame correction is
+            reported: the stack's background noise is lower than a single frame, so the LM is
+            correspondingly deeper. None by default (no correction).
+        n_eff: [float] Noise-equivalent frame count used to size the correction:
+            delta_lm = 2.5*log10(sqrt(n_eff)). Defaults to n_frames (true mean stack,
+            noise ~sqrt(n_frames)). Pass a smaller value when the stack is noisier per frame
+            than an ideal mean - e.g. a median over m samples has the noise of a mean of
+            m*2/pi frames, so callers pass n_eff = m*2/pi.
 
     Return:
         [dict] or None if the fit cannot be performed. Keys:
@@ -289,6 +294,7 @@ def limitingMagnitude(mags, snr_arr, snr_targets=(5, 10), exclude_mask=None, n_f
             'lm'                 : dict {snr_target: limiting_magnitude}
             'eqn_str'            : multi-line annotation string for the plot
             'n_frames'           : the n_frames argument (None if not given)
+            'n_eff'              : the noise-equivalent frame count used (None if not given)
             'single_frame_delta' : single-frame LM correction in mag, or None
             'single_frame_str'   : single-frame correction annotation line, or None
     """
@@ -330,12 +336,15 @@ def limitingMagnitude(mags, snr_arr, snr_targets=(5, 10), exclude_mask=None, n_f
     d = -b/a
     lm = {target: c*np.log10(target) + d for target in snr_targets}
 
-    # Single-frame correction: the measurement image averages n_frames frames, so its
-    # background noise is ~sqrt(n_frames) lower and the LM is deeper by 2.5*log10(sqrt(N)).
+    # Single-frame correction: the measurement image stacks n_frames frames, so its
+    # background noise is lower and the LM is deeper than a single frame by
+    # 2.5*log10(sqrt(n_eff)), where n_eff is the noise-equivalent frame count.
     delta_lm = None
     single_frame_str = None
     if (n_frames is not None) and (n_frames > 1):
-        delta_lm = 2.5*np.log10(np.sqrt(n_frames))
+        if n_eff is None:
+            n_eff = n_frames
+        delta_lm = 2.5*np.log10(np.sqrt(n_eff))
         single_frame_str = "1-frame ΔLM = +{:.2f} mag".format(delta_lm)
 
     # Model equation line; include the stacking frame count when known
@@ -349,7 +358,7 @@ def limitingMagnitude(mags, snr_arr, snr_targets=(5, 10), exclude_mask=None, n_f
         eqn_str += "\n" + single_frame_str
 
     return {'slope': a, 'intercept': b, 'r2': r2, 'lm': lm, 'eqn_str': eqn_str,
-            'n_frames': n_frames, 'single_frame_delta': delta_lm,
+            'n_frames': n_frames, 'n_eff': n_eff, 'single_frame_delta': delta_lm,
             'single_frame_str': single_frame_str}
 
 

@@ -7426,14 +7426,25 @@ class PlateTool(QtWidgets.QMainWindow):
         # magnitude minus the fit residual. Saturated stars are excluded (their flux is capped).
         predicted_mags = np.array(catalog_mags) - np.array(self.photom_fit_resids)
 
-        # Number of frames stacked into the measurement image (avepixel). For all input types
-        # this is the loaded FF / FFMimickInterface frame count; used to report the single-frame
-        # LM correction (single-image mode and dfn have nframes=1 -> no correction).
-        n_frames = getattr(getattr(self.img_handle, 'ff', None), 'nframes', None)
+        # Number of frames stacked into the measurement image (avepixel), used to report the
+        # single-frame LM correction. For real FF files img_handle.ff is the on-disk FFStruct
+        # whose avepixel is a true mean over all nframes (noise ~ sqrt(nframes)). For all other
+        # inputs it is an FFMimickInterface whose avepixel is a *median* over only
+        # min(nframes, res_size) reservoir samples, so the displayed count is capped at the
+        # reservoir size and the noise-equivalent count carries the median penalty: the noise of
+        # a median over m samples equals that of a mean of m*2/pi frames.
+        ff = getattr(self.img_handle, 'ff', None)
+        n_total = getattr(ff, 'nframes', None)
+        res_size = getattr(ff, 'res_size', None)   # only FFMimickInterface has this
+        n_frames = n_total
+        n_eff = n_total
+        if (n_total is not None) and res_size:
+            n_frames = min(n_total, res_size)
+            n_eff = n_frames*2.0/np.pi
 
         self.limiting_mag_info = limitingMagnitude(
             predicted_mags, np.array(snr_list), snr_targets=(5, 10),
-            exclude_mask=np.array(saturation_list), n_frames=n_frames)
+            exclude_mask=np.array(saturation_list), n_frames=n_frames, n_eff=n_eff)
 
         # Update the values in the platepar tab in the GUI
         self.tab.param_manager.updatePlatepar()
