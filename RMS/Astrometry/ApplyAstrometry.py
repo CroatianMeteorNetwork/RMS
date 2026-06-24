@@ -263,7 +263,7 @@ def photomLineMinimize(params, px_sum, radius, catalog_mags, fixed_vignetting, w
 
 
 
-def limitingMagnitude(mags, snr_arr, snr_targets=(5, 10), exclude_mask=None):
+def limitingMagnitude(mags, snr_arr, snr_targets=(5, 10), exclude_mask=None, n_frames=None):
     """ Fit log10(S/N) = a*mag + b and return limiting magnitudes at given S/N targets.
 
         Physical basis: in the background-limited regime S/N is proportional to flux and
@@ -276,6 +276,11 @@ def limitingMagnitude(mags, snr_arr, snr_targets=(5, 10), exclude_mask=None):
     Keyword arguments:
         snr_targets: [tuple] S/N values at which to report the limiting magnitude.
         exclude_mask: [ndarray of bool] True = exclude star from the fit (e.g. saturated).
+        n_frames: [int] Number of frames stacked/averaged into the measurement image. If
+            given and > 1, a single-frame correction is reported: the measurement image
+            averages n_frames frames, so its background noise is ~sqrt(n_frames) lower and
+            the LM is correspondingly deeper than a single frame by
+             delta_lm = 2.5*log10(sqrt(n_frames)) mag. None by default (no correction).
 
     Return:
         [dict] or None if the fit cannot be performed. Keys:
@@ -283,6 +288,9 @@ def limitingMagnitude(mags, snr_arr, snr_targets=(5, 10), exclude_mask=None):
             'r2'                 : coefficient of determination
             'lm'                 : dict {snr_target: limiting_magnitude}
             'eqn_str'            : multi-line annotation string for the plot
+            'n_frames'           : the n_frames argument (None if not given)
+            'single_frame_delta' : single-frame LM correction in mag, or None
+            'single_frame_str'   : single-frame correction annotation line, or None
     """
 
     mags = np.array(mags, dtype=np.float64)
@@ -322,11 +330,27 @@ def limitingMagnitude(mags, snr_arr, snr_targets=(5, 10), exclude_mask=None):
     d = -b/a
     lm = {target: c*np.log10(target) + d for target in snr_targets}
 
-    eqn_str = "LM = {:.3f} log10(S/N) + {:.2f} (R2={:.2f})".format(c, d, r2)
+    # Single-frame correction: the measurement image averages n_frames frames, so its
+    # background noise is ~sqrt(n_frames) lower and the LM is deeper by 2.5*log10(sqrt(N)).
+    delta_lm = None
+    single_frame_str = None
+    if (n_frames is not None) and (n_frames > 1):
+        delta_lm = 2.5*np.log10(np.sqrt(n_frames))
+        single_frame_str = "1-frame ΔLM = +{:.2f} mag".format(delta_lm)
+
+    # Model equation line; include the stacking frame count when known
+    if n_frames is not None and n_frames > 1:
+        eqn_str = "LM = {:.3f} log10(S/N) + {:.2f} (R2={:.2f}, N={:d}fr)".format(c, d, r2, int(n_frames))
+    else:
+        eqn_str = "LM = {:.3f} log10(S/N) + {:.2f} (R2={:.2f})".format(c, d, r2)
     for target in snr_targets:
         eqn_str += "\nLM = {:.2f} mag @ S/N = {:g}".format(lm[target], target)
+    if single_frame_str is not None:
+        eqn_str += "\n" + single_frame_str
 
-    return {'slope': a, 'intercept': b, 'r2': r2, 'lm': lm, 'eqn_str': eqn_str}
+    return {'slope': a, 'intercept': b, 'r2': r2, 'lm': lm, 'eqn_str': eqn_str,
+            'n_frames': n_frames, 'single_frame_delta': delta_lm,
+            'single_frame_str': single_frame_str}
 
 
 
