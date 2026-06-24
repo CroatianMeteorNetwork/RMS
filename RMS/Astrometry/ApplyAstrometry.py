@@ -337,11 +337,14 @@ def limitingMagnitude(mags, snr_arr, snr_targets=(5, 10), exclude_mask=None, n_f
 
     # Fit a line log10(S/N) = a*mag + b, with the covariance of (a, b) when enough points
     # remain (np.polyfit needs len > order + 2, i.e. >= 4 points, to scale the covariance).
+    # np.polyfit applies w to the *unsquared* residual (it minimises sum((w*resid)**2)), so to
+    # make the objective weight equal w_fit = min(S/N, 10) we pass sqrt(w_fit), not w_fit.
+    w_poly = np.sqrt(w_fit)
     cov = None
     if mags_fit.size >= 4:
-        (a, b), cov = np.polyfit(mags_fit, log_snr, 1, w=w_fit, cov=True)
+        (a, b), cov = np.polyfit(mags_fit, log_snr, 1, w=w_poly, cov=True)
     else:
-        a, b = np.polyfit(mags_fit, log_snr, 1, w=w_fit)
+        a, b = np.polyfit(mags_fit, log_snr, 1, w=w_poly)
 
     # A non-negative slope is unphysical (fainter stars must have lower S/N) and makes the
     # limiting magnitude inversion meaningless
