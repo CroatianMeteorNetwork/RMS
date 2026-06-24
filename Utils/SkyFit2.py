@@ -7425,9 +7425,15 @@ class PlateTool(QtWidgets.QMainWindow):
         # corrected) apparent magnitude. The predicted magnitude per star equals the catalog
         # magnitude minus the fit residual. Saturated stars are excluded (their flux is capped).
         predicted_mags = np.array(catalog_mags) - np.array(self.photom_fit_resids)
+
+        # Number of frames stacked into the measurement image (avepixel). For all input types
+        # this is the loaded FF / FFMimickInterface frame count; used to report the single-frame
+        # LM correction (single-image mode and dfn have nframes=1 -> no correction).
+        n_frames = getattr(getattr(self.img_handle, 'ff', None), 'nframes', None)
+
         self.limiting_mag_info = limitingMagnitude(
             predicted_mags, np.array(snr_list), snr_targets=(5, 10),
-            exclude_mask=np.array(saturation_list))
+            exclude_mask=np.array(saturation_list), n_frames=n_frames)
 
         # Update the values in the platepar tab in the GUI
         self.tab.param_manager.updatePlatepar()
@@ -7741,8 +7747,13 @@ class PlateTool(QtWidgets.QMainWindow):
                                     color=lm_colors.get(snr_target, 'm'),
                                     label="LM = {:.2f} mag @ S/N = {:g}".format(lm_mag, snr_target))
 
-                # Show the model equation so users can compute the LM for any S/N
-                ax_m.text(0.02, 0.03, self.limiting_mag_info['eqn_str'].split('\n')[0],
+                # Show the model equation so users can compute the LM for any S/N, plus the
+                # single-frame LM correction (when the measurement image stacks >1 frame)
+                annot = self.limiting_mag_info['eqn_str'].split('\n')[0]
+                sf = self.limiting_mag_info.get('single_frame_str')
+                if sf:
+                    annot += '\n' + sf
+                ax_m.text(0.02, 0.03, annot,
                             transform=ax_m.transAxes, fontsize=7, va='bottom', ha='left',
                             bbox=dict(boxstyle='round', fc='white', alpha=0.6, ec='none'))
 
