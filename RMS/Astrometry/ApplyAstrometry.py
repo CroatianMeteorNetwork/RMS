@@ -264,7 +264,7 @@ def photomLineMinimize(params, px_sum, radius, catalog_mags, fixed_vignetting, w
 
 
 def limitingMagnitude(mags, snr_arr, snr_targets=(5, 10), exclude_mask=None, n_frames=None,
-                      n_eff=None):
+                      n_eff=None, weights=None):
     """ Fit log10(S/N) = a*mag + b and return limiting magnitudes at given S/N targets.
 
         Physical basis: in the background-limited regime S/N is proportional to flux and
@@ -286,12 +286,20 @@ def limitingMagnitude(mags, snr_arr, snr_targets=(5, 10), exclude_mask=None, n_f
             noise ~sqrt(n_frames)). Pass a smaller value when the stack is noisier per frame
             than an ideal mean - e.g. a median over m samples has the noise of a mean of
             m*2/pi frames, so callers pass n_eff = m*2/pi.
+        weights: [ndarray] Per-star fit weights. None by default, in which case the fit is
+            weighted by min(S/N, 10) so faint near-limit stars (noisy log10(S/N), high
+            leverage at the faint end) do not dominate the slope - consistent with the
+            SNR-weighted photometry fit.
 
     Return:
         [dict] or None if the fit cannot be performed. Keys:
             'slope', 'intercept' : fit coefficients a, b (log10(S/N) = a*mag + b)
             'r2'                 : coefficient of determination
             'lm'                 : dict {snr_target: limiting_magnitude}
+            'lm_err'             : dict {snr_target: 1-sigma LM uncertainty} (None if the fit
+                                   has too few points for a covariance estimate)
+            'lm_extrapolated'    : dict {snr_target: bool} True if the target S/N lies outside
+                                   the measured S/N range (the LM is an extrapolation)
             'eqn_str'            : multi-line annotation string for the plot
             'n_frames'           : the n_frames argument (None if not given)
             'n_eff'              : the noise-equivalent frame count used (None if not given)
@@ -316,18 +324,38 @@ def limitingMagnitude(mags, snr_arr, snr_targets=(5, 10), exclude_mask=None, n_f
     mags_fit = mags[mask]
     log_snr = np.log10(snr_arr[mask])
 
-    # Fit a line: log10(S/N) = a*mag + b
-    a, b = np.polyfit(mags_fit, log_snr, 1)
+    # Fit weights: down-weight faint, low-S/N stars near the limit (noisy log10(S/N) and high
+    # leverage at the faint end). Default to min(S/N, 10), matching the photometry fit.
+    if weights is None:
+        w_fit = np.clip(snr_arr[mask], 0, 10)
+    else:
+        w_fit = np.array(weights, dtype=np.float64)[mask]
+
+    # Guard against all-zero weights (fall back to an unweighted fit)
+    if not np.any(w_fit > 0):
+        w_fit = np.ones_like(mags_fit)
+
+    # Fit a line log10(S/N) = a*mag + b, with the covariance of (a, b) when enough points
+    # remain (np.polyfit needs len > order + 2, i.e. >= 4 points, to scale the covariance).
+    # np.polyfit applies w to the *unsquared* residual (it minimises sum((w*resid)**2)), so to
+    # make the objective weight equal w_fit = min(S/N, 10) we pass sqrt(w_fit), not w_fit.
+    w_poly = np.sqrt(w_fit)
+    cov = None
+    if mags_fit.size >= 4:
+        (a, b), cov = np.polyfit(mags_fit, log_snr, 1, w=w_poly, cov=True)
+    else:
+        a, b = np.polyfit(mags_fit, log_snr, 1, w=w_poly)
 
     # A non-negative slope is unphysical (fainter stars must have lower S/N) and makes the
     # limiting magnitude inversion meaningless
     if a >= 0:
         return None
 
-    # Coefficient of determination
+    # Weighted coefficient of determination
     log_snr_pred = a*mags_fit + b
-    ss_res = np.sum((log_snr - log_snr_pred)**2)
-    ss_tot = np.sum((log_snr - np.mean(log_snr))**2)
+    w_mean = np.sum(w_fit*log_snr)/np.sum(w_fit)
+    ss_res = np.sum(w_fit*(log_snr - log_snr_pred)**2)
+    ss_tot = np.sum(w_fit*(log_snr - w_mean)**2)
     r2 = 1.0 - ss_res/ss_tot if ss_tot > 0 else 0.0
 
     # Invert the model so the limiting magnitude is expressed directly as a function of S/N:
@@ -335,6 +363,24 @@ def limitingMagnitude(mags, snr_arr, snr_targets=(5, 10), exclude_mask=None, n_f
     c = 1.0/a
     d = -b/a
     lm = {target: c*np.log10(target) + d for target in snr_targets}
+
+    # Per-target LM uncertainty by propagating the (a, b) covariance through LM = (L - b)/a,
+    # where L = log10(target):  d(LM)/da = -LM/a,  d(LM)/db = -1/a.
+    lm_err = {target: None for target in snr_targets}
+    if cov is not None:
+        var_a, var_b, cov_ab = cov[0, 0], cov[1, 1], cov[0, 1]
+        for target in snr_targets:
+            dmag_da = -lm[target]/a
+            dmag_db = -1.0/a
+            var_mag = (dmag_da**2)*var_a + (dmag_db**2)*var_b + 2*dmag_da*dmag_db*cov_ab
+            lm_err[target] = float(np.sqrt(var_mag)) if var_mag > 0 else 0.0
+
+    # Flag targets whose S/N lies outside the measured S/N range: the LM there is an
+    # extrapolation beyond the data and should be read with caution.
+    log_snr_min, log_snr_max = np.min(log_snr), np.max(log_snr)
+    lm_extrapolated = {target: bool((np.log10(target) < log_snr_min)
+                                    or (np.log10(target) > log_snr_max))
+                       for target in snr_targets}
 
     # Single-frame correction: the measurement image stacks n_frames frames, so its
     # background noise is lower and the LM is deeper than a single frame by
@@ -353,11 +399,18 @@ def limitingMagnitude(mags, snr_arr, snr_targets=(5, 10), exclude_mask=None, n_f
     else:
         eqn_str = "LM = {:.3f} log10(S/N) + {:.2f} (R2={:.2f})".format(c, d, r2)
     for target in snr_targets:
-        eqn_str += "\nLM = {:.2f} mag @ S/N = {:g}".format(lm[target], target)
+        line = "\nLM = {:.2f}".format(lm[target])
+        if lm_err[target] is not None:
+            line += " ± {:.2f}".format(lm_err[target])
+        line += " mag @ S/N = {:g}".format(target)
+        if lm_extrapolated[target]:
+            line += " (extrap)"
+        eqn_str += line
     if single_frame_str is not None:
         eqn_str += "\n" + single_frame_str
 
-    return {'slope': a, 'intercept': b, 'r2': r2, 'lm': lm, 'eqn_str': eqn_str,
+    return {'slope': a, 'intercept': b, 'r2': r2, 'lm': lm, 'lm_err': lm_err,
+            'lm_extrapolated': lm_extrapolated, 'eqn_str': eqn_str,
             'n_frames': n_frames, 'n_eff': n_eff, 'single_frame_delta': delta_lm,
             'single_frame_str': single_frame_str}
 

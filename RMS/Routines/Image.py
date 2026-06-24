@@ -1101,6 +1101,49 @@ def thickLine(img_h, img_w, x_cent, y_cent, length, rotation, radius):
     return photom_mask
 
 
+def sigmaClippedStd(values, sigma=3.0, max_iter=5):
+    """ Robust standard deviation via iterative sigma clipping.
+
+        The plain np.std of a background annulus is inflated by neighbouring stars, cosmic
+        rays or hot pixels that leak into the annulus, which corrupts the SNR. Iteratively
+        rejecting points more than `sigma` standard deviations from the median yields a
+        background noise estimate resistant to such outliers.
+
+    Arguments:
+        values: [ndarray] Background pixel values (any shape; flattened internally).
+
+    Keyword arguments:
+        sigma: [float] Clipping threshold in standard deviations. Default 3.0.
+        max_iter: [int] Maximum clipping iterations. Default 5.
+
+    Return:
+        [float] Robust standard deviation. Returns 0.0 if there are no finite values.
+    """
+
+    v = np.asarray(values, dtype=np.float64).ravel()
+    v = v[np.isfinite(v)]
+
+    if v.size == 0:
+        return 0.0
+
+    for _ in range(max_iter):
+        med = np.median(v)
+        std = np.std(v)
+
+        if std == 0:
+            break
+
+        keep = np.abs(v - med) <= sigma*std
+
+        # Stop if nothing was clipped or too few points remain to estimate a std
+        if keep.all() or (np.count_nonzero(keep) < 2):
+            break
+
+        v = v[keep]
+
+    return float(np.std(v))
+
+
 def signalToNoise(source_intens, source_px_count, bg_median, bg_std):
     """ Compute the signal to noise ratio using the "CCD equation" (Howell et al., 1989).
 
@@ -1112,8 +1155,19 @@ def signalToNoise(source_intens, source_px_count, bg_median, bg_std):
 
     Return:
         [float] Signal to noise ratio.
+
+    Note on stacked images:
+        When measured on an avepixel (a per-frame mean/median of N stacked frames),
+        source_intens is a per-frame-scaled flux (its sqrt is per-frame source shot noise)
+        while bg_std is the noise of the N-frame-averaged background (lower by ~sqrt(N)).
+        The two noise terms therefore correspond to different effective exposures, so the
+        returned value is neither the single-frame nor the full-integration SNR - it is an
+        intermediate measure that is consistent across stars on the same stack and is used
+        relatively (fit weighting, the log10(S/N) vs mag trend). It is not an absolute
+        radiometric SNR. See the single-frame LM correction in SkyFit photometry for how the
+        stack depth is folded back in.
     """
-    
+
     # Compute the SNR using the "CCD equation" (Howell et al., 1989)
     snr = source_intens/(math.sqrt(source_intens + source_px_count*(bg_median + bg_std**2)))
 
