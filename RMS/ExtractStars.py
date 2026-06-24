@@ -540,8 +540,9 @@ def fitPSF(img, img_median, x_init, y_init, gamma=1.0, segment_radius=4, roundne
     snr_fitted = []
     saturated_count_fitted = []
 
-    # Set the initial guess
-    initial_guess = (30.0, segment_radius, segment_radius, 1.0, 1.0, 0.0, img_median)
+    # Initial guess for positions and sigmas (amplitude and offset are seeded per-star
+    # below from the actual segment, so the fit converges at any bit depth).
+    init_pos_sigma = (segment_radius, segment_radius, 1.0, 1.0, 0.0)
 
     # Get the image dimensions
     nrows, ncols = img.shape
@@ -586,6 +587,16 @@ def fitPSF(img, img_median, x_init, y_init, gamma=1.0, segment_radius=4, roundne
 
         # Estimate saturation level from image type
         saturation = (2**bit_depth - 1)*np.ones_like(y_ind)
+
+        # Skip empty segments (can happen at the very edge of the image)
+        if star_seg.size == 0:
+            continue
+
+        # Seed the amplitude from this segment's peak so the fit converges regardless of bit
+        # depth. A fixed amplitude guess (e.g. 30, an 8-bit value) starts ~1000x too low on
+        # 16-bit data, so bright stars never converge within maxfev and are silently dropped.
+        amp_guess = max(float(np.max(star_seg)) - img_median, 1.0)
+        initial_guess = (amp_guess,) + init_pos_sigma + (img_median,)
 
         # Fit a PSF to the star
         try:
