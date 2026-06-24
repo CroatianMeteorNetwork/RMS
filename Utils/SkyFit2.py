@@ -9833,6 +9833,10 @@ class PlateTool(QtWidgets.QMainWindow):
         modifiers = QtWidgets.QApplication.keyboardModifiers()
         qmodifiers = QtWidgets.QApplication.queryKeyboardModifiers()
 
+        # Strip the GroupSwitchModifier (constantly pressed on some systems for some reason, not used in SkyFit)
+        modifiers &= ~int(QtCore.Qt.GroupSwitchModifier)
+        qmodifiers &= ~int(QtCore.Qt.GroupSwitchModifier)
+
         self.keys_pressed.append(event.key())
 
         # Handle mask drawing - Space or Enter to close polygon
