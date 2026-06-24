@@ -5327,7 +5327,17 @@ class PlateTool(QtWidgets.QMainWindow):
             # Phase 2: Sweep intensity threshold from high to low with best segment
             # Continue until we see clear degradation, then analyze all results
             print(f"\n  Phase 2: Intensity threshold sweep (segment_radius={best_segment})")
-            intensity_values = list(range(40, 2, -1))  # 40 down to 3
+
+            # Scale the 8-bit sweep range (40..3) to the camera's working threshold so it
+            # brackets the usable range on high-bit-depth data. A fixed 8-bit sweep lands
+            # below the noise on 16-bit, floods the candidate list past max_stars, and aborts
+            # on the first step. 8-bit configs are unchanged (scale = 1, sweep = 40..3).
+            if getattr(self.config, 'bit_depth', 8) > 8:
+                thr_scale = max(1.0, self.config.intensity_threshold/20.0)
+            else:
+                thr_scale = 1.0
+            intensity_values = sorted({max(3, int(round(v*thr_scale))) for v in range(40, 2, -1)},
+                                      reverse=True)  # high -> low
 
             # Collect results - we'll analyze the full curve to find optimal point
             results = []  # (threshold, n_true_pos, n_false_pos, n_detected)
@@ -5453,8 +5463,15 @@ class PlateTool(QtWidgets.QMainWindow):
             self.config.segment_radius = original_segment_radius
             self.config.max_stars = original_max_stars
 
-            # Update sliders to the optimal values
-            self.tab.star_detection.intensity_threshold_slider.setValue(best_threshold)
+            # Update sliders to the optimal values. Raise the threshold slider's maximum
+            # first if needed: its default max (200) is an 8-bit-era value, so a high-bit
+            # -depth tuned threshold would otherwise be silently clamped, leaving the
+            # re-detect running at the wrong (clamped) threshold. Mirrors the max_stars
+            # slider handling below.
+            thr_slider = self.tab.star_detection.intensity_threshold_slider
+            if best_threshold > thr_slider.maximum():
+                thr_slider.setMaximum(int(best_threshold))
+            thr_slider.setValue(int(best_threshold))
             self.tab.star_detection.segment_radius_slider.setValue(best_segment)
 
             # Update catalog LM and reload catalog
@@ -5642,28 +5659,43 @@ class PlateTool(QtWidgets.QMainWindow):
             (best_segment, n_true_pos, fp_ratio): Tuple of optimal segment radius,
                 true positive count and false positive ratio from validation.
         """
-        # Use a generous segment_radius (12) and high threshold to detect bright stars
-        # segment=12 is large enough for almost any stellar PSF
+        # Use a generous segment_radius (12) to detect bright stars; segment=12 is large
+        # enough for almost any stellar PSF.
         probe_segment = 12
-        high_threshold = 25
+
+        # Probe for bright stars. A hardcoded 8-bit threshold (25) lands far below the noise
+        # on high-bit-depth data, flooding the candidate list past max_stars so extractStars
+        # returns nothing. Start at least at the camera's configured threshold and escalate
+        # until a workable detection comes back. 8-bit configs (threshold ~18-25) are
+        # unaffected -- they start at 25 exactly as before.
+        base_threshold = max(25, self.config.intensity_threshold)
+        probe_thresholds = [base_threshold, 2*base_threshold, 4*base_threshold, 8*base_threshold]
 
         try:
             # Save and set config
             orig_intensity = self.config.intensity_threshold
             orig_segment = self.config.segment_radius
-            self.config.intensity_threshold = high_threshold
             self.config.segment_radius = probe_segment
             self.config.max_feature_ratio = self.override_max_feature_ratio
             self.config.roundness_threshold = self.override_roundness_threshold
 
-            star_data = self._extractStarsCurrentImage(ff_name)
+            # Escalate the threshold until extractStars returns stars. An empty result means
+            # either too many candidates (extractStars bails) or none detected; raising the
+            # threshold resolves the former, which is the high-bit-depth failure mode.
+            star_data = []
+            high_threshold = base_threshold
+            for high_threshold in probe_thresholds:
+                self.config.intensity_threshold = high_threshold
+                star_data = self._extractStarsCurrentImage(ff_name)
+                if star_data:
+                    break
 
             self.config.intensity_threshold = orig_intensity
             self.config.segment_radius = orig_segment
 
             if not star_data or len(star_data) == 0:
-                print(f"    No bright stars detected with threshold={high_threshold}, "
-                      f"segment={probe_segment}")
+                print(f"    No bright stars detected (probed thresholds "
+                      f"{base_threshold}..{probe_thresholds[-1]}, segment={probe_segment})")
                 print(f"    Using default segment_radius=4")
                 return 4, 0, 1.0
 
