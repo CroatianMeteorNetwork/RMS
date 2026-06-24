@@ -97,6 +97,26 @@ class RtspProbeResult:
     UNKNOWN_ERROR = "UNKNOWN_ERROR"        # Other connection errors
 
 
+def validVideoCrop(crop_str):
+    """ Validate a video_crop string of the form 'top=N bottom=N left=N right=N'
+        (any subset of sides; values must be non-negative integers).
+
+    Arguments:
+        crop_str: [str] The video_crop value from the config.
+
+    Return:
+        [bool] True if the string is a well-formed videocrop spec, False otherwise.
+    """
+
+    valid_keys = {"top", "bottom", "left", "right"}
+    for token in crop_str.split():
+        key, sep, val = token.partition("=")
+        if not sep or key not in valid_keys or not val.isdigit():
+            return False
+
+    return True
+
+
 class BufferedCapture(Process):
     """ Capture from device to buffer in memory.
     """
@@ -1109,15 +1129,32 @@ class BufferedCapture(Process):
             "rtph264depay ! h264parse ! tee name=t"
             ).format(self.config.udp_buffer_size, protocol_str, device_url)
 
+        # Optionally scale and/or crop the source video before further processing.
+        # videoscale/videocrop run on raw decoded frames, ahead of videoconvert.
+        video_scale = ''
+        if self.config.video_scale_width is not None and self.config.video_scale_height is not None:
+            video_scale = "videoscale ! video/x-raw,width={:d},height={:d} ! ".format(
+                self.config.video_scale_width, self.config.video_scale_height)
+        elif (self.config.video_scale_width is not None) or (self.config.video_scale_height is not None):
+            log.warning("video_scale ignored: both video_scale_width and video_scale_height must be set")
+
+        video_crop = ''
+        if self.config.video_crop is not None:
+            if validVideoCrop(self.config.video_crop):
+                video_crop = "videocrop {:s} ! ".format(self.config.video_crop)
+            else:
+                log.warning("video_crop ignored: malformed value %r (expected e.g. "
+                            "'top=N bottom=N left=N right=N', non-negative ints)", self.config.video_crop)
+
         # Branch for processing
         queue_size = self.config.gst_queue_size
         processing_branch = (
             "t. ! queue ! {:s} ! "
-            "queue leaky=downstream max-size-buffers={:d} max-size-bytes=0 max-size-time=0 ! "
+            "queue leaky=downstream max-size-buffers={:d} max-size-bytes=0 max-size-time=0 ! {:s}{:s}"
             "videoconvert ! video/x-raw,format={:s} ! "
             "queue max-size-buffers={:d} max-size-bytes=0 max-size-time=0 ! "
             "appsink max-buffers={:d} drop=true sync=0 name=appsink"
-            ).format(gst_decoder, queue_size, video_format, queue_size, queue_size)
+            ).format(gst_decoder, queue_size, video_scale, video_crop, video_format, queue_size, queue_size)
         
          # Branch for storage - if video_file_dir is not None, save the raw stream to a file
         if video_file_dir is not None:
@@ -1408,6 +1445,19 @@ class BufferedCapture(Process):
                     # Extract width, height, and format, and create frame
                     width = getStructureValue(structure, 'width')
                     height = getStructureValue(structure, 'height')
+
+                    # Based on camera settings and optional video_scale/video_crop parameters, the decoded frame size is what
+                    # gets written into the fixed-size capture arrays (sized to config
+                    # width/height). Warn if they disagree: a smaller frame is silently
+                    # zero-padded into the top-left of the array, while a larger one may cause overflows
+                    # and may abort the capture block. (ROI is applied separately and may
+                    # legitimately shrink the frame further, so only warn, never abort.)
+                    if width != self.config.width or height != self.config.height:
+                        log.warning("video output is {:d}x{:d} but config "
+                                    "width/height is {:d}x{:d}; set width/height to match the "
+                                    "source video/scaled+cropped size (smaller frames are zero-padded, larger "
+                                    "ones abort capture)".format(width, height,
+                                                                 self.config.width, self.config.height))
 
                     if self.config.gst_colorspace == 'GRAY8':
                         self.frame_shape = (height, width)
