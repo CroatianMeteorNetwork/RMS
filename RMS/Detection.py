@@ -852,6 +852,52 @@ def fitGaussianCentroid2D(img, x_init, y_init, segment_radius=4, max_shift=2.5, 
         patch, x_min, y_min, x_init, y_init, max_shift=max_shift, max_nfev=max_nfev, method=method)
 
 
+def crossTrackScatter(frames, xs, ys, order=3):
+    """ Std of the cross-track residual of a centroid series about a smooth polynomial track fit.
+
+    Used to compare the quality of two competing centroid series (e.g. weighted vs Gaussian) for
+    the same track without an external reference: the true path of a tracked object is smooth over
+    the detection window, so the series whose residual about that smooth fit is smaller is the more
+    self-consistent (less noisy) one. Cross-track (perpendicular to motion) isolates centroiding
+    noise from along-track timing jitter.
+
+    Arguments:
+        frames: [ndarray] Frame numbers (independent variable; handles gaps).
+        xs, ys: [ndarray] Centroid coordinates.
+
+    Keyword arguments:
+        order: [int] Polynomial order of the smooth track fit.
+
+    Return:
+        [float] Cross-track residual standard deviation in pixels, or np.inf if it cannot be
+            computed (too few points or a degenerate fit).
+    """
+
+    t = np.asarray(frames, dtype=np.float64)
+    x = np.asarray(xs, dtype=np.float64)
+    y = np.asarray(ys, dtype=np.float64)
+    n = len(t)
+
+    # Need enough points to over-determine the polynomial and still leave residual scatter.
+    if n < order + 3:
+        return np.inf
+
+    try:
+        px = np.polyfit(t, x, order)
+        py = np.polyfit(t, y, order)
+    except (np.linalg.LinAlgError, ValueError):
+        return np.inf
+
+    rx = x - np.polyval(px, t)
+    ry = y - np.polyval(py, t)
+
+    # Project the residual onto the cross-track axis defined by the overall track direction.
+    ang = np.arctan2(y[-1] - y[0], x[-1] - x[0])
+    ct = -rx*np.sin(ang) + ry*np.cos(ang)
+
+    return float(np.std(ct))
+
+
 
 
 def fitMovingGaussianCentroid2DPatch(patch, x_origin, y_origin, x_init, y_init,
@@ -3995,18 +4041,56 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                     logDebug("centroid: fr {:>12.3f}, x {:>7.2f}, y {:>7.2f}, intens {:g}, runtime: {:.6f} s".format(frame_no, \
                         x_centroid, y_centroid, intensity, time() - t_centroid))
 
-                    # Add computed centroid to the centroid list
+                    # Add computed centroid to the centroid list. The trailing weighted-centroid
+                    # columns are used by the per-track weighted-vs-Gaussian selection below and
+                    # are stripped again before the centroids are filtered/returned.
                     centroids.append([
-                        frame_no, seq_num, 
-                        x_centroid, y_centroid, 
-                        intensity, background_intensity, snr, saturated_count
+                        frame_no, seq_num,
+                        x_centroid, y_centroid,
+                        intensity, background_intensity, snr, saturated_count,
+                        x_centroid_weighted, y_centroid_weighted
                         ])
                     frames_centroided += 1
 
             logDebug('Centroiding summary: {:g} frames in range, {:g} centroided, '
                 '{:g} skipped (no pixels), {:g} skipped (zero weights)'.format(
-                frame_max - frame_min + 1, frames_centroided, skipped_no_pixels, 
+                frame_max - frame_min + 1, frames_centroided, skipped_no_pixels,
                 skipped_zero_weights))
+
+
+            # Per-track centroid selection: a static 2D Gaussian fit improves accuracy on
+            # well-sampled PSFs but can inject cross-track noise on undersampled / near-round
+            # sources (slow tracked objects), where a plain intensity-weighted centroid is more
+            # stable. Neither wins universally and the failure mode is not predictable per frame,
+            # so choose per track: keep whichever series (Gaussian-refined vs weighted) is smoother
+            # in the cross-track direction about a smooth polynomial track fit. Columns 8,9 hold the
+            # weighted centroid; 2,3 hold the Gaussian-refined one (== weighted when the fit was
+            # rejected for that frame).
+            #
+            # Restricted to the static-Gaussian path: the moving/kinematic streak model is the
+            # established choice for fast meteors, where the weighted centroid of an elongated
+            # streak is biased and this selection would wrongly prefer it (verified regression).
+            if gaussian_fit_enabled and gauss_fit_method not in ('moving', 'kinematic') \
+                    and len(centroids) >= (config.line_minimum_frame_range_det):
+                _arr = np.array(centroids, dtype=np.float64)
+                _ct_gauss = crossTrackScatter(_arr[:, 0], _arr[:, 2], _arr[:, 3])
+                _ct_weighted = crossTrackScatter(_arr[:, 0], _arr[:, 8], _arr[:, 9])
+
+                # Use the weighted series only when it is strictly smoother; ties default to the
+                # Gaussian (the established behaviour).
+                if np.isfinite(_ct_weighted) and (_ct_weighted < _ct_gauss):
+                    for _row in centroids:
+                        _row[2] = _row[8]
+                        _row[3] = _row[9]
+                    logDebug('Per-track centroid: WEIGHTED selected (cross-track scatter '
+                             '{:.3f} px < Gaussian {:.3f} px)'.format(_ct_weighted, _ct_gauss))
+                else:
+                    logDebug('Per-track centroid: GAUSSIAN selected (cross-track scatter '
+                             '{:.3f} px <= weighted {:.3f} px)'.format(_ct_gauss, _ct_weighted))
+
+            # Strip the trailing weighted-centroid columns so downstream code sees the original
+            # [frame, seq, x, y, intensity, background, snr, saturated] row format.
+            centroids = [row[:8] for row in centroids]
 
 
             # Filter centroids (confirm propagation)
