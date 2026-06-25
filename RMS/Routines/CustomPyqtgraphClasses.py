@@ -2382,13 +2382,13 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         # Update restore defaults button state
         self.updateRestoreDefaultsButton()
 
-    def updateRMSD(self, rmsd_img, rmsd_angular, angular_error_label, rmsd_fwd_px=None):
+    def updateRMSD(self, rmsd_img, rmsd_angular, angular_error_label, fwdrev_mismatch=False):
         """Update the RMSD display with color coding based on pixel RMSD.
 
-        rmsd_img is the reverse (catalog->image) RMSD. rmsd_fwd_px, if given, is the forward
-        (image->sky) RMSD expressed in px: when the distortion is healthy it matches rmsd_img;
-        a large mismatch means the forward and reverse mappings disagree (broken mapping), which
-        is shown in red regardless of how good the reverse RMSD looks.
+        rmsd_img is the reverse (catalog->image) residual in px -- its natural unit. rmsd_angular
+        is the forward (image->sky) residual in its natural angular unit. fwdrev_mismatch flags
+        that the two mappings disagree (a broken/inconsistent distortion mapping), which is shown
+        in red regardless of how good the reverse RMSD looks.
 
         Thresholds are normalized to 1280x720 resolution:
             - < 0.2 px: Excellent (green)
@@ -2397,7 +2397,7 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
             - < 0.5 px: Marginal (orange)
             - >= 0.5 px: Poor (red)
         """
-        text = "{:.2f} px, {:.2f} {:s}".format(rmsd_img, rmsd_angular, angular_error_label)
+        text = "{:.2f} px (rev), {:.2f} {:s} (fwd)".format(rmsd_img, rmsd_angular, angular_error_label)
 
         # Scale thresholds by resolution (reference: 720p)
         scale = self.gui.platepar.Y_res / 720.0
@@ -2413,12 +2413,11 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         else:
             color = "#DC143C"  # Crimson - poor
 
-        # Forward/reverse consistency check
-        if rmsd_fwd_px is not None:
-            text += " | fwd {:.2f} px".format(rmsd_fwd_px)
-            if rmsd_fwd_px > 2.0*rmsd_img + 0.3:
-                text += "  MAPPING MISMATCH"
-                color = "#DC143C"  # broken mapping overrides the (good-looking) reverse RMSD
+        # A forward/reverse mapping mismatch means the platepar is broken even if the reverse
+        # RMSD looks good -- override to red and say so.
+        if fwdrev_mismatch:
+            text += "  MAPPING MISMATCH"
+            color = "#DC143C"
 
         self.rmsd_label.setText(text)
         self.rmsd_label.setStyleSheet("font-weight: bold; font-size: 12pt; color: {};".format(color))
