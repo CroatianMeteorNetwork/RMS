@@ -15305,12 +15305,14 @@ class PlateTool(QtWidgets.QMainWindow):
         rmsd_angular = 60*RMSD([entry[4] for entry in residuals])
         rmsd_img = RMSD([entry[3] for entry in residuals])
 
-        # Forward residual expressed in px so it is directly comparable to the reverse RMSD.
-        # When the distortion is healthy the two agree; a large mismatch means the forward and
-        # reverse mappings disagree (e.g. a diverged forward polynomial) -- the catalog overlay
-        # will be off even though the (reverse) RMSD looks fine.
-        rmsd_fwd_px = RMSD([entry[4] for entry in residuals])*self.platepar.F_scale
-        fwdrev_mismatch = rmsd_fwd_px > 2.0*rmsd_img + 0.3
+        # Forward/reverse consistency check. The two residuals live in different spaces (reverse
+        # is px, forward is angular), so to compare them we convert the forward to a px-equivalent
+        # with the reference plate scale (F_scale). That conversion is approximate -- the true
+        # scale varies across the FOV by the distortion amount -- but it is plenty for detecting a
+        # gross mismatch (a diverged forward mapping is off by huge factors). Used only for the
+        # flag below; the reported numbers stay in their natural units.
+        rmsd_fwd_px_approx = RMSD([entry[4] for entry in residuals])*self.platepar.F_scale
+        fwdrev_mismatch = rmsd_fwd_px_approx > 2.0*rmsd_img + 0.3
 
         # If the average angular error is larger than 60 arc minutes, report it in degrees
         if rmsd_angular > 60:
@@ -15324,17 +15326,17 @@ class PlateTool(QtWidgets.QMainWindow):
             rmsd_angular *= 60
             angular_error_label = 'arcsec'
 
-
-        print('RMSD: {:.2f} px (reverse), {:.2f} px (forward), {:.2f} {:s}'.format(
-            rmsd_img, rmsd_fwd_px, rmsd_angular, angular_error_label))
+        # reverse residual in its natural unit (px), forward residual in its natural unit (angular)
+        print('RMSD: {:.2f} px (reverse), {:.2f} {:s} (forward)'.format(
+            rmsd_img, rmsd_angular, angular_error_label))
         if fwdrev_mismatch:
-            print('  WARNING: forward/reverse mapping mismatch (reverse {:.2f} px vs forward {:.2f} px) -- '
-                  'the distortion mapping is inconsistent and the catalog overlay will be off.'.format(
-                      rmsd_img, rmsd_fwd_px))
+            print('  WARNING: forward/reverse mapping mismatch (forward ~{:.2f} px-equivalent vs reverse '
+                  '{:.2f} px) -- the distortion mapping is inconsistent; the catalog overlay will be off.'.format(
+                      rmsd_fwd_px_approx, rmsd_img))
 
         # Update RMSD display in the Fit Parameters tab
         self.tab.param_manager.updateRMSD(rmsd_img, rmsd_angular, angular_error_label,
-                                          rmsd_fwd_px=rmsd_fwd_px)
+                                          fwdrev_mismatch=fwdrev_mismatch)
 
         # Update fit residuals in the station tab when geopoints are used
         if self.geo_points_obj is not None:
