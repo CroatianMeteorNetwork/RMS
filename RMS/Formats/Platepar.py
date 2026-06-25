@@ -938,6 +938,23 @@ class Platepar(object):
 
             return dist_sum
 
+        def _calcImageResidualsAstroAndDistortionRadialVect(params, platepar, jd, catalog_stars, img_stars):
+            """Vector-residual form of _calcImageResidualsAstroAndDistortionRadial for least_squares:
+               fits pointing + reverse distortion on the per-star pixel residual."""
+
+            pp_copy = copy.copy(platepar)
+            ra_ref, dec_ref, pos_angle_ref, F_scale = params[:4]
+            pp_copy.RA_d = (360 * ra_ref) % (360)
+            pp_copy.dec_d = -90 + (90 * dec_ref + 90) % (180.000001)
+            pp_copy.pos_angle_ref = (360 * pos_angle_ref) % (360)
+            pp_copy.F_scale = abs(F_scale)
+            pp_copy.x_poly_rev = np.array(params[4:])
+
+            img_x, img_y, _ = img_stars.T
+            catalog_x, catalog_y, _ = getCatalogStarsImagePositions(catalog_stars, jd, pp_copy)
+
+            return np.concatenate([catalog_x - img_x, catalog_y - img_y])
+
         def _calcSkyResidualsAstroAndDistortionRadial(params, platepar, jd, catalog_stars, img_stars):
             """Calculates the differences between the stars on the image and catalog stars in celestial
             coordinates with the given astrometrical solution. Pointing and distortion parameters are used
@@ -1704,6 +1721,27 @@ class Platepar(object):
                             if fwd_rev_iter > 0:
                                 print("    Converged after {} iterations".format(fwd_rev_iter + 1))
                             break
+
+                    # Final refinement: fit pointing + reverse distortion jointly on the IMAGE
+                    # (pixel) residual -- the metric reported to users. The fwd-rev loop fits the
+                    # forward mapping on SKY angular separation, whose optimum can leave the
+                    # pointing slightly off for the pixel residual (forward/reverse mappings are
+                    # not exact inverses), which showed up as a worse RMSD with least_squares.
+                    # This recovers the old Nelder-Mead pixel accuracy while keeping the speedup.
+                    p_final = [self.RA_d/360.0, self.dec_d/90.0, self.pos_angle_ref/360.0,
+                               abs(self.F_scale)] + self.x_poly_rev.tolist()
+                    res_final = _lstsqFit(
+                        _calcImageResidualsAstroAndDistortionRadialVect,
+                        p_final,
+                        (self, jd, catalog_stars, img_stars),
+                    )
+                    xf = res_final.x
+                    self.RA_d = (360*xf[0]) % 360
+                    self.dec_d = -90 + (90*xf[1] + 90) % (180.000001)
+                    self.pos_angle_ref = (360*xf[2]) % 360
+                    self.F_scale = abs(xf[3])
+                    self.x_poly_rev = np.array(xf[4:])
+                    self.updateRefAltAz()
 
                 ### ###
 
