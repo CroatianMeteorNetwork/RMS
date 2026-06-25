@@ -15086,60 +15086,38 @@ class PlateTool(QtWidgets.QMainWindow):
         return float(np.sqrt(np.mean(held_sq))), n_folds
 
 
-    def checkFitOverfit(self):
-        """ Compute and report the cross-validated (held-out) RMSD for the current matched pairs,
-            as an overfitting check. Triggered from the menu (it runs n_folds extra fits, so it is
-            not automatic after every fit). """
+    def reportOverfit(self, in_sample_rmsd):
+        """ Run the held-out (cross-validated) RMSD overfitting check and print the breakdown to
+            the console. Runs automatically as part of every fit (see fitPickedStars).
 
-        if len(self.paired_stars) == 0:
-            qmessagebox(message="No matched pairs to evaluate.", title="Held-out RMSD",
-                        message_type="warning")
-            return
+        Arguments:
+            in_sample_rmsd: [float] The in-sample reverse-mapping RMSD (px) of the current fit, used
+                as the reference the held-out RMSD is compared against.
 
-        # Disable the button while computing so a queued second click can't re-run it
-        button = self.tab.param_manager.check_overfit_button
-        button.setEnabled(False)
-        self.status_bar.showMessage("Computing held-out RMSD (cross-validation)...")
-        QtWidgets.QApplication.processEvents()
+        Returns:
+            bool: True if the fit looks like it is overfitting (held-out RMSD much worse than
+                in-sample), False otherwise -- including when there are too few stars to evaluate,
+                in which case nothing is flagged.
+        """
 
-        try:
-            result = self.crossValidatedRMSD()
-            if result is None:
-                msg = "Need more matched pairs for a stable held-out RMSD (have {}).".format(
-                    len(self.paired_stars))
-                print(msg)
-                self.status_bar.showMessage(msg)
-                return
+        result = self.crossValidatedRMSD()
+        if result is None:
+            print("  Overfitting check: not enough matched pairs for a stable held-out RMSD "
+                  "(have {}).".format(len(self.paired_stars)))
+            return False
 
-            cv_rmsd, n_folds = result
+        cv_rmsd, n_folds = result
+        gap = cv_rmsd - in_sample_rmsd
+        overfit = gap > 0.5*in_sample_rmsd + 0.05
 
-            # In-sample RMSD for comparison
-            img_stars = np.array(self.paired_stars.imageCoords())
-            catalog_stars = np.array(self.paired_stars.skyCoords())
-            jd = date2JD(*self.img_handle.currentTime())
-            cat_x, cat_y, _ = getCatalogStarsImagePositions(catalog_stars, jd, self.platepar)
-            in_sample = float(np.sqrt(np.mean((cat_x - img_stars[:, 0])**2 + (cat_y - img_stars[:, 1])**2)))
+        print("  Held-out RMSD ({:d}-fold CV): {:.3f} px   in-sample: {:.3f} px   gap: {:+.3f} px"
+              .format(n_folds, cv_rmsd, in_sample_rmsd, gap))
+        if overfit:
+            print("  -> large gap: the fit may be OVERFITTING (model too flexible for this many stars).")
+        else:
+            print("  -> gap is small: the fit generalises well (not overfitting).")
 
-            gap = cv_rmsd - in_sample
-            msg = ("Held-out RMSD ({:d}-fold CV): {:.3f} px   in-sample: {:.3f} px   gap: {:+.3f} px"
-                   .format(n_folds, cv_rmsd, in_sample, gap))
-            print("\n" + msg)
-            overfit = gap > 0.5*in_sample + 0.05
-            if overfit:
-                print("  -> large gap: the fit may be OVERFITTING (model too flexible for this many stars).")
-            else:
-                print("  -> gap is small: the fit generalises well (not overfitting).")
-            self.status_bar.showMessage(msg)
-
-            # Show it in the Fit Parameters tab next to the in-sample RMSD
-            color = "#DC143C" if overfit else "#228B22"  # crimson if overfitting, green if clean
-            self.tab.param_manager.cv_rmsd_label.setText(
-                "Held-out ({}-fold): {:.3f} px   (gap {:+.3f} px)".format(n_folds, cv_rmsd, gap))
-            self.tab.param_manager.cv_rmsd_label.setStyleSheet(
-                "font-size: 9pt; font-weight: bold; color: {};".format(color))
-
-        finally:
-            button.setEnabled(True)
+        return overfit
 
 
     def fitPickedStars(self):
@@ -15326,17 +15304,26 @@ class PlateTool(QtWidgets.QMainWindow):
             rmsd_angular *= 60
             angular_error_label = 'arcsec'
 
-        # reverse residual in its natural unit (px), forward residual in its natural unit (angular)
-        print('RMSD: {:.2f} px (reverse), {:.2f} {:s} (forward)'.format(
-            rmsd_img, rmsd_angular, angular_error_label))
+        # The GUI shows the plain RMSD; the console carries the full breakdown and the two health
+        # checks (forward/reverse consistency and held-out overfitting) that, if tripped, turn the
+        # GUI label red.
+        print('RMSD: {:.2f} px, {:.2f} {:s}'.format(rmsd_img, rmsd_angular, angular_error_label))
+
+        # Forward/reverse mapping consistency (console detail)
         if fwdrev_mismatch:
             print('  WARNING: forward/reverse mapping mismatch (forward ~{:.2f} px-equivalent vs reverse '
                   '{:.2f} px) -- the distortion mapping is inconsistent; the catalog overlay will be off.'.format(
                       rmsd_fwd_px_approx, rmsd_img))
+        else:
+            print('  forward/reverse mapping consistent (forward ~{:.2f} px-equivalent vs reverse '
+                  '{:.2f} px).'.format(rmsd_fwd_px_approx, rmsd_img))
 
-        # Update RMSD display in the Fit Parameters tab
+        # Overfitting check via held-out cross-validation (console detail). Runs on every fit.
+        overfit = self.reportOverfit(rmsd_img)
+
+        # Update RMSD display in the Fit Parameters tab (red on either health-check failure)
         self.tab.param_manager.updateRMSD(rmsd_img, rmsd_angular, angular_error_label,
-                                          fwdrev_mismatch=fwdrev_mismatch)
+                                          fwdrev_mismatch=fwdrev_mismatch, overfit=overfit)
 
         # Update fit residuals in the station tab when geopoints are used
         if self.geo_points_obj is not None:
