@@ -1870,6 +1870,22 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         self.rmsd_label.setStyleSheet("font-weight: bold; font-size: 12pt;")
         box.addWidget(self.rmsd_label)
 
+        # Cross-validated (held-out) RMSD: honest generalisation / overfitting check. Opt-in
+        # (it runs several extra fits), so it is a button rather than automatic. The fit itself
+        # always uses all stars; this only measures how well that fit generalises.
+        self.check_overfit_button = QtWidgets.QPushButton("Check overfit (held-out RMSD)")
+        self.check_overfit_button.setToolTip(
+            "K-fold cross-validation: fit on subsets of the stars and measure RMSD on the "
+            "held-out stars. A held-out RMSD close to the in-sample RMSD means the fit is not "
+            "overfitting. Runs several extra fits, so it is not automatic.")
+        self.check_overfit_button.clicked.connect(self.gui.checkFitOverfit)
+        box.addWidget(self.check_overfit_button)
+
+        self.cv_rmsd_label = QtWidgets.QLabel("")
+        self.cv_rmsd_label.setStyleSheet("font-size: 9pt;")
+        self.cv_rmsd_label.setWordWrap(True)
+        box.addWidget(self.cv_rmsd_label)
+
         hbox = QtWidgets.QHBoxLayout()
         hbox.setSpacing(self.scaledSpacing(0.25))  # Reduce spacing between buttons
         self.astrometry_button = QtWidgets.QPushButton('Astrometry')
@@ -2406,6 +2422,10 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
 
         self.rmsd_label.setText(text)
         self.rmsd_label.setStyleSheet("font-weight: bold; font-size: 12pt; color: {};".format(color))
+
+        # A new fit invalidates any previous held-out (cross-validation) result
+        if hasattr(self, 'cv_rmsd_label'):
+            self.cv_rmsd_label.setText("")
 
     def onFitParametersChanged(self):
         # fit parameter object updates platepar by itself
