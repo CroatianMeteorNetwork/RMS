@@ -158,6 +158,16 @@ def _lstsqFit(residual_func, x0, args):
         residual_func, x0, args=args, method=method, ftol=1e-12, xtol=1e-12, gtol=1e-12)
 
 
+def _raDecToUnitVectors(ra_deg, dec_deg):
+    """Convert RA/Dec arrays (degrees) to 3D unit vectors. Euclidean nearest-neighbour on unit
+    vectors gives the same result as angular nearest-neighbour, so a cKDTree of these vectors
+    replaces an O(N*M) angular-separation matrix with an O(N log M) query."""
+    ra = np.radians(ra_deg)
+    dec = np.radians(dec_deg)
+    cos_dec = np.cos(dec)
+    return np.column_stack([cos_dec*np.cos(ra), cos_dec*np.sin(ra), np.sin(dec)])
+
+
 class Platepar(object):
     def __init__(self, distortion_type="radial7-odd"):
         """Astrometric and photometric calibration plate parameters. Several distortion types are supported.
@@ -994,7 +1004,8 @@ class Platepar(object):
                 np.radians(ra_catalog), np.radians(dec_catalog),
             )
 
-        def _calcSkyResidualsAstroAndDistortionRadialNN(params, platepar, jd, catalog_stars, img_stars):
+        def _calcSkyResidualsAstroAndDistortionRadialNN(params, platepar, jd, catalog_stars, img_stars,
+                                                        cat_tree=None):
             """Like _calcSkyResidualsAstroAndDistortionRadial but uses nearest-neighbor matching.
 
             Instead of requiring pre-matched pairs, this finds the nearest catalog star for each
@@ -1030,18 +1041,24 @@ class Platepar(object):
             # Convert detected image positions to sky coordinates
             ra_det, dec_det = getPairedStarsSkyPositions(img_x, img_y, jd, pp_copy)
 
-            # Catalog is pre-filtered to FOV by caller - no need to re-filter here
-            ra_catalog, dec_catalog, _ = catalog_stars.T
+            if cat_tree is not None:
+                # Fast path: query a prebuilt KD-tree of catalog unit vectors. Same nearest
+                # neighbour as the matrix below, but O(N log M) instead of O(N*M) per eval.
+                chord_dist, _ = cat_tree.query(_raDecToUnitVectors(ra_det, dec_det), k=1)
+                nn_distances = 2.0*np.arcsin(np.clip(chord_dist/2.0, 0.0, 1.0))  # chord -> angle
+            else:
+                # Catalog is pre-filtered to FOV by caller - no need to re-filter here
+                ra_catalog, dec_catalog, _ = catalog_stars.T
 
-            # Vectorized NN: compute NxM angular separation matrix, then take row-wise min
-            ra_det_rad = np.radians(ra_det)[:, np.newaxis]  # (N, 1)
-            dec_det_rad = np.radians(dec_det)[:, np.newaxis]  # (N, 1)
-            ra_cat_rad = np.radians(ra_catalog)[np.newaxis, :]  # (1, M)
-            dec_cat_rad = np.radians(dec_catalog)[np.newaxis, :]  # (1, M)
+                # Vectorized NN: compute NxM angular separation matrix, then take row-wise min
+                ra_det_rad = np.radians(ra_det)[:, np.newaxis]  # (N, 1)
+                dec_det_rad = np.radians(dec_det)[:, np.newaxis]  # (N, 1)
+                ra_cat_rad = np.radians(ra_catalog)[np.newaxis, :]  # (1, M)
+                dec_cat_rad = np.radians(dec_catalog)[np.newaxis, :]  # (1, M)
 
-            # angularSeparation broadcasts to (N, M) separation matrix
-            sep_matrix = angularSeparation(ra_det_rad, dec_det_rad, ra_cat_rad, dec_cat_rad)
-            nn_distances = np.min(sep_matrix, axis=1)  # (N,)
+                # angularSeparation broadcasts to (N, M) separation matrix
+                sep_matrix = angularSeparation(ra_det_rad, dec_det_rad, ra_cat_rad, dec_cat_rad)
+                nn_distances = np.min(sep_matrix, axis=1)  # (N,)
             total_cost = np.sum(nn_distances ** 2)
 
             return total_cost
@@ -1413,9 +1430,14 @@ class Platepar(object):
                         # Kept on Nelder-Mead: the NN cost is non-smooth (nearest-neighbour
                         # assignment jumps as params move), so a gradient/least-squares method
                         # is unreliable here. The smooth matched-pair paths use _lstsqFit.
+                        # Speedup: build a catalog KD-tree once per iteration so each NN cost
+                        # eval is O(N log M) instead of rebuilding an N×M matrix (~80x fewer
+                        # ops/eval, identical nearest-neighbour result).
+                        ra_cat_fov, dec_cat_fov, _ = catalog_stars_fov.T
+                        cat_tree = cKDTree(_raDecToUnitVectors(ra_cat_fov, dec_cat_fov))
                         res = scipy.optimize.minimize(
                             cost_func, start_params,
-                            args=(self, jd, catalog_stars_fov, img_stars_subset),
+                            args=(self, jd, catalog_stars_fov, img_stars_subset, cat_tree),
                             method='Nelder-Mead', options=ransac_opts,
                         )
 
