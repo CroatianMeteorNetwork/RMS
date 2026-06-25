@@ -14830,6 +14830,119 @@ class PlateTool(QtWidgets.QMainWindow):
         return min_stars
 
 
+    def crossValidatedRMSD(self, n_folds=5, min_stars=50):
+        """ K-fold cross-validated, per-star image RMSD (px).
+
+        Splits the matched pairs into n_folds groups; for each group, fits the platepar on the
+        other folds and measures the per-star RMSD on the held-out group, then averages. This
+        is an honest "how well does the fit generalise to stars it was not fit on" number -- the
+        gap between it and the in-sample RMSD is a direct overfitting check (a flexible model
+        that fits centroid noise will show a large gap).
+
+        The live platepar is NOT modified. Interactive-tool feature only; the batch RMS pipeline
+        does not pay this cost. Returns (held_out_rmsd_px, n_folds_used) or None if there are too
+        few stars to split meaningfully.
+        """
+
+        import io as _io
+        import contextlib as _ctx
+
+        img_stars = np.array(self.paired_stars.imageCoords())
+        catalog_stars = np.array(self.paired_stars.skyCoords())
+        n = len(img_stars)
+
+        # Need enough stars that a fold still has plenty to fit and the held-out RMSD is stable
+        min_fit = self.getMinFitStars()
+        if (n < min_stars) or (n < (min_fit + 1)*2):
+            return None
+
+        n_folds = int(min(n_folds, n // max(min_fit + 1, 1)))
+        if n_folds < 2:
+            return None
+
+        jd = date2JD(*self.img_handle.currentTime())
+
+        rng = np.random.RandomState(0)  # deterministic across calls
+        folds = np.array_split(rng.permutation(n), n_folds)
+
+        held_sq = []
+        for k in range(n_folds):
+            test = folds[k]
+            train = np.concatenate([folds[j] for j in range(n_folds) if j != k])
+            if len(train) < min_fit:
+                return None
+
+            pp = copy.deepcopy(self.platepar)
+            try:
+                # Suppress the per-fit console spam from the fold fits
+                with _ctx.redirect_stdout(_io.StringIO()):
+                    pp.fitAstrometry(jd, img_stars[train], catalog_stars[train],
+                                     first_platepar_fit=False,
+                                     fit_only_pointing=self.fit_only_pointing,
+                                     fixed_scale=self.fixed_scale)
+            except Exception:
+                return None
+
+            cat_x, cat_y, _ = getCatalogStarsImagePositions(catalog_stars[test], jd, pp)
+            dx = cat_x - img_stars[test][:, 0]
+            dy = cat_y - img_stars[test][:, 1]
+            held_sq.extend((dx**2 + dy**2).tolist())
+
+        if not held_sq:
+            return None
+
+        return float(np.sqrt(np.mean(held_sq))), n_folds
+
+
+    def checkFitOverfit(self):
+        """ Compute and report the cross-validated (held-out) RMSD for the current matched pairs,
+            as an overfitting check. Triggered from the menu (it runs n_folds extra fits, so it is
+            not automatic after every fit). """
+
+        if len(self.paired_stars) == 0:
+            qmessagebox(message="No matched pairs to evaluate.", title="Held-out RMSD",
+                        message_type="warning")
+            return
+
+        self.status_bar.showMessage("Computing held-out RMSD (cross-validation)...")
+        QtWidgets.QApplication.processEvents()
+
+        result = self.crossValidatedRMSD()
+        if result is None:
+            msg = "Need more matched pairs for a stable held-out RMSD (have {}).".format(
+                len(self.paired_stars))
+            print(msg)
+            self.status_bar.showMessage(msg)
+            return
+
+        cv_rmsd, n_folds = result
+
+        # In-sample RMSD for comparison
+        img_stars = np.array(self.paired_stars.imageCoords())
+        catalog_stars = np.array(self.paired_stars.skyCoords())
+        jd = date2JD(*self.img_handle.currentTime())
+        cat_x, cat_y, _ = getCatalogStarsImagePositions(catalog_stars, jd, self.platepar)
+        in_sample = float(np.sqrt(np.mean((cat_x - img_stars[:, 0])**2 + (cat_y - img_stars[:, 1])**2)))
+
+        gap = cv_rmsd - in_sample
+        msg = ("Held-out RMSD ({:d}-fold CV): {:.3f} px   in-sample: {:.3f} px   gap: {:+.3f} px"
+               .format(n_folds, cv_rmsd, in_sample, gap))
+        print("\n" + msg)
+        overfit = gap > 0.5*in_sample + 0.05
+        if overfit:
+            print("  -> large gap: the fit may be OVERFITTING (model too flexible for this many stars).")
+        else:
+            print("  -> gap is small: the fit generalises well (not overfitting).")
+        self.status_bar.showMessage(msg)
+
+        # Show it in the Fit Parameters tab next to the in-sample RMSD
+        color = "#DC143C" if overfit else "#228B22"  # crimson if overfitting, green if clean
+        self.tab.param_manager.cv_rmsd_label.setText(
+            "Held-out ({}-fold): {:.3f} px   (gap {:+.3f} px)".format(n_folds, cv_rmsd, gap))
+        self.tab.param_manager.cv_rmsd_label.setStyleSheet(
+            "font-size: 9pt; font-weight: bold; color: {};".format(color))
+
+
     def fitPickedStars(self):
         """ Fit stars that are manually picked. The function first only estimates the astrometry parameters
             without the distortion, then just the distortion parameters, then all together.
