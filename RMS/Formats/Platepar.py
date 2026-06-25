@@ -458,7 +458,7 @@ class Platepar(object):
 
             img_x, img_y, _ = img_stars.T
 
-            pp_copy = copy.deepcopy(platepar)
+            pp_copy = copy.copy(platepar)
 
             # Assign guessed parameters
             pp_copy.RA_d = ra_ref
@@ -488,7 +488,7 @@ class Platepar(object):
 
             img_x, img_y, _ = img_stars.T
 
-            pp_copy = copy.deepcopy(platepar)
+            pp_copy = copy.copy(platepar)
 
             # Assign guessed parameters
             pp_copy.RA_d = ra_ref
@@ -747,7 +747,7 @@ class Platepar(object):
             """
 
             # Set distortion parameters
-            pp_copy = copy.deepcopy(platepar)
+            pp_copy = copy.copy(platepar)
 
             if (dimension == 'x') or (dimension == 'radial'):
                 pp_copy.x_poly_rev = params
@@ -790,7 +790,7 @@ class Platepar(object):
                 dimension: [str] 'x' for X polynomial fit, 'y' for Y polynomial fit
             """
 
-            pp_copy = copy.deepcopy(platepar)
+            pp_copy = copy.copy(platepar)
 
             if (dimension == 'x') or (dimension == 'radial'):
                 pp_copy.x_poly_fwd = params
@@ -832,13 +832,12 @@ class Platepar(object):
                 dimension: [str] 'x' for X polynomial fit, 'y' for Y polynomial fit
             """
 
-            # Set distortion parameters
-            pp_copy = copy.deepcopy(platepar)
-
             # Unpack pointing parameters and assign to the copy of platepar used for the fit
             ra_ref, dec_ref, pos_angle_ref, F_scale = params[:4]
 
-            pp_copy = copy.deepcopy(platepar)
+            # Shallow copy: the residual only rebinds scalar/poly attributes below and the
+            # projection reads the rest, so a full deepcopy (per optimizer eval) is wasted.
+            pp_copy = copy.copy(platepar)
 
             # Unnormalize the pointing parameters
             pp_copy.RA_d = (360 * ra_ref) % (360)
@@ -866,13 +865,12 @@ class Platepar(object):
 
             """
 
-            # Set distortion parameters
-            pp_copy = copy.deepcopy(platepar)
-
             # Unpack pointing parameters and assign to the copy of platepar used for the fit
             ra_ref, dec_ref, pos_angle_ref, F_scale = params[:4]
 
-            pp_copy = copy.deepcopy(platepar)
+            # Shallow copy: the residual only rebinds scalar/poly attributes below and the
+            # projection reads the rest, so a full deepcopy (per optimizer eval) is wasted.
+            pp_copy = copy.copy(platepar)
 
             # Unnormalize the pointing parameters
             pp_copy.RA_d = (360 * ra_ref) % (360)
@@ -920,7 +918,7 @@ class Platepar(object):
                 Sum of squared angular separations to nearest catalog star for each detected star
             """
             # Set distortion parameters
-            pp_copy = copy.deepcopy(platepar)
+            pp_copy = copy.copy(platepar)
 
             # Unpack pointing parameters and assign to the copy of platepar used for the fit
             ra_ref, dec_ref, pos_angle_ref, F_scale = params[:4]
