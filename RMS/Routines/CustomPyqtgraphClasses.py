@@ -1853,26 +1853,12 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
 
         box.addWidget(QtWidgets.QLabel("Residuals:"))
 
-        # RMSD display label with color coding
+        # RMSD display label with color coding. Shows the simple px RMSD; the forward/reverse
+        # consistency and held-out overfitting checks run internally on every fit and turn this
+        # label red when either trips (the detailed numbers are printed to the console).
         self.rmsd_label = QtWidgets.QLabel("--")
         self.rmsd_label.setStyleSheet("font-weight: bold; font-size: 12pt;")
         box.addWidget(self.rmsd_label)
-
-        # Cross-validated (held-out) RMSD: honest generalisation / overfitting check. Opt-in
-        # (it runs several extra fits), so it is a button rather than automatic. The fit itself
-        # always uses all stars; this only measures how well that fit generalises.
-        self.check_overfit_button = QtWidgets.QPushButton("Check overfit (held-out RMSD)")
-        self.check_overfit_button.setToolTip(
-            "K-fold cross-validation: fit on subsets of the stars and measure RMSD on the "
-            "held-out stars. A held-out RMSD close to the in-sample RMSD means the fit is not "
-            "overfitting. Runs several extra fits, so it is not automatic.")
-        self.check_overfit_button.clicked.connect(self.gui.checkFitOverfit)
-        box.addWidget(self.check_overfit_button)
-
-        self.cv_rmsd_label = QtWidgets.QLabel("")
-        self.cv_rmsd_label.setStyleSheet("font-size: 9pt;")
-        self.cv_rmsd_label.setWordWrap(True)
-        box.addWidget(self.cv_rmsd_label)
 
         hbox = QtWidgets.QHBoxLayout()
         hbox.setSpacing(self.scaledSpacing(0.25))  # Reduce spacing between buttons
@@ -2382,13 +2368,18 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         # Update restore defaults button state
         self.updateRestoreDefaultsButton()
 
-    def updateRMSD(self, rmsd_img, rmsd_angular, angular_error_label, fwdrev_mismatch=False):
+    def updateRMSD(self, rmsd_img, rmsd_angular, angular_error_label, fwdrev_mismatch=False,
+                   overfit=False):
         """Update the RMSD display with color coding based on pixel RMSD.
 
-        rmsd_img is the reverse (catalog->image) residual in px -- its natural unit. rmsd_angular
-        is the forward (image->sky) residual in its natural angular unit. fwdrev_mismatch flags
-        that the two mappings disagree (a broken/inconsistent distortion mapping), which is shown
-        in red regardless of how good the reverse RMSD looks.
+        The label shows the plain RMSD (reverse residual in px and forward residual in angular
+        units). Two health checks run internally on every fit and, when either trips, override the
+        color to red so a good-looking RMSD can't hide a broken fit (the detailed numbers behind
+        both checks are printed to the console):
+            - fwdrev_mismatch: the forward and reverse distortion mappings disagree, so the catalog
+              overlay will be off even though the reverse RMSD looks fine.
+            - overfit: the held-out (cross-validated) RMSD is much worse than in-sample, i.e. the
+              model is fitting centroid noise rather than the true distortion.
 
         Thresholds are normalized to 1280x720 resolution:
             - < 0.2 px: Excellent (green)
@@ -2397,7 +2388,7 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
             - < 0.5 px: Marginal (orange)
             - >= 0.5 px: Poor (red)
         """
-        text = "{:.2f} px (rev), {:.2f} {:s} (fwd)".format(rmsd_img, rmsd_angular, angular_error_label)
+        text = "{:.2f} px, {:.2f} {:s}".format(rmsd_img, rmsd_angular, angular_error_label)
 
         # Scale thresholds by resolution (reference: 720p)
         scale = self.gui.platepar.Y_res / 720.0
@@ -2413,18 +2404,18 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         else:
             color = "#DC143C"  # Crimson - poor
 
-        # A forward/reverse mapping mismatch means the platepar is broken even if the reverse
-        # RMSD looks good -- override to red and say so.
+        # Internal health checks override the color to red regardless of how good the RMSD looks.
+        flags = []
         if fwdrev_mismatch:
-            text += "  MAPPING MISMATCH"
+            flags.append("MAPPING MISMATCH")
+        if overfit:
+            flags.append("OVERFIT")
+        if flags:
+            text += "  " + " / ".join(flags)
             color = "#DC143C"
 
         self.rmsd_label.setText(text)
         self.rmsd_label.setStyleSheet("font-weight: bold; font-size: 12pt; color: {};".format(color))
-
-        # A new fit invalidates any previous held-out (cross-validation) result
-        if hasattr(self, 'cv_rmsd_label'):
-            self.cv_rmsd_label.setText("")
 
     def onFitParametersChanged(self):
         # fit parameter object updates platepar by itself
