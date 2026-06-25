@@ -15107,9 +15107,18 @@ class PlateTool(QtWidgets.QMainWindow):
                 )
 
 
-        # Compute RMSD errors
+        # Compute RMSD errors.
+        #   rmsd_img    = reverse residual (catalog sky -> image, via x_poly_rev), in px
+        #   rmsd_angular= forward residual (image -> sky, via x_poly_fwd), in arcmin
         rmsd_angular = 60*RMSD([entry[4] for entry in residuals])
         rmsd_img = RMSD([entry[3] for entry in residuals])
+
+        # Forward residual expressed in px so it is directly comparable to the reverse RMSD.
+        # When the distortion is healthy the two agree; a large mismatch means the forward and
+        # reverse mappings disagree (e.g. a diverged forward polynomial) -- the catalog overlay
+        # will be off even though the (reverse) RMSD looks fine.
+        rmsd_fwd_px = RMSD([entry[4] for entry in residuals])*self.platepar.F_scale
+        fwdrev_mismatch = rmsd_fwd_px > 2.0*rmsd_img + 0.3
 
         # If the average angular error is larger than 60 arc minutes, report it in degrees
         if rmsd_angular > 60:
@@ -15124,10 +15133,16 @@ class PlateTool(QtWidgets.QMainWindow):
             angular_error_label = 'arcsec'
 
 
-        print('RMSD: {:.2f} px, {:.2f} {:s}'.format(rmsd_img, rmsd_angular, angular_error_label))
+        print('RMSD: {:.2f} px (reverse), {:.2f} px (forward), {:.2f} {:s}'.format(
+            rmsd_img, rmsd_fwd_px, rmsd_angular, angular_error_label))
+        if fwdrev_mismatch:
+            print('  WARNING: forward/reverse mapping mismatch (reverse {:.2f} px vs forward {:.2f} px) -- '
+                  'the distortion mapping is inconsistent and the catalog overlay will be off.'.format(
+                      rmsd_img, rmsd_fwd_px))
 
         # Update RMSD display in the Fit Parameters tab
-        self.tab.param_manager.updateRMSD(rmsd_img, rmsd_angular, angular_error_label)
+        self.tab.param_manager.updateRMSD(rmsd_img, rmsd_angular, angular_error_label,
+                                          rmsd_fwd_px=rmsd_fwd_px)
 
         # Update fit residuals in the station tab when geopoints are used
         if self.geo_points_obj is not None:
