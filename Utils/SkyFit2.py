@@ -2658,6 +2658,12 @@ class PlateTool(QtWidgets.QMainWindow):
         self.load_state_action = QtWidgets.QAction("Load state")
         self.load_state_action.triggered.connect(self.findLoadState)
 
+        self.save_pairs_action = QtWidgets.QAction("Save matched pairs")
+        self.save_pairs_action.triggered.connect(self.savePairs)
+
+        self.load_pairs_action = QtWidgets.QAction("Load matched pairs")
+        self.load_pairs_action.triggered.connect(self.loadPairs)
+
         self.toggle_info_action = QtWidgets.QAction("Toggle Info")
         self.toggle_info_action.triggered.connect(self.toggleInfo)
         self.toggle_info_action.setShortcut('F1')
@@ -3498,6 +3504,8 @@ class PlateTool(QtWidgets.QMainWindow):
                                        self.save_state_platepar_action,
                                        self.quick_save_platepar_action,
                                        self.load_state_action])
+            self.file_menu.addSeparator()
+            self.file_menu.addActions([self.save_pairs_action, self.load_pairs_action])
             self.file_menu.addSeparator()
             self.file_menu.addAction(self.calibration_files_action)
 
@@ -8697,6 +8705,9 @@ class PlateTool(QtWidgets.QMainWindow):
             self.updateFitResiduals()
             self.residual_text.clear()
 
+            # Hint if this image has saved matched pairs available to load
+            self.pairsHint()
+
             # Clear satellite tracks when image changes (they're time-specific)
             self.clearSatelliteTracks()
             
@@ -8948,6 +8959,135 @@ class PlateTool(QtWidgets.QMainWindow):
             
         savePickle(dic, self.dir_path, 'skyFitMR_latest.state')
         print("Saved state to file")
+
+
+    def _pairsFilePath(self):
+        """ Path to the folder-level matched-pairs file (one file per data folder). """
+        return os.path.join(self.dir_path, 'skyfit_matched_pairs.json')
+
+
+    def _currentImageKey(self):
+        """ Stable identifier for the current image/chunk. Matched pairs are per-image (the
+            detected x,y belong to the displayed image), so saved pairs are keyed by this. """
+        try:
+            return str(self.img_handle.name())
+        except Exception:
+            return "unknown"
+
+
+    def savePairs(self):
+        """ Save the current image's matched star pairs into the folder-level pairs file,
+            keyed by image. Pairs saved for other images in the folder are preserved. """
+
+        if len(self.paired_stars) == 0:
+            qmessagebox(message="No matched pairs on the current image to save.",
+                        title="Save pairs", message_type="warning")
+            return
+
+        # Serialize current pairs (skip geo points - they reference external arrays and
+        # cannot be reconstructed standalone)
+        pairs = []
+        n_skipped = 0
+        for x, y, fwhm, intens_acc, obj, snr, saturated in self.paired_stars.paired_stars:
+            if getattr(obj, 'pick_type', 'star') == 'geopoint':
+                n_skipped += 1
+                continue
+            ra, dec, mag = obj.coords()
+            pairs.append({'x': float(x), 'y': float(y), 'fwhm': float(fwhm),
+                          'intens_acc': float(intens_acc), 'snr': float(snr),
+                          'saturated': bool(saturated),
+                          'ra': float(ra), 'dec': float(dec), 'mag': float(mag),
+                          'type': getattr(obj, 'pick_type', 'star')})
+
+        path = self._pairsFilePath()
+
+        # Merge into the existing folder-level file so other images' pairs are kept
+        data = {'format': 'skyfit_matched_pairs', 'version': 1, 'images': {}}
+        if os.path.isfile(path):
+            try:
+                with open(path) as f:
+                    existing = json.load(f)
+                if isinstance(existing, dict) and existing.get('format') == 'skyfit_matched_pairs':
+                    data = existing
+                    data.setdefault('images', {})
+            except Exception:
+                pass  # corrupt/unreadable - start fresh
+
+        key = self._currentImageKey()
+        try:
+            jd = date2JD(*self.img_handle.currentTime())
+        except Exception:
+            jd = None
+        data['images'][key] = {'jd': jd, 'pairs': pairs}
+
+        with open(path, 'w') as f:
+            json.dump(data, f, indent=1)
+
+        msg = "Saved {} matched pairs for '{}'".format(len(pairs), key)
+        if n_skipped:
+            msg += " ({} geo points skipped)".format(n_skipped)
+        print(msg)
+        self.status_bar.showMessage(msg)
+
+
+    def loadPairs(self):
+        """ Load matched pairs for the CURRENT image from the folder-level pairs file.
+            Pairs are per-image, so only the current image's saved entry is restored. """
+
+        path = self._pairsFilePath()
+        if not os.path.isfile(path):
+            qmessagebox(message="No saved pairs file in this folder.",
+                        title="Load pairs", message_type="warning")
+            return
+
+        try:
+            with open(path) as f:
+                data = json.load(f)
+        except Exception as e:
+            qmessagebox(message="Could not read pairs file:\n{}".format(e),
+                        title="Load pairs", message_type="warning")
+            return
+
+        images = data.get('images', {}) if isinstance(data, dict) else {}
+        key = self._currentImageKey()
+        if key not in images:
+            avail = ", ".join(sorted(images.keys())[:8])
+            qmessagebox(message="No saved pairs for the current image ('{}').\n\n"
+                                "Images with saved pairs: {}".format(key, avail or "none"),
+                        title="Load pairs", message_type="warning")
+            return
+
+        new_pairs = PairedStars()
+        for p in images[key].get('pairs', []):
+            star = CatalogStar(p['ra'], p['dec'], p['mag'])
+            new_pairs.addPair(p['x'], p['y'], p['fwhm'], p['intens_acc'], star,
+                              snr=p.get('snr', 0), saturated=p.get('saturated', False))
+
+        self.paired_stars = new_pairs
+        self.updatePairedStars()
+
+        msg = "Loaded {} matched pairs for '{}'".format(len(new_pairs), key)
+        print(msg)
+        self.status_bar.showMessage(msg)
+
+
+    def pairsHint(self):
+        """ If the folder pairs file has saved pairs for the current image, show a status-bar
+            hint. Called on image navigation; silent if there is nothing saved. """
+        try:
+            path = self._pairsFilePath()
+            if not os.path.isfile(path):
+                return
+            with open(path) as f:
+                data = json.load(f)
+            images = data.get('images', {}) if isinstance(data, dict) else {}
+            entry = images.get(self._currentImageKey())
+            if entry and len(entry.get('pairs', [])) > 0:
+                self.status_bar.showMessage(
+                    "{} saved matched pairs available for this image "
+                    "(File → Load matched pairs)".format(len(entry['pairs'])))
+        except Exception:
+            pass
 
 
     def findLoadState(self):
