@@ -2394,8 +2394,13 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         # Update restore defaults button state
         self.updateRestoreDefaultsButton()
 
-    def updateRMSD(self, rmsd_img, rmsd_angular, angular_error_label):
+    def updateRMSD(self, rmsd_img, rmsd_angular, angular_error_label, rmsd_fwd_px=None):
         """Update the RMSD display with color coding based on pixel RMSD.
+
+        rmsd_img is the reverse (catalog->image) RMSD. rmsd_fwd_px, if given, is the forward
+        (image->sky) RMSD expressed in px: when the distortion is healthy it matches rmsd_img;
+        a large mismatch means the forward and reverse mappings disagree (broken mapping), which
+        is shown in red regardless of how good the reverse RMSD looks.
 
         Thresholds are normalized to 1280x720 resolution:
             - < 0.2 px: Excellent (green)
@@ -2419,6 +2424,13 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
             color = "#FF8C00"  # Dark orange - marginal
         else:
             color = "#DC143C"  # Crimson - poor
+
+        # Forward/reverse consistency check
+        if rmsd_fwd_px is not None:
+            text += " | fwd {:.2f} px".format(rmsd_fwd_px)
+            if rmsd_fwd_px > 2.0*rmsd_img + 0.3:
+                text += "  MAPPING MISMATCH"
+                color = "#DC143C"  # broken mapping overrides the (good-looking) reverse RMSD
 
         self.rmsd_label.setText(text)
         self.rmsd_label.setStyleSheet("font-weight: bold; font-size: 12pt; color: {};".format(color))
