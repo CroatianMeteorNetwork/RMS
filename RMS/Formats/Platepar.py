@@ -1137,11 +1137,15 @@ class Platepar(object):
 
                 ### ###
 
-                # If this is the first fit of the distortion, set the forward parameters to be equal to the reverse
-                if first_platepar_fit:
-
-                    self.x_poly_fwd = np.array(self.x_poly_rev)
-                    self.y_poly_fwd = np.array(self.y_poly_rev)
+                # Always seed the forward fit from the freshly-fit reverse polynomial. The reverse
+                # fit is robust (pixel residual) and forward ~ reverse for the distortion, so this
+                # is a good starting point. Seeding from a stale/garbage x_poly_fwd (e.g. on a
+                # manual re-fit, or after a distortion-type change) can leave the forward fit stuck
+                # far from the solution because the sky-residual objective saturates -- producing a
+                # broken forward mapping (catalog overlay far off) while the reverse, and the RMSD,
+                # still look fine.
+                self.x_poly_fwd = np.array(self.x_poly_rev)
+                self.y_poly_fwd = np.array(self.y_poly_rev)
 
                 ### FORWARD MAPPING FIT ###
 
