@@ -778,6 +778,30 @@ class Platepar(object):
 
             return dist_sum
 
+        def _calcImageResidualsDistortionVect(params, platepar, jd, catalog_stars, img_stars, dimension):
+            """Vector-residual form of _calcImageResidualsDistortion for scipy.least_squares.
+               Returns per-star residuals; least_squares minimizes their sum of squares, which
+               equals the scalar dist_sum above, so the optimum is identical."""
+
+            pp_copy = copy.copy(platepar)
+
+            if (dimension == 'x') or (dimension == 'radial'):
+                pp_copy.x_poly_rev = params
+                pp_copy.y_poly_rev = np.zeros(platepar.poly_length)
+            else:
+                pp_copy.x_poly_rev = np.zeros(platepar.poly_length)
+                pp_copy.y_poly_rev = params
+
+            img_x, img_y, _ = img_stars.T
+            catalog_x, catalog_y, _ = getCatalogStarsImagePositions(catalog_stars, jd, pp_copy)
+
+            if dimension == 'x':
+                return catalog_x - img_x
+            elif dimension == 'y':
+                return catalog_y - img_y
+            else:
+                return np.concatenate([catalog_x - img_x, catalog_y - img_y])
+
         # Modify the residuals function so that it takes a list of arguments
         def _calcImageResidualsDistortionListArguments(params, *args, **kwargs):
             return [_calcImageResidualsDistortion(param_line, *args, **kwargs) for param_line in params]
@@ -900,6 +924,29 @@ class Platepar(object):
             )
 
             return separation_sum
+
+        def _calcSkyResidualsAstroAndDistortionRadialVect(params, platepar, jd, catalog_stars, img_stars):
+            """Vector-residual form of _calcSkyResidualsAstroAndDistortionRadial for scipy.least_squares.
+               Returns per-star angular separations; least_squares minimizes their sum of squares,
+               which equals the scalar separation_sum above, so the optimum is identical."""
+
+            pp_copy = copy.copy(platepar)
+
+            ra_ref, dec_ref, pos_angle_ref, F_scale = params[:4]
+            pp_copy.RA_d = (360 * ra_ref) % (360)
+            pp_copy.dec_d = -90 + (90 * dec_ref + 90) % (180.000001)
+            pp_copy.pos_angle_ref = (360 * pos_angle_ref) % (360)
+            pp_copy.F_scale = abs(F_scale)
+            pp_copy.x_poly_fwd = np.array(params[4:])
+
+            img_x, img_y, _ = img_stars.T
+            ra_array, dec_array = getPairedStarsSkyPositions(img_x, img_y, jd, pp_copy)
+            ra_catalog, dec_catalog, _ = catalog_stars.T
+
+            return angularSeparation(
+                np.radians(ra_array), np.radians(dec_array),
+                np.radians(ra_catalog), np.radians(dec_catalog),
+            )
 
         def _calcSkyResidualsAstroAndDistortionRadialNN(params, platepar, jd, catalog_stars, img_stars):
             """Like _calcSkyResidualsAstroAndDistortionRadial but uses nearest-neighbor matching.
@@ -1541,14 +1588,16 @@ class Platepar(object):
                         prev_x_poly_rev = self.x_poly_rev.copy()
 
                         ### FORWARD MAPPING FIT ###
-                        res = scipy.optimize.minimize(
-                            cost_func,
+                        # Prototype: Levenberg-Marquardt least-squares on the vector residual.
+                        # Converges in far fewer evals than Nelder-Mead and lands on the same
+                        # (or lower-residual) least-squares minimum.
+                        res = scipy.optimize.least_squares(
+                            _calcSkyResidualsAstroAndDistortionRadialVect,
                             p0,
                             args=(self, jd, catalog_stars, img_stars),
-                            method='Nelder-Mead',
-                            options=opt_options_final,
+                            method='lm', ftol=1e-12, xtol=1e-12, gtol=1e-12,
                         )
-                        fwd_status = "maxiter" if res.nit >= opt_options_final['maxiter'] else "converged"
+                        fwd_status = "converged" if res.success else "stopped"
 
                         # Update fitted astrometric parameters (Unnormalize the pointing parameters)
                         ra_ref, dec_ref, pos_angle_ref, F_scale = res.x[:4]
@@ -1573,15 +1622,13 @@ class Platepar(object):
                         # cameras with extreme distortion center offset where the optimizer
                         # can diverge when starting from zeros
                         rev_init = self.x_poly_fwd.copy()
-                        rev_maxiter = 10000
-                        res_rev = scipy.optimize.minimize(
-                            _calcImageResidualsDistortion,
+                        res_rev = scipy.optimize.least_squares(
+                            _calcImageResidualsDistortionVect,
                             rev_init,
                             args=(self, jd, catalog_stars, img_stars, 'radial'),
-                            method='Nelder-Mead',
-                            options={'maxiter': rev_maxiter, 'adaptive': True},
+                            method='lm', ftol=1e-12, xtol=1e-12, gtol=1e-12,
                         )
-                        rev_status = "maxiter" if res_rev.nit >= rev_maxiter else "converged"
+                        rev_status = "converged" if res_rev.success else "stopped"
 
                         self.x_poly_rev = res_rev.x
 
