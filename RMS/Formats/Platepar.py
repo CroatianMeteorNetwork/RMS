@@ -1743,6 +1743,17 @@ class Platepar(object):
                     self.x_poly_rev = np.array(xf[4:])
                     self.updateRefAltAz()
 
+                    # The joint fit above moved the pointing, which leaves the forward distortion
+                    # (fit to the previous pointing) stale -- the forward and reverse mappings
+                    # would disagree (broken image<->sky round-trip). Re-fit the forward
+                    # distortion to the refined pointing so the two mappings stay consistent.
+                    res_fwd = _lstsqFit(
+                        _calcSkyResidualsDistortionVect,
+                        self.x_poly_fwd,
+                        (self, jd, catalog_stars, img_stars, 'radial'),
+                    )
+                    self.x_poly_fwd = res_fwd.x
+
                 ### ###
 
         else:
