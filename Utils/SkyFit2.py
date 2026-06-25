@@ -15250,12 +15250,30 @@ class PlateTool(QtWidgets.QMainWindow):
             # Handle FigureCanvasQTAgg error on some versions of Qt
             print("Failed to set the window title!")
 
+        # Wrap azimuths so a cluster straddling the 0/360 boundary is plotted contiguously instead of being
+        #   split between the left and right edges. Find the widest empty arc; if it is not at the 0/360 seam,
+        #   the data crosses the seam, so unwrap by adding 360 to the azimuths below the cut point.
+        azim_plot = np.array(azim_list, dtype=float)
+        azim_wrapped = False
+        if azim_plot.size > 2:
+            azim_sorted = np.sort(azim_plot)
+            gaps = np.diff(azim_sorted)
+            seam_gap = (azim_sorted[0] + 360.0) - azim_sorted[-1]  # empty arc across the 0/360 seam
+            if gaps.size and (gaps.max() > seam_gap):
+                cut = azim_sorted[np.argmax(gaps)]  # azimuths at/below this are shifted up by 360
+                azim_plot = np.where(azim_plot <= cut, azim_plot + 360.0, azim_plot)
+                azim_wrapped = True
+
         # Plot azimuth vs azimuth error
-        ax_azim.scatter(azim_list, 60*np.array(azim_residuals), s=2, c='k', zorder=3, picker=5)
+        ax_azim.scatter(azim_plot, 60*np.array(azim_residuals), s=2, c='k', zorder=3, picker=5)
 
         ax_azim.grid()
         ax_azim.set_xlabel("Azimuth (deg, +E of due N)")
         ax_azim.set_ylabel("Azimuth error (arcmin)")
+
+        # When unwrapped past 360, label ticks with the real (mod 360) azimuth values
+        if azim_wrapped:
+            ax_azim.xaxis.set_major_formatter(ticker.FuncFormatter(lambda v, _: "{:.0f}".format(v % 360)))
 
         # Plot elevation vs elevation error
         ax_elev.scatter(elev_list, 60*np.array(elev_residuals), s=2, c='k', zorder=3, picker=5)
@@ -15266,7 +15284,8 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # If the FOV is larger than 45 deg, set maximum limits on azimuth and elevation
         if np.hypot(*computeFOVSize(self.platepar)) > 45:
-            ax_azim.set_xlim([0, 360])
+            if not azim_wrapped:
+                ax_azim.set_xlim([0, 360])
             ax_elev.set_xlim([0, 90])
 
         # Plot sky radius vs radius error
@@ -15422,7 +15441,7 @@ class PlateTool(QtWidgets.QMainWindow):
         }
         
         self.astrometry_fit_data = {
-            'azim': (azim_list, 60*np.array(azim_residuals)),
+            'azim': (azim_plot, 60*np.array(azim_residuals)),
             'elev': (elev_list, 60*np.array(elev_residuals)),
             'skyradius': (skyradius_list, 60*np.array(skyradius_residuals)),
             'x': (x_list, x_residuals),
