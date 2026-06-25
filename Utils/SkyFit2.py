@@ -14904,43 +14904,50 @@ class PlateTool(QtWidgets.QMainWindow):
                         message_type="warning")
             return
 
+        # Disable the button while computing so a queued second click can't re-run it
+        button = self.tab.param_manager.check_overfit_button
+        button.setEnabled(False)
         self.status_bar.showMessage("Computing held-out RMSD (cross-validation)...")
         QtWidgets.QApplication.processEvents()
 
-        result = self.crossValidatedRMSD()
-        if result is None:
-            msg = "Need more matched pairs for a stable held-out RMSD (have {}).".format(
-                len(self.paired_stars))
-            print(msg)
+        try:
+            result = self.crossValidatedRMSD()
+            if result is None:
+                msg = "Need more matched pairs for a stable held-out RMSD (have {}).".format(
+                    len(self.paired_stars))
+                print(msg)
+                self.status_bar.showMessage(msg)
+                return
+
+            cv_rmsd, n_folds = result
+
+            # In-sample RMSD for comparison
+            img_stars = np.array(self.paired_stars.imageCoords())
+            catalog_stars = np.array(self.paired_stars.skyCoords())
+            jd = date2JD(*self.img_handle.currentTime())
+            cat_x, cat_y, _ = getCatalogStarsImagePositions(catalog_stars, jd, self.platepar)
+            in_sample = float(np.sqrt(np.mean((cat_x - img_stars[:, 0])**2 + (cat_y - img_stars[:, 1])**2)))
+
+            gap = cv_rmsd - in_sample
+            msg = ("Held-out RMSD ({:d}-fold CV): {:.3f} px   in-sample: {:.3f} px   gap: {:+.3f} px"
+                   .format(n_folds, cv_rmsd, in_sample, gap))
+            print("\n" + msg)
+            overfit = gap > 0.5*in_sample + 0.05
+            if overfit:
+                print("  -> large gap: the fit may be OVERFITTING (model too flexible for this many stars).")
+            else:
+                print("  -> gap is small: the fit generalises well (not overfitting).")
             self.status_bar.showMessage(msg)
-            return
 
-        cv_rmsd, n_folds = result
+            # Show it in the Fit Parameters tab next to the in-sample RMSD
+            color = "#DC143C" if overfit else "#228B22"  # crimson if overfitting, green if clean
+            self.tab.param_manager.cv_rmsd_label.setText(
+                "Held-out ({}-fold): {:.3f} px   (gap {:+.3f} px)".format(n_folds, cv_rmsd, gap))
+            self.tab.param_manager.cv_rmsd_label.setStyleSheet(
+                "font-size: 9pt; font-weight: bold; color: {};".format(color))
 
-        # In-sample RMSD for comparison
-        img_stars = np.array(self.paired_stars.imageCoords())
-        catalog_stars = np.array(self.paired_stars.skyCoords())
-        jd = date2JD(*self.img_handle.currentTime())
-        cat_x, cat_y, _ = getCatalogStarsImagePositions(catalog_stars, jd, self.platepar)
-        in_sample = float(np.sqrt(np.mean((cat_x - img_stars[:, 0])**2 + (cat_y - img_stars[:, 1])**2)))
-
-        gap = cv_rmsd - in_sample
-        msg = ("Held-out RMSD ({:d}-fold CV): {:.3f} px   in-sample: {:.3f} px   gap: {:+.3f} px"
-               .format(n_folds, cv_rmsd, in_sample, gap))
-        print("\n" + msg)
-        overfit = gap > 0.5*in_sample + 0.05
-        if overfit:
-            print("  -> large gap: the fit may be OVERFITTING (model too flexible for this many stars).")
-        else:
-            print("  -> gap is small: the fit generalises well (not overfitting).")
-        self.status_bar.showMessage(msg)
-
-        # Show it in the Fit Parameters tab next to the in-sample RMSD
-        color = "#DC143C" if overfit else "#228B22"  # crimson if overfitting, green if clean
-        self.tab.param_manager.cv_rmsd_label.setText(
-            "Held-out ({}-fold): {:.3f} px   (gap {:+.3f} px)".format(n_folds, cv_rmsd, gap))
-        self.tab.param_manager.cv_rmsd_label.setStyleSheet(
-            "font-size: 9pt; font-weight: bold; color: {};".format(color))
+        finally:
+            button.setEnabled(True)
 
 
     def fitPickedStars(self):
