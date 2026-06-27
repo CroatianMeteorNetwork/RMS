@@ -10,14 +10,14 @@ import multiprocessing
 import traceback
 
 import RMS.ConfigReader as cr
-from RMS.Logger import getLogger
+from RMS.Logger import getLogger, getLoggingQueue
 
 # Get the logger from the main module
 log = getLogger("rmslogger")
 
 
 def _runExternalInChild(external_script_dir, module_name, function_name, captured_night_dir,
-                        archived_night_dir, config, inhibit_logging):
+                        archived_night_dir, config, inhibit_logging, logging_queue):
     """ Runs in the child process: re-establishes sys.path, imports the user module and calls
         the requested function.
 
@@ -35,19 +35,28 @@ def _runExternalInChild(external_script_dir, module_name, function_name, capture
         archived_night_dir: [str] Path to the Archived night directory.
         config: [Config instance]
         inhibit_logging: [bool] If True, remove inherited log handlers in this process.
+        logging_queue: [multiprocessing.Queue] Shared logging queue, or None. Used to
+            re-attach logging when it is not inhibited (handlers are not inherited under
+            'forkserver'/'spawn').
     """
 
     if external_script_dir not in sys.path:
         sys.path.insert(0, external_script_dir)
 
-    # If logging is to be inhibited, remove all handlers from the root logger
-    if inhibit_logging and ('logging' in sys.modules):
+    if inhibit_logging:
+        # Remove any (inherited) handlers so the external script does not log to the RMS log
         import logging
         root = logging.getLogger()
         if root.handlers:
             for handler in root.handlers[:]:
                 root.removeHandler(handler)
                 handler.close()
+    else:
+        # Re-attach logging so the external script's records reach the listener, which under
+        # 'forkserver'/'spawn' a fresh child does not inherit. Logging only - signal handling
+        # is left untouched for the user script.
+        from RMS.Logger import initChildLogging
+        initChildLogging(logging_queue, config)
 
     # Import the user module and resolve the function in the child process
     module = importlib.import_module(module_name)
@@ -113,7 +122,8 @@ def runExternalScript(captured_night_dir, archived_night_dir, config):
         p = multiprocessing.Process(
             target=_runExternalInChild,
             args=(external_script_dir, module_name, config.external_function_name,
-                  captured_night_dir, archived_night_dir, config, inhibit_logging))
+                  captured_night_dir, archived_night_dir, config, inhibit_logging,
+                  getLoggingQueue()))
         p.start()
 
         if config.external_script_log:
