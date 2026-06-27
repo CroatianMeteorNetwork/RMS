@@ -1268,7 +1268,7 @@ def serialize(config, format_nicely=True, as_json=False, night_directory=None, d
                     'fits_file_shortfall_as_time_ephemeris',
                     'detections_after_ml',
                     'media_backend','protocol_in_use','jitter_quality','dropped_frame_rate','kht_wrapper_count',
-                    'traceback_count', 'traceback_count' ]
+                    'traceback_count']
 
 
     # Warn for duplicated keys in ordering list
