@@ -45,6 +45,31 @@ if sys.version_info[0] < 3:
 log = getLogger("rmslogger")
 
 
+def frameBufferShape(config):
+    """ Return the shape of the shared frame buffer used for FF compression: (256, H, W).
+
+    The width/height are padded by one pixel in the rare case the buffer size is an exact
+    multiple of 512 KiB, to avoid a CPU-cache aliasing performance issue.
+
+    This is the single source of truth for the buffer shape, used both by the parent (which
+    allocates the multiprocessing.Array) and by the child processes (which rebuild a numpy
+    view over that shared memory in their own run()). Under the 'forkserver'/'spawn' start
+    methods a numpy view cannot be passed between processes (it pickles by value and becomes
+    a private copy), so each process must build its own view from the shared mp.Array base.
+
+    Arguments:
+        config: [Config] Configuration object (uses width and height).
+
+    Return:
+        [tuple] (256, height [+1], width [+1])
+    """
+    array_pad = 0
+    if (256*config.width*config.height) % (512*1024) == 0:
+        array_pad = 1
+
+    return (256, config.height + array_pad, config.width + array_pad)
+
+
 def setMultiprocessingStartMethod(preferred="forkserver"):
     """ Pin the multiprocessing start method for consistent behavior across Python versions.
 

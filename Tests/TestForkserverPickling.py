@@ -26,6 +26,13 @@ def _dummy_worker(x):
     return x*2
 
 
+def _write_shared_buffer(base, shape):
+    """ Rebuild a numpy view over the shared mp.Array base and write into it (runs in a child). """
+    import numpy as np
+    arr = np.ctypeslib.as_array(base.get_obj()).reshape(shape)
+    arr[:] = 7
+
+
 def _logcheck_worker(x):
     """ Worker that reports the root logger handlers present in its process. Used to confirm
         the worker re-attached logging (a QueueHandler) under spawn.
@@ -126,6 +133,31 @@ def test_queuedpool_worker_reattaches_logging():
         assert 'QueueHandler' in results[0]   # logging was re-attached in the worker
     finally:
         pool.shutdownManager()
+
+
+def test_shared_frame_buffer_is_shared_under_spawn():
+    """ The frame buffer must be passed to children as an mp.Array base, with the numpy view
+        rebuilt in the child, so capture and compression share memory under forkserver/spawn.
+        Passing a numpy view instead pickles by value, giving each child a private copy -
+        producing blank FF files and zero star detection.
+    """
+    import ctypes
+    import numpy as np
+
+    multiprocessing.set_start_method('spawn', force=True)
+
+    shape = (4, 3)  # tiny stand-in for (256, height, width)
+    base = multiprocessing.Array(ctypes.c_uint8, shape[0]*shape[1])
+    parent_view = np.ctypeslib.as_array(base.get_obj()).reshape(shape)
+    assert parent_view.max() == 0
+
+    proc = multiprocessing.Process(target=_write_shared_buffer, args=(base, shape))
+    proc.start()
+    proc.join(30)
+
+    assert proc.exitcode == 0
+    # The child's write is visible in the parent only if the memory is genuinely shared
+    assert parent_view.max() == 7
 
 
 def test_getLoggingQueue_reads_root_queuehandler():

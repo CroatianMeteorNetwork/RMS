@@ -44,7 +44,7 @@ from RMS.Misc import obfuscatePassword
 from RMS.Routines.GstreamerCapture import GstVideoFile, getStructureValue
 from RMS.Formats.ObservationSummary import addObsParam, getObservationSummaryDict
 from RMS.RawFrameSave import RawFrameSaver
-from RMS.Misc import RmsDateTime, mkdirP, UTCFromTimestamp
+from RMS.Misc import RmsDateTime, mkdirP, UTCFromTimestamp, frameBufferShape
 from RMS.Formats import FTfile, FTStruct
 from RMS.Logger import LoggingManager, getLogger, gstDebugLogger, getLoggingQueue, initChildProcess
 from RMS.CaptureModeSwitcher import switchCameraMode
@@ -162,10 +162,15 @@ class BufferedCapture(Process):
         else:
             self.camera_mode_switch_trigger = camera_mode_switch_trigger
 
-        # Store shared memory arrays and values for compressor (these are designed for multiprocessing)
-        self.array1 = array1
+        # Store shared memory arrays and values for compressor (these are designed for multiprocessing).
+        # array1/array2 are multiprocessing.Array BASE objects (picklable across forkserver/spawn).
+        # The numpy views over them are rebuilt in run() so they stay backed by shared memory; a
+        # numpy view passed here would pickle by value and disconnect this process from the buffer.
+        self.array1_base = array1
+        self.array2_base = array2
+        self.array1 = None
+        self.array2 = None
         self.start_time1 = start_time1
-        self.array2 = array2
         self.start_time2 = start_time2
         self.start_time1.value = 0
         self.start_time2.value = 0
@@ -1773,6 +1778,13 @@ class BufferedCapture(Process):
         try:
             # Re-establish logging and signal handling in the child (no-op under 'fork')
             initChildProcess(self.logging_queue, self.config)
+
+            # Rebuild numpy views over the shared frame buffers in this process. Under
+            # forkserver/spawn the views cannot be inherited, so build them here from the
+            # shared multiprocessing.Array base objects (same shared memory the Compressor maps).
+            frame_buffer_shape = frameBufferShape(self.config)
+            self.array1 = np.ctypeslib.as_array(self.array1_base.get_obj()).reshape(frame_buffer_shape)
+            self.array2 = np.ctypeslib.as_array(self.array2_base.get_obj()).reshape(frame_buffer_shape)
 
             log.debug("Initializing process-specific resources...")
 
