@@ -24,6 +24,7 @@ import multiprocessing
 from math import floor
 
 import cv2
+import numpy as np
 
 from RMS.Logger import getLogger, getLoggingQueue, initChildProcess
 from RMS.Misc import mkdirP
@@ -38,31 +39,40 @@ class RawFrameSaver(multiprocessing.Process):
 
     running = False
     
-    def __init__(self, saved_frames_dir, array1, start_time1, array2, start_time2, tsArray1, tsArray2, daytime_mode, config):
+    def __init__(self, saved_frames_dir, array1, start_time1, array2, start_time2, tsArray1, tsArray2, daytime_mode, config, raw_array_shape):
         """
 
         Arguments:
             saved_frames_dir: directory to save raw frames to
-            array1: first numpy array in shared memory of raw video frames
+            array1: multiprocessing.Array base for the first raw-frame buffer (shared memory)
             start_time1: float in shared memory that holds time of first raw frame in array1
-            array2: second numpy array in shared memory
+            array2: multiprocessing.Array base for the second raw-frame buffer
             start_time1: float in shared memory that holds time of first raw frame in array2
-            tsArray1: first numpy array in shared memory for timestamps
-            tsArray2: second numpy array in shared memory for timestamps
+            tsArray1: multiprocessing.Array base for the first timestamp buffer
+            tsArray2: multiprocessing.Array base for the second timestamp buffer
             config: configuration class
             daytime_mode: [bool] True if the camera is in daytime mode, False if in nightime mode
+            raw_array_shape: [tuple] Shape of the raw-frame buffer, used to rebuild the numpy view.
 
         """
-        
+
         super(RawFrameSaver, self).__init__()
-        
+
         self.saved_frames_dir = saved_frames_dir
-        self.array1 = array1
+        # array1/array2 and the timestamp arrays are multiprocessing.Array BASE objects (picklable
+        # across forkserver/spawn). The numpy views over them are rebuilt in run() so they stay
+        # backed by the same shared memory the capture process writes into.
+        self.array1_base = array1
+        self.array2_base = array2
+        self.timeStamps1_base = tsArray1
+        self.timeStamps2_base = tsArray2
+        self.raw_array_shape = raw_array_shape
+        self.array1 = None
+        self.array2 = None
+        self.timeStamps1 = None
+        self.timeStamps2 = None
         self.start_time1 = start_time1
-        self.array2 = array2
         self.start_time2 = start_time2
-        self.timeStamps1 = tsArray1
-        self.timeStamps2 = tsArray2
         self.daytime_mode = daytime_mode
         self.config = config
 
@@ -224,6 +234,14 @@ class RawFrameSaver(multiprocessing.Process):
 
         # Re-establish logging and signal handling in the child (no-op under 'fork')
         initChildProcess(self.logging_queue, self.config)
+
+        # Rebuild numpy views over the shared raw-frame and timestamp buffers in this process.
+        # Under forkserver/spawn the views cannot be inherited, so build them here from the
+        # shared multiprocessing.Array base objects (same memory the capture process writes).
+        self.array1 = np.ctypeslib.as_array(self.array1_base.get_obj()).reshape(self.raw_array_shape)
+        self.array2 = np.ctypeslib.as_array(self.array2_base.get_obj()).reshape(self.raw_array_shape)
+        self.timeStamps1 = np.ctypeslib.as_array(self.timeStamps1_base.get_obj())
+        self.timeStamps2 = np.ctypeslib.as_array(self.timeStamps2_base.get_obj())
 
         try:
             # Repeat until the raw frame saver is killed from the outside

@@ -1762,8 +1762,9 @@ class BufferedCapture(Process):
 
             # Store current array configuration
             self.current_raw_frame_shape = frame_shape
+            self.raw_array_shape = array_shape
             self.current_mode = self.daytime_mode.value if self.daytime_mode is not None else False
-            
+
             return True
 
         except Exception as e:
@@ -2118,13 +2119,17 @@ class BufferedCapture(Process):
 
                         else:
                             # Initialize new frame saver
+                            # Pass the multiprocessing.Array base objects (not numpy views), so the
+                            # saver rebuilds its own views over the same shared memory under
+                            # forkserver/spawn (a view would pickle by value and disconnect it).
                             self.raw_frame_saver = RawFrameSaver(
                                 self.saved_frames_dir,
-                                self.shared_raw_array, self.start_raw_time1,
-                                self.shared_raw_array2, self.start_raw_time2,
-                                self.sharedTimestamps, self.sharedTimestamps2,
+                                self.shared_raw_array_base, self.start_raw_time1,
+                                self.shared_raw_array_base2, self.start_raw_time2,
+                                self.shared_timestamps_base, self.shared_timestamps_base2,
                                 self.daytime_mode.value,
-                                self.config
+                                self.config,
+                                self.raw_array_shape
                             )
                             self.raw_frame_saver.start()
                             self.raw_frame_count = 0
