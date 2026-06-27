@@ -282,7 +282,7 @@ class Config:
 
         self.reboot_after_processing = False
         self.reboot_lock_file = ".reboot_lock"
-        self.time_server = "time_server"
+        self.time_server = "time.cloudflare.com"
 
         ##### Capture
         self.deviceID = 0
