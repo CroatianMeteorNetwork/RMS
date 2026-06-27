@@ -128,6 +128,27 @@ def test_queuedpool_worker_reattaches_logging():
         pool.shutdownManager()
 
 
+def test_getLoggingQueue_reads_root_queuehandler():
+    """ getLoggingQueue() must find the queue from the root logger's QueueHandler even when
+        the global LoggingManager was never used. StartCapture/Reprocess create their own
+        LoggingManager() instance, so the global manager's queue stays None; without this
+        fallback every child process would receive None and silently stop logging under
+        forkserver/spawn.
+    """
+    import logging
+    import logging.handlers
+    from RMS.Logger import getLoggingQueue
+
+    root = logging.getLogger()
+    saved = root.handlers[:]
+    try:
+        q = multiprocessing.Queue()
+        root.handlers = [logging.handlers.QueueHandler(q)]
+        assert getLoggingQueue() is q
+    finally:
+        root.handlers = saved
+
+
 def test_uploadmanager_getstate_drops_manager():
     """ UploadManager.__getstate__ must drop the SyncManager but keep the queue proxies. """
     pytest.importorskip("paramiko")  # UploadManager import chain

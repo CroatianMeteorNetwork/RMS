@@ -701,7 +701,19 @@ def getLoggingQueue():
         [multiprocessing.Queue or None] The shared logging queue, or None if logging was
             never initialized in this process.
     """
-    return _global_logging_manager.logging_queue
+    # Prefer the global manager's queue, if it was used
+    if _global_logging_manager.logging_queue is not None:
+        return _global_logging_manager.logging_queue
+
+    # Otherwise read the queue straight from the root logger's QueueHandler. This is the
+    # authoritative source and works no matter which LoggingManager instance configured
+    # logging - e.g. StartCapture/Reprocess create their own LoggingManager() rather than
+    # using the global one, so the global manager's queue stays None.
+    for handler in logging.getLogger().handlers:
+        if isinstance(handler, logging.handlers.QueueHandler):
+            return handler.queue
+
+    return None
 
 
 def initChildLogging(logging_queue, config):
