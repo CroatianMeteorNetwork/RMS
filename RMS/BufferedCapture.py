@@ -2480,10 +2480,13 @@ if __name__ == "__main__":
     print('Media backend: {}'.format(config.media_backend))
 
 
-    # Init dummy shared memory
-    sharedArrayBase = multiprocessing.Array(ctypes.c_uint8, 256*(config.width)*(config.height))
-    sharedArray = np.ctypeslib.as_array(sharedArrayBase.get_obj())
-    sharedArray = sharedArray.reshape(256, (config.height), (config.width))
+    # Init dummy shared memory. Pass the multiprocessing.Array base (not a numpy view) to
+    # BufferedCapture, which rebuilds its own view in run() - matching the production path and
+    # keeping it working under the forkserver/spawn start methods.
+    frame_buffer_shape = frameBufferShape(config)
+    frame_buffer_len = frame_buffer_shape[0]*frame_buffer_shape[1]*frame_buffer_shape[2]
+    sharedArrayBase = multiprocessing.Array(ctypes.c_uint8, frame_buffer_len)
+    sharedArray = sharedArrayBase
     startTime = multiprocessing.Value('d', 0.0)
 
 
