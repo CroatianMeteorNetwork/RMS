@@ -197,6 +197,9 @@ def getTimeClient():
         except subprocess.CalledProcessError:
             # Not active or not recognised
             pass
+        except Exception:
+            # other error such as systemctl not available
+            pass
     return "Not recognized"
 
 def timeSyncStatus(config, conn, force_client=None):
@@ -238,7 +241,11 @@ def timeSyncStatus(config, conn, force_client=None):
 
     else:
         addObsParam(conn, "clock_measurement_source", "Not detected")
-        remote_time_query, uncertainty = timestampFromNTP()
+        try:
+            remote_time_query, uncertainty = timestampFromNTP(addr=config.time_server)
+        except Exception:
+            remote_time_query, uncertainty = (None, None)
+
         if remote_time_query is not None:
             local_time_query = (datetime.datetime.now(datetime.timezone.utc)
                                 - datetime.datetime(1970, 1, 1)
@@ -251,12 +258,15 @@ def timeSyncStatus(config, conn, force_client=None):
             addObsParam(conn, "clock_error_uncertainty_ms", uncertainty)
         addObsParam(conn, "clock_ahead_ms", ahead_ms)
 
-        result_list = subprocess.run(['timedatectl','status'], capture_output = True).stdout.splitlines()
+        try:
+            result_list = subprocess.run(['timedatectl','status'], capture_output = True).stdout.splitlines()
+        except Exception:
+            result_list = []
 
         for raw_result in result_list:
             result = raw_result.decode('ascii')
             if "synchronized" in result:
-                conn = getObsDBConn(config)
+                #conn = getObsDBConn(config)
                 if result.split(":")[1].strip() == "no":
                     addObsParam(conn, "clock_synchronized", False)
                 else:
@@ -1290,7 +1300,11 @@ def finalizeObservationSummary(config, night_data_dir, platepar=None):
 
 if __name__ == "__main__":
 
-    config = parse(os.path.expanduser("~/source/RMS/.config"))
+    # to allow the script to be run on an arbitrary target eg multicam or tests
+    if len(sys.argv) > 1:
+        config = parse(os.path.expanduser(sys.argv[1]))
+    else:
+        config = parse(os.path.expanduser("~/source/RMS/.config"))
 
     obs_db_conn = getObsDBConn(config)
 

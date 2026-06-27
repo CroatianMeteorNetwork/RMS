@@ -283,6 +283,8 @@ class Config:
         self.reboot_after_processing = False
         self.reboot_lock_file = ".reboot_lock"
         
+        self.time_server = 'time.cloudflare.com'
+
         ##### Capture
         self.deviceID = 0
 
@@ -971,6 +973,9 @@ def parseSystem(config, parser):
 
     if parser.has_option(section, "public_elevation"):
         config.pub_elevation = parser.getfloat(section, "public_elevation")
+
+    if parser.has_option(section, "time_server") and parser.get(section, "time_server").strip() !='':
+        config.time_server = parser.get(section, "time_server")
 
 
 def parseCapture(config, parser):
