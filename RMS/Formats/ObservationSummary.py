@@ -463,7 +463,8 @@ def timeSyncStatus(config, d, force_client=None):
 
     else:
         addObsParam(d, "clock_measurement_source", "Not detected")
-        remote_time_query, uncertainty = timestampFromNTP(config.time_server)
+        remote_time_query, uncertainty, time_server = timestampFromNTP(config.time_server)
+        addObsParam(d, "time_server", time_server)
         if remote_time_query is not None:
             local_time_query = (datetime.datetime.now(datetime.timezone.utc)
                                 - datetime.datetime(1970, 1, 1)
@@ -739,16 +740,16 @@ def timestampFromNTP(addr='time.cloudflare.com'):
         # Next calculation assumes that remote and local clock are running at identical rates
         estimated_network_delay = local_clock_measured_response_time - remote_clock_measured_processing_time
         if estimated_network_delay < 0:
-            return None, None
+            return None, None, addr
 
         # Now calculate estimated clock offsets
         clock_offset_out_leg = remote_clock_time_receive_timestamp - local_clock_transmit_timestamp
         clock_offset_return_leg = remote_clock_time_transmit_timestamp - local_clock_receive_timestamp
         estimated_offset = (clock_offset_out_leg + clock_offset_return_leg)/2
         adjusted_time = remote_clock_time_transmit_timestamp + estimated_offset
-        return adjusted_time, estimated_network_delay
+        return adjusted_time, estimated_network_delay, addr
     else:
-        return None, None
+        return None, None, addr
 
 def addObsParam(d, key, value):
     """Add a single key value pair into the observation summary dictionary
@@ -1257,7 +1258,7 @@ def serialize(config, format_nicely=True, as_json=False, night_directory=None, d
                     'camera_lens','camera_fov_h','camera_fov_v',
                     'camera_pointing_alt','camera_pointing_az',
                     'camera_information', 'camera_firmware_build_date', 'camera_firmware_version',
-                    'clock_measurement_source', 'clock_synchronized', 'clock_ahead_ms', 'clock_error_uncertainty_ms',
+                    'clock_measurement_source', 'clock_synchronized', 'clock_ahead_ms', 'clock_error_uncertainty_ms', 'time_server',
                     'start_time', 'duration_from_start_of_observation', 'continuous_capture', 'photometry_good',
                     'time_start_ephem', 'time_first_fits_file', 'time_first_detection', 'time_last_detection',
                     'time_end_ephem', 'time_last_fits_file', 'days_since_last_detection',
