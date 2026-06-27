@@ -235,7 +235,6 @@ def storeDictInDB(conn, d, debug=False):
     if len(dropped) != 0:
         log.warning(f"No columns for following keys: {sorted(dropped)}")
 
-
     # Normalise booleans safely (TEXT columns expect strings)
     clean = {
         k: ("True" if v is True else "False" if v is False else v)
@@ -1259,10 +1258,9 @@ def serialize(config, format_nicely=True, as_json=False, night_directory=None, d
                     'camera_pointing_alt','camera_pointing_az',
                     'camera_information', 'camera_firmware_build_date', 'camera_firmware_version',
                     'clock_measurement_source', 'clock_synchronized', 'clock_ahead_ms', 'clock_error_uncertainty_ms',
-                    'start_time', 'duration_from_start_of_observation', 'continuous_capture',
-                    'photometry_good', 'star_catalog_file',
-                    'time_start_ephem', 'time_first_fits_file', 'time_first_detection',
-                    'time_end_ephem', 'time_last_fits_file', 'time_last_detection', 'days_since_last_detection',
+                    'start_time', 'duration_from_start_of_observation', 'continuous_capture', 'photometry_good',
+                    'time_start_ephem', 'time_first_fits_file', 'time_first_detection', 'time_last_detection',
+                    'time_end_ephem', 'time_last_fits_file', 'days_since_last_detection',
                     'total_expected_fits','total_fits',
                     'fits_files_from_duration','fits_file_shortfall', 'fits_file_shortfall_as_time',
                     'capture_duration_from_fits',
@@ -1270,11 +1268,21 @@ def serialize(config, format_nicely=True, as_json=False, night_directory=None, d
                     'fits_file_shortfall_as_time_ephemeris',
                     'detections_after_ml',
                     'media_backend','protocol_in_use','jitter_quality','dropped_frame_rate','kht_wrapper_count',
-                    'traceback_count']
+                    'traceback_count', 'traceback_count' ]
+
+
+    # Warn for duplicated keys in ordering list
+    seen = set()
+    for x in ordering:
+        if x in seen:
+            log.warning(f"Duplicated key {x} in ordering list")
+        else:
+            seen.add(x)
 
     # Dedupe while preserving first occurrence - the ordering list contains a few repeats
     # (e.g. media_backend, star_catalog_file) which would otherwise produce duplicate output lines.
     ordering = list(dict.fromkeys(ordering))
+
 
     # Use this print call to check the ordering
     # print("Ordering {}".format(ordering))
