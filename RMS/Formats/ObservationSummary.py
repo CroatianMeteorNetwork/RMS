@@ -186,12 +186,12 @@ def addRequiredColumns(conn, d):
         d: [dict] Dictionary of keys and values for the observation summary.
 
      Return:
-        Nothing.
+        [set] columns existing in the table
     """
 
     # If d has not yet been initialised, return to prevent iterating over None
     if d is None:
-        log.info("Not adding columns for an empty observation summary dictionary")
+        log.info("Not adding columns for observation summary dictionary which is None")
         return
 
     existing = getColumns(conn)
@@ -204,6 +204,8 @@ def addRequiredColumns(conn, d):
         if key.lower() not in existing:
             sql_command = f"ALTER TABLE {OBSERVATIONS_TABLE_NAME} ADD COLUMN {key.lower()} TEXT"
             conn.execute(sql_command)
+
+    return set(getColumns(conn))
 
 def storeDictInDB(conn, d, debug=False):
     """Store the dict d in the observation summary database, create new columns if needed.
@@ -219,18 +221,25 @@ def storeDictInDB(conn, d, debug=False):
         Nothing.
     """
 
-    # Nothing to store if the dict was never initialised
+    # Nothing to store if the dict is None, return early
     if d is None:
         log.info("Not storing an empty observation summary in the database")
         return
 
     # Ensure schema is up to date
-    addRequiredColumns(conn, d)
+    existing_columns = addRequiredColumns(conn, d)
+
+    dict_filtered_by_columns = {k: v for k, v in d.items() if k in existing_columns}
+
+    dropped = set(d.keys()) - set(dict_filtered_by_columns.keys())
+    if len(dropped) != 0:
+        log.warning(f"No columns for following keys: {sorted(dropped)}")
+
 
     # Normalise booleans safely (TEXT columns expect strings)
     clean = {
         k: ("True" if v is True else "False" if v is False else v)
-        for k, v in d.items()
+        for k, v in dict_filtered_by_columns.items()
     }
 
     # Only store the basename for night_data_dir
@@ -252,7 +261,7 @@ def storeDictInDB(conn, d, debug=False):
     sql_command += f"VALUES ({placeholders})\n"
     sql_command += f"ON CONFLICT(night_data_dir) DO UPDATE SET {assignments}\n"
 
-    # Show the SQL with placeholders (safe)
+    # Show the SQL with placeholders
     if debug:
         print(sql_command)
         print(values)
