@@ -206,13 +206,14 @@ def addRequiredColumns(conn, d):
             conn.execute(sql_command)
 
 def storeDictInDB(conn, d, debug=False):
-    """
-    Store the dict d in the observation summary database.
+    """Store the dict d in the observation summary database, create new columns if needed.
 
     Arguments:
         conn: connection to database.
         d: [dict] Dictionary of keys and values for the observation summary.
 
+    Keyword Arguments:
+        debug: [bool] Optional, default False, pring debugging information
 
     Return:
         Nothing.
