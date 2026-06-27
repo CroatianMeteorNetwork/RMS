@@ -1273,11 +1273,11 @@ def serialize(config, format_nicely=True, as_json=False, night_directory=None, d
 
     # Warn for duplicated keys in ordering list
     seen = set()
-    for x in ordering:
-        if x in seen:
-            log.warning(f"Duplicated key {x} in ordering list")
+    for key_name in ordering:
+        if key_name in seen:
+            log.warning(f"Duplicated key {key_name} in ordering list")
         else:
-            seen.add(x)
+            seen.add(key_name)
 
     # Dedupe while preserving first occurrence - the ordering list contains a few repeats
     # (e.g. media_backend, star_catalog_file) which would otherwise produce duplicate output lines.
