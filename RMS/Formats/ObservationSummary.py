@@ -463,7 +463,7 @@ def timeSyncStatus(config, d, force_client=None):
 
     else:
         addObsParam(d, "clock_measurement_source", "Not detected")
-        remote_time_query, uncertainty = timestampFromNTP()
+        remote_time_query, uncertainty = timestampFromNTP(config.time_server)
         if remote_time_query is not None:
             local_time_query = (datetime.datetime.now(datetime.timezone.utc)
                                 - datetime.datetime(1970, 1, 1)
