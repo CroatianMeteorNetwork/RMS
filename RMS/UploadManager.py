@@ -611,8 +611,9 @@ class UploadManager(multiprocessing.Process):
         self.join(timeout)
         if not self.is_alive():
             log.info("UploadManager stopped successfully.")
+            self._shutdownManager()
             return
-        
+
         log.warning("UploadManager did not stop within the timeout period of {} seconds.".format(timeout))
         self.terminate()
 
@@ -629,6 +630,22 @@ class UploadManager(multiprocessing.Process):
 
         # Always join to reap zombie (returns instantly if already dead)
         self.join()
+        self._shutdownManager()
+
+
+    def _shutdownManager(self):
+        """ Shut down the Manager server process (parent side) so its semaphores are released
+            at shutdown instead of being reclaimed by the resource_tracker (which warns under
+            the 'forkserver'/'spawn' start methods). A no-op in child processes, where _mgr is
+            None (see __getstate__). Safe to call more than once.
+        """
+        mgr = getattr(self, '_mgr', None)
+        if mgr is not None:
+            try:
+                mgr.shutdown()
+            except Exception:
+                pass
+            self._mgr = None
 
 
 
