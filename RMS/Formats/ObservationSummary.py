@@ -1283,10 +1283,6 @@ def serialize(config, format_nicely=True, as_json=False, night_directory=None, d
     # (e.g. media_backend, star_catalog_file) which would otherwise produce duplicate output lines.
     ordering = list(dict.fromkeys(ordering))
 
-
-    # Use this print call to check the ordering
-    # print("Ordering {}".format(ordering))
-
     if drop_keys_list:
         if isinstance(drop_keys_list, str):
             drop_keys_list = [drop_keys_list]
