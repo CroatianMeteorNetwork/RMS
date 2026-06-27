@@ -46,7 +46,7 @@ from RMS.Compression import Compressor
 from RMS.DeleteOldObservations import deleteOldObservations
 from RMS.DetectStarsAndMeteors import detectStarsAndMeteors
 from RMS.Formats.FFfile import validFFName
-from RMS.Misc import mkdirP, RmsDateTime, UTCFromTimestamp
+from RMS.Misc import mkdirP, RmsDateTime, UTCFromTimestamp, setMultiprocessingStartMethod
 from RMS.QueuedPool import QueuedPool
 from RMS.Reprocess import getPlatepar, processNight, processFramesFiles
 from RMS.RunExternalScript import runExternalScript
@@ -1029,6 +1029,11 @@ def processIncompleteCaptures(config, upload_manager):
 
 
 if __name__ == "__main__":
+
+    # Pin the multiprocessing start method for consistent behavior across Python versions
+    # (3.6-3.14). Must be done before any Process/Pool is created (including the logging
+    # listener below). 'forkserver' where available, else 'spawn'.
+    setMultiprocessingStartMethod()
 
     ### COMMAND LINE ARGUMENTS
 

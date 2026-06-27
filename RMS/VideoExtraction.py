@@ -23,7 +23,7 @@ from multiprocessing import Process, Event
 import numpy as np
 
 from RMS.DetectionTools import loadImageCalibration, binImageCalibration
-from RMS.Logger import getLogger
+from RMS.Logger import getLogger, getLoggingQueue, initChildProcess
 from RMS.Routines import Grouping3D
 from RMS.Routines.MaskImage import maskImage
 from RMS.Formats import FRbin
@@ -58,6 +58,10 @@ class Extractor(Process):
         # Bin the calibration images
         self.mask, self.dark, self.flat_struct = binImageCalibration(self.config, self.mask, self.dark, \
             self.flat_struct)
+
+        # Grab the logging queue on the parent side so the child can re-attach logging
+        # under the 'forkserver'/'spawn' start methods (handlers are not inherited there)
+        self.logging_queue = getLoggingQueue()
 
 
     
@@ -259,7 +263,10 @@ class Extractor(Process):
     def run(self):
         """ Retrieve frames from list, convert, compress and save them.
         """
-        
+
+        # Re-establish logging and signal handling in the child (no-op under 'fork')
+        initChildProcess(self.logging_queue, self.config)
+
         self.executeAll()
     
 

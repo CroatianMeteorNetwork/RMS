@@ -194,6 +194,34 @@ class QueuedPool(object):
         self.print_state = print_state
 
 
+    def __getstate__(self):
+        """ Return a picklable representation of the pool.
+
+        Required under the 'forkserver'/'spawn' start methods (the default on Linux from
+        Python 3.14), where the Pool initializer (the bound method self._workerFunc) is
+        pickled and sent to each worker process. The SyncManager (self.manager) and the
+        Pool handle (self.pool) are neither picklable nor needed in workers; the Manager
+        queue/value proxies ARE picklable and transparently reconnect on the worker side.
+        A logging.Logger is not picklable before Python 3.7, so it is reduced to its name
+        and re-fetched in the worker (handlers are not inherited across processes anyway).
+
+        Under 'fork' no pickling occurs, so this method is never called and behavior is
+        unchanged.
+        """
+        state = self.__dict__.copy()
+        state['manager'] = None
+        state['pool'] = None
+        state['log'] = self.log.name if self.log is not None else None
+        return state
+
+
+    def __setstate__(self, state):
+        """ Restore state in a worker process, re-fetching the logger by name. """
+        log_name = state.get('log')
+        self.__dict__.update(state)
+        self.log = getLogger(log_name) if log_name is not None else None
+
+
     def printAndLog(self, *args):
         """ Print and log the given message. """
 

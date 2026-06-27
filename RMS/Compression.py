@@ -30,7 +30,7 @@ import cv2
 from RMS.VideoExtraction import Extractor
 from RMS.Formats import FFfile, FFStruct
 from RMS.Formats import FieldIntensities
-from RMS.Logger import getLogger
+from RMS.Logger import getLogger, getLoggingQueue, initChildProcess
 from RMS.Misc import UTCFromTimestamp
 from RMS.Routines.Image import saveImage
 
@@ -84,7 +84,11 @@ class Compressor(multiprocessing.Process):
         self.exit = multiprocessing.Event()
 
         self.run_exited = multiprocessing.Event()
-    
+
+        # Grab the logging queue on the parent side so the child can re-attach logging
+        # under the 'forkserver'/'spawn' start methods (handlers are not inherited there)
+        self.logging_queue = getLoggingQueue()
+
 
 
     def compress(self, frames):
@@ -259,7 +263,10 @@ class Compressor(multiprocessing.Process):
     def run(self):
         """ Retrieve frames from list, convert, compress and save them.
         """
-        
+
+        # Re-establish logging and signal handling in the child (no-op under 'fork')
+        initChildProcess(self.logging_queue, self.config)
+
         n = 0
         exit_wait_start = None
         

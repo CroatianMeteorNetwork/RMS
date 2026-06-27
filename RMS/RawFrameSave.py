@@ -25,7 +25,7 @@ from math import floor
 
 import cv2
 
-from RMS.Logger import getLogger
+from RMS.Logger import getLogger, getLoggingQueue, initChildProcess
 from RMS.Misc import mkdirP
 
 # Get the logger from the main module
@@ -71,6 +71,10 @@ class RawFrameSaver(multiprocessing.Process):
 
         self.exit = multiprocessing.Event()
         self.run_exited = multiprocessing.Event()
+
+        # Grab the logging queue on the parent side so the child can re-attach logging
+        # under the 'forkserver'/'spawn' start methods (handlers are not inherited there)
+        self.logging_queue = getLoggingQueue()
 
 
     def saveFramesToDisk(self, frametimes, daytime_mode=False):
@@ -217,6 +221,9 @@ class RawFrameSaver(multiprocessing.Process):
     def run(self):
         """ Retrieve raw frames from shared array and save them.
         """
+
+        # Re-establish logging and signal handling in the child (no-op under 'fork')
+        initChildProcess(self.logging_queue, self.config)
 
         try:
             # Repeat until the raw frame saver is killed from the outside

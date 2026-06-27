@@ -46,7 +46,7 @@ from RMS.Formats.ObservationSummary import addObsParam, getObservationSummaryDic
 from RMS.RawFrameSave import RawFrameSaver
 from RMS.Misc import RmsDateTime, mkdirP, UTCFromTimestamp
 from RMS.Formats import FTfile, FTStruct
-from RMS.Logger import LoggingManager, getLogger, gstDebugLogger
+from RMS.Logger import LoggingManager, getLogger, gstDebugLogger, getLoggingQueue, initChildProcess
 from RMS.CaptureModeSwitcher import switchCameraMode
 import Utils.CameraControl as cc
 
@@ -209,6 +209,10 @@ class BufferedCapture(Process):
         # handle for the Gst bus-poller thread
         self._bus_should_exit = False
         self._bus_thread = None
+
+        # Grab the logging queue on the parent side so the child can re-attach logging
+        # under the 'forkserver'/'spawn' start methods (handlers are not inherited there)
+        self.logging_queue = getLoggingQueue()
 
 
     def startCapture(self, cameraID=0):
@@ -1767,6 +1771,9 @@ class BufferedCapture(Process):
         """ Main process function - initializes all process-specific resources and runs capture loop.
         """
         try:
+            # Re-establish logging and signal handling in the child (no-op under 'fork')
+            initChildProcess(self.logging_queue, self.config)
+
             log.debug("Initializing process-specific resources...")
 
             # Initialize heartbeat for watchdog

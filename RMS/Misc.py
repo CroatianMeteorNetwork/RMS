@@ -45,6 +45,46 @@ if sys.version_info[0] < 3:
 log = getLogger("rmslogger")
 
 
+def setMultiprocessingStartMethod(preferred="forkserver"):
+    """ Pin the multiprocessing start method for consistent behavior across Python versions.
+
+    RMS uses multiprocessing throughout the capture pipeline. Historically it relied on the
+    platform default, which on Linux was 'fork' up to Python 3.13 and becomes 'forkserver'
+    in Python 3.14. To get one consistent, well-tested behavior on every supported version
+    (3.6-3.14), we explicitly select 'forkserver' where available (it has existed since
+    Python 3.4), falling back to 'spawn' on platforms that lack it (e.g. Windows). This also
+    silences the Python 3.12/3.13 DeprecationWarning about relying on the implicit 'fork'
+    default.
+
+    Call this once, early, from an entry point's __main__ block, before any Process or Pool
+    is created. It is safe to call more than once.
+
+    Keyword arguments:
+        preferred: [str] Preferred start method. 'forkserver' by default.
+
+    Return:
+        [str] The start method now in effect.
+    """
+    import multiprocessing as mp
+
+    available = mp.get_all_start_methods()
+
+    if preferred in available:
+        method = preferred
+    elif "spawn" in available:
+        method = "spawn"
+    else:
+        method = available[0]
+
+    try:
+        mp.set_start_method(method, force=True)
+    except RuntimeError:
+        # Context already fixed by an earlier call; keep the existing one
+        pass
+
+    return mp.get_start_method()
+
+
 def interruptibleWait(seconds):
     """ Wait for the specified number of seconds, but allow interruption by Ctrl+C.
 

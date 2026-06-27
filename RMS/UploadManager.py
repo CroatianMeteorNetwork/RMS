@@ -10,7 +10,7 @@ from multiprocessing import Manager
 
 import paramiko
 
-from RMS.Logger import LoggingManager, getLogger
+from RMS.Logger import LoggingManager, getLogger, getLoggingQueue, initChildProcess
 from RMS.Misc import mkdirP, UTCFromTimestamp, runWithTimeout
 
 # Suppress Paramiko internal errors before they appear in logs
@@ -569,9 +569,28 @@ class UploadManager(multiprocessing.Process):
 
         # Time when the next upload should be run (used for delaying the upload)
         self.next_runtime = multiprocessing.Value('d', 0.0)
-        self.next_runtime_lock = multiprocessing.Lock() 
+        self.next_runtime_lock = multiprocessing.Lock()
 
-        
+        # Grab the logging queue on the parent side so the child can re-attach logging
+        # under the 'forkserver'/'spawn' start methods (handlers are not inherited there)
+        self.logging_queue = getLoggingQueue()
+
+
+    def __getstate__(self):
+        """ Return a picklable representation of the manager.
+
+        Required under the 'forkserver'/'spawn' start methods (the default on Linux from
+        Python 3.14), where .start() pickles self and sends it to the child. The SyncManager
+        instance (self._mgr) is not picklable and is not needed in the child - the parent
+        keeps it alive, and the Queue/Lock proxies it created (self.file_queue,
+        self.file_queue_lock) are picklable and reconnect on the child side. Under 'fork' no
+        pickling occurs, so this is never called and behavior is unchanged.
+        """
+        state = self.__dict__.copy()
+        state['_mgr'] = None
+        return state
+
+
 
 
     def start(self):
@@ -855,6 +874,9 @@ class UploadManager(multiprocessing.Process):
 
     def run(self):
         """ Try uploading the files every 15 minutes. """
+
+        # Re-establish logging and signal handling in the child (no-op under 'fork')
+        initChildProcess(self.logging_queue, self.config)
 
         # Load the file queue from disk
         self.loadQueue()

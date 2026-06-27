@@ -682,3 +682,85 @@ def initLogging(config, log_file_prefix="", safedir=None, level=logging.DEBUG):
         console_level=console_level,
         file_level=file_level
     )
+
+
+##############################################################################
+# CHILD PROCESS SETUP (forkserver / spawn compatibility)
+##############################################################################
+
+def getLoggingQueue():
+    """ Return the multiprocessing logging queue created by initLogging, or None.
+
+    Child Process classes grab this in their (parent-side) __init__ and pass it to
+    initChildProcess() inside run(), so their log records still reach the listener
+    process. This is required under the 'forkserver'/'spawn' start methods (the default
+    on Linux from Python 3.14), where a child does NOT inherit the parent's root logger
+    handlers. Under 'fork' the queue is inherited anyway, so this is harmless there.
+
+    Return:
+        [multiprocessing.Queue or None] The shared logging queue, or None if logging was
+            never initialized in this process.
+    """
+    return _global_logging_manager.logging_queue
+
+
+def initChildLogging(logging_queue, config):
+    """ Attach a QueueHandler to the root logger inside a child process.
+
+    Under 'fork' children inherit the parent's QueueHandler, but under 'forkserver'/'spawn'
+    they start with a fresh logging configuration. Call this (or initChildProcess) at the
+    top of a child process's run() so its records are forwarded to the listener process.
+    A no-op if logging was never initialized (queue is None).
+
+    Arguments:
+        logging_queue: [multiprocessing.Queue] The shared logging queue, or None.
+        config: [Config] Config used for the InRmsFilter. If None, no filter is applied.
+    """
+    if logging_queue is None:
+        return
+
+    root = logging.getLogger()
+
+    # Replace any inherited/default handlers with a single queue handler
+    for handler in root.handlers[:]:
+        root.removeHandler(handler)
+
+    qh = logging.handlers.QueueHandler(logging_queue)
+    qh.setFormatter(logging.Formatter('%(message)s'))
+    if config is not None:
+        qh.addFilter(InRmsFilter(config))
+
+    root.handlers = [qh]
+    root.setLevel(logging.DEBUG)  # permissive; level filtering happens in the listener
+    root.propagate = False
+
+    # Make the queue discoverable via getLoggingQueue() in this process, so any further
+    # child processes spawned from here (e.g. RawFrameSaver from BufferedCapture, Extractor
+    # from Compressor) can grab it in their own __init__ under 'forkserver'/'spawn', where
+    # the module-level manager state is not inherited.
+    _global_logging_manager.logging_queue = logging_queue
+
+
+def initChildProcess(logging_queue=None, config=None, ignore_sigint=True):
+    """ Re-establish logging and signal handling at the start of a child process's run().
+
+    Needed under the 'forkserver'/'spawn' start methods (the default on Linux from Python
+    3.14), where a child does NOT inherit the parent's logging handlers or signal
+    dispositions. Under 'fork' this simply re-creates the configuration the child would
+    have inherited, so it is safe on every supported Python version.
+
+    Arguments:
+        logging_queue: [multiprocessing.Queue] Shared logging queue, or None.
+        config: [Config] Config for the logging filter, or None.
+        ignore_sigint: [bool] If True, ignore SIGINT in the child and let the parent
+            coordinate shutdown via the child's exit Event (mirrors the log listener).
+    """
+    if ignore_sigint:
+        import signal
+        try:
+            signal.signal(signal.SIGINT, signal.SIG_IGN)
+        except (ValueError, OSError):
+            # signal() only works in the main thread of the main interpreter
+            pass
+
+    initChildLogging(logging_queue, config)
