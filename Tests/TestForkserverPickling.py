@@ -26,6 +26,14 @@ def _dummy_worker(x):
     return x*2
 
 
+def _logcheck_worker(x):
+    """ Worker that reports the root logger handlers present in its process. Used to confirm
+        the worker re-attached logging (a QueueHandler) under spawn.
+    """
+    import logging
+    return [type(h).__name__ for h in logging.getLogger().handlers]
+
+
 def _exercise_pool_in_child(pool, result_queue):
     """ Runs in a spawned child: the pool arrived via QueuedPool.__getstate__. Verify the
         non-picklable handles were dropped and the picklable proxies/primitives still work.
@@ -57,6 +65,8 @@ def test_queuedpool_getstate_is_clean():
         assert state['pool'] is None
         # The logger is reduced to its name (a str) or None - never a Logger object
         assert state['log'] is None or isinstance(state['log'], str)
+        # The logging queue must be preserved so workers can re-attach logging in _workerFunc
+        assert 'logging_queue' in state
     finally:
         pool.shutdownManager()
 
@@ -85,6 +95,35 @@ def test_queuedpool_roundtrips_through_spawn():
         # The child put an item on the Manager-backed input queue; the parent should see it
         assert pool.input_queue.get(timeout=30) == ['hello']
         assert pool.kill_workers.is_set()         # Event state is shared across processes
+    finally:
+        pool.shutdownManager()
+
+
+def test_queuedpool_worker_reattaches_logging():
+    """ A QueuedPool worker must re-attach a QueueHandler under spawn (handlers are not
+        inherited), and the real Pool(initializer=self._workerFunc) path must pickle the
+        whole pool successfully.
+    """
+    import time
+
+    multiprocessing.set_start_method('spawn', force=True)
+
+    pool = QueuedPool(_logcheck_worker, cores=1, backup_dir=None, print_state=False)
+    # Simulate an initialized logging queue (getLoggingQueue() is None without initLogging)
+    pool.logging_queue = multiprocessing.Queue()
+    try:
+        pool.addJob([1])
+        pool.startPool()
+
+        deadline = time.time() + 30
+        while not pool.allDone() and time.time() < deadline:
+            time.sleep(0.1)
+
+        pool.closePool()
+        results = pool.getResults()
+
+        assert results, "worker produced no result"
+        assert 'QueueHandler' in results[0]   # logging was re-attached in the worker
     finally:
         pool.shutdownManager()
 

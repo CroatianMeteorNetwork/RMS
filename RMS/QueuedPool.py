@@ -9,7 +9,7 @@ import multiprocessing
 import multiprocessing.dummy
 
 from RMS.Pickling import savePickle, loadPickle
-from RMS.Logger import getLogger
+from RMS.Logger import getLogger, getLoggingQueue, initChildProcess
 from RMS.Misc import randomCharacters, isListKeyInDict, listToTupleRecursive
 
 
@@ -147,6 +147,10 @@ class QueuedPool(object):
 
         self.cores = SafeValue(cores, minval=1, maxval=multiprocessing.cpu_count())
         self.log = log
+
+        # Grab the logging queue on the parent side so each worker can re-attach logging
+        # under the 'forkserver'/'spawn' start methods (handlers are not inherited there)
+        self.logging_queue = getLoggingQueue()
 
         self.start_time = time.time()
         self.delay_start = delay_start
@@ -314,7 +318,14 @@ class QueuedPool(object):
 
     def _workerFunc(self, func):
         """ A wrapper function for the given worker function. Handles the queue operations. """
-        
+
+        # Re-attach logging in this worker process. Under 'forkserver'/'spawn' (the default on
+        # Linux from Python 3.14) a worker does not inherit the parent's root logger handlers,
+        # so records from the worker function (and printAndLog) would otherwise never reach the
+        # listener. The listener applies its own InRmsFilter, so no filter is needed here. This
+        # also sets SIGINT to be ignored so the parent coordinates shutdown.
+        initChildProcess(self.logging_queue, None)
+
         # Set lower priority, if given
         if self.low_priority:
 
