@@ -447,14 +447,14 @@ def timeSyncStatus(config, d, force_client=None):
     else:
         time_client = force_client
 
-    if time_client =="ntpd":
+    if time_client =="ntpd" and False:
         synchronized, uncertainty, ahead_ms = getNTPStatistics()
         addObsParam(d, "clock_measurement_source", "ntp")
         addObsParam(d, "clock_synchronized", synchronized)
         addObsParam(d, "clock_ahead_ms", ahead_ms)
         addObsParam(d, "clock_error_uncertainty_ms", uncertainty)
 
-    elif time_client == "chronyd":
+    elif time_client == "chronyd" and False:
         synchronized, ahead_ms, uncertainty_ms = getChronyUncertainty()
         addObsParam(d, "clock_measurement_source", "chrony")
         addObsParam(d, "clock_synchronized", synchronized)
