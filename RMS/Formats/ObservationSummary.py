@@ -422,7 +422,7 @@ def getTimeClient():
             if output == 'active':
                 return name
         except subprocess.CalledProcessError:
-            # Not active or not recognised
+            # Other error such as systemctl not available
             pass
     return "Not recognized"
 
@@ -463,7 +463,10 @@ def timeSyncStatus(config, d, force_client=None):
 
     else:
         addObsParam(d, "clock_measurement_source", "Not detected")
-        remote_time_query, uncertainty, time_server = timestampFromNTP(config.time_server)
+        try:
+            remote_time_query, uncertainty, time_server = timestampFromNTP(config.time_server)
+        except Exception:
+            remote_time_query, uncertainty, time_server = (None, None, None)
         addObsParam(d, "time_server", time_server)
         if remote_time_query is not None:
             local_time_query = (datetime.datetime.now(datetime.timezone.utc)
@@ -477,7 +480,10 @@ def timeSyncStatus(config, d, force_client=None):
             addObsParam(d, "clock_error_uncertainty_ms", uncertainty)
         addObsParam(d, "clock_ahead_ms", ahead_ms)
 
-        result_list = subprocess.run(['timedatectl','status'], capture_output = True).stdout.splitlines()
+        try:
+            result_list = subprocess.run(['timedatectl','status'], capture_output = True).stdout.splitlines()
+        except Exception:
+            result_list = []
 
         for raw_result in result_list:
             result = raw_result.decode('ascii')
