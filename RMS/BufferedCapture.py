@@ -198,6 +198,15 @@ class BufferedCapture(Process):
         # Heartbeat timestamp for watchdog - updated every frame block to detect hangs
         self.heartbeat = Value('d', 0.0)
 
+        # In-process native-memory probe (opt-in via RMS_MEMPROFILE). Counts pipeline
+        # rebuilds and periodically logs glibc allocator stats + thread/fd counts so a
+        # native GStreamer/rtspsrc leak (uordblks/hblkhd growth, thread growth) can be
+        # distinguished from arena retention (fordblks growth, reclaimable by malloc_trim)
+        # within a single overnight run. Completely inert when the env var is unset.
+        self._memprofile = os.environ.get("RMS_MEMPROFILE")
+        self._pipeline_rebuilds = 0
+        self._last_native_log = 0.0
+
         # Initialize sync tick
         self.last_sync_tick = -1
         self.sync_tick_reference = 0  # reference epoch for sync ticks
@@ -1418,8 +1427,12 @@ class BufferedCapture(Process):
                     if not self.device:
                         raise ValueError("Could not create GStreamer pipeline.")
                     
-                    log.info("GStreamer pipeline created!")   
-                    
+                    log.info("GStreamer pipeline created!")
+
+                    # Count pipeline (re)builds so the memory profiler can correlate
+                    # native growth with rebuild churn.
+                    self._pipeline_rebuilds += 1
+
                     # Reset presentation time stamp buffer
                     self.pts_buffer = []
 
@@ -1537,6 +1550,46 @@ class BufferedCapture(Process):
                 raise ValueError(error_msg)
 
         return False
+
+
+    def _logNativeStats(self):
+        """Log in-process native allocator + thread/fd stats for leak diagnosis.
+
+        Opt-in via RMS_MEMPROFILE. Throttled to that interval. The glibc mallinfo2 split
+        (uordblks vs fordblks vs hblkhd) is the decisive piece external sampling cannot
+        see: it separates a genuine leak (uordblks/hblkhd grow) from arena retention
+        (fordblks grows, reclaimable). Tagged with the pipeline-rebuild count so growth
+        can be tied to reconnect churn. Never raises.
+        """
+        if not self._memprofile:
+            return
+        try:
+            interval = float(self._memprofile)
+        except (TypeError, ValueError):
+            interval = 60.0
+        now = time.time()
+        if now - self._last_native_log < interval:
+            return
+        self._last_native_log = now
+
+        try:
+            from Utils.MemoryProfiler import mallinfo, _read_status, _fd_count
+
+            pid = os.getpid()
+            st = _read_status(pid)
+            mi = mallinfo()
+            mb = 1024.0 * 1024.0
+
+            log.info("MEMPROFILE-NATIVE pid=%d rebuilds=%d VmRSS=%.0fMB RssAnon=%.0fMB "
+                     "threads=%d fds=%d | malloc uordblks=%.0fMB fordblks=%.0fMB "
+                     "hblkhd=%.0fMB arena=%.0fMB" % (
+                         pid, self._pipeline_rebuilds,
+                         st.get("VmRSS", 0) / mb, st.get("RssAnon", 0) / mb,
+                         st.get("Threads", 0), _fd_count(pid),
+                         mi.get("uordblks", 0) / mb, mi.get("fordblks", 0) / mb,
+                         mi.get("hblkhd", 0) / mb, mi.get("arena", 0) / mb))
+        except Exception as e:
+            log.debug("MEMPROFILE-NATIVE failed: %s", e)
 
 
     def releaseResources(self):
@@ -2285,6 +2338,10 @@ class BufferedCapture(Process):
                         recent_dropped = len([t for t in self.dropped_frames_timestamps if t > ten_min_ago])
 
                         log.info(f"Buffer fill: {buffer_fill_percent:.1f}%. Dropped frames: {recent_dropped} (last 10 min), {self.dropped_frames.value} this session")
+
+                        # Native-memory probe (opt-in, throttled). Lets one overnight run
+                        # tell a real leak from arena retention without a second night.
+                        self._logNativeStats()
 
                 last_frame_timestamp = frame_timestamp
                 
