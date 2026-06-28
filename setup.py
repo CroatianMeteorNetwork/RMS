@@ -40,24 +40,19 @@ if "install" in sys.argv and "--old-and-unmanageable" not in sys.argv:
     sys.exit(0)
 # -----------------------------------------------------------------------------    
 
-# C/C++ extension
-kht_module = Extension(
-    "kht_module",
-    sources=[
-        "Native/Hough/kht.cpp",
-        "Native/Hough/buffer_2d.cpp",
-        "Native/Hough/eigen.cpp",
-        "Native/Hough/linking.cpp",
-        "Native/Hough/peak_detection.cpp",
-        "Native/Hough/subdivision.cpp",
-        "Native/Hough/voting.cpp",
-    ],
-    include_dirs=["Native/Hough/"],
-    extra_compile_args=["-O3", "-Wall"],
-)
+# Kernel-based Hough Transform: a thin Cython wrapper (RMS/Routines/Kht.pyx) compiled
+# together with the KHT C++ sources. Building it as a regular Cython extension means it
+# is imported (and ABI-matched to the interpreter) like every other native module,
+# instead of being located by a file-system walk and loaded via ctypes.
+kht_sources = ["RMS/Routines/Kht.pyx"] + [
+    "Native/Hough/{:s}.cpp".format(name) for name in
+    ("kht", "buffer_2d", "eigen", "linking", "peak_detection", "subdivision", "voting")
+]
 
 # Cython extensions
 cython_modules = [
+    Extension("RMS.Routines.Kht", kht_sources, include_dirs=["Native/Hough/"],
+        language="c++", extra_compile_args=["-O3"]),
     Extension("RMS.Astrometry.CyFunctions", ["RMS/Astrometry/CyFunctions.pyx"], include_dirs=numpy_includes),
     Extension("RMS.Routines.BinImageCy", ["RMS/Routines/BinImageCy.pyx"], include_dirs=numpy_includes),
     Extension("RMS.Routines.DynamicFTPCompressionCy", ["RMS/Routines/DynamicFTPCompressionCy.pyx"], include_dirs=numpy_includes),
@@ -92,7 +87,7 @@ setup(
         ("share", share_files),
         ("share/platepar_templates", plate_files),
     ],
-    ext_modules=[kht_module] + cythonize(cython_modules),
+    ext_modules=cythonize(cython_modules),
     include_dirs=numpy_includes,
     include_package_data=True,
 )
