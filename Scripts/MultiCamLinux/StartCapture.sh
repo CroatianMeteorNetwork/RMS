@@ -56,6 +56,14 @@ fi
 source "$HOME/vRMS/bin/activate"
 cd "$HOME/source/RMS"
 
+# === MEMPROFILE (debug-memprofile branch only) ===========================
+# Enable the in-RMS memory profiler for every camera launched by this script.
+# Each station writes its own per-station CSV (memprofile_<STATION>.csv) beside its
+# logs and logs MEMPROFILE-NATIVE (mallinfo + pipeline-rebuild count) to its own log.
+# Remove this line to disable. Do NOT set MALLOC_ARENA_MAX (would mask arena retention).
+export RMS_MEMPROFILE=60
+# =========================================================================
+
 configpath="/home/$(whoami)/source/Stations/$1/.config"
 echo "Using config from $configpath"
 

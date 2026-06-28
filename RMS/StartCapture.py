@@ -1109,10 +1109,18 @@ if __name__ == "__main__":
     if _memprofile_interval:
         try:
             from Utils.MemoryProfiler import start_background_logger
+            # Per-station CSV beside the logs so multiple cameras on a multicam box do
+            # not clobber one shared file. The whole-box scan is identical from any
+            # station, so any one of these CSVs captures the full box (the others are
+            # redundant safety copies).
+            _mp_csv = os.path.join(os.path.expanduser(config.data_dir), config.log_dir,
+                                   "memprofile_{}.csv".format(config.stationID))
             start_background_logger(root_pid=os.getpid(),
                                     interval=float(_memprofile_interval),
-                                    logger=getLogger("rmslogger"))
-            log.info("Memory profiler enabled (interval={}s)".format(_memprofile_interval))
+                                    logger=getLogger("rmslogger"),
+                                    csv_path=_mp_csv)
+            log.info("Memory profiler enabled (interval={}s, csv={})".format(
+                _memprofile_interval, _mp_csv))
         except Exception as e:
             log.warning("Could not start memory profiler: {}".format(e))
 
