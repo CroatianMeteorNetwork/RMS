@@ -332,20 +332,32 @@ def _dev_shm_bytes():
     return total
 
 
-def _recent_oom(seen_marker):
+def _recent_oom(seen_offset):
+    """Return new kernel oom-kill lines since byte offset *seen_offset* (best-effort).
+
+    Reads in binary and decodes with errors='replace' so non-UTF-8 bytes in the kernel
+    log can't crash the profiler. Tracks a byte offset (not a line count) so each call
+    only reads appended bytes rather than re-reading the whole file every sample.
+    """
     for path in ("/var/log/kern.log", "/var/log/syslog", "/var/log/messages"):
         try:
-            with open(path) as f:
-                content = f.readlines()
+            with open(path, "rb") as f:
+                f.seek(0, 2)
+                size = f.tell()
+                # First call (prime to current end) or log rotated/truncated: start fresh.
+                if seen_offset <= 0 or seen_offset > size:
+                    return [], size
+                f.seek(seen_offset)
+                data = f.read()
         except (IOError, OSError):
             continue
         lines = []
-        for ln in content[seen_marker:]:
+        for ln in data.decode("utf-8", "replace").splitlines():
             low = ln.lower()
             if "out of memory" in low or "oom-kill" in low or "killed process" in low:
                 lines.append(ln.rstrip())
-        return lines, len(content)
-    return [], seen_marker
+        return lines, size
+    return [], seen_offset
 
 
 def _mb(n):
@@ -439,7 +451,10 @@ def start_background_logger(root_pid=None, interval=60.0, logger=None,
 
     def _run():
         oom_marker = 0
-        _, oom_marker = _recent_oom(0)
+        try:
+            _, oom_marker = _recent_oom(0)
+        except Exception as e:
+            logger.debug("MEMPROFILE oom-scan init failed (continuing): %s", e)
         logger.info("MEMPROFILE started: interval=%.0fs low_mem_burst<%.0fMB csv=%s",
                     interval, low_mb, csv_path)
         while True:
