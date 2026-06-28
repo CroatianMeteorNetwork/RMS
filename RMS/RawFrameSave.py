@@ -185,12 +185,31 @@ class RawFrameSaver(multiprocessing.Process):
             self.total_saved_frames += 1
 
 
+    def ensureViews(self):
+        """ Build numpy views over the shared multiprocessing.Array bases if not already built.
+
+        Both the capture process (which calls stop() to flush tail-end frames) and this saver
+        process (run()) need a view backed by the same shared memory. Under forkserver/spawn a
+        numpy view cannot be inherited or pickled, so each process builds its own view from the
+        shared base here. Idempotent.
+        """
+        if self.array1 is None:
+            self.array1 = np.ctypeslib.as_array(self.array1_base.get_obj()).reshape(self.raw_array_shape)
+            self.array2 = np.ctypeslib.as_array(self.array2_base.get_obj()).reshape(self.raw_array_shape)
+            self.timeStamps1 = np.ctypeslib.as_array(self.timeStamps1_base.get_obj())
+            self.timeStamps2 = np.ctypeslib.as_array(self.timeStamps2_base.get_obj())
+
+
     def stop(self):
         """ Stop saving frames.
         """
 
         self.exit.set()
         log.debug('Raw frame saver exit flag set')
+
+        # Build views over the shared buffers in this (capture) process so the tail-end flush
+        # reads the same shared memory the saver process wrote into.
+        self.ensureViews()
 
         # flush any frames whose TS array still has data
         leftovers = []
@@ -211,10 +230,10 @@ class RawFrameSaver(multiprocessing.Process):
         # Free shared memory after the raw frame saver is done
         try:
             log.debug('Freeing frame buffers in raw frame saver...')
-            del self.array1
-            del self.array2
-            del self.timeStamps1
-            del self.timeStamps2
+            self.array1 = None
+            self.array2 = None
+            self.timeStamps1 = None
+            self.timeStamps2 = None
 
         except Exception as e:
             log.debug('Freeing raw frame buffers failed with error:' + repr(e))
@@ -238,10 +257,7 @@ class RawFrameSaver(multiprocessing.Process):
         # Rebuild numpy views over the shared raw-frame and timestamp buffers in this process.
         # Under forkserver/spawn the views cannot be inherited, so build them here from the
         # shared multiprocessing.Array base objects (same memory the capture process writes).
-        self.array1 = np.ctypeslib.as_array(self.array1_base.get_obj()).reshape(self.raw_array_shape)
-        self.array2 = np.ctypeslib.as_array(self.array2_base.get_obj()).reshape(self.raw_array_shape)
-        self.timeStamps1 = np.ctypeslib.as_array(self.timeStamps1_base.get_obj())
-        self.timeStamps2 = np.ctypeslib.as_array(self.timeStamps2_base.get_obj())
+        self.ensureViews()
 
         try:
             # Repeat until the raw frame saver is killed from the outside
