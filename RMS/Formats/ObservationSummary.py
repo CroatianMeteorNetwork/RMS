@@ -232,7 +232,7 @@ def storeDictInDB(conn, d, debug=False):
     dict_filtered_by_columns = {k: v for k, v in d.items() if k in existing_columns}
 
     dropped = set(d.keys()) - set(dict_filtered_by_columns.keys())
-    if len(dropped) != 0:
+    if len(dropped) != 0 and debug:
         log.warning(f"No columns for following keys: {sorted(dropped)}")
 
     # Normalise booleans safely (TEXT columns expect strings)
@@ -447,14 +447,14 @@ def timeSyncStatus(config, d, force_client=None):
     else:
         time_client = force_client
 
-    if time_client =="ntpd" and False:
+    if time_client =="ntpd":
         synchronized, uncertainty, ahead_ms = getNTPStatistics()
         addObsParam(d, "clock_measurement_source", "ntp")
         addObsParam(d, "clock_synchronized", synchronized)
         addObsParam(d, "clock_ahead_ms", ahead_ms)
         addObsParam(d, "clock_error_uncertainty_ms", uncertainty)
 
-    elif time_client == "chronyd" and False:
+    elif time_client == "chronyd":
         synchronized, ahead_ms, uncertainty_ms = getChronyUncertainty()
         addObsParam(d, "clock_measurement_source", "chrony")
         addObsParam(d, "clock_synchronized", synchronized)
