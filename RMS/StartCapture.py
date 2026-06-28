@@ -1099,6 +1099,24 @@ if __name__ == "__main__":
     log.info("Program version: {:s}, {:s}".format(commit_time, sha))
 
 
+    # Optional memory profiler for diagnosing capture OOM/leak issues. Completely inert
+    # unless the RMS_MEMPROFILE env var is set to a sampling interval in seconds, e.g.
+    #   export RMS_MEMPROFILE=60
+    # It logs a per-process memory breakdown of the whole RMS tree to the 'memprofile'
+    # logger (same log file), interleaved with the capture/reconnect lines. See
+    # Utils/MemoryProfiler.py for how to read the output.
+    _memprofile_interval = os.environ.get("RMS_MEMPROFILE")
+    if _memprofile_interval:
+        try:
+            from Utils.MemoryProfiler import start_background_logger
+            start_background_logger(root_pid=os.getpid(),
+                                    interval=float(_memprofile_interval),
+                                    logger=getLogger("rmslogger"))
+            log.info("Memory profiler enabled (interval={}s)".format(_memprofile_interval))
+        except Exception as e:
+            log.warning("Could not start memory profiler: {}".format(e))
+
+
     # Set the number of cores to use if given
     if cml_args.num_cores is not None:
         config.num_cores = cml_args.num_cores
