@@ -342,14 +342,14 @@ def format_report(rows, tot, mi, devshm):
                      _mb(tot["Private_Dirty"]), tot["Threads"], tot["FDs"],
                      _mb(mi.get("MemAvailable", 0)), _mb(mi.get("Committed_AS", 0)),
                      _mb(mi.get("SwapFree", 0)), _mb(devshm)))
-    lines.append("  {:>7} {:<18} {:<10} {:>8} {:>8} {:>9} {:>9} {:>7} {:>6}".format(
-        "PID", "role", "station", "Pss", "Anon", "Shmem", "PrivD", "Thr", "FDs"))
+    lines.append("  {:>7} {:<18} {:<10} {:>8} {:>8} {:>9} {:>9} {:>8} {:>7} {:>6}".format(
+        "PID", "role", "station", "Pss", "Anon", "Shmem", "PrivD", "Swap", "Thr", "FDs"))
     for r in rows:
         lines.append("  {:>7} {:<18} {:<10} {:>8.0f} {:>8.0f} {:>9.0f} {:>9.0f} "
-                     "{:>7} {:>6}".format(
+                     "{:>8.0f} {:>7} {:>6}".format(
                          r["pid"], r["role"][:18], r["station"][:10],
                          _mb(r["Pss"]), _mb(r["RssAnon"]), _mb(r["RssShmem"]),
-                         _mb(r["Private_Dirty"]), r["Threads"], r["FDs"]))
+                         _mb(r["Private_Dirty"]), _mb(r["Swap"]), r["Threads"], r["FDs"]))
     return "\n".join(lines)
 
 
