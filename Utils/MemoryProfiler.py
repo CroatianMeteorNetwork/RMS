@@ -210,11 +210,23 @@ _ROLE_TABLE = [
     ("compress", "Compressor"),
     ("queuedpool", "DetectionPool"),
     ("meteordetect", "DetectionPool"),
+    ("reprocess", "Reprocess/processNight"),
+    ("processnight", "Reprocess/processNight"),
+    ("timelapse", "Timelapse"),
+    ("generatemp4", "GenerateMP4"),
+    ("runexternal", "ExternalScript"),
     ("liveview", "LiveViewer"),
     ("upload", "UploadManager"),
     ("eventmonitor", "EventMonitor"),
-    ("reprocess", "Reprocess"),
 ]
+
+# Post-processing children spawned by RMS that DON'T carry an "RMS" hint in their
+# command line (ffmpeg for timelapse/MP4, user external scripts). We catch these by
+# walking the descendants of the RMS seed processes and labelling by comm.
+_COMM_ROLE = {
+    "ffmpeg": "ffmpeg(postproc)",
+    "convert": "ImageMagick(postproc)",
+}
 
 
 def _all_pids():
@@ -227,24 +239,62 @@ def _all_pids():
     return pids
 
 
+def _ppid(pid):
+    try:
+        with open("/proc/{}/stat".format(pid)) as f:
+            data = f.read()
+            after = data[data.rfind(")") + 2:].split()
+            return int(after[1])
+    except (IOError, OSError, ValueError, IndexError):
+        return None
+
+
 def _rms_pids():
     """Every RMS-related PID on the box, with (pid, role, station) labels.
 
-    Matches by cmdline hint so a single deployed profiler instance sees all cameras,
-    including fork children that inherit the parent argv.
+    Two-step discovery so a single deployed instance sees the whole station AND any
+    post-processing burst:
+      1. Seed = processes whose cmdline carries an RMS hint (all cameras, all children
+         that inherit the parent argv).
+      2. Expand to every descendant of a seed, so ffmpeg/timelapse/external scripts
+         forked during post-processing are included even though they aren't "RMS".
     """
-    found = []
-    for pid in _all_pids():
+    all_pids = _all_pids()
+
+    # Build child map once.
+    children = {}
+    for pid in all_pids:
+        pp = _ppid(pid)
+        if pp is not None:
+            children.setdefault(pp, []).append(pid)
+
+    # Seeds by cmdline hint.
+    seeds = []
+    for pid in all_pids:
         cmd = _cmdline(pid).lower()
-        if not cmd or "python" not in cmd and not any(h in cmd for h in _RMS_HINTS):
-            continue
-        if not any(h in cmd for h in _RMS_HINTS):
-            continue
-        role = "RMS"
+        if cmd and any(h in cmd for h in _RMS_HINTS):
+            seeds.append(pid)
+
+    # Expand to all descendants of seeds.
+    members = set(seeds)
+    stack = list(seeds)
+    while stack:
+        pid = stack.pop()
+        for ch in children.get(pid, []):
+            if ch not in members:
+                members.add(ch)
+                stack.append(ch)
+
+    found = []
+    for pid in members:
+        cmd = _cmdline(pid).lower()
+        role = None
         for needle, name in _ROLE_TABLE:
             if needle in cmd:
                 role = name
                 break
+        if role is None:
+            role = _COMM_ROLE.get(_comm(pid), "child:" + _comm(pid))
         station = _cwd_base(pid) or "?"
         found.append((pid, role, station))
     return found
@@ -419,12 +469,25 @@ def start_background_logger(root_pid=None, interval=60.0, logger=None,
 
 
 if __name__ == "__main__":
+    # Standalone decoupled monitor: run as its own long-lived process (screen/tmux/
+    # systemd/cron) so it keeps sampling across capture -> post-processing -> upload and
+    # survives even if RMS itself is the OOM victim. Catches a post-processing burst
+    # (ffmpeg/timelapse/detection) and attributes it to the owning PID/role.
+    #
+    #   python -m Utils.MemoryProfiler [interval_s] [csv_path] [low_mb]
     import sys
+    iv = float(sys.argv[1]) if len(sys.argv) > 1 else 60.0
+    csv = sys.argv[2] if len(sys.argv) > 2 else os.path.join(os.getcwd(),
+                                                             "rms_memprofile.csv")
+    low = float(sys.argv[3]) if len(sys.argv) > 3 else 400.0
+
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
-    iv = float(sys.argv[1]) if len(sys.argv) > 1 else 30.0
-    print("Whole-box RMS memory profile every {:.0f}s (Ctrl+C to stop)".format(iv))
-    while True:
-        rows, tot, mi, devshm = collect()
-        print(format_report(rows, tot, mi, devshm))
-        print("-" * 110)
-        time.sleep(iv)
+    log = logging.getLogger("memprofile")
+    print("Whole-box RMS memory monitor: every {:.0f}s, csv={}, "
+          "fast-burst<{:.0f}MB. Ctrl+C to stop.".format(iv, csv, low))
+    start_background_logger(interval=iv, logger=log, csv_path=csv, low_mb=low)
+    try:
+        while True:
+            time.sleep(3600)
+    except KeyboardInterrupt:
+        print("stopped")
