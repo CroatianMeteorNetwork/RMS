@@ -44,7 +44,7 @@ from RMS.Misc import obfuscatePassword
 from RMS.Routines.GstreamerCapture import GstVideoFile, getStructureValue
 from RMS.Formats.ObservationSummary import addObsParam, getObservationSummaryDict
 from RMS.RawFrameSave import RawFrameSaver
-from RMS.Misc import RmsDateTime, mkdirP, UTCFromTimestamp
+from RMS.Misc import RmsDateTime, mkdirP, UTCFromTimestamp, runWithTimeout
 from RMS.Formats import FTfile, FTStruct
 from RMS.Logger import LoggingManager, getLogger, gstDebugLogger
 from RMS.CaptureModeSwitcher import switchCameraMode
@@ -52,6 +52,13 @@ import Utils.CameraControl as cc
 
 # Get the logger from the main module
 log = getLogger("rmslogger")
+
+# Hard cap (seconds) on a single GStreamer set_state(NULL) during teardown. A wedged
+# rtspsrc (camera connected but unresponsive) can make set_state(NULL) block far longer
+# than its own teardown-timeout, freezing the capture loop's heartbeat until the watchdog
+# force-kills the process. Bounding it well under the watchdog timeout (180 s) lets a
+# stuck teardown be abandoned so capture keeps its heartbeat and is never force-killed.
+GST_TEARDOWN_TIMEOUT = 10
 
 if sys.version_info[0] < 3:
     # py2
@@ -1593,27 +1600,49 @@ class BufferedCapture(Process):
                                     Gst.MessageType.EOS | Gst.MessageType.ERROR)
                 log.debug(f"releaseResources: timed_pop_filtered returned: {msg}")
 
-                log.debug("releaseResources: Setting pipeline to NULL state")
-                ret = self.pipeline.set_state(Gst.State.NULL)
-                log.debug(f"releaseResources: set_state returned: {ret}")
-                
-                log.debug("releaseResources: Getting pipeline state (2 second timeout)")
-                ret, state, pending = self.pipeline.get_state(2*Gst.SECOND)
-                log.debug(f"releaseResources: get_state returned: ret={ret}, state={state}, pending={pending}")
-                
-                # Check if we actually reached NULL state
-                if state != Gst.State.NULL:
-                    log.warning("releaseResources: Graceful shutdown failed, pipeline stuck in state %s", state)
-                    raise Exception("Pipeline stuck, forcing shutdown")
-                    
-                log.debug("releaseResources: Graceful shutdown successful")
-                
+                # set_state(NULL) can block indefinitely when rtspsrc is wedged on a
+                # connected-but-unresponsive camera (TEARDOWN never completes). Run it with
+                # a hard timeout so a stuck teardown can't freeze the heartbeat and trip the
+                # watchdog into a force-kill (which orphans children and leaks memory).
+                log.debug("releaseResources: Setting pipeline to NULL state (timeout %ds)", GST_TEARDOWN_TIMEOUT)
+                ok, ret, exc = runWithTimeout(self.pipeline.set_state,
+                                              args=(Gst.State.NULL,),
+                                              timeout=GST_TEARDOWN_TIMEOUT)
+                if not ok:
+                    # Teardown hung. Abandon it (the call keeps running in a daemon thread,
+                    # holding the old pipeline until it eventually unwinds) and drop our
+                    # reference below. Do NOT retry/verify - keeping capture alive matters
+                    # more than a clean teardown of an already-dead camera.
+                    log.warning("releaseResources: set_state(NULL) did not return within %ds - "
+                                "abandoning teardown to keep capture alive (pipeline left to GC)",
+                                GST_TEARDOWN_TIMEOUT)
+                else:
+                    if exc is not None:
+                        raise exc
+                    log.debug(f"releaseResources: set_state returned: {ret}")
+
+                    log.debug("releaseResources: Getting pipeline state (2 second timeout)")
+                    ret, state, pending = self.pipeline.get_state(2*Gst.SECOND)
+                    log.debug(f"releaseResources: get_state returned: ret={ret}, state={state}, pending={pending}")
+
+                    # Check if we actually reached NULL state
+                    if state != Gst.State.NULL:
+                        log.warning("releaseResources: Graceful shutdown failed, pipeline stuck in state %s", state)
+                        raise Exception("Pipeline stuck, forcing shutdown")
+
+                    log.debug("releaseResources: Graceful shutdown successful")
+
             except Exception as e:
                 log.warning("releaseResources: Graceful shutdown failed (%s), forcing pipeline shutdown", e)
-                
-                # Force shutdown - just set to NULL without waiting
-                log.debug("releaseResources: Force setting pipeline to NULL state")
-                self.pipeline.set_state(Gst.State.NULL)
+
+                # Force shutdown - also time-bounded so the force path can't hang either.
+                log.debug("releaseResources: Force setting pipeline to NULL state (timeout %ds)", GST_TEARDOWN_TIMEOUT)
+                fok, _, _ = runWithTimeout(self.pipeline.set_state,
+                                           args=(Gst.State.NULL,),
+                                           timeout=GST_TEARDOWN_TIMEOUT)
+                if not fok:
+                    log.warning("releaseResources: forced set_state(NULL) also hung >%ds - abandoning",
+                                GST_TEARDOWN_TIMEOUT)
                 # Don't wait for state change - just proceed with cleanup
 
             # wake poller
