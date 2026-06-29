@@ -9875,7 +9875,9 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.cursor.show()
                 self.cursor2.show()
 
-                self.star_pick_info.show()
+                # Respect the F1 overlay toggle: only show the picking hints if overlays are on
+                if self.label1.isVisible():
+                    self.star_pick_info.show()
 
                 # Enable the Next button for star panning
                 self.tab.param_manager.next_star_button.setEnabled(True)
@@ -11412,15 +11414,22 @@ class PlateTool(QtWidgets.QMainWindow):
             self.v_zoom.hide()
 
     def toggleInfo(self):
-        """ Show/hide the info panel in the top-left corner of the image.
+        """ Show/hide the on-image overlays: the top-left info panel and, while picking, the
+        star-picking key hints.
 
-        (The keyboard reference and workflow guide live in the right-hand "Help" tab.)
+        (The full keyboard reference and workflow guide live in the right-hand "Help" tab.)
         """
 
-        if self.label1.isVisible():
-            self.label1.hide()
-        else:
+        show = not self.label1.isVisible()
+
+        if show:
             self.label1.show()
+            # Only show the picking hints when actually in star-pick mode
+            if self.star_pick_mode:
+                self.star_pick_info.show()
+        else:
+            self.label1.hide()
+            self.star_pick_info.hide()
 
         # Shift the zoom window so it doesn't overlap the info panel
         if self.v_zoom_left:
