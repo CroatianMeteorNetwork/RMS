@@ -196,6 +196,55 @@ def malloc_trim_probe():
     return before, after, before - after
 
 
+# Per-process throttle state for the in-process native probe (fresh in each fork child).
+_NATIVE_LAST = {}
+
+
+def logNativeStats(log, role, extra=""):
+    """Log this process's native memory stats, for any RMS worker to call from its loop.
+
+    Opt-in via RMS_MEMPROFILE (interval seconds); inert otherwise. Throttled per role so
+    it can be called every loop iteration cheaply. Emits VmRSS/RssAnon/threads/fds plus
+    the glibc mallinfo split (uordblks = in-use -> real leak; fordblks = retained free ->
+    arena retention; hblkhd = mmap'd large allocs). Uniform "MEMPROFILE-NATIVE role=..."
+    format across all processes so the log is greppable. Never raises into the caller.
+
+    Arguments:
+        log: logger to write to.
+        role: [str] short process role, e.g. "RMS-Compress".
+        extra: [str] optional extra field, e.g. "rebuilds=12".
+    """
+    iv = os.environ.get("RMS_MEMPROFILE")
+    if not iv:
+        return
+    try:
+        iv = float(iv)
+    except (TypeError, ValueError):
+        iv = 60.0
+    now = time.time()
+    if now - _NATIVE_LAST.get(role, 0.0) < iv:
+        return
+    _NATIVE_LAST[role] = now
+    try:
+        pid = os.getpid()
+        st = _read_status(pid)
+        mi = mallinfo()
+        mb = 1024.0 * 1024.0
+        log.info("MEMPROFILE-NATIVE role=%s pid=%d %s VmRSS=%.0fMB RssAnon=%.0fMB "
+                 "threads=%d fds=%d | malloc uordblks=%.0fMB fordblks=%.0fMB "
+                 "hblkhd=%.0fMB arena=%.0fMB" % (
+                     role, pid, extra,
+                     st.get("VmRSS", 0) / mb, st.get("RssAnon", 0) / mb,
+                     st.get("Threads", 0), _fd_count(pid),
+                     mi.get("uordblks", 0) / mb, mi.get("fordblks", 0) / mb,
+                     mi.get("hblkhd", 0) / mb, mi.get("arena", 0) / mb))
+    except Exception as e:
+        try:
+            log.debug("MEMPROFILE-NATIVE failed: %s", e)
+        except Exception:
+            pass
+
+
 # ----------------------------------------------------------------------------------------
 # /proc readers
 # ----------------------------------------------------------------------------------------

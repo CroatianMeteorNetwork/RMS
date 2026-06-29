@@ -39,6 +39,13 @@ import pyximport
 pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 from RMS.CompressionCy import compressFrames
 
+# Opt-in in-process memory probe (no-op fallback so compression never breaks on it)
+try:
+    from Utils.MemoryProfiler import logNativeStats
+except Exception:
+    def logNativeStats(*args, **kwargs):
+        pass
+
 
 # Get the logger from the main module
 log = getLogger("rmslogger")
@@ -267,6 +274,8 @@ class Compressor(multiprocessing.Process):
         
         # Repeat until the compressor is killed from the outside
         while True:
+            logNativeStats(log, "RMS-Compress")
+
             # graceful-exit check
             if self.exit.is_set():
                 if self.start_time1.value == 0 and self.start_time2.value == 0:

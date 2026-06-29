@@ -50,6 +50,13 @@ from RMS.Logger import LoggingManager, getLogger, gstDebugLogger
 from RMS.CaptureModeSwitcher import switchCameraMode
 import Utils.CameraControl as cc
 
+# Opt-in in-process memory probe (no-op fallback so core capture never breaks on it)
+try:
+    from Utils.MemoryProfiler import logNativeStats
+except Exception:
+    def logNativeStats(*args, **kwargs):
+        pass
+
 # Get the logger from the main module
 log = getLogger("rmslogger")
 
@@ -1553,43 +1560,13 @@ class BufferedCapture(Process):
 
 
     def _logNativeStats(self):
-        """Log in-process native allocator + thread/fd stats for leak diagnosis.
+        """Log this process's native allocator + thread/fd stats for leak diagnosis.
 
-        Opt-in via RMS_MEMPROFILE. Throttled to that interval. The glibc mallinfo2 split
-        (uordblks vs fordblks vs hblkhd) is the decisive piece external sampling cannot
-        see: it separates a genuine leak (uordblks/hblkhd grow) from arena retention
-        (fordblks grows, reclaimable). Tagged with the pipeline-rebuild count so growth
-        can be tied to reconnect churn. Never raises.
+        Delegates to the shared probe (uniform MEMPROFILE-NATIVE format across all RMS
+        processes), tagged with the pipeline-rebuild count so capture growth can be tied
+        to reconnect churn. Opt-in via RMS_MEMPROFILE; throttled and inert otherwise.
         """
-        if not self._memprofile:
-            return
-        try:
-            interval = float(self._memprofile)
-        except (TypeError, ValueError):
-            interval = 60.0
-        now = time.time()
-        if now - self._last_native_log < interval:
-            return
-        self._last_native_log = now
-
-        try:
-            from Utils.MemoryProfiler import mallinfo, _read_status, _fd_count
-
-            pid = os.getpid()
-            st = _read_status(pid)
-            mi = mallinfo()
-            mb = 1024.0 * 1024.0
-
-            log.info("MEMPROFILE-NATIVE pid=%d rebuilds=%d VmRSS=%.0fMB RssAnon=%.0fMB "
-                     "threads=%d fds=%d | malloc uordblks=%.0fMB fordblks=%.0fMB "
-                     "hblkhd=%.0fMB arena=%.0fMB" % (
-                         pid, self._pipeline_rebuilds,
-                         st.get("VmRSS", 0) / mb, st.get("RssAnon", 0) / mb,
-                         st.get("Threads", 0), _fd_count(pid),
-                         mi.get("uordblks", 0) / mb, mi.get("fordblks", 0) / mb,
-                         mi.get("hblkhd", 0) / mb, mi.get("arena", 0) / mb))
-        except Exception as e:
-            log.debug("MEMPROFILE-NATIVE failed: %s", e)
+        logNativeStats(log, "RMS-Capture", "rebuilds=%d" % self._pipeline_rebuilds)
 
 
     def releaseResources(self):

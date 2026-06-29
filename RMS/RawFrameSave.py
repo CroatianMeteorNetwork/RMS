@@ -28,6 +28,13 @@ import cv2
 from RMS.Logger import getLogger
 from RMS.Misc import mkdirP, setProcName
 
+# Opt-in in-process memory probe (no-op fallback so raw saving never breaks on it)
+try:
+    from Utils.MemoryProfiler import logNativeStats
+except Exception:
+    def logNativeStats(*args, **kwargs):
+        pass
+
 # Get the logger from the main module
 log = getLogger("rmslogger")
 
@@ -223,6 +230,8 @@ class RawFrameSaver(multiprocessing.Process):
         try:
             # Repeat until the raw frame saver is killed from the outside
             while not self.exit.is_set():
+
+                logNativeStats(log, "RMS-RawSave")
 
                 # Block until the raw frames are available
                 while (self.start_time1.value == 0) and (self.start_time2.value == 0):

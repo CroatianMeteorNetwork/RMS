@@ -12,6 +12,13 @@ from RMS.Pickling import savePickle, loadPickle
 from RMS.Logger import getLogger
 from RMS.Misc import randomCharacters, isListKeyInDict, listToTupleRecursive, setProcName
 
+# Opt-in in-process memory probe (no-op fallback so the worker never breaks on it)
+try:
+    from Utils.MemoryProfiler import logNativeStats
+except Exception:
+    def logNativeStats(*args, **kwargs):
+        pass
+
 
 from errno import EPIPE
 
@@ -309,7 +316,11 @@ class QueuedPool(object):
         
         input_ret_failures = 0
 
+        _wlog = getLogger("rmslogger")
+
         while True:
+
+            logNativeStats(_wlog, "RMS-Worker")
 
             # Get the function arguments (block until available, handle possible errors)
             try:
