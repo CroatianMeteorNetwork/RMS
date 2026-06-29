@@ -1185,8 +1185,12 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                 maxpix_elements = img_handle.ff.maxpixel[ys,xs].astype(np.float64)
                 weights = maxpix_elements/np.sum(maxpix_elements)
 
-                # Random sample the point, sampling is weighted by pixel intensity
-                indices = np.random.choice(len(zs), config.max_points_det, replace=False, p=weights)
+                # Random sample the point, sampling is weighted by pixel intensity.
+                # Use a fixed-seed local generator so reprocessing the same data is
+                # reproducible (the global RNG is unseeded; this matches the seeded-RNG
+                # convention used elsewhere in RMS, e.g. ApplyRecalibrate).
+                rng = np.random.default_rng(0)
+                indices = rng.choice(len(zs), config.max_points_det, replace=False, p=weights)
                 ys = ys[indices]
                 xs = xs[indices]
                 zs = zs[indices]
