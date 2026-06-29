@@ -257,6 +257,23 @@ def _cwd_base(pid):
         return ""
 
 
+_STATION_RE = re.compile(r'[Ss]tations/([^/ ]+)/')
+
+
+def _station(pid):
+    """Which camera this PID belongs to, from the -c .../Stations/<ID>/.config arg.
+
+    On a multicam box every camera runs from the same cwd (~/source/RMS), so cwd can't
+    tell them apart - the station ID is only in the config path on the command line.
+    Fork children inherit the parent argv, so they carry it too. Falls back to cwd
+    basename for non-RMS children (ffmpeg etc.) that have no config arg.
+    """
+    m = _STATION_RE.search(_cmdline(pid))
+    if m:
+        return m.group(1)
+    return _cwd_base(pid) or "?"
+
+
 def _comm(pid):
     try:
         with open("/proc/{}/comm".format(pid)) as f:
@@ -374,7 +391,7 @@ def _rms_pids():
                     break
             if role is None:
                 role = _COMM_ROLE.get(comm, "child:" + comm)
-        station = _cwd_base(pid) or "?"
+        station = _station(pid)
         found.append((pid, role, station))
     return found
 
