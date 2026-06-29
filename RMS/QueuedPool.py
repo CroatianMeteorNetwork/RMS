@@ -10,7 +10,7 @@ import multiprocessing.dummy
 
 from RMS.Pickling import savePickle, loadPickle
 from RMS.Logger import getLogger
-from RMS.Misc import randomCharacters, isListKeyInDict, listToTupleRecursive
+from RMS.Misc import randomCharacters, isListKeyInDict, listToTupleRecursive, setProcName
 
 
 from errno import EPIPE
@@ -286,7 +286,9 @@ class QueuedPool(object):
 
     def _workerFunc(self, func):
         """ A wrapper function for the given worker function. Handles the queue operations. """
-        
+
+        setProcName("RMS-Worker")
+
         # Set lower priority, if given
         if self.low_priority:
 

@@ -68,6 +68,7 @@ Pure stdlib, Linux /proc only. Never raises into the caller.
 from __future__ import print_function
 
 import os
+import re
 import glob
 import threading
 import time
@@ -85,25 +86,94 @@ class _Mallinfo2(ctypes.Structure):
         "usmblks", "fsmblks", "uordblks", "fordblks", "keepcost")]
 
 
+# Load libc unconditionally; then probe each function separately so that a glibc too old
+# for mallinfo2 (e.g. < 2.33, common on Ubuntu 20.04 / Py3.8) still gets malloc_info and
+# malloc_trim instead of disabling everything.
 _libc = None
+_has_mallinfo2 = False
+_has_malloc_info = False
 try:
     _libc = ctypes.CDLL("libc.so.6", use_errno=True)
-    _libc.mallinfo2.restype = _Mallinfo2          # glibc >= 2.33, size_t fields (no overflow)
-    _libc.malloc_trim.argtypes = [ctypes.c_size_t]
-    _libc.malloc_trim.restype = ctypes.c_int
-except (OSError, AttributeError):
+    try:
+        _libc.malloc_trim.argtypes = [ctypes.c_size_t]
+        _libc.malloc_trim.restype = ctypes.c_int
+    except AttributeError:
+        pass
+    try:
+        _libc.mallinfo2.restype = _Mallinfo2      # size_t fields, no >2GB overflow
+        _has_mallinfo2 = True
+    except AttributeError:
+        pass
+    try:
+        # int open_memstream-backed capture of malloc_info(0, FILE*)
+        _libc.open_memstream.restype = ctypes.c_void_p
+        _libc.open_memstream.argtypes = [ctypes.POINTER(ctypes.c_char_p),
+                                         ctypes.POINTER(ctypes.c_size_t)]
+        _libc.malloc_info.argtypes = [ctypes.c_int, ctypes.c_void_p]
+        _libc.fclose.argtypes = [ctypes.c_void_p]
+        _has_malloc_info = True
+    except AttributeError:
+        pass
+except OSError:
     _libc = None
 
 
-def mallinfo():
-    """Return the glibc mallinfo2 struct as a dict of bytes, or {} if unavailable."""
-    if _libc is None:
+def _mallinfo_via_xml():
+    """Parse glibc malloc_info() XML into the same keys mallinfo2 exposes (bytes).
+
+    malloc_info emits per-arena blocks then grand totals. We take the LAST occurrence of
+    each total so we get the whole-process aggregate:
+        arena    <- <system type="current" size=..>   (heap obtained from OS)
+        hblkhd   <- <total  type="mmap"    size=..>    (large mmap'd allocations)
+        fordblks <- fast + rest free                   (freed but retained in arenas)
+        uordblks <- arena - fordblks                   (in use; a real leak grows this)
+    Returns {} if unavailable.
+    """
+    if _libc is None or not _has_malloc_info:
+        return {}
+    buf = ctypes.c_char_p()
+    size = ctypes.c_size_t()
+    fp = _libc.open_memstream(ctypes.byref(buf), ctypes.byref(size))
+    if not fp:
         return {}
     try:
-        mi = _libc.mallinfo2()
-        return {f: getattr(mi, f) for f, _ in _Mallinfo2._fields_}
-    except Exception:
-        return {}
+        _libc.malloc_info(0, fp)
+        _libc.fclose(fp)
+        xml = ctypes.string_at(buf) if buf.value else b""
+    finally:
+        if buf.value:
+            # free the open_memstream buffer
+            try:
+                ctypes.CDLL("libc.so.6").free(buf)
+            except Exception:
+                pass
+    text = xml.decode("ascii", "replace")
+
+    def _last(kind, typ):
+        vals = re.findall(r'<%s type="%s"[^>]*size="(\d+)"' % (kind, typ), text)
+        return int(vals[-1]) if vals else 0
+
+    arena = _last("system", "current")
+    hblkhd = _last("total", "mmap")
+    fordblks = _last("total", "fast") + _last("total", "rest")
+    uordblks = max(0, arena - fordblks)
+    return {"arena": arena, "hblkhd": hblkhd, "fordblks": fordblks,
+            "uordblks": uordblks}
+
+
+def mallinfo():
+    """Return glibc allocator stats as a dict of bytes (arena/uordblks/fordblks/hblkhd).
+
+    Prefers mallinfo2 (exact). Falls back to malloc_info() XML on older glibc. Returns {}
+    only if neither is available.
+    """
+    if _has_mallinfo2:
+        try:
+            mi = _libc.mallinfo2()
+            return {f: getattr(mi, f) for f, _ in _Mallinfo2._fields_}
+        except Exception:
+            pass
+    return _mallinfo_via_xml()
 
 
 def malloc_trim_probe():
@@ -268,11 +338,11 @@ def _rms_pids():
         if pp is not None:
             children.setdefault(pp, []).append(pid)
 
-    # Seeds by cmdline hint.
+    # Seeds by cmdline hint OR a prctl-set RMS- process name (comm).
     seeds = []
     for pid in all_pids:
         cmd = _cmdline(pid).lower()
-        if cmd and any(h in cmd for h in _RMS_HINTS):
+        if (cmd and any(h in cmd for h in _RMS_HINTS)) or _comm(pid).startswith("RMS-"):
             seeds.append(pid)
 
     # Expand to all descendants of seeds.
@@ -287,14 +357,23 @@ def _rms_pids():
 
     found = []
     for pid in members:
-        cmd = _cmdline(pid).lower()
+        comm = _comm(pid)
         role = None
-        for needle, name in _ROLE_TABLE:
-            if needle in cmd:
-                role = name
-                break
-        if role is None:
-            role = _COMM_ROLE.get(_comm(pid), "child:" + _comm(pid))
+        # 1. A prctl-set RMS- name is the only reliable label: fork children inherit the
+        #    parent's argv, so cmdline cannot tell BufferedCapture/Compressor/RawSave/
+        #    workers apart - comm (set via setProcName) can.
+        if comm.startswith("RMS-"):
+            role = comm
+        else:
+            # 2. Fall back to cmdline hint (catches the StartCapture root and any process
+            #    not yet name-tagged) then comm for non-RMS children (ffmpeg etc.).
+            cmd = _cmdline(pid).lower()
+            for needle, name in _ROLE_TABLE:
+                if needle in cmd:
+                    role = name
+                    break
+            if role is None:
+                role = _COMM_ROLE.get(comm, "child:" + comm)
         station = _cwd_base(pid) or "?"
         found.append((pid, role, station))
     return found

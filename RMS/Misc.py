@@ -45,6 +45,25 @@ if sys.version_info[0] < 3:
 log = getLogger("rmslogger")
 
 
+def setProcName(name):
+    """Set this process's OS-visible name (/proc/<pid>/comm) via prctl(PR_SET_NAME).
+
+    Used so memory/diagnostic tools can tell forked RMS workers apart - multiprocessing
+    children otherwise inherit the parent's argv/comm and are indistinguishable. The
+    kernel truncates the name to 15 bytes. No-op on non-Linux or if prctl is unavailable.
+
+    Arguments:
+        name: [str] Short process name, e.g. "RMS-Capture".
+    """
+    try:
+        import ctypes
+        libc = ctypes.CDLL("libc.so.6", use_errno=True)
+        buf = ctypes.create_string_buffer(name.encode("ascii", "replace")[:15])
+        libc.prctl(15, ctypes.byref(buf), 0, 0, 0)  # 15 == PR_SET_NAME
+    except Exception:
+        pass
+
+
 def interruptibleWait(seconds):
     """ Wait for the specified number of seconds, but allow interruption by Ctrl+C.
 

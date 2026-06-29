@@ -31,7 +31,7 @@ from RMS.VideoExtraction import Extractor
 from RMS.Formats import FFfile, FFStruct
 from RMS.Formats import FieldIntensities
 from RMS.Logger import getLogger
-from RMS.Misc import UTCFromTimestamp
+from RMS.Misc import UTCFromTimestamp, setProcName
 from RMS.Routines.Image import saveImage
 
 # Import Cython functions
@@ -259,7 +259,9 @@ class Compressor(multiprocessing.Process):
     def run(self):
         """ Retrieve frames from list, convert, compress and save them.
         """
-        
+
+        setProcName("RMS-Compress")
+
         n = 0
         exit_wait_start = None
         

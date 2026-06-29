@@ -44,7 +44,7 @@ from RMS.Misc import obfuscatePassword
 from RMS.Routines.GstreamerCapture import GstVideoFile, getStructureValue
 from RMS.Formats.ObservationSummary import addObsParam, getObservationSummaryDict
 from RMS.RawFrameSave import RawFrameSaver
-from RMS.Misc import RmsDateTime, mkdirP, UTCFromTimestamp
+from RMS.Misc import RmsDateTime, mkdirP, UTCFromTimestamp, setProcName
 from RMS.Formats import FTfile, FTStruct
 from RMS.Logger import LoggingManager, getLogger, gstDebugLogger
 from RMS.CaptureModeSwitcher import switchCameraMode
@@ -1820,6 +1820,7 @@ class BufferedCapture(Process):
         """ Main process function - initializes all process-specific resources and runs capture loop.
         """
         try:
+            setProcName("RMS-Capture")
             log.debug("Initializing process-specific resources...")
 
             # Initialize heartbeat for watchdog

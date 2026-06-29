@@ -26,7 +26,7 @@ from math import floor
 import cv2
 
 from RMS.Logger import getLogger
-from RMS.Misc import mkdirP
+from RMS.Misc import mkdirP, setProcName
 
 # Get the logger from the main module
 log = getLogger("rmslogger")
@@ -217,6 +217,8 @@ class RawFrameSaver(multiprocessing.Process):
     def run(self):
         """ Retrieve raw frames from shared array and save them.
         """
+
+        setProcName("RMS-RawSave")
 
         try:
             # Repeat until the raw frame saver is killed from the outside
