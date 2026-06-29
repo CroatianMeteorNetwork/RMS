@@ -207,6 +207,44 @@ def _topic_overview(gui):
     return _page("Overview &amp; quick start", body)
 
 
+def _topic_levels(gui):
+    c = _ctrl(gui)
+    body = (
+        "<p class=\"lead\">The <b>Levels</b> tab controls the <b>display contrast</b> of the image. "
+        "It changes only how the image looks on screen &ndash; never the underlying pixel data, the "
+        "fit, or the photometry.</p>"
+
+        "<h3>The histogram</h3>"
+        "<p>The plot is a <b>histogram</b>: for each brightness value (horizontal axis) it shows how "
+        "many pixels in the image have that value (height). Most pixels are dark sky, so there is "
+        "usually a tall spike near the low end, with a long thin tail of brighter pixels (stars).</p>"
+
+        "<h3>Black point &amp; white point</h3>"
+        "<p>Two draggable handles bound a highlighted region on the histogram:</p>"
+        "<ul>"
+        "<li><b>Black point</b> (lower handle): every pixel at or below this value is shown as pure "
+        "black.</li>"
+        "<li><b>White point</b> (upper handle): every pixel at or above this value is shown as pure "
+        "white.</li>"
+        "</ul>"
+        "<p>Brightness between the two is spread across the grey ramp. <b>Narrowing</b> the window "
+        "(handles closer together) increases contrast and makes faint stars pop; <b>widening</b> it "
+        "softens the image. Drag the edges of the highlighted region to set them by hand.</p>"
+
+        "<h3>Auto levels (" + _key(c + " + A") + ")</h3>"
+        "<p>Auto levels sets the black and white points automatically from the image's brightness "
+        "distribution &ndash; roughly the <b>0.1st percentile</b> for black and the "
+        "<b>99.95th percentile</b> for white, while ignoring the brightest few percent of pixels so "
+        "hot or saturated pixels don't blow out the stretch. It is a good starting point for almost "
+        "any image. Press " + _key(c + " + A") + " again to return to your manual levels; while auto "
+        "is on, the handles are locked.</p>"
+        + _callout("Levels are display-only. Set them so you can comfortably see the stars you need "
+                   "to pick &ndash; they have no effect on the calibration result.")
+        + _nav_links(related=[('tabs', 'Guide to the tabs')])
+    )
+    return _page("Levels (display contrast)", body)
+
+
 def _topic_tabs(gui):
     mode = _mode(gui)
     mode_name = "SkyFit" if mode == 'skyfit' else "Manual Reduction"
@@ -214,7 +252,8 @@ def _topic_tabs(gui):
     rows = []
     rows.append(("Levels",
                  "Adjust image brightness and contrast with the histogram &ndash; drag the handles, "
-                 "or press " + _key(_ctrl(gui) + " + A") + " for auto levels."))
+                 "or press " + _key(_ctrl(gui) + " + A") + " for auto levels. "
+                 "<a href=\"topic:levels\">More</a>."))
 
     if mode == 'skyfit':
         rows.append(("Fit Parameters",
@@ -784,6 +823,8 @@ HELP_TOPICS = [
                                desc="Start here: what SkyFit does and the fastest way to calibrate.")),
     ('tabs',              dict(title="Guide to the tabs",                 modes=('skyfit',),          enabled=_always,        build=_topic_tabs,
                                desc="What each tab on the right does.")),
+    ('levels',            dict(title="Levels (display contrast)",         modes=('skyfit',),          enabled=_always,        build=_topic_levels,
+                               desc="The histogram, black/white points, auto levels.")),
     ('astrometry',        dict(title="Calibrate astrometry (pick stars)", modes=('skyfit',),          enabled=_always,        build=_topic_astrometry,
                                desc="Pick stars and fit the plate by hand.")),
     ('photometry',        dict(title="Photometry",                        modes=('skyfit',),          enabled=_always,        build=_topic_photometry,
@@ -814,6 +855,8 @@ HELP_TOPICS = [
                                desc="Start here: measure a meteor frame by frame.")),
     ('mr_tabs',           dict(title="Guide to the tabs",                 modes=('manualreduction',), enabled=_always,        build=_topic_tabs,
                                desc="What each tab on the right does.")),
+    ('mr_levels',         dict(title="Levels (display contrast)",         modes=('manualreduction',), enabled=_always,        build=_topic_levels,
+                               desc="The histogram, black/white points, auto levels.")),
     ('mr_picking',        dict(title="Pick meteor positions",             modes=('manualreduction',), enabled=_always,        build=_topic_mr_picking,
                                desc="Mark the meteor position on each frame.")),
     ('mr_lightcurve',     dict(title="Light curve &amp; saving",          modes=('manualreduction',), enabled=_always,        build=_topic_mr_lightcurve,
