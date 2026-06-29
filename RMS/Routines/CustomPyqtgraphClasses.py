@@ -1120,6 +1120,9 @@ class RightOptionsTab(QtWidgets.QTabWidget, ScaledSizeHelper):
     TAB_WIDTH_CHARS = 32
     TAB_MINIMIZED_CHARS = 2
 
+    # The Help tab is shown at this multiple of the normal width (more readable docs)
+    HELP_WIDTH_MULT = 2
+
     def __init__(self, gui):
         super(RightOptionsTab, self).__init__()
 
@@ -1160,20 +1163,32 @@ class RightOptionsTab(QtWidgets.QTabWidget, ScaledSizeHelper):
             self.gui.view_widget.setFocus()
 
 
+    def maximizedWidthChars(self):
+        """ Maximized panel width (in characters). The Help tab gets extra width for readability;
+            all other tabs use the normal width. """
+        if 0 <= self.index < self.count() and self.widget(self.index) is self.help:
+            return self.TAB_WIDTH_CHARS*self.HELP_WIDTH_MULT
+        return self.TAB_WIDTH_CHARS
+
+    def applyTabWidth(self):
+        """ Resize the panel to match the current maximized/minimized state and selected tab. """
+        if self.maximized:
+            self.setFixedWidth(self.scaledWidth(self.maximizedWidthChars()))
+        else:
+            self.setFixedWidth(self.scaledWidth(self.TAB_MINIMIZED_CHARS))
+
     def onTabBarClicked(self, index):
         old_index = self.index
         if index != self.index:
             self.index = index
             self.maximized = True
-            self.setFixedWidth(self.scaledWidth(self.TAB_WIDTH_CHARS))
+            # Wider for Help, normal for everything else
+            self.applyTabWidth()
             # Emit signal for tab change
             self.sigTabChanged.emit(old_index, index)
         else:
             self.maximized = not self.maximized
-            if self.maximized:
-                self.setFixedWidth(self.scaledWidth(self.TAB_WIDTH_CHARS))
-            else:
-                self.setFixedWidth(self.scaledWidth(self.TAB_MINIMIZED_CHARS))
+            self.applyTabWidth()
 
         # Always set the focus back to the image window
         self.gui.view_widget.setFocus()

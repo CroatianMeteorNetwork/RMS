@@ -11439,7 +11439,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.setCurrentIndex(help_index)
         self.tab.index = help_index
         self.tab.maximized = True
-        self.tab.setFixedWidth(self.tab.scaledWidth(self.tab.TAB_WIDTH_CHARS))
+        self.tab.applyTabWidth()
         return True
 
 
