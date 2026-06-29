@@ -45,8 +45,14 @@ if sys.version_info[0] < 3:
 log = getLogger("rmslogger")
 
 
-def setParentDeathSignal(sig=signal.SIGKILL):
+def setParentDeathSignal(sig=9):
     """Ask the kernel to deliver *sig* to this process when its parent process dies.
+
+    NOTE: under the multiprocessing 'forkserver' start method (Python 3.14's new default
+    on Linux) the OS parent is the fork-server, not the logical parent, so this fires on
+    the wrong death. Callers that must survive forkserver should ALSO use an explicit
+    parent-PID liveness check (see RawFrameSaver). This remains a fast, exact fast-path
+    under 'fork' (3.6-3.13 default) and 'spawn'.
 
     Prevents a worker forked by another worker from being orphaned and living forever when
     its parent is force-killed. Without this, a BufferedCapture that the watchdog SIGKILLs

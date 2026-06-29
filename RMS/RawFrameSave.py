@@ -72,6 +72,14 @@ class RawFrameSaver(multiprocessing.Process):
         self.exit = multiprocessing.Event()
         self.run_exited = multiprocessing.Event()
 
+        # PID of the logical parent (BufferedCapture). __init__ runs in the parent, so this
+        # is captured correctly under fork, spawn AND forkserver - unlike os.getppid(),
+        # which under forkserver returns the fork-server, not BufferedCapture. Used in run()
+        # to self-terminate if the parent dies without setting our exit Event (watchdog
+        # force-kill), so an orphan can never linger and leak its buffer. Start-method- and
+        # platform-agnostic, so it works across Python 3.6-3.14.
+        self.parent_pid = os.getpid()
+
 
     def saveFramesToDisk(self, frametimes, daytime_mode=False):
         """Saves a block of raw image frames to disk with timestamp-based filenames.
@@ -236,6 +244,18 @@ class RawFrameSaver(multiprocessing.Process):
                         log.debug('Raw frame saver run exit')
                         self.run_exited.set()
 
+                        return None
+
+                    # Forkserver-safe orphan guard: if the logical parent (BufferedCapture)
+                    # is gone, our exit Event will never be set, so self-terminate instead
+                    # of spinning here forever holding the frame buffer. Complements
+                    # PR_SET_PDEATHSIG (which doesn't fire correctly under forkserver).
+                    try:
+                        os.kill(self.parent_pid, 0)
+                    except OSError:
+                        log.warning('RawFrameSaver: parent process %d gone, exiting orphan',
+                                    self.parent_pid)
+                        self.run_exited.set()
                         return None
 
                     time.sleep(0.1)
