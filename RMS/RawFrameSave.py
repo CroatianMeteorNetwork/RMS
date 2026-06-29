@@ -26,7 +26,7 @@ from math import floor
 import cv2
 
 from RMS.Logger import getLogger
-from RMS.Misc import mkdirP
+from RMS.Misc import mkdirP, setParentDeathSignal
 
 # Get the logger from the main module
 log = getLogger("rmslogger")
@@ -217,6 +217,11 @@ class RawFrameSaver(multiprocessing.Process):
     def run(self):
         """ Retrieve raw frames from shared array and save them.
         """
+
+        # Die if our parent BufferedCapture dies (e.g. watchdog force-kill). Without this
+        # the orphaned saver loops forever on a shared exit Event that is never set,
+        # leaking its inherited ~450 MB buffer; hundreds accumulate and OOM the box.
+        setParentDeathSignal()
 
         try:
             # Repeat until the raw frame saver is killed from the outside
