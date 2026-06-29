@@ -229,10 +229,14 @@ def storeDictInDB(conn, d, debug=False):
     # Ensure schema is up to date
     existing_columns = addRequiredColumns(conn, d)
 
-    dict_filtered_by_columns = {k: v for k, v in d.items() if k in existing_columns}
+    # Columns are always created lower-cased (see addRequiredColumns), and SQLite column
+    # names are case-insensitive, so match case-insensitively and key the filtered dict by
+    # the lower-cased name. Comparing the original-case key would silently drop mixed-case
+    # keys such as "stationID".
+    dict_filtered_by_columns = {k.lower(): v for k, v in d.items() if k.lower() in existing_columns}
 
-    dropped = set(d.keys()) - set(dict_filtered_by_columns.keys())
-    if len(dropped) != 0 and debug:
+    dropped = {k for k in d.keys() if k.lower() not in existing_columns}
+    if len(dropped) != 0:
         log.warning(f"No columns for following keys: {sorted(dropped)}")
 
     # Normalise booleans safely (TEXT columns expect strings)
