@@ -26,7 +26,7 @@ from math import floor
 import cv2
 
 from RMS.Logger import getLogger
-from RMS.Misc import mkdirP, setProcName
+from RMS.Misc import mkdirP, setProcName, setParentDeathSignal
 
 # Opt-in in-process memory probe (no-op fallback so raw saving never breaks on it)
 try:
@@ -226,6 +226,11 @@ class RawFrameSaver(multiprocessing.Process):
         """
 
         setProcName("RMS-RawSave")
+
+        # Die if our parent BufferedCapture dies (e.g. watchdog force-kill). Without this
+        # the orphaned saver loops forever on a shared exit Event that is never set,
+        # leaking its inherited ~450 MB buffer; hundreds accumulate and OOM the box.
+        setParentDeathSignal()
 
         try:
             # Repeat until the raw frame saver is killed from the outside

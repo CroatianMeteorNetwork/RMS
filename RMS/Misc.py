@@ -64,6 +64,34 @@ def setProcName(name):
         pass
 
 
+def setParentDeathSignal(sig=signal.SIGKILL):
+    """Ask the kernel to deliver *sig* to this process when its parent process dies.
+
+    Prevents a worker that was forked by another worker from being orphaned and living
+    forever when its parent is force-killed. Without this, a BufferedCapture that the
+    watchdog SIGKILLs leaves its RawFrameSaver child reparented to init, still looping on
+    a shared exit Event that will never be set - so it never exits and keeps its inherited
+    ~450 MB frame buffer. Repeated across watchdog restarts that orphans hundreds of
+    processes and OOMs the box.
+
+    Linux-only (prctl PR_SET_PDEATHSIG); no-op elsewhere. Call as early as possible in a
+    child's run(). Also handles the race where the parent already died before the call.
+
+    Arguments:
+        sig: [int] Signal to receive on parent death. Default SIGKILL.
+    """
+    try:
+        import ctypes
+        libc = ctypes.CDLL("libc.so.6", use_errno=True)
+        libc.prctl(1, int(sig), 0, 0, 0)  # 1 == PR_SET_PDEATHSIG
+        # If the parent already exited before we armed the signal, we were just reparented
+        # to init (ppid == 1): exit now rather than linger.
+        if os.getppid() == 1:
+            os._exit(0)
+    except Exception:
+        pass
+
+
 def interruptibleWait(seconds):
     """ Wait for the specified number of seconds, but allow interruption by Ctrl+C.
 
