@@ -39,6 +39,8 @@ HELP_STYLE = """
                color: #16324f; font-weight: bold; }
     span.btn { background-color: #dfe6ef; color: #16324f; font-weight: bold; }
     span.tip { color: #5f6368; }
+    p.navnext { margin-top: 8px; margin-bottom: 2px; }
+    p.navrel { margin-top: 2px; margin-bottom: 2px; color: #5f6368; }
 """
 
 
@@ -127,20 +129,21 @@ def _callout(html, kind="tip"):
 
 
 def _nav_links(next_pair=None, related=None):
-    """ Footer with a "Next" link and/or a list of "Related" links.
+    """ Footer with a "Next" link and/or a list of "Related" links, each on its own line.
 
     next_pair: (topic_id, title) or None.  related: list of (topic_id, title) or None.
     """
-    parts = []
+    html = ""
     if next_pair:
-        parts.append('<b>Next:</b> <a href="topic:{0}">{1}</a> &rarr;'.format(next_pair[0], next_pair[1]))
+        html += ('<p class="navnext"><b>Next:</b> '
+                 '<a href="topic:{0}">{1} &rarr;</a></p>').format(next_pair[0], next_pair[1])
     if related:
-        links = ' &middot; '.join(
+        links = ' &nbsp;&middot;&nbsp; '.join(
             '<a href="topic:{0}">{1}</a>'.format(t, n) for t, n in related)
-        parts.append('<b>Related:</b> ' + links)
-    if not parts:
+        html += '<p class="navrel"><b>Related:</b> ' + links + '</p>'
+    if not html:
         return ""
-    return '<hr><p class="lead">' + ' &nbsp;&nbsp;&nbsp; '.join(parts) + '</p>'
+    return '<hr>' + html
 
 
 def _page(title, body_html):
