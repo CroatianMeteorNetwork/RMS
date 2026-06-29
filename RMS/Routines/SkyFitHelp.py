@@ -273,7 +273,8 @@ def _topic_tabs(gui):
                  "Re-detect stars on the current image with tunable parameters and use them instead "
                  "of the stored CALSTARS detections."))
     rows.append(("Mask",
-                 "Draw or paint a mask to hide obstructions (roofs, trees) from the star catalog."))
+                 "Draw or paint a mask over obstructions (roofs, trees) so the star and meteor "
+                 "detectors ignore them."))
     rows.append(("Settings",
                  "Display options: which overlays to show (catalog / detected / selected stars, "
                  "constellations, coordinate grids, distortion), image gamma, magnitude limits, "
@@ -557,11 +558,27 @@ def _topic_stardetect(gui):
 
 def _topic_mask(gui):
     body = (
-        "<p>The <b>Mask</b> tab edits the mask applied to the star catalog so stars over "
-        "obstructions (roofs, trees) are ignored.</p>"
+        "<p class=\"lead\">The mask marks parts of the image to <b>ignore</b>. Its main job is for "
+        "<b>detection</b>: the star and meteor detectors skip masked pixels, so obstructions don't "
+        "produce false detections or get confused for stars and meteors. (It also keeps catalog "
+        "stars over those areas out of the fit.)</p>"
+
+        "<h3>What to mask</h3>"
+        "<p>Mask anything that is <b>not clear sky</b> and could trigger or corrupt detections: "
+        "rooflines, trees, poles, wires, the horizon, timestamps/illuminated overlays, persistent "
+        "lights, and any fixed bright reflections.</p>"
+
+        "<h3>How carefully to mask</h3>"
+        "<p>It does not need to be pixel-perfect, but don't be sloppy either. Aim to <b>maximise the "
+        "observable sky</b> (mask as little as possible) while still fully covering each "
+        "obstruction. Leave a small margin of about <b>5&ndash;10 px</b> around obstructions so the "
+        "mask still holds if the camera shifts slightly. Too tight and a small camera move exposes "
+        "the obstruction; too loose and you throw away usable sky.</p>"
+
+        "<h3>Tools</h3>"
         "<ul>"
         "<li><b>Draw mode</b>: click to lay down polygon vertices; the enclosed area is masked.</li>"
-        "<li><b>Brush mode</b>: paint/erase the mask freehand; adjust the brush size.</li>"
+        "<li><b>Brush mode</b>: paint / erase the mask freehand; adjust the brush size.</li>"
         "<li>Undo strokes, clear polygons, invert, and toggle the overlay from the same tab.</li>"
         "</ul>"
         "<p>Launch with <b>-m / --mask PATH</b> to start from an existing mask.</p>"
@@ -683,12 +700,60 @@ def _topic_geopoints(gui):
 def _topic_sattracks(gui):
     c = _ctrl(gui)
     body = (
-        "<p>Satellite tracks overlay predicted satellite paths on the image (enabled with "
-        "<b>--sattracks</b>, optionally with <b>--tle_file</b>). Downloading TLEs needs internet; a "
-        "local TLE file closest to the clip start is selected automatically when provided.</p>"
+        "<p class=\"lead\">Satellite tracks overlay the predicted paths of satellites on the image, "
+        "so you can identify a satellite trail or tell one apart from a meteor. Needs the "
+        "<b>skyfield</b> package (the feature is disabled with a warning if it is missing) and a "
+        "valid platepar to project positions onto the image.</p>"
+
+        "<h3>How positions are predicted</h3>"
+        "<p>Each satellite's orbit is propagated from its <b>TLE</b> (two-line element set) with the "
+        "SGP4 model via skyfield, converted to RA/Dec for your station and time, then projected to "
+        "image pixels through the platepar. Only satellites that are <b>sunlit</b> (not in Earth's "
+        "shadow) are shown.</p>"
+
+        "<h3>What you see</h3>"
+        "<ul>"
+        "<li>A coloured <b>track line</b> spanning the clip's time range &ndash; one per satellite.</li>"
+        "<li><b>Direction arrows</b> at the start, middle and end showing the direction of motion.</li>"
+        "<li>The satellite <b>name label</b>.</li>"
+        "</ul>"
+
+        "<h3>Manual Reduction: matching a moving satellite</h3>"
+        "<p>In Manual Reduction mode a <b>marker</b> shows the satellite's predicted position at the "
+        "<i>current frame's time</i>, interpolated along the track. As you step through frames it "
+        "advances, so you can follow a satellite frame by frame and match it to a trail. Turn on "
+        "<b>Automatically compute tracks</b> to refresh on every frame change (off by default "
+        "because it is slow); otherwise press <b>Redraw Satellite Tracks</b> after changing frame or "
+        "TLEs.</p>"
+        "<p>Click a satellite's <b>name label</b> to open its page on n2yo.com "
+        "(<i>n2yo.com/satellite/?s=&lt;NORAD&nbsp;ID&gt;</i>) in your browser for orbit and pass "
+        "details.</p>"
+
+        "<h3>TLEs and getting a good match</h3>"
+        "<p>SkyFit chooses TLEs in this order: a file or directory you pass with <b>--tle_file</b> "
+        "or the <b>Load TLE File</b> button; otherwise TLEs downloaded from Celestrak's active "
+        "catalog and cached locally (refreshed about daily &ndash; needs internet the first time). "
+        "Point it at a <b>directory</b> of dated TLE files (named <i>TLE_YYYYMMDD_HHMMSS_...</i>) and "
+        "it picks the one closest in time to your observation. <b>Reset TLE Selection</b> returns to "
+        "the auto-downloaded set.</p>"
+        + _callout("For the best match, use a TLE set from the <b>closest date to your data</b>. "
+                   "When SkyFit opens it prints the chosen TLE file and its time offset in the "
+                   "terminal (e.g. <i>\"Best file found ... (diff: X hours)\"</i>). If the TLEs are "
+                   "more than a <b>few days</b> from the observation the predicted positions will "
+                   "<b>not match</b> &ndash; orbits drift, so old TLEs are unreliable.", "note")
+
+        + "<h3>Controls</h3>"
         + _shortcut_table([
             (c + " + T", "Toggle satellite tracks"),
         ])
+        + "<ul>"
+        "<li><b>Show Satellite Tracks</b> / <b>Automatically compute tracks</b> &ndash; in the "
+        "Settings tab.</li>"
+        "<li><b>Load TLE File</b> &ndash; pick a local TLE file or a directory of dated TLE files.</li>"
+        "<li><b>Redraw Satellite Tracks</b> &ndash; recompute now (after loading new TLEs).</li>"
+        "<li>Command line: <b>--sattracks</b> to enable, <b>--tle_file PATH</b> for a local set.</li>"
+        "</ul>"
+        + _nav_links(related=[('settings', 'Settings tab')])
     )
     return _page("Satellite tracks", body)
 
@@ -896,7 +961,7 @@ HELP_TOPICS = [
     ('stardetect',        dict(title="Star detection override",           modes=('skyfit',),          enabled=_always,        build=_topic_stardetect,
                                desc="Re-detect stars with tunable parameters.")),
     ('mask',              dict(title="Mask drawing",                      modes=('skyfit',),          enabled=_always,        build=_topic_mask,
-                               desc="Hide obstructions from the star catalog.")),
+                               desc="Ignore obstructions so detection isn't fooled.")),
     ('settings',          dict(title="Settings tab",                      modes=('skyfit',),          enabled=_always,        build=_topic_settings,
                                desc="Every option in the Settings tab explained.")),
     ('shortcuts_skyfit',  dict(title="Keyboard reference",                modes=('skyfit',),          enabled=_always,        build=_topic_shortcuts_skyfit,
