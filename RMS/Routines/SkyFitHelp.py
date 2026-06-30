@@ -204,8 +204,13 @@ def _topic_overview(gui):
         "<li>Press " + _key(c + " + Z") + " to fit; repeat until the solution stabilises. Then "
         "<a href=\"topic:residuals\">check the residual plots</a> and save (" + _key(c + " + S") + ").</li>"
         "</ol>"
+
+        "<h3>Next: measure a meteor</h3>"
+        "<p>With a good platepar, switch to <b>Manual Reduction</b> (button under the image) to "
+        "measure a meteor frame by frame &ndash; see <a href=\"topic:mr_overview\">Manual "
+        "reduction</a> (and <a href=\"topic:mr_fireballs\">measuring fireballs</a>).</p>"
         + _nav_links(next_pair=('astrometry', 'Calibrate astrometry'),
-                     related=[('residuals', 'Checking the fit'), ('tabs', 'Guide to the tabs')])
+                     related=[('residuals', 'Checking the fit'), ('mr_overview', 'Manual reduction')])
     )
     return _page("Overview &amp; quick start", body)
 
@@ -840,7 +845,7 @@ def _topic_mr_overview(gui):
         "<li>Save with " + _key(c + " + S") + " (FTPdetectinfo).</li>"
         "</ol>"
         + _nav_links(next_pair=('mr_picking', 'Pick meteor positions'),
-                     related=[('mr_lightcurve', 'Light curve & saving')])
+                     related=[('mr_fireballs', 'Measuring fireballs'), ('mr_lightcurve', 'Light curve & saving')])
     )
     return _page("Overview &amp; quick start", body)
 
@@ -848,11 +853,47 @@ def _topic_mr_overview(gui):
 def _topic_mr_picking(gui):
     c = _ctrl(gui)
     body = (
-        "<p>Press " + _key(c + " + R") + " to enter picking mode, then mark the meteor on each "
-        "frame, keeping the points in time order.</p>"
+        "<p class=\"lead\">Enter picking mode with " + _key(c + " + R") + ", then mark the meteor on "
+        "each frame in time order, stepping with " + _key("Left / Right") + ".</p>"
+
+        "<h3>Centroid vs manual pick</h3>"
+        "<ul>"
+        "<li><b>Left click</b> &ndash; <b>centroid</b>: snaps to the intensity-weighted centre "
+        "inside the aperture. Use it whenever the segment is a clean blob.</li>"
+        "<li>" + _key(c + " + Left click") + " &ndash; <b>manual (forced) pick</b> at the exact "
+        "cursor position, with no centroiding. Use it when a centroid would be dragged off by a "
+        "neighbour, wake, or a saturated / elongated shape.</li>"
+        "<li><b>Right click</b> removes the pick on the current frame.</li>"
+        "</ul>"
+
+        "<h3>Aperture</h3>"
+        "<p>Hold " + _key(c + " + Scroll") + " to resize the circular aperture. Match it to the "
+        "segment: big enough to enclose all of its light, small enough to exclude neighbours and "
+        "background. The aperture also sets the photometry region and, for saturated blobs, doubles "
+        "as a positioning aid (see <a href=\"topic:mr_fireballs\">fireballs</a>).</p>"
+
+        "<h3>Slow vs fast meteors</h3>"
+        "<ul>"
+        "<li><b>Slow</b> (short, roughly round segment each frame): just <b>centroid</b> (left "
+        "click) &ndash; the centre is well defined.</li>"
+        "<li><b>Fast</b> (the per-frame segment is an elongated streak): the centroid is ambiguous "
+        "along the streak, so measure the <b>leading edge</b> (the front of the streak, in the "
+        "direction of travel) <i>consistently</i> on every frame with a "
+        + _key(c + " + Left click") + ". For streaked events consider "
+        "<a href=\"topic:mr_astra\">ASTRA</a>, which is built for them.</li>"
+        "</ul>"
+
+        "<h3>The great-circle fit as a guide</h3>"
+        "<p>Turn on <b>Show Great Circle Line</b> (Settings). A meteor follows a great circle on the "
+        "sky, so SkyFit fits one through your picks and draws it as a <b>purple dotted arc</b>. Where "
+        "a frame is faint or ambiguous, place the pick <b>on the arc</b> &ndash; it shows the path "
+        "the meteor must follow and exposes any pick that sits off the line.</p>"
+
         + _shortcut_table([
             ("LEFT CLICK", "Centroid the meteor at the cursor"),
             (c + " + LEFT CLICK", "Force a pick at the exact cursor position"),
+            (c + " + SCROLL", "Resize the aperture"),
+            ("RIGHT CLICK", "Remove the pick on this frame"),
             ("ALT / Num0 + LEFT CLICK", "Mark a gap (DFN sequences)"),
             ("Left / Right", "Previous / next frame"),
             (c + " + Left / Right", "+/- 10 frames"),
@@ -862,9 +903,44 @@ def _topic_mr_picking(gui):
             ("K", "Subtract average"),
             ("T", "Toggle refraction correction"),
         ])
-        + _nav_links(next_pair=('mr_lightcurve', 'Light curve & saving'))
+        + _nav_links(next_pair=('mr_lightcurve', 'Light curve & saving'),
+                     related=[('mr_fireballs', 'Measuring fireballs'), ('mr_astra', 'ASTRA')])
     )
     return _page("Picking meteor positions", body)
+
+
+def _topic_fireballs(gui):
+    c = _ctrl(gui)
+    body = (
+        "<p class=\"lead\">Fireballs are much harder to measure than ordinary meteors: they "
+        "<b>saturate</b>, develop a trailing <b>wake</b>, and can <b>fragment</b>, so the bright "
+        "blob no longer has a clean, well-defined centre.</p>"
+
+        "<h3>Strategy</h3>"
+        "<ol>"
+        "<li><b>Measure the easy parts first.</b> Where the fireball is <i>not</i> saturating and "
+        "looks like a clean point source &ndash; usually the <b>beginning and the end</b> &ndash; "
+        "centroid normally. These good picks anchor the trajectory.</li>"
+        "<li><b>Let the great circle guide the middle.</b> With the clean picks in place, the "
+        "<a href=\"topic:mr_picking\">great-circle fit</a> (purple arc) shows the path through the "
+        "difficult middle frames &ndash; place picks along it.</li>"
+        "<li><b>Saturated-blob frames.</b> When the fireball saturates into a big blob the centroid "
+        "is meaningless. <b>Size the aperture to match the blob</b> (" + _key(c + " + Scroll") + "), "
+        "then make a <b>manual pick</b> (" + _key(c + " + Left click") + ") <b>on the great-circle "
+        "line</b>, using the aperture circle to judge the blob's centre across-track.</li>"
+        "</ol>"
+
+        + _callout("Along-track (in-track) position on saturated frames is the hard part and can't "
+                   "be read precisely. A fireball moves smoothly and never jumps back and forth, so "
+                   "aim for <b>roughly even spacing between consecutive frames</b>, letting the "
+                   "spacing of the clean frames before and after guide where the middle picks fall.")
+
+        + "<p>Wake and fragmentation also pull a centroid backwards or sideways, so prefer manual "
+        "leading-edge picks there as well. <a href=\"topic:mr_astra\">ASTRA</a> can help refine "
+        "difficult picks.</p>"
+        + _nav_links(related=[('mr_picking', 'Pick meteor positions'), ('mr_astra', 'ASTRA')])
+    )
+    return _page("Measuring fireballs", body)
 
 
 def _topic_mr_lightcurve(gui):
@@ -883,9 +959,14 @@ def _topic_mr_astra(gui):
     body = (
         "<p><b>ASTRA</b> (Astrometric Streak Tracking and Refinement Algorithm) automates EMCCD "
         "picking/photometry and can also refine manual picks. Open it with " + _key(c + " + K") + ".</p>"
+        "<p>Reach for ASTRA when picking by hand is unreliable: <b>fast / streaked</b> meteors where "
+        "you'd otherwise pick the leading edge frame by frame, EMCCD-style data, or to refine the "
+        "difficult middle frames of a <a href=\"topic:mr_fireballs\">fireball</a>.</p>"
         "<p>ASTRA needs at least 3 frame-adjacent leading-edge picks at a good-SNR section, plus 2 "
         "leading-edge picks at the start/end frames of the event. These can be loaded from ECSV/txt "
         "or made manually. Hover over its parameters and READY/NOT READY icons for guidance.</p>"
+        + _nav_links(related=[('mr_picking', 'Pick meteor positions'),
+                              ('mr_fireballs', 'Measuring fireballs')])
     )
     return _page("ASTRA (automated picking)", body)
 
@@ -976,6 +1057,8 @@ HELP_TOPICS = [
                                desc="The histogram, black/white points, auto levels.")),
     ('mr_picking',        dict(title="Pick meteor positions",             modes=('manualreduction',), enabled=_always,        build=_topic_mr_picking,
                                desc="Mark the meteor position on each frame.")),
+    ('mr_fireballs',      dict(title="Measuring fireballs",                modes=('manualreduction',), enabled=_always,        build=_topic_fireballs,
+                               desc="Saturation, wake, fragmentation: how to pick them.")),
     ('mr_lightcurve',     dict(title="Light curve &amp; saving",          modes=('manualreduction',), enabled=_always,        build=_topic_mr_lightcurve,
                                desc="View the light curve and export results.")),
     ('debruijn',          dict(title="DFN / Debruijn timing",             modes=('manualreduction',), enabled=_is_dfn,        build=_topic_debruijn,
