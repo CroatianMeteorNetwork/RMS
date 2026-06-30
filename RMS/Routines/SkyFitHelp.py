@@ -557,6 +557,10 @@ def _topic_calibration_files(gui):
         + "<p>A <b>mask</b> hides parts of the image (e.g. obstructions) from the star catalog - "
         "see the <a href=\"topic:mask\">mask drawing</a> topic. Flat/dark are applied to the image "
         "before measurement; the <b>--flatbiassub</b> option also subtracts bias from the flat.</p>"
+        + _callout("Never load the <b>auto-generated flat</b> that RMS produces (e.g. flat.bmp) into "
+                   "SkyFit, and never use it operationally &ndash; it is not a true flat field and "
+                   "will corrupt the photometry. Only load a <b>dedicated flat</b> made separately, "
+                   "and only on <b>science-grade sensors</b>.", "note")
     )
     return _page("Calibration files (dark / flat / mask)", body)
 
