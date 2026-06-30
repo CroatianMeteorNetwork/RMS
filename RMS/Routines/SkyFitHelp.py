@@ -885,7 +885,7 @@ def _topic_shortcuts_skyfit(gui):
         (c + " + U / " + c + " + O", "Pan to next star / toggle auto-pan"),
         (c + " + X", "astrometry.net (image upload)"),
         (c + " + SHIFT + X", "astrometry.net (star XY only)"),
-        (c + " + SHIFT + B", "Fit spectral bands"),
+        (c + " + SHIFT + B", "Fit spectral bands <span class=\"tip\">(experimental)</span>"),
         (c + " + N", "New platepar"),
         (c + " + S", "Save platepar &amp; state"),
         (c + " + SHIFT + S", "Save platepar to data folder"),
