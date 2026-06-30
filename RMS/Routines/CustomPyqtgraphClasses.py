@@ -1116,11 +1116,11 @@ class PointingIndicator(pg.GraphicsObject):
         tx = -tw - 15.0     # right edge clears the optical-axis plus arm
         painter.setFont(self.font)
         painter.setPen(QtGui.QPen(self.text_color))
-        # Two well-separated lines straddling the centre (Az above, Alt below)
+        # Two well-separated lines straddling the centre (Alt above, Az below)
         painter.drawText(QtCore.QRectF(tx, -30.0, tw, th),
-                         QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter, az_str)
-        painter.drawText(QtCore.QRectF(tx, 2.0, tw, th),
                          QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter, alt_str)
+        painter.drawText(QtCore.QRectF(tx, 2.0, tw, th),
+                         QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter, az_str)
 
         # Direction in device coordinates (screen-up = device -Y)
         ang = np.radians(self.angle)
