@@ -4622,19 +4622,20 @@ class PlateTool(QtWidgets.QMainWindow):
         # Get current FOV center coordinates for filtering (apparent coordinates)
         fov_ra, fov_dec = self.computeCentreRADec()
 
-        # Use same FOV radius as catalog filtering, with margin for edge cases
-        # Cap at 90 degrees (gnomonic projection limit)
+        # Gate bodies on angular distance from the FOV centre, using the same selection radius as the
+        # catalog star filtering (subsetCatalog). The projected-bounds check below is NOT a sufficient
+        # FOV test on its own: a radial distortion polynomial extrapolated beyond its fit range can fold
+        # far-off-sky points back into the image, so a body well outside the FOV would otherwise project
+        # in-bounds and pop in and out as the pointing changes.
         fov_radius = getFOVSelectionRadius(self.platepar)
-        max_ang_sep = min(90, fov_radius * 1.5)
 
         for display_name, ra_deg, dec_deg, mag in self._planet_cache_radec:
-            # Check angular separation from FOV center
-            # Skip bodies outside the extended FOV radius (prevents gnomonic projection wrapping)
+            # Skip bodies outside the FOV selection radius
             ang_sep = np.degrees(angularSeparation(
                 np.radians(ra_deg), np.radians(dec_deg),
                 np.radians(fov_ra), np.radians(fov_dec)
             ))
-            if ang_sep > max_ang_sep:
+            if ang_sep > fov_radius:
                 continue
 
             # Convert RA/Dec to image coordinates
