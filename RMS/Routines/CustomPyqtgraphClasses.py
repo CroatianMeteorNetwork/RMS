@@ -518,6 +518,14 @@ class ImageItem(pg.ImageItem):
         """
         self.img_handle = img_handle
 
+        # Display-LUT state. Replaces the old copy-pasted render() override that
+        #   reached into pyqtgraph internals (self._effectiveLut etc.), which broke on
+        #   pyqtgraph >= 0.13. _base_lut holds any LUT pushed by the histogram (None for
+        #   a plain grayscale gradient); gamma and inversion are composed on top of it.
+        self._base_lut = None
+        self._gamma = 1
+        self.invert_img = False
+
         if 'saturation_threshold' in kwargs:
             self.saturation_threshold = kwargs.pop('saturation_threshold')
         else:
@@ -552,6 +560,9 @@ class ImageItem(pg.ImageItem):
             self.flat_struct = kwargs['flat_struct']
         else:
             self.flat_struct = None
+
+        # Apply the initial display LUT now that gamma/inversion are known
+        self._applyDisplayLut(update=False)
 
         if img_handle is not None:
             self.avepixel()
@@ -822,14 +833,14 @@ class ImageItem(pg.ImageItem):
         elif self._gamma > 10:
             self._gamma = old
 
-        self.updateImage()
+        self._applyDisplayLut()
 
     def updateGamma(self, factor):
         self.setGamma(self.gamma*factor)
 
     def invert(self):
         self.invert_img = not self.invert_img
-        self.updateImage()
+        self._applyDisplayLut()
 
     def autopan(self):
         self.autopan_chk = not self.autopan_chk
@@ -838,91 +849,47 @@ class ImageItem(pg.ImageItem):
         super().setLevels(levels, update)
         self.sigLevelsChanged.emit()
 
-    def render(self):
-        # THIS WAS COPY PASTED FROM SOURCE CODE AND WAS SLIGHTLY
-        # CHANGED TO IMPLEMENT GAMMA AND INVERT
+    def setLookupTable(self, lut, update=True):
+        # The histogram pushes its gradient LUT here (None for a plain grayscale
+        #   gradient). Keep it as the base so gamma/inversion can be re-composed on top
+        #   whenever they change, then hand pyqtgraph the effective LUT.
+        self._base_lut = lut
+        super().setLookupTable(self._composeDisplayLut(lut), update=update)
 
-        # Convert data to QImage for display.
+    def _applyDisplayLut(self, update=True):
+        """ Rebuild and apply the effective display LUT from the current base LUT,
+            gamma and inversion. Used instead of overriding render(), so we no longer
+            depend on pyqtgraph render internals. """
+        super().setLookupTable(self._composeDisplayLut(self._base_lut), update=update)
 
-        profile = pg.debug.Profiler()
-        if self.image is None or self.image.size == 0:
-            return
-        if callable(self.lut):
-            lut = self.lut(self.image)
+    def _composeDisplayLut(self, base_lut):
+        """ Build the grayscale lookup table that bakes in gamma and inversion.
+
+        The old render() applied gamma to the post-levels 8-bit luminance and forced
+        R = G = B. pyqtgraph maps levels -> LUT index, so a 256-entry grayscale ramp
+        carrying gamma/inversion reproduces gamma(rescale(value)) exactly (for 8-bit the
+        LUT index equals the rescaled value). An optional base LUT (e.g. a non-trivial
+        histogram gradient) is composed underneath.
+        """
+        if base_lut is None:
+            n = 256
+            rgb = np.repeat(np.linspace(0, 255, n)[:, None], 3, axis=1)
+            alpha = None
         else:
-            lut = self.lut
+            base_lut = np.asarray(base_lut)
+            rgb = base_lut[:, :3].astype(float)
+            alpha = base_lut[:, 3:4] if base_lut.shape[1] == 4 else None
 
-        if self.autoDownsample:
-            # reduce dimensions of image based on screen resolution
-            o = self.mapToDevice(pg.QtCore.QPointF(0, 0))
-            x = self.mapToDevice(pg.QtCore.QPointF(1, 0))
-            y = self.mapToDevice(pg.QtCore.QPointF(0, 1))
-            w = pg.Point(x - o).length()
-            h = pg.Point(y - o).length()
-            if w == 0 or h == 0:
-                self.qimage = None
-                return
-            xds = max(1, int(1.0/w))
-            yds = max(1, int(1.0/h))
-            axes = [1, 0] if self.axisOrder == 'row-major' else [0, 1]
-            image = pgfn.downsample(self.image, xds, axis=axes[0])
-            image = pgfn.downsample(image, yds, axis=axes[1])
-            self._lastDownsample = (xds, yds)
-        else:
-            image = self.image
-
-        # if the image data is a small int, then we can combine levels + lut
-        # into a single lut for better performance
-        levels = self.levels
-
-        if (levels is not None) and (levels.ndim == 1) and (image.dtype in (np.ubyte, np.uint16)):
-
-            if self._effectiveLut is None:
-
-                eflsize = 2**(image.itemsize*8)
-                ind = np.arange(eflsize)
-                minlev, maxlev = levels
-                levdiff = maxlev - minlev
-                levdiff = 1 if levdiff == 0 else levdiff  # don't allow division by 0
-
-                if lut is None:
-                    efflut = pgfn.rescaleData(ind, scale=255./levdiff,
-                                               offset=minlev, dtype=np.ubyte)
-                else:
-                    lutdtype = np.min_scalar_type(lut.shape[0] - 1)
-                    efflut = pgfn.rescaleData(ind, scale=(lut.shape[0] - 1)/levdiff, \
-                                               offset=minlev, dtype=lutdtype, clip=(0, lut.shape[0] - 1))
-                    efflut = lut[efflut]
-
-                self._effectiveLut = efflut
-
-            lut = self._effectiveLut
-            levels = None
-
-
-        # Assume images are in column-major order for backward compatibility
-        # (most images are in row-major order)
-
-        if self.axisOrder == 'col-major':
-            image = image.transpose((1, 0, 2)[:image.ndim])
-
-        # Make an RGB image
-        argb, alpha = pgfn.makeARGB(image, lut=lut, levels=levels)
-        
-        # Perform gamma correction on only one channel to speed things up
-        argb[:, :, 0] = np.clip(np.power(argb[:, :, 0]/255, 1/self._gamma)*255, 0, 255)
-        argb[:, :, 1] = argb[:, :, 0]
-        argb[:, :, 2] = argb[:, :, 0]
-
-        
-        # Invert image colors
+        # Gamma on the displayed luminance, then optional inversion
+        out = np.clip(np.power(rgb/255.0, 1.0/self._gamma)*255.0, 0, 255)
         if self.invert_img:
-            argb[:, :, 0] = 255 - argb[:, :, 0]
-            argb[:, :, 1] = argb[:, :, 0]
-            argb[:, :, 2] = argb[:, :, 0]
+            out = 255.0 - out
+        out = out.astype(np.ubyte)
 
+        if alpha is not None:
+            out = np.concatenate([out, alpha.astype(np.ubyte)], axis=1)
 
-        self.qimage = pgfn.makeQImage(argb, alpha, transpose=False)
+        return out
 
 
 class CursorItem(pg.GraphicsObject):
@@ -2258,7 +2225,9 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
 
         box.addWidget(QtWidgets.QLabel("Residuals:"))
 
-        # RMSD display label with color coding
+        # RMSD display label with color coding. Shows the simple px RMSD; the forward/reverse
+        # consistency and held-out overfitting checks run internally on every fit and turn this
+        # label red when either trips (the detailed numbers are printed to the console).
         self.rmsd_label = QtWidgets.QLabel("--")
         self.rmsd_label.setStyleSheet("font-weight: bold; font-size: 12pt;")
         box.addWidget(self.rmsd_label)
@@ -2775,8 +2744,18 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         # Update restore defaults button state
         self.updateRestoreDefaultsButton()
 
-    def updateRMSD(self, rmsd_img, rmsd_angular, angular_error_label):
+    def updateRMSD(self, rmsd_img, rmsd_angular, angular_error_label, fwdrev_mismatch=False,
+                   overfit=False):
         """Update the RMSD display with color coding based on pixel RMSD.
+
+        The label shows the plain RMSD (reverse residual in px and forward residual in angular
+        units). Two health checks run internally on every fit and, when either trips, override the
+        color to red so a good-looking RMSD can't hide a broken fit (the detailed numbers behind
+        both checks are printed to the console):
+            - fwdrev_mismatch: the forward and reverse distortion mappings disagree, so the catalog
+              overlay will be off even though the reverse RMSD looks fine.
+            - overfit: the held-out (cross-validated) RMSD is much worse than in-sample, i.e. the
+              model is fitting centroid noise rather than the true distortion.
 
         Thresholds are normalized to 1280x720 resolution:
             - < 0.2 px: Excellent (green)
@@ -2800,6 +2779,16 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
             color = "#FF8C00"  # Dark orange - marginal
         else:
             color = "#DC143C"  # Crimson - poor
+
+        # Internal health checks override the color to red regardless of how good the RMSD looks.
+        flags = []
+        if fwdrev_mismatch:
+            flags.append("MAPPING MISMATCH")
+        if overfit:
+            flags.append("OVERFIT")
+        if flags:
+            text += "  " + " / ".join(flags)
+            color = "#DC143C"
 
         self.rmsd_label.setText(text)
         self.rmsd_label.setStyleSheet("font-weight: bold; font-size: 12pt; color: {};".format(color))
@@ -3506,6 +3495,19 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
     def loadFromConfig(self, config):
         """Initialize sliders from config values."""
         if hasattr(config, 'intensity_threshold'):
+            # Give the threshold slider a bit-depth-appropriate maximum before setting the
+            # value, otherwise a high-bit-depth config threshold is silently clamped to the
+            # pre-existing default slider max (200, an arbitrary ceiling -- the 8-bit threshold
+            # range is nominally 0-255, with realistic values in the tens) at load, and the
+            # user has no headroom to adjust up without first running auto-tune. Raw-ADU
+            # thresholds scale with bit depth (~tens at 8-bit, hundreds-to-thousands at 16-bit),
+            # so use a gentle per-2-bit doubling (8->200, 12->800, 16->3200) and ensure headroom
+            # over the configured value. Never lower the existing max, so 8-bit keeps its 200.
+            bit_depth = getattr(config, 'bit_depth', 8)
+            bitdepth_default_max = 200*2**max(0, (bit_depth - 8)//2)
+            thr_max = max(self.intensity_threshold_slider.maximum(), bitdepth_default_max,
+                          int(config.intensity_threshold*3))
+            self.intensity_threshold_slider.setMaximum(thr_max)
             self.intensity_threshold_slider.setValue(config.intensity_threshold)
         if hasattr(config, 'neighborhood_size'):
             self.neighborhood_size_slider.setValue(config.neighborhood_size)

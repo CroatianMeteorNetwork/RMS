@@ -2658,6 +2658,12 @@ class PlateTool(QtWidgets.QMainWindow):
         self.load_state_action = QtWidgets.QAction("Load state")
         self.load_state_action.triggered.connect(self.findLoadState)
 
+        self.save_pairs_action = QtWidgets.QAction("Save matched pairs")
+        self.save_pairs_action.triggered.connect(self.savePairs)
+
+        self.load_pairs_action = QtWidgets.QAction("Load matched pairs")
+        self.load_pairs_action.triggered.connect(self.loadPairs)
+
         self.toggle_info_action = QtWidgets.QAction("Toggle Info")
         self.toggle_info_action.triggered.connect(self.toggleInfo)
         self.toggle_info_action.setShortcut('F1')
@@ -3499,6 +3505,8 @@ class PlateTool(QtWidgets.QMainWindow):
                                        self.save_state_platepar_action,
                                        self.quick_save_platepar_action,
                                        self.load_state_action])
+            self.file_menu.addSeparator()
+            self.file_menu.addActions([self.save_pairs_action, self.load_pairs_action])
             self.file_menu.addSeparator()
             self.file_menu.addAction(self.calibration_files_action)
 
@@ -5123,7 +5131,17 @@ class PlateTool(QtWidgets.QMainWindow):
             # Phase 2: Sweep intensity threshold from high to low with best segment
             # Continue until we see clear degradation, then analyze all results
             print(f"\n  Phase 2: Intensity threshold sweep (segment_radius={best_segment})")
-            intensity_values = list(range(40, 2, -1))  # 40 down to 3
+
+            # Scale the 8-bit sweep range (40..3) to the camera's working threshold so it
+            # brackets the usable range on high-bit-depth data. A fixed 8-bit sweep lands
+            # below the noise on 16-bit, floods the candidate list past max_stars, and aborts
+            # on the first step. 8-bit configs are unchanged (scale = 1, sweep = 40..3).
+            if getattr(self.config, 'bit_depth', 8) > 8:
+                thr_scale = max(1.0, self.config.intensity_threshold/20.0)
+            else:
+                thr_scale = 1.0
+            intensity_values = sorted({max(3, int(round(v*thr_scale))) for v in range(40, 2, -1)},
+                                      reverse=True)  # high -> low
 
             # Collect results - we'll analyze the full curve to find optimal point
             results = []  # (threshold, n_true_pos, n_false_pos, n_detected)
@@ -5249,8 +5267,17 @@ class PlateTool(QtWidgets.QMainWindow):
             self.config.segment_radius = original_segment_radius
             self.config.max_stars = original_max_stars
 
-            # Update sliders to the optimal values
-            self.tab.star_detection.intensity_threshold_slider.setValue(best_threshold)
+            # Update sliders to the optimal values. The threshold slider's default max (200)
+            # is an arbitrary pre-existing ceiling (the 8-bit threshold range is nominally
+            # 0-255, with realistic values in the tens), so on high-bit-depth data the tuned
+            # threshold can exceed it and be silently clamped (leaving the re-detect at the
+            # wrong threshold). Raise the max with headroom *above* the tuned value so the user
+            # can still override upward. Scale the headroom to the tuned value itself, since a
+            # reasonable ceiling differs greatly between 8-bit and 16-bit. Never lower the
+            # existing max, so 8-bit keeps its default 200.
+            thr_slider = self.tab.star_detection.intensity_threshold_slider
+            thr_slider.setMaximum(max(thr_slider.maximum(), int(best_threshold*3)))
+            thr_slider.setValue(int(best_threshold))
             self.tab.star_detection.segment_radius_slider.setValue(best_segment)
 
             # Update catalog LM and reload catalog
@@ -5419,6 +5446,105 @@ class PlateTool(QtWidgets.QMainWindow):
             return 0, 0, 0
 
 
+    def _extractStarsCurrentImage(self, ff_name, extra_info=None):
+        """ Extract stars from the currently displayed image. Uses extractStarsFF for FF files,
+            and extractStars (raw image) for everything else (video, images, etc.).
+
+        Arguments:
+            ff_name: [str] Name of the current file.
+
+        Keyword arguments:
+            extra_info: [dict] Optional dict to receive extra extraction info.
+
+        Return:
+            star_data: [list] List of star tuples in CALSTARS format:
+                [(y, x, intensity, amplitude, fwhm, background, snr, saturated_count), ...]
+                Empty list if no stars detected.
+        """
+
+        from RMS.ExtractStars import extractStars
+
+        if self.img_handle.input_type == 'ff':
+            # For FF files, use the dedicated FF extraction (reads from disk)
+            star_list = extractStarsFF(
+                self.dir_path,
+                ff_name,
+                config=self.config,
+                flat_struct=self.flat_struct if hasattr(self, 'flat_struct') else None,
+                dark=self.dark if hasattr(self, 'dark') else None,
+                mask=self.mask if hasattr(self, 'mask') else None,
+                extra_info=extra_info
+            )
+
+            if not star_list or len(star_list) < 2:
+                return []
+
+            # extractStarsFF returns: (ff_name, x_arr, y_arr, amplitude, intensity, fwhm, bg, snr, sat)
+            ff_name_ret, x_arr, y_arr, amplitude, intensity, fwhm, background, snr, saturated_count = star_list
+
+            # Construct CALSTARS format: Y(0) X(1) IntensSum(2) Ampltd(3) FWHM(4) BgLvl(5) SNR(6) NSatPx(7)
+            star_data = list(zip(y_arr, x_arr, intensity, amplitude, fwhm, background, snr, saturated_count))
+            return star_data
+
+        else:
+            # For video/images/etc., extract stars directly from the currently displayed avepixel
+            ff = self.img_handle.ff
+            if ff is None:
+                print("  No image data loaded")
+                return []
+
+            # Get the average pixel image (this is the currently displayed stack)
+            img = ff.avepixel.copy().astype(np.float32)
+
+            # Apply dark frame
+            if hasattr(self, 'dark') and self.dark is not None:
+                from RMS.Routines.Image import applyDark
+                img = applyDark(img, self.dark)
+
+            # Apply flat field
+            if hasattr(self, 'flat_struct') and self.flat_struct is not None:
+                from RMS.Routines.Image import applyFlat
+                img = applyFlat(img, self.flat_struct)
+
+            # Get the median
+            img_median = np.median(img)
+
+            # Check if image is too bright (scale the cutoff to the image bit depth, matching
+            # extractStarsFF/extractStarsImgHandle so high-bit-depth data is not wrongly skipped)
+            bit_depth = getattr(self.config, 'bit_depth', 8)
+            max_global_intensity = getattr(self.config, 'max_global_intensity', 150)*(2**(bit_depth - 8))
+            if img_median > max_global_intensity:
+                print(f"  Image too bright (median={img_median:.1f} > {max_global_intensity})")
+                return []
+
+            # Get mask
+            mask = self.mask if hasattr(self, 'mask') else None
+
+            # Run star extraction directly on the image
+            status = extractStars(
+                img, img_median=img_median,
+                mask=mask, gamma=self.config.gamma,
+                max_star_candidates=self.config.max_stars,
+                border=getattr(self.config, 'border', 10),
+                neighborhood_size=self.config.neighborhood_size,
+                intensity_threshold=self.config.intensity_threshold,
+                segment_radius=self.config.segment_radius,
+                roundness_threshold=self.config.roundness_threshold,
+                max_feature_ratio=self.config.max_feature_ratio,
+                bit_depth=getattr(self.config, 'bit_depth', 8),
+                extra_info=extra_info
+            )
+
+            if status is False:
+                return []
+
+            x_arr, y_arr, amplitude, intensity, fwhm, background, snr, saturated_count = status
+
+            # Construct CALSTARS format
+            star_data = list(zip(y_arr, x_arr, intensity, amplitude, fwhm, background, snr, saturated_count))
+            return star_data
+
+
     def _findSegmentRadiusFromFWHM(self, ff_name, visible_cat_x, visible_cat_y):
         """
         Determine the optimal segment_radius by measuring the FWHM of bright stars.
@@ -5440,35 +5566,51 @@ class PlateTool(QtWidgets.QMainWindow):
             (best_segment, n_true_pos, fp_ratio): Tuple of optimal segment radius,
                 true positive count and false positive ratio from validation.
         """
-        # Use a generous segment_radius (12) and high threshold to detect bright stars
-        # segment=12 is large enough for almost any stellar PSF
+        # Use a generous segment_radius (12) to detect bright stars; segment=12 is large
+        # enough for almost any stellar PSF.
         probe_segment = 12
-        high_threshold = 25
+
+        # Probe for bright stars. A hardcoded 8-bit threshold (25) lands far below the noise
+        # on high-bit-depth data, flooding the candidate list past max_stars so extractStars
+        # returns nothing. Start at least at the camera's configured threshold and escalate
+        # until a workable detection comes back. 8-bit configs (threshold ~18-25) are
+        # unaffected -- they start at 25 exactly as before.
+        base_threshold = max(25, self.config.intensity_threshold)
+        probe_thresholds = [base_threshold, 2*base_threshold, 4*base_threshold, 8*base_threshold]
 
         try:
             # Save and set config
             orig_intensity = self.config.intensity_threshold
             orig_segment = self.config.segment_radius
-            self.config.intensity_threshold = high_threshold
             self.config.segment_radius = probe_segment
             self.config.max_feature_ratio = self.override_max_feature_ratio
             self.config.roundness_threshold = self.override_roundness_threshold
 
-            star_list = extractStarsFF(
-                self.dir_path, ff_name, config=self.config,
-                flat_struct=self.flat_struct, dark=self.dark, mask=self.mask
-            )
+            # Escalate the threshold until extractStars returns stars. An empty result means
+            # either too many candidates (extractStars bails) or none detected; raising the
+            # threshold resolves the former, which is the high-bit-depth failure mode.
+            star_data = []
+            high_threshold = base_threshold
+            for high_threshold in probe_thresholds:
+                self.config.intensity_threshold = high_threshold
+                star_data = self._extractStarsCurrentImage(ff_name)
+                if star_data:
+                    break
 
             self.config.intensity_threshold = orig_intensity
             self.config.segment_radius = orig_segment
 
-            if not star_list or len(star_list[1]) == 0:
-                print(f"    No bright stars detected with threshold={high_threshold}, "
-                      f"segment={probe_segment}")
+            if not star_data or len(star_data) == 0:
+                print(f"    No bright stars detected (probed thresholds "
+                      f"{base_threshold}..{probe_thresholds[-1]}, segment={probe_segment})")
                 print(f"    Using default segment_radius=4")
                 return 4, 0, 1.0
 
-            _, x_arr, y_arr, amplitude, intensity, fwhm_arr, background, snr, saturated = star_list
+            # CALSTARS format: Y(0) X(1) IntensSum(2) Ampltd(3) FWHM(4) BgLvl(5) SNR(6) NSatPx(7)
+            star_data_arr = np.array(star_data)
+            x_arr = star_data_arr[:, 1].astype(float)
+            y_arr = star_data_arr[:, 0].astype(float)
+            fwhm_arr = star_data_arr[:, 4].astype(float)
             n_detected = len(x_arr)
 
             # Identify true positives (match to catalog)
@@ -5528,8 +5670,7 @@ class PlateTool(QtWidgets.QMainWindow):
             return best_segment, n_true_pos, fp_ratio
 
         except Exception as e:
-            print(f"    FWHM measurement error: {e}")
-            import traceback
+            print(f"    FWHM measurement error: {type(e).__name__}: {e}")
             traceback.print_exc()
             return 4, 0, 1.0
 
@@ -8661,6 +8802,9 @@ class PlateTool(QtWidgets.QMainWindow):
             self.updateFitResiduals()
             self.residual_text.clear()
 
+            # Hint if this image has saved matched pairs available to load
+            self.pairsHint()
+
             # Clear satellite tracks when image changes (they're time-specific)
             self.clearSatelliteTracks()
             
@@ -8912,6 +9056,135 @@ class PlateTool(QtWidgets.QMainWindow):
             
         savePickle(dic, self.dir_path, 'skyFitMR_latest.state')
         print("Saved state to file")
+
+
+    def _pairsFilePath(self):
+        """ Path to the folder-level matched-pairs file (one file per data folder). """
+        return os.path.join(self.dir_path, 'skyfit_matched_pairs.json')
+
+
+    def _currentImageKey(self):
+        """ Stable identifier for the current image/chunk. Matched pairs are per-image (the
+            detected x,y belong to the displayed image), so saved pairs are keyed by this. """
+        try:
+            return str(self.img_handle.name())
+        except Exception:
+            return "unknown"
+
+
+    def savePairs(self):
+        """ Save the current image's matched star pairs into the folder-level pairs file,
+            keyed by image. Pairs saved for other images in the folder are preserved. """
+
+        if len(self.paired_stars) == 0:
+            qmessagebox(message="No matched pairs on the current image to save.",
+                        title="Save pairs", message_type="warning")
+            return
+
+        # Serialize current pairs (skip geo points - they reference external arrays and
+        # cannot be reconstructed standalone)
+        pairs = []
+        n_skipped = 0
+        for x, y, fwhm, intens_acc, obj, snr, saturated in self.paired_stars.paired_stars:
+            if getattr(obj, 'pick_type', 'star') == 'geopoint':
+                n_skipped += 1
+                continue
+            ra, dec, mag = obj.coords()
+            pairs.append({'x': float(x), 'y': float(y), 'fwhm': float(fwhm),
+                          'intens_acc': float(intens_acc), 'snr': float(snr),
+                          'saturated': bool(saturated),
+                          'ra': float(ra), 'dec': float(dec), 'mag': float(mag),
+                          'type': getattr(obj, 'pick_type', 'star')})
+
+        path = self._pairsFilePath()
+
+        # Merge into the existing folder-level file so other images' pairs are kept
+        data = {'format': 'skyfit_matched_pairs', 'version': 1, 'images': {}}
+        if os.path.isfile(path):
+            try:
+                with open(path) as f:
+                    existing = json.load(f)
+                if isinstance(existing, dict) and existing.get('format') == 'skyfit_matched_pairs':
+                    data = existing
+                    data.setdefault('images', {})
+            except Exception:
+                pass  # corrupt/unreadable - start fresh
+
+        key = self._currentImageKey()
+        try:
+            jd = date2JD(*self.img_handle.currentTime())
+        except Exception:
+            jd = None
+        data['images'][key] = {'jd': jd, 'pairs': pairs}
+
+        with open(path, 'w') as f:
+            json.dump(data, f, indent=1)
+
+        msg = "Saved {} matched pairs for '{}'".format(len(pairs), key)
+        if n_skipped:
+            msg += " ({} geo points skipped)".format(n_skipped)
+        print(msg)
+        self.status_bar.showMessage(msg)
+
+
+    def loadPairs(self):
+        """ Load matched pairs for the CURRENT image from the folder-level pairs file.
+            Pairs are per-image, so only the current image's saved entry is restored. """
+
+        path = self._pairsFilePath()
+        if not os.path.isfile(path):
+            qmessagebox(message="No saved pairs file in this folder.",
+                        title="Load pairs", message_type="warning")
+            return
+
+        try:
+            with open(path) as f:
+                data = json.load(f)
+        except Exception as e:
+            qmessagebox(message="Could not read pairs file:\n{}".format(e),
+                        title="Load pairs", message_type="warning")
+            return
+
+        images = data.get('images', {}) if isinstance(data, dict) else {}
+        key = self._currentImageKey()
+        if key not in images:
+            avail = ", ".join(sorted(images.keys())[:8])
+            qmessagebox(message="No saved pairs for the current image ('{}').\n\n"
+                                "Images with saved pairs: {}".format(key, avail or "none"),
+                        title="Load pairs", message_type="warning")
+            return
+
+        new_pairs = PairedStars()
+        for p in images[key].get('pairs', []):
+            star = CatalogStar(p['ra'], p['dec'], p['mag'])
+            new_pairs.addPair(p['x'], p['y'], p['fwhm'], p['intens_acc'], star,
+                              snr=p.get('snr', 0), saturated=p.get('saturated', False))
+
+        self.paired_stars = new_pairs
+        self.updatePairedStars()
+
+        msg = "Loaded {} matched pairs for '{}'".format(len(new_pairs), key)
+        print(msg)
+        self.status_bar.showMessage(msg)
+
+
+    def pairsHint(self):
+        """ If the folder pairs file has saved pairs for the current image, show a status-bar
+            hint. Called on image navigation; silent if there is nothing saved. """
+        try:
+            path = self._pairsFilePath()
+            if not os.path.isfile(path):
+                return
+            with open(path) as f:
+                data = json.load(f)
+            images = data.get('images', {}) if isinstance(data, dict) else {}
+            entry = images.get(self._currentImageKey())
+            if entry and len(entry.get('pairs', [])) > 0:
+                self.status_bar.showMessage(
+                    "{} saved matched pairs available for this image "
+                    "(File → Load matched pairs)".format(len(entry['pairs'])))
+        except Exception:
+            pass
 
 
     def findLoadState(self):
@@ -14738,6 +15011,104 @@ class PlateTool(QtWidgets.QMainWindow):
         return min_stars
 
 
+    def crossValidatedRMSD(self, n_folds=5, min_stars=50):
+        """ K-fold cross-validated, per-star image RMSD (px).
+
+        Splits the matched pairs into n_folds groups; for each group, fits the platepar on the
+        other folds and measures the per-star RMSD on the held-out group, then averages. This
+        is an honest "how well does the fit generalise to stars it was not fit on" number -- the
+        gap between it and the in-sample RMSD is a direct overfitting check (a flexible model
+        that fits centroid noise will show a large gap).
+
+        The live platepar is NOT modified. Interactive-tool feature only; the batch RMS pipeline
+        does not pay this cost. Returns (held_out_rmsd_px, n_folds_used) or None if there are too
+        few stars to split meaningfully.
+        """
+
+        import io as _io
+        import contextlib as _ctx
+
+        img_stars = np.array(self.paired_stars.imageCoords())
+        catalog_stars = np.array(self.paired_stars.skyCoords())
+        n = len(img_stars)
+
+        # Need enough stars that a fold still has plenty to fit and the held-out RMSD is stable
+        min_fit = self.getMinFitStars()
+        if (n < min_stars) or (n < (min_fit + 1)*2):
+            return None
+
+        n_folds = int(min(n_folds, n // max(min_fit + 1, 1)))
+        if n_folds < 2:
+            return None
+
+        jd = date2JD(*self.img_handle.currentTime())
+
+        rng = np.random.RandomState(0)  # deterministic across calls
+        folds = np.array_split(rng.permutation(n), n_folds)
+
+        held_sq = []
+        for k in range(n_folds):
+            test = folds[k]
+            train = np.concatenate([folds[j] for j in range(n_folds) if j != k])
+            if len(train) < min_fit:
+                return None
+
+            pp = copy.deepcopy(self.platepar)
+            try:
+                # Suppress the per-fit console spam from the fold fits
+                with _ctx.redirect_stdout(_io.StringIO()):
+                    pp.fitAstrometry(jd, img_stars[train], catalog_stars[train],
+                                     first_platepar_fit=False,
+                                     fit_only_pointing=self.fit_only_pointing,
+                                     fixed_scale=self.fixed_scale)
+            except Exception:
+                return None
+
+            cat_x, cat_y, _ = getCatalogStarsImagePositions(catalog_stars[test], jd, pp)
+            dx = cat_x - img_stars[test][:, 0]
+            dy = cat_y - img_stars[test][:, 1]
+            held_sq.extend((dx**2 + dy**2).tolist())
+
+        if not held_sq:
+            return None
+
+        return float(np.sqrt(np.mean(held_sq))), n_folds
+
+
+    def reportOverfit(self, in_sample_rmsd):
+        """ Run the held-out (cross-validated) RMSD overfitting check and print the breakdown to
+            the console. Runs automatically as part of every fit (see fitPickedStars).
+
+        Arguments:
+            in_sample_rmsd: [float] The in-sample reverse-mapping RMSD (px) of the current fit, used
+                as the reference the held-out RMSD is compared against.
+
+        Returns:
+            bool: True if the fit looks like it is overfitting (held-out RMSD much worse than
+                in-sample), False otherwise -- including when there are too few stars to evaluate,
+                in which case nothing is flagged.
+        """
+
+        result = self.crossValidatedRMSD()
+        if result is None:
+            print("  Overfitting check: not enough matched pairs for a stable held-out RMSD "
+                  "(have {}).".format(len(self.paired_stars)))
+            return False
+
+        cv_rmsd, n_folds = result
+        gap = cv_rmsd - in_sample_rmsd
+        overfit = gap > 0.5*in_sample_rmsd + 0.05
+
+        print("  Held-out RMSD ({:d}-fold CV): {:.3f} px   in-sample: {:.3f} px   gap: {:+.3f} px"
+              .format(n_folds, cv_rmsd, in_sample_rmsd, gap))
+        if overfit:
+            print("  -> large gap: the fit may be OVERFITTING (model too flexible for this many stars).")
+        else:
+            print("  -> gap is small: the fit generalises well (not overfitting).")
+
+        return overfit
+
+
     def fitPickedStars(self):
         """ Fit stars that are manually picked. The function first only estimates the astrometry parameters
             without the distortion, then just the distortion parameters, then all together.
@@ -14895,9 +15266,20 @@ class PlateTool(QtWidgets.QMainWindow):
                 )
 
 
-        # Compute RMSD errors
+        # Compute RMSD errors.
+        #   rmsd_img    = reverse residual (catalog sky -> image, via x_poly_rev), in px
+        #   rmsd_angular= forward residual (image -> sky, via x_poly_fwd), in arcmin
         rmsd_angular = 60*RMSD([entry[4] for entry in residuals])
         rmsd_img = RMSD([entry[3] for entry in residuals])
+
+        # Forward/reverse consistency check. The two residuals live in different spaces (reverse
+        # is px, forward is angular), so to compare them we convert the forward to a px-equivalent
+        # with the reference plate scale (F_scale). That conversion is approximate -- the true
+        # scale varies across the FOV by the distortion amount -- but it is plenty for detecting a
+        # gross mismatch (a diverged forward mapping is off by huge factors). Used only for the
+        # flag below; the reported numbers stay in their natural units.
+        rmsd_fwd_px_approx = RMSD([entry[4] for entry in residuals])*self.platepar.F_scale
+        fwdrev_mismatch = rmsd_fwd_px_approx > 2.0*rmsd_img + 0.3
 
         # If the average angular error is larger than 60 arc minutes, report it in degrees
         if rmsd_angular > 60:
@@ -14911,11 +15293,26 @@ class PlateTool(QtWidgets.QMainWindow):
             rmsd_angular *= 60
             angular_error_label = 'arcsec'
 
-
+        # The GUI shows the plain RMSD; the console carries the full breakdown and the two health
+        # checks (forward/reverse consistency and held-out overfitting) that, if tripped, turn the
+        # GUI label red.
         print('RMSD: {:.2f} px, {:.2f} {:s}'.format(rmsd_img, rmsd_angular, angular_error_label))
 
-        # Update RMSD display in the Fit Parameters tab
-        self.tab.param_manager.updateRMSD(rmsd_img, rmsd_angular, angular_error_label)
+        # Forward/reverse mapping consistency (console detail)
+        if fwdrev_mismatch:
+            print('  WARNING: forward/reverse mapping mismatch (forward ~{:.2f} px-equivalent vs reverse '
+                  '{:.2f} px) -- the distortion mapping is inconsistent; the catalog overlay will be off.'.format(
+                      rmsd_fwd_px_approx, rmsd_img))
+        else:
+            print('  forward/reverse mapping consistent (forward ~{:.2f} px-equivalent vs reverse '
+                  '{:.2f} px).'.format(rmsd_fwd_px_approx, rmsd_img))
+
+        # Overfitting check via held-out cross-validation (console detail). Runs on every fit.
+        overfit = self.reportOverfit(rmsd_img)
+
+        # Update RMSD display in the Fit Parameters tab (red on either health-check failure)
+        self.tab.param_manager.updateRMSD(rmsd_img, rmsd_angular, angular_error_label,
+                                          fwdrev_mismatch=fwdrev_mismatch, overfit=overfit)
 
         # Update fit residuals in the station tab when geopoints are used
         if self.geo_points_obj is not None:
