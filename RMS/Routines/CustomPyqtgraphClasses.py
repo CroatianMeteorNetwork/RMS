@@ -15,6 +15,7 @@ from RMS.Astrometry.Conversions import AER2LatLonAlt
 from RMS.Formats.FFfile import reconstructFrame as reconstructFrameFF
 from RMS.Routines import Image
 from RMS.Routines.DebruijnSequence import findAllInDeBruijnSequence, generateDeBruijnSequence
+from RMS.Routines.SkyFitHelp import HELP_STYLE, buildHelpHome, buildHelpTopic
 
 import time
 import re
@@ -1282,7 +1283,6 @@ class HelpWidget(QtWidgets.QWidget, ScaledSizeHelper):
         self.browser.anchorClicked.connect(self.onAnchorClicked)
 
         # Apply the help stylesheet to the document (persists across setHtml calls)
-        from RMS.Routines.SkyFitHelp import HELP_STYLE
         self.browser.document().setDefaultStyleSheet(HELP_STYLE)
 
         layout.addWidget(self.browser)
@@ -1311,7 +1311,6 @@ class HelpWidget(QtWidgets.QWidget, ScaledSizeHelper):
 
     def _renderHome(self, query):
         """ Build and display the home page, guarded so a content error can't blank the tab. """
-        from RMS.Routines.SkyFitHelp import buildHelpHome
         try:
             html = buildHelpHome(self.gui, query=query)
         except Exception as e:
@@ -1327,7 +1326,6 @@ class HelpWidget(QtWidgets.QWidget, ScaledSizeHelper):
 
     def showTopic(self, topic_id):
         """ Show one detailed topic page. """
-        from RMS.Routines.SkyFitHelp import buildHelpTopic
         html = buildHelpTopic(self.gui, topic_id)
         if html is None:
             return
@@ -1339,7 +1337,6 @@ class HelpWidget(QtWidgets.QWidget, ScaledSizeHelper):
 
     def goBack(self):
         """ Step back to the previous topic, or Home. """
-        from RMS.Routines.SkyFitHelp import buildHelpTopic
         if self._history:
             self._history.pop()
         if self._history:

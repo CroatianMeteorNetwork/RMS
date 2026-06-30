@@ -71,10 +71,6 @@ def _has_geopoints(gui):
     return getattr(gui, 'geo_points_obj', None) is not None
 
 
-def _has_sattracks(gui):
-    return bool(getattr(gui, 'show_sattracks', False)) or (getattr(gui, 'tle_file', None) is not None)
-
-
 def _has_fr(gui):
     return bool(getattr(gui, 'use_fr_files', False))
 
@@ -92,24 +88,23 @@ def _key(text):
     return '<span class="key">&nbsp;{:s}&nbsp;</span>'.format(text)
 
 
-def _shortcut_table(rows):
-    """ Build a two-column shortcut table from a list of (keys, description) tuples. """
+def _two_col_table(rows, term_fn):
+    """ Build a two-column table; term_fn formats the left cell of each (term, description) row. """
     html = '<table cellspacing="0" cellpadding="0">'
-    for keys, desc in rows:
-        html += ('<tr><td valign="top">{k}</td>'
-                 '<td valign="top" class="desc">{d}</td></tr>').format(k=_key(keys), d=desc)
-    html += '</table>'
-    return html
+    for term, desc in rows:
+        html += ('<tr><td valign="top">{t}</td>'
+                 '<td valign="top" class="desc">{d}</td></tr>').format(t=term_fn(term), d=desc)
+    return html + '</table>'
+
+
+def _shortcut_table(rows):
+    """ Two-column table of (keys, description); keys rendered as keycaps. """
+    return _two_col_table(rows, _key)
 
 
 def _defn_table(rows):
-    """ Build a two-column "term -> description" table from (term_html, description) tuples. """
-    html = '<table cellspacing="0" cellpadding="0">'
-    for term, desc in rows:
-        html += ('<tr><td valign="top"><b>{t}</b></td>'
-                 '<td valign="top" class="desc">{d}</td></tr>').format(t=term, d=desc)
-    html += '</table>'
-    return html
+    """ Two-column table of (term, description); term rendered bold. """
+    return _two_col_table(rows, lambda t: '<b>{:s}</b>'.format(t))
 
 
 def _btn(text):
@@ -1185,11 +1180,6 @@ def _enabled_topics(gui, mode_filter=True):
             continue
         out.append((topic_id, meta))
     return out
-
-
-def _visible_topics(gui):
-    """ Return the (id, meta) topics for the current mode whose feature gate is satisfied. """
-    return _enabled_topics(gui, mode_filter=True)
 
 
 def buildHelpHome(gui, query=None):

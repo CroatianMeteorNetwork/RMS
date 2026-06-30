@@ -2783,22 +2783,6 @@ class PlateTool(QtWidgets.QMainWindow):
         self.label1.setParentItem(self.img_frame)
         self.label1.show()
 
-        # bottom left label (unused - keyboard help moved to the Help tab)
-        self.label2 = TextItem(color=(0, 0, 0), fill=(255, 255, 255, 100))
-        self.label2.setFont(label_font)
-        self.label2.setTextWidth(label_fm.averageCharWidth() * 38)  # ~38 chars wide
-        self.label2.setZValue(1000)
-        self.label2.setParentItem(self.img_frame)
-        self.label2.hide()
-
-        # Legacy bottom-right hint label (unused, kept hidden for back-compat)
-        self.label_f1 = TextItem(color=(0, 0, 0), fill=(255, 255, 255, 100))
-        self.label_f1.setFont(label_font)
-        self.label_f1.setTextWidth(label_fm.averageCharWidth() * 20)  # ~20 chars wide
-        self.label_f1.setZValue(1000)
-        self.label_f1.setParentItem(self.img_frame)
-        self.label_f1.hide()
-
         self.catalog_stars_visible = True
 
         # catalog star markers (main window)
@@ -8812,7 +8796,7 @@ class PlateTool(QtWidgets.QMainWindow):
         pyqtgraph_keys = [
             'sat_track_curves', 'sat_track_labels', 'sat_track_arrows', 'sat_markers',
             # TextItem objects
-            'label1', 'label2', 'label_f1', 'star_pick_info',
+            'label1', 'star_pick_info',
             # TextItemList objects
             'planet_labels', 'residual_text', 'spectral_type_text_list',
             # Matplotlib objects
