@@ -151,7 +151,7 @@ from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP, \
     rotationWrtHorizon, rotationWrtHorizonToPosAngle, computeFOVSize, photomLine, photometryFit, \
     rotationWrtStandard, rotationWrtStandardToPosAngle, correctVignetting, \
     extinctionCorrectionTrueToApparent, applyAstrometryFTPdetectinfo, getFOVSelectionRadius, \
-    limitingMagnitude
+    limitingMagnitude, screenNudgeToAzAltDelta, fovCentreZenithDirection
 from RMS.Astrometry.AtmosphericExtinction import atmosphericExtinctionCorrection
 from RMS.Astrometry.StarClasses import CatalogStar, GeoPoint, PlanetPoint, PairedStars
 from RMS.Astrometry.StarFilters import filterPhotometricOutliers, filterBlendedStars
@@ -173,7 +173,7 @@ from RMS.Pickling import loadPickle, savePickle
 from RMS.Math import angularSeparation, RMSD, vectNorm
 from RMS.Misc import decimalDegreesToSexHours
 from RMS.Routines.AddCelestialGrid import updateRaDecGrid, updateAzAltGrid
-from RMS.Routines.CustomPyqtgraphClasses import ViewBox, TextItem, TextItemList, Crosshair, Plus, Cross, CursorItem, BrushCursorItem, ImageItem, RightOptionsTab, qmessagebox
+from RMS.Routines.CustomPyqtgraphClasses import ViewBox, TextItem, TextItemList, Crosshair, Plus, Cross, CursorItem, BrushCursorItem, ImageItem, RightOptionsTab, qmessagebox, PointingIndicator
 from RMS.Routines.GreatCircle import fitGreatCircle, greatCircle
 from RMS.Routines.SphericalPolygonCheck import sphericalPolygonCheck
 from RMS.Routines.Image import loadFlat, loadDark, applyFlat, applyDark, signalToNoise, gammaCorrectionImage, adjustLevels, saveImage, loadImage
@@ -3000,6 +3000,16 @@ class PlateTool(QtWidgets.QMainWindow):
         self.distortion_center_marker.setZValue(5)
         self.img_frame.addItem(self.distortion_center_marker)
 
+        # Pointing indicator (zenith arrow + elevation notch + WASD step-size bar) at the optical axis
+        self.pointing_indicator = PointingIndicator()
+        self.pointing_indicator.setZValue(6)
+        self.img_frame.addItem(self.pointing_indicator, ignoreBounds=True)
+        self.pointing_indicator.hide()
+
+        # Refresh the indicator on zoom/pan so the step-size bar (drawn in screen pixels but representing
+        # a real image distance) rescales with the view
+        self.img_frame.sigRangeChanged.connect(lambda *args: self.pointing_indicator.refresh())
+
         # Distortion center marker (red cross) - zoom window
         self.distortion_center_marker2 = pg.ScatterPlotItem()
         self.distortion_center_marker2.setPen((255, 0, 0), width=2)
@@ -3511,6 +3521,10 @@ class PlateTool(QtWidgets.QMainWindow):
             self.skyfit_button.setDisabled(False)
             self.manualreduction_button.setDisabled(True)
 
+            # The pointing indicator is only relevant in skyfit mode
+            if hasattr(self, 'pointing_indicator'):
+                self.pointing_indicator.hide()
+
             self.img_type_flag = 'avepixel'
             self.tab.settings.updateMaxAvePixel()
             self.img_zoom.loadImage(self.mode, self.img_type_flag)
@@ -3902,6 +3916,10 @@ class PlateTool(QtWidgets.QMainWindow):
 
         if not self.hasData():
             return
+
+        # Refresh the optical-axis pointing indicator (zenith arrow, elevation, WASD step size). This
+        # is the common path for the pan (WASD), rotation (Q/E), scale and step-size (+/-) keys.
+        self.updatePointingIndicator()
 
         # Sky fit
         if self.mode == 'skyfit':
@@ -4497,19 +4515,20 @@ class PlateTool(QtWidgets.QMainWindow):
         # Get current FOV center coordinates for filtering (apparent coordinates)
         fov_ra, fov_dec = self.computeCentreRADec()
 
-        # Use same FOV radius as catalog filtering, with margin for edge cases
-        # Cap at 90 degrees (gnomonic projection limit)
+        # Gate bodies on angular distance from the FOV centre, using the same selection radius as the
+        # catalog star filtering (subsetCatalog). The projected-bounds check below is NOT a sufficient
+        # FOV test on its own: a radial distortion polynomial extrapolated beyond its fit range can fold
+        # far-off-sky points back into the image, so a body well outside the FOV would otherwise project
+        # in-bounds and pop in and out as the pointing changes.
         fov_radius = getFOVSelectionRadius(self.platepar)
-        max_ang_sep = min(90, fov_radius * 1.5)
 
         for display_name, ra_deg, dec_deg, mag in self._planet_cache_radec:
-            # Check angular separation from FOV center
-            # Skip bodies outside the extended FOV radius (prevents gnomonic projection wrapping)
+            # Skip bodies outside the FOV selection radius
             ang_sep = np.degrees(angularSeparation(
                 np.radians(ra_deg), np.radians(dec_deg),
                 np.radians(fov_ra), np.radians(fov_dec)
             ))
-            if ang_sep > max_ang_sep:
+            if ang_sep > fov_radius:
                 continue
 
             # Convert RA/Dec to image coordinates
@@ -7033,6 +7052,52 @@ class PlateTool(QtWidgets.QMainWindow):
 
             self.distortion_center_marker.setData(x=[x_centre], y=[y_centre])
             self.distortion_center_marker2.setData(x=[x_centre], y=[y_centre])
+
+            self.updatePointingIndicator()
+
+
+    def updatePointingIndicator(self):
+        """ Update the zenith arrow / elevation notch / WASD step-size indicator at the optical axis. """
+
+        # Only relevant when fitting a plate (skyfit mode) with a valid platepar
+        if (self.platepar is None) or (self.mode != 'skyfit'):
+            if hasattr(self, 'pointing_indicator'):
+                self.pointing_indicator.hide()
+            return
+
+        try:
+            # Anchor the glyph at the optical axis (same point as the red plus)
+            x_centre, y_centre = self.platepar.getDistortionCentre()
+
+            # Screen direction toward the zenith + East along the horizon + apparent az/elev, evaluated at
+            # the optical axis so the readout matches where the glyph is pinned
+            angle_screen, east_screen, azimuth, elevation, valid = fovCentreZenithDirection(self.platepar, \
+                centre=(x_centre, y_centre))
+
+            # On-screen size of one WASD step: panStepDeg is the FOV-relative angular step (deg) and
+            # F_scale is the reference plate scale (px/deg) at the centre
+            step_px = abs(self.panStepDeg()*self.platepar.F_scale)
+
+            # Az/Alt readout precision scales with the FOV: integer degrees for wide/all-sky fields, more
+            # decimals for narrow fields where finer pointing matters
+            fov_h, fov_v = computeFOVSize(self.platepar)
+            fov_diag = np.hypot(fov_h, fov_v)
+            if fov_diag >= 60:
+                precision = 0
+            elif fov_diag >= 20:
+                precision = 1
+            elif fov_diag >= 5:
+                precision = 2
+            else:
+                precision = 3
+
+            self.pointing_indicator.setPos(x_centre, y_centre)
+            self.pointing_indicator.setData(angle_screen, east_screen, azimuth, elevation, step_px, \
+                precision, valid)
+            self.pointing_indicator.show()
+
+        except Exception:
+            self.pointing_indicator.hide()
 
 
     def screenPlotDPI(self):
@@ -10080,53 +10145,21 @@ class PlateTool(QtWidgets.QMainWindow):
 
                 print('Plate fitted!')
 
-            # Increase reference azimuth
+            # Pan the view left on screen (roll-aware)
             elif event.key() == QtCore.Qt.Key_A:
-                self.platepar.az_centre += self.key_increment
-                
-                self.checkParamRange()
-                self.platepar.updateRefRADec(preserve_rotation=True)
-                self.checkParamRange()
+                self.nudgeReferenceScreen(-1, 0)
 
-                self.tab.param_manager.updatePlatepar()
-                self.updateLeftLabels()
-                self.updateStars()
-
-            # Decrease reference azimuth
+            # Pan the view right on screen (roll-aware)
             elif event.key() == QtCore.Qt.Key_D:
-                self.platepar.az_centre -= self.key_increment
+                self.nudgeReferenceScreen(+1, 0)
 
-                self.checkParamRange()
-                self.platepar.updateRefRADec(preserve_rotation=True)
-                self.checkParamRange()
-
-                self.tab.param_manager.updatePlatepar()
-                self.updateLeftLabels()
-                self.updateStars()
-
-            # Increase reference altitude
+            # Pan the view up on screen (roll-aware)
             elif event.key() == QtCore.Qt.Key_W:
-                self.platepar.alt_centre -= self.key_increment
+                self.nudgeReferenceScreen(0, +1)
 
-                self.checkParamRange()
-                self.platepar.updateRefRADec(preserve_rotation=True)
-                self.checkParamRange()
-
-                self.tab.param_manager.updatePlatepar()
-                self.updateLeftLabels()
-                self.updateStars()
-
-            # Decrease reference altitude
+            # Pan the view down on screen (roll-aware)
             elif event.key() == QtCore.Qt.Key_S:
-                self.platepar.alt_centre += self.key_increment
-
-                self.checkParamRange()
-                self.platepar.updateRefRADec(preserve_rotation=True)
-                self.checkParamRange()
-
-                self.tab.param_manager.updatePlatepar()
-                self.updateLeftLabels()
-                self.updateStars()
+                self.nudgeReferenceScreen(0, -1)
 
             # Pan to unmatched star most distant from all other matched stars
 
@@ -11348,6 +11381,73 @@ class PlateTool(QtWidgets.QMainWindow):
                     self.scrolls_back = 0
                     self.img_frame.wheelEventModified(event, axis)
 
+
+
+    def panStepDeg(self):
+        """ FOV-relative WASD pan step in angular degrees.
+
+            The pan step is decoupled from the absolute-degree meaning of key_increment (which is shared
+            with the rotation/scale/distortion keys) and is instead a fraction of the FOV diagonal, so a
+            press feels equally responsive on a narrow lens and on an all-sky camera. key_increment still
+            acts as a relative sensitivity knob via the +/- keys.
+        """
+
+        REF_INCREMENT = 1.0     # key_increment value at which the pan step equals BASE_FRACTION of the FOV
+        BASE_FRACTION = 0.04    # fraction of the FOV diagonal moved per press at the default increment
+        MIN_STEP = 0.002        # deg, lower clamp so the step never collapses to zero
+        MAX_STEP = 60.0         # deg, upper clamp so a single press can't fling the pointing across the sky
+
+        fov_h, fov_v = computeFOVSize(self.platepar)
+        fov_diag = np.hypot(fov_h, fov_v)
+
+        step = (self.key_increment/REF_INCREMENT)*BASE_FRACTION*fov_diag
+
+        return float(min(max(step, MIN_STEP), MAX_STEP))
+
+
+    def nudgeReferenceScreen(self, screen_dx, screen_dy):
+        """ Pan the FOV reference pointing in an on-screen direction (roll-aware).
+
+        Arguments:
+            screen_dx: [float] Screen direction X (+1 = right, -1 = left, 0 = none).
+            screen_dy: [float] Screen direction Y (+1 = up, -1 = down, 0 = none).
+        """
+
+        # Convert the requested screen direction into a change of the apparent reference az/alt. The step
+        # magnitude is FOV-relative (panStepDeg) and the direction is roll-independent. The image view is
+        # Y-inverted for display (img_frame.invertY()), so image +Y is screen down.
+        step = self.panStepDeg()
+        d_az, d_alt = screenNudgeToAzAltDelta(self.platepar, screen_dx, screen_dy, step, screen_y_sign=-1)
+
+        # Skip degenerate / no-op nudges so the UI isn't churned
+        if (d_az == 0.0) and (d_alt == 0.0):
+            return
+
+        # Decide how the camera roll is carried. Away from the zenith/nadir we keep the rotation w.r.t.
+        # horizon fixed (preserve_rotation) so the horizon stays level while panning azimuth. Close to a
+        # pole that solver is degenerate and traps the pointing, so there we hold the celestial roll
+        # (skip_rot_update) instead, which lets the pointing cross the pole cleanly with the horizon
+        # rotation flipping by ~180 deg. The threshold is at least 5 deg from the pole, and at least one
+        # step (so the crossing press itself is handled in the pole regime).
+        near_pole = (90.0 - abs(self.platepar.alt_centre)) < max(step, 5.0)
+
+        self.platepar.az_centre += d_az
+        self.platepar.alt_centre += d_alt
+
+        self.checkParamRange()
+
+        if near_pole:
+            self.platepar.updateRefRADec(skip_rot_update=True)
+        else:
+            self.platepar.updateRefRADec(preserve_rotation=True)
+        self.checkParamRange()
+
+        # Keep the stored rotation-w.r.t.-horizon in sync with the new pointing for the labels/indicator
+        self.platepar.rotation_from_horiz = rotationWrtHorizon(self.platepar)
+
+        self.tab.param_manager.updatePlatepar()
+        self.updateLeftLabels()
+        self.updateStars()
 
 
     def checkParamRange(self):
