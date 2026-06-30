@@ -15,10 +15,31 @@ from RMS.Astrometry.Conversions import AER2LatLonAlt
 from RMS.Formats.FFfile import reconstructFrame as reconstructFrameFF
 from RMS.Routines import Image
 from RMS.Routines.DebruijnSequence import findAllInDeBruijnSequence, generateDeBruijnSequence
+from RMS.Routines.SkyFitHelp import HELP_STYLE, buildHelpHome, buildHelpTopic
 
 import time
 import re
 import sys
+
+
+class _CornerHelpOverlay(QtCore.QObject):
+    """ Keeps a help button pinned to the top-right corner of a host widget without taking up any
+        layout space (so it never shifts the tab content down). """
+
+    def __init__(self, host, button, margin):
+        super(_CornerHelpOverlay, self).__init__(host)
+        self.host = host
+        self.button = button
+        self.margin = margin
+
+    def reposition(self):
+        self.button.move(self.host.width() - self.button.width() - self.margin, self.margin)
+        self.button.raise_()
+
+    def eventFilter(self, obj, event):
+        if obj is self.host and event.type() in (QtCore.QEvent.Resize, QtCore.QEvent.Show):
+            self.reposition()
+        return False
 
 
 class ScaledSizeHelper:
@@ -67,6 +88,45 @@ class ScaledSizeHelper:
         """
         fm = QtGui.QFontMetrics(self.font())
         return int(fm.height() * fraction)
+
+    def makeHelpButton(self, topic, tooltip="Open the related help page"):
+        """ Create a small circular blue "i" info button that opens a Help topic.
+
+        The widget must have a ``self.gui`` attribute exposing ``openHelpTopic(topic_id)``.
+        """
+        btn = QtWidgets.QToolButton()
+        btn.setText("i")
+        btn.setToolTip(tooltip)
+        btn.setCursor(QtCore.Qt.PointingHandCursor)
+        btn.setFocusPolicy(QtCore.Qt.NoFocus)
+        d = max(self.scaledHeight(1.0), 13)
+        btn.setFixedSize(d, d)
+        btn.setStyleSheet(
+            "QToolButton { border: none; border-radius: %dpx; background-color: #1a73e8; "
+            "color: white; font-weight: bold; font-style: italic; font-family: serif; "
+            "font-size: %dpx; } "
+            "QToolButton:hover { background-color: #1666c1; }" % (int(d/2), max(int(d*0.62), 8))
+        )
+        btn.clicked.connect(lambda: self.gui.openHelpTopic(topic))
+        return btn
+
+    def addCornerHelpButton(self, topic, tooltip="Open the help page for this tab"):
+        """ Pin a small circular "i" help button to the widget's top-right corner.
+
+        The button floats over the content (it is parented to the widget, not added to a layout),
+        so it does not take up layout space or shift the tab content down. An event filter keeps it
+        in the corner as the widget resizes.
+        """
+        btn = self.makeHelpButton(topic, tooltip)
+        btn.setParent(self)
+        margin = max(self.scaledSpacing(0.15), 2)
+        overlay = _CornerHelpOverlay(self, btn, margin)
+        self.installEventFilter(overlay)
+        # Keep a reference so the filter isn't garbage-collected
+        self._help_overlay = overlay
+        overlay.reposition()
+        btn.show()
+        return btn
 
 
 def qmessagebox(message="", title="Error", message_type="warning"):
@@ -1061,6 +1121,9 @@ class RightOptionsTab(QtWidgets.QTabWidget, ScaledSizeHelper):
     TAB_WIDTH_CHARS = 32
     TAB_MINIMIZED_CHARS = 2
 
+    # The Help tab is shown at this multiple of the normal width (more readable docs)
+    HELP_WIDTH_MULT = 2
+
     def __init__(self, gui):
         super(RightOptionsTab, self).__init__()
 
@@ -1072,6 +1135,7 @@ class RightOptionsTab(QtWidgets.QTabWidget, ScaledSizeHelper):
         self.star_detection = StarDetectionWidget(gui)
         self.mask = MaskWidget(gui)
         self.settings = SettingsWidget(gui)
+        self.help = HelpWidget(gui)
         self.debruijn = DebruijnSequenceManager(gui)
 
         self.index = 0
@@ -1084,6 +1148,7 @@ class RightOptionsTab(QtWidgets.QTabWidget, ScaledSizeHelper):
         self.addTab(self.star_detection, 'Star Detection')
         self.addTab(self.mask, 'Mask')
         self.addTab(self.settings, 'Settings')
+        self.addTab(self.help, 'ⓘ Help')
 
         self.setCurrentIndex(self.index)  # redundant
         self.setTabPosition(QtWidgets.QTabWidget.East)
@@ -1099,20 +1164,32 @@ class RightOptionsTab(QtWidgets.QTabWidget, ScaledSizeHelper):
             self.gui.view_widget.setFocus()
 
 
+    def maximizedWidthChars(self):
+        """ Maximized panel width (in characters). The Help tab gets extra width for readability;
+            all other tabs use the normal width. """
+        if 0 <= self.index < self.count() and self.widget(self.index) is self.help:
+            return self.TAB_WIDTH_CHARS*self.HELP_WIDTH_MULT
+        return self.TAB_WIDTH_CHARS
+
+    def applyTabWidth(self):
+        """ Resize the panel to match the current maximized/minimized state and selected tab. """
+        if self.maximized:
+            self.setFixedWidth(self.scaledWidth(self.maximizedWidthChars()))
+        else:
+            self.setFixedWidth(self.scaledWidth(self.TAB_MINIMIZED_CHARS))
+
     def onTabBarClicked(self, index):
         old_index = self.index
         if index != self.index:
             self.index = index
             self.maximized = True
-            self.setFixedWidth(self.scaledWidth(self.TAB_WIDTH_CHARS))
+            # Wider for Help, normal for everything else
+            self.applyTabWidth()
             # Emit signal for tab change
             self.sigTabChanged.emit(old_index, index)
         else:
             self.maximized = not self.maximized
-            if self.maximized:
-                self.setFixedWidth(self.scaledWidth(self.TAB_WIDTH_CHARS))
-            else:
-                self.setFixedWidth(self.scaledWidth(self.TAB_MINIMIZED_CHARS))
+            self.applyTabWidth()
 
         # Always set the focus back to the image window
         self.gui.view_widget.setFocus()
@@ -1155,6 +1232,136 @@ class RightOptionsTab(QtWidgets.QTabWidget, ScaledSizeHelper):
             if self.tabText(i) == text:
                 self.removeTab(i)
                 break
+
+
+class HelpWidget(QtWidgets.QWidget, ScaledSizeHelper):
+    """ Read-only Help tab with mode- and feature-aware documentation.
+
+    Uses progressive disclosure: a Home page with an intro and a triage list of links, each
+    opening a detailed topic page. Content is built in RMS.Routines.SkyFitHelp from the current
+    GUI state (mode + enabled features). Call updateHelp() to rebuild after a mode/feature change.
+    """
+
+    def __init__(self, gui):
+        QtWidgets.QWidget.__init__(self)
+
+        self.gui = gui
+
+        # Stack of visited topic ids (for the Back button)
+        self._history = []
+
+        layout = QtWidgets.QVBoxLayout()
+        layout.setAlignment(QtCore.Qt.AlignTop)
+        layout.setContentsMargins(*self.scaledMargins(0.5, 0.25))
+        layout.setSpacing(self.scaledSpacing(0.25))
+        self.setLayout(layout)
+
+        # Navigation buttons
+        nav = QtWidgets.QHBoxLayout()
+        nav.setSpacing(self.scaledSpacing(0.25))
+        self.home_button = QtWidgets.QPushButton("Home")
+        self.home_button.setToolTip("Back to the help topic list")
+        self.home_button.clicked.connect(self.showHome)
+        self.back_button = QtWidgets.QPushButton("Back")
+        self.back_button.clicked.connect(self.goBack)
+        nav.addWidget(self.home_button)
+        nav.addWidget(self.back_button)
+        layout.addLayout(nav)
+
+        # Search box: filters the home topic list as you type
+        self.search_box = QtWidgets.QLineEdit()
+        self.search_box.setPlaceholderText("Search help...")
+        self.search_box.setClearButtonEnabled(True)
+        self.search_box.textChanged.connect(self._onSearchChanged)
+        layout.addWidget(self.search_box)
+
+        # Read-only rich-text view. Internal "topic:" links and external http(s) links are handled
+        # manually in onAnchorClicked, so disable Qt's own link following.
+        self.browser = QtWidgets.QTextBrowser()
+        self.browser.setOpenLinks(False)
+        self.browser.setOpenExternalLinks(False)
+        self.browser.anchorClicked.connect(self.onAnchorClicked)
+
+        # Apply the help stylesheet to the document (persists across setHtml calls)
+        self.browser.document().setDefaultStyleSheet(HELP_STYLE)
+
+        layout.addWidget(self.browser)
+
+        self.showHome()
+
+
+    def showHome(self):
+        """ Show the intro + triage page for the current mode/features (unfiltered). """
+        self._history = []
+        # Reset any active search without re-triggering a render
+        if self.search_box.text():
+            self.search_box.blockSignals(True)
+            self.search_box.clear()
+            self.search_box.blockSignals(False)
+        self._renderHome(None)
+        self._updateBackButton()
+
+
+    def _onSearchChanged(self, text):
+        """ Re-render the home page filtered by the search query. """
+        self._history = []
+        self._renderHome(text.strip() or None)
+        self._updateBackButton()
+
+
+    def _renderHome(self, query):
+        """ Build and display the home page, guarded so a content error can't blank the tab. """
+        try:
+            html = buildHelpHome(self.gui, query=query)
+        except Exception as e:
+            html = "<h2>Help</h2><p>Could not render the help page: {:s}</p>".format(str(e))
+        self.browser.setHtml(html)
+        self.browser.verticalScrollBar().setValue(0)
+
+
+    def updateHelp(self):
+        """ Rebuild the help content from the current GUI state (mode/feature change). """
+        self.showHome()
+
+
+    def showTopic(self, topic_id):
+        """ Show one detailed topic page. """
+        html = buildHelpTopic(self.gui, topic_id)
+        if html is None:
+            return
+        self._history.append(topic_id)
+        self.browser.setHtml(html)
+        self.browser.verticalScrollBar().setValue(0)
+        self._updateBackButton()
+
+
+    def goBack(self):
+        """ Step back to the previous topic, or Home. """
+        if self._history:
+            self._history.pop()
+        if self._history:
+            self.browser.setHtml(buildHelpTopic(self.gui, self._history[-1]))
+            self.browser.verticalScrollBar().setValue(0)
+        else:
+            self.showHome()
+        self._updateBackButton()
+
+
+    def _updateBackButton(self):
+        self.back_button.setEnabled(len(self._history) > 0)
+
+
+    def onAnchorClicked(self, url):
+        """ Route internal topic links and open external links in the system browser. """
+        scheme = url.scheme()
+        if scheme in ("http", "https"):
+            QtGui.QDesktopServices.openUrl(url)
+            return
+
+        topic_id = url.toString()
+        if topic_id.startswith("topic:"):
+            topic_id = topic_id[len("topic:"):]
+        self.showTopic(topic_id)
 
 
 class DebruijnSequenceManager(QtWidgets.QWidget, ScaledSizeHelper):
@@ -1475,6 +1682,9 @@ class GeolocationWidget(QtWidgets.QWidget, ScaledSizeHelper):
         full_layout = QtWidgets.QVBoxLayout()
         full_layout.setAlignment(QtCore.Qt.AlignTop)
         self.setLayout(full_layout)
+
+        # Tab help button (top-right)
+        self.addCornerHelpButton('station', "Help: station & geo points")
 
         # Station geo position input boxes
         form = QtWidgets.QFormLayout()
@@ -1803,6 +2013,9 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         full_layout.setContentsMargins(*self.scaledMargins(0.5, 0.25))
         self.setLayout(full_layout)
 
+        # Tab help button (top-right)
+        self.addCornerHelpButton('astrometry', "Help: fitting the astrometry")
+
         # buttons
         box = QtWidgets.QVBoxLayout()
         box.setContentsMargins(*self.scaledMargins(0.5, 0.25))
@@ -1833,9 +2046,10 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         # Quick Align button row
         quick_align_hbox = QtWidgets.QHBoxLayout()
         quick_align_hbox.setSpacing(self.scaledSpacing(0.25))
-        self.quick_align_button = QtWidgets.QPushButton("Re-fit Pointing")
+        self.quick_align_button = QtWidgets.QPushButton("Auto Pointing")
         self.quick_align_button.setToolTip(
-            "Re-fit pointing using existing distortion. Uses astrometry.net if needed.")
+            "Automatically re-estimate pointing from detected stars (existing distortion kept). "
+            "Falls back to astrometry.net. Does not use your picked stars.")
         self.quick_align_button.clicked.connect(self.sigQuickAlignPressed.emit)
         quick_align_hbox.addWidget(self.quick_align_button)
         box.addLayout(quick_align_hbox)
@@ -1867,6 +2081,10 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         self.photometry_button = QtWidgets.QPushButton('Photometry')
         self.photometry_button.clicked.connect(self.sigPhotometryPressed.emit)
         hbox.addWidget(self.photometry_button)
+
+        # Small circular "i" button: opens the Help page on reading the residual plots
+        self.residuals_help_button = self.makeHelpButton('residuals', "How to read the residual plots")
+        hbox.addWidget(self.residuals_help_button)
         box.addLayout(hbox)
 
         self.updatePairedStars()
@@ -2648,7 +2866,7 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
             self.auto_fit_button.repaint()
             self.fit_astrometry_button.repaint()
         else:
-            self.quick_align_button.setText("Re-fit Pointing")
+            self.quick_align_button.setText("Auto Pointing")
             self.quick_align_button.setEnabled(True)
             self.auto_fit_button.setEnabled(True)
             # Re-enable fit button based on paired stars count
@@ -2883,6 +3101,9 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
         layout.setContentsMargins(*self.scaledMargins(1, 0.5))
         layout.setSpacing(self.scaledSpacing(0.3))
         self.setLayout(layout)
+
+        # Tab help button (top-right)
+        self.addCornerHelpButton('stardetect', "Help: star detection override")
 
         # Title
         title = QtWidgets.QLabel('Star Detection Override')
@@ -3167,6 +3388,9 @@ class MaskWidget(QtWidgets.QWidget, ScaledSizeHelper):
         layout.setContentsMargins(*self.scaledMargins(1, 0.5))
         layout.setSpacing(self.scaledSpacing(0.5))
         self.setLayout(layout)
+
+        # Tab help button (top-right)
+        self.addCornerHelpButton('mask', "Help: drawing a mask")
 
         # ── Header ────────────────────────────────────────────────────────────
 
@@ -3461,7 +3685,7 @@ class MaskWidget(QtWidgets.QWidget, ScaledSizeHelper):
             self.use_flat.setChecked(False)
 
 
-class SettingsWidget(QtWidgets.QWidget):
+class SettingsWidget(QtWidgets.QWidget, ScaledSizeHelper):
     """
     QWidget which displays all of the visual values of the gui. Changing any parameters
     here will not affect the functionality of the gui and will not be saved with savestate.
@@ -3498,6 +3722,9 @@ class SettingsWidget(QtWidgets.QWidget):
         vbox = QtWidgets.QVBoxLayout()
         vbox.setAlignment(QtCore.Qt.AlignTop)
         self.setLayout(vbox)
+
+        # Tab help button (top-right)
+        self.addCornerHelpButton('settings', "Help: the Settings tab")
 
         hbox = QtWidgets.QHBoxLayout()
         pixel_group = QtWidgets.QButtonGroup(self)

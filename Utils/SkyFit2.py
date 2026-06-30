@@ -2666,8 +2666,17 @@ class PlateTool(QtWidgets.QMainWindow):
         self.toggle_zoom_window.triggered.connect(self.toggleZoomWindow)
         self.toggle_zoom_window.setShortcut('shift+Z')
 
+        # Open the in-app Help tab
+        self.open_help_action = QtWidgets.QAction("SkyFit2 Guide")
+        self.open_help_action.triggered.connect(self.openHelp)
+        self.open_help_action.setShortcut('Shift+F1')
+
         self.file_menu = menu.addMenu('File')
         self.view_menu = menu.addMenu('View')
+
+        # Persistent Help menu (not rebuilt on mode change)
+        self.help_menu = menu.addMenu('Help')
+        self.help_menu.addAction(self.open_help_action)
 
         # TESTING
         self.i = 0
@@ -2762,35 +2771,17 @@ class PlateTool(QtWidgets.QMainWindow):
         self.v_zoom_left = True  # whether to draw zoom window on left or right
         self.zoom_window.invertY()
 
-        # top left label
-        self.show_key_help = 2
-
         # Create font and metrics for overlay labels
         label_font = QtGui.QFont('monospace', 8)
         label_fm = QtGui.QFontMetrics(label_font)
 
-        # top left label (hidden by default — F1 state 2)
+        # top left info panel (shown by default, toggled with F1)
         self.label1 = TextItem(color=(0, 0, 0), fill=(255, 255, 255, 100))
         self.label1.setFont(label_font)
         self.label1.setTextWidth(label_fm.averageCharWidth() * 35)  # ~35 chars wide
         self.label1.setZValue(1000)
         self.label1.setParentItem(self.img_frame)
-        self.label1.hide()
-
-        # bottom left label (hidden by default — F1 state 2)
-        self.label2 = TextItem(color=(0, 0, 0), fill=(255, 255, 255, 100))
-        self.label2.setFont(label_font)
-        self.label2.setTextWidth(label_fm.averageCharWidth() * 38)  # ~38 chars wide
-        self.label2.setZValue(1000)
-        self.label2.setParentItem(self.img_frame)
-        self.label2.hide()
-
-        # F1 info label (visible by default — F1 state 0 shows hint)
-        self.label_f1 = TextItem(color=(0, 0, 0), fill=(255, 255, 255, 100))
-        self.label_f1.setFont(label_font)
-        self.label_f1.setTextWidth(label_fm.averageCharWidth() * 20)  # ~20 chars wide
-        self.label_f1.setZValue(1000)
-        self.label_f1.setParentItem(self.img_frame)
+        self.label1.show()
 
         self.catalog_stars_visible = True
 
@@ -3512,6 +3503,9 @@ class PlateTool(QtWidgets.QMainWindow):
 
             self.star_pick_info.setText(self.star_pick_info_text_str)
 
+            # Refresh mode-aware Help content
+            self.tab.help.updateHelp()
+
         else:
             self.mode = 'manualreduction'
             self.skyfit_button.setDisabled(False)
@@ -3550,6 +3544,10 @@ class PlateTool(QtWidgets.QMainWindow):
             self.cursor.hide()
             self.cursor2.hide()
             self.tab.onManualReduction()
+
+            # Refresh mode-aware Help content
+            self.tab.help.updateHelp()
+
             self.pick_marker.show()
             self.pick_marker2.show()
             self.great_circle_line.show()
@@ -3785,11 +3783,6 @@ class PlateTool(QtWidgets.QMainWindow):
     def onFrameResize(self):
         """ What happens when the window is resized. """
 
-        self.label2.setPos(self.img_frame.width() - self.label2.boundingRect().width(), \
-            self.img_frame.height() - self.label2.boundingRect().height())
-        self.label_f1.setPos(self.img_frame.width() - self.label_f1.boundingRect().width(), \
-            self.img_frame.height() - self.label_f1.boundingRect().height())
-
         self.star_pick_info.setPos(0, self.img_frame.height() - 50)
 
         if self.config.height/self.config.width < self.img_frame.height()/self.img_frame.width():
@@ -3910,8 +3903,6 @@ class PlateTool(QtWidgets.QMainWindow):
         if not self.hasData():
             return
 
-        ctrl = self.ctrl_label
-
         # Sky fit
         if self.mode == 'skyfit':
             ra_centre, dec_centre = self.computeCentreRADec()
@@ -3965,106 +3956,8 @@ class PlateTool(QtWidgets.QMainWindow):
             text_str += 'Camera gamma = {:.2f}\n'.format(self.config.gamma)
             text_str += 'Refraction = {:s}'.format(str(self.platepar.refraction))
 
+        # Only update the text; visibility of the top-left panel is controlled by F1 (toggleInfo)
         self.label1.setText(text_str)
-
-        if self.mode == 'skyfit':
-            text_str = 'Keys:\n'
-            text_str += '-----\n'
-            text_str += 'F1 - Hide/show this text\n'
-            text_str += 'Left/Right - Previous/next image\n'
-            text_str += f'{ctrl} + Left/Right - +/- 10 images\n'
-            text_str += 'A/D - Azimuth\n'
-            text_str += 'S/W - Altitude\n'
-            text_str += 'Q/E - Position angle\n'
-            text_str += 'Up/Down - Scale\n'
-            text_str += 'T - Toggle refraction correction\n'
-
-            # Add aspect info if the radial distortion is used
-            if not self.platepar.distortion_type.startswith("poly"):
-                text_str += 'G - Toggle equal aspect\n'
-                text_str += 'Y - Toggle asymmetry correction\n'
-                text_str += 'B - Dist = img centre toggle\n'
-
-            text_str += '1/2 - X offset\n'
-            text_str += '3/4 - Y offset\n'
-            text_str += '5/6 - X 1st dist. coeff.\n'
-            text_str += '7/8 - Y 1st dist. coeff.\n'
-            text_str += '9/0 - extinction scale\n'
-            text_str += f'{ctrl} + 1 - poly3+radial distortion\n'
-            text_str += f'{ctrl} + 2 - poly3+radial3 distortion\n'
-            text_str += f'{ctrl} + 3 - radial3 distortion\n'
-            text_str += f'{ctrl} + 4 - radial5 distortion\n'
-            text_str += f'{ctrl} + 5 - radial7 distortion\n'
-            text_str += f'{ctrl} + 6 - radial9 distortion\n'
-            text_str += '\n'
-            text_str += f'{ctrl} + R - Pick stars\n'
-            text_str += '\n'
-            text_str += 'Scroll - zoom in/out\n'
-            text_str += 'R/F - Lim mag\n'
-            text_str += '+/- - Increment adjust\n'
-            text_str += '\n'
-            text_str += 'M - Toggle maxpixel/avepixel\n'
-            text_str += 'H - Hide/show catalog stars\n'
-            text_str += 'C - Hide/show detected stars\n'
-            if self.show_sattracks:
-                text_str += f'{ctrl} + T - Toggle satellite tracks\n'
-            text_str += f'{ctrl} + I - Show/hide distortion\n'
-            text_str += 'U/J - Img Gamma\n'
-            text_str += 'I - Invert colors\n'
-            text_str += 'V - FOV centre\n'
-            text_str += '\n'
-            text_str += f'{ctrl} + A - Auto levels\n'
-            text_str += f'{ctrl} + D - Load dark\n'
-            text_str += f'{ctrl} + F - Load flat\n'
-            text_str += f'{ctrl} + G - Cycle grids\n'
-            text_str += f'{ctrl} + U - Pan to next\n'
-            text_str += f'{ctrl} + O - Toggle auto pan\n'
-            text_str += f'{ctrl} + X - astrometry.net img upload\n'
-            text_str += f'{ctrl} + SHIFT + X - astrometry.net XY only\n'
-            text_str += f'{ctrl} + SHIFT + B - Fit spectral bands\n'
-            text_str += 'SHIFT + Q - Quick align test (debug)\n'
-            text_str += 'SHIFT + Z - Show zoomed window\n'
-            text_str += f'{ctrl} + N - New platepar\n'
-            text_str += f'{ctrl} + S - Save platepar & state\n'
-            text_str += f'{ctrl} + SHIFT + S - Save platepar to data folder'
-        else:
-            text_str = 'Keys:\n'
-            text_str += '-----------\n'
-            text_str += 'F1 - Hide/show this text\n'
-            text_str += 'Left/Right - Previous/next frame\n'
-            text_str += f'{ctrl} + Left/Right - +/- 10 frames\n'
-            text_str += 'Down/Up - +/- 25 frames\n'
-            text_str += ',/. - Previous/next FR line\n'
-            text_str += '\n'
-            text_str += f'{ctrl} + R - Pick points\n'
-            text_str += 'Left click - Centroid\n'
-            text_str += f'{ctrl} + Left click - Force pick\n'
-            text_str += 'ALT/Num0 + Left click - Mark gap (DFN)\n'
-            text_str += '\n'
-            text_str += 'Scroll - zoom in/out\n'
-            text_str += 'M - Show maxpixel\n'
-            text_str += 'K - Subtract average\n'
-            text_str += 'T - Toggle refraction correction\n'
-            text_str += 'U/J - Img Gamma\n'
-            text_str += '\n'
-            text_str += 'P - Show lightcurve\n'
-            text_str += f'{ctrl} + A - Auto levels\n'
-            text_str += f'{ctrl} + D - Load dark\n'
-            text_str += f'{ctrl} + F - Load flat\n'
-            text_str += f'{ctrl} + P - Load platepar\n'
-            text_str += f'{ctrl} + W - Save current frame\n'
-            text_str += f'{ctrl} + S - Save FTPdetectinfo\n'
-            text_str += '\n'
-            text_str += f'{ctrl} + K - Open ASTRA GUI'
-
-        self.label2.setText(text_str)
-        self.label2.setPos(self.img_frame.width() - self.label2.boundingRect().width(), \
-            self.img_frame.height() - self.label2.boundingRect().height())
-
-
-        self.label_f1.setText("F1 - Show hotkeys")
-        self.label_f1.setPos(self.img_frame.width() - self.label_f1.boundingRect().width(), \
-            self.img_frame.height() - self.label_f1.boundingRect().height())
 
         # Update window title with current image name
         mode_label = "SkyFit" if self.mode == 'skyfit' else "ManualReduction"
@@ -6707,6 +6600,12 @@ class PlateTool(QtWidgets.QMainWindow):
 
     def onTabChanged(self, old_index, new_index):
         """Handle tab changes - restore image when leaving mask tab."""
+
+        # Refresh the Help tab content when it is opened, so it reflects the current mode and any
+        # features that were toggled since it was last shown.
+        if new_index == self.tab.indexOf(self.tab.help):
+            self.tab.help.updateHelp()
+
         # Mask tab is at index 4 (Levels=0, Fit Parameters=1, Station=2, Star Detection=3, Mask=4)
         mask_tab_index = self.tab.indexOf(self.tab.mask)
 
@@ -8897,7 +8796,7 @@ class PlateTool(QtWidgets.QMainWindow):
         pyqtgraph_keys = [
             'sat_track_curves', 'sat_track_labels', 'sat_track_arrows', 'sat_markers',
             # TextItem objects
-            'label1', 'label2', 'label_f1', 'star_pick_info',
+            'label1', 'star_pick_info',
             # TextItemList objects
             'planet_labels', 'residual_text', 'spectral_type_text_list',
             # Matplotlib objects
@@ -9363,6 +9262,25 @@ class PlateTool(QtWidgets.QMainWindow):
             self.setFPS()
 
 
+    def _isTextInputFocused(self):
+        """ True if an editable text input (e.g. the Help search box, a coordinate field) currently
+            has keyboard focus, so global shortcuts should not steal the keystrokes. Read-only views
+            such as the Help browser are not treated as text inputs. """
+
+        w = QtWidgets.QApplication.focusWidget()
+
+        if isinstance(w, QtWidgets.QAbstractSpinBox):
+            return True
+
+        if isinstance(w, (QtWidgets.QLineEdit, QtWidgets.QTextEdit, QtWidgets.QPlainTextEdit)):
+            try:
+                return not w.isReadOnly()
+            except Exception:
+                return True
+
+        return False
+
+
     def eventFilter(self, obj, event):
         """Event filter to catch mouse release and global keyboard shortcuts."""
 
@@ -9379,6 +9297,11 @@ class PlateTool(QtWidgets.QMainWindow):
         if event.type() == QtCore.QEvent.KeyPress:
             modifiers = event.modifiers()
             key = event.key()
+
+            # While typing in a text input (e.g. the Help search box), let the widget keep the
+            # keystrokes. Escape still falls through so it can return focus to the image.
+            if key != QtCore.Qt.Key_Escape and self._isTextInputFocused():
+                return False
 
             # Check if this is a shortcut we want to handle globally
             should_intercept = False
@@ -9714,7 +9637,7 @@ class PlateTool(QtWidgets.QMainWindow):
             range_ = self.img_frame.getState()['viewRange'][0]
             if mp.x() > (range_[1] - range_[0])/2 + range_[0]:
                 self.v_zoom_left = True
-                if self.show_key_help != 2:
+                if self.label1.isVisible():
                     self.v_zoom.move(QtCore.QPoint(int(self.label1.boundingRect().width()), 0))
                 else:
                     self.v_zoom.move(QtCore.QPoint(0, 0))
@@ -9829,6 +9752,11 @@ class PlateTool(QtWidgets.QMainWindow):
 
     def keyPressEvent(self, event):
 
+        # Don't run shortcuts while typing in a text input (e.g. the Help search box). Escape is
+        # still allowed through (it returns focus to the image).
+        if event.key() != QtCore.Qt.Key_Escape and self._isTextInputFocused():
+            return
+
         # Read modifiers (e.g. CTRL, SHIFT)
         modifiers = QtWidgets.QApplication.keyboardModifiers()
         qmodifiers = QtWidgets.QApplication.queryKeyboardModifiers()
@@ -9931,7 +9859,9 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.cursor.show()
                 self.cursor2.show()
 
-                self.star_pick_info.show()
+                # Respect the F1 overlay toggle: only show the picking hints if overlays are on
+                if self.label1.isVisible():
+                    self.star_pick_info.show()
 
                 # Enable the Next button for star panning
                 self.tab.param_manager.next_star_button.setEnabled(True)
@@ -11468,38 +11398,56 @@ class PlateTool(QtWidgets.QMainWindow):
             self.v_zoom.hide()
 
     def toggleInfo(self):
-        """ Toggle left label info """
+        """ Show/hide the on-image overlays: the top-left info panel and, while picking, the
+        star-picking key hints.
 
-        self.show_key_help += 1
+        (The full keyboard reference and workflow guide live in the right-hand "Help" tab.)
+        """
 
-        if self.show_key_help >= 3:
-            self.show_key_help = 0
+        show = not self.label1.isVisible()
 
-        if self.show_key_help == 0:
+        if show:
             self.label1.show()
-            self.label2.hide()
-            self.label_f1.show()
-
-        elif self.show_key_help == 1:
-            self.label1.show()
-            self.label2.show()
-            self.label_f1.hide()
-
+            # Only show the picking hints when actually in star-pick mode
+            if self.star_pick_mode:
+                self.star_pick_info.show()
         else:
             self.label1.hide()
-            self.label2.hide()
-            self.label_f1.show()
+            self.star_pick_info.hide()
 
+        # Shift the zoom window so it doesn't overlap the info panel
         if self.v_zoom_left:
-            if self.show_key_help != 2:
+            if self.label1.isVisible():
                 self.v_zoom.move(QtCore.QPoint(int(self.label1.boundingRect().width()), 0))
             else:
                 self.v_zoom.move(QtCore.QPoint(0, 0))
 
-        if (self.show_key_help == 1) and self.star_pick_mode:
-            self.star_pick_info.show()
-        else:
-            self.star_pick_info.hide()
+
+    def _raiseHelpTab(self):
+        """ Select and maximise the Help tab. Returns True if the tab exists. """
+
+        help_index = self.tab.indexOf(self.tab.help)
+        if help_index == -1:
+            return False
+        self.tab.setCurrentIndex(help_index)
+        self.tab.index = help_index
+        self.tab.maximized = True
+        self.tab.applyTabWidth()
+        return True
+
+
+    def openHelp(self):
+        """ Open the Help tab at its home page (menu / Shift+F1). """
+
+        if self._raiseHelpTab():
+            self.tab.help.showHome()
+
+
+    def openHelpTopic(self, topic_id):
+        """ Select and maximise the Help tab, then open a specific help topic page. """
+
+        if self._raiseHelpTab():
+            self.tab.help.showTopic(topic_id)
 
 
     def toggleImageType(self):
@@ -12166,7 +12114,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self.photom_fit_resids = None
 
             self.status_bar.showMessage(
-                "Re-fit pointing complete: {} stars".format(len(self.paired_stars)))
+                "Auto pointing complete: {} stars".format(len(self.paired_stars)))
 
             return True
 
@@ -12882,9 +12830,9 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Report result
         if success:
-            self.status_bar.showMessage("Re-fit pointing succeeded")
+            self.status_bar.showMessage("Auto pointing succeeded")
         else:
-            self.status_bar.showMessage("Re-fit pointing failed — try Auto Fit for full recalibration")
+            self.status_bar.showMessage("Auto pointing failed — try Auto Fit for full recalibration")
 
         # Restore the user's catalog LM
         if self.cat_lim_mag != user_cat_lim_mag:
