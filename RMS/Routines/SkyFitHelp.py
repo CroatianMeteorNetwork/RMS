@@ -392,6 +392,7 @@ def _topic_astrometry(gui):
         "they do not honour \"Only fit pointing\". For a picked-star pointing-only fit, use the "
         "<b>Fit</b> button.</p>"
         "<p>Press " + _key("L") + " for the astrometry residual plot.</p>"
+        + "<h3>Relevant shortcuts</h3>"
         + _shortcut_table([
             ("LEFT CLICK", "Centroid the star under the cursor"),
             (c + " + LEFT CLICK", "Manual (forced) star position"),
@@ -476,6 +477,7 @@ def _topic_photometry(gui):
         "(aim for &lt;= ~0.2 mag). For saturated-object work, launch with <b>--nobg</b> or "
         "<b>--peribg</b>.</li>"
         "</ol>"
+        + "<h3>Relevant shortcuts</h3>"
         + _shortcut_table([
             ("P", "Show / refresh the photometry fit"),
             ("U / J", "Image display gamma"),
@@ -544,6 +546,7 @@ def _topic_calibration_files(gui):
     body = (
         "<p>Calibration frames improve both astrometry and photometry. Load them from the File "
         "Manager / Calibration Files dialog or with shortcuts.</p>"
+        + "<h3>Relevant shortcuts</h3>"
         + _shortcut_table([
             (c + " + D", "Load a dark frame"),
             (c + " + F", "Load a flat field"),
@@ -951,6 +954,7 @@ def _topic_mr_picking(gui):
         "a frame is faint or ambiguous, place the pick <b>on the arc</b> &ndash; it shows the path "
         "the meteor must follow and exposes any pick that sits off the line.</p>"
 
+        + "<h3>Relevant shortcuts</h3>"
         + _shortcut_table([
             ("LEFT CLICK", "Centroid the meteor at the cursor"),
             (c + " + LEFT CLICK", "Force a pick at the exact cursor position"),
