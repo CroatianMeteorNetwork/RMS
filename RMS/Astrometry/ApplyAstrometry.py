@@ -627,11 +627,13 @@ def screenNudgeToAzAltDelta(platepar, screen_dx, screen_dy, key_increment, scree
     dX = screen_dx
     dY = screen_y_sign*screen_dy
 
-    # Sample the centre pixel and one h_px step in the requested screen direction, as 3D unit vectors.
+    # Sample at the distortion centre (optical axis) and one h_px step in the requested screen direction,
+    # as 3D unit vectors. The reference az_centre/alt_centre track the optical axis (not the image
+    # midpoint when force_distortion_centre is False), so the screen tangent must be sampled there too,
+    # otherwise on a distorted wide field the nudge direction is taken from the wrong part of the image.
     # Working in 3D (rather than with az/alt gradients) keeps the screen direction well-defined right up
     # to the zenith, where the az/alt parametrisation is singular.
-    xc = platepar.X_res/2
-    yc = platepar.Y_res/2
+    xc, yc = platepar.getDistortionCentre()
     p_c = _vec(xc, yc)
     p_d = _vec(xc + h_px*dX, yc + h_px*dY)
 
