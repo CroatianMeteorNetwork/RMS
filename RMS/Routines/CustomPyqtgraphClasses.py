@@ -971,6 +971,197 @@ class CursorItem(pg.GraphicsObject):
         return QtCore.QRectF(self.picture.boundingRect())
 
 
+class PointingIndicator(pg.GraphicsObject):
+    """ A HUD glyph pinned at the optical-axis marker that shows:
+
+          - a zenith arrow: points toward the zenith on screen (its angle conveys the camera roll),
+          - an elevation notch: a tick sliding along the arrow from the centre (horizon, 0 deg) to the
+            tip (zenith, 90 deg), marking the apparent elevation of the optical centre,
+          - an Az/Alt readout: the apparent azimuth and altitude of the optical centre,
+          - a horizon bar through the optical axis (along the East-West horizon, so it doubles as a
+            horizon/roll indicator). Its length is one WASD pan step on screen, and it carries an azimuth
+            compass: the middle is North, little notches mark West/East, and a notch slides to the
+            current azimuth.
+
+        The arrow and readout are a constant pixel size (ItemIgnoresTransformations), while the bar and
+        its notches scale with the image zoom; the whole glyph stays anchored to the optical-axis pixel.
+    """
+
+    def __init__(self, arrow_length=52):
+        """
+        Arguments:
+            arrow_length: [float] Length of the zenith arrow in screen pixels.
+        """
+        super().__init__()
+
+        # Keep the glyph a constant device-pixel size, anchored at setPos()
+        self.setFlag(QtGui.QGraphicsItem.ItemIgnoresTransformations, True)
+
+        self.arrow_length = float(arrow_length)
+
+        # State (screen frame: +x right, +y up)
+        self.angle = 90.0          # zenith direction (deg)
+        self.east_angle = 0.0      # screen direction of increasing azimuth (East along the horizon, deg)
+        self.azimuth = 0.0         # apparent azimuth of the optical centre (deg)
+        self.elevation = 0.0       # apparent elevation of the optical centre (deg)
+        self.step_px = 0.0         # one WASD step in screen pixels
+        self.precision = 0         # decimals for the Az/Alt readout (FOV-dependent)
+        self.valid_zenith = True   # False when the centre is at/near the zenith
+
+        # Colours (muted, so the glyph stays unobtrusive over the image)
+        self.arrow_color = QtGui.QColor(170, 175, 180)
+        self.notch_color = QtGui.QColor(210, 215, 220)
+        self.step_color = QtGui.QColor(255, 255, 255, 90)
+        self.text_color = QtGui.QColor(185, 190, 195)
+
+        # Compact, fixed-size font for the Az/Alt readout (independent of the system default)
+        self.font = QtGui.QFont()
+        self.font.setPointSize(9)
+
+
+    def setData(self, angle, east_angle, azimuth, elevation, step_px, precision, valid_zenith):
+        self.angle = float(angle)
+        self.east_angle = float(east_angle)
+        self.azimuth = float(azimuth)
+        self.elevation = float(elevation)
+        self.step_px = float(step_px)
+        self.precision = int(precision)
+        self.valid_zenith = bool(valid_zenith)
+        self.prepareGeometryChange()
+        self.update()
+
+
+    def refresh(self):
+        """ Recompute geometry and repaint. Connect this to the view's range-change signal so the
+            step bar (which scales with zoom) is redrawn with up-to-date bounds. """
+        self.prepareGeometryChange()
+        self.update()
+
+
+    def _deviceScaleX(self):
+        """ Device pixels per one image pixel (data unit) along X at the current zoom. Used to scale the
+            step bar, which represents a real on-screen distance, while the arrow/notch stay fixed size. """
+        parent = self.parentItem()
+        if parent is None:
+            return 1.0
+        try:
+            o = parent.mapToDevice(pg.Point(0.0, 0.0))
+            ex = parent.mapToDevice(pg.Point(1.0, 0.0))
+            if (o is None) or (ex is None):
+                return 1.0
+            return abs(ex.x() - o.x())
+        except Exception:
+            return 1.0
+
+
+    def boundingRect(self):
+        # Cover the arrow (plus arrowhead and text margin) and the horizontal step bar (zoom-scaled)
+        bar_half = 0.5*self.step_px*self._deviceScaleX()
+        reach = max(self.arrow_length + 34.0, bar_half + 24.0, 122.0)
+        return QtCore.QRectF(-reach, -reach, 2*reach, 2*reach)
+
+
+    def paint(self, painter, option, widget=None):
+
+        painter.setRenderHint(QtGui.QPainter.Antialiasing, True)
+
+        L = self.arrow_length
+
+        # Step-size / horizon / azimuth bar: a line through the optical-axis centre, oriented along the
+        # horizon (East-West). It doubles as (a) a horizon/roll indicator, (b) a pan step-size gauge -- its
+        # length is one WASD step on screen, so it scales with the image zoom -- and (c) an azimuth compass:
+        # the middle is North, little notches mark West and East (+/- 90 deg), and a longer notch slides to
+        # the current azimuth. The compass spans +/-180 deg over the bar (the ends are South).
+        if self.step_px > 0.5:
+            half = 0.5*self.step_px*self._deviceScaleX()
+            ea = np.radians(self.east_angle)
+            ux, uy = np.cos(ea), -np.sin(ea)         # unit toward East along the horizon (device coords)
+            px_, py_ = -uy, ux                       # unit perpendicular (for the notch ticks)
+
+            pen = QtGui.QPen(self.step_color, 2.0, QtCore.Qt.SolidLine)
+            painter.setPen(pen)
+            painter.drawLine(QtCore.QPointF(-half*ux, -half*uy), QtCore.QPointF(half*ux, half*uy))
+            # End caps
+            cap = 4.0
+            for s in (-1.0, 1.0):
+                painter.drawLine(QtCore.QPointF(s*half*ux - cap*px_, s*half*uy - cap*py_),
+                                 QtCore.QPointF(s*half*ux + cap*px_, s*half*uy + cap*py_))
+
+            if self.valid_zenith:
+                def _notch(frac, length, pen):
+                    # Perpendicular tick at the given fraction (-1..1) along the bar from the centre (N)
+                    f = min(max(frac, -1.0), 1.0)
+                    bx, by = f*half*ux, f*half*uy
+                    painter.setPen(pen)
+                    painter.drawLine(QtCore.QPointF(bx - length*px_, by - length*py_),
+                                     QtCore.QPointF(bx + length*px_, by + length*py_))
+
+                # Little reference notches: West (-90 deg) and East (+90 deg) at +/- half the bar
+                ref_pen = QtGui.QPen(self.step_color, 1.5, QtCore.Qt.SolidLine)
+                _notch(-0.5, 3.0, ref_pen)
+                _notch(+0.5, 3.0, ref_pen)
+
+                # Current-azimuth notch (azimuth wrapped to +/-180 deg, mapped over the bar)
+                az_frac = (((self.azimuth + 180.0)%360.0) - 180.0)/180.0
+                _notch(az_frac, 6.0, QtGui.QPen(self.notch_color, 2.2, QtCore.Qt.SolidLine))
+
+        # Az/Alt readout, in the middle just left of the optical-axis plus (right-aligned, two lines).
+        # 'Az' = azimuth (+E of due N), 'Alt' = altitude/elevation. The decimal precision scales with the
+        # FOV (coarser for wide/all-sky, finer for narrow fields).
+        dec = max(self.precision, 0)
+        az_str = ("Az {:." + str(dec) + "f}°").format(self.azimuth)
+        alt_str = ("Alt {:." + str(dec) + "f}°").format(self.elevation)
+        tw = 100.0
+        th = 20.0           # tall enough to not clip glyph descenders / the degree sign
+        tx = -tw - 15.0     # right edge clears the optical-axis plus arm
+        painter.setFont(self.font)
+        painter.setPen(QtGui.QPen(self.text_color))
+        # Two well-separated lines straddling the centre (Az above, Alt below)
+        painter.drawText(QtCore.QRectF(tx, -30.0, tw, th),
+                         QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter, az_str)
+        painter.drawText(QtCore.QRectF(tx, 2.0, tw, th),
+                         QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter, alt_str)
+
+        # Direction in device coordinates (screen-up = device -Y)
+        ang = np.radians(self.angle)
+        dx, dy = np.cos(ang), -np.sin(ang)
+
+        if not self.valid_zenith:
+            # Near the zenith the direction is undefined: draw a dashed ring instead of an arrow
+            pen = QtGui.QPen(self.arrow_color, 1.6, QtCore.Qt.DashLine)
+            painter.setPen(pen)
+            painter.setBrush(QtCore.Qt.NoBrush)
+            painter.drawEllipse(QtCore.QPointF(0.0, 0.0), 0.5*L, 0.5*L)
+            return
+
+        # Shaft (originates from the centre of the optical-axis plus, points toward the zenith)
+        x1, y1 = L*dx, L*dy
+        pen = QtGui.QPen(self.arrow_color, 2.2, QtCore.Qt.SolidLine)
+        pen.setCapStyle(QtCore.Qt.RoundCap)
+        painter.setPen(pen)
+        painter.drawLine(QtCore.QPointF(0.0, 0.0), QtCore.QPointF(x1, y1))
+
+        # Arrowhead (two short barbs at the tip)
+        head = 9.0
+        spread = np.radians(26.0)
+        for s in (+1, -1):
+            ba = ang + np.pi + s*spread
+            bx, by = x1 + head*np.cos(ba), y1 - head*np.sin(ba)
+            painter.drawLine(QtCore.QPointF(x1, y1), QtCore.QPointF(bx, by))
+
+        # Elevation notch: tick perpendicular to the shaft, sliding centre->tip with elevation 0->90 deg
+        f = min(max(self.elevation/90.0, 0.0), 1.0)
+        # Position along the shaft
+        px, py = f*L*dx, f*L*dy
+        # Perpendicular direction (screen) rotated 90 deg
+        perp = ang + np.pi/2.0
+        pwx, pwy = np.cos(perp), -np.sin(perp)
+        nw = 6.0
+        painter.setPen(QtGui.QPen(self.notch_color, 2.2, QtCore.Qt.SolidLine))
+        painter.drawLine(QtCore.QPointF(px - nw*pwx, py - nw*pwy),
+                         QtCore.QPointF(px + nw*pwx, py + nw*pwy))
+
+
 class HistogramLUTWidget(pg.HistogramLUTWidget):
     def __init__(self, gui, parent=None, *args, **kwargs):
 
