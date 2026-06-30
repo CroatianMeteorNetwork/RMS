@@ -1097,8 +1097,11 @@ def _topic_shortcuts_mr(gui):
 # ---------------------------------------------------------------------------------------------- #
 
 # Ordered topic registry. Keep the order you want them listed on the Home page.
-# Section headers used to group topics on the home page, in display order
-SECTION_ORDER = ["Getting started", "Calibration", "Reduction", "Tools & tabs", "Reference"]
+# Section headers used to group topics on the home page, in display order.
+# The two workflow sections are shown on the home in BOTH modes (so meteor measurement is
+# discoverable while calibrating, and vice versa); the rest are filtered to the current mode.
+SECTION_ORDER = ["Getting started", "Calibration", "Meteor measurement", "Tools & tabs", "Reference"]
+CROSS_MODE_SECTIONS = {"Calibration", "Meteor measurement"}
 
 HELP_TOPICS = [
     # SkyFit
@@ -1140,15 +1143,15 @@ HELP_TOPICS = [
                                desc="Start here: measure a meteor frame by frame.")),
     ('mr_inputs',         dict(title="Data input types",                  modes=('manualreduction',), enabled=_always,        build=_topic_inputs,          section="Getting started",
                                desc="What data SkyFit can load and what each needs.")),
-    ('mr_picking',        dict(title="Pick meteor positions",             modes=('manualreduction',), enabled=_always,        build=_topic_mr_picking,      section="Reduction",
+    ('mr_picking',        dict(title="Pick meteor positions",             modes=('manualreduction',), enabled=_always,        build=_topic_mr_picking,      section="Meteor measurement",
                                desc="Mark the meteor position on each frame.")),
-    ('mr_fireballs',      dict(title="Measuring fireballs",                modes=('manualreduction',), enabled=_always,        build=_topic_fireballs,       section="Reduction",
+    ('mr_fireballs',      dict(title="Measuring fireballs",                modes=('manualreduction',), enabled=_always,        build=_topic_fireballs,       section="Meteor measurement",
                                desc="Saturation, wake, fragmentation: how to pick them.")),
-    ('mr_lightcurve',     dict(title="Light curve &amp; saving",          modes=('manualreduction',), enabled=_always,        build=_topic_mr_lightcurve,   section="Reduction",
+    ('mr_lightcurve',     dict(title="Light curve &amp; saving",          modes=('manualreduction',), enabled=_always,        build=_topic_mr_lightcurve,   section="Meteor measurement",
                                desc="View the light curve and export results.")),
-    ('debruijn',          dict(title="DFN / Debruijn timing",             modes=('manualreduction',), enabled=_is_dfn,        build=_topic_debruijn,        section="Reduction",
+    ('debruijn',          dict(title="DFN / Debruijn timing",             modes=('manualreduction',), enabled=_is_dfn,        build=_topic_debruijn,        section="Meteor measurement",
                                desc="Recover DFN fireball timing.")),
-    ('mr_astra',          dict(title="ASTRA (automated picking)",         modes=('manualreduction',), enabled=_always,        build=_topic_mr_astra,        section="Reduction",
+    ('mr_astra',          dict(title="ASTRA (automated picking)",         modes=('manualreduction',), enabled=_always,        build=_topic_mr_astra,        section="Meteor measurement",
                                desc="Automate or refine picks with ASTRA.")),
     ('mr_tabs',           dict(title="Guide to the tabs",                 modes=('manualreduction',), enabled=_always,        build=_topic_tabs,            section="Tools & tabs",
                                desc="What each tab on the right does.")),
@@ -1163,20 +1166,26 @@ HELP_TOPICS = [
 _TOPIC_MAP = dict(HELP_TOPICS)
 
 
-def _visible_topics(gui):
-    """ Return the (id, meta) topics for the current mode whose feature gate is satisfied. """
+def _enabled_topics(gui, mode_filter=True):
+    """ Return (id, meta) topics whose feature gate is satisfied. If mode_filter is True, also
+        restrict to the current mode; otherwise return all enabled topics across modes. """
     mode = _mode(gui)
-    visible = []
+    out = []
     for topic_id, meta in HELP_TOPICS:
-        if mode not in meta['modes']:
+        if mode_filter and mode not in meta['modes']:
             continue
         try:
             if not meta['enabled'](gui):
                 continue
         except Exception:
             continue
-        visible.append((topic_id, meta))
-    return visible
+        out.append((topic_id, meta))
+    return out
+
+
+def _visible_topics(gui):
+    """ Return the (id, meta) topics for the current mode whose feature gate is satisfied. """
+    return _enabled_topics(gui, mode_filter=True)
 
 
 def buildHelpHome(gui, query=None):
@@ -1202,13 +1211,20 @@ def buildHelpHome(gui, query=None):
                 '<td valign="top" class="desc">{desc}</td></tr>').format(
                     tid=topic_id, title=meta['title'], desc=meta.get('desc', ''))
 
-    topics = _visible_topics(gui)
+    mode_topics = _enabled_topics(gui, mode_filter=True)   # current mode only
+    all_topics = _enabled_topics(gui, mode_filter=False)   # across both modes
 
-    # Search: flat list of matches, no section headers
+    # Search: flat list of matches across both modes (de-duplicated by title), no section headers
     if query:
         q = query.lower()
-        matches = [(tid, m) for (tid, m) in topics
-                   if q in m['title'].lower() or q in m.get('desc', '').lower()]
+        seen_titles = set()
+        matches = []
+        for tid, m in all_topics:
+            if q in m['title'].lower() or q in m.get('desc', '').lower():
+                if m['title'] in seen_titles:
+                    continue
+                seen_titles.add(m['title'])
+                matches.append((tid, m))
         body = "<h3>Search results</h3>"
         if not matches:
             body += "<p class=\"lead\">No topics match &ldquo;{:s}&rdquo;.</p>".format(query)
@@ -1217,10 +1233,13 @@ def buildHelpHome(gui, query=None):
                      + "".join(_row(tid, m) for tid, m in matches) + "</table>")
         return "<h2>SkyFit2 Help &mdash; {mode}</h2>{body}".format(mode=mode_name, body=body)
 
-    # Normal home: group topics under section headers
+    # Normal home: group topics under section headers. Workflow sections (Calibration, Meteor
+    # measurement) are shown regardless of mode so both workflows are discoverable; the rest are
+    # filtered to the current mode.
     sections_html = ""
     for section in SECTION_ORDER:
-        rows = "".join(_row(tid, m) for tid, m in topics if m.get('section') == section)
+        pool = all_topics if section in CROSS_MODE_SECTIONS else mode_topics
+        rows = "".join(_row(tid, m) for tid, m in pool if m.get('section') == section)
         if rows:
             sections_html += ("<h3>" + section + "</h3>"
                               "<table cellspacing=\"0\" cellpadding=\"0\">" + rows + "</table>")
