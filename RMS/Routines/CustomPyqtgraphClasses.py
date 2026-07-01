@@ -15,10 +15,31 @@ from RMS.Astrometry.Conversions import AER2LatLonAlt
 from RMS.Formats.FFfile import reconstructFrame as reconstructFrameFF
 from RMS.Routines import Image
 from RMS.Routines.DebruijnSequence import findAllInDeBruijnSequence, generateDeBruijnSequence
+from RMS.Routines.SkyFitHelp import HELP_STYLE, buildHelpHome, buildHelpTopic
 
 import time
 import re
 import sys
+
+
+class _CornerHelpOverlay(QtCore.QObject):
+    """ Keeps a help button pinned to the top-right corner of a host widget without taking up any
+        layout space (so it never shifts the tab content down). """
+
+    def __init__(self, host, button, margin):
+        super(_CornerHelpOverlay, self).__init__(host)
+        self.host = host
+        self.button = button
+        self.margin = margin
+
+    def reposition(self):
+        self.button.move(self.host.width() - self.button.width() - self.margin, self.margin)
+        self.button.raise_()
+
+    def eventFilter(self, obj, event):
+        if obj is self.host and event.type() in (QtCore.QEvent.Resize, QtCore.QEvent.Show):
+            self.reposition()
+        return False
 
 
 class ScaledSizeHelper:
@@ -67,6 +88,45 @@ class ScaledSizeHelper:
         """
         fm = QtGui.QFontMetrics(self.font())
         return int(fm.height() * fraction)
+
+    def makeHelpButton(self, topic, tooltip="Open the related help page"):
+        """ Create a small circular blue "i" info button that opens a Help topic.
+
+        The widget must have a ``self.gui`` attribute exposing ``openHelpTopic(topic_id)``.
+        """
+        btn = QtWidgets.QToolButton()
+        btn.setText("i")
+        btn.setToolTip(tooltip)
+        btn.setCursor(QtCore.Qt.PointingHandCursor)
+        btn.setFocusPolicy(QtCore.Qt.NoFocus)
+        d = max(self.scaledHeight(1.0), 13)
+        btn.setFixedSize(d, d)
+        btn.setStyleSheet(
+            "QToolButton { border: none; border-radius: %dpx; background-color: #1a73e8; "
+            "color: white; font-weight: bold; font-style: italic; font-family: serif; "
+            "font-size: %dpx; } "
+            "QToolButton:hover { background-color: #1666c1; }" % (int(d/2), max(int(d*0.62), 8))
+        )
+        btn.clicked.connect(lambda: self.gui.openHelpTopic(topic))
+        return btn
+
+    def addCornerHelpButton(self, topic, tooltip="Open the help page for this tab"):
+        """ Pin a small circular "i" help button to the widget's top-right corner.
+
+        The button floats over the content (it is parented to the widget, not added to a layout),
+        so it does not take up layout space or shift the tab content down. An event filter keeps it
+        in the corner as the widget resizes.
+        """
+        btn = self.makeHelpButton(topic, tooltip)
+        btn.setParent(self)
+        margin = max(self.scaledSpacing(0.15), 2)
+        overlay = _CornerHelpOverlay(self, btn, margin)
+        self.installEventFilter(overlay)
+        # Keep a reference so the filter isn't garbage-collected
+        self._help_overlay = overlay
+        overlay.reposition()
+        btn.show()
+        return btn
 
 
 def qmessagebox(message="", title="Error", message_type="warning"):
@@ -458,6 +518,14 @@ class ImageItem(pg.ImageItem):
         """
         self.img_handle = img_handle
 
+        # Display-LUT state. Replaces the old copy-pasted render() override that
+        #   reached into pyqtgraph internals (self._effectiveLut etc.), which broke on
+        #   pyqtgraph >= 0.13. _base_lut holds any LUT pushed by the histogram (None for
+        #   a plain grayscale gradient); gamma and inversion are composed on top of it.
+        self._base_lut = None
+        self._gamma = 1
+        self.invert_img = False
+
         if 'saturation_threshold' in kwargs:
             self.saturation_threshold = kwargs.pop('saturation_threshold')
         else:
@@ -492,6 +560,9 @@ class ImageItem(pg.ImageItem):
             self.flat_struct = kwargs['flat_struct']
         else:
             self.flat_struct = None
+
+        # Apply the initial display LUT now that gamma/inversion are known
+        self._applyDisplayLut(update=False)
 
         if img_handle is not None:
             self.avepixel()
@@ -762,14 +833,14 @@ class ImageItem(pg.ImageItem):
         elif self._gamma > 10:
             self._gamma = old
 
-        self.updateImage()
+        self._applyDisplayLut()
 
     def updateGamma(self, factor):
         self.setGamma(self.gamma*factor)
 
     def invert(self):
         self.invert_img = not self.invert_img
-        self.updateImage()
+        self._applyDisplayLut()
 
     def autopan(self):
         self.autopan_chk = not self.autopan_chk
@@ -778,91 +849,47 @@ class ImageItem(pg.ImageItem):
         super().setLevels(levels, update)
         self.sigLevelsChanged.emit()
 
-    def render(self):
-        # THIS WAS COPY PASTED FROM SOURCE CODE AND WAS SLIGHTLY
-        # CHANGED TO IMPLEMENT GAMMA AND INVERT
+    def setLookupTable(self, lut, update=True):
+        # The histogram pushes its gradient LUT here (None for a plain grayscale
+        #   gradient). Keep it as the base so gamma/inversion can be re-composed on top
+        #   whenever they change, then hand pyqtgraph the effective LUT.
+        self._base_lut = lut
+        super().setLookupTable(self._composeDisplayLut(lut), update=update)
 
-        # Convert data to QImage for display.
+    def _applyDisplayLut(self, update=True):
+        """ Rebuild and apply the effective display LUT from the current base LUT,
+            gamma and inversion. Used instead of overriding render(), so we no longer
+            depend on pyqtgraph render internals. """
+        super().setLookupTable(self._composeDisplayLut(self._base_lut), update=update)
 
-        profile = pg.debug.Profiler()
-        if self.image is None or self.image.size == 0:
-            return
-        if callable(self.lut):
-            lut = self.lut(self.image)
+    def _composeDisplayLut(self, base_lut):
+        """ Build the grayscale lookup table that bakes in gamma and inversion.
+
+        The old render() applied gamma to the post-levels 8-bit luminance and forced
+        R = G = B. pyqtgraph maps levels -> LUT index, so a 256-entry grayscale ramp
+        carrying gamma/inversion reproduces gamma(rescale(value)) exactly (for 8-bit the
+        LUT index equals the rescaled value). An optional base LUT (e.g. a non-trivial
+        histogram gradient) is composed underneath.
+        """
+        if base_lut is None:
+            n = 256
+            rgb = np.repeat(np.linspace(0, 255, n)[:, None], 3, axis=1)
+            alpha = None
         else:
-            lut = self.lut
+            base_lut = np.asarray(base_lut)
+            rgb = base_lut[:, :3].astype(float)
+            alpha = base_lut[:, 3:4] if base_lut.shape[1] == 4 else None
 
-        if self.autoDownsample:
-            # reduce dimensions of image based on screen resolution
-            o = self.mapToDevice(pg.QtCore.QPointF(0, 0))
-            x = self.mapToDevice(pg.QtCore.QPointF(1, 0))
-            y = self.mapToDevice(pg.QtCore.QPointF(0, 1))
-            w = pg.Point(x - o).length()
-            h = pg.Point(y - o).length()
-            if w == 0 or h == 0:
-                self.qimage = None
-                return
-            xds = max(1, int(1.0/w))
-            yds = max(1, int(1.0/h))
-            axes = [1, 0] if self.axisOrder == 'row-major' else [0, 1]
-            image = pgfn.downsample(self.image, xds, axis=axes[0])
-            image = pgfn.downsample(image, yds, axis=axes[1])
-            self._lastDownsample = (xds, yds)
-        else:
-            image = self.image
-
-        # if the image data is a small int, then we can combine levels + lut
-        # into a single lut for better performance
-        levels = self.levels
-
-        if (levels is not None) and (levels.ndim == 1) and (image.dtype in (np.ubyte, np.uint16)):
-
-            if self._effectiveLut is None:
-
-                eflsize = 2**(image.itemsize*8)
-                ind = np.arange(eflsize)
-                minlev, maxlev = levels
-                levdiff = maxlev - minlev
-                levdiff = 1 if levdiff == 0 else levdiff  # don't allow division by 0
-
-                if lut is None:
-                    efflut = pgfn.rescaleData(ind, scale=255./levdiff,
-                                               offset=minlev, dtype=np.ubyte)
-                else:
-                    lutdtype = np.min_scalar_type(lut.shape[0] - 1)
-                    efflut = pgfn.rescaleData(ind, scale=(lut.shape[0] - 1)/levdiff, \
-                                               offset=minlev, dtype=lutdtype, clip=(0, lut.shape[0] - 1))
-                    efflut = lut[efflut]
-
-                self._effectiveLut = efflut
-
-            lut = self._effectiveLut
-            levels = None
-
-
-        # Assume images are in column-major order for backward compatibility
-        # (most images are in row-major order)
-
-        if self.axisOrder == 'col-major':
-            image = image.transpose((1, 0, 2)[:image.ndim])
-
-        # Make an RGB image
-        argb, alpha = pgfn.makeARGB(image, lut=lut, levels=levels)
-        
-        # Perform gamma correction on only one channel to speed things up
-        argb[:, :, 0] = np.clip(np.power(argb[:, :, 0]/255, 1/self._gamma)*255, 0, 255)
-        argb[:, :, 1] = argb[:, :, 0]
-        argb[:, :, 2] = argb[:, :, 0]
-
-        
-        # Invert image colors
+        # Gamma on the displayed luminance, then optional inversion
+        out = np.clip(np.power(rgb/255.0, 1.0/self._gamma)*255.0, 0, 255)
         if self.invert_img:
-            argb[:, :, 0] = 255 - argb[:, :, 0]
-            argb[:, :, 1] = argb[:, :, 0]
-            argb[:, :, 2] = argb[:, :, 0]
+            out = 255.0 - out
+        out = out.astype(np.ubyte)
 
+        if alpha is not None:
+            out = np.concatenate([out, alpha.astype(np.ubyte)], axis=1)
 
-        self.qimage = pgfn.makeQImage(argb, alpha, transpose=False)
+        return out
 
 
 class CursorItem(pg.GraphicsObject):
@@ -971,6 +998,197 @@ class CursorItem(pg.GraphicsObject):
         return QtCore.QRectF(self.picture.boundingRect())
 
 
+class PointingIndicator(pg.GraphicsObject):
+    """ A HUD glyph pinned at the optical-axis marker that shows:
+
+          - a zenith arrow: points toward the zenith on screen (its angle conveys the camera roll),
+          - an elevation notch: a tick sliding along the arrow from the centre (horizon, 0 deg) to the
+            tip (zenith, 90 deg), marking the apparent elevation of the optical centre,
+          - an Az/Alt readout: the apparent azimuth and altitude of the optical centre,
+          - a horizon bar through the optical axis (along the East-West horizon, so it doubles as a
+            horizon/roll indicator). Its length is one WASD pan step on screen, and it carries an azimuth
+            compass: the middle is North, little notches mark West/East, and a notch slides to the
+            current azimuth.
+
+        The arrow and readout are a constant pixel size (ItemIgnoresTransformations), while the bar and
+        its notches scale with the image zoom; the whole glyph stays anchored to the optical-axis pixel.
+    """
+
+    def __init__(self, arrow_length=52):
+        """
+        Arguments:
+            arrow_length: [float] Length of the zenith arrow in screen pixels.
+        """
+        super().__init__()
+
+        # Keep the glyph a constant device-pixel size, anchored at setPos()
+        self.setFlag(QtGui.QGraphicsItem.ItemIgnoresTransformations, True)
+
+        self.arrow_length = float(arrow_length)
+
+        # State (screen frame: +x right, +y up)
+        self.angle = 90.0          # zenith direction (deg)
+        self.east_angle = 0.0      # screen direction of increasing azimuth (East along the horizon, deg)
+        self.azimuth = 0.0         # apparent azimuth of the optical centre (deg)
+        self.elevation = 0.0       # apparent elevation of the optical centre (deg)
+        self.step_px = 0.0         # one WASD step in screen pixels
+        self.precision = 0         # decimals for the Az/Alt readout (FOV-dependent)
+        self.valid_zenith = True   # False when the centre is at/near the zenith
+
+        # Colours (muted, so the glyph stays unobtrusive over the image)
+        self.arrow_color = QtGui.QColor(170, 175, 180)
+        self.notch_color = QtGui.QColor(210, 215, 220)
+        self.step_color = QtGui.QColor(255, 255, 255, 90)
+        self.text_color = QtGui.QColor(185, 190, 195)
+
+        # Compact, fixed-size font for the Az/Alt readout (independent of the system default)
+        self.font = QtGui.QFont()
+        self.font.setPointSize(9)
+
+
+    def setData(self, angle, east_angle, azimuth, elevation, step_px, precision, valid_zenith):
+        self.angle = float(angle)
+        self.east_angle = float(east_angle)
+        self.azimuth = float(azimuth)
+        self.elevation = float(elevation)
+        self.step_px = float(step_px)
+        self.precision = int(precision)
+        self.valid_zenith = bool(valid_zenith)
+        self.prepareGeometryChange()
+        self.update()
+
+
+    def refresh(self):
+        """ Recompute geometry and repaint. Connect this to the view's range-change signal so the
+            step bar (which scales with zoom) is redrawn with up-to-date bounds. """
+        self.prepareGeometryChange()
+        self.update()
+
+
+    def _deviceScaleX(self):
+        """ Device pixels per one image pixel (data unit) along X at the current zoom. Used to scale the
+            step bar, which represents a real on-screen distance, while the arrow/notch stay fixed size. """
+        parent = self.parentItem()
+        if parent is None:
+            return 1.0
+        try:
+            o = parent.mapToDevice(pg.Point(0.0, 0.0))
+            ex = parent.mapToDevice(pg.Point(1.0, 0.0))
+            if (o is None) or (ex is None):
+                return 1.0
+            return abs(ex.x() - o.x())
+        except Exception:
+            return 1.0
+
+
+    def boundingRect(self):
+        # Cover the arrow (plus arrowhead and text margin) and the horizontal step bar (zoom-scaled)
+        bar_half = 0.5*self.step_px*self._deviceScaleX()
+        reach = max(self.arrow_length + 34.0, bar_half + 24.0, 122.0)
+        return QtCore.QRectF(-reach, -reach, 2*reach, 2*reach)
+
+
+    def paint(self, painter, option, widget=None):
+
+        painter.setRenderHint(QtGui.QPainter.Antialiasing, True)
+
+        L = self.arrow_length
+
+        # Step-size / horizon / azimuth bar: a line through the optical-axis centre, oriented along the
+        # horizon (East-West). It doubles as (a) a horizon/roll indicator, (b) a pan step-size gauge -- its
+        # length is one WASD step on screen, so it scales with the image zoom -- and (c) an azimuth compass:
+        # the middle is North, little notches mark West and East (+/- 90 deg), and a longer notch slides to
+        # the current azimuth. The compass spans +/-180 deg over the bar (the ends are South).
+        if self.step_px > 0.5:
+            half = 0.5*self.step_px*self._deviceScaleX()
+            ea = np.radians(self.east_angle)
+            ux, uy = np.cos(ea), -np.sin(ea)         # unit toward East along the horizon (device coords)
+            px_, py_ = -uy, ux                       # unit perpendicular (for the notch ticks)
+
+            pen = QtGui.QPen(self.step_color, 2.0, QtCore.Qt.SolidLine)
+            painter.setPen(pen)
+            painter.drawLine(QtCore.QPointF(-half*ux, -half*uy), QtCore.QPointF(half*ux, half*uy))
+            # End caps
+            cap = 4.0
+            for s in (-1.0, 1.0):
+                painter.drawLine(QtCore.QPointF(s*half*ux - cap*px_, s*half*uy - cap*py_),
+                                 QtCore.QPointF(s*half*ux + cap*px_, s*half*uy + cap*py_))
+
+            if self.valid_zenith:
+                def _notch(frac, length, pen):
+                    # Perpendicular tick at the given fraction (-1..1) along the bar from the centre (N)
+                    f = min(max(frac, -1.0), 1.0)
+                    bx, by = f*half*ux, f*half*uy
+                    painter.setPen(pen)
+                    painter.drawLine(QtCore.QPointF(bx - length*px_, by - length*py_),
+                                     QtCore.QPointF(bx + length*px_, by + length*py_))
+
+                # Little reference notches: West (-90 deg) and East (+90 deg) at +/- half the bar
+                ref_pen = QtGui.QPen(self.step_color, 1.5, QtCore.Qt.SolidLine)
+                _notch(-0.5, 3.0, ref_pen)
+                _notch(+0.5, 3.0, ref_pen)
+
+                # Current-azimuth notch (azimuth wrapped to +/-180 deg, mapped over the bar)
+                az_frac = (((self.azimuth + 180.0)%360.0) - 180.0)/180.0
+                _notch(az_frac, 6.0, QtGui.QPen(self.notch_color, 2.2, QtCore.Qt.SolidLine))
+
+        # Az/Alt readout, in the middle just left of the optical-axis plus (right-aligned, two lines).
+        # 'Az' = azimuth (+E of due N), 'Alt' = altitude/elevation. The decimal precision scales with the
+        # FOV (coarser for wide/all-sky, finer for narrow fields).
+        dec = max(self.precision, 0)
+        az_str = ("Az {:." + str(dec) + "f}°").format(self.azimuth)
+        alt_str = ("Alt {:." + str(dec) + "f}°").format(self.elevation)
+        tw = 100.0
+        th = 20.0           # tall enough to not clip glyph descenders / the degree sign
+        tx = -tw - 15.0     # right edge clears the optical-axis plus arm
+        painter.setFont(self.font)
+        painter.setPen(QtGui.QPen(self.text_color))
+        # Two well-separated lines straddling the centre (Alt above, Az below)
+        painter.drawText(QtCore.QRectF(tx, -30.0, tw, th),
+                         QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter, alt_str)
+        painter.drawText(QtCore.QRectF(tx, 2.0, tw, th),
+                         QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter, az_str)
+
+        # Direction in device coordinates (screen-up = device -Y)
+        ang = np.radians(self.angle)
+        dx, dy = np.cos(ang), -np.sin(ang)
+
+        if not self.valid_zenith:
+            # Near the zenith the direction is undefined: draw a dashed ring instead of an arrow
+            pen = QtGui.QPen(self.arrow_color, 1.6, QtCore.Qt.DashLine)
+            painter.setPen(pen)
+            painter.setBrush(QtCore.Qt.NoBrush)
+            painter.drawEllipse(QtCore.QPointF(0.0, 0.0), 0.5*L, 0.5*L)
+            return
+
+        # Shaft (originates from the centre of the optical-axis plus, points toward the zenith)
+        x1, y1 = L*dx, L*dy
+        pen = QtGui.QPen(self.arrow_color, 2.2, QtCore.Qt.SolidLine)
+        pen.setCapStyle(QtCore.Qt.RoundCap)
+        painter.setPen(pen)
+        painter.drawLine(QtCore.QPointF(0.0, 0.0), QtCore.QPointF(x1, y1))
+
+        # Arrowhead (two short barbs at the tip)
+        head = 9.0
+        spread = np.radians(26.0)
+        for s in (+1, -1):
+            ba = ang + np.pi + s*spread
+            bx, by = x1 + head*np.cos(ba), y1 - head*np.sin(ba)
+            painter.drawLine(QtCore.QPointF(x1, y1), QtCore.QPointF(bx, by))
+
+        # Elevation notch: tick perpendicular to the shaft, sliding centre->tip with elevation 0->90 deg
+        f = min(max(self.elevation/90.0, 0.0), 1.0)
+        # Position along the shaft
+        px, py = f*L*dx, f*L*dy
+        # Perpendicular direction (screen) rotated 90 deg
+        perp = ang + np.pi/2.0
+        pwx, pwy = np.cos(perp), -np.sin(perp)
+        nw = 6.0
+        painter.setPen(QtGui.QPen(self.notch_color, 2.2, QtCore.Qt.SolidLine))
+        painter.drawLine(QtCore.QPointF(px - nw*pwx, py - nw*pwy),
+                         QtCore.QPointF(px + nw*pwx, py + nw*pwy))
+
+
 class HistogramLUTWidget(pg.HistogramLUTWidget):
     def __init__(self, gui, parent=None, *args, **kwargs):
 
@@ -1061,6 +1279,9 @@ class RightOptionsTab(QtWidgets.QTabWidget, ScaledSizeHelper):
     TAB_WIDTH_CHARS = 32
     TAB_MINIMIZED_CHARS = 2
 
+    # The Help tab is shown at this multiple of the normal width (more readable docs)
+    HELP_WIDTH_MULT = 2
+
     def __init__(self, gui):
         super(RightOptionsTab, self).__init__()
 
@@ -1072,6 +1293,7 @@ class RightOptionsTab(QtWidgets.QTabWidget, ScaledSizeHelper):
         self.star_detection = StarDetectionWidget(gui)
         self.mask = MaskWidget(gui)
         self.settings = SettingsWidget(gui)
+        self.help = HelpWidget(gui)
         self.debruijn = DebruijnSequenceManager(gui)
 
         self.index = 0
@@ -1084,6 +1306,7 @@ class RightOptionsTab(QtWidgets.QTabWidget, ScaledSizeHelper):
         self.addTab(self.star_detection, 'Star Detection')
         self.addTab(self.mask, 'Mask')
         self.addTab(self.settings, 'Settings')
+        self.addTab(self.help, 'ⓘ Help')
 
         self.setCurrentIndex(self.index)  # redundant
         self.setTabPosition(QtWidgets.QTabWidget.East)
@@ -1099,20 +1322,32 @@ class RightOptionsTab(QtWidgets.QTabWidget, ScaledSizeHelper):
             self.gui.view_widget.setFocus()
 
 
+    def maximizedWidthChars(self):
+        """ Maximized panel width (in characters). The Help tab gets extra width for readability;
+            all other tabs use the normal width. """
+        if 0 <= self.index < self.count() and self.widget(self.index) is self.help:
+            return self.TAB_WIDTH_CHARS*self.HELP_WIDTH_MULT
+        return self.TAB_WIDTH_CHARS
+
+    def applyTabWidth(self):
+        """ Resize the panel to match the current maximized/minimized state and selected tab. """
+        if self.maximized:
+            self.setFixedWidth(self.scaledWidth(self.maximizedWidthChars()))
+        else:
+            self.setFixedWidth(self.scaledWidth(self.TAB_MINIMIZED_CHARS))
+
     def onTabBarClicked(self, index):
         old_index = self.index
         if index != self.index:
             self.index = index
             self.maximized = True
-            self.setFixedWidth(self.scaledWidth(self.TAB_WIDTH_CHARS))
+            # Wider for Help, normal for everything else
+            self.applyTabWidth()
             # Emit signal for tab change
             self.sigTabChanged.emit(old_index, index)
         else:
             self.maximized = not self.maximized
-            if self.maximized:
-                self.setFixedWidth(self.scaledWidth(self.TAB_WIDTH_CHARS))
-            else:
-                self.setFixedWidth(self.scaledWidth(self.TAB_MINIMIZED_CHARS))
+            self.applyTabWidth()
 
         # Always set the focus back to the image window
         self.gui.view_widget.setFocus()
@@ -1155,6 +1390,136 @@ class RightOptionsTab(QtWidgets.QTabWidget, ScaledSizeHelper):
             if self.tabText(i) == text:
                 self.removeTab(i)
                 break
+
+
+class HelpWidget(QtWidgets.QWidget, ScaledSizeHelper):
+    """ Read-only Help tab with mode- and feature-aware documentation.
+
+    Uses progressive disclosure: a Home page with an intro and a triage list of links, each
+    opening a detailed topic page. Content is built in RMS.Routines.SkyFitHelp from the current
+    GUI state (mode + enabled features). Call updateHelp() to rebuild after a mode/feature change.
+    """
+
+    def __init__(self, gui):
+        QtWidgets.QWidget.__init__(self)
+
+        self.gui = gui
+
+        # Stack of visited topic ids (for the Back button)
+        self._history = []
+
+        layout = QtWidgets.QVBoxLayout()
+        layout.setAlignment(QtCore.Qt.AlignTop)
+        layout.setContentsMargins(*self.scaledMargins(0.5, 0.25))
+        layout.setSpacing(self.scaledSpacing(0.25))
+        self.setLayout(layout)
+
+        # Navigation buttons
+        nav = QtWidgets.QHBoxLayout()
+        nav.setSpacing(self.scaledSpacing(0.25))
+        self.home_button = QtWidgets.QPushButton("Home")
+        self.home_button.setToolTip("Back to the help topic list")
+        self.home_button.clicked.connect(self.showHome)
+        self.back_button = QtWidgets.QPushButton("Back")
+        self.back_button.clicked.connect(self.goBack)
+        nav.addWidget(self.home_button)
+        nav.addWidget(self.back_button)
+        layout.addLayout(nav)
+
+        # Search box: filters the home topic list as you type
+        self.search_box = QtWidgets.QLineEdit()
+        self.search_box.setPlaceholderText("Search help...")
+        self.search_box.setClearButtonEnabled(True)
+        self.search_box.textChanged.connect(self._onSearchChanged)
+        layout.addWidget(self.search_box)
+
+        # Read-only rich-text view. Internal "topic:" links and external http(s) links are handled
+        # manually in onAnchorClicked, so disable Qt's own link following.
+        self.browser = QtWidgets.QTextBrowser()
+        self.browser.setOpenLinks(False)
+        self.browser.setOpenExternalLinks(False)
+        self.browser.anchorClicked.connect(self.onAnchorClicked)
+
+        # Apply the help stylesheet to the document (persists across setHtml calls)
+        self.browser.document().setDefaultStyleSheet(HELP_STYLE)
+
+        layout.addWidget(self.browser)
+
+        self.showHome()
+
+
+    def showHome(self):
+        """ Show the intro + triage page for the current mode/features (unfiltered). """
+        self._history = []
+        # Reset any active search without re-triggering a render
+        if self.search_box.text():
+            self.search_box.blockSignals(True)
+            self.search_box.clear()
+            self.search_box.blockSignals(False)
+        self._renderHome(None)
+        self._updateBackButton()
+
+
+    def _onSearchChanged(self, text):
+        """ Re-render the home page filtered by the search query. """
+        self._history = []
+        self._renderHome(text.strip() or None)
+        self._updateBackButton()
+
+
+    def _renderHome(self, query):
+        """ Build and display the home page, guarded so a content error can't blank the tab. """
+        try:
+            html = buildHelpHome(self.gui, query=query)
+        except Exception as e:
+            html = "<h2>Help</h2><p>Could not render the help page: {:s}</p>".format(str(e))
+        self.browser.setHtml(html)
+        self.browser.verticalScrollBar().setValue(0)
+
+
+    def updateHelp(self):
+        """ Rebuild the help content from the current GUI state (mode/feature change). """
+        self.showHome()
+
+
+    def showTopic(self, topic_id):
+        """ Show one detailed topic page. """
+        html = buildHelpTopic(self.gui, topic_id)
+        if html is None:
+            return
+        self._history.append(topic_id)
+        self.browser.setHtml(html)
+        self.browser.verticalScrollBar().setValue(0)
+        self._updateBackButton()
+
+
+    def goBack(self):
+        """ Step back to the previous topic, or Home. """
+        if self._history:
+            self._history.pop()
+        if self._history:
+            self.browser.setHtml(buildHelpTopic(self.gui, self._history[-1]))
+            self.browser.verticalScrollBar().setValue(0)
+        else:
+            self.showHome()
+        self._updateBackButton()
+
+
+    def _updateBackButton(self):
+        self.back_button.setEnabled(len(self._history) > 0)
+
+
+    def onAnchorClicked(self, url):
+        """ Route internal topic links and open external links in the system browser. """
+        scheme = url.scheme()
+        if scheme in ("http", "https"):
+            QtGui.QDesktopServices.openUrl(url)
+            return
+
+        topic_id = url.toString()
+        if topic_id.startswith("topic:"):
+            topic_id = topic_id[len("topic:"):]
+        self.showTopic(topic_id)
 
 
 class DebruijnSequenceManager(QtWidgets.QWidget, ScaledSizeHelper):
@@ -1475,6 +1840,9 @@ class GeolocationWidget(QtWidgets.QWidget, ScaledSizeHelper):
         full_layout = QtWidgets.QVBoxLayout()
         full_layout.setAlignment(QtCore.Qt.AlignTop)
         self.setLayout(full_layout)
+
+        # Tab help button (top-right)
+        self.addCornerHelpButton('station', "Help: station & geo points")
 
         # Station geo position input boxes
         form = QtWidgets.QFormLayout()
@@ -1803,6 +2171,9 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         full_layout.setContentsMargins(*self.scaledMargins(0.5, 0.25))
         self.setLayout(full_layout)
 
+        # Tab help button (top-right)
+        self.addCornerHelpButton('astrometry', "Help: fitting the astrometry")
+
         # buttons
         box = QtWidgets.QVBoxLayout()
         box.setContentsMargins(*self.scaledMargins(0.5, 0.25))
@@ -1833,9 +2204,10 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         # Quick Align button row
         quick_align_hbox = QtWidgets.QHBoxLayout()
         quick_align_hbox.setSpacing(self.scaledSpacing(0.25))
-        self.quick_align_button = QtWidgets.QPushButton("Re-fit Pointing")
+        self.quick_align_button = QtWidgets.QPushButton("Auto Pointing")
         self.quick_align_button.setToolTip(
-            "Re-fit pointing using existing distortion. Uses astrometry.net if needed.")
+            "Automatically re-estimate pointing from detected stars (existing distortion kept). "
+            "Falls back to astrometry.net. Does not use your picked stars.")
         self.quick_align_button.clicked.connect(self.sigQuickAlignPressed.emit)
         quick_align_hbox.addWidget(self.quick_align_button)
         box.addLayout(quick_align_hbox)
@@ -1853,7 +2225,9 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
 
         box.addWidget(QtWidgets.QLabel("Residuals:"))
 
-        # RMSD display label with color coding
+        # RMSD display label with color coding. Shows the simple px RMSD; the forward/reverse
+        # consistency and held-out overfitting checks run internally on every fit and turn this
+        # label red when either trips (the detailed numbers are printed to the console).
         self.rmsd_label = QtWidgets.QLabel("--")
         self.rmsd_label.setStyleSheet("font-weight: bold; font-size: 12pt;")
         box.addWidget(self.rmsd_label)
@@ -1867,6 +2241,10 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         self.photometry_button = QtWidgets.QPushButton('Photometry')
         self.photometry_button.clicked.connect(self.sigPhotometryPressed.emit)
         hbox.addWidget(self.photometry_button)
+
+        # Small circular "i" button: opens the Help page on reading the residual plots
+        self.residuals_help_button = self.makeHelpButton('residuals', "How to read the residual plots")
+        hbox.addWidget(self.residuals_help_button)
         box.addLayout(hbox)
 
         self.updatePairedStars()
@@ -2366,8 +2744,18 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         # Update restore defaults button state
         self.updateRestoreDefaultsButton()
 
-    def updateRMSD(self, rmsd_img, rmsd_angular, angular_error_label):
+    def updateRMSD(self, rmsd_img, rmsd_angular, angular_error_label, fwdrev_mismatch=False,
+                   overfit=False):
         """Update the RMSD display with color coding based on pixel RMSD.
+
+        The label shows the plain RMSD (reverse residual in px and forward residual in angular
+        units). Two health checks run internally on every fit and, when either trips, override the
+        color to red so a good-looking RMSD can't hide a broken fit (the detailed numbers behind
+        both checks are printed to the console):
+            - fwdrev_mismatch: the forward and reverse distortion mappings disagree, so the catalog
+              overlay will be off even though the reverse RMSD looks fine.
+            - overfit: the held-out (cross-validated) RMSD is much worse than in-sample, i.e. the
+              model is fitting centroid noise rather than the true distortion.
 
         Thresholds are normalized to 1280x720 resolution:
             - < 0.2 px: Excellent (green)
@@ -2391,6 +2779,16 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
             color = "#FF8C00"  # Dark orange - marginal
         else:
             color = "#DC143C"  # Crimson - poor
+
+        # Internal health checks override the color to red regardless of how good the RMSD looks.
+        flags = []
+        if fwdrev_mismatch:
+            flags.append("MAPPING MISMATCH")
+        if overfit:
+            flags.append("OVERFIT")
+        if flags:
+            text += "  " + " / ".join(flags)
+            color = "#DC143C"
 
         self.rmsd_label.setText(text)
         self.rmsd_label.setStyleSheet("font-weight: bold; font-size: 12pt; color: {};".format(color))
@@ -2648,7 +3046,7 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
             self.auto_fit_button.repaint()
             self.fit_astrometry_button.repaint()
         else:
-            self.quick_align_button.setText("Re-fit Pointing")
+            self.quick_align_button.setText("Auto Pointing")
             self.quick_align_button.setEnabled(True)
             self.auto_fit_button.setEnabled(True)
             # Re-enable fit button based on paired stars count
@@ -2884,6 +3282,9 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
         layout.setSpacing(self.scaledSpacing(0.3))
         self.setLayout(layout)
 
+        # Tab help button (top-right)
+        self.addCornerHelpButton('stardetect', "Help: star detection override")
+
         # Title
         title = QtWidgets.QLabel('Star Detection Override')
         title.setStyleSheet("font-weight: bold; font-size: 11pt;")
@@ -3094,6 +3495,19 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
     def loadFromConfig(self, config):
         """Initialize sliders from config values."""
         if hasattr(config, 'intensity_threshold'):
+            # Give the threshold slider a bit-depth-appropriate maximum before setting the
+            # value, otherwise a high-bit-depth config threshold is silently clamped to the
+            # pre-existing default slider max (200, an arbitrary ceiling -- the 8-bit threshold
+            # range is nominally 0-255, with realistic values in the tens) at load, and the
+            # user has no headroom to adjust up without first running auto-tune. Raw-ADU
+            # thresholds scale with bit depth (~tens at 8-bit, hundreds-to-thousands at 16-bit),
+            # so use a gentle per-2-bit doubling (8->200, 12->800, 16->3200) and ensure headroom
+            # over the configured value. Never lower the existing max, so 8-bit keeps its 200.
+            bit_depth = getattr(config, 'bit_depth', 8)
+            bitdepth_default_max = 200*2**max(0, (bit_depth - 8)//2)
+            thr_max = max(self.intensity_threshold_slider.maximum(), bitdepth_default_max,
+                          int(config.intensity_threshold*3))
+            self.intensity_threshold_slider.setMaximum(thr_max)
             self.intensity_threshold_slider.setValue(config.intensity_threshold)
         if hasattr(config, 'neighborhood_size'):
             self.neighborhood_size_slider.setValue(config.neighborhood_size)
@@ -3167,6 +3581,9 @@ class MaskWidget(QtWidgets.QWidget, ScaledSizeHelper):
         layout.setContentsMargins(*self.scaledMargins(1, 0.5))
         layout.setSpacing(self.scaledSpacing(0.5))
         self.setLayout(layout)
+
+        # Tab help button (top-right)
+        self.addCornerHelpButton('mask', "Help: drawing a mask")
 
         # ── Header ────────────────────────────────────────────────────────────
 
@@ -3461,7 +3878,7 @@ class MaskWidget(QtWidgets.QWidget, ScaledSizeHelper):
             self.use_flat.setChecked(False)
 
 
-class SettingsWidget(QtWidgets.QWidget):
+class SettingsWidget(QtWidgets.QWidget, ScaledSizeHelper):
     """
     QWidget which displays all of the visual values of the gui. Changing any parameters
     here will not affect the functionality of the gui and will not be saved with savestate.
@@ -3498,6 +3915,9 @@ class SettingsWidget(QtWidgets.QWidget):
         vbox = QtWidgets.QVBoxLayout()
         vbox.setAlignment(QtCore.Qt.AlignTop)
         self.setLayout(vbox)
+
+        # Tab help button (top-right)
+        self.addCornerHelpButton('settings', "Help: the Settings tab")
 
         hbox = QtWidgets.QHBoxLayout()
         pixel_group = QtWidgets.QButtonGroup(self)

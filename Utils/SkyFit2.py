@@ -151,7 +151,7 @@ from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP, \
     rotationWrtHorizon, rotationWrtHorizonToPosAngle, computeFOVSize, photomLine, photometryFit, \
     rotationWrtStandard, rotationWrtStandardToPosAngle, correctVignetting, \
     extinctionCorrectionTrueToApparent, applyAstrometryFTPdetectinfo, getFOVSelectionRadius, \
-    limitingMagnitude
+    limitingMagnitude, screenNudgeToAzAltDelta, fovCentreZenithDirection
 from RMS.Astrometry.AtmosphericExtinction import atmosphericExtinctionCorrection
 from RMS.Astrometry.StarClasses import CatalogStar, GeoPoint, PlanetPoint, PairedStars
 from RMS.Astrometry.StarFilters import filterPhotometricOutliers, filterBlendedStars
@@ -173,7 +173,7 @@ from RMS.Pickling import loadPickle, savePickle
 from RMS.Math import angularSeparation, RMSD, vectNorm
 from RMS.Misc import decimalDegreesToSexHours
 from RMS.Routines.AddCelestialGrid import updateRaDecGrid, updateAzAltGrid
-from RMS.Routines.CustomPyqtgraphClasses import ViewBox, TextItem, TextItemList, Crosshair, Plus, Cross, CursorItem, BrushCursorItem, ImageItem, RightOptionsTab, qmessagebox
+from RMS.Routines.CustomPyqtgraphClasses import ViewBox, TextItem, TextItemList, Crosshair, Plus, Cross, CursorItem, BrushCursorItem, ImageItem, RightOptionsTab, qmessagebox, PointingIndicator
 from RMS.Routines.GreatCircle import fitGreatCircle, greatCircle
 from RMS.Routines.SphericalPolygonCheck import sphericalPolygonCheck
 from RMS.Routines.Image import loadFlat, loadDark, applyFlat, applyDark, signalToNoise, gammaCorrectionImage, adjustLevels, saveImage, loadImage
@@ -2658,6 +2658,12 @@ class PlateTool(QtWidgets.QMainWindow):
         self.load_state_action = QtWidgets.QAction("Load state")
         self.load_state_action.triggered.connect(self.findLoadState)
 
+        self.save_pairs_action = QtWidgets.QAction("Save matched pairs")
+        self.save_pairs_action.triggered.connect(self.savePairs)
+
+        self.load_pairs_action = QtWidgets.QAction("Load matched pairs")
+        self.load_pairs_action.triggered.connect(self.loadPairs)
+
         self.toggle_info_action = QtWidgets.QAction("Toggle Info")
         self.toggle_info_action.triggered.connect(self.toggleInfo)
         self.toggle_info_action.setShortcut('F1')
@@ -2666,8 +2672,17 @@ class PlateTool(QtWidgets.QMainWindow):
         self.toggle_zoom_window.triggered.connect(self.toggleZoomWindow)
         self.toggle_zoom_window.setShortcut('shift+Z')
 
+        # Open the in-app Help tab
+        self.open_help_action = QtWidgets.QAction("SkyFit2 Guide")
+        self.open_help_action.triggered.connect(self.openHelp)
+        self.open_help_action.setShortcut('Shift+F1')
+
         self.file_menu = menu.addMenu('File')
         self.view_menu = menu.addMenu('View')
+
+        # Persistent Help menu (not rebuilt on mode change)
+        self.help_menu = menu.addMenu('Help')
+        self.help_menu.addAction(self.open_help_action)
 
         # TESTING
         self.i = 0
@@ -2762,35 +2777,17 @@ class PlateTool(QtWidgets.QMainWindow):
         self.v_zoom_left = True  # whether to draw zoom window on left or right
         self.zoom_window.invertY()
 
-        # top left label
-        self.show_key_help = 2
-
         # Create font and metrics for overlay labels
         label_font = QtGui.QFont('monospace', 8)
         label_fm = QtGui.QFontMetrics(label_font)
 
-        # top left label (hidden by default — F1 state 2)
+        # top left info panel (shown by default, toggled with F1)
         self.label1 = TextItem(color=(0, 0, 0), fill=(255, 255, 255, 100))
         self.label1.setFont(label_font)
         self.label1.setTextWidth(label_fm.averageCharWidth() * 35)  # ~35 chars wide
         self.label1.setZValue(1000)
         self.label1.setParentItem(self.img_frame)
-        self.label1.hide()
-
-        # bottom left label (hidden by default — F1 state 2)
-        self.label2 = TextItem(color=(0, 0, 0), fill=(255, 255, 255, 100))
-        self.label2.setFont(label_font)
-        self.label2.setTextWidth(label_fm.averageCharWidth() * 38)  # ~38 chars wide
-        self.label2.setZValue(1000)
-        self.label2.setParentItem(self.img_frame)
-        self.label2.hide()
-
-        # F1 info label (visible by default — F1 state 0 shows hint)
-        self.label_f1 = TextItem(color=(0, 0, 0), fill=(255, 255, 255, 100))
-        self.label_f1.setFont(label_font)
-        self.label_f1.setTextWidth(label_fm.averageCharWidth() * 20)  # ~20 chars wide
-        self.label_f1.setZValue(1000)
-        self.label_f1.setParentItem(self.img_frame)
+        self.label1.show()
 
         self.catalog_stars_visible = True
 
@@ -3008,6 +3005,16 @@ class PlateTool(QtWidgets.QMainWindow):
         self.distortion_center_marker.setSymbol(Plus())
         self.distortion_center_marker.setZValue(5)
         self.img_frame.addItem(self.distortion_center_marker)
+
+        # Pointing indicator (zenith arrow + elevation notch + WASD step-size bar) at the optical axis
+        self.pointing_indicator = PointingIndicator()
+        self.pointing_indicator.setZValue(6)
+        self.img_frame.addItem(self.pointing_indicator, ignoreBounds=True)
+        self.pointing_indicator.hide()
+
+        # Refresh the indicator on zoom/pan so the step-size bar (drawn in screen pixels but representing
+        # a real image distance) rescales with the view
+        self.img_frame.sigRangeChanged.connect(lambda *args: self.pointing_indicator.refresh())
 
         # Distortion center marker (red cross) - zoom window
         self.distortion_center_marker2 = pg.ScatterPlotItem()
@@ -3499,6 +3506,8 @@ class PlateTool(QtWidgets.QMainWindow):
                                        self.quick_save_platepar_action,
                                        self.load_state_action])
             self.file_menu.addSeparator()
+            self.file_menu.addActions([self.save_pairs_action, self.load_pairs_action])
+            self.file_menu.addSeparator()
             self.file_menu.addAction(self.calibration_files_action)
 
             self.view_menu.addActions([self.toggle_info_action,
@@ -3512,10 +3521,17 @@ class PlateTool(QtWidgets.QMainWindow):
 
             self.star_pick_info.setText(self.star_pick_info_text_str)
 
+            # Refresh mode-aware Help content
+            self.tab.help.updateHelp()
+
         else:
             self.mode = 'manualreduction'
             self.skyfit_button.setDisabled(False)
             self.manualreduction_button.setDisabled(True)
+
+            # The pointing indicator is only relevant in skyfit mode
+            if hasattr(self, 'pointing_indicator'):
+                self.pointing_indicator.hide()
 
             self.img_type_flag = 'avepixel'
             self.tab.settings.updateMaxAvePixel()
@@ -3550,6 +3566,10 @@ class PlateTool(QtWidgets.QMainWindow):
             self.cursor.hide()
             self.cursor2.hide()
             self.tab.onManualReduction()
+
+            # Refresh mode-aware Help content
+            self.tab.help.updateHelp()
+
             self.pick_marker.show()
             self.pick_marker2.show()
             self.great_circle_line.show()
@@ -3785,11 +3805,6 @@ class PlateTool(QtWidgets.QMainWindow):
     def onFrameResize(self):
         """ What happens when the window is resized. """
 
-        self.label2.setPos(self.img_frame.width() - self.label2.boundingRect().width(), \
-            self.img_frame.height() - self.label2.boundingRect().height())
-        self.label_f1.setPos(self.img_frame.width() - self.label_f1.boundingRect().width(), \
-            self.img_frame.height() - self.label_f1.boundingRect().height())
-
         self.star_pick_info.setPos(0, self.img_frame.height() - 50)
 
         if self.config.height/self.config.width < self.img_frame.height()/self.img_frame.width():
@@ -3910,7 +3925,9 @@ class PlateTool(QtWidgets.QMainWindow):
         if not self.hasData():
             return
 
-        ctrl = self.ctrl_label
+        # Refresh the optical-axis pointing indicator (zenith arrow, elevation, WASD step size). This
+        # is the common path for the pan (WASD), rotation (Q/E), scale and step-size (+/-) keys.
+        self.updatePointingIndicator()
 
         # Sky fit
         if self.mode == 'skyfit':
@@ -3965,106 +3982,8 @@ class PlateTool(QtWidgets.QMainWindow):
             text_str += 'Camera gamma = {:.2f}\n'.format(self.config.gamma)
             text_str += 'Refraction = {:s}'.format(str(self.platepar.refraction))
 
+        # Only update the text; visibility of the top-left panel is controlled by F1 (toggleInfo)
         self.label1.setText(text_str)
-
-        if self.mode == 'skyfit':
-            text_str = 'Keys:\n'
-            text_str += '-----\n'
-            text_str += 'F1 - Hide/show this text\n'
-            text_str += 'Left/Right - Previous/next image\n'
-            text_str += f'{ctrl} + Left/Right - +/- 10 images\n'
-            text_str += 'A/D - Azimuth\n'
-            text_str += 'S/W - Altitude\n'
-            text_str += 'Q/E - Position angle\n'
-            text_str += 'Up/Down - Scale\n'
-            text_str += 'T - Toggle refraction correction\n'
-
-            # Add aspect info if the radial distortion is used
-            if not self.platepar.distortion_type.startswith("poly"):
-                text_str += 'G - Toggle equal aspect\n'
-                text_str += 'Y - Toggle asymmetry correction\n'
-                text_str += 'B - Dist = img centre toggle\n'
-
-            text_str += '1/2 - X offset\n'
-            text_str += '3/4 - Y offset\n'
-            text_str += '5/6 - X 1st dist. coeff.\n'
-            text_str += '7/8 - Y 1st dist. coeff.\n'
-            text_str += '9/0 - extinction scale\n'
-            text_str += f'{ctrl} + 1 - poly3+radial distortion\n'
-            text_str += f'{ctrl} + 2 - poly3+radial3 distortion\n'
-            text_str += f'{ctrl} + 3 - radial3 distortion\n'
-            text_str += f'{ctrl} + 4 - radial5 distortion\n'
-            text_str += f'{ctrl} + 5 - radial7 distortion\n'
-            text_str += f'{ctrl} + 6 - radial9 distortion\n'
-            text_str += '\n'
-            text_str += f'{ctrl} + R - Pick stars\n'
-            text_str += '\n'
-            text_str += 'Scroll - zoom in/out\n'
-            text_str += 'R/F - Lim mag\n'
-            text_str += '+/- - Increment adjust\n'
-            text_str += '\n'
-            text_str += 'M - Toggle maxpixel/avepixel\n'
-            text_str += 'H - Hide/show catalog stars\n'
-            text_str += 'C - Hide/show detected stars\n'
-            if self.show_sattracks:
-                text_str += f'{ctrl} + T - Toggle satellite tracks\n'
-            text_str += f'{ctrl} + I - Show/hide distortion\n'
-            text_str += 'U/J - Img Gamma\n'
-            text_str += 'I - Invert colors\n'
-            text_str += 'V - FOV centre\n'
-            text_str += '\n'
-            text_str += f'{ctrl} + A - Auto levels\n'
-            text_str += f'{ctrl} + D - Load dark\n'
-            text_str += f'{ctrl} + F - Load flat\n'
-            text_str += f'{ctrl} + G - Cycle grids\n'
-            text_str += f'{ctrl} + U - Pan to next\n'
-            text_str += f'{ctrl} + O - Toggle auto pan\n'
-            text_str += f'{ctrl} + X - astrometry.net img upload\n'
-            text_str += f'{ctrl} + SHIFT + X - astrometry.net XY only\n'
-            text_str += f'{ctrl} + SHIFT + B - Fit spectral bands\n'
-            text_str += 'SHIFT + Q - Quick align test (debug)\n'
-            text_str += 'SHIFT + Z - Show zoomed window\n'
-            text_str += f'{ctrl} + N - New platepar\n'
-            text_str += f'{ctrl} + S - Save platepar & state\n'
-            text_str += f'{ctrl} + SHIFT + S - Save platepar to data folder'
-        else:
-            text_str = 'Keys:\n'
-            text_str += '-----------\n'
-            text_str += 'F1 - Hide/show this text\n'
-            text_str += 'Left/Right - Previous/next frame\n'
-            text_str += f'{ctrl} + Left/Right - +/- 10 frames\n'
-            text_str += 'Down/Up - +/- 25 frames\n'
-            text_str += ',/. - Previous/next FR line\n'
-            text_str += '\n'
-            text_str += f'{ctrl} + R - Pick points\n'
-            text_str += 'Left click - Centroid\n'
-            text_str += f'{ctrl} + Left click - Force pick\n'
-            text_str += 'ALT/Num0 + Left click - Mark gap (DFN)\n'
-            text_str += '\n'
-            text_str += 'Scroll - zoom in/out\n'
-            text_str += 'M - Show maxpixel\n'
-            text_str += 'K - Subtract average\n'
-            text_str += 'T - Toggle refraction correction\n'
-            text_str += 'U/J - Img Gamma\n'
-            text_str += '\n'
-            text_str += 'P - Show lightcurve\n'
-            text_str += f'{ctrl} + A - Auto levels\n'
-            text_str += f'{ctrl} + D - Load dark\n'
-            text_str += f'{ctrl} + F - Load flat\n'
-            text_str += f'{ctrl} + P - Load platepar\n'
-            text_str += f'{ctrl} + W - Save current frame\n'
-            text_str += f'{ctrl} + S - Save FTPdetectinfo\n'
-            text_str += '\n'
-            text_str += f'{ctrl} + K - Open ASTRA GUI'
-
-        self.label2.setText(text_str)
-        self.label2.setPos(self.img_frame.width() - self.label2.boundingRect().width(), \
-            self.img_frame.height() - self.label2.boundingRect().height())
-
-
-        self.label_f1.setText("F1 - Show hotkeys")
-        self.label_f1.setPos(self.img_frame.width() - self.label_f1.boundingRect().width(), \
-            self.img_frame.height() - self.label_f1.boundingRect().height())
 
         # Update window title with current image name
         mode_label = "SkyFit" if self.mode == 'skyfit' else "ManualReduction"
@@ -4604,19 +4523,20 @@ class PlateTool(QtWidgets.QMainWindow):
         # Get current FOV center coordinates for filtering (apparent coordinates)
         fov_ra, fov_dec = self.computeCentreRADec()
 
-        # Use same FOV radius as catalog filtering, with margin for edge cases
-        # Cap at 90 degrees (gnomonic projection limit)
+        # Gate bodies on angular distance from the FOV centre, using the same selection radius as the
+        # catalog star filtering (subsetCatalog). The projected-bounds check below is NOT a sufficient
+        # FOV test on its own: a radial distortion polynomial extrapolated beyond its fit range can fold
+        # far-off-sky points back into the image, so a body well outside the FOV would otherwise project
+        # in-bounds and pop in and out as the pointing changes.
         fov_radius = getFOVSelectionRadius(self.platepar)
-        max_ang_sep = min(90, fov_radius * 1.5)
 
         for display_name, ra_deg, dec_deg, mag in self._planet_cache_radec:
-            # Check angular separation from FOV center
-            # Skip bodies outside the extended FOV radius (prevents gnomonic projection wrapping)
+            # Skip bodies outside the FOV selection radius
             ang_sep = np.degrees(angularSeparation(
                 np.radians(ra_deg), np.radians(dec_deg),
                 np.radians(fov_ra), np.radians(fov_dec)
             ))
-            if ang_sep > max_ang_sep:
+            if ang_sep > fov_radius:
                 continue
 
             # Convert RA/Dec to image coordinates
@@ -5211,7 +5131,17 @@ class PlateTool(QtWidgets.QMainWindow):
             # Phase 2: Sweep intensity threshold from high to low with best segment
             # Continue until we see clear degradation, then analyze all results
             print(f"\n  Phase 2: Intensity threshold sweep (segment_radius={best_segment})")
-            intensity_values = list(range(40, 2, -1))  # 40 down to 3
+
+            # Scale the 8-bit sweep range (40..3) to the camera's working threshold so it
+            # brackets the usable range on high-bit-depth data. A fixed 8-bit sweep lands
+            # below the noise on 16-bit, floods the candidate list past max_stars, and aborts
+            # on the first step. 8-bit configs are unchanged (scale = 1, sweep = 40..3).
+            if getattr(self.config, 'bit_depth', 8) > 8:
+                thr_scale = max(1.0, self.config.intensity_threshold/20.0)
+            else:
+                thr_scale = 1.0
+            intensity_values = sorted({max(3, int(round(v*thr_scale))) for v in range(40, 2, -1)},
+                                      reverse=True)  # high -> low
 
             # Collect results - we'll analyze the full curve to find optimal point
             results = []  # (threshold, n_true_pos, n_false_pos, n_detected)
@@ -5337,8 +5267,17 @@ class PlateTool(QtWidgets.QMainWindow):
             self.config.segment_radius = original_segment_radius
             self.config.max_stars = original_max_stars
 
-            # Update sliders to the optimal values
-            self.tab.star_detection.intensity_threshold_slider.setValue(best_threshold)
+            # Update sliders to the optimal values. The threshold slider's default max (200)
+            # is an arbitrary pre-existing ceiling (the 8-bit threshold range is nominally
+            # 0-255, with realistic values in the tens), so on high-bit-depth data the tuned
+            # threshold can exceed it and be silently clamped (leaving the re-detect at the
+            # wrong threshold). Raise the max with headroom *above* the tuned value so the user
+            # can still override upward. Scale the headroom to the tuned value itself, since a
+            # reasonable ceiling differs greatly between 8-bit and 16-bit. Never lower the
+            # existing max, so 8-bit keeps its default 200.
+            thr_slider = self.tab.star_detection.intensity_threshold_slider
+            thr_slider.setMaximum(max(thr_slider.maximum(), int(best_threshold*3)))
+            thr_slider.setValue(int(best_threshold))
             self.tab.star_detection.segment_radius_slider.setValue(best_segment)
 
             # Update catalog LM and reload catalog
@@ -5507,6 +5446,105 @@ class PlateTool(QtWidgets.QMainWindow):
             return 0, 0, 0
 
 
+    def _extractStarsCurrentImage(self, ff_name, extra_info=None):
+        """ Extract stars from the currently displayed image. Uses extractStarsFF for FF files,
+            and extractStars (raw image) for everything else (video, images, etc.).
+
+        Arguments:
+            ff_name: [str] Name of the current file.
+
+        Keyword arguments:
+            extra_info: [dict] Optional dict to receive extra extraction info.
+
+        Return:
+            star_data: [list] List of star tuples in CALSTARS format:
+                [(y, x, intensity, amplitude, fwhm, background, snr, saturated_count), ...]
+                Empty list if no stars detected.
+        """
+
+        from RMS.ExtractStars import extractStars
+
+        if self.img_handle.input_type == 'ff':
+            # For FF files, use the dedicated FF extraction (reads from disk)
+            star_list = extractStarsFF(
+                self.dir_path,
+                ff_name,
+                config=self.config,
+                flat_struct=self.flat_struct if hasattr(self, 'flat_struct') else None,
+                dark=self.dark if hasattr(self, 'dark') else None,
+                mask=self.mask if hasattr(self, 'mask') else None,
+                extra_info=extra_info
+            )
+
+            if not star_list or len(star_list) < 2:
+                return []
+
+            # extractStarsFF returns: (ff_name, x_arr, y_arr, amplitude, intensity, fwhm, bg, snr, sat)
+            ff_name_ret, x_arr, y_arr, amplitude, intensity, fwhm, background, snr, saturated_count = star_list
+
+            # Construct CALSTARS format: Y(0) X(1) IntensSum(2) Ampltd(3) FWHM(4) BgLvl(5) SNR(6) NSatPx(7)
+            star_data = list(zip(y_arr, x_arr, intensity, amplitude, fwhm, background, snr, saturated_count))
+            return star_data
+
+        else:
+            # For video/images/etc., extract stars directly from the currently displayed avepixel
+            ff = self.img_handle.ff
+            if ff is None:
+                print("  No image data loaded")
+                return []
+
+            # Get the average pixel image (this is the currently displayed stack)
+            img = ff.avepixel.copy().astype(np.float32)
+
+            # Apply dark frame
+            if hasattr(self, 'dark') and self.dark is not None:
+                from RMS.Routines.Image import applyDark
+                img = applyDark(img, self.dark)
+
+            # Apply flat field
+            if hasattr(self, 'flat_struct') and self.flat_struct is not None:
+                from RMS.Routines.Image import applyFlat
+                img = applyFlat(img, self.flat_struct)
+
+            # Get the median
+            img_median = np.median(img)
+
+            # Check if image is too bright (scale the cutoff to the image bit depth, matching
+            # extractStarsFF/extractStarsImgHandle so high-bit-depth data is not wrongly skipped)
+            bit_depth = getattr(self.config, 'bit_depth', 8)
+            max_global_intensity = getattr(self.config, 'max_global_intensity', 150)*(2**(bit_depth - 8))
+            if img_median > max_global_intensity:
+                print(f"  Image too bright (median={img_median:.1f} > {max_global_intensity})")
+                return []
+
+            # Get mask
+            mask = self.mask if hasattr(self, 'mask') else None
+
+            # Run star extraction directly on the image
+            status = extractStars(
+                img, img_median=img_median,
+                mask=mask, gamma=self.config.gamma,
+                max_star_candidates=self.config.max_stars,
+                border=getattr(self.config, 'border', 10),
+                neighborhood_size=self.config.neighborhood_size,
+                intensity_threshold=self.config.intensity_threshold,
+                segment_radius=self.config.segment_radius,
+                roundness_threshold=self.config.roundness_threshold,
+                max_feature_ratio=self.config.max_feature_ratio,
+                bit_depth=getattr(self.config, 'bit_depth', 8),
+                extra_info=extra_info
+            )
+
+            if status is False:
+                return []
+
+            x_arr, y_arr, amplitude, intensity, fwhm, background, snr, saturated_count = status
+
+            # Construct CALSTARS format
+            star_data = list(zip(y_arr, x_arr, intensity, amplitude, fwhm, background, snr, saturated_count))
+            return star_data
+
+
     def _findSegmentRadiusFromFWHM(self, ff_name, visible_cat_x, visible_cat_y):
         """
         Determine the optimal segment_radius by measuring the FWHM of bright stars.
@@ -5528,35 +5566,51 @@ class PlateTool(QtWidgets.QMainWindow):
             (best_segment, n_true_pos, fp_ratio): Tuple of optimal segment radius,
                 true positive count and false positive ratio from validation.
         """
-        # Use a generous segment_radius (12) and high threshold to detect bright stars
-        # segment=12 is large enough for almost any stellar PSF
+        # Use a generous segment_radius (12) to detect bright stars; segment=12 is large
+        # enough for almost any stellar PSF.
         probe_segment = 12
-        high_threshold = 25
+
+        # Probe for bright stars. A hardcoded 8-bit threshold (25) lands far below the noise
+        # on high-bit-depth data, flooding the candidate list past max_stars so extractStars
+        # returns nothing. Start at least at the camera's configured threshold and escalate
+        # until a workable detection comes back. 8-bit configs (threshold ~18-25) are
+        # unaffected -- they start at 25 exactly as before.
+        base_threshold = max(25, self.config.intensity_threshold)
+        probe_thresholds = [base_threshold, 2*base_threshold, 4*base_threshold, 8*base_threshold]
 
         try:
             # Save and set config
             orig_intensity = self.config.intensity_threshold
             orig_segment = self.config.segment_radius
-            self.config.intensity_threshold = high_threshold
             self.config.segment_radius = probe_segment
             self.config.max_feature_ratio = self.override_max_feature_ratio
             self.config.roundness_threshold = self.override_roundness_threshold
 
-            star_list = extractStarsFF(
-                self.dir_path, ff_name, config=self.config,
-                flat_struct=self.flat_struct, dark=self.dark, mask=self.mask
-            )
+            # Escalate the threshold until extractStars returns stars. An empty result means
+            # either too many candidates (extractStars bails) or none detected; raising the
+            # threshold resolves the former, which is the high-bit-depth failure mode.
+            star_data = []
+            high_threshold = base_threshold
+            for high_threshold in probe_thresholds:
+                self.config.intensity_threshold = high_threshold
+                star_data = self._extractStarsCurrentImage(ff_name)
+                if star_data:
+                    break
 
             self.config.intensity_threshold = orig_intensity
             self.config.segment_radius = orig_segment
 
-            if not star_list or len(star_list[1]) == 0:
-                print(f"    No bright stars detected with threshold={high_threshold}, "
-                      f"segment={probe_segment}")
+            if not star_data or len(star_data) == 0:
+                print(f"    No bright stars detected (probed thresholds "
+                      f"{base_threshold}..{probe_thresholds[-1]}, segment={probe_segment})")
                 print(f"    Using default segment_radius=4")
                 return 4, 0, 1.0
 
-            _, x_arr, y_arr, amplitude, intensity, fwhm_arr, background, snr, saturated = star_list
+            # CALSTARS format: Y(0) X(1) IntensSum(2) Ampltd(3) FWHM(4) BgLvl(5) SNR(6) NSatPx(7)
+            star_data_arr = np.array(star_data)
+            x_arr = star_data_arr[:, 1].astype(float)
+            y_arr = star_data_arr[:, 0].astype(float)
+            fwhm_arr = star_data_arr[:, 4].astype(float)
             n_detected = len(x_arr)
 
             # Identify true positives (match to catalog)
@@ -5616,8 +5670,7 @@ class PlateTool(QtWidgets.QMainWindow):
             return best_segment, n_true_pos, fp_ratio
 
         except Exception as e:
-            print(f"    FWHM measurement error: {e}")
-            import traceback
+            print(f"    FWHM measurement error: {type(e).__name__}: {e}")
             traceback.print_exc()
             return 4, 0, 1.0
 
@@ -6707,6 +6760,12 @@ class PlateTool(QtWidgets.QMainWindow):
 
     def onTabChanged(self, old_index, new_index):
         """Handle tab changes - restore image when leaving mask tab."""
+
+        # Refresh the Help tab content when it is opened, so it reflects the current mode and any
+        # features that were toggled since it was last shown.
+        if new_index == self.tab.indexOf(self.tab.help):
+            self.tab.help.updateHelp()
+
         # Mask tab is at index 4 (Levels=0, Fit Parameters=1, Station=2, Star Detection=3, Mask=4)
         mask_tab_index = self.tab.indexOf(self.tab.mask)
 
@@ -7134,6 +7193,52 @@ class PlateTool(QtWidgets.QMainWindow):
 
             self.distortion_center_marker.setData(x=[x_centre], y=[y_centre])
             self.distortion_center_marker2.setData(x=[x_centre], y=[y_centre])
+
+            self.updatePointingIndicator()
+
+
+    def updatePointingIndicator(self):
+        """ Update the zenith arrow / elevation notch / WASD step-size indicator at the optical axis. """
+
+        # Only relevant when fitting a plate (skyfit mode) with a valid platepar
+        if (self.platepar is None) or (self.mode != 'skyfit'):
+            if hasattr(self, 'pointing_indicator'):
+                self.pointing_indicator.hide()
+            return
+
+        try:
+            # Anchor the glyph at the optical axis (same point as the red plus)
+            x_centre, y_centre = self.platepar.getDistortionCentre()
+
+            # Screen direction toward the zenith + East along the horizon + apparent az/elev, evaluated at
+            # the optical axis so the readout matches where the glyph is pinned
+            angle_screen, east_screen, azimuth, elevation, valid = fovCentreZenithDirection(self.platepar, \
+                centre=(x_centre, y_centre))
+
+            # On-screen size of one WASD step: panStepDeg is the FOV-relative angular step (deg) and
+            # F_scale is the reference plate scale (px/deg) at the centre
+            step_px = abs(self.panStepDeg()*self.platepar.F_scale)
+
+            # Az/Alt readout precision scales with the FOV: integer degrees for wide/all-sky fields, more
+            # decimals for narrow fields where finer pointing matters
+            fov_h, fov_v = computeFOVSize(self.platepar)
+            fov_diag = np.hypot(fov_h, fov_v)
+            if fov_diag >= 60:
+                precision = 0
+            elif fov_diag >= 20:
+                precision = 1
+            elif fov_diag >= 5:
+                precision = 2
+            else:
+                precision = 3
+
+            self.pointing_indicator.setPos(x_centre, y_centre)
+            self.pointing_indicator.setData(angle_screen, east_screen, azimuth, elevation, step_px, \
+                precision, valid)
+            self.pointing_indicator.show()
+
+        except Exception:
+            self.pointing_indicator.hide()
 
 
     def screenPlotDPI(self):
@@ -8697,6 +8802,9 @@ class PlateTool(QtWidgets.QMainWindow):
             self.updateFitResiduals()
             self.residual_text.clear()
 
+            # Hint if this image has saved matched pairs available to load
+            self.pairsHint()
+
             # Clear satellite tracks when image changes (they're time-specific)
             self.clearSatelliteTracks()
             
@@ -8897,7 +9005,7 @@ class PlateTool(QtWidgets.QMainWindow):
         pyqtgraph_keys = [
             'sat_track_curves', 'sat_track_labels', 'sat_track_arrows', 'sat_markers',
             # TextItem objects
-            'label1', 'label2', 'label_f1', 'star_pick_info',
+            'label1', 'star_pick_info',
             # TextItemList objects
             'planet_labels', 'residual_text', 'spectral_type_text_list',
             # Matplotlib objects
@@ -8948,6 +9056,135 @@ class PlateTool(QtWidgets.QMainWindow):
             
         savePickle(dic, self.dir_path, 'skyFitMR_latest.state')
         print("Saved state to file")
+
+
+    def _pairsFilePath(self):
+        """ Path to the folder-level matched-pairs file (one file per data folder). """
+        return os.path.join(self.dir_path, 'skyfit_matched_pairs.json')
+
+
+    def _currentImageKey(self):
+        """ Stable identifier for the current image/chunk. Matched pairs are per-image (the
+            detected x,y belong to the displayed image), so saved pairs are keyed by this. """
+        try:
+            return str(self.img_handle.name())
+        except Exception:
+            return "unknown"
+
+
+    def savePairs(self):
+        """ Save the current image's matched star pairs into the folder-level pairs file,
+            keyed by image. Pairs saved for other images in the folder are preserved. """
+
+        if len(self.paired_stars) == 0:
+            qmessagebox(message="No matched pairs on the current image to save.",
+                        title="Save pairs", message_type="warning")
+            return
+
+        # Serialize current pairs (skip geo points - they reference external arrays and
+        # cannot be reconstructed standalone)
+        pairs = []
+        n_skipped = 0
+        for x, y, fwhm, intens_acc, obj, snr, saturated in self.paired_stars.paired_stars:
+            if getattr(obj, 'pick_type', 'star') == 'geopoint':
+                n_skipped += 1
+                continue
+            ra, dec, mag = obj.coords()
+            pairs.append({'x': float(x), 'y': float(y), 'fwhm': float(fwhm),
+                          'intens_acc': float(intens_acc), 'snr': float(snr),
+                          'saturated': bool(saturated),
+                          'ra': float(ra), 'dec': float(dec), 'mag': float(mag),
+                          'type': getattr(obj, 'pick_type', 'star')})
+
+        path = self._pairsFilePath()
+
+        # Merge into the existing folder-level file so other images' pairs are kept
+        data = {'format': 'skyfit_matched_pairs', 'version': 1, 'images': {}}
+        if os.path.isfile(path):
+            try:
+                with open(path) as f:
+                    existing = json.load(f)
+                if isinstance(existing, dict) and existing.get('format') == 'skyfit_matched_pairs':
+                    data = existing
+                    data.setdefault('images', {})
+            except Exception:
+                pass  # corrupt/unreadable - start fresh
+
+        key = self._currentImageKey()
+        try:
+            jd = date2JD(*self.img_handle.currentTime())
+        except Exception:
+            jd = None
+        data['images'][key] = {'jd': jd, 'pairs': pairs}
+
+        with open(path, 'w') as f:
+            json.dump(data, f, indent=1)
+
+        msg = "Saved {} matched pairs for '{}'".format(len(pairs), key)
+        if n_skipped:
+            msg += " ({} geo points skipped)".format(n_skipped)
+        print(msg)
+        self.status_bar.showMessage(msg)
+
+
+    def loadPairs(self):
+        """ Load matched pairs for the CURRENT image from the folder-level pairs file.
+            Pairs are per-image, so only the current image's saved entry is restored. """
+
+        path = self._pairsFilePath()
+        if not os.path.isfile(path):
+            qmessagebox(message="No saved pairs file in this folder.",
+                        title="Load pairs", message_type="warning")
+            return
+
+        try:
+            with open(path) as f:
+                data = json.load(f)
+        except Exception as e:
+            qmessagebox(message="Could not read pairs file:\n{}".format(e),
+                        title="Load pairs", message_type="warning")
+            return
+
+        images = data.get('images', {}) if isinstance(data, dict) else {}
+        key = self._currentImageKey()
+        if key not in images:
+            avail = ", ".join(sorted(images.keys())[:8])
+            qmessagebox(message="No saved pairs for the current image ('{}').\n\n"
+                                "Images with saved pairs: {}".format(key, avail or "none"),
+                        title="Load pairs", message_type="warning")
+            return
+
+        new_pairs = PairedStars()
+        for p in images[key].get('pairs', []):
+            star = CatalogStar(p['ra'], p['dec'], p['mag'])
+            new_pairs.addPair(p['x'], p['y'], p['fwhm'], p['intens_acc'], star,
+                              snr=p.get('snr', 0), saturated=p.get('saturated', False))
+
+        self.paired_stars = new_pairs
+        self.updatePairedStars()
+
+        msg = "Loaded {} matched pairs for '{}'".format(len(new_pairs), key)
+        print(msg)
+        self.status_bar.showMessage(msg)
+
+
+    def pairsHint(self):
+        """ If the folder pairs file has saved pairs for the current image, show a status-bar
+            hint. Called on image navigation; silent if there is nothing saved. """
+        try:
+            path = self._pairsFilePath()
+            if not os.path.isfile(path):
+                return
+            with open(path) as f:
+                data = json.load(f)
+            images = data.get('images', {}) if isinstance(data, dict) else {}
+            entry = images.get(self._currentImageKey())
+            if entry and len(entry.get('pairs', [])) > 0:
+                self.status_bar.showMessage(
+                    "{} saved matched pairs available for this image "
+                    "(File → Load matched pairs)".format(len(entry['pairs'])))
+        except Exception:
+            pass
 
 
     def findLoadState(self):
@@ -9363,6 +9600,25 @@ class PlateTool(QtWidgets.QMainWindow):
             self.setFPS()
 
 
+    def _isTextInputFocused(self):
+        """ True if an editable text input (e.g. the Help search box, a coordinate field) currently
+            has keyboard focus, so global shortcuts should not steal the keystrokes. Read-only views
+            such as the Help browser are not treated as text inputs. """
+
+        w = QtWidgets.QApplication.focusWidget()
+
+        if isinstance(w, QtWidgets.QAbstractSpinBox):
+            return True
+
+        if isinstance(w, (QtWidgets.QLineEdit, QtWidgets.QTextEdit, QtWidgets.QPlainTextEdit)):
+            try:
+                return not w.isReadOnly()
+            except Exception:
+                return True
+
+        return False
+
+
     def eventFilter(self, obj, event):
         """Event filter to catch mouse release and global keyboard shortcuts."""
 
@@ -9379,6 +9635,11 @@ class PlateTool(QtWidgets.QMainWindow):
         if event.type() == QtCore.QEvent.KeyPress:
             modifiers = event.modifiers()
             key = event.key()
+
+            # While typing in a text input (e.g. the Help search box), let the widget keep the
+            # keystrokes. Escape still falls through so it can return focus to the image.
+            if key != QtCore.Qt.Key_Escape and self._isTextInputFocused():
+                return False
 
             # Check if this is a shortcut we want to handle globally
             should_intercept = False
@@ -9714,7 +9975,7 @@ class PlateTool(QtWidgets.QMainWindow):
             range_ = self.img_frame.getState()['viewRange'][0]
             if mp.x() > (range_[1] - range_[0])/2 + range_[0]:
                 self.v_zoom_left = True
-                if self.show_key_help != 2:
+                if self.label1.isVisible():
                     self.v_zoom.move(QtCore.QPoint(int(self.label1.boundingRect().width()), 0))
                 else:
                     self.v_zoom.move(QtCore.QPoint(0, 0))
@@ -9829,6 +10090,11 @@ class PlateTool(QtWidgets.QMainWindow):
 
     def keyPressEvent(self, event):
 
+        # Don't run shortcuts while typing in a text input (e.g. the Help search box). Escape is
+        # still allowed through (it returns focus to the image).
+        if event.key() != QtCore.Qt.Key_Escape and self._isTextInputFocused():
+            return
+
         # Read modifiers (e.g. CTRL, SHIFT)
         modifiers = QtWidgets.QApplication.keyboardModifiers()
         qmodifiers = QtWidgets.QApplication.queryKeyboardModifiers()
@@ -9931,7 +10197,9 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.cursor.show()
                 self.cursor2.show()
 
-                self.star_pick_info.show()
+                # Respect the F1 overlay toggle: only show the picking hints if overlays are on
+                if self.label1.isVisible():
+                    self.star_pick_info.show()
 
                 # Enable the Next button for star panning
                 self.tab.param_manager.next_star_button.setEnabled(True)
@@ -10150,53 +10418,21 @@ class PlateTool(QtWidgets.QMainWindow):
 
                 print('Plate fitted!')
 
-            # Increase reference azimuth
+            # Pan the view left on screen (roll-aware)
             elif event.key() == QtCore.Qt.Key_A:
-                self.platepar.az_centre += self.key_increment
-                
-                self.checkParamRange()
-                self.platepar.updateRefRADec(preserve_rotation=True)
-                self.checkParamRange()
+                self.nudgeReferenceScreen(-1, 0)
 
-                self.tab.param_manager.updatePlatepar()
-                self.updateLeftLabels()
-                self.updateStars()
-
-            # Decrease reference azimuth
+            # Pan the view right on screen (roll-aware)
             elif event.key() == QtCore.Qt.Key_D:
-                self.platepar.az_centre -= self.key_increment
+                self.nudgeReferenceScreen(+1, 0)
 
-                self.checkParamRange()
-                self.platepar.updateRefRADec(preserve_rotation=True)
-                self.checkParamRange()
-
-                self.tab.param_manager.updatePlatepar()
-                self.updateLeftLabels()
-                self.updateStars()
-
-            # Increase reference altitude
+            # Pan the view up on screen (roll-aware)
             elif event.key() == QtCore.Qt.Key_W:
-                self.platepar.alt_centre -= self.key_increment
+                self.nudgeReferenceScreen(0, +1)
 
-                self.checkParamRange()
-                self.platepar.updateRefRADec(preserve_rotation=True)
-                self.checkParamRange()
-
-                self.tab.param_manager.updatePlatepar()
-                self.updateLeftLabels()
-                self.updateStars()
-
-            # Decrease reference altitude
+            # Pan the view down on screen (roll-aware)
             elif event.key() == QtCore.Qt.Key_S:
-                self.platepar.alt_centre += self.key_increment
-
-                self.checkParamRange()
-                self.platepar.updateRefRADec(preserve_rotation=True)
-                self.checkParamRange()
-
-                self.tab.param_manager.updatePlatepar()
-                self.updateLeftLabels()
-                self.updateStars()
+                self.nudgeReferenceScreen(0, -1)
 
             # Pan to unmatched star most distant from all other matched stars
 
@@ -11420,6 +11656,73 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
 
+    def panStepDeg(self):
+        """ FOV-relative WASD pan step in angular degrees.
+
+            The pan step is decoupled from the absolute-degree meaning of key_increment (which is shared
+            with the rotation/scale/distortion keys) and is instead a fraction of the FOV diagonal, so a
+            press feels equally responsive on a narrow lens and on an all-sky camera. key_increment still
+            acts as a relative sensitivity knob via the +/- keys.
+        """
+
+        REF_INCREMENT = 1.0     # key_increment value at which the pan step equals BASE_FRACTION of the FOV
+        BASE_FRACTION = 0.04    # fraction of the FOV diagonal moved per press at the default increment
+        MIN_STEP = 0.002        # deg, lower clamp so the step never collapses to zero
+        MAX_STEP = 60.0         # deg, upper clamp so a single press can't fling the pointing across the sky
+
+        fov_h, fov_v = computeFOVSize(self.platepar)
+        fov_diag = np.hypot(fov_h, fov_v)
+
+        step = (self.key_increment/REF_INCREMENT)*BASE_FRACTION*fov_diag
+
+        return float(min(max(step, MIN_STEP), MAX_STEP))
+
+
+    def nudgeReferenceScreen(self, screen_dx, screen_dy):
+        """ Pan the FOV reference pointing in an on-screen direction (roll-aware).
+
+        Arguments:
+            screen_dx: [float] Screen direction X (+1 = right, -1 = left, 0 = none).
+            screen_dy: [float] Screen direction Y (+1 = up, -1 = down, 0 = none).
+        """
+
+        # Convert the requested screen direction into a change of the apparent reference az/alt. The step
+        # magnitude is FOV-relative (panStepDeg) and the direction is roll-independent. The image view is
+        # Y-inverted for display (img_frame.invertY()), so image +Y is screen down.
+        step = self.panStepDeg()
+        d_az, d_alt = screenNudgeToAzAltDelta(self.platepar, screen_dx, screen_dy, step, screen_y_sign=-1)
+
+        # Skip degenerate / no-op nudges so the UI isn't churned
+        if (d_az == 0.0) and (d_alt == 0.0):
+            return
+
+        # Decide how the camera roll is carried. Away from the zenith/nadir we keep the rotation w.r.t.
+        # horizon fixed (preserve_rotation) so the horizon stays level while panning azimuth. Close to a
+        # pole that solver is degenerate and traps the pointing, so there we hold the celestial roll
+        # (skip_rot_update) instead, which lets the pointing cross the pole cleanly with the horizon
+        # rotation flipping by ~180 deg. The threshold is at least 5 deg from the pole, and at least one
+        # step (so the crossing press itself is handled in the pole regime).
+        near_pole = (90.0 - abs(self.platepar.alt_centre)) < max(step, 5.0)
+
+        self.platepar.az_centre += d_az
+        self.platepar.alt_centre += d_alt
+
+        self.checkParamRange()
+
+        if near_pole:
+            self.platepar.updateRefRADec(skip_rot_update=True)
+        else:
+            self.platepar.updateRefRADec(preserve_rotation=True)
+        self.checkParamRange()
+
+        # Keep the stored rotation-w.r.t.-horizon in sync with the new pointing for the labels/indicator
+        self.platepar.rotation_from_horiz = rotationWrtHorizon(self.platepar)
+
+        self.tab.param_manager.updatePlatepar()
+        self.updateLeftLabels()
+        self.updateStars()
+
+
     def checkParamRange(self):
         """ Checks that the astrometry parameters are within the allowed range. """
 
@@ -11468,38 +11771,56 @@ class PlateTool(QtWidgets.QMainWindow):
             self.v_zoom.hide()
 
     def toggleInfo(self):
-        """ Toggle left label info """
+        """ Show/hide the on-image overlays: the top-left info panel and, while picking, the
+        star-picking key hints.
 
-        self.show_key_help += 1
+        (The full keyboard reference and workflow guide live in the right-hand "Help" tab.)
+        """
 
-        if self.show_key_help >= 3:
-            self.show_key_help = 0
+        show = not self.label1.isVisible()
 
-        if self.show_key_help == 0:
+        if show:
             self.label1.show()
-            self.label2.hide()
-            self.label_f1.show()
-
-        elif self.show_key_help == 1:
-            self.label1.show()
-            self.label2.show()
-            self.label_f1.hide()
-
+            # Only show the picking hints when actually in star-pick mode
+            if self.star_pick_mode:
+                self.star_pick_info.show()
         else:
             self.label1.hide()
-            self.label2.hide()
-            self.label_f1.show()
+            self.star_pick_info.hide()
 
+        # Shift the zoom window so it doesn't overlap the info panel
         if self.v_zoom_left:
-            if self.show_key_help != 2:
+            if self.label1.isVisible():
                 self.v_zoom.move(QtCore.QPoint(int(self.label1.boundingRect().width()), 0))
             else:
                 self.v_zoom.move(QtCore.QPoint(0, 0))
 
-        if (self.show_key_help == 1) and self.star_pick_mode:
-            self.star_pick_info.show()
-        else:
-            self.star_pick_info.hide()
+
+    def _raiseHelpTab(self):
+        """ Select and maximise the Help tab. Returns True if the tab exists. """
+
+        help_index = self.tab.indexOf(self.tab.help)
+        if help_index == -1:
+            return False
+        self.tab.setCurrentIndex(help_index)
+        self.tab.index = help_index
+        self.tab.maximized = True
+        self.tab.applyTabWidth()
+        return True
+
+
+    def openHelp(self):
+        """ Open the Help tab at its home page (menu / Shift+F1). """
+
+        if self._raiseHelpTab():
+            self.tab.help.showHome()
+
+
+    def openHelpTopic(self, topic_id):
+        """ Select and maximise the Help tab, then open a specific help topic page. """
+
+        if self._raiseHelpTab():
+            self.tab.help.showTopic(topic_id)
 
 
     def toggleImageType(self):
@@ -12166,7 +12487,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self.photom_fit_resids = None
 
             self.status_bar.showMessage(
-                "Re-fit pointing complete: {} stars".format(len(self.paired_stars)))
+                "Auto pointing complete: {} stars".format(len(self.paired_stars)))
 
             return True
 
@@ -12882,9 +13203,9 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Report result
         if success:
-            self.status_bar.showMessage("Re-fit pointing succeeded")
+            self.status_bar.showMessage("Auto pointing succeeded")
         else:
-            self.status_bar.showMessage("Re-fit pointing failed — try Auto Fit for full recalibration")
+            self.status_bar.showMessage("Auto pointing failed — try Auto Fit for full recalibration")
 
         # Restore the user's catalog LM
         if self.cat_lim_mag != user_cat_lim_mag:
@@ -14690,6 +15011,104 @@ class PlateTool(QtWidgets.QMainWindow):
         return min_stars
 
 
+    def crossValidatedRMSD(self, n_folds=5, min_stars=50):
+        """ K-fold cross-validated, per-star image RMSD (px).
+
+        Splits the matched pairs into n_folds groups; for each group, fits the platepar on the
+        other folds and measures the per-star RMSD on the held-out group, then averages. This
+        is an honest "how well does the fit generalise to stars it was not fit on" number -- the
+        gap between it and the in-sample RMSD is a direct overfitting check (a flexible model
+        that fits centroid noise will show a large gap).
+
+        The live platepar is NOT modified. Interactive-tool feature only; the batch RMS pipeline
+        does not pay this cost. Returns (held_out_rmsd_px, n_folds_used) or None if there are too
+        few stars to split meaningfully.
+        """
+
+        import io as _io
+        import contextlib as _ctx
+
+        img_stars = np.array(self.paired_stars.imageCoords())
+        catalog_stars = np.array(self.paired_stars.skyCoords())
+        n = len(img_stars)
+
+        # Need enough stars that a fold still has plenty to fit and the held-out RMSD is stable
+        min_fit = self.getMinFitStars()
+        if (n < min_stars) or (n < (min_fit + 1)*2):
+            return None
+
+        n_folds = int(min(n_folds, n // max(min_fit + 1, 1)))
+        if n_folds < 2:
+            return None
+
+        jd = date2JD(*self.img_handle.currentTime())
+
+        rng = np.random.RandomState(0)  # deterministic across calls
+        folds = np.array_split(rng.permutation(n), n_folds)
+
+        held_sq = []
+        for k in range(n_folds):
+            test = folds[k]
+            train = np.concatenate([folds[j] for j in range(n_folds) if j != k])
+            if len(train) < min_fit:
+                return None
+
+            pp = copy.deepcopy(self.platepar)
+            try:
+                # Suppress the per-fit console spam from the fold fits
+                with _ctx.redirect_stdout(_io.StringIO()):
+                    pp.fitAstrometry(jd, img_stars[train], catalog_stars[train],
+                                     first_platepar_fit=False,
+                                     fit_only_pointing=self.fit_only_pointing,
+                                     fixed_scale=self.fixed_scale)
+            except Exception:
+                return None
+
+            cat_x, cat_y, _ = getCatalogStarsImagePositions(catalog_stars[test], jd, pp)
+            dx = cat_x - img_stars[test][:, 0]
+            dy = cat_y - img_stars[test][:, 1]
+            held_sq.extend((dx**2 + dy**2).tolist())
+
+        if not held_sq:
+            return None
+
+        return float(np.sqrt(np.mean(held_sq))), n_folds
+
+
+    def reportOverfit(self, in_sample_rmsd):
+        """ Run the held-out (cross-validated) RMSD overfitting check and print the breakdown to
+            the console. Runs automatically as part of every fit (see fitPickedStars).
+
+        Arguments:
+            in_sample_rmsd: [float] The in-sample reverse-mapping RMSD (px) of the current fit, used
+                as the reference the held-out RMSD is compared against.
+
+        Returns:
+            bool: True if the fit looks like it is overfitting (held-out RMSD much worse than
+                in-sample), False otherwise -- including when there are too few stars to evaluate,
+                in which case nothing is flagged.
+        """
+
+        result = self.crossValidatedRMSD()
+        if result is None:
+            print("  Overfitting check: not enough matched pairs for a stable held-out RMSD "
+                  "(have {}).".format(len(self.paired_stars)))
+            return False
+
+        cv_rmsd, n_folds = result
+        gap = cv_rmsd - in_sample_rmsd
+        overfit = gap > 0.5*in_sample_rmsd + 0.05
+
+        print("  Held-out RMSD ({:d}-fold CV): {:.3f} px   in-sample: {:.3f} px   gap: {:+.3f} px"
+              .format(n_folds, cv_rmsd, in_sample_rmsd, gap))
+        if overfit:
+            print("  -> large gap: the fit may be OVERFITTING (model too flexible for this many stars).")
+        else:
+            print("  -> gap is small: the fit generalises well (not overfitting).")
+
+        return overfit
+
+
     def fitPickedStars(self):
         """ Fit stars that are manually picked. The function first only estimates the astrometry parameters
             without the distortion, then just the distortion parameters, then all together.
@@ -14847,9 +15266,20 @@ class PlateTool(QtWidgets.QMainWindow):
                 )
 
 
-        # Compute RMSD errors
+        # Compute RMSD errors.
+        #   rmsd_img    = reverse residual (catalog sky -> image, via x_poly_rev), in px
+        #   rmsd_angular= forward residual (image -> sky, via x_poly_fwd), in arcmin
         rmsd_angular = 60*RMSD([entry[4] for entry in residuals])
         rmsd_img = RMSD([entry[3] for entry in residuals])
+
+        # Forward/reverse consistency check. The two residuals live in different spaces (reverse
+        # is px, forward is angular), so to compare them we convert the forward to a px-equivalent
+        # with the reference plate scale (F_scale). That conversion is approximate -- the true
+        # scale varies across the FOV by the distortion amount -- but it is plenty for detecting a
+        # gross mismatch (a diverged forward mapping is off by huge factors). Used only for the
+        # flag below; the reported numbers stay in their natural units.
+        rmsd_fwd_px_approx = RMSD([entry[4] for entry in residuals])*self.platepar.F_scale
+        fwdrev_mismatch = rmsd_fwd_px_approx > 2.0*rmsd_img + 0.3
 
         # If the average angular error is larger than 60 arc minutes, report it in degrees
         if rmsd_angular > 60:
@@ -14863,11 +15293,26 @@ class PlateTool(QtWidgets.QMainWindow):
             rmsd_angular *= 60
             angular_error_label = 'arcsec'
 
-
+        # The GUI shows the plain RMSD; the console carries the full breakdown and the two health
+        # checks (forward/reverse consistency and held-out overfitting) that, if tripped, turn the
+        # GUI label red.
         print('RMSD: {:.2f} px, {:.2f} {:s}'.format(rmsd_img, rmsd_angular, angular_error_label))
 
-        # Update RMSD display in the Fit Parameters tab
-        self.tab.param_manager.updateRMSD(rmsd_img, rmsd_angular, angular_error_label)
+        # Forward/reverse mapping consistency (console detail)
+        if fwdrev_mismatch:
+            print('  WARNING: forward/reverse mapping mismatch (forward ~{:.2f} px-equivalent vs reverse '
+                  '{:.2f} px) -- the distortion mapping is inconsistent; the catalog overlay will be off.'.format(
+                      rmsd_fwd_px_approx, rmsd_img))
+        else:
+            print('  forward/reverse mapping consistent (forward ~{:.2f} px-equivalent vs reverse '
+                  '{:.2f} px).'.format(rmsd_fwd_px_approx, rmsd_img))
+
+        # Overfitting check via held-out cross-validation (console detail). Runs on every fit.
+        overfit = self.reportOverfit(rmsd_img)
+
+        # Update RMSD display in the Fit Parameters tab (red on either health-check failure)
+        self.tab.param_manager.updateRMSD(rmsd_img, rmsd_angular, angular_error_label,
+                                          fwdrev_mismatch=fwdrev_mismatch, overfit=overfit)
 
         # Update fit residuals in the station tab when geopoints are used
         if self.geo_points_obj is not None:

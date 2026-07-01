@@ -20,11 +20,9 @@ import argparse
 from time import time
 import datetime
 import sys, os
-import ctypes
 import traceback
 
 import numpy as np
-import numpy.ctypeslib as npct
 import cv2
 
 # Plotting
@@ -45,6 +43,7 @@ from RMS.Formats.FrameInterface import detectInputType
 from RMS.Formats.AST import loadAST
 from RMS.Logger import LoggingManager, getLogger
 from RMS.Misc import mkdirP
+from RMS.Routines import Kht
 from RMS.Routines.Grouping3D import find3DLines, getAllPoints
 from RMS.Routines.CompareLines import compareLines
 from RMS.Routines import MaskImage
@@ -387,10 +386,10 @@ def checkWhiteRatio(img_thres, ff, max_white_ratio):
 
 
 
-def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_white_ratio, kht_lib_path, \
+def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_white_ratio, \
     mask=None, flat_struct=None, dark=None, debug=False):
     """ Get (rho, phi) pairs for each meteor present on the image using KHT.
-        
+
     Arguments:
         img_handle: [FrameInterface instance] Object with common interface to various input formats.
         k1: [float] weight parameter for the standard deviation during thresholding
@@ -399,29 +398,14 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
         time_window_size: [int] size of the time window which will be slided over the time axis
         max_lines: [int] maximum number of lines to find by KHT
         max_white_ratio: [float] max ratio between write and all pixels after thresholding
-        kht_lib_path: [string] path to the compiled KHT library
         mask: [MaskStruct] Mask structure.
         flat_struct: [FlatStruct]  Flat frame structure.
         dark: [ndarray] Dark frame.
 
-    
+
     Return:
         [list] a list of all found lines
     """
-
-    # Load the KHT library
-    kht = ctypes.cdll.LoadLibrary(kht_lib_path)
-    kht.kht_wrapper.argtypes = [npct.ndpointer(dtype=np.double, ndim=2),
-                                npct.ndpointer(dtype=np.byte, ndim=1),
-                                ctypes.c_size_t,
-                                ctypes.c_size_t,
-                                ctypes.c_size_t,
-                                ctypes.c_size_t,
-                                ctypes.c_double,
-                                ctypes.c_double,
-                                ctypes.c_double,
-                                ctypes.c_double]
-    kht.kht_wrapper.restype = ctypes.c_size_t
 
     line_results = []
 
@@ -530,15 +514,15 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
         # Get image shape
         w, h = img.shape[1], img.shape[0]
 
-        # Convert the image to feed it into the KHT
-        img_flatten = (img.flatten().astype(np.int16) * 255).astype(np.byte)
-        
+        # Convert the image to feed it into the KHT (C-contiguous uint8, 0 or 255)
+        img_flatten = np.ascontiguousarray((img.flatten().astype(np.int16) * 255).astype(np.uint8))
+
         # Predefine the line output
         lines = np.empty((max_lines, 2), np.double)
-        
+
         # Call the KHT line finding
         # Parameters: cluster_min_size (px), cluster_min_deviation, delta, kernel_min_height, n_sigmas
-        length = kht.kht_wrapper(lines, img_flatten, w, h, max_lines, 9, 2, 0.1, 0.004, 1)
+        length = Kht.khtLineDetection(lines, img_flatten, w, h, max_lines, 9, 2, 0.1, 0.004, 1)
         
         # Cut the line array to the number of found lines
         lines = lines[:length]
@@ -1118,8 +1102,8 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
 
 
     # Get lines on the image
-    line_list = getLines(img_handle, config.k1_det, config.j1_det, config.time_slide, config.time_window_size, 
-        config.max_lines_det, config.max_white_ratio, config.kht_lib_path, mask=mask, \
+    line_list = getLines(img_handle, config.k1_det, config.j1_det, config.time_slide, config.time_window_size,
+        config.max_lines_det, config.max_white_ratio, mask=mask, \
         flat_struct=flat_struct, dark=dark, debug=debug)
 
     # logDebug('List of lines:', line_list)
@@ -1201,8 +1185,12 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                 maxpix_elements = img_handle.ff.maxpixel[ys,xs].astype(np.float64)
                 weights = maxpix_elements/np.sum(maxpix_elements)
 
-                # Random sample the point, sampling is weighted by pixel intensity
-                indices = np.random.choice(len(zs), config.max_points_det, replace=False, p=weights)
+                # Random sample the point, sampling is weighted by pixel intensity.
+                # Use a fixed-seed local generator so reprocessing the same data is
+                # reproducible (the global RNG is unseeded; this matches the seeded-RNG
+                # convention used elsewhere in RMS, e.g. ApplyRecalibrate).
+                rng = np.random.default_rng(0)
+                indices = rng.choice(len(zs), config.max_points_det, replace=False, p=weights)
                 ys = ys[indices]
                 xs = xs[indices]
                 zs = zs[indices]
