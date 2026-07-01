@@ -192,7 +192,7 @@ def addRequiredColumns(conn, d):
     # If d has not yet been initialised, return to prevent iterating over None
     if d is None:
         log.info("Not adding columns for observation summary dictionary which is None")
-        return
+        return set()
 
     existing = getColumns(conn)
     for key in d:
@@ -215,7 +215,7 @@ def storeDictInDB(conn, d, debug=False):
         d: [dict] Dictionary of keys and values for the observation summary.
 
     Keyword Arguments:
-        debug: [bool] Optional, default False, pring debugging information
+        debug: [bool] Optional, default False, print debugging information
 
     Return:
         Nothing.
