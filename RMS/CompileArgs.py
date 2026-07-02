@@ -17,8 +17,9 @@ except ImportError:
 
 
 # Defaults, used when the .config file is missing or does not set the [Build] options.
-# These mirror the values shipped in the repository .config.
-DEFAULT_WIN_PC_ARGS = ["-Wall"]
+# These mirror the values shipped in the repository .config. Windows gets no extra
+# arguments: distutils already passes /O2 /W3 to MSVC, which is the right baseline.
+DEFAULT_WIN_PC_ARGS = []
 DEFAULT_LINUX_PC_ARGS = ["-O3"]
 DEFAULT_RPI_ARGS = ["-O3", "-mfpu=neon", "-funsafe-loop-optimizations",
                     "-ftree-loop-if-convert-stores"]
@@ -38,7 +39,13 @@ def getCompileArgs(win_args=None, rpi_args=None, linux_pc_args=None):
     """
 
     if sys.platform.startswith('win'):
-        return win_args if win_args is not None else DEFAULT_WIN_PC_ARGS
+        args = win_args if win_args is not None else DEFAULT_WIN_PC_ARGS
+
+        # MSVC reads -Wall as /Wall, which enables every warning there is (including
+        # ones from system headers and Cython-generated code), unlike gcc's -Wall.
+        # Old .config files ship it, so strip the gcc spelling; distutils already
+        # passes /W3. An explicit /Wall in the config is left alone.
+        return [arg for arg in args if arg != "-Wall"]
 
     # The RPi flags (e.g. -mfpu=neon) only apply to 32-bit ARM Linux with gcc; macOS
     # on Apple Silicon also reports an 'arm' machine but clang rejects those flags
