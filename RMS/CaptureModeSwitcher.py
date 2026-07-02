@@ -31,6 +31,24 @@ def getCameraControlModule(config):
         import Utils.CameraControl as cc
         return cc
 
+
+def getCameraSettingsPath(config):
+    """Return the camera settings JSON path matching the configured control protocol.
+
+    Args:
+        config: RMS config object
+
+    Returns:
+        Path to the camera settings JSON file (ONVIF or DVRIP variant)
+    """
+    protocol = getattr(config, 'camera_control_protocol', 'dvrip').lower()
+
+    if protocol == 'onvif':
+        return getattr(config, 'camera_settings_path_onvif', './camera_settings_onvif.json')
+
+    return config.camera_settings_path
+
+
 # Sun altitude (in degrees) that defines the switch point.
 # Negative numbers mean the Sun is below the horizon.
 SWITCH_HORIZON_DEG = "-9"  # Used for continuous capture mode switching
@@ -53,12 +71,13 @@ def switchCameraMode(config, daytime_mode, camera_mode_switch_trigger):
     """
     mode_name = "day" if daytime_mode.value else "night"
 
-    mode_path = config.camera_settings_path
-
-    # Get the appropriate camera control module based on protocol
-    cc = getCameraControlModule(config)
+    mode_path = getCameraSettingsPath(config)
 
     try:
+        # Get the appropriate camera control module based on protocol. Done inside the
+        # try block so a missing protocol library (e.g. onvif-zeep) is handled gracefully.
+        cc = getCameraControlModule(config)
+
         if not os.path.exists(mode_path):
             raise FileNotFoundError("Mode file {} not found.".format(mode_path))
 

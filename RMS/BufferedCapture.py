@@ -47,7 +47,7 @@ from RMS.RawFrameSave import RawFrameSaver
 from RMS.Misc import RmsDateTime, mkdirP, UTCFromTimestamp
 from RMS.Formats import FTfile, FTStruct
 from RMS.Logger import LoggingManager, getLogger, gstDebugLogger
-from RMS.CaptureModeSwitcher import switchCameraMode, getCameraControlModule
+from RMS.CaptureModeSwitcher import switchCameraMode, getCameraControlModule, getCameraSettingsPath
 
 # Get the logger from the main module
 log = getLogger("rmslogger")
@@ -1324,7 +1324,7 @@ class BufferedCapture(Process):
                         reprobe = True
                         try:
                             mode_name = "init"
-                            mode_path = self.config.camera_settings_path
+                            mode_path = getCameraSettingsPath(self.config)
 
                             if not os.path.exists(mode_path):
                                 raise FileNotFoundError("Mode file {} not found.".format(mode_path))

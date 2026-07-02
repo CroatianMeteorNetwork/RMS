@@ -235,6 +235,9 @@ class Config:
         self.onvif_password = ""
         self.onvif_port = 80
 
+        # Path to the json file containing ONVIF camera settings
+        self.camera_settings_path_onvif = "./camera_settings_onvif.json"
+
         # Whether to run the one-time camera setup defined in camera_settings.json
         self.initialize_camera = False
 
@@ -1151,6 +1154,20 @@ def parseCapture(config, parser):
 
     if parser.has_option(section, "onvif_port"):
         config.onvif_port = parser.getint(section, "onvif_port")
+
+    if parser.has_option(section, "camera_settings_path_onvif") \
+            and os.path.isfile(parser.get(section, "camera_settings_path_onvif")):
+        config.camera_settings_path_onvif = parser.get(section, "camera_settings_path_onvif")
+    else:
+        station_specific_file = os.path.expanduser(
+            os.path.join(config.config_file_path, 'camera_settings_onvif.json'))
+        if os.path.isfile(station_specific_file):
+            config.camera_settings_path_onvif = station_specific_file
+        else:
+            config.camera_settings_path_onvif = './camera_settings_onvif.json'
+
+    if config.camera_control_protocol == 'onvif':
+        print(f'ONVIF camera settings file: {config.camera_settings_path_onvif}')
 
     if parser.has_option(section, "initialize_camera"):
         config.initialize_camera = parser.getboolean(section, "initialize_camera")

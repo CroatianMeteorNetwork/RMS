@@ -57,16 +57,18 @@ import datetime
 
 try:
     from onvif import ONVIFCamera
-except ImportError:
-    print("Error: onvif-zeep library not installed. Install with: pip install onvif-zeep")
-    sys.exit(1)
+except ImportError as e:
+    raise ImportError(
+        "onvif-zeep library not installed (required for ONVIF camera control). "
+        "Install with: pip install onvif-zeep"
+    ) from e
 
 import RMS.ConfigReader as cr
 from RMS.Logger import getLogger, initLogging
-from time import sleep
+from RMS.Misc import RmsDateTime
 
 # Get the logger from the main module
-log = getLogger("logger")
+log = getLogger("rmslogger")
 
 
 def connectCamera(ip_address, port, username, password):
@@ -102,6 +104,7 @@ def rebootCamera(cam):
         log.info('Camera will be unavailable for 30-60 seconds')
     except Exception as e:
         log.error("Failed to reboot camera: %s", e)
+        raise
 
 
 def getHostname(cam):
@@ -495,7 +498,7 @@ def setCameraTime(cam, new_time=None):
     """
     try:
         if new_time is None:
-            new_time = datetime.datetime.utcnow()
+            new_time = RmsDateTime.utcnow()
 
         # Create the request
         request = cam.devicemgmt.create_type('SetSystemDateAndTime')
@@ -519,6 +522,7 @@ def setCameraTime(cam, new_time=None):
 
     except Exception as e:
         log.error("Failed to set camera time: %s", e)
+        raise
 
 
 def setImagingParam(cam, param_name, value):
@@ -534,8 +538,7 @@ def setImagingParam(cam, param_name, value):
         token = getVideoSourceToken(cam)
 
         if not token:
-            log.error("Could not get video source token")
-            return
+            raise RuntimeError("Could not get video source token")
 
         request = imaging.create_type('SetImagingSettings')
         request.VideoSourceToken = token
@@ -546,6 +549,7 @@ def setImagingParam(cam, param_name, value):
 
     except Exception as e:
         log.error("Failed to set imaging param %s: %s", param_name, e)
+        raise
 
 
 def setExposureParam(cam, param_name, value):
@@ -561,8 +565,7 @@ def setExposureParam(cam, param_name, value):
         token = getVideoSourceToken(cam)
 
         if not token:
-            log.error("Could not get video source token")
-            return
+            raise RuntimeError("Could not get video source token")
 
         request = imaging.create_type('SetImagingSettings')
         request.VideoSourceToken = token
@@ -578,6 +581,7 @@ def setExposureParam(cam, param_name, value):
 
     except Exception as e:
         log.error("Failed to set exposure param %s: %s", param_name, e)
+        raise
 
 
 def setColor(cam, opts):
@@ -603,8 +607,7 @@ def setColor(cam, opts):
         token = getVideoSourceToken(cam)
 
         if not token:
-            log.error("Could not get video source token")
-            return
+            raise RuntimeError("Could not get video source token")
 
         settings = {}
         if brightness is not None:
@@ -626,6 +629,7 @@ def setColor(cam, opts):
 
     except Exception as e:
         log.error("Failed to set color: %s", e)
+        raise
 
 
 def setNetworkParam(cam, opts):
@@ -675,6 +679,7 @@ def setNetworkParam(cam, opts):
 
     except Exception as e:
         log.error("Failed to set network param: %s", e)
+        raise
 
 
 def setCameraParam(cam, opts):
@@ -716,6 +721,8 @@ def setCameraParam(cam, opts):
         try:
             imaging = cam.create_imaging_service()
             token = getVideoSourceToken(cam)
+            if not token:
+                raise RuntimeError("Could not get video source token")
             request = imaging.create_type('SetImagingSettings')
             request.VideoSourceToken = token
             request.ImagingSettings = {'IrCutFilter': value}
@@ -723,6 +730,7 @@ def setCameraParam(cam, opts):
             log.info('Set IrCutFilter to %s', value)
         except Exception as e:
             log.error("Failed to set IrCutFilter: %s", e)
+            raise
 
     else:
         log.info('Camera parameter %s not supported', field)
@@ -774,7 +782,10 @@ def switchMode(cam, mode_name, path='./camera_settings_onvif.json'):
 
     log.info("Switching to mode '%s'", mode_name)
 
-    # Loop over each command array in the specified mode
+    # Loop over each command array in the specified mode. Keep going on individual failures so
+    # the camera ends up as close to the target mode as possible, but report them at the end so
+    # callers know the switch was incomplete and can retry.
+    failed_commands = []
     for param in modes[mode_name]:
         cmd = param[0]
         opts = param[1:] if len(param) > 1 else []
@@ -789,6 +800,11 @@ def switchMode(cam, mode_name, path='./camera_settings_onvif.json'):
             onvifCall(cam, cmd, opts, path)
         except Exception as e:
             log.error("Error executing command '%s' with opts %s: %s", cmd, opts, e)
+            failed_commands.append(cmd)
+
+    if failed_commands:
+        raise RuntimeError("Mode switch to '{}' incomplete, failed commands: {}"
+                           .format(mode_name, failed_commands))
 
     log.info("Mode switch to '%s' completed", mode_name)
 
@@ -852,9 +868,9 @@ def onvifCall(cam, cmd, opts, camera_settings_path='./camera_settings_onvif.json
                 try:
                     reqtime = datetime.datetime.strptime(opts[1], '%Y%m%d_%H%M%S')
                 except Exception:
-                    reqtime = datetime.datetime.utcnow()
+                    reqtime = RmsDateTime.utcnow()
             else:
-                reqtime = datetime.datetime.utcnow()
+                reqtime = RmsDateTime.utcnow()
             setCameraTime(cam, reqtime)
         else:
             log.info('usage: CameraTime get|set [YYYYMMDD_HHMMSS]')
@@ -905,59 +921,48 @@ def cameraControl(camera_ip, port, username, password, cmd, opts='',
         cmd (string): Command to be executed
         opts (array of strings): Optional array of field, subfield and value for SetParam
         camera_settings_path (string): Path to camera settings JSON file for SwitchMode
+
+    Raises:
+        RuntimeError: if the camera cannot be reached, or if the command fails.
     """
     cam = connectCamera(camera_ip, port, username, password)
-    if cam:
-        try:
-            onvifCall(cam, cmd, opts, camera_settings_path)
-        except Exception as e:
-            log.error("Error executing command: %s", e)
-            log.error("This command may not be supported by your camera.")
-    else:
-        log.info("Failure. Could not connect.")
+    if cam is None:
+        raise RuntimeError("Could not connect to ONVIF camera at {}:{}".format(camera_ip, port))
+
+    onvifCall(cam, cmd, opts, camera_settings_path)
 
 
 def cameraControlV2(config, cmd, opts=''):
     """High-level entry point that uses config to figure out IP, port, and credentials.
 
+    The camera IP is extracted from the device URL in the config (e.g.
+    rtsp://192.168.42.10:554/...). The ONVIF credentials and port are taken from the
+    onvif_user, onvif_password and onvif_port config options.
+
     Args:
-        config: RMS config object (must have onvif_ip, onvif_port, onvif_user, onvif_password)
+        config: RMS config object
         cmd: Command to execute
         opts: Optional parameters
+
+    Raises:
+        ValueError: if the camera IP cannot be determined from the config.
+        RuntimeError: if the camera cannot be reached, or if the command fails.
     """
-    # Check for required ONVIF config options
-    if not hasattr(config, 'onvif_ip') or not config.onvif_ip:
-        # Try to extract from deviceID if it's an IP address
-        if hasattr(config, 'deviceID') and not str(config.deviceID).isdigit():
-            ip_match = re.findall(r"[0-9]+(?:\.[0-9]+){3}", str(config.deviceID))
-            if ip_match:
-                camera_ip = ip_match[0]
-            else:
-                log.error('Error: onvif_ip not configured and could not extract IP from deviceID')
-                return
-        else:
-            log.error('Error: onvif_ip not configured')
-            return
-    else:
-        camera_ip = config.onvif_ip
+    if str(config.deviceID).isdigit():
+        raise ValueError("ONVIF camera control only works with IP cameras")
+
+    ip_match = re.findall(r"[0-9]+(?:\.[0-9]+){3}", str(config.deviceID))
+    if not ip_match:
+        raise ValueError("Could not extract camera IP from device '{}'".format(config.deviceID))
+
+    camera_ip = ip_match[0]
 
     port = getattr(config, 'onvif_port', 80)
     username = getattr(config, 'onvif_user', 'admin')
     password = getattr(config, 'onvif_password', '')
 
-    # Determine camera settings path
-    if hasattr(config, 'camera_settings_path_onvif') and os.path.isfile(config.camera_settings_path_onvif):
-        camera_settings_path = config.camera_settings_path_onvif
-    elif hasattr(config, 'camera_settings_path') and config.camera_settings_path:
-        # Try ONVIF variant of the DVRIP settings path
-        base_path = os.path.splitext(config.camera_settings_path)[0]
-        onvif_path = base_path + '_onvif.json'
-        if os.path.isfile(onvif_path):
-            camera_settings_path = onvif_path
-        else:
-            camera_settings_path = './camera_settings_onvif.json'
-    else:
-        camera_settings_path = './camera_settings_onvif.json'
+    camera_settings_path = getattr(config, 'camera_settings_path_onvif',
+                                   './camera_settings_onvif.json')
 
     cameraControl(camera_ip, port, username, password, cmd, opts,
                   camera_settings_path=camera_settings_path)
@@ -1049,16 +1054,17 @@ if __name__ == '__main__':
 
     # If IP provided via command line, use direct connection
     if cml_args.ip:
-        # Initialize logging
-        log = getLogger("logger")
-
         if cmd not in cmd_list:
             log.info('Error: command "%s" not supported', cmd)
             log.info('Supported commands: %s', cmd_list)
             sys.exit(1)
 
-        cameraControl(cml_args.ip, cml_args.port, cml_args.user, cml_args.password, cmd, opts,
-                      camera_settings_path=cml_args.settings)
+        try:
+            cameraControl(cml_args.ip, cml_args.port, cml_args.user, cml_args.password, cmd, opts,
+                          camera_settings_path=cml_args.settings)
+        except Exception as e:
+            log.error("Command failed: %s", e)
+            sys.exit(1)
     else:
         # Load the config file
         config = cr.loadConfigFromDirectory(cml_args.config, 'notused')
@@ -1070,7 +1076,11 @@ if __name__ == '__main__':
             log.info('Supported commands: %s', cmd_list)
             sys.exit(1)
 
-        cameraControlV2(config, cmd, opts)
+        try:
+            cameraControlV2(config, cmd, opts)
+        except Exception as e:
+            log.error("Command failed: %s", e)
+            sys.exit(1)
 
 
 """

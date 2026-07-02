@@ -15,15 +15,13 @@
     ["CameraTime", "set"],
     ["SetParam", "Camera", "IrCutFilter", "ON"],
     ["SetParam", "Camera", "Brightness", "50"],
-    ["SetParam", "Camera", "ExposureParam", "Mode", "AUTO"],
-    ["reboot"]
+    ["SetParam", "Camera", "ExposureParam", "Mode", "AUTO"]
   ],
 
   "night": [
     ["CameraTime", "set"],
     ["SetParam", "Camera", "IrCutFilter", "OFF"],
     ["SetParam", "Camera", "Brightness", "60"],
-    ["SetParam", "Camera", "ExposureParam", "Mode", "AUTO"],
-    ["reboot"]
+    ["SetParam", "Camera", "ExposureParam", "Mode", "AUTO"]
   ]
 }
