@@ -160,6 +160,10 @@ def downloadNewMask(config):
 
         log.info('Remote mask renamed to: ' + dl_mask_name)
 
+    except (paramiko.SSHException, EOFError, OSError) as e:
+        log.warning('Connection error during mask download: {}'.format(e))
+        return False
+
     finally:
         if sftp:
             log.debug("Closing SFTP channel")

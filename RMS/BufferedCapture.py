@@ -16,6 +16,7 @@
 
 from __future__ import print_function, division, absolute_import
 
+import gc
 import os
 import sys
 import ctypes
@@ -41,7 +42,7 @@ import json
 
 from RMS.Misc import obfuscatePassword
 from RMS.Routines.GstreamerCapture import GstVideoFile, getStructureValue
-from RMS.Formats.ObservationSummary import getObsDBConn, addObsParam
+from RMS.Formats.ObservationSummary import addObsParam, getObservationSummaryDict
 from RMS.RawFrameSave import RawFrameSaver
 from RMS.Misc import RmsDateTime, mkdirP, UTCFromTimestamp
 from RMS.Formats import FTfile, FTStruct
@@ -93,6 +94,26 @@ class RtspProbeResult:
     TIMEOUT = "TIMEOUT"                    # Connection attempt timed out
     DNS_ERROR = "DNS_ERROR"                # Can't resolve hostname
     UNKNOWN_ERROR = "UNKNOWN_ERROR"        # Other connection errors
+
+
+def validVideoCrop(crop_str):
+    """ Validate a video_crop string of the form 'top=N bottom=N left=N right=N'
+        (any subset of sides; values must be non-negative integers).
+
+    Arguments:
+        crop_str: [str] The video_crop value from the config.
+
+    Return:
+        [bool] True if the string is a well-formed videocrop spec, False otherwise.
+    """
+
+    valid_keys = {"top", "bottom", "left", "right"}
+    for token in crop_str.split():
+        key, sep, val = token.partition("=")
+        if not sep or key not in valid_keys or not val.isdigit():
+            return False
+
+    return True
 
 
 class BufferedCapture(Process):
@@ -173,6 +194,9 @@ class BufferedCapture(Process):
         # Flag for process control
         self.exit = Event()
 
+        # Heartbeat timestamp for watchdog - updated every frame block to detect hangs
+        self.heartbeat = Value('d', 0.0)
+
         # Initialize sync tick
         self.last_sync_tick = -1
         self.sync_tick_reference = 0  # reference epoch for sync ticks
@@ -229,28 +253,26 @@ class BufferedCapture(Process):
             log.info("Capture joined successfully after {} seconds".format(seconds_waited))
         else:
             log.info("Timed out after waiting {} seconds, capture thread still alive".format(seconds_waited))
-            log.info("Sending interrupt signal for graceful shutdown...")
-            
+            log.info("Terminating capture process...")
+
             try:
-                # Send SIGINT to allow child process to clean up gracefully
-                if self.pid:
-                    os.kill(self.pid, signal.SIGINT)
-                
+                # Use SIGTERM (terminate) instead of SIGINT to avoid triggering
+                # the main process SIGINT handler via process group propagation
+                self.terminate()
+
                 # Wait a few seconds for graceful shutdown
                 self.join(5)
-                
+
                 if self.is_alive():
-                    log.warning("Process still alive after interrupt, forcing termination")
-                    self.terminate()
+                    log.warning("Process still alive after terminate, sending SIGKILL...")
+                    os.kill(self.pid, signal.SIGKILL)
                 else:
-                    log.info("Process exited gracefully after interrupt")
-                    
+                    log.info("Process terminated successfully")
+
             except ProcessLookupError:
                 log.info("Process already terminated")
             except Exception as e:
-                log.error("Error during graceful shutdown: {}".format(e))
-                log.info("Falling back to terminate()")
-                self.terminate()
+                log.error("Error during termination: {}".format(e))
             
             # Always join to reap zombie (returns instantly if already dead)
             self.join()
@@ -668,6 +690,11 @@ class BufferedCapture(Process):
                 if stop_event is not None and stop_event.is_set():
                     log.info("RTSP probe aborted - shutdown requested")
                     return False, RtspProbeResult.UNKNOWN_ERROR
+
+                # Update heartbeat during probe attempts to show we're still alive
+                if hasattr(self, 'heartbeat'):
+                    self.heartbeat.value = time.time()
+
                 try:
                     # Try to resolve hostname first
                     try:
@@ -690,19 +717,17 @@ class BufferedCapture(Process):
                         time.sleep(10)
 
                         # Second verification probe
-                        sock2 = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                        sock2.settimeout(timeout)
-                        result2 = sock2.connect_ex((host, port))
-                        sock2.close()
+                        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                        sock.settimeout(timeout)
+                        result = sock.connect_ex((host, port))
+                        sock.close()
 
-                        if result2 == 0:
+                        if result == 0:
                             log.info("RTSP service ready after {} attempts (verified with 2 probes)".format(attempt + 1))
                             return True, RtspProbeResult.SUCCESS
-                        else:
-                            log.info("Second probe failed, continuing retry loop...")
-                            last_error = RtspProbeResult.CONNECTION_REFUSED
-                            # Don't sleep at end of loop - continue to next attempt immediately
-                    
+
+                        log.info("Second probe failed, continuing retry loop...")
+
                     # Analyze specific connection errors
                     if result in (errno.ENETUNREACH, errno.ENETDOWN):
                         last_error = RtspProbeResult.NETWORK_DOWN
@@ -762,21 +787,28 @@ class BufferedCapture(Process):
             stride (int): Spacing for diagonal sampling, skipping many pixels for efficiency.
 
         Returns:
-            bool: True if all sampled channels match (or frame is single-channel), otherwise False.
+            bool or None: True if all sampled channels match (or frame is single-channel),
+                False if channels differ (color), or None if inconclusive (all pixels are
+                the same value, e.g. all white or all black).
         """
         if frame is None:
             raise ValueError("isGrayscale() called with frame=None")
-        
+
         # We don't explicitly check frame.shape first; instead we rely on an IndexError
         # if 'frame' is single-channel (which is inherently grayscale).
-        # This is faster than an extra dimension check for most BGR GMN stations 
+        # This is faster than an extra dimension check for most BGR GMN stations
 
         try:
             # If diagonal samples are not identical, frame is color
             sampled = frame[::stride, ::stride]
             is_gray = np.all(sampled[..., 0] == sampled[..., 1]) and \
                     np.all(sampled[..., 1] == sampled[..., 2])
-            
+
+            # If all sampled pixels have the same value (e.g. all white or all black),
+            # the check is inconclusive — channels match trivially
+            if is_gray and np.all(sampled[..., 0] == sampled[0, 0, 0]):
+                return None
+
         except IndexError:
              # If IndexError, frame is grayscale
             is_gray = True
@@ -988,11 +1020,11 @@ class BufferedCapture(Process):
         """Poll the GStreamer bus and drain queued messages.
 
         Runs in a background daemon thread:
-                - Wakes every 5 s via ``bus.timed_pop_filtered``.
+                - Wakes every 1 s via ``bus.timed_pop_filtered``.
                 - Logs any ``ERROR`` or ``WARNING`` message for visibility.
                 - Silently discards all other message types to keep the queue small.
 
-        The loop exits when ``self.pipeline`` becomes ``None`` inside ``releaseResources``.
+        The loop exits when ``_bus_should_exit`` is set or EOS is received.
 
         Arguments:
             None
@@ -1005,15 +1037,24 @@ class BufferedCapture(Process):
             return
 
         try:
-            bus = self.pipeline.get_bus()
+            # Get bus reference - this keeps the bus (and indirectly the pipeline)
+            # alive until this thread exits, preventing premature garbage collection
+            pipeline = self.pipeline
+            if pipeline is None:
+                log.debug("_busPoller: No pipeline, exiting immediately")
+                return
+
+            bus = pipeline.get_bus()
+            if bus is None:
+                log.debug("_busPoller: No bus, exiting immediately")
+                return
+
             mask = Gst.MessageType.ANY
 
-            while not self._bus_should_exit and self.pipeline is not None:
-                msg = bus.timed_pop_filtered(5 * Gst.SECOND, mask)
+            # Use shorter timeout (1 second) so thread can check exit flag more frequently
+            while not self._bus_should_exit:
+                msg = bus.timed_pop_filtered(1 * Gst.SECOND, mask)
                 if not msg:
-                    # Check if pipeline still exists
-                    if self.pipeline is None:
-                        break
                     continue
 
                 if msg.type == Gst.MessageType.ERROR:
@@ -1025,10 +1066,15 @@ class BufferedCapture(Process):
                 elif msg.type == Gst.MessageType.EOS:
                     log.debug("_busPoller: Received EOS, exiting")
                     break
-                    
+
         except Exception as e:
             log.debug("_busPoller: Exception occurred: %s", str(e))
         finally:
+            # Explicitly release local references to allow GC to free the pipeline
+            # These would go out of scope anyway, but being explicit ensures cleanup
+            # happens promptly even if this thread is slow to fully exit
+            pipeline = None
+            bus = None
             log.debug("_busPoller: Thread exiting")
 
 
@@ -1071,19 +1117,43 @@ class BufferedCapture(Process):
 
         # Define the source up to the point where we want to branch off
         source_to_tee = (
-            "rtspsrc name=src buffer-mode=1 {:s} "
+            # udp-buffer-size: per-socket RTP receive buffer. rtspsrc defaults to
+            # 512KB, which can overflow during bitrate bursts and shows
+            # up as UDP RcvbufErrors -> dropped frames. The configured size
+            # (default 16MB) gives bursts room.
+            # NOTE: net.core.rmem_max must be >= this value (see Scripts/UpdateBuffers.sh)
+            # or the kernel clamps it back. Only affects the UDP transport path.
+            "rtspsrc name=src buffer-mode=1 udp-buffer-size={:d} {:s} "
             "location=\"{:s}\" ! "
             "rtph264depay ! h264parse ! tee name=t"
-            ).format(protocol_str, device_url)
+            ).format(self.config.udp_buffer_size, protocol_str, device_url)
+
+        # Optionally scale and/or crop the source video before further processing.
+        # videoscale/videocrop run on raw decoded frames, ahead of videoconvert.
+        video_scale = ''
+        if self.config.video_scale_width is not None and self.config.video_scale_height is not None:
+            video_scale = "videoscale ! video/x-raw,width={:d},height={:d} ! ".format(
+                self.config.video_scale_width, self.config.video_scale_height)
+        elif (self.config.video_scale_width is not None) or (self.config.video_scale_height is not None):
+            log.warning("video_scale ignored: both video_scale_width and video_scale_height must be set")
+
+        video_crop = ''
+        if self.config.video_crop is not None:
+            if validVideoCrop(self.config.video_crop):
+                video_crop = "videocrop {:s} ! ".format(self.config.video_crop)
+            else:
+                log.warning("video_crop ignored: malformed value %r (expected e.g. "
+                            "'top=N bottom=N left=N right=N', non-negative ints)", self.config.video_crop)
 
         # Branch for processing
+        queue_size = self.config.gst_queue_size
         processing_branch = (
             "t. ! queue ! {:s} ! "
-            "queue leaky=downstream max-size-buffers=100 max-size-bytes=0 max-size-time=0 ! "
+            "queue leaky=downstream max-size-buffers={:d} max-size-bytes=0 max-size-time=0 ! {:s}{:s}"
             "videoconvert ! video/x-raw,format={:s} ! "
-            "queue max-size-buffers=100 max-size-bytes=0 max-size-time=0 ! "
-            "appsink max-buffers=100 drop=true sync=0 name=appsink"
-            ).format(gst_decoder, video_format)
+            "queue max-size-buffers={:d} max-size-bytes=0 max-size-time=0 ! "
+            "appsink max-buffers={:d} drop=true sync=0 name=appsink"
+            ).format(gst_decoder, queue_size, video_scale, video_crop, video_format, queue_size, queue_size)
         
          # Branch for storage - if video_file_dir is not None, save the raw stream to a file
         if video_file_dir is not None:
@@ -1140,13 +1210,20 @@ class BufferedCapture(Process):
                 # Transition through states
                 log.info("Starting pipeline state transitions...")
 
-                success, start_time = self.handleStateChange(self.pipeline, Gst.State.PLAYING)
+                # First transition to PAUSED to capture start_time
+                success, start_time = self.handleStateChange(self.pipeline, Gst.State.PAUSED)
                 if not success:
-                    raise ValueError("Failed to transition pipeline to PLAYING state")
+                    raise ValueError("Failed to transition pipeline to PAUSED state")
 
-                # Calculate start timestamp
+                # Calculate start timestamp BEFORE going to PLAYING
+                # This ensures splitmuxsink has correct timing reference when it creates first segment
                 if start_time is not None:
                     self.start_timestamp = start_time - (self.config.camera_buffer/self.config.fps + self.config.camera_latency)
+
+                # Now transition to PLAYING
+                success, _ = self.handleStateChange(self.pipeline, Gst.State.PLAYING)
+                if not success:
+                    raise ValueError("Failed to transition pipeline to PLAYING state")
 
                 # Log start time
                 start_time_str = (UTCFromTimestamp.utcfromtimestamp(self.start_timestamp)
@@ -1370,6 +1447,19 @@ class BufferedCapture(Process):
                     width = getStructureValue(structure, 'width')
                     height = getStructureValue(structure, 'height')
 
+                    # Based on camera settings and optional video_scale/video_crop parameters, the decoded frame size is what
+                    # gets written into the fixed-size capture arrays (sized to config
+                    # width/height). Warn if they disagree: a smaller frame is silently
+                    # zero-padded into the top-left of the array, while a larger one may cause overflows
+                    # and may abort the capture block. (ROI is applied separately and may
+                    # legitimately shrink the frame further, so only warn, never abort.)
+                    if width != self.config.width or height != self.config.height:
+                        log.warning("video output is {:d}x{:d} but config "
+                                    "width/height is {:d}x{:d}; set width/height to match the "
+                                    "source video/scaled+cropped size (smaller frames are zero-padded, larger "
+                                    "ones abort capture)".format(width, height,
+                                                                 self.config.width, self.config.height))
+
                     if self.config.gst_colorspace == 'GRAY8':
                         self.frame_shape = (height, width)
                     else:
@@ -1381,18 +1471,20 @@ class BufferedCapture(Process):
                     buffer.unmap(map_info)
                     
                     # Check if frame is grayscale and set flag
-                    self.convert_to_gray = self.isGrayscale(frame)
-                    log.info("Video format: {}, {}P, color: {}".format(self.config.gst_colorspace, height, 
+                    gray_result = self.isGrayscale(frame)
+                    if gray_result is not None:
+                        self.convert_to_gray = gray_result
+                    log.info("Video format: {}, {}P, color: {}".format(self.config.gst_colorspace, height,
                                                                        not self.convert_to_gray))
 
                     # Set the video device type
                     self.video_device_type = "gst"
 
-                    conn = getObsDBConn(self.config)
-                    try:
-                        addObsParam(conn, "media_backend", self.video_device_type)
-                    finally:
-                        conn.close()
+                    if self.night_data_dir is not None and os.path.isdir(self.night_data_dir):
+                        try:
+                            addObsParam(getObservationSummaryDict(self.night_data_dir), "media_backend", "gst")
+                        except Exception as e:
+                            log.warning("Could not record media_backend in observation summary: {}".format(e))
 
                     return True
 
@@ -1401,17 +1493,23 @@ class BufferedCapture(Process):
                     self.media_backend_override = True
                     self.releaseResources()
 
-                    conn = getObsDBConn(self.config)
-                    try:
-                        addObsParam(conn, "media_backend", self.video_device_type)
-                    finally:
-                        conn.close()
+
+
 
             if self.config.media_backend == 'v4l2':
                 try:
                     log.info("Initialize OpenCV Device with v4l2.")
                     self.device = cv2.VideoCapture(self.config.deviceID, cv2.CAP_V4L2)
                     self.device.set(cv2.CAP_PROP_CONVERT_RGB, 0)
+
+                    # Note: video_device_type stays "cv2" - downstream logic (isOpened check,
+                    # first-frame skipping) treats v4l2 as an OpenCV device. Only the recorded
+                    # media_backend label is "v4l2".
+                    if self.night_data_dir is not None and os.path.isdir(self.night_data_dir):
+                        try:
+                            addObsParam(getObservationSummaryDict(self.night_data_dir), "media_backend", "v4l2")
+                        except Exception as e:
+                            log.warning("Could not record media_backend in observation summary: {}".format(e))
 
                     return True
                 
@@ -1425,6 +1523,12 @@ class BufferedCapture(Process):
             elif (self.config.media_backend == 'cv2') or self.media_backend_override:
                 log.info("Initialize OpenCV Device.")
                 self.device = cv2.VideoCapture(self.config.deviceID)
+
+                if self.night_data_dir is not None and os.path.isdir(self.night_data_dir):
+                    try:
+                        addObsParam(getObservationSummaryDict(self.night_data_dir), "media_backend", "cv2")
+                    except Exception as e:
+                        log.warning("Could not record media_backend in observation summary: {}".format(e))
 
                 return True
 
@@ -1518,34 +1622,32 @@ class BufferedCapture(Process):
                 log.debug("releaseResources: Posting EOS to wake poller")
                 bus.post(Gst.Message.new_eos(None))
 
-            pipe = self.pipeline
         else:
             log.debug("releaseResources: No pipeline to shutdown")
-            pipe = None
+
+        # Clear pipeline reference. Note: the bus poller thread holds its own local
+        # reference to the pipeline, so it won't be garbage collected until that
+        # thread exits. We set _bus_should_exit=True below to signal the thread to stop.
+        self.pipeline = None
 
         # shut down the poller
         if self._bus_thread and self._bus_thread.is_alive():
             log.debug(f"releaseResources: Bus thread is alive (thread={self._bus_thread})")
             self._bus_should_exit = True
-            
+
             log.debug("releaseResources: Joining bus thread (6 second timeout)")
             self._bus_thread.join(timeout=6)
-            
+
             if self._bus_thread.is_alive():
                 log.debug("releaseResources: WARNING - Bus thread still alive after timeout!")
             else:
                 log.debug("releaseResources: Bus thread joined successfully")
         self._bus_thread = None
 
-        # only now drop the last reference
-        if pipe:
-            log.debug("releaseResources: Unreffing pipeline")
-            # Use a timed call as final safety net (should not be needed with teardown-timeout)
-            if not _timedCall(pipe.unref, timeout_s=10):
-                log.warning("releaseResources: pipeline.unref() timed out after 10 seconds - this indicates a GStreamer bug")
-            else:
-                log.debug("releaseResources: Pipeline unreffed successfully")
-        self.pipeline = None
+        # NOTE: Do NOT call pipeline.unref() manually! Python's GI bindings handle
+        # reference counting automatically. Calling unref() manually causes double-free
+        # crashes when Python's garbage collector also tries to free the object.
+        # The pipeline will be cleaned up when all Python references go out of scope.
 
         # device section
         if self.device:
@@ -1556,22 +1658,11 @@ class BufferedCapture(Process):
                     if not _timedCall(self.device.release):
                         log.warning("releaseResources: cap.release() hung - fd dropped")
 
-                elif hasattr(self.device, "set_state"):                  # GStreamer branch
-                    try:
-                        self.device.set_state(Gst.State.NULL)
-                    except Exception as exc:
-                        log.warning("releaseResources: Gst set_state(NULL) failed: %s", exc)
-                
-                elif self.video_device_type == "gst" and GST_IMPORTED:
-                    # This is likely a GstAppSink - ensure it's properly cleaned
-                    log.debug("releaseResources: Releasing GStreamer AppSink")
-                    # AppSink cleanup happens when pipeline is unreffed
-                    # Just ensure we're not holding extra references
-                    if hasattr(self.device, 'set_emit_signals'):
-                        try:
-                            self.device.set_emit_signals(False)
-                        except:
-                            pass
+                # For GStreamer devices (AppSink), cleanup happens automatically when
+                # the pipeline is garbage collected. Don't try to access the device
+                # as it may have already been freed with the pipeline.
+                elif self.video_device_type == "gst":
+                    log.debug("releaseResources: GStreamer device cleaned up with pipeline")
 
                 else:                                                    # Fallback
                     log.debug("releaseResources: Unknown device type - just dropping ref")
@@ -1580,7 +1671,12 @@ class BufferedCapture(Process):
                 self.device = None
 
         log.debug("releaseResources: Completed")
-        
+
+        # Force garbage collection to break any reference cycles and ensure
+        # GStreamer resources are freed. This replaces the manual unref() call
+        # which caused double-free crashes.
+        gc.collect()
+
         # Reset the flag so future calls can proceed
         self._releasing_resources = False
 
@@ -1592,25 +1688,26 @@ class BufferedCapture(Process):
                 self.raw_frame_saver.stop()
                 self.raw_frame_saver.join(5)
                 if self.raw_frame_saver.is_alive():
-                    log.warning("RawFrameSaver still busy. Sending interrupt signal...")
+                    log.warning("RawFrameSaver still busy. Terminating...")
                     try:
-                        if self.raw_frame_saver.pid:
-                            os.kill(self.raw_frame_saver.pid, signal.SIGINT)
-                        
+                        # Use terminate (SIGTERM) instead of SIGINT to avoid triggering
+                        # the main process SIGINT handler via process group propagation
+                        self.raw_frame_saver.terminate()
+
                         # Wait for graceful shutdown
                         self.raw_frame_saver.join(3)
-                        
+
                         if self.raw_frame_saver.is_alive():
-                            log.warning("RawFrameSaver still alive after interrupt, forcing termination")
-                            self.raw_frame_saver.terminate()
+                            log.warning("RawFrameSaver still alive after terminate, sending SIGKILL...")
+                            os.kill(self.raw_frame_saver.pid, signal.SIGKILL)
                             self.raw_frame_saver.join()
                         else:
-                            log.info("RawFrameSaver exited gracefully after interrupt")
-                            
+                            log.info("RawFrameSaver terminated successfully")
+
                     except ProcessLookupError:
                         log.info("RawFrameSaver already terminated")
                     except Exception as e:
-                        log.error("Error during graceful RawFrameSaver shutdown: {}".format(e))
+                        log.error("Error during RawFrameSaver termination: {}".format(e))
                         self.raw_frame_saver.terminate()
                         self.raw_frame_saver.join()
             finally:
@@ -1673,6 +1770,9 @@ class BufferedCapture(Process):
         try:
             log.debug("Initializing process-specific resources...")
 
+            # Initialize heartbeat for watchdog
+            self.heartbeat.value = time.time()
+
             # GStreamer debug setup
             if GST_IMPORTED:
                 try:
@@ -1700,7 +1800,7 @@ class BufferedCapture(Process):
             self.pipeline = None
             self.start_timestamp = 0
             self.frame_shape = None
-            self.convert_to_gray = False
+            self.convert_to_gray = not (self.daytime_mode.value if self.daytime_mode is not None else False)
             self.last_pts_correction_ns = 0
             self.last_running_time_ns = None
 
@@ -1753,6 +1853,8 @@ class BufferedCapture(Process):
 
             # Main capture loop
             while not self.exit.is_set() and not self.initVideoDevice():
+                # Update heartbeat during connection attempts to show we're still alive
+                self.heartbeat.value = time.time()
                 log.info('Waiting for the video device to be connected...')
                 time.sleep(5)
 
@@ -1855,6 +1957,9 @@ class BufferedCapture(Process):
 
                 while not self.exit.is_set() and not self.initVideoDevice():
 
+                    # Update heartbeat during reconnection attempts to show we're still alive
+                    self.heartbeat.value = time.time()
+
                     log.info('Waiting for the video device to be reconnected...')
 
                     time.sleep(5)
@@ -1875,7 +1980,9 @@ class BufferedCapture(Process):
                     # If the connection was made and the frame was retrieved, continue with the capture
                     if ret:
                         log.info('Video device reconnected successfully!')
-                        self.convert_to_gray = self.isGrayscale(frame)
+                        gray_result = self.isGrayscale(frame)
+                        if gray_result is not None:
+                            self.convert_to_gray = gray_result
                         wait_for_reconnect = False
                         break
 
@@ -1909,6 +2016,10 @@ class BufferedCapture(Process):
 
 
             log.info('Grabbing a new block of {:d} frames...'.format(block_frames))
+
+            # Update heartbeat timestamp for watchdog to detect hangs
+            self.heartbeat.value = time.time()
+
             for i in range(block_frames):
 
                 # Read the frame (keep track how long it took to grab it), and check for color if saving raw frame
@@ -1932,7 +2043,9 @@ class BufferedCapture(Process):
 
                 # Check if frame contains color information
                 if save_this_frame:
-                    self.convert_to_gray = self.isGrayscale(frame)
+                    gray_result = self.isGrayscale(frame)
+                    if gray_result is not None:
+                        self.convert_to_gray = gray_result
 
                 # Handling for grayscale conversion
                 frame = self.handleGrayscaleConversion(frame)
@@ -2130,7 +2243,7 @@ class BufferedCapture(Process):
                         current_daytime = self.daytime_mode.value if self.daytime_mode is not None else False
                         if self.last_daytime_mode is not None and self.last_daytime_mode != current_daytime:
                             # Transition detected (either day→night or night→day)
-                            transition_type = "Day→Night" if not current_daytime else "Night→Day"
+                            transition_type = "Day->Night" if not current_daytime else "Night->Day"
                             log.info(f"{transition_type} transition detected, resetting counters and media backend")
 
                             # Update last_daytime_mode BEFORE breaking to prevent detecting same transition again
@@ -2139,6 +2252,12 @@ class BufferedCapture(Process):
                             # Reset dropped frames counter for new session
                             self.dropped_frames.value = 0
                             self.dropped_frames_timestamps.clear()
+
+                            # Reset last_frame_timestamp so the reconnection gap after a
+                            # planned transition is not counted as dropped frames. For
+                            # unexpected disconnects this is NOT reset, so those gaps are
+                            # still properly counted.
+                            last_frame_timestamp = False
 
                             # Reset PTS smoothing reset counter for new session
                             self.reset_count = -1
@@ -2149,14 +2268,16 @@ class BufferedCapture(Process):
                             # Force device re-initialization by releasing and reconnecting
                             log.info("Releasing resources to re-initialize video device with GStreamer")
                             self.releaseResources()
+
                             wait_for_reconnect = True
                             break
 
                         self.last_daytime_mode = current_daytime
 
                         # Calculate buffer fill percentage based on max frame age
-                        # The appsink has max-buffers=100, so at fps rate, max capacity is ~100/fps seconds
-                        max_buffer_time = 100.0 / self.config.fps  # Theoretical max buffer time in seconds
+                        # The appsink has max-buffers=gst_queue_size, so at fps rate, max
+                        # capacity is ~gst_queue_size/fps seconds
+                        max_buffer_time = float(self.config.gst_queue_size) / self.config.fps  # Theoretical max buffer time in seconds
                         buffer_fill_percent = min(100, (max_frame_age_seconds / max_buffer_time) * 100)
 
                         # Calculate dropped frames in last 10 minutes
@@ -2352,7 +2473,7 @@ if __name__ == "__main__":
                              video_file=cml_args.video_file)
         
         bc.initVideoDevice()
-        
+
 
         # Read at least 256 frames from the video file
         for i in range(256):

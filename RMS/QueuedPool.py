@@ -156,17 +156,17 @@ class QueuedPool(object):
         self.func_kwargs = func_kwargs
         self.worker_wait_inbetween_jobs = worker_wait_inbetween_jobs
 
-        # Initialize queues (for some reason queues from Manager need to be created, otherwise they are 
+        # Initialize queues (for some reason queues from Manager need to be created, otherwise they are
         # blocking when using get_nowait)
-        manager = multiprocessing.Manager()
+        self.manager = multiprocessing.Manager()
 
         # Only init with maxsize if given, otherwise it return a TypeError when fed data from Compressor
         if input_queue_maxsize is None:
-            self.input_queue = manager.Queue()
+            self.input_queue = self.manager.Queue()
         else:
-            self.input_queue = manager.Queue(maxsize=input_queue_maxsize)
+            self.input_queue = self.manager.Queue(maxsize=input_queue_maxsize)
 
-        self.output_queue = manager.Queue()
+        self.output_queue = self.manager.Queue()
 
         self.func = func
         self.pool = None
@@ -463,7 +463,7 @@ class QueuedPool(object):
                     break
 
 
-                
+
 
                 # If all workers are idle, set the last idle time
                 if all_workers_idle_time is None:
@@ -542,6 +542,17 @@ class QueuedPool(object):
                 else:
                     time.sleep(0.1)
 
+
+
+    def shutdownManager(self):
+        """ Shut down the Manager server process. Call this after all results have been collected. """
+
+        if hasattr(self, 'manager') and self.manager is not None:
+            try:
+                self.manager.shutdown()
+            except Exception:
+                pass
+            self.manager = None
 
 
     def updateCoreNumber(self, cores=None):

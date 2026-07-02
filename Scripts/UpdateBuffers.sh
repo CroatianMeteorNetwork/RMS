@@ -6,12 +6,12 @@
 # Usage: sudo ./Scripts/UpdateBuffers.sh
 #
 # This script checks and optionally updates UDP buffer sizes to handle
-# GStreamer's UDP source requirements (512KB per camera). Default Linux
-# settings are often too small, causing GStreamer warnings.
+# GStreamer's UDP source requirements (rtspsrc udp-buffer-size, default 16MB).
+# Default Linux settings are often too small, causing dropped frames.
 #
 # The script will:
 # - Show current buffer sizes
-# - Warn if below recommended values (512KB min, 1MB recommended)
+# - Warn if below recommended values (1MB min, 16MB recommended)
 # - Create backup of original settings
 # - Update settings if confirmed
 # - Show before/after comparison
@@ -24,8 +24,8 @@ if [ "$EUID" -ne 0 ]; then
 fi
 
 # Configuration
-RECOMMENDED_SIZE=1048576  # 1MB in bytes
-MIN_RECOMMENDED=524288    # 512KB in bytes (GStreamer requested size)
+RECOMMENDED_SIZE=16777216  # 16MB in bytes - must be >= rtspsrc udp-buffer-size in BufferedCapture.py
+MIN_RECOMMENDED=1048576    # 1MB in bytes (old default; below this UDP RtspSrc bursts overflow)
 
 # Function to convert bytes to human readable format
 human_readable() {
@@ -51,11 +51,11 @@ show_settings() {
     # Check if buffers are below recommended size
     local update_needed=false
     if [ $current_rmem_max -lt $MIN_RECOMMENDED ] || [ $current_wmem_max -lt $MIN_RECOMMENDED ]; then
-        echo -e "WARNING: Current buffer sizes are below the minimum recommended size (512KB)"
+        echo -e "WARNING: Current buffer sizes are below the minimum recommended size ($(human_readable $MIN_RECOMMENDED))"
         echo "This may cause issues with GStreamer UDP buffer allocation."
         update_needed=true
     elif [ $current_rmem_max -lt $RECOMMENDED_SIZE ] || [ $current_wmem_max -lt $RECOMMENDED_SIZE ]; then
-        echo -e "NOTE: Current buffer sizes are below the recommended size (1MB)"
+        echo -e "NOTE: Current buffer sizes are below the recommended size ($(human_readable $RECOMMENDED_SIZE))"
         echo "Increasing them would provide more headroom for UDP operations."
         update_needed=true
     fi
@@ -80,38 +80,38 @@ echo "CHECKING CURRENT SETTINGS:"
 show_settings
 echo
 
-# Backup original sysctl.conf
-echo "Creating backup of current sysctl.conf..."
-cp /etc/sysctl.conf /etc/sysctl.conf.backup.$(date +%Y%m%d_%H%M%S)
+# Use drop-in file in /etc/sysctl.d/ for systemd compatibility
+# The 99- prefix ensures this loads last and won't be overridden
+# This method works on all modern Linux distributions (Debian 7+, Ubuntu 12.04+, all Raspberry Pi OS)
+SYSCTL_DROP_IN="/etc/sysctl.d/99-rms-udp-buffers.conf"
 
-# Function to add or update sysctl setting
-update_sysctl() {
-    local key=$1
-    local value=$2
-    
-    # Check if setting already exists
-    if grep -q "^${key}[[:space:]]*=" /etc/sysctl.conf; then
-        # Update existing setting
-        sed -i "s|^${key}[[:space:]]*=.*|${key}=${value}|" /etc/sysctl.conf
-        echo "Updated ${key} to ${value}"
-    else
-        # Add new setting
-        echo "${key}=${value}" >> /etc/sysctl.conf
-        echo "Added ${key}=${value}"
-    fi
-}
+# Ensure the directory exists (should always exist on supported systems)
+if [ ! -d /etc/sysctl.d ]; then
+    echo "Warning: /etc/sysctl.d not found, creating it..."
+    mkdir -p /etc/sysctl.d
+fi
 
-echo "Updating buffer size settings..."
+echo "Creating sysctl drop-in file: $SYSCTL_DROP_IN"
 
-# Update the settings
-update_sysctl "net.core.rmem_max" "$RECOMMENDED_SIZE"
-update_sysctl "net.core.wmem_max" "$RECOMMENDED_SIZE"
+# Write the drop-in configuration file
+cat > "$SYSCTL_DROP_IN" << EOF
+# RMS UDP Buffer Configuration
+# Created by UpdateBuffers.sh on $(date)
+# Required for GStreamer UDP streaming (rtspsrc udp-buffer-size, default 16MB)
 
-# Apply changes
+net.core.rmem_max=$RECOMMENDED_SIZE
+net.core.wmem_max=$RECOMMENDED_SIZE
+EOF
+
+echo "Created $SYSCTL_DROP_IN with:"
+echo "  net.core.rmem_max=$RECOMMENDED_SIZE"
+echo "  net.core.wmem_max=$RECOMMENDED_SIZE"
+
+# Apply changes immediately
 echo "Applying changes..."
-sysctl -p >/dev/null 2>&1  # Suppress detailed output
+sysctl -p "$SYSCTL_DROP_IN" >/dev/null 2>&1
 
 echo -e "\nAFTER CHANGES:"
 show_settings
 
-echo -e "\nDone! A backup of your original sysctl.conf has been created."
+echo -e "\nDone! Settings will persist across reboots via $SYSCTL_DROP_IN"

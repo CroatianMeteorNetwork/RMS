@@ -1,0 +1,38 @@
+from __future__ import absolute_import
+
+
+def make_ext(modname, pyxfilename):
+    """ Build the KHT Cython wrapper as a C++ extension for the pyximport fallback.
+
+    setup.py already builds RMS.Routines.Kht correctly (language="c++" plus the
+    Native/Hough C++ sources). This mirrors that recipe so that when the compiled
+    binary is missing or ABI-stale, pyximport can rebuild the module instead of
+    trying to compile the generated C++ as plain C and failing on `extern "C"`.
+    """
+
+    import os
+    from distutils.extension import Extension
+    from RMS.Misc import getRmsRootDir
+
+    root = getRmsRootDir()
+    hough_dir = os.path.join(root, "Native", "Hough")
+
+    # The KHT C++ implementation, compiled and linked together with the wrapper.
+    cpp_sources = [
+        os.path.join(hough_dir, "{:s}.cpp".format(name)) for name in
+        ("kht", "buffer_2d", "eigen", "linking", "peak_detection", "subdivision", "voting")
+    ]
+
+    ext = Extension(
+        name=modname,
+        sources=[pyxfilename] + cpp_sources,
+        include_dirs=[hough_dir],
+        language="c++",
+        extra_compile_args=["-O3"],
+    )
+
+    return ext
+
+
+def make_setup_args():
+    return dict(script_args=["--verbose"])

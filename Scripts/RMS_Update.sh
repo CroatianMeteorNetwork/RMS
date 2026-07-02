@@ -121,7 +121,11 @@ usage() {
     print_status "info" "  --switch <branch>  Interactively switch or switch to a specific branch"
     print_status "info" "  --force            Force update even if repository is up-to-date"
     print_status "info" "  --help             Show usage info"
-    exit 1
+    print_status "info" ""
+    print_status "info" "Environment:"
+    print_status "info" "  RMS_BRANCH=<branch>  Switch to <branch> (same as --switch <branch>,"
+    print_status "info" "                       ignored when --switch is given)"
+    exit "${1:-1}"
 }
 
 parse_args() {
@@ -143,7 +147,7 @@ parse_args() {
                 shift 1
                 ;;
             --help|-h)
-                usage
+                usage 0
                 ;;
             *)
                 print_status "error" "Unknown argument: $1"

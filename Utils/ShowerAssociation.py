@@ -11,6 +11,8 @@ import sys
 import matplotlib.gridspec as gridspec
 import matplotlib.pyplot as plt
 import numpy as np
+import matplotlib.colors as mcolors
+
 from RMS.Astrometry.Conversions import (EARTH_CONSTANTS, datetime2JD,
                                         jd2Date, raDec2AltAz, raDec2Vector,
                                         vector2RaDec, AEH2Range)
@@ -111,9 +113,9 @@ class MeteorSingleStation(object):
         self.end_vect = self.cartesian_points[-1]
 
         # Compute alt of the beginning and the last point
-        self.beg_azim, self.beg_alt = raDec2AltAz(self.ra_array[0], self.dec_array[0], self.jd_array[0], \
+        self.beg_azim, self.beg_alt = raDec2AltAz(self.ra_array[0], self.dec_array[0], self.jd_array[0],
             self.lat, self.lon)
-        self.end_azim, self.end_alt = raDec2AltAz(self.ra_array[-1], self.dec_array[-1], self.jd_array[-1], \
+        self.end_azim, self.end_alt = raDec2AltAz(self.ra_array[-1], self.dec_array[-1], self.jd_array[-1],
             self.lat, self.lon)
 
 
@@ -224,7 +226,7 @@ class MeteorSingleStation(object):
             ang_separation: [float] Radiant distance (deg).
         """
 
-        ang_separation = np.degrees(abs(np.pi/2 - angularSeparation(np.radians(ra), \
+        ang_separation = np.degrees(abs(np.pi/2 - angularSeparation(np.radians(ra),
                 np.radians(dec), np.radians(self.normal_ra), np.radians(self.normal_dec))))
 
         return ang_separation
@@ -263,13 +265,12 @@ class MeteorSingleStation(object):
             else:
                     
                 # Otherwise compute from the model
-                ref_height = (heightModel(shower.v_init, ht_type='beg') + \
-                    heightModel(shower.v_init, ht_type='end'))/2
+                ref_height = (heightModel(shower.v_init, ht_type='beg') + heightModel(shower.v_init, ht_type='end'))/2
             
 
             # Compute alt/az at the peak magnitude point
             self.peak_azim, self.peak_alt = raDec2AltAz(
-                self.ra_array[peak_mag_index], self.dec_array[peak_mag_index], \
+                self.ra_array[peak_mag_index], self.dec_array[peak_mag_index],
                 self.jd_array[peak_mag_index], self.lat, self.lon)
 
             # Get the range to the meteor at the reference height
@@ -347,7 +348,7 @@ def estimateMeteorHeight(config, meteor_obj, shower):
     end_vect_horiz = raDec2Vector(end_azim, end_alt)
 
     # Compute radiant vector in alt/az
-    radiant_azim, radiant_alt = raDec2AltAz(shower.ra, shower.dec, meteor_obj.jdt_ref, meteor_obj.lat, \
+    radiant_azim, radiant_alt = raDec2AltAz(shower.ra, shower.dec, meteor_obj.jdt_ref, meteor_obj.lat,
         meteor_obj.lon)
     radiant_vector_horiz = raDec2Vector(radiant_azim, radiant_alt)
 
@@ -387,15 +388,15 @@ def estimateMeteorHeight(config, meteor_obj, shower):
 
 
     # Compute the height of the begin point using the law of cosines
-    ht_b  = np.sqrt(dist_beg**2 + re_dist**2 - 2*dist_beg*re_dist*np.cos(np.radians(90 + meteor_obj.beg_alt)))
+    ht_b = np.sqrt(dist_beg**2 + re_dist**2 - 2*dist_beg*re_dist*np.cos(np.radians(90 + meteor_obj.beg_alt)))
     ht_b -= earth_radius
-    ht_b  = abs(ht_b)
+    ht_b = abs(ht_b)
 
 
     # Compute the height of the end point using the law of cosines
-    ht_e  = np.sqrt(dist_end**2 + re_dist**2 - 2*dist_end*re_dist*np.cos(np.radians(90 + meteor_obj.end_alt)))
+    ht_e = np.sqrt(dist_end**2 + re_dist**2 - 2*dist_end*re_dist*np.cos(np.radians(90 + meteor_obj.end_alt)))
     ht_e -= earth_radius
-    ht_e  = abs(ht_e)
+    ht_e = abs(ht_e)
 
 
     return ht_b, ht_e
@@ -423,8 +424,8 @@ def showerMatchScore(radiant_distance, height_difference):
     return score
 
 
-def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=False, save_plot=False, \
-    plot_activity=False, flux_showers=False, color_map='viridis'):
+def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=False, save_plot=False, 
+        plot_activity=False, flux_showers=False, color_map='viridis', sporadic_color='gray'):
     """ Do single station shower association based on radiant direction and height. 
     
     Arguments:
@@ -538,13 +539,13 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
             # threshold solar longitude difference
             if np.any(np.isnan([shower.lasun_beg, shower.lasun_end])):
 
-                shower.lasun_beg = (shower.lasun_max - config.shower_lasun_threshold)%360
-                shower.lasun_end = (shower.lasun_max + config.shower_lasun_threshold)%360
+                shower.lasun_beg = (shower.lasun_max - config.shower_lasun_threshold) % 360
+                shower.lasun_end = (shower.lasun_max + config.shower_lasun_threshold) % 360
 
 
             # Filter out all showers which are not active    
             if not isAngleBetween(np.radians(shower.lasun_beg), np.radians(meteor_obj.lasun), 
-                np.radians(shower.lasun_end)):
+                    np.radians(shower.lasun_end)):
 
                 continue
 
@@ -567,7 +568,7 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
                 meteor_fixed_ht = (meteor_ht_beg + meteor_ht_end)/2
 
             # Compute the apparent radiant
-            shower.computeApparentRadiant(config.latitude, config.longitude, meteor_obj.jdt_ref, \
+            shower.computeApparentRadiant(config.latitude, config.longitude, meteor_obj.jdt_ref,
                 meteor_fixed_ht=meteor_fixed_ht)
 
             # Compute the angle between the meteor radiant and the great circle normal
@@ -586,9 +587,9 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
 
             # Compute angle between the meteor's beginning and end, and the shower radiant
             shower.radiant_vector = vectNorm(raDec2Vector(shower.ra, shower.dec))
-            begin_separation = np.degrees(angularSeparationVect(shower.radiant_vector, \
+            begin_separation = np.degrees(angularSeparationVect(shower.radiant_vector,
                 meteor_obj.meteor_begin_cartesian))
-            end_separation = np.degrees(angularSeparationVect(shower.radiant_vector, \
+            end_separation = np.degrees(angularSeparationVect(shower.radiant_vector,
                 meteor_obj.meteor_end_cartesian))
 
 
@@ -643,8 +644,8 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
 
             # If all heights (even those with +/- 1 frame) are outside the height range, reject the meteor
             if ((meteor_ht_p1 < filter_end_ht) or (meteor_ht_p1 > filter_beg_ht)) and \
-                ((meteor_ht    < filter_end_ht) or (meteor_ht    > filter_beg_ht)) and \
-                ((meteor_ht_m1 < filter_end_ht) or (meteor_ht_m1 > filter_beg_ht)):
+                ((meteor_ht < filter_end_ht) or (meteor_ht > filter_beg_ht)) and \
+                    ((meteor_ht_m1 < filter_end_ht) or (meteor_ht_m1 > filter_beg_ht)):
 
                 continue
 
@@ -652,7 +653,7 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
 
 
             # Compute the radiant elevation above the horizon
-            shower.azim, shower.elev = raDec2AltAz(shower.ra, shower.dec, meteor_obj.jdt_ref, \
+            shower.azim, shower.elev = raDec2AltAz(shower.ra, shower.dec, meteor_obj.jdt_ref,
                 config.latitude, config.longitude)
 
 
@@ -709,7 +710,7 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
     _, unique_showers_indices = np.unique(shower_name_list_temp, return_index=True)
     unique_shower_names = np.array(shower_name_list_temp)[unique_showers_indices]
     unique_showers = np.array(shower_list_temp)[unique_showers_indices]
-    shower_counts = [[shower_obj, shower_name_list_temp.count(shower_name)] for shower_obj, \
+    shower_counts = [[shower_obj, shower_name_list_temp.count(shower_name)] for shower_obj,
         shower_name in zip(unique_showers, unique_shower_names)]
     shower_counts = sorted(shower_counts, key=lambda x: x[1], reverse=True)
 
@@ -719,11 +720,12 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
 
         # Generate consistent colours
         colors_by_name = makeShowerColors(shower_list, color_map=color_map)
+
         def get_shower_color(shower):
             try:
-                return colors_by_name[shower.name] if shower else "0.4"
+                return colors_by_name[shower.name] if shower else sporadic_color
             except KeyError:
-                return 'gray'
+                return sporadic_color
 
         # Init the figure
         plt.figure()
@@ -763,7 +765,7 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
                 peak_color = 'tomato'
                 peak_alpha = 0.8
 
-            allsky_plot.scatter(meteor_obj.ra_array[-1], meteor_obj.dec_array[-1], c=peak_color, marker='+', \
+            allsky_plot.scatter(meteor_obj.ra_array[-1], meteor_obj.dec_array[-1], c=peak_color, marker='+',
                 s=2, zorder=5, alpha=peak_alpha)
 
             ### ###
@@ -772,11 +774,11 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
             ### Plot fitted great circle points ###
 
             # Find the GC phase angle of the beginning of the meteor
-            gc_beg_phase = meteor_obj.findGCPhase(meteor_obj.ra_array[0], meteor_obj.dec_array[0])[0]%360
+            gc_beg_phase = meteor_obj.findGCPhase(meteor_obj.ra_array[0], meteor_obj.dec_array[0])[0] % 360
 
             # If the meteor belongs to a shower, find the GC phase which ends at the shower
             if shower is not None:
-                gc_end_phase = meteor_obj.findGCPhase(shower.ra, shower.dec)[0]%360
+                gc_end_phase = meteor_obj.findGCPhase(shower.ra, shower.dec)[0] % 360
 
                 # Fix 0/360 wrap
                 if abs(gc_end_phase - gc_beg_phase) > 180:
@@ -791,11 +793,11 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
             else:
 
                 # If it's a sporadic, find the direction to which the meteor should extend
-                gc_end_phase = meteor_obj.findGCPhase(meteor_obj.ra_array[-1], \
-                    meteor_obj.dec_array[-1])[0]%360
+                gc_end_phase = meteor_obj.findGCPhase(meteor_obj.ra_array[-1],
+                    meteor_obj.dec_array[-1])[0] % 360
 
                 # Find the correct direction
-                if (gc_beg_phase - gc_end_phase)%360 > (gc_end_phase - gc_beg_phase)%360:
+                if (gc_beg_phase - gc_end_phase) % 360 > (gc_end_phase - gc_beg_phase) % 360:
                     gc_end_phase = gc_beg_phase - 170
 
                 else:
@@ -809,13 +811,13 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
             meteor_obj.gc_end_phase = gc_end_phase
 
             # Get phases 180 deg before the meteor
-            phase_angles = np.linspace(gc_end_phase, gc_beg_phase, 100)%360
+            phase_angles = np.linspace(gc_end_phase, gc_beg_phase, 100) % 360
 
             # Compute RA/Dec of points on the great circle
             ra_gc, dec_gc = meteor_obj.sampleGC(phase_angles)
 
             # Cull all points below the horizon
-            azim_gc, elev_gc = raDec2AltAz(ra_gc, dec_gc, meteor_obj.jdt_ref, config.latitude, \
+            azim_gc, elev_gc = raDec2AltAz(ra_gc, dec_gc, meteor_obj.jdt_ref, config.latitude,
                 config.longitude)
             temp_arr = np.c_[ra_gc, dec_gc]
             temp_arr = temp_arr[elev_gc > 0]
@@ -871,7 +873,7 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
                 association_radius = config.shower_max_radiant_separation
 
             # Compute coordinates on a circle around the given RA, Dec
-            ra_circle, dec_circle = sphericalPointFromHeadingAndDistance(shower.ra, shower.dec, \
+            ra_circle, dec_circle = sphericalPointFromHeadingAndDistance(shower.ra, shower.dec,
                 heading_arr, association_radius)
 
 
@@ -881,7 +883,7 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
 
             # Plot the shower name
             x_text, y_text = allsky_plot.raDec2XY(shower.ra, shower.dec)
-            allsky_plot.ax.text(x_text, y_text, shower.name, color='w', size=8, va='center', \
+            allsky_plot.ax.text(x_text, y_text, shower.name, color='w', size=8, va='center',
                 ha='center', zorder=6)
 
 
@@ -916,7 +918,7 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
                 else:
                     shower_name = "..."
 
-                allsky_plot.ax.text(-180, 73 - i*4, "{:s}: {:d}".format(shower_name, count), color='w', \
+                allsky_plot.ax.text(-180, 73 - i*4, "{:s}: {:d}".format(shower_name, count), color='w',
                     family='monospace')
 
 
@@ -926,7 +928,7 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
             if plot_activity:
 
                 # Plot the activity diagram
-                generateActivityDiagram(config, shower_list, ax_handle=ax_activity, \
+                generateActivityDiagram(config, shower_list, ax_handle=ax_activity,
                     sol_marker=[sol_min, sol_max], color_map=color_map)
 
 
@@ -960,8 +962,8 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
                     # Print date range
                     f.write("#                    Beg          |            End            \n")
                     f.write("#      -----------------------------------------------------\n")
-                    f.write("# Date | {:24s} | {:24s} \n".format(jd2Date(jd_min, \
-                        dt_obj=True).strftime("%Y%m%d %H:%M:%S.%f"), jd2Date(jd_max, \
+                    f.write("# Date | {:24s} | {:24s} \n".format(jd2Date(jd_min,
+                        dt_obj=True).strftime("%Y%m%d %H:%M:%S.%f"), jd2Date(jd_max,
                         dt_obj=True).strftime("%Y%m%d %H:%M:%S.%f")))
                     f.write("# Sol  | {:>24.2f} | {:>24.2f} \n".format(sol_min, sol_max))
 
@@ -1025,20 +1027,20 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
 
                         if shower is not None:
 
-                            f.write("{:24s}, {:20.12f}, {:>10.6f}, {:>6s}, {:6.2f}, {:+7.2f}, {:6.2f}, {:+7.2f}, {:6.2f}, {:+7.2f}, {:9.3f}, {:8.3f}, {:12.3f}, {:12.3f}, {:>6s}, {:>6s}, {:>7s}\n".format(jd2Date(meteor_obj.jdt_ref, dt_obj=True).strftime("%Y%m%d %H:%M:%S.%f"), \
-                                meteor_obj.jdt_ref, meteor_obj.lasun, shower.name, \
-                                meteor_obj.ra_array[0]%360, meteor_obj.dec_array[0], \
-                                meteor_obj.ra_array[-1]%360, meteor_obj.dec_array[-1], \
-                                meteor_obj.radiant_ra%360, meteor_obj.radiant_dec, \
-                                np.degrees(meteor_obj.theta0), np.degrees(meteor_obj.phi0), \
+                            f.write("{:24s}, {:20.12f}, {:>10.6f}, {:>6s}, {:6.2f}, {:+7.2f}, {:6.2f}, {:+7.2f}, {:6.2f}, {:+7.2f}, {:9.3f}, {:8.3f}, {:12.3f}, {:12.3f}, {:>6s}, {:>6s}, {:>7s}\n".format(jd2Date(meteor_obj.jdt_ref, dt_obj=True).strftime("%Y%m%d %H:%M:%S.%f"),
+                                meteor_obj.jdt_ref, meteor_obj.lasun, shower.name,
+                                meteor_obj.ra_array[0] % 360, meteor_obj.dec_array[0],
+                                meteor_obj.ra_array[-1] % 360, meteor_obj.dec_array[-1],
+                                meteor_obj.radiant_ra % 360, meteor_obj.radiant_dec,
+                                np.degrees(meteor_obj.theta0), np.degrees(meteor_obj.phi0),
                                 meteor_obj.gc_beg_phase, meteor_obj.gc_end_phase, peak_mag, abs_mag, rad_elev))
 
                         else:
-                            f.write("{:24s}, {:20.12f}, {:>10.6f}, {:>6s}, {:6.2f}, {:+7.2f}, {:6.2f}, {:+7.2f}, {:>6s}, {:>7s}, {:9.3f}, {:8.3f}, {:12.3f}, {:12.3f}, {:>6s}, {:>6s}, {:>7s}\n".format(jd2Date(meteor_obj.jdt_ref, dt_obj=True).strftime("%Y%m%d %H:%M:%S.%f"), \
-                                meteor_obj.jdt_ref, meteor_obj.lasun, '...', meteor_obj.ra_array[0]%360, \
-                                meteor_obj.dec_array[0], meteor_obj.ra_array[-1]%360, \
-                                meteor_obj.dec_array[-1], "None", "None", np.degrees(meteor_obj.theta0), \
-                                np.degrees(meteor_obj.phi0), meteor_obj.gc_beg_phase, \
+                            f.write("{:24s}, {:20.12f}, {:>10.6f}, {:>6s}, {:6.2f}, {:+7.2f}, {:6.2f}, {:+7.2f}, {:>6s}, {:>7s}, {:9.3f}, {:8.3f}, {:12.3f}, {:12.3f}, {:>6s}, {:>6s}, {:>7s}\n".format(jd2Date(meteor_obj.jdt_ref, dt_obj=True).strftime("%Y%m%d %H:%M:%S.%f"),
+                                meteor_obj.jdt_ref, meteor_obj.lasun, '...', meteor_obj.ra_array[0] % 360,
+                                meteor_obj.dec_array[0], meteor_obj.ra_array[-1] % 360,
+                                meteor_obj.dec_array[-1], "None", "None", np.degrees(meteor_obj.theta0),
+                                np.degrees(meteor_obj.phi0), meteor_obj.gc_beg_phase,
                                 meteor_obj.gc_end_phase, peak_mag, abs_mag, rad_elev))
 
 
@@ -1071,24 +1073,26 @@ if __name__ == "__main__":
     # Init the command line arguments parser
     arg_parser = argparse.ArgumentParser(description="Perform single-station established shower association on an FTPdetectinfo file.")
 
-    arg_parser.add_argument('ftpdetectinfo_path', metavar='FTPDETECTINFO_PATH', nargs='+', type=str, \
+    arg_parser.add_argument('ftpdetectinfo_path', metavar='FTPDETECTINFO_PATH', nargs='+', type=str,
         help='Path to an FTPdetectinfo file or a directory with an FTPdetectinfo file.')
 
-    arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str, \
+    arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str,
         help="Path to a config file which will be used instead of the default one.")
 
-    arg_parser.add_argument('-s', '--shower', metavar='SHOWER', type=str, \
+    arg_parser.add_argument('-s', '--shower', metavar='SHOWER', type=str,
         help="Associate just this single shower given its code (e.g. PER, ORI, ETA).")
 
-    arg_parser.add_argument('-f', '--fluxshowers', action="store_true", \
+    arg_parser.add_argument('-f', '--fluxshowers', action="store_true",
         help="""Only show shower association for showers used for flux estimation.""")
 
-    arg_parser.add_argument('-x', '--hideplot', action="store_true", \
+    arg_parser.add_argument('-x', '--hideplot', action="store_true",
         help="""Do not show the plot on the screen.""")
 
-    arg_parser.add_argument('-p', '--palette', metavar='PALETTE', type=str, \
+    arg_parser.add_argument('-p', '--palette', metavar='PALETTE', type=str,
         help="color palette to use - one of viridis, gist_ncar, rainbow etc")
 
+    arg_parser.add_argument('--sporadic_color', metavar='SPORCOLOR', type=str, 
+        help="color to use for sporadics - default gray ")
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
@@ -1148,10 +1152,18 @@ if __name__ == "__main__":
     else:
         color_map = cml_args.palette
 
+    sporadic_color = cml_args.sporadic_color
+    if sporadic_color is None:
+        sporadic_color = config.sporadic_color
+    if sporadic_color not in mcolors.CSS4_COLORS:
+        sporadic_color = 'gray'
+
+       
+
     # Perform shower association
-    associations, shower_counts = showerAssociation(config, ftpdetectinfo_path_list, \
+    associations, shower_counts = showerAssociation(config, ftpdetectinfo_path_list,
         shower_code=cml_args.shower, show_plot=(not cml_args.hideplot), save_plot=True, plot_activity=True,
-        flux_showers=cml_args.fluxshowers, color_map=color_map)
+        flux_showers=cml_args.fluxshowers, color_map=color_map, sporadic_color=sporadic_color)
 
 
     # Print results to screen
@@ -1169,6 +1181,3 @@ if __name__ == "__main__":
 
     else:
         print("No meteors!")
-
-
-

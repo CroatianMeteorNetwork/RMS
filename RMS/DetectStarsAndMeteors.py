@@ -320,7 +320,9 @@ def saveDetections(detection_results, ff_dir, config, output_suffix=''):
             continue
 
         # Construct the table of the star parameters
-        star_data = zip(y2, x2, amplitude, intensity, fwhm, background, snr, saturated_count)
+        # CALSTARS format: Y(0) X(1) IntensSum(2) Ampltd(3) FWHM(4) BgLvl(5) SNR(6) NSatPx(7)
+        # Note: intensity=IntensSum (integrated), amplitude=Ampltd (peak)
+        star_data = zip(y2, x2, intensity, amplitude, fwhm, background, snr, saturated_count)
 
         # Add star info to the star list
         star_list.append([ff_name, star_data])
@@ -440,6 +442,7 @@ def detectStarsAndMeteorsDirectory(dir_path, config, output_suffix=''):
 
     # Get the detection results from the queue
     detection_results = detector.getResults()
+    detector.shutdownManager()
 
 
     # Save detection to disk

@@ -84,48 +84,51 @@ def read(directory, filename, array=False, full_filename=False, memmap=True):
 
     # Make sure the file starts with "FF_"
     if (filename.startswith('FF') and ('.fits' in filename)) or full_filename:
-        fid = open(os.path.join(directory, filename), "rb")
+        file_path = os.path.join(directory, filename)
     else:
-        fid = open(os.path.join(directory, "FF_" + filename + ".fits"), "rb")
+        file_path = os.path.join(directory, "FF_" + filename + ".fits")
 
     # Init an empty FF structure
     ff = FFStruct()
 
-    # Read in the FITS
-    hdulist = fits.open(fid, memmap=memmap)
+    # Read in the FITS. Pass the path (not a pre-opened handle) so astropy owns and closes
+    # the file, and use a context manager so the file/memmap is always released, even on
+    # error. The image data is copied out of the HDUs (below) so it stays valid after the
+    # file is closed. Without the copy, returning memmap-backed views keeps a file handle
+    # open per FF; reading many FFs in sequence and retaining the arrays then exhausts the
+    # process file descriptor limit ("too many open files"). See issue #406.
+    with fits.open(file_path, memmap=memmap) as hdulist:
 
-    # Read the header
-    head = hdulist[0].header
+        # Read the header
+        head = hdulist[0].header
 
-    # Read in the data from the header
-    ff.nrows = head['NROWS']
-    ff.ncols = head['NCOLS']
-    ff.nbits = head['NBITS']
-    ff.nframes = head['NFRAMES']
-    ff.first = head['FIRST']
-    ff.camno = head['CAMNO']
-    ff.fps = head['FPS']
+        # Read in the data from the header
+        ff.nrows = head['NROWS']
+        ff.ncols = head['NCOLS']
+        ff.nbits = head['NBITS']
+        ff.nframes = head['NFRAMES']
+        ff.first = head['FIRST']
+        ff.camno = head['CAMNO']
+        ff.fps = head['FPS']
 
-    # Check for the DATE-OBS field and read datetime from filename it if it doesn't exist
-    if 'DATE-OBS' in head:
-        ff.starttime = head['DATE-OBS']
-    else:
-        ff.starttime = filenameToDatetimeStr(filename, iso8601=True)
+        # Check for the DATE-OBS field and read datetime from filename it if it doesn't exist
+        if 'DATE-OBS' in head:
+            ff.starttime = head['DATE-OBS']
+        else:
+            ff.starttime = filenameToDatetimeStr(filename, iso8601=True)
 
-    # Read in the image data
-    ff.maxpixel = hdulist[1].data
-    ff.maxframe = hdulist[2].data
-    ff.avepixel = hdulist[3].data
-    ff.stdpixel = hdulist[4].data
+        # Read in the image data, copying it so it remains valid (and detached from the
+        # memmap) after the file is closed
+        ff.maxpixel = hdulist[1].data.copy()
+        ff.maxframe = hdulist[2].data.copy()
+        ff.avepixel = hdulist[3].data.copy()
+        ff.stdpixel = hdulist[4].data.copy()
 
     if array:
         ff.array = np.dstack([ff.maxpixel, ff.maxframe, ff.avepixel, ff.stdpixel])
 
         ff.array = np.swapaxes(ff.array, 0, 1)
         ff.array = np.swapaxes(ff.array, 0, 2)
-
-    # CLose the FITS file
-    hdulist.close()
 
     return ff
 
@@ -205,6 +208,12 @@ if __name__ == "__main__":
 
     ff.ncols = wid
     ff.nrows = ht
+    ff.nbits = 8
+    ff.nframes = 256
+    ff.first = 0
+    ff.camno = 1
+    ff.fps = 25.0
+    ff.starttime = "2022-02-26T18:17:11.737000"
 
     # ff.maxpixel = np.zeros((ht, wid), dtype=np.uint8)
     # ff.avepixel = np.zeros((ht, wid), dtype=np.uint8) + 10

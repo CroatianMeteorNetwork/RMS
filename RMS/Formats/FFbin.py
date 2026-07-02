@@ -44,58 +44,61 @@ def read(directory, filename, array=False, full_filename=False):
     """
     
     if (filename.startswith("FF") and ('.bin' in filename)) or full_filename:
-        fid = open(os.path.join(directory, filename), "rb")
+        file_path = os.path.join(directory, filename)
     else:
-        fid = open(os.path.join(directory, "FF" + filename + ".bin"), "rb")
+        file_path = os.path.join(directory, "FF" + filename + ".bin")
 
     ff = FFStruct()
-    
-    # Check if it is the new of the old CAMS data format
-    version_flag = int(np.fromfile(fid, dtype=np.int32, count = 1))
 
-    # Old format
-    if version_flag > 0:
+    # Read inside a context manager so the file handle is always closed, even on error
+    with open(file_path, "rb") as fid:
 
-        ff.nrows = version_flag
-        ff.ncols = int(np.fromfile(fid, dtype=np.uint32, count = 1))
-        ff.nbits = int(np.fromfile(fid, dtype=np.uint32, count = 1))
-        ff.nframes = 2**ff.nbits
-        ff.first = int(np.fromfile(fid, dtype=np.uint32, count = 1))
-        ff.camno = int(np.fromfile(fid, dtype=np.uint32, count = 1))
+        # Check if it is the new of the old CAMS data format
+        version_flag = int(np.fromfile(fid, dtype=np.int32, count = 1))
 
-        ff.decimation_fact = 1
+        # Old format
+        if version_flag > 0:
 
-        
+            ff.nrows = version_flag
+            ff.ncols = int(np.fromfile(fid, dtype=np.uint32, count = 1))
+            ff.nbits = int(np.fromfile(fid, dtype=np.uint32, count = 1))
+            ff.nframes = 2**ff.nbits
+            ff.first = int(np.fromfile(fid, dtype=np.uint32, count = 1))
+            ff.camno = int(np.fromfile(fid, dtype=np.uint32, count = 1))
 
-    # New format
-    elif version_flag == -1:
+            ff.decimation_fact = 1
 
-        ff.nrows = int(np.fromfile(fid, dtype=np.uint32, count = 1))
-        ff.ncols = int(np.fromfile(fid, dtype=np.uint32, count = 1))
 
-        ff.nframes = int(np.fromfile(fid, dtype=np.uint32, count = 1))
-        ff.first = int(np.fromfile(fid, dtype=np.uint32, count = 1))
-        ff.camno = int(np.fromfile(fid, dtype=np.uint32, count = 1))
 
-        ff.decimation_fact = int(np.fromfile(fid, dtype=np.uint32, count = 1))
+        # New format
+        elif version_flag == -1:
 
-        ff.interleave_flag = int(np.fromfile(fid, dtype=np.uint32, count = 1))
+            ff.nrows = int(np.fromfile(fid, dtype=np.uint32, count = 1))
+            ff.ncols = int(np.fromfile(fid, dtype=np.uint32, count = 1))
 
-        ff.fps = float(np.fromfile(fid, dtype=np.uint32, count = 1))/1000
+            ff.nframes = int(np.fromfile(fid, dtype=np.uint32, count = 1))
+            ff.first = int(np.fromfile(fid, dtype=np.uint32, count = 1))
+            ff.camno = int(np.fromfile(fid, dtype=np.uint32, count = 1))
 
-    
-    if array:
-        N = 4*ff.nrows*ff.ncols
-    
-        ff.array = np.reshape(np.fromfile(fid, dtype=np.uint8, count=N), (4, ff.nrows, ff.ncols))
-        
-    else:
-        N = ff.nrows*ff.ncols
-    
-        ff.maxpixel = np.reshape(np.fromfile(fid, dtype=np.uint8, count=N), (ff.nrows, ff.ncols))
-        ff.maxframe = np.reshape(np.fromfile(fid, dtype=np.uint8, count=N), (ff.nrows, ff.ncols))
-        ff.avepixel = np.reshape(np.fromfile(fid, dtype=np.uint8, count=N), (ff.nrows, ff.ncols))
-        ff.stdpixel = np.reshape(np.fromfile(fid, dtype=np.uint8, count=N), (ff.nrows, ff.ncols))
+            ff.decimation_fact = int(np.fromfile(fid, dtype=np.uint32, count = 1))
+
+            ff.interleave_flag = int(np.fromfile(fid, dtype=np.uint32, count = 1))
+
+            ff.fps = float(np.fromfile(fid, dtype=np.uint32, count = 1))/1000
+
+
+        if array:
+            N = 4*ff.nrows*ff.ncols
+
+            ff.array = np.reshape(np.fromfile(fid, dtype=np.uint8, count=N), (4, ff.nrows, ff.ncols))
+
+        else:
+            N = ff.nrows*ff.ncols
+
+            ff.maxpixel = np.reshape(np.fromfile(fid, dtype=np.uint8, count=N), (ff.nrows, ff.ncols))
+            ff.maxframe = np.reshape(np.fromfile(fid, dtype=np.uint8, count=N), (ff.nrows, ff.ncols))
+            ff.avepixel = np.reshape(np.fromfile(fid, dtype=np.uint8, count=N), (ff.nrows, ff.ncols))
+            ff.stdpixel = np.reshape(np.fromfile(fid, dtype=np.uint8, count=N), (ff.nrows, ff.ncols))
 
     return ff
 

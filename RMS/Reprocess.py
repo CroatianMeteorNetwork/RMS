@@ -39,7 +39,8 @@ from Utils.PlotFieldsums import plotFieldsums
 from Utils.RMS2UFO import FTPdetectinfo2UFOOrbitInput
 from Utils.ShowerAssociation import showerAssociation
 from Utils.PlotTimeIntervals import plotFFTimeIntervals
-from RMS.Formats.ObservationSummary import addObsParam, getObsDBConn
+from RMS.Formats.ObservationSummary import addObsParam, getObservationSummaryDict, saveObservationSummaryDict, \
+    startObservationSummaryReport
 from RMS.Formats.ObservationSummary import serialize, finalizeObservationSummary
 from Utils.AuditConfig import compareConfigs
 from RMS.Misc import RmsDateTime, tarWithProgress
@@ -204,7 +205,7 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
 
 
 
-        obs_db_conn = getObsDBConn(config)
+        obs_dict = getObservationSummaryDict(night_data_dir)
         # Filter out detections using machine learning
         if config.ml_filter > 0:
 
@@ -212,10 +213,10 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
 
             ff_detected = filterFTPdetectinfoML(config, os.path.join(night_data_dir, ftpdetectinfo_name), 
                 threshold=config.ml_filter, keep_pngs=False, clear_prev_run=True)
-            addObsParam(obs_db_conn, "detections_after_ml", len(ff_detected))
+            addObsParam(obs_dict, "detections_after_ml", len(ff_detected))
 
-        addObsParam(obs_db_conn,"detections_after_ml", len(readFTPdetectinfo(night_data_dir,ftpdetectinfo_name)))
-        obs_db_conn.close()
+        addObsParam(obs_dict,"detections_after_ml", len(readFTPdetectinfo(night_data_dir,ftpdetectinfo_name)))
+        saveObservationSummaryDict(obs_dict, night_data_dir)
 
         # Get the platepar file
         platepar, platepar_path, platepar_fmt = getPlatepar(config, night_data_dir)
@@ -231,21 +232,21 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
             # Run astrometry check and refinement
             platepar, fit_status = autoCheckFit(config, platepar, calstars_data)
 
-            obs_db_conn = getObsDBConn(config)
+            obs_dict = getObservationSummaryDict(night_data_dir)
             # If the fit was successful, apply the astrometry to detected meteors
             if fit_status:
 
                 log.info('Astrometric calibration SUCCESSFUL!')
-                addObsParam(obs_db_conn, "photometry_good", "True")
+                addObsParam(obs_dict, "photometry_good", "True")
                 # Save the refined platepar to the night directory and as default
                 platepar.write(os.path.join(night_data_dir, config.platepar_name), fmt=platepar_fmt)
                 platepar.write(platepar_path, fmt=platepar_fmt)
 
             else:
                 log.info('Astrometric calibration FAILED!, Using old platepar for calibration...')
-                addObsParam(obs_db_conn, "photometry_good", "False")
+                addObsParam(obs_dict, "photometry_good", "False")
 
-            obs_db_conn.close()
+            saveObservationSummaryDict(obs_dict)
             # If a flat is used, disable vignetting correction
             if config.use_flat:
                 platepar.vignetting_coeff = 0.0
@@ -285,7 +286,8 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
             log.info("Performing single station shower association...")
             try:
                 showerAssociation(config, [os.path.join(night_data_dir, ftpdetectinfo_name)], 
-                    save_plot=True, plot_activity=True, color_map=config.shower_color_map)
+                    save_plot=True, plot_activity=True, color_map=config.shower_color_map, 
+                    sporadic_color=config.sporadic_color)
 
             except Exception as e:
                 log.debug('Shower association failed with the message:\n' + repr(e))
@@ -375,7 +377,7 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
     # Archive all fieldsums to one archive
     archiveFieldsums(night_data_dir)
 
-    # List for any extra files which will be copied to the night archive directory. Full paths have to be 
+    # List for any extra files which will be copied to the archive directories. Full paths have to be
     #   given
     extra_files = []
 
@@ -496,10 +498,10 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
         # Add the timelapse to the extra files
         if intervals_path is not None:
             extra_files.append(intervals_path)
-        obs_db_conn = getObsDBConn(config)
-        addObsParam(obs_db_conn,"jitter_quality",jitter_quality)
-        addObsParam(obs_db_conn,"dropped_frame_rate",dropped_frame_rate)
-        obs_db_conn.close()
+        obs_dict = getObservationSummaryDict(night_data_dir)
+        addObsParam(obs_dict,"jitter_quality",jitter_quality)
+        addObsParam(obs_dict,"dropped_frame_rate",dropped_frame_rate)
+
 
     except Exception as e:
         log.debug('Plotting timestamp interval failed with message:\n' + repr(e))
@@ -644,19 +646,20 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
                     celestial_coords_given=(platepar is not None))
 
     try:
+        log.info("Calling finalize observation summary")
         observation_summary_path_file_name, observation_summary_json_path_file_name = (
             finalizeObservationSummary(config, night_data_dir))
-        
+        log.info("Returned from finalize observation summary")
         extra_files.append(observation_summary_path_file_name)
         extra_files.append(observation_summary_json_path_file_name)
-        
-        log.info("\n\nObservation Summary\n===================\n\n" + serialize(config) + "\n\n")
+
 
     except Exception as e:
-        log.debug('Generating Observation Summary failed with message:\n' + repr(e))
+        log.debug('Finalizing Observation Summary failed with message:\n' + repr(e))
         log.debug(repr(traceback.format_exception(*sys.exc_info())))
 
-
+    obs_summary_to_log = serialize(config, night_directory=night_data_dir, final=True)
+    log.info("\n\nObservation Summary\n===================\n\n" + obs_summary_to_log + "\n\n")
 
     night_archive_dir = os.path.join(os.path.abspath(config.data_dir), config.archived_dir,
         night_data_dir_name)
@@ -666,11 +669,11 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
     log.info('Archiving detections to ' + night_archive_dir)
     
     # Archive the detections
-    archive_name = archiveDetections(night_data_dir, night_archive_dir, ff_detected, config, 
-        extra_files=extra_files)
+    archive_name, imgdata_archive_name, metadata_archive_name = archiveDetections(night_data_dir,
+                                            night_archive_dir, ff_detected, config, extra_files=extra_files)
 
 
-    return night_archive_dir, archive_name, detector
+    return night_archive_dir, archive_name, imgdata_archive_name, metadata_archive_name, detector
 
 
 def cleanupTempArtifacts(config):
@@ -777,6 +780,19 @@ def processFramesFiles(config):
         remove_source=(config.frame_cleanup == "delete")
     )
 
+    # -- 4. prune empty directories left behind by per-block cleanup --------
+    # Per-block cleanup may fail to rmdir shared parent directories (e.g. year
+    # or day dirs) when sibling blocks still have files at the time of pruning.
+    # Walk bottom-up and remove any empty subdirectories under frame_dir.
+    if config.frame_cleanup in ('delete', 'tar'):
+        for root, dirs, files in os.walk(frame_dir, topdown=False):
+            if root == frame_dir:
+                continue
+            try:
+                os.rmdir(root)  # succeeds only if empty
+            except OSError:
+                pass
+
     return archive_paths
 
 
@@ -826,8 +842,12 @@ if __name__ == "__main__":
 
             log.info("Using all available cores for detection.")
 
+    log.info(f"Starting Observation summary report for {cml_args.dir_path[0]}")
+    startObservationSummaryReport(config, cml_args.dir_path[0], None)
+
     # Process the night
-    night_archive_dir, archive_name, detector = processNight(cml_args.dir_path[0], config)
+    night_archive_dir, archive_name, imgdata_archive_name, metadata_archive_name, detector =  \
+                                                    processNight(cml_args.dir_path[0], config)
 
     if cml_args.run_extl_script:
         # Run the external script
@@ -836,6 +856,10 @@ if __name__ == "__main__":
     # Upload the archive, if upload is enabled
     if config.upload_enabled:
 
+        # Add metadata archive first, so it might get uploaded first
+        files_to_add_list_unfiltered = [metadata_archive_name, imgdata_archive_name, archive_name]
+        files_to_add_list = [f for f in files_to_add_list_unfiltered if f is not None]
+
         # Init the upload manager
         log.info('Starting the upload manager...')
 
@@ -843,8 +867,8 @@ if __name__ == "__main__":
         upload_manager.start()
 
         # Add file for upload
-        log.info('Adding file to upload list: ' + archive_name)
-        upload_manager.addFiles([archive_name])
+        log.info(f'Adding files to upload list: {files_to_add_list}')
+        upload_manager.addFiles(files_to_add_list)
 
         # Stop the upload manager
         if upload_manager.is_alive():

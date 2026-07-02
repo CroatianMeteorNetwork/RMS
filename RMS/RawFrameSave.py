@@ -21,7 +21,6 @@ import sys
 import traceback
 import time
 import multiprocessing
-import signal
 from math import floor
 
 import cv2
@@ -103,6 +102,17 @@ class RawFrameSaver(multiprocessing.Process):
             # If timestamp is 0, then we've reached the end and this is the last block 
             if timestamp == 0:
                 break
+
+            # Handle when frame has only two channels (yuyv/uyvy)
+            # OpenCV only supports 1, 3, or 4 color channels
+            if (len(frame.shape) == 3) and (frame.shape[2] == 2):
+                # If UYVY image given, luma (Y) channel is channel 1
+                if self.config.uyvy_pixelformat:
+                    frame = frame[:, :, 1]
+                
+                # Otherwise, take the first available channel
+                else:
+                    frame = frame[:, :, 0]
 
             # In case the timestamp day changes mid-block
             if self.day_of_year != time.strftime("%j", time.gmtime(timestamp)):
@@ -286,5 +296,3 @@ class RawFrameSaver(multiprocessing.Process):
             log.debug(repr(traceback.format_exception(*sys.exc_info())))
             self.exit.set()
             self.run_exited.set()
-
-

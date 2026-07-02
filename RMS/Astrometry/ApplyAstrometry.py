@@ -263,7 +263,74 @@ def photomLineMinimize(params, px_sum, radius, catalog_mags, fixed_vignetting, w
 
 
 
-def photometryFit(px_intens_list, radius_list, catalog_mags, fixed_vignetting=None, weights=None, 
+def limitingMagnitude(mags, snr_arr, snr_targets=(5, 10), exclude_mask=None):
+    """ Fit log10(S/N) = a*mag + b and return limiting magnitudes at given S/N targets.
+
+        Physical basis: in the background-limited regime S/N is proportional to flux and
+        flux = 10**(-0.4*mag), so log10(S/N) is linear in magnitude.
+
+    Arguments:
+        mags: [ndarray] Apparent (vignetting + extinction corrected) magnitudes per star.
+        snr_arr: [ndarray] Signal-to-noise ratio per star.
+
+    Keyword arguments:
+        snr_targets: [tuple] S/N values at which to report the limiting magnitude.
+        exclude_mask: [ndarray of bool] True = exclude star from the fit (e.g. saturated).
+
+    Return:
+        [dict] or None if the fit cannot be performed. Keys:
+            'slope', 'intercept' : fit coefficients a, b (log10(S/N) = a*mag + b)
+            'r2'                 : coefficient of determination
+            'lm'                 : dict {snr_target: limiting_magnitude}
+            'eqn_str'            : multi-line annotation string for the plot
+    """
+
+    mags = np.array(mags, dtype=np.float64)
+    snr_arr = np.array(snr_arr, dtype=np.float64)
+
+    # Keep only finite magnitudes and positive S/N (log10 requires S/N > 0)
+    mask = np.isfinite(mags) & np.isfinite(snr_arr) & (snr_arr > 0)
+
+    # Exclude flagged stars (e.g. saturated), whose flux is capped and breaks the log-linear trend
+    if exclude_mask is not None:
+        mask &= ~np.array(exclude_mask, dtype=bool)
+
+    # Need at least 3 stars for a meaningful fit
+    if np.sum(mask) < 3:
+        return None
+
+    mags_fit = mags[mask]
+    log_snr = np.log10(snr_arr[mask])
+
+    # Fit a line: log10(S/N) = a*mag + b
+    a, b = np.polyfit(mags_fit, log_snr, 1)
+
+    # A non-negative slope is unphysical (fainter stars must have lower S/N) and makes the
+    # limiting magnitude inversion meaningless
+    if a >= 0:
+        return None
+
+    # Coefficient of determination
+    log_snr_pred = a*mags_fit + b
+    ss_res = np.sum((log_snr - log_snr_pred)**2)
+    ss_tot = np.sum((log_snr - np.mean(log_snr))**2)
+    r2 = 1.0 - ss_res/ss_tot if ss_tot > 0 else 0.0
+
+    # Invert the model so the limiting magnitude is expressed directly as a function of S/N:
+    # LM = (1/a)*log10(S/N) - b/a
+    c = 1.0/a
+    d = -b/a
+    lm = {target: c*np.log10(target) + d for target in snr_targets}
+
+    eqn_str = "LM = {:.3f} log10(S/N) + {:.2f} (R2={:.2f})".format(c, d, r2)
+    for target in snr_targets:
+        eqn_str += "\nLM = {:.2f} mag @ S/N = {:g}".format(lm[target], target)
+
+    return {'slope': a, 'intercept': b, 'r2': r2, 'lm': lm, 'eqn_str': eqn_str}
+
+
+
+def photometryFit(px_intens_list, radius_list, catalog_mags, fixed_vignetting=None, weights=None,
                   exclude_list=None):
     """ Fit the photometry on given data.
 
@@ -293,7 +360,13 @@ def photometryFit(px_intens_list, radius_list, catalog_mags, fixed_vignetting=No
         weights = np.ones(len(px_intens_list))
     else:
         # Normalize the weights to have a sum of 1
-        weights = np.array(weights)/np.sum(weights)
+        weights = np.array(weights)
+        weight_sum = np.sum(weights)
+        if weight_sum > 0:
+            weights = weights / weight_sum
+        else:
+            # Fall back to equal weights if sum is zero
+            weights = np.ones(len(px_intens_list)) / len(px_intens_list)
 
     # If the exclude list is not given, set it to an empty list
     if exclude_list is None:
@@ -452,8 +525,8 @@ def getFOVSelectionRadius(platepar):
     ur_sep = np.degrees(angularSeparation(np.radians(ra3), np.radians(dec3), np.radians(ra_mid), np.radians(dec_mid)))
     ll_sep = np.degrees(angularSeparation(np.radians(ra4), np.radians(dec4), np.radians(ra_mid), np.radians(dec_mid)))
 
-    # Take the average radius
-    fov_radius = np.mean([ul_sep, lr_sep, ur_sep, ll_sep])
+    # Take the maximum radius to include all corners
+    fov_radius = np.max([ul_sep, lr_sep, ur_sep, ll_sep])
 
     return fov_radius
 
@@ -484,14 +557,208 @@ def rotationWrtHorizon(platepar):
     azim_up, alt_up = cyTrueRaDec2ApparentAltAz(np.radians(ra_arr[1]), np.radians(dec_arr[1]), jd_arr[1], \
         np.radians(platepar.lat), np.radians(platepar.lon), platepar.refraction)
 
+    # Compute the azimuth difference, wrapping across the 0/360 deg boundary. Without this, a FOV centre
+    # pointing near due north (azimuth ~ 0/360 deg) puts the two sample points on opposite sides of the
+    # wrap, producing a spurious ~360 deg difference that pins the rotation near +/-180 deg and makes it
+    # insensitive to the true camera roll.
+    d_azim = (azim_up - azim_mid + np.pi)%(2*np.pi) - np.pi
+
     # Compute the rotation wrt horizon (deg)
-    rot_angle = np.degrees(np.arctan2(alt_up - alt_mid, azim_up - azim_mid))
+    rot_angle = np.degrees(np.arctan2(alt_up - alt_mid, d_azim))
 
     # Wrap output to <-180, 180] range
     if rot_angle > 180:
         rot_angle -= 360
 
     return rot_angle
+
+
+
+def screenNudgeToAzAltDelta(platepar, screen_dx, screen_dy, key_increment, screen_y_sign=-1, h_px=10):
+    """ Map a requested on-screen nudge direction to a change in the apparent reference azimuth and
+        altitude, so that pressing a pan key always moves the view in the apparent screen direction
+        regardless of the camera roll (rotation w.r.t. horizon) or FOV size.
+
+        The screen direction is sampled at the FOV centre as a 3D tangent on the sky, and the pointing
+        is then advanced by rotating its unit vector along the corresponding great circle by exactly
+        key_increment degrees. This automatically absorbs the camera roll and lens distortion, keeps
+        every step an equal angular size regardless of pointing, and carries the pointing cleanly over
+        the zenith (no alt = 90 deg singularity). The raw-space rotationWrtHorizon angle is only used as
+        a fallback when the sampling is degenerate.
+
+    Arguments:
+        platepar: [Platepar object] Input platepar.
+        screen_dx: [float] Requested screen direction X (+1 = right, -1 = left, 0 = none).
+        screen_dy: [float] Requested screen direction Y (+1 = up, -1 = down, 0 = none).
+        key_increment: [float] Desired angular step size (deg).
+
+    Keyword arguments:
+        screen_y_sign: [int] Sign mapping the image +Y axis to the screen vertical. -1 when the image
+            view is Y-inverted for display (SkyFit2 calls img_frame.invertY()), i.e. image +Y is screen
+            down. Default: -1.
+        h_px: [float] Finite-difference pixel step used to sample the local Jacobian. Default: 10.
+
+    Return:
+        (delta_az, delta_alt): [tuple of float] Degrees to add to az_centre/alt_centre. Returns
+            (0.0, 0.0) when the nudge is degenerate or non-finite (no-op).
+    """
+
+    # Numerical safety constants
+    NORM_EPS = 1e-12                        # threshold below which a sampled direction is treated as null
+    AZ_DELTA_CAP = 45.0                     # max azimuth step (deg) applied in the degenerate fallback
+
+
+    def _wrap(d):
+        # Wrap an angle difference (radians) to the (-pi, pi] range
+        return (d + np.pi)%(2*np.pi) - np.pi
+
+
+    def _vec(x, y):
+        # Unit pointing vector (horizontal Cartesian: North, East, Up) of an image pixel
+        jd_arr, ra_arr, dec_arr, _ = xyToRaDecPP([jd2Date(platepar.JD)], [x], [y], [1], platepar, \
+            extinction_correction=False, precompute_pointing_corr=True)
+        az, alt = cyTrueRaDec2ApparentAltAz(np.radians(ra_arr[0]), np.radians(dec_arr[0]), jd_arr[0], \
+            np.radians(platepar.lat), np.radians(platepar.lon), platepar.refraction)
+        ca = np.cos(alt)
+        return np.array([ca*np.cos(az), ca*np.sin(az), np.sin(alt)])
+
+
+    # Requested direction in image-pixel space (screen up maps to image -Y when the view is Y-inverted)
+    dX = screen_dx
+    dY = screen_y_sign*screen_dy
+
+    # Sample at the distortion centre (optical axis) and one h_px step in the requested screen direction,
+    # as 3D unit vectors. The reference az_centre/alt_centre track the optical axis (not the image
+    # midpoint when force_distortion_centre is False), so the screen tangent must be sampled there too,
+    # otherwise on a distorted wide field the nudge direction is taken from the wrong part of the image.
+    # Working in 3D (rather than with az/alt gradients) keeps the screen direction well-defined right up
+    # to the zenith, where the az/alt parametrisation is singular.
+    xc, yc = platepar.getDistortionCentre()
+    p_c = _vec(xc, yc)
+    p_d = _vec(xc + h_px*dX, yc + h_px*dY)
+
+    # Tangent at the centre toward the requested screen direction (component of p_d perpendicular to p_c)
+    t = p_d - np.dot(p_d, p_c)*p_c
+    tn = np.linalg.norm(t)
+
+    # Degenerate sampling -> fall back to rotating the legacy raw command by the rotation w.r.t. horizon
+    if (tn < NORM_EPS) or (not np.isfinite(tn)):
+        theta = np.radians(rotationWrtHorizon(platepar))
+        cmd_az = key_increment*screen_dx
+        cmd_alt = key_increment*screen_dy
+        d_az = np.cos(theta)*cmd_az - np.sin(theta)*cmd_alt
+        d_alt = np.sin(theta)*cmd_az + np.cos(theta)*cmd_alt
+        if not (np.isfinite(d_az) and np.isfinite(d_alt)):
+            return 0.0, 0.0
+        return float(np.clip(d_az, -AZ_DELTA_CAP, AZ_DELTA_CAP)), float(d_alt)
+
+    t = t/tn
+
+    # Great-circle normal for the requested screen motion
+    k = np.cross(p_c, t)
+    kn = np.linalg.norm(k)
+    if (kn < NORM_EPS) or (not np.isfinite(kn)):
+        return 0.0, 0.0
+    k = k/kn
+
+    # Rotate the reference pointing about k by the step angle (Rodrigues). This advances the pointing an
+    # exact `key_increment` degrees of arc anywhere on the sky and carries it straight over the zenith --
+    # azimuth flips by 180 deg and the elevation turns back down -- without sticking at alt = 90 deg.
+    az_c = np.radians(platepar.az_centre)
+    alt_c = np.radians(platepar.alt_centre)
+    ca, sa = np.cos(alt_c), np.sin(alt_c)
+    cz, sz = np.cos(az_c), np.sin(az_c)
+    p_ref = np.array([ca*cz, ca*sz, sa])
+
+    theta = np.radians(key_increment)
+    ct, st = np.cos(theta), np.sin(theta)
+    p2 = p_ref*ct + np.cross(k, p_ref)*st + k*np.dot(k, p_ref)*(1.0 - ct)
+
+    alt2 = np.arcsin(np.clip(p2[2], -1.0, 1.0))
+    az2 = np.arctan2(p2[1], p2[0])
+
+    d_alt = np.degrees(alt2 - alt_c)
+    d_az = np.degrees(_wrap(az2 - az_c))
+
+    if not (np.isfinite(d_az) and np.isfinite(d_alt)):
+        return 0.0, 0.0
+
+    return float(d_az), float(d_alt)
+
+
+
+def fovCentreZenithDirection(platepar, h_px=10, centre=None):
+    """ Compute the on-screen direction toward the zenith and the apparent elevation at the FOV centre.
+
+        The altitude gradient of the projection is sampled at the FOV centre and expressed in screen
+        coordinates (so it already accounts for the camera roll and the lens distortion). This is used
+        to draw a zenith pointer at the optical-axis marker in SkyFit2.
+
+    Arguments:
+        platepar: [Platepar object] Input platepar.
+
+    Keyword arguments:
+        h_px: [float] Finite-difference pixel step. Default: 10.
+        centre: [tuple or None] (x, y) image pixel to evaluate at. Defaults to the image centre; pass the
+            distortion centre (optical axis) to match the indicator that is pinned there.
+
+    Return:
+        (angle_screen_deg, east_screen_deg, azimuth_deg, elevation_deg, valid):
+            angle_screen_deg: [float] Direction toward the zenith measured in screen coordinates
+                (0 = right, 90 = up), degrees.
+            east_screen_deg: [float] Direction of increasing azimuth (East along the horizon) measured in
+                the same screen coordinates, degrees.
+            azimuth_deg: [float] Apparent azimuth of the FOV centre, degrees (0-360, +E of due N).
+            elevation_deg: [float] Apparent elevation (altitude) of the FOV centre, degrees.
+            valid: [bool] False when the zenith direction is ill-defined (FOV centre near the zenith,
+                where the altitude gradient vanishes).
+    """
+
+    NORM_EPS = 1e-9             # below this the altitude gradient is treated as null
+    ELEV_VALID_MAX = 89.5       # above this elevation the zenith direction is meaningless
+
+    def _wrap(d):
+        return (d + np.pi)%(2*np.pi) - np.pi
+
+    def _azalt(x, y):
+        # Return the apparent (azimuth, altitude) in radians of an image pixel
+        jd_arr, ra_arr, dec_arr, _ = xyToRaDecPP([jd2Date(platepar.JD)], [x], [y], [1], platepar, \
+            extinction_correction=False, precompute_pointing_corr=True)
+        az, alt = cyTrueRaDec2ApparentAltAz(np.radians(ra_arr[0]), np.radians(dec_arr[0]), jd_arr[0], \
+            np.radians(platepar.lat), np.radians(platepar.lon), platepar.refraction)
+        return az, alt
+
+    if centre is None:
+        xc, yc = platepar.X_res/2, platepar.Y_res/2
+    else:
+        xc, yc = centre
+
+    az0, alt0 = _azalt(xc, yc)
+    azx, altx = _azalt(xc + h_px, yc)
+    azy, alty = _azalt(xc, yc + h_px)
+
+    azimuth_deg = np.degrees(az0)%360.0
+    elevation_deg = np.degrees(alt0)
+
+    # Altitude gradient in image space (per +h_px step). It points toward increasing altitude,
+    # i.e. toward the zenith.
+    gx = altx - alt0
+    gy = alty - alt0
+
+    # Azimuth gradient in image space (wrapped across the 0/360 boundary). Points toward increasing
+    # azimuth, i.e. East along the horizon.
+    ax = _wrap(azx - az0)
+    ay = _wrap(azy - az0)
+
+    # Convert to screen coordinates. The SkyFit2 image view is Y-inverted for display, so image +Y is
+    # screen down; the screen-up component is therefore -gy / -ay.
+    norm = np.hypot(gx, gy)
+    valid = bool((norm > NORM_EPS) and (elevation_deg < ELEV_VALID_MAX) and np.isfinite(norm))
+
+    angle_screen_deg = np.degrees(np.arctan2(-gy, gx))
+    east_screen_deg = np.degrees(np.arctan2(-ay, ax))
+
+    return angle_screen_deg, float(east_screen_deg), float(azimuth_deg), float(elevation_deg), valid
 
 
 
@@ -558,9 +825,13 @@ def rotationWrtStandard(platepar):
     ra_up = ra[1]
     dec_up = dec[1]
 
+    # Compute the RA difference, wrapping across the 0/360 deg boundary so a FOV centre near RA ~ 0 deg
+    # does not produce a spurious ~360 deg difference (same failure mode as the azimuth wrap in
+    # rotationWrtHorizon).
+    d_ra = (np.radians(ra_mid) - np.radians(ra_up) + np.pi)%(2*np.pi) - np.pi
+
     # Compute the equatorial orientation
-    rot_angle = np.degrees(np.arctan2(np.radians(dec_mid) - np.radians(dec_up), \
-        np.radians(ra_mid) - np.radians(ra_up)))
+    rot_angle = np.degrees(np.arctan2(np.radians(dec_mid) - np.radians(dec_up), d_ra))
 
     # Wrap output to 0-360 range
     rot_angle = rot_angle%360

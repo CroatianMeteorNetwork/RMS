@@ -89,6 +89,7 @@ target/
 
 #VS Code files
 .vscode
+.env
 
 #Jetbrains code files
 .idea
@@ -102,7 +103,16 @@ RMS/Routines/BinImageCy.c
 RMS/Routines/DynamicFTPCompressionCy.c
 RMS/Routines/Grouping3Dcy.c
 RMS/Routines/MorphCy.c
+RMS/Routines/Kht.cpp
 Utils/SaturationTools.c
 
 # Large GMN catalog that's too big for GitHub
 Catalogs/GMN_StarCatalog_LM12.0.bin
+
+# RMS SatellitePositions.py cache
+*.bsp
+.skyfield_cache
+
+# Agents
+.agents/
+skills-lock.json
