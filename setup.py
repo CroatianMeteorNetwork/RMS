@@ -49,10 +49,13 @@ kht_sources = ["RMS/Routines/Kht.pyx"] + [
     ("kht", "buffer_2d", "eigen", "linking", "peak_detection", "subdivision", "voting")
 ]
 
+# MSVC does not understand -O3 (warning D9002) and optimizes by default
+kht_compile_args = [] if sys.platform == "win32" else ["-O3"]
+
 # Cython extensions
 cython_modules = [
     Extension("RMS.Routines.Kht", kht_sources, include_dirs=["Native/Hough/"],
-        language="c++", extra_compile_args=["-O3"]),
+        language="c++", extra_compile_args=kht_compile_args),
     Extension("RMS.Astrometry.CyFunctions", ["RMS/Astrometry/CyFunctions.pyx"], include_dirs=numpy_includes),
     Extension("RMS.Routines.BinImageCy", ["RMS/Routines/BinImageCy.pyx"], include_dirs=numpy_includes),
     Extension("RMS.Routines.DynamicFTPCompressionCy", ["RMS/Routines/DynamicFTPCompressionCy.pyx"], include_dirs=numpy_includes),
