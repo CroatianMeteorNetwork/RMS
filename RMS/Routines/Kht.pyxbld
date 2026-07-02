@@ -12,15 +12,11 @@ def make_ext(modname, pyxfilename):
 
     import os
     from distutils.extension import Extension
-    import RMS.ConfigReader as cr
+    from RMS.CompileArgs import getExtraCompileArgs
     from RMS.Misc import getRmsRootDir
 
     root = getRmsRootDir()
     hough_dir = os.path.join(root, "Native", "Hough")
-
-    # Use the platform-specific compile arguments from the config file, like the
-    # other .pyxbld modules
-    config = cr.parse(os.path.join(root, '.config'))
 
     # The KHT C++ implementation, compiled and linked together with the wrapper.
     cpp_sources = [
@@ -33,8 +29,7 @@ def make_ext(modname, pyxfilename):
         sources=[pyxfilename] + cpp_sources,
         include_dirs=[hough_dir],
         language="c++",
-        extra_compile_args=config.extra_compile_args,
-        extra_link_args=config.extra_compile_args,
+        extra_compile_args=getExtraCompileArgs(),
     )
 
     return ext
