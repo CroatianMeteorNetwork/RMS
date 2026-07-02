@@ -61,7 +61,9 @@ def choosePlatform(win_conf, rpi_conf, linux_pc_conf):
 
     else:
 
-        if 'arm' in os.uname()[4]:
+        # The RPi flags (e.g. -mfpu=neon) only apply to 32-bit ARM Linux with gcc; macOS
+        # on Apple Silicon also reports an 'arm' machine but clang rejects those flags
+        if ('arm' in os.uname()[4]) and (sys.platform != 'darwin'):
             return rpi_conf
 
         else:
