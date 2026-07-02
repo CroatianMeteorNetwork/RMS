@@ -132,6 +132,42 @@ def getPairedStarsSkyPositions(img_x, img_y, jd, platepar):
     return ra_array, dec_array
 
 
+def _lstsqFit(residual_func, x0, args):
+    """Levenberg-Marquardt least-squares fit on a vector-valued residual.
+
+    Replaces Nelder-Mead on the smooth, matched-pair cost functions: it uses the residual's
+    Jacobian structure, so it converges in far fewer evaluations and reaches the same (or a
+    lower-residual) least-squares minimum. Uses 'lm' when there are at least as many residuals
+    as parameters (lm's requirement); otherwise falls back to the robust 'trf'. Tight
+    tolerances ensure full convergence.
+
+    Arguments:
+        residual_func: [callable] Returns the per-observation residual VECTOR (not the sum of
+            squares). least_squares minimizes 0.5*sum(residual**2), so this must match the
+            squared-and-summed scalar cost it replaces.
+        x0: [array] Initial parameters.
+        args: [tuple] Extra args passed to residual_func.
+
+    Return:
+        scipy.optimize.OptimizeResult
+    """
+    x0 = np.asarray(x0, dtype=float)
+    n_resid = len(np.atleast_1d(residual_func(x0, *args)))
+    method = 'lm' if n_resid >= len(x0) else 'trf'
+    return scipy.optimize.least_squares(
+        residual_func, x0, args=args, method=method, ftol=1e-12, xtol=1e-12, gtol=1e-12)
+
+
+def _raDecToUnitVectors(ra_deg, dec_deg):
+    """Convert RA/Dec arrays (degrees) to 3D unit vectors. Euclidean nearest-neighbour on unit
+    vectors gives the same result as angular nearest-neighbour, so a cKDTree of these vectors
+    replaces an O(N*M) angular-separation matrix with an O(N log M) query."""
+    ra = np.radians(ra_deg)
+    dec = np.radians(dec_deg)
+    cos_dec = np.cos(dec)
+    return np.column_stack([cos_dec*np.cos(ra), cos_dec*np.sin(ra), np.sin(dec)])
+
+
 class Platepar(object):
     def __init__(self, distortion_type="radial7-odd"):
         """Astrometric and photometric calibration plate parameters. Several distortion types are supported.
@@ -458,7 +494,7 @@ class Platepar(object):
 
             img_x, img_y, _ = img_stars.T
 
-            pp_copy = copy.deepcopy(platepar)
+            pp_copy = copy.copy(platepar)
 
             # Assign guessed parameters
             pp_copy.RA_d = ra_ref
@@ -488,7 +524,7 @@ class Platepar(object):
 
             img_x, img_y, _ = img_stars.T
 
-            pp_copy = copy.deepcopy(platepar)
+            pp_copy = copy.copy(platepar)
 
             # Assign guessed parameters
             pp_copy.RA_d = ra_ref
@@ -747,7 +783,7 @@ class Platepar(object):
             """
 
             # Set distortion parameters
-            pp_copy = copy.deepcopy(platepar)
+            pp_copy = copy.copy(platepar)
 
             if (dimension == 'x') or (dimension == 'radial'):
                 pp_copy.x_poly_rev = params
@@ -778,6 +814,30 @@ class Platepar(object):
 
             return dist_sum
 
+        def _calcImageResidualsDistortionVect(params, platepar, jd, catalog_stars, img_stars, dimension):
+            """Vector-residual form of _calcImageResidualsDistortion for scipy.least_squares.
+               Returns per-star residuals; least_squares minimizes their sum of squares, which
+               equals the scalar dist_sum above, so the optimum is identical."""
+
+            pp_copy = copy.copy(platepar)
+
+            if (dimension == 'x') or (dimension == 'radial'):
+                pp_copy.x_poly_rev = params
+                pp_copy.y_poly_rev = np.zeros(platepar.poly_length)
+            else:
+                pp_copy.x_poly_rev = np.zeros(platepar.poly_length)
+                pp_copy.y_poly_rev = params
+
+            img_x, img_y, _ = img_stars.T
+            catalog_x, catalog_y, _ = getCatalogStarsImagePositions(catalog_stars, jd, pp_copy)
+
+            if dimension == 'x':
+                return catalog_x - img_x
+            elif dimension == 'y':
+                return catalog_y - img_y
+            else:
+                return np.concatenate([catalog_x - img_x, catalog_y - img_y])
+
         # Modify the residuals function so that it takes a list of arguments
         def _calcImageResidualsDistortionListArguments(params, *args, **kwargs):
             return [_calcImageResidualsDistortion(param_line, *args, **kwargs) for param_line in params]
@@ -790,7 +850,7 @@ class Platepar(object):
                 dimension: [str] 'x' for X polynomial fit, 'y' for Y polynomial fit
             """
 
-            pp_copy = copy.deepcopy(platepar)
+            pp_copy = copy.copy(platepar)
 
             if (dimension == 'x') or (dimension == 'radial'):
                 pp_copy.x_poly_fwd = params
@@ -818,6 +878,26 @@ class Platepar(object):
 
             return separation_sum
 
+        def _calcSkyResidualsDistortionVect(params, platepar, jd, catalog_stars, img_stars, dimension):
+            """Vector-residual form of _calcSkyResidualsDistortion for scipy.least_squares.
+               Returns per-star angular separations (sum of squares == the scalar cost above)."""
+
+            pp_copy = copy.copy(platepar)
+
+            if (dimension == 'x') or (dimension == 'radial'):
+                pp_copy.x_poly_fwd = params
+            else:
+                pp_copy.y_poly_fwd = params
+
+            img_x, img_y, _ = img_stars.T
+            ra_array, dec_array = getPairedStarsSkyPositions(img_x, img_y, jd, pp_copy)
+            ra_catalog, dec_catalog, _ = catalog_stars.T
+
+            return angularSeparation(
+                np.radians(ra_array), np.radians(dec_array),
+                np.radians(ra_catalog), np.radians(dec_catalog),
+            )
+
         # Modify the residuals function so that it takes a list of arguments
         def _calcSkyResidualsDistortionListArguments(params, *args, **kwargs):
             return [_calcSkyResidualsDistortion(param_line, *args, **kwargs) for param_line in params]
@@ -832,13 +912,12 @@ class Platepar(object):
                 dimension: [str] 'x' for X polynomial fit, 'y' for Y polynomial fit
             """
 
-            # Set distortion parameters
-            pp_copy = copy.deepcopy(platepar)
-
             # Unpack pointing parameters and assign to the copy of platepar used for the fit
             ra_ref, dec_ref, pos_angle_ref, F_scale = params[:4]
 
-            pp_copy = copy.deepcopy(platepar)
+            # Shallow copy: the residual only rebinds scalar/poly attributes below and the
+            # projection reads the rest, so a full deepcopy (per optimizer eval) is wasted.
+            pp_copy = copy.copy(platepar)
 
             # Unnormalize the pointing parameters
             pp_copy.RA_d = (360 * ra_ref) % (360)
@@ -859,6 +938,23 @@ class Platepar(object):
 
             return dist_sum
 
+        def _calcImageResidualsAstroAndDistortionRadialVect(params, platepar, jd, catalog_stars, img_stars):
+            """Vector-residual form of _calcImageResidualsAstroAndDistortionRadial for least_squares:
+               fits pointing + reverse distortion on the per-star pixel residual."""
+
+            pp_copy = copy.copy(platepar)
+            ra_ref, dec_ref, pos_angle_ref, F_scale = params[:4]
+            pp_copy.RA_d = (360 * ra_ref) % (360)
+            pp_copy.dec_d = -90 + (90 * dec_ref + 90) % (180.000001)
+            pp_copy.pos_angle_ref = (360 * pos_angle_ref) % (360)
+            pp_copy.F_scale = abs(F_scale)
+            pp_copy.x_poly_rev = np.array(params[4:])
+
+            img_x, img_y, _ = img_stars.T
+            catalog_x, catalog_y, _ = getCatalogStarsImagePositions(catalog_stars, jd, pp_copy)
+
+            return np.concatenate([catalog_x - img_x, catalog_y - img_y])
+
         def _calcSkyResidualsAstroAndDistortionRadial(params, platepar, jd, catalog_stars, img_stars):
             """Calculates the differences between the stars on the image and catalog stars in celestial
             coordinates with the given astrometrical solution. Pointing and distortion parameters are used
@@ -866,13 +962,12 @@ class Platepar(object):
 
             """
 
-            # Set distortion parameters
-            pp_copy = copy.deepcopy(platepar)
-
             # Unpack pointing parameters and assign to the copy of platepar used for the fit
             ra_ref, dec_ref, pos_angle_ref, F_scale = params[:4]
 
-            pp_copy = copy.deepcopy(platepar)
+            # Shallow copy: the residual only rebinds scalar/poly attributes below and the
+            # projection reads the rest, so a full deepcopy (per optimizer eval) is wasted.
+            pp_copy = copy.copy(platepar)
 
             # Unnormalize the pointing parameters
             pp_copy.RA_d = (360 * ra_ref) % (360)
@@ -903,7 +998,31 @@ class Platepar(object):
 
             return separation_sum
 
-        def _calcSkyResidualsAstroAndDistortionRadialNN(params, platepar, jd, catalog_stars, img_stars):
+        def _calcSkyResidualsAstroAndDistortionRadialVect(params, platepar, jd, catalog_stars, img_stars):
+            """Vector-residual form of _calcSkyResidualsAstroAndDistortionRadial for scipy.least_squares.
+               Returns per-star angular separations; least_squares minimizes their sum of squares,
+               which equals the scalar separation_sum above, so the optimum is identical."""
+
+            pp_copy = copy.copy(platepar)
+
+            ra_ref, dec_ref, pos_angle_ref, F_scale = params[:4]
+            pp_copy.RA_d = (360 * ra_ref) % (360)
+            pp_copy.dec_d = -90 + (90 * dec_ref + 90) % (180.000001)
+            pp_copy.pos_angle_ref = (360 * pos_angle_ref) % (360)
+            pp_copy.F_scale = abs(F_scale)
+            pp_copy.x_poly_fwd = np.array(params[4:])
+
+            img_x, img_y, _ = img_stars.T
+            ra_array, dec_array = getPairedStarsSkyPositions(img_x, img_y, jd, pp_copy)
+            ra_catalog, dec_catalog, _ = catalog_stars.T
+
+            return angularSeparation(
+                np.radians(ra_array), np.radians(dec_array),
+                np.radians(ra_catalog), np.radians(dec_catalog),
+            )
+
+        def _calcSkyResidualsAstroAndDistortionRadialNN(params, platepar, jd, catalog_stars, img_stars,
+                                                        cat_tree=None):
             """Like _calcSkyResidualsAstroAndDistortionRadial but uses nearest-neighbor matching.
 
             Instead of requiring pre-matched pairs, this finds the nearest catalog star for each
@@ -920,7 +1039,7 @@ class Platepar(object):
                 Sum of squared angular separations to nearest catalog star for each detected star
             """
             # Set distortion parameters
-            pp_copy = copy.deepcopy(platepar)
+            pp_copy = copy.copy(platepar)
 
             # Unpack pointing parameters and assign to the copy of platepar used for the fit
             ra_ref, dec_ref, pos_angle_ref, F_scale = params[:4]
@@ -939,18 +1058,24 @@ class Platepar(object):
             # Convert detected image positions to sky coordinates
             ra_det, dec_det = getPairedStarsSkyPositions(img_x, img_y, jd, pp_copy)
 
-            # Catalog is pre-filtered to FOV by caller - no need to re-filter here
-            ra_catalog, dec_catalog, _ = catalog_stars.T
+            if cat_tree is not None:
+                # Fast path: query a prebuilt KD-tree of catalog unit vectors. Same nearest
+                # neighbour as the matrix below, but O(N log M) instead of O(N*M) per eval.
+                chord_dist, _ = cat_tree.query(_raDecToUnitVectors(ra_det, dec_det), k=1)
+                nn_distances = 2.0*np.arcsin(np.clip(chord_dist/2.0, 0.0, 1.0))  # chord -> angle
+            else:
+                # Catalog is pre-filtered to FOV by caller - no need to re-filter here
+                ra_catalog, dec_catalog, _ = catalog_stars.T
 
-            # Vectorized NN: compute NxM angular separation matrix, then take row-wise min
-            ra_det_rad = np.radians(ra_det)[:, np.newaxis]  # (N, 1)
-            dec_det_rad = np.radians(dec_det)[:, np.newaxis]  # (N, 1)
-            ra_cat_rad = np.radians(ra_catalog)[np.newaxis, :]  # (1, M)
-            dec_cat_rad = np.radians(dec_catalog)[np.newaxis, :]  # (1, M)
+                # Vectorized NN: compute NxM angular separation matrix, then take row-wise min
+                ra_det_rad = np.radians(ra_det)[:, np.newaxis]  # (N, 1)
+                dec_det_rad = np.radians(dec_det)[:, np.newaxis]  # (N, 1)
+                ra_cat_rad = np.radians(ra_catalog)[np.newaxis, :]  # (1, M)
+                dec_cat_rad = np.radians(dec_catalog)[np.newaxis, :]  # (1, M)
 
-            # angularSeparation broadcasts to (N, M) separation matrix
-            sep_matrix = angularSeparation(ra_det_rad, dec_det_rad, ra_cat_rad, dec_cat_rad)
-            nn_distances = np.min(sep_matrix, axis=1)  # (N,)
+                # angularSeparation broadcasts to (N, M) separation matrix
+                sep_matrix = angularSeparation(ra_det_rad, dec_det_rad, ra_cat_rad, dec_cat_rad)
+                nn_distances = np.min(sep_matrix, axis=1)  # (N,)
             total_cost = np.sum(nn_distances ** 2)
 
             return total_cost
@@ -991,24 +1116,20 @@ class Platepar(object):
                 ### REVERSE MAPPING FIT ###
 
                 # Fit distortion parameters in X direction, reverse mapping
-                res = scipy.optimize.minimize(
-                    _calcImageResidualsDistortion,
+                res = _lstsqFit(
+                    _calcImageResidualsDistortionVect,
                     self.x_poly_rev,
-                    args=(self, jd, catalog_stars, img_stars, 'x'),
-                    method='Nelder-Mead',
-                    options={'maxiter': 10000, 'adaptive': True},
+                    (self, jd, catalog_stars, img_stars, 'x'),
                 )
 
                 # Extract fitted X polynomial
                 self.x_poly_rev = res.x
 
                 # Fit distortion parameters in Y direction, reverse mapping
-                res = scipy.optimize.minimize(
-                    _calcImageResidualsDistortion,
+                res = _lstsqFit(
+                    _calcImageResidualsDistortionVect,
                     self.y_poly_rev,
-                    args=(self, jd, catalog_stars, img_stars, 'y'),
-                    method='Nelder-Mead',
-                    options={'maxiter': 10000, 'adaptive': True},
+                    (self, jd, catalog_stars, img_stars, 'y'),
                 )
 
                 # Extract fitted Y polynomial
@@ -1016,33 +1137,33 @@ class Platepar(object):
 
                 ### ###
 
-                # If this is the first fit of the distortion, set the forward parameters to be equal to the reverse
-                if first_platepar_fit:
-
-                    self.x_poly_fwd = np.array(self.x_poly_rev)
-                    self.y_poly_fwd = np.array(self.y_poly_rev)
+                # Always seed the forward fit from the freshly-fit reverse polynomial. The reverse
+                # fit is robust (pixel residual) and forward ~ reverse for the distortion, so this
+                # is a good starting point. Seeding from a stale/garbage x_poly_fwd (e.g. on a
+                # manual re-fit, or after a distortion-type change) can leave the forward fit stuck
+                # far from the solution because the sky-residual objective saturates -- producing a
+                # broken forward mapping (catalog overlay far off) while the reverse, and the RMSD,
+                # still look fine.
+                self.x_poly_fwd = np.array(self.x_poly_rev)
+                self.y_poly_fwd = np.array(self.y_poly_rev)
 
                 ### FORWARD MAPPING FIT ###
 
                 # Fit distortion parameters in X direction, forward mapping
-                res = scipy.optimize.minimize(
-                    _calcSkyResidualsDistortion,
+                res = _lstsqFit(
+                    _calcSkyResidualsDistortionVect,
                     self.x_poly_fwd,
-                    args=(self, jd, catalog_stars, img_stars, 'x'),
-                    method='Nelder-Mead',
-                    options={'maxiter': 10000, 'adaptive': True},
+                    (self, jd, catalog_stars, img_stars, 'x'),
                 )
 
                 # Extract fitted X polynomial
                 self.x_poly_fwd = res.x
 
                 # Fit distortion parameters in Y direction, forward mapping
-                res = scipy.optimize.minimize(
-                    _calcSkyResidualsDistortion,
+                res = _lstsqFit(
+                    _calcSkyResidualsDistortionVect,
                     self.y_poly_fwd,
-                    args=(self, jd, catalog_stars, img_stars, 'y'),
-                    method='Nelder-Mead',
-                    options={'maxiter': 10000, 'adaptive': True},
+                    (self, jd, catalog_stars, img_stars, 'y'),
                 )
 
                 # IMPORTANT NOTE - the X polynomial is used to store the fit parameters
@@ -1327,9 +1448,17 @@ class Platepar(object):
                             ransac_opts = opt_options_ransac_r5
                         else:
                             ransac_opts = opt_options_ransac_r7
+                        # Kept on Nelder-Mead: the NN cost is non-smooth (nearest-neighbour
+                        # assignment jumps as params move), so a gradient/least-squares method
+                        # is unreliable here. The smooth matched-pair paths use _lstsqFit.
+                        # Speedup: build a catalog KD-tree once per iteration so each NN cost
+                        # eval is O(N log M) instead of rebuilding an N×M matrix (~80x fewer
+                        # ops/eval, identical nearest-neighbour result).
+                        ra_cat_fov, dec_cat_fov, _ = catalog_stars_fov.T
+                        cat_tree = cKDTree(_raDecToUnitVectors(ra_cat_fov, dec_cat_fov))
                         res = scipy.optimize.minimize(
                             cost_func, start_params,
-                            args=(self, jd, catalog_stars_fov, img_stars_subset),
+                            args=(self, jd, catalog_stars_fov, img_stars_subset, cat_tree),
                             method='Nelder-Mead', options=ransac_opts,
                         )
 
@@ -1543,14 +1672,15 @@ class Platepar(object):
                         prev_x_poly_rev = self.x_poly_rev.copy()
 
                         ### FORWARD MAPPING FIT ###
-                        res = scipy.optimize.minimize(
-                            cost_func,
+                        # Prototype: Levenberg-Marquardt least-squares on the vector residual.
+                        # Converges in far fewer evals than Nelder-Mead and lands on the same
+                        # (or lower-residual) least-squares minimum.
+                        res = _lstsqFit(
+                            _calcSkyResidualsAstroAndDistortionRadialVect,
                             p0,
-                            args=(self, jd, catalog_stars, img_stars),
-                            method='Nelder-Mead',
-                            options=opt_options_final,
+                            (self, jd, catalog_stars, img_stars),
                         )
-                        fwd_status = "maxiter" if res.nit >= opt_options_final['maxiter'] else "converged"
+                        fwd_status = "converged" if res.success else "stopped"
 
                         # Update fitted astrometric parameters (Unnormalize the pointing parameters)
                         ra_ref, dec_ref, pos_angle_ref, F_scale = res.x[:4]
@@ -1575,15 +1705,12 @@ class Platepar(object):
                         # cameras with extreme distortion center offset where the optimizer
                         # can diverge when starting from zeros
                         rev_init = self.x_poly_fwd.copy()
-                        rev_maxiter = 10000
-                        res_rev = scipy.optimize.minimize(
-                            _calcImageResidualsDistortion,
+                        res_rev = _lstsqFit(
+                            _calcImageResidualsDistortionVect,
                             rev_init,
-                            args=(self, jd, catalog_stars, img_stars, 'radial'),
-                            method='Nelder-Mead',
-                            options={'maxiter': rev_maxiter, 'adaptive': True},
+                            (self, jd, catalog_stars, img_stars, 'radial'),
                         )
-                        rev_status = "maxiter" if res_rev.nit >= rev_maxiter else "converged"
+                        rev_status = "converged" if res_rev.success else "stopped"
 
                         self.x_poly_rev = res_rev.x
 
@@ -1598,6 +1725,38 @@ class Platepar(object):
                             if fwd_rev_iter > 0:
                                 print("    Converged after {} iterations".format(fwd_rev_iter + 1))
                             break
+
+                    # Final refinement: fit pointing + reverse distortion jointly on the IMAGE
+                    # (pixel) residual -- the metric reported to users. The fwd-rev loop fits the
+                    # forward mapping on SKY angular separation, whose optimum can leave the
+                    # pointing slightly off for the pixel residual (forward/reverse mappings are
+                    # not exact inverses), which showed up as a worse RMSD with least_squares.
+                    # This recovers the old Nelder-Mead pixel accuracy while keeping the speedup.
+                    p_final = [self.RA_d/360.0, self.dec_d/90.0, self.pos_angle_ref/360.0,
+                               abs(self.F_scale)] + self.x_poly_rev.tolist()
+                    res_final = _lstsqFit(
+                        _calcImageResidualsAstroAndDistortionRadialVect,
+                        p_final,
+                        (self, jd, catalog_stars, img_stars),
+                    )
+                    xf = res_final.x
+                    self.RA_d = (360*xf[0]) % 360
+                    self.dec_d = -90 + (90*xf[1] + 90) % (180.000001)
+                    self.pos_angle_ref = (360*xf[2]) % 360
+                    self.F_scale = abs(xf[3])
+                    self.x_poly_rev = np.array(xf[4:])
+                    self.updateRefAltAz()
+
+                    # The joint fit above moved the pointing, which leaves the forward distortion
+                    # (fit to the previous pointing) stale -- the forward and reverse mappings
+                    # would disagree (broken image<->sky round-trip). Re-fit the forward
+                    # distortion to the refined pointing so the two mappings stay consistent.
+                    res_fwd = _lstsqFit(
+                        _calcSkyResidualsDistortionVect,
+                        self.x_poly_fwd,
+                        (self, jd, catalog_stars, img_stars, 'radial'),
+                    )
+                    self.x_poly_fwd = res_fwd.x
 
                 ### ###
 
