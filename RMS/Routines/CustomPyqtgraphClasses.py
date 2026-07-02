@@ -3268,6 +3268,8 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
     sigIntensityThresholdChanged = QtCore.pyqtSignal(int)
     sigNeighborhoodSizeChanged = QtCore.pyqtSignal(int)
     sigMaxStarsChanged = QtCore.pyqtSignal(int)
+    sigConfigMaxStarsChanged = QtCore.pyqtSignal(int)
+    sigMaxGlobalIntensityChanged = QtCore.pyqtSignal(int)
     sigGammaChanged = QtCore.pyqtSignal(float)
     sigSegmentRadiusChanged = QtCore.pyqtSignal(int)
     sigMaxFeatureRatioChanged = QtCore.pyqtSignal(float)
@@ -3301,7 +3303,9 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
         slider_data = [
             ('Intensity Threshold', 1, 200, 18, '18', self.onIntensityThresholdChanged),
             ('Neighborhood Size', 5, 40, 10, '10', self.onNeighborhoodSizeChanged),
-            ('Max Stars', 50, 5000, 200, '200', self.onMaxStarsChanged),
+            ('SkyFit Max Stars', 50, 5000, 800, '800', self.onMaxStarsChanged),
+            ('Config Max Stars', 50, 2000, 400, '400', self.onConfigMaxStarsChanged),
+            ('Max Global Intensity', 30, 255, 230, '230', self.onMaxGlobalIntensityChanged),
             ('Gamma', 45, 200, 100, '1.00', self.onGammaChanged),
             ('Segment Radius', 2, 20, 4, '4', self.onSegmentRadiusChanged),
             ('Max Feature Ratio', 50, 200, 80, '0.80', self.onMaxFeatureRatioChanged),
@@ -3310,6 +3314,7 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
 
         self.sliders = {}
         self.slider_labels = {}
+        self.slider_defaults = {}
 
         for name, min_val, max_val, default, default_str, callback in slider_data:
             key = name.lower().replace(' ', '_')
@@ -3332,6 +3337,7 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
 
             self.sliders[key] = slider
             self.slider_labels[key] = val_label
+            self.slider_defaults[key] = default
 
             # Add gamma preset buttons right after gamma slider
             if key == 'gamma':
@@ -3360,8 +3366,12 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
         self.intensity_threshold_label = self.slider_labels['intensity_threshold']
         self.neighborhood_size_slider = self.sliders['neighborhood_size']
         self.neighborhood_size_label = self.slider_labels['neighborhood_size']
-        self.max_stars_slider = self.sliders['max_stars']
-        self.max_stars_label = self.slider_labels['max_stars']
+        self.max_stars_slider = self.sliders['skyfit_max_stars']
+        self.max_stars_label = self.slider_labels['skyfit_max_stars']
+        self.config_max_stars_slider = self.sliders['config_max_stars']
+        self.config_max_stars_label = self.slider_labels['config_max_stars']
+        self.max_global_intensity_slider = self.sliders['max_global_intensity']
+        self.max_global_intensity_label = self.slider_labels['max_global_intensity']
         self.gamma_slider = self.sliders['gamma']
         self.gamma_label = self.slider_labels['gamma']
         self.segment_radius_slider = self.sliders['segment_radius']
@@ -3370,6 +3380,14 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
         self.max_feature_ratio_label = self.slider_labels['max_feature_ratio']
         self.roundness_threshold_slider = self.sliders['roundness_threshold']
         self.roundness_threshold_label = self.slider_labels['roundness_threshold']
+
+        # Tooltips distinguishing the two star count budgets
+        self.max_stars_slider.setToolTip(
+            'Number of star candidates used by SkyFit re-detection in this session.\n'
+            'Initial calibration benefits from a deep sample - this value is never saved.')
+        self.config_max_stars_slider.setToolTip(
+            'max_stars value written to the station config by Save Config.\n'
+            'This bounds the star extraction cost of the nightly pipeline - 400 recommended.')
 
         layout.addSpacing(self.scaledSpacing(1))
 
@@ -3389,6 +3407,11 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
         self.tune_button.setToolTip('Auto-find optimal threshold and segment radius')
         self.tune_button.clicked.connect(self.sigTuneParameters.emit)
         btn_layout.addWidget(self.tune_button)
+
+        self.defaults_button = QtWidgets.QPushButton('Reset to Defaults')
+        self.defaults_button.setToolTip('Reset all star detection parameters to the recommended defaults')
+        self.defaults_button.clicked.connect(self.resetToDefaults)
+        btn_layout.addWidget(self.defaults_button)
 
         self.save_config_button = QtWidgets.QPushButton('Save Config...')
         self.save_config_button.setToolTip('Open File Manager to save star detection settings')
@@ -3440,6 +3463,21 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
     def onMaxStarsChanged(self, value):
         self.max_stars_label.setText(str(value))
         self.sigMaxStarsChanged.emit(value)
+
+    def onConfigMaxStarsChanged(self, value):
+        self.config_max_stars_label.setText(str(value))
+        self.sigConfigMaxStarsChanged.emit(value)
+
+    def resetToDefaults(self):
+        """Reset all sliders to the recommended default values."""
+        for key, default in self.slider_defaults.items():
+            # setValue triggers each slider's callback, so labels and override
+            # values in SkyFit update through the normal signal path
+            self.sliders[key].setValue(default)
+
+    def onMaxGlobalIntensityChanged(self, value):
+        self.max_global_intensity_label.setText(str(value))
+        self.sigMaxGlobalIntensityChanged.emit(value)
 
     def onGammaChanged(self, value):
         gamma = value / 100.0
@@ -3512,7 +3550,12 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
         if hasattr(config, 'neighborhood_size'):
             self.neighborhood_size_slider.setValue(config.neighborhood_size)
         if hasattr(config, 'max_stars'):
+            # The config value seeds both budgets: the session one is free to move,
+            # the config one is what Save Config writes back
             self.max_stars_slider.setValue(config.max_stars)
+            self.config_max_stars_slider.setValue(config.max_stars)
+        if hasattr(config, 'max_global_intensity'):
+            self.max_global_intensity_slider.setValue(config.max_global_intensity)
         if hasattr(config, 'gamma'):
             self.gamma_slider.setValue(int(config.gamma * 100))
         if hasattr(config, 'segment_radius'):

@@ -1876,7 +1876,8 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
                     # Sync in-memory config attrs so modified state is cleared
                     pt.config.intensity_threshold = pt.override_intensity_threshold
                     pt.config.neighborhood_size = pt.override_neighborhood_size
-                    pt.config.max_stars = pt.override_max_stars
+                    pt.config.max_stars = pt.override_config_max_stars
+                    pt.config.max_global_intensity = pt.override_max_global_intensity
                     pt.config.segment_radius = pt.override_segment_radius
                     pt.config.max_feature_ratio = pt.override_max_feature_ratio
                     pt.config.roundness_threshold = pt.override_roundness_threshold
@@ -2435,7 +2436,9 @@ class PlateTool(QtWidgets.QMainWindow):
         self.star_detection_override_data = {}  # Store re-detected stars per FF file
         self.override_intensity_threshold = 18
         self.override_neighborhood_size = 10
-        self.override_max_stars = 200
+        self.override_max_stars = 800
+        self.override_config_max_stars = 400
+        self.override_max_global_intensity = 230
         self.override_gamma = 1.0
         self.override_segment_radius = 4
         self.override_max_feature_ratio = 0.8
@@ -3352,6 +3355,8 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.star_detection.sigIntensityThresholdChanged.connect(self.updateIntensityThreshold)
         self.tab.star_detection.sigNeighborhoodSizeChanged.connect(self.updateNeighborhoodSize)
         self.tab.star_detection.sigMaxStarsChanged.connect(self.updateMaxStars)
+        self.tab.star_detection.sigConfigMaxStarsChanged.connect(self.updateConfigMaxStars)
+        self.tab.star_detection.sigMaxGlobalIntensityChanged.connect(self.updateMaxGlobalIntensity)
         self.tab.star_detection.sigGammaChanged.connect(self.updateGamma)
         self.tab.star_detection.sigSegmentRadiusChanged.connect(self.updateSegmentRadius)
         self.tab.star_detection.sigMaxFeatureRatioChanged.connect(self.updateMaxFeatureRatio)
@@ -4646,6 +4651,9 @@ class PlateTool(QtWidgets.QMainWindow):
             self.override_neighborhood_size = self.config.neighborhood_size
         if hasattr(self.config, 'max_stars'):
             self.override_max_stars = self.config.max_stars
+            self.override_config_max_stars = self.config.max_stars
+        if hasattr(self.config, 'max_global_intensity'):
+            self.override_max_global_intensity = self.config.max_global_intensity
         if hasattr(self.config, 'gamma'):
             self.override_gamma = self.config.gamma
         if hasattr(self.config, 'segment_radius'):
@@ -4670,8 +4678,17 @@ class PlateTool(QtWidgets.QMainWindow):
         self._updateConfigSaveButtonState()
 
     def updateMaxStars(self, value):
-        """ Update max stars override parameter. """
+        """ Update the SkyFit session max stars parameter (used for re-detection, never saved). """
         self.override_max_stars = value
+
+    def updateConfigMaxStars(self, value):
+        """ Update the max_stars value that Save Config writes to the station config. """
+        self.override_config_max_stars = value
+        self._updateConfigSaveButtonState()
+
+    def updateMaxGlobalIntensity(self, value):
+        """ Update max global intensity (too-bright image cutoff) override parameter. """
+        self.override_max_global_intensity = value
         self._updateConfigSaveButtonState()
 
     def updateGamma(self, value):
@@ -4707,7 +4724,8 @@ class PlateTool(QtWidgets.QMainWindow):
         return (
             self.override_intensity_threshold != getattr(cfg, 'intensity_threshold', self.override_intensity_threshold)
             or self.override_neighborhood_size != getattr(cfg, 'neighborhood_size', self.override_neighborhood_size)
-            or self.override_max_stars != getattr(cfg, 'max_stars', self.override_max_stars)
+            or self.override_config_max_stars != getattr(cfg, 'max_stars', self.override_config_max_stars)
+            or self.override_max_global_intensity != getattr(cfg, 'max_global_intensity', self.override_max_global_intensity)
             or self.override_segment_radius != getattr(cfg, 'segment_radius', self.override_segment_radius)
             or abs(self.override_max_feature_ratio - getattr(cfg, 'max_feature_ratio', self.override_max_feature_ratio)) > 1e-6
             or abs(self.override_roundness_threshold - getattr(cfg, 'roundness_threshold', self.override_roundness_threshold)) > 1e-6
@@ -4790,6 +4808,7 @@ class PlateTool(QtWidgets.QMainWindow):
             original_intensity_threshold = getattr(self.config, 'intensity_threshold', 18)
             original_neighborhood_size = getattr(self.config, 'neighborhood_size', 10)
             original_max_stars = getattr(self.config, 'max_stars', 200)
+            original_max_global_intensity = getattr(self.config, 'max_global_intensity', 230)
             original_gamma = getattr(self.config, 'gamma', 1.0)
             original_segment_radius = getattr(self.config, 'segment_radius', 4)
             original_max_feature_ratio = getattr(self.config, 'max_feature_ratio', 0.8)
@@ -4799,6 +4818,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self.config.intensity_threshold = self.override_intensity_threshold
             self.config.neighborhood_size = self.override_neighborhood_size
             self.config.max_stars = self.override_max_stars
+            self.config.max_global_intensity = self.override_max_global_intensity
             self.config.gamma = self.override_gamma
             self.config.segment_radius = self.override_segment_radius
             self.config.max_feature_ratio = self.override_max_feature_ratio
@@ -4820,6 +4840,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.config.intensity_threshold = original_intensity_threshold
                 self.config.neighborhood_size = original_neighborhood_size
                 self.config.max_stars = original_max_stars
+                self.config.max_global_intensity = original_max_global_intensity
                 self.config.gamma = original_gamma
                 self.config.segment_radius = original_segment_radius
                 self.config.max_feature_ratio = original_max_feature_ratio
@@ -4892,6 +4913,7 @@ class PlateTool(QtWidgets.QMainWindow):
         original_intensity_threshold = getattr(self.config, 'intensity_threshold', 18)
         original_neighborhood_size = getattr(self.config, 'neighborhood_size', 10)
         original_max_stars = getattr(self.config, 'max_stars', 200)
+        original_max_global_intensity = getattr(self.config, 'max_global_intensity', 230)
         original_gamma = getattr(self.config, 'gamma', 1.0)
         original_segment_radius = getattr(self.config, 'segment_radius', 4)
         original_max_feature_ratio = getattr(self.config, 'max_feature_ratio', 0.8)
@@ -4901,6 +4923,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.config.intensity_threshold = self.override_intensity_threshold
         self.config.neighborhood_size = self.override_neighborhood_size
         self.config.max_stars = self.override_max_stars
+        self.config.max_global_intensity = self.override_max_global_intensity
         self.config.gamma = self.override_gamma
         self.config.segment_radius = self.override_segment_radius
         self.config.max_feature_ratio = self.override_max_feature_ratio
@@ -4948,6 +4971,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self.config.intensity_threshold = original_intensity_threshold
             self.config.neighborhood_size = original_neighborhood_size
             self.config.max_stars = original_max_stars
+            self.config.max_global_intensity = original_max_global_intensity
             self.config.gamma = original_gamma
             self.config.segment_radius = original_segment_radius
             self.config.max_feature_ratio = original_max_feature_ratio
@@ -5512,7 +5536,7 @@ class PlateTool(QtWidgets.QMainWindow):
             # Check if image is too bright (scale the cutoff to the image bit depth, matching
             # extractStarsFF/extractStarsImgHandle so high-bit-depth data is not wrongly skipped)
             bit_depth = getattr(self.config, 'bit_depth', 8)
-            max_global_intensity = getattr(self.config, 'max_global_intensity', 150)*(2**(bit_depth - 8))
+            max_global_intensity = getattr(self.config, 'max_global_intensity', 230)*(2**(bit_depth - 8))
             if img_median > max_global_intensity:
                 print(f"  Image too bright (median={img_median:.1f} > {max_global_intensity})")
                 return []
@@ -6050,7 +6074,8 @@ class PlateTool(QtWidgets.QMainWindow):
             "StarExtraction": {
                 "intensity_threshold": str(self.override_intensity_threshold),
                 "segment_radius": str(self.override_segment_radius),
-                "max_stars": str(self.override_max_stars),
+                "max_stars": str(self.override_config_max_stars),
+                "max_global_intensity": str(self.override_max_global_intensity),
                 "neighborhood_size": str(self.override_neighborhood_size),
                 "max_feature_ratio": str(self.override_max_feature_ratio),
                 "roundness_threshold": str(self.override_roundness_threshold),
@@ -6134,7 +6159,7 @@ class PlateTool(QtWidgets.QMainWindow):
             print(f"Saved star detection settings to: {config_path}")
             print(f"  intensity_threshold: {self.override_intensity_threshold}")
             print(f"  segment_radius: {self.override_segment_radius}")
-            print(f"  max_stars: {self.override_max_stars}")
+            print(f"  max_stars: {self.override_config_max_stars}")
             print(f"  catalog_mag_limit: {catalog_mag_limit:.1f}")
 
             qmessagebox(message=f"Star detection settings saved to:\n{config_path}",
