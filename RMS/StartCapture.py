@@ -909,7 +909,17 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         # Standard mode: need to run it all just once
         # Continuous mode: if the program just got done with nighttime processing and needs to reboot
         elif (not config.continuous_capture) or (not daytime_mode_prev and config.reboot_after_processing):
-            break 
+
+            # Continuous mode: stop the capture before returning for the reboot. If the reboot
+            # fails, the main loop calls runCapture again - the old capture must not be left
+            # running, or two captures will run in parallel and save every frame twice, with the
+            # old one stamping a stale day/night suffix (it holds the previous daytime_mode)
+            if config.continuous_capture:
+                log.info('Ending capture before reboot...')
+                dropped_frames = bc.stopCapture()
+                log.info('Total number of late or dropped frames: ' + str(dropped_frames))
+
+            break
 
         ran_once = True
 
