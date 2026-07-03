@@ -71,6 +71,38 @@ from RMS.Misc import RmsDateTime
 log = getLogger("rmslogger")
 
 
+def findWsdlDir():
+    """Locate the WSDL directory bundled with onvif-zeep.
+
+    Depending on the pip/setuptools combination, the package's 'wsdl' data directory
+    ends up in different locations (or is missing entirely), while onvif-zeep's default
+    lookup only checks one path. Resolve it explicitly so we can pass it to ONVIFCamera.
+
+    Returns:
+        Path to the directory containing the ONVIF WSDL files.
+
+    Raises:
+        RuntimeError: if the WSDL files cannot be found in any known location.
+    """
+    import onvif
+
+    package_dir = os.path.dirname(os.path.abspath(onvif.__file__))
+    candidates = [
+        os.path.join(os.path.dirname(package_dir), 'wsdl'),  # site-packages/wsdl (library default)
+        os.path.join(package_dir, 'wsdl'),                   # inside the onvif package
+        os.path.join(sys.prefix, 'wsdl'),                    # environment root (data_files scheme)
+    ]
+
+    for candidate in candidates:
+        if os.path.isfile(os.path.join(candidate, 'devicemgmt.wsdl')):
+            return candidate
+
+    raise RuntimeError(
+        "Could not find the ONVIF WSDL files (devicemgmt.wsdl). Looked in: {}. "
+        "The onvif-zeep install is likely incomplete - try reinstalling with: "
+        "pip install --force-reinstall --no-cache-dir onvif-zeep".format(candidates))
+
+
 def connectCamera(ip_address, port, username, password):
     """Connect to an ONVIF camera and return the camera object.
 
@@ -82,9 +114,16 @@ def connectCamera(ip_address, port, username, password):
 
     Returns:
         ONVIFCamera object or None if connection failed
+
+    Raises:
+        RuntimeError: if the onvif-zeep WSDL files cannot be found.
     """
+    # Resolved outside the try block so an incomplete onvif-zeep install surfaces as a
+    # clear error instead of a generic connection failure
+    wsdl_dir = findWsdlDir()
+
     try:
-        cam = ONVIFCamera(ip_address, port, username, password)
+        cam = ONVIFCamera(ip_address, port, username, password, wsdl_dir=wsdl_dir)
         return cam
     except Exception as e:
         log.error("Failed to connect to camera: %s", e)
