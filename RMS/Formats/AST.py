@@ -150,13 +150,13 @@ def loadAST(dir_path, file_name):
     ast.r3 = np.fromfile(fid, dtype=np.int32, count=1)
 
     # Text description
-    ast.text = np.fromfile(fid, dtype='|S'+str(256), count=1)[0].tostring().decode()
+    ast.text = np.fromfile(fid, dtype='|S'+str(256), count=1)[0].tobytes().decode()
 
     # Name of catalogue
-    ast.starcat = np.fromfile(fid, dtype='|S'+str(32), count=1)[0].tostring().decode()
+    ast.starcat = np.fromfile(fid, dtype='|S'+str(32), count=1)[0].tobytes().decode()
 
     # Name of observing site
-    ast.sitename = np.fromfile(fid, dtype='|S'+str(32), count=1)[0].tostring().decode()
+    ast.sitename = np.fromfile(fid, dtype='|S'+str(32), count=1)[0].tobytes().decode()
 
     # Site geo coordinates
     ast.lat = np.fromfile(fid, dtype=np.float64, count=1)[0]

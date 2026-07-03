@@ -2,6 +2,9 @@ import numpy as np
 
 # Cython import
 cimport numpy as np
+
+# Initialize the NumPy C API (required on NumPy 2.0+ when built with Cython < 3)
+np.import_array()
 cimport cython
 
 # Define numpy types
