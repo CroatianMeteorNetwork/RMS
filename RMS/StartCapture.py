@@ -1264,7 +1264,13 @@ if __name__ == "__main__":
 
                     # Reboot the computer (script needs sudo privileges, works only on Linux)
                     try:
-                        os.system('sudo shutdown -r now')
+                        exit_status = os.system('sudo shutdown -r now')
+
+                        # os.system returns a wait status, not the exit code directly
+                        if exit_status != 0:
+                            log.error('Reboot command failed with exit code {}, '
+                                'giving up on rebooting'.format(exit_status >> 8))
+                            break
 
                     except Exception as e:
                         log.debug('Rebooting failed with message:\n' + repr(e))
@@ -1292,7 +1298,7 @@ if __name__ == "__main__":
 
             # If reboot didn't happen in continuous capture mode, reset so capture resumes normally
             if config.continuous_capture:
-                log.warning("Reboot failed after 4 hours of attempts, resuming capture")
+                log.warning("Reboot did not happen, resuming capture")
                 ran_once = False
 
 
