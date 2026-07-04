@@ -2792,7 +2792,10 @@ class PlateTool(QtWidgets.QMainWindow):
         self.label1.setTextWidth(label_fm.averageCharWidth() * 35)  # ~35 chars wide
         self.label1.setZValue(1000)
         self.label1.setParentItem(self.img_frame)
-        self.label1.show()
+
+        # Hidden by default, toggled with F1. It is force-shown as the empty-state hint when no
+        # data is loaded, and hidden again once data arrives.
+        self.label1.hide()
 
         self.catalog_stars_visible = True
 
@@ -3447,8 +3450,10 @@ class PlateTool(QtWidgets.QMainWindow):
                 self._show_calibration_dialog_on_start = False
                 self.showCalibrationFilesDialog()
         else:
-            # Show empty-state message
+            # Show empty-state message (the panel is otherwise hidden by default)
             self.label1.setText("No data loaded.\nUse File > File Manager to open a folder.")
+            self.label1.show()
+            self._label1_empty_hint = True
             self.image_navigation_slider.hide()
             self.image_navigation_label.hide()
 
@@ -3931,6 +3936,12 @@ class PlateTool(QtWidgets.QMainWindow):
 
         if not self.hasData():
             return
+
+        # The empty-state hint force-shows the info panel; restore the hidden-by-default state
+        # once data is loaded (F1 toggles it from then on)
+        if getattr(self, '_label1_empty_hint', False):
+            self._label1_empty_hint = False
+            self.label1.hide()
 
         # Refresh the optical-axis pointing indicator (zenith arrow, elevation, WASD step size). This
         # is the common path for the pan (WASD), rotation (Q/E), scale and step-size (+/-) keys.
