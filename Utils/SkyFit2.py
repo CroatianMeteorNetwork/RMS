@@ -1878,6 +1878,8 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
                     pt.config.neighborhood_size = pt.override_neighborhood_size
                     pt.config.max_stars = pt.override_config_max_stars
                     pt.config.max_global_intensity = pt.override_max_global_intensity
+                    pt.config.gamma = pt.override_gamma
+                    pt._original_config_gamma = pt.override_gamma
                     pt.config.segment_radius = pt.override_segment_radius
                     pt.config.max_feature_ratio = pt.override_max_feature_ratio
                     pt.config.roundness_threshold = pt.override_roundness_threshold
@@ -4701,6 +4703,7 @@ class PlateTool(QtWidgets.QMainWindow):
             if self.platepar is not None:
                 self.platepar.gamma = value
 
+        self._updateConfigSaveButtonState()
         self.updateLeftLabels()
 
     def updateSegmentRadius(self, value):
@@ -4729,6 +4732,11 @@ class PlateTool(QtWidgets.QMainWindow):
             or self.override_segment_radius != getattr(cfg, 'segment_radius', self.override_segment_radius)
             or abs(self.override_max_feature_ratio - getattr(cfg, 'max_feature_ratio', self.override_max_feature_ratio)) > 1e-6
             or abs(self.override_roundness_threshold - getattr(cfg, 'roundness_threshold', self.override_roundness_threshold)) > 1e-6
+            # Compare gamma against the original config value: with override enabled,
+            # the in-memory config.gamma is synced to the slider and would mask the change
+            or abs(self.override_gamma - (self._original_config_gamma
+                if self._original_config_gamma is not None
+                else getattr(cfg, 'gamma', self.override_gamma))) > 0.005
         )
 
     def _updateConfigSaveButtonState(self):
@@ -6079,6 +6087,9 @@ class PlateTool(QtWidgets.QMainWindow):
                 "neighborhood_size": str(self.override_neighborhood_size),
                 "max_feature_ratio": str(self.override_max_feature_ratio),
                 "roundness_threshold": str(self.override_roundness_threshold),
+            },
+            "Capture": {
+                "gamma": f"{self.override_gamma:.2f}",
             },
             "Calibration": {
                 "catalog_mag_limit": f"{catalog_mag_limit:.1f}",

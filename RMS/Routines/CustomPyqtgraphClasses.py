@@ -1214,6 +1214,10 @@ class HistogramLUTWidget(pg.HistogramLUTWidget):
 
 
 class HistogramLUTItem(pg.HistogramLUTItem):
+
+    # Emitted with the new state whenever auto levels is toggled (button or Ctrl+A)
+    sigAutoLevelsToggled = QtCore.pyqtSignal(bool)
+
     def __init__(self, *args, **kwargs):
         pg.HistogramLUTItem.__init__(self, *args, **kwargs)
         self.level_images = []
@@ -1249,6 +1253,7 @@ class HistogramLUTItem(pg.HistogramLUTItem):
             self.setLevels(*self.saved_manual_levels)
         self.auto_levels = not self.auto_levels
         self.region.setMovable(not self.auto_levels)
+        self.sigAutoLevelsToggled.emit(self.auto_levels)
 
     def paint(self, p, *args):
         # tbh this is an improvement
@@ -1300,7 +1305,22 @@ class RightOptionsTab(QtWidgets.QTabWidget, ScaledSizeHelper):
         self.maximized = True
         self.setFixedWidth(self.scaledWidth(self.TAB_WIDTH_CHARS))
 
-        self.addTab(self.hist, 'Levels')
+        # Levels tab: auto-levels toggle button above the histogram. The button state stays in
+        # sync with the Ctrl+A shortcut through sigAutoLevelsToggled.
+        self.levels_tab = QtWidgets.QWidget()
+        levels_layout = QtWidgets.QVBoxLayout()
+        levels_layout.setContentsMargins(*self.scaledMargins(0.3, 0.2))
+        levels_layout.setSpacing(self.scaledSpacing(0.3))
+        self.auto_levels_button = QtWidgets.QPushButton('Auto Levels')
+        self.auto_levels_button.setCheckable(True)
+        self.auto_levels_button.setToolTip('Toggle automatic image levels (Ctrl+A)')
+        self.auto_levels_button.clicked.connect(lambda checked: self.hist.item.toggleAutoLevels())
+        self.hist.item.sigAutoLevelsToggled.connect(self.auto_levels_button.setChecked)
+        levels_layout.addWidget(self.auto_levels_button)
+        levels_layout.addWidget(self.hist)
+        self.levels_tab.setLayout(levels_layout)
+
+        self.addTab(self.levels_tab, 'Levels')
         self.addTab(self.param_manager, 'Fit Parameters')
         self.addTab(self.geolocation, 'Station')
         self.addTab(self.star_detection, 'Star Detection')
@@ -3292,32 +3312,52 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
         title.setStyleSheet("font-weight: bold; font-size: 11pt;")
         layout.addWidget(title)
 
-        # Use QGridLayout for stable slider layout
-        grid = QtWidgets.QGridLayout()
-        grid.setSpacing(self.scaledSpacing(0.3))
-        grid.setColumnStretch(0, 1)  # Label column stretches
-        grid.setColumnStretch(1, 0)  # Value column fixed
-        layout.addLayout(grid)
-
-        row = 0
+        # Detection parameters, split into what Save Config persists to the station config
+        # and what only applies to this SkyFit session
         slider_data = [
-            ('Intensity Threshold', 1, 200, 18, '18', self.onIntensityThresholdChanged),
-            ('Neighborhood Size', 5, 40, 10, '10', self.onNeighborhoodSizeChanged),
-            ('SkyFit Max Stars', 50, 5000, 800, '800', self.onMaxStarsChanged),
-            ('Config Max Stars', 50, 2000, 400, '400', self.onConfigMaxStarsChanged),
-            ('Max Global Intensity', 30, 255, 230, '230', self.onMaxGlobalIntensityChanged),
-            ('Gamma', 45, 200, 100, '1.00', self.onGammaChanged),
-            ('Segment Radius', 2, 20, 4, '4', self.onSegmentRadiusChanged),
-            ('Max Feature Ratio', 50, 200, 80, '0.80', self.onMaxFeatureRatioChanged),
-            ('Roundness Threshold', 30, 90, 50, '0.50', self.onRoundnessThresholdChanged),
+            # (key, label, min, max, default, default label, callback, group)
+            ('intensity_threshold', 'Intensity Threshold', 1, 200, 18, '18', self.onIntensityThresholdChanged, 'config'),
+            ('neighborhood_size', 'Neighborhood Size', 5, 40, 10, '10', self.onNeighborhoodSizeChanged, 'config'),
+            ('config_max_stars', 'Max Stars', 50, 2000, 400, '400', self.onConfigMaxStarsChanged, 'config'),
+            ('max_global_intensity', 'Max Global Intensity', 30, 255, 230, '230', self.onMaxGlobalIntensityChanged, 'config'),
+            ('gamma', 'Gamma', 45, 200, 100, '1.00', self.onGammaChanged, 'config'),
+            ('segment_radius', 'Segment Radius', 2, 20, 4, '4', self.onSegmentRadiusChanged, 'config'),
+            ('max_feature_ratio', 'Max Feature Ratio', 50, 200, 80, '0.80', self.onMaxFeatureRatioChanged, 'config'),
+            ('roundness_threshold', 'Roundness Threshold', 30, 90, 50, '0.50', self.onRoundnessThresholdChanged, 'config'),
+            ('skyfit_max_stars', 'Max Stars', 50, 5000, 800, '800', self.onMaxStarsChanged, 'session'),
         ]
 
         self.sliders = {}
         self.slider_labels = {}
         self.slider_defaults = {}
 
-        for name, min_val, max_val, default, default_str, callback in slider_data:
-            key = name.lower().replace(' ', '_')
+        # One group box per parameter scope
+        group_grids = {}
+        group_rows = {}
+        for group_key, group_title, group_tip in [
+                ('config', 'Station Config',
+                 'Written to the station config file by Save Config - these control the nightly pipeline'),
+                ('session', 'SkyFit Session Only',
+                 'Only used by SkyFit re-detection in this session - never written to the config')]:
+
+            box = QtWidgets.QGroupBox(group_title)
+            box.setToolTip(group_tip)
+            grid = QtWidgets.QGridLayout()
+            grid.setSpacing(self.scaledSpacing(0.3))
+            # Keep the group box padding tight so the label column doesn't get clipped
+            grid.setContentsMargins(*self.scaledMargins(0.4, 0.3))
+            grid.setColumnStretch(0, 1)  # Label column stretches
+            grid.setColumnStretch(1, 0)  # Value column fixed
+            box.setLayout(grid)
+            layout.addWidget(box)
+
+            group_grids[group_key] = grid
+            group_rows[group_key] = 0
+
+        for key, name, min_val, max_val, default, default_str, callback, group in slider_data:
+
+            grid = group_grids[group]
+            row = group_rows[group]
 
             # Row with label and value
             grid.addWidget(QtWidgets.QLabel(name), row, 0)
@@ -3361,6 +3401,8 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
                 grid.setRowMinimumHeight(row, self.scaledHeight(1.75))
                 row += 1
 
+            group_rows[group] = row
+
         # Create named references for compatibility
         self.intensity_threshold_slider = self.sliders['intensity_threshold']
         self.intensity_threshold_label = self.slider_labels['intensity_threshold']
@@ -3388,6 +3430,9 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
         self.config_max_stars_slider.setToolTip(
             'max_stars value written to the station config by Save Config.\n'
             'This bounds the star extraction cost of the nightly pipeline - 400 recommended.')
+        self.gamma_slider.setToolTip(
+            'Camera gamma used for detection and photometry.\n'
+            'Written to the config [Capture] section by Save Config, and also stored in the platepar.')
 
         layout.addSpacing(self.scaledSpacing(1))
 
