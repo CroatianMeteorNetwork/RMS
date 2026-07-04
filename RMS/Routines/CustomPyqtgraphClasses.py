@@ -2129,6 +2129,8 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
 
     sigFitPressed = QtCore.pyqtSignal()
     sigAutoFitPressed = QtCore.pyqtSignal()
+    sigFindPairsPressed = QtCore.pyqtSignal()
+    sigComputeResidualsPressed = QtCore.pyqtSignal()
     sigQuickAlignPressed = QtCore.pyqtSignal()
     sigFindBestFramePressed = QtCore.pyqtSignal()
     sigNextStarPressed = QtCore.pyqtSignal()
@@ -2192,6 +2194,8 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         fit_hbox = QtWidgets.QHBoxLayout()
         fit_hbox.setSpacing(self.scaledSpacing(0.25))
         self.fit_astrometry_button = QtWidgets.QPushButton("Fit")
+        self.fit_astrometry_button.setToolTip(
+            "Fit the platepar to the current star pairs (needs pairs)")
         self.fit_astrometry_button.clicked.connect(self.sigFitPressed.emit)
         fit_hbox.addWidget(self.fit_astrometry_button)
 
@@ -2200,6 +2204,24 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         self.auto_fit_button.clicked.connect(self.sigAutoFitPressed.emit)
         fit_hbox.addWidget(self.auto_fit_button)
         box.addLayout(fit_hbox)
+
+        # Individual fit steps: pair finding and residuals, runnable independently of the fit
+        steps_hbox = QtWidgets.QHBoxLayout()
+        steps_hbox.setSpacing(self.scaledSpacing(0.25))
+        self.find_pairs_button = QtWidgets.QPushButton("Find Pairs")
+        self.find_pairs_button.setToolTip(
+            "Match detected stars to catalog stars using the current platepar.\n"
+            "Replaces the current pairs; does not fit anything (needs a decent platepar).")
+        self.find_pairs_button.clicked.connect(self.sigFindPairsPressed.emit)
+        steps_hbox.addWidget(self.find_pairs_button)
+
+        self.compute_residuals_button = QtWidgets.QPushButton("Residuals")
+        self.compute_residuals_button.setToolTip(
+            "Compute residuals of the current pairs against the current platepar.\n"
+            "Does not fit anything (needs pairs).")
+        self.compute_residuals_button.clicked.connect(self.sigComputeResidualsPressed.emit)
+        steps_hbox.addWidget(self.compute_residuals_button)
+        box.addLayout(steps_hbox)
 
         # Quick Align button row
         quick_align_hbox = QtWidgets.QHBoxLayout()
@@ -2993,9 +3015,15 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         Updates QPushButtons to be enabled/disabled based on the number of paired stars
         Call whenever paired_stars is changed
         """
-        self.astrometry_button.setEnabled(len(self.gui.paired_stars) > 0)
-        self.photometry_button.setEnabled(len(self.gui.paired_stars) >= 2)
-        self.fit_astrometry_button.setEnabled(len(self.gui.paired_stars) >= min_fit_stars)
+        n_pairs = len(self.gui.paired_stars)
+        self.astrometry_button.setEnabled(n_pairs > 0)
+        self.photometry_button.setEnabled(n_pairs >= 2)
+        self.fit_astrometry_button.setEnabled(n_pairs >= min_fit_stars)
+
+        # Pair finding needs a platepar to project the catalog; residuals need a platepar and pairs
+        has_platepar = getattr(self.gui, 'platepar', None) is not None
+        self.find_pairs_button.setEnabled(has_platepar)
+        self.compute_residuals_button.setEnabled(has_platepar and (n_pairs > 0))
 
 
     def setFitButtonBusy(self, busy):
@@ -3008,6 +3036,8 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
             self.fit_astrometry_button.setText("Fitting...")
             self.fit_astrometry_button.setEnabled(False)
             self.auto_fit_button.setEnabled(False)
+            self.find_pairs_button.setEnabled(False)
+            self.compute_residuals_button.setEnabled(False)
             # Force visual update
             self.fit_astrometry_button.repaint()
             self.auto_fit_button.repaint()
@@ -3029,6 +3059,8 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
             self.auto_fit_button.setEnabled(False)
             self.fit_astrometry_button.setEnabled(False)
             self.quick_align_button.setEnabled(False)
+            self.find_pairs_button.setEnabled(False)
+            self.compute_residuals_button.setEnabled(False)
             # Force visual update
             self.auto_fit_button.repaint()
             self.fit_astrometry_button.repaint()

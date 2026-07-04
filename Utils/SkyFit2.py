@@ -3345,6 +3345,8 @@ class PlateTool(QtWidgets.QMainWindow):
         # Connect astrometry & photometry buttons to functions
         self.tab.param_manager.sigFitPressed.connect(self.fitPickedStars)
         self.tab.param_manager.sigAutoFitPressed.connect(self.autoFitAstrometryNet)
+        self.tab.param_manager.sigFindPairsPressed.connect(self.findMatchingPairs)
+        self.tab.param_manager.sigComputeResidualsPressed.connect(self.computeResiduals)
         self.tab.param_manager.sigQuickAlignPressed.connect(self.quickAlign)
         self.tab.param_manager.sigFindBestFramePressed.connect(self.findBestFrame)
         self.tab.param_manager.sigNextStarPressed.connect(self.jumpNextStar)
@@ -15286,29 +15288,133 @@ class PlateTool(QtWidgets.QMainWindow):
         return overfit
 
 
-    def fitPickedStars(self):
-        """ Fit stars that are manually picked. The function first only estimates the astrometry parameters
-            without the distortion, then just the distortion parameters, then all together.
-
+    def findMatchingPairs(self):
+        """ Match detected stars to catalog stars using the current platepar and replace the
+            current paired stars with the matches. Does not fit or modify the platepar - run the
+            fit as a separate step.
         """
 
-        # Check if there are enough stars for the fit
-        min_stars = self.getMinFitStars()
-        if len(self.paired_stars) < min_stars:
-
-            qmessagebox(title='Number of stars',
-                        message="At least {:d} paired stars are needed to do the fit!".format(min_stars),
+        # Pair finding requires a usable platepar to project the catalog
+        if (self.platepar is None) or (getattr(self.platepar, 'JD', None) is None):
+            qmessagebox(title='Find pairs',
+                        message="A platepar is needed to project catalog stars for matching!",
                         message_type="warning")
+            return
 
-            return self.platepar
+        # If there are existing matched star pairs, warn the user they will be replaced
+        if len(self.paired_stars) > 0:
+            reply = QtWidgets.QMessageBox.question(
+                self,
+                "Replace Matched Stars?",
+                "You have {} matched star pair(s) that will be replaced.\n\n"
+                "Do you want to continue?".format(len(self.paired_stars)),
+                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+                QtWidgets.QMessageBox.No
+            )
+            if reply != QtWidgets.QMessageBox.Yes:
+                return
 
-        # Show busy state on button
-        self.tab.param_manager.setFitButtonBusy(True)
-        QtWidgets.QApplication.processEvents()
+        # Get the detected stars on the current image (override detections take precedence)
+        ff_name_c = convertFRNameToFF(self.img_handle.name())
+        if self.star_detection_override_enabled and ff_name_c in self.star_detection_override_data:
+            detected_stars = np.array(self.star_detection_override_data[ff_name_c])
+        elif ff_name_c in self.calstars:
+            detected_stars = np.array(self.calstars[ff_name_c])
+        else:
+            qmessagebox(title='Find pairs',
+                        message="No detected stars are available on this image!",
+                        message_type="warning")
+            return
+
+        if len(detected_stars) < 1:
+            qmessagebox(title='Find pairs',
+                        message="No detected stars are available on this image!",
+                        message_type="warning")
+            return
+
+        # CALSTARS format: Y(0) X(1) IntensSum(2) Ampltd(3) FWHM(4) BgLvl(5) SNR(6) NSatPx(7)
+        det_y = detected_stars[:, 0]
+        det_x = detected_stars[:, 1]
+        det_intens = detected_stars[:, 2] if detected_stars.shape[1] > 2 else np.ones(len(det_x))
+        det_fwhm = detected_stars[:, 4] if detected_stars.shape[1] > 4 else np.zeros(len(det_x))
+        det_snr = detected_stars[:, 6] if detected_stars.shape[1] > 6 else np.ones(len(det_x))
+        det_saturated = detected_stars[:, 7] if detected_stars.shape[1] > 7 else np.zeros(len(det_x))
+
+        jd = date2JD(*self.img_handle.currentTime())
+
+        # Project the loaded catalog to image coordinates (iterative inversion of the forward
+        # mapping, exact regardless of the reverse polynomial state)
+        cat_x, cat_y, _ = getCatalogStarsImagePositions(self.catalog_stars, jd, self.platepar,
+                                                        use_iterative=True)
+
+        # Keep only catalog stars inside the image and outside the mask
+        in_image = (cat_x >= 0) & (cat_x < self.platepar.X_res) \
+            & (cat_y >= 0) & (cat_y < self.platepar.Y_res)
+        catalog_stars_fov = self.catalog_stars[in_image]
+        cat_x, cat_y = cat_x[in_image], cat_y[in_image]
+
+        catalog_stars_fov, not_masked = self.filterCatalogStarsByMask(cat_x, cat_y,
+                                                                      catalog_stars_fov)
+        cat_x, cat_y = cat_x[not_masked], cat_y[not_masked]
+
+        if len(cat_x) == 0:
+            qmessagebox(title='Find pairs',
+                        message="No catalog stars project inside the image - check the platepar "
+                                "pointing and the catalog limiting magnitude!",
+                        message_type="warning")
+            return
+
+        # Match radius scaled to the star size on this image
+        good_fwhm = det_fwhm[det_fwhm > 0]
+        match_radius = 2.0*float(np.median(good_fwhm)) if len(good_fwhm) else 6.0
+        match_radius = min(15.0, max(4.0, match_radius))
 
         print()
-        print("----------------------------------------")
-        print("Fitting platepar...")
+        print("Finding matching pairs (match radius: {:.1f} px)...".format(match_radius))
+
+        # One-to-one nearest-neighbour matching within the radius
+        self.paired_stars = PairedStars()
+        matched_cat = set()
+        for i in range(len(det_x)):
+            distances = np.sqrt((cat_x - det_x[i])**2 + (cat_y - det_y[i])**2)
+            closest_idx = int(np.argmin(distances))
+            if (distances[closest_idx] < match_radius) and (closest_idx not in matched_cat):
+                matched_cat.add(closest_idx)
+                cat_star = catalog_stars_fov[closest_idx]
+                sky_obj = CatalogStar(cat_star[0], cat_star[1], cat_star[2])
+                self.paired_stars.addPair(
+                    det_x[i], det_y[i], det_fwhm[i], det_intens[i], sky_obj,
+                    snr=det_snr[i], saturated=det_saturated[i] > 0
+                )
+
+        print("  Matched {} of {} detected stars to {} catalog stars in FOV".format(
+            len(self.paired_stars), len(det_x), len(cat_x)))
+
+        # Old residuals and photometry no longer correspond to the new pairs
+        self.residuals = None
+        self.photom_fit_resids = None
+
+        # Refresh the display and button gating
+        self.updateStars()
+        self.updatePairedStars()
+        self.updateFitResiduals()
+        self.tab.param_manager.updatePairedStars(min_fit_stars=self.getMinFitStars())
+
+        self.status_bar.showMessage("Matched {} star pairs".format(len(self.paired_stars)))
+
+
+    def computeResiduals(self):
+        """ Compute and display the astrometric residuals of the current paired stars against the
+            current platepar. Does not fit or modify anything - can be run standalone after manual
+            platepar changes or after finding pairs.
+        """
+
+        # Residuals require a platepar and at least one paired star
+        if (self.platepar is None) or (len(self.paired_stars) == 0):
+            qmessagebox(title='Compute residuals',
+                        message="A platepar and at least one paired star are needed to compute residuals!",
+                        message_type="warning")
+            return
 
         # Extract paired catalog stars and image coordinates separately
         img_stars = np.array(self.paired_stars.imageCoords())
@@ -15316,19 +15422,6 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Get the Julian date of the image that's being fit
         jd = date2JD(*self.img_handle.currentTime())
-
-        # Fit the platepar to paired stars
-        self.platepar.fitAstrometry(jd, img_stars, catalog_stars, first_platepar_fit=self.first_platepar_fit,\
-            fit_only_pointing=self.fit_only_pointing, fixed_scale=self.fixed_scale)
-        self.first_platepar_fit = False
-        self.platepar_modified = True
-
-        # Mark error overlay for recomputation after the platepar changed
-        self.error_overlay_needs_update = True
-
-        # Show platepar parameters
-        print()
-        print(self.platepar)
 
         ### Calculate the fit residuals for every fitted star ###
 
@@ -15506,6 +15599,58 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Save the residuals
         self.residuals = residuals
+
+
+        # Draw the updated residual lines
+        self.updateFitResiduals()
+
+
+    def fitPickedStars(self):
+        """ Fit stars that are manually picked. The function first only estimates the astrometry parameters
+            without the distortion, then just the distortion parameters, then all together.
+
+        """
+
+        # Check if there are enough stars for the fit
+        min_stars = self.getMinFitStars()
+        if len(self.paired_stars) < min_stars:
+
+            qmessagebox(title='Number of stars',
+                        message="At least {:d} paired stars are needed to do the fit!".format(min_stars),
+                        message_type="warning")
+
+            return self.platepar
+
+        # Show busy state on button
+        self.tab.param_manager.setFitButtonBusy(True)
+        QtWidgets.QApplication.processEvents()
+
+        print()
+        print("----------------------------------------")
+        print("Fitting platepar...")
+
+        # Extract paired catalog stars and image coordinates separately
+        img_stars = np.array(self.paired_stars.imageCoords())
+        catalog_stars = np.array(self.paired_stars.skyCoords())
+
+        # Get the Julian date of the image that's being fit
+        jd = date2JD(*self.img_handle.currentTime())
+
+        # Fit the platepar to paired stars
+        self.platepar.fitAstrometry(jd, img_stars, catalog_stars, first_platepar_fit=self.first_platepar_fit,\
+            fit_only_pointing=self.fit_only_pointing, fixed_scale=self.fixed_scale)
+        self.first_platepar_fit = False
+        self.platepar_modified = True
+
+        # Mark error overlay for recomputation after the platepar changed
+        self.error_overlay_needs_update = True
+
+        # Show platepar parameters
+        print()
+        print(self.platepar)
+
+        # Compute and display the fit residuals
+        self.computeResiduals()
 
         self.updateDistortion()
         self.updateLeftLabels()
