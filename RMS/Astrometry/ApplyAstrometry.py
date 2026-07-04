@@ -59,6 +59,7 @@ import pyximport
 pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 from RMS.Astrometry.CyFunctions import (cyraDecToXY, cyTrueRaDec2ApparentAltAz,
                                         cyXYToRADec,
+                                        cyRaDecToXY_iter,
                                         eqRefractionApparentToTrue,
                                         equatorialCoordPrecession)
 
@@ -1002,11 +1003,38 @@ def raDecToXYPP(RA_data, dec_data, jd, platepar):
 
     # Use the cythonized function instead of the Python function
     X_data, Y_data = cyraDecToXY(RA_data, dec_data, float(jd), float(platepar.lat), float(platepar.lon),
-        float(platepar.X_res), float(platepar.Y_res), float(platepar.Ho), float(platepar.JD),  
-        float(platepar.RA_d), float(platepar.dec_d), float(platepar.pos_angle_ref), platepar.F_scale, 
-        platepar.x_poly_rev, platepar.y_poly_rev, unicode(platepar.distortion_type), 
-        refraction=platepar.refraction, equal_aspect=platepar.equal_aspect, 
+        float(platepar.X_res), float(platepar.Y_res), float(platepar.Ho), float(platepar.JD),
+        float(platepar.RA_d), float(platepar.dec_d), float(platepar.pos_angle_ref), platepar.F_scale,
+        platepar.x_poly_rev, platepar.y_poly_rev, unicode(platepar.distortion_type),
+        refraction=platepar.refraction, equal_aspect=platepar.equal_aspect,
         force_distortion_centre=platepar.force_distortion_centre, asymmetry_corr=platepar.asymmetry_corr)
+
+    return X_data, Y_data
+
+
+def raDecToXYPP_iter(RA_data, dec_data, jd, platepar):
+    """ Converts RA, Dec to image coordinates by iteratively inverting the forward (image -> sky)
+        mapping, so only the forward distortion polynomial is needed. This gives an exact round trip
+        with xyToRaDecPP even when the reverse polynomial has not been fitted (e.g. mid auto-fit).
+
+    Arguments:
+        RA_data: [ndarray] Array of right ascensions (degrees).
+        dec_data: [ndarray] Array of declinations (degrees).
+        jd: [float] Julian date.
+        platepar: [Platepar structure] Astrometry parameters.
+
+    Return:
+        (x, y): [tuple of ndarrays] Image X and Y coordinates.
+    """
+
+    X_data, Y_data = cyRaDecToXY_iter(RA_data, dec_data, float(jd), float(platepar.lat),
+        float(platepar.lon), float(platepar.X_res), float(platepar.Y_res), float(platepar.Ho),
+        float(platepar.JD), float(platepar.RA_d), float(platepar.dec_d),
+        float(platepar.pos_angle_ref), platepar.F_scale,
+        platepar.x_poly_fwd, platepar.y_poly_fwd, unicode(platepar.distortion_type),
+        refraction=platepar.refraction, equal_aspect=platepar.equal_aspect,
+        force_distortion_centre=platepar.force_distortion_centre,
+        asymmetry_corr=platepar.asymmetry_corr)
 
     return X_data, Y_data
 

@@ -23,6 +23,7 @@ import numpy as np
 import zlib
 from PIL import Image
 
+import matplotlib
 import matplotlib.pyplot as plt
 
 # Astropy imports for solar system body ephemeris
@@ -2221,6 +2222,14 @@ class PlateTool(QtWidgets.QMainWindow):
         self.max_pixels_between_matched_stars = np.inf
         self.autopan_mode = False
 
+        # Round-trip error overlay (heatmap of fwd/rev transform disagreement across the image)
+        self.error_overlay_enabled = False  # Default: OFF
+        self.error_overlay_item = None  # Store QGraphicsPixmapItem for error overlay
+        self.error_overlay_pixmap = None  # Cached pixmap for error overlay
+        self.error_overlay_stride = 20  # Compute error every N pixels for performance
+        self.error_overlay_threshold = 0.1  # Errors below this (px) are fully transparent
+        self.error_overlay_needs_update = True  # Flag to track if overlay needs recomputation
+
         # Handle empty construction (no input path or config)
         if config is None:
             config = cr.Config()
@@ -3397,6 +3406,8 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.settings.sigGridToggled.connect(self.onGridChanged)
         self.tab.settings.sigInvertToggled.connect(self.toggleInvertColours)
         self.tab.settings.sigAutoPanToggled.connect(self.toggleAutoPan)
+        self.tab.settings.sigErrorOverlayToggled.connect(self.toggleErrorOverlay)
+        self.tab.settings.sigErrorOverlayThresholdChanged.connect(self.updateErrorOverlayThreshold)
         self.tab.settings.sigSingleClickPhotometryToggled.connect(self.toggleSingleClickPhotometry)
         self.tab.settings.sigSatTracksToggled.connect(self.toggleShowSatTracks)
         self.tab.settings.sigAutoComputeSatTracksToggled.connect(self.toggleAutoComputeSatTracks)
@@ -4049,7 +4060,8 @@ class PlateTool(QtWidgets.QMainWindow):
             pp_noref = copy.deepcopy(self.platepar)
             pp_noref.refraction = False
             pp_noref.updateRefRADec(preserve_rotation=True)
-            self.geo_x, self.geo_y, _ = getCatalogStarsImagePositions(self.geo_points, ff_jd, pp_noref)
+            self.geo_x, self.geo_y, _ = getCatalogStarsImagePositions(self.geo_points, ff_jd, pp_noref,
+                                                                      use_iterative=True)
 
             geo_xy = np.c_[self.geo_x, self.geo_y]
 
@@ -4085,9 +4097,12 @@ class PlateTool(QtWidgets.QMainWindow):
         ### Draw catalog stars on the image using the current platepar ###
         ######################################################################################################
 
-        # Get positions of catalog stars on the image
+        # Get positions of catalog stars on the image. The iterative inversion of the forward mapping
+        # keeps the displayed positions exact even mid auto-fit, when only the forward polynomial has
+        # been fitted so far
         self.catalog_x, self.catalog_y, catalog_mag = getCatalogStarsImagePositions(self.catalog_stars, \
-                                                                                    ff_jd, self.platepar)
+                                                                                    ff_jd, self.platepar, \
+                                                                                    use_iterative=True)
 
         # Apply apparent magnitude correction if enabled
         if self.apparent_mag_corr_enabled:
@@ -4541,7 +4556,8 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Convert RA/Dec to image coordinates
             body_radec = np.array([[ra_deg, dec_deg, mag]])
-            x_arr, y_arr, _ = getCatalogStarsImagePositions(body_radec, ff_jd, self.platepar)
+            x_arr, y_arr, _ = getCatalogStarsImagePositions(body_radec, ff_jd, self.platepar,
+                                                            use_iterative=True)
 
             if len(x_arr) > 0:
                 x, y = x_arr[0], y_arr[0]
@@ -4603,7 +4619,146 @@ class PlateTool(QtWidgets.QMainWindow):
         if len(self.paired_stars) >= 2:
             self.photometry()
 
+        # Update the round-trip error overlay
+        self.updateErrorOverlay()
+
         self.tab.param_manager.updatePairedStars(min_fit_stars=self.getMinFitStars())
+
+
+    def toggleErrorOverlay(self):
+        """ Toggle the round-trip error overlay display. """
+        self.error_overlay_enabled = not self.error_overlay_enabled
+        self.updateErrorOverlay()
+
+
+    def updateErrorOverlayThreshold(self, threshold):
+        """ Update error overlay threshold and refresh display.
+
+        Arguments:
+            threshold: [float] Errors below this value (pixels) will be fully transparent.
+        """
+        self.error_overlay_threshold = threshold
+        self.error_overlay_needs_update = True  # Force recomputation with new threshold
+
+        # Update the label in the settings panel
+        self.tab.settings.error_overlay_value_label.setText('{:.2f} px'.format(threshold))
+
+        # Refresh the overlay if it's enabled
+        if self.error_overlay_enabled:
+            self.updateErrorOverlay()
+
+
+    def updateErrorOverlay(self):
+        """ Update the round-trip error overlay showing the disagreement between the forward and
+            reverse astrometric mappings across the image.
+        """
+
+        # Remove existing overlay
+        if self.error_overlay_item is not None:
+            self.img_frame.removeItem(self.error_overlay_item)
+            self.error_overlay_item = None
+
+        # Only draw if enabled and we're in skyfit mode
+        if not self.error_overlay_enabled or self.mode != 'skyfit':
+            return
+
+        # Check if image is loaded
+        if not hasattr(self, 'img') or self.img is None or self.img.data is None:
+            return
+
+        # Check if platepar has required data
+        if not hasattr(self.platepar, 'JD') or self.platepar.JD is None:
+            return
+
+        # Get image dimensions
+        img_x_max, img_y_max = self.img.data.shape[:2]
+
+        # If we have a cached pixmap and don't need to update, just redisplay it
+        if not self.error_overlay_needs_update and self.error_overlay_pixmap is not None:
+            self.error_overlay_item = QtWidgets.QGraphicsPixmapItem(self.error_overlay_pixmap)
+            self.error_overlay_item.setZValue(0.5)  # Between image (0) and overlays (1)
+            self.img_frame.addItem(self.error_overlay_item)
+            return
+
+        # Create a grid for error computation
+        stride = self.error_overlay_stride
+        x_grid = np.arange(0, img_x_max, stride)
+        y_grid = np.arange(0, img_y_max, stride)
+
+        # Compute round-trip errors
+        error_grid = np.zeros((len(y_grid), len(x_grid)))
+
+        # Use platepar reference time for both directions to measure pure geometric accuracy
+        jd = self.platepar.JD
+        time_data = jd2Date(jd)
+
+        for i, y in enumerate(y_grid):
+            for j, x in enumerate(x_grid):
+                try:
+                    # Convert xy -> RA/Dec
+                    _, ra_array, dec_array, _ = xyToRaDecPP(
+                        [time_data],
+                        [float(x)],
+                        [float(y)],
+                        [1],
+                        self.platepar,
+                        extinction_correction=False
+                    )
+
+                    # Convert RA/Dec -> xy (using same time for a true round trip)
+                    x_recovered, y_recovered = raDecToXYPP(
+                        np.array([ra_array[0]]),
+                        np.array([dec_array[0]]),
+                        jd,
+                        self.platepar
+                    )
+
+                    error_grid[i, j] = np.sqrt(
+                        (x_recovered[0] - x)**2 + (y_recovered[0] - y)**2)
+
+                except Exception:
+                    # If computation fails, set error to 0 (transparent)
+                    error_grid[i, j] = 0
+
+        # Normalize errors for colormap: values below threshold are 0, above threshold scale to [0, 1]
+        error_normalized = np.copy(error_grid)
+        error_normalized[error_normalized < self.error_overlay_threshold] = 0
+
+        max_error = np.max(error_normalized)
+        if max_error > self.error_overlay_threshold:
+            # Map [threshold, max_error] to [0, 1]
+            above = error_normalized >= self.error_overlay_threshold
+            error_normalized[above] = (error_normalized[above] - self.error_overlay_threshold) \
+                /(max_error - self.error_overlay_threshold)
+
+        # Create RGBA image using the hot colormap (registry API on modern matplotlib)
+        if hasattr(matplotlib, 'colormaps'):
+            cmap = matplotlib.colormaps.get_cmap('hot')
+        else:
+            cmap = plt.get_cmap('hot')
+        rgba_grid = cmap(error_normalized)  # Shape: (h, w, 4)
+
+        # Set alpha channel: 0 for errors below threshold, otherwise scale with error (max 60% opacity)
+        alpha = np.where(error_grid < self.error_overlay_threshold, 0,
+                        np.clip(error_normalized*0.6, 0, 0.6))
+        rgba_grid[:, :, 3] = alpha
+
+        rgba_uint8 = (rgba_grid*255).astype(np.uint8)
+
+        # Resize to match image dimensions - cv2.resize expects (width, height)
+        rgba_resized = cv2.resize(rgba_uint8, (img_x_max, img_y_max),
+                                 interpolation=cv2.INTER_LINEAR)
+
+        # Convert to QPixmap and cache for reuse
+        height, width, channel = rgba_resized.shape
+        q_img = QtGui.QImage(rgba_resized.data, width, height, 4*width,
+                            QtGui.QImage.Format_RGBA8888)
+        self.error_overlay_pixmap = QtGui.QPixmap.fromImage(q_img)
+        self.error_overlay_needs_update = False
+
+        self.error_overlay_item = QtWidgets.QGraphicsPixmapItem(self.error_overlay_pixmap)
+        self.error_overlay_item.setZValue(0.5)  # Between image (0) and overlays (1)
+        self.img_frame.addItem(self.error_overlay_item)
 
 
     def updateCalstars(self):
@@ -12551,6 +12706,10 @@ class PlateTool(QtWidgets.QMainWindow):
                     final_catalog_stars=tuned_catalog,
                     iteration_callback=iteration_callback
                 )
+
+                # Mark error overlay for recomputation after the platepar changed
+                self.error_overlay_needs_update = True
+
                 print("  NN fit complete: RA={:.2f} Dec={:.2f} Scale={:.3f} arcmin/px".format(
                     self.platepar.RA_d, self.platepar.dec_d, 60/self.platepar.F_scale))
             except Exception as e:
@@ -13524,6 +13683,10 @@ class PlateTool(QtWidgets.QMainWindow):
                     final_catalog_stars=tuned_catalog,
                     iteration_callback=iteration_callback
                 )
+
+                # Mark error overlay for recomputation after the platepar changed
+                self.error_overlay_needs_update = True
+
                 print("  NN fit complete: RA={:.2f} Dec={:.2f} Scale={:.3f} arcmin/px".format(
                     self.platepar.RA_d, self.platepar.dec_d, 60/self.platepar.F_scale))
             except Exception as e:
@@ -15145,6 +15308,9 @@ class PlateTool(QtWidgets.QMainWindow):
             fit_only_pointing=self.fit_only_pointing, fixed_scale=self.fixed_scale)
         self.first_platepar_fit = False
         self.platepar_modified = True
+
+        # Mark error overlay for recomputation after the platepar changed
+        self.error_overlay_needs_update = True
 
         # Show platepar parameters
         print()

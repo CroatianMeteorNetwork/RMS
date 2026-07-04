@@ -3901,6 +3901,8 @@ class SettingsWidget(QtWidgets.QWidget, ScaledSizeHelper):
     sigGreatCircleToggled = QtCore.pyqtSignal()
     sigRegionToggled = QtCore.pyqtSignal()
     sigSingleClickPhotometryToggled = QtCore.pyqtSignal()
+    sigErrorOverlayToggled = QtCore.pyqtSignal()
+    sigErrorOverlayThresholdChanged = QtCore.pyqtSignal(float)
     sigSatTracksToggled = QtCore.pyqtSignal()
     sigAutoComputeSatTracksToggled = QtCore.pyqtSignal()
     sigLoadTLEPressed = QtCore.pyqtSignal()
@@ -4003,6 +4005,34 @@ class SettingsWidget(QtWidgets.QWidget, ScaledSizeHelper):
         self.distortion.released.connect(self.sigDistortionToggled.emit)
         self.updateShowDistortion()
         vbox.addWidget(self.distortion)
+
+        # Round-trip error overlay controls
+        self.error_overlay_chk = QtWidgets.QCheckBox('Show Round-Trip Error Overlay')
+        self.error_overlay_chk.setToolTip(
+            'Heatmap of the disagreement (px) between the forward and reverse\n'
+            'astrometric mappings across the image. Bright areas mark where the\n'
+            'two distortion polynomials are inconsistent.')
+        self.error_overlay_chk.released.connect(self.sigErrorOverlayToggled.emit)
+        self.error_overlay_chk.setChecked(False)  # Default OFF
+        vbox.addWidget(self.error_overlay_chk)
+
+        error_overlay_hbox = QtWidgets.QHBoxLayout()
+        error_overlay_hbox.addWidget(QtWidgets.QLabel('Threshold:'))
+
+        self.error_overlay_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+        self.error_overlay_slider.setMinimum(1)    # 0.01 px
+        self.error_overlay_slider.setMaximum(200)  # 2.0 px
+        self.error_overlay_slider.setValue(10)     # Default 0.1 px
+        self.error_overlay_slider.setToolTip(
+            'Transparency threshold - errors below this (px) are invisible')
+        self.error_overlay_slider.valueChanged.connect(
+            lambda v: self.sigErrorOverlayThresholdChanged.emit(v/100.0))
+        error_overlay_hbox.addWidget(self.error_overlay_slider)
+
+        self.error_overlay_value_label = QtWidgets.QLabel('0.10 px')
+        self.error_overlay_value_label.setMinimumWidth(self.scaledWidth(6))
+        error_overlay_hbox.addWidget(self.error_overlay_value_label)
+        vbox.addLayout(error_overlay_hbox)
 
         self.invert = QtWidgets.QCheckBox('Invert Colors')
         self.invert.released.connect(self.sigInvertToggled.emit)
@@ -4288,6 +4318,9 @@ class SettingsWidget(QtWidgets.QWidget, ScaledSizeHelper):
         self.std_label.show()
         self.detected_stars.show()
         self.distortion.show()
+        self.error_overlay_chk.show()
+        self.error_overlay_slider.show()
+        self.error_overlay_value_label.show()
         self.selected_stars.show()
         self.picks.hide()
         self.great_circle.hide()
@@ -4318,6 +4351,9 @@ class SettingsWidget(QtWidgets.QWidget, ScaledSizeHelper):
         self.std_label.hide()
         self.detected_stars.hide()
         self.distortion.hide()
+        self.error_overlay_chk.hide()
+        self.error_overlay_slider.hide()
+        self.error_overlay_value_label.hide()
         self.selected_stars.hide()
         self.picks.show()
         self.great_circle.show()

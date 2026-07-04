@@ -92,12 +92,17 @@ def parseInf(file_name):
     return station_data_obj
 
 
-def getCatalogStarsImagePositions(catalog_stars, jd, platepar):
+def getCatalogStarsImagePositions(catalog_stars, jd, platepar, use_iterative=False):
     """Get image positions of catalog stars using the current platepar values.
     Arguments:
         catalog_stars: [2D list] A list of (ra, dec, mag) pairs of catalog stars.
         jd: [float] Julian date for transformation.
         platepar: [Platepar]
+    Keyword arguments:
+        use_iterative: [bool] Invert the forward (image -> sky) mapping iteratively instead of using
+            the reverse distortion polynomial. Exact even when the reverse polynomial is stale (e.g.
+            mid auto-fit), so it is preferred for display purposes. Must stay False inside fitting
+            cost functions that optimize the reverse polynomial. False by default.
     Return:
         (x_array, y_array mag_catalog): [tuple of ndarrays] X, Y positions and magnitudes of stars on the
             image.
@@ -106,7 +111,11 @@ def getCatalogStarsImagePositions(catalog_stars, jd, platepar):
     ra_catalog, dec_catalog, mag_catalog = catalog_stars.T
 
     # Convert star RA, Dec to image coordinates
-    x_array, y_array = RMS.Astrometry.ApplyAstrometry.raDecToXYPP(ra_catalog, dec_catalog, jd, platepar)
+    if use_iterative:
+        x_array, y_array = RMS.Astrometry.ApplyAstrometry.raDecToXYPP_iter(
+            ra_catalog, dec_catalog, jd, platepar)
+    else:
+        x_array, y_array = RMS.Astrometry.ApplyAstrometry.raDecToXYPP(ra_catalog, dec_catalog, jd, platepar)
 
     return x_array, y_array, mag_catalog
 
