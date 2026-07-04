@@ -362,6 +362,10 @@ def _topic_astrometry(gui):
     body = (
         "<p>The goal is to pair at least <b>14 catalog stars</b> spread uniformly across the whole "
         "image (more is better, and include some near the horizon). Then fit.</p>"
+        "<p><b>Find Best Frame</b> picks a good image to calibrate on: it scores every frame of "
+        "the night on star distribution and quality, and on sky condition &ndash; the darkest, "
+        "most uniform background and sharpest stars, ranked against the rest of the night &ndash; "
+        "so moonlit or hazy frames lose to clean ones even when they show plenty of stars.</p>"
         "<h3>Picking stars</h3>"
         "<ol>"
         "<li>Press " + _key(c + " + R") + " to start. Two yellow circles follow the cursor; scroll "
