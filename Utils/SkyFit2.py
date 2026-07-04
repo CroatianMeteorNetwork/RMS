@@ -4673,6 +4673,20 @@ class PlateTool(QtWidgets.QMainWindow):
         # Get image dimensions
         img_x_max, img_y_max = self.img.data.shape[:2]
 
+        # Recompute whenever any platepar parameter that affects the mapping has changed, so manual
+        # adjustments (pointing nudges, distortion edits, refraction toggles, platepar loads) are
+        # picked up without having to instrument every mutation site
+        pp = self.platepar
+        pp_key = (
+            pp.RA_d, pp.dec_d, pp.pos_angle_ref, pp.F_scale, pp.Ho, pp.JD, pp.lat, pp.lon,
+            pp.refraction, pp.equal_aspect, pp.force_distortion_centre, pp.asymmetry_corr,
+            str(pp.distortion_type),
+            tuple(pp.x_poly_fwd), tuple(pp.y_poly_fwd), tuple(pp.x_poly_rev), tuple(pp.y_poly_rev),
+        )
+        if getattr(self, 'error_overlay_pp_key', None) != pp_key:
+            self.error_overlay_pp_key = pp_key
+            self.error_overlay_needs_update = True
+
         # If we have a cached pixmap and don't need to update, just redisplay it
         if not self.error_overlay_needs_update and self.error_overlay_pixmap is not None:
             self.error_overlay_item = QtWidgets.QGraphicsPixmapItem(self.error_overlay_pixmap)
