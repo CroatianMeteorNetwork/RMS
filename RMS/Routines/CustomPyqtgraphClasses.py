@@ -1320,12 +1320,25 @@ class RightOptionsTab(QtWidgets.QTabWidget, ScaledSizeHelper):
         levels_layout.addWidget(self.hist)
         self.levels_tab.setLayout(levels_layout)
 
+        # Wrap the form-style tabs in scroll areas so that short windows scroll the content
+        # instead of compressing it into unreadability. Levels stretches naturally with the
+        # window and Help scrolls by itself, so they stay unwrapped.
+        self._tab_scroll_wrappers = {}
+        for panel in (self.param_manager, self.geolocation, self.star_detection,
+                      self.mask, self.settings, self.debruijn):
+            scroll = QtWidgets.QScrollArea()
+            scroll.setWidgetResizable(True)
+            scroll.setFrameShape(QtWidgets.QFrame.NoFrame)
+            scroll.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
+            scroll.setWidget(panel)
+            self._tab_scroll_wrappers[panel] = scroll
+
         self.addTab(self.levels_tab, 'Levels')
-        self.addTab(self.param_manager, 'Fit Parameters')
-        self.addTab(self.geolocation, 'Station')
-        self.addTab(self.star_detection, 'Star Detection')
-        self.addTab(self.mask, 'Mask')
-        self.addTab(self.settings, 'Settings')
+        self.addTab(self.tabWidgetFor(self.param_manager), 'Fit Parameters')
+        self.addTab(self.tabWidgetFor(self.geolocation), 'Station')
+        self.addTab(self.tabWidgetFor(self.star_detection), 'Star Detection')
+        self.addTab(self.tabWidgetFor(self.mask), 'Mask')
+        self.addTab(self.tabWidgetFor(self.settings), 'Settings')
         self.addTab(self.help, 'ⓘ Help')
 
         self.setCurrentIndex(self.index)  # redundant
@@ -1373,14 +1386,24 @@ class RightOptionsTab(QtWidgets.QTabWidget, ScaledSizeHelper):
         self.gui.view_widget.setFocus()
 
 
+    def tabWidgetFor(self, panel):
+        """ Return the widget actually inserted in the tab bar for the given panel
+            (its scroll wrapper if it has one, the panel itself otherwise).
+        """
+        return self._tab_scroll_wrappers.get(panel, panel)
+
+    def tabIndexOf(self, panel):
+        """ Return the tab index of the given panel, looking through scroll wrappers. """
+        return self.indexOf(self.tabWidgetFor(panel))
+
     def onSkyFit(self):
 
         # Remove ManualReduction-specific tabs
         self.removeTabText('Debruijn')
 
         # Add Skyfit-specific tabs
-        self.insertTab(1, self.param_manager, "Fit Parameters")
-        self.insertTab(2, self.geolocation, "Station")
+        self.insertTab(1, self.tabWidgetFor(self.param_manager), "Fit Parameters")
+        self.insertTab(2, self.tabWidgetFor(self.geolocation), "Station")
         self.settings.onSkyFit()
 
         self.setCurrentIndex(self.index)
@@ -1394,7 +1417,7 @@ class RightOptionsTab(QtWidgets.QTabWidget, ScaledSizeHelper):
 
         # Add ManualReduction-specific tabs
         if self.gui.img.img_handle.input_type == 'dfn':
-            self.insertTab(1, self.debruijn, 'Debruijn')
+            self.insertTab(1, self.tabWidgetFor(self.debruijn), 'Debruijn')
 
         self.setCurrentIndex(self.index)
 
@@ -3318,13 +3341,13 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
             # (key, label, min, max, default, default label, callback, group)
             ('intensity_threshold', 'Intensity Threshold', 1, 200, 18, '18', self.onIntensityThresholdChanged, 'config'),
             ('neighborhood_size', 'Neighborhood Size', 5, 40, 10, '10', self.onNeighborhoodSizeChanged, 'config'),
-            ('config_max_stars', 'Max Stars', 50, 2000, 400, '400', self.onConfigMaxStarsChanged, 'config'),
+            ('config_max_stars', 'Max Stars', 100, 2000, 400, '400', self.onConfigMaxStarsChanged, 'config'),
             ('max_global_intensity', 'Max Global Intensity', 30, 255, 230, '230', self.onMaxGlobalIntensityChanged, 'config'),
             ('gamma', 'Gamma', 45, 200, 100, '1.00', self.onGammaChanged, 'config'),
             ('segment_radius', 'Segment Radius', 2, 20, 4, '4', self.onSegmentRadiusChanged, 'config'),
             ('max_feature_ratio', 'Max Feature Ratio', 50, 200, 80, '0.80', self.onMaxFeatureRatioChanged, 'config'),
             ('roundness_threshold', 'Roundness Threshold', 30, 90, 50, '0.50', self.onRoundnessThresholdChanged, 'config'),
-            ('skyfit_max_stars', 'Max Stars', 50, 5000, 800, '800', self.onMaxStarsChanged, 'session'),
+            ('skyfit_max_stars', 'Max Stars', 100, 5000, 800, '800', self.onMaxStarsChanged, 'session'),
         ]
 
         self.sliders = {}
@@ -3423,6 +3446,11 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
         self.roundness_threshold_slider = self.sliders['roundness_threshold']
         self.roundness_threshold_label = self.slider_labels['roundness_threshold']
 
+        # Both max stars budgets move in increments of 100
+        for s in (self.max_stars_slider, self.config_max_stars_slider):
+            s.setSingleStep(100)
+            s.setPageStep(500)
+
         # Tooltips distinguishing the two star count budgets
         self.max_stars_slider.setToolTip(
             'Number of star candidates used by SkyFit re-detection in this session.\n'
@@ -3505,13 +3533,28 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
         self.neighborhood_size_label.setText(str(value))
         self.sigNeighborhoodSizeChanged.emit(value)
 
+    @staticmethod
+    def _snapTo100(value):
+        """Snap a max stars value to the nearest 100."""
+        return max(100, int(round(value/100.0))*100)
+
     def onMaxStarsChanged(self, value):
-        self.max_stars_label.setText(str(value))
-        self.sigMaxStarsChanged.emit(value)
+        snapped = self._snapTo100(value)
+        if snapped != value:
+            # Re-fires this handler with the snapped value
+            self.max_stars_slider.setValue(snapped)
+            return
+        self.max_stars_label.setText(str(snapped))
+        self.sigMaxStarsChanged.emit(snapped)
 
     def onConfigMaxStarsChanged(self, value):
-        self.config_max_stars_label.setText(str(value))
-        self.sigConfigMaxStarsChanged.emit(value)
+        snapped = self._snapTo100(value)
+        if snapped != value:
+            # Re-fires this handler with the snapped value
+            self.config_max_stars_slider.setValue(snapped)
+            return
+        self.config_max_stars_label.setText(str(snapped))
+        self.sigConfigMaxStarsChanged.emit(snapped)
 
     def resetToDefaults(self):
         """Reset all sliders to the recommended default values."""

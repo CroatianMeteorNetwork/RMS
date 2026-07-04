@@ -6763,7 +6763,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.mask_use_flat_background = use_flat
 
         # Only change the image if we're currently on the mask tab
-        mask_tab_index = self.tab.indexOf(self.tab.mask)
+        mask_tab_index = self.tab.tabIndexOf(self.tab.mask)
         if self.tab.currentIndex() != mask_tab_index:
             return
 
@@ -6799,11 +6799,11 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Refresh the Help tab content when it is opened, so it reflects the current mode and any
         # features that were toggled since it was last shown.
-        if new_index == self.tab.indexOf(self.tab.help):
+        if new_index == self.tab.tabIndexOf(self.tab.help):
             self.tab.help.updateHelp()
 
         # Mask tab is at index 4 (Levels=0, Fit Parameters=1, Station=2, Star Detection=3, Mask=4)
-        mask_tab_index = self.tab.indexOf(self.tab.mask)
+        mask_tab_index = self.tab.tabIndexOf(self.tab.mask)
 
         if old_index == mask_tab_index and self.mask_use_flat_background:
             # Leaving mask tab while flat was shown - restore current image
@@ -10150,7 +10150,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Handle brush undo - Ctrl+Z when on mask tab
         if event.key() == QtCore.Qt.Key_Z and (modifiers == QtCore.Qt.ControlModifier):
-            mask_tab_index = self.tab.indexOf(self.tab.mask)
+            mask_tab_index = self.tab.tabIndexOf(self.tab.mask)
             if self.tab.currentIndex() == mask_tab_index and self.mask_brush_stroke_history:
                 self.undoBrushStroke()
                 return
@@ -11835,7 +11835,7 @@ class PlateTool(QtWidgets.QMainWindow):
     def _raiseHelpTab(self):
         """ Select and maximise the Help tab. Returns True if the tab exists. """
 
-        help_index = self.tab.indexOf(self.tab.help)
+        help_index = self.tab.tabIndexOf(self.tab.help)
         if help_index == -1:
             return False
         self.tab.setCurrentIndex(help_index)
