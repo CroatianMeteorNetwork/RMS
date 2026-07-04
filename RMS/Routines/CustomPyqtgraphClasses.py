@@ -2232,6 +2232,12 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         self.rmsd_label.setStyleSheet("font-weight: bold; font-size: 12pt;")
         box.addWidget(self.rmsd_label)
 
+        # Max round-trip (forward vs reverse mapping) disagreement across the whole image,
+        # updated with the error overlay. Complements the RMSD, which only covers matched stars.
+        self.roundtrip_label = QtWidgets.QLabel("")
+        self.roundtrip_label.setStyleSheet("color: gray; font-size: 9pt;")
+        box.addWidget(self.roundtrip_label)
+
         hbox = QtWidgets.QHBoxLayout()
         hbox.setSpacing(self.scaledSpacing(0.25))  # Reduce spacing between buttons
         self.astrometry_button = QtWidgets.QPushButton('Astrometry')
@@ -2743,6 +2749,10 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
 
         # Update restore defaults button state
         self.updateRestoreDefaultsButton()
+
+    def updateRoundtripError(self, max_err):
+        """Show the maximum forward/reverse round-trip error across the image (px)."""
+        self.roundtrip_label.setText("Round-trip max: {:.2f} px".format(max_err))
 
     def updateRMSD(self, rmsd_img, rmsd_angular, angular_error_label, fwdrev_mismatch=False,
                    overfit=False):
@@ -4013,7 +4023,7 @@ class SettingsWidget(QtWidgets.QWidget, ScaledSizeHelper):
             'astrometric mappings across the image. Bright areas mark where the\n'
             'two distortion polynomials are inconsistent.')
         self.error_overlay_chk.released.connect(self.sigErrorOverlayToggled.emit)
-        self.error_overlay_chk.setChecked(False)  # Default OFF
+        self.error_overlay_chk.setChecked(True)  # Default ON
         vbox.addWidget(self.error_overlay_chk)
 
         error_overlay_hbox = QtWidgets.QHBoxLayout()
@@ -4021,15 +4031,15 @@ class SettingsWidget(QtWidgets.QWidget, ScaledSizeHelper):
 
         self.error_overlay_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
         self.error_overlay_slider.setMinimum(1)    # 0.01 px
-        self.error_overlay_slider.setMaximum(200)  # 2.0 px
-        self.error_overlay_slider.setValue(10)     # Default 0.1 px
+        self.error_overlay_slider.setMaximum(300)  # 3.0 px
+        self.error_overlay_slider.setValue(50)     # Default 0.5 px
         self.error_overlay_slider.setToolTip(
             'Transparency threshold - errors below this (px) are invisible')
         self.error_overlay_slider.valueChanged.connect(
             lambda v: self.sigErrorOverlayThresholdChanged.emit(v/100.0))
         error_overlay_hbox.addWidget(self.error_overlay_slider)
 
-        self.error_overlay_value_label = QtWidgets.QLabel('0.10 px')
+        self.error_overlay_value_label = QtWidgets.QLabel('0.50 px')
         self.error_overlay_value_label.setMinimumWidth(self.scaledWidth(6))
         error_overlay_hbox.addWidget(self.error_overlay_value_label)
         vbox.addLayout(error_overlay_hbox)

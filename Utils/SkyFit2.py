@@ -2223,11 +2223,13 @@ class PlateTool(QtWidgets.QMainWindow):
         self.autopan_mode = False
 
         # Round-trip error overlay (heatmap of fwd/rev transform disagreement across the image)
-        self.error_overlay_enabled = False  # Default: OFF
+        self.error_overlay_enabled = True  # Default: ON
         self.error_overlay_item = None  # Store QGraphicsPixmapItem for error overlay
+        self.error_overlay_grid = None  # Cached error grid (recomputed when the platepar changes)
         self.error_overlay_pixmap = None  # Cached pixmap for error overlay
+        self.error_overlay_pixmap_threshold = None  # Threshold the cached pixmap was built with
         self.error_overlay_stride = 20  # Compute error every N pixels for performance
-        self.error_overlay_threshold = 0.1  # Errors below this (px) are fully transparent
+        self.error_overlay_threshold = 0.5  # Errors below this (px) are fully transparent
         self.error_overlay_needs_update = True  # Flag to track if overlay needs recomputation
 
         # Handle empty construction (no input path or config)
@@ -4638,19 +4640,21 @@ class PlateTool(QtWidgets.QMainWindow):
             threshold: [float] Errors below this value (pixels) will be fully transparent.
         """
         self.error_overlay_threshold = threshold
-        self.error_overlay_needs_update = True  # Force recomputation with new threshold
 
         # Update the label in the settings panel
         self.tab.settings.error_overlay_value_label.setText('{:.2f} px'.format(threshold))
 
-        # Refresh the overlay if it's enabled
+        # Refresh the overlay if it's enabled (the pixmap is rebuilt from the cached error grid)
         if self.error_overlay_enabled:
             self.updateErrorOverlay()
 
 
     def updateErrorOverlay(self):
         """ Update the round-trip error overlay showing the disagreement between the forward and
-            reverse astrometric mappings across the image.
+            reverse astrometric mappings across the image. The error grid is recomputed whenever
+            the platepar changes (also feeding the round-trip max readout in the Fit Parameters
+            tab); the overlay pixmap itself is only rebuilt when the grid or the transparency
+            threshold changes.
         """
 
         # Remove existing overlay
@@ -4658,8 +4662,8 @@ class PlateTool(QtWidgets.QMainWindow):
             self.img_frame.removeItem(self.error_overlay_item)
             self.error_overlay_item = None
 
-        # Only draw if enabled and we're in skyfit mode
-        if not self.error_overlay_enabled or self.mode != 'skyfit':
+        # Only compute in skyfit mode
+        if self.mode != 'skyfit':
             return
 
         # Check if image is loaded
@@ -4667,7 +4671,7 @@ class PlateTool(QtWidgets.QMainWindow):
             return
 
         # Check if platepar has required data
-        if not hasattr(self.platepar, 'JD') or self.platepar.JD is None:
+        if (self.platepar is None) or (getattr(self.platepar, 'JD', None) is None):
             return
 
         # Get image dimensions
@@ -4687,88 +4691,84 @@ class PlateTool(QtWidgets.QMainWindow):
             self.error_overlay_pp_key = pp_key
             self.error_overlay_needs_update = True
 
-        # If we have a cached pixmap and don't need to update, just redisplay it
-        if not self.error_overlay_needs_update and self.error_overlay_pixmap is not None:
-            self.error_overlay_item = QtWidgets.QGraphicsPixmapItem(self.error_overlay_pixmap)
-            self.error_overlay_item.setZValue(0.5)  # Between image (0) and overlays (1)
-            self.img_frame.addItem(self.error_overlay_item)
+        # Recompute the error grid if needed. This runs even when the overlay display is disabled,
+        # so the round-trip max readout in the Fit Parameters tab stays current (the vectorized
+        # computation is cheap).
+        if self.error_overlay_needs_update or (self.error_overlay_grid is None):
+
+            # Use platepar reference time for both directions to measure pure geometric accuracy
+            jd = self.platepar.JD
+            time_data = jd2Date(jd)
+
+            stride = self.error_overlay_stride
+            x_grid = np.arange(0, img_x_max, stride)
+            y_grid = np.arange(0, img_y_max, stride)
+            xx, yy = np.meshgrid(x_grid.astype(np.float64), y_grid.astype(np.float64))
+            xs, ys = xx.ravel(), yy.ravel()
+
+            try:
+                # Round trip: xy -> RA/Dec -> xy, vectorized over the whole grid
+                _, ra_arr, dec_arr, _ = xyToRaDecPP([time_data]*len(xs), xs, ys, [1]*len(xs),
+                    self.platepar, extinction_correction=False)
+                x_rec, y_rec = raDecToXYPP(np.array(ra_arr), np.array(dec_arr), jd, self.platepar)
+                err = np.hypot(np.array(x_rec) - xs, np.array(y_rec) - ys)
+                self.error_overlay_grid = err.reshape(len(y_grid), len(x_grid))
+
+            except Exception:
+                self.error_overlay_grid = np.zeros((len(y_grid), len(x_grid)))
+
+            self.error_overlay_pixmap = None  # Grid changed, cached pixmap is stale
+            self.error_overlay_needs_update = False
+
+            # Show the maximum round-trip error under the residuals in the Fit Parameters tab
+            if hasattr(self, 'tab') and hasattr(self.tab, 'param_manager'):
+                self.tab.param_manager.updateRoundtripError(float(np.max(self.error_overlay_grid)))
+
+        # Only draw the overlay if enabled
+        if not self.error_overlay_enabled:
             return
 
-        # Create a grid for error computation
-        stride = self.error_overlay_stride
-        x_grid = np.arange(0, img_x_max, stride)
-        y_grid = np.arange(0, img_y_max, stride)
+        # Rebuild the pixmap if the grid or the threshold changed
+        if (self.error_overlay_pixmap is None) \
+                or (self.error_overlay_pixmap_threshold != self.error_overlay_threshold):
 
-        # Compute round-trip errors
-        error_grid = np.zeros((len(y_grid), len(x_grid)))
+            error_grid = self.error_overlay_grid
 
-        # Use platepar reference time for both directions to measure pure geometric accuracy
-        jd = self.platepar.JD
-        time_data = jd2Date(jd)
+            # Normalize errors for colormap: below threshold is 0, above scales to [0, 1]
+            error_normalized = np.copy(error_grid)
+            error_normalized[error_normalized < self.error_overlay_threshold] = 0
 
-        for i, y in enumerate(y_grid):
-            for j, x in enumerate(x_grid):
-                try:
-                    # Convert xy -> RA/Dec
-                    _, ra_array, dec_array, _ = xyToRaDecPP(
-                        [time_data],
-                        [float(x)],
-                        [float(y)],
-                        [1],
-                        self.platepar,
-                        extinction_correction=False
-                    )
+            max_error = np.max(error_normalized)
+            if max_error > self.error_overlay_threshold:
+                # Map [threshold, max_error] to [0, 1]
+                above = error_normalized >= self.error_overlay_threshold
+                error_normalized[above] = (error_normalized[above] - self.error_overlay_threshold) \
+                    /(max_error - self.error_overlay_threshold)
 
-                    # Convert RA/Dec -> xy (using same time for a true round trip)
-                    x_recovered, y_recovered = raDecToXYPP(
-                        np.array([ra_array[0]]),
-                        np.array([dec_array[0]]),
-                        jd,
-                        self.platepar
-                    )
+            # Create RGBA image using the hot colormap (registry API on modern matplotlib)
+            if hasattr(matplotlib, 'colormaps'):
+                cmap = matplotlib.colormaps.get_cmap('hot')
+            else:
+                cmap = plt.get_cmap('hot')
+            rgba_grid = cmap(error_normalized)  # Shape: (h, w, 4)
 
-                    error_grid[i, j] = np.sqrt(
-                        (x_recovered[0] - x)**2 + (y_recovered[0] - y)**2)
+            # Alpha channel: 0 below threshold, otherwise scale with error (max 60% opacity)
+            alpha = np.where(error_grid < self.error_overlay_threshold, 0,
+                            np.clip(error_normalized*0.6, 0, 0.6))
+            rgba_grid[:, :, 3] = alpha
 
-                except Exception:
-                    # If computation fails, set error to 0 (transparent)
-                    error_grid[i, j] = 0
+            rgba_uint8 = (rgba_grid*255).astype(np.uint8)
 
-        # Normalize errors for colormap: values below threshold are 0, above threshold scale to [0, 1]
-        error_normalized = np.copy(error_grid)
-        error_normalized[error_normalized < self.error_overlay_threshold] = 0
+            # Resize to match image dimensions - cv2.resize expects (width, height)
+            rgba_resized = cv2.resize(rgba_uint8, (img_x_max, img_y_max),
+                                     interpolation=cv2.INTER_LINEAR)
 
-        max_error = np.max(error_normalized)
-        if max_error > self.error_overlay_threshold:
-            # Map [threshold, max_error] to [0, 1]
-            above = error_normalized >= self.error_overlay_threshold
-            error_normalized[above] = (error_normalized[above] - self.error_overlay_threshold) \
-                /(max_error - self.error_overlay_threshold)
-
-        # Create RGBA image using the hot colormap (registry API on modern matplotlib)
-        if hasattr(matplotlib, 'colormaps'):
-            cmap = matplotlib.colormaps.get_cmap('hot')
-        else:
-            cmap = plt.get_cmap('hot')
-        rgba_grid = cmap(error_normalized)  # Shape: (h, w, 4)
-
-        # Set alpha channel: 0 for errors below threshold, otherwise scale with error (max 60% opacity)
-        alpha = np.where(error_grid < self.error_overlay_threshold, 0,
-                        np.clip(error_normalized*0.6, 0, 0.6))
-        rgba_grid[:, :, 3] = alpha
-
-        rgba_uint8 = (rgba_grid*255).astype(np.uint8)
-
-        # Resize to match image dimensions - cv2.resize expects (width, height)
-        rgba_resized = cv2.resize(rgba_uint8, (img_x_max, img_y_max),
-                                 interpolation=cv2.INTER_LINEAR)
-
-        # Convert to QPixmap and cache for reuse
-        height, width, channel = rgba_resized.shape
-        q_img = QtGui.QImage(rgba_resized.data, width, height, 4*width,
-                            QtGui.QImage.Format_RGBA8888)
-        self.error_overlay_pixmap = QtGui.QPixmap.fromImage(q_img)
-        self.error_overlay_needs_update = False
+            # Convert to QPixmap and cache for reuse
+            height, width, channel = rgba_resized.shape
+            q_img = QtGui.QImage(rgba_resized.data, width, height, 4*width,
+                                QtGui.QImage.Format_RGBA8888)
+            self.error_overlay_pixmap = QtGui.QPixmap.fromImage(q_img)
+            self.error_overlay_pixmap_threshold = self.error_overlay_threshold
 
         self.error_overlay_item = QtWidgets.QGraphicsPixmapItem(self.error_overlay_pixmap)
         self.error_overlay_item.setZValue(0.5)  # Between image (0) and overlays (1)
