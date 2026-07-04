@@ -415,8 +415,6 @@ def _topic_astrometry(gui):
             ("LEFT CLICK", "Centroid the star under the cursor"),
             (c + " + LEFT CLICK", "Manual (forced) star position"),
             ("ENTER / SPACE", "Accept the star pair"),
-            (c + " + SPACE", "Mark the pair as bad"),
-            ("SHIFT + SPACE", "Jump to a random region"),
             ("RIGHT CLICK", "Remove a pair"),
             (c + " + SCROLL", "Adjust aperture radius"),
             (c + " + Z", "Fit the plate"),
@@ -699,7 +697,6 @@ def _topic_settings(gui):
          "The <b>Threshold</b> slider sets the error below which the overlay is fully transparent; "
          "the maximum value is always shown under the residuals in the Fit Parameters tab."),
         ("Invert Colors", "Invert the image (dark stars on a light background)."),
-        ("Auto Pan To Next Star", "Recentre the view on the next star while picking."),
         ("Single Click Photometry", "Measure photometry with a single click while picking."),
     ]
 
@@ -910,7 +907,6 @@ def _topic_shortcuts_skyfit(gui):
         ("L", "Astrometry residual plot"),
         ("P", "Photometry fit plot"),
         (c + " + D / " + c + " + F", "Load dark / flat"),
-        (c + " + U / " + c + " + O", "Pan to next star / toggle auto-pan"),
         (c + " + X", "astrometry.net (image upload)"),
         (c + " + SHIFT + X", "astrometry.net (star XY only)"),
         (c + " + SHIFT + B", "Fit spectral bands <span class=\"tip\">(experimental)</span>"),

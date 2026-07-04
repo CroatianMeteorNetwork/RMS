@@ -12,7 +12,6 @@ import collections
 import glob
 import sys
 import time
-import random
 from concurrent.futures import ThreadPoolExecutor
 import copy
 import shutil
@@ -2219,8 +2218,6 @@ class PlateTool(QtWidgets.QMainWindow):
         #   of position on frames and photometry
         self.mode = 'skyfit'
         self.mode_list = ['skyfit', 'manualreduction']
-        self.max_pixels_between_matched_stars = np.inf
-        self.autopan_mode = False
 
         # Round-trip error overlay (heatmap of fwd/rev transform disagreement across the image)
         self.error_overlay_enabled = True  # Default: ON
@@ -2326,13 +2323,6 @@ class PlateTool(QtWidgets.QMainWindow):
         self.pick_list = {}
         self.paired_stars = PairedStars()
         self.residuals = None
-
-        # Autopan coordinates
-        self.old_autopan_x, self.old_autopan_y = None, None
-        self.current_autopan_x, self.current_autopan_y = None, None
-
-        # List of unsuitable stars
-        self.unsuitable_stars = PairedStars()
 
         # Positions of the mouse cursor
         self.mouse_x = 0
@@ -2737,9 +2727,6 @@ class PlateTool(QtWidgets.QMainWindow):
         self.image_navigation_slider.valueChanged.connect(self.jumpToImage)
         self.status_bar.addPermanentWidget(self.image_navigation_slider)
 
-        self.nextstar_button = QtWidgets.QPushButton('SkyFit')
-        self.nextstar_button.pressed.connect(self.jumpNextStar)
-
         ###################################################################################################
         # CENTRAL WIDGET (DISPLAY)
 
@@ -2955,7 +2942,6 @@ class PlateTool(QtWidgets.QMainWindow):
         self.label_mag_limit = 5.0
         self.show_constellations = False
         self.selected_stars_visible = True
-        self.unsuitable_stars_visible = True
 
         # selected catalog star markers (main window)
         self.sel_cat_star_markers = pg.ScatterPlotItem()
@@ -2991,23 +2977,6 @@ class PlateTool(QtWidgets.QMainWindow):
 
         self.draw_calstars = True
 
-        # selected unsuitable star markers (main window)
-        self.unsuitable_star_markers = pg.ScatterPlotItem()
-        self.unsuitable_star_markers.setPen('r', width=3)
-        self.unsuitable_star_markers.setSize(10)
-        self.unsuitable_star_markers.setSymbol('s')
-        self.unsuitable_star_markers.setZValue(4)
-        self.img_frame.addItem(self.unsuitable_star_markers)
-
-        # selected catalog star markers (zoom window)
-        self.unsuitable_star_markers2 = pg.ScatterPlotItem()
-        self.unsuitable_star_markers2.setPen('r', width=3)
-        self.unsuitable_star_markers2.setSize(10)
-        self.unsuitable_star_markers2.setSymbol('s')
-        self.unsuitable_star_markers2.setZValue(4)
-        self.zoom_window.addItem(self.unsuitable_star_markers2)
-
-        self.unsuitable_stars_visble = True
 
         # Distortion center marker (red cross) - main window
         self.distortion_center_marker = pg.ScatterPlotItem()
@@ -3097,8 +3066,6 @@ class PlateTool(QtWidgets.QMainWindow):
         self.star_pick_info_text_str += "LEFT CLICK - Centroid star\n"
         self.star_pick_info_text_str += f"{ctrl} + LEFT CLICK - Manual star position\n"
         self.star_pick_info_text_str += "ENTER or SPACE - Accept pair\n"
-        self.star_pick_info_text_str += f"{ctrl} + SPACE - Mark pair bad\n"
-        self.star_pick_info_text_str += "SHIFT + SPACE - Jump random\n"
         self.star_pick_info_text_str += "RIGHT CLICK - Remove pair\n"
         self.star_pick_info_text_str += f"{ctrl} + SCROLL - Aperture radius adjust\n"
         self.star_pick_info_text_str += f"{ctrl} + Z - Fit stars\n"
@@ -3349,7 +3316,6 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.param_manager.sigComputeResidualsPressed.connect(self.computeResiduals)
         self.tab.param_manager.sigQuickAlignPressed.connect(self.quickAlign)
         self.tab.param_manager.sigFindBestFramePressed.connect(self.findBestFrame)
-        self.tab.param_manager.sigNextStarPressed.connect(self.jumpNextStar)
         self.tab.param_manager.sigPhotometryPressed.connect(lambda: self.photometry(show_plot=True))
         self.tab.param_manager.sigAstrometryPressed.connect(self.showAstrometryFitPlots)
         self.tab.param_manager.sigResetDistortionPressed.connect(self.resetDistortion)
@@ -3409,7 +3375,6 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.settings.sigMeasGroundPointsToggled.connect(self.toggleMeasGroundPoints)
         self.tab.settings.sigGridToggled.connect(self.onGridChanged)
         self.tab.settings.sigInvertToggled.connect(self.toggleInvertColours)
-        self.tab.settings.sigAutoPanToggled.connect(self.toggleAutoPan)
         self.tab.settings.sigErrorOverlayToggled.connect(self.toggleErrorOverlay)
         self.tab.settings.sigErrorOverlayThresholdChanged.connect(self.updateErrorOverlayThreshold)
         self.tab.settings.sigSingleClickPhotometryToggled.connect(self.toggleSingleClickPhotometry)
@@ -3882,23 +3847,6 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Add RA/Dec info
             status_str += ", RA={:6.2f} Dec={:+6.2f} (J2000)".format(ra[0], dec[0])
-
-            # Show mode for debugging purposes
-
-            if self.star_pick_mode and not self.autopan_mode:
-                pass
-            elif self.star_pick_mode and self.autopan_mode:
-                status_str += ", Auto pan"
-
-            if self.max_pixels_between_matched_stars != np.inf:
-                percentage_complete = min([100,100*(len(self.paired_stars)+len(self.unsuitable_stars))/
-                                                                len(self.catalog_x_filtered)])
-
-                if self.max_pixels_between_matched_stars != 0:
-                    status_str += ", max gap {:.0f}px".format(self.max_pixels_between_matched_stars)
-
-                status_str += " good:{} bad:{} progress {:.0f}%".format(
-                    len(self.paired_stars), len(self.unsuitable_stars), percentage_complete)
 
         return status_str
 
@@ -4608,13 +4556,6 @@ class PlateTool(QtWidgets.QMainWindow):
         else:
             self.sel_cat_star_markers.setData(pos=[])
             self.sel_cat_star_markers2.setData(pos=[])
-
-        if len(self.unsuitable_stars) > 0:
-            self.unsuitable_star_markers.setData(pos=self.unsuitable_stars.imageCoords(draw=True))
-            self.unsuitable_star_markers2.setData(pos=self.unsuitable_stars.imageCoords(draw=True))
-        else:
-            self.unsuitable_star_markers.setData(pos=[])
-            self.unsuitable_star_markers2.setData(pos=[])
 
         self.centroid_star_markers.setData(pos=[])
         self.centroid_star_markers2.setData(pos=[])
@@ -8966,7 +8907,6 @@ class PlateTool(QtWidgets.QMainWindow):
             # Reset paired stars
             self.pick_list = {}
             self.paired_stars = PairedStars()
-            self.unsuitable_stars = PairedStars()
             self.residuals = None
 
             # Clear residual overlay from previous image
@@ -9600,15 +9540,6 @@ class PlateTool(QtWidgets.QMainWindow):
         # Update possibly missing flag for measuring ground points
         if not hasattr(self, "meas_ground_points"):
             self.meas_ground_points = False
-
-        if not hasattr(self, "autopan_mode"):
-            self.autopan_mode = False
-
-        if not hasattr(self, "unsuitable_stars"):
-            self.unsuitable_stars = PairedStars()
-
-        if not hasattr(self, "max_pixels_between_matched_stars"):
-            self.max_pixels_between_matched_stars = np.inf
 
         # Update possibly missing flag for measuring ground points
         if not hasattr(self, "single_click_photometry"):
@@ -10324,13 +10255,6 @@ class PlateTool(QtWidgets.QMainWindow):
             self.img_zoom.reloadImage()
             self.img.reloadImage()
 
-        # Jump to the next star
-        elif event.key() == QtCore.Qt.Key_Space and (modifiers == QtCore.Qt.ShiftModifier):
-
-            self.jumpNextStar(miss_this_one=True)
-            self.updateBottomLabel()
-
-
         # Fit spectral band ratios (hidden feature)
         elif event.key() == QtCore.Qt.Key_B and modifiers == (QtCore.Qt.ControlModifier | QtCore.Qt.ShiftModifier):
             self.fitBandRatio()
@@ -10372,18 +10296,12 @@ class PlateTool(QtWidgets.QMainWindow):
                 if self.label1.isVisible():
                     self.star_pick_info.show()
 
-                # Enable the Next button for star panning
-                self.tab.param_manager.next_star_button.setEnabled(True)
-
             else:
                 self.img_frame.setMouseEnabled(True, True)
                 self.cursor2.hide()
                 self.cursor.hide()
 
                 self.star_pick_info.hide()
-
-                # Disable the Next button for star panning
-                self.tab.param_manager.next_star_button.setEnabled(False)
 
 
         # Toggle grid
@@ -10604,18 +10522,6 @@ class PlateTool(QtWidgets.QMainWindow):
             # Pan the view down on screen (roll-aware)
             elif event.key() == QtCore.Qt.Key_S:
                 self.nudgeReferenceScreen(0, -1)
-
-            # Pan to unmatched star most distant from all other matched stars
-
-            elif event.key() == QtCore.Qt.Key_U and modifiers == QtCore.Qt.ControlModifier:
-
-                self.jumpNextStar(miss_this_one=False)
-
-            elif event.key() == QtCore.Qt.Key_O and modifiers == QtCore.Qt.ControlModifier:
-
-                self.toggleAutoPan()
-                self.tab.settings.updateAutoPan()
-                self.updateBottomLabel()
 
 
 
@@ -10897,45 +10803,12 @@ class PlateTool(QtWidgets.QMainWindow):
                 # updates image automatically
 
 
-            # Save the point to the matched stars list by pressing Enter or Space or to the
-            # unsuitable stars
+            # Save the point to the matched stars list by pressing Enter or Space
 
             elif (event.key() == QtCore.Qt.Key_Return) or (event.key() == QtCore.Qt.Key_Enter) \
                 or (event.key() == QtCore.Qt.Key_Space):
 
                 if self.star_pick_mode:
-                    
-                    # Check if the star has been skipped
-                    unsuitable = False
-                    if modifiers == QtCore.Qt.ControlModifier:
-                        
-                        # If a star has been skipped, mark it as unsuitable
-                        if (self.old_autopan_x is not None) and (self.old_autopan_y is not None):
-                            
-                            # Check that a new star has been selected
-                            if (self.old_autopan_x != self.current_autopan_x) or \
-                                (self.old_autopan_y != self.current_autopan_y):
-                                
-                                unsuitable = True
-                        
-                        elif (self.current_autopan_x is None) and (self.current_autopan_y is None):
-                            unsuitable = False
-
-                        else:
-                            unsuitable = True
-                    
-                    if unsuitable:
-
-                        print("Unsuitable star at coordinates: ({}, {})".format(self.current_autopan_x, self.current_autopan_y))
-
-                        self.unsuitable_stars.addPair(self.current_autopan_x, self.current_autopan_y,
-                                                        0, 0, None)
-                        self.updateBottomLabel()
-                        self.unsuitable_star_markers.addPoints(x=[self.current_autopan_x],
-                                                                y=[self.current_autopan_y])
-                        self.unsuitable_star_markers2.addPoints(x=[self.current_autopan_x],
-                                                                y=[self.current_autopan_y])
-
                     # If the catalog star, planet, or geo point has been selected, save the pair to the list
                     if self.cursor.mode == 1:
 
@@ -10972,29 +10845,13 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
                         # Add the image/catalog pair to the list
-                        if not unsuitable:
-                            self.paired_stars.addPair(self.x_centroid, self.y_centroid, self.star_fwhm,
-                                    self.star_intensity, pair_obj,
-                                    snr=self.star_snr, saturated=self.star_saturated)
+                        self.paired_stars.addPair(self.x_centroid, self.y_centroid, self.star_fwhm,
+                                self.star_intensity, pair_obj,
+                                snr=self.star_snr, saturated=self.star_saturated)
 
                         # Switch back to centroiding mode
                         self.cursor.setMode(0)
                         self.updatePairedStars()
-
-                        if self.autopan_mode:
-
-                            self.updateBottomLabel()
-
-                            self.jumpNextStar(miss_this_one=False)
-
-
-                    else:
-
-                        # Jump to next star if CTRL + SPACE is pressed
-                        if modifiers == QtCore.Qt.ControlModifier:
-                            print("Jumping to the next star")
-                            self.jumpNextStar(miss_this_one=False)
-
 
             elif event.key() == QtCore.Qt.Key_Escape:
                 if self.star_pick_mode:
@@ -12347,12 +12204,6 @@ class PlateTool(QtWidgets.QMainWindow):
     def toggleInvertColours(self):
         self.img.invert()
         self.img_zoom.invert()
-
-    def toggleAutoPan(self):
-
-        self.img.autopan()
-        self.autopan_mode = not self.autopan_mode
-
 
     def toggleSingleClickPhotometry(self):
         self.single_click_photometry = not self.single_click_photometry
@@ -15671,20 +15522,6 @@ class PlateTool(QtWidgets.QMainWindow):
             self.showAstrometryFitPlots(force_update=True)
 
 
-    def jumpNextStar(self, miss_this_one=False):
-
-        new_x, new_y, self.max_pixels_between_matched_stars  = self.furthestStar(miss_this_one=miss_this_one)
-        self.updateBottomLabel()
-        self.old_autopan_x, self.old_autopan_y = self.current_autopan_x, self.current_autopan_y
-        self.current_autopan_x, self.current_autopan_y = new_x, new_y
-        self.img_frame.setRange(xRange=(new_x + 15, new_x - 15), yRange=(new_y + 15, new_y - 15))
-        self.checkParamRange()
-        self.platepar.updateRefRADec(preserve_rotation=True)
-        self.checkParamRange()
-        self.tab.param_manager.updatePlatepar()
-        self.updateLeftLabels()
-        self.updateStars()
-
     def showAstrometryFitPlots(self, force_update=False):
         """ Show window with astrometry fit details. Toggle on/off if already open. """
 
@@ -17538,202 +17375,6 @@ class PlateTool(QtWidgets.QMainWindow):
         except ZeroDivisionError:
             pass
         self.time = time.time()
-
-    def furthestStar(self, miss_this_one=False, min_separation=15):
-        """
-        Find the star which is furthest away from all other stars that have already been matched.
-
-        Keyword arguments:
-            miss_this_one: Return coordinates of a different star at random, but don't mark anything.
-            min_separation: Minimum separation in pixels between stars.
-
-        Returns: 
-            (x,y) integers of the image location of the furthest star away from all other matched stars.
-
-        """
-
-        # Strategy
-
-        # Working in image coordinates
-
-        # Get two lists marked_x, marked_y of each marked star - getMarkedStars()
-        # Get three lists candidate_x, candidate_y of each unmarked star, and the distance to nearest
-        # marked star which is more than minimum separation away
-
-        # Get star with the greatest distance to the nearest marked star
-
-
-
-        # Return the image coordinates of the star which is furthest away from any marked star
-        # Create marked_x, marked_y in image coordinates which is composed of matched stars and unsuitable stars
-
-        # Get all the matched stars in image coordinates
-
-
-
-        def getMarkedStars(include_unsuitable=True):
-
-            """
-
-            Returns: a list of stars which are either marked as paired, or bad in image coordinates
-
-            """
-
-            marked_x, marked_y = [], []
-            coords_list = self.paired_stars.imageCoords()
-            for coords in coords_list:
-                marked_x.append(coords[0])
-                marked_y.append(coords[1])
-
-            if include_unsuitable:
-                coords_list = self.unsuitable_stars.imageCoords()
-                for coords in coords_list:
-                    marked_x.append(coords[0])
-                    marked_y.append(coords[1])
-
-            return marked_x, marked_y
-        ##############################################################################################################
-
-        def isDouble(x,y, reference_x_list, reference_y_list, min_separation=5):
-
-            """
-            Are x,y coordinates which are very close to, but distinct from all coordinates in reference list
-
-            Args:
-                x: image coordinates of star
-                y: image coordinates of star
-                reference_x_list: list of x image coordinates
-                reference_y_list: list of y image coordinates
-
-            Returns:
-                [bool] True if star is within min_separation of another star
-            """
-
-            for reference_x, reference_y in zip(reference_x_list, reference_y_list):
-                # Check if this the reference is the same star
-                if reference_x == x and reference_y == y:
-                    continue
-                if ((reference_x - x) ** 2 + (reference_y - y) ** 2) ** 0.5 < min_separation:
-                    return True
-
-            return False
-        ##############################################################################################################
-
-        def getVisibleUnmarkedStarsAndDistanceToMarked(marked_x_list, marked_y_list, min_separation=15):
-
-            """
-            From the catalogue of filtered stars return a lists of coordinates stars which are not marked,
-            and another list which is the distance to the nearest marked star
-
-            Args:
-                marked_x_list: list of marked star x coordinates
-                marked_y_list: list of marked star y coordinates
-                min_separation: minimum separation to be regarded as a different stra
-
-            Returns:
-                unmarked_x_list: list of unmarked star x coordinates
-                unmarked_y_list: list of unmarked star x coordinates
-                dist_nearest_marked_list: distance of the nearest marked star for returned star coordinates
-
-
-            """
-
-            # Is there a way to get this in image coordinates directly
-            visible_ra_list = [star[0] for star in self.catalog_stars_filtered]
-            visible_dec_list = [star[1] for star in self.catalog_stars_filtered]
-
-            # Convert all visible star to image coordinates
-
-            visible_x, visible_y = raDecToXYPP(np.array(visible_ra_list), np.array(visible_dec_list),
-                                               datetime2JD(self.img_handle.currentFrameTime(dt_obj=True)),
-                                               self.platepar)
-
-            # Handle jump when no stars are marked - just pick and return a single random star
-            if len(marked_x_list) == 0 or len(marked_y_list) == 0:
-                random_star = random.randint(0, len(visible_x) - 1)
-                return [visible_x[random_star]], [visible_y[random_star]], [np.inf], [np.inf]
-
-            # Iterate through all visible stars creating a list of stars which are more than
-            # min separation from a marked star, and then add coordinates of the visible star
-            # and minimum distance to the nearest marked star, which is more than min_separation away
-            # If a visible star is too close to an already marked star then ignore this star
-            # and do not append to the candidate star list
-
-            candidate_x_list, candidate_y_list, dist_nearest_marked_list = [], [], []
-
-
-            # Reject stars which are too close to the edge
-            edge_margin = 5 # px
-
-            for x, y in zip(visible_x, visible_y):
-                ignore_this_star = False
-
-                if isDouble(x,y, visible_x, visible_y):
-                    continue
-
-                nearest_pixel_separation = np.inf
-
-                for marked_x, marked_y in zip(marked_x_list, marked_y_list):
-                    
-                    # calculate cartesian separation
-                    pixel_separation = ((marked_x - x) ** 2 + (marked_y - y) ** 2) ** 0.5
-                    
-                    # If this star is less than minimum separation away
-                    if pixel_separation < min_separation or ignore_this_star:
-                        # do not use this visible star in any further iteration
-                        ignore_this_star = True
-                        break
-                    
-                    # If this star is too close to the edge, do not use it
-                    if (x < edge_margin) or (x > self.platepar.X_res - edge_margin) or \
-                        (y < edge_margin) or (y > self.platepar.Y_res - edge_margin):
-
-                        ignore_this_star = True
-                        break
-
-
-                    else:
-                        if pixel_separation < nearest_pixel_separation:
-
-                            # Update the x, y coordinates and the nearest star by pixel separation
-                            nearest_x, nearest_y, nearest_pixel_separation = x, y, pixel_separation
-
-
-                # Append once for each visible star that is not marked to be ignored
-                if not ignore_this_star:
-                    candidate_x_list.append(nearest_x)
-                    candidate_y_list.append(nearest_y)
-                    dist_nearest_marked_list.append(nearest_pixel_separation)
-
-            return candidate_x_list, candidate_y_list, dist_nearest_marked_list, nearest_pixel_separation
-        
-        ######################################################################################################
-
-        marked_x_list, marked_y_list = getMarkedStars(include_unsuitable=False)
-        max_distance_between_paired = maxDistBetweenPoints(marked_x_list, marked_y_list)
-
-        marked_x_list, marked_y_list = getMarkedStars(include_unsuitable=True)
-        unmarked_x_list, unmarked_y_list, dist_nearest_marked_list, distance_between_unmarked = \
-            getVisibleUnmarkedStarsAndDistanceToMarked(marked_x_list, marked_y_list, 
-                                                       min_separation=min_separation)
-
-        if len(dist_nearest_marked_list) == 0:
-            print("No stars left to pick")
-            return marked_x_list[-1], marked_y_list[-1], max_distance_between_paired
-
-        if miss_this_one:
-            # Pick a distance at random
-            next_star_index = dist_nearest_marked_list.index(random.choice(dist_nearest_marked_list))
-        else:
-            # Find the index of this star
-            next_star_index = dist_nearest_marked_list.index(max(dist_nearest_marked_list))
-
-
-        # Return coordinates of next star and maximum pixel distance between marked stars
-
-        return unmarked_x_list[next_star_index], unmarked_y_list[next_star_index], max_distance_between_paired
-
-
 
 if __name__ == '__main__':
     ### COMMAND LINE ARGUMENTS
