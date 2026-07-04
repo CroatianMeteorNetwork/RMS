@@ -14224,6 +14224,10 @@ class PlateTool(QtWidgets.QMainWindow):
         else:
             dlg.exec_()
 
+        # The dialog is parented to the main window, so Qt would keep it alive indefinitely -
+        # delete it explicitly, otherwise every File Manager open leaks a full dialog widget tree
+        dlg.deleteLater()
+
     def saveCurrentFrame(self):
         """ Saves the current frame to disk. """
 
