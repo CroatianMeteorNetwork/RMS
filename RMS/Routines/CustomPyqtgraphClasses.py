@@ -2129,6 +2129,7 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
 
     sigFitPressed = QtCore.pyqtSignal()
     sigAutoFitPressed = QtCore.pyqtSignal()
+    sigValidateFitPressed = QtCore.pyqtSignal()
     sigQuickAlignPressed = QtCore.pyqtSignal()
     sigFindBestFramePressed = QtCore.pyqtSignal()
     sigNextStarPressed = QtCore.pyqtSignal()
@@ -2211,6 +2212,19 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         self.quick_align_button.clicked.connect(self.sigQuickAlignPressed.emit)
         quick_align_hbox.addWidget(self.quick_align_button)
         box.addLayout(quick_align_hbox)
+
+        # Cross-frame validation button row
+        validate_hbox = QtWidgets.QHBoxLayout()
+        validate_hbox.setSpacing(self.scaledSpacing(0.25))
+        self.validate_fit_button = QtWidgets.QPushButton("Validate Across Frames")
+        self.validate_fit_button.setToolTip(
+            "Check how well the fit generalizes to other frames of the night, especially the\n"
+            "image corners: matches detected stars (CALSTARS) to the catalog on a coverage-\n"
+            "selected frame subset, refits only the pointing per frame so mount drift is\n"
+            "separated from distortion error, and reports residuals by radius.")
+        self.validate_fit_button.clicked.connect(self.sigValidateFitPressed.emit)
+        validate_hbox.addWidget(self.validate_fit_button)
+        box.addLayout(validate_hbox)
 
         # Next Star button row
         next_star_hbox = QtWidgets.QHBoxLayout()
