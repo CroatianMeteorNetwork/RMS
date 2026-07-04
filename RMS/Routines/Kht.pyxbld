@@ -12,6 +12,7 @@ def make_ext(modname, pyxfilename):
 
     import os
     from distutils.extension import Extension
+    from RMS.CompileArgs import getExtraCompileArgs
     from RMS.Misc import getRmsRootDir
 
     root = getRmsRootDir()
@@ -28,7 +29,7 @@ def make_ext(modname, pyxfilename):
         sources=[pyxfilename] + cpp_sources,
         include_dirs=[hough_dir],
         language="c++",
-        extra_compile_args=["-O3"],
+        extra_compile_args=getExtraCompileArgs(),
     )
 
     return ext
