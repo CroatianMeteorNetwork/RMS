@@ -12851,6 +12851,9 @@ class PlateTool(QtWidgets.QMainWindow):
 
         fig, (ax_r, ax_map, ax_drift) = plt.subplots(1, 3, figsize=(16, 5.5))
 
+        # Fixed residual scale so runs are directly comparable side by side
+        res_scale_px = 2.0
+
         # Residual vs radius, with annulus medians
         ax_r.scatter(r_frac, results["star_res"], s=4, alpha=0.25, color='k', label='matched stars')
         ann = summary["annuli"]
@@ -12859,13 +12862,20 @@ class PlateTool(QtWidgets.QMainWindow):
         ax_r.axvline(0.75, color='orange', ls='--', lw=1, label='corner region')
         ax_r.set_xlabel('Radius (fraction of half-diagonal)')
         ax_r.set_ylabel('Residual (px)')
-        ax_r.set_title('Residual vs radius')
+        ax_r.set_xlim(0, 1)
+        ax_r.set_ylim(0, res_scale_px)
+        n_offscale = int(np.sum(results["star_res"] > res_scale_px))
+        title = 'Residual vs radius'
+        if n_offscale:
+            title += ' ({:d} stars above {:.0f} px)'.format(n_offscale, res_scale_px)
+        ax_r.set_title(title)
         ax_r.legend(fontsize=8)
         ax_r.grid(alpha=0.3)
 
-        # Spatial map of median residual
+        # Spatial map of median residual, colour scale pegged to the same fixed range
         hb = ax_map.hexbin(results["star_x"], results["star_y"], C=results["star_res"],
                            reduce_C_function=np.median, gridsize=24, cmap='hot',
+                           vmin=0, vmax=res_scale_px,
                            extent=(0, self.platepar.X_res, 0, self.platepar.Y_res))
         if len(results["unmatched_x"]):
             ax_map.scatter(results["unmatched_x"], results["unmatched_y"], s=14, marker='x',
@@ -12874,7 +12884,7 @@ class PlateTool(QtWidgets.QMainWindow):
         ax_map.invert_yaxis()
         ax_map.set_aspect('equal')
         ax_map.set_title('Median residual across the image')
-        fig.colorbar(hb, ax=ax_map, label='px')
+        fig.colorbar(hb, ax=ax_map, label='px (capped at {:.0f})'.format(res_scale_px))
 
         # Pointing drift over the night
         drift_jd = [f["jd"] for f in results["frames"] if f["drift_arcmin"] is not None]
