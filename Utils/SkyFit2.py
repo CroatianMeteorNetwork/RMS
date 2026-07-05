@@ -12882,7 +12882,10 @@ class PlateTool(QtWidgets.QMainWindow):
             ax_map.scatter(results["unmatched_x"], results["unmatched_y"], s=14, marker='x',
                            color='cyan', label='match failures')
             ax_map.legend(fontsize=8)
-        ax_map.invert_yaxis()
+        # Pin the axes exactly to the image bounds (no margins) so the plot corners ARE the
+        # image corners
+        ax_map.set_xlim(0, self.platepar.X_res)
+        ax_map.set_ylim(self.platepar.Y_res, 0)
         ax_map.set_aspect('equal')
 
         # The hot colormap tops out at white - give no-data regions a distinct neutral
