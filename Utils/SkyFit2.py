@@ -12859,7 +12859,6 @@ class PlateTool(QtWidgets.QMainWindow):
         ann = summary["annuli"]
         ax_r.step([a[0] for a in ann] + [1.0], [a[3] for a in ann] + [ann[-1][3]],
                   where='post', color='r', lw=2, label='annulus median')
-        ax_r.axvline(0.75, color='orange', ls='--', lw=1, label='corner region')
         ax_r.set_xlabel('Radius (fraction of half-diagonal)')
         ax_r.set_ylabel('Residual (px)')
         ax_r.set_xlim(0, 1)
