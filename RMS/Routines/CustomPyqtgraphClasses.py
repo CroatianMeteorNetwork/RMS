@@ -545,11 +545,6 @@ class ImageItem(pg.ImageItem):
         else:
             self.invert_img = False
 
-        if 'autopan' in kwargs.keys():
-            self.autopan_chk = kwargs['autopan']
-        else:
-            self.autopan_chk = False
-
 
         if 'dark' in kwargs.keys():
             self.dark = kwargs['dark']
@@ -841,9 +836,6 @@ class ImageItem(pg.ImageItem):
     def invert(self):
         self.invert_img = not self.invert_img
         self._applyDisplayLut()
-
-    def autopan(self):
-        self.autopan_chk = not self.autopan_chk
 
     def setLevels(self, levels, update=True):
         super().setLevels(levels, update)
@@ -2172,9 +2164,10 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
 
     sigFitPressed = QtCore.pyqtSignal()
     sigAutoFitPressed = QtCore.pyqtSignal()
+    sigFindPairsPressed = QtCore.pyqtSignal()
+    sigComputeResidualsPressed = QtCore.pyqtSignal()
     sigQuickAlignPressed = QtCore.pyqtSignal()
     sigFindBestFramePressed = QtCore.pyqtSignal()
-    sigNextStarPressed = QtCore.pyqtSignal()
     sigAstrometryPressed = QtCore.pyqtSignal()
     sigPhotometryPressed = QtCore.pyqtSignal()
     sigResetDistortionPressed = QtCore.pyqtSignal()
@@ -2226,7 +2219,10 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         best_frame_hbox = QtWidgets.QHBoxLayout()
         best_frame_hbox.setSpacing(self.scaledSpacing(0.25))
         self.find_best_frame_button = QtWidgets.QPushButton("Find Best Frame")
-        self.find_best_frame_button.setToolTip("Find the frame with best star distribution for calibration")
+        self.find_best_frame_button.setToolTip(
+            "Find the best frame for calibration: star distribution and quality,\n"
+            "plus sky condition (darkest, most uniform background and sharpest stars,\n"
+            "ranked against the rest of the night)")
         self.find_best_frame_button.clicked.connect(self.sigFindBestFramePressed.emit)
         best_frame_hbox.addWidget(self.find_best_frame_button)
         box.addLayout(best_frame_hbox)
@@ -2235,6 +2231,8 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         fit_hbox = QtWidgets.QHBoxLayout()
         fit_hbox.setSpacing(self.scaledSpacing(0.25))
         self.fit_astrometry_button = QtWidgets.QPushButton("Fit")
+        self.fit_astrometry_button.setToolTip(
+            "Fit the platepar to the current star pairs (needs pairs)")
         self.fit_astrometry_button.clicked.connect(self.sigFitPressed.emit)
         fit_hbox.addWidget(self.fit_astrometry_button)
 
@@ -2243,6 +2241,24 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         self.auto_fit_button.clicked.connect(self.sigAutoFitPressed.emit)
         fit_hbox.addWidget(self.auto_fit_button)
         box.addLayout(fit_hbox)
+
+        # Individual fit steps: pair finding and residuals, runnable independently of the fit
+        steps_hbox = QtWidgets.QHBoxLayout()
+        steps_hbox.setSpacing(self.scaledSpacing(0.25))
+        self.find_pairs_button = QtWidgets.QPushButton("Find Pairs")
+        self.find_pairs_button.setToolTip(
+            "Match detected stars to catalog stars using the current platepar.\n"
+            "Replaces the current pairs; does not fit anything (needs a decent platepar).")
+        self.find_pairs_button.clicked.connect(self.sigFindPairsPressed.emit)
+        steps_hbox.addWidget(self.find_pairs_button)
+
+        self.compute_residuals_button = QtWidgets.QPushButton("Residuals")
+        self.compute_residuals_button.setToolTip(
+            "Compute residuals of the current pairs against the current platepar.\n"
+            "Does not fit anything (needs pairs).")
+        self.compute_residuals_button.clicked.connect(self.sigComputeResidualsPressed.emit)
+        steps_hbox.addWidget(self.compute_residuals_button)
+        box.addLayout(steps_hbox)
 
         # Quick Align button row
         quick_align_hbox = QtWidgets.QHBoxLayout()
@@ -2255,15 +2271,6 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         quick_align_hbox.addWidget(self.quick_align_button)
         box.addLayout(quick_align_hbox)
 
-        # Next Star button row
-        next_star_hbox = QtWidgets.QHBoxLayout()
-        next_star_hbox.setSpacing(self.scaledSpacing(0.25))
-        self.next_star_button = QtWidgets.QPushButton("Next Star")
-        self.next_star_button.clicked.connect(self.sigNextStarPressed.emit)
-        self.next_star_button.setEnabled(False)
-        next_star_hbox.addWidget(self.next_star_button)
-        box.addLayout(next_star_hbox)
-
 
 
         box.addWidget(QtWidgets.QLabel("Residuals:"))
@@ -2274,6 +2281,12 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         self.rmsd_label = QtWidgets.QLabel("--")
         self.rmsd_label.setStyleSheet("font-weight: bold; font-size: 12pt;")
         box.addWidget(self.rmsd_label)
+
+        # Max round-trip (forward vs reverse mapping) disagreement across the whole image,
+        # updated with the error overlay. Complements the RMSD, which only covers matched stars.
+        self.roundtrip_label = QtWidgets.QLabel("")
+        self.roundtrip_label.setStyleSheet("color: gray; font-size: 9pt;")
+        box.addWidget(self.roundtrip_label)
 
         hbox = QtWidgets.QHBoxLayout()
         hbox.setSpacing(self.scaledSpacing(0.25))  # Reduce spacing between buttons
@@ -2787,6 +2800,10 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         # Update restore defaults button state
         self.updateRestoreDefaultsButton()
 
+    def updateRoundtripError(self, max_err):
+        """Show the maximum forward/reverse round-trip error across the image (px)."""
+        self.roundtrip_label.setText("Round-trip max: {:.2f} px".format(max_err))
+
     def updateRMSD(self, rmsd_img, rmsd_angular, angular_error_label, fwdrev_mismatch=False,
                    overfit=False):
         """Update the RMSD display with color coding based on pixel RMSD.
@@ -3026,9 +3043,15 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         Updates QPushButtons to be enabled/disabled based on the number of paired stars
         Call whenever paired_stars is changed
         """
-        self.astrometry_button.setEnabled(len(self.gui.paired_stars) > 0)
-        self.photometry_button.setEnabled(len(self.gui.paired_stars) >= 2)
-        self.fit_astrometry_button.setEnabled(len(self.gui.paired_stars) >= min_fit_stars)
+        n_pairs = len(self.gui.paired_stars)
+        self.astrometry_button.setEnabled(n_pairs > 0)
+        self.photometry_button.setEnabled(n_pairs >= 2)
+        self.fit_astrometry_button.setEnabled(n_pairs >= min_fit_stars)
+
+        # Pair finding needs a platepar to project the catalog; residuals need a platepar and pairs
+        has_platepar = getattr(self.gui, 'platepar', None) is not None
+        self.find_pairs_button.setEnabled(has_platepar)
+        self.compute_residuals_button.setEnabled(has_platepar and (n_pairs > 0))
 
 
     def setFitButtonBusy(self, busy):
@@ -3041,6 +3064,8 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
             self.fit_astrometry_button.setText("Fitting...")
             self.fit_astrometry_button.setEnabled(False)
             self.auto_fit_button.setEnabled(False)
+            self.find_pairs_button.setEnabled(False)
+            self.compute_residuals_button.setEnabled(False)
             # Force visual update
             self.fit_astrometry_button.repaint()
             self.auto_fit_button.repaint()
@@ -3062,6 +3087,8 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
             self.auto_fit_button.setEnabled(False)
             self.fit_astrometry_button.setEnabled(False)
             self.quick_align_button.setEnabled(False)
+            self.find_pairs_button.setEnabled(False)
+            self.compute_residuals_button.setEnabled(False)
             # Force visual update
             self.auto_fit_button.repaint()
             self.fit_astrometry_button.repaint()
@@ -4025,13 +4052,14 @@ class SettingsWidget(QtWidgets.QWidget, ScaledSizeHelper):
     sigDistortionToggled = QtCore.pyqtSignal()
     sigMeasGroundPointsToggled = QtCore.pyqtSignal()
     sigInvertToggled = QtCore.pyqtSignal()
-    sigAutoPanToggled = QtCore.pyqtSignal()
     sigGridToggled = QtCore.pyqtSignal()
     sigSelStarsToggled = QtCore.pyqtSignal()
     sigPicksToggled = QtCore.pyqtSignal()
     sigGreatCircleToggled = QtCore.pyqtSignal()
     sigRegionToggled = QtCore.pyqtSignal()
     sigSingleClickPhotometryToggled = QtCore.pyqtSignal()
+    sigErrorOverlayToggled = QtCore.pyqtSignal()
+    sigErrorOverlayThresholdChanged = QtCore.pyqtSignal(float)
     sigSatTracksToggled = QtCore.pyqtSignal()
     sigAutoComputeSatTracksToggled = QtCore.pyqtSignal()
     sigLoadTLEPressed = QtCore.pyqtSignal()
@@ -4135,6 +4163,34 @@ class SettingsWidget(QtWidgets.QWidget, ScaledSizeHelper):
         self.updateShowDistortion()
         vbox.addWidget(self.distortion)
 
+        # Round-trip error overlay controls
+        self.error_overlay_chk = QtWidgets.QCheckBox('Show Round-Trip Error Overlay')
+        self.error_overlay_chk.setToolTip(
+            'Heatmap of the disagreement (px) between the forward and reverse\n'
+            'astrometric mappings across the image. Bright areas mark where the\n'
+            'two distortion polynomials are inconsistent.')
+        self.error_overlay_chk.released.connect(self.sigErrorOverlayToggled.emit)
+        self.error_overlay_chk.setChecked(True)  # Default ON
+        vbox.addWidget(self.error_overlay_chk)
+
+        error_overlay_hbox = QtWidgets.QHBoxLayout()
+        error_overlay_hbox.addWidget(QtWidgets.QLabel('Threshold:'))
+
+        self.error_overlay_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+        self.error_overlay_slider.setMinimum(1)    # 0.01 px
+        self.error_overlay_slider.setMaximum(300)  # 3.0 px
+        self.error_overlay_slider.setValue(50)     # Default 0.5 px
+        self.error_overlay_slider.setToolTip(
+            'Transparency threshold - errors below this (px) are invisible')
+        self.error_overlay_slider.valueChanged.connect(
+            lambda v: self.sigErrorOverlayThresholdChanged.emit(v/100.0))
+        error_overlay_hbox.addWidget(self.error_overlay_slider)
+
+        self.error_overlay_value_label = QtWidgets.QLabel('0.50 px')
+        self.error_overlay_value_label.setMinimumWidth(self.scaledWidth(6))
+        error_overlay_hbox.addWidget(self.error_overlay_value_label)
+        vbox.addLayout(error_overlay_hbox)
+
         self.invert = QtWidgets.QCheckBox('Invert Colors')
         self.invert.released.connect(self.sigInvertToggled.emit)
         try:
@@ -4142,11 +4198,6 @@ class SettingsWidget(QtWidgets.QWidget, ScaledSizeHelper):
         except AttributeError:
             self.invert.setChecked(False)
         vbox.addWidget(self.invert)
-
-        self.autopan_chk = QtWidgets.QCheckBox('Auto Pan To Next Star')
-        self.autopan_chk.released.connect(self.sigAutoPanToggled.emit)
-        self.autopan_chk.setChecked(False)
-        vbox.addWidget(self.autopan_chk)
 
 
         self.meas_ground_points = QtWidgets.QCheckBox('Measure ground points')
@@ -4295,9 +4346,6 @@ class SettingsWidget(QtWidgets.QWidget, ScaledSizeHelper):
     def updateInvertColours(self):
         self.invert.setChecked(self.gui.img.invert_img)
 
-    def updateAutoPan(self):
-        self.autopan_chk.setChecked(self.gui.img.autopan_chk)
-
     def updateSingleClickPhotometry(self):
         self.single_click_photometry.setChecked(self.gui.single_click_photometry)
 
@@ -4419,6 +4467,9 @@ class SettingsWidget(QtWidgets.QWidget, ScaledSizeHelper):
         self.std_label.show()
         self.detected_stars.show()
         self.distortion.show()
+        self.error_overlay_chk.show()
+        self.error_overlay_slider.show()
+        self.error_overlay_value_label.show()
         self.selected_stars.show()
         self.picks.hide()
         self.great_circle.hide()
@@ -4449,6 +4500,9 @@ class SettingsWidget(QtWidgets.QWidget, ScaledSizeHelper):
         self.std_label.hide()
         self.detected_stars.hide()
         self.distortion.hide()
+        self.error_overlay_chk.hide()
+        self.error_overlay_slider.hide()
+        self.error_overlay_value_label.hide()
         self.selected_stars.hide()
         self.picks.show()
         self.great_circle.show()

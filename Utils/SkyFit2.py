@@ -12,7 +12,6 @@ import collections
 import glob
 import sys
 import time
-import random
 from concurrent.futures import ThreadPoolExecutor
 import copy
 import shutil
@@ -23,6 +22,7 @@ import numpy as np
 import zlib
 from PIL import Image
 
+import matplotlib
 import matplotlib.pyplot as plt
 
 # Astropy imports for solar system body ephemeris
@@ -2221,8 +2221,16 @@ class PlateTool(QtWidgets.QMainWindow):
         #   of position on frames and photometry
         self.mode = 'skyfit'
         self.mode_list = ['skyfit', 'manualreduction']
-        self.max_pixels_between_matched_stars = np.inf
-        self.autopan_mode = False
+
+        # Round-trip error overlay (heatmap of fwd/rev transform disagreement across the image)
+        self.error_overlay_enabled = True  # Default: ON
+        self.error_overlay_item = None  # Store QGraphicsPixmapItem for error overlay
+        self.error_overlay_grid = None  # Cached error grid (recomputed when the platepar changes)
+        self.error_overlay_pixmap = None  # Cached pixmap for error overlay
+        self.error_overlay_pixmap_threshold = None  # Threshold the cached pixmap was built with
+        self.error_overlay_stride = 20  # Compute error every N pixels for performance
+        self.error_overlay_threshold = 0.5  # Errors below this (px) are fully transparent
+        self.error_overlay_needs_update = True  # Flag to track if overlay needs recomputation
 
         # Handle empty construction (no input path or config)
         if config is None:
@@ -2318,13 +2326,6 @@ class PlateTool(QtWidgets.QMainWindow):
         self.pick_list = {}
         self.paired_stars = PairedStars()
         self.residuals = None
-
-        # Autopan coordinates
-        self.old_autopan_x, self.old_autopan_y = None, None
-        self.current_autopan_x, self.current_autopan_y = None, None
-
-        # List of unsuitable stars
-        self.unsuitable_stars = PairedStars()
 
         # Positions of the mouse cursor
         self.mouse_x = 0
@@ -2731,9 +2732,6 @@ class PlateTool(QtWidgets.QMainWindow):
         self.image_navigation_slider.valueChanged.connect(self.jumpToImage)
         self.status_bar.addPermanentWidget(self.image_navigation_slider)
 
-        self.nextstar_button = QtWidgets.QPushButton('SkyFit')
-        self.nextstar_button.pressed.connect(self.jumpNextStar)
-
         ###################################################################################################
         # CENTRAL WIDGET (DISPLAY)
 
@@ -2952,7 +2950,6 @@ class PlateTool(QtWidgets.QMainWindow):
         self.label_mag_limit = 5.0
         self.show_constellations = False
         self.selected_stars_visible = True
-        self.unsuitable_stars_visible = True
 
         # selected catalog star markers (main window)
         self.sel_cat_star_markers = pg.ScatterPlotItem()
@@ -2988,23 +2985,6 @@ class PlateTool(QtWidgets.QMainWindow):
 
         self.draw_calstars = True
 
-        # selected unsuitable star markers (main window)
-        self.unsuitable_star_markers = pg.ScatterPlotItem()
-        self.unsuitable_star_markers.setPen('r', width=3)
-        self.unsuitable_star_markers.setSize(10)
-        self.unsuitable_star_markers.setSymbol('s')
-        self.unsuitable_star_markers.setZValue(4)
-        self.img_frame.addItem(self.unsuitable_star_markers)
-
-        # selected catalog star markers (zoom window)
-        self.unsuitable_star_markers2 = pg.ScatterPlotItem()
-        self.unsuitable_star_markers2.setPen('r', width=3)
-        self.unsuitable_star_markers2.setSize(10)
-        self.unsuitable_star_markers2.setSymbol('s')
-        self.unsuitable_star_markers2.setZValue(4)
-        self.zoom_window.addItem(self.unsuitable_star_markers2)
-
-        self.unsuitable_stars_visble = True
 
         # Distortion center marker (red cross) - main window
         self.distortion_center_marker = pg.ScatterPlotItem()
@@ -3094,8 +3074,6 @@ class PlateTool(QtWidgets.QMainWindow):
         self.star_pick_info_text_str += "LEFT CLICK - Centroid star\n"
         self.star_pick_info_text_str += f"{ctrl} + LEFT CLICK - Manual star position\n"
         self.star_pick_info_text_str += "ENTER or SPACE - Accept pair\n"
-        self.star_pick_info_text_str += f"{ctrl} + SPACE - Mark pair bad\n"
-        self.star_pick_info_text_str += "SHIFT + SPACE - Jump random\n"
         self.star_pick_info_text_str += "RIGHT CLICK - Remove pair\n"
         self.star_pick_info_text_str += f"{ctrl} + SCROLL - Aperture radius adjust\n"
         self.star_pick_info_text_str += f"{ctrl} + Z - Fit stars\n"
@@ -3342,9 +3320,10 @@ class PlateTool(QtWidgets.QMainWindow):
         # Connect astrometry & photometry buttons to functions
         self.tab.param_manager.sigFitPressed.connect(self.fitPickedStars)
         self.tab.param_manager.sigAutoFitPressed.connect(self.autoFitAstrometryNet)
+        self.tab.param_manager.sigFindPairsPressed.connect(self.findMatchingPairs)
+        self.tab.param_manager.sigComputeResidualsPressed.connect(self.computeResiduals)
         self.tab.param_manager.sigQuickAlignPressed.connect(self.quickAlign)
         self.tab.param_manager.sigFindBestFramePressed.connect(self.findBestFrame)
-        self.tab.param_manager.sigNextStarPressed.connect(self.jumpNextStar)
         self.tab.param_manager.sigPhotometryPressed.connect(lambda: self.photometry(show_plot=True))
         self.tab.param_manager.sigAstrometryPressed.connect(self.showAstrometryFitPlots)
         self.tab.param_manager.sigResetDistortionPressed.connect(self.resetDistortion)
@@ -3406,7 +3385,8 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.settings.sigMeasGroundPointsToggled.connect(self.toggleMeasGroundPoints)
         self.tab.settings.sigGridToggled.connect(self.onGridChanged)
         self.tab.settings.sigInvertToggled.connect(self.toggleInvertColours)
-        self.tab.settings.sigAutoPanToggled.connect(self.toggleAutoPan)
+        self.tab.settings.sigErrorOverlayToggled.connect(self.toggleErrorOverlay)
+        self.tab.settings.sigErrorOverlayThresholdChanged.connect(self.updateErrorOverlayThreshold)
         self.tab.settings.sigSingleClickPhotometryToggled.connect(self.toggleSingleClickPhotometry)
         self.tab.settings.sigSatTracksToggled.connect(self.toggleShowSatTracks)
         self.tab.settings.sigAutoComputeSatTracksToggled.connect(self.toggleAutoComputeSatTracks)
@@ -3880,23 +3860,6 @@ class PlateTool(QtWidgets.QMainWindow):
             # Add RA/Dec info
             status_str += ", RA={:6.2f} Dec={:+6.2f} (J2000)".format(ra[0], dec[0])
 
-            # Show mode for debugging purposes
-
-            if self.star_pick_mode and not self.autopan_mode:
-                pass
-            elif self.star_pick_mode and self.autopan_mode:
-                status_str += ", Auto pan"
-
-            if self.max_pixels_between_matched_stars != np.inf:
-                percentage_complete = min([100,100*(len(self.paired_stars)+len(self.unsuitable_stars))/
-                                                                len(self.catalog_x_filtered)])
-
-                if self.max_pixels_between_matched_stars != 0:
-                    status_str += ", max gap {:.0f}px".format(self.max_pixels_between_matched_stars)
-
-                status_str += " good:{} bad:{} progress {:.0f}%".format(
-                    len(self.paired_stars), len(self.unsuitable_stars), percentage_complete)
-
         return status_str
 
 
@@ -4067,7 +4030,8 @@ class PlateTool(QtWidgets.QMainWindow):
             pp_noref = copy.deepcopy(self.platepar)
             pp_noref.refraction = False
             pp_noref.updateRefRADec(preserve_rotation=True)
-            self.geo_x, self.geo_y, _ = getCatalogStarsImagePositions(self.geo_points, ff_jd, pp_noref)
+            self.geo_x, self.geo_y, _ = getCatalogStarsImagePositions(self.geo_points, ff_jd, pp_noref,
+                                                                      use_iterative=True)
 
             geo_xy = np.c_[self.geo_x, self.geo_y]
 
@@ -4103,9 +4067,12 @@ class PlateTool(QtWidgets.QMainWindow):
         ### Draw catalog stars on the image using the current platepar ###
         ######################################################################################################
 
-        # Get positions of catalog stars on the image
+        # Get positions of catalog stars on the image. The iterative inversion of the forward mapping
+        # keeps the displayed positions exact even mid auto-fit, when only the forward polynomial has
+        # been fitted so far
         self.catalog_x, self.catalog_y, catalog_mag = getCatalogStarsImagePositions(self.catalog_stars, \
-                                                                                    ff_jd, self.platepar)
+                                                                                    ff_jd, self.platepar, \
+                                                                                    use_iterative=True)
 
         # Apply apparent magnitude correction if enabled
         if self.apparent_mag_corr_enabled:
@@ -4559,7 +4526,8 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Convert RA/Dec to image coordinates
             body_radec = np.array([[ra_deg, dec_deg, mag]])
-            x_arr, y_arr, _ = getCatalogStarsImagePositions(body_radec, ff_jd, self.platepar)
+            x_arr, y_arr, _ = getCatalogStarsImagePositions(body_radec, ff_jd, self.platepar,
+                                                            use_iterative=True)
 
             if len(x_arr) > 0:
                 x, y = x_arr[0], y_arr[0]
@@ -4607,13 +4575,6 @@ class PlateTool(QtWidgets.QMainWindow):
             self.sel_cat_star_markers.setData(pos=[])
             self.sel_cat_star_markers2.setData(pos=[])
 
-        if len(self.unsuitable_stars) > 0:
-            self.unsuitable_star_markers.setData(pos=self.unsuitable_stars.imageCoords(draw=True))
-            self.unsuitable_star_markers2.setData(pos=self.unsuitable_stars.imageCoords(draw=True))
-        else:
-            self.unsuitable_star_markers.setData(pos=[])
-            self.unsuitable_star_markers2.setData(pos=[])
-
         self.centroid_star_markers.setData(pos=[])
         self.centroid_star_markers2.setData(pos=[])
 
@@ -4621,7 +4582,158 @@ class PlateTool(QtWidgets.QMainWindow):
         if len(self.paired_stars) >= 2:
             self.photometry()
 
+        # Update the round-trip error overlay
+        self.updateErrorOverlay()
+
         self.tab.param_manager.updatePairedStars(min_fit_stars=self.getMinFitStars())
+
+
+    def toggleErrorOverlay(self):
+        """ Toggle the round-trip error overlay display. """
+        self.error_overlay_enabled = not self.error_overlay_enabled
+        self.updateErrorOverlay()
+
+
+    def updateErrorOverlayThreshold(self, threshold):
+        """ Update error overlay threshold and refresh display.
+
+        Arguments:
+            threshold: [float] Errors below this value (pixels) will be fully transparent.
+        """
+        self.error_overlay_threshold = threshold
+
+        # Update the label in the settings panel
+        self.tab.settings.error_overlay_value_label.setText('{:.2f} px'.format(threshold))
+
+        # Refresh the overlay if it's enabled (the pixmap is rebuilt from the cached error grid)
+        if self.error_overlay_enabled:
+            self.updateErrorOverlay()
+
+
+    def updateErrorOverlay(self):
+        """ Update the round-trip error overlay showing the disagreement between the forward and
+            reverse astrometric mappings across the image. The error grid is recomputed whenever
+            the platepar changes (also feeding the round-trip max readout in the Fit Parameters
+            tab); the overlay pixmap itself is only rebuilt when the grid or the transparency
+            threshold changes.
+        """
+
+        # Remove existing overlay
+        if self.error_overlay_item is not None:
+            self.img_frame.removeItem(self.error_overlay_item)
+            self.error_overlay_item = None
+
+        # Only compute in skyfit mode
+        if self.mode != 'skyfit':
+            return
+
+        # Check if image is loaded
+        if not hasattr(self, 'img') or self.img is None or self.img.data is None:
+            return
+
+        # Check if platepar has required data
+        if (self.platepar is None) or (getattr(self.platepar, 'JD', None) is None):
+            return
+
+        # Get image dimensions
+        img_x_max, img_y_max = self.img.data.shape[:2]
+
+        # Recompute whenever any platepar parameter that affects the mapping has changed, so manual
+        # adjustments (pointing nudges, distortion edits, refraction toggles, platepar loads) are
+        # picked up without having to instrument every mutation site
+        pp = self.platepar
+        pp_key = (
+            pp.RA_d, pp.dec_d, pp.pos_angle_ref, pp.F_scale, pp.Ho, pp.JD, pp.lat, pp.lon,
+            pp.refraction, pp.equal_aspect, pp.force_distortion_centre, pp.asymmetry_corr,
+            str(pp.distortion_type),
+            tuple(pp.x_poly_fwd), tuple(pp.y_poly_fwd), tuple(pp.x_poly_rev), tuple(pp.y_poly_rev),
+        )
+        if getattr(self, 'error_overlay_pp_key', None) != pp_key:
+            self.error_overlay_pp_key = pp_key
+            self.error_overlay_needs_update = True
+
+        # Recompute the error grid if needed. This runs even when the overlay display is disabled,
+        # so the round-trip max readout in the Fit Parameters tab stays current (the vectorized
+        # computation is cheap).
+        if self.error_overlay_needs_update or (self.error_overlay_grid is None):
+
+            # Use platepar reference time for both directions to measure pure geometric accuracy
+            jd = self.platepar.JD
+            time_data = jd2Date(jd)
+
+            stride = self.error_overlay_stride
+            x_grid = np.arange(0, img_x_max, stride)
+            y_grid = np.arange(0, img_y_max, stride)
+            xx, yy = np.meshgrid(x_grid.astype(np.float64), y_grid.astype(np.float64))
+            xs, ys = xx.ravel(), yy.ravel()
+
+            try:
+                # Round trip: xy -> RA/Dec -> xy, vectorized over the whole grid
+                _, ra_arr, dec_arr, _ = xyToRaDecPP([time_data]*len(xs), xs, ys, [1]*len(xs),
+                    self.platepar, extinction_correction=False)
+                x_rec, y_rec = raDecToXYPP(np.array(ra_arr), np.array(dec_arr), jd, self.platepar)
+                err = np.hypot(np.array(x_rec) - xs, np.array(y_rec) - ys)
+                self.error_overlay_grid = err.reshape(len(y_grid), len(x_grid))
+
+            except Exception:
+                self.error_overlay_grid = np.zeros((len(y_grid), len(x_grid)))
+
+            self.error_overlay_pixmap = None  # Grid changed, cached pixmap is stale
+            self.error_overlay_needs_update = False
+
+            # Show the maximum round-trip error under the residuals in the Fit Parameters tab
+            if hasattr(self, 'tab') and hasattr(self.tab, 'param_manager'):
+                self.tab.param_manager.updateRoundtripError(float(np.max(self.error_overlay_grid)))
+
+        # Only draw the overlay if enabled
+        if not self.error_overlay_enabled:
+            return
+
+        # Rebuild the pixmap if the grid or the threshold changed
+        if (self.error_overlay_pixmap is None) \
+                or (self.error_overlay_pixmap_threshold != self.error_overlay_threshold):
+
+            error_grid = self.error_overlay_grid
+
+            # Normalize errors for colormap: below threshold is 0, above scales to [0, 1]
+            error_normalized = np.copy(error_grid)
+            error_normalized[error_normalized < self.error_overlay_threshold] = 0
+
+            max_error = np.max(error_normalized)
+            if max_error > self.error_overlay_threshold:
+                # Map [threshold, max_error] to [0, 1]
+                above = error_normalized >= self.error_overlay_threshold
+                error_normalized[above] = (error_normalized[above] - self.error_overlay_threshold) \
+                    /(max_error - self.error_overlay_threshold)
+
+            # Create RGBA image using the hot colormap (registry API on modern matplotlib)
+            if hasattr(matplotlib, 'colormaps'):
+                cmap = matplotlib.colormaps.get_cmap('hot')
+            else:
+                cmap = plt.get_cmap('hot')
+            rgba_grid = cmap(error_normalized)  # Shape: (h, w, 4)
+
+            # Alpha channel: 0 below threshold, otherwise scale with error (max 60% opacity)
+            alpha = np.where(error_grid < self.error_overlay_threshold, 0,
+                            np.clip(error_normalized*0.6, 0, 0.6))
+            rgba_grid[:, :, 3] = alpha
+
+            rgba_uint8 = (rgba_grid*255).astype(np.uint8)
+
+            # Resize to match image dimensions - cv2.resize expects (width, height)
+            rgba_resized = cv2.resize(rgba_uint8, (img_x_max, img_y_max),
+                                     interpolation=cv2.INTER_LINEAR)
+
+            # Convert to QPixmap and cache for reuse
+            height, width, channel = rgba_resized.shape
+            q_img = QtGui.QImage(rgba_resized.data, width, height, 4*width,
+                                QtGui.QImage.Format_RGBA8888)
+            self.error_overlay_pixmap = QtGui.QPixmap.fromImage(q_img)
+            self.error_overlay_pixmap_threshold = self.error_overlay_threshold
+
+        self.error_overlay_item = QtWidgets.QGraphicsPixmapItem(self.error_overlay_pixmap)
+        self.error_overlay_item.setZValue(0.5)  # Between image (0) and overlays (1)
+        self.img_frame.addItem(self.error_overlay_item)
 
 
     def updateCalstars(self):
@@ -8842,7 +8954,6 @@ class PlateTool(QtWidgets.QMainWindow):
             # Reset paired stars
             self.pick_list = {}
             self.paired_stars = PairedStars()
-            self.unsuitable_stars = PairedStars()
             self.residuals = None
 
             # Clear residual overlay from previous image
@@ -9476,15 +9587,6 @@ class PlateTool(QtWidgets.QMainWindow):
         # Update possibly missing flag for measuring ground points
         if not hasattr(self, "meas_ground_points"):
             self.meas_ground_points = False
-
-        if not hasattr(self, "autopan_mode"):
-            self.autopan_mode = False
-
-        if not hasattr(self, "unsuitable_stars"):
-            self.unsuitable_stars = PairedStars()
-
-        if not hasattr(self, "max_pixels_between_matched_stars"):
-            self.max_pixels_between_matched_stars = np.inf
 
         # Update possibly missing flag for measuring ground points
         if not hasattr(self, "single_click_photometry"):
@@ -10200,13 +10302,6 @@ class PlateTool(QtWidgets.QMainWindow):
             self.img_zoom.reloadImage()
             self.img.reloadImage()
 
-        # Jump to the next star
-        elif event.key() == QtCore.Qt.Key_Space and (modifiers == QtCore.Qt.ShiftModifier):
-
-            self.jumpNextStar(miss_this_one=True)
-            self.updateBottomLabel()
-
-
         # Fit spectral band ratios (hidden feature)
         elif event.key() == QtCore.Qt.Key_B and modifiers == (QtCore.Qt.ControlModifier | QtCore.Qt.ShiftModifier):
             self.fitBandRatio()
@@ -10248,18 +10343,12 @@ class PlateTool(QtWidgets.QMainWindow):
                 if self.label1.isVisible():
                     self.star_pick_info.show()
 
-                # Enable the Next button for star panning
-                self.tab.param_manager.next_star_button.setEnabled(True)
-
             else:
                 self.img_frame.setMouseEnabled(True, True)
                 self.cursor2.hide()
                 self.cursor.hide()
 
                 self.star_pick_info.hide()
-
-                # Disable the Next button for star panning
-                self.tab.param_manager.next_star_button.setEnabled(False)
 
 
         # Toggle grid
@@ -10480,18 +10569,6 @@ class PlateTool(QtWidgets.QMainWindow):
             # Pan the view down on screen (roll-aware)
             elif event.key() == QtCore.Qt.Key_S:
                 self.nudgeReferenceScreen(0, -1)
-
-            # Pan to unmatched star most distant from all other matched stars
-
-            elif event.key() == QtCore.Qt.Key_U and modifiers == QtCore.Qt.ControlModifier:
-
-                self.jumpNextStar(miss_this_one=False)
-
-            elif event.key() == QtCore.Qt.Key_O and modifiers == QtCore.Qt.ControlModifier:
-
-                self.toggleAutoPan()
-                self.tab.settings.updateAutoPan()
-                self.updateBottomLabel()
 
 
 
@@ -10773,45 +10850,12 @@ class PlateTool(QtWidgets.QMainWindow):
                 # updates image automatically
 
 
-            # Save the point to the matched stars list by pressing Enter or Space or to the
-            # unsuitable stars
+            # Save the point to the matched stars list by pressing Enter or Space
 
             elif (event.key() == QtCore.Qt.Key_Return) or (event.key() == QtCore.Qt.Key_Enter) \
                 or (event.key() == QtCore.Qt.Key_Space):
 
                 if self.star_pick_mode:
-                    
-                    # Check if the star has been skipped
-                    unsuitable = False
-                    if modifiers == QtCore.Qt.ControlModifier:
-                        
-                        # If a star has been skipped, mark it as unsuitable
-                        if (self.old_autopan_x is not None) and (self.old_autopan_y is not None):
-                            
-                            # Check that a new star has been selected
-                            if (self.old_autopan_x != self.current_autopan_x) or \
-                                (self.old_autopan_y != self.current_autopan_y):
-                                
-                                unsuitable = True
-                        
-                        elif (self.current_autopan_x is None) and (self.current_autopan_y is None):
-                            unsuitable = False
-
-                        else:
-                            unsuitable = True
-                    
-                    if unsuitable:
-
-                        print("Unsuitable star at coordinates: ({}, {})".format(self.current_autopan_x, self.current_autopan_y))
-
-                        self.unsuitable_stars.addPair(self.current_autopan_x, self.current_autopan_y,
-                                                        0, 0, None)
-                        self.updateBottomLabel()
-                        self.unsuitable_star_markers.addPoints(x=[self.current_autopan_x],
-                                                                y=[self.current_autopan_y])
-                        self.unsuitable_star_markers2.addPoints(x=[self.current_autopan_x],
-                                                                y=[self.current_autopan_y])
-
                     # If the catalog star, planet, or geo point has been selected, save the pair to the list
                     if self.cursor.mode == 1:
 
@@ -10848,29 +10892,13 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
                         # Add the image/catalog pair to the list
-                        if not unsuitable:
-                            self.paired_stars.addPair(self.x_centroid, self.y_centroid, self.star_fwhm,
-                                    self.star_intensity, pair_obj,
-                                    snr=self.star_snr, saturated=self.star_saturated)
+                        self.paired_stars.addPair(self.x_centroid, self.y_centroid, self.star_fwhm,
+                                self.star_intensity, pair_obj,
+                                snr=self.star_snr, saturated=self.star_saturated)
 
                         # Switch back to centroiding mode
                         self.cursor.setMode(0)
                         self.updatePairedStars()
-
-                        if self.autopan_mode:
-
-                            self.updateBottomLabel()
-
-                            self.jumpNextStar(miss_this_one=False)
-
-
-                    else:
-
-                        # Jump to next star if CTRL + SPACE is pressed
-                        if modifiers == QtCore.Qt.ControlModifier:
-                            print("Jumping to the next star")
-                            self.jumpNextStar(miss_this_one=False)
-
 
             elif event.key() == QtCore.Qt.Key_Escape:
                 if self.star_pick_mode:
@@ -12224,12 +12252,6 @@ class PlateTool(QtWidgets.QMainWindow):
         self.img.invert()
         self.img_zoom.invert()
 
-    def toggleAutoPan(self):
-
-        self.img.autopan()
-        self.autopan_mode = not self.autopan_mode
-
-
     def toggleSingleClickPhotometry(self):
         self.single_click_photometry = not self.single_click_photometry
 
@@ -12598,6 +12620,10 @@ class PlateTool(QtWidgets.QMainWindow):
                     final_catalog_stars=tuned_catalog,
                     iteration_callback=iteration_callback
                 )
+
+                # Mark error overlay for recomputation after the platepar changed
+                self.error_overlay_needs_update = True
+
                 print("  NN fit complete: RA={:.2f} Dec={:.2f} Scale={:.3f} arcmin/px".format(
                     self.platepar.RA_d, self.platepar.dec_d, 60/self.platepar.F_scale))
             except Exception as e:
@@ -13571,6 +13597,10 @@ class PlateTool(QtWidgets.QMainWindow):
                     final_catalog_stars=tuned_catalog,
                     iteration_callback=iteration_callback
                 )
+
+                # Mark error overlay for recomputation after the platepar changed
+                self.error_overlay_needs_update = True
+
                 print("  NN fit complete: RA={:.2f} Dec={:.2f} Scale={:.3f} arcmin/px".format(
                     self.platepar.RA_d, self.platepar.dec_d, 60/self.platepar.F_scale))
             except Exception as e:
@@ -14240,6 +14270,10 @@ class PlateTool(QtWidgets.QMainWindow):
             dlg.close()
         else:
             dlg.exec_()
+
+        # The dialog is parented to the main window, so Qt would keep it alive indefinitely -
+        # delete it explicitly, otherwise every File Manager open leaks a full dialog widget tree
+        dlg.deleteLater()
 
     def saveCurrentFrame(self):
         """ Saves the current frame to disk. """
@@ -15156,29 +15190,133 @@ class PlateTool(QtWidgets.QMainWindow):
         return overfit
 
 
-    def fitPickedStars(self):
-        """ Fit stars that are manually picked. The function first only estimates the astrometry parameters
-            without the distortion, then just the distortion parameters, then all together.
-
+    def findMatchingPairs(self):
+        """ Match detected stars to catalog stars using the current platepar and replace the
+            current paired stars with the matches. Does not fit or modify the platepar - run the
+            fit as a separate step.
         """
 
-        # Check if there are enough stars for the fit
-        min_stars = self.getMinFitStars()
-        if len(self.paired_stars) < min_stars:
-
-            qmessagebox(title='Number of stars',
-                        message="At least {:d} paired stars are needed to do the fit!".format(min_stars),
+        # Pair finding requires a usable platepar to project the catalog
+        if (self.platepar is None) or (getattr(self.platepar, 'JD', None) is None):
+            qmessagebox(title='Find pairs',
+                        message="A platepar is needed to project catalog stars for matching!",
                         message_type="warning")
+            return
 
-            return self.platepar
+        # If there are existing matched star pairs, warn the user they will be replaced
+        if len(self.paired_stars) > 0:
+            reply = QtWidgets.QMessageBox.question(
+                self,
+                "Replace Matched Stars?",
+                "You have {} matched star pair(s) that will be replaced.\n\n"
+                "Do you want to continue?".format(len(self.paired_stars)),
+                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+                QtWidgets.QMessageBox.No
+            )
+            if reply != QtWidgets.QMessageBox.Yes:
+                return
 
-        # Show busy state on button
-        self.tab.param_manager.setFitButtonBusy(True)
-        QtWidgets.QApplication.processEvents()
+        # Get the detected stars on the current image (override detections take precedence)
+        ff_name_c = convertFRNameToFF(self.img_handle.name())
+        if self.star_detection_override_enabled and ff_name_c in self.star_detection_override_data:
+            detected_stars = np.array(self.star_detection_override_data[ff_name_c])
+        elif ff_name_c in self.calstars:
+            detected_stars = np.array(self.calstars[ff_name_c])
+        else:
+            qmessagebox(title='Find pairs',
+                        message="No detected stars are available on this image!",
+                        message_type="warning")
+            return
+
+        if len(detected_stars) < 1:
+            qmessagebox(title='Find pairs',
+                        message="No detected stars are available on this image!",
+                        message_type="warning")
+            return
+
+        # CALSTARS format: Y(0) X(1) IntensSum(2) Ampltd(3) FWHM(4) BgLvl(5) SNR(6) NSatPx(7)
+        det_y = detected_stars[:, 0]
+        det_x = detected_stars[:, 1]
+        det_intens = detected_stars[:, 2] if detected_stars.shape[1] > 2 else np.ones(len(det_x))
+        det_fwhm = detected_stars[:, 4] if detected_stars.shape[1] > 4 else np.zeros(len(det_x))
+        det_snr = detected_stars[:, 6] if detected_stars.shape[1] > 6 else np.ones(len(det_x))
+        det_saturated = detected_stars[:, 7] if detected_stars.shape[1] > 7 else np.zeros(len(det_x))
+
+        jd = date2JD(*self.img_handle.currentTime())
+
+        # Project the loaded catalog to image coordinates (iterative inversion of the forward
+        # mapping, exact regardless of the reverse polynomial state)
+        cat_x, cat_y, _ = getCatalogStarsImagePositions(self.catalog_stars, jd, self.platepar,
+                                                        use_iterative=True)
+
+        # Keep only catalog stars inside the image and outside the mask
+        in_image = (cat_x >= 0) & (cat_x < self.platepar.X_res) \
+            & (cat_y >= 0) & (cat_y < self.platepar.Y_res)
+        catalog_stars_fov = self.catalog_stars[in_image]
+        cat_x, cat_y = cat_x[in_image], cat_y[in_image]
+
+        catalog_stars_fov, not_masked = self.filterCatalogStarsByMask(cat_x, cat_y,
+                                                                      catalog_stars_fov)
+        cat_x, cat_y = cat_x[not_masked], cat_y[not_masked]
+
+        if len(cat_x) == 0:
+            qmessagebox(title='Find pairs',
+                        message="No catalog stars project inside the image - check the platepar "
+                                "pointing and the catalog limiting magnitude!",
+                        message_type="warning")
+            return
+
+        # Match radius scaled to the star size on this image
+        good_fwhm = det_fwhm[det_fwhm > 0]
+        match_radius = 2.0*float(np.median(good_fwhm)) if len(good_fwhm) else 6.0
+        match_radius = min(15.0, max(4.0, match_radius))
 
         print()
-        print("----------------------------------------")
-        print("Fitting platepar...")
+        print("Finding matching pairs (match radius: {:.1f} px)...".format(match_radius))
+
+        # One-to-one nearest-neighbour matching within the radius
+        self.paired_stars = PairedStars()
+        matched_cat = set()
+        for i in range(len(det_x)):
+            distances = np.sqrt((cat_x - det_x[i])**2 + (cat_y - det_y[i])**2)
+            closest_idx = int(np.argmin(distances))
+            if (distances[closest_idx] < match_radius) and (closest_idx not in matched_cat):
+                matched_cat.add(closest_idx)
+                cat_star = catalog_stars_fov[closest_idx]
+                sky_obj = CatalogStar(cat_star[0], cat_star[1], cat_star[2])
+                self.paired_stars.addPair(
+                    det_x[i], det_y[i], det_fwhm[i], det_intens[i], sky_obj,
+                    snr=det_snr[i], saturated=det_saturated[i] > 0
+                )
+
+        print("  Matched {} of {} detected stars to {} catalog stars in FOV".format(
+            len(self.paired_stars), len(det_x), len(cat_x)))
+
+        # Old residuals and photometry no longer correspond to the new pairs
+        self.residuals = None
+        self.photom_fit_resids = None
+
+        # Refresh the display and button gating
+        self.updateStars()
+        self.updatePairedStars()
+        self.updateFitResiduals()
+        self.tab.param_manager.updatePairedStars(min_fit_stars=self.getMinFitStars())
+
+        self.status_bar.showMessage("Matched {} star pairs".format(len(self.paired_stars)))
+
+
+    def computeResiduals(self):
+        """ Compute and display the astrometric residuals of the current paired stars against the
+            current platepar. Does not fit or modify anything - can be run standalone after manual
+            platepar changes or after finding pairs.
+        """
+
+        # Residuals require a platepar and at least one paired star
+        if (self.platepar is None) or (len(self.paired_stars) == 0):
+            qmessagebox(title='Compute residuals',
+                        message="A platepar and at least one paired star are needed to compute residuals!",
+                        message_type="warning")
+            return
 
         # Extract paired catalog stars and image coordinates separately
         img_stars = np.array(self.paired_stars.imageCoords())
@@ -15186,16 +15324,6 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Get the Julian date of the image that's being fit
         jd = date2JD(*self.img_handle.currentTime())
-
-        # Fit the platepar to paired stars
-        self.platepar.fitAstrometry(jd, img_stars, catalog_stars, first_platepar_fit=self.first_platepar_fit,\
-            fit_only_pointing=self.fit_only_pointing, fixed_scale=self.fixed_scale)
-        self.first_platepar_fit = False
-        self.platepar_modified = True
-
-        # Show platepar parameters
-        print()
-        print(self.platepar)
 
         ### Calculate the fit residuals for every fitted star ###
 
@@ -15374,6 +15502,58 @@ class PlateTool(QtWidgets.QMainWindow):
         # Save the residuals
         self.residuals = residuals
 
+
+        # Draw the updated residual lines
+        self.updateFitResiduals()
+
+
+    def fitPickedStars(self):
+        """ Fit stars that are manually picked. The function first only estimates the astrometry parameters
+            without the distortion, then just the distortion parameters, then all together.
+
+        """
+
+        # Check if there are enough stars for the fit
+        min_stars = self.getMinFitStars()
+        if len(self.paired_stars) < min_stars:
+
+            qmessagebox(title='Number of stars',
+                        message="At least {:d} paired stars are needed to do the fit!".format(min_stars),
+                        message_type="warning")
+
+            return self.platepar
+
+        # Show busy state on button
+        self.tab.param_manager.setFitButtonBusy(True)
+        QtWidgets.QApplication.processEvents()
+
+        print()
+        print("----------------------------------------")
+        print("Fitting platepar...")
+
+        # Extract paired catalog stars and image coordinates separately
+        img_stars = np.array(self.paired_stars.imageCoords())
+        catalog_stars = np.array(self.paired_stars.skyCoords())
+
+        # Get the Julian date of the image that's being fit
+        jd = date2JD(*self.img_handle.currentTime())
+
+        # Fit the platepar to paired stars
+        self.platepar.fitAstrometry(jd, img_stars, catalog_stars, first_platepar_fit=self.first_platepar_fit,\
+            fit_only_pointing=self.fit_only_pointing, fixed_scale=self.fixed_scale)
+        self.first_platepar_fit = False
+        self.platepar_modified = True
+
+        # Mark error overlay for recomputation after the platepar changed
+        self.error_overlay_needs_update = True
+
+        # Show platepar parameters
+        print()
+        print(self.platepar)
+
+        # Compute and display the fit residuals
+        self.computeResiduals()
+
         self.updateDistortion()
         self.updateLeftLabels()
         self.updateStars()
@@ -15392,20 +15572,6 @@ class PlateTool(QtWidgets.QMainWindow):
         if self.fig_astrometry is not None and plt.fignum_exists(self.fig_astrometry.number):
             self.showAstrometryFitPlots(force_update=True)
 
-
-    def jumpNextStar(self, miss_this_one=False):
-
-        new_x, new_y, self.max_pixels_between_matched_stars  = self.furthestStar(miss_this_one=miss_this_one)
-        self.updateBottomLabel()
-        self.old_autopan_x, self.old_autopan_y = self.current_autopan_x, self.current_autopan_y
-        self.current_autopan_x, self.current_autopan_y = new_x, new_y
-        self.img_frame.setRange(xRange=(new_x + 15, new_x - 15), yRange=(new_y + 15, new_y - 15))
-        self.checkParamRange()
-        self.platepar.updateRefRADec(preserve_rotation=True)
-        self.checkParamRange()
-        self.tab.param_manager.updatePlatepar()
-        self.updateLeftLabels()
-        self.updateStars()
 
     def showAstrometryFitPlots(self, force_update=False):
         """ Show window with astrometry fit details. Toggle on/off if already open. """
@@ -17260,202 +17426,6 @@ class PlateTool(QtWidgets.QMainWindow):
         except ZeroDivisionError:
             pass
         self.time = time.time()
-
-    def furthestStar(self, miss_this_one=False, min_separation=15):
-        """
-        Find the star which is furthest away from all other stars that have already been matched.
-
-        Keyword arguments:
-            miss_this_one: Return coordinates of a different star at random, but don't mark anything.
-            min_separation: Minimum separation in pixels between stars.
-
-        Returns: 
-            (x,y) integers of the image location of the furthest star away from all other matched stars.
-
-        """
-
-        # Strategy
-
-        # Working in image coordinates
-
-        # Get two lists marked_x, marked_y of each marked star - getMarkedStars()
-        # Get three lists candidate_x, candidate_y of each unmarked star, and the distance to nearest
-        # marked star which is more than minimum separation away
-
-        # Get star with the greatest distance to the nearest marked star
-
-
-
-        # Return the image coordinates of the star which is furthest away from any marked star
-        # Create marked_x, marked_y in image coordinates which is composed of matched stars and unsuitable stars
-
-        # Get all the matched stars in image coordinates
-
-
-
-        def getMarkedStars(include_unsuitable=True):
-
-            """
-
-            Returns: a list of stars which are either marked as paired, or bad in image coordinates
-
-            """
-
-            marked_x, marked_y = [], []
-            coords_list = self.paired_stars.imageCoords()
-            for coords in coords_list:
-                marked_x.append(coords[0])
-                marked_y.append(coords[1])
-
-            if include_unsuitable:
-                coords_list = self.unsuitable_stars.imageCoords()
-                for coords in coords_list:
-                    marked_x.append(coords[0])
-                    marked_y.append(coords[1])
-
-            return marked_x, marked_y
-        ##############################################################################################################
-
-        def isDouble(x,y, reference_x_list, reference_y_list, min_separation=5):
-
-            """
-            Are x,y coordinates which are very close to, but distinct from all coordinates in reference list
-
-            Args:
-                x: image coordinates of star
-                y: image coordinates of star
-                reference_x_list: list of x image coordinates
-                reference_y_list: list of y image coordinates
-
-            Returns:
-                [bool] True if star is within min_separation of another star
-            """
-
-            for reference_x, reference_y in zip(reference_x_list, reference_y_list):
-                # Check if this the reference is the same star
-                if reference_x == x and reference_y == y:
-                    continue
-                if ((reference_x - x) ** 2 + (reference_y - y) ** 2) ** 0.5 < min_separation:
-                    return True
-
-            return False
-        ##############################################################################################################
-
-        def getVisibleUnmarkedStarsAndDistanceToMarked(marked_x_list, marked_y_list, min_separation=15):
-
-            """
-            From the catalogue of filtered stars return a lists of coordinates stars which are not marked,
-            and another list which is the distance to the nearest marked star
-
-            Args:
-                marked_x_list: list of marked star x coordinates
-                marked_y_list: list of marked star y coordinates
-                min_separation: minimum separation to be regarded as a different stra
-
-            Returns:
-                unmarked_x_list: list of unmarked star x coordinates
-                unmarked_y_list: list of unmarked star x coordinates
-                dist_nearest_marked_list: distance of the nearest marked star for returned star coordinates
-
-
-            """
-
-            # Is there a way to get this in image coordinates directly
-            visible_ra_list = [star[0] for star in self.catalog_stars_filtered]
-            visible_dec_list = [star[1] for star in self.catalog_stars_filtered]
-
-            # Convert all visible star to image coordinates
-
-            visible_x, visible_y = raDecToXYPP(np.array(visible_ra_list), np.array(visible_dec_list),
-                                               datetime2JD(self.img_handle.currentFrameTime(dt_obj=True)),
-                                               self.platepar)
-
-            # Handle jump when no stars are marked - just pick and return a single random star
-            if len(marked_x_list) == 0 or len(marked_y_list) == 0:
-                random_star = random.randint(0, len(visible_x) - 1)
-                return [visible_x[random_star]], [visible_y[random_star]], [np.inf], [np.inf]
-
-            # Iterate through all visible stars creating a list of stars which are more than
-            # min separation from a marked star, and then add coordinates of the visible star
-            # and minimum distance to the nearest marked star, which is more than min_separation away
-            # If a visible star is too close to an already marked star then ignore this star
-            # and do not append to the candidate star list
-
-            candidate_x_list, candidate_y_list, dist_nearest_marked_list = [], [], []
-
-
-            # Reject stars which are too close to the edge
-            edge_margin = 5 # px
-
-            for x, y in zip(visible_x, visible_y):
-                ignore_this_star = False
-
-                if isDouble(x,y, visible_x, visible_y):
-                    continue
-
-                nearest_pixel_separation = np.inf
-
-                for marked_x, marked_y in zip(marked_x_list, marked_y_list):
-                    
-                    # calculate cartesian separation
-                    pixel_separation = ((marked_x - x) ** 2 + (marked_y - y) ** 2) ** 0.5
-                    
-                    # If this star is less than minimum separation away
-                    if pixel_separation < min_separation or ignore_this_star:
-                        # do not use this visible star in any further iteration
-                        ignore_this_star = True
-                        break
-                    
-                    # If this star is too close to the edge, do not use it
-                    if (x < edge_margin) or (x > self.platepar.X_res - edge_margin) or \
-                        (y < edge_margin) or (y > self.platepar.Y_res - edge_margin):
-
-                        ignore_this_star = True
-                        break
-
-
-                    else:
-                        if pixel_separation < nearest_pixel_separation:
-
-                            # Update the x, y coordinates and the nearest star by pixel separation
-                            nearest_x, nearest_y, nearest_pixel_separation = x, y, pixel_separation
-
-
-                # Append once for each visible star that is not marked to be ignored
-                if not ignore_this_star:
-                    candidate_x_list.append(nearest_x)
-                    candidate_y_list.append(nearest_y)
-                    dist_nearest_marked_list.append(nearest_pixel_separation)
-
-            return candidate_x_list, candidate_y_list, dist_nearest_marked_list, nearest_pixel_separation
-        
-        ######################################################################################################
-
-        marked_x_list, marked_y_list = getMarkedStars(include_unsuitable=False)
-        max_distance_between_paired = maxDistBetweenPoints(marked_x_list, marked_y_list)
-
-        marked_x_list, marked_y_list = getMarkedStars(include_unsuitable=True)
-        unmarked_x_list, unmarked_y_list, dist_nearest_marked_list, distance_between_unmarked = \
-            getVisibleUnmarkedStarsAndDistanceToMarked(marked_x_list, marked_y_list, 
-                                                       min_separation=min_separation)
-
-        if len(dist_nearest_marked_list) == 0:
-            print("No stars left to pick")
-            return marked_x_list[-1], marked_y_list[-1], max_distance_between_paired
-
-        if miss_this_one:
-            # Pick a distance at random
-            next_star_index = dist_nearest_marked_list.index(random.choice(dist_nearest_marked_list))
-        else:
-            # Find the index of this star
-            next_star_index = dist_nearest_marked_list.index(max(dist_nearest_marked_list))
-
-
-        # Return coordinates of next star and maximum pixel distance between marked stars
-
-        return unmarked_x_list[next_star_index], unmarked_y_list[next_star_index], max_distance_between_paired
-
-
 
 if __name__ == '__main__':
     ### COMMAND LINE ARGUMENTS

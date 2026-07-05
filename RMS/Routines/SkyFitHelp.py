@@ -363,6 +363,10 @@ def _topic_astrometry(gui):
     body = (
         "<p>The goal is to pair at least <b>14 catalog stars</b> spread uniformly across the whole "
         "image (more is better, and include some near the horizon). Then fit.</p>"
+        "<p><b>Find Best Frame</b> picks a good image to calibrate on: it scores every frame of "
+        "the night on star distribution and quality, and on sky condition &ndash; the darkest, "
+        "most uniform background and sharpest stars, ranked against the rest of the night &ndash; "
+        "so moonlit or hazy frames lose to clean ones even when they show plenty of stars.</p>"
         "<h3>Picking stars</h3>"
         "<ol>"
         "<li>Press " + _key(c + " + R") + " to start. Two yellow circles follow the cursor; scroll "
@@ -392,14 +396,26 @@ def _topic_astrometry(gui):
         "automatically detected stars (and astrometry.net), <i>not</i> from your manual picks, and "
         "they do not honour \"Only fit pointing\". For a picked-star pointing-only fit, use the "
         "<b>Fit</b> button.</p>"
+        "<h3>Running the fit steps independently</h3>"
+        "<p>Auto Fit chains three steps that can also be run one at a time from the Fit Parameters "
+        "tab, each gated on its prerequisites:</p>"
+        "<ul>"
+        "<li><b>Find Pairs</b> &ndash; matches the detected stars to catalog stars projected "
+        "through the <i>current</i> platepar (nearest neighbour within a radius scaled to the star "
+        "size). Replaces your current pairs and does not fit anything, so it needs a reasonably "
+        "good platepar to start from.</li>"
+        "<li><b>Fit</b> &ndash; fits the platepar to the current pairs (manual picks or found "
+        "pairs alike). Needs enough pairs.</li>"
+        "<li><b>Residuals</b> &ndash; recomputes the residuals of the current pairs against the "
+        "current platepar <i>without fitting</i>. Use it after manually adjusting the platepar, or "
+        "right after Find Pairs to judge the calibration before committing to a fit.</li>"
+        "</ul>"
         "<p>Press " + _key("L") + " for the astrometry residual plot.</p>"
         + "<h3>Relevant shortcuts</h3>"
         + _shortcut_table([
             ("LEFT CLICK", "Centroid the star under the cursor"),
             (c + " + LEFT CLICK", "Manual (forced) star position"),
             ("ENTER / SPACE", "Accept the star pair"),
-            (c + " + SPACE", "Mark the pair as bad"),
-            ("SHIFT + SPACE", "Jump to a random region"),
             ("RIGHT CLICK", "Remove a pair"),
             (c + " + SCROLL", "Adjust aperture radius"),
             (c + " + Z", "Fit the plate"),
@@ -497,6 +513,13 @@ def _topic_residuals(gui):
         "<b>Astrometry</b> and <b>Photometry</b> buttons in the Fit Parameters tab (or press "
         + _key("L") + " and " + _key("P") + "). The small <b>i</b> button next to them reopens this "
         "page.</p>"
+
+        "<p>The colour-coded RMSD under \"Residuals:\" summarises the fit, and the small "
+        "<b>Round-trip max</b> line beneath it shows the worst disagreement between the forward "
+        "and reverse mappings anywhere in the image (visualised by the error overlay in the "
+        "Settings tab). The <b>Residuals</b> button recomputes the residuals against the current "
+        "platepar without fitting &ndash; handy after manual platepar changes or after Find "
+        "Pairs.</p>"
 
         "<h3>Astrometry residuals &ndash; what good looks like</h3>"
         "<ul>"
@@ -688,8 +711,12 @@ def _topic_settings(gui):
         ("Show Detected Stars", "Overlay the automatically detected stars (CALSTARS)."),
         ("Show Selected Stars", "Overlay the stars you have paired for the fit."),
         ("Show Distortion", "Draw the lens-distortion grid."),
+        ("Show Round-Trip Error Overlay", "Heatmap of the disagreement (px) between the forward "
+         "and reverse astrometric mappings across the image. Bright areas mark where the two "
+         "distortion polynomials are inconsistent, so the catalog overlay cannot be trusted there. "
+         "The <b>Threshold</b> slider sets the error below which the overlay is fully transparent; "
+         "the maximum value is always shown under the residuals in the Fit Parameters tab."),
         ("Invert Colors", "Invert the image (dark stars on a light background)."),
-        ("Auto Pan To Next Star", "Recentre the view on the next star while picking."),
         ("Single Click Photometry", "Measure photometry with a single click while picking."),
     ]
 
@@ -900,7 +927,6 @@ def _topic_shortcuts_skyfit(gui):
         ("L", "Astrometry residual plot"),
         ("P", "Photometry fit plot"),
         (c + " + D / " + c + " + F", "Load dark / flat"),
-        (c + " + U / " + c + " + O", "Pan to next star / toggle auto-pan"),
         (c + " + X", "astrometry.net (image upload)"),
         (c + " + SHIFT + X", "astrometry.net (star XY only)"),
         (c + " + SHIFT + B", "Fit spectral bands <span class=\"tip\">(experimental)</span>"),
