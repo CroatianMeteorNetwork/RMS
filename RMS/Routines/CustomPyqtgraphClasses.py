@@ -2273,9 +2273,7 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         quick_align_hbox.addWidget(self.quick_align_button)
         box.addLayout(quick_align_hbox)
 
-        # Cross-frame validation button row
-        validate_hbox = QtWidgets.QHBoxLayout()
-        validate_hbox.setSpacing(self.scaledSpacing(0.25))
+        # Cross-frame validation buttons (stacked - side by side they overflow the panel)
         self.validate_fit_button = QtWidgets.QPushButton("Validate Across Frames")
         self.validate_fit_button.setToolTip(
             "Check how well the fit generalizes to other frames of the night, especially the\n"
@@ -2283,7 +2281,7 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
             "selected frame subset, refits only the pointing per frame so mount drift is\n"
             "separated from distortion error, and reports residuals by radius.")
         self.validate_fit_button.clicked.connect(self.sigValidateFitPressed.emit)
-        validate_hbox.addWidget(self.validate_fit_button)
+        box.addWidget(self.validate_fit_button)
 
         self.refit_night_button = QtWidgets.QPushButton("Refit W/ Night")
         self.refit_night_button.setToolTip(
@@ -2292,8 +2290,7 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
             "it must come from a single frame. Run Validate Across Frames first.")
         self.refit_night_button.setEnabled(False)
         self.refit_night_button.clicked.connect(self.sigRefitNightPressed.emit)
-        validate_hbox.addWidget(self.refit_night_button)
-        box.addLayout(validate_hbox)
+        box.addWidget(self.refit_night_button)
 
 
 
