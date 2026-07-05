@@ -157,7 +157,7 @@ def validateFit(platepar, calstars, catalog_stars, frames=None, match_radius=10.
     catalog_stars = np.asarray(catalog_stars, dtype=np.float64)
 
     star_x, star_y, star_res, star_frame = [], [], [], []
-    unmatched_x, unmatched_y = [], []
+    unmatched_x, unmatched_y, unmatched_frame = [], [], []
     frame_reports = []
 
     for i, ff_name in enumerate(frames):
@@ -260,6 +260,7 @@ def validateFit(platepar, calstars, catalog_stars, frames=None, match_radius=10.
             if d_i not in matched_det:
                 unmatched_x.append(det_x[d_i])
                 unmatched_y.append(det_y[d_i])
+                unmatched_frame.append(i)
 
         frame_reports.append(dict(ff_name=ff_name, jd=jd, n_matched=len(matches),
                                   drift_arcmin=drift_arcmin))
@@ -268,6 +269,7 @@ def validateFit(platepar, calstars, catalog_stars, frames=None, match_radius=10.
         star_x=np.array(star_x), star_y=np.array(star_y), star_res=np.array(star_res),
         star_frame=np.array(star_frame),
         unmatched_x=np.array(unmatched_x), unmatched_y=np.array(unmatched_y),
+        unmatched_frame=np.array(unmatched_frame),
         frames=frame_reports,
     )
 

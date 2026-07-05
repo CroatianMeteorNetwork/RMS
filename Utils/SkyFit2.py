@@ -12885,8 +12885,26 @@ class PlateTool(QtWidgets.QMainWindow):
                            vmin=0, vmax=res_scale_px,
                            extent=(0, self.platepar.X_res, 0, self.platepar.Y_res))
         if len(results["unmatched_x"]):
-            ax_map.scatter(results["unmatched_x"], results["unmatched_y"], s=14, marker='x',
-                           color='cyan', label='match failures')
+
+            # Split match failures into transient (frame-local: satellites, planes, planets
+            # passing through) and persistent (same neighbourhood failing on multiple frames:
+            # real misfit beyond the match radius, i.e. censored large residuals)
+            ux, uy = results["unmatched_x"], results["unmatched_y"]
+            uframe = results["unmatched_frame"]
+            persistent = np.zeros(len(ux), dtype=bool)
+            if len(ux) > 1:
+                tree_u = cKDTree(np.column_stack([ux, uy]))
+                for k, neighbours in enumerate(tree_u.query_ball_point(
+                        np.column_stack([ux, uy]), r=40.0)):
+                    if len(set(uframe[j] for j in neighbours)) >= 3:
+                        persistent[k] = True
+
+            if (~persistent).any():
+                ax_map.scatter(ux[~persistent], uy[~persistent], s=14, marker='x',
+                               color='cyan', label='match failures (transient)')
+            if persistent.any():
+                ax_map.scatter(ux[persistent], uy[persistent], s=20, marker='x',
+                               color='lime', label='match failures (persistent)')
             ax_map.legend(fontsize=8)
         # Pin the axes exactly to the image bounds (no margins) so the plot corners ARE the
         # image corners
