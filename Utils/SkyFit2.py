@@ -12868,27 +12868,99 @@ class PlateTool(QtWidgets.QMainWindow):
                         message_type="warning")
             return
 
-        image_groups = buildRefitGroups(self.night_validation, self.platepar)
-        n_pairs = sum(len(img_stars) for _, _, img_stars, _ in image_groups)
+        inputs = self._nightValidationInputs()
+        if inputs is None:
+            qmessagebox(title='Refit with night stars',
+                        message="Cross-frame validation needs CALSTARS data from the night!",
+                        message_type="warning")
+            return
+        merged, frames, catalog_val = inputs
 
-        if n_pairs < 20:
+        def _score(s):
+            score = s["median_global"] + 0.25*s["rmsd_global"]
+            if s["median_corner"] is not None:
+                score += s["median_corner"] + 0.25*s["rmsd_corner"]
+            return score
+
+        def _fmt(s):
+            txt = "global median {:.2f} px, RMSD {:.2f} px".format(
+                s["median_global"], s["rmsd_global"])
+            if s["median_corner"] is not None:
+                txt += "; corner median {:.2f} px, RMSD {:.2f} px".format(
+                    s["median_corner"], s["rmsd_corner"])
+            return txt
+
+        summary_before = summarizeValidation(self.night_validation,
+                                             self.platepar.X_res, self.platepar.Y_res)
+
+        # Fit both drift variants and validate each: with little real drift the per-frame
+        # pointing estimates are noisier than the drift and the compensation hurts; with
+        # real drift the uncorrected fit soaks it into the distortion. Which wins is a
+        # property of the night, so measure instead of guessing.
+        print()
+        candidates = []
+        self.tab.param_manager.setFitButtonBusy(True)
+        QtWidgets.QApplication.processEvents()
+        try:
+            for label, drift_corr in [("drift-corrected", True), ("uncorrected", False)]:
+                image_groups = buildRefitGroups(self.night_validation, self.platepar,
+                                                drift_correction=drift_corr)
+                n_pairs = sum(len(img_stars) for _, _, img_stars, _ in image_groups)
+                if n_pairs < 20:
+                    continue
+
+                self.status_bar.showMessage(
+                    "Refitting with night stars ({:s})...".format(label))
+                QtWidgets.QApplication.processEvents()
+
+                print("Refitting astrometry with {:d} night star pairs from {:d} frames, "
+                      "{:s} (photometry untouched)...".format(
+                          n_pairs, len(image_groups), label))
+                pp_cand = copy.deepcopy(self.platepar)
+                pp_cand.fitAstrometryMultiImage(image_groups,
+                    first_platepar_fit=False, fit_only_pointing=self.fit_only_pointing,
+                    fixed_scale=self.fixed_scale)
+
+                self.status_bar.showMessage(
+                    "Validating the {:s} refit...".format(label))
+                QtWidgets.QApplication.processEvents()
+
+                res_cand = validateFit(pp_cand, merged, catalog_val, frames=frames)
+                if not len(res_cand["star_res"]):
+                    continue
+                summary_cand = summarizeValidation(res_cand, pp_cand.X_res, pp_cand.Y_res)
+                candidates.append((label, pp_cand, summary_cand))
+        finally:
+            self.tab.param_manager.setFitButtonBusy(False)
+
+        if not candidates:
             qmessagebox(title='Refit with night stars',
                         message="Not enough validated pairs for a refit!",
                         message_type="warning")
             return
 
+        # Keep the best of the three platepars - a refit never makes the calibration worse
         print()
-        print("Refitting astrometry with {:d} night star pairs from {:d} frames "
-              "(photometry untouched)...".format(n_pairs, len(image_groups)))
-        self.tab.param_manager.setFitButtonBusy(True)
-        QtWidgets.QApplication.processEvents()
+        print("Refit validation comparison:")
+        print("  current platepar      : " + _fmt(summary_before))
+        for label, _, summary_cand in candidates:
+            print("  refit {:16s}: {:s}".format(label, _fmt(summary_cand)))
 
-        try:
-            self.platepar.fitAstrometryMultiImage(image_groups,
-                first_platepar_fit=False, fit_only_pointing=self.fit_only_pointing,
-                fixed_scale=self.fixed_scale)
-        finally:
-            self.tab.param_manager.setFitButtonBusy(False)
+        best_label, best_pp, best_summary = min(candidates, key=lambda c: _score(c[2]))
+
+        if _score(best_summary) >= _score(summary_before) - 1e-3:
+            print("Neither refit improved the validation - keeping the current platepar.")
+            self.status_bar.showMessage("Refit did not improve on the current platepar - kept it.")
+            qmessagebox(title='Refit with night stars',
+                        message="The refit did not improve the cross-frame validation - "
+                                "the current platepar was kept.\n\n"
+                                "Current: {:s}\nBest refit ({:s}): {:s}".format(
+                                    _fmt(summary_before), best_label, _fmt(best_summary)),
+                        message_type="info")
+            return
+
+        print("Applying the {:s} refit.".format(best_label))
+        self.platepar = best_pp
 
         self.first_platepar_fit = False
         self.platepar_modified = True
@@ -12903,8 +12975,45 @@ class PlateTool(QtWidgets.QMainWindow):
         self.updateStars()
         self.tab.param_manager.updatePlatepar()
 
-        # Re-validate so the before/after is immediately visible
+        # Re-validate so the before/after figure is immediately visible
         self.validateFitAcrossFrames()
+
+
+    def _nightValidationInputs(self):
+        """ Assemble the inputs for a cross-frame validation run: merged CALSTARS data, the
+            coverage-selected frame subset and the deep validation catalog.
+
+        Return:
+            (merged, frames, catalog_val) or None if there is no usable CALSTARS data.
+        """
+
+        # Merge CALSTARS with any re-detected override data
+        merged = dict(self.calstars) if (hasattr(self, 'calstars') and self.calstars) else {}
+        if getattr(self, 'star_detection_override_enabled', False):
+            merged.update(self.star_detection_override_data)
+        merged = {ff: stars for ff, stars in merged.items() if len(stars) > 0}
+
+        if len(merged) < 2:
+            return None
+
+        # Select frames for spatial coverage - corners are topped up to dataset exhaustion
+        frames, _ = selectValidationFrames(merged, self.platepar.X_res, self.platepar.Y_res)
+
+        # Match against a catalog deeper than the display LM: the star detector reaches
+        # fainter than the displayed catalog, and real stars just past the LM cutoff
+        # would otherwise recur as match failures on every frame
+        lim_mag_val = self.cat_lim_mag + 1.5
+        years_from_J2000 = (self.img_handle.beginning_datetime
+            - datetime.datetime(2000, 1, 1, 12, 0, 0)).days/365.25
+        deep_results = StarCatalog.readStarCatalog(
+            self.config.star_catalog_path, self.config.star_catalog_file,
+            years_from_J2000=years_from_J2000, lim_mag=lim_mag_val,
+            mag_band_ratios=self.config.star_catalog_band_ratios)
+        catalog_val = deep_results[0]
+        print("Validation catalog: LM {:.1f} (display {:.1f}), {:d} stars".format(
+            lim_mag_val, self.cat_lim_mag, len(catalog_val)))
+
+        return merged, frames, catalog_val
 
 
     def validateFitAcrossFrames(self):
@@ -12921,44 +13030,22 @@ class PlateTool(QtWidgets.QMainWindow):
                         message_type="warning")
             return
 
-        # Merge CALSTARS with any re-detected override data
-        merged = dict(self.calstars) if (hasattr(self, 'calstars') and self.calstars) else {}
-        if getattr(self, 'star_detection_override_enabled', False):
-            merged.update(self.star_detection_override_data)
-        merged = {ff: stars for ff, stars in merged.items() if len(stars) > 0}
-
-        if len(merged) < 2:
+        inputs = self._nightValidationInputs()
+        if inputs is None:
             qmessagebox(title='Validate fit',
                         message="Cross-frame validation needs CALSTARS data from the night!",
                         message_type="warning")
             return
+        merged, frames, catalog_val = inputs
 
         self.tab.param_manager.validate_fit_button.setText("Validating...")
         self.tab.param_manager.validate_fit_button.setEnabled(False)
         QtWidgets.QApplication.processEvents()
 
         try:
-            # Select frames for spatial coverage - corners are topped up to dataset exhaustion
-            frames, coverage = selectValidationFrames(merged, self.platepar.X_res,
-                                                      self.platepar.Y_res)
-
             def progress(i, n, ff_name):
                 self.status_bar.showMessage("Validating fit: frame {:d}/{:d}".format(i + 1, n))
                 QtWidgets.QApplication.processEvents()
-
-            # Match against a catalog deeper than the display LM: the star detector reaches
-            # fainter than the displayed catalog, and real stars just past the LM cutoff
-            # would otherwise recur as match failures on every frame
-            lim_mag_val = self.cat_lim_mag + 1.5
-            years_from_J2000 = (self.img_handle.beginning_datetime
-                - datetime.datetime(2000, 1, 1, 12, 0, 0)).days/365.25
-            deep_results = StarCatalog.readStarCatalog(
-                self.config.star_catalog_path, self.config.star_catalog_file,
-                years_from_J2000=years_from_J2000, lim_mag=lim_mag_val,
-                mag_band_ratios=self.config.star_catalog_band_ratios)
-            catalog_val = deep_results[0]
-            print("Validation catalog: LM {:.1f} (display {:.1f}), {:d} stars".format(
-                lim_mag_val, self.cat_lim_mag, len(catalog_val)))
 
             results = validateFit(self.platepar, merged, catalog_val, frames=frames,
                                   progress_callback=progress)
