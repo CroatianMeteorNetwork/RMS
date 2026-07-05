@@ -12922,7 +12922,8 @@ class PlateTool(QtWidgets.QMainWindow):
         # Mount drift is reported in the title (per-frame values are in the console report)
         fig_title = headline
         if summary["max_drift_arcmin"] is not None:
-            fig_title += "  |  max drift {:.1f} arcmin (removed)".format(summary["max_drift_arcmin"])
+            fig_title += "  |  mount drift up to {:.1f} arcmin, compensated per frame".format(
+                summary["max_drift_arcmin"])
 
         fig.suptitle(fig_title, fontweight='bold')
         fig.tight_layout()
