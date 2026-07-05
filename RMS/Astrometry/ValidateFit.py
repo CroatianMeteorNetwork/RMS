@@ -20,7 +20,7 @@ import numpy as np
 from scipy.spatial import cKDTree
 
 from RMS.Astrometry.ApplyAstrometry import raDecToXYPP, xyToRaDecPP
-from RMS.Astrometry.Conversions import date2JD, trueRaDec2ApparentAltAz, apparentAltAz2TrueRADec
+from RMS.Astrometry.Conversions import date2JD
 from RMS.Formats.FFfile import filenameToDatetime
 from RMS.Math import angularSeparation
 
@@ -469,44 +469,37 @@ def summarizeValidation(results, x_res, y_res, n_annuli=8, corner_radius_frac=No
     )
 
 
-def buildRefitPairs(results, platepar, max_per_cell=15, n_grid=8):
-    """ Turn the validated cross-frame matches into astrometric fit pairs at the platepar's
-        reference epoch, so they can complement the picked pairs in a distortion refit.
+def buildRefitGroups(results, platepar, max_per_cell=15, n_grid=8):
+    """ Turn the validated cross-frame matches into per-image groups for
+        Platepar.fitAstrometryMultiImage.
 
-    The camera is fixed in alt/az, so a pair observed at frame time jd_f transfers to the
-    reference epoch by: catalog RA/Dec at jd_f -> apparent alt/az -> equivalent RA/Dec at the
-    reference jd. The per-frame pointing drift measured during validation is applied as a
-    first-order alt/az correction, so mount drift does not leak into the transferred pairs.
+    Unlike an epoch-transfer approach, the multi-image fit projects the catalog at each
+    image's own Julian date, so the pairs are used exactly as observed - no coordinate
+    round trips, no drift approximation baked into the data.
 
-    Photometry must never use these pairs - the intensities come from different frames under
-    different sky conditions. They are for the astrometric fit only.
+    The set is spatially balanced with a per-cell cap so the star-rich image centre does
+    not dominate the fit; corner cells rarely reach the cap, so their pairs are all kept.
 
     Arguments:
-        results: [dict] Output of validateFit (with pointing_refit enabled).
-        platepar: [Platepar] The platepar the refit will start from (provides the reference
-            epoch and observer location).
+        results: [dict] Output of validateFit.
+        platepar: [Platepar] Provides the image dimensions for the spatial cap.
 
     Keyword arguments:
-        max_per_cell: [int] Cap on pairs per image grid cell, so the star-rich image centre
-            does not dominate the fit. Corner cells rarely reach the cap, so their pairs are
-            effectively all kept.
+        max_per_cell: [int] Cap on pairs per image grid cell.
         n_grid: [int] Grid divisions per axis for the spatial cap.
 
     Return:
-        img_stars: [ndarray] (x, y, intensity) rows for Platepar.fitAstrometry.
-        catalog_stars: [ndarray] (ra, dec, mag) rows at the reference epoch, degrees.
+        image_groups: [list] (image_id, jd, img_stars, catalog_stars) tuples, as expected by
+            fitAstrometryMultiImage.
     """
-
-    jd_ref = platepar.JD
-    lat, lon = platepar.lat, platepar.lon
 
     by_index = {f["frame_index"]: f for f in results["frames"]}
 
     n = len(results["star_x"])
     if n == 0:
-        return np.empty((0, 3)), np.empty((0, 3))
+        return []
 
-    # Spatial cap: deterministic shuffle, then keep up to max_per_cell per grid cell
+    # Spatial cap: deterministic shuffle, keep up to max_per_cell per grid cell
     rng = np.random.default_rng(0)
     order = rng.permutation(n)
     cell_counts = {}
@@ -518,30 +511,25 @@ def buildRefitPairs(results, platepar, max_per_cell=15, n_grid=8):
             cell_counts[(cy, cx)] = cell_counts.get((cy, cx), 0) + 1
             keep.append(k)
 
-    img_stars, catalog_out = [], []
+    # Group the kept pairs by source frame
+    groups = {}
     for k in keep:
-        report = by_index.get(int(results["star_frame"][k]))
+        i = int(results["star_frame"][k])
+        report = by_index.get(i)
         if report is None:
             continue
-        jd_f = report["jd"]
+        g = groups.setdefault(i, dict(ff_name=report["ff_name"], jd=report["jd"],
+                                      img=[], cat=[]))
+        g["img"].append([results["star_x"][k], results["star_y"][k],
+                         results["star_intens"][k]])
+        g["cat"].append([results["star_ra"][k], results["star_dec"][k],
+                         results["star_mag"][k]])
 
-        # Catalog position -> apparent alt/az at the frame time
-        azim, alt = trueRaDec2ApparentAltAz(results["star_ra"][k], results["star_dec"][k],
-                                            jd_f, lat, lon)
+    image_groups = []
+    for i in sorted(groups):
+        g = groups[i]
+        if len(g["img"]) < 3:
+            continue
+        image_groups.append((g["ff_name"], g["jd"], np.array(g["img"]), np.array(g["cat"])))
 
-        # First-order drift correction: shift by the measured pointing offset of this frame
-        if report["centre_radec_ref"] is not None:
-            az_r, alt_r = trueRaDec2ApparentAltAz(*report["centre_radec_ref"], jd_f, lat, lon)
-            az_f, alt_f = trueRaDec2ApparentAltAz(*report["centre_radec_frame"], jd_f, lat, lon)
-            daz = (az_r - az_f + 180.0) % 360.0 - 180.0
-            azim = (azim + daz) % 360.0
-            alt = alt + (alt_r - alt_f)
-
-        # Equivalent sky position at the reference epoch (refraction cancels: same altitude)
-        ra_ref, dec_ref = apparentAltAz2TrueRADec(azim, alt, jd_ref, lat, lon)
-
-        img_stars.append([results["star_x"][k], results["star_y"][k],
-                          results["star_intens"][k]])
-        catalog_out.append([ra_ref, dec_ref, results["star_mag"][k]])
-
-    return np.array(img_stars), np.array(catalog_out)
+    return image_groups

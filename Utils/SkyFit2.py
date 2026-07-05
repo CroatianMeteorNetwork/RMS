@@ -148,7 +148,7 @@ except Exception as exc:
 
 
 from RMS.Astrometry.ValidateFit import (selectValidationFrames, validateFit,
-    summarizeValidation, buildRefitPairs)
+    summarizeValidation, buildRefitGroups)
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP, \
     rotationWrtHorizon, rotationWrtHorizonToPosAngle, computeFOVSize, photomLine, photometryFit, \
     rotationWrtStandard, rotationWrtStandardToPosAngle, correctVignetting, \
@@ -12775,10 +12775,11 @@ class PlateTool(QtWidgets.QMainWindow):
         """ Complement the astrometric fit with the validated cross-frame star pairs.
 
         The pairs come from the last Validate Across Frames run: catalog-matched, blend- and
-        photometry-filtered detections from the whole night, epoch-transferred to the platepar
-        reference time with per-frame drift compensation, and spatially balanced so the image
-        centre does not dominate (corner pairs are kept in full). Photometry is not touched -
-        it must come from a single frame.
+        photometry-filtered detections from the whole night, spatially balanced so the image
+        centre does not dominate (corner pairs are kept in full). The multi-image fit projects
+        each frame's catalog stars at that frame's own time, so picks from different times
+        combine exactly - no epoch transfer. Photometry is not touched - it must come from a
+        single frame.
         """
 
         if (self.platepar is None) or (getattr(self, 'night_validation', None) is None):
@@ -12794,22 +12795,23 @@ class PlateTool(QtWidgets.QMainWindow):
                         message_type="warning")
             return
 
-        img_stars, cat_stars = buildRefitPairs(self.night_validation, self.platepar)
+        image_groups = buildRefitGroups(self.night_validation, self.platepar)
+        n_pairs = sum(len(img_stars) for _, _, img_stars, _ in image_groups)
 
-        if len(img_stars) < 20:
+        if n_pairs < 20:
             qmessagebox(title='Refit with night stars',
                         message="Not enough validated pairs for a refit!",
                         message_type="warning")
             return
 
         print()
-        print("Refitting astrometry with {:d} night star pairs (photometry untouched)...".format(
-            len(img_stars)))
+        print("Refitting astrometry with {:d} night star pairs from {:d} frames "
+              "(photometry untouched)...".format(n_pairs, len(image_groups)))
         self.tab.param_manager.setFitButtonBusy(True)
         QtWidgets.QApplication.processEvents()
 
         try:
-            self.platepar.fitAstrometry(self.platepar.JD, img_stars, cat_stars,
+            self.platepar.fitAstrometryMultiImage(image_groups,
                 first_platepar_fit=False, fit_only_pointing=self.fit_only_pointing,
                 fixed_scale=self.fixed_scale)
         finally:
