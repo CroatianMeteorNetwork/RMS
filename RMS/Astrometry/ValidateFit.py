@@ -244,6 +244,48 @@ def validateFit(platepar, calstars, catalog_stars, frames=None, match_radius=10.
                 cat_x, cat_y, inside = projectCatalog(pp_frame)
                 matches = matchStars(cat_x, cat_y, inside, match_radius)
 
+        ### Sanity filters mirroring the auto-fit pipeline (RMS.Astrometry.StarFilters) ###
+
+        det_fwhm = star_data[:, 4] if star_data.shape[1] > 4 else None
+
+        # Blend rejection: drop pairs whose catalog star has ANOTHER catalog star within
+        # 2x the median detected FWHM - the detection is likely a blend of both and its
+        # centroid sits between them
+        n_blend = 0
+        rejected_det = set()
+        if len(matches) >= 5:
+            good_fwhm = det_fwhm[det_fwhm > 0] if det_fwhm is not None else np.array([])
+            blend_radius = 2.0*float(np.median(good_fwhm)) if len(good_fwhm) else 6.0
+            idx_inside = np.where(inside)[0]
+            cat_tree = cKDTree(np.column_stack([cat_x[idx_inside], cat_y[idx_inside]]))
+            kept = []
+            for d_i, c_i, dist in matches:
+                neighbours = cat_tree.query_ball_point((cat_x[c_i], cat_y[c_i]), blend_radius)
+                # The catalog star itself is always its own neighbour
+                if len(neighbours) > 1:
+                    n_blend += 1
+                    rejected_det.add(d_i)
+                else:
+                    kept.append((d_i, c_i, dist))
+            matches = kept
+
+        # Photometric consistency: a pairing whose instrumental brightness disagrees with the
+        # catalog magnitude is likely a wrong pairing (junk detection or a transient matched
+        # to a star by chance). 2.5 sigma clip around the frame's photometric offset.
+        n_phot = 0
+        if len(matches) >= 8:
+            m_inst = np.array([-2.5*np.log10(max(det_intens[d], 1.0)) for d, _, _ in matches])
+            m_cat = np.array([catalog_stars[c, 2] for _, c, _ in matches])
+            phot_res = (m_cat - m_inst) - np.median(m_cat - m_inst)
+            sigma = 1.4826*np.median(np.abs(phot_res))  # robust MAD sigma
+            if sigma > 0:
+                keep_mask = np.abs(phot_res) <= 2.5*sigma
+                n_phot = int((~keep_mask).sum())
+                rejected_det.update(m[0] for m, k in zip(matches, keep_mask) if not k)
+                matches = [m for m, k in zip(matches, keep_mask) if k]
+
+        ###
+
         # Record matched residuals
         for d_i, c_i, dist in matches:
             star_x.append(det_x[d_i])
@@ -251,19 +293,40 @@ def validateFit(platepar, calstars, catalog_stars, frames=None, match_radius=10.
             star_res.append(dist)
             star_frame.append(i)
 
-        # Censoring accounting: detected stars that have a projected catalog neighbour within
-        # 3x the radius but failed to match within it. These are exactly the large residuals
-        # a naive average would silently drop.
+        # Censoring accounting: detected stars whose nearest projected catalog star is within
+        # 3x the radius, UNCLAIMED by any other detection, and yet no match happened within
+        # the radius. These are exactly the large residuals a naive average would silently
+        # drop. Contention losers (nearest catalog star claimed by a closer detection -
+        # doubles, blends) are counted separately and are not failures.
         matched_det = set(d for d, _, _ in matches)
-        wide = matchStars(cat_x, cat_y, inside, 3*match_radius)
-        for d_i, _, _ in wide:
-            if d_i not in matched_det:
-                unmatched_x.append(det_x[d_i])
-                unmatched_y.append(det_y[d_i])
-                unmatched_frame.append(i)
+        claimed_cat = set(c for _, c, _ in matches)
+        n_contention = 0
+        idx_inside = np.where(inside)[0]
+        if len(idx_inside):
+            tree_cens = cKDTree(np.column_stack([cat_x[idx_inside], cat_y[idx_inside]]))
+            dist_all, nn_all = tree_cens.query(np.column_stack([det_x, det_y]), k=1)
+            for d_i in range(len(det_x)):
+
+                # Matched pairs and filter-rejected pairs are already accounted for
+                if (d_i in matched_det) or (d_i in rejected_det):
+                    continue
+
+                # No plausible counterpart at all - not a failure, no story to tell
+                if dist_all[d_i] > 3*match_radius:
+                    continue
+
+                c_i = idx_inside[nn_all[d_i]]
+                if c_i in claimed_cat:
+                    # Nearest catalog star was won by a closer detection (double/blend)
+                    n_contention += 1
+                else:
+                    unmatched_x.append(det_x[d_i])
+                    unmatched_y.append(det_y[d_i])
+                    unmatched_frame.append(i)
 
         frame_reports.append(dict(ff_name=ff_name, jd=jd, n_matched=len(matches),
-                                  drift_arcmin=drift_arcmin))
+                                  n_blend_rejected=n_blend, n_photometric_rejected=n_phot,
+                                  n_contention=n_contention, drift_arcmin=drift_arcmin))
 
     return dict(
         star_x=np.array(star_x), star_y=np.array(star_y), star_res=np.array(star_res),

@@ -12818,8 +12818,13 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Console report
         print()
-        print("Cross-frame validation: {:d} frames, {:d} matched stars, {:d} censored".format(
+        n_blend = sum(f.get("n_blend_rejected", 0) for f in results["frames"])
+        n_phot = sum(f.get("n_photometric_rejected", 0) for f in results["frames"])
+        n_cont = sum(f.get("n_contention", 0) for f in results["frames"])
+        print("Cross-frame validation: {:d} frames, {:d} matched stars, {:d} match failures".format(
             len(results["frames"]), len(results["star_res"]), len(results["unmatched_x"])))
+        print("  Filtered out: {:d} blended, {:d} photometric outliers, "
+              "{:d} double-star contention".format(n_blend, n_phot, n_cont))
         print("  Global: median {:.2f} px, RMSD {:.2f} px".format(
             summary["median_global"], summary["rmsd_global"]))
         if summary["rmsd_corner"] is not None:
