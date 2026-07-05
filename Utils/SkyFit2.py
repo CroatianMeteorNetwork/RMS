@@ -12849,7 +12849,9 @@ class PlateTool(QtWidgets.QMainWindow):
         r_max = np.hypot(cx, cy)
         r_frac = np.hypot(results["star_x"] - cx, results["star_y"] - cy)/r_max
 
-        fig, (ax_r, ax_map, ax_drift) = plt.subplots(1, 3, figsize=(16, 5.5))
+        # Two panels: the spatial map is the star of the show, give it the room
+        fig, (ax_r, ax_map) = plt.subplots(1, 2, figsize=(16, 5.6),
+                                           gridspec_kw={'width_ratios': [1, 2.2]})
 
         # Fixed residual scale so runs are directly comparable side by side
         res_scale_px = 2.0
@@ -12885,20 +12887,12 @@ class PlateTool(QtWidgets.QMainWindow):
         ax_map.set_title('Median residual across the image')
         fig.colorbar(hb, ax=ax_map, label='px (capped at {:.0f})'.format(res_scale_px))
 
-        # Pointing drift over the night
-        drift_jd = [f["jd"] for f in results["frames"] if f["drift_arcmin"] is not None]
-        drift_val = [f["drift_arcmin"] for f in results["frames"] if f["drift_arcmin"] is not None]
-        if drift_jd:
-            t0 = min(drift_jd)
-            ax_drift.plot([(jd - t0)*24 for jd in drift_jd], drift_val, 'o', ms=3)
-            ax_drift.set_xlabel('Hours from first sampled frame')
-            ax_drift.set_ylabel('Pointing correction (arcmin)')
-            ax_drift.set_title('Mount drift (removed before residuals)')
-            ax_drift.grid(alpha=0.3)
-        else:
-            ax_drift.axis('off')
+        # Mount drift is reported in the title (per-frame values are in the console report)
+        fig_title = headline
+        if summary["max_drift_arcmin"] is not None:
+            fig_title += "  |  max drift {:.1f} arcmin (removed)".format(summary["max_drift_arcmin"])
 
-        fig.suptitle(headline, fontweight='bold')
+        fig.suptitle(fig_title, fontweight='bold')
         fig.tight_layout()
         fig.show()
 
