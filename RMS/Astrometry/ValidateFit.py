@@ -262,8 +262,22 @@ def validateFit(platepar, calstars, catalog_stars, frames=None, match_radius=10.
             kept = []
             for d_i, c_i, dist in matches:
                 neighbours = cat_tree.query_ball_point((cat_x[c_i], cat_y[c_i]), blend_radius)
-                # The catalog star itself is always its own neighbour
-                if len(neighbours) > 1:
+
+                # A neighbour is a blend threat only if it pulls the blended centroid enough
+                # to corrupt the residual: a neighbour with flux ratio f at separation s
+                # shifts the photocentre by ~s*f/(1 + f)
+                threat = False
+                for j in neighbours:
+                    n_i = idx_inside[j]
+                    if n_i == c_i:
+                        continue
+                    sep = np.hypot(cat_x[n_i] - cat_x[c_i], cat_y[n_i] - cat_y[c_i])
+                    flux_ratio = 10.0**(-0.4*(catalog_stars[n_i, 2] - catalog_stars[c_i, 2]))
+                    if sep*flux_ratio/(1.0 + flux_ratio) > 0.5:
+                        threat = True
+                        break
+
+                if threat:
                     n_blend += 1
                     rejected_det.add(d_i)
                 else:

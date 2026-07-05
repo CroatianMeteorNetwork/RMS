@@ -12800,7 +12800,21 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.status_bar.showMessage("Validating fit: frame {:d}/{:d}".format(i + 1, n))
                 QtWidgets.QApplication.processEvents()
 
-            results = validateFit(self.platepar, merged, self.catalog_stars, frames=frames,
+            # Match against a catalog deeper than the display LM: the star detector reaches
+            # fainter than the displayed catalog, and real stars just past the LM cutoff
+            # would otherwise recur as match failures on every frame
+            lim_mag_val = self.cat_lim_mag + 1.5
+            years_from_J2000 = (self.img_handle.beginning_datetime
+                - datetime.datetime(2000, 1, 1, 12, 0, 0)).days/365.25
+            deep_results = StarCatalog.readStarCatalog(
+                self.config.star_catalog_path, self.config.star_catalog_file,
+                years_from_J2000=years_from_J2000, lim_mag=lim_mag_val,
+                mag_band_ratios=self.config.star_catalog_band_ratios)
+            catalog_val = deep_results[0]
+            print("Validation catalog: LM {:.1f} (display {:.1f}), {:d} stars".format(
+                lim_mag_val, self.cat_lim_mag, len(catalog_val)))
+
+            results = validateFit(self.platepar, merged, catalog_val, frames=frames,
                                   progress_callback=progress)
             summary = summarizeValidation(results, self.platepar.X_res, self.platepar.Y_res)
 
