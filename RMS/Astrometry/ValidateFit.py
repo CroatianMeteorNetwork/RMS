@@ -20,7 +20,7 @@ import numpy as np
 from scipy.spatial import cKDTree
 
 from RMS.Astrometry.ApplyAstrometry import raDecToXYPP, xyToRaDecPP
-from RMS.Astrometry.Conversions import date2JD
+from RMS.Astrometry.Conversions import date2JD, trueRaDec2ApparentAltAz, apparentAltAz2TrueRADec
 from RMS.Formats.FFfile import filenameToDatetime
 from RMS.Math import angularSeparation
 
@@ -157,6 +157,7 @@ def validateFit(platepar, calstars, catalog_stars, frames=None, match_radius=10.
     catalog_stars = np.asarray(catalog_stars, dtype=np.float64)
 
     star_x, star_y, star_res, star_frame = [], [], [], []
+    star_ra, star_dec, star_mag, star_intens = [], [], [], []
     unmatched_x, unmatched_y, unmatched_frame = [], [], []
     unmatched_ra, unmatched_dec = [], []
     frame_reports = []
@@ -210,6 +211,8 @@ def validateFit(platepar, calstars, catalog_stars, frames=None, match_radius=10.
             continue
 
         drift_arcmin = None
+        centre_radec_ref = None
+        centre_radec_frame = None
         pp_frame = platepar
 
         if pointing_refit:
@@ -240,6 +243,8 @@ def validateFit(platepar, calstars, catalog_stars, frames=None, match_radius=10.
                     extinction_correction=False)
                 drift_arcmin = 60*np.degrees(angularSeparation(np.radians(ra0[0]),
                     np.radians(dec0[0]), np.radians(ra1[0]), np.radians(dec1[0])))
+                centre_radec_ref = (float(ra0[0]), float(dec0[0]))
+                centre_radec_frame = (float(ra1[0]), float(dec1[0]))
 
                 # Re-project and re-match with the drift-corrected pointing
                 cat_x, cat_y, inside = projectCatalog(pp_frame)
@@ -301,12 +306,17 @@ def validateFit(platepar, calstars, catalog_stars, frames=None, match_radius=10.
 
         ###
 
-        # Record matched residuals
+        # Record matched residuals (and the pair identities, so the pairs can also be
+        # reused for a cross-frame astrometric refit)
         for d_i, c_i, dist in matches:
             star_x.append(det_x[d_i])
             star_y.append(det_y[d_i])
             star_res.append(dist)
             star_frame.append(i)
+            star_ra.append(catalog_stars[c_i, 0])
+            star_dec.append(catalog_stars[c_i, 1])
+            star_mag.append(catalog_stars[c_i, 2])
+            star_intens.append(det_intens[d_i])
 
         # Censoring accounting: detected stars whose nearest projected catalog star is within
         # 3x the radius, UNCLAIMED by any other detection, and yet no match happened within
@@ -353,9 +363,12 @@ def validateFit(platepar, calstars, catalog_stars, frames=None, match_radius=10.
                 unmatched_ra.append(ra)
                 unmatched_dec.append(dec)
 
-        frame_reports.append(dict(ff_name=ff_name, jd=jd, n_matched=len(matches),
+        frame_reports.append(dict(ff_name=ff_name, jd=jd, frame_index=i,
+                                  n_matched=len(matches),
                                   n_blend_rejected=n_blend, n_photometric_rejected=n_phot,
-                                  n_contention=n_contention, drift_arcmin=drift_arcmin))
+                                  n_contention=n_contention, drift_arcmin=drift_arcmin,
+                                  centre_radec_ref=centre_radec_ref,
+                                  centre_radec_frame=centre_radec_frame))
 
     # Separate failures that are the SAME sky star recurring across frames (a catalog gap,
     # tight double or variable - tells us nothing about the calibration) from the rest.
@@ -380,6 +393,8 @@ def validateFit(platepar, calstars, catalog_stars, frames=None, match_radius=10.
     return dict(
         star_x=np.array(star_x), star_y=np.array(star_y), star_res=np.array(star_res),
         star_frame=np.array(star_frame),
+        star_ra=np.array(star_ra), star_dec=np.array(star_dec),
+        star_mag=np.array(star_mag), star_intens=np.array(star_intens),
         unmatched_x=ux[~recurring], unmatched_y=uy[~recurring],
         unmatched_frame=uframe[~recurring],
         recurring_x=ux[recurring], recurring_y=uy[recurring],
@@ -452,3 +467,81 @@ def summarizeValidation(results, x_res, y_res, n_annuli=8, corner_radius_frac=No
         corner_match_fraction=n_corner/(n_corner + corner_u) if (n_corner + corner_u) else None,
         max_drift_arcmin=float(np.max(drifts)) if drifts else None,
     )
+
+
+def buildRefitPairs(results, platepar, max_per_cell=15, n_grid=8):
+    """ Turn the validated cross-frame matches into astrometric fit pairs at the platepar's
+        reference epoch, so they can complement the picked pairs in a distortion refit.
+
+    The camera is fixed in alt/az, so a pair observed at frame time jd_f transfers to the
+    reference epoch by: catalog RA/Dec at jd_f -> apparent alt/az -> equivalent RA/Dec at the
+    reference jd. The per-frame pointing drift measured during validation is applied as a
+    first-order alt/az correction, so mount drift does not leak into the transferred pairs.
+
+    Photometry must never use these pairs - the intensities come from different frames under
+    different sky conditions. They are for the astrometric fit only.
+
+    Arguments:
+        results: [dict] Output of validateFit (with pointing_refit enabled).
+        platepar: [Platepar] The platepar the refit will start from (provides the reference
+            epoch and observer location).
+
+    Keyword arguments:
+        max_per_cell: [int] Cap on pairs per image grid cell, so the star-rich image centre
+            does not dominate the fit. Corner cells rarely reach the cap, so their pairs are
+            effectively all kept.
+        n_grid: [int] Grid divisions per axis for the spatial cap.
+
+    Return:
+        img_stars: [ndarray] (x, y, intensity) rows for Platepar.fitAstrometry.
+        catalog_stars: [ndarray] (ra, dec, mag) rows at the reference epoch, degrees.
+    """
+
+    jd_ref = platepar.JD
+    lat, lon = platepar.lat, platepar.lon
+
+    by_index = {f["frame_index"]: f for f in results["frames"]}
+
+    n = len(results["star_x"])
+    if n == 0:
+        return np.empty((0, 3)), np.empty((0, 3))
+
+    # Spatial cap: deterministic shuffle, then keep up to max_per_cell per grid cell
+    rng = np.random.default_rng(0)
+    order = rng.permutation(n)
+    cell_counts = {}
+    keep = []
+    for k in order:
+        cx = int(np.clip(results["star_x"][k]*n_grid/platepar.X_res, 0, n_grid - 1))
+        cy = int(np.clip(results["star_y"][k]*n_grid/platepar.Y_res, 0, n_grid - 1))
+        if cell_counts.get((cy, cx), 0) < max_per_cell:
+            cell_counts[(cy, cx)] = cell_counts.get((cy, cx), 0) + 1
+            keep.append(k)
+
+    img_stars, catalog_out = [], []
+    for k in keep:
+        report = by_index.get(int(results["star_frame"][k]))
+        if report is None:
+            continue
+        jd_f = report["jd"]
+
+        # Catalog position -> apparent alt/az at the frame time
+        azim, alt = trueRaDec2ApparentAltAz(results["star_ra"][k], results["star_dec"][k],
+                                            jd_f, lat, lon)
+
+        # First-order drift correction: shift by the measured pointing offset of this frame
+        if report["centre_radec_ref"] is not None:
+            az_r, alt_r = trueRaDec2ApparentAltAz(*report["centre_radec_ref"], jd_f, lat, lon)
+            az_f, alt_f = trueRaDec2ApparentAltAz(*report["centre_radec_frame"], jd_f, lat, lon)
+            daz = (az_r - az_f + 180.0) % 360.0 - 180.0
+            azim = (azim + daz) % 360.0
+            alt = alt + (alt_r - alt_f)
+
+        # Equivalent sky position at the reference epoch (refraction cancels: same altitude)
+        ra_ref, dec_ref = apparentAltAz2TrueRADec(azim, alt, jd_ref, lat, lon)
+
+        img_stars.append([results["star_x"][k], results["star_y"][k],
+                          results["star_intens"][k]])
+        catalog_out.append([ra_ref, dec_ref, results["star_mag"][k]])
+
+    return np.array(img_stars), np.array(catalog_out)

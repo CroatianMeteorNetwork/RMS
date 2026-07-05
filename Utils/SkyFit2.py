@@ -147,7 +147,8 @@ except Exception as exc:
     sys.exit(1)
 
 
-from RMS.Astrometry.ValidateFit import selectValidationFrames, validateFit, summarizeValidation
+from RMS.Astrometry.ValidateFit import (selectValidationFrames, validateFit,
+    summarizeValidation, buildRefitPairs)
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP, \
     rotationWrtHorizon, rotationWrtHorizonToPosAngle, computeFOVSize, photomLine, photometryFit, \
     rotationWrtStandard, rotationWrtStandardToPosAngle, correctVignetting, \
@@ -3336,6 +3337,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.param_manager.sigFitPressed.connect(self.fitPickedStars)
         self.tab.param_manager.sigAutoFitPressed.connect(self.autoFitAstrometryNet)
         self.tab.param_manager.sigValidateFitPressed.connect(self.validateFitAcrossFrames)
+        self.tab.param_manager.sigRefitNightPressed.connect(self.refitWithNightStars)
         self.tab.param_manager.sigQuickAlignPressed.connect(self.quickAlign)
         self.tab.param_manager.sigFindBestFramePressed.connect(self.findBestFrame)
         self.tab.param_manager.sigNextStarPressed.connect(self.jumpNextStar)
@@ -12761,6 +12763,75 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
 
+    def _nightValidationKey(self):
+        """ Fingerprint of the platepar parameters the night validation was computed with. """
+        pp = self.platepar
+        return (pp.RA_d, pp.dec_d, pp.pos_angle_ref, pp.F_scale, str(pp.distortion_type),
+                tuple(pp.x_poly_fwd), tuple(pp.y_poly_fwd),
+                tuple(pp.x_poly_rev), tuple(pp.y_poly_rev))
+
+
+    def refitWithNightStars(self):
+        """ Complement the astrometric fit with the validated cross-frame star pairs.
+
+        The pairs come from the last Validate Across Frames run: catalog-matched, blend- and
+        photometry-filtered detections from the whole night, epoch-transferred to the platepar
+        reference time with per-frame drift compensation, and spatially balanced so the image
+        centre does not dominate (corner pairs are kept in full). Photometry is not touched -
+        it must come from a single frame.
+        """
+
+        if (self.platepar is None) or (getattr(self, 'night_validation', None) is None):
+            qmessagebox(title='Refit with night stars',
+                        message="Run Validate Across Frames first!",
+                        message_type="warning")
+            return
+
+        if self._nightValidationKey() != self.night_validation_pp_key:
+            qmessagebox(title='Refit with night stars',
+                        message="The platepar has changed since the last validation.\n"
+                                "Run Validate Across Frames again first.",
+                        message_type="warning")
+            return
+
+        img_stars, cat_stars = buildRefitPairs(self.night_validation, self.platepar)
+
+        if len(img_stars) < 20:
+            qmessagebox(title='Refit with night stars',
+                        message="Not enough validated pairs for a refit!",
+                        message_type="warning")
+            return
+
+        print()
+        print("Refitting astrometry with {:d} night star pairs (photometry untouched)...".format(
+            len(img_stars)))
+        self.tab.param_manager.setFitButtonBusy(True)
+        QtWidgets.QApplication.processEvents()
+
+        try:
+            self.platepar.fitAstrometry(self.platepar.JD, img_stars, cat_stars,
+                first_platepar_fit=False, fit_only_pointing=self.fit_only_pointing,
+                fixed_scale=self.fixed_scale)
+        finally:
+            self.tab.param_manager.setFitButtonBusy(False)
+
+        self.first_platepar_fit = False
+        self.platepar_modified = True
+        self.error_overlay_needs_update = True
+
+        # The stored validation no longer matches the new platepar
+        self.night_validation = None
+        self.tab.param_manager.refit_night_button.setEnabled(False)
+
+        self.updateDistortion()
+        self.updateLeftLabels()
+        self.updateStars()
+        self.tab.param_manager.updatePlatepar()
+
+        # Re-validate so the before/after is immediately visible
+        self.validateFitAcrossFrames()
+
+
     def validateFitAcrossFrames(self):
         """ Validate the current platepar against the detected stars of the whole night.
 
@@ -12862,6 +12933,11 @@ class PlateTool(QtWidgets.QMainWindow):
                 "{:5.2f} px".format(med) if med is not None else "    -   ",
                 "{:5.2f} px".format(rmsd) if rmsd is not None else "    -   ",
                 "{:.2f}".format(frac) if frac is not None else "  - "))
+
+        # Keep the results for the cross-frame refit, keyed to this exact platepar
+        self.night_validation = results
+        self.night_validation_pp_key = self._nightValidationKey()
+        self.tab.param_manager.refit_night_button.setEnabled(True)
 
         headline = "Validation: global median {:.2f} px, corner median {} (n={})".format(
             summary["median_global"],

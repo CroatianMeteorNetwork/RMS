@@ -2130,6 +2130,7 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
     sigFitPressed = QtCore.pyqtSignal()
     sigAutoFitPressed = QtCore.pyqtSignal()
     sigValidateFitPressed = QtCore.pyqtSignal()
+    sigRefitNightPressed = QtCore.pyqtSignal()
     sigQuickAlignPressed = QtCore.pyqtSignal()
     sigFindBestFramePressed = QtCore.pyqtSignal()
     sigNextStarPressed = QtCore.pyqtSignal()
@@ -2224,6 +2225,15 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
             "separated from distortion error, and reports residuals by radius.")
         self.validate_fit_button.clicked.connect(self.sigValidateFitPressed.emit)
         validate_hbox.addWidget(self.validate_fit_button)
+
+        self.refit_night_button = QtWidgets.QPushButton("Refit W/ Night")
+        self.refit_night_button.setToolTip(
+            "Complement the astrometric fit with the validated cross-frame star pairs\n"
+            "(spatially balanced, corner pairs kept in full). Photometry is not affected -\n"
+            "it must come from a single frame. Run Validate Across Frames first.")
+        self.refit_night_button.setEnabled(False)
+        self.refit_night_button.clicked.connect(self.sigRefitNightPressed.emit)
+        validate_hbox.addWidget(self.refit_night_button)
         box.addLayout(validate_hbox)
 
         # Next Star button row
