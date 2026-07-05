@@ -2166,6 +2166,8 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
     sigAutoFitPressed = QtCore.pyqtSignal()
     sigFindPairsPressed = QtCore.pyqtSignal()
     sigComputeResidualsPressed = QtCore.pyqtSignal()
+    sigValidateFitPressed = QtCore.pyqtSignal()
+    sigRefitNightPressed = QtCore.pyqtSignal()
     sigQuickAlignPressed = QtCore.pyqtSignal()
     sigFindBestFramePressed = QtCore.pyqtSignal()
     sigAstrometryPressed = QtCore.pyqtSignal()
@@ -2270,6 +2272,28 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         self.quick_align_button.clicked.connect(self.sigQuickAlignPressed.emit)
         quick_align_hbox.addWidget(self.quick_align_button)
         box.addLayout(quick_align_hbox)
+
+        # Cross-frame validation button row
+        validate_hbox = QtWidgets.QHBoxLayout()
+        validate_hbox.setSpacing(self.scaledSpacing(0.25))
+        self.validate_fit_button = QtWidgets.QPushButton("Validate Across Frames")
+        self.validate_fit_button.setToolTip(
+            "Check how well the fit generalizes to other frames of the night, especially the\n"
+            "image corners: matches detected stars (CALSTARS) to the catalog on a coverage-\n"
+            "selected frame subset, refits only the pointing per frame so mount drift is\n"
+            "separated from distortion error, and reports residuals by radius.")
+        self.validate_fit_button.clicked.connect(self.sigValidateFitPressed.emit)
+        validate_hbox.addWidget(self.validate_fit_button)
+
+        self.refit_night_button = QtWidgets.QPushButton("Refit W/ Night")
+        self.refit_night_button.setToolTip(
+            "Complement the astrometric fit with the validated cross-frame star pairs\n"
+            "(spatially balanced, corner pairs kept in full). Photometry is not affected -\n"
+            "it must come from a single frame. Run Validate Across Frames first.")
+        self.refit_night_button.setEnabled(False)
+        self.refit_night_button.clicked.connect(self.sigRefitNightPressed.emit)
+        validate_hbox.addWidget(self.refit_night_button)
+        box.addLayout(validate_hbox)
 
 
 

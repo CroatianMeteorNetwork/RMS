@@ -147,6 +147,8 @@ except Exception as exc:
     sys.exit(1)
 
 
+from RMS.Astrometry.ValidateFit import (selectValidationFrames, validateFit,
+    summarizeValidation, buildRefitGroups)
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP, \
     rotationWrtHorizon, rotationWrtHorizonToPosAngle, computeFOVSize, photomLine, photometryFit, \
     rotationWrtStandard, rotationWrtStandardToPosAngle, correctVignetting, \
@@ -3322,6 +3324,8 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.param_manager.sigAutoFitPressed.connect(self.autoFitAstrometryNet)
         self.tab.param_manager.sigFindPairsPressed.connect(self.findMatchingPairs)
         self.tab.param_manager.sigComputeResidualsPressed.connect(self.computeResiduals)
+        self.tab.param_manager.sigValidateFitPressed.connect(self.validateFitAcrossFrames)
+        self.tab.param_manager.sigRefitNightPressed.connect(self.refitWithNightStars)
         self.tab.param_manager.sigQuickAlignPressed.connect(self.quickAlign)
         self.tab.param_manager.sigFindBestFramePressed.connect(self.findBestFrame)
         self.tab.param_manager.sigPhotometryPressed.connect(lambda: self.photometry(show_plot=True))
@@ -12829,6 +12833,287 @@ class PlateTool(QtWidgets.QMainWindow):
         print("=" * 70, flush=True)
         print(flush=True)
         sys.stdout.flush()
+
+
+
+    def _nightValidationKey(self):
+        """ Fingerprint of the platepar parameters the night validation was computed with. """
+        pp = self.platepar
+        return (pp.RA_d, pp.dec_d, pp.pos_angle_ref, pp.F_scale, str(pp.distortion_type),
+                tuple(pp.x_poly_fwd), tuple(pp.y_poly_fwd),
+                tuple(pp.x_poly_rev), tuple(pp.y_poly_rev))
+
+
+    def refitWithNightStars(self):
+        """ Complement the astrometric fit with the validated cross-frame star pairs.
+
+        The pairs come from the last Validate Across Frames run: catalog-matched, blend- and
+        photometry-filtered detections from the whole night, spatially balanced so the image
+        centre does not dominate (corner pairs are kept in full). The multi-image fit projects
+        each frame's catalog stars at that frame's own time, so picks from different times
+        combine exactly - no epoch transfer. Photometry is not touched - it must come from a
+        single frame.
+        """
+
+        if (self.platepar is None) or (getattr(self, 'night_validation', None) is None):
+            qmessagebox(title='Refit with night stars',
+                        message="Run Validate Across Frames first!",
+                        message_type="warning")
+            return
+
+        if self._nightValidationKey() != self.night_validation_pp_key:
+            qmessagebox(title='Refit with night stars',
+                        message="The platepar has changed since the last validation.\n"
+                                "Run Validate Across Frames again first.",
+                        message_type="warning")
+            return
+
+        image_groups = buildRefitGroups(self.night_validation, self.platepar)
+        n_pairs = sum(len(img_stars) for _, _, img_stars, _ in image_groups)
+
+        if n_pairs < 20:
+            qmessagebox(title='Refit with night stars',
+                        message="Not enough validated pairs for a refit!",
+                        message_type="warning")
+            return
+
+        print()
+        print("Refitting astrometry with {:d} night star pairs from {:d} frames "
+              "(photometry untouched)...".format(n_pairs, len(image_groups)))
+        self.tab.param_manager.setFitButtonBusy(True)
+        QtWidgets.QApplication.processEvents()
+
+        try:
+            self.platepar.fitAstrometryMultiImage(image_groups,
+                first_platepar_fit=False, fit_only_pointing=self.fit_only_pointing,
+                fixed_scale=self.fixed_scale)
+        finally:
+            self.tab.param_manager.setFitButtonBusy(False)
+
+        self.first_platepar_fit = False
+        self.platepar_modified = True
+        self.error_overlay_needs_update = True
+
+        # The stored validation no longer matches the new platepar
+        self.night_validation = None
+        self.tab.param_manager.refit_night_button.setEnabled(False)
+
+        self.updateDistortion()
+        self.updateLeftLabels()
+        self.updateStars()
+        self.tab.param_manager.updatePlatepar()
+
+        # Re-validate so the before/after is immediately visible
+        self.validateFitAcrossFrames()
+
+
+    def validateFitAcrossFrames(self):
+        """ Validate the current platepar against the detected stars of the whole night.
+
+        Uses CALSTARS detections on a coverage-selected frame subset (corner cells are filled
+        whenever the dataset has stars there), refits only the pointing per frame so mount
+        drift is separated from distortion error, and shows spatially binned residuals.
+        """
+
+        if self.platepar is None:
+            qmessagebox(title='Validate fit',
+                        message="A fitted platepar is needed for validation!",
+                        message_type="warning")
+            return
+
+        # Merge CALSTARS with any re-detected override data
+        merged = dict(self.calstars) if (hasattr(self, 'calstars') and self.calstars) else {}
+        if getattr(self, 'star_detection_override_enabled', False):
+            merged.update(self.star_detection_override_data)
+        merged = {ff: stars for ff, stars in merged.items() if len(stars) > 0}
+
+        if len(merged) < 2:
+            qmessagebox(title='Validate fit',
+                        message="Cross-frame validation needs CALSTARS data from the night!",
+                        message_type="warning")
+            return
+
+        self.tab.param_manager.validate_fit_button.setText("Validating...")
+        self.tab.param_manager.validate_fit_button.setEnabled(False)
+        QtWidgets.QApplication.processEvents()
+
+        try:
+            # Select frames for spatial coverage - corners are topped up to dataset exhaustion
+            frames, coverage = selectValidationFrames(merged, self.platepar.X_res,
+                                                      self.platepar.Y_res)
+
+            def progress(i, n, ff_name):
+                self.status_bar.showMessage("Validating fit: frame {:d}/{:d}".format(i + 1, n))
+                QtWidgets.QApplication.processEvents()
+
+            # Match against a catalog deeper than the display LM: the star detector reaches
+            # fainter than the displayed catalog, and real stars just past the LM cutoff
+            # would otherwise recur as match failures on every frame
+            lim_mag_val = self.cat_lim_mag + 1.5
+            years_from_J2000 = (self.img_handle.beginning_datetime
+                - datetime.datetime(2000, 1, 1, 12, 0, 0)).days/365.25
+            deep_results = StarCatalog.readStarCatalog(
+                self.config.star_catalog_path, self.config.star_catalog_file,
+                years_from_J2000=years_from_J2000, lim_mag=lim_mag_val,
+                mag_band_ratios=self.config.star_catalog_band_ratios)
+            catalog_val = deep_results[0]
+            print("Validation catalog: LM {:.1f} (display {:.1f}), {:d} stars".format(
+                lim_mag_val, self.cat_lim_mag, len(catalog_val)))
+
+            results = validateFit(self.platepar, merged, catalog_val, frames=frames,
+                                  progress_callback=progress)
+            summary = summarizeValidation(results, self.platepar.X_res, self.platepar.Y_res)
+
+        finally:
+            self.tab.param_manager.validate_fit_button.setText("Validate Across Frames")
+            self.tab.param_manager.validate_fit_button.setEnabled(True)
+
+        if not len(results["star_res"]):
+            self.status_bar.showMessage("Validation failed: no catalog matches on the night")
+            qmessagebox(title='Validate fit',
+                        message="No detected stars could be matched to the catalog - check the "
+                                "platepar pointing and the catalog limiting magnitude.",
+                        message_type="warning")
+            return
+
+        # Console report
+        print()
+        n_blend = sum(f.get("n_blend_rejected", 0) for f in results["frames"])
+        n_phot = sum(f.get("n_photometric_rejected", 0) for f in results["frames"])
+        n_cont = sum(f.get("n_contention", 0) for f in results["frames"])
+        print("Cross-frame validation: {:d} frames, {:d} matched stars, {:d} match failures".format(
+            len(results["frames"]), len(results["star_res"]), len(results["unmatched_x"])))
+        print("  Filtered out: {:d} blended, {:d} photometric outliers, "
+              "{:d} double-star contention".format(n_blend, n_phot, n_cont))
+        if results.get("n_recurring_detections"):
+            print("  Recurring unmatched sky stars (likely catalog gaps/doubles): "
+                  "{:d} detections".format(results["n_recurring_detections"]))
+        print("  Global: median {:.2f} px, RMSD {:.2f} px".format(
+            summary["median_global"], summary["rmsd_global"]))
+        if summary["rmsd_corner"] is not None:
+            print("  Corners (r>{:.2f}): median {:.2f} px, RMSD {:.2f} px "
+                  "(n={:d}, match fraction {:.2f})".format(
+                summary["corner_radius_frac"], summary["median_corner"],
+                summary["rmsd_corner"], summary["n_corner"],
+                summary["corner_match_fraction"]))
+        else:
+            print("  Corners: no corner stars available in the dataset")
+        if summary["max_drift_arcmin"] is not None:
+            print("  Max pointing drift over the night: {:.1f} arcmin".format(
+                summary["max_drift_arcmin"]))
+        print("  Radius bins (fraction of half-diagonal):")
+        for lo, hi, n, med, rmsd, frac in summary["annuli"]:
+            print("    {:.2f}-{:.2f}: n={:5d}  median={}  rmsd={}  match={}".format(
+                lo, hi, n,
+                "{:5.2f} px".format(med) if med is not None else "    -   ",
+                "{:5.2f} px".format(rmsd) if rmsd is not None else "    -   ",
+                "{:.2f}".format(frac) if frac is not None else "  - "))
+
+        # Keep the results for the cross-frame refit, keyed to this exact platepar
+        self.night_validation = results
+        self.night_validation_pp_key = self._nightValidationKey()
+        self.tab.param_manager.refit_night_button.setEnabled(True)
+
+        headline = "Validation: global median {:.2f} px, corner median {} (n={})".format(
+            summary["median_global"],
+            "{:.2f} px".format(summary["median_corner"]) if summary["median_corner"] is not None
+            else "no data", summary["n_corner"])
+        self.status_bar.showMessage(headline)
+
+        ### Result figure ###
+
+        cx, cy = self.platepar.X_res/2.0, self.platepar.Y_res/2.0
+        r_max = np.hypot(cx, cy)
+        r_frac = np.hypot(results["star_x"] - cx, results["star_y"] - cy)/r_max
+
+        # Two panels: the spatial map is the star of the show, give it the room
+        fig, (ax_r, ax_map) = plt.subplots(1, 2, figsize=(16, 5.6),
+                                           gridspec_kw={'width_ratios': [1, 2.2]})
+
+        # Fixed residual scale so runs are directly comparable side by side
+        res_scale_px = 2.0
+
+        # Residual vs radius, with annulus medians
+        ax_r.scatter(r_frac, results["star_res"], s=4, alpha=0.25, color='k', label='matched stars')
+        ann = summary["annuli"]
+        ax_r.step([a[0] for a in ann] + [1.0], [a[3] for a in ann] + [ann[-1][3]],
+                  where='post', color='r', lw=2, label='annulus median')
+        ax_r.set_xlabel('Radius (fraction of half-diagonal)')
+        ax_r.set_ylabel('Residual (px)')
+        ax_r.set_xlim(0, 1)
+        ax_r.set_ylim(0, res_scale_px)
+        n_offscale = int(np.sum(results["star_res"] > res_scale_px))
+        title = 'Residual vs radius'
+        if n_offscale:
+            title += ' ({:d} stars above {:.0f} px)'.format(n_offscale, res_scale_px)
+        ax_r.set_title(title)
+        ax_r.legend(fontsize=8)
+        ax_r.grid(alpha=0.3)
+
+        # Spatial map of median residual, colour scale pegged to the same fixed range
+        # mincnt keeps single-star hexes from masquerading as bad (or good) regions - a hex
+        # needs a few stars before its median means anything; below that it stays no-data grey
+        hb = ax_map.hexbin(results["star_x"], results["star_y"], C=results["star_res"],
+                           reduce_C_function=np.median, gridsize=16, mincnt=4, cmap='hot',
+                           vmin=0, vmax=res_scale_px,
+                           extent=(0, self.platepar.X_res, 0, self.platepar.Y_res))
+        if len(results.get("recurring_x", [])):
+
+            # The same sky star failing on many frames traces its diurnal arc across the
+            # image - a catalog gap or tight double, not a calibration problem
+            ax_map.scatter(results["recurring_x"], results["recurring_y"], s=8, marker='.',
+                           color='dodgerblue', label='recurring star (catalog gap?)')
+
+        if len(results["unmatched_x"]):
+
+            # Split the remaining match failures into transient (frame-local: satellites,
+            # planes passing through) and persistent (same place failing on multiple frames:
+            # real misfit beyond the match radius, i.e. censored large residuals)
+            ux, uy = results["unmatched_x"], results["unmatched_y"]
+            uframe = results["unmatched_frame"]
+            persistent = np.zeros(len(ux), dtype=bool)
+            if len(ux) > 1:
+                tree_u = cKDTree(np.column_stack([ux, uy]))
+                for k, neighbours in enumerate(tree_u.query_ball_point(
+                        np.column_stack([ux, uy]), r=40.0)):
+                    if len(set(uframe[j] for j in neighbours)) >= 3:
+                        persistent[k] = True
+
+            if (~persistent).any():
+                ax_map.scatter(ux[~persistent], uy[~persistent], s=14, marker='x',
+                               color='cyan', label='match failures (transient)')
+            if persistent.any():
+                ax_map.scatter(ux[persistent], uy[persistent], s=20, marker='x',
+                               color='lime', label='match failures (persistent)')
+
+            # Legend below the map, outside the image area
+        if len(results["unmatched_x"]) or len(results.get("recurring_x", [])):
+            ax_map.legend(fontsize=8, loc='upper center', bbox_to_anchor=(0.5, -0.06),
+                          ncol=3, frameon=False)
+        # Pin the axes exactly to the image bounds (no margins) so the plot corners ARE the
+        # image corners
+        ax_map.set_xlim(0, self.platepar.X_res)
+        ax_map.set_ylim(self.platepar.Y_res, 0)
+        ax_map.set_aspect('equal')
+
+        # The hot colormap tops out at white - give no-data regions a distinct neutral
+        # background so an unvalidated corner cannot be mistaken for a terrible one (or
+        # vice versa)
+        ax_map.set_facecolor('0.45')
+        ax_map.set_title('Median residual across the image (grey = no data)')
+        fig.colorbar(hb, ax=ax_map, label='px (capped at {:.0f})'.format(res_scale_px))
+
+        # Mount drift is reported in the title (per-frame values are in the console report)
+        fig_title = headline
+        if summary["max_drift_arcmin"] is not None:
+            fig_title += "  |  mount drift up to {:.1f} arcmin, compensated per frame".format(
+                summary["max_drift_arcmin"])
+
+        fig.suptitle(fig_title, fontweight='bold')
+        fig.tight_layout()
+        # Leave room for the legend below the map
+        fig.subplots_adjust(bottom=0.14)
+        fig.show()
 
 
     def findBestFrame(self):
