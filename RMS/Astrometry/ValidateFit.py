@@ -20,7 +20,7 @@ import numpy as np
 from scipy.spatial import cKDTree
 
 from RMS.Astrometry.ApplyAstrometry import raDecToXYPP, xyToRaDecPP
-from RMS.Astrometry.Conversions import date2JD
+from RMS.Astrometry.Conversions import date2JD, trueRaDec2ApparentAltAz, apparentAltAz2TrueRADec
 from RMS.Formats.FFfile import filenameToDatetime
 from RMS.Math import angularSeparation
 
@@ -469,24 +469,32 @@ def summarizeValidation(results, x_res, y_res, n_annuli=8, corner_radius_frac=No
     )
 
 
-def buildRefitGroups(results, platepar, max_per_cell=15, n_grid=8):
+def buildRefitGroups(results, platepar, max_per_cell=15, n_grid=8, drift_correction=True):
     """ Turn the validated cross-frame matches into per-image groups for
         Platepar.fitAstrometryMultiImage.
 
-    Unlike an epoch-transfer approach, the multi-image fit projects the catalog at each
-    image's own Julian date, so the pairs are used exactly as observed - no coordinate
-    round trips, no drift approximation baked into the data.
+    The multi-image fit projects the catalog at each image's own Julian date, so the pairs
+    combine exactly across times - but it fits a SINGLE pointing for all frames, while the
+    mount drifts over the night (validateFit measures this per frame, often an arcminute).
+    Left uncorrected, that drift enters the fit as a systematic per-frame offset and can
+    make the refit worse than the platepar it started from on already-good calibrations.
+    Each group's catalog stars are therefore shifted by the frame's measured pointing
+    offset (first order, in apparent alt/az - the space the mount actually moves in), the
+    same compensation validateFit's per-frame pointing refit applies when measuring.
 
     The set is spatially balanced with a per-cell cap so the star-rich image centre does
     not dominate the fit; corner cells rarely reach the cap, so their pairs are all kept.
 
     Arguments:
         results: [dict] Output of validateFit.
-        platepar: [Platepar] Provides the image dimensions for the spatial cap.
+        platepar: [Platepar] Provides the image dimensions for the spatial cap and the
+            observer location for the drift correction.
 
     Keyword arguments:
         max_per_cell: [int] Cap on pairs per image grid cell.
         n_grid: [int] Grid divisions per axis for the spatial cap.
+        drift_correction: [bool] Compensate each frame's measured pointing drift. True by
+            default; requires validateFit to have run with pointing_refit enabled.
 
     Return:
         image_groups: [list] (image_id, jd, img_stars, catalog_stars) tuples, as expected by
@@ -519,17 +527,41 @@ def buildRefitGroups(results, platepar, max_per_cell=15, n_grid=8):
         if report is None:
             continue
         g = groups.setdefault(i, dict(ff_name=report["ff_name"], jd=report["jd"],
+                                      centre_ref=report.get("centre_radec_ref"),
+                                      centre_frame=report.get("centre_radec_frame"),
                                       img=[], cat=[]))
         g["img"].append([results["star_x"][k], results["star_y"][k],
                          results["star_intens"][k]])
         g["cat"].append([results["star_ra"][k], results["star_dec"][k],
                          results["star_mag"][k]])
 
+    lat, lon = platepar.lat, platepar.lon
+
     image_groups = []
     for i in sorted(groups):
         g = groups[i]
         if len(g["img"]) < 3:
             continue
-        image_groups.append((g["ff_name"], g["jd"], np.array(g["img"]), np.array(g["cat"])))
+
+        cat_arr = np.array(g["cat"])
+
+        # First-order drift compensation: shift the catalog by the frame's measured pointing
+        # offset in apparent alt/az, so the single fitted pointing is consistent with every
+        # frame's pairs
+        if drift_correction and (g["centre_ref"] is not None) and (g["centre_frame"] is not None):
+            jd_f = g["jd"]
+            az_r, alt_r = trueRaDec2ApparentAltAz(g["centre_ref"][0], g["centre_ref"][1],
+                                                  jd_f, lat, lon)
+            az_f, alt_f = trueRaDec2ApparentAltAz(g["centre_frame"][0], g["centre_frame"][1],
+                                                  jd_f, lat, lon)
+            daz = (az_r - az_f + 180.0)%360.0 - 180.0
+            dalt = alt_r - alt_f
+
+            for row in cat_arr:
+                azim, alt = trueRaDec2ApparentAltAz(row[0], row[1], jd_f, lat, lon)
+                row[0], row[1] = apparentAltAz2TrueRADec((azim + daz)%360.0, alt + dalt,
+                                                         jd_f, lat, lon)
+
+        image_groups.append((g["ff_name"], g["jd"], np.array(g["img"]), cat_arr))
 
     return image_groups
