@@ -12874,8 +12874,10 @@ class PlateTool(QtWidgets.QMainWindow):
         ax_r.grid(alpha=0.3)
 
         # Spatial map of median residual, colour scale pegged to the same fixed range
+        # mincnt keeps single-star hexes from masquerading as bad (or good) regions - a hex
+        # needs a few stars before its median means anything; below that it stays no-data grey
         hb = ax_map.hexbin(results["star_x"], results["star_y"], C=results["star_res"],
-                           reduce_C_function=np.median, gridsize=24, cmap='hot',
+                           reduce_C_function=np.median, gridsize=16, mincnt=4, cmap='hot',
                            vmin=0, vmax=res_scale_px,
                            extent=(0, self.platepar.X_res, 0, self.platepar.Y_res))
         if len(results["unmatched_x"]):
