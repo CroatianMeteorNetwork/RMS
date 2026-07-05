@@ -12820,12 +12820,16 @@ class PlateTool(QtWidgets.QMainWindow):
         print()
         print("Cross-frame validation: {:d} frames, {:d} matched stars, {:d} censored".format(
             len(results["frames"]), len(results["star_res"]), len(results["unmatched_x"])))
-        print("  Global RMSD:  {:.2f} px".format(summary["rmsd_global"]))
+        print("  Global: median {:.2f} px, RMSD {:.2f} px".format(
+            summary["median_global"], summary["rmsd_global"]))
         if summary["rmsd_corner"] is not None:
-            print("  Corner RMSD:  {:.2f} px (n={:d}, match fraction {:.2f})".format(
-                summary["rmsd_corner"], summary["n_corner"], summary["corner_match_fraction"]))
+            print("  Corners (r>{:.2f}): median {:.2f} px, RMSD {:.2f} px "
+                  "(n={:d}, match fraction {:.2f})".format(
+                summary["corner_radius_frac"], summary["median_corner"],
+                summary["rmsd_corner"], summary["n_corner"],
+                summary["corner_match_fraction"]))
         else:
-            print("  Corner RMSD:  no corner stars available in the dataset")
+            print("  Corners: no corner stars available in the dataset")
         if summary["max_drift_arcmin"] is not None:
             print("  Max pointing drift over the night: {:.1f} arcmin".format(
                 summary["max_drift_arcmin"]))
@@ -12837,9 +12841,9 @@ class PlateTool(QtWidgets.QMainWindow):
                 "{:5.2f} px".format(rmsd) if rmsd is not None else "    -   ",
                 "{:.2f}".format(frac) if frac is not None else "  - "))
 
-        headline = "Validation: global RMSD {:.2f} px, corner RMSD {} (n={})".format(
-            summary["rmsd_global"],
-            "{:.2f} px".format(summary["rmsd_corner"]) if summary["rmsd_corner"] is not None
+        headline = "Validation: global median {:.2f} px, corner median {} (n={})".format(
+            summary["median_global"],
+            "{:.2f} px".format(summary["median_corner"]) if summary["median_corner"] is not None
             else "no data", summary["n_corner"])
         self.status_bar.showMessage(headline)
 

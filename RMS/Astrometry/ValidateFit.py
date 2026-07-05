@@ -272,7 +272,7 @@ def validateFit(platepar, calstars, catalog_stars, frames=None, match_radius=10.
     )
 
 
-def summarizeValidation(results, x_res, y_res, n_annuli=8, corner_radius_frac=0.75):
+def summarizeValidation(results, x_res, y_res, n_annuli=8, corner_radius_frac=None):
     """ Aggregate validation results into radius-binned statistics and headline numbers.
 
     Arguments:
@@ -282,7 +282,10 @@ def summarizeValidation(results, x_res, y_res, n_annuli=8, corner_radius_frac=0.
     Keyword arguments:
         n_annuli: [int] Number of radius bins between the centre and the corner.
         corner_radius_frac: [float] Radii beyond this fraction of the half-diagonal count as
-            "corner" for the headline corner RMSD.
+            "corner". If None (default), it is derived from the image aspect: radii beyond the
+            farthest edge midpoint, which are geometrically reachable only in the corner wedges
+            (~0.87 for 16:9). A looser threshold dilutes the corner statistic with the healthy
+            outer ring.
 
     Return:
         summary: [dict]
@@ -292,6 +295,10 @@ def summarizeValidation(results, x_res, y_res, n_annuli=8, corner_radius_frac=0.
 
     cx, cy = x_res/2.0, y_res/2.0
     r_max = np.hypot(cx, cy)
+
+    # Default corner threshold: beyond the farthest edge midpoint only the corner wedges remain
+    if corner_radius_frac is None:
+        corner_radius_frac = max(cx, cy)/r_max
 
     def radii(x, y):
         return np.hypot(np.asarray(x) - cx, np.asarray(y) - cy)/r_max
@@ -320,8 +327,11 @@ def summarizeValidation(results, x_res, y_res, n_annuli=8, corner_radius_frac=0.
 
     return dict(
         annuli=annuli,
+        corner_radius_frac=float(corner_radius_frac),
         rmsd_global=float(np.sqrt(np.mean(res**2))) if len(res) else None,
+        median_global=float(np.median(res)) if len(res) else None,
         rmsd_corner=float(np.sqrt(np.mean(res[corner]**2))) if n_corner else None,
+        median_corner=float(np.median(res[corner])) if n_corner else None,
         n_corner=n_corner,
         corner_match_fraction=n_corner/(n_corner + corner_u) if (n_corner + corner_u) else None,
         max_drift_arcmin=float(np.max(drifts)) if drifts else None,
