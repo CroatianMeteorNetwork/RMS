@@ -878,9 +878,28 @@ class Platepar(object):
 
             return separation_sum
 
+        def _signedSkyResiduals(ra_array, dec_array, ra_catalog, dec_catalog):
+            """Signed on-sky residual components (dRA*cos(dec), dDec), radians.
+
+            Signed components rather than angular separations: a separation is a folded
+            residual (always >= 0) whose derivative is discontinuous at zero, so for stars
+            near the optimum the finite-difference Jacobian is noise. Levenberg-Marquardt
+            then burns its whole evaluation budget without converging (~100x slower), and on
+            dense star sets the garbage steps can walk the fit away from the optimum
+            entirely. The sum of squares matches the separation squared to first order, so
+            the optimum itself is unchanged.
+            """
+
+            dec_cat_rad = np.radians(dec_catalog)
+            dra = np.radians(ra_array - ra_catalog)
+            dra = (dra + np.pi) % (2*np.pi) - np.pi
+            ddec = np.radians(dec_array - dec_catalog)
+
+            return np.concatenate([dra*np.cos(dec_cat_rad), ddec])
+
         def _calcSkyResidualsDistortionVect(params, platepar, jd, catalog_stars, img_stars, dimension):
             """Vector-residual form of _calcSkyResidualsDistortion for scipy.least_squares.
-               Returns per-star angular separations (sum of squares == the scalar cost above)."""
+               Returns signed per-star sky residual components (see _signedSkyResiduals)."""
 
             pp_copy = copy.copy(platepar)
 
@@ -893,10 +912,7 @@ class Platepar(object):
             ra_array, dec_array = getPairedStarsSkyPositions(img_x, img_y, jd, pp_copy)
             ra_catalog, dec_catalog, _ = catalog_stars.T
 
-            return angularSeparation(
-                np.radians(ra_array), np.radians(dec_array),
-                np.radians(ra_catalog), np.radians(dec_catalog),
-            )
+            return _signedSkyResiduals(ra_array, dec_array, ra_catalog, dec_catalog)
 
         # Modify the residuals function so that it takes a list of arguments
         def _calcSkyResidualsDistortionListArguments(params, *args, **kwargs):
@@ -1000,8 +1016,8 @@ class Platepar(object):
 
         def _calcSkyResidualsAstroAndDistortionRadialVect(params, platepar, jd, catalog_stars, img_stars):
             """Vector-residual form of _calcSkyResidualsAstroAndDistortionRadial for scipy.least_squares.
-               Returns per-star angular separations; least_squares minimizes their sum of squares,
-               which equals the scalar separation_sum above, so the optimum is identical."""
+               Fits pointing + forward distortion on signed per-star sky residual components
+               (see _signedSkyResiduals)."""
 
             pp_copy = copy.copy(platepar)
 
@@ -1016,10 +1032,7 @@ class Platepar(object):
             ra_array, dec_array = getPairedStarsSkyPositions(img_x, img_y, jd, pp_copy)
             ra_catalog, dec_catalog, _ = catalog_stars.T
 
-            return angularSeparation(
-                np.radians(ra_array), np.radians(dec_array),
-                np.radians(ra_catalog), np.radians(dec_catalog),
-            )
+            return _signedSkyResiduals(ra_array, dec_array, ra_catalog, dec_catalog)
 
         def _calcSkyResidualsAstroAndDistortionRadialNN(params, platepar, jd, catalog_stars, img_stars,
                                                         cat_tree=None):
