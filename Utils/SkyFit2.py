@@ -12820,74 +12820,65 @@ class PlateTool(QtWidgets.QMainWindow):
         summary_before = summarizeValidation(self.night_validation,
                                              self.platepar.X_res, self.platepar.Y_res)
 
-        # Fit both drift variants and validate each: with little real drift the per-frame
-        # pointing estimates are noisier than the drift and the compensation hurts; with
-        # real drift the uncorrected fit soaks it into the distortion. Which wins is a
-        # property of the night, so measure instead of guessing.
-        print()
-        candidates = []
-        self.tab.param_manager.setFitButtonBusy(True)
-        QtWidgets.QApplication.processEvents()
-        try:
-            for label, drift_corr in [("drift-corrected", True), ("uncorrected", False)]:
-                image_groups = buildRefitGroups(self.night_validation, self.platepar,
-                                                drift_correction=drift_corr)
-                n_pairs = sum(len(img_stars) for _, _, img_stars, _ in image_groups)
-                if n_pairs < 20:
-                    continue
+        # The pair set is drift-compensated: the multi-image fit uses a single pointing for
+        # all frames, so each frame's measured pointing offset is removed from its pairs
+        # first (refraction-free rigid rotation - see buildRefitGroups)
+        image_groups = buildRefitGroups(self.night_validation, self.platepar,
+                                        drift_correction=True)
+        n_pairs = sum(len(img_stars) for _, _, img_stars, _ in image_groups)
 
-                self.status_bar.showMessage(
-                    "Refitting with night stars ({:s})...".format(label))
-                QtWidgets.QApplication.processEvents()
-
-                print("Refitting astrometry with {:d} night star pairs from {:d} frames, "
-                      "{:s} (photometry untouched)...".format(
-                          n_pairs, len(image_groups), label))
-                pp_cand = copy.deepcopy(self.platepar)
-                pp_cand.fitAstrometryMultiImage(image_groups,
-                    first_platepar_fit=False, fit_only_pointing=self.fit_only_pointing,
-                    fixed_scale=self.fixed_scale)
-
-                self.status_bar.showMessage(
-                    "Validating the {:s} refit...".format(label))
-                QtWidgets.QApplication.processEvents()
-
-                res_cand = validateFit(pp_cand, merged, catalog_val, frames=frames)
-                if not len(res_cand["star_res"]):
-                    continue
-                summary_cand = summarizeValidation(res_cand, pp_cand.X_res, pp_cand.Y_res)
-                candidates.append((label, pp_cand, summary_cand))
-        finally:
-            self.tab.param_manager.setFitButtonBusy(False)
-
-        if not candidates:
+        if n_pairs < 20:
             qmessagebox(title='Refit with night stars',
                         message="Not enough validated pairs for a refit!",
                         message_type="warning")
             return
 
-        # Keep the best of the three platepars - a refit never makes the calibration worse
+        print()
+        print("Refitting astrometry with {:d} night star pairs from {:d} frames "
+              "(photometry untouched)...".format(n_pairs, len(image_groups)))
+        self.tab.param_manager.setFitButtonBusy(True)
+        QtWidgets.QApplication.processEvents()
+        try:
+            pp_cand = copy.deepcopy(self.platepar)
+            pp_cand.fitAstrometryMultiImage(image_groups,
+                first_platepar_fit=False, fit_only_pointing=self.fit_only_pointing,
+                fixed_scale=self.fixed_scale)
+
+            self.status_bar.showMessage("Validating the refit...")
+            QtWidgets.QApplication.processEvents()
+
+            res_cand = validateFit(pp_cand, merged, catalog_val, frames=frames)
+        finally:
+            self.tab.param_manager.setFitButtonBusy(False)
+
+        if not len(res_cand["star_res"]):
+            qmessagebox(title='Refit with night stars',
+                        message="The refit produced no catalog matches - kept the current "
+                                "platepar.",
+                        message_type="warning")
+            return
+
+        summary_after = summarizeValidation(res_cand, pp_cand.X_res, pp_cand.Y_res)
+
+        # Keep the better of the two platepars - a refit never makes the calibration worse
         print()
         print("Refit validation comparison:")
-        print("  current platepar      : " + _fmt(summary_before))
-        for label, _, summary_cand in candidates:
-            print("  refit {:16s}: {:s}".format(label, _fmt(summary_cand)))
+        print("  current platepar: " + _fmt(summary_before))
+        print("  refit           : " + _fmt(summary_after))
 
-        best_label, best_pp, best_summary = min(candidates, key=lambda c: _score(c[2]))
-
-        if _score(best_summary) >= _score(summary_before) - 1e-3:
-            print("Neither refit improved the validation - keeping the current platepar.")
+        if _score(summary_after) >= _score(summary_before) - 1e-3:
+            print("The refit did not improve the validation - keeping the current platepar.")
             self.status_bar.showMessage("Refit did not improve on the current platepar - kept it.")
             qmessagebox(title='Refit with night stars',
                         message="The refit did not improve the cross-frame validation - "
                                 "the current platepar was kept.\n\n"
-                                "Current: {:s}\nBest refit ({:s}): {:s}".format(
-                                    _fmt(summary_before), best_label, _fmt(best_summary)),
+                                "Current: {:s}\nRefit:     {:s}".format(
+                                    _fmt(summary_before), _fmt(summary_after)),
                         message_type="info")
             return
 
-        print("Applying the {:s} refit.".format(best_label))
-        self.platepar = best_pp
+        print("Applying the refit.")
+        self.platepar = pp_cand
 
         self.first_platepar_fit = False
         self.platepar_modified = True
