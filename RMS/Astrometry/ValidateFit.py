@@ -171,6 +171,23 @@ def validateFit(platepar, calstars, catalog_stars, frames=None, match_radius=10.
         if len(star_data) < min_match_stars:
             continue
 
+        # Keep only astrometry-grade detections. Tuned/override detection settings reach far
+        # deeper than the pipeline defaults; the faint extra detections have px-level
+        # centroid noise or are junk, and they match wrong faint neighbours, building a
+        # heavy residual tail that swamps the statistics. Use the per-star SNR when the
+        # rows carry it (new CALSTARS / override rows); older 4-5 column CALSTARS files pad
+        # SNR with -1, so fall back to capping at the brightest detections (the pipeline's
+        # own conservative depth).
+        n_before = len(star_data)
+        if (star_data.shape[1] > 6) and np.any(star_data[:, 6] > 0):
+            star_data = star_data[star_data[:, 6] >= 5.0]
+        elif len(star_data) > 200:
+            order = np.argsort(-star_data[:, 2])
+            star_data = star_data[order[:200]]
+        n_culled = n_before - len(star_data)
+        if len(star_data) < min_match_stars:
+            continue
+
         det_y, det_x = star_data[:, 0], star_data[:, 1]
         det_intens = star_data[:, 2] if star_data.shape[1] > 2 else np.ones(len(det_x))
 
@@ -183,7 +200,7 @@ def validateFit(platepar, calstars, catalog_stars, frames=None, match_radius=10.
             inside = (cat_x >= 0) & (cat_x < pp.X_res) & (cat_y >= 0) & (cat_y < pp.Y_res)
             return cat_x, cat_y, inside
 
-        def matchStars(cat_x, cat_y, inside, radius):
+        def matchStars(cat_x, cat_y, inside, radius, exclude=None):
             """One-to-one nearest match of detected stars to projected catalog stars."""
             idx_inside = np.where(inside)[0]
             if len(idx_inside) == 0:
@@ -196,6 +213,8 @@ def validateFit(platepar, calstars, catalog_stars, frames=None, match_radius=10.
             for d_i in np.argsort(dist):
                 if dist[d_i] > radius:
                     break
+                if (exclude is not None) and (d_i in exclude):
+                    continue
                 cat_i = idx_inside[nn[d_i]]
                 if cat_i in taken:
                     continue
@@ -366,6 +385,7 @@ def validateFit(platepar, calstars, catalog_stars, frames=None, match_radius=10.
         frame_reports.append(dict(ff_name=ff_name, jd=jd, frame_index=i,
                                   n_matched=len(matches),
                                   n_blend_rejected=n_blend, n_photometric_rejected=n_phot,
+                                  n_quality_culled=n_culled,
                                   n_contention=n_contention, drift_arcmin=drift_arcmin,
                                   centre_radec_ref=centre_radec_ref,
                                   centre_radec_frame=centre_radec_frame))
