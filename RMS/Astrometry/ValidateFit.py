@@ -158,6 +158,7 @@ def validateFit(platepar, calstars, catalog_stars, frames=None, match_radius=10.
 
     star_x, star_y, star_res, star_frame = [], [], [], []
     unmatched_x, unmatched_y, unmatched_frame = [], [], []
+    unmatched_ra, unmatched_dec = [], []
     frame_reports = []
 
     for i, ff_name in enumerate(frames):
@@ -301,6 +302,7 @@ def validateFit(platepar, calstars, catalog_stars, frames=None, match_radius=10.
         matched_det = set(d for d, _, _ in matches)
         claimed_cat = set(c for _, c, _ in matches)
         n_contention = 0
+        fail_idx = []
         idx_inside = np.where(inside)[0]
         if len(idx_inside):
             tree_cens = cKDTree(np.column_stack([cat_x[idx_inside], cat_y[idx_inside]]))
@@ -320,19 +322,54 @@ def validateFit(platepar, calstars, catalog_stars, frames=None, match_radius=10.
                     # Nearest catalog star was won by a closer detection (double/blend)
                     n_contention += 1
                 else:
-                    unmatched_x.append(det_x[d_i])
-                    unmatched_y.append(det_y[d_i])
-                    unmatched_frame.append(i)
+                    fail_idx.append(d_i)
+
+        # Sky positions of the failures, so the same problem star can be recognized across
+        # frames wherever the sky rotation carries it in the image
+        if fail_idx:
+            time_tuple = (ff_dt.year, ff_dt.month, ff_dt.day, ff_dt.hour, ff_dt.minute,
+                          ff_dt.second, ff_dt.microsecond/1000)
+            _, f_ra, f_dec, _ = xyToRaDecPP([time_tuple]*len(fail_idx),
+                [det_x[k] for k in fail_idx], [det_y[k] for k in fail_idx],
+                [1]*len(fail_idx), pp_frame, extinction_correction=False)
+            for k, ra, dec in zip(fail_idx, f_ra, f_dec):
+                unmatched_x.append(det_x[k])
+                unmatched_y.append(det_y[k])
+                unmatched_frame.append(i)
+                unmatched_ra.append(ra)
+                unmatched_dec.append(dec)
 
         frame_reports.append(dict(ff_name=ff_name, jd=jd, n_matched=len(matches),
                                   n_blend_rejected=n_blend, n_photometric_rejected=n_phot,
                                   n_contention=n_contention, drift_arcmin=drift_arcmin))
 
+    # Separate failures that are the SAME sky star recurring across frames (a catalog gap,
+    # tight double or variable - tells us nothing about the calibration) from the rest.
+    # The same star clusters to arcseconds on the sky no matter where the rotation carries
+    # it in the image, so cluster on sky unit vectors.
+    ux = np.array(unmatched_x); uy = np.array(unmatched_y)
+    uframe = np.array(unmatched_frame)
+    recurring = np.zeros(len(ux), dtype=bool)
+    if len(ux) > 1:
+        ra = np.radians(np.array(unmatched_ra)); dec = np.radians(np.array(unmatched_dec))
+        vec = np.column_stack([np.cos(dec)*np.cos(ra), np.cos(dec)*np.sin(ra), np.sin(dec)])
+
+        # Angular clustering radius: the match radius expressed on the sky
+        ang_radius = np.radians(2.0*match_radius/platepar.F_scale)
+        chord = 2.0*np.sin(ang_radius/2.0)
+
+        sky_tree = cKDTree(vec)
+        for k, neighbours in enumerate(sky_tree.query_ball_point(vec, r=chord)):
+            if len(set(uframe[j] for j in neighbours)) >= 3:
+                recurring[k] = True
+
     return dict(
         star_x=np.array(star_x), star_y=np.array(star_y), star_res=np.array(star_res),
         star_frame=np.array(star_frame),
-        unmatched_x=np.array(unmatched_x), unmatched_y=np.array(unmatched_y),
-        unmatched_frame=np.array(unmatched_frame),
+        unmatched_x=ux[~recurring], unmatched_y=uy[~recurring],
+        unmatched_frame=uframe[~recurring],
+        recurring_x=ux[recurring], recurring_y=uy[recurring],
+        n_recurring_detections=int(recurring.sum()),
         frames=frame_reports,
     )
 

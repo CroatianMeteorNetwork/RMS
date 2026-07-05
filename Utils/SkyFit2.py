@@ -12825,6 +12825,9 @@ class PlateTool(QtWidgets.QMainWindow):
             len(results["frames"]), len(results["star_res"]), len(results["unmatched_x"])))
         print("  Filtered out: {:d} blended, {:d} photometric outliers, "
               "{:d} double-star contention".format(n_blend, n_phot, n_cont))
+        if results.get("n_recurring_detections"):
+            print("  Recurring unmatched sky stars (likely catalog gaps/doubles): "
+                  "{:d} detections".format(results["n_recurring_detections"]))
         print("  Global: median {:.2f} px, RMSD {:.2f} px".format(
             summary["median_global"], summary["rmsd_global"]))
         if summary["rmsd_corner"] is not None:
@@ -12889,10 +12892,17 @@ class PlateTool(QtWidgets.QMainWindow):
                            reduce_C_function=np.median, gridsize=16, mincnt=4, cmap='hot',
                            vmin=0, vmax=res_scale_px,
                            extent=(0, self.platepar.X_res, 0, self.platepar.Y_res))
+        if len(results.get("recurring_x", [])):
+
+            # The same sky star failing on many frames traces its diurnal arc across the
+            # image - a catalog gap or tight double, not a calibration problem
+            ax_map.scatter(results["recurring_x"], results["recurring_y"], s=8, marker='.',
+                           color='dodgerblue', label='recurring star (catalog gap?)')
+
         if len(results["unmatched_x"]):
 
-            # Split match failures into transient (frame-local: satellites, planes, planets
-            # passing through) and persistent (same neighbourhood failing on multiple frames:
+            # Split the remaining match failures into transient (frame-local: satellites,
+            # planes passing through) and persistent (same place failing on multiple frames:
             # real misfit beyond the match radius, i.e. censored large residuals)
             ux, uy = results["unmatched_x"], results["unmatched_y"]
             uframe = results["unmatched_frame"]
@@ -12912,8 +12922,9 @@ class PlateTool(QtWidgets.QMainWindow):
                                color='lime', label='match failures (persistent)')
 
             # Legend below the map, outside the image area
+        if len(results["unmatched_x"]) or len(results.get("recurring_x", [])):
             ax_map.legend(fontsize=8, loc='upper center', bbox_to_anchor=(0.5, -0.06),
-                          ncol=2, frameon=False)
+                          ncol=3, frameon=False)
         # Pin the axes exactly to the image bounds (no margins) so the plot corners ARE the
         # image corners
         ax_map.set_xlim(0, self.platepar.X_res)
