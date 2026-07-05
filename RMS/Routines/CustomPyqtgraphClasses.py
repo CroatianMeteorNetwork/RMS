@@ -22,6 +22,24 @@ import re
 import sys
 
 
+class _MinWidthScrollArea(QtWidgets.QScrollArea):
+    """ Scroll area that only scrolls vertically and reserves its widget's minimum WIDTH.
+
+    A plain QScrollArea decouples the widget's minimum width from the layout, so the tab
+    column can shrink below the content width - and with the horizontal scrollbar disabled
+    the right edge of the content (including the corner help button) is silently clipped.
+    The reservation is computed live because the panels' minimum size hints keep growing
+    after construction as their values are populated.
+    """
+
+    def minimumSizeHint(self):
+        hint = super(_MinWidthScrollArea, self).minimumSizeHint()
+        if self.widget() is not None:
+            extent = self.style().pixelMetric(QtWidgets.QStyle.PM_ScrollBarExtent)
+            hint.setWidth(self.widget().minimumSizeHint().width() + extent + 2)
+        return hint
+
+
 class _CornerHelpOverlay(QtCore.QObject):
     """ Keeps a help button pinned to the top-right corner of a host widget without taking up any
         layout space (so it never shifts the tab content down). """
@@ -1324,19 +1342,13 @@ class RightOptionsTab(QtWidgets.QTabWidget, ScaledSizeHelper):
         # instead of compressing it into unreadability. Levels stretches naturally with the
         # window and Help scrolls by itself, so they stay unwrapped.
         self._tab_scroll_wrappers = {}
-        scrollbar_extent = self.style().pixelMetric(QtWidgets.QStyle.PM_ScrollBarExtent)
         for panel in (self.param_manager, self.geolocation, self.star_detection,
                       self.mask, self.settings, self.debruijn):
-            scroll = QtWidgets.QScrollArea()
+            scroll = _MinWidthScrollArea()
             scroll.setWidgetResizable(True)
             scroll.setFrameShape(QtWidgets.QFrame.NoFrame)
             scroll.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
             scroll.setWidget(panel)
-            # The scroll area decouples the panel's minimum width from the layout, so
-            # without this the tab column can shrink below the content width and the
-            # right edge of every panel (including the corner help button) gets clipped.
-            # Reserve the panel's minimum width plus the vertical scrollbar gutter.
-            scroll.setMinimumWidth(panel.minimumSizeHint().width() + scrollbar_extent + 2)
             self._tab_scroll_wrappers[panel] = scroll
 
         self.addTab(self.levels_tab, 'Levels')
