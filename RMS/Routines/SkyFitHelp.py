@@ -403,6 +403,11 @@ def _topic_astrometry(gui):
         "(moving objects), and <b>persistent-in-place</b> &ndash; the last, sitting on hot map "
         "cells, marks real misfit beyond the match radius. A rising residual toward large radii "
         "means the distortion model does not generalize to the corners.</p>"
+        "<p><b>Refit W/ Night</b> then feeds the validated pairs back into the astrometric fit: "
+        "epoch-transferred to the platepar reference time with per-frame drift compensation, and "
+        "spatially balanced so the star-rich centre does not dominate (corner pairs are kept in "
+        "full). This typically improves the corners substantially when the calibration frame had "
+        "few corner stars. Photometry is untouched &ndash; it must come from a single frame.</p>"
         "<p>Press " + _key("L") + " for the astrometry residual plot.</p>"
         + "<h3>Relevant shortcuts</h3>"
         + _shortcut_table([
