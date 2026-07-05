@@ -12905,7 +12905,10 @@ class PlateTool(QtWidgets.QMainWindow):
             if persistent.any():
                 ax_map.scatter(ux[persistent], uy[persistent], s=20, marker='x',
                                color='lime', label='match failures (persistent)')
-            ax_map.legend(fontsize=8)
+
+            # Legend below the map, outside the image area
+            ax_map.legend(fontsize=8, loc='upper center', bbox_to_anchor=(0.5, -0.06),
+                          ncol=2, frameon=False)
         # Pin the axes exactly to the image bounds (no margins) so the plot corners ARE the
         # image corners
         ax_map.set_xlim(0, self.platepar.X_res)
@@ -12927,6 +12930,8 @@ class PlateTool(QtWidgets.QMainWindow):
 
         fig.suptitle(fig_title, fontweight='bold')
         fig.tight_layout()
+        # Leave room for the legend below the map
+        fig.subplots_adjust(bottom=0.14)
         fig.show()
 
 
