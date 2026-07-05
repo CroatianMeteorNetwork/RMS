@@ -52,7 +52,7 @@ def _cellCounts(star_data, x_res, y_res, n_grid):
     return counts
 
 
-def selectValidationFrames(calstars, x_res, y_res, n_grid=8, min_per_cell=20, max_frames=100,
+def selectValidationFrames(calstars, x_res, y_res, n_grid=8, min_per_cell=50, max_frames=300,
                            min_stars_frame=10):
     """ Select a subset of frames whose union of detected stars covers the image, with an
         explicit guarantee that the corner cells are filled whenever the dataset has stars there.
