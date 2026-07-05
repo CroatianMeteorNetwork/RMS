@@ -12884,7 +12884,12 @@ class PlateTool(QtWidgets.QMainWindow):
             ax_map.legend(fontsize=8)
         ax_map.invert_yaxis()
         ax_map.set_aspect('equal')
-        ax_map.set_title('Median residual across the image')
+
+        # The hot colormap tops out at white - give no-data regions a distinct neutral
+        # background so an unvalidated corner cannot be mistaken for a terrible one (or
+        # vice versa)
+        ax_map.set_facecolor('0.45')
+        ax_map.set_title('Median residual across the image (grey = no data)')
         fig.colorbar(hb, ax=ax_map, label='px (capped at {:.0f})'.format(res_scale_px))
 
         # Mount drift is reported in the title (per-frame values are in the console report)
