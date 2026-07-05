@@ -2286,10 +2286,10 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         self.refit_night_button = QtWidgets.QPushButton("Refit W/ Night")
         self.refit_night_button.setToolTip(
             "Complement the astrometric fit with the validated cross-frame star pairs\n"
-            "(spatially balanced, corner pairs kept in full). Fits with and without\n"
-            "per-frame drift compensation and keeps the best validated platepar - the\n"
-            "current one is kept if neither refit improves on it. Photometry is not\n"
-            "affected - it must come from a single frame. Run Validate Across Frames first.")
+            "(spatially balanced, corner pairs kept in full, per-frame pointing drift\n"
+            "compensated). The refit is validated against the night and only kept if it\n"
+            "improves on the current platepar. Photometry is not affected - it must come\n"
+            "from a single frame. Run Validate Across Frames first.")
         self.refit_night_button.setEnabled(False)
         self.refit_night_button.clicked.connect(self.sigRefitNightPressed.emit)
         box.addWidget(self.refit_night_button)

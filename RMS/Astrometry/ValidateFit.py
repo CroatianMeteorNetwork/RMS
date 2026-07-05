@@ -550,17 +550,22 @@ def buildRefitGroups(results, platepar, max_per_cell=15, n_grid=8, drift_correct
         # frame's pairs
         if drift_correction and (g["centre_ref"] is not None) and (g["centre_frame"] is not None):
             jd_f = g["jd"]
+
+            # refraction=False throughout: the correction is a rigid geometric rotation, and
+            # the refraction model does not invert exactly (up to ~4 arcsec of round-trip
+            # bias at low altitude, which would be baked into every corrected pair)
             az_r, alt_r = trueRaDec2ApparentAltAz(g["centre_ref"][0], g["centre_ref"][1],
-                                                  jd_f, lat, lon)
+                                                  jd_f, lat, lon, refraction=False)
             az_f, alt_f = trueRaDec2ApparentAltAz(g["centre_frame"][0], g["centre_frame"][1],
-                                                  jd_f, lat, lon)
+                                                  jd_f, lat, lon, refraction=False)
             daz = (az_r - az_f + 180.0)%360.0 - 180.0
             dalt = alt_r - alt_f
 
             for row in cat_arr:
-                azim, alt = trueRaDec2ApparentAltAz(row[0], row[1], jd_f, lat, lon)
+                azim, alt = trueRaDec2ApparentAltAz(row[0], row[1], jd_f, lat, lon,
+                                                    refraction=False)
                 row[0], row[1] = apparentAltAz2TrueRADec((azim + daz)%360.0, alt + dalt,
-                                                         jd_f, lat, lon)
+                                                         jd_f, lat, lon, refraction=False)
 
         image_groups.append((g["ff_name"], g["jd"], np.array(g["img"]), cat_arr))
 
