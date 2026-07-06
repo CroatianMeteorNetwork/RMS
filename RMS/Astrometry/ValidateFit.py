@@ -15,6 +15,7 @@ reports spatially binned residuals of catalog-matched detected stars.
 from __future__ import print_function, division, absolute_import
 
 import copy
+import datetime
 
 import numpy as np
 from scipy.spatial import cKDTree
@@ -117,7 +118,8 @@ def selectValidationFrames(calstars, x_res, y_res, n_grid=8, min_per_cell=150, m
 
 
 def validateFit(platepar, calstars, catalog_stars, frames=None, match_radius=10.0,
-                pointing_refit=True, min_match_stars=8, progress_callback=None):
+                pointing_refit=True, min_match_stars=8, progress_callback=None,
+                fps=None, chunk_frames=256):
     """ Measure how well the platepar generalizes to other frames of the night.
 
     For every frame, catalog stars are projected with the platepar at the frame's time and
@@ -138,6 +140,14 @@ def validateFit(platepar, calstars, catalog_stars, frames=None, match_radius=10.
             so large-residual censoring is visible in the match fraction.
         pointing_refit: [bool] Refit pointing per frame before measuring. True by default.
         min_match_stars: [int] Minimum initial matches for a frame to be used.
+        fps: [float] Camera frames per second. When given, star positions are referenced to
+            the MIDDLE of the FF block (FF name time + (chunk_frames-1)/(2*fps)), matching
+            the CALSTARS convention ("Cal time = FF header time plus 255/(2*framerate_Hz)").
+            Without it the block start time is used, which lags the true star epoch by half
+            a block (~5 s at 25 fps) - the sky rotates ~1.3 arcmin in that time, which
+            shows up as fake pointing drift and, near the celestial pole, as a tangential
+            residual field that a rigid drift compensation cannot remove.
+        chunk_frames: [int] Number of frames in the FF block. 256 by default.
         progress_callback: [callable] Called with (i_frame, n_frames, ff_name) per frame.
 
     Return:
@@ -192,6 +202,12 @@ def validateFit(platepar, calstars, catalog_stars, frames=None, match_radius=10.
         det_intens = star_data[:, 2] if star_data.shape[1] > 2 else np.ones(len(det_x))
 
         ff_dt = filenameToDatetime(ff_name)
+
+        # Reference the star positions to the middle of the FF block (the CALSTARS time
+        # convention) - see the fps keyword documentation
+        if fps is not None and fps > 0:
+            ff_dt = ff_dt + datetime.timedelta(seconds=(chunk_frames - 1)/(2.0*fps))
+
         jd = date2JD(ff_dt.year, ff_dt.month, ff_dt.day, ff_dt.hour, ff_dt.minute, ff_dt.second,
                      millisecond=ff_dt.microsecond/1000)
 
