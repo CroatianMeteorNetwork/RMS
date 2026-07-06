@@ -13098,6 +13098,11 @@ class PlateTool(QtWidgets.QMainWindow):
         self.updateStars()
         self.tab.param_manager.updatePlatepar()
 
+        # Recompute the picked-star residuals (and the RMSD display) against the refit
+        # platepar, if the session has pairs and the split-step workflow is available
+        if len(self.paired_stars) > 0 and hasattr(self, 'computeResiduals'):
+            self.computeResiduals()
+
         # Re-validate so the before/after figure is immediately visible
         self.validateFitAcrossFrames()
 
