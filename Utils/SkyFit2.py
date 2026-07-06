@@ -4875,6 +4875,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
                 # Store the override detected stars
                 self.star_detection_override_data[ff_name] = star_data
+                self.updateFindBestFrameButton()
                 original_count = len(self.calstars.get(ff_name, []))
                 print(f"  Detected {len(star_data)} stars (original: {original_count})")
 
@@ -4974,6 +4975,7 @@ class PlateTool(QtWidgets.QMainWindow):
                         # CALSTARS format: Y(0) X(1) IntensSum(2) Ampltd(3) FWHM(4) BgLvl(5) SNR(6) NSatPx(7)
                         star_data = list(zip(y_arr, x_arr, intensity, amplitude, fwhm, background, snr, saturated_count))
                         self.star_detection_override_data[ff_name] = star_data
+                        self.updateFindBestFrameButton()
                         
                         # Store candidate count in star data if needed, or handle separately. 
                         # For redetectAllImages, we usually just update the main status for the last one
@@ -13815,10 +13817,21 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
     def updateFindBestFrameButton(self):
-        """ Enable/disable the Find Best Frame button based on the number of frames in CALSTARS. """
+        """ Enable/disable the Find Best Frame button based on the number of frames with star
+            data - from CALSTARS and/or from re-detected (override) frames. """
         if hasattr(self, 'tab') and hasattr(self.tab, 'param_manager'):
-            # Disable button if there's only one frame or no frames
-            enable = len(self.calstars) > 1
+
+            # Count frames with stars from both sources - a station without a CALSTARS file
+            # still gets frames to rank once stars are re-detected in the session
+            frames = set()
+            if hasattr(self, 'calstars') and self.calstars:
+                frames.update(ff for ff, stars in self.calstars.items() if len(stars) > 0)
+            if getattr(self, 'star_detection_override_data', None):
+                frames.update(ff for ff, stars in self.star_detection_override_data.items()
+                              if len(stars) > 0)
+
+            # Disable the button if there's only one frame or no frames
+            enable = len(frames) > 1
             self.tab.param_manager.find_best_frame_button.setEnabled(enable)
             if not enable:
                 self.tab.param_manager.find_best_frame_button.setToolTip(
