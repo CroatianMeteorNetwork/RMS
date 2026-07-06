@@ -15884,6 +15884,20 @@ class PlateTool(QtWidgets.QMainWindow):
         print("  Matched {} of {} detected stars to {} catalog stars in FOV".format(
             len(self.paired_stars), len(det_x), len(cat_x)))
 
+        # Apply the same pair hygiene as the auto-fit: without it the manual workflow fits
+        # (and reports RMSD over) blended and photometrically inconsistent pairs that the
+        # auto-fit and the cross-frame validation both reject - at coarse plate scales the
+        # blends alone can be ~40% of the raw matches and dominate the reported RMSD
+        if len(self.paired_stars) >= 15:
+            removed = self.filterPhotometricOutliers(sigma_threshold=2.5)
+            if removed > 0:
+                print("  Pairs after photometric filtering: {}".format(len(self.paired_stars)))
+
+        if len(self.paired_stars) >= 15:
+            removed = self.filterBlendedStars(fwhm_mult=2.0, mag_margin=0.3)
+            if removed > 0:
+                print("  Pairs after blend filtering: {}".format(len(self.paired_stars)))
+
         # Old residuals and photometry no longer correspond to the new pairs
         self.residuals = None
         self.photom_fit_resids = None
