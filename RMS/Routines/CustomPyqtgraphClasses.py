@@ -3322,6 +3322,15 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
         QtWidgets.QWidget.__init__(self)
         self.gui = gui
 
+        # While True, programmatic slider seeding bypasses the snap-to-100 handlers, so a
+        # config value like max_stars=150 survives loading exactly instead of being snapped
+        # (and then counting as an unsaved modification with zero user input)
+        self._seeding = False
+
+        # The station config last loaded into the sliders - Reset to Defaults returns the
+        # station-bound values (gamma, config max stars) to it rather than global defaults
+        self._loaded_config = None
+
         layout = QtWidgets.QVBoxLayout()
         layout.setContentsMargins(*self.scaledMargins(1, 0.5))
         layout.setSpacing(self.scaledSpacing(0.3))
@@ -3539,29 +3548,66 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
         return max(100, int(round(value/100.0))*100)
 
     def onMaxStarsChanged(self, value):
-        snapped = self._snapTo100(value)
-        if snapped != value:
-            # Re-fires this handler with the snapped value
-            self.max_stars_slider.setValue(snapped)
-            return
-        self.max_stars_label.setText(str(snapped))
-        self.sigMaxStarsChanged.emit(snapped)
+        # Snap only user motion - programmatic seeding keeps the exact config value
+        if not self._seeding:
+            snapped = self._snapTo100(value)
+            if snapped != value:
+                # Re-fires this handler with the snapped value
+                self.max_stars_slider.setValue(snapped)
+                return
+        self.max_stars_label.setText(str(value))
+        self.sigMaxStarsChanged.emit(value)
 
     def onConfigMaxStarsChanged(self, value):
-        snapped = self._snapTo100(value)
-        if snapped != value:
-            # Re-fires this handler with the snapped value
-            self.config_max_stars_slider.setValue(snapped)
-            return
-        self.config_max_stars_label.setText(str(snapped))
-        self.sigConfigMaxStarsChanged.emit(snapped)
+        # Snap only user motion - programmatic seeding keeps the exact config value
+        if not self._seeding:
+            snapped = self._snapTo100(value)
+            if snapped != value:
+                # Re-fires this handler with the snapped value
+                self.config_max_stars_slider.setValue(snapped)
+                return
+        self.config_max_stars_label.setText(str(value))
+        self.sigConfigMaxStarsChanged.emit(value)
 
     def resetToDefaults(self):
-        """Reset all sliders to the recommended default values."""
+        """Reset the tuning sliders to the recommended defaults.
+
+        Station-bound values return to the loaded config instead: gamma is a hardware
+        property of the camera (resetting it to 1.0 would corrupt photometry the moment
+        Save Config is pressed), and the config max stars is the station's pipeline
+        budget, not a tuning preference.
+        """
+        cfg = self._loaded_config
+
         for key, default in self.slider_defaults.items():
+
+            if key == 'gamma':
+                if cfg is not None and hasattr(cfg, 'gamma'):
+                    self.gamma_slider.setValue(int(round(cfg.gamma*100)))
+                continue
+
+            if key == 'config_max_stars':
+                if cfg is not None and hasattr(cfg, 'max_stars'):
+                    self._seedSlider(self.config_max_stars_slider, cfg.max_stars)
+                continue
+
             # setValue triggers each slider's callback, so labels and override
             # values in SkyFit update through the normal signal path
             self.sliders[key].setValue(default)
+
+    def _seedSlider(self, slider, value):
+        """ Set a slider value programmatically, bypassing the snap-to-100 handlers so the
+            exact value survives (the change signal still fires normally). Extends the
+            slider range if needed so out-of-range config values are not clamped. """
+        if value < slider.minimum():
+            slider.setMinimum(value)
+        if value > slider.maximum():
+            slider.setMaximum(value)
+        self._seeding = True
+        try:
+            slider.setValue(value)
+        finally:
+            self._seeding = False
 
     def onMaxGlobalIntensityChanged(self, value):
         self.max_global_intensity_label.setText(str(value))
@@ -3620,6 +3666,9 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
 
     def loadFromConfig(self, config):
         """Initialize sliders from config values."""
+
+        self._loaded_config = config
+
         if hasattr(config, 'intensity_threshold'):
             # Give the threshold slider a bit-depth-appropriate maximum before setting the
             # value, otherwise a high-bit-depth config threshold is silently clamped to the
@@ -3639,9 +3688,12 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
             self.neighborhood_size_slider.setValue(config.neighborhood_size)
         if hasattr(config, 'max_stars'):
             # The config value seeds both budgets: the session one is free to move,
-            # the config one is what Save Config writes back
-            self.max_stars_slider.setValue(config.max_stars)
-            self.config_max_stars_slider.setValue(config.max_stars)
+            # the config one is what Save Config writes back. Seed without snapping so a
+            # config value like 150 loads exactly - otherwise the seeded value counts as
+            # an unsaved config modification with zero user input, and Save Config would
+            # write the snapped value back to the station config
+            self._seedSlider(self.max_stars_slider, config.max_stars)
+            self._seedSlider(self.config_max_stars_slider, config.max_stars)
         if hasattr(config, 'max_global_intensity'):
             self.max_global_intensity_slider.setValue(config.max_global_intensity)
         if hasattr(config, 'gamma'):
