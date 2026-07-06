@@ -3736,6 +3736,14 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.tab.param_manager.show_night_pairs_checkbox.setEnabled(False)
             self.updateNightPairsOverlay()
 
+            # Clear the fit residual overlay (lines and the residual/mag/SNR labels) - it
+            # belongs to the previous folder's fit
+            if hasattr(self, 'residual_lines_img'):
+                self.residual_lines_img.clear()
+                self.residual_lines_astro.clear()
+            if hasattr(self, 'residual_text'):
+                self.residual_text.clear()
+
             # Populate menus with mode-specific actions (including F1 shortcut)
             self.changeMode(self.mode)
 
