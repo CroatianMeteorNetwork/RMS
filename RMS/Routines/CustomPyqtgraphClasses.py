@@ -22,24 +22,6 @@ import re
 import sys
 
 
-class _MinWidthScrollArea(QtWidgets.QScrollArea):
-    """ Scroll area that only scrolls vertically and reserves its widget's minimum WIDTH.
-
-    A plain QScrollArea decouples the widget's minimum width from the layout, so the tab
-    column can shrink below the content width - and with the horizontal scrollbar disabled
-    the right edge of the content (including the corner help button) is silently clipped.
-    The reservation is computed live because the panels' minimum size hints keep growing
-    after construction as their values are populated.
-    """
-
-    def minimumSizeHint(self):
-        hint = super(_MinWidthScrollArea, self).minimumSizeHint()
-        if self.widget() is not None:
-            extent = self.style().pixelMetric(QtWidgets.QStyle.PM_ScrollBarExtent)
-            hint.setWidth(self.widget().minimumSizeHint().width() + extent + 2)
-        return hint
-
-
 class _CornerHelpOverlay(QtCore.QObject):
     """ Keeps a help button pinned to the top-right corner of a host widget without taking up any
         layout space (so it never shifts the tab content down). """
@@ -1336,11 +1318,20 @@ class RightOptionsTab(QtWidgets.QTabWidget, ScaledSizeHelper):
         self._tab_scroll_wrappers = {}
         for panel in (self.param_manager, self.geolocation, self.star_detection,
                       self.mask, self.settings, self.debruijn):
-            scroll = _MinWidthScrollArea()
+            scroll = QtWidgets.QScrollArea()
             scroll.setWidgetResizable(True)
             scroll.setFrameShape(QtWidgets.QFrame.NoFrame)
             scroll.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
             scroll.setWidget(panel)
+
+            # The tab column has a FIXED width; as direct tab pages the panels simply
+            # compressed their content when their minimum width exceeded it. A scroll area
+            # would instead enforce the panel's minimum width and clip the right edge
+            # (corner help button first). The Ignored horizontal policy makes the scroll
+            # area size the panel to the viewport width unconditionally, restoring the
+            # graceful compression, while the vertical direction still scrolls.
+            panel.setSizePolicy(QtWidgets.QSizePolicy.Ignored,
+                                panel.sizePolicy().verticalPolicy())
             self._tab_scroll_wrappers[panel] = scroll
 
         self.addTab(self.levels_tab, 'Levels')
