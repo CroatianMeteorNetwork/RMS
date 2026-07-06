@@ -2176,6 +2176,7 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
     sigFindPairsPressed = QtCore.pyqtSignal()
     sigComputeResidualsPressed = QtCore.pyqtSignal()
     sigValidateFitPressed = QtCore.pyqtSignal()
+    sigShowNightPairsToggled = QtCore.pyqtSignal(bool)
     sigRefitNightPressed = QtCore.pyqtSignal()
     sigQuickAlignPressed = QtCore.pyqtSignal()
     sigFindBestFramePressed = QtCore.pyqtSignal()
@@ -2303,6 +2304,16 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         self.refit_night_button.clicked.connect(self.sigRefitNightPressed.emit)
         box.addWidget(self.refit_night_button)
 
+        self.show_night_pairs_checkbox = QtWidgets.QCheckBox('Show Night Pairs')
+        self.show_night_pairs_checkbox.setToolTip(
+            "Overlay the validated cross-frame star pairs on the current frame: circles mark\n"
+            "detections from other frames of the night (the camera is fixed, so their pixel\n"
+            "positions apply directly), needles point to their catalog positions projected at\n"
+            "each pair's own frame time (exaggerated). This is the pair set Refit W/ Night\n"
+            "would fit - useful to eyeball corner coverage before refitting.")
+        self.show_night_pairs_checkbox.setEnabled(False)
+        self.show_night_pairs_checkbox.toggled.connect(self.sigShowNightPairsToggled.emit)
+        box.addWidget(self.show_night_pairs_checkbox)
 
 
         box.addWidget(QtWidgets.QLabel("Residuals:"))

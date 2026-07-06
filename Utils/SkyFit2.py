@@ -3130,6 +3130,24 @@ class PlateTool(QtWidgets.QMainWindow):
                                                                              style=QtCore.Qt.DashLine))
         self.img_frame.addItem(self.residual_lines_img)
         self.residual_lines_img.setZValue(2)
+
+        # Night-pairs overlay: the validated cross-frame star pairs drawn on the current
+        # frame. The camera is fixed, so detections from other frames of the night apply
+        # directly in pixel coordinates; needles point to the catalog position projected at
+        # each pair's own frame time (exaggerated like the residual lines)
+        self.night_pairs_markers = pg.ScatterPlotItem()
+        self.night_pairs_markers.setPen(pg.mkPen((255, 0, 255, 190)))
+        self.night_pairs_markers.setBrush((0, 0, 0, 0))
+        self.night_pairs_markers.setSize(8)
+        self.night_pairs_markers.setSymbol('o')
+        self.night_pairs_markers.setZValue(3)
+        self.img_frame.addItem(self.night_pairs_markers)
+
+        self.night_pairs_needles = pg.PlotCurveItem(connect='pairs',
+                                                    pen=pg.mkPen((255, 0, 255, 160)))
+        self.night_pairs_needles.setZValue(3)
+        self.img_frame.addItem(self.night_pairs_needles)
+        self._night_pairs_key = None
         
         # Fit residuals (astrometric, yellow)
         self.residual_lines_astro = pg.PlotCurveItem(connect='pairs', pen=pg.mkPen((255, 255, 0),
@@ -3326,6 +3344,8 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.param_manager.sigComputeResidualsPressed.connect(self.computeResiduals)
         self.tab.param_manager.sigValidateFitPressed.connect(self.validateFitAcrossFrames)
         self.tab.param_manager.sigRefitNightPressed.connect(self.refitWithNightStars)
+        self.tab.param_manager.sigShowNightPairsToggled.connect(
+            lambda checked: self.updateNightPairsOverlay())
         self.tab.param_manager.sigQuickAlignPressed.connect(self.quickAlign)
         self.tab.param_manager.sigFindBestFramePressed.connect(self.findBestFrame)
         self.tab.param_manager.sigPhotometryPressed.connect(lambda: self.photometry(show_plot=True))
@@ -3696,6 +3716,9 @@ class PlateTool(QtWidgets.QMainWindow):
             # The stored cross-frame validation belongs to the previous folder's night
             self.night_validation = None
             self.tab.param_manager.refit_night_button.setEnabled(False)
+            if hasattr(self.tab.param_manager, 'show_night_pairs_checkbox'):
+                self.tab.param_manager.show_night_pairs_checkbox.setEnabled(False)
+            self.updateNightPairsOverlay()
 
             # Populate menus with mode-specific actions (including F1 shortcut)
             self.changeMode(self.mode)
@@ -4001,6 +4024,10 @@ class PlateTool(QtWidgets.QMainWindow):
             only_update_catalog: [bool] If True, only the catalog stars will be updated. (default: False)
 
         """
+
+        # Keep the night-pairs overlay consistent with the platepar (cheap no-op when
+        # nothing changed; clears the overlay when a manual fit invalidates the validation)
+        self.updateNightPairsOverlay()
 
         if not self.hasData():
             return
@@ -12892,6 +12919,54 @@ class PlateTool(QtWidgets.QMainWindow):
                 tuple(pp.x_poly_rev), tuple(pp.y_poly_rev))
 
 
+    def updateNightPairsOverlay(self):
+        """ Draw or clear the validated cross-frame pair overlay on the current frame.
+
+        Shows the spatially balanced, drift-compensated pair set that Refit W/ Night would
+        fit: circles at the detected positions (from all over the night - valid on any frame
+        because the camera is fixed), needles toward the catalog position projected at each
+        pair's own frame time, exaggerated by the same factor as the residual lines.
+        """
+
+        if not hasattr(self, 'night_pairs_markers'):
+            return
+
+        checked = self.tab.param_manager.show_night_pairs_checkbox.isChecked()
+        valid = (self.platepar is not None
+                 and getattr(self, 'night_validation', None) is not None
+                 and self._nightValidationKey() == self.night_validation_pp_key)
+
+        # Skip the rebuild when nothing changed (this is called from hot paths)
+        key = (checked, id(self.night_validation) if valid else None,
+               self._nightValidationKey() if valid else None)
+        if key == self._night_pairs_key:
+            return
+        self._night_pairs_key = key
+
+        if not (checked and valid):
+            self.night_pairs_markers.setData(pos=[])
+            self.night_pairs_needles.clear()
+            return
+
+        image_groups = buildRefitGroups(self.night_validation, self.platepar,
+                                        drift_correction=True)
+
+        res_scale = 100
+        det_x, det_y, seg_x, seg_y = [], [], [], []
+        for _, jd, img_stars, cat_arr in image_groups:
+            cat_x, cat_y = raDecToXYPP(cat_arr[:, 0], cat_arr[:, 1], jd, self.platepar)
+            for (dx, dy, _), px, py in zip(img_stars, cat_x, cat_y):
+                det_x.append(dx)
+                det_y.append(dy)
+                seg_x.extend([dx, dx + res_scale*(px - dx)])
+                seg_y.extend([dy, dy + res_scale*(py - dy)])
+
+        self.night_pairs_markers.setData(x=np.array(det_x) + 0.5, y=np.array(det_y) + 0.5)
+        self.night_pairs_needles.setData(x=np.array(seg_x) + 0.5, y=np.array(seg_y) + 0.5)
+        print("Night pairs overlay: {:d} pairs from {:d} frames".format(
+            len(det_x), len(image_groups)))
+
+
     def refitWithNightStars(self):
         """ Complement the astrometric fit with the validated cross-frame star pairs.
 
@@ -13039,6 +13114,7 @@ class PlateTool(QtWidgets.QMainWindow):
         # The stored validation no longer matches the new platepar
         self.night_validation = None
         self.tab.param_manager.refit_night_button.setEnabled(False)
+        self.updateNightPairsOverlay()
 
         self.updateDistortion()
         self.updateLeftLabels()
@@ -13172,6 +13248,8 @@ class PlateTool(QtWidgets.QMainWindow):
         # Keep the results for the cross-frame refit, keyed to this exact platepar
         self.night_validation = results
         self.night_validation_pp_key = self._nightValidationKey()
+        self.tab.param_manager.show_night_pairs_checkbox.setEnabled(True)
+        self.updateNightPairsOverlay()
         self.tab.param_manager.refit_night_button.setEnabled(True)
 
         headline = "Validation: global median {:.2f} px, corner median {} (n={})".format(
