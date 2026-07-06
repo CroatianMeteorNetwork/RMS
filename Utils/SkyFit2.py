@@ -15280,8 +15280,15 @@ class PlateTool(QtWidgets.QMainWindow):
 
         ### Calculate the fit residuals for every fitted star ###
 
-        # Get image coordinates of catalog stars
-        catalog_x, catalog_y, catalog_mag = getCatalogStarsImagePositions(catalog_stars, jd, self.platepar)
+        # Get image coordinates of catalog stars. Use the same projection as Find Pairs and
+        # the on-screen catalog overlay (iterative inversion of the forward mapping): with a
+        # platepar whose forward and reverse mappings disagree (large round-trip error, e.g.
+        # a freshly loaded platepar fitted elsewhere), projecting here through the reverse
+        # polynomial instead would offset every residual by the round-trip error - pairs
+        # matched at forward positions, residuals measured at reverse positions
+        catalog_x, catalog_y, catalog_mag = getCatalogStarsImagePositions(catalog_stars, jd,
+                                                                          self.platepar,
+                                                                          use_iterative=True)
 
         # ## Compute standard coordinates ##
 
