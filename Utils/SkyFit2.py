@@ -3643,6 +3643,11 @@ class PlateTool(QtWidgets.QMainWindow):
             if not self.tab.hist.auto_levels:
                 self.tab.hist.setLevels(0, 2**(8*self.img.data.itemsize) - 1)
 
+            # Sync both image items to the histogram levels (setImage assigns each item independent
+            #   min/max levels, and an unchanged histogram won't re-emit them)
+            self.img.setLevels(self.tab.hist.getLevels())
+            self.img_zoom.setLevels(self.tab.hist.getLevels())
+
             # Now that the new image dimensions are available, load this station's mask (or clear a
             #   previous station's mask if this one has none), then render the overlay
             self.initMaskFromFile()
@@ -9587,6 +9592,12 @@ class PlateTool(QtWidgets.QMainWindow):
 
             if not self.tab.hist.auto_levels:
                 self.tab.hist.setLevels(0, 2**(8*self.img.data.itemsize) - 1)
+
+            # Sync both image items to the histogram levels (setImage assigns each item independent
+            #   min/max levels, and an unchanged histogram won't re-emit them)
+            self.img.setLevels(self.tab.hist.getLevels())
+            self.img_zoom.setLevels(self.tab.hist.getLevels())
+
             self.img_frame.autoRange(padding=0)
 
             self.updateCalstars()
