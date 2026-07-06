@@ -1109,14 +1109,24 @@ class Platepar(object):
                 self.updateRefAltAz()
 
                 # Re-fit the forward distortion to the refined pointing so the forward and
-                # reverse mappings stay consistent (diff_step: see the forward fit above)
-                res_fwd = _lstsqFit(
-                    _calcSkyResidualsDistortionVectMulti,
-                    self.x_poly_fwd,
-                    (self, image_groups, 'radial'),
-                    max_nfev=2000, diff_step=1e-6,
-                )
-                self.x_poly_fwd = res_fwd.x
+                # reverse mappings stay consistent (diff_step: see the forward fit above).
+                # The joint sky-residual stage above can wander far along the pointing/
+                # distortion-centre degeneracy (still satisfying the sky residual), leaving
+                # x_poly_fwd a hopeless seed and the forward mapping broken (validation,
+                # which only exercises the reverse mapping, then still looks fine!). Also
+                # seed from the reverse coefficients - pixel-anchored by the joint
+                # refinement - and keep whichever fit ends lower.
+                best_fwd = None
+                for fwd_seed in (self.x_poly_fwd, np.array(self.x_poly_rev)):
+                    res_fwd = _lstsqFit(
+                        _calcSkyResidualsDistortionVectMulti,
+                        np.array(fwd_seed),
+                        (self, image_groups, 'radial'),
+                        max_nfev=2000, diff_step=1e-6,
+                    )
+                    if (best_fwd is None) or (res_fwd.cost < best_fwd.cost):
+                        best_fwd = res_fwd
+                self.x_poly_fwd = best_fwd.x
 
         else:
             if total_stars < min_fit_stars:
@@ -1135,6 +1145,25 @@ class Platepar(object):
         # Set flags
         self.auto_check_fit_refined = False
         self.auto_recalibrated = False
+
+        # Forward/reverse consistency self-check: project a grid through image -> sky ->
+        # image. A broken forward mapping does NOT show up in pixel residuals (they only
+        # exercise the reverse mapping), so check and report it here.
+        gx, gy = np.meshgrid(np.linspace(20, self.X_res - 20, 12),
+                             np.linspace(20, self.Y_res - 20, 8))
+        gx, gy = gx.ravel(), gy.ravel()
+        _, rt_ra, rt_dec, _ = RMS.Astrometry.ApplyAstrometry.xyToRaDecPP(
+            np.full(len(gx), self.JD), gx, gy, np.ones(len(gx)), self,
+            extinction_correction=False, jd_time=True, precompute_pointing_corr=True)
+        rt_x, rt_y = RMS.Astrometry.ApplyAstrometry.raDecToXYPP(
+            np.array(rt_ra), np.array(rt_dec), self.JD, self)
+        rt_err = np.hypot(rt_x - gx, rt_y - gy)
+        print()
+        print("Forward/reverse round-trip: median {:.2f} px, max {:.2f} px".format(
+            float(np.median(rt_err)), float(np.max(rt_err))))
+        if np.max(rt_err) > 2.0:
+            print("WARNING: the forward and reverse mappings are inconsistent - the catalog")
+            print("         overlay and the round-trip heatmap will be off!")
 
         print()
         print("Multi-image fit complete!")

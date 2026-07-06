@@ -12933,11 +12933,42 @@ class PlateTool(QtWidgets.QMainWindow):
 
         summary_after = summarizeValidation(res_cand, pp_cand.X_res, pp_cand.Y_res)
 
+        # A broken forward mapping does not show up in the validation numbers (they only
+        # exercise the reverse, catalog -> image mapping) but it wrecks the catalog overlay
+        # and the round-trip heatmap - so guard the forward/reverse round trip separately
+        def _roundtripMax(pp_x):
+            gx, gy = np.meshgrid(np.linspace(20, pp_x.X_res - 20, 12),
+                                 np.linspace(20, pp_x.Y_res - 20, 8))
+            gx, gy = gx.ravel(), gy.ravel()
+            _, rt_ra, rt_dec, _ = xyToRaDecPP(np.full(len(gx), pp_x.JD), gx, gy,
+                np.ones(len(gx)), pp_x, extinction_correction=False, jd_time=True,
+                precompute_pointing_corr=True)
+            rt_x, rt_y = raDecToXYPP(np.array(rt_ra), np.array(rt_dec), pp_x.JD, pp_x)
+            return float(np.max(np.hypot(rt_x - gx, rt_y - gy)))
+
+        rt_before = _roundtripMax(self.platepar)
+        rt_after = _roundtripMax(pp_cand)
+        rt_broken = rt_after > max(2.0*rt_before, rt_before + 1.0)
+
         # Keep the better of the two platepars - a refit never makes the calibration worse
         print()
         print("Refit validation comparison:")
-        print("  current platepar: " + _fmt(summary_before))
-        print("  refit           : " + _fmt(summary_after))
+        print("  current platepar: " + _fmt(summary_before)
+              + "; round-trip max {:.2f} px".format(rt_before))
+        print("  refit           : " + _fmt(summary_after)
+              + "; round-trip max {:.2f} px".format(rt_after))
+
+        if rt_broken:
+            print("The refit broke the forward/reverse consistency - keeping the current platepar.")
+            self.status_bar.showMessage("Refit rejected (forward mapping inconsistent) - kept the "
+                                        "current platepar.")
+            qmessagebox(title='Refit with night stars',
+                        message="The refit produced an inconsistent forward/reverse mapping "
+                                "(round-trip error {:.1f} px vs {:.1f} px before) and was "
+                                "rejected - the current platepar was kept.".format(
+                                    rt_after, rt_before),
+                        message_type="warning")
+            return
 
         if _score(summary_after) >= _score(summary_before) - 1e-3:
             print("The refit did not improve the validation - keeping the current platepar.")
