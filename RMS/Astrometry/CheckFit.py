@@ -504,8 +504,18 @@ def autoCheckFit(config, platepar, calstars_data, _nn_refinement=False):
 
             calstars_dict = {ff_file: star_data for ff_file, star_data in calstars_list}
 
-            # Extract star list from CALSTARS file from FF file with most stars
-            max_len_ff = max(calstars_dict, key=lambda k: len(calstars_dict[k]))
+            # Extract star list from the FF file with the most high-quality stars. Counting
+            # raw entries would let a junk-flooded frame (moon glare, noise) win and seed
+            # the alignment badly - prefer the SNR-filtered count where the data has SNR
+            # (older CALSTARS files pad the column with -1, in which case fall back to the
+            # raw count)
+            def qualityStarCount(ff_name):
+                star_data = np.array(calstars_dict[ff_name])
+                if (star_data.ndim == 2) and (star_data.shape[1] > 6)                         and np.any(star_data[:, 6] > 0):
+                    return int(np.sum(star_data[:, 6] >= 5.0))
+                return len(star_data)
+
+            max_len_ff = max(calstars_dict, key=qualityStarCount)
 
             # Pass full CALSTARS data (y, x, intensity, ...) - alignPlatepar will extract what it needs
             # and use intensities to infer appropriate catalog limiting magnitude
