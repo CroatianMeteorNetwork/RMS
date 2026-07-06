@@ -390,6 +390,43 @@ def validateFit(platepar, calstars, catalog_stars, frames=None, match_radius=10.
                                   centre_radec_ref=centre_radec_ref,
                                   centre_radec_frame=centre_radec_frame))
 
+    # Per-frame sanity gate: a frame whose pointing refit converged to the wrong place
+    # (clouds, star-poor field, contaminated initial matching) carries a systematic offset
+    # on ALL its stars. The pooled medians stay clean - most frames are fine - but the RMSD
+    # grows a fat tail in every radius bin, which reads as a mysterious global problem.
+    # Exclude whole frames whose median matched residual is an outlier against the night.
+    star_x = np.array(star_x); star_y = np.array(star_y)
+    star_res = np.array(star_res); star_frame = np.array(star_frame)
+    star_ra = np.array(star_ra); star_dec = np.array(star_dec)
+    star_mag = np.array(star_mag); star_intens = np.array(star_intens)
+
+    n_frames_excluded = 0
+    if len(star_res):
+        night_median = float(np.median(star_res))
+        gate = max(3.0*night_median, 0.5)
+        bad_frames = set()
+        for rep in frame_reports:
+            m = star_frame == rep["frame_index"]
+            if np.count_nonzero(m) >= 3 and float(np.median(star_res[m])) > gate:
+                bad_frames.add(rep["frame_index"])
+                rep["excluded"] = True
+
+        if bad_frames:
+            n_frames_excluded = len(bad_frames)
+            keep = ~np.isin(star_frame, list(bad_frames))
+            star_x, star_y = star_x[keep], star_y[keep]
+            star_res, star_frame = star_res[keep], star_frame[keep]
+            star_ra, star_dec = star_ra[keep], star_dec[keep]
+            star_mag, star_intens = star_mag[keep], star_intens[keep]
+
+            keep_u = [k for k in range(len(unmatched_x))
+                      if unmatched_frame[k] not in bad_frames]
+            unmatched_x = [unmatched_x[k] for k in keep_u]
+            unmatched_y = [unmatched_y[k] for k in keep_u]
+            unmatched_frame = [unmatched_frame[k] for k in keep_u]
+            unmatched_ra = [unmatched_ra[k] for k in keep_u]
+            unmatched_dec = [unmatched_dec[k] for k in keep_u]
+
     # Separate failures that are the SAME sky star recurring across frames (a catalog gap,
     # tight double or variable - tells us nothing about the calibration) from the rest.
     # The same star clusters to arcseconds on the sky no matter where the rotation carries
@@ -411,14 +448,15 @@ def validateFit(platepar, calstars, catalog_stars, frames=None, match_radius=10.
                 recurring[k] = True
 
     return dict(
-        star_x=np.array(star_x), star_y=np.array(star_y), star_res=np.array(star_res),
-        star_frame=np.array(star_frame),
-        star_ra=np.array(star_ra), star_dec=np.array(star_dec),
-        star_mag=np.array(star_mag), star_intens=np.array(star_intens),
+        star_x=star_x, star_y=star_y, star_res=star_res,
+        star_frame=star_frame,
+        star_ra=star_ra, star_dec=star_dec,
+        star_mag=star_mag, star_intens=star_intens,
         unmatched_x=ux[~recurring], unmatched_y=uy[~recurring],
         unmatched_frame=uframe[~recurring],
         recurring_x=ux[recurring], recurring_y=uy[recurring],
         n_recurring_detections=int(recurring.sum()),
+        n_frames_excluded=n_frames_excluded,
         frames=frame_reports,
     )
 
@@ -474,7 +512,8 @@ def summarizeValidation(results, x_res, y_res, n_annuli=8, corner_radius_frac=No
     corner_u = int((r_unmatched >= corner_radius_frac).sum()) if len(r_unmatched) else 0
     n_corner = int(corner.sum())
 
-    drifts = [f["drift_arcmin"] for f in results["frames"] if f["drift_arcmin"] is not None]
+    drifts = [f["drift_arcmin"] for f in results["frames"]
+              if (f["drift_arcmin"] is not None) and (not f.get("excluded"))]
 
     return dict(
         annuli=annuli,

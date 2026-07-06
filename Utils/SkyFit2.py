@@ -13024,6 +13024,9 @@ class PlateTool(QtWidgets.QMainWindow):
         if results.get("n_recurring_detections"):
             print("  Recurring unmatched sky stars (likely catalog gaps/doubles): "
                   "{:d} detections".format(results["n_recurring_detections"]))
+        if results.get("n_frames_excluded"):
+            print("  Excluded {:d} frame(s) with a whole-frame offset (clouds or a failed "
+                  "per-frame pointing refit)".format(results["n_frames_excluded"]))
         print("  Global: median {:.2f} px, RMSD {:.2f} px".format(
             summary["median_global"], summary["rmsd_global"]))
         if summary["rmsd_corner"] is not None:
