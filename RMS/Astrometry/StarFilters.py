@@ -109,7 +109,8 @@ def filterPhotometricOutliers(paired_stars, platepar, jd, sigma_threshold=DEFAUL
 
 def filterBlendedStars(paired_stars, catalog_stars, platepar, jd, lim_mag,
                        fwhm_mult=DEFAULT_BLEND_FWHM_MULT,
-                       mag_margin=DEFAULT_BLEND_MAG_MARGIN, verbose=False):
+                       mag_margin=DEFAULT_BLEND_MAG_MARGIN,
+                       pull_px=None, verbose=False):
     """
     Filter paired_stars by removing likely blended stars.
 
@@ -134,6 +135,9 @@ def filterBlendedStars(paired_stars, catalog_stars, platepar, jd, lim_mag,
         new_paired_stars: [PairedStars] Filtered paired stars.
         removed_count: [int] Number of stars removed.
     """
+    if pull_px is None:
+        pull_px = DEFAULT_BLEND_PULL_PX
+
     if len(paired_stars) < 5 or catalog_stars is None:
         return paired_stars, 0
 
@@ -218,10 +222,10 @@ def filterBlendedStars(paired_stars, catalog_stars, platepar, jd, lim_mag,
         # faint neighbour is almost always inside it - but a mag 9 speck cannot move the
         # centroid of a mag 3 star).
         flux_ratio = 10.0**(-0.4*(catalog_mag[np.newaxis, :] - matched_mags[:, np.newaxis]))
-        pull_px = dist_matrix*flux_ratio/(1.0 + flux_ratio)
+        pull_px_matrix = dist_matrix*flux_ratio/(1.0 + flux_ratio)
         threat = np.any(
             (dist_matrix < blend_radii[:, np.newaxis]) & (dist_matrix > 0.1)
-            & (pull_px > DEFAULT_BLEND_PULL_PX), axis=1)
+            & (pull_px_matrix > pull_px), axis=1)
 
         for k, idx in enumerate(check_indices):
             if threat[k]:
@@ -236,7 +240,7 @@ def filterBlendedStars(paired_stars, catalog_stars, platepar, jd, lim_mag,
         if verbose:
             print("  Removed {:d} blended stars (photocentre pull > {:.1f} px from neighbors "
                   "within {:.1f}x FWHM, mag < {:.1f})".format(
-                len(blended_indices), DEFAULT_BLEND_PULL_PX, fwhm_mult, max_mag))
+                len(blended_indices), pull_px, fwhm_mult, max_mag))
 
         return new_paired_stars, len(blended_indices)
 

@@ -2847,7 +2847,7 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         """Show the maximum forward/reverse round-trip error across the image (px)."""
         self.roundtrip_label.setText("Round-trip max: {:.2f} px".format(max_err))
 
-    def updateRMSD(self, rmsd_img, rmsd_angular, angular_error_label, fwdrev_mismatch=False,
+    def updateRMSD(self, rmsd_img, rmsd_angular, angular_error_label, fwdrev_mismatch=False, clean_info=None,
                    overfit=False):
         """Update the RMSD display with color coding based on pixel RMSD.
 
@@ -2868,6 +2868,8 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
             - >= 0.5 px: Poor (red)
         """
         text = "{:.2f} px, {:.2f} {:s}".format(rmsd_img, rmsd_angular, angular_error_label)
+        if clean_info:
+            text += "  ({:s})".format(clean_info)
 
         # Scale thresholds by resolution (reference: 720p)
         scale = self.gui.platepar.Y_res / 720.0
