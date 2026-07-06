@@ -16182,6 +16182,25 @@ class PlateTool(QtWidgets.QMainWindow):
         # Draw the updated residual lines
         self.updateFitResiduals()
 
+        # Refresh the RMSD display so it reflects the current platepar - it otherwise only
+        # updates on a fit and silently goes stale after e.g. a night refit or a manual
+        # platepar change. The fit-specific health checks (forward/reverse mismatch,
+        # held-out overfitting) only run on an actual fit, so no flags here.
+        if len(residuals):
+            rmsd_img = RMSD([entry[3] for entry in residuals])
+            rmsd_angular = RMSD([entry[4] for entry in residuals])*60
+
+            if rmsd_angular > 60:
+                rmsd_angular /= 60
+                angular_error_label = 'deg'
+            elif rmsd_angular > 0.5:
+                angular_error_label = 'arcmin'
+            else:
+                rmsd_angular *= 60
+                angular_error_label = 'arcsec'
+
+            self.tab.param_manager.updateRMSD(rmsd_img, rmsd_angular, angular_error_label)
+
 
     def fitPickedStars(self):
         """ Fit stars that are manually picked. The function first only estimates the astrometry parameters
