@@ -1342,9 +1342,15 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
         recalibrated_platepars, ff_limiting_magnitude, config, mask=mask, show_plot=show_plots
     )
 
-    # Compute the ratio between matched and predicted stars
+    # Compute the ratio between matched and predicted stars. The prediction counts every
+    # catalog star the detector could see, but the extractor never returns more than
+    # config.max_stars detections - so on star-rich nights with sensitive cameras the
+    # prediction can exceed what detection is allowed to deliver, and a perfectly clear
+    # sky would read as cloudy (matched ~ cap, predicted >> cap). Saturate the prediction
+    # at the detection cap so the ratio compares against what is actually achievable.
     ratio = {
-        ff_file: (matched_count[ff_file]/predicted_stars[ff_file] if ff_file in predicted_stars else 0)
+        ff_file: (matched_count[ff_file]/min(predicted_stars[ff_file], config.max_stars)
+                  if (ff_file in predicted_stars) and (predicted_stars[ff_file] > 0) else 0)
         for ff_file in recorded_files
     }
 
