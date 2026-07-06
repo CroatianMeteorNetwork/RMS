@@ -3427,7 +3427,7 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
             ('segment_radius', 'Segment Radius', 2, 20, 4, '4', self.onSegmentRadiusChanged, 'config'),
             ('max_feature_ratio', 'Max Feature Ratio', 50, 200, 80, '0.80', self.onMaxFeatureRatioChanged, 'config'),
             ('roundness_threshold', 'Roundness Threshold', 30, 90, 50, '0.50', self.onRoundnessThresholdChanged, 'config'),
-            ('skyfit_max_stars', 'Max Stars', 100, 5000, 800, '800', self.onMaxStarsChanged, 'session'),
+            ('skyfit_max_stars', 'Max Stars', 100, 5000, 2000, '2000', self.onMaxStarsChanged, 'session'),
         ]
 
         self.sliders = {}
@@ -3765,12 +3765,13 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
         if hasattr(config, 'neighborhood_size'):
             self.neighborhood_size_slider.setValue(config.neighborhood_size)
         if hasattr(config, 'max_stars'):
-            # The config value seeds both budgets: the session one is free to move,
-            # the config one is what Save Config writes back. Seed without snapping so a
-            # config value like 150 loads exactly - otherwise the seeded value counts as
-            # an unsaved config modification with zero user input, and Save Config would
-            # write the snapped value back to the station config
-            self._seedSlider(self.max_stars_slider, config.max_stars)
+            # Only the CONFIG budget tracks the station config (it is what Save Config
+            # writes back). The session budget is a desktop compute limit for calibration
+            # work - seeding it from the Pi's pipeline budget would drag the deep session
+            # default down on every folder load. Seed without snapping so a config value
+            # like 150 loads exactly - otherwise the seeded value counts as an unsaved
+            # config modification with zero user input, and Save Config would write the
+            # snapped value back to the station config
             self._seedSlider(self.config_max_stars_slider, config.max_stars)
         if hasattr(config, 'max_global_intensity'):
             self.max_global_intensity_slider.setValue(config.max_global_intensity)
