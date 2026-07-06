@@ -1817,16 +1817,12 @@ def sensorCharacterization(config, flux_config, dir_path, meteor_data, default_f
         else:
             star_data = np.array(star_data)
 
-            # Compute the median star FWHM over high-quality detections: with permissive
-            # extraction settings a bad night keeps junk detections whose bogus FWHM would
-            # bias the median. Filter on SNR where the data has it (older CALSTARS files
-            # pad the column with -1), otherwise use all entries
-            fwhm_values = star_data[:, 4]
-            if (star_data.shape[1] > 6) and np.any(star_data[:, 6] > 0):
-                snr_mask = star_data[:, 6] >= 5.0
-                if np.any(snr_mask):
-                    fwhm_values = star_data[snr_mask, 4]
-            fwhm_median = np.median(fwhm_values)
+            # Compute the median star FWHM. Deliberately NOT SNR-filtered: junk detections
+            # that survive the PSF fit have star-like FWHM by construction (measured: a 94%
+            # junk-flooded frame shifts the median by only 0.07 px), while an SNR cut
+            # biases the median toward bright stars on perfectly normal nights (+0.4 px at
+            # SNR >= 5, where the median detection SNR of a standard night is ~3.5)
+            fwhm_median = np.median(star_data[:, 4])
 
         # Store the values to the dictionary
         sensor_data[ff_name] = [fwhm_median]
