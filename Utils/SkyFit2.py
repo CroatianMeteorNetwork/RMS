@@ -8690,14 +8690,28 @@ class PlateTool(QtWidgets.QMainWindow):
         Returns:
             int: Number of stars removed.
         """
-        # Get FOV-filtered catalog stars for neighbor lookup
-        # Using filtered catalog prevents false positives from stars behind the camera
-        if hasattr(self, 'catalog_stars_filtered_unmasked') and self.catalog_stars_filtered_unmasked is not None:
-            catalog_for_blend = self.catalog_stars_filtered_unmasked
-        elif hasattr(self, 'catalog_stars') and self.catalog_stars is not None:
-            catalog_for_blend = self.catalog_stars
+
+        # Check the neighbourhood against a catalog DEEPER than the display: the detector's
+        # centroids are pulled by neighbours the display catalog cannot even see (the
+        # cross-frame validation uses the same +1.5 mag convention). Cached per LM.
+        deep_lm = self.cat_lim_mag + 1.5
+        cached = getattr(self, '_blend_catalog_cache', None)
+        if (cached is not None) and abs(cached[0] - deep_lm) < 0.01:
+            catalog_for_blend = cached[1]
         else:
-            return 0
+            try:
+                years_from_J2000 = (self.img_handle.beginning_datetime
+                    - datetime.datetime(2000, 1, 1, 12, 0, 0)).days/365.25
+                catalog_for_blend = StarCatalog.readStarCatalog(
+                    self.config.star_catalog_path, self.config.star_catalog_file,
+                    years_from_J2000=years_from_J2000, lim_mag=deep_lm,
+                    mag_band_ratios=self.config.star_catalog_band_ratios)[0]
+                self._blend_catalog_cache = (deep_lm, catalog_for_blend)
+            except Exception:
+                # Fall back to the display catalog if the deep load fails
+                catalog_for_blend = getattr(self, 'catalog_stars', None)
+                if catalog_for_blend is None:
+                    return 0
 
         jd = date2JD(*self.img_handle.currentFrameTime())
 
@@ -8706,12 +8720,36 @@ class PlateTool(QtWidgets.QMainWindow):
             catalog_for_blend,
             self.platepar,
             jd,
-            self.cat_lim_mag,
+            deep_lm,
             fwhm_mult=fwhm_mult,
             mag_margin=mag_margin,
             verbose=True
         )
 
+        return removed_count
+
+    def filterLowSNRPairs(self, min_snr=5.0):
+        """ Remove paired stars whose detection SNR is below min_snr. Low-SNR detections
+            carry px-level centroid noise (sigma ~ FWHM/(2.355*SNR)) that inflates the
+            reported RMSD and dilutes the fit without constraining the astrometry. Pairs
+            without SNR data (old CALSTARS, value <= 0) are kept.
+
+        Returns:
+            int: Number of pairs removed.
+        """
+        from RMS.Astrometry.StarClasses import PairedStars as _PairedStars
+
+        kept = _PairedStars()
+        removed_count = 0
+        for x, y, fwhm, intens_acc, obj, snr, saturated in self.paired_stars.paired_stars:
+            if (snr is not None) and (snr > 0) and (snr < min_snr):
+                removed_count += 1
+                continue
+            kept.addPair(x, y, fwhm, intens_acc, obj, snr=snr, saturated=saturated)
+
+        if removed_count:
+            self.paired_stars = kept
+            print("Removed {:d} low-SNR (< {:.0f}) pairs".format(removed_count, min_snr))
         return removed_count
 
 
@@ -12638,6 +12676,13 @@ class PlateTool(QtWidgets.QMainWindow):
             if removed > 0:
                 print("Pairs after blend filtering: {}".format(len(self.paired_stars)))
 
+        # Drop low-SNR pairs: their centroid noise inflates the RMSD without constraining
+        # the fit (the cross-frame validation applies the same cut)
+        if len(self.paired_stars) >= 15:
+            removed = self.filterLowSNRPairs()
+            if removed > 0:
+                print("Pairs after SNR filtering: {}".format(len(self.paired_stars)))
+
         # Do a final fit with user's distortion settings
         if len(self.paired_stars) >= 10:
             if pointing_only:
@@ -13606,6 +13651,13 @@ class PlateTool(QtWidgets.QMainWindow):
                 removed = self.filterBlendedStars(fwhm_mult=2.0, mag_margin=0.3)
                 if removed > 0:
                     print("Pairs after blend filtering: {}".format(len(self.paired_stars)))
+
+            # Drop low-SNR pairs: their centroid noise inflates the RMSD without
+            # constraining the fit (the cross-frame validation applies the same cut)
+            if len(self.paired_stars) >= 15:
+                removed = self.filterLowSNRPairs()
+                if removed > 0:
+                    print("Pairs after SNR filtering: {}".format(len(self.paired_stars)))
 
             # Do the final fit with user's settings
             print()
@@ -15258,6 +15310,11 @@ class PlateTool(QtWidgets.QMainWindow):
             removed = self.filterBlendedStars(fwhm_mult=2.0, mag_margin=0.3)
             if removed > 0:
                 print("  Pairs after blend filtering: {}".format(len(self.paired_stars)))
+
+        if len(self.paired_stars) >= 15:
+            removed = self.filterLowSNRPairs()
+            if removed > 0:
+                print("  Pairs after SNR filtering: {}".format(len(self.paired_stars)))
 
         # Old residuals and photometry no longer correspond to the new pairs
         self.residuals = None
