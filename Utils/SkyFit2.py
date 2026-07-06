@@ -3367,6 +3367,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.star_detection.sigMaxFeatureRatioChanged.connect(self.updateMaxFeatureRatio)
         self.tab.star_detection.sigRoundnessThresholdChanged.connect(self.updateRoundnessThreshold)
         self.tab.star_detection.sigTuneParameters.connect(self.tuneStarDetection)
+        self.tab.star_detection.sigSaveCalstarsPressed.connect(self.saveOverrideCalstars)
         self.tab.star_detection.sigSaveToConfig.connect(lambda: self.showCalibrationFilesDialog(save_ftype="Config"))
         self.tab.star_detection.sigCatalogLMChanged.connect(self.updateCatalogLMFromStarDetection)
 
@@ -4902,6 +4903,37 @@ class PlateTool(QtWidgets.QMainWindow):
         except Exception as e:
             print(f"  Error during star detection: {e}")
             traceback.print_exc()
+
+
+    def saveOverrideCalstars(self):
+        """ Write the current star data - CALSTARS merged with any re-detected (override)
+            frames - to a CALSTARS file for sharing or offline analysis. """
+
+        merged = dict(self.calstars) if (hasattr(self, 'calstars') and self.calstars) else {}
+        if getattr(self, 'star_detection_override_enabled', False):
+            merged.update(self.star_detection_override_data)
+        elif getattr(self, 'star_detection_override_data', None) and not merged:
+            merged = dict(self.star_detection_override_data)
+        merged = {ff: stars for ff, stars in merged.items() if len(stars) > 0}
+
+        if not merged:
+            qmessagebox(title='Save CALSTARS', message="No star data to save!",
+                        message_type="warning")
+            return
+
+        default_name = "CALSTARS_{:s}_override.txt".format(self.config.stationID)
+        file_path, _ = QFileDialog.getSaveFileName(self, "Save CALSTARS",
+            os.path.join(self.dir_path, default_name), "CALSTARS files (*.txt)")
+        if not file_path:
+            return
+
+        star_list = [[ff, [list(row) for row in merged[ff]]] for ff in sorted(merged)]
+        CALSTARS.writeCALSTARS(star_list, os.path.dirname(file_path),
+                               os.path.basename(file_path), self.config.stationID,
+                               self.platepar.Y_res if self.platepar else self.config.height,
+                               self.platepar.X_res if self.platepar else self.config.width)
+        print("Saved {:d} frames of star data to {:s}".format(len(star_list), file_path))
+        self.status_bar.showMessage("CALSTARS saved: {:s}".format(os.path.basename(file_path)))
 
 
     def redetectAllImages(self):
