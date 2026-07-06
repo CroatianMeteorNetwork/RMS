@@ -167,7 +167,7 @@ import RMS.ConfigReader as cr
 from RMS.ExtractStars import extractStarsAndSave, extractStarsFF
 import RMS.Formats.CALSTARS as CALSTARS
 from RMS.Formats.Platepar import Platepar, getCatalogStarsImagePositions
-from RMS.Formats.FFfile import convertFRNameToFF, constructFFName
+from RMS.Formats.FFfile import convertFRNameToFF, constructFFName, validFFName
 from RMS.Formats.FrameInterface import detectInputTypeFolder, detectInputTypeFile
 from RMS.Formats.FTPdetectinfo import writeFTPdetectinfo
 from RMS.Formats import StarCatalog
@@ -5027,9 +5027,11 @@ class PlateTool(QtWidgets.QMainWindow):
         # Ensure unsaved mask polygons are applied to the detection
         self.mask = MaskStructure(self.generateMaskImage())
 
-        # Get list of all FF files that exist on disk, excluding placeholders
-        ff_files = [f for f in self.calstars.keys()
-                     if os.path.isfile(os.path.join(self.dir_path, f)) and "_placeholder" not in f]
+        # Get the list of all FF files on disk, excluding placeholders. Enumerate the disk
+        # (not the CALSTARS keys) so stations without a CALSTARS file still get all frames
+        ff_files = [f for f in sorted(os.listdir(self.dir_path))
+                    if validFFName(f) and "_placeholder" not in f
+                    and os.path.isfile(os.path.join(self.dir_path, f))]
         if not ff_files:
             print("  No FF files found on disk")
             return
