@@ -8676,7 +8676,7 @@ class PlateTool(QtWidgets.QMainWindow):
         return removed_count
 
 
-    def filterBlendedStars(self, fwhm_mult=2.0, mag_margin=0.3):
+    def filterBlendedStars(self, fwhm_mult=2.0, mag_margin=0.3, pull_px=None):
         """
         Filter paired_stars by removing likely blended stars.
 
@@ -8723,35 +8723,11 @@ class PlateTool(QtWidgets.QMainWindow):
             deep_lm,
             fwhm_mult=fwhm_mult,
             mag_margin=mag_margin,
+            pull_px=pull_px,
             verbose=True
         )
 
         return removed_count
-
-    def filterLowSNRPairs(self, min_snr=5.0):
-        """ Remove paired stars whose detection SNR is below min_snr. Low-SNR detections
-            carry px-level centroid noise (sigma ~ FWHM/(2.355*SNR)) that inflates the
-            reported RMSD and dilutes the fit without constraining the astrometry. Pairs
-            without SNR data (old CALSTARS, value <= 0) are kept.
-
-        Returns:
-            int: Number of pairs removed.
-        """
-        from RMS.Astrometry.StarClasses import PairedStars as _PairedStars
-
-        kept = _PairedStars()
-        removed_count = 0
-        for x, y, fwhm, intens_acc, obj, snr, saturated in self.paired_stars.paired_stars:
-            if (snr is not None) and (snr > 0) and (snr < min_snr):
-                removed_count += 1
-                continue
-            kept.addPair(x, y, fwhm, intens_acc, obj, snr=snr, saturated=saturated)
-
-        if removed_count:
-            self.paired_stars = kept
-            print("Removed {:d} low-SNR (< {:.0f}) pairs".format(removed_count, min_snr))
-        return removed_count
-
 
     def balanceCatalogMagnitude(self):
         """
@@ -12670,18 +12646,12 @@ class PlateTool(QtWidgets.QMainWindow):
             if removed > 0:
                 print("Pairs after photometric filtering: {}".format(len(self.paired_stars)))
 
-        # Filter blended stars before final fit
+        # Filter gross blends before the final fit (pull > 2 px only - the empirical
+        # threshold sweep showed the fit is best with maximum coverage; see findMatchingPairs)
         if len(self.paired_stars) >= 15:
-            removed = self.filterBlendedStars(fwhm_mult=2.0, mag_margin=0.3)
+            removed = self.filterBlendedStars(fwhm_mult=2.0, mag_margin=0.3, pull_px=2.0)
             if removed > 0:
-                print("Pairs after blend filtering: {}".format(len(self.paired_stars)))
-
-        # Drop low-SNR pairs: their centroid noise inflates the RMSD without constraining
-        # the fit (the cross-frame validation applies the same cut)
-        if len(self.paired_stars) >= 15:
-            removed = self.filterLowSNRPairs()
-            if removed > 0:
-                print("Pairs after SNR filtering: {}".format(len(self.paired_stars)))
+                print("Pairs after gross-blend filtering: {}".format(len(self.paired_stars)))
 
         # Do a final fit with user's distortion settings
         if len(self.paired_stars) >= 10:
@@ -13646,18 +13616,12 @@ class PlateTool(QtWidgets.QMainWindow):
                 if removed > 0:
                     print("Pairs after photometric filtering: {}".format(len(self.paired_stars)))
 
-            # Filter blended stars before final fit
+            # Filter gross blends before the final fit (pull > 2 px only - the empirical
+            # threshold sweep showed the fit is best with maximum coverage)
             if len(self.paired_stars) >= 15:
-                removed = self.filterBlendedStars(fwhm_mult=2.0, mag_margin=0.3)
+                removed = self.filterBlendedStars(fwhm_mult=2.0, mag_margin=0.3, pull_px=2.0)
                 if removed > 0:
-                    print("Pairs after blend filtering: {}".format(len(self.paired_stars)))
-
-            # Drop low-SNR pairs: their centroid noise inflates the RMSD without
-            # constraining the fit (the cross-frame validation applies the same cut)
-            if len(self.paired_stars) >= 15:
-                removed = self.filterLowSNRPairs()
-                if removed > 0:
-                    print("Pairs after SNR filtering: {}".format(len(self.paired_stars)))
+                    print("Pairs after gross-blend filtering: {}".format(len(self.paired_stars)))
 
             # Do the final fit with user's settings
             print()
@@ -15297,24 +15261,21 @@ class PlateTool(QtWidgets.QMainWindow):
         print("  Matched {} of {} detected stars to {} catalog stars in FOV".format(
             len(self.paired_stars), len(det_x), len(cat_x)))
 
-        # Apply the same pair hygiene as the auto-fit: without it the manual workflow fits
-        # (and reports RMSD over) blended and photometrically inconsistent pairs that the
-        # auto-fit and the cross-frame validation both reject - at coarse plate scales the
-        # blends alone can be ~40% of the raw matches and dominate the reported RMSD
+        # Pair hygiene for the FIT, calibrated empirically (threshold sweep scored by
+        # whole-night validation): the fit is best with maximum coverage - zero-mean
+        # centroid noise averages out, and corner pairs matter more than per-pair purity -
+        # so only genuinely biasing pairs are removed. Wrong pairings (photometric clip)
+        # and gross photocentre corruption (pull > 2 px) hurt; everything else stays.
+        # The reported RMSD is computed over the astrometry-grade subset separately.
         if len(self.paired_stars) >= 15:
             removed = self.filterPhotometricOutliers(sigma_threshold=2.5)
             if removed > 0:
                 print("  Pairs after photometric filtering: {}".format(len(self.paired_stars)))
 
         if len(self.paired_stars) >= 15:
-            removed = self.filterBlendedStars(fwhm_mult=2.0, mag_margin=0.3)
+            removed = self.filterBlendedStars(fwhm_mult=2.0, mag_margin=0.3, pull_px=2.0)
             if removed > 0:
-                print("  Pairs after blend filtering: {}".format(len(self.paired_stars)))
-
-        if len(self.paired_stars) >= 15:
-            removed = self.filterLowSNRPairs()
-            if removed > 0:
-                print("  Pairs after SNR filtering: {}".format(len(self.paired_stars)))
+                print("  Pairs after gross-blend filtering: {}".format(len(self.paired_stars)))
 
         # Old residuals and photometry no longer correspond to the new pairs
         self.residuals = None
@@ -15499,10 +15460,37 @@ class PlateTool(QtWidgets.QMainWindow):
             rmsd_angular *= 60
             angular_error_label = 'arcsec'
 
+        # Headline RMSD over the astrometry-grade subset (SNR >= 5; unknown SNR kept): the
+        # fit deliberately uses ALL pairs - the empirical threshold sweep showed maximum
+        # coverage fits best - but low-SNR pairs carry centroid noise (sigma ~
+        # FWHM/(2.355*SNR)) that says nothing about the calibration, so the reported number
+        # is computed on clean stars, comparable with the cross-frame validation.
+        snr_arr = np.array([entry[6] for entry in residuals])
+        clean = (snr_arr <= 0) | (snr_arr >= 5.0)
+        clean_info = None
+        rmsd_img_all = rmsd_img
+        if (clean.sum() >= 10) and (clean.sum() < len(residuals)):
+            res_clean = [residuals[k] for k in np.where(clean)[0]]
+            rmsd_img = RMSD([entry[3] for entry in res_clean])
+            rmsd_angular = 60*RMSD([entry[4] for entry in res_clean])
+            if rmsd_angular > 60:
+                rmsd_angular /= 60
+                angular_error_label = 'deg'
+            elif rmsd_angular > 0.5:
+                angular_error_label = 'arcmin'
+            else:
+                rmsd_angular *= 60
+                angular_error_label = 'arcsec'
+            clean_info = "on {:d} of {:d}".format(int(clean.sum()), len(residuals))
+
         # The GUI shows the plain RMSD; the console carries the full breakdown and the two health
         # checks (forward/reverse consistency and held-out overfitting) that, if tripped, turn the
         # GUI label red.
-        print('RMSD: {:.2f} px, {:.2f} {:s}'.format(rmsd_img, rmsd_angular, angular_error_label))
+        if clean_info:
+            print('RMSD: {:.2f} px, {:.2f} {:s} (astrometry-grade pairs, {:s}; all-pair fit)'.format(
+                rmsd_img, rmsd_angular, angular_error_label, clean_info))
+        else:
+            print('RMSD: {:.2f} px, {:.2f} {:s}'.format(rmsd_img, rmsd_angular, angular_error_label))
 
         # Forward/reverse mapping consistency (console detail)
         if fwdrev_mismatch:
@@ -15514,11 +15502,12 @@ class PlateTool(QtWidgets.QMainWindow):
                   '{:.2f} px).'.format(rmsd_fwd_px_approx, rmsd_img))
 
         # Overfitting check via held-out cross-validation (console detail). Runs on every fit.
-        overfit = self.reportOverfit(rmsd_img)
+        overfit = self.reportOverfit(rmsd_img_all)
 
         # Update RMSD display in the Fit Parameters tab (red on either health-check failure)
         self.tab.param_manager.updateRMSD(rmsd_img, rmsd_angular, angular_error_label,
-                                          fwdrev_mismatch=fwdrev_mismatch, overfit=overfit)
+                                          fwdrev_mismatch=fwdrev_mismatch, overfit=overfit,
+                                          clean_info=clean_info)
 
         # Update fit residuals in the station tab when geopoints are used
         if self.geo_points_obj is not None:
@@ -15540,10 +15529,19 @@ class PlateTool(QtWidgets.QMainWindow):
         # Refresh the RMSD display so it reflects the current platepar - it otherwise only
         # updates on a fit and silently goes stale after e.g. a night refit or a manual
         # platepar change. The fit-specific health checks (forward/reverse mismatch,
-        # held-out overfitting) only run on an actual fit, so no flags here.
+        # held-out overfitting) only run on an actual fit, so no flags here. Like the fit,
+        # the headline is computed over the astrometry-grade subset (SNR >= 5, unknown kept).
         if len(residuals):
-            rmsd_img = RMSD([entry[3] for entry in residuals])
-            rmsd_angular = RMSD([entry[4] for entry in residuals])*60
+            snr_arr = np.array([entry[6] for entry in residuals])
+            clean = (snr_arr <= 0) | (snr_arr >= 5.0)
+            clean_info = None
+            use = residuals
+            if (clean.sum() >= 10) and (clean.sum() < len(residuals)):
+                use = [residuals[k] for k in np.where(clean)[0]]
+                clean_info = "on {:d} of {:d}".format(int(clean.sum()), len(residuals))
+
+            rmsd_img = RMSD([entry[3] for entry in use])
+            rmsd_angular = RMSD([entry[4] for entry in use])*60
 
             if rmsd_angular > 60:
                 rmsd_angular /= 60
@@ -15554,7 +15552,8 @@ class PlateTool(QtWidgets.QMainWindow):
                 rmsd_angular *= 60
                 angular_error_label = 'arcsec'
 
-            self.tab.param_manager.updateRMSD(rmsd_img, rmsd_angular, angular_error_label)
+            self.tab.param_manager.updateRMSD(rmsd_img, rmsd_angular, angular_error_label,
+                                              clean_info=clean_info)
 
 
     def fitPickedStars(self):
