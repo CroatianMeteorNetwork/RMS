@@ -3682,6 +3682,14 @@ class PlateTool(QtWidgets.QMainWindow):
             self.updateLeftLabels()
             self.updateImageNavigationDisplay()
             self.tab.debruijn.updateTable()
+
+            # Session state from the previous folder must not leak into this one: the
+            # re-detected star sets belong to the old station's frames and would otherwise
+            # be merged into this station's star data (validation, Find Best Frame)
+            self.star_detection_override_data = {}
+            self.star_detection_override_enabled = False
+            self.tab.star_detection.use_override_checkbox.setChecked(False)
+
             self.initStarDetectionOverrides()
             self.updateFindBestFrameButton()
 
