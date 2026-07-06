@@ -2180,6 +2180,11 @@ class GeoPoints(object):
 # CatalogStar, GeoPoint, and PairedStars are now imported from RMS.Astrometry.StarClasses
 
 
+class OperationCancelled(Exception):
+    """ Raised inside a cancellable long-running operation when the user presses Stop. """
+    pass
+
+
 class PlateTool(QtWidgets.QMainWindow):
     def __init__(self, input_path=None, config=None, beginning_time=None, fps=None, gamma=None,
         use_fr_files=False, geo_points_input=None, startUI=True, mask=None, nobg=False, peribg=False,
@@ -2700,6 +2705,17 @@ class PlateTool(QtWidgets.QMainWindow):
         self.status_bar = QtWidgets.QStatusBar()
         self.status_bar.setFont(QtGui.QFont('monospace'))
         self.setStatusBar(self.status_bar)
+
+        # Stop button for long-running operations (validation, night refit, redetect-all).
+        # Hidden unless a cancellable operation is running; the operations pump the Qt event
+        # loop, so a click lands mid-operation and sets the cancel flag they check.
+        self._cancel_requested = False
+        self.stop_button = QtWidgets.QPushButton('Stop')
+        self.stop_button.setStyleSheet("color: #c62828; font-weight: bold;")
+        self.stop_button.setToolTip("Abort the running operation")
+        self.stop_button.pressed.connect(self._requestCancel)
+        self.stop_button.setVisible(False)
+        self.status_bar.addPermanentWidget(self.stop_button)
 
         self.file_manager_button = QtWidgets.QPushButton('File Manager')
         self.file_manager_button.pressed.connect(self.showCalibrationFilesDialog)
@@ -4920,6 +4936,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.star_detection.redetect_all_button.setEnabled(False)
         self.tab.star_detection.redetect_button.setEnabled(False)
         self.tab.star_detection.tune_button.setEnabled(False)
+        self._beginCancellableOperation()
         self.status_bar.showMessage(f"Re-detecting stars on {total} images...")
         QtWidgets.QApplication.processEvents()
 
@@ -4945,10 +4962,18 @@ class PlateTool(QtWidgets.QMainWindow):
             for i, ff_name in enumerate(ff_files):
                 print(f"  Processing {i+1}/{total}: {ff_name}")
 
-                # Update status bar and keep UI responsive
+                # Update status bar and keep UI responsive; the Stop button aborts here,
+                # keeping the frames re-detected so far
                 self.status_bar.showMessage(
                     f"Re-detecting stars... {i+1}/{total} ({success_count} successful)")
-                QtWidgets.QApplication.processEvents()
+                try:
+                    self._checkCancelled()
+                except OperationCancelled:
+                    print("Re-detection stopped by the user after "
+                          f"{success_count}/{total} frames.")
+                    self.status_bar.showMessage(
+                        f"Re-detection stopped ({success_count}/{total} frames done)")
+                    break
 
                 try:
                     extra_info = {}
@@ -4989,6 +5014,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self.config.roundness_threshold = original_roundness_threshold
 
             # Re-enable buttons
+            self._endCancellableOperation()
             self.tab.star_detection.redetect_all_button.setText("Re-Detect All")
             self.tab.star_detection.redetect_all_button.setEnabled(True)
             self.tab.star_detection.redetect_button.setEnabled(True)
@@ -12802,6 +12828,28 @@ class PlateTool(QtWidgets.QMainWindow):
                 tuple(pp.x_poly_rev), tuple(pp.y_poly_rev))
 
 
+    def _requestCancel(self):
+        self._cancel_requested = True
+        self.status_bar.showMessage("Stopping...")
+
+    def _beginCancellableOperation(self):
+        """ Show the Stop button and reset the cancel flag. Pair with _endCancellableOperation
+            in a finally block. """
+        self._cancel_requested = False
+        self.stop_button.setVisible(True)
+
+    def _checkCancelled(self):
+        """ Pump the event loop (so the Stop button can be clicked and the UI stays alive)
+            and raise OperationCancelled if a stop was requested. """
+        QtWidgets.QApplication.processEvents()
+        if self._cancel_requested:
+            raise OperationCancelled()
+
+    def _endCancellableOperation(self):
+        self._cancel_requested = False
+        self.stop_button.setVisible(False)
+
+
     def updateNightPairsOverlay(self):
         """ Draw or clear the validated cross-frame pair overlay on the current frame.
 
@@ -12916,6 +12964,7 @@ class PlateTool(QtWidgets.QMainWindow):
         print("Refitting astrometry with {:d} night star pairs from {:d} frames "
               "(photometry untouched)...".format(n_pairs, len(image_groups)))
         self.tab.param_manager.setFitButtonBusy(True)
+        self._beginCancellableOperation()
         QtWidgets.QApplication.processEvents()
         try:
             pp_cand = copy.deepcopy(self.platepar)
@@ -12924,11 +12973,23 @@ class PlateTool(QtWidgets.QMainWindow):
                 fixed_scale=self.fixed_scale)
 
             self.status_bar.showMessage("Validating the refit...")
-            QtWidgets.QApplication.processEvents()
+
+            def refit_progress(i, n, ff_name):
+                self.status_bar.showMessage(
+                    "Validating the refit: frame {:d}/{:d}".format(i + 1, n))
+                self._checkCancelled()
 
             res_cand = validateFit(pp_cand, merged, catalog_val, frames=frames,
+                progress_callback=refit_progress,
                 fps=self.config.fps, chunk_frames=getattr(self, 'calstars_chunk_frames', 256))
+
+        except OperationCancelled:
+            self.status_bar.showMessage("Refit cancelled - the current platepar was kept")
+            print("Refit cancelled - the current platepar was kept.")
+            return
+
         finally:
+            self._endCancellableOperation()
             self.tab.param_manager.setFitButtonBusy(False)
 
         if not len(res_cand["star_res"]):
@@ -13070,19 +13131,26 @@ class PlateTool(QtWidgets.QMainWindow):
 
         self.tab.param_manager.validate_fit_button.setText("Validating...")
         self.tab.param_manager.validate_fit_button.setEnabled(False)
+        self._beginCancellableOperation()
         QtWidgets.QApplication.processEvents()
 
         try:
             def progress(i, n, ff_name):
                 self.status_bar.showMessage("Validating fit: frame {:d}/{:d}".format(i + 1, n))
-                QtWidgets.QApplication.processEvents()
+                self._checkCancelled()
 
             results = validateFit(self.platepar, merged, catalog_val, frames=frames,
                                   progress_callback=progress, fps=self.config.fps,
                                   chunk_frames=getattr(self, 'calstars_chunk_frames', 256))
             summary = summarizeValidation(results, self.platepar.X_res, self.platepar.Y_res)
 
+        except OperationCancelled:
+            self.status_bar.showMessage("Validation cancelled")
+            print("Validation cancelled.")
+            return
+
         finally:
+            self._endCancellableOperation()
             self.tab.param_manager.validate_fit_button.setText("Validate Across Frames")
             self.tab.param_manager.validate_fit_button.setEnabled(True)
 
