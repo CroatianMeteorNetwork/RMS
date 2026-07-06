@@ -329,7 +329,7 @@ def extractStarsFF(
         ff_dir: [str] Path to directory where FF files are.
         ff_name: [str] Name of the FF file.
         config: [config object] configuration object (loaded from the .config file)
-        max_global_intensity: [int] maximum mean intensity of an image before it is discarded as too bright
+        max_global_intensity: [int] maximum median intensity of an image before it is discarded as too bright. 230 by default.
         border: [int] apply a mask on the detections by removing all that are too close to the given image 
             border (in pixels)
         neighborhood_size: [int] size of the neighbourhood for the maximum search (in pixels)
@@ -439,7 +439,7 @@ def extractStarsImgHandle(img_handle,
         dark: [ndarray] Dark frame. None by default.
         mask: [ndarray] Mask image. None by default.
         config: [config object] configuration object (loaded from the .config file)
-        max_global_intensity: [int] maximum mean intensity of an image before it is discarded as too bright
+        max_global_intensity: [int] maximum median intensity of an image before it is discarded as too bright. 230 by default.
         border: [int] apply a mask on the detections by removing all that are too close to the given image 
             border (in pixels)
         neighborhood_size: [int] size of the neighbourhood for the maximum search (in pixels)
