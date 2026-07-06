@@ -7606,7 +7606,12 @@ class PlateTool(QtWidgets.QMainWindow):
         # Set photometry parameters
         self.platepar.mag_0 = -2.5
         self.platepar.mag_lev = photom_offset
-        self.platepar.mag_lev_stddev = self.photom_fit_stddev
+        # Guard against a degenerate photometric fit (too few stars) poisoning the platepar
+        # with NaN - it leaks into every later magnitude error as "+nan"
+        if (self.photom_fit_stddev is not None) and np.isfinite(self.photom_fit_stddev):
+            self.platepar.mag_lev_stddev = self.photom_fit_stddev
+        else:
+            self.platepar.mag_lev_stddev = 0.0
         self.platepar.vignetting_coeff = vignetting_coeff
 
         # Fit the limiting magnitude model: log10(S/N) vs the calibrated (vignetting + extinction
@@ -16035,7 +16040,10 @@ class PlateTool(QtWidgets.QMainWindow):
             # Compute magnitude error from SNR (same formula as used in lightcurve plots and FTPdetectinfo)
             if snr > 0:
                 mag_err_random = 2.5*np.log10(1 + 1/snr)
-                mag_err = np.sqrt(mag_err_random**2 + self.platepar.mag_lev_stddev**2)
+                mag_lev_std = self.platepar.mag_lev_stddev
+                if (mag_lev_std is None) or (not np.isfinite(mag_lev_std)):
+                    mag_lev_std = 0.0
+                mag_err = np.sqrt(mag_err_random**2 + mag_lev_std**2)
             else:
                 mag_err = 0.0
 
