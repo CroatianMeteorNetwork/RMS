@@ -12926,7 +12926,8 @@ class PlateTool(QtWidgets.QMainWindow):
             self.status_bar.showMessage("Validating the refit...")
             QtWidgets.QApplication.processEvents()
 
-            res_cand = validateFit(pp_cand, merged, catalog_val, frames=frames)
+            res_cand = validateFit(pp_cand, merged, catalog_val, frames=frames,
+                fps=self.config.fps, chunk_frames=getattr(self, 'calstars_chunk_frames', 256))
         finally:
             self.tab.param_manager.setFitButtonBusy(False)
 
@@ -13077,7 +13078,8 @@ class PlateTool(QtWidgets.QMainWindow):
                 QtWidgets.QApplication.processEvents()
 
             results = validateFit(self.platepar, merged, catalog_val, frames=frames,
-                                  progress_callback=progress)
+                                  progress_callback=progress, fps=self.config.fps,
+                                  chunk_frames=getattr(self, 'calstars_chunk_frames', 256))
             summary = summarizeValidation(results, self.platepar.X_res, self.platepar.Y_res)
 
         finally:
@@ -14234,7 +14236,8 @@ class PlateTool(QtWidgets.QMainWindow):
         else:
 
             # Load the calstars file
-            calstars_list, _ = CALSTARS.readCALSTARS(self.dir_path, calstars_file)
+            calstars_list, self.calstars_chunk_frames = CALSTARS.readCALSTARS(
+                self.dir_path, calstars_file)
 
             print('CALSTARS file: ' + calstars_file + ' loaded!')
 
