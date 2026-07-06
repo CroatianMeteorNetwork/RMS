@@ -3364,6 +3364,7 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
     sigRedetectStars = QtCore.pyqtSignal()
     sigRedetectAllImages = QtCore.pyqtSignal()
     sigTuneParameters = QtCore.pyqtSignal()
+    sigSaveCalstarsPressed = QtCore.pyqtSignal()
     sigSaveToConfig = QtCore.pyqtSignal()
     sigCatalogLMChanged = QtCore.pyqtSignal(float)
     sigUseOverrideToggled = QtCore.pyqtSignal()
@@ -3550,6 +3551,13 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
         self.save_config_button.setEnabled(False)
         self.save_config_button.clicked.connect(self.sigSaveToConfig.emit)
         btn_layout.addWidget(self.save_config_button)
+
+        self.save_calstars_button = QtWidgets.QPushButton('Save CALSTARS...')
+        self.save_calstars_button.setToolTip(
+            'Write the current star data (CALSTARS merged with any re-detected frames)\n'
+            'to a CALSTARS file, e.g. for sharing or offline analysis')
+        self.save_calstars_button.clicked.connect(self.sigSaveCalstarsPressed.emit)
+        btn_layout.addWidget(self.save_calstars_button)
 
         layout.addLayout(btn_layout)
         layout.addSpacing(self.scaledSpacing(0.6))
