@@ -3692,6 +3692,10 @@ class PlateTool(QtWidgets.QMainWindow):
             self.initStarDetectionOverrides()
             self.updateFindBestFrameButton()
 
+            # The stored cross-frame validation belongs to the previous folder's night
+            self.night_validation = None
+            self.tab.param_manager.refit_night_button.setEnabled(False)
+
             # Populate menus with mode-specific actions (including F1 shortcut)
             self.changeMode(self.mode)
 
