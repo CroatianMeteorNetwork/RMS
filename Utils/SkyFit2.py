@@ -3743,6 +3743,13 @@ class PlateTool(QtWidgets.QMainWindow):
             if hasattr(self, 'residual_text'):
                 self.residual_text.clear()
 
+            # The tuned catalog limiting magnitude belongs to the previous station's camera -
+            # left set, it silently feeds the new station's auto-fit final stages
+            self.catalog_lm_tuned = False
+
+            # Satellite tracks were projected with the previous folder's platepar and times
+            self.clearSatelliteTrackItems()
+
             # Populate menus with mode-specific actions (including F1 shortcut)
             self.changeMode(self.mode)
 
@@ -14348,6 +14355,10 @@ class PlateTool(QtWidgets.QMainWindow):
             else:
 
                 print("The CALSTARS file is missing, trying to generate it automatically...")
+
+                # No CALSTARS file to read the chunk size from - don't inherit a previous
+                # folder's value
+                self.calstars_chunk_frames = 256
                 try:
                     calstars_list = extractStarsAndSave(self.config, self.dir_path)
                 except Exception as e:
@@ -17350,22 +17361,26 @@ class PlateTool(QtWidgets.QMainWindow):
         else:
             print("Cannot load satellite tracks: Skyfield not available.")
 
-    def drawSatelliteTracks(self):
-        """ Draws satellite tracks on the image. """
-        
-        # Clear existing
-        for curve in self.sat_track_curves:
+    def clearSatelliteTrackItems(self):
+        """ Remove all drawn satellite track items from the image. """
+        for curve in getattr(self, 'sat_track_curves', []):
             self.img_frame.removeItem(curve)
-        for label in self.sat_track_labels:
+        for label in getattr(self, 'sat_track_labels', []):
             self.img_frame.removeItem(label)
-        for arrow in self.sat_track_arrows:
+        for arrow in getattr(self, 'sat_track_arrows', []):
             self.img_frame.removeItem(arrow)
-        for marker in self.sat_markers:
+        for marker in getattr(self, 'sat_markers', []):
             self.img_frame.removeItem(marker)
         self.sat_track_curves = []
         self.sat_track_labels = []
         self.sat_track_arrows = []
         self.sat_markers = []
+
+    def drawSatelliteTracks(self):
+        """ Draws satellite tracks on the image. """
+
+        # Clear existing
+        self.clearSatelliteTrackItems()
 
         if not self.show_sattracks:
             return
