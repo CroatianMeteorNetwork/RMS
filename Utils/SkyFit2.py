@@ -12713,24 +12713,40 @@ class PlateTool(QtWidgets.QMainWindow):
                     # Redraw catalog stars and distortion center with updated platepar
                     self.updateStars(only_update_catalog=True)
                     self.updateDistortionCenterMarker()
-                    QtWidgets.QApplication.processEvents()
 
                     # Restore original platepar so optimizer isn't corrupted
                     self.platepar = saved_pp
 
-                ransac_result = self.platepar.fitAstrometry(
-                    jd, img_stars_arr, catalog_stars_filtered,
-                    first_platepar_fit=True,
-                    use_nn_cost=True,
-                    final_catalog_stars=tuned_catalog,
-                    iteration_callback=iteration_callback
-                )
+                    # Abort point: raises OperationCancelled if Stop was pressed (also pumps
+                    # the event loop so the click can land)
+                    self._checkCancelled()
 
-                # Mark error overlay for recomputation after the platepar changed
-                self.error_overlay_needs_update = True
+                # The fit mutates the platepar in place - keep a copy to restore on cancel
+                platepar_backup = copy.deepcopy(self.platepar)
+                self._beginCancellableOperation()
+                try:
+                    ransac_result = self.platepar.fitAstrometry(
+                        jd, img_stars_arr, catalog_stars_filtered,
+                        first_platepar_fit=True,
+                        use_nn_cost=True,
+                        final_catalog_stars=tuned_catalog,
+                        iteration_callback=iteration_callback
+                    )
 
+                    # Mark error overlay for recomputation after the platepar changed
+                    self.error_overlay_needs_update = True
+                finally:
+                    self._endCancellableOperation()
                 print("  NN fit complete: RA={:.2f} Dec={:.2f} Scale={:.3f} arcmin/px".format(
                     self.platepar.RA_d, self.platepar.dec_d, 60/self.platepar.F_scale))
+            except OperationCancelled:
+                # Restore the platepar and re-raise: returning a falsy value here would
+                # send the caller into the astrometry.net fallback - the opposite of Stop
+                self.platepar = platepar_backup
+                self.updateStars(only_update_catalog=True)
+                self.updateDistortionCenterMarker()
+                print("  NN fit cancelled - platepar restored.")
+                raise
             except Exception as e:
                 print("  NN fit failed: {} - falling back to astrometry.net".format(str(e)))
                 return False
@@ -13836,6 +13852,13 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
     def quickAlign(self):
+        try:
+            return self._quickAlignImpl()
+        except OperationCancelled:
+            self.status_bar.showMessage("Quick align cancelled - platepar restored")
+            return
+
+    def _quickAlignImpl(self):
         """ Re-fit pointing using existing distortion. Uses astrometry.net if NNalign fails.
 
         Flow: tryQuickAlignment -> if fails, astrometry.net solve -> apply pointing
@@ -13890,6 +13913,13 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
     def autoFitAstrometryNet(self):
+        try:
+            return self._autoFitAstrometryNetImpl()
+        except OperationCancelled:
+            self.status_bar.showMessage("Auto-fit cancelled - platepar restored")
+            return
+
+    def _autoFitAstrometryNetImpl(self):
         """ Auto fit using astrometry.net. Called from Auto Fit button. """
 
         # If there are existing matched star pairs, warn the user they will be replaced
@@ -14177,11 +14207,17 @@ class PlateTool(QtWidgets.QMainWindow):
                 # Redraw catalog stars and distortion center with updated platepar
                 self.updateStars(only_update_catalog=True)
                 self.updateDistortionCenterMarker()
-                QtWidgets.QApplication.processEvents()
 
                 # Restore original platepar so optimizer isn't corrupted
                 self.platepar = saved_pp
 
+                # Abort point: raises OperationCancelled if Stop was pressed (also pumps
+                # the event loop so the click can land)
+                self._checkCancelled()
+
+            # The fit mutates the platepar in place - keep a copy to restore on cancel
+            platepar_backup = copy.deepcopy(self.platepar)
+            self._beginCancellableOperation()
             try:
                 self.platepar.fitAstrometry(
                     jd, img_stars_arr, catalog_stars_extended,  # Extended catalog for edge stars
@@ -14196,8 +14232,17 @@ class PlateTool(QtWidgets.QMainWindow):
 
                 print("  NN fit complete: RA={:.2f} Dec={:.2f} Scale={:.3f} arcmin/px".format(
                     self.platepar.RA_d, self.platepar.dec_d, 60/self.platepar.F_scale))
+            except OperationCancelled:
+                # Restore and re-raise - the entry-point guard reports the cancellation
+                self.platepar = platepar_backup
+                self.updateStars(only_update_catalog=True)
+                self.updateDistortionCenterMarker()
+                print("  NN fit cancelled - platepar restored.")
+                raise
             except Exception as e:
                 print("  NN fit failed: {}".format(str(e)))
+            finally:
+                self._endCancellableOperation()
 
             # Populate paired_stars from NN matches for visualization
             self.paired_stars = PairedStars()
