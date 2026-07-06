@@ -913,15 +913,6 @@ class Platepar(object):
             return _skySeparationsAllGroups(pp_copy)
 
 
-        def _calcSkyResidualsAstroAndDistortionRadialVectMulti(params, platepar, image_groups):
-            """Pointing + forward radial distortion on the sky residual, over all groups."""
-
-            pp_copy = _applyPointingParams(platepar, params)
-            pp_copy.x_poly_fwd = np.array(params[4:])
-
-            return _skySeparationsAllGroups(pp_copy)
-
-
         def _calcImageResidualsAstroAndDistortionRadialVectMulti(params, platepar, image_groups):
             """Pointing + reverse radial distortion on the pixel residual, over all groups."""
 
@@ -1019,88 +1010,31 @@ class Platepar(object):
 
                 ### ###
 
-            # Fit radial distortion (+ pointing) - same structure as the single-image radial
-            # fit: iterate forward (pointing + distortion on the sky residual) and reverse
-            # (distortion on the pixel residual) until consistent, then refine pointing +
-            # reverse jointly on the pixel residual and re-fit the forward mapping to it
+            # Fit radial distortion (+ pointing), pixel-first: pointing and the reverse
+            # distortion are fitted jointly on the pixel residual - the metric that is
+            # validated and reported - and the forward mapping is fitted ONCE at the end,
+            # with the pointing frozen, seeded from the reverse coefficients. The historical
+            # forward-first structure (pointing + forward on the sky residual, iterated
+            # against the reverse) added nothing the pixel stage does not re-derive, and its
+            # joint sky stage could wander far along the pointing/distortion-centre
+            # degeneracy, leaving a broken forward mapping that pixel-based validation is
+            # blind to.
             else:
 
-                print("Fitting radial distortion + pointing across all images...")
+                print("Fitting radial distortion + pointing across all images (pixel residual)...")
 
                 p0 = [self.RA_d/360, self.dec_d/90, self.pos_angle_ref/360, abs(self.F_scale)]
-                p0 += self.x_poly_fwd.tolist()
+                p0 += self.x_poly_rev.tolist()
 
-                max_fwd_rev_iter = 3
-                convergence_threshold = 1e-6
-
-                for fwd_rev_iter in range(max_fwd_rev_iter):
-                    prev_x_poly_fwd = self.x_poly_fwd.copy()
-                    prev_x_poly_rev = self.x_poly_rev.copy()
-
-                    ### FORWARD MAPPING FIT ###
-                    # diff_step: the angular residuals (~1e-5 rad) sit near the transform's
-                    # numerical noise floor, so the default finite-difference step produces a
-                    # noise Jacobian and the optimizer runs to its evaluation cap (~100x
-                    # slower) without converging any further
-                    res = _lstsqFit(
-                        _calcSkyResidualsAstroAndDistortionRadialVectMulti,
-                        p0,
-                        (self, image_groups),
-                        max_nfev=2000, diff_step=1e-6,
-                    )
-                    fwd_status = "converged" if res.success else "stopped"
-
-                    # Update fitted astrometric parameters (unnormalize the pointing)
-                    ra_ref, dec_ref, pos_angle_ref, F_scale = res.x[:4]
-                    self.RA_d = (360*ra_ref) % (360)
-                    self.dec_d = -90 + (90*dec_ref + 90) % (180.000001)
-                    self.pos_angle_ref = (360*pos_angle_ref) % (360)
-                    self.F_scale = abs(F_scale)
-
-                    self.updateRefAltAz()
-
-                    # Extract distortion parameters
-                    self.x_poly_fwd = np.array(res.x[4:])
-
-                    # Update p0 for the next iteration with current fitted values
-                    p0 = [self.RA_d/360.0, self.dec_d/90.0, self.pos_angle_ref/360.0,
-                          abs(self.F_scale)]
-                    p0 += self.x_poly_fwd.tolist()
-
-                    ### REVERSE MAPPING FIT ###
-                    # Initialize the reverse fit from the forward coefficients
-                    rev_init = self.x_poly_fwd.copy()
-                    res_rev = _lstsqFit(
-                        _calcImageResidualsDistortionVectMulti,
-                        rev_init,
-                        (self, image_groups, 'radial'),
-                    )
-                    rev_status = "converged" if res_rev.success else "stopped"
-
-                    self.x_poly_rev = res_rev.x
-
-                    # Check convergence
-                    fwd_change = np.max(np.abs(self.x_poly_fwd - prev_x_poly_fwd))
-                    rev_change = np.max(np.abs(self.x_poly_rev - prev_x_poly_rev))
-
-                    print("  Fwd-rev iteration {}: fwd_change={:.2e} ({}), rev_change={:.2e} ({})".format(
-                        fwd_rev_iter + 1, fwd_change, fwd_status, rev_change, rev_status))
-
-                    if fwd_change < convergence_threshold and rev_change < convergence_threshold:
-                        if fwd_rev_iter > 0:
-                            print("  Converged after {} iterations".format(fwd_rev_iter + 1))
-                        break
-
-                # Final refinement: fit pointing + reverse distortion jointly on the pixel
-                # residual - the metric reported to users (see the single-image fit)
-                p_final = [self.RA_d/360.0, self.dec_d/90.0, self.pos_angle_ref/360.0,
-                           abs(self.F_scale)] + self.x_poly_rev.tolist()
-                res_final = _lstsqFit(
+                res = _lstsqFit(
                     _calcImageResidualsAstroAndDistortionRadialVectMulti,
-                    p_final,
+                    p0,
                     (self, image_groups),
                 )
-                xf = res_final.x
+                print("  Joint pointing + reverse fit: {:s}".format(
+                    "converged" if res.success else "stopped"))
+
+                xf = res.x
                 self.RA_d = (360*xf[0]) % 360
                 self.dec_d = -90 + (90*xf[1] + 90) % (180.000001)
                 self.pos_angle_ref = (360*xf[2]) % 360
@@ -1108,14 +1042,12 @@ class Platepar(object):
                 self.x_poly_rev = np.array(xf[4:])
                 self.updateRefAltAz()
 
-                # Re-fit the forward distortion to the refined pointing so the forward and
-                # reverse mappings stay consistent (diff_step: see the forward fit above).
-                # The joint sky-residual stage above can wander far along the pointing/
-                # distortion-centre degeneracy (still satisfying the sky residual), leaving
-                # x_poly_fwd a hopeless seed and the forward mapping broken (validation,
-                # which only exercises the reverse mapping, then still looks fine!). Also
-                # seed from the reverse coefficients - pixel-anchored by the joint
-                # refinement - and keep whichever fit ends lower.
+                # Fit the forward mapping to the refined pointing. Seed from both the
+                # existing forward coefficients and the reverse ones (forward ~ reverse for
+                # the distortion) and keep the lower-cost fit - a stale or garbage forward
+                # seed can strand the fit in a far minimum (diff_step: the angular residuals
+                # sit near the transform's numerical noise floor, so the default finite-
+                # difference step produces a noise Jacobian)
                 best_fwd = None
                 for fwd_seed in (self.x_poly_fwd, np.array(self.x_poly_rev)):
                     res_fwd = _lstsqFit(
