@@ -1414,11 +1414,12 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
         ax[0].plot(time_arr, [ratio_threshold, ratio_threshold], linestyle='dashed', color='r', zorder=5, \
             alpha=0.5, label='Threshold')
 
-        # Reference for reading the ratio: ~1 = the full clear-sky expectation is delivered
-        # (values slightly above 1 are normal - the deficit is calibrated on uncapped
-        # frames, whose fainter star population underperforms the bright capped subset)
+        # Reference for reading the plot: on the line, the frame delivered exactly the
+        # expected star count (slightly above is normal - the deficit is calibrated on
+        # uncapped frames, whose fainter star population underperforms the bright capped
+        # subset)
         ax[0].plot(time_arr, [1.0, 1.0], linestyle='dotted', color='g', zorder=5,
-            alpha=0.6, label='Clear-sky expectation')
+            alpha=0.6, label='Matched = Expected')
 
         # Shade the regions with clear skies
         if len(time_intervals):
@@ -1453,8 +1454,7 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
             ax[1].scatter(
                 [FFfile.filenameToDatetime(ff) for ff in expected_stars],
                 [expected_stars[ff] for ff in expected_stars],
-                label='Expected (cap {:d}, deficit {:.2f})'.format(
-                    config.max_stars, detection_deficit),
+                label='Expected stars',
                 marker='x', color='gray', zorder=5,
             )
         
