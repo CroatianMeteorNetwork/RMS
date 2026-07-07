@@ -207,6 +207,29 @@ def addRequiredColumns(conn, d):
 
     return set(getColumns(conn))
 
+def getLatestObservationRecord(conn):
+    """Get the most recent observation summary record from the database.
+
+    Arguments:
+        conn: connection to database.
+
+    Return:
+        [dict or None] The latest record as a column name -> value dict, or None if the table is empty.
+    """
+
+    cursor = conn.execute(
+        f"SELECT * FROM {OBSERVATIONS_TABLE_NAME} ORDER BY {NIGHT_DATA_DIR_COL} DESC LIMIT 1")
+
+    row = cursor.fetchone()
+
+    if row is None:
+        return None
+
+    columns = [description[0] for description in cursor.description]
+
+    return dict(zip(columns, row))
+
+
 def storeDictInDB(conn, d, debug=False):
     """Store the dict d in the observation summary database, create new columns if needed.
 
