@@ -1414,12 +1414,6 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
         ax[0].plot(time_arr, [ratio_threshold, ratio_threshold], linestyle='dashed', color='r', zorder=5, \
             alpha=0.5, label='Threshold')
 
-        # Reference for reading the plot: on the line, the frame delivered exactly the
-        # expected star count (slightly above is normal - the deficit is calibrated on
-        # uncapped frames, whose fainter star population underperforms the bright capped
-        # subset)
-        ax[0].plot(time_arr, [1.0, 1.0], linestyle='dotted', color='g', zorder=5,
-            alpha=0.6, label='Matched = Expected')
 
         # Shade the regions with clear skies
         if len(time_intervals):
