@@ -1378,7 +1378,7 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
         # Plot the computed ratio
         ax[0].scatter([FFfile.filenameToDatetime(x) for x in ratio.keys()], list(ratio.values()), \
             marker='o', s=5, c='k', zorder=6, label='Measurements')
-        ax[0].set_ylabel("Matched/Predicted stars")
+        ax[0].set_ylabel("Matched/Predicted stars\n(prediction capped at max_stars)")
 
         # Plot the radio threshold
         times = [FFfile.filenameToDatetime(x) for x in ratio.keys()]
@@ -1412,6 +1412,17 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
             [predicted_stars[ff] for ff in predicted_stars],
             label='Predicted stars', marker='x', color='k', zorder=5,
         )
+
+        # Show the prediction the ratio actually uses: detection never returns more than
+        # max_stars, so the prediction saturates there - without this line the two panels
+        # disagree on star-rich nights (top ratio uses the cap, bottom raw counts do not)
+        if any(predicted_stars[ff] > config.max_stars for ff in predicted_stars):
+            ax[1].scatter(
+                [FFfile.filenameToDatetime(ff) for ff in predicted_stars],
+                [min(predicted_stars[ff], config.max_stars) for ff in predicted_stars],
+                label='Predicted (capped at max_stars={:d})'.format(config.max_stars),
+                marker='x', color='gray', zorder=5,
+            )
         
 
         # Shade the regions with clear skies
