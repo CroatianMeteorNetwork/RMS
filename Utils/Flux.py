@@ -1342,15 +1342,43 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
         recalibrated_platepars, ff_limiting_magnitude, config, mask=mask, show_plot=show_plots
     )
 
-    # Compute the ratio between matched and predicted stars. The prediction counts every
-    # catalog star the detector could see, but the extractor never returns more than
-    # config.max_stars detections - so on star-rich nights with sensitive cameras the
-    # prediction can exceed what detection is allowed to deliver, and a perfectly clear
-    # sky would read as cloudy (matched ~ cap, predicted >> cap). Saturate the prediction
-    # at the detection cap so the ratio compares against what is actually achievable.
+    # Compute the ratio between matched and EXPECTED stars. Two effects separate the raw
+    # prediction from what detection can deliver on a perfectly clear sky:
+    # 1. The extractor never returns more than config.max_stars candidates, so the
+    #    prediction saturates at the cap (on star-rich nights predicted >> cap and the raw
+    #    ratio would read a clear sky as cloudy).
+    # 2. The chain from candidates to matched stars loses a roughly constant fraction
+    #    (PSF-fit acceptance, catalog matching, prediction model error) - a clear-sky
+    #    "deficit" that would otherwise cap the achievable ratio well below 1.
+    # The deficit is self-calibrated from the night: the median matched/predicted over
+    # frames where the cap does NOT bind and the sky is already clearly clear. It is
+    # applied to the CAP ONLY - uncapped frames keep the historical matched/predicted
+    # semantics the threshold was tuned on; only cap-bound frames compare against what
+    # the capped detection chain actually delivers. Clamped to [0.5, 1] so a contaminated
+    # calibration sample cannot inflate cloudy frames past the threshold, and left at 1
+    # (conservative, previous behavior) when there is no usable sample (fully capped or
+    # fully cloudy night).
+    deficit_sample = [
+        matched_count[ff]/predicted_stars[ff]
+        for ff in recorded_files
+        if (ff in predicted_stars) and (0 < predicted_stars[ff] <= config.max_stars)
+        and (matched_count[ff]/predicted_stars[ff] >= ratio_threshold)
+    ]
+    if len(deficit_sample) >= 5:
+        detection_deficit = float(np.clip(np.median(deficit_sample), 0.5, 1.0))
+        log.info("Clear-sky detection deficit self-calibrated from {:d} uncapped frames: "
+                 "{:.2f}".format(len(deficit_sample), detection_deficit))
+    else:
+        detection_deficit = 1.0
+
+    expected_stars = {
+        ff: min(predicted_stars[ff], detection_deficit*config.max_stars)
+        for ff in predicted_stars
+    }
+
     ratio = {
-        ff_file: (matched_count[ff_file]/min(predicted_stars[ff_file], config.max_stars)
-                  if (ff_file in predicted_stars) and (predicted_stars[ff_file] > 0) else 0)
+        ff_file: (matched_count[ff_file]/expected_stars[ff_file]
+                  if (ff_file in expected_stars) and (expected_stars[ff_file] > 0) else 0)
         for ff_file in recorded_files
     }
 
@@ -1378,7 +1406,7 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
         # Plot the computed ratio
         ax[0].scatter([FFfile.filenameToDatetime(x) for x in ratio.keys()], list(ratio.values()), \
             marker='o', s=5, c='k', zorder=6, label='Measurements')
-        ax[0].set_ylabel("Matched/Predicted stars\n(prediction capped at max_stars)")
+        ax[0].set_ylabel("Matched/Expected stars")
 
         # Plot the radio threshold
         times = [FFfile.filenameToDatetime(x) for x in ratio.keys()]
@@ -1413,14 +1441,14 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
             label='Predicted stars', marker='x', color='k', zorder=5,
         )
 
-        # Show the prediction the ratio actually uses: detection never returns more than
-        # max_stars, so the prediction saturates there - without this line the two panels
-        # disagree on star-rich nights (top ratio uses the cap, bottom raw counts do not)
-        if any(predicted_stars[ff] > config.max_stars for ff in predicted_stars):
+        # Show the expectation the ratio actually uses (cap + self-calibrated clear-sky
+        # deficit) - without this the two panels disagree on star-rich nights
+        if any(abs(expected_stars[ff] - predicted_stars[ff]) > 1 for ff in predicted_stars):
             ax[1].scatter(
-                [FFfile.filenameToDatetime(ff) for ff in predicted_stars],
-                [min(predicted_stars[ff], config.max_stars) for ff in predicted_stars],
-                label='Predicted (capped at max_stars={:d})'.format(config.max_stars),
+                [FFfile.filenameToDatetime(ff) for ff in expected_stars],
+                [expected_stars[ff] for ff in expected_stars],
+                label='Expected (cap {:d}, deficit {:.2f})'.format(
+                    config.max_stars, detection_deficit),
                 marker='x', color='gray', zorder=5,
             )
         
