@@ -82,6 +82,27 @@ Detailed atmospheric and orbital analysis tools, particularly for computing mete
 
 ---
 
+## ⚙️ Runnable Modules in `RMS/`
+
+The main pipeline modules live in the `RMS/` package and are run the same way, using `python -m RMS.<ModuleName>`:
+
+- **`RMS.StartCapture`**: Starts the capture pipeline - recording, compression, detection, calibration, and upload. The main entry point for running a station.
+- **`RMS.Reprocess`**: Reprocesses a night directory from raw FF files - detection, calibration, archiving, and all night products.
+- **`RMS.DetectStarsAndMeteors`**: Runs star extraction and meteor detection on FF files in a given directory.
+- **`RMS.ExtractStars`**: Extracts stars from FF files and writes a CALSTARS file.
+- **`RMS.ArchiveDetections`**: Archives detection results of a night into upload-ready archive files.
+- **`RMS.UploadManager`**: Uploads archived night data to the server over SFTP.
+- **`RMS.EventMonitor`**: Monitors the network event list and uploads footage if a fireball trajectory crossed the station's field of view.
+- **`RMS.DownloadMask`**: Downloads a new mask file for the station from the server.
+- **`RMS.DownloadPlatepar`**: Downloads an updated platepar calibration file from the server.
+- **`RMS.CaptureDuration`**: Prints the capture start time and duration for the night (given the station coordinates).
+- **`RMS.DeleteOldObservations`**: Frees up disk space by deleting old observation data.
+- **`RMS.MLFilter`**: Filters detections using the machine-learning meteor classifier.
+- **`RMS.ClearSkyDetector`**: Estimates which parts of the night had clear skies.
+- **`RMS.CaptureModeSwitcher`**: Switches between day and night capture modes based on the Sun's altitude.
+
+---
+
 ### General Usage
 To use a script, you can generally invoke it as a Python module to ensure that the main `RMS` dependency paths are resolved properly:
 ```bash
