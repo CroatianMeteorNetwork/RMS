@@ -18,7 +18,7 @@ configparser==4.0.2
 imageio>=2.31
 python-dvr>=0.0.1 ; python_version >='3.6'
 onvif-zeep-async>=4.0 ; python_version >= '3.10'
-onvif-zeep-async>=1.3,<3 ; python_version >= '3.7' and python_version < '3.10'
+onvif-zeep-async>=1.3,<2 ; python_version >= '3.7' and python_version < '3.10'
 onvif-zeep>=0.2.12 ; python_version == '3.6'
 pyqtgraph>=0.12,<0.13 ; python_version >='3.6'
 pyyaml; python_version>='3.6'

@@ -66,7 +66,7 @@ except ImportError as e:
     raise ImportError(
         "Could not import the onvif library (required for ONVIF camera control). "
         "Underlying error: {}. If it is not installed, run RMS_Update.sh or install "
-        "manually: pip install onvif-zeep-async (Python 3.10+), 'onvif-zeep-async<3' "
+        "manually: pip install onvif-zeep-async (Python 3.10+), 'onvif-zeep-async<2' "
         "(Python 3.7-3.9), or onvif-zeep (Python 3.6). If both onvif-zeep and "
         "onvif-zeep-async are installed, uninstall both and reinstall one.".format(e)
     ) from e
