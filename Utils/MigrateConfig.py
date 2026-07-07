@@ -380,10 +380,11 @@ if __name__ == "__main__":
     if args.template:
         template_config_file = args.template
 
-    # If the template doesn't exist yet (it's only created by RMS_Update.sh), fall back to the
-    # pristine .config tracked in git
+    # If the default template doesn't exist yet (it's only created by RMS_Update.sh), fall back to
+    # the pristine .config tracked in git. A template given explicitly with -t is never substituted -
+    # if that path is wrong, updateConfig() fails with an error as before.
     template_tmp_path = None
-    if not os.path.exists(template_config_file):
+    if (not args.template) and (not os.path.exists(template_config_file)):
 
         template_content = readTemplateFromGit()
 
