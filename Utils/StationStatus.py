@@ -14,7 +14,7 @@ or through the umbrella launcher:
 from __future__ import print_function, division, absolute_import
 
 import argparse
-import datetime
+import contextlib
 import json
 import os
 import re
@@ -24,6 +24,7 @@ import sys
 from RMS.CLITools import addConfigArgument, loadConfig
 from RMS.Formats.ObservationSummary import (OBSERVATION_DB_FILE_NAME, getObsDBConn,
     getLatestObservationRecord, getObservationDuration, pingOnce)
+from RMS.Misc import RmsDateTime
 
 
 def getLastNightReport(config):
@@ -80,10 +81,10 @@ def getCurrentStatus(config):
         status['camera_ip'] = None
         status['camera_reachable'] = None
 
-    # Next capture start and duration
+    # Next capture start and duration. The capture duration code works with naive UTC times, so a
+    # timezone-aware datetime must not be passed in.
     try:
-        start_time, duration, end_time = getObservationDuration(config,
-            datetime.datetime.now(datetime.timezone.utc))
+        start_time, duration, end_time = getObservationDuration(config, RmsDateTime.utcnow())
         status['next_capture_start'] = str(start_time)
         status['next_capture_duration_hrs'] = duration/3600 if duration is not None else None
     except Exception:
@@ -170,7 +171,13 @@ camera, next capture). Works over SSH, no display needed.""")
 
     cml_args = arg_parser.parse_args()
 
-    config = loadConfig(cml_args.config)
+    # With --json, keep stdout parseable - config loading prints its banner messages, so route them
+    # to stderr instead
+    if cml_args.json:
+        with contextlib.redirect_stdout(sys.stderr):
+            config = loadConfig(cml_args.config)
+    else:
+        config = loadConfig(cml_args.config)
 
     record = getLastNightReport(config)
     status = getCurrentStatus(config)
