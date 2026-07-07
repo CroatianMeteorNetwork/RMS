@@ -3,7 +3,9 @@
     This module provides camera control functionality for ONVIF-compliant cameras,
     mirroring the interface of CameraControl.py (which uses DVRIP protocol).
 
-    Note: Requires the onvif-zeep library: pip install onvif-zeep
+    Note: Requires the onvif-zeep-async library: pip install onvif-zeep-async
+    (the legacy synchronous onvif-zeep library also works if already installed;
+    coroutine-based calls are bridged transparently)
 
     usage 1:
     python -m Utils.CameraControlONVIF command {opts}
@@ -47,6 +49,7 @@
 
 """
 
+import asyncio
 import sys
 import os
 import argparse
@@ -54,13 +57,14 @@ import json
 import pprint
 import re
 import datetime
+import inspect
 
 try:
     from onvif import ONVIFCamera
 except ImportError as e:
     raise ImportError(
-        "onvif-zeep library not installed (required for ONVIF camera control). "
-        "Install with: pip install onvif-zeep"
+        "onvif-zeep-async library not installed (required for ONVIF camera control). "
+        "Install with: pip install onvif-zeep-async"
     ) from e
 
 import RMS.ConfigReader as cr
@@ -70,13 +74,17 @@ from RMS.Misc import RmsDateTime
 # Get the logger from the main module
 log = getLogger("rmslogger")
 
+_ONVIF_SYNC_LOOP = None
+
 
 def findWsdlDir():
-    """Locate the WSDL directory bundled with onvif-zeep.
+    """Locate the WSDL directory bundled with the installed onvif library.
 
-    Depending on the pip/setuptools combination, the package's 'wsdl' data directory
-    ends up in different locations (or is missing entirely), while onvif-zeep's default
-    lookup only checks one path. Resolve it explicitly so we can pass it to ONVIFCamera.
+    Depending on the library (onvif-zeep-async vs legacy onvif-zeep) and the
+    pip/setuptools combination, the 'wsdl' data directory ends up in different
+    locations (or is missing entirely). Check the known locations explicitly so an
+    incomplete install surfaces as a clear error instead of a generic connection
+    failure.
 
     Returns:
         Path to the directory containing the ONVIF WSDL files.
@@ -88,9 +96,10 @@ def findWsdlDir():
 
     package_dir = os.path.dirname(os.path.abspath(onvif.__file__))
     candidates = [
-        os.path.join(os.path.dirname(package_dir), 'wsdl'),  # site-packages/wsdl (library default)
-        os.path.join(package_dir, 'wsdl'),                   # inside the onvif package
+        os.path.join(package_dir, 'wsdl'),                   # inside the onvif package (onvif-zeep-async)
+        os.path.join(os.path.dirname(package_dir), 'wsdl'),  # site-packages/wsdl (legacy onvif-zeep)
         os.path.join(sys.prefix, 'wsdl'),                    # environment root (data_files scheme)
+        os.path.join(os.path.dirname(package_dir), 'zeep', 'wsdl'),
     ]
 
     for candidate in candidates:
@@ -99,8 +108,33 @@ def findWsdlDir():
 
     raise RuntimeError(
         "Could not find the ONVIF WSDL files (devicemgmt.wsdl). Looked in: {}. "
-        "The onvif-zeep install is likely incomplete - try reinstalling with: "
-        "pip install --force-reinstall --no-cache-dir onvif-zeep".format(candidates))
+        "The onvif library install is likely incomplete - try reinstalling with: "
+        "pip install --force-reinstall --no-cache-dir onvif-zeep-async".format(candidates))
+
+
+async def _connect_camera_async(ip_address, port, username, password):
+    """Create and initialize ONVIF camera inside an active event loop."""
+    cam = ONVIFCamera(ip_address, port, username, password)
+
+    try:
+        if hasattr(cam, 'update_xaddrs'):
+            update_result = cam.update_xaddrs()
+            if inspect.isawaitable(update_result):
+                await update_result
+    except Exception:
+        # Close the camera's transport session, otherwise every failed connection
+        # attempt leaks it (and its file descriptors)
+        close_fn = getattr(cam, 'close', None)
+        if close_fn is not None:
+            try:
+                close_result = close_fn()
+                if inspect.isawaitable(close_result):
+                    await close_result
+            except Exception:
+                pass
+        raise
+
+    return cam
 
 
 def connectCamera(ip_address, port, username, password):
@@ -116,18 +150,75 @@ def connectCamera(ip_address, port, username, password):
         ONVIFCamera object or None if connection failed
 
     Raises:
-        RuntimeError: if the onvif-zeep WSDL files cannot be found.
+        RuntimeError: if the onvif library WSDL files cannot be found.
     """
-    # Resolved outside the try block so an incomplete onvif-zeep install surfaces as a
+    # Run before attempting the connection so an incomplete install surfaces as a
     # clear error instead of a generic connection failure
-    wsdl_dir = findWsdlDir()
+    findWsdlDir()
 
     try:
-        cam = ONVIFCamera(ip_address, port, username, password, wsdl_dir=wsdl_dir)
-        return cam
+        # Keep camera creation on an active loop for coroutine-based onvif builds
+        return _resolve_onvif_call(_connect_camera_async(ip_address, port, username, password))
     except Exception as e:
         log.error("Failed to connect to camera: %s", e)
         return None
+
+
+def _get_onvif_token(obj):
+    """Return ONVIF token from zeep objects that may expose token/_token."""
+    return getattr(obj, 'token', None) or getattr(obj, '_token', None)
+
+
+def _resolve_onvif_call(result):
+    """Resolve ONVIF API return values that may be sync objects or coroutines."""
+    if not inspect.isawaitable(result):
+        return result
+
+    try:
+        running_loop = asyncio.get_running_loop()
+    except RuntimeError:
+        running_loop = None
+
+    if running_loop is not None and running_loop.is_running():
+        raise RuntimeError("Cannot synchronously resolve ONVIF coroutine while an event loop is running")
+
+    global _ONVIF_SYNC_LOOP
+    if (_ONVIF_SYNC_LOOP is None) or _ONVIF_SYNC_LOOP.is_closed():
+        _ONVIF_SYNC_LOOP = asyncio.new_event_loop()
+
+    return _ONVIF_SYNC_LOOP.run_until_complete(result)
+
+
+def _close_camera(cam):
+    """Close ONVIF camera session when the implementation exposes close()."""
+    try:
+        close_fn = getattr(cam, 'close', None)
+        if close_fn is None:
+            return
+        _resolve_onvif_call(close_fn())
+    except Exception as e:
+        log.warning("Failed to close ONVIF camera session cleanly: %s", e)
+
+
+def _close_onvif_loop():
+    """Close the persistent ONVIF sync loop used for coroutine-based APIs."""
+    global _ONVIF_SYNC_LOOP
+    if (_ONVIF_SYNC_LOOP is not None) and (not _ONVIF_SYNC_LOOP.is_closed()):
+        _ONVIF_SYNC_LOOP.close()
+    _ONVIF_SYNC_LOOP = None
+
+
+def _get_devicemgmt_service(cam):
+    """Return device management service for sync/async ONVIF implementations."""
+    service = getattr(cam, 'devicemgmt', None)
+    if service is not None:
+        return service
+
+    create_fn = getattr(cam, 'create_devicemgmt_service', None)
+    if create_fn is None:
+        raise AttributeError("ONVIF camera object has no devicemgmt service accessor")
+
+    return _resolve_onvif_call(create_fn())
 
 
 def rebootCamera(cam):
@@ -138,7 +229,8 @@ def rebootCamera(cam):
     """
     log.info('Rebooting camera, please wait...')
     try:
-        cam.devicemgmt.SystemReboot()
+        devicemgmt = _get_devicemgmt_service(cam)
+        _resolve_onvif_call(devicemgmt.SystemReboot())
         log.info('Reboot command sent successfully')
         log.info('Camera will be unavailable for 30-60 seconds')
     except Exception as e:
@@ -156,7 +248,8 @@ def getHostname(cam):
         Hostname string
     """
     try:
-        resp = cam.devicemgmt.GetHostname()
+        devicemgmt = _get_devicemgmt_service(cam)
+        resp = _resolve_onvif_call(devicemgmt.GetHostname())
         hostname = resp.Name if hasattr(resp, 'Name') else str(resp)
         log.info('Hostname: %s', hostname)
         return hostname
@@ -176,20 +269,22 @@ def getNetworkParams(cam, showit=True):
         dict containing network configuration
     """
     try:
+        devicemgmt = _get_devicemgmt_service(cam)
+
         # Get network interfaces
-        interfaces = cam.devicemgmt.GetNetworkInterfaces()
+        interfaces = _resolve_onvif_call(devicemgmt.GetNetworkInterfaces())
 
         # Get DNS configuration
-        dns = cam.devicemgmt.GetDNS()
+        dns = _resolve_onvif_call(devicemgmt.GetDNS())
 
         # Get NTP configuration
         try:
-            ntp = cam.devicemgmt.GetNTP()
+            ntp = _resolve_onvif_call(devicemgmt.GetNTP())
         except Exception:
             ntp = None
 
         # Get hostname
-        hostname = cam.devicemgmt.GetHostname()
+        hostname = _resolve_onvif_call(devicemgmt.GetHostname())
 
         result = {
             'Hostname': hostname.Name if hasattr(hostname, 'Name') else str(hostname),
@@ -248,7 +343,8 @@ def getIP(cam):
         cam: ONVIFCamera object
     """
     try:
-        interfaces = cam.devicemgmt.GetNetworkInterfaces()
+        devicemgmt = _get_devicemgmt_service(cam)
+        interfaces = _resolve_onvif_call(devicemgmt.GetNetworkInterfaces())
         for iface in interfaces:
             if hasattr(iface, 'IPv4') and iface.IPv4:
                 if hasattr(iface.IPv4, 'Config') and iface.IPv4.Config:
@@ -277,10 +373,10 @@ def getVideoSourceToken(cam):
         Video source token string
     """
     try:
-        media = cam.create_media_service()
-        video_sources = media.GetVideoSources()
+        media = _resolve_onvif_call(cam.create_media_service())
+        video_sources = _resolve_onvif_call(media.GetVideoSources())
         if video_sources:
-            return video_sources[0].token
+            return _get_onvif_token(video_sources[0])
         return None
     except Exception as e:
         log.error("Failed to get video source token: %s", e)
@@ -298,20 +394,23 @@ def getCameraParams(cam, showit=True):
         dict containing imaging parameters
     """
     try:
-        imaging = cam.create_imaging_service()
-        media = cam.create_media_service()
-        video_sources = media.GetVideoSources()
+        imaging = _resolve_onvif_call(cam.create_imaging_service())
+        media = _resolve_onvif_call(cam.create_media_service())
+        video_sources = _resolve_onvif_call(media.GetVideoSources())
 
         if not video_sources:
             log.error("No video sources found")
             return None
 
-        token = video_sources[0].token
-        settings = imaging.GetImagingSettings({'VideoSourceToken': token})
+        token = _get_onvif_token(video_sources[0])
+        if not token:
+            log.error("Camera returned a video source without a usable token")
+            return None
+        settings = _resolve_onvif_call(imaging.GetImagingSettings({'VideoSourceToken': token}))
 
         # Get imaging options to understand valid ranges
         try:
-            options = imaging.GetOptions({'VideoSourceToken': token})
+            options = _resolve_onvif_call(imaging.GetOptions({'VideoSourceToken': token}))
         except Exception:
             options = None
 
@@ -407,15 +506,15 @@ def getEncodeParams(cam, showit=True):
         dict containing encoding parameters
     """
     try:
-        media = cam.create_media_service()
-        profiles = media.GetProfiles()
+        media = _resolve_onvif_call(cam.create_media_service())
+        profiles = _resolve_onvif_call(media.GetProfiles())
 
         result = {'Profiles': []}
 
         for profile in profiles:
             profile_info = {
                 'Name': profile.Name if hasattr(profile, 'Name') else 'Unknown',
-                'Token': profile.token if hasattr(profile, 'token') else 'Unknown',
+                'Token': _get_onvif_token(profile) or 'Unknown',
             }
 
             if hasattr(profile, 'VideoEncoderConfiguration') and profile.VideoEncoderConfiguration:
@@ -469,7 +568,8 @@ def getDeviceInfo(cam, showit=True):
         dict containing device information
     """
     try:
-        info = cam.devicemgmt.GetDeviceInformation()
+        devicemgmt = _get_devicemgmt_service(cam)
+        info = _resolve_onvif_call(devicemgmt.GetDeviceInformation())
 
         result = {
             'Manufacturer': info.Manufacturer if hasattr(info, 'Manufacturer') else 'Unknown',
@@ -501,7 +601,8 @@ def getCameraTime(cam):
         datetime object or None
     """
     try:
-        dt = cam.devicemgmt.GetSystemDateAndTime()
+        devicemgmt = _get_devicemgmt_service(cam)
+        dt = _resolve_onvif_call(devicemgmt.GetSystemDateAndTime())
 
         if hasattr(dt, 'UTCDateTime') and dt.UTCDateTime:
             utc = dt.UTCDateTime
@@ -536,11 +637,13 @@ def setCameraTime(cam, new_time=None):
         new_time: datetime object (defaults to current system time)
     """
     try:
+        devicemgmt = _get_devicemgmt_service(cam)
+
         if new_time is None:
             new_time = RmsDateTime.utcnow()
 
         # Create the request
-        request = cam.devicemgmt.create_type('SetSystemDateAndTime')
+        request = devicemgmt.create_type('SetSystemDateAndTime')
         request.DateTimeType = 'Manual'
         request.DaylightSavings = False
         request.UTCDateTime = {
@@ -556,7 +659,7 @@ def setCameraTime(cam, new_time=None):
             }
         }
 
-        cam.devicemgmt.SetSystemDateAndTime(request)
+        _resolve_onvif_call(devicemgmt.SetSystemDateAndTime(request))
         log.info('Camera time set to: %s', new_time)
 
     except Exception as e:
@@ -573,7 +676,7 @@ def setImagingParam(cam, param_name, value):
         value: Value to set
     """
     try:
-        imaging = cam.create_imaging_service()
+        imaging = _resolve_onvif_call(cam.create_imaging_service())
         token = getVideoSourceToken(cam)
 
         if not token:
@@ -583,7 +686,7 @@ def setImagingParam(cam, param_name, value):
         request.VideoSourceToken = token
         request.ImagingSettings = {param_name: float(value)}
 
-        imaging.SetImagingSettings(request)
+        _resolve_onvif_call(imaging.SetImagingSettings(request))
         log.info('Set %s to %s', param_name, value)
 
     except Exception as e:
@@ -600,7 +703,7 @@ def setExposureParam(cam, param_name, value):
         value: Value to set
     """
     try:
-        imaging = cam.create_imaging_service()
+        imaging = _resolve_onvif_call(cam.create_imaging_service())
         token = getVideoSourceToken(cam)
 
         if not token:
@@ -615,7 +718,7 @@ def setExposureParam(cam, param_name, value):
         else:
             request.ImagingSettings = {'Exposure': {param_name: float(value)}}
 
-        imaging.SetImagingSettings(request)
+        _resolve_onvif_call(imaging.SetImagingSettings(request))
         log.info('Set Exposure.%s to %s', param_name, value)
 
     except Exception as e:
@@ -642,7 +745,7 @@ def setColor(cam, opts):
         saturation = float(parts[2]) if len(parts) > 2 else None
         sharpness = float(parts[3]) if len(parts) > 3 else None
 
-        imaging = cam.create_imaging_service()
+        imaging = _resolve_onvif_call(cam.create_imaging_service())
         token = getVideoSourceToken(cam)
 
         if not token:
@@ -662,7 +765,7 @@ def setColor(cam, opts):
         request.VideoSourceToken = token
         request.ImagingSettings = settings
 
-        imaging.SetImagingSettings(request)
+        _resolve_onvif_call(imaging.SetImagingSettings(request))
         log.info('Set color configuration: brightness=%s, contrast=%s, saturation=%s, sharpness=%s',
                  brightness, contrast, saturation, sharpness)
 
@@ -686,11 +789,13 @@ def setNetworkParam(cam, opts):
     field = opts[1]
 
     try:
+        devicemgmt = _get_devicemgmt_service(cam)
+
         if field == 'Hostname':
             value = opts[2]
-            request = cam.devicemgmt.create_type('SetHostname')
+            request = devicemgmt.create_type('SetHostname')
             request.Name = value
-            cam.devicemgmt.SetHostname(request)
+            _resolve_onvif_call(devicemgmt.SetHostname(request))
             log.info('Set hostname to %s', value)
 
         elif field == 'EnableDHCP':
@@ -700,16 +805,16 @@ def setNetworkParam(cam, opts):
         elif field == 'EnableNTP':
             value = opts[2]
             if value == "0":
-                request = cam.devicemgmt.create_type('SetNTP')
+                request = devicemgmt.create_type('SetNTP')
                 request.FromDHCP = False
                 request.NTPManual = []
-                cam.devicemgmt.SetNTP(request)
+                _resolve_onvif_call(devicemgmt.SetNTP(request))
                 log.info('NTP disabled')
             else:
-                request = cam.devicemgmt.create_type('SetNTP')
+                request = devicemgmt.create_type('SetNTP')
                 request.FromDHCP = False
                 request.NTPManual = [{'Type': 'IPv4', 'IPv4Address': value}]
-                cam.devicemgmt.SetNTP(request)
+                _resolve_onvif_call(devicemgmt.SetNTP(request))
                 log.info('NTP enabled with server %s', value)
 
         else:
@@ -758,14 +863,14 @@ def setCameraParam(cam, opts):
             log.info('IrCutFilter must be ON, OFF, or AUTO')
             return
         try:
-            imaging = cam.create_imaging_service()
+            imaging = _resolve_onvif_call(cam.create_imaging_service())
             token = getVideoSourceToken(cam)
             if not token:
                 raise RuntimeError("Could not get video source token")
             request = imaging.create_type('SetImagingSettings')
             request.VideoSourceToken = token
             request.ImagingSettings = {'IrCutFilter': value}
-            imaging.SetImagingSettings(request)
+            _resolve_onvif_call(imaging.SetImagingSettings(request))
             log.info('Set IrCutFilter to %s', value)
         except Exception as e:
             log.error("Failed to set IrCutFilter: %s", e)
@@ -964,11 +1069,18 @@ def cameraControl(camera_ip, port, username, password, cmd, opts='',
     Raises:
         RuntimeError: if the camera cannot be reached, or if the command fails.
     """
-    cam = connectCamera(camera_ip, port, username, password)
-    if cam is None:
-        raise RuntimeError("Could not connect to ONVIF camera at {}:{}".format(camera_ip, port))
+    try:
+        cam = connectCamera(camera_ip, port, username, password)
+        if cam is None:
+            raise RuntimeError("Could not connect to ONVIF camera at {}:{}".format(camera_ip, port))
 
-    onvifCall(cam, cmd, opts, camera_settings_path)
+        try:
+            onvifCall(cam, cmd, opts, camera_settings_path)
+        finally:
+            _close_camera(cam)
+    finally:
+        # Close the loop even when the connection failed - connectCamera already spun it up
+        _close_onvif_loop()
 
 
 def cameraControlV2(config, cmd, opts=''):
