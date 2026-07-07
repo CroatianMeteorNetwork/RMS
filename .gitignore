@@ -117,3 +117,6 @@ Catalogs/GMN_StarCatalog_LM12.0.bin
 # Agents
 .agents/
 skills-lock.json
+
+# QueuedPool backup files (written to the working directory by test/debug runs)
+rms_queue_bkup_*.pickle
