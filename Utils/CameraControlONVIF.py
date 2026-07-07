@@ -63,8 +63,8 @@ try:
     from onvif import ONVIFCamera
 except ImportError as e:
     raise ImportError(
-        "onvif-zeep-async library not installed (required for ONVIF camera control). "
-        "Install with: pip install onvif-zeep-async"
+        "onvif-zeep-async library not installed (required for ONVIF camera control, "
+        "needs Python 3.10+). Install with: pip install onvif-zeep-async"
     ) from e
 
 import RMS.ConfigReader as cr

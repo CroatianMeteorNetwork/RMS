@@ -73,11 +73,16 @@ def switchCameraMode(config, daytime_mode, camera_mode_switch_trigger):
 
     mode_path = getCameraSettingsPath(config)
 
+    # A missing protocol library (e.g. onvif-zeep-async, which needs Python 3.10+) cannot
+    # resolve within this run, so disable switching instead of retrying every capture block
     try:
-        # Get the appropriate camera control module based on protocol. Done inside the
-        # try block so a missing protocol library (e.g. onvif-zeep) is handled gracefully.
         cc = getCameraControlModule(config)
+    except ImportError as e:
+        log.error("Camera mode switching disabled - %s", e)
+        camera_mode_switch_trigger.value = False
+        return
 
+    try:
         if not os.path.exists(mode_path):
             raise FileNotFoundError("Mode file {} not found.".format(mode_path))
 
