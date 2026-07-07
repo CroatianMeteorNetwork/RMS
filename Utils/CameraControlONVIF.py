@@ -4,8 +4,9 @@
     mirroring the interface of CameraControl.py (which uses DVRIP protocol).
 
     Note: Requires the onvif-zeep-async library: pip install onvif-zeep-async
-    (the legacy synchronous onvif-zeep library also works if already installed;
-    coroutine-based calls are bridged transparently)
+    (4.x on Python 3.10+, tested; 1.x/2.x on Python 3.7-3.9, best-effort).
+    The legacy synchronous onvif-zeep library is also supported as a fallback
+    (Python 3.6); coroutine-based calls are bridged transparently.
 
     usage 1:
     python -m Utils.CameraControlONVIF command {opts}
@@ -63,8 +64,9 @@ try:
     from onvif import ONVIFCamera
 except ImportError as e:
     raise ImportError(
-        "onvif-zeep-async library not installed (required for ONVIF camera control, "
-        "needs Python 3.10+). Install with: pip install onvif-zeep-async"
+        "onvif library not installed (required for ONVIF camera control). "
+        "Run RMS_Update.sh, or install manually: pip install onvif-zeep-async "
+        "(Python 3.10+), 'onvif-zeep-async<3' (Python 3.7-3.9), or onvif-zeep (Python 3.6)"
     ) from e
 
 import RMS.ConfigReader as cr
@@ -178,6 +180,10 @@ def _resolve_onvif_call(result):
         running_loop = asyncio.get_running_loop()
     except RuntimeError:
         running_loop = None
+    except AttributeError:
+        # Python < 3.7: no get_running_loop(); the private variant returns None
+        # instead of raising when no loop is running
+        running_loop = asyncio._get_running_loop()
 
     if running_loop is not None and running_loop.is_running():
         raise RuntimeError("Cannot synchronously resolve ONVIF coroutine while an event loop is running")
