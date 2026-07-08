@@ -3909,7 +3909,11 @@ if __name__ == "__main__":
     # Automatically deterine time intervals
     else:
 
-        time_intervals = detectClouds(config, dir_path, show_plots=True, save_plots=False, \
+        # Load the mask so the star prediction skips obstructed regions - without it the
+        # expectation counts stars the detector can never match and the ratio biases low
+        mask = getMaskFile(dir_path, config, default_as_backup=True)
+
+        time_intervals = detectClouds(config, dir_path, mask=mask, show_plots=True, save_plots=False, \
             ratio_threshold=cml_args.ratiothres)
 
         for i, interval in enumerate(time_intervals):
