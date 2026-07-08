@@ -66,8 +66,9 @@ def extractStars(img, img_median=None, mask=None, gamma=1.0, max_star_candidates
         img_median: [float] Median value of the image. If not given, it will be computed.
         mask: [ndarray] Mask image. None by default.
         gamma: [float] Gamma correction factor for the image.
-        max_star_candidates: [int] Maximum number of star candidates to process. If the number of 
-            candidates is larger than this number, the image will be skipped.
+        max_star_candidates: [int] Maximum number of star candidates to process. If more candidates
+            are found (e.g. the image is flooded with noise or glare around the Moon), only the
+            max_star_candidates most prominent ones are kept.
         border: [int] apply a mask on the detections by removing all that are too close to the given image 
             border (in pixels)
         neighborhood_size: [int] size of the neighbourhood for the maximum search (in pixels)
@@ -129,13 +130,55 @@ def extractStars(img, img_median=None, mask=None, gamma=1.0, max_star_candidates
     if extra_info is not None:
         extra_info['num_candidates'] = num_objects
 
-    # Skip the image if there are too many maxima to process
+    label_index = range(1, num_objects + 1)
+
+    # If there are too many candidates (e.g. the image is flooded with sensor noise or glare around
+    # the Moon), subsample them instead of skipping the image. The PSF fit below rejects the
+    # non-star candidates. This bounds the PSF fitting cost to max_star_candidates.
     if num_objects > max_star_candidates:
-        log.warning('Too many candidate stars to process! {:d}/{:d}'.format(num_objects, max_star_candidates))
-        return False
+
+        log.warning('Too many candidate stars ({:d}/{:d}), keeping the {:d} most prominent ones'.format(
+            num_objects, max_star_candidates, max_star_candidates))
+
+        # Rank the candidates by their peak height above the local background (white top-hat,
+        # i.e. the image minus its morphological opening). Unlike the raw pixel value, this is
+        # insensitive to brightness gradients, so stars rank above noise on glare or clouds.
+        opening = filters.maximum_filter(img_min, neighborhood_size)
+        tophat = img_convolved - opening
+        prominence = np.array(ndimage.maximum(tophat, labeled, label_index))
+
+        # Stratify the selection on a spatial grid so that the sample stays spatially uniform.
+        # A purely global prominence ranking would bias the sample toward the image centre
+        # (vignetting dims the stars near the edges) and let noisy regions (e.g. around the
+        # Moon) crowd out real stars elsewhere. Each tile gets an equal share of the budget,
+        # filled by local prominence; any unused share goes to the most prominent leftovers.
+        # Size the grid so each tile's share stays meaningful (at least ~4 candidates).
+        n_tiles = int(np.clip(np.sqrt(max_star_candidates/4.0), 2, 8))
+        positions = np.array(ndimage.maximum_position(tophat, labeled, label_index))
+        tile_y = np.clip(positions[:, 0]*n_tiles//img.shape[0], 0, n_tiles - 1)
+        tile_x = np.clip(positions[:, 1]*n_tiles//img.shape[1], 0, n_tiles - 1)
+        tile_id = (tile_y*n_tiles + tile_x).astype(int)
+
+        tile_quota = max(1, max_star_candidates//(n_tiles*n_tiles))
+        tile_counts = np.zeros(n_tiles*n_tiles, dtype=int)
+
+        selected = []
+        leftover = []
+        for i in np.argsort(prominence)[::-1]:
+            if (tile_counts[tile_id[i]] < tile_quota) and (len(selected) < max_star_candidates):
+                tile_counts[tile_id[i]] += 1
+                selected.append(i)
+            else:
+                leftover.append(i)
+
+        # Fill any remaining budget with the most prominent unselected candidates
+        selected.extend(leftover[:max_star_candidates - len(selected)])
+
+        # Convert positional indices to labels
+        label_index = (np.array(selected) + 1).tolist()
 
     # Find centres of mass of each labeled objects
-    xy = np.array(ndimage.center_of_mass(img_convolved, labeled, range(1, num_objects + 1)))
+    xy = np.array(ndimage.center_of_mass(img_convolved, labeled, label_index))
 
     # Remove all detection on the border
     #xy = xy[np.where((xy[:, 1] > border) & (xy[:,1] < ff.ncols - border) & (xy[:,0] > border) & (xy[:,0] < ff.nrows - border))]
@@ -259,7 +302,7 @@ def extractStarsFF(
         flat_struct=None, dark=None, mask=None,
         config=None,
         border=10,
-        max_global_intensity=150,
+        max_global_intensity=230,
         neighborhood_size=10, intensity_threshold=18,
         segment_radius=4, roundness_threshold=0.5, max_feature_ratio=0.8,
         extra_info=None
@@ -274,7 +317,7 @@ def extractStarsFF(
         ff_dir: [str] Path to directory where FF files are.
         ff_name: [str] Name of the FF file.
         config: [config object] configuration object (loaded from the .config file)
-        max_global_intensity: [int] maximum mean intensity of an image before it is discarded as too bright
+        max_global_intensity: [int] maximum median intensity of an image before it is discarded as too bright. 230 by default.
         border: [int] apply a mask on the detections by removing all that are too close to the given image 
             border (in pixels)
         neighborhood_size: [int] size of the neighbourhood for the maximum search (in pixels)
@@ -331,7 +374,10 @@ def extractStarsFF(
     img_median = np.median(ff.avepixel)
 
     # Check if the image is too bright and skip the image (scale the cutoff to the image bit depth)
-    if img_median > max_global_intensity*(2**(config.bit_depth - 8)):
+    max_global_intensity_scaled = max_global_intensity*(2**(config.bit_depth - 8))
+    if img_median > max_global_intensity_scaled:
+        log.info('{:s} is too bright, skipping star extraction (median {:.0f} > {:d})'.format(
+            ff_name, img_median, max_global_intensity_scaled))
         return error_return
 
     # Get the image data from the average pixel image
@@ -365,8 +411,8 @@ def extractStarsImgHandle(img_handle,
         flat_struct=None, dark=None, mask=None,
         config=None, 
         border=10,
-        max_global_intensity=150, 
-        neighborhood_size=10, intensity_threshold=18, 
+        max_global_intensity=230,
+        neighborhood_size=10, intensity_threshold=18,
         segment_radius=4, roundness_threshold=0.5, max_feature_ratio=0.8
     ):
 
@@ -381,7 +427,7 @@ def extractStarsImgHandle(img_handle,
         dark: [ndarray] Dark frame. None by default.
         mask: [ndarray] Mask image. None by default.
         config: [config object] configuration object (loaded from the .config file)
-        max_global_intensity: [int] maximum mean intensity of an image before it is discarded as too bright
+        max_global_intensity: [int] maximum median intensity of an image before it is discarded as too bright. 230 by default.
         border: [int] apply a mask on the detections by removing all that are too close to the given image 
             border (in pixels)
         neighborhood_size: [int] size of the neighbourhood for the maximum search (in pixels)
@@ -447,9 +493,15 @@ def extractStarsImgHandle(img_handle,
         # Calculate image mean and stddev
         img_median = np.median(avepixel)
 
-        # Check if the image is too bright and skip the image (scale the cutoff to the image bit depth)
-        if img_median > max_global_intensity*(2**(config.bit_depth - 8)):
-            return error_return
+        # Check if the chunk is too bright and skip it (scale the cutoff to the image bit depth).
+        # Only this chunk is skipped - other chunks in the image handle are still processed.
+        max_global_intensity_scaled = max_global_intensity*(2**(config.bit_depth - 8))
+        if img_median > max_global_intensity_scaled:
+            log.info('Chunk {:d} is too bright, skipping star extraction (median {:.0f} > {:d})'.format(
+                chunk_no, img_median, max_global_intensity_scaled))
+
+            img_handle.nextChunk()
+            continue
 
         # Get the image data from the average pixel image
         img = avepixel.astype(np.float32)
@@ -464,10 +516,11 @@ def extractStarsImgHandle(img_handle,
             max_feature_ratio=max_feature_ratio, bit_depth=config.bit_depth
         )
 
-        # If the star extraction failed, return an empty list
+        # If the star extraction failed, skip this chunk
         if status is False:
-            return error_return
-        
+            img_handle.nextChunk()
+            continue
+
         # Unpack the star data
         x_arr, y_arr, amplitude, intensity, fwhm, background, snr, saturated_count = status
 

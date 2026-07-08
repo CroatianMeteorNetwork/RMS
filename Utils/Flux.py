@@ -1342,9 +1342,43 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
         recalibrated_platepars, ff_limiting_magnitude, config, mask=mask, show_plot=show_plots
     )
 
-    # Compute the ratio between matched and predicted stars
+    # Compute the ratio between matched and EXPECTED stars. Two effects separate the raw
+    # prediction from what detection can deliver on a perfectly clear sky:
+    # 1. The extractor never returns more than config.max_stars candidates, so the
+    #    prediction saturates at the cap (on star-rich nights predicted >> cap and the raw
+    #    ratio would read a clear sky as cloudy).
+    # 2. The chain from candidates to matched stars loses a roughly constant fraction
+    #    (PSF-fit acceptance, catalog matching, prediction model error) - a clear-sky
+    #    "deficit" that would otherwise cap the achievable ratio well below 1.
+    # The deficit is self-calibrated from the night: the median matched/predicted over
+    # frames where the cap does NOT bind and the sky is already clearly clear. It is
+    # applied to the CAP ONLY - uncapped frames keep the historical matched/predicted
+    # semantics the threshold was tuned on; only cap-bound frames compare against what
+    # the capped detection chain actually delivers. Clamped to [0.5, 1] so a contaminated
+    # calibration sample cannot inflate cloudy frames past the threshold, and left at 1
+    # (conservative, previous behavior) when there is no usable sample (fully capped or
+    # fully cloudy night).
+    deficit_sample = [
+        matched_count[ff]/predicted_stars[ff]
+        for ff in recorded_files
+        if (ff in predicted_stars) and (0 < predicted_stars[ff] <= config.max_stars)
+        and (matched_count[ff]/predicted_stars[ff] >= ratio_threshold)
+    ]
+    if len(deficit_sample) >= 5:
+        detection_deficit = float(np.clip(np.median(deficit_sample), 0.5, 1.0))
+        log.info("Clear-sky detection deficit self-calibrated from {:d} uncapped frames: "
+                 "{:.2f}".format(len(deficit_sample), detection_deficit))
+    else:
+        detection_deficit = 1.0
+
+    expected_stars = {
+        ff: min(predicted_stars[ff], detection_deficit*config.max_stars)
+        for ff in predicted_stars
+    }
+
     ratio = {
-        ff_file: (matched_count[ff_file]/predicted_stars[ff_file] if ff_file in predicted_stars else 0)
+        ff_file: (matched_count[ff_file]/expected_stars[ff_file]
+                  if (ff_file in expected_stars) and (expected_stars[ff_file] > 0) else 0)
         for ff_file in recorded_files
     }
 
@@ -1372,13 +1406,14 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
         # Plot the computed ratio
         ax[0].scatter([FFfile.filenameToDatetime(x) for x in ratio.keys()], list(ratio.values()), \
             marker='o', s=5, c='k', zorder=6, label='Measurements')
-        ax[0].set_ylabel("Matched/Predicted stars")
+        ax[0].set_ylabel("Matched/Expected stars")
 
         # Plot the radio threshold
         times = [FFfile.filenameToDatetime(x) for x in ratio.keys()]
         time_arr = [min(times), max(times)]
         ax[0].plot(time_arr, [ratio_threshold, ratio_threshold], linestyle='dashed', color='r', zorder=5, \
             alpha=0.5, label='Threshold')
+
 
         # Shade the regions with clear skies
         if len(time_intervals):
@@ -1406,6 +1441,16 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
             [predicted_stars[ff] for ff in predicted_stars],
             label='Predicted stars', marker='x', color='k', zorder=5,
         )
+
+        # Show the expectation the ratio actually uses (cap + self-calibrated clear-sky
+        # deficit) - without this the two panels disagree on star-rich nights
+        if any(abs(expected_stars[ff] - predicted_stars[ff]) > 1 for ff in predicted_stars):
+            ax[1].scatter(
+                [FFfile.filenameToDatetime(ff) for ff in expected_stars],
+                [expected_stars[ff] for ff in expected_stars],
+                label='Expected stars',
+                marker='x', color='gray', zorder=5,
+            )
         
 
         # Shade the regions with clear skies
@@ -1817,7 +1862,11 @@ def sensorCharacterization(config, flux_config, dir_path, meteor_data, default_f
         else:
             star_data = np.array(star_data)
 
-            # Compute the median star FWHM
+            # Compute the median star FWHM. Deliberately NOT SNR-filtered: junk detections
+            # that survive the PSF fit have star-like FWHM by construction (measured: a 94%
+            # junk-flooded frame shifts the median by only 0.07 px), while an SNR cut
+            # biases the median toward bright stars on perfectly normal nights (+0.4 px at
+            # SNR >= 5, where the median detection SNR of a standard night is ~3.5)
             fwhm_median = np.median(star_data[:, 4])
 
         # Store the values to the dictionary
@@ -3860,7 +3909,11 @@ if __name__ == "__main__":
     # Automatically deterine time intervals
     else:
 
-        time_intervals = detectClouds(config, dir_path, show_plots=True, save_plots=False, \
+        # Load the mask so the star prediction skips obstructed regions - without it the
+        # expectation counts stars the detector can never match and the ratio biases low
+        mask = getMaskFile(dir_path, config, default_as_backup=True)
+
+        time_intervals = detectClouds(config, dir_path, mask=mask, show_plots=True, save_plots=False, \
             ratio_threshold=cml_args.ratiothres)
 
         for i, interval in enumerate(time_intervals):

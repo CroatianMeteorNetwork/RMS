@@ -239,8 +239,9 @@ def _topic_levels(gui):
         "distribution &ndash; roughly the <b>0.1st percentile</b> for black and the "
         "<b>99.95th percentile</b> for white, while ignoring the brightest few percent of pixels so "
         "hot or saturated pixels don't blow out the stretch. It is a good starting point for almost "
-        "any image. Press " + _key(c + " + A") + " again to return to your manual levels; while auto "
-        "is on, the handles are locked.</p>"
+        "any image. Toggle it with the <b>Auto Levels</b> button at the top of the tab or with "
+        + _key(c + " + A") + "; toggling again returns to your manual levels. While auto is on, "
+        "the handles are locked.</p>"
         + _callout("Levels are display-only. Set them so you can comfortably see the stars you need "
                    "to pick &ndash; they have no effect on the calibration result.")
         + _nav_links(related=[('tabs', 'Guide to the tabs')])
@@ -573,13 +574,24 @@ def _topic_stardetect(gui):
          "Size of the local window used to pick one peak per star. <b>Larger</b> merges close stars "
          "(fewer detections); <b>smaller</b> separates them but can split one bright star into "
          "several. Set it a little larger than your typical star spacing."),
-        ("Max stars <span class=\"tip\">(def. 200)</span>",
-         "Upper limit on how many detections are kept (brightest first). Raise it for rich, "
-         "wide-field images; lower it to keep only the brightest."),
+        ("Max stars <span class=\"tip\">(Station Config, def. 400)</span>",
+         "The <code>max_stars</code> value that <b>Save Config</b> writes to the station config. "
+         "This bounds the star extraction cost of the nightly pipeline on the station, which only "
+         "needs a modest sample to track calibration drift &ndash; <b>400 is recommended</b>."),
+        ("Max stars (detection depth) <span class=\"tip\">(SkyFit Session, def. 800)</span>",
+         "Candidate budget used by <b>Re-Detect in this session only</b> &ndash; it is never saved "
+         "to the config. Initial plate fitting benefits from a deep, frame-wide star sample, so feel "
+         "free to raise it. When more candidates are found than the budget, they are subsampled "
+         "evenly across the frame (most prominent first within each region), not simply brightest "
+         "first."),
+        ("Max global intensity <span class=\"tip\">(def. 230)</span>",
+         "Median image level (8-bit scale) above which a frame is considered too bright to contain "
+         "stars and is skipped entirely. Raise it if twilight or moonlit frames that still show "
+         "stars are being rejected; frames near saturation are never worth processing."),
         ("Gamma <span class=\"tip\">(def. 1.0)</span>",
-         "Gamma stretch applied to the image <i>for detection only</i> (not the camera gamma and "
-         "not the display gamma). Values below 1 lift faint stars out of the background so they get "
-         "detected."),
+         "Camera gamma used when measuring stars (not the display gamma). Values below 1 lift "
+         "faint stars out of the background so they get detected. Saved to the config "
+         "<code>[Capture]</code> section and also stored in the platepar for photometry."),
         ("Segment radius <span class=\"tip\">(def. 4 px)</span>",
          "Radius of the patch used to centroid and measure each star. Match it to the typical star "
          "size (FWHM): too small clips the star and worsens the centroid; too large pulls in "
@@ -602,6 +614,11 @@ def _topic_stardetect(gui):
         "use those instead &ndash; handy when the default detection misses stars or picks up "
         "noise.</p>"
 
+        "<p>The parameters are split into two groups: <b>Station Config</b> values are what "
+        "<b>Save Config</b> writes to the station config file (they control the nightly pipeline), "
+        "while <b>SkyFit Session Only</b> values are used by re-detection here and are never "
+        "saved.</p>"
+
         "<h3>How to use it</h3>"
         "<ol>"
         "<li>Adjust the parameters below and click <b>Redetect</b> to re-run detection on the "
@@ -611,8 +628,11 @@ def _topic_stardetect(gui):
         "so the number of detected stars roughly matches the catalog stars in the field.</li>"
         "<li>Tick <b>Use Override Detections</b> to feed these detections into fitting and Auto "
         "Fit instead of CALSTARS.</li>"
-        "<li><b>Save to Config</b> writes the parameters to your config file so future runs reuse "
-        "them.</li>"
+        "<li><b>Save Config</b> writes the parameters to your config file so the station pipeline "
+        "reuses them. Note it saves <b>Config max stars</b>, not the SkyFit session budget &ndash; "
+        "deep detection is for calibration here, while the nightly pipeline should stay cheap.</li>"
+        "<li><b>Reset to Defaults</b> returns every slider in this tab to the recommended "
+        "values.</li>"
         "</ol>"
 
         "<h3>Parameters</h3>"

@@ -1214,6 +1214,10 @@ class HistogramLUTWidget(pg.HistogramLUTWidget):
 
 
 class HistogramLUTItem(pg.HistogramLUTItem):
+
+    # Emitted with the new state whenever auto levels is toggled (button or Ctrl+A)
+    sigAutoLevelsToggled = QtCore.pyqtSignal(bool)
+
     def __init__(self, *args, **kwargs):
         pg.HistogramLUTItem.__init__(self, *args, **kwargs)
         self.level_images = []
@@ -1249,6 +1253,7 @@ class HistogramLUTItem(pg.HistogramLUTItem):
             self.setLevels(*self.saved_manual_levels)
         self.auto_levels = not self.auto_levels
         self.region.setMovable(not self.auto_levels)
+        self.sigAutoLevelsToggled.emit(self.auto_levels)
 
     def paint(self, p, *args):
         # tbh this is an improvement
@@ -1300,12 +1305,40 @@ class RightOptionsTab(QtWidgets.QTabWidget, ScaledSizeHelper):
         self.maximized = True
         self.setFixedWidth(self.scaledWidth(self.TAB_WIDTH_CHARS))
 
-        self.addTab(self.hist, 'Levels')
-        self.addTab(self.param_manager, 'Fit Parameters')
-        self.addTab(self.geolocation, 'Station')
-        self.addTab(self.star_detection, 'Star Detection')
-        self.addTab(self.mask, 'Mask')
-        self.addTab(self.settings, 'Settings')
+        # Levels tab: auto-levels toggle button above the histogram. The button state stays in
+        # sync with the Ctrl+A shortcut through sigAutoLevelsToggled.
+        self.levels_tab = QtWidgets.QWidget()
+        levels_layout = QtWidgets.QVBoxLayout()
+        levels_layout.setContentsMargins(*self.scaledMargins(0.3, 0.2))
+        levels_layout.setSpacing(self.scaledSpacing(0.3))
+        self.auto_levels_button = QtWidgets.QPushButton('Auto Levels')
+        self.auto_levels_button.setCheckable(True)
+        self.auto_levels_button.setToolTip('Toggle automatic image levels (Ctrl+A)')
+        self.auto_levels_button.clicked.connect(lambda checked: self.hist.item.toggleAutoLevels())
+        self.hist.item.sigAutoLevelsToggled.connect(self.auto_levels_button.setChecked)
+        levels_layout.addWidget(self.auto_levels_button)
+        levels_layout.addWidget(self.hist)
+        self.levels_tab.setLayout(levels_layout)
+
+        # Wrap the form-style tabs in scroll areas so that short windows scroll the content
+        # instead of compressing it into unreadability. Levels stretches naturally with the
+        # window and Help scrolls by itself, so they stay unwrapped.
+        self._tab_scroll_wrappers = {}
+        for panel in (self.param_manager, self.geolocation, self.star_detection,
+                      self.mask, self.settings, self.debruijn):
+            scroll = QtWidgets.QScrollArea()
+            scroll.setWidgetResizable(True)
+            scroll.setFrameShape(QtWidgets.QFrame.NoFrame)
+            scroll.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
+            scroll.setWidget(panel)
+            self._tab_scroll_wrappers[panel] = scroll
+
+        self.addTab(self.levels_tab, 'Levels')
+        self.addTab(self.tabWidgetFor(self.param_manager), 'Fit Parameters')
+        self.addTab(self.tabWidgetFor(self.geolocation), 'Station')
+        self.addTab(self.tabWidgetFor(self.star_detection), 'Star Detection')
+        self.addTab(self.tabWidgetFor(self.mask), 'Mask')
+        self.addTab(self.tabWidgetFor(self.settings), 'Settings')
         self.addTab(self.help, 'ⓘ Help')
 
         self.setCurrentIndex(self.index)  # redundant
@@ -1353,14 +1386,24 @@ class RightOptionsTab(QtWidgets.QTabWidget, ScaledSizeHelper):
         self.gui.view_widget.setFocus()
 
 
+    def tabWidgetFor(self, panel):
+        """ Return the widget actually inserted in the tab bar for the given panel
+            (its scroll wrapper if it has one, the panel itself otherwise).
+        """
+        return self._tab_scroll_wrappers.get(panel, panel)
+
+    def tabIndexOf(self, panel):
+        """ Return the tab index of the given panel, looking through scroll wrappers. """
+        return self.indexOf(self.tabWidgetFor(panel))
+
     def onSkyFit(self):
 
         # Remove ManualReduction-specific tabs
         self.removeTabText('Debruijn')
 
         # Add Skyfit-specific tabs
-        self.insertTab(1, self.param_manager, "Fit Parameters")
-        self.insertTab(2, self.geolocation, "Station")
+        self.insertTab(1, self.tabWidgetFor(self.param_manager), "Fit Parameters")
+        self.insertTab(2, self.tabWidgetFor(self.geolocation), "Station")
         self.settings.onSkyFit()
 
         self.setCurrentIndex(self.index)
@@ -1374,7 +1417,7 @@ class RightOptionsTab(QtWidgets.QTabWidget, ScaledSizeHelper):
 
         # Add ManualReduction-specific tabs
         if self.gui.img.img_handle.input_type == 'dfn':
-            self.insertTab(1, self.debruijn, 'Debruijn')
+            self.insertTab(1, self.tabWidgetFor(self.debruijn), 'Debruijn')
 
         self.setCurrentIndex(self.index)
 
@@ -3268,6 +3311,8 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
     sigIntensityThresholdChanged = QtCore.pyqtSignal(int)
     sigNeighborhoodSizeChanged = QtCore.pyqtSignal(int)
     sigMaxStarsChanged = QtCore.pyqtSignal(int)
+    sigConfigMaxStarsChanged = QtCore.pyqtSignal(int)
+    sigMaxGlobalIntensityChanged = QtCore.pyqtSignal(int)
     sigGammaChanged = QtCore.pyqtSignal(float)
     sigSegmentRadiusChanged = QtCore.pyqtSignal(int)
     sigMaxFeatureRatioChanged = QtCore.pyqtSignal(float)
@@ -3276,6 +3321,15 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
     def __init__(self, gui):
         QtWidgets.QWidget.__init__(self)
         self.gui = gui
+
+        # While True, programmatic slider seeding bypasses the snap-to-100 handlers, so a
+        # config value like max_stars=150 survives loading exactly instead of being snapped
+        # (and then counting as an unsaved modification with zero user input)
+        self._seeding = False
+
+        # The station config last loaded into the sliders - Reset to Defaults returns the
+        # station-bound values (gamma, config max stars) to it rather than global defaults
+        self._loaded_config = None
 
         layout = QtWidgets.QVBoxLayout()
         layout.setContentsMargins(*self.scaledMargins(1, 0.5))
@@ -3290,29 +3344,52 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
         title.setStyleSheet("font-weight: bold; font-size: 11pt;")
         layout.addWidget(title)
 
-        # Use QGridLayout for stable slider layout
-        grid = QtWidgets.QGridLayout()
-        grid.setSpacing(self.scaledSpacing(0.3))
-        grid.setColumnStretch(0, 1)  # Label column stretches
-        grid.setColumnStretch(1, 0)  # Value column fixed
-        layout.addLayout(grid)
-
-        row = 0
+        # Detection parameters, split into what Save Config persists to the station config
+        # and what only applies to this SkyFit session
         slider_data = [
-            ('Intensity Threshold', 1, 200, 18, '18', self.onIntensityThresholdChanged),
-            ('Neighborhood Size', 5, 40, 10, '10', self.onNeighborhoodSizeChanged),
-            ('Max Stars', 50, 5000, 200, '200', self.onMaxStarsChanged),
-            ('Gamma', 45, 200, 100, '1.00', self.onGammaChanged),
-            ('Segment Radius', 2, 20, 4, '4', self.onSegmentRadiusChanged),
-            ('Max Feature Ratio', 50, 200, 80, '0.80', self.onMaxFeatureRatioChanged),
-            ('Roundness Threshold', 30, 90, 50, '0.50', self.onRoundnessThresholdChanged),
+            # (key, label, min, max, default, default label, callback, group)
+            ('intensity_threshold', 'Intensity Threshold', 1, 200, 18, '18', self.onIntensityThresholdChanged, 'config'),
+            ('neighborhood_size', 'Neighborhood Size', 5, 40, 10, '10', self.onNeighborhoodSizeChanged, 'config'),
+            ('config_max_stars', 'Max Stars', 100, 2000, 400, '400', self.onConfigMaxStarsChanged, 'config'),
+            ('max_global_intensity', 'Max Global Intensity', 30, 255, 230, '230', self.onMaxGlobalIntensityChanged, 'config'),
+            ('gamma', 'Gamma', 45, 200, 100, '1.00', self.onGammaChanged, 'config'),
+            ('segment_radius', 'Segment Radius', 2, 20, 4, '4', self.onSegmentRadiusChanged, 'config'),
+            ('max_feature_ratio', 'Max Feature Ratio', 50, 200, 80, '0.80', self.onMaxFeatureRatioChanged, 'config'),
+            ('roundness_threshold', 'Roundness Threshold', 30, 90, 50, '0.50', self.onRoundnessThresholdChanged, 'config'),
+            ('skyfit_max_stars', 'Max Stars', 100, 5000, 2000, '2000', self.onMaxStarsChanged, 'session'),
         ]
 
         self.sliders = {}
         self.slider_labels = {}
+        self.slider_defaults = {}
 
-        for name, min_val, max_val, default, default_str, callback in slider_data:
-            key = name.lower().replace(' ', '_')
+        # One group box per parameter scope
+        group_grids = {}
+        group_rows = {}
+        for group_key, group_title, group_tip in [
+                ('config', 'Station Config',
+                 'Written to the station config file by Save Config - these control the nightly pipeline'),
+                ('session', 'SkyFit Session Only',
+                 'Only used by SkyFit re-detection in this session - never written to the config')]:
+
+            box = QtWidgets.QGroupBox(group_title)
+            box.setToolTip(group_tip)
+            grid = QtWidgets.QGridLayout()
+            grid.setSpacing(self.scaledSpacing(0.3))
+            # Keep the group box padding tight so the label column doesn't get clipped
+            grid.setContentsMargins(*self.scaledMargins(0.4, 0.3))
+            grid.setColumnStretch(0, 1)  # Label column stretches
+            grid.setColumnStretch(1, 0)  # Value column fixed
+            box.setLayout(grid)
+            layout.addWidget(box)
+
+            group_grids[group_key] = grid
+            group_rows[group_key] = 0
+
+        for key, name, min_val, max_val, default, default_str, callback, group in slider_data:
+
+            grid = group_grids[group]
+            row = group_rows[group]
 
             # Row with label and value
             grid.addWidget(QtWidgets.QLabel(name), row, 0)
@@ -3332,6 +3409,7 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
 
             self.sliders[key] = slider
             self.slider_labels[key] = val_label
+            self.slider_defaults[key] = default
 
             # Add gamma preset buttons right after gamma slider
             if key == 'gamma':
@@ -3355,13 +3433,19 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
                 grid.setRowMinimumHeight(row, self.scaledHeight(1.75))
                 row += 1
 
+            group_rows[group] = row
+
         # Create named references for compatibility
         self.intensity_threshold_slider = self.sliders['intensity_threshold']
         self.intensity_threshold_label = self.slider_labels['intensity_threshold']
         self.neighborhood_size_slider = self.sliders['neighborhood_size']
         self.neighborhood_size_label = self.slider_labels['neighborhood_size']
-        self.max_stars_slider = self.sliders['max_stars']
-        self.max_stars_label = self.slider_labels['max_stars']
+        self.max_stars_slider = self.sliders['skyfit_max_stars']
+        self.max_stars_label = self.slider_labels['skyfit_max_stars']
+        self.config_max_stars_slider = self.sliders['config_max_stars']
+        self.config_max_stars_label = self.slider_labels['config_max_stars']
+        self.max_global_intensity_slider = self.sliders['max_global_intensity']
+        self.max_global_intensity_label = self.slider_labels['max_global_intensity']
         self.gamma_slider = self.sliders['gamma']
         self.gamma_label = self.slider_labels['gamma']
         self.segment_radius_slider = self.sliders['segment_radius']
@@ -3370,6 +3454,22 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
         self.max_feature_ratio_label = self.slider_labels['max_feature_ratio']
         self.roundness_threshold_slider = self.sliders['roundness_threshold']
         self.roundness_threshold_label = self.slider_labels['roundness_threshold']
+
+        # Both max stars budgets move in increments of 100
+        for s in (self.max_stars_slider, self.config_max_stars_slider):
+            s.setSingleStep(100)
+            s.setPageStep(500)
+
+        # Tooltips distinguishing the two star count budgets
+        self.max_stars_slider.setToolTip(
+            'Number of star candidates used by SkyFit re-detection in this session.\n'
+            'Initial calibration benefits from a deep sample - this value is never saved.')
+        self.config_max_stars_slider.setToolTip(
+            'max_stars value written to the station config by Save Config.\n'
+            'This bounds the star extraction cost of the nightly pipeline - 400 recommended.')
+        self.gamma_slider.setToolTip(
+            'Camera gamma used for detection and photometry.\n'
+            'Written to the config [Capture] section by Save Config, and also stored in the platepar.')
 
         layout.addSpacing(self.scaledSpacing(1))
 
@@ -3389,6 +3489,11 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
         self.tune_button.setToolTip('Auto-find optimal threshold and segment radius')
         self.tune_button.clicked.connect(self.sigTuneParameters.emit)
         btn_layout.addWidget(self.tune_button)
+
+        self.defaults_button = QtWidgets.QPushButton('Reset to Defaults')
+        self.defaults_button.setToolTip('Reset all star detection parameters to the recommended defaults')
+        self.defaults_button.clicked.connect(self.resetToDefaults)
+        btn_layout.addWidget(self.defaults_button)
 
         self.save_config_button = QtWidgets.QPushButton('Save Config...')
         self.save_config_button.setToolTip('Open File Manager to save star detection settings')
@@ -3437,9 +3542,76 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
         self.neighborhood_size_label.setText(str(value))
         self.sigNeighborhoodSizeChanged.emit(value)
 
+    @staticmethod
+    def _snapTo100(value):
+        """Snap a max stars value to the nearest 100."""
+        return max(100, int(round(value/100.0))*100)
+
     def onMaxStarsChanged(self, value):
+        # Snap only user motion - programmatic seeding keeps the exact config value
+        if not self._seeding:
+            snapped = self._snapTo100(value)
+            if snapped != value:
+                # Re-fires this handler with the snapped value
+                self.max_stars_slider.setValue(snapped)
+                return
         self.max_stars_label.setText(str(value))
         self.sigMaxStarsChanged.emit(value)
+
+    def onConfigMaxStarsChanged(self, value):
+        # Snap only user motion - programmatic seeding keeps the exact config value
+        if not self._seeding:
+            snapped = self._snapTo100(value)
+            if snapped != value:
+                # Re-fires this handler with the snapped value
+                self.config_max_stars_slider.setValue(snapped)
+                return
+        self.config_max_stars_label.setText(str(value))
+        self.sigConfigMaxStarsChanged.emit(value)
+
+    def resetToDefaults(self):
+        """Reset the tuning sliders to the recommended defaults.
+
+        Station-bound values return to the loaded config instead: gamma is a hardware
+        property of the camera (resetting it to 1.0 would corrupt photometry the moment
+        Save Config is pressed), and the config max stars is the station's pipeline
+        budget, not a tuning preference.
+        """
+        cfg = self._loaded_config
+
+        for key, default in self.slider_defaults.items():
+
+            if key == 'gamma':
+                if cfg is not None and hasattr(cfg, 'gamma'):
+                    self.gamma_slider.setValue(int(round(cfg.gamma*100)))
+                continue
+
+            if key == 'config_max_stars':
+                if cfg is not None and hasattr(cfg, 'max_stars'):
+                    self._seedSlider(self.config_max_stars_slider, cfg.max_stars)
+                continue
+
+            # setValue triggers each slider's callback, so labels and override
+            # values in SkyFit update through the normal signal path
+            self.sliders[key].setValue(default)
+
+    def _seedSlider(self, slider, value):
+        """ Set a slider value programmatically, bypassing the snap-to-100 handlers so the
+            exact value survives (the change signal still fires normally). Extends the
+            slider range if needed so out-of-range config values are not clamped. """
+        if value < slider.minimum():
+            slider.setMinimum(value)
+        if value > slider.maximum():
+            slider.setMaximum(value)
+        self._seeding = True
+        try:
+            slider.setValue(value)
+        finally:
+            self._seeding = False
+
+    def onMaxGlobalIntensityChanged(self, value):
+        self.max_global_intensity_label.setText(str(value))
+        self.sigMaxGlobalIntensityChanged.emit(value)
 
     def onGammaChanged(self, value):
         gamma = value / 100.0
@@ -3494,6 +3666,9 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
 
     def loadFromConfig(self, config):
         """Initialize sliders from config values."""
+
+        self._loaded_config = config
+
         if hasattr(config, 'intensity_threshold'):
             # Give the threshold slider a bit-depth-appropriate maximum before setting the
             # value, otherwise a high-bit-depth config threshold is silently clamped to the
@@ -3512,7 +3687,16 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
         if hasattr(config, 'neighborhood_size'):
             self.neighborhood_size_slider.setValue(config.neighborhood_size)
         if hasattr(config, 'max_stars'):
-            self.max_stars_slider.setValue(config.max_stars)
+            # Only the CONFIG budget tracks the station config (it is what Save Config
+            # writes back). The session budget is a desktop compute limit for calibration
+            # work - seeding it from the Pi's pipeline budget would drag the deep session
+            # default down on every folder load. Seed without snapping so a config value
+            # like 150 loads exactly - otherwise the seeded value counts as an unsaved
+            # config modification with zero user input, and Save Config would write the
+            # snapped value back to the station config
+            self._seedSlider(self.config_max_stars_slider, config.max_stars)
+        if hasattr(config, 'max_global_intensity'):
+            self.max_global_intensity_slider.setValue(config.max_global_intensity)
         if hasattr(config, 'gamma'):
             self.gamma_slider.setValue(int(config.gamma * 100))
         if hasattr(config, 'segment_radius'):

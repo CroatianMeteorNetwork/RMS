@@ -539,7 +539,7 @@ class Config:
         ##### StarExtraction
 
         # Extraction parameters
-        self.max_global_intensity = 150 # maximum mean intensity of an image before it is discarded as too bright
+        self.max_global_intensity = 230 # maximum median intensity of an image (8-bit scale) before it is discarded as too bright to contain stars
         self.border = 10 #  apply a mask on the detections by removing all that are too close to the given image border (in pixels)
         self.neighborhood_size = 10 # size of the neighbourhood for the maximum search (in pixels)
         self.intensity_threshold = 5 # a threshold for cutting the detections which are too faint (0-255)

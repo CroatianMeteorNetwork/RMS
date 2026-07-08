@@ -26,6 +26,7 @@ from RMS.Formats.FTPdetectinfo import findFTPdetectinfoFile
 from RMS.Formats.Showers import FluxShowers, loadRadiantShowers
 from Utils.Flux import calculatePopulationIndex, calculateMassIndex, computeFlux, detectClouds, fluxParser, \
     calculateFixedBins, calculateZHR, massVerniani, loadShower
+from RMS.Routines.MaskImage import getMaskFile
 from RMS.Routines.SolarLongitude import unwrapSol
 from RMS.Misc import formatScientific, roundToSignificantDigits, SegmentedScale, mkdirP
 from RMS.QueuedPool import QueuedPool
@@ -833,8 +834,13 @@ def computeTimeIntervalsPerStation(night_dir_path, time_intervals, binduration, 
         # Find time intervals to compute flux with
         print('Detecting whether clouds are present...')
 
+        # Load the mask so the star prediction skips obstructed regions - without it the
+        # expectation counts stars the detector can never match and the ratio biases low
+        mask = getMaskFile(ftp_dir_path, config_station, default_as_backup=True)
+
         time_intervals = detectClouds(
-            config_station, ftp_dir_path, show_plots=False, ratio_threshold=ratio_threshold
+            config_station, ftp_dir_path, mask=mask, show_plots=False,
+            ratio_threshold=ratio_threshold
         )
 
         print('Cloud detection complete!')
