@@ -19,6 +19,7 @@ from __future__ import absolute_import, division, print_function
 import math
 import os
 import sys
+from RMS.CompileArgs import getCompileArgs
 from RMS.Misc import getRmsRootDir
 from Utils.GenerateTimelapse import isFfmpegWorking
 import matplotlib.colors as mcolors
@@ -50,22 +51,9 @@ except ImportError:
             pass
 
 
-def choosePlatform(win_conf, rpi_conf, linux_pc_conf):
-    """ Choose the setting depending on if this is running on the RPi or a Linux PC. """
-
-    # Check if running on Windows.
-    # ``startswith`` ensures the platform string actually begins with ``"win"``
-    # instead of matching other identifiers that merely contain that substring.
-    if sys.platform.startswith('win'):
-        return win_conf
-
-    else:
-
-        if 'arm' in os.uname()[4]:
-            return rpi_conf
-
-        else:
-            return linux_pc_conf
+# Platform selection of compile arguments lives in RMS.CompileArgs so that setup.py
+# and the .pyxbld files can use it without importing this module's heavy dependencies
+choosePlatform = getCompileArgs
 
 
 
@@ -197,7 +185,9 @@ class Config:
 
         self.reboot_after_processing = False
         self.reboot_lock_file = ".reboot_lock"
-        
+
+        self.time_server = "time.cloudflare.com"
+
         ##### Capture
         self.deviceID = 0
 
@@ -450,7 +440,7 @@ class Config:
 
 
         ##### Weave compilation arguments
-        self.extra_compile_args = ["-O3"]
+        self.extra_compile_args = getCompileArgs()
         
         ##### FireballDetection
 
@@ -882,6 +872,10 @@ def parseSystem(config, parser):
     if parser.has_option(section, "reboot_lock_file"):
         config.reboot_lock_file = parser.get(section, "reboot_lock_file")
 
+    if parser.has_option(section, "time_server"):
+        time_server = parser.get(section, "time_server").strip()
+        if time_server != '':
+            config.time_server = time_server
 
     if parser.has_option(section, "event_monitor_db_name"):
         config.event_monitor_db_name = parser.get(section, "event_monitor_db_name")
@@ -1365,9 +1359,9 @@ def parseBuildArgs(config, parser):
         win_pc_weave = parser.get(section, "win_pc_weave").split()
         
 
-    # Read in the KHT library path for both the PC and the RPi, but decide which one to take based on the 
-    # system this is running on
-    config.extra_compile_args = choosePlatform(win_pc_weave, rpi_weave, linux_pc_weave)
+    # Pick the compile arguments for the system this is running on, keeping the
+    # defaults for any option not set in the config file
+    config.extra_compile_args = getCompileArgs(win_pc_weave, rpi_weave, linux_pc_weave)
 
 
 

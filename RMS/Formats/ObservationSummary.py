@@ -186,8 +186,13 @@ def addRequiredColumns(conn, d):
         d: [dict] Dictionary of keys and values for the observation summary.
 
      Return:
-        Nothing.
+        [set] columns existing in the table
     """
+
+    # If d has not yet been initialised, return to prevent iterating over None
+    if d is None:
+        log.info("Not adding columns for observation summary dictionary which is None")
+        return set()
 
     existing = getColumns(conn)
     for key in d:
@@ -200,26 +205,44 @@ def addRequiredColumns(conn, d):
             sql_command = f"ALTER TABLE {OBSERVATIONS_TABLE_NAME} ADD COLUMN {key.lower()} TEXT"
             conn.execute(sql_command)
 
+    return set(getColumns(conn))
+
 def storeDictInDB(conn, d, debug=False):
-    """
-    Store the dict d in the observation summary database.
+    """Store the dict d in the observation summary database, create new columns if needed.
 
     Arguments:
         conn: connection to database.
         d: [dict] Dictionary of keys and values for the observation summary.
 
+    Keyword Arguments:
+        debug: [bool] Optional, default False, print debugging information
 
     Return:
         Nothing.
     """
 
+    # Nothing to store if the dict is None, return early
+    if d is None:
+        log.info("Not storing an empty observation summary in the database")
+        return
+
     # Ensure schema is up to date
-    addRequiredColumns(conn, d)
+    existing_columns = addRequiredColumns(conn, d)
+
+    # Columns are always created lower-cased (see addRequiredColumns), and SQLite column
+    # names are case-insensitive, so match case-insensitively and key the filtered dict by
+    # the lower-cased name. Comparing the original-case key would silently drop mixed-case
+    # keys such as "stationID".
+    dict_filtered_by_columns = {k.lower(): v for k, v in d.items() if k.lower() in existing_columns}
+
+    dropped = {k for k in d.keys() if k.lower() not in existing_columns}
+    if len(dropped) != 0:
+        log.warning(f"No columns for following keys: {sorted(dropped)}")
 
     # Normalise booleans safely (TEXT columns expect strings)
     clean = {
         k: ("True" if v is True else "False" if v is False else v)
-        for k, v in d.items()
+        for k, v in dict_filtered_by_columns.items()
     }
 
     # Only store the basename for night_data_dir
@@ -241,7 +264,7 @@ def storeDictInDB(conn, d, debug=False):
     sql_command += f"VALUES ({placeholders})\n"
     sql_command += f"ON CONFLICT(night_data_dir) DO UPDATE SET {assignments}\n"
 
-    # Show the SQL with placeholders (safe)
+    # Show the SQL with placeholders
     if debug:
         print(sql_command)
         print(values)
@@ -416,7 +439,7 @@ def getTimeClient():
             if output == 'active':
                 return name
         except subprocess.CalledProcessError:
-            # Not active or not recognised
+            # Other error such as systemctl not available
             pass
     return "Not recognized"
 
@@ -457,7 +480,11 @@ def timeSyncStatus(config, d, force_client=None):
 
     else:
         addObsParam(d, "clock_measurement_source", "Not detected")
-        remote_time_query, uncertainty = timestampFromNTP()
+        try:
+            remote_time_query, uncertainty, time_server = timestampFromNTP(config.time_server)
+        except Exception:
+            remote_time_query, uncertainty, time_server = (None, None, None)
+        addObsParam(d, "time_server", time_server)
         if remote_time_query is not None:
             local_time_query = (datetime.datetime.now(datetime.timezone.utc)
                                 - datetime.datetime(1970, 1, 1)
@@ -470,7 +497,10 @@ def timeSyncStatus(config, d, force_client=None):
             addObsParam(d, "clock_error_uncertainty_ms", uncertainty)
         addObsParam(d, "clock_ahead_ms", ahead_ms)
 
-        result_list = subprocess.run(['timedatectl','status'], capture_output = True).stdout.splitlines()
+        try:
+            result_list = subprocess.run(['timedatectl','status'], capture_output = True).stdout.splitlines()
+        except Exception:
+            result_list = []
 
         for raw_result in result_list:
             result = raw_result.decode('ascii')
@@ -687,7 +717,7 @@ def timestampFromNTP(addr='time.cloudflare.com'):
         None
 
     Keyword arguments:
-        addr: optional, address of ntp server to use.
+        addr: [str] optional, address of ntp server to use.
 
     Return:
         adjusted_time: [float] time in seconds since epoch.
@@ -733,16 +763,16 @@ def timestampFromNTP(addr='time.cloudflare.com'):
         # Next calculation assumes that remote and local clock are running at identical rates
         estimated_network_delay = local_clock_measured_response_time - remote_clock_measured_processing_time
         if estimated_network_delay < 0:
-            return None, None
+            return None, None, addr
 
         # Now calculate estimated clock offsets
         clock_offset_out_leg = remote_clock_time_receive_timestamp - local_clock_transmit_timestamp
         clock_offset_return_leg = remote_clock_time_transmit_timestamp - local_clock_receive_timestamp
         estimated_offset = (clock_offset_out_leg + clock_offset_return_leg)/2
         adjusted_time = remote_clock_time_transmit_timestamp + estimated_offset
-        return adjusted_time, estimated_network_delay
+        return adjusted_time, estimated_network_delay, addr
     else:
-        return None, None
+        return None, None, addr
 
 def addObsParam(d, key, value):
     """Add a single key value pair into the observation summary dictionary
@@ -1251,11 +1281,10 @@ def serialize(config, format_nicely=True, as_json=False, night_directory=None, d
                     'camera_lens','camera_fov_h','camera_fov_v',
                     'camera_pointing_alt','camera_pointing_az',
                     'camera_information', 'camera_firmware_build_date', 'camera_firmware_version',
-                    'clock_measurement_source', 'clock_synchronized', 'clock_ahead_ms', 'clock_error_uncertainty_ms',
-                    'start_time', 'duration_from_start_of_observation', 'continuous_capture',
-                    'photometry_good', 'star_catalog_file',
-                    'time_start_ephem', 'time_first_fits_file', 'time_first_detection',
-                    'time_end_ephem', 'time_last_fits_file', 'time_last_detection', 'days_since_last_detection',
+                    'clock_measurement_source', 'clock_synchronized', 'clock_ahead_ms', 'clock_error_uncertainty_ms', 'time_server',
+                    'start_time', 'duration_from_start_of_observation', 'continuous_capture', 'photometry_good',
+                    'time_start_ephem', 'time_first_fits_file', 'time_first_detection', 'time_last_detection',
+                    'time_end_ephem', 'time_last_fits_file', 'days_since_last_detection',
                     'total_expected_fits','total_fits',
                     'fits_files_from_duration','fits_file_shortfall', 'fits_file_shortfall_as_time',
                     'capture_duration_from_fits',
@@ -1265,12 +1294,18 @@ def serialize(config, format_nicely=True, as_json=False, night_directory=None, d
                     'media_backend','protocol_in_use','jitter_quality','dropped_frame_rate','kht_wrapper_count',
                     'traceback_count']
 
+
+    # Warn for duplicated keys in ordering list
+    seen = set()
+    for key_name in ordering:
+        if key_name in seen:
+            log.warning(f"Duplicated key {key_name} in ordering list")
+        else:
+            seen.add(key_name)
+
     # Dedupe while preserving first occurrence - the ordering list contains a few repeats
     # (e.g. media_backend, star_catalog_file) which would otherwise produce duplicate output lines.
     ordering = list(dict.fromkeys(ordering))
-
-    # Use this print call to check the ordering
-    # print("Ordering {}".format(ordering))
 
     if drop_keys_list:
         if isinstance(drop_keys_list, str):
@@ -1533,11 +1568,19 @@ def getObservationSummaryDict(data_dir, final=False, config=None):
             with open(observation_summary_json_path, "r") as f:
                 try:
                     d = json.load(f)
+
+                    # A file containing e.g. the literal "null" parses fine but yields a
+                    # non-dict (None); reject it so it is recovered like a corrupt file
+                    # rather than being returned and crashing every downstream consumer.
+                    if not isinstance(d, dict):
+                        raise ValueError("observation summary JSON is not a dict (got {})".format(
+                            type(d).__name__))
+
                     log.info(f"Loaded {os.path.basename(observation_summary_json_path)}")
 
                 except:
-                    # Don't silently delete - back up the unparseable file so data is not lost,
-                    # then start fresh.
+                    # Don't silently delete - back up the unparseable/invalid file so data is
+                    # not lost, then start fresh.
                     corrupt_path = observation_summary_json_path + ".corrupt"
                     try:
                         os.replace(observation_summary_json_path, corrupt_path)

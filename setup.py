@@ -49,17 +49,26 @@ kht_sources = ["RMS/Routines/Kht.pyx"] + [
     ("kht", "buffer_2d", "eigen", "linking", "peak_detection", "subdivision", "voting")
 ]
 
+# Platform-specific compile arguments from the [Build] section of .config, shared with
+# the .pyxbld pyximport fallback recipes. RMS.CompileArgs is standard-library only, so
+# it is safe to import before the RMS dependencies are installed. The repository root
+# must be put on sys.path explicitly: pip's PEP 517 build hooks exec this file from
+# another directory, so the local RMS package is not importable by default.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from RMS.CompileArgs import getExtraCompileArgs
+compile_args = getExtraCompileArgs()
+
 # Cython extensions
 cython_modules = [
     Extension("RMS.Routines.Kht", kht_sources, include_dirs=["Native/Hough/"],
-        language="c++", extra_compile_args=["-O3"]),
-    Extension("RMS.Astrometry.CyFunctions", ["RMS/Astrometry/CyFunctions.pyx"], include_dirs=numpy_includes),
-    Extension("RMS.Routines.BinImageCy", ["RMS/Routines/BinImageCy.pyx"], include_dirs=numpy_includes),
-    Extension("RMS.Routines.DynamicFTPCompressionCy", ["RMS/Routines/DynamicFTPCompressionCy.pyx"], include_dirs=numpy_includes),
-    Extension("RMS.Routines.Grouping3Dcy", ["RMS/Routines/Grouping3Dcy.pyx"], include_dirs=numpy_includes),
-    Extension("RMS.Routines.MorphCy", ["RMS/Routines/MorphCy.pyx"], include_dirs=numpy_includes),
-    Extension("RMS.CompressionCy", ["RMS/CompressionCy.pyx"], include_dirs=numpy_includes),
-    Extension("Utils.SaturationTools", ["Utils/SaturationTools.pyx"], include_dirs=numpy_includes),
+        language="c++", extra_compile_args=compile_args),
+    Extension("RMS.Astrometry.CyFunctions", ["RMS/Astrometry/CyFunctions.pyx"], include_dirs=numpy_includes, extra_compile_args=compile_args),
+    Extension("RMS.Routines.BinImageCy", ["RMS/Routines/BinImageCy.pyx"], include_dirs=numpy_includes, extra_compile_args=compile_args),
+    Extension("RMS.Routines.DynamicFTPCompressionCy", ["RMS/Routines/DynamicFTPCompressionCy.pyx"], include_dirs=numpy_includes, extra_compile_args=compile_args),
+    Extension("RMS.Routines.Grouping3Dcy", ["RMS/Routines/Grouping3Dcy.pyx"], include_dirs=numpy_includes, extra_compile_args=compile_args),
+    Extension("RMS.Routines.MorphCy", ["RMS/Routines/MorphCy.pyx"], include_dirs=numpy_includes, extra_compile_args=compile_args),
+    Extension("RMS.CompressionCy", ["RMS/CompressionCy.pyx"], include_dirs=numpy_includes, extra_compile_args=compile_args),
+    Extension("Utils.SaturationTools", ["Utils/SaturationTools.pyx"], include_dirs=numpy_includes, extra_compile_args=compile_args),
 ]
 
 # Runtime requirements
