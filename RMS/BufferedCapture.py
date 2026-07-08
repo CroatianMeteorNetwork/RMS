@@ -1249,10 +1249,20 @@ class BufferedCapture(Process):
             
             except Exception as e:
                 log.error("Attempt {} failed: {}".format(attempt + 1, str(e)))
-                # Clean up any partial pipeline that was created
+                # Clean up any partial pipeline that was created. Time-bound like the
+                # releaseResources teardowns: in the reconnect case the frame savers are
+                # already running, so an unbounded hang here would freeze the heartbeat
+                # and recreate the watchdog-kill -> orphan scenario.
                 if hasattr(self, 'pipeline') and self.pipeline:
                     try:
-                        self.pipeline.set_state(Gst.State.NULL)
+                        ok, _, _ = runWithTimeout(
+                            self.pipeline.set_state, args=(Gst.State.NULL,),
+                            timeout=GST_TEARDOWN_TIMEOUT,
+                            on_late_completion=lambda: log.info(
+                                "createGstreamDevice: abandoned cleanup set_state(NULL) finally unwound"))
+                        if not ok:
+                            log.warning("createGstreamDevice: cleanup set_state(NULL) hung >%ds - "
+                                        "abandoning partial pipeline", GST_TEARDOWN_TIMEOUT)
                         self.pipeline = None
                     except Exception as cleanup_e:
                         log.error("Error cleaning up failed pipeline: {}".format(cleanup_e))
@@ -1561,14 +1571,6 @@ class BufferedCapture(Process):
         self.last_pts_correction_ns = 0
         self.last_running_time_ns = None
 
-        def _timedCall(fn, timeout_s=2):
-            """Run *fn()* in a daemon thread and wait *timeout_s*.
-            Returns True if the call finished in time."""
-            th = threading.Thread(target=fn, daemon=True)
-            th.start()
-            th.join(timeout_s)
-            return not th.is_alive()
-
         # stop frame-saver children
         log.debug("releaseResources: Calling releaseRawArrays()")
         self.releaseRawArrays()
@@ -1607,7 +1609,9 @@ class BufferedCapture(Process):
                 log.debug("releaseResources: Setting pipeline to NULL state (timeout %ds)", GST_TEARDOWN_TIMEOUT)
                 ok, ret, exc = runWithTimeout(self.pipeline.set_state,
                                               args=(Gst.State.NULL,),
-                                              timeout=GST_TEARDOWN_TIMEOUT)
+                                              timeout=GST_TEARDOWN_TIMEOUT,
+                                              on_late_completion=lambda: log.info(
+                                                  "releaseResources: abandoned set_state(NULL) finally unwound"))
                 if not ok:
                     # Teardown hung. Abandon it (the call keeps running in a daemon thread,
                     # holding the old pipeline until it eventually unwinds) and drop our
@@ -1639,7 +1643,9 @@ class BufferedCapture(Process):
                 log.debug("releaseResources: Force setting pipeline to NULL state (timeout %ds)", GST_TEARDOWN_TIMEOUT)
                 fok, _, _ = runWithTimeout(self.pipeline.set_state,
                                            args=(Gst.State.NULL,),
-                                           timeout=GST_TEARDOWN_TIMEOUT)
+                                           timeout=GST_TEARDOWN_TIMEOUT,
+                                           on_late_completion=lambda: log.info(
+                                               "releaseResources: abandoned forced set_state(NULL) finally unwound"))
                 if not fok:
                     log.warning("releaseResources: forced set_state(NULL) also hung >%ds - abandoning",
                                 GST_TEARDOWN_TIMEOUT)
@@ -1683,7 +1689,8 @@ class BufferedCapture(Process):
 
             try:
                 if hasattr(self.device, "release"):                      # OpenCV branch
-                    if not _timedCall(self.device.release):
+                    rok, _, _ = runWithTimeout(self.device.release, timeout=2)
+                    if not rok:
                         log.warning("releaseResources: cap.release() hung - fd dropped")
 
                 # For GStreamer devices (AppSink), cleanup happens automatically when

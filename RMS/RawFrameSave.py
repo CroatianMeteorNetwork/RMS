@@ -250,13 +250,17 @@ class RawFrameSaver(multiprocessing.Process):
                     # is gone, our exit Event will never be set, so self-terminate instead
                     # of spinning here forever holding the frame buffer. Complements
                     # PR_SET_PDEATHSIG (which doesn't fire correctly under forkserver).
-                    try:
-                        os.kill(self.parent_pid, 0)
-                    except OSError:
-                        log.warning('RawFrameSaver: parent process %d gone, exiting orphan',
-                                    self.parent_pid)
-                        self.run_exited.set()
-                        return None
+                    # POSIX only: on Windows signal 0 is CTRL_C_EVENT, so os.kill(pid, 0)
+                    # is not a liveness probe there. ProcessLookupError (ESRCH) rather than
+                    # OSError, so an EPERM on a live parent isn't mistaken for death.
+                    if os.name == 'posix':
+                        try:
+                            os.kill(self.parent_pid, 0)
+                        except ProcessLookupError:
+                            log.warning('RawFrameSaver: parent process %d gone, exiting orphan',
+                                        self.parent_pid)
+                            self.run_exited.set()
+                            return None
 
                     time.sleep(0.1)
 
