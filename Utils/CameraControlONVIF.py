@@ -116,9 +116,11 @@ def findWsdlDir():
         "pip install --force-reinstall --no-cache-dir onvif-zeep-async".format(candidates))
 
 
-async def _connect_camera_async(ip_address, port, username, password):
+async def _connect_camera_async(ip_address, port, username, password, wsdl_dir):
     """Create and initialize ONVIF camera inside an active event loop."""
-    cam = ONVIFCamera(ip_address, port, username, password)
+    # Pass wsdl_dir explicitly: all supported onvif library versions accept it, and
+    # onvif-zeep-async 1.x ships its WSDL files in a different place than its own default
+    cam = ONVIFCamera(ip_address, port, username, password, wsdl_dir=wsdl_dir)
 
     try:
         if hasattr(cam, 'update_xaddrs'):
@@ -158,11 +160,12 @@ def connectCamera(ip_address, port, username, password):
     """
     # Run before attempting the connection so an incomplete install surfaces as a
     # clear error instead of a generic connection failure
-    findWsdlDir()
+    wsdl_dir = findWsdlDir()
 
     try:
         # Keep camera creation on an active loop for coroutine-based onvif builds
-        return _resolve_onvif_call(_connect_camera_async(ip_address, port, username, password))
+        return _resolve_onvif_call(
+            _connect_camera_async(ip_address, port, username, password, wsdl_dir))
     except Exception as e:
         log.error("Failed to connect to camera: %s", e)
         return None
