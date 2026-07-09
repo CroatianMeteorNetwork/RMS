@@ -17,10 +17,12 @@ import numpy as np
 from scipy.ndimage import maximum_filter, uniform_filter
 from scipy.spatial import Voronoi
 
-from RMS.Astrometry.Conversions import date2JD
+from RMS.Astrometry.ApplyAstrometry import raDecToXYPP, xyToRaDecPP
+from RMS.Astrometry.Conversions import date2JD, jd2Date
 from RMS.ConfigReader import findConfigInDir
 from RMS.Formats import StarCatalog
-from RMS.Formats.Platepar import Platepar, getCatalogStarsImagePositions
+from RMS.Formats.Platepar import Platepar
+from RMS.Math import pointInsideConvexPolygonSphere
 
 
 class ClearSkyResult:
@@ -351,7 +353,6 @@ class ClearSkyDetector:
                 return dt
 
         # Fallback
-        from RMS.Astrometry.Conversions import jd2Date
         dt_tuple = jd2Date(self.platepar.JD)
         return datetime.datetime(*[int(x) for x in dt_tuple[:6]])
 
@@ -565,10 +566,35 @@ def detectFrame(detector, frame, jd, background=None):
     result = ClearSkyResult()
     result.jd = jd
 
-    # Project catalog stars to image coordinates
-    x_cat, y_cat, mag_cat = getCatalogStarsImagePositions(
-        detector.catalog_stars, jd, detector.platepar
+    # Make a polygon on the sky using the outline of the image, 5 points on each side
+    x_res = detector.platepar.X_res
+    y_res = detector.platepar.Y_res
+    x_vert = [0, x_res/4, x_res/2, 3/4*x_res, x_res, x_res, x_res, x_res, x_res, 3/4*x_res, x_res/2,
+              x_res/4, 0, 0, 0, 0, 0]
+    y_vert = [0, 0, 0, 0, 0, y_res/4, y_res/2, 3/4*y_res, y_res, y_res, y_res, y_res, y_res, 3/4*y_res,
+              y_res/2, y_res/4, 0]
+
+    date = jd2Date(jd)
+    _, ra_vertices, dec_vertices, _ = xyToRaDecPP(
+        [date]*len(x_vert),
+        list(reversed(x_vert)),
+        list(reversed(y_vert)),
+        [1]*len(x_vert),
+        detector.platepar,
+        extinction_correction=False,
+        precompute_pointing_corr=True
     )
+
+    # Filter out stars outside the polygon on the sphere made by the FOV, so that stars far outside
+    # the FOV don't get folded back into image bounds by the distortion model
+    ra_catalog, dec_catalog, mag_catalog = detector.catalog_stars.T
+    inside = pointInsideConvexPolygonSphere(
+        np.array([ra_catalog, dec_catalog]).T, np.array([ra_vertices, dec_vertices]).T
+    )
+
+    # Project catalog stars inside the FOV to image coordinates
+    x_cat, y_cat = raDecToXYPP(ra_catalog[inside], dec_catalog[inside], jd, detector.platepar)
+    mag_cat = mag_catalog[inside]
 
     # Filter to stars within image bounds
     h, w = frame.shape[:2]
