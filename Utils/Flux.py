@@ -1230,7 +1230,12 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
 
 
     # Detect which images don't have a moon visible, and filter the file list based on this
+    pre_moon_files = list(recorded_files)
     recorded_files = detectMoon(recorded_files, platepar, config)
+
+    # Frames excluded because of the moon - shown on the observing plot so moon periods
+    # are not read as cloudy (both look like "no clear interval" otherwise)
+    moon_excluded_files = sorted(set(pre_moon_files) - set(recorded_files))
 
     # Keep the time-binned, moon-filtered list: the dense dome scoring below scores these
     # frames directly (the reassignment of recorded_files to the recalibrated platepar keys
@@ -1287,6 +1292,15 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
         )
         for ff_file in recorded_files
     }
+
+    # Self-prime the light-dome model from this station's own archives if none exists (or
+    # an auto-fitted one went stale) - no operator needed after an update. Never blocks:
+    # any failure logs and falls through to the scalar behavior below.
+    try:
+        from Utils.FitLightDome import ensureLightDomeModel
+        ensureLightDomeModel(config, platepar=platepar)
+    except Exception as e:
+        log.warning("Light-dome auto-fit unavailable: {}".format(e))
 
     # Load the fitted site light-dome model, if one is available. It supersedes the scalar
     # LM prediction below: the limiting magnitude varies by over a magnitude across a
@@ -1419,7 +1433,8 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
             if any(r > 0 for r in ratio_raw.values()) else None
 
         ratio_norm = domeRatioNormalization(
-            config, os.path.basename(os.path.normpath(dir_path)), night_median_ratio)
+            config, os.path.basename(os.path.normpath(dir_path)), night_median_ratio,
+            model_version=dome_model.model.get("fit_date"))
 
         if abs(ratio_norm - 1.0) > 0.01:
             log.info("Dome ratio normalization from camera history: {:.2f}".format(ratio_norm))
@@ -1508,10 +1523,30 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
 
 
         # Shade the regions with clear skies
-        if len(time_intervals):
+        for i, (beg, end) in enumerate(time_intervals):
+            ax[0].axvspan(beg, end, alpha=0.5, color='lightblue', zorder=4,
+                label='Clear interval' if i == 0 else None)
 
-            for beg, end in time_intervals:
-                ax[0].axvspan(beg, end, alpha=0.5, color='lightblue', zorder=4)
+        # Shade the periods excluded because of the moon, so they are not read as cloudy
+        if moon_excluded_files:
+
+            moon_times = sorted(FFfile.filenameToDatetime(ff) for ff in moon_excluded_files)
+
+            # Group contiguous excluded frames into spans
+            moon_spans = []
+            span_beg = span_end = moon_times[0]
+            for t in moon_times[1:]:
+                if (t - span_end).total_seconds() > 15*60:
+                    moon_spans.append((span_beg, span_end))
+                    span_beg = t
+                span_end = t
+            moon_spans.append((span_beg, span_end))
+
+            pad = datetime.timedelta(minutes=2.5)
+            for i, (beg, end) in enumerate(moon_spans):
+                for axis in ax:
+                    axis.axvspan(beg - pad, end + pad, alpha=0.3, color='khaki', zorder=3,
+                        label=('Moon excluded' if (i == 0 and axis is ax[0]) else None))
 
         ax[0].legend()
         ax[0].set_ylim(ymin=0)
@@ -2408,7 +2443,7 @@ DOME_RATIO_NORM_MAX = 2.5    # ceiling - bounds deflation on nights much deeper 
                              # model's fit epoch (e.g. dry season vs a monsoon-epoch fit)
 
 
-def domeRatioNormalization(config, night_id, night_median_ratio):
+def domeRatioNormalization(config, night_id, night_median_ratio, model_version=None):
     """ Slow, cloud-immune normalization of the dome-model clear-sky ratio.
 
     The light-dome model is fitted at one epoch; the light-pollution amplitude then drifts
@@ -2430,10 +2465,15 @@ def domeRatioNormalization(config, night_id, night_median_ratio):
         night_id: [str] Identifier of this night (capture directory basename).
         night_median_ratio: [float] Tonight's median matched/expected ratio (None skips
             recording).
+        model_version: [str] Version tag of the dome model the ratios were measured
+            against (its fit_date). Ratios are only comparable within one model version,
+            so a refit resets the normalization to its warmup.
 
     Return:
         norm: [float] Normalization to divide the nightly ratios by.
     """
+
+    version = str(model_version) if model_version is not None else "unversioned"
 
     history = {}
     history_path = None
@@ -2453,7 +2493,8 @@ def domeRatioNormalization(config, night_id, night_median_ratio):
     night_key = _nightKey(night_id)
 
     prior_ratios = [v["dratio"] for k, v in sorted(history.items())[-LM_HISTORY_WINDOW:]
-                    if (k != night_key) and isinstance(v, dict) and ("dratio" in v)]
+                    if (k != night_key) and isinstance(v, dict) and ("dratio" in v)
+                    and (v.get("dmodel", "unversioned") == version)]
 
     norm = 1.0
     if len(prior_ratios) >= LM_HISTORY_MIN_NIGHTS:
@@ -2468,6 +2509,7 @@ def domeRatioNormalization(config, night_id, night_median_ratio):
             if not isinstance(entry, dict):
                 entry = {}
             entry["dratio"] = round(float(night_median_ratio), 3)
+            entry["dmodel"] = version
             history[night_key] = entry
             history = dict(sorted(history.items())[-LM_HISTORY_WINDOW:])
             with open(history_path, 'w') as f:

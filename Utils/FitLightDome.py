@@ -25,6 +25,7 @@ its LM0. Refit after retuning a camera, refocusing, or re-aiming.
 from __future__ import absolute_import, division, print_function
 
 import argparse
+import datetime
 import json
 import os
 
@@ -39,7 +40,7 @@ from RMS.Astrometry.ApplyAstrometry import raDecToXYPP, xyToRaDecPP
 from RMS.Astrometry.Conversions import date2JD, jd2Date, raDec2AltAz
 from RMS.Routines.MaskImage import getMaskFile
 from RMS.Math import pointInsideConvexPolygonSphere
-from RMS.LightDomeModel import DOME_CATALOG_LIM_MAG, LIGHT_DOME_FILE_SUFFIX
+from RMS.LightDomeModel import DOME_CATALOG_LIM_MAG, LIGHT_DOME_FILE_SUFFIX, LightDomeModel
 
 
 # Trial building
@@ -215,10 +216,11 @@ def buildStationTrials(config, night_dirs, n_ff=FF_PER_NIGHT, moon_phase_max=MOO
         return None
 
     return dict(az=np.concatenate(az_all), alt=np.concatenate(alt_all),
-        mag=np.concatenate(mag_all), det=np.concatenate(det_all))
+        mag=np.concatenate(mag_all), det=np.concatenate(det_all),
+        pointing=(float(pp.az_centre), float(pp.alt_centre)))
 
 
-def selectNightDirs(config, dates=None, window=30, max_nights=4):
+def selectNightDirs(config, dates=None, window=30, max_nights=4, min_rel_clarity=None):
     """ Pick night directories to fit on: explicit dates, or the clearest recent nights
         (highest median matched-star count over the trailing window).
 
@@ -229,6 +231,10 @@ def selectNightDirs(config, dates=None, window=30, max_nights=4):
         dates: [list of str] YYYYMMDD dates. If given, all segments of those dates.
         window: [int] Trailing night directories to consider for auto-selection.
         max_nights: [int] Number of auto-selected nights.
+        min_rel_clarity: [float] If given, only keep nights whose median matched count is
+            at least this fraction of the best selected night's - excludes cloudy nights
+            from the training set even when few nights are available (training on cloudy
+            frames biases the model shallow, which can read cloudy nights as clear).
 
     Return:
         night_dirs: [list of str] Paths to selected night directories.
@@ -258,14 +264,23 @@ def selectNightDirs(config, dates=None, window=30, max_nights=4):
                 ppr = json.load(f)
         except Exception:
             continue
+        # Only successfully recalibrated frames count: failed entries carry the SkyFit
+        # calibration star_list (a fossil of a clear night), which makes fully cloudy
+        # nights look clear to this selector
         counts = [len(v["star_list"]) for k, v in ppr.items()
-                  if k.startswith("FF_") and isinstance(v, dict) and v.get("star_list")]
+                  if k.startswith("FF_") and isinstance(v, dict) and v.get("star_list")
+                  and v.get("auto_recalibrated")]
         if len(counts) >= 10:
             scored.append((float(np.median(counts)), d))
 
     scored.sort(reverse=True)
+    scored = scored[:max_nights]
 
-    return [os.path.join(archive_dir, d) for _, d in scored[:max_nights]]
+    if min_rel_clarity is not None and scored:
+        best = scored[0][0]
+        scored = [(s, d) for s, d in scored if s >= min_rel_clarity*best]
+
+    return [os.path.join(archive_dir, d) for _, d in scored]
 
 
 def fitLightDome(station_configs, dates=None, max_domes=2, moon_phase_max=MOON_PHASE_MAX):
@@ -289,6 +304,8 @@ def fitLightDome(station_configs, dates=None, max_domes=2, moon_phase_max=MOON_P
 
     az_l, alt_l, mag_l, det_l, ci_l = [], [], [], [], []
     fit_nights = []
+    pointing = {}
+    thresholds = {}
 
     for i, config in enumerate(station_configs):
 
@@ -310,6 +327,10 @@ def fitLightDome(station_configs, dates=None, max_domes=2, moon_phase_max=MOON_P
         mag_l.append(trials["mag"])
         det_l.append(trials["det"])
         ci_l.append(np.full(n, i, dtype=np.int64))
+
+        # Metadata for staleness detection (see ensureLightDomeModel)
+        pointing[cams[i]] = list(trials["pointing"])
+        thresholds[cams[i]] = float(config.intensity_threshold)
 
     if not az_l:
         return None
@@ -397,6 +418,10 @@ def fitLightDome(station_configs, dates=None, max_domes=2, moon_phase_max=MOON_P
         domes=domes,
         model="vanrhijn_brightness",
         fit_nights=sorted(set(fit_nights)),
+        fit_date=datetime.datetime.utcnow().strftime("%Y-%m-%d"),
+        n_trials=int(len(az)),
+        pointing=pointing,
+        intensity_threshold=thresholds,
         nll={str(kk): v["nll"] for kk, v in results.items()},
     )
 
@@ -421,6 +446,159 @@ def fitLightDome(station_configs, dates=None, max_domes=2, moon_phase_max=MOON_P
             print("  {:s}: {:.2f}".format(cam, float(np.sum(det[sel])/np.sum(p_det[sel]))))
 
     return model_dict
+
+
+# Self-priming (see ensureLightDomeModel)
+AUTO_MIN_NIGHTS = 3        # usable archived nights required before an auto-fit is attempted
+AUTO_MIN_TRIALS = 10000    # star trials required for the fit to be trusted
+AUTO_REFIT_DAYS = 14       # age (days) after which an auto-fitted model is refit - the
+                           # atmospheric epoch (aerosols, e.g. monsoon haze) drifts on
+                           # week scales and the model must represent the CURRENT epoch
+AUTO_SELECT_WINDOW = 14    # nights - auto-fits train on the clearest of the RECENT nights
+                           # only: picking the clearest nights of a long window selects the
+                           # most transparent atmospheric epoch ever seen, and a model fit
+                           # there under-scores every hazier (but clear) night that follows
+AUTO_MAX_NIGHTS = 6        # nights - more current-epoch data makes the bootstrap fit better
+AUTO_REL_CLARITY = 0.5     # keep only nights at least this clear relative to the best one
+                           # (cloudy training frames bias the model shallow, which can read
+                           # cloudy nights as clear)
+AUTO_POINTING_TOL = 3.0    # deg - pointing change that invalidates an auto-fitted model
+AUTO_ATTEMPT_MARKER = "light_dome_fit_attempt.json"
+
+
+def modelIsStale(model_dict, config, platepar=None):
+    """ Decide whether an AUTO-FITTED station model needs a refit.
+
+    Arguments:
+        model_dict: [dict] The loaded model dictionary.
+        config: [Config] Station config.
+
+    Keyword arguments:
+        platepar: [Platepar] Current platepar for the pointing check (skipped if None).
+
+    Return:
+        reason: [str] Why the model is stale, or None if it is fresh.
+    """
+
+    station = str(config.stationID)
+
+    # Age
+    fit_date = model_dict.get("fit_date")
+    if fit_date is not None:
+        try:
+            age = (datetime.datetime.utcnow()
+                   - datetime.datetime.strptime(fit_date, "%Y-%m-%d")).days
+            if age > AUTO_REFIT_DAYS:
+                return "age {:d} d > {:d} d".format(age, AUTO_REFIT_DAYS)
+        except ValueError:
+            pass
+
+    # Star extractor retuned - the model absorbs the threshold into LM0
+    fit_threshold = model_dict.get("intensity_threshold", {}).get(station)
+    if (fit_threshold is not None) and (float(fit_threshold) != float(config.intensity_threshold)):
+        return "intensity_threshold changed {:g} -> {:g}".format(
+            fit_threshold, config.intensity_threshold)
+
+    # Camera re-aimed - the FOV samples a different part of the dome
+    fit_pointing = model_dict.get("pointing", {}).get(station)
+    if (fit_pointing is not None) and (platepar is not None):
+        d_az = abs((float(platepar.az_centre) - fit_pointing[0] + 180)%360 - 180)
+        d_alt = abs(float(platepar.alt_centre) - fit_pointing[1])
+        if max(d_az, d_alt) > AUTO_POINTING_TOL:
+            return "pointing moved {:.1f} deg".format(max(d_az, d_alt))
+
+    return None
+
+
+def ensureLightDomeModel(config, platepar=None):
+    """ Self-prime the station's light-dome model from its own archives, no operator needed.
+
+    Called nightly from detectClouds. If no model file exists (or a previously auto-fitted
+    one went stale), the clearest recent archived nights are selected and a single-station
+    model is fitted and installed. A single camera constrains the model only inside its own
+    FOV footprint - which is exactly and only where it is evaluated for that camera, so a
+    station-local fit is valid on its own. A manually fitted multi-station (site-pooled)
+    model is NEVER overwritten: pooling is strictly better, so if one is present and stale
+    this only logs a recommendation to refit it manually.
+
+    Attempts are rate-limited to one per day via a marker file, so stations without enough
+    archived nights retry cheaply until history accumulates; until then detectClouds falls
+    back to the previous scalar behavior.
+
+    Arguments:
+        config: [Config] Station config.
+
+    Keyword arguments:
+        platepar: [Platepar] Current platepar, used for the pointing staleness check.
+
+    Return:
+        present: [bool] True if a usable model file is in place after the call.
+    """
+
+    data_dir = os.path.expanduser(config.data_dir)
+    station = str(config.stationID)
+    model_path = os.path.join(data_dir, "{:s}_{:s}".format(station, LIGHT_DOME_FILE_SUFFIX))
+
+    # Existing model: keep it unless it is an auto-fitted one that went stale
+    model = LightDomeModel.load(config)
+    if model is not None:
+
+        stale = modelIsStale(model.model, config, platepar=platepar)
+
+        if stale is None:
+            return True
+
+        if (not model.model.get("auto_fitted")) or (len(model.model.get("cams", [])) > 1):
+            print("Light-dome model is stale ({:s}) but was fitted manually/site-pooled - "
+                  "keeping it; consider refitting with Utils.FitLightDome".format(stale))
+            return True
+
+        print("Auto-fitted light-dome model is stale ({:s}) - refitting".format(stale))
+
+    # Rate-limit attempts to one per day
+    marker_path = os.path.join(data_dir, "{:s}_{:s}".format(station, AUTO_ATTEMPT_MARKER))
+    today = datetime.datetime.utcnow().strftime("%Y-%m-%d")
+    try:
+        with open(marker_path) as f:
+            if json.load(f).get("date") == today:
+                return model is not None
+    except Exception:
+        pass
+    try:
+        with open(marker_path, "w") as f:
+            json.dump(dict(date=today), f)
+    except Exception:
+        pass
+
+    # Enough usable archived nights? Prefer the recent window (current atmospheric epoch),
+    # widen only if a young station does not have enough history yet
+    night_dirs = selectNightDirs(config, window=AUTO_SELECT_WINDOW,
+        max_nights=AUTO_MAX_NIGHTS, min_rel_clarity=AUTO_REL_CLARITY)
+    if len(night_dirs) < AUTO_MIN_NIGHTS:
+        night_dirs = selectNightDirs(config, window=30,
+            max_nights=AUTO_MAX_NIGHTS, min_rel_clarity=AUTO_REL_CLARITY)
+    if len(night_dirs) < AUTO_MIN_NIGHTS:
+        print("Light-dome auto-fit: only {:d} usable archived night(s), need {:d} - "
+              "waiting for more history".format(len(night_dirs), AUTO_MIN_NIGHTS))
+        return model is not None
+
+    dates = sorted(set(os.path.basename(d).split("_")[1] for d in night_dirs))
+    print("Light-dome auto-fit from the {:d} clearest archived nights: {:s}".format(
+        len(night_dirs), ", ".join(dates)))
+
+    model_dict = fitLightDome([config], dates=dates)
+
+    if (model_dict is None) or (model_dict.get("n_trials", 0) < AUTO_MIN_TRIALS):
+        print("Light-dome auto-fit produced insufficient trials - keeping previous behavior")
+        return model is not None
+
+    model_dict["auto_fitted"] = True
+
+    with open(model_path, "w") as f:
+        json.dump(model_dict, f, indent=1)
+    print("Light-dome model auto-fitted and installed: {:s}".format(model_path))
+
+    return True
 
 
 if __name__ == "__main__":
