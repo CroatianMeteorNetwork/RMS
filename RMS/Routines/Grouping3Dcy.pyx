@@ -487,7 +487,12 @@ def thresholdAndSubsample(np.ndarray[UINT8_TYPE_t, ndim=3] frames, \
             # Compute the threshold limit
             avg_std = int(float(compressed[2, y, x]) + k1*float(compressed[3, y, x])) + j1
 
-            # Clip threshold to 254 so that pixels at exactly max_val=254 can still pass
+            # The threshold can exceed the uint8 range and must be clipped. With the old
+            # clip at 255 a saturated pixel (max_val == 255) still passed (255 >= 255) --
+            # the real recall loss was unsaturated trail pixels whose threshold clipped to
+            # 255, and that is fixed upstream by stdpixel decontamination in
+            # VideoExtraction.findPoints. Clipping to 254 additionally lets max_val == 254
+            # pixels through: a minor, harmless extra rescue.
             if avg_std > 254:
                 avg_std = 254
             
