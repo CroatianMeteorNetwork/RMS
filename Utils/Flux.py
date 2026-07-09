@@ -2007,6 +2007,22 @@ LM_HISTORY_MIN_NIGHTS = 5    # nights required before a correction is applied
 LM_CORRECTION_MAX = 1.5      # mag - bounds the worst-case ratio boost to ~4x
 LM_DEPTH_MIN_STARS = 20      # matched stars a frame needs to measure a depth
 LM_DEPTH_MIN_FRAMES = 5      # frames a night needs to measure a depth
+LM_DEPTH_ENVELOPE_PCT = 80   # percentile of the per-night depths taken as the clear-sky
+                             # envelope (high = clear-leaning, robust to a cloudy minority;
+                             # lower is more conservative). Tunable.
+
+
+def _nightKey(night_id):
+    """ Collapse a capture-directory name to one key per calendar night.
+
+    A night split into several captures (e.g. after a mid-night restart) would otherwise
+    write several history entries and let one calendar night dominate the trailing window.
+    Directory names look like STATION_YYYYMMDD_HHMMSS_microseconds; keep STATION_YYYYMMDD.
+    """
+    parts = night_id.split("_")
+    if len(parts) >= 2 and len(parts[1]) == 8 and parts[1].isdigit():
+        return "_".join(parts[:2])
+    return night_id
 
 
 def measureNightMatchedDepth(recalibrated_platepars):
@@ -2043,23 +2059,37 @@ def empiricalLMCorrection(config, night_id, model_lm, measured_depth):
     low-elevation cameras it overestimates the depth, inflating the predicted star count
     and sinking the clear-sky ratio below threshold on genuinely clear nights.
 
-    The camera's true clear-sky depth is measurable: each night contributes its matched-star
-    depth envelope, and the correction is the MINIMUM of (model - measured) over the trailing
-    window - clouds shrink the measured depth and so INCREASE a night's (model - measured),
-    which means cloudy nights can never lower the minimum: the correction converges to the
-    camera's persistent (pollution/optics) deficit, not to weather. Within a single night the
-    two are degenerate (uniform haze looks like pollution), which is exactly why the history
-    is required at all: pollution persists across the window, haze does not.
+    The camera's true clear-sky depth is measurable and stable: each night contributes its
+    deepest well-matched frame (measureNightMatchedDepth), which is cloud-immune within the
+    night. The correction pulls tonight's model LM down onto the CLEAR-SKY DEPTH ENVELOPE -
+    a high percentile of those per-night depths over the trailing window:
 
-    The correction is applied only in the deflating direction (model deeper than reality),
-    capped at LM_CORRECTION_MAX (bounding the worst-case clear-sky-ratio boost to ~4x, so
-    heavily obscured nights at raw ratios <~0.12 cannot be lifted past the 0.5 threshold),
-    and requires LM_HISTORY_MIN_NIGHTS of history. Stations without history (or server-side
-    batch runs without the state file) get no correction - the previous behavior.
+        correction = clip(model_lm - percentile(prior_depths, LM_DEPTH_ENVELOPE_PCT), 0, MAX)
+
+    The envelope is built from depths ONLY, never from (model - depth). That distinction is
+    the whole point: model_lm = stellarLMModel(mag_lev) + const, and mag_lev is itself
+    weather/moon-dependent, so on hazy or moonlit nights model_lm collapses toward the
+    measured depth. A MINIMUM of per-night (model - depth) latches onto exactly those
+    degraded nights and drives the correction to ~0 (verified on real US005C history: the
+    minimum gave 0.04 mag where ~0.65 was needed). The per-night depth, by contrast, barely
+    moves (it is set by the sensor and the clear-sky background), so a percentile of depths
+    is a robust, weather-stable estimator of the camera's reach.
+
+    Cloud handling: clouds only lower a night's depth, so a high percentile ignores a cloudy
+    minority; if most of the window is obscured the envelope drops and the correction shrinks
+    (conservative - it never invents depth the camera has not recently shown). Sensitivity is
+    preserved because the envelope is a fixed clear-sky reference: a genuinely cloudy tonight
+    still matches far fewer stars than the envelope predicts, so its ratio stays below 0.5.
+
+    The correction is applied only in the deflating direction (model deeper than the
+    envelope), capped at LM_CORRECTION_MAX (bounding the worst-case clear-sky-ratio boost to
+    ~4x, so heavily obscured nights at raw ratios <~0.12 cannot be lifted past the 0.5
+    threshold), and requires LM_HISTORY_MIN_NIGHTS of history. Stations without history (or
+    server-side batch runs without the state file) get no correction - the previous behavior.
 
     Arguments:
         config: [Config] Provides data_dir and stationID for the per-station history file.
-        night_id: [str] Identifier of this night (directory basename).
+        night_id: [str] Identifier of this night (capture directory basename).
         model_lm: [float] The night's median model limiting magnitude.
         measured_depth: [float] The night's measured depth (None if unmeasurable).
 
@@ -2082,20 +2112,23 @@ def empiricalLMCorrection(config, night_id, model_lm, measured_depth):
         history = {}
         history_path = None
 
-    # Correction from PRIOR nights only, so tonight cannot classify itself
-    prior = [v for k, v in sorted(history.items())[-LM_HISTORY_WINDOW:] if k != night_id]
+    night_key = _nightKey(night_id)
+
+    # Clear-sky depth envelope from PRIOR nights only, so tonight cannot classify itself.
+    # Tolerate legacy entries that stored only (model_lm, depth) - we read depth either way.
+    prior_depths = [v["depth"] for k, v in sorted(history.items())[-LM_HISTORY_WINDOW:]
+                    if (k != night_key) and ("depth" in v)]
 
     correction = 0.0
-    if len(prior) >= LM_HISTORY_MIN_NIGHTS:
-        per_night = [max(0.0, v["model_lm"] - v["depth"]) for v in prior]
-        correction = float(np.clip(min(per_night), 0.0, LM_CORRECTION_MAX))
+    if (model_lm is not None) and (len(prior_depths) >= LM_HISTORY_MIN_NIGHTS):
+        depth_envelope = float(np.percentile(prior_depths, LM_DEPTH_ENVELOPE_PCT))
+        correction = float(np.clip(model_lm - depth_envelope, 0.0, LM_CORRECTION_MAX))
 
-    # Record tonight for future runs (an overcast night records a large per-night
-    # correction, which can never lower the minimum - safe to store unconditionally)
-    if (history_path is not None) and (measured_depth is not None) and (model_lm is not None):
+    # Record tonight for future runs, one entry per calendar night (latest capture wins).
+    # A cloudy night simply stores a shallower depth, which a high percentile ignores.
+    if (history_path is not None) and (measured_depth is not None):
         try:
-            history[night_id] = dict(model_lm=round(float(model_lm), 3),
-                                     depth=round(float(measured_depth), 3))
+            history[night_key] = dict(depth=round(float(measured_depth), 3))
             history = dict(sorted(history.items())[-LM_HISTORY_WINDOW:])
             with open(history_path, 'w') as f:
                 json.dump(history, f, indent=1)
