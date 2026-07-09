@@ -1232,6 +1232,12 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
     # Detect which images don't have a moon visible, and filter the file list based on this
     recorded_files = detectMoon(recorded_files, platepar, config)
 
+    # Keep the time-binned, moon-filtered list: the dense dome scoring below scores these
+    # frames directly (the reassignment of recorded_files to the recalibrated platepar keys
+    # further down would otherwise both undo the moon filter and drop every frame whose own
+    # recalibration failed)
+    recorded_files_dense = list(recorded_files)
+
     # Try loading previously recalibrated platepars on N minute intervals
     recalibrated_platepars = loadRecalibratedPlatepar(dir_path, config, file_list, type='flux')
 
@@ -1374,22 +1380,38 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
     #     plt.show()
 
 
-    # Compute the predicted number of stars on every recalibrated FF file
-    predicted_stars = predictStarNumberInFOV(
-        recalibrated_platepars, ff_limiting_magnitude, config, mask=mask, show_plot=show_plots,
-        dome_model=dome_model
-    )
-
     if dome_model is not None:
 
-        # Dome-model path: the expected counts are calibrated per sky position, so no cap or
-        # deficit correction applies - the clear-sky ratio is ~1 by construction at the fit
-        # epoch. What remains is the slow drift of the light-pollution amplitude (aerosols,
-        # e.g. monsoon haze brighten the whole LP field together), tracked as a cloud-immune
+        # Dense dome-model path: score EVERY time-binned, moon-filtered frame directly from
+        # its CALSTARS detections against catalog stars projected with the nearest valid
+        # platepar - independent of whether the frame's own recalibration succeeded. This
+        # measures cloudy frames as cloudy (instead of leaving them as interval gaps) and
+        # keeps genuinely clear frames scoreable even when sparse recalibrations (e.g. a
+        # defocused camera) would otherwise fragment the night (see denseDomeRatios).
+        calstars_positions = {
+            ff_name: (np.array(star_data)[:, [1, 0]].astype(float)
+                      if len(star_data) else np.zeros((0, 2)))
+            for ff_name, star_data in calstars_list
+        }
+
+        matched_count, predicted_stars = denseDomeRatios(config, dome_model,
+            recorded_files_dense, calstars_positions, recalibrated_platepars, mask)
+
+        if not predicted_stars:
+            log.warning("No valid recalibrated platepar this night - "
+                        "cannot score frames with the dome model")
+
+        # The expected counts are calibrated per sky position, so no cap or deficit
+        # correction applies - the clear-sky ratio is ~1 by construction at the fit epoch.
+        # What remains is the slow drift of the light-pollution amplitude (aerosols, e.g.
+        # monsoon haze brighten the whole LP field together), tracked as a cloud-immune
         # normalization over the trailing nights (see domeRatioNormalization).
+        recorded_files = sorted(predicted_stars.keys())
+        expected_stars = predicted_stars
+
         ratio_raw = {
             ff_file: (matched_count[ff_file]/predicted_stars[ff_file]
-                      if (ff_file in predicted_stars) and (predicted_stars[ff_file] > 0.001) else 0)
+                      if predicted_stars[ff_file] > 0.001 else 0)
             for ff_file in recorded_files
         }
 
@@ -1405,6 +1427,12 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
         ratio = {ff: r/ratio_norm for ff, r in ratio_raw.items()}
 
     else:
+
+        # Compute the predicted number of stars on every recalibrated FF file
+        predicted_stars = predictStarNumberInFOV(
+            recalibrated_platepars, ff_limiting_magnitude, config, mask=mask,
+            show_plot=show_plots
+        )
 
         # Compute the ratio between matched and EXPECTED stars. Two effects separate the raw
         # prediction from what detection can deliver on a perfectly clear sky:
@@ -1552,6 +1580,156 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
 
 
 
+def projectCatalogStarsInFOV(platepar, date, jd, catalog_stars, mask=None, border_px=10, alt_min=5.0):
+    """ Project catalog stars into the frame with the spherical FOV polygon guard.
+
+    Without the polygon guard, catalog stars far outside the FOV are folded back to
+    in-frame pixel coordinates by the distortion polynomial (only valid within the FOV)
+    and would be counted as phantom expected stars.
+
+    Arguments:
+        platepar: [Platepar object]
+        date: [tuple] Date tuple of the frame (as from FFfile.getMiddleTimeFF).
+        jd: [float] Julian date of the frame.
+        catalog_stars: [ndarray] (N, 3) array of (RA, Dec, Mag).
+
+    Keyword arguments:
+        mask: [Mask object] Exclude stars on masked pixels.
+        border_px: [int] Skip stars within this many px of the frame border (the star
+            extractor does not detect there).
+        alt_min: [float] Minimum altitude (deg).
+
+    Return:
+        (x, y, mag, az, alt): [ndarrays] Image coordinates, catalog magnitudes and
+            horizontal coordinates of the catalog stars inside the usable FOV.
+    """
+
+    w, h = platepar.X_res, platepar.Y_res
+
+    # FOV outline on the sky, 5 points per side
+    x_vert = [0, w/4, w/2, 3*w/4, w, w, w,     w, w, 3*w/4, w/2, w/4, 0,     0,   0,   0, 0]
+    y_vert = [0,   0,   0,     0, 0, h/4, h/2, 3*h/4, h,     h,   h,   h, h, 3*h/4, h/2, h/4, 0]
+
+    _, ra_vert, dec_vert, _ = xyToRaDecPP([date]*len(x_vert), list(reversed(x_vert)),
+        list(reversed(y_vert)), [1]*len(x_vert), platepar, extinction_correction=False,
+        precompute_pointing_corr=True)
+
+    ra_catalog, dec_catalog, mag = catalog_stars.T
+    inside = pointInsideConvexPolygonSphere(np.array([ra_catalog, dec_catalog]).T,
+        np.array([ra_vert, dec_vert]).T)
+
+    x, y = raDecToXYPP(ra_catalog[inside], dec_catalog[inside], jd, platepar)
+    mag = mag[inside]
+    ra_inside = ra_catalog[inside]
+    dec_inside = dec_catalog[inside]
+
+    in_frame = (x >= border_px) & (x < w - border_px) & (y >= border_px) & (y < h - border_px)
+
+    if (mask is not None) and (mask.img is not None):
+        x_int = np.clip(x.astype(int), 0, w - 1)
+        y_int = np.clip(y.astype(int), 0, h - 1)
+        in_frame &= mask.img[y_int, x_int] > 0
+
+    x, y, mag = x[in_frame], y[in_frame], mag[in_frame]
+    az, alt = raDec2AltAz(ra_inside[in_frame], dec_inside[in_frame], jd, platepar.lat,
+        platepar.lon)
+
+    up = alt >= alt_min
+
+    return x[up], y[up], mag[up], az[up], alt[up]
+
+
+DENSE_MATCH_RADIUS_PX = 3.0   # px - a predicted star counts as matched if a CALSTARS
+                              # detection lies within this radius (same radius the light
+                              # dome model is fitted with, see Utils.FitLightDome)
+
+
+def denseDomeRatios(config, dome_model, ff_list, calstars_positions, recalibrated_platepars, mask):
+    """ Score EVERY frame with the light-dome model, independent of its own recalibration.
+
+    The per-frame recalibration fails preferentially on cloudy frames (too few stars to
+    fit), so scoring only successfully recalibrated frames biases the scored sample toward
+    clear skies and leaves cloudy periods "cloudy by absence" (interval gaps) instead of
+    cloudy by measurement - and sparse recalibrations (e.g. a defocused camera) fragment
+    genuinely clear intervals. Here each frame is instead scored directly: its CALSTARS
+    detections are matched against catalog stars projected with the nearest-in-time VALID
+    platepar (the cameras are fixed, so a platepar hours away projects identically to
+    within the match radius), and the expectation is the dome model's summed detection
+    probabilities. Every frame with CALSTARS data gets a live measured ratio.
+
+    Arguments:
+        config: [Config object]
+        dome_model: [LightDomeModel]
+        ff_list: [list] FF files to score (time-binned, moon-filtered).
+        calstars_positions: [dict] ff_name -> (n, 2) ndarray of detected (x, y).
+        recalibrated_platepars: [dict] ff_name -> Platepar; only auto_recalibrated entries
+            are used as projection sources.
+        mask: [Mask object]
+
+    Return:
+        (matched, expected): [dict, dict] ff_name -> matched count / expected count. Empty
+            if the night has no valid platepar at all.
+    """
+
+    # Time-sorted valid platepars to source projections from
+    valid_pps = sorted(
+        (FFfile.filenameToDatetime(ff), pp)
+        for ff, pp in recalibrated_platepars.items() if getattr(pp, "auto_recalibrated", False)
+    )
+
+    if not valid_pps:
+        return {}, {}
+
+    valid_times = [t for t, _ in valid_pps]
+    valid_times_arr = np.array(valid_times)
+
+    # Fixed deep catalog cut so the logistic tail is fully sampled
+    catalog_stars, _, _ = StarCatalog.readStarCatalog(
+        config.star_catalog_path,
+        config.star_catalog_file,
+        lim_mag=DOME_CATALOG_LIM_MAG,
+        mag_band_ratios=config.star_catalog_band_ratios,
+    )
+
+    matched = {}
+    expected = {}
+
+    for ff_file in sorted(ff_list):
+
+        detections = calstars_positions.get(ff_file)
+
+        if detections is None:
+            continue
+
+        # Nearest-in-time valid platepar
+        ff_time = FFfile.filenameToDatetime(ff_file)
+        i = np.searchsorted(valid_times_arr, ff_time)
+        candidates = [j for j in (i - 1, i) if 0 <= j < len(valid_pps)]
+        platepar = min((abs((valid_times[j] - ff_time).total_seconds()), j) for j in candidates)[1]
+        platepar = valid_pps[platepar][1]
+
+        date = FFfile.getMiddleTimeFF(ff_file, config.fps, ret_milliseconds=True)
+        jd = date2JD(*date)
+
+        x, y, mag, az, alt = projectCatalogStarsInFOV(platepar, date, jd, catalog_stars,
+            mask=mask)
+
+        if not len(x):
+            continue
+
+        p_det = dome_model.detectionProbability(mag, az, alt, station_id=config.stationID)
+        expected[ff_file] = float(np.sum(p_det))
+
+        if len(detections):
+            dist2 = (x[:, None] - detections[None, :, 0])**2 \
+                + (y[:, None] - detections[None, :, 1])**2
+            matched[ff_file] = int(np.sum(dist2.min(axis=1) <= DENSE_MATCH_RADIUS_PX**2))
+        else:
+            matched[ff_file] = 0
+
+    return matched, expected
+
+
 def predictStarNumberInFOV(recalibrated_platepars, ff_limiting_magnitude, config, mask=None, \
     show_plot=True, dome_model=None):
     """ Predicts the number of stars that should be in the FOV, considering limiting magnitude,
@@ -1621,6 +1799,20 @@ def predictStarNumberInFOV(recalibrated_platepars, ff_limiting_magnitude, config
             date = FFfile.getMiddleTimeFF(ff_file, config.fps, ret_milliseconds=True)
             jd = date2JD(*date)
 
+            # Dome-model path: expected count = sum of per-star clear-sky detection
+            # probabilities at each star's own sky position
+            if dome_model is not None:
+
+                x_fov, y_fov, mag_fov, star_az, star_alt = projectCatalogStarsInFOV(
+                    platepar, date, jd, catalog_stars_deep, mask=mask)
+
+                p_det = dome_model.detectionProbability(mag_fov, star_az, star_alt, \
+                    station_id=config.stationID)
+
+                pred_star_count[ff_file] = float(np.sum(p_det))
+
+                continue
+
             # Make a polygon on a the sky using the outline of the image, 5 points on each side
             x = platepar.X_res
             y = platepar.Y_res
@@ -1638,15 +1830,12 @@ def predictStarNumberInFOV(recalibrated_platepars, ff_limiting_magnitude, config
             )
 
             # Collect and filter catalog stars
-            if dome_model is not None:
-                catalog_stars = catalog_stars_deep
-            else:
-                catalog_stars, _, _ = StarCatalog.readStarCatalog(
-                    config.star_catalog_path,
-                    config.star_catalog_file,
-                    lim_mag=lim_mag,
-                    mag_band_ratios=config.star_catalog_band_ratios,
-                )
+            catalog_stars, _, _ = StarCatalog.readStarCatalog(
+                config.star_catalog_path,
+                config.star_catalog_file,
+                lim_mag=lim_mag,
+                mag_band_ratios=config.star_catalog_band_ratios,
+            )
 
             # Filter out stars that are outside of the polygon on the sphere made by the FOV
             ra_catalog, dec_catalog, mag = catalog_stars.T
@@ -1661,35 +1850,6 @@ def predictStarNumberInFOV(recalibrated_platepars, ff_limiting_magnitude, config
             # Skip if there are no stars inside
             if len(x) == 0:
                 log.info("No predicted stars in {:s}!".format(ff_file))
-                continue
-
-            # Dome-model path: expected count = sum of per-star clear-sky detection
-            # probabilities at each star's own sky position
-            if dome_model is not None:
-
-                ra_inside = ra_catalog[inside]
-                dec_inside = dec_catalog[inside]
-
-                # In-frame filter, matching the border used when the model was fitted
-                in_frame = (x >= 10) & (x < platepar.X_res - 10) \
-                    & (y >= 10) & (y < platepar.Y_res - 10)
-
-                # Filter stars with mask
-                x_int = np.clip(x.astype(int), 0, platepar.X_res - 1)
-                y_int = np.clip(y.astype(int), 0, platepar.Y_res - 1)
-                in_frame &= mask.img[y_int, x_int] > 0
-
-                # Star sky positions
-                star_az, star_alt = raDec2AltAz(ra_inside[in_frame], dec_inside[in_frame], \
-                    jd, platepar.lat, platepar.lon)
-
-                up = star_alt >= 5.0
-
-                p_det = dome_model.detectionProbability(mag[in_frame][up], star_az[up], \
-                    star_alt[up], station_id=config.stationID)
-
-                pred_star_count[ff_file] = float(np.sum(p_det))
-
                 continue
 
             # Compute star image levels from catalog magnitudes without any vignetting or extinction
