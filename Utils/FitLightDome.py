@@ -50,6 +50,10 @@ FF_PER_NIGHT = 40        # frames sampled per night per station
 SUN_ALT_MAX = -18.0      # deg - only fully dark frames (twilight frames train the model
                          # on a temporarily bright sky and bias it shallow, which makes
                          # cloudy nights pass the ratio threshold)
+MOON_PHASE_MAX = 25.0    # percent illumination - frames with a brighter moon above the
+                         # horizon are excluded: scattered moonlight brightens the whole
+                         # sky, which the static site model would absorb as permanent
+                         # light pollution. Matches the detectMoon phase convention.
 
 # Fitting
 MIN_DOME_SIGNIFICANCE = 50.0   # NLL improvement required to accept one more dome
@@ -69,7 +73,22 @@ def sunAltitude(jd, lat, lon):
     return np.degrees(float(sun.alt))
 
 
-def buildStationTrials(config, night_dirs, n_ff=FF_PER_NIGHT):
+def moonAltPhase(jd, lat, lon):
+    """ Lunar altitude (deg) and illuminated fraction (percent) at the given time and
+        location. """
+
+    obs = ephem.Observer()
+    obs.lat = str(lat)
+    obs.lon = str(lon)
+    obs.date = jd2Date(jd, dt_obj=True)
+
+    moon = ephem.Moon()
+    moon.compute(obs)
+
+    return np.degrees(float(moon.alt)), float(moon.phase)
+
+
+def buildStationTrials(config, night_dirs, n_ff=FF_PER_NIGHT, moon_phase_max=MOON_PHASE_MAX):
     """ Build hit/miss trials for one station over the given night directories.
 
     Arguments:
@@ -79,10 +98,14 @@ def buildStationTrials(config, night_dirs, n_ff=FF_PER_NIGHT):
 
     Keyword arguments:
         n_ff: [int] Frames sampled per night.
+        moon_phase_max: [float] Exclude frames with a moon above the horizon illuminated
+            more than this (percent). 100 disables the filter.
 
     Return:
         trials: [dict of ndarray] az, alt, mag, det - or None if no usable data.
     """
+
+    n_moon_excluded = 0
 
     catalog_stars, _, _ = StarCatalog.readStarCatalog(config.star_catalog_path,
         config.star_catalog_file, lim_mag=DOME_CATALOG_LIM_MAG,
@@ -125,6 +148,13 @@ def buildStationTrials(config, night_dirs, n_ff=FF_PER_NIGHT):
 
             # Fully dark frames only
             if sunAltitude(jd, pp.lat, pp.lon) > SUN_ALT_MAX:
+                continue
+
+            # Exclude moonlit frames: scattered moonlight brightens the whole sky and a
+            # static site model would absorb it as permanent light pollution
+            moon_alt, moon_phase = moonAltPhase(jd, pp.lat, pp.lon)
+            if (moon_alt > 0) and (moon_phase > moon_phase_max):
+                n_moon_excluded += 1
                 continue
 
             # Spherical FOV polygon guard - without it, catalog stars far outside the FOV
@@ -176,6 +206,10 @@ def buildStationTrials(config, night_dirs, n_ff=FF_PER_NIGHT):
             alt_all.append(alt)
             mag_all.append(m)
             det_all.append(detected)
+
+    if n_moon_excluded:
+        print("  moon filter: excluded {:d} frame(s) (moon up, phase > {:.0f}%)".format(
+            n_moon_excluded, moon_phase_max))
 
     if not az_all:
         return None
@@ -234,7 +268,7 @@ def selectNightDirs(config, dates=None, window=30, max_nights=4):
     return [os.path.join(archive_dir, d) for _, d in scored[:max_nights]]
 
 
-def fitLightDome(station_configs, dates=None, max_domes=2):
+def fitLightDome(station_configs, dates=None, max_domes=2, moon_phase_max=MOON_PHASE_MAX):
     """ Fit the site model over multiple co-located stations.
 
     Arguments:
@@ -243,6 +277,8 @@ def fitLightDome(station_configs, dates=None, max_domes=2):
     Keyword arguments:
         dates: [list of str] Explicit YYYYMMDD training dates (recommended: clear nights).
         max_domes: [int] Maximum localized dome components to try.
+        moon_phase_max: [float] Exclude frames with a moon above the horizon illuminated
+            more than this (percent). 100 disables the filter.
 
     Return:
         model_dict: [dict] Fitted site model (LightDomeModel format), or None.
@@ -259,7 +295,7 @@ def fitLightDome(station_configs, dates=None, max_domes=2):
         night_dirs = selectNightDirs(config, dates=dates)
         fit_nights += [os.path.basename(d) for d in night_dirs]
 
-        trials = buildStationTrials(config, night_dirs)
+        trials = buildStationTrials(config, night_dirs, moon_phase_max=moon_phase_max)
 
         if trials is None:
             print("{:s}: no usable trials, station excluded from fit".format(cams[i]))
@@ -398,6 +434,9 @@ if __name__ == "__main__":
              "Auto-selects the clearest recent nights if omitted.")
     parser.add_argument("--max-domes", type=int, default=2,
         help="Maximum localized dome components (default 2).")
+    parser.add_argument("--moon-phase-max", type=float, default=MOON_PHASE_MAX,
+        help="Exclude frames with a moon above the horizon illuminated more than this "
+             "percentage (default {:.0f}; 100 disables the filter).".format(MOON_PHASE_MAX))
 
     args = parser.parse_args()
 
@@ -406,7 +445,8 @@ if __name__ == "__main__":
 
     dates = args.nights.split(",") if args.nights else None
 
-    model_dict = fitLightDome(configs, dates=dates, max_domes=args.max_domes)
+    model_dict = fitLightDome(configs, dates=dates, max_domes=args.max_domes,
+        moon_phase_max=args.moon_phase_max)
 
     if model_dict is None:
         print("No usable data - nothing written.")
