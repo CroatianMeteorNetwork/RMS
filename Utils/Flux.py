@@ -1278,6 +1278,27 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
         for ff_file in recorded_files
     }
 
+    # Apply the per-camera empirical LM correction: the model infers depth from throughput
+    # and cannot see the sky background, so it overestimates the depth of light-polluted or
+    # low-elevation cameras. The correction is learned from the station's cross-night
+    # matched-star depth history (see empiricalLMCorrection for the cloud-immunity argument
+    # and safety bounds).
+    model_lms = [v for v in ff_limiting_magnitude.values() if v is not None]
+    if model_lms:
+        night_depth = measureNightMatchedDepth(recalibrated_platepars)
+        lm_correction = empiricalLMCorrection(
+            config, os.path.basename(os.path.normpath(dir_path)),
+            float(np.median(model_lms)), night_depth)
+        if lm_correction > 0:
+            log.info("Empirical LM correction from camera history: -{:.2f} mag "
+                     "(model median {:.2f}, night depth {})".format(
+                lm_correction, float(np.median(model_lms)),
+                "{:.2f}".format(night_depth) if night_depth is not None else "n/a"))
+            ff_limiting_magnitude = {
+                ff: (v - lm_correction if v is not None else None)
+                for ff, v in ff_limiting_magnitude.items()
+            }
+
 
     # if show_plots:
 
@@ -1978,6 +1999,110 @@ def getSensorCharacterization(dir_path, config, flux_config, meteor_data, defaul
             f.write(out_str)
 
     return sensor_data
+
+
+LM_HISTORY_FILE = "flux_lm_history.json"
+LM_HISTORY_WINDOW = 30       # trailing nights kept per camera
+LM_HISTORY_MIN_NIGHTS = 5    # nights required before a correction is applied
+LM_CORRECTION_MAX = 1.5      # mag - bounds the worst-case ratio boost to ~4x
+LM_DEPTH_MIN_STARS = 20      # matched stars a frame needs to measure a depth
+LM_DEPTH_MIN_FRAMES = 5      # frames a night needs to measure a depth
+
+
+def measureNightMatchedDepth(recalibrated_platepars):
+    """ Measure the night's empirical detection depth: the deepest 90th-percentile matched-star
+        magnitude achieved by any well-matched frame. Clouds only ever make frames shallower,
+        so the per-night maximum is cloud-immune as long as any part of the night was clear.
+
+    Arguments:
+        recalibrated_platepars: [dict] ff_name -> recalibrated Platepar (star_list holds the
+            matched pairs as [jd, x, y, intensity, ra, dec, mag] rows).
+
+    Return:
+        depth: [float] Empirical depth (mag), or None if too few well-matched frames.
+    """
+
+    frame_depths = []
+    for pp in recalibrated_platepars.values():
+        star_list = getattr(pp, "star_list", None)
+        if star_list and len(star_list) >= LM_DEPTH_MIN_STARS:
+            mags = [entry[6] for entry in star_list]
+            frame_depths.append(float(np.percentile(mags, 90)))
+
+    if len(frame_depths) < LM_DEPTH_MIN_FRAMES:
+        return None
+
+    return float(max(frame_depths))
+
+
+def empiricalLMCorrection(config, night_id, model_lm, measured_depth):
+    """ Per-camera limiting magnitude correction from the station's cross-night history.
+
+    The LM model (stellarLMModel) infers detection depth from the photometric zero-point,
+    which measures throughput and cannot see the sky background - on light-polluted or
+    low-elevation cameras it overestimates the depth, inflating the predicted star count
+    and sinking the clear-sky ratio below threshold on genuinely clear nights.
+
+    The camera's true clear-sky depth is measurable: each night contributes its matched-star
+    depth envelope, and the correction is the MINIMUM of (model - measured) over the trailing
+    window - clouds shrink the measured depth and so INCREASE a night's (model - measured),
+    which means cloudy nights can never lower the minimum: the correction converges to the
+    camera's persistent (pollution/optics) deficit, not to weather. Within a single night the
+    two are degenerate (uniform haze looks like pollution), which is exactly why the history
+    is required at all: pollution persists across the window, haze does not.
+
+    The correction is applied only in the deflating direction (model deeper than reality),
+    capped at LM_CORRECTION_MAX (bounding the worst-case clear-sky-ratio boost to ~4x, so
+    heavily obscured nights at raw ratios <~0.12 cannot be lifted past the 0.5 threshold),
+    and requires LM_HISTORY_MIN_NIGHTS of history. Stations without history (or server-side
+    batch runs without the state file) get no correction - the previous behavior.
+
+    Arguments:
+        config: [Config] Provides data_dir and stationID for the per-station history file.
+        night_id: [str] Identifier of this night (directory basename).
+        model_lm: [float] The night's median model limiting magnitude.
+        measured_depth: [float] The night's measured depth (None if unmeasurable).
+
+    Return:
+        correction: [float] Magnitude to subtract from the model LM (>= 0).
+    """
+
+    history = {}
+    history_path = None
+    try:
+        data_dir = os.path.expanduser(config.data_dir)
+        if os.path.isdir(data_dir):
+            history_path = os.path.join(data_dir, "{:s}_{:s}".format(
+                str(config.stationID), LM_HISTORY_FILE))
+            if os.path.isfile(history_path):
+                with open(history_path) as f:
+                    history = json.load(f)
+    except Exception as e:
+        log.debug("LM history unavailable ({}) - no empirical LM correction".format(e))
+        history = {}
+        history_path = None
+
+    # Correction from PRIOR nights only, so tonight cannot classify itself
+    prior = [v for k, v in sorted(history.items())[-LM_HISTORY_WINDOW:] if k != night_id]
+
+    correction = 0.0
+    if len(prior) >= LM_HISTORY_MIN_NIGHTS:
+        per_night = [max(0.0, v["model_lm"] - v["depth"]) for v in prior]
+        correction = float(np.clip(min(per_night), 0.0, LM_CORRECTION_MAX))
+
+    # Record tonight for future runs (an overcast night records a large per-night
+    # correction, which can never lower the minimum - safe to store unconditionally)
+    if (history_path is not None) and (measured_depth is not None) and (model_lm is not None):
+        try:
+            history[night_id] = dict(model_lm=round(float(model_lm), 3),
+                                     depth=round(float(measured_depth), 3))
+            history = dict(sorted(history.items())[-LM_HISTORY_WINDOW:])
+            with open(history_path, 'w') as f:
+                json.dump(history, f, indent=1)
+        except Exception as e:
+            log.debug("Could not update the LM history: {}".format(e))
+
+    return correction
 
 
 def stellarLMModel(p0):
