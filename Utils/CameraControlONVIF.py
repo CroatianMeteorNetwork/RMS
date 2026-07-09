@@ -168,6 +168,14 @@ def connectCamera(ip_address, port, username, password):
             _connect_camera_async(ip_address, port, username, password, wsdl_dir))
     except Exception as e:
         log.error("Failed to connect to camera: %s", e)
+
+        # A SOAP parser complaint about html means the camera served its web UI on this
+        # port, i.e. onvif_port points at the wrong service
+        if 'html' in str(e).lower():
+            log.error("The camera returned a web page instead of an ONVIF response - "
+                      "onvif_port ({}) is likely wrong. Common values: 80, 8080 (SMTSEC), "
+                      "8899 (XM)".format(port))
+
         return None
 
 
