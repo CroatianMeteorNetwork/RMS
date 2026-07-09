@@ -1,0 +1,419 @@
+""" Fit the site light-dome limiting magnitude model from archived nights.
+
+Builds (star, frame) hit/miss trials from the flux-recalibrated platepars of one or more
+co-located stations: every catalog star predicted inside a frame's FOV (spherical polygon
+guarded, mask filtered) is one binary trial - matched within the match radius or not.
+The site model (see RMS.LightDomeModel) is then fitted by maximum likelihood with a
+logistic detection probability, so non-detections carry information and no binning or
+censoring bias enters.
+
+Fit on CLEAR nights: pass explicit dates with --nights, or let the tool pick the
+clearest recent nights per station (highest median matched-star count). Cloudy training
+nights bias the model shallow; when in doubt, pass known-clear dates.
+
+The fitted model is written as <stationID>_light_dome.json into every station's data
+directory, one identical site file per station.
+
+Usage:
+    python -m Utils.FitLightDome /path/to/station_config_dir1 [dir2 ...] \\
+        --nights 20260708,20260709
+
+Note: the model absorbs the CURRENT intensity_threshold/focus/gain of each camera into
+its LM0. Refit after retuning a camera, refocusing, or re-aiming.
+"""
+
+from __future__ import absolute_import, division, print_function
+
+import argparse
+import json
+import os
+
+import ephem
+import numpy as np
+from scipy.optimize import minimize
+
+import RMS.ConfigReader as cr
+from RMS.Formats import FFfile, StarCatalog
+from RMS.Formats.Platepar import Platepar
+from RMS.Astrometry.ApplyAstrometry import raDecToXYPP, xyToRaDecPP
+from RMS.Astrometry.Conversions import date2JD, jd2Date, raDec2AltAz
+from RMS.Routines.MaskImage import getMaskFile
+from RMS.Math import pointInsideConvexPolygonSphere
+from RMS.LightDomeModel import DOME_CATALOG_LIM_MAG, LIGHT_DOME_FILE_SUFFIX
+
+
+# Trial building
+MATCH_RADIUS_PX = 3.0    # px - predicted star counts as matched within this radius
+BORDER_PX = 10           # px - skip stars near the frame border (extractor border)
+ALT_MIN = 5.0            # deg - ignore sky below this altitude
+FF_PER_NIGHT = 40        # frames sampled per night per station
+SUN_ALT_MAX = -18.0      # deg - only fully dark frames (twilight frames train the model
+                         # on a temporarily bright sky and bias it shallow, which makes
+                         # cloudy nights pass the ratio threshold)
+
+# Fitting
+MIN_DOME_SIGNIFICANCE = 50.0   # NLL improvement required to accept one more dome
+
+
+def sunAltitude(jd, lat, lon):
+    """ Solar altitude (deg) at the given time and location. """
+
+    obs = ephem.Observer()
+    obs.lat = str(lat)
+    obs.lon = str(lon)
+    obs.date = jd2Date(jd, dt_obj=True)
+
+    sun = ephem.Sun()
+    sun.compute(obs)
+
+    return np.degrees(float(sun.alt))
+
+
+def buildStationTrials(config, night_dirs, n_ff=FF_PER_NIGHT):
+    """ Build hit/miss trials for one station over the given night directories.
+
+    Arguments:
+        config: [Config] Station config.
+        night_dirs: [list of str] Paths to night directories with
+            platepars_flux_recalibrated.json.
+
+    Keyword arguments:
+        n_ff: [int] Frames sampled per night.
+
+    Return:
+        trials: [dict of ndarray] az, alt, mag, det - or None if no usable data.
+    """
+
+    catalog_stars, _, _ = StarCatalog.readStarCatalog(config.star_catalog_path,
+        config.star_catalog_file, lim_mag=DOME_CATALOG_LIM_MAG,
+        mag_band_ratios=config.star_catalog_band_ratios)
+    cat_ra, cat_dec, cat_mag = catalog_stars[:, 0], catalog_stars[:, 1], catalog_stars[:, 2]
+
+    az_all, alt_all, mag_all, det_all = [], [], [], []
+
+    for night_dir in night_dirs:
+
+        pp_path = os.path.join(night_dir, "platepars_flux_recalibrated.json")
+        if not os.path.isfile(pp_path):
+            continue
+
+        with open(pp_path) as f:
+            ppr = json.load(f)
+
+        ff_names = sorted(k for k in ppr if k.startswith("FF_") and isinstance(ppr[k], dict)
+            and ppr[k].get("auto_recalibrated") and ppr[k].get("star_list"))
+
+        if len(ff_names) < 3:
+            continue
+
+        mask = getMaskFile(night_dir, config, default_as_backup=True)
+
+        indices = np.unique(np.linspace(0, len(ff_names) - 1,
+            min(n_ff, len(ff_names))).astype(int))
+
+        for ff_name in [ff_names[i] for i in indices]:
+
+            pp = Platepar()
+            pp.loadFromDict(ppr[ff_name], use_flat=config.use_flat)
+            w, h = pp.X_res, pp.Y_res
+
+            if mask is not None:
+                mask.checkMask(w, h)
+
+            date = FFfile.getMiddleTimeFF(ff_name, config.fps, ret_milliseconds=True)
+            jd = date2JD(*date)
+
+            # Fully dark frames only
+            if sunAltitude(jd, pp.lat, pp.lon) > SUN_ALT_MAX:
+                continue
+
+            # Spherical FOV polygon guard - without it, catalog stars far outside the FOV
+            # fold back to in-frame pixel coordinates through the distortion polynomial
+            x_vert = [0, w/4, w/2, 3*w/4, w, w, w, w, w, 3*w/4, w/2, w/4, 0, 0, 0, 0, 0]
+            y_vert = [0, 0, 0, 0, 0, h/4, h/2, 3*h/4, h, h, h, h, h, 3*h/4, h/2, h/4, 0]
+            _, ra_vert, dec_vert, _ = xyToRaDecPP([date]*len(x_vert),
+                list(reversed(x_vert)), list(reversed(y_vert)), [1]*len(x_vert), pp,
+                extinction_correction=False, precompute_pointing_corr=True)
+
+            inside = pointInsideConvexPolygonSphere(np.array([cat_ra, cat_dec]).T,
+                np.array([ra_vert, dec_vert]).T)
+
+            x, y = raDecToXYPP(cat_ra[inside], cat_dec[inside], jd, pp)
+            m = cat_mag[inside]
+            ra_in = cat_ra[inside]
+            dec_in = cat_dec[inside]
+
+            in_frame = (x >= BORDER_PX) & (x < w - BORDER_PX) \
+                & (y >= BORDER_PX) & (y < h - BORDER_PX)
+
+            if mask is not None:
+                xi = np.clip(x.astype(int), 0, w - 1)
+                yi = np.clip(y.astype(int), 0, h - 1)
+                in_frame &= mask.img[yi, xi] > 0
+
+            x, y, m = x[in_frame], y[in_frame], m[in_frame]
+            az, alt = raDec2AltAz(ra_in[in_frame], dec_in[in_frame], jd, pp.lat, pp.lon)
+
+            up = alt >= ALT_MIN
+            x, y, m, az, alt = x[up], y[up], m[up], az[up], alt[up]
+
+            if not len(x):
+                continue
+
+            # Matched star positions (star_list rows are [jd, x, y, ...] - detect a
+            # transposed variant by coordinate range)
+            star_list = np.array(ppr[ff_name]["star_list"])
+            c1, c2 = star_list[:, 1], star_list[:, 2]
+            if (c1.max() <= h + 1) and (c2.max() > h + 1):
+                sx, sy = c2, c1
+            else:
+                sx, sy = c1, c2
+
+            dist2 = (x[:, None] - sx[None, :])**2 + (y[:, None] - sy[None, :])**2
+            detected = (dist2.min(axis=1) <= MATCH_RADIUS_PX**2).astype(np.int8)
+
+            az_all.append(az)
+            alt_all.append(alt)
+            mag_all.append(m)
+            det_all.append(detected)
+
+    if not az_all:
+        return None
+
+    return dict(az=np.concatenate(az_all), alt=np.concatenate(alt_all),
+        mag=np.concatenate(mag_all), det=np.concatenate(det_all))
+
+
+def selectNightDirs(config, dates=None, window=30, max_nights=4):
+    """ Pick night directories to fit on: explicit dates, or the clearest recent nights
+        (highest median matched-star count over the trailing window).
+
+    Arguments:
+        config: [Config] Station config (data_dir locates ArchivedFiles).
+
+    Keyword arguments:
+        dates: [list of str] YYYYMMDD dates. If given, all segments of those dates.
+        window: [int] Trailing night directories to consider for auto-selection.
+        max_nights: [int] Number of auto-selected nights.
+
+    Return:
+        night_dirs: [list of str] Paths to selected night directories.
+    """
+
+    archive_dir = os.path.join(os.path.expanduser(config.data_dir), "ArchivedFiles")
+
+    if not os.path.isdir(archive_dir):
+        return []
+
+    all_dirs = sorted(d for d in os.listdir(archive_dir)
+        if d.startswith(str(config.stationID) + "_")
+        and os.path.isdir(os.path.join(archive_dir, d)))
+
+    if dates is not None:
+        return [os.path.join(archive_dir, d) for d in all_dirs
+                if d.split("_")[1] in dates]
+
+    # Auto-select: median matched count per night dir, take the top max_nights
+    scored = []
+    for d in all_dirs[-window:]:
+        pp_path = os.path.join(archive_dir, d, "platepars_flux_recalibrated.json")
+        if not os.path.isfile(pp_path):
+            continue
+        try:
+            with open(pp_path) as f:
+                ppr = json.load(f)
+        except Exception:
+            continue
+        counts = [len(v["star_list"]) for k, v in ppr.items()
+                  if k.startswith("FF_") and isinstance(v, dict) and v.get("star_list")]
+        if len(counts) >= 10:
+            scored.append((float(np.median(counts)), d))
+
+    scored.sort(reverse=True)
+
+    return [os.path.join(archive_dir, d) for _, d in scored[:max_nights]]
+
+
+def fitLightDome(station_configs, dates=None, max_domes=2):
+    """ Fit the site model over multiple co-located stations.
+
+    Arguments:
+        station_configs: [list of Config] One config per station.
+
+    Keyword arguments:
+        dates: [list of str] Explicit YYYYMMDD training dates (recommended: clear nights).
+        max_domes: [int] Maximum localized dome components to try.
+
+    Return:
+        model_dict: [dict] Fitted site model (LightDomeModel format), or None.
+    """
+
+    cams = [str(c.stationID) for c in station_configs]
+    ncam = len(cams)
+
+    az_l, alt_l, mag_l, det_l, ci_l = [], [], [], [], []
+    fit_nights = []
+
+    for i, config in enumerate(station_configs):
+
+        night_dirs = selectNightDirs(config, dates=dates)
+        fit_nights += [os.path.basename(d) for d in night_dirs]
+
+        trials = buildStationTrials(config, night_dirs)
+
+        if trials is None:
+            print("{:s}: no usable trials, station excluded from fit".format(cams[i]))
+            continue
+
+        n = len(trials["az"])
+        print("{:s}: {:d} trials from {:d} night dir(s), detected fraction {:.2f}".format(
+            cams[i], n, len(night_dirs), float(np.mean(trials["det"]))))
+
+        az_l.append(trials["az"])
+        alt_l.append(trials["alt"])
+        mag_l.append(trials["mag"])
+        det_l.append(trials["det"])
+        ci_l.append(np.full(n, i, dtype=np.int64))
+
+    if not az_l:
+        return None
+
+    az = np.concatenate(az_l)
+    alt = np.concatenate(alt_l)
+    mag = np.concatenate(mag_l)
+    det = np.concatenate(det_l)
+    ci = np.concatenate(ci_l)
+
+    print("TOTAL: {:d} trials".format(len(az)))
+
+    def modelLM(p, azv, altv, civ, ndom):
+        k = p[ncam]
+        q0, hb = p[ncam + 2], p[ncam + 3]
+        alt_c = np.clip(altv, 5.0, 90.0)
+        z2 = np.sin(np.radians(90.0 - alt_c))**2
+        B = 1.0/np.sqrt(1.0 - 0.97*z2) + (10.0**q0)*np.exp(-alt_c/hb)
+        for j in range(ndom):
+            a0, qd, kap, hh = p[ncam + 4 + 4*j:ncam + 4 + 4*j + 4]
+            B = B + (10.0**qd)*np.exp(kap*(np.cos(np.radians(azv - a0)) - 1.0)) \
+                *np.exp(-alt_c/hh)
+        return p[civ] - k*(1.0/np.sin(np.radians(alt_c)) - 1.0) - 1.25*np.log10(B)
+
+    def nll(p, ndom):
+        s = p[ncam + 1]
+        pr = 1.0/(1.0 + np.exp(-(modelLM(p, az, alt, ci, ndom) - mag)/s))
+        pr = np.clip(pr, 1e-6, 1 - 1e-6)
+        return -np.sum(det*np.log(pr) + (1 - det)*np.log(1 - pr))
+
+    base_bounds = [(4.0, 7.0)]*ncam + [(0.0, 1.5), (0.12, 1.2), (-2.0, 3.0), (5.0, 60.0)]
+    dome_bounds = [(-360.0, 720.0), (-2.0, 3.5), (2.0, 20.0), (3.0, 30.0)]
+
+    results = {}
+    for ndom in range(max_domes + 1):
+
+        base0 = [5.5]*ncam + [0.2, 0.35, 1.0, 20.0]
+
+        if ndom == 0:
+            starts = [base0]
+        elif ndom == 1:
+            starts = [base0 + [a, 1.3, 4.0, 12.0] for a in (90, 180, 225, 270, 0)]
+        else:
+            prev = results[ndom - 1]["p"]
+            a_prev = prev[ncam + 4]%360
+            starts = [list(prev) + [(a_prev + da)%360, 1.0, 4.0, 12.0] for da in (180, 90)]
+
+        bounds = base_bounds + dome_bounds*ndom
+
+        best = None
+        for p0 in starts:
+            r = minimize(nll, np.array(p0), args=(ndom,), method="L-BFGS-B",
+                bounds=bounds, options=dict(maxiter=120))
+            if (best is None) or (r.fun < best.fun):
+                best = r
+
+        r = minimize(nll, best.x, args=(ndom,), method="L-BFGS-B", bounds=bounds,
+            options=dict(maxiter=500))
+
+        results[ndom] = {"p": r.x, "nll": float(r.fun)}
+        print("domes={:d}  NLL={:.0f}".format(ndom, r.fun))
+
+    # Keep adding domes only while each one earns its keep
+    use = 0
+    while (use + 1 in results) \
+            and (results[use]["nll"] - results[use + 1]["nll"] > MIN_DOME_SIGNIFICANCE):
+        use += 1
+
+    p = results[use]["p"]
+
+    domes = []
+    for j in range(use):
+        a0, qd, kap, hh = p[ncam + 4 + 4*j:ncam + 4 + 4*j + 4]
+        domes.append(dict(az=float(a0%360), B=float(10.0**qd), kappa=float(kap),
+            h=float(hh)))
+
+    model_dict = dict(
+        cams=cams,
+        LM0=[float(p[i]) for i in range(ncam)],
+        k=float(p[ncam]),
+        s=float(p[ncam + 1]),
+        q0=float(p[ncam + 2]),
+        h0=float(p[ncam + 3]),
+        ndom=use,
+        domes=domes,
+        model="vanrhijn_brightness",
+        fit_nights=sorted(set(fit_nights)),
+        nll={str(kk): v["nll"] for kk, v in results.items()},
+    )
+
+    print("\nFitted model ({:d} dome(s)):".format(use))
+    for i, cam in enumerate(cams):
+        print("  LM0[{:s}] = {:.2f}".format(cam, model_dict["LM0"][i]))
+    print("  k={:.2f}  s={:.2f}  LP bowl B={:.1f} (h0={:.0f} deg)".format(
+        model_dict["k"], model_dict["s"], 10.0**model_dict["q0"], model_dict["h0"]))
+    for j, d in enumerate(domes):
+        print("  dome {:d}: az={:.0f} deg  B={:.1f}  kappa={:.1f}  h={:.0f} deg".format(
+            j + 1, d["az"], d["B"], d["kappa"], d["h"]))
+
+    # Per-camera calibration sanity: aggregate detected/expected on the training trials
+    # must be ~1.00 for every camera; a deviation means the shared terms misallocate
+    print("Training calibration (detected/expected per camera, want ~1.00):")
+    s_soft = model_dict["s"]
+    lm_all = modelLM(p, az, alt, ci, use)
+    p_det = 1.0/(1.0 + np.exp(-(lm_all - mag)/s_soft))
+    for i, cam in enumerate(cams):
+        sel = ci == i
+        if np.any(sel):
+            print("  {:s}: {:.2f}".format(cam, float(np.sum(det[sel])/np.sum(p_det[sel]))))
+
+    return model_dict
+
+
+if __name__ == "__main__":
+
+    parser = argparse.ArgumentParser(
+        description="Fit the site light-dome LM model from archived nights.")
+    parser.add_argument("station_dirs", nargs="+",
+        help="Station config directories (one per co-located camera).")
+    parser.add_argument("--nights", type=str, default=None,
+        help="Comma-separated YYYYMMDD training dates (clear nights). "
+             "Auto-selects the clearest recent nights if omitted.")
+    parser.add_argument("--max-domes", type=int, default=2,
+        help="Maximum localized dome components (default 2).")
+
+    args = parser.parse_args()
+
+    configs = [cr.loadConfigFromDirectory(".", os.path.abspath(d))
+               for d in args.station_dirs]
+
+    dates = args.nights.split(",") if args.nights else None
+
+    model_dict = fitLightDome(configs, dates=dates, max_domes=args.max_domes)
+
+    if model_dict is None:
+        print("No usable data - nothing written.")
+    else:
+        for config in configs:
+            out_path = os.path.join(os.path.expanduser(config.data_dir),
+                "{:s}_{:s}".format(str(config.stationID), LIGHT_DOME_FILE_SUFFIX))
+            with open(out_path, "w") as f:
+                json.dump(model_dict, f, indent=1)
+            print("wrote {:s}".format(out_path))
