@@ -45,6 +45,7 @@ from RMS.Formats.CALSTARS import readCALSTARS
 import RMS.Formats.CALSTARS as CALSTARS
 from RMS.Formats.FTPdetectinfo import findFTPdetectinfoFile, readFTPdetectinfo
 from RMS.Formats.Showers import FluxShowers, loadRadiantShowers
+from RMS.LightDomeModel import LightDomeModel, DOME_CATALOG_LIM_MAG
 from RMS.Math import angularSeparation, pointInsideConvexPolygonSphere
 from RMS.Routines.FOVArea import fovArea, xyHt2Geo
 from RMS.Routines.MaskImage import MaskStructure, getMaskFile
@@ -1167,7 +1168,10 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
     """
 
 
-    # Take the default value of the ratio threshold
+    # Take the default value of the ratio threshold. With a light-dome model the expected
+    # counts are calibrated (clear-sky ratio ~ 1), so the default threshold is higher; the
+    # dome default is resolved after the model is loaded below.
+    ratio_threshold_explicit = ratio_threshold is not None
     if ratio_threshold is None:
         ratio_threshold = 0.5
 
@@ -1278,13 +1282,25 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
         for ff_file in recorded_files
     }
 
+    # Load the fitted site light-dome model, if one is available. It supersedes the scalar
+    # LM prediction below: the limiting magnitude varies by over a magnitude across a
+    # light-polluted FOV, so predicted counts are computed per star at its own sky position
+    # (see RMS.LightDomeModel and Utils.FitLightDome).
+    dome_model = LightDomeModel.load(config)
+
+    if dome_model is not None:
+        log.info("Site light-dome model found - using per-sky-position expected star counts")
+
+        if not ratio_threshold_explicit:
+            ratio_threshold = 0.7
+
     # Apply the per-camera empirical LM correction: the model infers depth from throughput
     # and cannot see the sky background, so it overestimates the depth of light-polluted or
     # low-elevation cameras. The correction is learned from the station's cross-night
     # matched-star depth history (see empiricalLMCorrection for the cloud-immunity argument
-    # and safety bounds).
+    # and safety bounds). Superseded by the light-dome model when one is present.
     model_lms = [v for v in ff_limiting_magnitude.values() if v is not None]
-    if model_lms:
+    if model_lms and (dome_model is None):
         night_depth = measureNightMatchedDepth(recalibrated_platepars)
         lm_correction = empiricalLMCorrection(
             config, os.path.basename(os.path.normpath(dir_path)),
@@ -1360,48 +1376,75 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
 
     # Compute the predicted number of stars on every recalibrated FF file
     predicted_stars = predictStarNumberInFOV(
-        recalibrated_platepars, ff_limiting_magnitude, config, mask=mask, show_plot=show_plots
+        recalibrated_platepars, ff_limiting_magnitude, config, mask=mask, show_plot=show_plots,
+        dome_model=dome_model
     )
 
-    # Compute the ratio between matched and EXPECTED stars. Two effects separate the raw
-    # prediction from what detection can deliver on a perfectly clear sky:
-    # 1. The extractor never returns more than config.max_stars candidates, so the
-    #    prediction saturates at the cap (on star-rich nights predicted >> cap and the raw
-    #    ratio would read a clear sky as cloudy).
-    # 2. The chain from candidates to matched stars loses a roughly constant fraction
-    #    (PSF-fit acceptance, catalog matching, prediction model error) - a clear-sky
-    #    "deficit" that would otherwise cap the achievable ratio well below 1.
-    # The deficit is self-calibrated from the night: the median matched/predicted over
-    # frames where the cap does NOT bind and the sky is already clearly clear. It is
-    # applied to the CAP ONLY - uncapped frames keep the historical matched/predicted
-    # semantics the threshold was tuned on; only cap-bound frames compare against what
-    # the capped detection chain actually delivers. Clamped to [0.5, 1] so a contaminated
-    # calibration sample cannot inflate cloudy frames past the threshold, and left at 1
-    # (conservative, previous behavior) when there is no usable sample (fully capped or
-    # fully cloudy night).
-    deficit_sample = [
-        matched_count[ff]/predicted_stars[ff]
-        for ff in recorded_files
-        if (ff in predicted_stars) and (0 < predicted_stars[ff] <= config.max_stars)
-        and (matched_count[ff]/predicted_stars[ff] >= ratio_threshold)
-    ]
-    if len(deficit_sample) >= 5:
-        detection_deficit = float(np.clip(np.median(deficit_sample), 0.5, 1.0))
-        log.info("Clear-sky detection deficit self-calibrated from {:d} uncapped frames: "
-                 "{:.2f}".format(len(deficit_sample), detection_deficit))
+    if dome_model is not None:
+
+        # Dome-model path: the expected counts are calibrated per sky position, so no cap or
+        # deficit correction applies - the clear-sky ratio is ~1 by construction at the fit
+        # epoch. What remains is the slow drift of the light-pollution amplitude (aerosols,
+        # e.g. monsoon haze brighten the whole LP field together), tracked as a cloud-immune
+        # normalization over the trailing nights (see domeRatioNormalization).
+        ratio_raw = {
+            ff_file: (matched_count[ff_file]/predicted_stars[ff_file]
+                      if (ff_file in predicted_stars) and (predicted_stars[ff_file] > 0.001) else 0)
+            for ff_file in recorded_files
+        }
+
+        night_median_ratio = float(np.median([r for r in ratio_raw.values() if r > 0])) \
+            if any(r > 0 for r in ratio_raw.values()) else None
+
+        ratio_norm = domeRatioNormalization(
+            config, os.path.basename(os.path.normpath(dir_path)), night_median_ratio)
+
+        if abs(ratio_norm - 1.0) > 0.01:
+            log.info("Dome ratio normalization from camera history: {:.2f}".format(ratio_norm))
+
+        ratio = {ff: r/ratio_norm for ff, r in ratio_raw.items()}
+
     else:
-        detection_deficit = 1.0
 
-    expected_stars = {
-        ff: min(predicted_stars[ff], detection_deficit*config.max_stars)
-        for ff in predicted_stars
-    }
+        # Compute the ratio between matched and EXPECTED stars. Two effects separate the raw
+        # prediction from what detection can deliver on a perfectly clear sky:
+        # 1. The extractor never returns more than config.max_stars candidates, so the
+        #    prediction saturates at the cap (on star-rich nights predicted >> cap and the raw
+        #    ratio would read a clear sky as cloudy).
+        # 2. The chain from candidates to matched stars loses a roughly constant fraction
+        #    (PSF-fit acceptance, catalog matching, prediction model error) - a clear-sky
+        #    "deficit" that would otherwise cap the achievable ratio well below 1.
+        # The deficit is self-calibrated from the night: the median matched/predicted over
+        # frames where the cap does NOT bind and the sky is already clearly clear. It is
+        # applied to the CAP ONLY - uncapped frames keep the historical matched/predicted
+        # semantics the threshold was tuned on; only cap-bound frames compare against what
+        # the capped detection chain actually delivers. Clamped to [0.5, 1] so a contaminated
+        # calibration sample cannot inflate cloudy frames past the threshold, and left at 1
+        # (conservative, previous behavior) when there is no usable sample (fully capped or
+        # fully cloudy night).
+        deficit_sample = [
+            matched_count[ff]/predicted_stars[ff]
+            for ff in recorded_files
+            if (ff in predicted_stars) and (0 < predicted_stars[ff] <= config.max_stars)
+            and (matched_count[ff]/predicted_stars[ff] >= ratio_threshold)
+        ]
+        if len(deficit_sample) >= 5:
+            detection_deficit = float(np.clip(np.median(deficit_sample), 0.5, 1.0))
+            log.info("Clear-sky detection deficit self-calibrated from {:d} uncapped frames: "
+                     "{:.2f}".format(len(deficit_sample), detection_deficit))
+        else:
+            detection_deficit = 1.0
 
-    ratio = {
-        ff_file: (matched_count[ff_file]/expected_stars[ff_file]
-                  if (ff_file in expected_stars) and (expected_stars[ff_file] > 0) else 0)
-        for ff_file in recorded_files
-    }
+        expected_stars = {
+            ff: min(predicted_stars[ff], detection_deficit*config.max_stars)
+            for ff in predicted_stars
+        }
+
+        ratio = {
+            ff_file: (matched_count[ff_file]/expected_stars[ff_file]
+                      if (ff_file in expected_stars) and (expected_stars[ff_file] > 0) else 0)
+            for ff_file in recorded_files
+        }
 
     # Find the time intervals of clear weather
     time_intervals = computeClearSkyTimeIntervals(ratio, ratio_threshold=ratio_threshold)
@@ -1509,7 +1552,8 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
 
 
 
-def predictStarNumberInFOV(recalibrated_platepars, ff_limiting_magnitude, config, mask=None, show_plot=True):
+def predictStarNumberInFOV(recalibrated_platepars, ff_limiting_magnitude, config, mask=None, \
+    show_plot=True, dome_model=None):
     """ Predicts the number of stars that should be in the FOV, considering limiting magnitude,
         FOV and mask, and returns a dictionary mapping FF files to the number of predicted stars
 
@@ -1521,6 +1565,14 @@ def predictStarNumberInFOV(recalibrated_platepars, ff_limiting_magnitude, config
     Keyword Arguments:
         mask: [Mask object] Mask to filter stars to
         show_plot: [Bool] Whether to show plots (defaults to true)
+        dome_model: [LightDomeModel] Fitted site light-dome model. When given, the single
+            per-frame limiting magnitude in ff_limiting_magnitude is IGNORED and each catalog
+            star instead contributes its clear-sky detection probability at its own sky
+            position - the sum is the expected matched-star count (a float). This accounts
+            for the limiting magnitude varying across the FOV (light pollution gradient),
+            which a single per-frame LM cannot represent. The model is calibrated on catalog
+            magnitudes directly, so the extinction/vignetting darkening step is skipped on
+            this path (the model's altitude terms already absorb it).
 
     Return:
         pred_star_count: [dict] FF_file: number_of_stars_in_FOV
@@ -1539,6 +1591,18 @@ def predictStarNumberInFOV(recalibrated_platepars, ff_limiting_magnitude, config
                 recalibrated_platepars[ff_files[0]].Y_res)
 
 
+        # With a dome model the catalog cut is fixed and deep (the logistic tail needs
+        # stars below the limit), so read the catalog once instead of per frame
+        catalog_stars_deep = None
+        if dome_model is not None:
+            catalog_stars_deep, _, _ = StarCatalog.readStarCatalog(
+                config.star_catalog_path,
+                config.star_catalog_file,
+                lim_mag=DOME_CATALOG_LIM_MAG,
+                mag_band_ratios=config.star_catalog_band_ratios,
+            )
+
+
         # Go through all FF files and compute the number of predicted stars
         star_mag = {}
         for i, ff_file in enumerate(ff_files):
@@ -1546,6 +1610,11 @@ def predictStarNumberInFOV(recalibrated_platepars, ff_limiting_magnitude, config
             platepar = recalibrated_platepars[ff_file]
             lim_mag = ff_limiting_magnitude[ff_file]
 
+            # A None limiting magnitude marks a frame whose recalibration failed. Skip it on
+            # BOTH paths: such platepars fall back to the default calibration, whose star_list
+            # is the SkyFit calibration list rather than the night's matches, so scoring them
+            # would compare fossil "matched" counts against live expectations (on a cloudy
+            # night this reads as a clear sky).
             if lim_mag is None:
                 continue
 
@@ -1569,12 +1638,15 @@ def predictStarNumberInFOV(recalibrated_platepars, ff_limiting_magnitude, config
             )
 
             # Collect and filter catalog stars
-            catalog_stars, _, _ = StarCatalog.readStarCatalog(
-                config.star_catalog_path,
-                config.star_catalog_file,
-                lim_mag=lim_mag,
-                mag_band_ratios=config.star_catalog_band_ratios,
-            )
+            if dome_model is not None:
+                catalog_stars = catalog_stars_deep
+            else:
+                catalog_stars, _, _ = StarCatalog.readStarCatalog(
+                    config.star_catalog_path,
+                    config.star_catalog_file,
+                    lim_mag=lim_mag,
+                    mag_band_ratios=config.star_catalog_band_ratios,
+                )
 
             # Filter out stars that are outside of the polygon on the sphere made by the FOV
             ra_catalog, dec_catalog, mag = catalog_stars.T
@@ -1589,6 +1661,35 @@ def predictStarNumberInFOV(recalibrated_platepars, ff_limiting_magnitude, config
             # Skip if there are no stars inside
             if len(x) == 0:
                 log.info("No predicted stars in {:s}!".format(ff_file))
+                continue
+
+            # Dome-model path: expected count = sum of per-star clear-sky detection
+            # probabilities at each star's own sky position
+            if dome_model is not None:
+
+                ra_inside = ra_catalog[inside]
+                dec_inside = dec_catalog[inside]
+
+                # In-frame filter, matching the border used when the model was fitted
+                in_frame = (x >= 10) & (x < platepar.X_res - 10) \
+                    & (y >= 10) & (y < platepar.Y_res - 10)
+
+                # Filter stars with mask
+                x_int = np.clip(x.astype(int), 0, platepar.X_res - 1)
+                y_int = np.clip(y.astype(int), 0, platepar.Y_res - 1)
+                in_frame &= mask.img[y_int, x_int] > 0
+
+                # Star sky positions
+                star_az, star_alt = raDec2AltAz(ra_inside[in_frame], dec_inside[in_frame], \
+                    jd, platepar.lat, platepar.lon)
+
+                up = star_alt >= 5.0
+
+                p_det = dome_model.detectionProbability(mag[in_frame][up], star_az[up], \
+                    star_alt[up], station_id=config.stationID)
+
+                pred_star_count[ff_file] = float(np.sum(p_det))
+
                 continue
 
             # Compute star image levels from catalog magnitudes without any vignetting or extinction
@@ -2136,6 +2237,85 @@ def empiricalLMCorrection(config, night_id, model_lm, measured_depth):
             log.debug("Could not update the LM history: {}".format(e))
 
     return correction
+
+
+DOME_RATIO_NORM_PCT = 80     # percentile of trailing nightly median ratios taken as the
+                             # clear-sky level (clear-leaning, robust to a cloudy minority)
+DOME_RATIO_NORM_MIN = 0.6    # floor - bounds the worst-case boost so a run of overcast
+                             # nights (P80 of cloudy ratios ~0.3) cannot lift a cloudy
+                             # night past the 0.7 threshold (0.3/0.6 = 0.5 < 0.7)
+DOME_RATIO_NORM_MAX = 2.5    # ceiling - bounds deflation on nights much deeper than the
+                             # model's fit epoch (e.g. dry season vs a monsoon-epoch fit)
+
+
+def domeRatioNormalization(config, night_id, night_median_ratio):
+    """ Slow, cloud-immune normalization of the dome-model clear-sky ratio.
+
+    The light-dome model is fitted at one epoch; the light-pollution amplitude then drifts
+    on week scales as aerosols change (e.g. Phoenix monsoon haze scatters more city light
+    into the beam, dimming the achievable depth site-wide). Tonight's raw ratio therefore
+    drifts around 1.0 slowly - while clouds move it on night scales. The two are separated
+    across nights exactly like the depth envelope: the normalization is a high percentile
+    of the trailing nightly MEDIAN ratios, so a cloudy minority (low ratios) is ignored,
+    and only a persistent shift (aerosol epoch change) moves it.
+
+    Computed from PRIOR nights only, so tonight cannot normalize itself. Bounded to
+    [DOME_RATIO_NORM_MIN, DOME_RATIO_NORM_MAX] so that even a fully-overcast trailing
+    window cannot boost a cloudy night past the detection threshold. Returns 1.0 (no
+    normalization) until LM_HISTORY_MIN_NIGHTS of history accumulate - correct behavior
+    near the model's fit epoch, where the raw ratio is already calibrated.
+
+    Arguments:
+        config: [Config] Provides data_dir and stationID for the per-station history file.
+        night_id: [str] Identifier of this night (capture directory basename).
+        night_median_ratio: [float] Tonight's median matched/expected ratio (None skips
+            recording).
+
+    Return:
+        norm: [float] Normalization to divide the nightly ratios by.
+    """
+
+    history = {}
+    history_path = None
+    try:
+        data_dir = os.path.expanduser(config.data_dir)
+        if os.path.isdir(data_dir):
+            history_path = os.path.join(data_dir, "{:s}_{:s}".format(
+                str(config.stationID), LM_HISTORY_FILE))
+            if os.path.isfile(history_path):
+                with open(history_path) as f:
+                    history = json.load(f)
+    except Exception as e:
+        log.debug("LM history unavailable ({}) - no dome ratio normalization".format(e))
+        history = {}
+        history_path = None
+
+    night_key = _nightKey(night_id)
+
+    prior_ratios = [v["dratio"] for k, v in sorted(history.items())[-LM_HISTORY_WINDOW:]
+                    if (k != night_key) and isinstance(v, dict) and ("dratio" in v)]
+
+    norm = 1.0
+    if len(prior_ratios) >= LM_HISTORY_MIN_NIGHTS:
+        norm = float(np.clip(np.percentile(prior_ratios, DOME_RATIO_NORM_PCT),
+            DOME_RATIO_NORM_MIN, DOME_RATIO_NORM_MAX))
+
+    # Record tonight for future runs, merging with any existing entry so the depth field
+    # written by the scalar path is preserved if a station switches paths
+    if (history_path is not None) and (night_median_ratio is not None):
+        try:
+            entry = history.get(night_key, {})
+            if not isinstance(entry, dict):
+                entry = {}
+            entry["dratio"] = round(float(night_median_ratio), 3)
+            history[night_key] = entry
+            history = dict(sorted(history.items())[-LM_HISTORY_WINDOW:])
+            with open(history_path, 'w') as f:
+                json.dump(history, f, indent=1)
+        except Exception as e:
+            log.debug("Could not update the LM history: {}".format(e))
+
+    return norm
 
 
 def stellarLMModel(p0):
