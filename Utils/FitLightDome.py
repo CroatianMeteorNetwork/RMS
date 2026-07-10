@@ -107,6 +107,7 @@ def buildStationTrials(config, night_dirs, n_ff=FF_PER_NIGHT, moon_phase_max=MOO
     """
 
     n_moon_excluded = 0
+    footprint = None
 
     catalog_stars, _, _ = StarCatalog.readStarCatalog(config.star_catalog_path,
         config.star_catalog_file, lim_mag=DOME_CATALOG_LIM_MAG,
@@ -169,6 +170,15 @@ def buildStationTrials(config, night_dirs, n_ff=FF_PER_NIGHT, moon_phase_max=MOO
             inside = pointInsideConvexPolygonSphere(np.array([cat_ra, cat_dec]).T,
                 np.array([ra_vert, dec_vert]).T)
 
+            # FOV footprint on the sky (az/alt border polygon), captured once at a
+            # consistent epoch - the polygon RA/Dec and the jd MUST come from the same
+            # frame, or the sidereal mismatch smears the footprint
+            if footprint is None:
+                fp_az, fp_alt = raDec2AltAz(np.array(ra_vert), np.array(dec_vert), jd,
+                    pp.lat, pp.lon)
+                footprint = [[round(float(a), 2) for a in fp_az],
+                             [round(float(a), 2) for a in fp_alt]]
+
             x, y = raDecToXYPP(cat_ra[inside], cat_dec[inside], jd, pp)
             m = cat_mag[inside]
             ra_in = cat_ra[inside]
@@ -215,14 +225,10 @@ def buildStationTrials(config, night_dirs, n_ff=FF_PER_NIGHT, moon_phase_max=MOO
     if not az_all:
         return None
 
-    # FOV footprint on the sky (az/alt polygon of the frame border), for the model plot
-    # and as coverage metadata for downstream consumers
-    fp_az, fp_alt = raDec2AltAz(np.array(ra_vert), np.array(dec_vert), jd, pp.lat, pp.lon)
-
     return dict(az=np.concatenate(az_all), alt=np.concatenate(alt_all),
         mag=np.concatenate(mag_all), det=np.concatenate(det_all),
         pointing=(float(pp.az_centre), float(pp.alt_centre)),
-        footprint=[[round(float(a), 2) for a in fp_az], [round(float(a), 2) for a in fp_alt]])
+        footprint=footprint)
 
 
 def selectNightDirs(config, dates=None, window=30, max_nights=4, min_rel_clarity=None):
