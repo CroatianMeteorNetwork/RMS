@@ -215,9 +215,14 @@ def buildStationTrials(config, night_dirs, n_ff=FF_PER_NIGHT, moon_phase_max=MOO
     if not az_all:
         return None
 
+    # FOV footprint on the sky (az/alt polygon of the frame border), for the model plot
+    # and as coverage metadata for downstream consumers
+    fp_az, fp_alt = raDec2AltAz(np.array(ra_vert), np.array(dec_vert), jd, pp.lat, pp.lon)
+
     return dict(az=np.concatenate(az_all), alt=np.concatenate(alt_all),
         mag=np.concatenate(mag_all), det=np.concatenate(det_all),
-        pointing=(float(pp.az_centre), float(pp.alt_centre)))
+        pointing=(float(pp.az_centre), float(pp.alt_centre)),
+        footprint=[[round(float(a), 2) for a in fp_az], [round(float(a), 2) for a in fp_alt]])
 
 
 def selectNightDirs(config, dates=None, window=30, max_nights=4, min_rel_clarity=None):
@@ -306,6 +311,7 @@ def fitLightDome(station_configs, dates=None, max_domes=2, moon_phase_max=MOON_P
     fit_nights = []
     pointing = {}
     thresholds = {}
+    footprints = {}
 
     for i, config in enumerate(station_configs):
 
@@ -328,9 +334,10 @@ def fitLightDome(station_configs, dates=None, max_domes=2, moon_phase_max=MOON_P
         det_l.append(trials["det"])
         ci_l.append(np.full(n, i, dtype=np.int64))
 
-        # Metadata for staleness detection (see ensureLightDomeModel)
+        # Metadata for staleness detection (see ensureLightDomeModel) and the model plot
         pointing[cams[i]] = list(trials["pointing"])
         thresholds[cams[i]] = float(config.intensity_threshold)
+        footprints[cams[i]] = trials["footprint"]
 
     if not az_l:
         return None
@@ -422,6 +429,7 @@ def fitLightDome(station_configs, dates=None, max_domes=2, moon_phase_max=MOON_P
         n_trials=int(len(az)),
         pointing=pointing,
         intensity_threshold=thresholds,
+        footprints=footprints,
         nll={str(kk): v["nll"] for kk, v in results.items()},
     )
 
@@ -446,6 +454,97 @@ def fitLightDome(station_configs, dates=None, max_domes=2, moon_phase_max=MOON_P
             print("  {:s}: {:.2f}".format(cam, float(np.sum(det[sel])/np.sum(p_det[sel]))))
 
     return model_dict
+
+
+# Model plot (see renderLightDomeModel)
+NATURAL_ZENITH_SQM = 21.8   # mag/arcsec^2 - moonless natural zenith sky reference used to
+                            # express the model's relative brightness in absolute units.
+                            # NOTE: the absolute anchor is approximate (star detectability
+                            # cannot fully separate camera depth from sky brightness);
+                            # the relative structure and the fixed scale are the point.
+PLOT_SQM_MIN = 16.0         # fixed color scale so every station and site renders
+PLOT_SQM_MAX = 22.0         # comparably (brighter sky = brighter color)
+
+
+def renderLightDomeModel(model_dict, station_id, out_path):
+    """ Render the fitted site model as a sky-brightness hemisphere map.
+
+    Fixed absolute color scale (PLOT_SQM_MIN..MAX mag/arcsec^2, light pollution bright)
+    so plots from different stations and sites are directly comparable. The station's own
+    FOV footprint is highlighted; co-located sister cameras are drawn in grey for context.
+
+    Arguments:
+        model_dict: [dict] Fitted model (LightDomeModel format, with footprints metadata).
+        station_id: [str] Station to highlight.
+        out_path: [str] Output PNG path.
+    """
+
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib import cm
+
+    model = LightDomeModel(model_dict)
+
+    fig = plt.figure(figsize=(9.5, 8.2))
+    ax = fig.add_subplot(1, 1, 1, projection="polar")
+
+    az_grid = np.radians(np.arange(0, 361, 2))
+    alt_grid = np.arange(5, 86, 2)
+    az_mesh, alt_mesh = np.meshgrid(np.degrees(az_grid), alt_grid)
+
+    sqm = NATURAL_ZENITH_SQM - 2.5*np.log10(model.skyBrightness(az_mesh, alt_mesh))
+
+    cmap = cm.get_cmap("inferno_r")
+    pc = ax.pcolormesh(az_grid, 90 - alt_grid, sqm, cmap=cmap,
+        vmin=PLOT_SQM_MIN, vmax=PLOT_SQM_MAX, shading="auto")
+
+    # FOV footprints: this station highlighted, sisters grey
+    for cam, fp in sorted(model_dict.get("footprints", {}).items()):
+        fp_az = np.array(fp[0])
+        fp_r = 90 - np.clip(np.array(fp[1]), 5, 90)
+
+        if str(cam) == str(station_id):
+            ax.plot(np.radians(fp_az), fp_r, "-", lw=2.6, color="#00ff88", zorder=6)
+
+            # Label at the footprint centroid (circular mean azimuth), safely inside
+            mean_az = np.degrees(np.arctan2(np.mean(np.sin(np.radians(fp_az))),
+                                            np.mean(np.cos(np.radians(fp_az)))))
+            ax.annotate(str(cam), (np.radians(mean_az), float(np.mean(fp_r))),
+                color="#00ff88", fontsize=12, fontweight="bold",
+                ha="center", va="center", zorder=6)
+        else:
+            ax.plot(np.radians(fp_az), fp_r, "-", lw=1.0, color="#999999",
+                alpha=0.6, zorder=5)
+            ax.annotate(str(cam)[-1:], (np.radians(fp_az[len(fp_az)//2]),
+                float(fp_r[len(fp_az)//2])), color="#aaaaaa", fontsize=8, zorder=5)
+
+    ax.set_theta_zero_location("N")
+    ax.set_theta_direction(-1)
+    ax.set_rlim(0, 85)
+    ax.set_rticks([20, 40, 60, 80])
+    ax.set_yticklabels(["70", "50", "30", "10"], fontsize=7)
+    ax.set_xticks(np.radians([0, 90, 180, 270]))
+    ax.set_xticklabels(["N", "E", "S", "W"], fontsize=11)
+
+    cb = fig.colorbar(pc, ax=ax, shrink=0.8, pad=0.09,
+        ticks=np.arange(PLOT_SQM_MIN, PLOT_SQM_MAX + 0.1, 1.0))
+    cb.set_label("sky brightness (mag/arcsec$^2$) - brighter sky $\\rightarrow$ brighter color",
+        fontsize=9)
+
+    zenith_sqm = float(NATURAL_ZENITH_SQM - 2.5*np.log10(model.skyBrightness(0.0, 90.0)))
+    dome_str = ", ".join("az {:.0f}".format(d["az"]) for d in model_dict.get("domes", [])) \
+        or "none"
+    lm0 = model.lm0_map.get(str(station_id), model.lm0_default)
+    fit_kind = "auto-fit" if model_dict.get("auto_fitted") else "site fit"
+
+    ax.set_title("{:s} light dome ({:s} {:s})\nzenith {:.1f} mag/arcsec$^2$ | domes: {:s} | "
+        "LM0[{:s}]={:.2f}".format(str(station_id), fit_kind,
+        str(model_dict.get("fit_date", "")), zenith_sqm, dome_str, str(station_id), lm0),
+        fontsize=10)
+
+    fig.savefig(out_path, dpi=110, bbox_inches="tight")
+    plt.close(fig)
 
 
 # Self-priming (see ensureLightDomeModel)
@@ -598,6 +697,12 @@ def ensureLightDomeModel(config, platepar=None):
         json.dump(model_dict, f, indent=1)
     print("Light-dome model auto-fitted and installed: {:s}".format(model_path))
 
+    try:
+        renderLightDomeModel(model_dict, station,
+            os.path.splitext(model_path)[0] + ".png")
+    except Exception as e:
+        print("Light-dome model plot failed ({}) - model itself is installed".format(e))
+
     return True
 
 
@@ -635,3 +740,10 @@ if __name__ == "__main__":
             with open(out_path, "w") as f:
                 json.dump(model_dict, f, indent=1)
             print("wrote {:s}".format(out_path))
+
+            try:
+                renderLightDomeModel(model_dict, str(config.stationID),
+                    os.path.splitext(out_path)[0] + ".png")
+                print("wrote {:s}".format(os.path.splitext(out_path)[0] + ".png"))
+            except Exception as e:
+                print("plot failed ({}) - model itself is written".format(e))
