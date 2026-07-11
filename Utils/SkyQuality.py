@@ -55,7 +55,15 @@ BIAS_STEP_NIGHTS = 3
 FLOOR_GUARD_ADU = 3.0            # physics: night floor >= bias; a floor below the working
                                  # bias by more than this = pedestal dropped = demote to
                                  # limit rather than report a wrong absolute
-HISTORY_KEEP = 40                # nightly entries kept in the file
+BIAS_OBS_MAX_AGE_NIGHTS = 40     # calendar nights after which an observation no longer
+                                 # enters the estimator, so a stored seed regains authority
+                                 # after a long observation gap. This aging used to be an
+                                 # implicit side effect of the 40-entry file retention.
+HISTORY_KEEP = 3660              # nightly entries kept in the file (~10 years). This is
+                                 # RETENTION for the long-term calibration record (see
+                                 # Utils.PlotCalibrationHistory), not an estimator window -
+                                 # the estimator is bounded by the BIAS_* constants above
+                                 # and BIAS_OBS_MAX_AGE_NIGHTS
 
 # Approximate zenith SQM (mag/arcsec^2) to Bortle class mapping
 BORTLE_SCALE = [(21.99, "1"), (21.89, "2"), (21.69, "3"), (21.25, "4"), (20.49, "5"),
@@ -95,6 +103,8 @@ def loadRadiometricCalibration(config):
             if "nights" in raw or "seed" in raw:
                 cal["seed"] = raw.get("seed")
                 cal["nights"] = raw.get("nights", {})
+                if raw.get("handover") is not None:
+                    cal["handover"] = raw["handover"]
             elif "bias" in raw:
                 # Legacy single-value file becomes the seed observation
                 cal["seed"] = dict(bias=float(raw["bias"]),
@@ -105,14 +115,20 @@ def loadRadiometricCalibration(config):
     return cal
 
 
-def resolveWorkingBias(cal, tonight_obs, tonight_floor):
+def resolveWorkingBias(cal, tonight_obs, tonight_floor, night_key=None):
     """ Continuous bias tracking: fold tonight's observation into the history and return
         the working bias. Pure function - the caller persists the updated cal.
 
     The working bias is the median of the trailing regression observations. A stored seed
     (e.g. a host-level overlap-graph calibration) is used until enough observations
-    accumulate, then tracking takes over - nothing is trusted forever. Two change
-    detectors run every night:
+    accumulate, then tracking takes over - nothing is trusted forever. Observations older
+    than BIAS_OBS_MAX_AGE_NIGHTS never enter the estimator, so after a long observation
+    gap (weather, hardware down) the seed regains authority instead of stale observations
+    outranking it. The first night tracking outranks a seed is recorded in cal["handover"]
+    (date, both values, delta) and a disagreement larger than BIAS_STEP_ADU is logged as a
+    warning - the two calibrations both claim authority, so a large delta means one of
+    them is wrong (stale seed OR systematic regression error) and a human should glance at
+    the calibration history plot. Two change detectors run every night:
 
       - Step detector: if the last BIAS_STEP_NIGHTS observations all sit on the same side
         of the trailing median by more than BIAS_STEP_ADU, the pedestal has stepped
@@ -122,24 +138,42 @@ def resolveWorkingBias(cal, tonight_obs, tonight_floor):
         withdrawn (limit tier) unless tonight's own observation vouches for a new one.
 
     Arguments:
-        cal: [dict] {seed, nights} as loaded.
+        cal: [dict] {seed, nights, ...} as loaded. Extra keys (e.g. handover) are preserved.
         tonight_obs: [float] Tonight's regression bias observation, or None.
         tonight_floor: [float] Tonight's darkest-patch level (always available).
+
+    Keyword arguments:
+        night_key: [str] YYYYMMDD key to record tonight under. None (default) uses the
+            current UTC date; a historical replay (Utils.PlotCalibrationHistory) passes
+            the keys from the stored history to reproduce every night's decision.
 
     Return:
         (bias, source, cal): working bias (or None -> limit), a source label, updated cal.
     """
 
     nights = dict(cal.get("nights", {}))
-    key = datetime.datetime.utcnow().strftime("%Y%m%d")
+    key = night_key if night_key is not None else datetime.datetime.utcnow().strftime("%Y%m%d")
     nights[key] = dict(bias=(round(float(tonight_obs), 2) if tonight_obs is not None else None),
                        floor=round(float(tonight_floor), 2))
     nights = dict(sorted(nights.items())[-HISTORY_KEEP:])
-    cal = dict(seed=cal.get("seed"), nights=nights)
+
+    # Preserve keys beyond seed/nights (e.g. the handover record)
+    cal = dict(cal)
+    cal["nights"] = nights
+
+    # Only observations recent enough to describe the current pedestal enter the estimator
+    try:
+        cutoff = (datetime.datetime.strptime(key, "%Y%m%d")
+                  - datetime.timedelta(days=BIAS_OBS_MAX_AGE_NIGHTS)).strftime("%Y%m%d")
+    except ValueError:
+        cutoff = "00000000"
 
     obs = [(k, v["bias"]) for k, v in sorted(nights.items())
-           if isinstance(v, dict) and v.get("bias") is not None]
+           if isinstance(v, dict) and v.get("bias") is not None and k >= cutoff]
     obs_vals = [b for _, b in obs][-BIAS_WINDOW:]
+
+    seed = cal.get("seed")
+    seed_bias = seed.get("bias") if isinstance(seed, dict) else None
 
     bias = None
     source = None
@@ -157,9 +191,22 @@ def resolveWorkingBias(cal, tonight_obs, tonight_floor):
             bias = med
             source = "tracked ({:d} nights)".format(len(obs_vals))
 
-    elif cal.get("seed") and (cal["seed"].get("bias") is not None):
-        bias = float(cal["seed"]["bias"])
-        source = "seed ({:s})".format(str(cal["seed"].get("method", "stored")))
+        # First night tracking outranks a stored seed: record the handover so a large
+        # disagreement is a visible event (log + history plot), not a silent jump
+        if (seed_bias is not None) and (cal.get("handover") is None):
+            delta = round(float(bias) - float(seed_bias), 2)
+            cal["handover"] = dict(date=key, seed_bias=round(float(seed_bias), 2),
+                tracked_bias=round(float(bias), 2), delta=delta)
+
+            if abs(delta) > BIAS_STEP_ADU:
+                log.warning("Radiometric tracking took over from the stored seed with a "
+                    "{:+.1f} ADU disagreement (seed {:.1f}, tracked {:.1f}) - one of them "
+                    "is wrong; inspect the calibration history".format(
+                        delta, float(seed_bias), float(bias)))
+
+    elif seed_bias is not None:
+        bias = float(seed_bias)
+        source = "seed ({:s})".format(str(seed.get("method", "stored")))
 
     elif obs_vals:
         bias = float(np.median(obs_vals))

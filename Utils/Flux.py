@@ -2317,7 +2317,11 @@ def getSensorCharacterization(dir_path, config, flux_config, meteor_data, defaul
 
 
 LM_HISTORY_FILE = "flux_lm_history.json"
-LM_HISTORY_WINDOW = 30       # trailing nights kept per camera
+LM_HISTORY_WINDOW = 30       # trailing nights the estimators read
+LM_HISTORY_KEEP = 3660       # nightly entries kept in the file (~10 years) - retention for
+                             # the long-term calibration record (Utils.PlotCalibrationHistory);
+                             # the estimators only ever read the trailing LM_HISTORY_WINDOW
+                             # entries, so this does not change their behavior
 LM_HISTORY_MIN_NIGHTS = 5    # nights required before a correction is applied
 LM_CORRECTION_MAX = 1.5      # mag - bounds the worst-case ratio boost to ~4x
 LM_DEPTH_MIN_STARS = 20      # matched stars a frame needs to measure a depth
@@ -2444,7 +2448,7 @@ def empiricalLMCorrection(config, night_id, model_lm, measured_depth):
     if (history_path is not None) and (measured_depth is not None):
         try:
             history[night_key] = dict(depth=round(float(measured_depth), 3))
-            history = dict(sorted(history.items())[-LM_HISTORY_WINDOW:])
+            history = dict(sorted(history.items())[-LM_HISTORY_KEEP:])
             with open(history_path, 'w') as f:
                 json.dump(history, f, indent=1)
         except Exception as e:
@@ -2530,7 +2534,7 @@ def domeRatioNormalization(config, night_id, night_median_ratio, model_version=N
             entry["dratio"] = round(float(night_median_ratio), 3)
             entry["dmodel"] = version
             history[night_key] = entry
-            history = dict(sorted(history.items())[-LM_HISTORY_WINDOW:])
+            history = dict(sorted(history.items())[-LM_HISTORY_KEEP:])
             with open(history_path, 'w') as f:
                 json.dump(history, f, indent=1)
         except Exception as e:
