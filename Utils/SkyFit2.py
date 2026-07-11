@@ -12449,10 +12449,12 @@ class PlateTool(QtWidgets.QMainWindow):
             # Build star_dict_ff in the format recalibrateFF expects: {jd: calstars_array}
             star_dict_ff = {jd: detected_stars}
 
-            # Run recalibrateFF — fits pointing + scale via Nelder-Mead, preserves distortion
+            # Run recalibrateFF — fits pointing + scale via Nelder-Mead, preserves distortion.
+            # Disable the star coverage gate - it guards the unattended nightly pipeline against
+            # chaining bad fits forward, but here the fit is user-triggered and visually inspected
             result, min_match_radius = recalibrateFF(
                 self.config, self.platepar, jd, star_dict_ff, self.catalog_stars,
-                ignore_distance_threshold=True
+                ignore_distance_threshold=True, min_match_fraction=0.0
             )
 
             if result is None:
