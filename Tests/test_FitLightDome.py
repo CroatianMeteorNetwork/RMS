@@ -47,7 +47,7 @@ def test_fresh_model_not_stale(tmp_path):
 
 def test_stale_by_age(tmp_path):
     cfg = DummyConfig(str(tmp_path))
-    old = (datetime.datetime.utcnow() - datetime.timedelta(days=45)).strftime("%Y-%m-%d")
+    old = (datetime.datetime.utcnow() - datetime.timedelta(days=60)).strftime("%Y-%m-%d")
     reason = modelIsStale(freshModelDict(fit_date=old), cfg, DummyPlatepar())
     assert reason is not None and "age" in reason
 
@@ -105,3 +105,33 @@ def test_no_model_no_archives_waits(tmp_path):
     assert json.load(open(marker))["date"] == datetime.datetime.utcnow().strftime("%Y-%m-%d")
 
     assert ensureLightDomeModel(cfg) is False
+
+
+def _writeHistory(tmp_path, station, dratios, model_version):
+    import json
+    entries = {"%s_202606%02d" % (station, i + 1): dict(dratio=r, dmodel=model_version)
+               for i, r in enumerate(dratios)}
+    with open(os.path.join(str(tmp_path), "%s_flux_lm_history.json" % station), "w") as f:
+        json.dump(entries, f)
+
+
+def test_stale_by_normalization_drift(tmp_path):
+    cfg = DummyConfig(str(tmp_path))
+    model = freshModelDict()
+    _writeHistory(tmp_path, "US005X", [0.65]*6, model["fit_date"])
+    reason = modelIsStale(model, cfg, DummyPlatepar())
+    assert reason is not None and "drift" in reason
+
+
+def test_no_drift_when_ratios_near_one(tmp_path):
+    cfg = DummyConfig(str(tmp_path))
+    model = freshModelDict()
+    _writeHistory(tmp_path, "US005X", [0.95, 1.02, 0.98, 1.05, 0.9, 1.0], model["fit_date"])
+    assert modelIsStale(model, cfg, DummyPlatepar()) is None
+
+
+def test_drift_ignores_other_model_versions(tmp_path):
+    cfg = DummyConfig(str(tmp_path))
+    model = freshModelDict()
+    _writeHistory(tmp_path, "US005X", [0.5]*8, "2001-01-01")
+    assert modelIsStale(model, cfg, DummyPlatepar()) is None

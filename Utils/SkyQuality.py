@@ -38,12 +38,24 @@ log = getLogger("logger")
 
 
 RADIOMETRIC_FILE_SUFFIX = "radiometric.json"
-RADIOMETRIC_REFRESH_DAYS = 30    # auto (tier 2) calibrations older than this are redone
 SKY_PATCH_HALF = 30              # px - half-size of the measurement patch
 MAX_FRAMES = 10                  # frames sampled per night
 MIN_SKY_ADU = 1.5                # below this the sky signal is in the noise - skip frame
-MIN_LEVER = 3.0                  # min (p95/p05) model-brightness contrast for tier 2
+MIN_LEVER = 3.0                  # min (p95/p05) model-brightness contrast for regression
 MOON_PHASE_MAX = 25.0            # percent - frames with a brighter risen moon are skipped
+
+# Continuous bias tracking: the working bias is a robust trailing statistic over nightly
+# observations - there are no discrete refits and nothing is trusted forever
+BIAS_WINDOW = 14                 # nightly regression observations in the trailing window
+BIAS_MIN_OBS = 5                 # observations before tracking outranks a stored seed
+BIAS_STEP_ADU = 4.0              # persistent offset of recent obs that signals a pedestal
+                                 # step (firmware/gain change) - window resets, heals in
+                                 # ~BIAS_STEP_NIGHTS nights
+BIAS_STEP_NIGHTS = 3
+FLOOR_GUARD_ADU = 3.0            # physics: night floor >= bias; a floor below the working
+                                 # bias by more than this = pedestal dropped = demote to
+                                 # limit rather than report a wrong absolute
+HISTORY_KEEP = 40                # nightly entries kept in the file
 
 # Approximate zenith SQM (mag/arcsec^2) to Bortle class mapping
 BORTLE_SCALE = [(21.99, "1"), (21.89, "2"), (21.69, "3"), (21.25, "4"), (20.49, "5"),
@@ -60,52 +72,109 @@ def bortleClass(sqm):
     return "9"
 
 
-def loadRadiometricCalibration(config):
-    """ Load the station's stored radiometric calibration, or None.
+def _radiometricPath(config):
+    return os.path.join(os.path.expanduser(config.data_dir),
+        "{:s}_{:s}".format(str(config.stationID), RADIOMETRIC_FILE_SUFFIX))
 
-    Return:
-        cal: [dict] {bias, method, fit_date, ...} or None.
+
+def loadRadiometricCalibration(config):
+    """ Load the station's radiometric tracking file: {seed: {...}, nights: {...}}.
+
+    Legacy flat files ({bias, method, ...}) are read as a seed. Returns an empty
+    structure if nothing is stored.
     """
 
+    cal = dict(seed=None, nights={})
+
     try:
-        path = os.path.join(os.path.expanduser(config.data_dir),
-            "{:s}_{:s}".format(str(config.stationID), RADIOMETRIC_FILE_SUFFIX))
+        path = _radiometricPath(config)
         if os.path.isfile(path):
             with open(path) as f:
-                return json.load(f)
+                raw = json.load(f)
+
+            if "nights" in raw or "seed" in raw:
+                cal["seed"] = raw.get("seed")
+                cal["nights"] = raw.get("nights", {})
+            elif "bias" in raw:
+                # Legacy single-value file becomes the seed observation
+                cal["seed"] = dict(bias=float(raw["bias"]),
+                    method=raw.get("method", "stored"), date=raw.get("fit_date"))
     except Exception:
         pass
 
-    return None
+    return cal
 
 
-def _calibrationIsUsable(cal, dome_model):
-    """ Decide whether a stored calibration should be used as-is.
+def resolveWorkingBias(cal, tonight_obs, tonight_floor):
+    """ Continuous bias tracking: fold tonight's observation into the history and return
+        the working bias. Pure function - the caller persists the updated cal.
 
-    Manual/host-level calibrations (anything except method "model-regression") are always
-    trusted. Auto ones are refreshed when old or when the dome model they were regressed
-    against has been refitted.
+    The working bias is the median of the trailing regression observations. A stored seed
+    (e.g. a host-level overlap-graph calibration) is used until enough observations
+    accumulate, then tracking takes over - nothing is trusted forever. Two change
+    detectors run every night:
+
+      - Step detector: if the last BIAS_STEP_NIGHTS observations all sit on the same side
+        of the trailing median by more than BIAS_STEP_ADU, the pedestal has stepped
+        (firmware/gain change); the working value snaps to the recent observations.
+      - Floor guard: physics demands night_floor >= bias. A floor below the working bias
+        by more than FLOOR_GUARD_ADU proves the pedestal DROPPED; the working value is
+        withdrawn (limit tier) unless tonight's own observation vouches for a new one.
+
+    Arguments:
+        cal: [dict] {seed, nights} as loaded.
+        tonight_obs: [float] Tonight's regression bias observation, or None.
+        tonight_floor: [float] Tonight's darkest-patch level (always available).
+
+    Return:
+        (bias, source, cal): working bias (or None -> limit), a source label, updated cal.
     """
 
-    if cal is None or ("bias" not in cal):
-        return False
+    nights = dict(cal.get("nights", {}))
+    key = datetime.datetime.utcnow().strftime("%Y%m%d")
+    nights[key] = dict(bias=(round(float(tonight_obs), 2) if tonight_obs is not None else None),
+                       floor=round(float(tonight_floor), 2))
+    nights = dict(sorted(nights.items())[-HISTORY_KEEP:])
+    cal = dict(seed=cal.get("seed"), nights=nights)
 
-    if cal.get("method") != "model-regression":
-        return True
+    obs = [(k, v["bias"]) for k, v in sorted(nights.items())
+           if isinstance(v, dict) and v.get("bias") is not None]
+    obs_vals = [b for _, b in obs][-BIAS_WINDOW:]
 
-    try:
-        age = (datetime.datetime.utcnow()
-               - datetime.datetime.strptime(cal.get("fit_date", "1970-01-01"), "%Y-%m-%d")).days
-        if age > RADIOMETRIC_REFRESH_DAYS:
-            return False
-    except ValueError:
-        return False
+    bias = None
+    source = None
 
-    if dome_model is not None and \
-            cal.get("model_fit_date") != dome_model.model.get("fit_date"):
-        return False
+    if len(obs_vals) >= BIAS_MIN_OBS:
+        med = float(np.median(obs_vals))
+        recent = obs_vals[-BIAS_STEP_NIGHTS:]
 
-    return True
+        if len(obs_vals) >= BIAS_MIN_OBS + BIAS_STEP_NIGHTS and (
+                all(r - med > BIAS_STEP_ADU for r in recent)
+                or all(med - r > BIAS_STEP_ADU for r in recent)):
+            bias = float(np.median(recent))
+            source = "tracked (pedestal step detected)"
+        else:
+            bias = med
+            source = "tracked ({:d} nights)".format(len(obs_vals))
+
+    elif cal.get("seed") and (cal["seed"].get("bias") is not None):
+        bias = float(cal["seed"]["bias"])
+        source = "seed ({:s})".format(str(cal["seed"].get("method", "stored")))
+
+    elif obs_vals:
+        bias = float(np.median(obs_vals))
+        source = "tracking warmup ({:d} nights)".format(len(obs_vals))
+
+    # Floor guard - runs regardless of where the working value came from
+    if (bias is not None) and (tonight_floor < bias - FLOOR_GUARD_ADU):
+        if tonight_obs is not None:
+            bias = float(tonight_obs)
+            source = "tonight's observation (floor guard tripped)"
+        else:
+            bias = None
+            source = "floor guard tripped - working bias withdrawn"
+
+    return bias, source, cal
 
 
 def estimateBiasByRegression(config, dir_path, dome_model, pps, mask):
@@ -245,36 +314,11 @@ def measureSkyQuality(config, dir_path, dome_model, recalibrated_platepars, time
     if len(pps) < 3:
         return None
 
-    # --- resolve the bias through the tiers ---
-    cal = loadRadiometricCalibration(config)
-    tier = None
-
-    if _calibrationIsUsable(cal, dome_model):
-        bias = float(cal["bias"])
-        tier = 1 if cal.get("method") != "model-regression" else 2
-        method = cal.get("method", "stored")
-
-    else:
-        bias = None
-        if dome_model is not None:
-            bias = estimateBiasByRegression(config, dir_path, dome_model, pps, mask)
-
-        if bias is not None:
-            tier = 2
-            method = "model-regression"
-            try:
-                path = os.path.join(os.path.expanduser(config.data_dir),
-                    "{:s}_{:s}".format(str(config.stationID), RADIOMETRIC_FILE_SUFFIX))
-                with open(path, "w") as f:
-                    json.dump(dict(bias=round(bias, 2), method=method,
-                        fit_date=datetime.datetime.utcnow().strftime("%Y-%m-%d"),
-                        model_fit_date=dome_model.model.get("fit_date")), f, indent=1)
-                log.info("Sky quality: self-primed bias {:.1f} ADU (model regression)".format(bias))
-            except Exception as e:
-                log.debug("Could not store radiometric calibration: {}".format(e))
-        else:
-            tier = 3
-            method = "night-floor limit"
+    # --- tonight's bias observation: attempted EVERY night (continuous tracking), gated
+    # only by the physics (lever) inside the regression ---
+    tonight_obs = None
+    if dome_model is not None:
+        tonight_obs = estimateBiasByRegression(config, dir_path, dome_model, pps, mask)
 
     # --- choose the measurement patch: highest-altitude unmasked cell ---
     ffs = sorted(pps.keys())
@@ -335,9 +379,32 @@ def measureSkyQuality(config, dir_path, dome_model, recalibrated_platepars, time
     if not levels:
         return None
 
-    # Tier 3: the darkest observed patch level bounds the bias from above
-    if tier == 3:
-        bias = min(v for _, v in levels)
+    # --- continuous bias tracking: fold tonight's observation and floor into the
+    # history, get the working bias (or None -> limit), persist the updated history ---
+    tonight_floor = min(v for _, v in levels)
+    cal = loadRadiometricCalibration(config)
+    bias, source, cal = resolveWorkingBias(cal, tonight_obs, tonight_floor)
+
+    try:
+        with open(_radiometricPath(config), "w") as f:
+            json.dump(cal, f, indent=1)
+    except Exception as e:
+        log.debug("Could not store radiometric history: {}".format(e))
+
+    if bias is not None:
+        tier = 2 if source.startswith(("tracked", "tonight", "tracking")) else 1
+        method = source
+        absolute = True
+    else:
+        # Limit: the darkest observed patch level bounds the bias from above
+        bias = tonight_floor
+        tier = 3
+        method = "night-floor limit" + ("" if source is None else " ({:s})".format(source))
+        absolute = False
+
+    if source and "floor guard" in source:
+        log.warning("Sky quality: floor guard tripped - pedestal appears to have moved "
+                    "(floor {:.1f} ADU): {:s}".format(tonight_floor, source))
 
     sqm_values = []
     for ff_name, level in levels:
@@ -353,7 +420,6 @@ def measureSkyQuality(config, dir_path, dome_model, recalibrated_platepars, time
         return None
 
     sqm = float(np.median(sqm_values))
-    absolute = tier in (1, 2)
 
     # Bortle is a ZENITH scale: only class near-zenith measurements, otherwise the
     # naturally brighter low-altitude sky would be misread as light pollution class

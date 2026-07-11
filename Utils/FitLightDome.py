@@ -575,9 +575,15 @@ def renderLightDomeModel(model_dict, station_id, out_path):
 # Self-priming (see ensureLightDomeModel)
 AUTO_MIN_NIGHTS = 3        # usable archived nights required before an auto-fit is attempted
 AUTO_MIN_TRIALS = 10000    # star trials required for the fit to be trusted
-AUTO_REFIT_DAYS = 14       # age (days) after which an auto-fitted model is refit - the
-                           # atmospheric epoch (aerosols, e.g. monsoon haze) drifts on
-                           # week scales and the model must represent the CURRENT epoch
+AUTO_REFIT_DAYS = 45       # dead-man backstop only - the PRIMARY refit trigger is
+                           # measured: the nightly ratio normalization drifting
+                           # persistently away from 1 (see modelIsStale), which detects
+                           # atmospheric epoch changes when they actually happen instead
+                           # of on a calendar
+NORM_DRIFT_LIMIT = 0.25    # |median dratio - 1| beyond this = the model no longer
+                           # represents the current sky epoch
+NORM_DRIFT_MIN_NIGHTS = 5  # dratio entries (for the current model) needed to call drift
+LM_HISTORY_WINDOW_DRIFT = 14   # trailing dratio entries the drift check considers
 AUTO_SELECT_WINDOW = 14    # nights - auto-fits train on the clearest of the RECENT nights
                            # only: picking the clearest nights of a long window selects the
                            # most transparent atmospheric epoch ever seen, and a model fit
@@ -630,6 +636,27 @@ def modelIsStale(model_dict, config, platepar=None):
         d_alt = abs(float(platepar.alt_centre) - fit_pointing[1])
         if max(d_az, d_alt) > AUTO_POINTING_TOL:
             return "pointing moved {:.1f} deg".format(max(d_az, d_alt))
+
+    # Measured epoch drift: the nightly clear-sky ratio normalization (Utils.Flux) tracks
+    # how far reality sits from this model. A persistent departure from 1 means the
+    # atmospheric epoch has moved (e.g. monsoon onset) and the model should be re-based -
+    # detected when it happens, not on a calendar.
+    fit_date = model_dict.get("fit_date")
+    if fit_date is not None:
+        try:
+            history_path = os.path.join(os.path.expanduser(config.data_dir),
+                "{:s}_flux_lm_history.json".format(station))
+            if os.path.isfile(history_path):
+                with open(history_path) as f:
+                    history = json.load(f)
+                dratios = [v["dratio"] for v in history.values() if isinstance(v, dict)
+                           and ("dratio" in v) and (v.get("dmodel") == str(fit_date))]
+                if len(dratios) >= NORM_DRIFT_MIN_NIGHTS:
+                    drift = abs(float(np.median(dratios[-LM_HISTORY_WINDOW_DRIFT:])) - 1.0)
+                    if drift > NORM_DRIFT_LIMIT:
+                        return "ratio normalization drift {:.2f}".format(drift)
+        except Exception:
+            pass
 
     return None
 
