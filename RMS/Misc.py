@@ -45,6 +45,61 @@ if sys.version_info[0] < 3:
 log = getLogger("rmslogger")
 
 
+def setParentDeathSignal(sig=9):
+    """Ask the kernel to deliver *sig* to this process when its parent dies.
+
+    NOTE: per prctl(2), PR_SET_PDEATHSIG fires when the parent *thread* that created this
+    process terminates - not when the whole parent process exits. Only call this from
+    children spawned by the parent's main thread (RawFrameSaver is spawned from
+    BufferedCapture.run()); a child spawned from a short-lived helper thread would be
+    killed as soon as that thread exits.
+
+    NOTE: under the multiprocessing 'forkserver' start method (Python 3.14's new default
+    on Linux) the OS parent is the fork-server, not the logical parent, so this fires on
+    the wrong death. Callers that must survive forkserver should ALSO use an explicit
+    parent-PID liveness check (see RawFrameSaver). This remains a fast, exact fast-path
+    under 'fork' (3.6-3.13 default) and 'spawn'.
+
+    Prevents a worker forked by another worker from being orphaned and living forever when
+    its parent is force-killed. Without this, a BufferedCapture that the watchdog SIGKILLs
+    leaves its RawFrameSaver child reparented to init, still looping on a shared exit Event
+    that will never be set - so it never exits and keeps its inherited ~450 MB frame buffer.
+    Repeated across watchdog restarts, that orphans hundreds of processes and OOMs the box.
+
+    Linux-only (prctl PR_SET_PDEATHSIG); no-op elsewhere. Call as early as possible in a
+    child's run(). Also handles the race where the parent already died before the call -
+    best-effort only: it checks getppid() == 1, which misses orphans reparented to a
+    subreaper (systemd user sessions, containers) instead of init. Callers needing a hard
+    guarantee there should use a parent-PID liveness check as well.
+
+    Arguments:
+        sig: [int] Signal to receive on parent death. Default 9 (SIGKILL; numeric because
+            signal.SIGKILL does not exist on Windows).
+    """
+    try:
+        import ctypes
+        import ctypes.util
+
+        # Resolve the C library by name: musl systems (e.g. Alpine) have no "libc.so.6"
+        libc_name = ctypes.util.find_library("c") or "libc.so.6"
+        libc = ctypes.CDLL(libc_name, use_errno=True)
+
+        if libc.prctl(1, int(sig), 0, 0, 0) != 0:  # 1 == PR_SET_PDEATHSIG
+            log.debug("setParentDeathSignal: prctl failed (errno %d), orphan protection "
+                      "unavailable", ctypes.get_errno())
+            return
+
+        # If the parent already exited before we armed the signal we were reparented to
+        # init (ppid == 1): exit now rather than linger as an orphan.
+        if os.getppid() == 1:
+            os._exit(0)
+
+    except Exception as e:
+        # Non-Linux or no usable prctl: protection is simply unavailable. Log at debug
+        # so a station silently losing this guard is at least visible.
+        log.debug("setParentDeathSignal: unavailable (%s)", e)
+
+
 def interruptibleWait(seconds):
     """ Wait for the specified number of seconds, but allow interruption by Ctrl+C.
 

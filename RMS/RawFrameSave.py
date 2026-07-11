@@ -26,7 +26,7 @@ from math import floor
 import cv2
 
 from RMS.Logger import getLogger
-from RMS.Misc import mkdirP
+from RMS.Misc import mkdirP, setParentDeathSignal
 
 # Get the logger from the main module
 log = getLogger("rmslogger")
@@ -71,6 +71,14 @@ class RawFrameSaver(multiprocessing.Process):
 
         self.exit = multiprocessing.Event()
         self.run_exited = multiprocessing.Event()
+
+        # PID of the logical parent (BufferedCapture). __init__ runs in the parent, so this
+        # is captured correctly under fork, spawn AND forkserver - unlike os.getppid(),
+        # which under forkserver returns the fork-server, not BufferedCapture. Used in run()
+        # to self-terminate if the parent dies without setting our exit Event (watchdog
+        # force-kill), so an orphan can never linger and leak its buffer. Start-method- and
+        # platform-agnostic, so it works across Python 3.6-3.14.
+        self.parent_pid = os.getpid()
 
 
     def saveFramesToDisk(self, frametimes, daytime_mode=False):
@@ -218,6 +226,11 @@ class RawFrameSaver(multiprocessing.Process):
         """ Retrieve raw frames from shared array and save them.
         """
 
+        # Die if our parent BufferedCapture dies (e.g. watchdog force-kill). Without this
+        # the orphaned saver loops forever on a shared exit Event that is never set,
+        # leaking its inherited ~450 MB buffer; hundreds accumulate and OOM the box.
+        setParentDeathSignal()
+
         try:
             # Repeat until the raw frame saver is killed from the outside
             while not self.exit.is_set():
@@ -232,6 +245,22 @@ class RawFrameSaver(multiprocessing.Process):
                         self.run_exited.set()
 
                         return None
+
+                    # Forkserver-safe orphan guard: if the logical parent (BufferedCapture)
+                    # is gone, our exit Event will never be set, so self-terminate instead
+                    # of spinning here forever holding the frame buffer. Complements
+                    # PR_SET_PDEATHSIG (which doesn't fire correctly under forkserver).
+                    # POSIX only: on Windows signal 0 is CTRL_C_EVENT, so os.kill(pid, 0)
+                    # is not a liveness probe there. ProcessLookupError (ESRCH) rather than
+                    # OSError, so an EPERM on a live parent isn't mistaken for death.
+                    if os.name == 'posix':
+                        try:
+                            os.kill(self.parent_pid, 0)
+                        except ProcessLookupError:
+                            log.warning('RawFrameSaver: parent process %d gone, exiting orphan',
+                                        self.parent_pid)
+                            self.run_exited.set()
+                            return None
 
                     time.sleep(0.1)
 

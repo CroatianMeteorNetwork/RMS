@@ -3318,6 +3318,10 @@ class PlateTool(QtWidgets.QMainWindow):
         else:
             self.tab.hist.setLevels(0, 255)
 
+        # Turn on auto levels by default (Ctrl + A toggles back to manual)
+        if not self.tab.hist.auto_levels:
+            self.tab.hist.toggleAutoLevels()
+
         self.tab.settings.updateInvertColours()
         self.tab.settings.updateImageGamma()
         self.tab.star_detection.setCatalogLM(self.cat_lim_mag)
@@ -3648,7 +3652,13 @@ class PlateTool(QtWidgets.QMainWindow):
             # Update ImageItems with new handle before loading platepar (which triggers drawing)
             self.img.changeHandle(self.img_handle)
             self.img_zoom.changeHandle(self.img_handle)
-            self.tab.hist.setLevels(0, 2**(8*self.img.data.itemsize) - 1)
+            if not self.tab.hist.auto_levels:
+                self.tab.hist.setLevels(0, 2**(8*self.img.data.itemsize) - 1)
+
+            # Sync both image items to the histogram levels (setImage assigns each item independent
+            #   min/max levels, and an unchanged histogram won't re-emit them)
+            self.img.setLevels(self.tab.hist.getLevels())
+            self.img_zoom.setLevels(self.tab.hist.getLevels())
 
             # Now that the new image dimensions are available, load this station's mask (or clear a
             #   previous station's mask if this one has none), then render the overlay
@@ -9545,7 +9555,14 @@ class PlateTool(QtWidgets.QMainWindow):
             self.img.changeHandle(self.img_handle)
             self.img_zoom.changeHandle(self.img_handle)
 
-            self.tab.hist.setLevels(0, 2**(8*self.img.data.itemsize) - 1)
+            if not self.tab.hist.auto_levels:
+                self.tab.hist.setLevels(0, 2**(8*self.img.data.itemsize) - 1)
+
+            # Sync both image items to the histogram levels (setImage assigns each item independent
+            #   min/max levels, and an unchanged histogram won't re-emit them)
+            self.img.setLevels(self.tab.hist.getLevels())
+            self.img_zoom.setLevels(self.tab.hist.getLevels())
+
             self.img_frame.autoRange(padding=0)
 
             self.updateCalstars()

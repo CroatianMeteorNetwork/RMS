@@ -1204,6 +1204,7 @@ class HistogramLUTWidget(pg.HistogramLUTWidget):
         modifier = QtWidgets.QApplication.keyboardModifiers()
         pos = self.vb.mapSceneToView(event.pos())
         if self.item.region.movable and modifier == QtCore.Qt.ControlModifier:
+            self.item.exitAutoLevels()
             if event.button() == QtCore.Qt.LeftButton:
                 self.setLevels(pos.y(), self.getLevels()[1])
             elif event.button() == QtCore.Qt.RightButton:
@@ -1252,15 +1253,28 @@ class HistogramLUTItem(pg.HistogramLUTItem):
         else:
             self.setLevels(*self.saved_manual_levels)
         self.auto_levels = not self.auto_levels
-        self.region.setMovable(not self.auto_levels)
         self.sigAutoLevelsToggled.emit(self.auto_levels)
+
+    def exitAutoLevels(self):
+        """
+        Drop out of auto levels mode, keeping the auto-determined levels as the manual levels
+        """
+        if self.auto_levels:
+            self.auto_levels = False
+            self.saved_manual_levels = self.getLevels()
+            self.sigAutoLevelsToggled.emit(self.auto_levels)
 
     def paint(self, p, *args):
         # tbh this is an improvement
         pass
 
     def regionChanging(self):
-        pass  # doesn't update when moving it
+        # Doesn't update the image when moving the region, only on release
+
+        # A user drag on the region while auto levels are on drops to manual mode, keeping the
+        #   auto-determined levels as the starting point
+        if self.auto_levels and (self.region.moving or any(l.moving for l in self.region.lines)):
+            self.exitAutoLevels()
 
     def imageChanged(self, autoLevel=False, autoRange=False):
         if not self.auto_levels:
