@@ -1504,6 +1504,16 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
     # Save the computed time intervals so they don't have to be recomputed later on
     saveTimeIntervals(config, dir_path, time_intervals)
 
+    # Nightly sky quality (SQM) measurement - tiered so single-camera stations degrade
+    # safely (absolute value only with a trusted bias; a limit otherwise). Guarded:
+    # never blocks the pipeline.
+    try:
+        from Utils.SkyQuality import measureSkyQuality
+        measureSkyQuality(config, dir_path, dome_model, recalibrated_platepars,
+            time_intervals, mask)
+    except Exception as e:
+        log.warning("Sky quality measurement failed: {}".format(e))
+
 
     if (show_plots or save_plots) and predicted_stars:
 
