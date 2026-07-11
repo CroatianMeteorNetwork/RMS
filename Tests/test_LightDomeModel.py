@@ -110,3 +110,48 @@ def test_load_roundtrip(model_dict, tmp_path):
         stationID = "US005A"
 
     assert LightDomeModel.load(DummyConfig2()) is None
+
+
+@pytest.fixture
+def harmonics_model_dict():
+    return dict(
+        cams=["US005A"],
+        LM0=[6.0],
+        k=0.2,
+        s=0.32,
+        q0=1.0, h0=30.0,
+        norder=1,
+        harmonics=[dict(order=1, A=8.0, phi=180.0, h=20.0)],
+        model="vanrhijn_harmonics",
+    )
+
+
+def test_harmonics_dipole_direction(harmonics_model_dict):
+    model = LightDomeModel(harmonics_model_dict)
+
+    # Brighter (shallower LM) toward the dipole phase than away from it, at low altitude
+    lm_toward = model.limitingMagnitude(180.0, 15.0, station_id="US005A")
+    lm_away = model.limitingMagnitude(0.0, 15.0, station_id="US005A")
+    assert lm_toward < lm_away
+
+    # The negative half of the cosine cannot push total LP below zero: away-side sky is
+    # never DARKER than the airglow-only sky
+    dark = LightDomeModel(dict(harmonics_model_dict, q0=-10.0, harmonics=[]))
+    assert model.limitingMagnitude(0.0, 15.0, station_id="US005A") \
+        <= dark.limitingMagnitude(0.0, 15.0, station_id="US005A") + 1e-9
+
+
+def test_harmonics_and_legacy_coexist(harmonics_model_dict, model_dict):
+    # Legacy lobe models must keep evaluating unchanged alongside the new basis
+    legacy = LightDomeModel(model_dict)
+    harm = LightDomeModel(harmonics_model_dict)
+
+    for m in (legacy, harm):
+        lm = m.limitingMagnitude(200.0, 30.0, station_id=m.cams[0])
+        assert 0.0 < lm < 8.0
+
+    # A model with BOTH populated (hand-built hybrid) sums both contributions
+    hybrid = LightDomeModel(dict(harmonics_model_dict,
+        domes=[dict(az=180.0, B=50.0, kappa=5.0, h=15.0)]))
+    assert hybrid.limitingMagnitude(180.0, 15.0, station_id="US005A") \
+        < harm.limitingMagnitude(180.0, 15.0, station_id="US005A")

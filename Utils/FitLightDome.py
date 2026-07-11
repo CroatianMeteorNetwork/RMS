@@ -57,7 +57,7 @@ MOON_PHASE_MAX = 25.0    # percent illumination - frames with a brighter moon ab
                          # light pollution. Matches the detectMoon phase convention.
 
 # Fitting
-MIN_DOME_SIGNIFICANCE = 50.0   # NLL improvement required to accept one more dome
+MIN_DOME_SIGNIFICANCE = 50.0   # NLL improvement required to accept one more harmonic order
 
 
 def sunAltitude(jd, lat, lon):
@@ -294,7 +294,7 @@ def selectNightDirs(config, dates=None, window=30, max_nights=4, min_rel_clarity
     return [os.path.join(archive_dir, d) for _, d in scored]
 
 
-def fitLightDome(station_configs, dates=None, max_domes=2, moon_phase_max=MOON_PHASE_MAX):
+def fitLightDome(station_configs, dates=None, max_order=3, moon_phase_max=MOON_PHASE_MAX):
     """ Fit the site model over multiple co-located stations.
 
     Arguments:
@@ -302,7 +302,8 @@ def fitLightDome(station_configs, dates=None, max_domes=2, moon_phase_max=MOON_P
 
     Keyword arguments:
         dates: [list of str] Explicit YYYYMMDD training dates (recommended: clear nights).
-        max_domes: [int] Maximum localized dome components to try.
+        max_order: [int] Maximum azimuthal harmonic order to try (1=dipole, 2=quadrupole,
+            ...). Each order is kept only if it clears the significance gate.
         moon_phase_max: [float] Exclude frames with a moon above the horizon illuminated
             more than this (percent). 100 disables the filter.
 
@@ -356,57 +357,65 @@ def fitLightDome(station_configs, dates=None, max_domes=2, moon_phase_max=MOON_P
 
     print("TOTAL: {:d} trials".format(len(az)))
 
-    def modelLM(p, azv, altv, civ, ndom):
+    def modelLM(p, azv, altv, civ, norder):
+        # Harmonics basis: LP = bowl + sum_k A_k*cos(k*(az - phi_k))*exp(-alt/h_k),
+        # clamped non-negative (the cosine terms go negative on the dark side). The
+        # dipole (k=1) is the leading term for an observer EMBEDDED in the glow field;
+        # for a distant city, higher orders approximate a localized dome.
         k = p[ncam]
         q0, hb = p[ncam + 2], p[ncam + 3]
         alt_c = np.clip(altv, 5.0, 90.0)
         z2 = np.sin(np.radians(90.0 - alt_c))**2
-        B = 1.0/np.sqrt(1.0 - 0.97*z2) + (10.0**q0)*np.exp(-alt_c/hb)
-        for j in range(ndom):
-            a0, qd, kap, hh = p[ncam + 4 + 4*j:ncam + 4 + 4*j + 4]
-            B = B + (10.0**qd)*np.exp(kap*(np.cos(np.radians(azv - a0)) - 1.0)) \
-                *np.exp(-alt_c/hh)
+        vr = 1.0/np.sqrt(1.0 - 0.97*z2)
+        lp = (10.0**q0)*np.exp(-alt_c/hb)
+        for j in range(norder):
+            qa, phi, hh = p[ncam + 4 + 3*j:ncam + 4 + 3*j + 3]
+            lp = lp + (10.0**qa)*np.cos(np.radians((j + 1)*(azv - phi)))*np.exp(-alt_c/hh)
+        B = vr + np.maximum(lp, 0.0)
         return p[civ] - k*(1.0/np.sin(np.radians(alt_c)) - 1.0) - 1.25*np.log10(B)
 
-    def nll(p, ndom):
+    def nll(p, norder):
         s = p[ncam + 1]
-        pr = 1.0/(1.0 + np.exp(-(modelLM(p, az, alt, ci, ndom) - mag)/s))
+        pr = 1.0/(1.0 + np.exp(-(modelLM(p, az, alt, ci, norder) - mag)/s))
         pr = np.clip(pr, 1e-6, 1 - 1e-6)
         return -np.sum(det*np.log(pr) + (1 - det)*np.log(1 - pr))
 
     base_bounds = [(4.0, 7.0)]*ncam + [(0.0, 1.5), (0.12, 1.2), (-2.0, 3.0), (5.0, 60.0)]
-    dome_bounds = [(-360.0, 720.0), (-2.0, 3.5), (2.0, 20.0), (3.0, 30.0)]
+    order_bounds = [(-2.0, 3.5), (-360.0, 720.0), (3.0, 60.0)]   # log10 A, phase, alt scale
 
     results = {}
-    for ndom in range(max_domes + 1):
+    for norder in range(max_order + 1):
 
         base0 = [5.5]*ncam + [0.2, 0.35, 1.0, 20.0]
 
-        if ndom == 0:
+        if norder == 0:
             starts = [base0]
-        elif ndom == 1:
-            starts = [base0 + [a, 1.3, 4.0, 12.0] for a in (90, 180, 225, 270, 0)]
+        elif norder == 1:
+            # Dipole phase multi-start around the compass
+            starts = [base0 + [1.0, phi, 20.0] for phi in (0, 90, 180, 270)]
         else:
-            prev = results[ndom - 1]["p"]
-            a_prev = prev[ncam + 4]%360
-            starts = [list(prev) + [(a_prev + da)%360, 1.0, 4.0, 12.0] for da in (180, 90)]
+            # Seed from the previous order's best fit; phase inits offset within the
+            # order's periodicity
+            prev = list(results[norder - 1]["p"])
+            period = 360.0/norder
+            starts = [prev + [0.7, phi, 15.0] for phi in (0.0, period/2)]
 
-        bounds = base_bounds + dome_bounds*ndom
+        bounds = base_bounds + order_bounds*norder
 
         best = None
         for p0 in starts:
-            r = minimize(nll, np.array(p0), args=(ndom,), method="L-BFGS-B",
+            r = minimize(nll, np.array(p0), args=(norder,), method="L-BFGS-B",
                 bounds=bounds, options=dict(maxiter=120))
             if (best is None) or (r.fun < best.fun):
                 best = r
 
-        r = minimize(nll, best.x, args=(ndom,), method="L-BFGS-B", bounds=bounds,
+        r = minimize(nll, best.x, args=(norder,), method="L-BFGS-B", bounds=bounds,
             options=dict(maxiter=500))
 
-        results[ndom] = {"p": r.x, "nll": float(r.fun)}
-        print("domes={:d}  NLL={:.0f}".format(ndom, r.fun))
+        results[norder] = {"p": r.x, "nll": float(r.fun)}
+        print("order={:d}  NLL={:.0f}".format(norder, r.fun))
 
-    # Keep adding domes only while each one earns its keep
+    # Keep adding harmonic orders only while each one earns its keep
     use = 0
     while (use + 1 in results) \
             and (results[use]["nll"] - results[use + 1]["nll"] > MIN_DOME_SIGNIFICANCE):
@@ -414,11 +423,11 @@ def fitLightDome(station_configs, dates=None, max_domes=2, moon_phase_max=MOON_P
 
     p = results[use]["p"]
 
-    domes = []
+    harmonics = []
     for j in range(use):
-        a0, qd, kap, hh = p[ncam + 4 + 4*j:ncam + 4 + 4*j + 4]
-        domes.append(dict(az=float(a0%360), B=float(10.0**qd), kappa=float(kap),
-            h=float(hh)))
+        qa, phi, hh = p[ncam + 4 + 3*j:ncam + 4 + 3*j + 3]
+        harmonics.append(dict(order=j + 1, A=float(10.0**qa),
+            phi=float(phi%(360.0/(j + 1))), h=float(hh)))
 
     model_dict = dict(
         cams=cams,
@@ -427,9 +436,9 @@ def fitLightDome(station_configs, dates=None, max_domes=2, moon_phase_max=MOON_P
         s=float(p[ncam + 1]),
         q0=float(p[ncam + 2]),
         h0=float(p[ncam + 3]),
-        ndom=use,
-        domes=domes,
-        model="vanrhijn_brightness",
+        norder=use,
+        harmonics=harmonics,
+        model="vanrhijn_harmonics",
         fit_nights=sorted(set(fit_nights)),
         fit_date=datetime.datetime.utcnow().strftime("%Y-%m-%d"),
         n_trials=int(len(az)),
@@ -439,14 +448,16 @@ def fitLightDome(station_configs, dates=None, max_domes=2, moon_phase_max=MOON_P
         nll={str(kk): v["nll"] for kk, v in results.items()},
     )
 
-    print("\nFitted model ({:d} dome(s)):".format(use))
+    print("\nFitted model ({:d} harmonic order(s)):".format(use))
     for i, cam in enumerate(cams):
         print("  LM0[{:s}] = {:.2f}".format(cam, model_dict["LM0"][i]))
     print("  k={:.2f}  s={:.2f}  LP bowl B={:.1f} (h0={:.0f} deg)".format(
         model_dict["k"], model_dict["s"], 10.0**model_dict["q0"], model_dict["h0"]))
-    for j, d in enumerate(domes):
-        print("  dome {:d}: az={:.0f} deg  B={:.1f}  kappa={:.1f}  h={:.0f} deg".format(
-            j + 1, d["az"], d["B"], d["kappa"], d["h"]))
+    for h in harmonics:
+        name = {1: "dipole", 2: "quadrupole", 3: "octupole"}.get(h["order"],
+            "order {:d}".format(h["order"]))
+        print("  {:s}: A={:.1f}  toward az {:.0f} deg  alt_scale={:.0f} deg".format(
+            name, h["A"], h["phi"], h["h"]))
 
     # Per-camera calibration sanity: aggregate detected/expected on the training trials
     # must be ~1.00 for every camera; a deviation means the shared terms misallocate
@@ -539,14 +550,22 @@ def renderLightDomeModel(model_dict, station_id, out_path):
         fontsize=9)
 
     zenith_sqm = float(NATURAL_ZENITH_SQM - 2.5*np.log10(model.skyBrightness(0.0, 90.0)))
-    dome_str = ", ".join("az {:.0f}".format(d["az"]) for d in model_dict.get("domes", [])) \
-        or "none"
     lm0 = model.lm0_map.get(str(station_id), model.lm0_default)
     fit_kind = "auto-fit" if model_dict.get("auto_fitted") else "site fit"
 
-    ax.set_title("{:s} light dome ({:s} {:s})\nzenith {:.1f} mag/arcsec$^2$ | domes: {:s} | "
-        "LM0[{:s}]={:.2f}".format(str(station_id), fit_kind,
-        str(model_dict.get("fit_date", "")), zenith_sqm, dome_str, str(station_id), lm0),
+    # Describe the directional glow structure in plain terms, whichever basis fitted it
+    parts = []
+    for h in model_dict.get("harmonics", []):
+        name = {1: "dipole", 2: "quadrupole"}.get(int(h["order"]),
+            "order {:d}".format(int(h["order"])))
+        parts.append("{:s} az {:.0f}".format(name, h["phi"]))
+    for d in model_dict.get("domes", []):
+        parts.append("lobe az {:.0f}".format(d["az"]))
+    glow_str = ", ".join(parts) or "uniform (no directional glow)"
+
+    ax.set_title("{:s} sky brightness ({:s} {:s})\nzenith {:.1f} mag/arcsec$^2$ | "
+        "glow: {:s} | LM0[{:s}]={:.2f}".format(str(station_id), fit_kind,
+        str(model_dict.get("fit_date", "")), zenith_sqm, glow_str, str(station_id), lm0),
         fontsize=10)
 
     fig.savefig(out_path, dpi=110, bbox_inches="tight")
@@ -721,8 +740,9 @@ if __name__ == "__main__":
     parser.add_argument("--nights", type=str, default=None,
         help="Comma-separated YYYYMMDD training dates (clear nights). "
              "Auto-selects the clearest recent nights if omitted.")
-    parser.add_argument("--max-domes", type=int, default=2,
-        help="Maximum localized dome components (default 2).")
+    parser.add_argument("--max-order", type=int, default=3,
+        help="Maximum azimuthal harmonic order (default 3; each order kept only if "
+             "statistically significant).")
     parser.add_argument("--moon-phase-max", type=float, default=MOON_PHASE_MAX,
         help="Exclude frames with a moon above the horizon illuminated more than this "
              "percentage (default {:.0f}; 100 disables the filter).".format(MOON_PHASE_MAX))
@@ -734,7 +754,7 @@ if __name__ == "__main__":
 
     dates = args.nights.split(",") if args.nights else None
 
-    model_dict = fitLightDome(configs, dates=dates, max_domes=args.max_domes,
+    model_dict = fitLightDome(configs, dates=dates, max_order=args.max_order,
         moon_phase_max=args.moon_phase_max)
 
     if model_dict is None:

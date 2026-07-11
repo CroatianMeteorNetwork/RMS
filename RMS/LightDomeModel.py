@@ -67,9 +67,16 @@ class LightDomeModel(object):
 
         self.k = float(model_dict["k"])
         self.s = float(model_dict["s"])
-        self.q0 = float(model_dict["q0"])
-        self.h0 = float(model_dict["h0"])
+        self.q0 = float(model_dict.get("q0", -10.0))
+        self.h0 = float(model_dict.get("h0", 20.0))
+
+        # Legacy basis: localized von Mises lobes ("vanrhijn_brightness")
         self.domes = model_dict.get("domes", [])
+
+        # Harmonics basis: azimuthal cosine series ("vanrhijn_harmonics") - the natural
+        # basis for an observer EMBEDDED in the glow field, where directional structure
+        # is a broad asymmetry gradient rather than discrete distant-city domes
+        self.harmonics = model_dict.get("harmonics", [])
 
         # Nightly aerosol scale on the light-pollution terms (1.0 = fit epoch)
         self.amplitude = 1.0
@@ -128,14 +135,23 @@ class LightDomeModel(object):
         z2 = np.sin(np.radians(90.0 - alt_c))**2
         B = 1.0/np.sqrt(1.0 - _VAN_RHIJN_C*z2)
 
-        # Light pollution: isotropic bowl + localized domes, scaled by the aerosol amplitude
+        # Light pollution: isotropic bowl term
         lp = (10.0**self.q0)*np.exp(-alt_c/self.h0)
 
+        # Harmonics basis: azimuthal cosine series, one altitude profile per order.
+        # A_k*cos(k*(az - phi_k)) can be negative on the dark side; the total LP field is
+        # clamped non-negative below.
+        for h in self.harmonics:
+            order = int(h["order"])
+            lp = lp + h["A"]*np.cos(np.radians(order*(az - h["phi"])))*np.exp(-alt_c/h["h"])
+
+        # Legacy basis: localized von Mises lobes (kept so archived provenance models and
+        # not-yet-refitted stations evaluate unchanged forever)
         for d in self.domes:
             lp = lp + d["B"]*np.exp(d["kappa"]*(np.cos(np.radians(az - d["az"])) - 1.0)) \
                 *np.exp(-alt_c/d["h"])
 
-        return B + self.amplitude*lp
+        return B + self.amplitude*np.maximum(lp, 0.0)
 
 
     def limitingMagnitude(self, az, alt, station_id=None):
