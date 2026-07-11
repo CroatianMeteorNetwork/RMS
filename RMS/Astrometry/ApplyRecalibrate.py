@@ -108,6 +108,7 @@ def recalibrateFF(
     lim_mag=None,
     ignore_distance_threshold=False,
     ignore_max_stars=False,
+    min_match_fraction=None,
 ):
     """Given the platepar and a list of stars on one image, try to recalibrate the platepar to achieve
         the best match by brute force star matching.
@@ -121,10 +122,15 @@ def recalibrateFF(
     Keyword arguments:
         max_match_radius: [float] Maximum radius used for star matching. None by default, which uses all 
             hardcoded values.
-        force_platepar_save: [bool] Skip the goodness of fit check and save the platepar.
+        force_platepar_save: [bool] Skip the goodness of fit check and save the platepar. Note that
+            the star coverage gate (min_match_fraction) still applies, so a fit that matched only a
+            small fraction of the detected stars is rejected even when this is True.
         ignore_distance_threshold: [bool] Don't consider the recalib as failed if the median distance
             is larger than the threshold.
         ignore_max_stars: [bool] Ignore the maximum number of image stars for recalibration.
+        min_match_fraction: [float] Minimum fraction of the detected stars that the fit must match
+            to be accepted. None by default, which uses config.recalibration_min_match_fraction.
+            Set to 0 to disable the coverage gate (e.g. for interactive use).
 
     Return:
         result: [?] A Platepar instance if refinement is successful, None if it failed.
@@ -132,6 +138,10 @@ def recalibrateFF(
     """
 
     working_platepar = copy.deepcopy(working_platepar)
+
+    # Resolve the coverage gate threshold from the config unless explicitly given
+    if min_match_fraction is None:
+        min_match_fraction = config.recalibration_min_match_fraction
 
     # If there more stars than a set limit, sample them randomly using the same seed for reproducibility
     if not ignore_max_stars and len(star_dict_ff[jd]) > config.recalibration_max_stars:
@@ -228,6 +238,7 @@ def recalibrateFF(
 
     # Go through all radii and match the stars
     min_match_radius = None
+    matched_stars_good = None
     for match_radius in radius_list:
 
         # Skip radiuses that are too small if the radius filter is on
@@ -341,6 +352,11 @@ def recalibrateFF(
             # Keep track of the minimum match radius
             min_match_radius = match_radius
 
+            # Keep the matched stars from this successful iteration - a later iteration that fails
+            #   overwrites matched_stars with matches of a platepar that was never accepted, and
+            #   those must not feed the coverage gate or the photometry fit below
+            matched_stars_good = matched_stars
+
             log.info('{:d}/{:d} match with avg distance {:.2f} px within radius {:.2f} px!'.format(
                 n_matched, len(star_dict_ff[jd]), dist, match_radius
             ))
@@ -358,10 +374,38 @@ def recalibrateFF(
         or force_platepar_save
     ):
 
+        # If no fit iteration succeeded, there is no matched star set consistent with the platepar,
+        #   so neither the coverage gate nor the photometry fit can run - reject the platepar (the
+        #   caller will fall back to the previous one)
+        if matched_stars_good is None:
+            log.info('Rejecting refined platepar, no successful fit iteration to take matched '
+                     'stars from')
+            return None, min_match_radius
+
+        # Get a list of matched image and catalog stars, taken from the last successful fit
+        #   iteration so that they are consistent with the platepar being saved
+        image_stars, matched_catalog_stars, _ = matched_stars_good[jd]
+
+        # Coverage gate: reject a fit that only matched a small fraction of the detected stars.
+        # The goodness check above only weighs the residuals of the stars that matched, so a
+        # sparse spurious subset (e.g. 29 of 308 detections aligned at a wrong pointing) can pass
+        # it. When such a fit is stamped auto_recalibrated and chained forward as the seed for the
+        # next FF, the pointing walks away over a marginal/cloudy night. Requiring a real coverage
+        # fraction rejects those fits (the frame keeps the previous good platepar) while accepting
+        # genuine fits - including after a real camera move, which re-matches the whole field at
+        # the new pointing.
+        n_detected = len(star_dict_ff[jd])
+        match_fraction = len(image_stars)/n_detected if n_detected > 0 else 0.0
+
+        if match_fraction < min_match_fraction:
+            log.info('Rejecting refined platepar, only {:d}/{:d} = {:.2f} of detected stars '
+                     'matched within {:.2f} px (< {:.2f})'.format(len(image_stars), n_detected,
+                                                                  match_fraction, min_match_radius,
+                                                                  min_match_fraction))
+            return None, min_match_radius
+
         ### PHOTOMETRY FIT ###
 
-        # Get a list of matched image and catalog stars
-        image_stars, matched_catalog_stars, _ = matched_stars[jd]
         star_intensities = image_stars[:, 2]
         ra_catalog, dec_catalog, catalog_mags = matched_catalog_stars.T
 
