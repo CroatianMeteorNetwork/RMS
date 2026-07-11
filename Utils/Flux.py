@@ -1314,6 +1314,15 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
         if not ratio_threshold_explicit:
             ratio_threshold = 0.7
 
+        # Archive the model that judged this night alongside the night's data (named per
+        # the archived-file convention), so verdicts stay reproducible after later refits
+        try:
+            night_name = os.path.basename(os.path.normpath(dir_path))
+            with open(os.path.join(dir_path, "{:s}_light_dome.json".format(night_name)), "w") as f:
+                json.dump(dome_model.model, f, indent=1)
+        except Exception as e:
+            log.debug("Could not archive the light-dome model copy: {}".format(e))
+
     # Apply the per-camera empirical LM correction: the model infers depth from throughput
     # and cannot see the sky background, so it overestimates the depth of light-polluted or
     # low-elevation cameras. The correction is learned from the station's cross-night
