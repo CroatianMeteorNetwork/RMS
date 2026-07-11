@@ -2,11 +2,12 @@
 
 The empirical limiting-magnitude correction (see Utils.Flux.empiricalLMCorrection) needs
 several nights of history before it activates. Stations typically have months of archived
-nights processed by earlier RMS versions - each with a platepars_all_recalibrated.json that
+nights processed by earlier RMS versions - each with a platepars_flux_recalibrated.json that
 contains everything the history needs (matched star lists and per-FF photometric
-zero-points). This utility walks those archives in chronological order and replays them
-through the same code path the nightly pipeline uses, so a station gets its correction on
-the first night after deployment instead of a week later.
+zero-points), measured the same way detectClouds does at runtime. This utility walks those
+archives in chronological order and replays them through the same code path the nightly
+pipeline uses, so a station gets its correction on the first night after deployment instead
+of a week later. Nights predating flux recalibration fall back to platepars_all_recalibrated.
 
 Usage:
     python -m Utils.PrimeFluxLMHistory /path/to/ArchivedFiles [--config /path/to/.config]
@@ -54,12 +55,20 @@ def primeFluxLMHistory(config, archive_dir):
     correction = 0.0
     for night in night_dirs:
 
-        pp_all_path = os.path.join(archive_dir, night, "platepars_all_recalibrated.json")
-        if not os.path.isfile(pp_all_path):
+        # Measure depth from the FLUX platepars, exactly as detectClouds does at runtime.
+        # The flux recalibration matches with the max-star cap lifted, so it reaches deeper
+        # than the standard platepars_all_recalibrated (by up to ~0.8 mag on star-rich
+        # cameras). Priming from the standard file would seed a too-shallow envelope and
+        # over-correct. Fall back to the standard file only for nights processed before flux
+        # recalibration existed.
+        pp_path = os.path.join(archive_dir, night, "platepars_flux_recalibrated.json")
+        if not os.path.isfile(pp_path):
+            pp_path = os.path.join(archive_dir, night, "platepars_all_recalibrated.json")
+        if not os.path.isfile(pp_path):
             continue
 
         try:
-            with open(pp_all_path) as f:
+            with open(pp_path) as f:
                 pp_dicts = json.load(f)
         except Exception as e:
             print("  {}: unreadable recalibrated platepars ({})".format(night, e))

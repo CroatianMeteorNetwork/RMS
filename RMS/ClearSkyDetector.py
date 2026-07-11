@@ -17,10 +17,22 @@ import numpy as np
 from scipy.ndimage import maximum_filter, uniform_filter
 from scipy.spatial import Voronoi
 
-from RMS.Astrometry.Conversions import date2JD
-from RMS.ConfigReader import findConfigInDir
+from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP
+from RMS.Astrometry.Conversions import date2JD, jd2Date
 from RMS.Formats import StarCatalog
 from RMS.Formats.Platepar import Platepar, getCatalogStarsImagePositions
+from RMS.Math import pointInsideConvexPolygonSphere
+
+
+def findConfigInDir(directory):
+    """ Return the path of a config file in the given directory, or None. """
+
+    for name in ('.config', 'config.txt'):
+        path = os.path.join(directory, name)
+        if os.path.isfile(path):
+            return path
+
+    return None
 
 
 class ClearSkyResult:
@@ -565,9 +577,29 @@ def detectFrame(detector, frame, jd, background=None):
     result = ClearSkyResult()
     result.jd = jd
 
+    # Keep only catalog stars inside the spherical FOV polygon. Without this guard,
+    # stars far outside the FOV are folded back to in-frame pixel coordinates by the
+    # distortion polynomial (which is only valid within the FOV) and counted as phantom
+    # expected stars, silently inflating expected_count.
+    pp = detector.platepar
+    date = jd2Date(jd)
+    w_pp, h_pp = pp.X_res, pp.Y_res
+    x_vert = [0, w_pp/4, w_pp/2, 3*w_pp/4, w_pp, w_pp, w_pp, w_pp, w_pp, 3*w_pp/4, w_pp/2,
+              w_pp/4, 0, 0, 0, 0, 0]
+    y_vert = [0, 0, 0, 0, 0, h_pp/4, h_pp/2, 3*h_pp/4, h_pp, h_pp, h_pp, h_pp, h_pp,
+              3*h_pp/4, h_pp/2, h_pp/4, 0]
+    _, ra_vert, dec_vert, _ = xyToRaDecPP(
+        [date]*len(x_vert), list(reversed(x_vert)), list(reversed(y_vert)),
+        [1]*len(x_vert), pp, extinction_correction=False, precompute_pointing_corr=True
+    )
+    inside_fov = pointInsideConvexPolygonSphere(
+        detector.catalog_stars[:, :2], np.array([ra_vert, dec_vert]).T
+    )
+    catalog_in_fov = detector.catalog_stars[inside_fov]
+
     # Project catalog stars to image coordinates
     x_cat, y_cat, mag_cat = getCatalogStarsImagePositions(
-        detector.catalog_stars, jd, detector.platepar
+        catalog_in_fov, jd, detector.platepar
     )
 
     # Filter to stars within image bounds
