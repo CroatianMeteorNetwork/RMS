@@ -182,9 +182,6 @@ def plotStationSkyQuality(config, dome_model=None):
         for top, bot, name in BORTLE_BANDS:
             ax.axhspan(bot, top, color=plt.cm.inferno_r(0.12 + 0.11*int(name)),
                 alpha=0.18, zorder=0)
-            ax.text(1.006, (top + bot)/2.0, "B{:s}".format(name),
-                transform=ax.get_yaxis_transform(), fontsize=8, va="center",
-                color="dimgray")
 
     xs = [d for d, v in zip(days, values) if v is not None]
     ys = [v for v in values if v is not None]
@@ -219,6 +216,15 @@ def plotStationSkyQuality(config, dome_model=None):
         fontsize=10)
     ax.grid(alpha=0.2)
     ax.legend(fontsize=8, loc="lower right")
+
+    # A properly labeled right-hand scale for the Bortle bands
+    if normalized:
+        ax_bortle = ax.twinx()
+        ax_bortle.set_ylim(ax.get_ylim())
+        ax_bortle.set_yticks([(top + bot)/2.0 for top, bot, _ in BORTLE_BANDS])
+        ax_bortle.set_yticklabels([name for _, _, name in BORTLE_BANDS], fontsize=8)
+        ax_bortle.set_ylabel("Bortle class (approximate)", fontsize=9)
+        ax_bortle.tick_params(length=0)
 
     # Status strip
     colors = {"ok": "#3a3", "skipped": "#bbb"}
