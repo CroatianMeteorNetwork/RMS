@@ -332,9 +332,29 @@ def _moonIsUp(jd, lat, lon):
         return False
 
 
+def _writeSkipRecord(config, dir_path, reason):
+    """ A skipped night still writes its record: an absent file must never be ambiguous
+        between 'skipped by design' and 'broken'. """
+
+    night = os.path.basename(os.path.normpath(dir_path))
+    record = dict(stationID=str(config.stationID), night=night, status="skipped",
+        reason=reason)
+
+    try:
+        with open(os.path.join(dir_path, "{:s}_sky_quality.json".format(night)), "w") as f:
+            json.dump(record, f, indent=1)
+    except Exception:
+        pass
+
+    log.info("Sky quality: skipped - {:s}".format(reason))
+
+    return None
+
+
 def measureSkyQuality(config, dir_path, dome_model, recalibrated_platepars, time_intervals,
         mask):
     """ Measure and record the night's sky quality. Never raises - guarded by the caller.
+        A record is written even on skipped nights (with a status and reason).
 
     Arguments:
         config: [Config]
@@ -345,7 +365,7 @@ def measureSkyQuality(config, dir_path, dome_model, recalibrated_platepars, time
         mask: [Mask object]
 
     Return:
-        result: [dict] The written sky quality record, or None.
+        result: [dict] The written sky quality record, or None if skipped.
     """
 
     from RMS.Formats import FFfile
@@ -353,13 +373,12 @@ def measureSkyQuality(config, dir_path, dome_model, recalibrated_platepars, time
     from RMS.Astrometry.Conversions import date2JD, raDec2AltAz
 
     if not time_intervals:
-        log.info("Sky quality: no clear intervals - skipped")
-        return None
+        return _writeSkipRecord(config, dir_path, "no clear intervals (cloudy night)")
 
     pps = {ff: pp for ff, pp in recalibrated_platepars.items()
            if getattr(pp, "auto_recalibrated", False)}
     if len(pps) < 3:
-        return None
+        return _writeSkipRecord(config, dir_path, "too few recalibrated frames")
 
     # --- tonight's bias observation: attempted EVERY night (continuous tracking), gated
     # only by the physics (lever) inside the regression ---
@@ -392,7 +411,7 @@ def measureSkyQuality(config, dir_path, dome_model, recalibrated_platepars, time
         break
 
     if patch is None:
-        return None
+        return _writeSkipRecord(config, dir_path, "no unmasked measurement patch")
     x0, y0, patch_az, patch_alt = patch
 
     # --- frames: inside clear intervals, no bright risen moon ---
@@ -407,8 +426,7 @@ def measureSkyQuality(config, dir_path, dome_model, recalibrated_platepars, time
         usable.append(ff_name)
 
     if not usable:
-        log.info("Sky quality: no moonless clear frames - skipped")
-        return None
+        return _writeSkipRecord(config, dir_path, "no moonless clear frames")
 
     usable = [usable[i] for i in np.unique(np.linspace(0, len(usable) - 1,
         min(MAX_FRAMES, len(usable))).astype(int))]
@@ -424,7 +442,7 @@ def measureSkyQuality(config, dir_path, dome_model, recalibrated_platepars, time
                                 x0 - SKY_PATCH_HALF:x0 + SKY_PATCH_HALF]))))
 
     if not levels:
-        return None
+        return _writeSkipRecord(config, dir_path, "no readable FF files in the night directory")
 
     # --- continuous bias tracking: fold tonight's observation and floor into the
     # history, get the working bias (or None -> limit), persist the updated history ---
@@ -463,8 +481,7 @@ def measureSkyQuality(config, dir_path, dome_model, recalibrated_platepars, time
         sqm_values.append(pp.mag_lev - 2.5*np.log10(sky) + 2.5*np.log10(area))
 
     if not sqm_values:
-        log.info("Sky quality: sky signal below noise at the measurement patch - skipped")
-        return None
+        return _writeSkipRecord(config, dir_path, "sky signal below noise at the measurement patch")
 
     sqm = float(np.median(sqm_values))
 

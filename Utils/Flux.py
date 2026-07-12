@@ -12,6 +12,7 @@ import collections
 import datetime
 import json
 import os
+import shutil
 import sys
 
 if sys.version_info[0] >= 3:
@@ -1315,11 +1316,19 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
             ratio_threshold = 0.7
 
         # Archive the model that judged this night alongside the night's data (named per
-        # the archived-file convention), so verdicts stay reproducible after later refits
+        # the archived-file convention), so verdicts stay reproducible after later refits.
+        # The station's sky-brightness map rides along so the archive is self-documenting
+        # visually as well (it is copied, not re-rendered - it belongs to this model).
         try:
             night_name = os.path.basename(os.path.normpath(dir_path))
             with open(os.path.join(dir_path, "{:s}_light_dome.json".format(night_name)), "w") as f:
                 json.dump(dome_model.model, f, indent=1)
+
+            station_png = os.path.join(os.path.expanduser(config.data_dir),
+                "{:s}_light_dome.png".format(str(config.stationID)))
+            if os.path.isfile(station_png):
+                shutil.copy(station_png,
+                    os.path.join(dir_path, "{:s}_light_dome.png".format(night_name)))
         except Exception as e:
             log.debug("Could not archive the light-dome model copy: {}".format(e))
 
