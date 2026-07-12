@@ -2346,10 +2346,12 @@ def _nightKey(night_id):
     A night split into several captures (e.g. after a mid-night restart) would otherwise
     write several history entries and let one calendar night dominate the trailing window.
     Directory names look like STATION_YYYYMMDD_HHMMSS_microseconds; keep STATION_YYYYMMDD.
+    The date chunk is located by pattern rather than position, so station IDs that do not
+    follow the usual naming (e.g. containing underscores) still key correctly.
     """
-    parts = night_id.split("_")
-    if len(parts) >= 2 and len(parts[1]) == 8 and parts[1].isdigit():
-        return "_".join(parts[:2])
+    match = re.search(r"_(\d{8})(?:_|$)", night_id)
+    if match:
+        return night_id[:match.end(1)]
     return night_id
 
 

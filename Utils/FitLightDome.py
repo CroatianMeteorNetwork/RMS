@@ -28,6 +28,7 @@ import argparse
 import datetime
 import json
 import os
+import re
 
 import ephem
 import numpy as np
@@ -261,8 +262,13 @@ def selectNightDirs(config, dates=None, window=30, max_nights=4, min_rel_clarity
         and os.path.isdir(os.path.join(archive_dir, d)))
 
     if dates is not None:
-        return [os.path.join(archive_dir, d) for d in all_dirs
-                if d.split("_")[1] in dates]
+        # Locate the date chunk by pattern, not position - robust to any stationID scheme
+        matched = []
+        for d in all_dirs:
+            m = re.search(r"_(\d{8})(?:_|$)", d)
+            if m and (m.group(1) in dates):
+                matched.append(os.path.join(archive_dir, d))
+        return matched
 
     # Auto-select: median matched count per night dir, take the top max_nights
     scored = []
@@ -533,8 +539,9 @@ def renderLightDomeModel(model_dict, station_id, out_path):
         else:
             ax.plot(np.radians(fp_az), fp_r, "-", lw=1.0, color="#999999",
                 alpha=0.6, zorder=5)
-            ax.annotate(str(cam)[-1:], (np.radians(fp_az[len(fp_az)//2]),
-                float(fp_r[len(fp_az)//2])), color="#aaaaaa", fontsize=8, zorder=5)
+            ax.annotate(str(cam), (np.radians(fp_az[len(fp_az)//2]),
+                float(fp_r[len(fp_az)//2])), color="#aaaaaa", fontsize=6, alpha=0.9,
+                zorder=5)
 
     ax.set_theta_zero_location("N")
     ax.set_theta_direction(-1)
@@ -733,7 +740,8 @@ def ensureLightDomeModel(config, platepar=None):
               "waiting for more history".format(len(night_dirs), AUTO_MIN_NIGHTS))
         return model is not None
 
-    dates = sorted(set(os.path.basename(d).split("_")[1] for d in night_dirs))
+    dates = sorted(set(m.group(1) for m in
+        (re.search(r"_(\d{8})(?:_|$)", os.path.basename(d)) for d in night_dirs) if m))
     print("Light-dome auto-fit from the {:d} clearest archived nights: {:s}".format(
         len(night_dirs), ", ".join(dates)))
 
