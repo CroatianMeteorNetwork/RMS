@@ -177,11 +177,16 @@ def plotStationSkyQuality(config, dome_model=None):
     fig, (ax, ax_status) = plt.subplots(2, 1, figsize=(11.5, 5.8), sharex=True,
         gridspec_kw=dict(height_ratios=[6, 0.5], hspace=0.05))
 
-    # Bortle bands only make sense on the zenith scale
+    # Bortle bands only make sense on the zenith scale. Band tints use the SAME
+    # brightness-to-color mapping as the light-dome sky map (fixed 16-22 mag/arcsec^2,
+    # brighter sky = brighter/warmer color), softened for use as a background; the
+    # darkest bands are lightness-capped so the data stays readable on top.
     if normalized:
+        from Utils.FitLightDome import PLOT_SQM_MIN, PLOT_SQM_MAX
         for top, bot, name in BORTLE_BANDS:
-            ax.axhspan(bot, top, color=plt.cm.inferno_r(0.12 + 0.11*int(name)),
-                alpha=0.18, zorder=0)
+            frac = ((top + bot)/2.0 - PLOT_SQM_MIN)/(PLOT_SQM_MAX - PLOT_SQM_MIN)
+            color = plt.cm.inferno_r(0.85*float(np.clip(frac, 0.0, 1.0)))
+            ax.axhspan(bot, top, color=color, alpha=0.30, zorder=0)
 
     xs = [d for d, v in zip(days, values) if v is not None]
     ys = [v for v in values if v is not None]
