@@ -489,17 +489,58 @@ PLOT_SQM_MIN = 16.0         # fixed color scale so every station and site render
 PLOT_SQM_MAX = 22.0         # comparably (brighter sky = brighter color)
 
 
-def renderLightDomeModel(model_dict, station_id, out_path):
+def _radiometricAnchorOffset(model, config):
+    """ Offset (mag) that pins the model's soft absolute scale to the station's MEASURED
+        sky quality history. The fit cannot separate camera depth from absolute sky
+        brightness (LM0 degeneracy), so the model-implied zenith runs too dark; the
+        radiometric SQM measurements supply the missing anchor. Returns 0 when no usable
+        history exists (map stays model-relative, labeled).
+    """
+
+    try:
+        path = os.path.join(os.path.expanduser(config.data_dir),
+            "{:s}_sky_quality_history.json".format(str(config.stationID)))
+        with open(path) as f:
+            nights = json.load(f).get("nights", {})
+
+        b_zen = float(model.skyBrightness(0.0, 90.0))
+        measured = []
+        for entry in nights.values():
+            if entry.get("sqm") is None or not entry.get("absolute", False):
+                continue
+            if (entry.get("az") is None) or (entry.get("alt") is None):
+                continue
+            b_patch = float(model.skyBrightness(float(entry["az"]), float(entry["alt"])))
+            measured.append(float(entry["sqm"]) + 2.5*np.log10(b_patch/b_zen))
+
+        if len(measured) < 3:
+            return 0.0
+
+        measured_zenith = float(np.median(measured[-14:]))
+        model_zenith = NATURAL_ZENITH_SQM - 2.5*np.log10(b_zen)
+
+        return measured_zenith - model_zenith
+
+    except Exception:
+        return 0.0
+
+
+def renderLightDomeModel(model_dict, station_id, out_path, config=None):
     """ Render the fitted site model as a sky-brightness hemisphere map.
 
     Fixed absolute color scale (PLOT_SQM_MIN..MAX mag/arcsec^2, light pollution bright)
     so plots from different stations and sites are directly comparable. The station's own
     FOV footprint is highlighted; co-located sister cameras are drawn in grey for context.
+    When the station has a measured sky quality history, the map's absolute scale is
+    radiometrically anchored to it (the model alone carries a soft absolute anchor).
 
     Arguments:
         model_dict: [dict] Fitted model (LightDomeModel format, with footprints metadata).
         station_id: [str] Station to highlight.
         out_path: [str] Output PNG path.
+
+    Keyword arguments:
+        config: [Config] Enables the radiometric anchor lookup. None = model-relative.
     """
 
     import matplotlib
@@ -509,6 +550,8 @@ def renderLightDomeModel(model_dict, station_id, out_path):
 
     model = LightDomeModel(model_dict)
 
+    anchor = _radiometricAnchorOffset(model, config) if config is not None else 0.0
+
     fig = plt.figure(figsize=(9.5, 8.2))
     ax = fig.add_subplot(1, 1, 1, projection="polar")
 
@@ -516,7 +559,7 @@ def renderLightDomeModel(model_dict, station_id, out_path):
     alt_grid = np.arange(5, 86, 2)
     az_mesh, alt_mesh = np.meshgrid(np.degrees(az_grid), alt_grid)
 
-    sqm = NATURAL_ZENITH_SQM - 2.5*np.log10(model.skyBrightness(az_mesh, alt_mesh))
+    sqm = NATURAL_ZENITH_SQM - 2.5*np.log10(model.skyBrightness(az_mesh, alt_mesh)) + anchor
 
     cmap = cm.get_cmap("inferno_r")
     pc = ax.pcolormesh(az_grid, 90 - alt_grid, sqm, cmap=cmap,
@@ -556,7 +599,8 @@ def renderLightDomeModel(model_dict, station_id, out_path):
     cb.set_label("sky brightness (mag/arcsec$^2$) - brighter sky $\\rightarrow$ brighter color",
         fontsize=9)
 
-    zenith_sqm = float(NATURAL_ZENITH_SQM - 2.5*np.log10(model.skyBrightness(0.0, 90.0)))
+    zenith_sqm = float(NATURAL_ZENITH_SQM - 2.5*np.log10(model.skyBrightness(0.0, 90.0))) + anchor
+    anchor_str = "radiometric anchor" if abs(anchor) > 0.001 else "model-relative, unanchored"
     lm0 = model.lm0_map.get(str(station_id), model.lm0_default)
     fit_kind = "auto-fit" if model_dict.get("auto_fitted") else "site fit"
 
@@ -570,10 +614,10 @@ def renderLightDomeModel(model_dict, station_id, out_path):
         parts.append("lobe az {:.0f}".format(d["az"]))
     glow_str = ", ".join(parts) or "uniform (no directional glow)"
 
-    ax.set_title("{:s} sky brightness ({:s} {:s})\nzenith {:.1f} mag/arcsec$^2$ | "
+    ax.set_title("{:s} sky brightness ({:s} {:s})\nzenith {:.1f} mag/arcsec$^2$ ({:s}) | "
         "glow: {:s} | LM0[{:s}]={:.2f}".format(str(station_id), fit_kind,
-        str(model_dict.get("fit_date", "")), zenith_sqm, glow_str, str(station_id), lm0),
-        fontsize=10)
+        str(model_dict.get("fit_date", "")), zenith_sqm, anchor_str, glow_str,
+        str(station_id), lm0), fontsize=10)
 
     fig.savefig(out_path, dpi=110, bbox_inches="tight")
     plt.close(fig)
@@ -759,7 +803,7 @@ def ensureLightDomeModel(config, platepar=None):
 
     try:
         renderLightDomeModel(model_dict, station,
-            os.path.splitext(model_path)[0] + ".png")
+            os.path.splitext(model_path)[0] + ".png", config=config)
     except Exception as e:
         print("Light-dome model plot failed ({}) - model itself is installed".format(e))
 
@@ -804,7 +848,7 @@ if __name__ == "__main__":
 
             try:
                 renderLightDomeModel(model_dict, str(config.stationID),
-                    os.path.splitext(out_path)[0] + ".png")
+                    os.path.splitext(out_path)[0] + ".png", config=config)
                 print("wrote {:s}".format(os.path.splitext(out_path)[0] + ".png"))
             except Exception as e:
                 print("plot failed ({}) - model itself is written".format(e))
