@@ -82,7 +82,7 @@ HISTORY_KEEP = 3660              # nightly entries kept in the file (~10 years).
 # station). Extended sky has no aperture to lose flux from, so converting it through
 # mag_lev overestimates its brightness by 2.5*log10(1/f). The capture fraction f is
 # measured nightly from growth curves of bright isolated stars on the same avepixels
-# the sky is measured on, and tracked like the bias (trailing median, same aging).
+# the sky is measured on, and tracked as a slow trailing median (see APERTURE_WINDOW).
 APERTURE_R_MAX = 16              # px - widest growth-curve aperture (PSF wings converge
                                  # well inside this at typical focus)
 APERTURE_BG_IN = 18              # px - background annulus (inner, outer)
@@ -92,7 +92,20 @@ APERTURE_MIN_INTENS = 400        # star_list intensity floor at 8 bits (scaled b
 APERTURE_ISO_RADIUS = 30         # px - no other detected star this close
 APERTURE_SAT_FRAC = 0.86         # of full scale - reject stars with clipped cores
 APERTURE_MIN_STARS = 10          # star samples required for tonight's f observation
-APERTURE_WINDOW = 14             # trailing nightly f observations in the estimator
+APERTURE_WINDOW = 60             # trailing nightly f observations in the estimator.
+                                 # Deliberately much longer than BIAS_WINDOW: tonight's
+                                 # TRUE f already cancels out of the sky value through
+                                 # the nightly mag_lev refit (same stars, same windows),
+                                 # so the correction only sets the ABSOLUTE scale and
+                                 # recency buys nothing - a noisy nightly f measurably
+                                 # degraded meter tracking (0.066 -> 0.120 mag RMS at
+                                 # SI0002) while a long median matched the uncorrected
+                                 # tracking exactly
+APERTURE_OBS_MAX_AGE_NIGHTS = 365  # own aging clock, slower than the bias one for the
+                                 # same reason - a stale f mis-sets the absolute scale
+                                 # by at most the focus drift, which self-heals over
+                                 # the window, while an emptied estimator would drop
+                                 # the correction (a known 0.4 mag error) entirely
 APERTURE_F_RANGE = (0.2, 1.5)    # sanity range for a single-star capture fraction
 
 # Approximate zenith SQM (mag/arcsec^2) to Bortle class mapping
@@ -338,8 +351,14 @@ def resolveApertureCorrection(cal, tonight_f, night_key=None):
     property of the optics + extraction window, so a robust median over recent nights is
     used as soon as a single observation exists (an uncorrected value is KNOWN to be
     wrong by 2.5*log10(1/f), so waiting for a long warmup would preserve a worse error).
-    Observations age out on the same clock as the bias, so a refocus heals within the
-    window and a long gap does not let a stale focus state linger.
+
+    Stability beats recency here, hence the long window and slow aging: tonight's true
+    f is already inside tonight's mag_lev (refit nightly from the same windowed sums)
+    and cancels out of the sky value, so night-to-night tracking is protected with or
+    without the correction - its only job is the absolute scale. Applying a noisy
+    per-night f injects that noise directly into an otherwise clean series (measured
+    at SI0002: 0.066 -> 0.120 mag RMS vs a meter), while the long median fixed the
+    absolute scale at no tracking cost.
 
     Arguments:
         cal: [dict] {seed, nights, ...} as loaded. Only nights[key]["aperture"] is touched.
@@ -367,7 +386,7 @@ def resolveApertureCorrection(cal, tonight_f, night_key=None):
 
     try:
         cutoff = (datetime.datetime.strptime(key, "%Y%m%d")
-                  - datetime.timedelta(days=BIAS_OBS_MAX_AGE_NIGHTS)).strftime("%Y%m%d")
+                  - datetime.timedelta(days=APERTURE_OBS_MAX_AGE_NIGHTS)).strftime("%Y%m%d")
     except ValueError:
         cutoff = "00000000"
 

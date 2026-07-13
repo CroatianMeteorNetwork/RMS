@@ -217,13 +217,23 @@ def test_aperture_median_over_window():
     assert f == pytest.approx(0.70)
 
 
-def test_aperture_observations_age_out():
-    # An old focus state must not linger across a long gap
+def test_aperture_observations_age_out_slowly():
+    # f ages on its own slow clock: still trusted after a bias-scale gap (stability
+    # beats recency - f self-cancels in tracking), gone after its own limit
+    from Utils.SkyQuality import APERTURE_OBS_MAX_AGE_NIGHTS
     cal = dict(seed=None, nights={})
     today = datetime.datetime.utcnow()
-    old_key = (today - datetime.timedelta(days=BIAS_OBS_MAX_AGE_NIGHTS + 10)).strftime("%Y%m%d")
-    _, _, cal = resolveApertureCorrection(cal, 0.50, night_key=old_key)
-    f, n, _ = resolveApertureCorrection(cal, None, night_key=today.strftime("%Y%m%d"))
+
+    key_mid = (today - datetime.timedelta(days=BIAS_OBS_MAX_AGE_NIGHTS + 10)).strftime("%Y%m%d")
+    _, _, cal = resolveApertureCorrection(cal, 0.65, night_key=key_mid)
+    f, n, _ = resolveApertureCorrection(dict(cal), None, night_key=today.strftime("%Y%m%d"))
+    assert f == pytest.approx(0.65)
+    assert n == 1
+
+    cal2 = dict(seed=None, nights={})
+    key_old = (today - datetime.timedelta(days=APERTURE_OBS_MAX_AGE_NIGHTS + 10)).strftime("%Y%m%d")
+    _, _, cal2 = resolveApertureCorrection(cal2, 0.50, night_key=key_old)
+    f, n, _ = resolveApertureCorrection(cal2, None, night_key=today.strftime("%Y%m%d"))
     assert f is None
     assert n == 0
 
