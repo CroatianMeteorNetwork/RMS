@@ -17,11 +17,23 @@ resolved through safe tiers:
       bright), never as an absolute value.
 
 Measurements are taken on the highest-altitude unmasked patch of the FOV, only on frames
-inside clear intervals with no significant moon. Results are written to
+inside clear intervals with no significant moon. The sky level is devignetted and scaled
+by the tracked PSF capture fraction (see the APERTURE_* constants: the star extractor's
+windowed sums miss the PSF wings, and mag_lev absorbs that deficit, so extended sources
+need the same haircut to sit on the calibrated flux scale). Results are written to
 <night>_sky_quality.json in the night directory and one line is logged.
 
 Convention note: mag_lev maps counts to above-atmosphere magnitudes, so the SQM values
-read ~0.2 mag brighter than the as-seen convention at the zenith.
+read ~0.2 mag brighter than the as-seen convention at the zenith. Beyond that, treat
+the absolute scale as UNCALIBRATED against SQM meters: validation against a co-sited
+SQM-LE at SI0002 (Aug+Nov 2024, 20 clear nights) measured excellent night-to-night
+tracking (~0.07 mag RMS) but a stable total offset of ~1.5-2 mag bright of the meter.
+The measured decomposition: extinction and the patch altitude ~0.5-0.7; PSF wing loss
++0.39 at SI0002 (now removed by the nightly aperture correction above); spectral band
+~0 (a Gaia G/BP/RP band-ratio fit showed the camera response is close to the catalog
+G band, color term -0.04 mag per BP-RP); the remaining ~0.5-1 mag is consistent with
+lens-scattered light (veiling glare), which no software correction can separate from
+sky signal. Bortle classes inherit whatever offset remains.
 """
 
 from __future__ import absolute_import, division, print_function
@@ -64,6 +76,24 @@ HISTORY_KEEP = 3660              # nightly entries kept in the file (~10 years).
                                  # Utils.PlotCalibrationHistory), not an estimator window -
                                  # the estimator is bounded by the BIAS_* constants above
                                  # and BIAS_OBS_MAX_AGE_NIGHTS
+
+# Aperture (PSF wing loss) correction: the star extractor sums flux in a small segment
+# window, so mag_lev absorbs the missing PSF wings (~30% of the flux at a typical
+# station). Extended sky has no aperture to lose flux from, so converting it through
+# mag_lev overestimates its brightness by 2.5*log10(1/f). The capture fraction f is
+# measured nightly from growth curves of bright isolated stars on the same avepixels
+# the sky is measured on, and tracked like the bias (trailing median, same aging).
+APERTURE_R_MAX = 16              # px - widest growth-curve aperture (PSF wings converge
+                                 # well inside this at typical focus)
+APERTURE_BG_IN = 18              # px - background annulus (inner, outer)
+APERTURE_BG_OUT = 26
+APERTURE_MIN_INTENS = 400        # star_list intensity floor at 8 bits (scaled by depth) -
+                                 # growth curves on fainter stars drown in sky noise
+APERTURE_ISO_RADIUS = 30         # px - no other detected star this close
+APERTURE_SAT_FRAC = 0.86         # of full scale - reject stars with clipped cores
+APERTURE_MIN_STARS = 10          # star samples required for tonight's f observation
+APERTURE_WINDOW = 14             # trailing nightly f observations in the estimator
+APERTURE_F_RANGE = (0.2, 1.5)    # sanity range for a single-star capture fraction
 
 # Approximate zenith SQM (mag/arcsec^2) to Bortle class mapping
 BORTLE_SCALE = [(21.99, "1"), (21.89, "2"), (21.69, "3"), (21.25, "4"), (20.49, "5"),
@@ -135,7 +165,8 @@ def resolveWorkingBias(cal, tonight_obs, tonight_floor, night_key=None):
         (firmware/gain change); the working value snaps to the recent observations.
       - Floor guard: physics demands night_floor >= bias. A floor below the working bias
         by more than FLOOR_GUARD_ADU proves the pedestal DROPPED; the working value is
-        withdrawn (limit tier) unless tonight's own observation vouches for a new one.
+        withdrawn (limit tier) unless tonight's own observation vouches for a new one -
+        and only an observation that itself respects the floor may vouch.
 
     Arguments:
         cal: [dict] {seed, nights, ...} as loaded. Extra keys (e.g. handover) are preserved.
@@ -212,9 +243,12 @@ def resolveWorkingBias(cal, tonight_obs, tonight_floor, night_key=None):
         bias = float(np.median(obs_vals))
         source = "tracking warmup ({:d} nights)".format(len(obs_vals))
 
-    # Floor guard - runs regardless of where the working value came from
+    # Floor guard - runs regardless of where the working value came from. Tonight's own
+    # observation may replace the withdrawn value only if it respects the same physics
+    # (bias <= floor): an observation above the floor is exactly the failure mode the
+    # guard exists to catch, so it must not vouch for itself.
     if (bias is not None) and (tonight_floor < bias - FLOOR_GUARD_ADU):
-        if tonight_obs is not None:
+        if (tonight_obs is not None) and (tonight_obs <= tonight_floor):
             bias = float(tonight_obs)
             source = "tonight's observation (floor guard tripped)"
         else:
@@ -222,6 +256,129 @@ def resolveWorkingBias(cal, tonight_obs, tonight_floor, night_key=None):
             source = "floor guard tripped - working bias withdrawn"
 
     return bias, source, cal
+
+
+def frameApertureSamples(ave, star_list, bit_depth=8):
+    """ Per-star PSF capture fractions f = windowed_intensity/total_flux on one avepixel.
+
+    For every bright, isolated, unsaturated detected star, the total flux is the
+    asymptote of an aperture growth curve with a local annulus background; the windowed
+    intensity is the one the star extractor recorded (and the photometric calibration
+    consumed), so f is exactly the deficit hidden in mag_lev.
+
+    Arguments:
+        ave: [2D ndarray] Avepixel image.
+        star_list: [list] Recalibrated platepar star list rows [jd, y, x, intensity, ...].
+
+    Keyword arguments:
+        bit_depth: [int] Camera bit depth, used to scale the brightness/saturation cuts.
+
+    Return:
+        samples: [list of float] Per-star capture fractions.
+    """
+
+    h, w = ave.shape
+    scale = 2.0**(bit_depth - 8)
+    min_intens = APERTURE_MIN_INTENS*scale
+    sat_level = APERTURE_SAT_FRAC*(2.0**bit_depth - 1)
+
+    yy, xx = np.mgrid[-APERTURE_BG_OUT:APERTURE_BG_OUT + 1,
+                      -APERTURE_BG_OUT:APERTURE_BG_OUT + 1]
+    rr = np.hypot(yy, xx)
+    bg_mask = (rr >= APERTURE_BG_IN) & (rr <= APERTURE_BG_OUT)
+
+    positions = np.array([(row[2], row[1]) for row in star_list]) if star_list else None
+
+    samples = []
+    for row in (star_list or []):
+        _, y, x, intens = row[0], row[1], row[2], row[3]
+        if intens < min_intens:
+            continue
+        if not (APERTURE_BG_OUT < x < w - APERTURE_BG_OUT - 1
+                and APERTURE_BG_OUT < y < h - APERTURE_BG_OUT - 1):
+            continue
+
+        # Isolation: any other detected star inside the growth region spoils the curve
+        dist = np.hypot(positions[:, 0] - x, positions[:, 1] - y)
+        if np.sum(dist < APERTURE_ISO_RADIUS) > 1:
+            continue
+
+        xi, yi = int(round(x)), int(round(y))
+        cut = ave[yi - APERTURE_BG_OUT:yi + APERTURE_BG_OUT + 1,
+                  xi - APERTURE_BG_OUT:xi + APERTURE_BG_OUT + 1]
+        if cut.shape != rr.shape:
+            continue
+        if cut[APERTURE_BG_OUT - 2:APERTURE_BG_OUT + 3,
+               APERTURE_BG_OUT - 2:APERTURE_BG_OUT + 3].max() > sat_level:
+            continue
+
+        bg = np.median(cut[bg_mask])
+        growth = [float(np.sum(cut[rr <= r] - bg))
+                  for r in range(2, APERTURE_R_MAX + 1)]
+        total = float(np.mean(growth[-3:]))
+        if total <= 0 or growth[6] <= 0:
+            continue
+        # A curve still climbing at the edge is a blend or a background gradient
+        if growth[-1] > 1.15*growth[-4]:
+            continue
+
+        f = intens/total
+        if APERTURE_F_RANGE[0] < f < APERTURE_F_RANGE[1]:
+            samples.append(f)
+
+    return samples
+
+
+def resolveApertureCorrection(cal, tonight_f, night_key=None):
+    """ Continuous tracking of the PSF capture fraction f, mirroring the bias tracker:
+        fold tonight's observation into the nightly history and return the working value
+        (trailing median). Pure function - the caller persists the updated cal.
+
+    Unlike the bias there is no seed alternative and no floor physics: f is a throughput
+    property of the optics + extraction window, so a robust median over recent nights is
+    used as soon as a single observation exists (an uncorrected value is KNOWN to be
+    wrong by 2.5*log10(1/f), so waiting for a long warmup would preserve a worse error).
+    Observations age out on the same clock as the bias, so a refocus heals within the
+    window and a long gap does not let a stale focus state linger.
+
+    Arguments:
+        cal: [dict] {seed, nights, ...} as loaded. Only nights[key]["aperture"] is touched.
+        tonight_f: [float] Tonight's median capture fraction, or None.
+
+    Keyword arguments:
+        night_key: [str] YYYYMMDD key, as in resolveWorkingBias.
+
+    Return:
+        (f, n_obs, cal): working capture fraction (or None -> no correction), the number
+            of observations in the estimator, updated cal.
+    """
+
+    nights = dict(cal.get("nights", {}))
+    key = night_key if night_key is not None else datetime.datetime.utcnow().strftime("%Y%m%d")
+
+    entry = dict(nights.get(key, {}))
+    if tonight_f is not None:
+        entry["aperture"] = round(float(tonight_f), 3)
+    nights[key] = entry
+    nights = dict(sorted(nights.items())[-HISTORY_KEEP:])
+
+    cal = dict(cal)
+    cal["nights"] = nights
+
+    try:
+        cutoff = (datetime.datetime.strptime(key, "%Y%m%d")
+                  - datetime.timedelta(days=BIAS_OBS_MAX_AGE_NIGHTS)).strftime("%Y%m%d")
+    except ValueError:
+        cutoff = "00000000"
+
+    obs = [v["aperture"] for k, v in sorted(nights.items())
+           if isinstance(v, dict) and v.get("aperture") is not None
+           and k >= cutoff][-APERTURE_WINDOW:]
+
+    if not obs:
+        return None, 0, cal
+
+    return float(np.median(obs)), len(obs), cal
 
 
 def estimateBiasByRegression(config, dir_path, dome_model, pps, mask):
@@ -414,6 +571,7 @@ def measureSkyQuality(config, dir_path, dome_model, recalibrated_platepars, time
         min(MAX_FRAMES, len(usable))).astype(int))]
 
     levels = []
+    aperture_samples = []
     for ff_name in usable:
         ff = FFfile.read(dir_path, ff_name)
         if ff is None:
@@ -423,14 +581,28 @@ def measureSkyQuality(config, dir_path, dome_model, recalibrated_platepars, time
             float(np.median(ave[y0 - SKY_PATCH_HALF:y0 + SKY_PATCH_HALF,
                                 x0 - SKY_PATCH_HALF:x0 + SKY_PATCH_HALF]))))
 
+        # Same frames, same avepixels: sample the PSF capture fraction from the
+        # detected stars so tonight's aperture correction rides along for free
+        try:
+            aperture_samples += frameApertureSamples(ave,
+                getattr(pps[ff_name], "star_list", None) or [],
+                bit_depth=getattr(config, "bit_depth", 8))
+        except Exception as e:
+            log.debug("Aperture sampling failed on {:s}: {}".format(ff_name, e))
+
     if not levels:
         return None
 
-    # --- continuous bias tracking: fold tonight's observation and floor into the
-    # history, get the working bias (or None -> limit), persist the updated history ---
+    tonight_f = None
+    if len(aperture_samples) >= APERTURE_MIN_STARS:
+        tonight_f = float(np.median(aperture_samples))
+
+    # --- continuous bias + aperture tracking: fold tonight's observations into the
+    # history, get the working values, persist the updated history once ---
     tonight_floor = min(v for _, v in levels)
     cal = loadRadiometricCalibration(config)
     bias, source, cal = resolveWorkingBias(cal, tonight_obs, tonight_floor)
+    f_aperture, f_nights, cal = resolveApertureCorrection(cal, tonight_f)
 
     try:
         with open(_radiometricPath(config), "w") as f:
@@ -459,6 +631,17 @@ def measureSkyQuality(config, dir_path, dome_model, recalibrated_platepars, time
         if sky < MIN_SKY_ADU:
             continue
         pp = pps[ff_name]
+        # The pedestal is uniform but the sky signal is vignetted: undo the throughput
+        # loss at the patch position (mag_lev calibrates vignetting-corrected counts,
+        # and the bias regression fits against a devignetted model for the same reason)
+        vc = getattr(pp, "vignetting_coeff", 0.0) or 0.0
+        r = np.hypot(x0 - pp.X_res/2.0, y0 - pp.Y_res/2.0)
+        sky /= np.cos(vc*r)**4
+        # Aperture correction: mag_lev was fitted on windowed star sums that miss the
+        # PSF wings; scaling the sky by the tracked capture fraction puts the extended
+        # source on the same flux scale the zero point was calibrated on
+        if f_aperture is not None:
+            sky *= f_aperture
         area = (3600.0/pp.F_scale)**2
         sqm_values.append(pp.mag_lev - 2.5*np.log10(sky) + 2.5*np.log10(area))
 
@@ -477,6 +660,9 @@ def measureSkyQuality(config, dir_path, dome_model, recalibrated_platepars, time
         night=os.path.basename(os.path.normpath(dir_path)),
         patch=dict(x=x0, y=y0, az=round(patch_az, 1), alt=round(patch_alt, 1)),
         bias=dict(value=round(float(bias), 2), tier=tier, method=method),
+        aperture=(dict(f=round(f_aperture, 3), n_stars=len(aperture_samples),
+                       nights=f_nights) if f_aperture is not None
+                  else dict(f=None, n_stars=len(aperture_samples), nights=0)),
         n_frames=len(sqm_values),
         sqm=round(sqm, 2),
         absolute=absolute,
@@ -492,13 +678,15 @@ def measureSkyQuality(config, dir_path, dome_model, recalibrated_platepars, time
     except Exception as e:
         log.debug("Could not write sky quality file: {}".format(e))
 
+    ap_str = ("aperture f={:.2f} ({:d} nights)".format(f_aperture, f_nights)
+              if f_aperture is not None else "no aperture correction")
     if absolute:
         bortle_str = "Bortle {:s}, ".format(result["bortle"]) if result["bortle"] else ""
         log.info("Sky quality: {:.2f} mag/arcsec2 at alt {:.0f} deg ({:s}"
-                 "tier {:d}, {:d} frames)".format(sqm, patch_alt, bortle_str,
-                 tier, len(sqm_values)))
+                 "tier {:d}, {:d} frames, {:s})".format(sqm, patch_alt, bortle_str,
+                 tier, len(sqm_values), ap_str))
     else:
         log.info("Sky quality: brighter than {:.2f} mag/arcsec2 at alt {:.0f} deg "
-                 "(limit only - no bias calibration)".format(sqm, patch_alt))
+                 "(limit only - no bias calibration, {:s})".format(sqm, patch_alt, ap_str))
 
     return result

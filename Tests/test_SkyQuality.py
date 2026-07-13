@@ -8,7 +8,10 @@ import os
 
 import pytest
 
+import numpy as np
+
 from Utils.SkyQuality import (bortleClass, resolveWorkingBias, loadRadiometricCalibration,
+    resolveApertureCorrection, frameApertureSamples,
     BIAS_MIN_OBS, BIAS_STEP_ADU, FLOOR_GUARD_ADU, HISTORY_KEEP, BIAS_OBS_MAX_AGE_NIGHTS)
 
 
@@ -85,6 +88,16 @@ def test_floor_guard_accepts_tonights_observation():
     bias, source, _ = resolveWorkingBias(cal, 57.5, 60.0)
     assert bias == 57.5
     assert "floor guard" in source
+
+
+def test_floor_guard_rejects_unphysical_tonights_observation():
+    # Tonight's obs is itself above the floor - the failure mode the guard exists to
+    # catch - so it must not vouch for itself; the working value is withdrawn
+    obs = [70.0]*6
+    cal = calWith(obs)
+    bias, source, _ = resolveWorkingBias(cal, 65.0, 60.0)
+    assert bias is None
+    assert "withdrawn" in source
 
 
 def test_history_is_trimmed():
@@ -170,3 +183,67 @@ def test_legacy_flat_file_loads_as_seed(tmp_path):
     assert cal["seed"]["bias"] == 71.0
     assert cal["seed"]["method"] == "overlap-graph"
     assert cal["nights"] == {}
+
+
+def test_aperture_tracking_median_and_coexistence():
+    # f observations ride in the same nightly entries as the bias without clobbering it
+    cal = calWith([58.0]*6)
+    f, n, cal2 = resolveApertureCorrection(cal, 0.72)
+    assert f == pytest.approx(0.72)
+    assert n == 1
+    key = sorted(cal2["nights"])[-1]
+    f2, n2, cal3 = resolveApertureCorrection(cal2, 0.70, night_key=key)
+    assert n2 == 1  # same night overwrites, does not accumulate
+    assert f2 == pytest.approx(0.70)
+    # prior bias/floor entries are preserved
+    old_key = sorted(cal3["nights"])[0]
+    assert cal3["nights"][old_key]["bias"] == 58.0
+
+
+def test_aperture_none_when_no_observations():
+    cal = calWith([58.0]*3)
+    f, n, _ = resolveApertureCorrection(cal, None)
+    assert f is None
+    assert n == 0
+
+
+def test_aperture_median_over_window():
+    cal = dict(seed=None, nights={})
+    today = datetime.datetime.utcnow()
+    for i, fv in enumerate([0.60, 0.70, 0.80, 0.72, 0.68]):
+        key = (today - datetime.timedelta(days=5 - i)).strftime("%Y%m%d")
+        f, n, cal = resolveApertureCorrection(cal, fv, night_key=key)
+    assert n == 5
+    assert f == pytest.approx(0.70)
+
+
+def test_aperture_observations_age_out():
+    # An old focus state must not linger across a long gap
+    cal = dict(seed=None, nights={})
+    today = datetime.datetime.utcnow()
+    old_key = (today - datetime.timedelta(days=BIAS_OBS_MAX_AGE_NIGHTS + 10)).strftime("%Y%m%d")
+    _, _, cal = resolveApertureCorrection(cal, 0.50, night_key=old_key)
+    f, n, _ = resolveApertureCorrection(cal, None, night_key=today.strftime("%Y%m%d"))
+    assert f is None
+    assert n == 0
+
+
+def test_frame_aperture_samples_recovers_gaussian_capture_fraction():
+    # Synthetic star: the extractor's windowed sum over a +/-4 px crop vs true total
+    h, w = 120, 120
+    sigma = 2.5
+    yy, xx = np.mgrid[0:h, 0:w]
+    x0, y0, amp, bg = 60.0, 60.0, 120.0, 20.0
+    star = amp*np.exp(-((xx - x0)**2 + (yy - y0)**2)/(2*sigma**2))
+    ave = bg + star
+
+    seg = 4
+    crop = star[int(y0) - seg:int(y0) + seg + 1, int(x0) - seg:int(x0) + seg + 1]
+    windowed_intens = float(np.sum(crop))
+    true_total = 2*np.pi*amp*sigma**2
+    expected_f = windowed_intens/true_total
+
+    star_list = [[0.0, y0, x0, windowed_intens, 0.0, 0.0, 3.0]]
+    samples = frameApertureSamples(ave, star_list, bit_depth=8)
+    assert len(samples) == 1
+    assert samples[0] == pytest.approx(expected_f, abs=0.03)
