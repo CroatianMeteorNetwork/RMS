@@ -99,6 +99,7 @@ camerasettings/*.json
 # these files are created by cython and should not be tracked
 RMS/Astrometry/CyFunctions.c
 RMS/CompressionCy.c
+RMS/ExtractStarsCy.c
 RMS/Routines/BinImageCy.c
 RMS/Routines/DynamicFTPCompressionCy.c
 RMS/Routines/Grouping3Dcy.c
@@ -116,3 +117,6 @@ Catalogs/GMN_StarCatalog_LM12.0.bin
 # Agents
 .agents/
 skills-lock.json
+
+# QueuedPool backup files (written to the working directory by test/debug runs)
+rms_queue_bkup_*.pickle

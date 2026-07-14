@@ -171,9 +171,78 @@ def scoreFrameQuality(star_data, min_stars=10, max_stars=200):
     return score, details
 
 
+def scoreFrameSky(star_data):
+    """
+    Extract per-frame sky condition metrics from the CALSTARS star rows.
+
+    The per-star local background level (BgLvl) is a direct probe of the sky: a bright moon,
+    twilight or haze raises the median, and moon glare or clouds also make the background vary
+    across the frame. Median FWHM catches thin cloud or dew blooming the stars.
+
+    Arguments:
+        star_data: [ndarray] Star data array with columns [y, x, IntensSum, Ampltd, FWHM, BgLvl, SNR, NSatPx]
+
+    Returns:
+        (median_bg, bg_spread, median_fwhm): [tuple of floats or None] Median background level,
+            10th-90th percentile background spread, and median FWHM. None where the CALSTARS
+            format does not carry the column.
+    """
+    star_data = np.array(star_data)
+    median_bg, bg_spread, median_fwhm = None, None, None
+
+    if (star_data.ndim == 2) and len(star_data):
+
+        # Older CALSTARS formats lack these columns and the reader pads them with -1
+        # sentinels, so only accept positive values
+        if star_data.shape[1] > 5:
+            bg = star_data[:, 5]
+            bg = bg[bg > 0]
+            if len(bg):
+                median_bg = float(np.median(bg))
+                bg_spread = float(np.percentile(bg, 90) - np.percentile(bg, 10))
+
+        if star_data.shape[1] > 4:
+            fwhm = star_data[:, 4]
+            fwhm = fwhm[fwhm > 0]
+            if len(fwhm):
+                median_fwhm = float(np.median(fwhm))
+
+    return median_bg, bg_spread, median_fwhm
+
+
+def _rankScoreLowerBetter(values):
+    """ Rank-normalize a list of values (None allowed) to [0, 1] scores where the LOWEST value
+        scores 1. Ties share the same (average) rank, and None entries get a neutral 0.5.
+        Rank-based so the scoring is relative to the night and independent of camera gain or
+        bit depth.
+    """
+    scores = [0.5]*len(values)
+
+    valid_idx = [i for i, v in enumerate(values) if v is not None]
+    if len(valid_idx) < 2:
+        return scores
+
+    valid_vals = np.array([values[i] for i in valid_idx], dtype=np.float64)
+
+    # Average rank for ties: rank of each value = mean position of its duplicates
+    order = np.argsort(valid_vals, kind='stable')
+    ranks = np.empty(len(valid_vals), dtype=np.float64)
+    ranks[order] = np.arange(len(valid_vals))
+    for v in np.unique(valid_vals):
+        same = valid_vals == v
+        ranks[same] = np.mean(ranks[same])
+
+    n = len(valid_vals) - 1
+    for i, rank in zip(valid_idx, ranks):
+        scores[i] = 1.0 - rank/n
+
+    return scores
+
+
 def selectBestFrame(calstars, img_width, img_height, min_stars=10, max_stars=200, verbose=False):
     """
-    Select the best frame from CALSTARS data based on star distribution and quality.
+    Select the best frame from CALSTARS data based on star distribution, star quality, and sky
+    condition (background darkness and uniformity, star sharpness).
 
     Arguments:
         calstars: [dict] Dictionary mapping FF filenames to star data arrays
@@ -190,28 +259,64 @@ def selectBestFrame(calstars, img_width, img_height, min_stars=10, max_stars=200
     """
     all_scores = {}
 
-    for ff_name, star_data in calstars.items():
-        star_data = np.array(star_data)
+    # First pass: per-frame scores and raw sky metrics
+    ff_names = list(calstars.keys())
+    median_bg_list, bg_spread_list, median_fwhm_list = [], [], []
+    for ff_name in ff_names:
+        star_data = np.array(calstars[ff_name])
 
         dist_score, dist_details = scoreFrameDistribution(star_data, img_width, img_height)
         qual_score, qual_details = scoreFrameQuality(star_data, min_stars, max_stars)
+        median_bg, bg_spread, median_fwhm = scoreFrameSky(star_data)
 
-        if qual_details.get('valid', False):
-            combined_score = 0.5 * dist_score + 0.5 * qual_score
-        else:
-            combined_score = 0.0
+        median_bg_list.append(median_bg)
+        bg_spread_list.append(bg_spread)
+        median_fwhm_list.append(median_fwhm)
 
         all_scores[ff_name] = {
-            'combined_score': combined_score,
             'distribution_score': dist_score,
             'quality_score': qual_score,
             'distribution_details': dist_details,
-            'quality_details': qual_details
+            'quality_details': qual_details,
+            'median_bg': median_bg,
+            'bg_spread': bg_spread,
+            'median_fwhm': median_fwhm,
         }
 
+    # Second pass: rank the sky metrics relative to the other frames of the night (lower is
+    # better for all three) and combine. A frame full of well-spread stars under a moonlit or
+    # hazy sky should lose to a comparable frame under a dark, uniform sky.
+    darkness_scores = _rankScoreLowerBetter(median_bg_list)
+    uniformity_scores = _rankScoreLowerBetter(bg_spread_list)
+    sharpness_scores = _rankScoreLowerBetter(median_fwhm_list)
+
+    for ff_name, darkness, uniformity, sharpness in zip(
+            ff_names, darkness_scores, uniformity_scores, sharpness_scores):
+
+        scores = all_scores[ff_name]
+
+        if scores['quality_details'].get('valid', False):
+            combined_score = (
+                0.35*scores['distribution_score']
+                + 0.25*scores['quality_score']
+                + 0.25*darkness
+                + 0.10*uniformity
+                + 0.05*sharpness
+            )
+        else:
+            combined_score = 0.0
+
+        scores['combined_score'] = combined_score
+        scores['darkness_score'] = darkness
+        scores['uniformity_score'] = uniformity
+        scores['sharpness_score'] = sharpness
+
         if verbose:
-            print("  {:s}: {:.3f} (dist={:.3f}, qual={:.3f}, n_stars={:d})".format(
-                ff_name, combined_score, dist_score, qual_score, len(star_data)))
+            print("  {:s}: {:.3f} (dist={:.3f}, qual={:.3f}, dark={:.2f}, unif={:.2f}, "
+                  "sharp={:.2f}, n_stars={:d})".format(
+                    ff_name, combined_score, scores['distribution_score'],
+                    scores['quality_score'], darkness, uniformity, sharpness,
+                    len(calstars[ff_name])))
 
     best_ff = None
     best_score = 0.0

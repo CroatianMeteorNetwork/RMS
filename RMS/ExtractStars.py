@@ -46,6 +46,18 @@ import pyximport
 pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 #import RMS.Routines.MorphCy as morph
 
+# The Cython 2D Gaussian is a numerical drop-in for RMS.Math.twoDGaussian. curve_fit evaluates
+# the model hundreds of times per star, so the C implementation speeds up the PSF fitting
+# several times. Fall back to the Python implementation if the module cannot be built.
+try:
+    from RMS.ExtractStarsCy import twoDGaussian as twoDGaussianModel
+    from RMS.ExtractStarsCy import twoDGaussianResiduals
+    CYTHON_PSF = True
+except ImportError:
+    twoDGaussianModel = twoDGaussian
+    twoDGaussianResiduals = None
+    CYTHON_PSF = False
+
 
 # Get the logger from the main module
 log = getLogger("rmslogger")
@@ -651,18 +663,32 @@ def fitPSF(img, img_median, x_init, y_init, gamma=1.0, segment_radius=4, roundne
         amp_guess = max(float(np.max(star_seg)) - img_median, 1.0)
         initial_guess = (amp_guess,) + init_pos_sigma + (img_median,)
 
-        # Fit a PSF to the star
-        try:
-            # Fit the 2D Gaussian with the limited number of iterations - this reduces the processing time
-            # and most of the bad star candidates take more iterations to fit
-            popt, pcov = opt.curve_fit(twoDGaussian, (y_ind, x_ind, saturation), star_seg.ravel(), \
-                p0=initial_guess, maxfev=200)
-            # print(popt)
-        except RuntimeError:
-            # print('Fitting failed!')
+        # Fit the 2D Gaussian with the limited number of iterations - this reduces the processing
+        # time and most of the bad star candidates take more iterations to fit
+        if CYTHON_PSF:
 
-            # Skip stars that can't be fitted in 200 iterations
-            continue
+            # Call leastsq directly with the C residual function. This is the same LM engine with
+            # the same tolerances and iteration limit as the curve_fit call below, minus the
+            # per-call Python wrapper around the model, which dominates the run time once the
+            # model evaluation itself is fast.
+            popt, cov_x, infodict, mesg, ier = opt.leastsq(
+                twoDGaussianResiduals, np.asarray(initial_guess, dtype=np.float64),
+                args=(y_ind.astype(np.float64), x_ind.astype(np.float64),
+                      float(2**bit_depth - 1), star_seg.ravel().astype(np.float64)),
+                maxfev=200, full_output=True)
+
+            # Skip stars that can't be fitted in 200 iterations (the same set of success
+            # statuses that curve_fit accepts)
+            if ier not in (1, 2, 3, 4):
+                continue
+
+        else:
+            try:
+                popt, pcov = opt.curve_fit(twoDGaussianModel, (y_ind, x_ind, saturation),
+                    star_seg.ravel(), p0=initial_guess, maxfev=200)
+            except RuntimeError:
+                # Skip stars that can't be fitted in 200 iterations
+                continue
 
         # Unpack fitted gaussian parameters
         amplitude, yo, xo, sigma_y, sigma_x, theta, offset = popt

@@ -978,23 +978,32 @@ def recalibrateIndividualFFsAndApplyAstrometry(
                             photom_offset_std_tmp_list.append(recalibrated_platepars[ff_name_tmp].mag_lev_stddev)
                             neighboring_ffs.append(ff_name_tmp)
 
-                # Compute the new photometric offset and improved standard deviation (assume equal sample size)
-                #   Source: https://stats.stackexchange.com/questions/55999/is-it-possible-to-find-the-combined-standard-deviation
-                photom_offset_new = np.mean(photom_offset_tmp_list)
-                photom_offset_std_new = np.sqrt(
-                    np.sum(
-                        [
-                            st ** 2 + (mt - photom_offset_new) ** 2
-                            for mt, st in zip(photom_offset_tmp_list, photom_offset_std_tmp_list)
-                        ]
-                    )
-                    / len(photom_offset_tmp_list)
-                )
+                # Pool only frames with a valid photometric fit. A frame can recalibrate
+                # astrometrically but fail photometry (e.g. every matched star saturated on
+                # a moonlit frame), leaving NaN - honest for that frame, but pooled with a
+                # plain mean it would poison the zero-point (and thus the meteor
+                # magnitudes) of every neighbouring frame. NaN frames instead RECEIVE the
+                # neighbourhood estimate.
+                valid = [(mt, st) for mt, st in
+                         zip(photom_offset_tmp_list, photom_offset_std_tmp_list)
+                         if np.isfinite(mt) and np.isfinite(st)]
 
-                # Assign the new photometric offset and standard deviation to all FFs used for computation
-                for ff_name_tmp in neighboring_ffs:
-                    recalibrated_platepars[ff_name_tmp].mag_lev = photom_offset_new
-                    recalibrated_platepars[ff_name_tmp].mag_lev_stddev = photom_offset_std_new
+                if len(valid):
+
+                    # Compute the new photometric offset and improved standard deviation
+                    # (assume equal sample size)
+                    #   Source: https://stats.stackexchange.com/questions/55999/is-it-possible-to-find-the-combined-standard-deviation
+                    photom_offset_new = np.mean([mt for mt, st in valid])
+                    photom_offset_std_new = np.sqrt(
+                        np.sum([st**2 + (mt - photom_offset_new)**2 for mt, st in valid])
+                        /len(valid)
+                    )
+
+                    # Assign the new photometric offset and standard deviation to all FFs
+                    # used for computation
+                    for ff_name_tmp in neighboring_ffs:
+                        recalibrated_platepars[ff_name_tmp].mag_lev = photom_offset_new
+                        recalibrated_platepars[ff_name_tmp].mag_lev_stddev = photom_offset_std_new
 
 
         # Add the recalibrated platepars to the list of all recalibrated platepars

@@ -194,6 +194,20 @@ class QueuedPool(object):
         self.print_state = print_state
 
 
+    def __getstate__(self):
+        """ Make the pool picklable for the 'spawn' multiprocessing start method (macOS,
+            Windows). The worker entry point is a bound method, so spawn pickles this whole
+            object; the Manager and Pool handles cannot be pickled (weakrefs, process
+            handles) and the workers do not need them - the queue PROXIES they hold pickle
+            fine on their own. Under 'fork' (Linux) nothing is pickled and this never runs.
+        """
+        state = self.__dict__.copy()
+        state['manager'] = None
+        state['pool'] = None
+        state['bkup_dict'] = {}
+        return state
+
+
     def printAndLog(self, *args):
         """ Print and log the given message. """
 

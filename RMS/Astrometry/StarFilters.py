@@ -21,6 +21,7 @@ from RMS.Astrometry.ApplyAstrometry import extinctionCorrectionTrueToApparent, r
 DEFAULT_PHOTOMETRIC_SIGMA = 2.5
 DEFAULT_BLEND_FWHM_MULT = 2.0  # Multiplier of FWHM for blending detection radius
 DEFAULT_BLEND_MAG_MARGIN = 0.3  # Margin above limiting magnitude for blend check
+DEFAULT_BLEND_PULL_PX = 0.5  # Photocentre pull (px) above which a neighbour makes a blend
 
 
 def filterPhotometricOutliers(paired_stars, platepar, jd, sigma_threshold=DEFAULT_PHOTOMETRIC_SIGMA,
@@ -108,7 +109,8 @@ def filterPhotometricOutliers(paired_stars, platepar, jd, sigma_threshold=DEFAUL
 
 def filterBlendedStars(paired_stars, catalog_stars, platepar, jd, lim_mag,
                        fwhm_mult=DEFAULT_BLEND_FWHM_MULT,
-                       mag_margin=DEFAULT_BLEND_MAG_MARGIN, verbose=False):
+                       mag_margin=DEFAULT_BLEND_MAG_MARGIN,
+                       pull_px=None, verbose=False):
     """
     Filter paired_stars by removing likely blended stars.
 
@@ -133,6 +135,9 @@ def filterBlendedStars(paired_stars, catalog_stars, platepar, jd, lim_mag,
         new_paired_stars: [PairedStars] Filtered paired stars.
         removed_count: [int] Number of stars removed.
     """
+    if pull_px is None:
+        pull_px = DEFAULT_BLEND_PULL_PX
+
     if len(paired_stars) < 5 or catalog_stars is None:
         return paired_stars, 0
 
@@ -143,9 +148,10 @@ def filterBlendedStars(paired_stars, catalog_stars, platepar, jd, lim_mag,
     if np.sum(bright_mask) == 0:
         return paired_stars, 0
 
-    # Get bright catalog star coordinates
+    # Get bright catalog star coordinates and magnitudes (needed for the photocentre pull)
     catalog_ra = catalog_stars[bright_mask, 0]
     catalog_dec = catalog_stars[bright_mask, 1]
+    catalog_mag = catalog_stars[bright_mask, 2]
 
     # Filter to stars actually in front of the camera (within FOV + margin)
     # This prevents false positives from stars behind the camera that could
@@ -169,6 +175,7 @@ def filterBlendedStars(paired_stars, catalog_stars, platepar, jd, lim_mag,
     in_fov = ang_dist_deg < fov_radius
     catalog_ra = catalog_ra[in_fov]
     catalog_dec = catalog_dec[in_fov]
+    catalog_mag = catalog_mag[in_fov]
 
     if len(catalog_ra) == 0:
         return paired_stars, 0
@@ -183,6 +190,7 @@ def filterBlendedStars(paired_stars, catalog_stars, platepar, jd, lim_mag,
     matched_ra_list = []
     matched_dec_list = []
     blend_radii = []
+    matched_mag_list = []
     for i, (x, y, fwhm, intens_acc, obj, snr, saturated) in enumerate(paired_stars.paired_stars):
         if hasattr(obj, 'pick_type') and obj.pick_type == "geopoint":
             continue
@@ -190,6 +198,7 @@ def filterBlendedStars(paired_stars, catalog_stars, platepar, jd, lim_mag,
         check_indices.append(i)
         matched_ra_list.append(ra)
         matched_dec_list.append(dec)
+        matched_mag_list.append(mag)
         blend_radii.append(fwhm_mult * fwhm)
 
     if len(check_indices) > 0:
@@ -197,6 +206,7 @@ def filterBlendedStars(paired_stars, catalog_stars, platepar, jd, lim_mag,
         all_matched_x, all_matched_y = raDecToXYPP(
             np.array(matched_ra_list), np.array(matched_dec_list), jd, platepar)
         blend_radii = np.array(blend_radii)
+        matched_mags = np.array(matched_mag_list)
 
         # Compute distance from each matched star to all bright catalog stars using broadcasting
         # Shape: (n_matched, n_catalog)
@@ -204,12 +214,21 @@ def filterBlendedStars(paired_stars, catalog_stars, platepar, jd, lim_mag,
         dy = all_matched_y[:, np.newaxis] - catalog_y[np.newaxis, :]
         dist_matrix = np.sqrt(dx**2 + dy**2)
 
-        # Check for neighbors within each star's blend radius (excluding self)
-        has_neighbor = np.any(
-            (dist_matrix < blend_radii[:, np.newaxis]) & (dist_matrix > 0.1), axis=1)
+        # Physical blend criterion: a neighbour is a threat only if it pulls the blended
+        # photocentre enough to corrupt the astrometry. A neighbour with flux ratio f at
+        # separation s shifts the photocentre by ~s*f/(1 + f); reject above half a pixel.
+        # A mere any-neighbour-in-radius test over-rejects catastrophically at coarse plate
+        # scales with a deep catalog (2x FWHM can be tens of arcminutes of sky, and some
+        # faint neighbour is almost always inside it - but a mag 9 speck cannot move the
+        # centroid of a mag 3 star).
+        flux_ratio = 10.0**(-0.4*(catalog_mag[np.newaxis, :] - matched_mags[:, np.newaxis]))
+        pull_px_matrix = dist_matrix*flux_ratio/(1.0 + flux_ratio)
+        threat = np.any(
+            (dist_matrix < blend_radii[:, np.newaxis]) & (dist_matrix > 0.1)
+            & (pull_px_matrix > pull_px), axis=1)
 
         for k, idx in enumerate(check_indices):
-            if has_neighbor[k]:
+            if threat[k]:
                 blended_indices.add(idx)
 
     if len(blended_indices) > 0:
@@ -219,8 +238,9 @@ def filterBlendedStars(paired_stars, catalog_stars, platepar, jd, lim_mag,
                 new_paired_stars.addPair(x, y, fwhm, intens_acc, obj, snr, saturated)
 
         if verbose:
-            print("  Removed {:d} blended stars (catalog neighbors within {:.1f}x FWHM, mag < {:.1f})".format(
-                len(blended_indices), fwhm_mult, max_mag))
+            print("  Removed {:d} blended stars (photocentre pull > {:.1f} px from neighbors "
+                  "within {:.1f}x FWHM, mag < {:.1f})".format(
+                len(blended_indices), pull_px, fwhm_mult, max_mag))
 
         return new_paired_stars, len(blended_indices)
 

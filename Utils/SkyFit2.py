@@ -12,7 +12,6 @@ import collections
 import glob
 import sys
 import time
-import random
 from concurrent.futures import ThreadPoolExecutor
 import copy
 import shutil
@@ -23,6 +22,7 @@ import numpy as np
 import zlib
 from PIL import Image
 
+import matplotlib
 import matplotlib.pyplot as plt
 
 # Astropy imports for solar system body ephemeris
@@ -147,6 +147,8 @@ except Exception as exc:
     sys.exit(1)
 
 
+from RMS.Astrometry.ValidateFit import (selectValidationFrames, validateFit,
+    summarizeValidation, buildRefitGroups)
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP, \
     rotationWrtHorizon, rotationWrtHorizonToPosAngle, computeFOVSize, photomLine, photometryFit, \
     rotationWrtStandard, rotationWrtStandardToPosAngle, correctVignetting, \
@@ -165,7 +167,7 @@ import RMS.ConfigReader as cr
 from RMS.ExtractStars import extractStarsAndSave, extractStarsFF
 import RMS.Formats.CALSTARS as CALSTARS
 from RMS.Formats.Platepar import Platepar, getCatalogStarsImagePositions
-from RMS.Formats.FFfile import convertFRNameToFF, constructFFName
+from RMS.Formats.FFfile import convertFRNameToFF, constructFFName, validFFName
 from RMS.Formats.FrameInterface import detectInputTypeFolder, detectInputTypeFile
 from RMS.Formats.FTPdetectinfo import writeFTPdetectinfo
 from RMS.Formats import StarCatalog
@@ -2181,6 +2183,11 @@ class GeoPoints(object):
 # CatalogStar, GeoPoint, and PairedStars are now imported from RMS.Astrometry.StarClasses
 
 
+class OperationCancelled(Exception):
+    """ Raised inside a cancellable long-running operation when the user presses Stop. """
+    pass
+
+
 class PlateTool(QtWidgets.QMainWindow):
     def __init__(self, input_path=None, config=None, beginning_time=None, fps=None, gamma=None,
         use_fr_files=False, geo_points_input=None, startUI=True, mask=None, nobg=False, peribg=False,
@@ -2221,8 +2228,16 @@ class PlateTool(QtWidgets.QMainWindow):
         #   of position on frames and photometry
         self.mode = 'skyfit'
         self.mode_list = ['skyfit', 'manualreduction']
-        self.max_pixels_between_matched_stars = np.inf
-        self.autopan_mode = False
+
+        # Round-trip error overlay (heatmap of fwd/rev transform disagreement across the image)
+        self.error_overlay_enabled = True  # Default: ON
+        self.error_overlay_item = None  # Store QGraphicsPixmapItem for error overlay
+        self.error_overlay_grid = None  # Cached error grid (recomputed when the platepar changes)
+        self.error_overlay_pixmap = None  # Cached pixmap for error overlay
+        self.error_overlay_pixmap_threshold = None  # Threshold the cached pixmap was built with
+        self.error_overlay_stride = 20  # Compute error every N pixels for performance
+        self.error_overlay_threshold = 0.5  # Errors below this (px) are fully transparent
+        self.error_overlay_needs_update = True  # Flag to track if overlay needs recomputation
 
         # Handle empty construction (no input path or config)
         if config is None:
@@ -2318,13 +2333,6 @@ class PlateTool(QtWidgets.QMainWindow):
         self.pick_list = {}
         self.paired_stars = PairedStars()
         self.residuals = None
-
-        # Autopan coordinates
-        self.old_autopan_x, self.old_autopan_y = None, None
-        self.current_autopan_x, self.current_autopan_y = None, None
-
-        # List of unsuitable stars
-        self.unsuitable_stars = PairedStars()
 
         # Positions of the mouse cursor
         self.mouse_x = 0
@@ -2704,6 +2712,18 @@ class PlateTool(QtWidgets.QMainWindow):
         self.status_bar.setFont(QtGui.QFont('monospace'))
         self.setStatusBar(self.status_bar)
 
+        # Stop button for long-running operations (validation, night refit, redetect-all,
+        # astrometry.net solving, NN fits).
+        # Hidden unless a cancellable operation is running; the operations pump the Qt event
+        # loop, so a click lands mid-operation and sets the cancel flag they check.
+        self._cancel_requested = False
+        self.stop_button = QtWidgets.QPushButton('Stop')
+        self.stop_button.setStyleSheet("color: #c62828; font-weight: bold;")
+        self.stop_button.setToolTip("Abort the running operation")
+        self.stop_button.pressed.connect(self._requestCancel)
+        self.stop_button.setVisible(False)
+        self.status_bar.addPermanentWidget(self.stop_button)
+
         self.file_manager_button = QtWidgets.QPushButton('File Manager')
         self.file_manager_button.pressed.connect(self.showCalibrationFilesDialog)
         self.file_manager_button.setToolTip("Open File Manager")
@@ -2730,9 +2750,6 @@ class PlateTool(QtWidgets.QMainWindow):
         self.image_navigation_slider.setToolTip("Drag or click to navigate through images")
         self.image_navigation_slider.valueChanged.connect(self.jumpToImage)
         self.status_bar.addPermanentWidget(self.image_navigation_slider)
-
-        self.nextstar_button = QtWidgets.QPushButton('SkyFit')
-        self.nextstar_button.pressed.connect(self.jumpNextStar)
 
         ###################################################################################################
         # CENTRAL WIDGET (DISPLAY)
@@ -2952,7 +2969,6 @@ class PlateTool(QtWidgets.QMainWindow):
         self.label_mag_limit = 5.0
         self.show_constellations = False
         self.selected_stars_visible = True
-        self.unsuitable_stars_visible = True
 
         # selected catalog star markers (main window)
         self.sel_cat_star_markers = pg.ScatterPlotItem()
@@ -2988,23 +3004,6 @@ class PlateTool(QtWidgets.QMainWindow):
 
         self.draw_calstars = True
 
-        # selected unsuitable star markers (main window)
-        self.unsuitable_star_markers = pg.ScatterPlotItem()
-        self.unsuitable_star_markers.setPen('r', width=3)
-        self.unsuitable_star_markers.setSize(10)
-        self.unsuitable_star_markers.setSymbol('s')
-        self.unsuitable_star_markers.setZValue(4)
-        self.img_frame.addItem(self.unsuitable_star_markers)
-
-        # selected catalog star markers (zoom window)
-        self.unsuitable_star_markers2 = pg.ScatterPlotItem()
-        self.unsuitable_star_markers2.setPen('r', width=3)
-        self.unsuitable_star_markers2.setSize(10)
-        self.unsuitable_star_markers2.setSymbol('s')
-        self.unsuitable_star_markers2.setZValue(4)
-        self.zoom_window.addItem(self.unsuitable_star_markers2)
-
-        self.unsuitable_stars_visble = True
 
         # Distortion center marker (red cross) - main window
         self.distortion_center_marker = pg.ScatterPlotItem()
@@ -3094,8 +3093,6 @@ class PlateTool(QtWidgets.QMainWindow):
         self.star_pick_info_text_str += "LEFT CLICK - Centroid star\n"
         self.star_pick_info_text_str += f"{ctrl} + LEFT CLICK - Manual star position\n"
         self.star_pick_info_text_str += "ENTER or SPACE - Accept pair\n"
-        self.star_pick_info_text_str += f"{ctrl} + SPACE - Mark pair bad\n"
-        self.star_pick_info_text_str += "SHIFT + SPACE - Jump random\n"
         self.star_pick_info_text_str += "RIGHT CLICK - Remove pair\n"
         self.star_pick_info_text_str += f"{ctrl} + SCROLL - Aperture radius adjust\n"
         self.star_pick_info_text_str += f"{ctrl} + Z - Fit stars\n"
@@ -3150,6 +3147,24 @@ class PlateTool(QtWidgets.QMainWindow):
                                                                              style=QtCore.Qt.DashLine))
         self.img_frame.addItem(self.residual_lines_img)
         self.residual_lines_img.setZValue(2)
+
+        # Night-pairs overlay: the validated cross-frame star pairs drawn on the current
+        # frame. The camera is fixed, so detections from other frames of the night apply
+        # directly in pixel coordinates; needles point to the catalog position projected at
+        # each pair's own frame time (exaggerated like the residual lines)
+        self.night_pairs_markers = pg.ScatterPlotItem()
+        self.night_pairs_markers.setPen(pg.mkPen((255, 0, 255, 190)))
+        self.night_pairs_markers.setBrush((0, 0, 0, 0))
+        self.night_pairs_markers.setSize(8)
+        self.night_pairs_markers.setSymbol('o')
+        self.night_pairs_markers.setZValue(3)
+        self.img_frame.addItem(self.night_pairs_markers)
+
+        self.night_pairs_needles = pg.PlotCurveItem(connect='pairs',
+                                                    pen=pg.mkPen((255, 0, 255, 160)))
+        self.night_pairs_needles.setZValue(3)
+        self.img_frame.addItem(self.night_pairs_needles)
+        self._night_pairs_key = None
         
         # Fit residuals (astrometric, yellow)
         self.residual_lines_astro = pg.PlotCurveItem(connect='pairs', pen=pg.mkPen((255, 255, 0),
@@ -3346,9 +3361,14 @@ class PlateTool(QtWidgets.QMainWindow):
         # Connect astrometry & photometry buttons to functions
         self.tab.param_manager.sigFitPressed.connect(self.fitPickedStars)
         self.tab.param_manager.sigAutoFitPressed.connect(self.autoFitAstrometryNet)
+        self.tab.param_manager.sigFindPairsPressed.connect(self.findMatchingPairs)
+        self.tab.param_manager.sigComputeResidualsPressed.connect(self.computeResiduals)
+        self.tab.param_manager.sigValidateFitPressed.connect(self.validateFitAcrossFrames)
+        self.tab.param_manager.sigRefitNightPressed.connect(self.refitWithNightStars)
+        self.tab.param_manager.sigShowNightPairsToggled.connect(
+            lambda checked: self.updateNightPairsOverlay())
         self.tab.param_manager.sigQuickAlignPressed.connect(self.quickAlign)
         self.tab.param_manager.sigFindBestFramePressed.connect(self.findBestFrame)
-        self.tab.param_manager.sigNextStarPressed.connect(self.jumpNextStar)
         self.tab.param_manager.sigPhotometryPressed.connect(lambda: self.photometry(show_plot=True))
         self.tab.param_manager.sigAstrometryPressed.connect(self.showAstrometryFitPlots)
         self.tab.param_manager.sigResetDistortionPressed.connect(self.resetDistortion)
@@ -3371,6 +3391,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.star_detection.sigMaxFeatureRatioChanged.connect(self.updateMaxFeatureRatio)
         self.tab.star_detection.sigRoundnessThresholdChanged.connect(self.updateRoundnessThreshold)
         self.tab.star_detection.sigTuneParameters.connect(self.tuneStarDetection)
+        self.tab.star_detection.sigSaveCalstarsPressed.connect(self.saveOverrideCalstars)
         self.tab.star_detection.sigSaveToConfig.connect(lambda: self.showCalibrationFilesDialog(save_ftype="Config"))
         self.tab.star_detection.sigCatalogLMChanged.connect(self.updateCatalogLMFromStarDetection)
 
@@ -3410,7 +3431,8 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.settings.sigMeasGroundPointsToggled.connect(self.toggleMeasGroundPoints)
         self.tab.settings.sigGridToggled.connect(self.onGridChanged)
         self.tab.settings.sigInvertToggled.connect(self.toggleInvertColours)
-        self.tab.settings.sigAutoPanToggled.connect(self.toggleAutoPan)
+        self.tab.settings.sigErrorOverlayToggled.connect(self.toggleErrorOverlay)
+        self.tab.settings.sigErrorOverlayThresholdChanged.connect(self.updateErrorOverlayThreshold)
         self.tab.settings.sigSingleClickPhotometryToggled.connect(self.toggleSingleClickPhotometry)
         self.tab.settings.sigSatTracksToggled.connect(self.toggleShowSatTracks)
         self.tab.settings.sigAutoComputeSatTracksToggled.connect(self.toggleAutoComputeSatTracks)
@@ -3707,8 +3729,38 @@ class PlateTool(QtWidgets.QMainWindow):
             self.updateLeftLabels()
             self.updateImageNavigationDisplay()
             self.tab.debruijn.updateTable()
+
+            # Session state from the previous folder must not leak into this one: the
+            # re-detected star sets belong to the old station's frames and would otherwise
+            # be merged into this station's star data (validation, Find Best Frame)
+            self.star_detection_override_data = {}
+            self.star_detection_override_enabled = False
+            self.tab.star_detection.use_override_checkbox.setChecked(False)
+
             self.initStarDetectionOverrides()
             self.updateFindBestFrameButton()
+
+            # The stored cross-frame validation belongs to the previous folder's night
+            self.night_validation = None
+            self.tab.param_manager.refit_night_button.setEnabled(False)
+            if hasattr(self.tab.param_manager, 'show_night_pairs_checkbox'):
+                self.tab.param_manager.show_night_pairs_checkbox.setEnabled(False)
+            self.updateNightPairsOverlay()
+
+            # Clear the fit residual overlay (lines and the residual/mag/SNR labels) - it
+            # belongs to the previous folder's fit
+            if hasattr(self, 'residual_lines_img'):
+                self.residual_lines_img.clear()
+                self.residual_lines_astro.clear()
+            if hasattr(self, 'residual_text'):
+                self.residual_text.clear()
+
+            # The tuned catalog limiting magnitude belongs to the previous station's camera -
+            # left set, it silently feeds the new station's auto-fit final stages
+            self.catalog_lm_tuned = False
+
+            # Satellite tracks were projected with the previous folder's platepar and times
+            self.clearSatelliteTrackItems()
 
             # Populate menus with mode-specific actions (including F1 shortcut)
             self.changeMode(self.mode)
@@ -3890,23 +3942,6 @@ class PlateTool(QtWidgets.QMainWindow):
             # Add RA/Dec info
             status_str += ", RA={:6.2f} Dec={:+6.2f} (J2000)".format(ra[0], dec[0])
 
-            # Show mode for debugging purposes
-
-            if self.star_pick_mode and not self.autopan_mode:
-                pass
-            elif self.star_pick_mode and self.autopan_mode:
-                status_str += ", Auto pan"
-
-            if self.max_pixels_between_matched_stars != np.inf:
-                percentage_complete = min([100,100*(len(self.paired_stars)+len(self.unsuitable_stars))/
-                                                                len(self.catalog_x_filtered)])
-
-                if self.max_pixels_between_matched_stars != 0:
-                    status_str += ", max gap {:.0f}px".format(self.max_pixels_between_matched_stars)
-
-                status_str += " good:{} bad:{} progress {:.0f}%".format(
-                    len(self.paired_stars), len(self.unsuitable_stars), percentage_complete)
-
         return status_str
 
 
@@ -4032,6 +4067,10 @@ class PlateTool(QtWidgets.QMainWindow):
 
         """
 
+        # Keep the night-pairs overlay consistent with the platepar (cheap no-op when
+        # nothing changed; clears the overlay when a manual fit invalidates the validation)
+        self.updateNightPairsOverlay()
+
         if not self.hasData():
             return
 
@@ -4077,7 +4116,8 @@ class PlateTool(QtWidgets.QMainWindow):
             pp_noref = copy.deepcopy(self.platepar)
             pp_noref.refraction = False
             pp_noref.updateRefRADec(preserve_rotation=True)
-            self.geo_x, self.geo_y, _ = getCatalogStarsImagePositions(self.geo_points, ff_jd, pp_noref)
+            self.geo_x, self.geo_y, _ = getCatalogStarsImagePositions(self.geo_points, ff_jd, pp_noref,
+                                                                      use_iterative=True)
 
             geo_xy = np.c_[self.geo_x, self.geo_y]
 
@@ -4113,9 +4153,12 @@ class PlateTool(QtWidgets.QMainWindow):
         ### Draw catalog stars on the image using the current platepar ###
         ######################################################################################################
 
-        # Get positions of catalog stars on the image
+        # Get positions of catalog stars on the image. The iterative inversion of the forward mapping
+        # keeps the displayed positions exact even mid auto-fit, when only the forward polynomial has
+        # been fitted so far
         self.catalog_x, self.catalog_y, catalog_mag = getCatalogStarsImagePositions(self.catalog_stars, \
-                                                                                    ff_jd, self.platepar)
+                                                                                    ff_jd, self.platepar, \
+                                                                                    use_iterative=True)
 
         # Apply apparent magnitude correction if enabled
         if self.apparent_mag_corr_enabled:
@@ -4569,7 +4612,8 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Convert RA/Dec to image coordinates
             body_radec = np.array([[ra_deg, dec_deg, mag]])
-            x_arr, y_arr, _ = getCatalogStarsImagePositions(body_radec, ff_jd, self.platepar)
+            x_arr, y_arr, _ = getCatalogStarsImagePositions(body_radec, ff_jd, self.platepar,
+                                                            use_iterative=True)
 
             if len(x_arr) > 0:
                 x, y = x_arr[0], y_arr[0]
@@ -4617,13 +4661,6 @@ class PlateTool(QtWidgets.QMainWindow):
             self.sel_cat_star_markers.setData(pos=[])
             self.sel_cat_star_markers2.setData(pos=[])
 
-        if len(self.unsuitable_stars) > 0:
-            self.unsuitable_star_markers.setData(pos=self.unsuitable_stars.imageCoords(draw=True))
-            self.unsuitable_star_markers2.setData(pos=self.unsuitable_stars.imageCoords(draw=True))
-        else:
-            self.unsuitable_star_markers.setData(pos=[])
-            self.unsuitable_star_markers2.setData(pos=[])
-
         self.centroid_star_markers.setData(pos=[])
         self.centroid_star_markers2.setData(pos=[])
 
@@ -4631,7 +4668,158 @@ class PlateTool(QtWidgets.QMainWindow):
         if len(self.paired_stars) >= 2:
             self.photometry()
 
+        # Update the round-trip error overlay
+        self.updateErrorOverlay()
+
         self.tab.param_manager.updatePairedStars(min_fit_stars=self.getMinFitStars())
+
+
+    def toggleErrorOverlay(self):
+        """ Toggle the round-trip error overlay display. """
+        self.error_overlay_enabled = not self.error_overlay_enabled
+        self.updateErrorOverlay()
+
+
+    def updateErrorOverlayThreshold(self, threshold):
+        """ Update error overlay threshold and refresh display.
+
+        Arguments:
+            threshold: [float] Errors below this value (pixels) will be fully transparent.
+        """
+        self.error_overlay_threshold = threshold
+
+        # Update the label in the settings panel
+        self.tab.settings.error_overlay_value_label.setText('{:.2f} px'.format(threshold))
+
+        # Refresh the overlay if it's enabled (the pixmap is rebuilt from the cached error grid)
+        if self.error_overlay_enabled:
+            self.updateErrorOverlay()
+
+
+    def updateErrorOverlay(self):
+        """ Update the round-trip error overlay showing the disagreement between the forward and
+            reverse astrometric mappings across the image. The error grid is recomputed whenever
+            the platepar changes (also feeding the round-trip max readout in the Fit Parameters
+            tab); the overlay pixmap itself is only rebuilt when the grid or the transparency
+            threshold changes.
+        """
+
+        # Remove existing overlay
+        if self.error_overlay_item is not None:
+            self.img_frame.removeItem(self.error_overlay_item)
+            self.error_overlay_item = None
+
+        # Only compute in skyfit mode
+        if self.mode != 'skyfit':
+            return
+
+        # Check if image is loaded
+        if not hasattr(self, 'img') or self.img is None or self.img.data is None:
+            return
+
+        # Check if platepar has required data
+        if (self.platepar is None) or (getattr(self.platepar, 'JD', None) is None):
+            return
+
+        # Get image dimensions
+        img_x_max, img_y_max = self.img.data.shape[:2]
+
+        # Recompute whenever any platepar parameter that affects the mapping has changed, so manual
+        # adjustments (pointing nudges, distortion edits, refraction toggles, platepar loads) are
+        # picked up without having to instrument every mutation site
+        pp = self.platepar
+        pp_key = (
+            pp.RA_d, pp.dec_d, pp.pos_angle_ref, pp.F_scale, pp.Ho, pp.JD, pp.lat, pp.lon,
+            pp.refraction, pp.equal_aspect, pp.force_distortion_centre, pp.asymmetry_corr,
+            str(pp.distortion_type),
+            tuple(pp.x_poly_fwd), tuple(pp.y_poly_fwd), tuple(pp.x_poly_rev), tuple(pp.y_poly_rev),
+        )
+        if getattr(self, 'error_overlay_pp_key', None) != pp_key:
+            self.error_overlay_pp_key = pp_key
+            self.error_overlay_needs_update = True
+
+        # Recompute the error grid if needed. This runs even when the overlay display is disabled,
+        # so the round-trip max readout in the Fit Parameters tab stays current (the vectorized
+        # computation is cheap).
+        if self.error_overlay_needs_update or (self.error_overlay_grid is None):
+
+            # Use platepar reference time for both directions to measure pure geometric accuracy
+            jd = self.platepar.JD
+            time_data = jd2Date(jd)
+
+            stride = self.error_overlay_stride
+            x_grid = np.arange(0, img_x_max, stride)
+            y_grid = np.arange(0, img_y_max, stride)
+            xx, yy = np.meshgrid(x_grid.astype(np.float64), y_grid.astype(np.float64))
+            xs, ys = xx.ravel(), yy.ravel()
+
+            try:
+                # Round trip: xy -> RA/Dec -> xy, vectorized over the whole grid
+                _, ra_arr, dec_arr, _ = xyToRaDecPP([time_data]*len(xs), xs, ys, [1]*len(xs),
+                    self.platepar, extinction_correction=False)
+                x_rec, y_rec = raDecToXYPP(np.array(ra_arr), np.array(dec_arr), jd, self.platepar)
+                err = np.hypot(np.array(x_rec) - xs, np.array(y_rec) - ys)
+                self.error_overlay_grid = err.reshape(len(y_grid), len(x_grid))
+
+            except Exception:
+                self.error_overlay_grid = np.zeros((len(y_grid), len(x_grid)))
+
+            self.error_overlay_pixmap = None  # Grid changed, cached pixmap is stale
+            self.error_overlay_needs_update = False
+
+            # Show the maximum round-trip error under the residuals in the Fit Parameters tab
+            if hasattr(self, 'tab') and hasattr(self.tab, 'param_manager'):
+                self.tab.param_manager.updateRoundtripError(float(np.max(self.error_overlay_grid)))
+
+        # Only draw the overlay if enabled
+        if not self.error_overlay_enabled:
+            return
+
+        # Rebuild the pixmap if the grid or the threshold changed
+        if (self.error_overlay_pixmap is None) \
+                or (self.error_overlay_pixmap_threshold != self.error_overlay_threshold):
+
+            error_grid = self.error_overlay_grid
+
+            # Normalize errors for colormap: below threshold is 0, above scales to [0, 1]
+            error_normalized = np.copy(error_grid)
+            error_normalized[error_normalized < self.error_overlay_threshold] = 0
+
+            max_error = np.max(error_normalized)
+            if max_error > self.error_overlay_threshold:
+                # Map [threshold, max_error] to [0, 1]
+                above = error_normalized >= self.error_overlay_threshold
+                error_normalized[above] = (error_normalized[above] - self.error_overlay_threshold) \
+                    /(max_error - self.error_overlay_threshold)
+
+            # Create RGBA image using the hot colormap (registry API on modern matplotlib)
+            if hasattr(matplotlib, 'colormaps'):
+                cmap = matplotlib.colormaps.get_cmap('hot')
+            else:
+                cmap = plt.get_cmap('hot')
+            rgba_grid = cmap(error_normalized)  # Shape: (h, w, 4)
+
+            # Alpha channel: 0 below threshold, otherwise scale with error (max 60% opacity)
+            alpha = np.where(error_grid < self.error_overlay_threshold, 0,
+                            np.clip(error_normalized*0.6, 0, 0.6))
+            rgba_grid[:, :, 3] = alpha
+
+            rgba_uint8 = (rgba_grid*255).astype(np.uint8)
+
+            # Resize to match image dimensions - cv2.resize expects (width, height)
+            rgba_resized = cv2.resize(rgba_uint8, (img_x_max, img_y_max),
+                                     interpolation=cv2.INTER_LINEAR)
+
+            # Convert to QPixmap and cache for reuse
+            height, width, channel = rgba_resized.shape
+            q_img = QtGui.QImage(rgba_resized.data, width, height, 4*width,
+                                QtGui.QImage.Format_RGBA8888)
+            self.error_overlay_pixmap = QtGui.QPixmap.fromImage(q_img)
+            self.error_overlay_pixmap_threshold = self.error_overlay_threshold
+
+        self.error_overlay_item = QtWidgets.QGraphicsPixmapItem(self.error_overlay_pixmap)
+        self.error_overlay_item.setZValue(0.5)  # Between image (0) and overlays (1)
+        self.img_frame.addItem(self.error_overlay_item)
 
 
     def updateCalstars(self):
@@ -4887,6 +5075,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
                 # Store the override detected stars
                 self.star_detection_override_data[ff_name] = star_data
+                self.updateFindBestFrameButton()
                 original_count = len(self.calstars.get(ff_name, []))
                 print(f"  Detected {len(star_data)} stars (original: {original_count})")
 
@@ -4915,6 +5104,37 @@ class PlateTool(QtWidgets.QMainWindow):
             traceback.print_exc()
 
 
+    def saveOverrideCalstars(self):
+        """ Write the current star data - CALSTARS merged with any re-detected (override)
+            frames - to a CALSTARS file for sharing or offline analysis. """
+
+        merged = dict(self.calstars) if (hasattr(self, 'calstars') and self.calstars) else {}
+        if getattr(self, 'star_detection_override_enabled', False):
+            merged.update(self.star_detection_override_data)
+        elif getattr(self, 'star_detection_override_data', None) and not merged:
+            merged = dict(self.star_detection_override_data)
+        merged = {ff: stars for ff, stars in merged.items() if len(stars) > 0}
+
+        if not merged:
+            qmessagebox(title='Save CALSTARS', message="No star data to save!",
+                        message_type="warning")
+            return
+
+        default_name = "CALSTARS_{:s}_override.txt".format(self.config.stationID)
+        file_path, _ = QFileDialog.getSaveFileName(self, "Save CALSTARS",
+            os.path.join(self.dir_path, default_name), "CALSTARS files (*.txt)")
+        if not file_path:
+            return
+
+        star_list = [[ff, [list(row) for row in merged[ff]]] for ff in sorted(merged)]
+        CALSTARS.writeCALSTARS(star_list, os.path.dirname(file_path),
+                               os.path.basename(file_path), self.config.stationID,
+                               self.platepar.Y_res if self.platepar else self.config.height,
+                               self.platepar.X_res if self.platepar else self.config.width)
+        print("Saved {:d} frames of star data to {:s}".format(len(star_list), file_path))
+        self.status_bar.showMessage("CALSTARS saved: {:s}".format(os.path.basename(file_path)))
+
+
     def redetectAllImages(self):
         """ Re-detect stars on all images using override parameters. """
         print("Re-detecting stars on all images...")
@@ -4922,9 +5142,11 @@ class PlateTool(QtWidgets.QMainWindow):
         # Ensure unsaved mask polygons are applied to the detection
         self.mask = MaskStructure(self.generateMaskImage())
 
-        # Get list of all FF files that exist on disk, excluding placeholders
-        ff_files = [f for f in self.calstars.keys()
-                     if os.path.isfile(os.path.join(self.dir_path, f)) and "_placeholder" not in f]
+        # Get the list of all FF files on disk, excluding placeholders. Enumerate the disk
+        # (not the CALSTARS keys) so stations without a CALSTARS file still get all frames
+        ff_files = [f for f in sorted(os.listdir(self.dir_path))
+                    if validFFName(f) and "_placeholder" not in f
+                    and os.path.isfile(os.path.join(self.dir_path, f))]
         if not ff_files:
             print("  No FF files found on disk")
             return
@@ -4937,6 +5159,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.star_detection.redetect_all_button.setEnabled(False)
         self.tab.star_detection.redetect_button.setEnabled(False)
         self.tab.star_detection.tune_button.setEnabled(False)
+        self._beginCancellableOperation()
         self.status_bar.showMessage(f"Re-detecting stars on {total} images...")
         QtWidgets.QApplication.processEvents()
 
@@ -4964,10 +5187,18 @@ class PlateTool(QtWidgets.QMainWindow):
             for i, ff_name in enumerate(ff_files):
                 print(f"  Processing {i+1}/{total}: {ff_name}")
 
-                # Update status bar and keep UI responsive
+                # Update status bar and keep UI responsive; the Stop button aborts here,
+                # keeping the frames re-detected so far
                 self.status_bar.showMessage(
                     f"Re-detecting stars... {i+1}/{total} ({success_count} successful)")
-                QtWidgets.QApplication.processEvents()
+                try:
+                    self._checkCancelled()
+                except OperationCancelled:
+                    print("Re-detection stopped by the user after "
+                          f"{success_count}/{total} frames.")
+                    self.status_bar.showMessage(
+                        f"Re-detection stopped ({success_count}/{total} frames done)")
+                    break
 
                 try:
                     extra_info = {}
@@ -4986,6 +5217,7 @@ class PlateTool(QtWidgets.QMainWindow):
                         # CALSTARS format: Y(0) X(1) IntensSum(2) Ampltd(3) FWHM(4) BgLvl(5) SNR(6) NSatPx(7)
                         star_data = list(zip(y_arr, x_arr, intensity, amplitude, fwhm, background, snr, saturated_count))
                         self.star_detection_override_data[ff_name] = star_data
+                        self.updateFindBestFrameButton()
                         
                         # Store candidate count in star data if needed, or handle separately. 
                         # For redetectAllImages, we usually just update the main status for the last one
@@ -5009,6 +5241,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self.config.roundness_threshold = original_roundness_threshold
 
             # Re-enable buttons
+            self._endCancellableOperation()
             self.tab.star_detection.redetect_all_button.setText("Re-Detect All")
             self.tab.star_detection.redetect_all_button.setEnabled(True)
             self.tab.star_detection.redetect_button.setEnabled(True)
@@ -7384,7 +7617,12 @@ class PlateTool(QtWidgets.QMainWindow):
         # Set photometry parameters
         self.platepar.mag_0 = -2.5
         self.platepar.mag_lev = photom_offset
-        self.platepar.mag_lev_stddev = self.photom_fit_stddev
+        # Guard against a degenerate photometric fit (too few stars) poisoning the platepar
+        # with NaN - it leaks into every later magnitude error as "+nan"
+        if (self.photom_fit_stddev is not None) and np.isfinite(self.photom_fit_stddev):
+            self.platepar.mag_lev_stddev = self.photom_fit_stddev
+        else:
+            self.platepar.mag_lev_stddev = 0.0
         self.platepar.vignetting_coeff = vignetting_coeff
 
         # Fit the limiting magnitude model: log10(S/N) vs the calibrated (vignetting + extinction
@@ -8539,7 +8777,7 @@ class PlateTool(QtWidgets.QMainWindow):
         return removed_count
 
 
-    def filterBlendedStars(self, fwhm_mult=2.0, mag_margin=0.3):
+    def filterBlendedStars(self, fwhm_mult=2.0, mag_margin=0.3, pull_px=None):
         """
         Filter paired_stars by removing likely blended stars.
 
@@ -8553,14 +8791,28 @@ class PlateTool(QtWidgets.QMainWindow):
         Returns:
             int: Number of stars removed.
         """
-        # Get FOV-filtered catalog stars for neighbor lookup
-        # Using filtered catalog prevents false positives from stars behind the camera
-        if hasattr(self, 'catalog_stars_filtered_unmasked') and self.catalog_stars_filtered_unmasked is not None:
-            catalog_for_blend = self.catalog_stars_filtered_unmasked
-        elif hasattr(self, 'catalog_stars') and self.catalog_stars is not None:
-            catalog_for_blend = self.catalog_stars
+
+        # Check the neighbourhood against a catalog DEEPER than the display: the detector's
+        # centroids are pulled by neighbours the display catalog cannot even see (the
+        # cross-frame validation uses the same +1.5 mag convention). Cached per LM.
+        deep_lm = self.cat_lim_mag + 1.5
+        cached = getattr(self, '_blend_catalog_cache', None)
+        if (cached is not None) and abs(cached[0] - deep_lm) < 0.01:
+            catalog_for_blend = cached[1]
         else:
-            return 0
+            try:
+                years_from_J2000 = (self.img_handle.beginning_datetime
+                    - datetime.datetime(2000, 1, 1, 12, 0, 0)).days/365.25
+                catalog_for_blend = StarCatalog.readStarCatalog(
+                    self.config.star_catalog_path, self.config.star_catalog_file,
+                    years_from_J2000=years_from_J2000, lim_mag=deep_lm,
+                    mag_band_ratios=self.config.star_catalog_band_ratios)[0]
+                self._blend_catalog_cache = (deep_lm, catalog_for_blend)
+            except Exception:
+                # Fall back to the display catalog if the deep load fails
+                catalog_for_blend = getattr(self, 'catalog_stars', None)
+                if catalog_for_blend is None:
+                    return 0
 
         jd = date2JD(*self.img_handle.currentFrameTime())
 
@@ -8569,14 +8821,14 @@ class PlateTool(QtWidgets.QMainWindow):
             catalog_for_blend,
             self.platepar,
             jd,
-            self.cat_lim_mag,
+            deep_lm,
             fwhm_mult=fwhm_mult,
             mag_margin=mag_margin,
+            pull_px=pull_px,
             verbose=True
         )
 
         return removed_count
-
 
     def balanceCatalogMagnitude(self):
         """
@@ -8770,7 +9022,6 @@ class PlateTool(QtWidgets.QMainWindow):
             # Reset paired stars
             self.pick_list = {}
             self.paired_stars = PairedStars()
-            self.unsuitable_stars = PairedStars()
             self.residuals = None
 
             # Clear residual overlay from previous image
@@ -9404,15 +9655,6 @@ class PlateTool(QtWidgets.QMainWindow):
         # Update possibly missing flag for measuring ground points
         if not hasattr(self, "meas_ground_points"):
             self.meas_ground_points = False
-
-        if not hasattr(self, "autopan_mode"):
-            self.autopan_mode = False
-
-        if not hasattr(self, "unsuitable_stars"):
-            self.unsuitable_stars = PairedStars()
-
-        if not hasattr(self, "max_pixels_between_matched_stars"):
-            self.max_pixels_between_matched_stars = np.inf
 
         # Update possibly missing flag for measuring ground points
         if not hasattr(self, "single_click_photometry"):
@@ -10135,13 +10377,6 @@ class PlateTool(QtWidgets.QMainWindow):
             self.img_zoom.reloadImage()
             self.img.reloadImage()
 
-        # Jump to the next star
-        elif event.key() == QtCore.Qt.Key_Space and (modifiers == QtCore.Qt.ShiftModifier):
-
-            self.jumpNextStar(miss_this_one=True)
-            self.updateBottomLabel()
-
-
         # Fit spectral band ratios (hidden feature)
         elif event.key() == QtCore.Qt.Key_B and modifiers == (QtCore.Qt.ControlModifier | QtCore.Qt.ShiftModifier):
             self.fitBandRatio()
@@ -10183,18 +10418,12 @@ class PlateTool(QtWidgets.QMainWindow):
                 if self.label1.isVisible():
                     self.star_pick_info.show()
 
-                # Enable the Next button for star panning
-                self.tab.param_manager.next_star_button.setEnabled(True)
-
             else:
                 self.img_frame.setMouseEnabled(True, True)
                 self.cursor2.hide()
                 self.cursor.hide()
 
                 self.star_pick_info.hide()
-
-                # Disable the Next button for star panning
-                self.tab.param_manager.next_star_button.setEnabled(False)
 
 
         # Toggle grid
@@ -10415,18 +10644,6 @@ class PlateTool(QtWidgets.QMainWindow):
             # Pan the view down on screen (roll-aware)
             elif event.key() == QtCore.Qt.Key_S:
                 self.nudgeReferenceScreen(0, -1)
-
-            # Pan to unmatched star most distant from all other matched stars
-
-            elif event.key() == QtCore.Qt.Key_U and modifiers == QtCore.Qt.ControlModifier:
-
-                self.jumpNextStar(miss_this_one=False)
-
-            elif event.key() == QtCore.Qt.Key_O and modifiers == QtCore.Qt.ControlModifier:
-
-                self.toggleAutoPan()
-                self.tab.settings.updateAutoPan()
-                self.updateBottomLabel()
 
 
 
@@ -10708,45 +10925,12 @@ class PlateTool(QtWidgets.QMainWindow):
                 # updates image automatically
 
 
-            # Save the point to the matched stars list by pressing Enter or Space or to the
-            # unsuitable stars
+            # Save the point to the matched stars list by pressing Enter or Space
 
             elif (event.key() == QtCore.Qt.Key_Return) or (event.key() == QtCore.Qt.Key_Enter) \
                 or (event.key() == QtCore.Qt.Key_Space):
 
                 if self.star_pick_mode:
-                    
-                    # Check if the star has been skipped
-                    unsuitable = False
-                    if modifiers == QtCore.Qt.ControlModifier:
-                        
-                        # If a star has been skipped, mark it as unsuitable
-                        if (self.old_autopan_x is not None) and (self.old_autopan_y is not None):
-                            
-                            # Check that a new star has been selected
-                            if (self.old_autopan_x != self.current_autopan_x) or \
-                                (self.old_autopan_y != self.current_autopan_y):
-                                
-                                unsuitable = True
-                        
-                        elif (self.current_autopan_x is None) and (self.current_autopan_y is None):
-                            unsuitable = False
-
-                        else:
-                            unsuitable = True
-                    
-                    if unsuitable:
-
-                        print("Unsuitable star at coordinates: ({}, {})".format(self.current_autopan_x, self.current_autopan_y))
-
-                        self.unsuitable_stars.addPair(self.current_autopan_x, self.current_autopan_y,
-                                                        0, 0, None)
-                        self.updateBottomLabel()
-                        self.unsuitable_star_markers.addPoints(x=[self.current_autopan_x],
-                                                                y=[self.current_autopan_y])
-                        self.unsuitable_star_markers2.addPoints(x=[self.current_autopan_x],
-                                                                y=[self.current_autopan_y])
-
                     # If the catalog star, planet, or geo point has been selected, save the pair to the list
                     if self.cursor.mode == 1:
 
@@ -10783,29 +10967,13 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
                         # Add the image/catalog pair to the list
-                        if not unsuitable:
-                            self.paired_stars.addPair(self.x_centroid, self.y_centroid, self.star_fwhm,
-                                    self.star_intensity, pair_obj,
-                                    snr=self.star_snr, saturated=self.star_saturated)
+                        self.paired_stars.addPair(self.x_centroid, self.y_centroid, self.star_fwhm,
+                                self.star_intensity, pair_obj,
+                                snr=self.star_snr, saturated=self.star_saturated)
 
                         # Switch back to centroiding mode
                         self.cursor.setMode(0)
                         self.updatePairedStars()
-
-                        if self.autopan_mode:
-
-                            self.updateBottomLabel()
-
-                            self.jumpNextStar(miss_this_one=False)
-
-
-                    else:
-
-                        # Jump to next star if CTRL + SPACE is pressed
-                        if modifiers == QtCore.Qt.ControlModifier:
-                            print("Jumping to the next star")
-                            self.jumpNextStar(miss_this_one=False)
-
 
             elif event.key() == QtCore.Qt.Key_Escape:
                 if self.star_pick_mode:
@@ -12159,12 +12327,6 @@ class PlateTool(QtWidgets.QMainWindow):
         self.img.invert()
         self.img_zoom.invert()
 
-    def toggleAutoPan(self):
-
-        self.img.autopan()
-        self.autopan_mode = not self.autopan_mode
-
-
     def toggleSingleClickPhotometry(self):
         self.single_click_photometry = not self.single_click_photometry
 
@@ -12523,20 +12685,40 @@ class PlateTool(QtWidgets.QMainWindow):
                     # Redraw catalog stars and distortion center with updated platepar
                     self.updateStars(only_update_catalog=True)
                     self.updateDistortionCenterMarker()
-                    QtWidgets.QApplication.processEvents()
 
                     # Restore original platepar so optimizer isn't corrupted
                     self.platepar = saved_pp
 
-                ransac_result = self.platepar.fitAstrometry(
-                    jd, img_stars_arr, catalog_stars_filtered,
-                    first_platepar_fit=True,
-                    use_nn_cost=True,
-                    final_catalog_stars=tuned_catalog,
-                    iteration_callback=iteration_callback
-                )
+                    # Abort point: raises OperationCancelled if Stop was pressed (also pumps
+                    # the event loop so the click can land)
+                    self._checkCancelled()
+
+                # The fit mutates the platepar in place - keep a copy to restore on cancel
+                platepar_backup = copy.deepcopy(self.platepar)
+                self._beginCancellableOperation()
+                try:
+                    ransac_result = self.platepar.fitAstrometry(
+                        jd, img_stars_arr, catalog_stars_filtered,
+                        first_platepar_fit=True,
+                        use_nn_cost=True,
+                        final_catalog_stars=tuned_catalog,
+                        iteration_callback=iteration_callback
+                    )
+
+                    # Mark error overlay for recomputation after the platepar changed
+                    self.error_overlay_needs_update = True
+                finally:
+                    self._endCancellableOperation()
                 print("  NN fit complete: RA={:.2f} Dec={:.2f} Scale={:.3f} arcmin/px".format(
                     self.platepar.RA_d, self.platepar.dec_d, 60/self.platepar.F_scale))
+            except OperationCancelled:
+                # Restore the platepar and re-raise: returning a falsy value here would
+                # send the caller into the astrometry.net fallback - the opposite of Stop
+                self.platepar = platepar_backup
+                self.updateStars(only_update_catalog=True)
+                self.updateDistortionCenterMarker()
+                print("  NN fit cancelled - platepar restored.")
+                raise
             except Exception as e:
                 print("  NN fit failed: {} - falling back to astrometry.net".format(str(e)))
                 return False
@@ -12590,11 +12772,12 @@ class PlateTool(QtWidgets.QMainWindow):
             if removed > 0:
                 print("Pairs after photometric filtering: {}".format(len(self.paired_stars)))
 
-        # Filter blended stars before final fit
+        # Filter gross blends before the final fit (pull > 2 px only - the empirical
+        # threshold sweep showed the fit is best with maximum coverage; see findMatchingPairs)
         if len(self.paired_stars) >= 15:
-            removed = self.filterBlendedStars(fwhm_mult=2.0, mag_margin=0.3)
+            removed = self.filterBlendedStars(fwhm_mult=2.0, mag_margin=0.3, pull_px=2.0)
             if removed > 0:
-                print("Pairs after blend filtering: {}".format(len(self.paired_stars)))
+                print("Pairs after gross-blend filtering: {}".format(len(self.paired_stars)))
 
         # Do a final fit with user's distortion settings
         if len(self.paired_stars) >= 10:
@@ -12740,6 +12923,499 @@ class PlateTool(QtWidgets.QMainWindow):
         print("=" * 70, flush=True)
         print(flush=True)
         sys.stdout.flush()
+
+
+
+    def _nightValidationKey(self):
+        """ Fingerprint of the platepar parameters the night validation was computed with. """
+        pp = self.platepar
+        return (pp.RA_d, pp.dec_d, pp.pos_angle_ref, pp.F_scale, str(pp.distortion_type),
+                tuple(pp.x_poly_fwd), tuple(pp.y_poly_fwd),
+                tuple(pp.x_poly_rev), tuple(pp.y_poly_rev))
+
+
+    def _requestCancel(self):
+        self._cancel_requested = True
+        self.status_bar.showMessage("Stopping...")
+
+    def _beginCancellableOperation(self):
+        """ Show the Stop button and reset the cancel flag. Pair with _endCancellableOperation
+            in a finally block. """
+        self._cancel_requested = False
+        self.stop_button.setVisible(True)
+
+    def _checkCancelled(self):
+        """ Pump the event loop (so the Stop button can be clicked and the UI stays alive)
+            and raise OperationCancelled if a stop was requested. """
+        QtWidgets.QApplication.processEvents()
+        if self._cancel_requested:
+            raise OperationCancelled()
+
+    def _endCancellableOperation(self):
+        self._cancel_requested = False
+        self.stop_button.setVisible(False)
+
+
+    def updateNightPairsOverlay(self):
+        """ Draw or clear the validated cross-frame pair overlay on the current frame.
+
+        Shows the spatially balanced, drift-compensated pair set that Refit W/ Night would
+        fit: circles at the detected positions (from all over the night - valid on any frame
+        because the camera is fixed), needles toward the catalog position projected at each
+        pair's own frame time, exaggerated by the same factor as the residual lines.
+        """
+
+        if not hasattr(self, 'night_pairs_markers'):
+            return
+
+        checked = self.tab.param_manager.show_night_pairs_checkbox.isChecked()
+        valid = (self.platepar is not None
+                 and getattr(self, 'night_validation', None) is not None
+                 and self._nightValidationKey() == self.night_validation_pp_key)
+
+        # Skip the rebuild when nothing changed (this is called from hot paths)
+        key = (checked, id(self.night_validation) if valid else None,
+               self._nightValidationKey() if valid else None)
+        if key == self._night_pairs_key:
+            return
+        self._night_pairs_key = key
+
+        if not (checked and valid):
+            self.night_pairs_markers.setData(pos=[])
+            self.night_pairs_needles.clear()
+            return
+
+        image_groups = buildRefitGroups(self.night_validation, self.platepar,
+                                        drift_correction=True)
+
+        res_scale = 100
+        det_x, det_y, seg_x, seg_y = [], [], [], []
+        for _, jd, img_stars, cat_arr in image_groups:
+            cat_x, cat_y = raDecToXYPP(cat_arr[:, 0], cat_arr[:, 1], jd, self.platepar)
+            for (dx, dy, _), px, py in zip(img_stars, cat_x, cat_y):
+                det_x.append(dx)
+                det_y.append(dy)
+                seg_x.extend([dx, dx + res_scale*(px - dx)])
+                seg_y.extend([dy, dy + res_scale*(py - dy)])
+
+        self.night_pairs_markers.setData(x=np.array(det_x) + 0.5, y=np.array(det_y) + 0.5)
+        self.night_pairs_needles.setData(x=np.array(seg_x) + 0.5, y=np.array(seg_y) + 0.5)
+        print("Night pairs overlay: {:d} pairs from {:d} frames".format(
+            len(det_x), len(image_groups)))
+
+
+    def refitWithNightStars(self):
+        """ Complement the astrometric fit with the validated cross-frame star pairs.
+
+        The pairs come from the last Validate Across Frames run: catalog-matched, blend- and
+        photometry-filtered detections from the whole night, spatially balanced so the image
+        centre does not dominate (corner pairs are kept in full). The multi-image fit projects
+        each frame's catalog stars at that frame's own time, so picks from different times
+        combine exactly - no epoch transfer. Photometry is not touched - it must come from a
+        single frame.
+        """
+
+        if (self.platepar is None) or (getattr(self, 'night_validation', None) is None):
+            qmessagebox(title='Refit with night stars',
+                        message="Run Validate Across Frames first!",
+                        message_type="warning")
+            return
+
+        if self._nightValidationKey() != self.night_validation_pp_key:
+            qmessagebox(title='Refit with night stars',
+                        message="The platepar has changed since the last validation.\n"
+                                "Run Validate Across Frames again first.",
+                        message_type="warning")
+            return
+
+        inputs = self._nightValidationInputs()
+        if inputs is None:
+            qmessagebox(title='Refit with night stars',
+                        message="Cross-frame validation needs CALSTARS data from the night!",
+                        message_type="warning")
+            return
+        merged, frames, catalog_val = inputs
+
+        def _score(s):
+            score = s["median_global"] + 0.25*s["rmsd_global"]
+            if s["median_corner"] is not None:
+                score += s["median_corner"] + 0.25*s["rmsd_corner"]
+            return score
+
+        def _fmt(s):
+            txt = "global median {:.2f} px, RMSD {:.2f} px".format(
+                s["median_global"], s["rmsd_global"])
+            if s["median_corner"] is not None:
+                txt += "; corner median {:.2f} px, RMSD {:.2f} px".format(
+                    s["median_corner"], s["rmsd_corner"])
+            return txt
+
+        summary_before = summarizeValidation(self.night_validation,
+                                             self.platepar.X_res, self.platepar.Y_res)
+
+        # The pair set is drift-compensated: the multi-image fit uses a single pointing for
+        # all frames, so each frame's measured pointing offset is removed from its pairs
+        # first (refraction-free rigid rotation - see buildRefitGroups)
+        image_groups = buildRefitGroups(self.night_validation, self.platepar,
+                                        drift_correction=True)
+        n_pairs = sum(len(img_stars) for _, _, img_stars, _ in image_groups)
+
+        if n_pairs < 20:
+            qmessagebox(title='Refit with night stars',
+                        message="Not enough validated pairs for a refit!",
+                        message_type="warning")
+            return
+
+        print()
+        print("Refitting astrometry with {:d} night star pairs from {:d} frames "
+              "(photometry untouched)...".format(n_pairs, len(image_groups)))
+        self.tab.param_manager.setFitButtonBusy(True)
+        self._beginCancellableOperation()
+        QtWidgets.QApplication.processEvents()
+        try:
+            pp_cand = copy.deepcopy(self.platepar)
+            pp_cand.fitAstrometryMultiImage(image_groups,
+                first_platepar_fit=False, fit_only_pointing=self.fit_only_pointing,
+                fixed_scale=self.fixed_scale)
+
+            self.status_bar.showMessage("Validating the refit...")
+
+            def refit_progress(i, n, ff_name):
+                self.status_bar.showMessage(
+                    "Validating the refit: frame {:d}/{:d}".format(i + 1, n))
+                self._checkCancelled()
+
+            res_cand = validateFit(pp_cand, merged, catalog_val, frames=frames,
+                progress_callback=refit_progress,
+                fps=self.config.fps, chunk_frames=getattr(self, 'calstars_chunk_frames', 256))
+
+        except OperationCancelled:
+            self.status_bar.showMessage("Refit cancelled - the current platepar was kept")
+            print("Refit cancelled - the current platepar was kept.")
+            return
+
+        finally:
+            self._endCancellableOperation()
+            self.tab.param_manager.setFitButtonBusy(False)
+
+        if not len(res_cand["star_res"]):
+            qmessagebox(title='Refit with night stars',
+                        message="The refit produced no catalog matches - kept the current "
+                                "platepar.",
+                        message_type="warning")
+            return
+
+        summary_after = summarizeValidation(res_cand, pp_cand.X_res, pp_cand.Y_res)
+
+        # A broken forward mapping does not show up in the validation numbers (they only
+        # exercise the reverse, catalog -> image mapping) but it wrecks the catalog overlay
+        # and the round-trip heatmap - so guard the forward/reverse round trip separately
+        def _roundtripMax(pp_x):
+            gx, gy = np.meshgrid(np.linspace(20, pp_x.X_res - 20, 12),
+                                 np.linspace(20, pp_x.Y_res - 20, 8))
+            gx, gy = gx.ravel(), gy.ravel()
+            _, rt_ra, rt_dec, _ = xyToRaDecPP(np.full(len(gx), pp_x.JD), gx, gy,
+                np.ones(len(gx)), pp_x, extinction_correction=False, jd_time=True,
+                precompute_pointing_corr=True)
+            rt_x, rt_y = raDecToXYPP(np.array(rt_ra), np.array(rt_dec), pp_x.JD, pp_x)
+            return float(np.max(np.hypot(rt_x - gx, rt_y - gy)))
+
+        rt_before = _roundtripMax(self.platepar)
+        rt_after = _roundtripMax(pp_cand)
+        rt_broken = rt_after > max(2.0*rt_before, rt_before + 1.0)
+
+        # Keep the better of the two platepars - a refit never makes the calibration worse
+        print()
+        print("Refit validation comparison:")
+        print("  current platepar: " + _fmt(summary_before)
+              + "; round-trip max {:.2f} px".format(rt_before))
+        print("  refit           : " + _fmt(summary_after)
+              + "; round-trip max {:.2f} px".format(rt_after))
+
+        if rt_broken:
+            print("The refit broke the forward/reverse consistency - keeping the current platepar.")
+            self.status_bar.showMessage("Refit rejected (forward mapping inconsistent) - kept the "
+                                        "current platepar.")
+            qmessagebox(title='Refit with night stars',
+                        message="The refit produced an inconsistent forward/reverse mapping "
+                                "(round-trip error {:.1f} px vs {:.1f} px before) and was "
+                                "rejected - the current platepar was kept.".format(
+                                    rt_after, rt_before),
+                        message_type="warning")
+            return
+
+        if _score(summary_after) >= _score(summary_before) - 1e-3:
+            print("The refit did not improve the validation - keeping the current platepar.")
+            self.status_bar.showMessage("Refit did not improve on the current platepar - kept it.")
+            qmessagebox(title='Refit with night stars',
+                        message="The refit did not improve the cross-frame validation - "
+                                "the current platepar was kept.\n\n"
+                                "Current: {:s}\nRefit:     {:s}".format(
+                                    _fmt(summary_before), _fmt(summary_after)),
+                        message_type="info")
+            return
+
+        print("Applying the refit.")
+        self.platepar = pp_cand
+
+        self.first_platepar_fit = False
+        self.platepar_modified = True
+        self.error_overlay_needs_update = True
+
+        # The stored validation no longer matches the new platepar
+        self.night_validation = None
+        self.tab.param_manager.refit_night_button.setEnabled(False)
+        self.updateNightPairsOverlay()
+
+        self.updateDistortion()
+        self.updateLeftLabels()
+        self.updateStars()
+        self.tab.param_manager.updatePlatepar()
+
+        # Recompute the picked-star residuals (and the RMSD display) against the refit
+        # platepar, if the session has pairs and the split-step workflow is available
+        if len(self.paired_stars) > 0 and hasattr(self, 'computeResiduals'):
+            self.computeResiduals()
+
+        # Re-validate so the before/after figure is immediately visible
+        self.validateFitAcrossFrames()
+
+
+    def _nightValidationInputs(self):
+        """ Assemble the inputs for a cross-frame validation run: merged CALSTARS data, the
+            coverage-selected frame subset and the deep validation catalog.
+
+        Return:
+            (merged, frames, catalog_val) or None if there is no usable CALSTARS data.
+        """
+
+        # Merge CALSTARS with any re-detected override data
+        merged = dict(self.calstars) if (hasattr(self, 'calstars') and self.calstars) else {}
+        if getattr(self, 'star_detection_override_enabled', False):
+            merged.update(self.star_detection_override_data)
+        merged = {ff: stars for ff, stars in merged.items() if len(stars) > 0}
+
+        if len(merged) < 2:
+            return None
+
+        # Select frames for spatial coverage - corners are topped up to dataset exhaustion
+        frames, _ = selectValidationFrames(merged, self.platepar.X_res, self.platepar.Y_res)
+
+        # Match against a catalog deeper than the display LM: the star detector reaches
+        # fainter than the displayed catalog, and real stars just past the LM cutoff
+        # would otherwise recur as match failures on every frame
+        lim_mag_val = self.cat_lim_mag + 1.5
+        years_from_J2000 = (self.img_handle.beginning_datetime
+            - datetime.datetime(2000, 1, 1, 12, 0, 0)).days/365.25
+        deep_results = StarCatalog.readStarCatalog(
+            self.config.star_catalog_path, self.config.star_catalog_file,
+            years_from_J2000=years_from_J2000, lim_mag=lim_mag_val,
+            mag_band_ratios=self.config.star_catalog_band_ratios)
+        catalog_val = deep_results[0]
+        print("Validation catalog: LM {:.1f} (display {:.1f}), {:d} stars".format(
+            lim_mag_val, self.cat_lim_mag, len(catalog_val)))
+
+        return merged, frames, catalog_val
+
+
+    def validateFitAcrossFrames(self):
+        """ Validate the current platepar against the detected stars of the whole night.
+
+        Uses CALSTARS detections on a coverage-selected frame subset (corner cells are filled
+        whenever the dataset has stars there), refits only the pointing per frame so mount
+        drift is separated from distortion error, and shows spatially binned residuals.
+        """
+
+        if self.platepar is None:
+            qmessagebox(title='Validate fit',
+                        message="A fitted platepar is needed for validation!",
+                        message_type="warning")
+            return
+
+        inputs = self._nightValidationInputs()
+        if inputs is None:
+            qmessagebox(title='Validate fit',
+                        message="Cross-frame validation needs CALSTARS data from the night!",
+                        message_type="warning")
+            return
+        merged, frames, catalog_val = inputs
+
+        self.tab.param_manager.validate_fit_button.setText("Validating...")
+        self.tab.param_manager.validate_fit_button.setEnabled(False)
+        self._beginCancellableOperation()
+        QtWidgets.QApplication.processEvents()
+
+        try:
+            def progress(i, n, ff_name):
+                self.status_bar.showMessage("Validating fit: frame {:d}/{:d}".format(i + 1, n))
+                self._checkCancelled()
+
+            results = validateFit(self.platepar, merged, catalog_val, frames=frames,
+                                  progress_callback=progress, fps=self.config.fps,
+                                  chunk_frames=getattr(self, 'calstars_chunk_frames', 256))
+            summary = summarizeValidation(results, self.platepar.X_res, self.platepar.Y_res)
+
+        except OperationCancelled:
+            self.status_bar.showMessage("Validation cancelled")
+            print("Validation cancelled.")
+            return
+
+        finally:
+            self._endCancellableOperation()
+            self.tab.param_manager.validate_fit_button.setText("Validate Across Frames")
+            self.tab.param_manager.validate_fit_button.setEnabled(True)
+
+        if not len(results["star_res"]):
+            self.status_bar.showMessage("Validation failed: no catalog matches on the night")
+            qmessagebox(title='Validate fit',
+                        message="No detected stars could be matched to the catalog - check the "
+                                "platepar pointing and the catalog limiting magnitude.",
+                        message_type="warning")
+            return
+
+        # Console report
+        print()
+        n_blend = sum(f.get("n_blend_rejected", 0) for f in results["frames"])
+        n_phot = sum(f.get("n_photometric_rejected", 0) for f in results["frames"])
+        n_cont = sum(f.get("n_contention", 0) for f in results["frames"])
+        print("Cross-frame validation: {:d} frames, {:d} matched stars, {:d} match failures".format(
+            len(results["frames"]), len(results["star_res"]), len(results["unmatched_x"])))
+        print("  Filtered out: {:d} blended, {:d} photometric outliers, "
+              "{:d} double-star contention".format(n_blend, n_phot, n_cont))
+        if results.get("n_recurring_detections"):
+            print("  Recurring unmatched sky stars (likely catalog gaps/doubles): "
+                  "{:d} detections".format(results["n_recurring_detections"]))
+        if results.get("n_frames_excluded"):
+            print("  Excluded {:d} frame(s) with a whole-frame offset (clouds or a failed "
+                  "per-frame pointing refit)".format(results["n_frames_excluded"]))
+        print("  Global: median {:.2f} px, RMSD {:.2f} px".format(
+            summary["median_global"], summary["rmsd_global"]))
+        if summary["rmsd_corner"] is not None:
+            print("  Corners (r>{:.2f}): median {:.2f} px, RMSD {:.2f} px "
+                  "(n={:d}, match fraction {:.2f})".format(
+                summary["corner_radius_frac"], summary["median_corner"],
+                summary["rmsd_corner"], summary["n_corner"],
+                summary["corner_match_fraction"]))
+        else:
+            print("  Corners: no corner stars available in the dataset")
+        if summary["max_drift_arcmin"] is not None:
+            print("  Max pointing drift over the night: {:.1f} arcmin".format(
+                summary["max_drift_arcmin"]))
+        print("  Radius bins (fraction of half-diagonal):")
+        for lo, hi, n, med, rmsd, frac in summary["annuli"]:
+            print("    {:.2f}-{:.2f}: n={:5d}  median={}  rmsd={}  match={}".format(
+                lo, hi, n,
+                "{:5.2f} px".format(med) if med is not None else "    -   ",
+                "{:5.2f} px".format(rmsd) if rmsd is not None else "    -   ",
+                "{:.2f}".format(frac) if frac is not None else "  - "))
+
+        # Keep the results for the cross-frame refit, keyed to this exact platepar
+        self.night_validation = results
+        self.night_validation_pp_key = self._nightValidationKey()
+        self.tab.param_manager.show_night_pairs_checkbox.setEnabled(True)
+        self.updateNightPairsOverlay()
+        self.tab.param_manager.refit_night_button.setEnabled(True)
+
+        headline = "Validation: global median {:.2f} px, corner median {} (n={})".format(
+            summary["median_global"],
+            "{:.2f} px".format(summary["median_corner"]) if summary["median_corner"] is not None
+            else "no data", summary["n_corner"])
+        self.status_bar.showMessage(headline)
+
+        ### Result figure ###
+
+        cx, cy = self.platepar.X_res/2.0, self.platepar.Y_res/2.0
+        r_max = np.hypot(cx, cy)
+        r_frac = np.hypot(results["star_x"] - cx, results["star_y"] - cy)/r_max
+
+        # Two panels: the spatial map is the star of the show, give it the room
+        fig, (ax_r, ax_map) = plt.subplots(1, 2, figsize=(16, 5.6),
+                                           gridspec_kw={'width_ratios': [1, 2.2]})
+
+        # Fixed residual scale so runs are directly comparable side by side
+        res_scale_px = 2.0
+
+        # Residual vs radius, with annulus medians
+        ax_r.scatter(r_frac, results["star_res"], s=4, alpha=0.25, color='k', label='matched stars')
+        ann = summary["annuli"]
+        ax_r.step([a[0] for a in ann] + [1.0], [a[3] for a in ann] + [ann[-1][3]],
+                  where='post', color='r', lw=2, label='annulus median')
+        ax_r.set_xlabel('Radius (fraction of half-diagonal)')
+        ax_r.set_ylabel('Residual (px)')
+        ax_r.set_xlim(0, 1)
+        ax_r.set_ylim(0, res_scale_px)
+        n_offscale = int(np.sum(results["star_res"] > res_scale_px))
+        title = 'Residual vs radius'
+        if n_offscale:
+            title += ' ({:d} stars above {:.0f} px)'.format(n_offscale, res_scale_px)
+        ax_r.set_title(title)
+        ax_r.legend(fontsize=8)
+        ax_r.grid(alpha=0.3)
+
+        # Spatial map of median residual, colour scale pegged to the same fixed range
+        # mincnt keeps single-star hexes from masquerading as bad (or good) regions - a hex
+        # needs a few stars before its median means anything; below that it stays no-data grey
+        hb = ax_map.hexbin(results["star_x"], results["star_y"], C=results["star_res"],
+                           reduce_C_function=np.median, gridsize=16, mincnt=4, cmap='hot',
+                           vmin=0, vmax=res_scale_px,
+                           extent=(0, self.platepar.X_res, 0, self.platepar.Y_res))
+        if len(results.get("recurring_x", [])):
+
+            # The same sky star failing on many frames traces its diurnal arc across the
+            # image - a catalog gap or tight double, not a calibration problem
+            ax_map.scatter(results["recurring_x"], results["recurring_y"], s=8, marker='.',
+                           color='dodgerblue', label='recurring star (catalog gap?)')
+
+        if len(results["unmatched_x"]):
+
+            # Split the remaining match failures into transient (frame-local: satellites,
+            # planes passing through) and persistent (same place failing on multiple frames:
+            # real misfit beyond the match radius, i.e. censored large residuals)
+            ux, uy = results["unmatched_x"], results["unmatched_y"]
+            uframe = results["unmatched_frame"]
+            persistent = np.zeros(len(ux), dtype=bool)
+            if len(ux) > 1:
+                tree_u = cKDTree(np.column_stack([ux, uy]))
+                for k, neighbours in enumerate(tree_u.query_ball_point(
+                        np.column_stack([ux, uy]), r=40.0)):
+                    if len(set(uframe[j] for j in neighbours)) >= 3:
+                        persistent[k] = True
+
+            if (~persistent).any():
+                ax_map.scatter(ux[~persistent], uy[~persistent], s=14, marker='x',
+                               color='cyan', label='match failures (transient)')
+            if persistent.any():
+                ax_map.scatter(ux[persistent], uy[persistent], s=20, marker='x',
+                               color='lime', label='match failures (persistent)')
+
+            # Legend below the map, outside the image area
+        if len(results["unmatched_x"]) or len(results.get("recurring_x", [])):
+            ax_map.legend(fontsize=8, loc='upper center', bbox_to_anchor=(0.5, -0.06),
+                          ncol=3, frameon=False)
+        # Pin the axes exactly to the image bounds (no margins) so the plot corners ARE the
+        # image corners
+        ax_map.set_xlim(0, self.platepar.X_res)
+        ax_map.set_ylim(self.platepar.Y_res, 0)
+        ax_map.set_aspect('equal')
+
+        # The hot colormap tops out at white - give no-data regions a distinct neutral
+        # background so an unvalidated corner cannot be mistaken for a terrible one (or
+        # vice versa)
+        ax_map.set_facecolor('0.45')
+        ax_map.set_title('Median residual across the image (grey = no data)')
+        fig.colorbar(hb, ax=ax_map, label='px (capped at {:.0f})'.format(res_scale_px))
+
+        # Mount drift is reported in the title (per-frame values are in the console report)
+        fig_title = headline
+        if summary["max_drift_arcmin"] is not None:
+            fig_title += "  |  mount drift up to {:.1f} arcmin, compensated per frame".format(
+                summary["max_drift_arcmin"])
+
+        fig.suptitle(fig_title, fontweight='bold')
+        fig.tight_layout()
+        # Leave room for the legend below the map
+        fig.subplots_adjust(bottom=0.14)
+        fig.show()
 
 
     def findBestFrame(self):
@@ -13154,6 +13830,16 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
     def quickAlign(self):
+        try:
+            return self._quickAlignImpl()
+        except OperationCancelled:
+            self.status_bar.showMessage("Quick align cancelled - platepar restored")
+            return
+        finally:
+            # Re-enable the buttons - a cancellation mid-operation skips the impl's own restore
+            self.tab.param_manager.setQuickAlignButtonBusy(False)
+
+    def _quickAlignImpl(self):
         """ Re-fit pointing using existing distortion. Uses astrometry.net if NNalign fails.
 
         Flow: tryQuickAlignment -> if fails, astrometry.net solve -> apply pointing
@@ -13208,6 +13894,16 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
     def autoFitAstrometryNet(self):
+        try:
+            return self._autoFitAstrometryNetImpl()
+        except OperationCancelled:
+            self.status_bar.showMessage("Auto-fit cancelled - platepar restored")
+            return
+        finally:
+            # Re-enable the buttons - a cancellation mid-operation skips the impl's own restore
+            self.tab.param_manager.setAutoFitButtonBusy(False)
+
+    def _autoFitAstrometryNetImpl(self):
         """ Auto fit using astrometry.net. Called from Auto Fit button. """
 
         # If there are existing matched star pairs, warn the user they will be replaced
@@ -13495,11 +14191,17 @@ class PlateTool(QtWidgets.QMainWindow):
                 # Redraw catalog stars and distortion center with updated platepar
                 self.updateStars(only_update_catalog=True)
                 self.updateDistortionCenterMarker()
-                QtWidgets.QApplication.processEvents()
 
                 # Restore original platepar so optimizer isn't corrupted
                 self.platepar = saved_pp
 
+                # Abort point: raises OperationCancelled if Stop was pressed (also pumps
+                # the event loop so the click can land)
+                self._checkCancelled()
+
+            # The fit mutates the platepar in place - keep a copy to restore on cancel
+            platepar_backup = copy.deepcopy(self.platepar)
+            self._beginCancellableOperation()
             try:
                 self.platepar.fitAstrometry(
                     jd, img_stars_arr, catalog_stars_extended,  # Extended catalog for edge stars
@@ -13508,10 +14210,23 @@ class PlateTool(QtWidgets.QMainWindow):
                     final_catalog_stars=tuned_catalog,
                     iteration_callback=iteration_callback
                 )
+
+                # Mark error overlay for recomputation after the platepar changed
+                self.error_overlay_needs_update = True
+
                 print("  NN fit complete: RA={:.2f} Dec={:.2f} Scale={:.3f} arcmin/px".format(
                     self.platepar.RA_d, self.platepar.dec_d, 60/self.platepar.F_scale))
+            except OperationCancelled:
+                # Restore and re-raise - the entry-point guard reports the cancellation
+                self.platepar = platepar_backup
+                self.updateStars(only_update_catalog=True)
+                self.updateDistortionCenterMarker()
+                print("  NN fit cancelled - platepar restored.")
+                raise
             except Exception as e:
                 print("  NN fit failed: {}".format(str(e)))
+            finally:
+                self._endCancellableOperation()
 
             # Populate paired_stars from NN matches for visualization
             self.paired_stars = PairedStars()
@@ -13555,11 +14270,12 @@ class PlateTool(QtWidgets.QMainWindow):
                 if removed > 0:
                     print("Pairs after photometric filtering: {}".format(len(self.paired_stars)))
 
-            # Filter blended stars before final fit
+            # Filter gross blends before the final fit (pull > 2 px only - the empirical
+            # threshold sweep showed the fit is best with maximum coverage)
             if len(self.paired_stars) >= 15:
-                removed = self.filterBlendedStars(fwhm_mult=2.0, mag_margin=0.3)
+                removed = self.filterBlendedStars(fwhm_mult=2.0, mag_margin=0.3, pull_px=2.0)
                 if removed > 0:
-                    print("Pairs after blend filtering: {}".format(len(self.paired_stars)))
+                    print("Pairs after gross-blend filtering: {}".format(len(self.paired_stars)))
 
             # Do the final fit with user's settings
             print()
@@ -13729,6 +14445,10 @@ class PlateTool(QtWidgets.QMainWindow):
             else:
 
                 print("The CALSTARS file is missing, trying to generate it automatically...")
+
+                # No CALSTARS file to read the chunk size from - don't inherit a previous
+                # folder's value
+                self.calstars_chunk_frames = 256
                 try:
                     calstars_list = extractStarsAndSave(self.config, self.dir_path)
                 except Exception as e:
@@ -13739,7 +14459,8 @@ class PlateTool(QtWidgets.QMainWindow):
         else:
 
             # Load the calstars file
-            calstars_list, _ = CALSTARS.readCALSTARS(self.dir_path, calstars_file)
+            calstars_list, self.calstars_chunk_frames = CALSTARS.readCALSTARS(
+                self.dir_path, calstars_file)
 
             print('CALSTARS file: ' + calstars_file + ' loaded!')
 
@@ -13752,10 +14473,21 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
     def updateFindBestFrameButton(self):
-        """ Enable/disable the Find Best Frame button based on the number of frames in CALSTARS. """
+        """ Enable/disable the Find Best Frame button based on the number of frames with star
+            data - from CALSTARS and/or from re-detected (override) frames. """
         if hasattr(self, 'tab') and hasattr(self.tab, 'param_manager'):
-            # Disable button if there's only one frame or no frames
-            enable = len(self.calstars) > 1
+
+            # Count frames with stars from both sources - a station without a CALSTARS file
+            # still gets frames to rank once stars are re-detected in the session
+            frames = set()
+            if hasattr(self, 'calstars') and self.calstars:
+                frames.update(ff for ff, stars in self.calstars.items() if len(stars) > 0)
+            if getattr(self, 'star_detection_override_data', None):
+                frames.update(ff for ff, stars in self.star_detection_override_data.items()
+                              if len(stars) > 0)
+
+            # Disable the button if there's only one frame or no frames
+            enable = len(frames) > 1
             self.tab.param_manager.find_best_frame_button.setEnabled(enable)
             if not enable:
                 self.tab.param_manager.find_best_frame_button.setToolTip(
@@ -13794,16 +14526,29 @@ class PlateTool(QtWidgets.QMainWindow):
             The return value of func(*args, **kwargs).
 
         Raises:
+            OperationCancelled if the user presses Stop while waiting.
             Any exception raised by func.
         """
-        with ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(func, *args, **kwargs)
+        executor = ThreadPoolExecutor(max_workers=1)
+        future = executor.submit(func, *args, **kwargs)
 
+        # Show the Stop button while waiting. The worker thread cannot be interrupted
+        # (the solver is blocking C code), so Stop abandons it: the thread keeps running
+        # to completion in the background but its result is discarded.
+        self._beginCancellableOperation()
+        try:
             while not future.done():
-                QtWidgets.QApplication.processEvents()
+                self._checkCancelled()
                 time.sleep(0.05)
+        except OperationCancelled:
+            executor.shutdown(wait=False)
+            print("Background operation cancelled - abandoning the worker thread.")
+            raise
+        finally:
+            self._endCancellableOperation()
 
-            return future.result()
+        executor.shutdown(wait=True)
+        return future.result()
 
 
     def loadCatalogStars(self, lim_mag):
@@ -14177,6 +14922,10 @@ class PlateTool(QtWidgets.QMainWindow):
             dlg.close()
         else:
             dlg.exec_()
+
+        # The dialog is parented to the main window, so Qt would keep it alive indefinitely -
+        # delete it explicitly, otherwise every File Manager open leaks a full dialog widget tree
+        dlg.deleteLater()
 
     def saveCurrentFrame(self):
         """ Saves the current frame to disk. """
@@ -15093,29 +15842,149 @@ class PlateTool(QtWidgets.QMainWindow):
         return overfit
 
 
-    def fitPickedStars(self):
-        """ Fit stars that are manually picked. The function first only estimates the astrometry parameters
-            without the distortion, then just the distortion parameters, then all together.
-
+    def findMatchingPairs(self):
+        """ Match detected stars to catalog stars using the current platepar and replace the
+            current paired stars with the matches. Does not fit or modify the platepar - run the
+            fit as a separate step.
         """
 
-        # Check if there are enough stars for the fit
-        min_stars = self.getMinFitStars()
-        if len(self.paired_stars) < min_stars:
-
-            qmessagebox(title='Number of stars',
-                        message="At least {:d} paired stars are needed to do the fit!".format(min_stars),
+        # Pair finding requires a usable platepar to project the catalog
+        if (self.platepar is None) or (getattr(self.platepar, 'JD', None) is None):
+            qmessagebox(title='Find pairs',
+                        message="A platepar is needed to project catalog stars for matching!",
                         message_type="warning")
+            return
 
-            return self.platepar
+        # If there are existing matched star pairs, warn the user they will be replaced
+        if len(self.paired_stars) > 0:
+            reply = QtWidgets.QMessageBox.question(
+                self,
+                "Replace Matched Stars?",
+                "You have {} matched star pair(s) that will be replaced.\n\n"
+                "Do you want to continue?".format(len(self.paired_stars)),
+                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+                QtWidgets.QMessageBox.No
+            )
+            if reply != QtWidgets.QMessageBox.Yes:
+                return
 
-        # Show busy state on button
-        self.tab.param_manager.setFitButtonBusy(True)
-        QtWidgets.QApplication.processEvents()
+        # Get the detected stars on the current image (override detections take precedence)
+        ff_name_c = convertFRNameToFF(self.img_handle.name())
+        if self.star_detection_override_enabled and ff_name_c in self.star_detection_override_data:
+            detected_stars = np.array(self.star_detection_override_data[ff_name_c])
+        elif ff_name_c in self.calstars:
+            detected_stars = np.array(self.calstars[ff_name_c])
+        else:
+            qmessagebox(title='Find pairs',
+                        message="No detected stars are available on this image!",
+                        message_type="warning")
+            return
+
+        if len(detected_stars) < 1:
+            qmessagebox(title='Find pairs',
+                        message="No detected stars are available on this image!",
+                        message_type="warning")
+            return
+
+        # CALSTARS format: Y(0) X(1) IntensSum(2) Ampltd(3) FWHM(4) BgLvl(5) SNR(6) NSatPx(7)
+        det_y = detected_stars[:, 0]
+        det_x = detected_stars[:, 1]
+        det_intens = detected_stars[:, 2] if detected_stars.shape[1] > 2 else np.ones(len(det_x))
+        det_fwhm = detected_stars[:, 4] if detected_stars.shape[1] > 4 else np.zeros(len(det_x))
+        det_snr = detected_stars[:, 6] if detected_stars.shape[1] > 6 else np.ones(len(det_x))
+        det_saturated = detected_stars[:, 7] if detected_stars.shape[1] > 7 else np.zeros(len(det_x))
+
+        jd = date2JD(*self.img_handle.currentTime())
+
+        # Project the loaded catalog to image coordinates (iterative inversion of the forward
+        # mapping, exact regardless of the reverse polynomial state)
+        cat_x, cat_y, _ = getCatalogStarsImagePositions(self.catalog_stars, jd, self.platepar,
+                                                        use_iterative=True)
+
+        # Keep only catalog stars inside the image and outside the mask
+        in_image = (cat_x >= 0) & (cat_x < self.platepar.X_res) \
+            & (cat_y >= 0) & (cat_y < self.platepar.Y_res)
+        catalog_stars_fov = self.catalog_stars[in_image]
+        cat_x, cat_y = cat_x[in_image], cat_y[in_image]
+
+        catalog_stars_fov, not_masked = self.filterCatalogStarsByMask(cat_x, cat_y,
+                                                                      catalog_stars_fov)
+        cat_x, cat_y = cat_x[not_masked], cat_y[not_masked]
+
+        if len(cat_x) == 0:
+            qmessagebox(title='Find pairs',
+                        message="No catalog stars project inside the image - check the platepar "
+                                "pointing and the catalog limiting magnitude!",
+                        message_type="warning")
+            return
+
+        # Match radius scaled to the star size on this image
+        good_fwhm = det_fwhm[det_fwhm > 0]
+        match_radius = 2.0*float(np.median(good_fwhm)) if len(good_fwhm) else 6.0
+        match_radius = min(15.0, max(4.0, match_radius))
 
         print()
-        print("----------------------------------------")
-        print("Fitting platepar...")
+        print("Finding matching pairs (match radius: {:.1f} px)...".format(match_radius))
+
+        # One-to-one nearest-neighbour matching within the radius
+        self.paired_stars = PairedStars()
+        matched_cat = set()
+        for i in range(len(det_x)):
+            distances = np.sqrt((cat_x - det_x[i])**2 + (cat_y - det_y[i])**2)
+            closest_idx = int(np.argmin(distances))
+            if (distances[closest_idx] < match_radius) and (closest_idx not in matched_cat):
+                matched_cat.add(closest_idx)
+                cat_star = catalog_stars_fov[closest_idx]
+                sky_obj = CatalogStar(cat_star[0], cat_star[1], cat_star[2])
+                self.paired_stars.addPair(
+                    det_x[i], det_y[i], det_fwhm[i], det_intens[i], sky_obj,
+                    snr=det_snr[i], saturated=det_saturated[i] > 0
+                )
+
+        print("  Matched {} of {} detected stars to {} catalog stars in FOV".format(
+            len(self.paired_stars), len(det_x), len(cat_x)))
+
+        # Pair hygiene for the FIT, calibrated empirically (threshold sweep scored by
+        # whole-night validation): the fit is best with maximum coverage - zero-mean
+        # centroid noise averages out, and corner pairs matter more than per-pair purity -
+        # so only genuinely biasing pairs are removed. Wrong pairings (photometric clip)
+        # and gross photocentre corruption (pull > 2 px) hurt; everything else stays.
+        # The reported RMSD is computed over the astrometry-grade subset separately.
+        if len(self.paired_stars) >= 15:
+            removed = self.filterPhotometricOutliers(sigma_threshold=2.5)
+            if removed > 0:
+                print("  Pairs after photometric filtering: {}".format(len(self.paired_stars)))
+
+        if len(self.paired_stars) >= 15:
+            removed = self.filterBlendedStars(fwhm_mult=2.0, mag_margin=0.3, pull_px=2.0)
+            if removed > 0:
+                print("  Pairs after gross-blend filtering: {}".format(len(self.paired_stars)))
+
+        # Old residuals and photometry no longer correspond to the new pairs
+        self.residuals = None
+        self.photom_fit_resids = None
+
+        # Refresh the display and button gating
+        self.updateStars()
+        self.updatePairedStars()
+        self.updateFitResiduals()
+        self.tab.param_manager.updatePairedStars(min_fit_stars=self.getMinFitStars())
+
+        self.status_bar.showMessage("Matched {} star pairs".format(len(self.paired_stars)))
+
+
+    def computeResiduals(self):
+        """ Compute and display the astrometric residuals of the current paired stars against the
+            current platepar. Does not fit or modify anything - can be run standalone after manual
+            platepar changes or after finding pairs.
+        """
+
+        # Residuals require a platepar and at least one paired star
+        if (self.platepar is None) or (len(self.paired_stars) == 0):
+            qmessagebox(title='Compute residuals',
+                        message="A platepar and at least one paired star are needed to compute residuals!",
+                        message_type="warning")
+            return
 
         # Extract paired catalog stars and image coordinates separately
         img_stars = np.array(self.paired_stars.imageCoords())
@@ -15124,20 +15993,17 @@ class PlateTool(QtWidgets.QMainWindow):
         # Get the Julian date of the image that's being fit
         jd = date2JD(*self.img_handle.currentTime())
 
-        # Fit the platepar to paired stars
-        self.platepar.fitAstrometry(jd, img_stars, catalog_stars, first_platepar_fit=self.first_platepar_fit,\
-            fit_only_pointing=self.fit_only_pointing, fixed_scale=self.fixed_scale)
-        self.first_platepar_fit = False
-        self.platepar_modified = True
-
-        # Show platepar parameters
-        print()
-        print(self.platepar)
-
         ### Calculate the fit residuals for every fitted star ###
 
-        # Get image coordinates of catalog stars
-        catalog_x, catalog_y, catalog_mag = getCatalogStarsImagePositions(catalog_stars, jd, self.platepar)
+        # Get image coordinates of catalog stars. Use the same projection as Find Pairs and
+        # the on-screen catalog overlay (iterative inversion of the forward mapping): with a
+        # platepar whose forward and reverse mappings disagree (large round-trip error, e.g.
+        # a freshly loaded platepar fitted elsewhere), projecting here through the reverse
+        # polynomial instead would offset every residual by the round-trip error - pairs
+        # matched at forward positions, residuals measured at reverse positions
+        catalog_x, catalog_y, catalog_mag = getCatalogStarsImagePositions(catalog_stars, jd,
+                                                                          self.platepar,
+                                                                          use_iterative=True)
 
         # ## Compute standard coordinates ##
 
@@ -15213,7 +16079,10 @@ class PlateTool(QtWidgets.QMainWindow):
             # Compute magnitude error from SNR (same formula as used in lightcurve plots and FTPdetectinfo)
             if snr > 0:
                 mag_err_random = 2.5*np.log10(1 + 1/snr)
-                mag_err = np.sqrt(mag_err_random**2 + self.platepar.mag_lev_stddev**2)
+                mag_lev_std = self.platepar.mag_lev_stddev
+                if (mag_lev_std is None) or (not np.isfinite(mag_lev_std)):
+                    mag_lev_std = 0.0
+                mag_err = np.sqrt(mag_err_random**2 + mag_lev_std**2)
             else:
                 mag_err = 0.0
 
@@ -15277,10 +16146,37 @@ class PlateTool(QtWidgets.QMainWindow):
             rmsd_angular *= 60
             angular_error_label = 'arcsec'
 
+        # Headline RMSD over the astrometry-grade subset (SNR >= 5; unknown SNR kept): the
+        # fit deliberately uses ALL pairs - the empirical threshold sweep showed maximum
+        # coverage fits best - but low-SNR pairs carry centroid noise (sigma ~
+        # FWHM/(2.355*SNR)) that says nothing about the calibration, so the reported number
+        # is computed on clean stars, comparable with the cross-frame validation.
+        snr_arr = np.array([entry[6] for entry in residuals])
+        clean = (snr_arr <= 0) | (snr_arr >= 5.0)
+        clean_info = None
+        rmsd_img_all = rmsd_img
+        if (clean.sum() >= 10) and (clean.sum() < len(residuals)):
+            res_clean = [residuals[k] for k in np.where(clean)[0]]
+            rmsd_img = RMSD([entry[3] for entry in res_clean])
+            rmsd_angular = 60*RMSD([entry[4] for entry in res_clean])
+            if rmsd_angular > 60:
+                rmsd_angular /= 60
+                angular_error_label = 'deg'
+            elif rmsd_angular > 0.5:
+                angular_error_label = 'arcmin'
+            else:
+                rmsd_angular *= 60
+                angular_error_label = 'arcsec'
+            clean_info = "on {:d} of {:d}".format(int(clean.sum()), len(residuals))
+
         # The GUI shows the plain RMSD; the console carries the full breakdown and the two health
         # checks (forward/reverse consistency and held-out overfitting) that, if tripped, turn the
         # GUI label red.
-        print('RMSD: {:.2f} px, {:.2f} {:s}'.format(rmsd_img, rmsd_angular, angular_error_label))
+        if clean_info:
+            print('RMSD: {:.2f} px, {:.2f} {:s} (astrometry-grade pairs, {:s}; all-pair fit)'.format(
+                rmsd_img, rmsd_angular, angular_error_label, clean_info))
+        else:
+            print('RMSD: {:.2f} px, {:.2f} {:s}'.format(rmsd_img, rmsd_angular, angular_error_label))
 
         # Forward/reverse mapping consistency (console detail)
         if fwdrev_mismatch:
@@ -15292,11 +16188,12 @@ class PlateTool(QtWidgets.QMainWindow):
                   '{:.2f} px).'.format(rmsd_fwd_px_approx, rmsd_img))
 
         # Overfitting check via held-out cross-validation (console detail). Runs on every fit.
-        overfit = self.reportOverfit(rmsd_img)
+        overfit = self.reportOverfit(rmsd_img_all)
 
         # Update RMSD display in the Fit Parameters tab (red on either health-check failure)
         self.tab.param_manager.updateRMSD(rmsd_img, rmsd_angular, angular_error_label,
-                                          fwdrev_mismatch=fwdrev_mismatch, overfit=overfit)
+                                          fwdrev_mismatch=fwdrev_mismatch, overfit=overfit,
+                                          clean_info=clean_info)
 
         # Update fit residuals in the station tab when geopoints are used
         if self.geo_points_obj is not None:
@@ -15310,6 +16207,87 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Save the residuals
         self.residuals = residuals
+
+
+        # Draw the updated residual lines
+        self.updateFitResiduals()
+
+        # Refresh the RMSD display so it reflects the current platepar - it otherwise only
+        # updates on a fit and silently goes stale after e.g. a night refit or a manual
+        # platepar change. The fit-specific health checks (forward/reverse mismatch,
+        # held-out overfitting) only run on an actual fit, so no flags here. Like the fit,
+        # the headline is computed over the astrometry-grade subset (SNR >= 5, unknown kept).
+        if len(residuals):
+            snr_arr = np.array([entry[6] for entry in residuals])
+            clean = (snr_arr <= 0) | (snr_arr >= 5.0)
+            clean_info = None
+            use = residuals
+            if (clean.sum() >= 10) and (clean.sum() < len(residuals)):
+                use = [residuals[k] for k in np.where(clean)[0]]
+                clean_info = "on {:d} of {:d}".format(int(clean.sum()), len(residuals))
+
+            rmsd_img = RMSD([entry[3] for entry in use])
+            rmsd_angular = RMSD([entry[4] for entry in use])*60
+
+            if rmsd_angular > 60:
+                rmsd_angular /= 60
+                angular_error_label = 'deg'
+            elif rmsd_angular > 0.5:
+                angular_error_label = 'arcmin'
+            else:
+                rmsd_angular *= 60
+                angular_error_label = 'arcsec'
+
+            self.tab.param_manager.updateRMSD(rmsd_img, rmsd_angular, angular_error_label,
+                                              clean_info=clean_info)
+
+
+    def fitPickedStars(self):
+        """ Fit stars that are manually picked. The function first only estimates the astrometry parameters
+            without the distortion, then just the distortion parameters, then all together.
+
+        """
+
+        # Check if there are enough stars for the fit
+        min_stars = self.getMinFitStars()
+        if len(self.paired_stars) < min_stars:
+
+            qmessagebox(title='Number of stars',
+                        message="At least {:d} paired stars are needed to do the fit!".format(min_stars),
+                        message_type="warning")
+
+            return self.platepar
+
+        # Show busy state on button
+        self.tab.param_manager.setFitButtonBusy(True)
+        QtWidgets.QApplication.processEvents()
+
+        print()
+        print("----------------------------------------")
+        print("Fitting platepar...")
+
+        # Extract paired catalog stars and image coordinates separately
+        img_stars = np.array(self.paired_stars.imageCoords())
+        catalog_stars = np.array(self.paired_stars.skyCoords())
+
+        # Get the Julian date of the image that's being fit
+        jd = date2JD(*self.img_handle.currentTime())
+
+        # Fit the platepar to paired stars
+        self.platepar.fitAstrometry(jd, img_stars, catalog_stars, first_platepar_fit=self.first_platepar_fit,\
+            fit_only_pointing=self.fit_only_pointing, fixed_scale=self.fixed_scale)
+        self.first_platepar_fit = False
+        self.platepar_modified = True
+
+        # Mark error overlay for recomputation after the platepar changed
+        self.error_overlay_needs_update = True
+
+        # Show platepar parameters
+        print()
+        print(self.platepar)
+
+        # Compute and display the fit residuals
+        self.computeResiduals()
 
         self.updateDistortion()
         self.updateLeftLabels()
@@ -15329,20 +16307,6 @@ class PlateTool(QtWidgets.QMainWindow):
         if self.fig_astrometry is not None and plt.fignum_exists(self.fig_astrometry.number):
             self.showAstrometryFitPlots(force_update=True)
 
-
-    def jumpNextStar(self, miss_this_one=False):
-
-        new_x, new_y, self.max_pixels_between_matched_stars  = self.furthestStar(miss_this_one=miss_this_one)
-        self.updateBottomLabel()
-        self.old_autopan_x, self.old_autopan_y = self.current_autopan_x, self.current_autopan_y
-        self.current_autopan_x, self.current_autopan_y = new_x, new_y
-        self.img_frame.setRange(xRange=(new_x + 15, new_x - 15), yRange=(new_y + 15, new_y - 15))
-        self.checkParamRange()
-        self.platepar.updateRefRADec(preserve_rotation=True)
-        self.checkParamRange()
-        self.tab.param_manager.updatePlatepar()
-        self.updateLeftLabels()
-        self.updateStars()
 
     def showAstrometryFitPlots(self, force_update=False):
         """ Show window with astrometry fit details. Toggle on/off if already open. """
@@ -16730,22 +17694,26 @@ class PlateTool(QtWidgets.QMainWindow):
         else:
             print("Cannot load satellite tracks: Skyfield not available.")
 
-    def drawSatelliteTracks(self):
-        """ Draws satellite tracks on the image. """
-        
-        # Clear existing
-        for curve in self.sat_track_curves:
+    def clearSatelliteTrackItems(self):
+        """ Remove all drawn satellite track items from the image. """
+        for curve in getattr(self, 'sat_track_curves', []):
             self.img_frame.removeItem(curve)
-        for label in self.sat_track_labels:
+        for label in getattr(self, 'sat_track_labels', []):
             self.img_frame.removeItem(label)
-        for arrow in self.sat_track_arrows:
+        for arrow in getattr(self, 'sat_track_arrows', []):
             self.img_frame.removeItem(arrow)
-        for marker in self.sat_markers:
+        for marker in getattr(self, 'sat_markers', []):
             self.img_frame.removeItem(marker)
         self.sat_track_curves = []
         self.sat_track_labels = []
         self.sat_track_arrows = []
         self.sat_markers = []
+
+    def drawSatelliteTracks(self):
+        """ Draws satellite tracks on the image. """
+
+        # Clear existing
+        self.clearSatelliteTrackItems()
 
         if not self.show_sattracks:
             return
@@ -17197,202 +18165,6 @@ class PlateTool(QtWidgets.QMainWindow):
         except ZeroDivisionError:
             pass
         self.time = time.time()
-
-    def furthestStar(self, miss_this_one=False, min_separation=15):
-        """
-        Find the star which is furthest away from all other stars that have already been matched.
-
-        Keyword arguments:
-            miss_this_one: Return coordinates of a different star at random, but don't mark anything.
-            min_separation: Minimum separation in pixels between stars.
-
-        Returns: 
-            (x,y) integers of the image location of the furthest star away from all other matched stars.
-
-        """
-
-        # Strategy
-
-        # Working in image coordinates
-
-        # Get two lists marked_x, marked_y of each marked star - getMarkedStars()
-        # Get three lists candidate_x, candidate_y of each unmarked star, and the distance to nearest
-        # marked star which is more than minimum separation away
-
-        # Get star with the greatest distance to the nearest marked star
-
-
-
-        # Return the image coordinates of the star which is furthest away from any marked star
-        # Create marked_x, marked_y in image coordinates which is composed of matched stars and unsuitable stars
-
-        # Get all the matched stars in image coordinates
-
-
-
-        def getMarkedStars(include_unsuitable=True):
-
-            """
-
-            Returns: a list of stars which are either marked as paired, or bad in image coordinates
-
-            """
-
-            marked_x, marked_y = [], []
-            coords_list = self.paired_stars.imageCoords()
-            for coords in coords_list:
-                marked_x.append(coords[0])
-                marked_y.append(coords[1])
-
-            if include_unsuitable:
-                coords_list = self.unsuitable_stars.imageCoords()
-                for coords in coords_list:
-                    marked_x.append(coords[0])
-                    marked_y.append(coords[1])
-
-            return marked_x, marked_y
-        ##############################################################################################################
-
-        def isDouble(x,y, reference_x_list, reference_y_list, min_separation=5):
-
-            """
-            Are x,y coordinates which are very close to, but distinct from all coordinates in reference list
-
-            Args:
-                x: image coordinates of star
-                y: image coordinates of star
-                reference_x_list: list of x image coordinates
-                reference_y_list: list of y image coordinates
-
-            Returns:
-                [bool] True if star is within min_separation of another star
-            """
-
-            for reference_x, reference_y in zip(reference_x_list, reference_y_list):
-                # Check if this the reference is the same star
-                if reference_x == x and reference_y == y:
-                    continue
-                if ((reference_x - x) ** 2 + (reference_y - y) ** 2) ** 0.5 < min_separation:
-                    return True
-
-            return False
-        ##############################################################################################################
-
-        def getVisibleUnmarkedStarsAndDistanceToMarked(marked_x_list, marked_y_list, min_separation=15):
-
-            """
-            From the catalogue of filtered stars return a lists of coordinates stars which are not marked,
-            and another list which is the distance to the nearest marked star
-
-            Args:
-                marked_x_list: list of marked star x coordinates
-                marked_y_list: list of marked star y coordinates
-                min_separation: minimum separation to be regarded as a different stra
-
-            Returns:
-                unmarked_x_list: list of unmarked star x coordinates
-                unmarked_y_list: list of unmarked star x coordinates
-                dist_nearest_marked_list: distance of the nearest marked star for returned star coordinates
-
-
-            """
-
-            # Is there a way to get this in image coordinates directly
-            visible_ra_list = [star[0] for star in self.catalog_stars_filtered]
-            visible_dec_list = [star[1] for star in self.catalog_stars_filtered]
-
-            # Convert all visible star to image coordinates
-
-            visible_x, visible_y = raDecToXYPP(np.array(visible_ra_list), np.array(visible_dec_list),
-                                               datetime2JD(self.img_handle.currentFrameTime(dt_obj=True)),
-                                               self.platepar)
-
-            # Handle jump when no stars are marked - just pick and return a single random star
-            if len(marked_x_list) == 0 or len(marked_y_list) == 0:
-                random_star = random.randint(0, len(visible_x) - 1)
-                return [visible_x[random_star]], [visible_y[random_star]], [np.inf], [np.inf]
-
-            # Iterate through all visible stars creating a list of stars which are more than
-            # min separation from a marked star, and then add coordinates of the visible star
-            # and minimum distance to the nearest marked star, which is more than min_separation away
-            # If a visible star is too close to an already marked star then ignore this star
-            # and do not append to the candidate star list
-
-            candidate_x_list, candidate_y_list, dist_nearest_marked_list = [], [], []
-
-
-            # Reject stars which are too close to the edge
-            edge_margin = 5 # px
-
-            for x, y in zip(visible_x, visible_y):
-                ignore_this_star = False
-
-                if isDouble(x,y, visible_x, visible_y):
-                    continue
-
-                nearest_pixel_separation = np.inf
-
-                for marked_x, marked_y in zip(marked_x_list, marked_y_list):
-                    
-                    # calculate cartesian separation
-                    pixel_separation = ((marked_x - x) ** 2 + (marked_y - y) ** 2) ** 0.5
-                    
-                    # If this star is less than minimum separation away
-                    if pixel_separation < min_separation or ignore_this_star:
-                        # do not use this visible star in any further iteration
-                        ignore_this_star = True
-                        break
-                    
-                    # If this star is too close to the edge, do not use it
-                    if (x < edge_margin) or (x > self.platepar.X_res - edge_margin) or \
-                        (y < edge_margin) or (y > self.platepar.Y_res - edge_margin):
-
-                        ignore_this_star = True
-                        break
-
-
-                    else:
-                        if pixel_separation < nearest_pixel_separation:
-
-                            # Update the x, y coordinates and the nearest star by pixel separation
-                            nearest_x, nearest_y, nearest_pixel_separation = x, y, pixel_separation
-
-
-                # Append once for each visible star that is not marked to be ignored
-                if not ignore_this_star:
-                    candidate_x_list.append(nearest_x)
-                    candidate_y_list.append(nearest_y)
-                    dist_nearest_marked_list.append(nearest_pixel_separation)
-
-            return candidate_x_list, candidate_y_list, dist_nearest_marked_list, nearest_pixel_separation
-        
-        ######################################################################################################
-
-        marked_x_list, marked_y_list = getMarkedStars(include_unsuitable=False)
-        max_distance_between_paired = maxDistBetweenPoints(marked_x_list, marked_y_list)
-
-        marked_x_list, marked_y_list = getMarkedStars(include_unsuitable=True)
-        unmarked_x_list, unmarked_y_list, dist_nearest_marked_list, distance_between_unmarked = \
-            getVisibleUnmarkedStarsAndDistanceToMarked(marked_x_list, marked_y_list, 
-                                                       min_separation=min_separation)
-
-        if len(dist_nearest_marked_list) == 0:
-            print("No stars left to pick")
-            return marked_x_list[-1], marked_y_list[-1], max_distance_between_paired
-
-        if miss_this_one:
-            # Pick a distance at random
-            next_star_index = dist_nearest_marked_list.index(random.choice(dist_nearest_marked_list))
-        else:
-            # Find the index of this star
-            next_star_index = dist_nearest_marked_list.index(max(dist_nearest_marked_list))
-
-
-        # Return coordinates of next star and maximum pixel distance between marked stars
-
-        return unmarked_x_list[next_star_index], unmarked_y_list[next_star_index], max_distance_between_paired
-
-
 
 if __name__ == '__main__':
     ### COMMAND LINE ARGUMENTS
