@@ -12,6 +12,8 @@ import collections
 import datetime
 import json
 import os
+import re
+import shutil
 import sys
 
 if sys.version_info[0] >= 3:
@@ -1315,11 +1317,19 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
             ratio_threshold = 0.7
 
         # Archive the model that judged this night alongside the night's data (named per
-        # the archived-file convention), so verdicts stay reproducible after later refits
+        # the archived-file convention), so verdicts stay reproducible after later refits.
+        # The station's sky-brightness map rides along so the archive is self-documenting
+        # visually as well (it is copied, not re-rendered - it belongs to this model).
         try:
             night_name = os.path.basename(os.path.normpath(dir_path))
             with open(os.path.join(dir_path, "{:s}_light_dome.json".format(night_name)), "w") as f:
                 json.dump(dome_model.model, f, indent=1)
+
+            station_png = os.path.join(os.path.expanduser(config.data_dir),
+                "{:s}_light_dome.png".format(str(config.stationID)))
+            if os.path.isfile(station_png):
+                shutil.copy(station_png,
+                    os.path.join(dir_path, "{:s}_light_dome.png".format(night_name)))
         except Exception as e:
             log.debug("Could not archive the light-dome model copy: {}".format(e))
 
@@ -2337,10 +2347,12 @@ def _nightKey(night_id):
     A night split into several captures (e.g. after a mid-night restart) would otherwise
     write several history entries and let one calendar night dominate the trailing window.
     Directory names look like STATION_YYYYMMDD_HHMMSS_microseconds; keep STATION_YYYYMMDD.
+    The date chunk is located by pattern rather than position, so station IDs that do not
+    follow the usual naming (e.g. containing underscores) still key correctly.
     """
-    parts = night_id.split("_")
-    if len(parts) >= 2 and len(parts[1]) == 8 and parts[1].isdigit():
-        return "_".join(parts[:2])
+    match = re.search(r"_(\d{8})(?:_|$)", night_id)
+    if match:
+        return night_id[:match.end(1)]
     return night_id
 
 
