@@ -2712,7 +2712,8 @@ class PlateTool(QtWidgets.QMainWindow):
         self.status_bar.setFont(QtGui.QFont('monospace'))
         self.setStatusBar(self.status_bar)
 
-        # Stop button for long-running operations (validation, night refit, redetect-all).
+        # Stop button for long-running operations (validation, night refit, redetect-all,
+        # astrometry.net solving, NN fits).
         # Hidden unless a cancellable operation is running; the operations pump the Qt event
         # loop, so a click lands mid-operation and sets the cancel flag they check.
         self._cancel_requested = False
@@ -13815,6 +13816,9 @@ class PlateTool(QtWidgets.QMainWindow):
         except OperationCancelled:
             self.status_bar.showMessage("Quick align cancelled - platepar restored")
             return
+        finally:
+            # Re-enable the buttons - a cancellation mid-operation skips the impl's own restore
+            self.tab.param_manager.setQuickAlignButtonBusy(False)
 
     def _quickAlignImpl(self):
         """ Re-fit pointing using existing distortion. Uses astrometry.net if NNalign fails.
@@ -13876,6 +13880,9 @@ class PlateTool(QtWidgets.QMainWindow):
         except OperationCancelled:
             self.status_bar.showMessage("Auto-fit cancelled - platepar restored")
             return
+        finally:
+            # Re-enable the buttons - a cancellation mid-operation skips the impl's own restore
+            self.tab.param_manager.setAutoFitButtonBusy(False)
 
     def _autoFitAstrometryNetImpl(self):
         """ Auto fit using astrometry.net. Called from Auto Fit button. """
@@ -14500,16 +14507,29 @@ class PlateTool(QtWidgets.QMainWindow):
             The return value of func(*args, **kwargs).
 
         Raises:
+            OperationCancelled if the user presses Stop while waiting.
             Any exception raised by func.
         """
-        with ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(func, *args, **kwargs)
+        executor = ThreadPoolExecutor(max_workers=1)
+        future = executor.submit(func, *args, **kwargs)
 
+        # Show the Stop button while waiting. The worker thread cannot be interrupted
+        # (the solver is blocking C code), so Stop abandons it: the thread keeps running
+        # to completion in the background but its result is discarded.
+        self._beginCancellableOperation()
+        try:
             while not future.done():
-                QtWidgets.QApplication.processEvents()
+                self._checkCancelled()
                 time.sleep(0.05)
+        except OperationCancelled:
+            executor.shutdown(wait=False)
+            print("Background operation cancelled - abandoning the worker thread.")
+            raise
+        finally:
+            self._endCancellableOperation()
 
-            return future.result()
+        executor.shutdown(wait=True)
+        return future.result()
 
 
     def loadCatalogStars(self, lim_mag):
