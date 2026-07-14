@@ -20,9 +20,9 @@ def model_dict():
         s=0.32,
         q0=1.0,      # LP bowl brightness 10x zenith-natural at alt 0
         h0=30.0,
-        ndom=1,
-        domes=[dict(az=200.0, B=100.0, kappa=5.0, h=15.0)],
-        model="vanrhijn_brightness",
+        norder=1,
+        harmonics=[dict(order=1, A=12.0, phi=200.0, h=20.0)],
+        model="vanrhijn_harmonics",
     )
 
 
@@ -40,15 +40,15 @@ def test_lm0_per_station(model_dict):
     assert lm_b < lm_x < lm_a
 
 
-def test_lm_decreases_toward_horizon_and_dome(model_dict):
+def test_lm_decreases_toward_horizon_and_glow(model_dict):
     model = LightDomeModel(model_dict)
 
-    # Away from the dome, LM must fall monotonically with decreasing altitude
+    # Away from the glow, LM must fall monotonically with decreasing altitude
     alts = np.array([80.0, 60.0, 40.0, 20.0, 10.0])
-    lms = model.limitingMagnitude(np.zeros_like(alts), alts, station_id="US005A")
+    lms = model.limitingMagnitude(np.full_like(alts, 20.0), alts, station_id="US005A")
     assert np.all(np.diff(lms) < 0)
 
-    # At low altitude, pointing into the dome must be shallower than away from it
+    # At low altitude, pointing into the glow must be shallower than away from it
     lm_into = model.limitingMagnitude(200.0, 15.0, station_id="US005A")
     lm_away = model.limitingMagnitude(20.0, 15.0, station_id="US005A")
     assert lm_into < lm_away - 0.5
@@ -84,11 +84,26 @@ def test_amplitude_scales_light_pollution_only(model_dict):
     assert lm_after < lm_before
 
     # With no LP at all, only van Rhijn + airmass remain and amplitude has no effect
-    model_dark = LightDomeModel(dict(model_dict, q0=-10.0, domes=[]))
+    model_dark = LightDomeModel(dict(model_dict, q0=-10.0, harmonics=[]))
     lm1 = model_dark.limitingMagnitude(200.0, 15.0, station_id="US005A")
     model_dark.amplitude = 2.0
     lm2 = model_dark.limitingMagnitude(200.0, 15.0, station_id="US005A")
     assert lm1 == pytest.approx(lm2, abs=1e-6)
+
+
+def test_dipole_direction(model_dict):
+    model = LightDomeModel(model_dict)
+
+    # Brighter (shallower LM) toward the dipole phase than away from it, at low altitude
+    lm_toward = model.limitingMagnitude(200.0, 15.0, station_id="US005A")
+    lm_away = model.limitingMagnitude(20.0, 15.0, station_id="US005A")
+    assert lm_toward < lm_away
+
+    # The negative half of the cosine cannot push total LP below zero: away-side sky is
+    # never DARKER than the airglow-only sky
+    dark = LightDomeModel(dict(model_dict, q0=-10.0, harmonics=[]))
+    assert model.limitingMagnitude(20.0, 15.0, station_id="US005A") \
+        <= dark.limitingMagnitude(20.0, 15.0, station_id="US005A") + 1e-9
 
 
 def test_load_roundtrip(model_dict, tmp_path):
@@ -112,46 +127,29 @@ def test_load_roundtrip(model_dict, tmp_path):
     assert LightDomeModel.load(DummyConfig2()) is None
 
 
-@pytest.fixture
-def harmonics_model_dict():
-    return dict(
-        cams=["US005A"],
-        LM0=[6.0],
-        k=0.2,
-        s=0.32,
-        q0=1.0, h0=30.0,
-        norder=1,
-        harmonics=[dict(order=1, A=8.0, phi=180.0, h=20.0)],
-        model="vanrhijn_harmonics",
+def test_load_rejects_legacy_basis(model_dict, tmp_path):
+    # A file from the retired von Mises dome basis must not load - it is left for
+    # ensureLightDomeModel to detect and refit with the harmonic basis
+    legacy = dict(
+        cams=["US005A"], LM0=[6.0], k=0.2, s=0.32, q0=1.0, h0=30.0,
+        ndom=1, domes=[dict(az=200.0, B=100.0, kappa=5.0, h=15.0)],
+        model="vanrhijn_brightness",
     )
 
+    path = os.path.join(str(tmp_path), "US005A_light_dome.json")
+    with open(path, "w") as f:
+        json.dump(legacy, f)
 
-def test_harmonics_dipole_direction(harmonics_model_dict):
-    model = LightDomeModel(harmonics_model_dict)
+    class DummyConfig(object):
+        data_dir = str(tmp_path)
+        stationID = "US005A"
 
-    # Brighter (shallower LM) toward the dipole phase than away from it, at low altitude
-    lm_toward = model.limitingMagnitude(180.0, 15.0, station_id="US005A")
-    lm_away = model.limitingMagnitude(0.0, 15.0, station_id="US005A")
-    assert lm_toward < lm_away
+    assert LightDomeModel.load(DummyConfig()) is None
 
-    # The negative half of the cosine cannot push total LP below zero: away-side sky is
-    # never DARKER than the airglow-only sky
-    dark = LightDomeModel(dict(harmonics_model_dict, q0=-10.0, harmonics=[]))
-    assert model.limitingMagnitude(0.0, 15.0, station_id="US005A") \
-        <= dark.limitingMagnitude(0.0, 15.0, station_id="US005A") + 1e-9
+    # A harmonic site-generic file behind the legacy per-station file still loads
+    with open(os.path.join(str(tmp_path), "light_dome.json"), "w") as f:
+        json.dump(model_dict, f)
 
-
-def test_harmonics_and_legacy_coexist(harmonics_model_dict, model_dict):
-    # Legacy lobe models must keep evaluating unchanged alongside the new basis
-    legacy = LightDomeModel(model_dict)
-    harm = LightDomeModel(harmonics_model_dict)
-
-    for m in (legacy, harm):
-        lm = m.limitingMagnitude(200.0, 30.0, station_id=m.cams[0])
-        assert 0.0 < lm < 8.0
-
-    # A model with BOTH populated (hand-built hybrid) sums both contributions
-    hybrid = LightDomeModel(dict(harmonics_model_dict,
-        domes=[dict(az=180.0, B=50.0, kappa=5.0, h=15.0)]))
-    assert hybrid.limitingMagnitude(180.0, 15.0, station_id="US005A") \
-        < harm.limitingMagnitude(180.0, 15.0, station_id="US005A")
+    model = LightDomeModel.load(DummyConfig())
+    assert model is not None
+    assert model.lm0_map["US005A"] == 6.0

@@ -317,43 +317,52 @@ def fitLightDome(station_configs, dates=None, max_order=3, moon_phase_max=MOON_P
         model_dict: [dict] Fitted site model (LightDomeModel format), or None.
     """
 
-    cams = [str(c.stationID) for c in station_configs]
-    ncam = len(cams)
-
     az_l, alt_l, mag_l, det_l, ci_l = [], [], [], [], []
     fit_nights = []
     pointing = {}
     thresholds = {}
     footprints = {}
 
-    for i, config in enumerate(station_configs):
+    # Stations without usable trials are dropped here, BEFORE the parameter vector is
+    # built - otherwise the written model would carry an unconstrained (initial-value)
+    # LM0 for a camera the data never touched
+    cams = []
+
+    for config in station_configs:
+
+        station = str(config.stationID)
 
         night_dirs = selectNightDirs(config, dates=dates)
-        fit_nights += [os.path.basename(d) for d in night_dirs]
 
         trials = buildStationTrials(config, night_dirs, moon_phase_max=moon_phase_max)
 
         if trials is None:
-            print("{:s}: no usable trials, station excluded from fit".format(cams[i]))
+            print("{:s}: no usable trials, station excluded from fit".format(station))
             continue
 
         n = len(trials["az"])
         print("{:s}: {:d} trials from {:d} night dir(s), detected fraction {:.2f}".format(
-            cams[i], n, len(night_dirs), float(np.mean(trials["det"]))))
+            station, n, len(night_dirs), float(np.mean(trials["det"]))))
+
+        fit_nights += [os.path.basename(d) for d in night_dirs]
 
         az_l.append(trials["az"])
         alt_l.append(trials["alt"])
         mag_l.append(trials["mag"])
         det_l.append(trials["det"])
-        ci_l.append(np.full(n, i, dtype=np.int64))
+        ci_l.append(np.full(n, len(cams), dtype=np.int64))
 
         # Metadata for staleness detection (see ensureLightDomeModel) and the model plot
-        pointing[cams[i]] = list(trials["pointing"])
-        thresholds[cams[i]] = float(config.intensity_threshold)
-        footprints[cams[i]] = trials["footprint"]
+        pointing[station] = list(trials["pointing"])
+        thresholds[station] = float(config.intensity_threshold)
+        footprints[station] = trials["footprint"]
 
-    if not az_l:
+        cams.append(station)
+
+    if not cams:
         return None
+
+    ncam = len(cams)
 
     az = np.concatenate(az_l)
     alt = np.concatenate(alt_l)
@@ -604,14 +613,12 @@ def renderLightDomeModel(model_dict, station_id, out_path, config=None):
     lm0 = model.lm0_map.get(str(station_id), model.lm0_default)
     fit_kind = "auto-fit" if model_dict.get("auto_fitted") else "site fit"
 
-    # Describe the directional glow structure in plain terms, whichever basis fitted it
+    # Describe the directional glow structure in plain terms
     parts = []
     for h in model_dict.get("harmonics", []):
         name = {1: "dipole", 2: "quadrupole"}.get(int(h["order"]),
             "order {:d}".format(int(h["order"])))
         parts.append("{:s} az {:.0f}".format(name, h["phi"]))
-    for d in model_dict.get("domes", []):
-        parts.append("lobe az {:.0f}".format(d["az"]))
     glow_str = ", ".join(parts) or "uniform (no directional glow)"
 
     ax.set_title("{:s} sky brightness ({:s} {:s})\nzenith {:.1f} mag/arcsec$^2$ ({:s}) | "
@@ -645,6 +652,106 @@ AUTO_REL_CLARITY = 0.5     # keep only nights at least this clear relative to th
                            # cloudy nights as clear)
 AUTO_POINTING_TOL = 3.0    # deg - pointing change that invalidates an auto-fitted model
 AUTO_ATTEMPT_MARKER = "light_dome_fit_attempt.json"
+
+
+def findSiblingStationConfigs(config):
+    """ Discover co-located sibling stations on a multi-station computer.
+
+    Uses the multi-camera layout convention: each station lives in a directory named by
+    its stationID (e.g. ~/source/Stations/XX0001/.config). A sibling is accepted only if
+    its directory name matches its stationID (this rules out unrelated RMS checkouts with
+    template configs) and it sits at the same site (within ~1 km) - the fitted glow field
+    is shared only by co-located cameras.
+
+    Arguments:
+        config: [Config] Station config.
+
+    Return:
+        configs: [list of Config] This station's config first, then any co-located
+            siblings. A single-camera station simply gets a one-entry list.
+    """
+
+    configs = [config]
+
+    cfg_path = getattr(config, "config_file_name", None)
+    if (not cfg_path) or (not os.path.isfile(cfg_path)):
+        return configs
+
+    station_dir = os.path.dirname(os.path.abspath(cfg_path))
+    root = os.path.dirname(station_dir)
+
+    # A duplicated data_dir would double-count its trials in the pooled fit
+    seen_data_dirs = {os.path.realpath(os.path.expanduser(config.data_dir))}
+
+    try:
+        entries = sorted(os.listdir(root))
+    except OSError:
+        return configs
+
+    for name in entries:
+
+        sib_dir = os.path.join(root, name)
+        sib_cfg_path = os.path.join(sib_dir, ".config")
+
+        if (os.path.realpath(sib_dir) == os.path.realpath(station_dir)) \
+                or (not os.path.isfile(sib_cfg_path)):
+            continue
+
+        try:
+            sib = cr.parse(sib_cfg_path)
+        except Exception:
+            continue
+
+        # The directory must be named by the station it hosts (the multi-camera layout)
+        if name.lower() != str(sib.stationID).lower():
+            continue
+
+        # Same site only
+        if (abs(float(sib.latitude) - float(config.latitude)) > 0.01) \
+                or (abs(float(sib.longitude) - float(config.longitude)) > 0.01):
+            continue
+
+        sib_data_dir = os.path.realpath(os.path.expanduser(sib.data_dir))
+        if sib_data_dir in seen_data_dirs:
+            continue
+        seen_data_dirs.add(sib_data_dir)
+
+        configs.append(sib)
+
+    return configs
+
+
+def findLegacyModelFile(data_dir, station):
+    """ Return the path of a model file from the retired dome basis, or None.
+
+    Arguments:
+        data_dir: [str] Station data directory.
+        station: [str] Station ID.
+
+    Return:
+        path: [str] Path of the legacy-basis model file, or None if none is present.
+    """
+
+    # Same precedence as LightDomeModel.load: only the file that would actually be used
+    # matters - a shadowed legacy file behind a harmonic one must not refit-loop forever
+    for name in ["{:s}_{:s}".format(station, LIGHT_DOME_FILE_SUFFIX), LIGHT_DOME_FILE_SUFFIX]:
+
+        path = os.path.join(data_dir, name)
+        if not os.path.isfile(path):
+            continue
+
+        try:
+            with open(path) as f:
+                model_dict = json.load(f)
+        except Exception:
+            continue
+
+        if model_dict.get("model") != "vanrhijn_harmonics":
+            return path
+
+        return None
+
+    return None
 
 
 def modelIsStale(model_dict, config, platepar=None):
@@ -713,19 +820,23 @@ def modelIsStale(model_dict, config, platepar=None):
 
 
 def ensureLightDomeModel(config, platepar=None):
-    """ Self-prime the station's light-dome model from its own archives, no operator needed.
+    """ Self-prime the site's light-dome model from the stations' own archives, no
+        operator needed.
 
-    Called nightly from detectClouds. If no model file exists (or a previously auto-fitted
-    one went stale), the clearest recent archived nights are selected and a single-station
-    model is fitted and installed. A single camera constrains the model only inside its own
-    FOV footprint - which is exactly and only where it is evaluated for that camera, so a
-    station-local fit is valid on its own. A manually fitted multi-station (site-pooled)
-    model is NEVER overwritten: pooling is strictly better, so if one is present and stale
-    this only logs a recommendation to refit it manually.
+    Called nightly from detectClouds. If no model file exists, or the present one went
+    stale, or it is from the retired dome basis, the clearest recent archived nights are
+    selected and the model is refitted. All co-located sibling stations found on this
+    computer (multi-camera layout: sibling config directories named by stationID) are
+    pooled into one site fit, so every camera's FOV constrains the shared glow field and
+    no camera relies on an extrapolation into sky it cannot see. A single-camera station
+    fits alone - it constrains the model only inside its own FOV footprint, which is
+    exactly and only where the model is evaluated for it. The identical site model is
+    installed for every station that contributed trials, and their attempt markers are
+    stamped so the siblings do not redo the same fit.
 
-    Attempts are rate-limited to one per day via a marker file, so stations without enough
-    archived nights retry cheaply until history accumulates; until then detectClouds falls
-    back to the previous scalar behavior.
+    Attempts are rate-limited to one per day per station via a marker file, so stations
+    without enough archived nights retry cheaply until history accumulates; until then
+    detectClouds falls back to the previous scalar behavior.
 
     Arguments:
         config: [Config] Station config.
@@ -739,23 +850,24 @@ def ensureLightDomeModel(config, platepar=None):
 
     data_dir = os.path.expanduser(config.data_dir)
     station = str(config.stationID)
-    model_path = os.path.join(data_dir, "{:s}_{:s}".format(station, LIGHT_DOME_FILE_SUFFIX))
 
-    # Existing model: keep it unless it is an auto-fitted one that went stale
+    # A model file from the retired dome basis is refitted outright - the harmonic basis
+    # is the only supported one, and old files no longer evaluate
+    legacy_path = findLegacyModelFile(data_dir, station)
+    if legacy_path is not None:
+        print("Light-dome model {:s} uses the retired dome basis - refitting with the "
+              "harmonic basis".format(os.path.basename(legacy_path)))
+
+    # Existing harmonic model: keep it while it is fresh
     model = LightDomeModel.load(config)
-    if model is not None:
+    if (model is not None) and (legacy_path is None):
 
         stale = modelIsStale(model.model, config, platepar=platepar)
 
         if stale is None:
             return True
 
-        if (not model.model.get("auto_fitted")) or (len(model.model.get("cams", [])) > 1):
-            print("Light-dome model is stale ({:s}) but was fitted manually/site-pooled - "
-                  "keeping it; consider refitting with Utils.FitLightDome".format(stale))
-            return True
-
-        print("Auto-fitted light-dome model is stale ({:s}) - refitting".format(stale))
+        print("Light-dome model is stale ({:s}) - refitting".format(stale))
 
     # Rate-limit attempts to one per day
     marker_path = os.path.join(data_dir, "{:s}_{:s}".format(station, AUTO_ATTEMPT_MARKER))
@@ -789,7 +901,13 @@ def ensureLightDomeModel(config, platepar=None):
     print("Light-dome auto-fit from the {:d} clearest archived nights: {:s}".format(
         len(night_dirs), ", ".join(dates)))
 
-    model_dict = fitLightDome([config], dates=dates)
+    # Pool every co-located sibling station on this computer into one site fit
+    station_configs = findSiblingStationConfigs(config)
+    if len(station_configs) > 1:
+        print("Pooling co-located stations for the site fit: {:s}".format(
+            ", ".join(str(c.stationID) for c in station_configs)))
+
+    model_dict = fitLightDome(station_configs, dates=dates)
 
     if (model_dict is None) or (model_dict.get("n_trials", 0) < AUTO_MIN_TRIALS):
         print("Light-dome auto-fit produced insufficient trials - keeping previous behavior")
@@ -797,17 +915,36 @@ def ensureLightDomeModel(config, platepar=None):
 
     model_dict["auto_fitted"] = True
 
-    with open(model_path, "w") as f:
-        json.dump(model_dict, f, indent=1)
-    print("Light-dome model auto-fitted and installed: {:s}".format(model_path))
+    # Install the identical site model for every station that contributed trials, and
+    # stamp their attempt markers so the siblings do not redo the same fit tonight
+    for sib_config in station_configs:
 
-    try:
-        renderLightDomeModel(model_dict, station,
-            os.path.splitext(model_path)[0] + ".png", config=config)
-    except Exception as e:
-        print("Light-dome model plot failed ({}) - model itself is installed".format(e))
+        sib_station = str(sib_config.stationID)
+        if sib_station not in model_dict["cams"]:
+            continue
 
-    return True
+        sib_data_dir = os.path.expanduser(sib_config.data_dir)
+        sib_model_path = os.path.join(sib_data_dir,
+            "{:s}_{:s}".format(sib_station, LIGHT_DOME_FILE_SUFFIX))
+
+        with open(sib_model_path, "w") as f:
+            json.dump(model_dict, f, indent=1)
+        print("Light-dome model auto-fitted and installed: {:s}".format(sib_model_path))
+
+        try:
+            renderLightDomeModel(model_dict, sib_station,
+                os.path.splitext(sib_model_path)[0] + ".png", config=sib_config)
+        except Exception as e:
+            print("Light-dome model plot failed ({}) - model itself is installed".format(e))
+
+        try:
+            with open(os.path.join(sib_data_dir,
+                    "{:s}_{:s}".format(sib_station, AUTO_ATTEMPT_MARKER)), "w") as f:
+                json.dump(dict(date=today), f)
+        except Exception:
+            pass
+
+    return (station in model_dict["cams"]) or (model is not None)
 
 
 if __name__ == "__main__":

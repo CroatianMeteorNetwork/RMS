@@ -8,14 +8,20 @@ import os
 
 import pytest
 
-from Utils.FitLightDome import modelIsStale, ensureLightDomeModel, AUTO_ATTEMPT_MARKER
+from Utils.FitLightDome import (modelIsStale, ensureLightDomeModel, findLegacyModelFile,
+    findSiblingStationConfigs, AUTO_ATTEMPT_MARKER)
+import RMS.ConfigReader as cr
 
 
 class DummyConfig(object):
-    def __init__(self, data_dir, station_id="US005X", intensity_threshold=10):
+    def __init__(self, data_dir, station_id="US005X", intensity_threshold=10,
+                 latitude=32.0, longitude=-110.0, config_file_name=None):
         self.data_dir = data_dir
         self.stationID = station_id
         self.intensity_threshold = intensity_threshold
+        self.latitude = latitude
+        self.longitude = longitude
+        self.config_file_name = config_file_name
 
 
 class DummyPlatepar(object):
@@ -28,8 +34,8 @@ def freshModelDict(**overrides):
     model = dict(
         cams=["US005X"],
         LM0=[5.5],
-        k=0.2, s=0.32, q0=1.0, h0=20.0, ndom=0, domes=[],
-        model="vanrhijn_brightness",
+        k=0.2, s=0.32, q0=1.0, h0=20.0, norder=0, harmonics=[],
+        model="vanrhijn_harmonics",
         fit_date=datetime.datetime.utcnow().strftime("%Y-%m-%d"),
         n_trials=50000,
         pointing={"US005X": [180.0, 45.0]},
@@ -38,6 +44,11 @@ def freshModelDict(**overrides):
     )
     model.update(overrides)
     return model
+
+
+def legacyModelDict():
+    return dict(cams=["US005X"], LM0=[5.5], k=0.2, s=0.32, q0=1.0, h0=20.0,
+                ndom=0, domes=[], model="vanrhijn_brightness")
 
 
 def test_fresh_model_not_stale(tmp_path):
@@ -68,17 +79,19 @@ def test_stale_by_pointing_change(tmp_path):
     assert modelIsStale(model, cfg, DummyPlatepar(az_centre=1.0)) is None
 
 
-def test_legacy_model_without_metadata_never_stale(tmp_path):
-    # Models written before the metadata existed (e.g. manual site-pooled fits) must be
-    # treated as fresh, not refit-looped
+def test_model_without_metadata_never_stale(tmp_path):
+    # Models written before the staleness metadata existed must be treated as fresh,
+    # not refit-looped
     cfg = DummyConfig(str(tmp_path))
-    legacy = dict(cams=["US005X"], LM0=[5.5], k=0.2, s=0.32, q0=1.0, h0=20.0,
-                  ndom=0, domes=[], model="vanrhijn_brightness")
-    assert modelIsStale(legacy, cfg, DummyPlatepar()) is None
+    bare = dict(cams=["US005X"], LM0=[5.5], k=0.2, s=0.32, q0=1.0, h0=20.0,
+                norder=0, harmonics=[], model="vanrhijn_harmonics")
+    assert modelIsStale(bare, cfg, DummyPlatepar()) is None
 
 
-def test_manual_pooled_model_never_overwritten(tmp_path):
-    # A stale MANUAL model (no auto_fitted flag) must be kept as-is
+def test_stale_manual_model_triggers_refit_attempt(tmp_path):
+    # A stale manual model is refit by the auto path too (the auto fit pools co-located
+    # stations itself, so a manual fit holds no advantage). With no archives available
+    # the previous model is kept and the attempt marker is written.
     cfg = DummyConfig(str(tmp_path))
     old = (datetime.datetime.utcnow() - datetime.timedelta(days=90)).strftime("%Y-%m-%d")
     model = freshModelDict(fit_date=old)
@@ -89,8 +102,42 @@ def test_manual_pooled_model_never_overwritten(tmp_path):
         json.dump(model, f)
     before = open(path).read()
 
+    # No archived nights in tmp_path: the refit cannot run, the model is kept
     assert ensureLightDomeModel(cfg, platepar=DummyPlatepar()) is True
     assert open(path).read() == before
+    assert os.path.isfile(os.path.join(str(tmp_path), "US005X_" + AUTO_ATTEMPT_MARKER))
+
+
+def test_legacy_basis_triggers_refit_attempt(tmp_path):
+    # A model file from the retired dome basis is refit outright, even if fresh: it no
+    # longer evaluates. With no archives the station falls back to scalar behavior.
+    cfg = DummyConfig(str(tmp_path))
+
+    path = os.path.join(str(tmp_path), "US005X_light_dome.json")
+    with open(path, "w") as f:
+        json.dump(legacyModelDict(), f)
+
+    assert findLegacyModelFile(str(tmp_path), "US005X") == path
+
+    assert ensureLightDomeModel(cfg, platepar=DummyPlatepar()) is False
+    assert os.path.isfile(os.path.join(str(tmp_path), "US005X_" + AUTO_ATTEMPT_MARKER))
+
+
+def test_shadowed_legacy_file_does_not_refit_loop(tmp_path):
+    # A legacy site-generic file behind a fresh harmonic per-station file is shadowed
+    # and must not trigger refits
+    cfg = DummyConfig(str(tmp_path))
+
+    with open(os.path.join(str(tmp_path), "light_dome.json"), "w") as f:
+        json.dump(legacyModelDict(), f)
+    with open(os.path.join(str(tmp_path), "US005X_light_dome.json"), "w") as f:
+        json.dump(freshModelDict(), f)
+
+    assert findLegacyModelFile(str(tmp_path), "US005X") is None
+    assert ensureLightDomeModel(cfg, platepar=DummyPlatepar()) is True
+
+    # No attempt marker: the fresh model short-circuits before the rate limiter
+    assert not os.path.isfile(os.path.join(str(tmp_path), "US005X_" + AUTO_ATTEMPT_MARKER))
 
 
 def test_no_model_no_archives_waits(tmp_path):
@@ -105,6 +152,46 @@ def test_no_model_no_archives_waits(tmp_path):
     assert json.load(open(marker))["date"] == datetime.datetime.utcnow().strftime("%Y-%m-%d")
 
     assert ensureLightDomeModel(cfg) is False
+
+
+def test_sibling_discovery(tmp_path, monkeypatch):
+    # Multi-camera layout: Stations/<ID>/.config with the directory named by the
+    # stationID. A far-away station and an unrelated RMS checkout (directory name does
+    # not match its template stationID) must both be excluded.
+    root = os.path.join(str(tmp_path), "Stations")
+    for name in ["US005X", "US005Y", "US005Z", "XX9999", "RMS"]:
+        os.makedirs(os.path.join(root, name))
+        with open(os.path.join(root, name, ".config"), "w") as f:
+            f.write("; dummy\n")
+
+    def fakeParse(path, strict=True):
+        name = os.path.basename(os.path.dirname(path))
+        station_id = "XX0001" if name == "RMS" else name
+        latitude = 45.0 if name == "XX9999" else 32.0
+        return DummyConfig(os.path.join(str(tmp_path), "data", station_id),
+            station_id=station_id, latitude=latitude, config_file_name=path)
+
+    monkeypatch.setattr(cr, "parse", fakeParse)
+
+    cfg = fakeParse(os.path.join(root, "US005X", ".config"))
+    siblings = findSiblingStationConfigs(cfg)
+    ids = [str(c.stationID) for c in siblings]
+
+    assert ids[0] == "US005X"
+    assert set(ids) == {"US005X", "US005Y", "US005Z"}
+
+    # A sibling sharing this station's data_dir would double-count trials - excluded
+    def fakeParseSameDataDir(path, strict=True):
+        c = fakeParse(path)
+        c.data_dir = str(cfg.data_dir)
+        return c
+
+    monkeypatch.setattr(cr, "parse", fakeParseSameDataDir)
+    assert [str(c.stationID) for c in findSiblingStationConfigs(cfg)] == ["US005X"]
+
+    # A single-camera station (config not in the multi-camera layout) fits alone
+    solo = DummyConfig(str(tmp_path), station_id="US1234", config_file_name=None)
+    assert [str(c.stationID) for c in findSiblingStationConfigs(solo)] == ["US1234"]
 
 
 def _writeHistory(tmp_path, station, dratios, model_version):

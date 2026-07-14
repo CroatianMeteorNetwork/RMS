@@ -4,11 +4,13 @@ Evaluates the stellar limiting magnitude of a station anywhere on the sky from a
 site sky-brightness model. The sky brightness is composed in BRIGHTNESS space (sources
 add in flux, not magnitudes):
 
-    B(az, alt) = vanRhijn(alt) + amplitude*(LP_bowl(alt) + sum_i dome_i(az, alt))
+    B(az, alt) = vanRhijn(alt) + amplitude*(LP_bowl(alt) + sum_k harmonic_k(az, alt))
 
 where vanRhijn is the natural airglow slant-path brightening (no free parameters),
-LP_bowl is the isotropic light-pollution term, and each dome_i is a localized city glow
-(von Mises in azimuth, exponential in altitude). The limiting magnitude then follows the
+LP_bowl is the isotropic light-pollution term, and the harmonics are an azimuthal cosine
+series (one altitude profile per order) - the natural basis for an observer EMBEDDED in
+the glow field, where directional structure is a broad asymmetry gradient rather than
+discrete distant-city domes. The limiting magnitude then follows the
 background-limited SNR relation:
 
     LM(az, alt, station) = LM0_station - k*(airmass - 1) - 1.25*log10(B(az, alt))
@@ -56,7 +58,7 @@ class LightDomeModel(object):
         Arguments:
             model_dict: [dict] Fitted model, as written by Utils.FitLightDome. Fields:
                 cams [list of stationID], LM0 [list, per cam], k, s, q0, h0,
-                domes [list of {az, B, kappa, h}].
+                harmonics [list of {order, A, phi, h}].
         """
 
         self.model = model_dict
@@ -70,12 +72,7 @@ class LightDomeModel(object):
         self.q0 = float(model_dict.get("q0", -10.0))
         self.h0 = float(model_dict.get("h0", 20.0))
 
-        # Legacy basis: localized von Mises lobes ("vanrhijn_brightness")
-        self.domes = model_dict.get("domes", [])
-
-        # Harmonics basis: azimuthal cosine series ("vanrhijn_harmonics") - the natural
-        # basis for an observer EMBEDDED in the glow field, where directional structure
-        # is a broad asymmetry gradient rather than discrete distant-city domes
+        # Azimuthal cosine series, one altitude profile per order
         self.harmonics = model_dict.get("harmonics", [])
 
         # Nightly aerosol scale on the light-pollution terms (1.0 = fit epoch)
@@ -108,13 +105,21 @@ class LightDomeModel(object):
         for name in candidates:
             path = os.path.join(data_dir, name)
 
-            if os.path.isfile(path):
-                try:
-                    with open(path) as f:
-                        return cls(json.load(f))
+            if not os.path.isfile(path):
+                continue
 
-                except Exception:
-                    return None
+            try:
+                with open(path) as f:
+                    model_dict = json.load(f)
+            except Exception:
+                continue
+
+            # Only the harmonic basis is supported - a file from the retired dome basis is
+            # left in place for ensureLightDomeModel to detect and refit
+            if model_dict.get("model") != "vanrhijn_harmonics":
+                continue
+
+            return cls(model_dict)
 
         return None
 
@@ -138,18 +143,12 @@ class LightDomeModel(object):
         # Light pollution: isotropic bowl term
         lp = (10.0**self.q0)*np.exp(-alt_c/self.h0)
 
-        # Harmonics basis: azimuthal cosine series, one altitude profile per order.
+        # Azimuthal cosine series, one altitude profile per order.
         # A_k*cos(k*(az - phi_k)) can be negative on the dark side; the total LP field is
         # clamped non-negative below.
         for h in self.harmonics:
             order = int(h["order"])
             lp = lp + h["A"]*np.cos(np.radians(order*(az - h["phi"])))*np.exp(-alt_c/h["h"])
-
-        # Legacy basis: localized von Mises lobes (kept so archived provenance models and
-        # not-yet-refitted stations evaluate unchanged forever)
-        for d in self.domes:
-            lp = lp + d["B"]*np.exp(d["kappa"]*(np.cos(np.radians(az - d["az"])) - 1.0)) \
-                *np.exp(-alt_c/d["h"])
 
         return B + self.amplitude*np.maximum(lp, 0.0)
 
