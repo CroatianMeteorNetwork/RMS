@@ -1236,6 +1236,15 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
         btn_row.addStretch()
         station_vlayout.addLayout(btn_row)
 
+        self.extract_stars_checkbox = QtWidgets.QCheckBox("Extract stars if CALSTARS is missing")
+        self.extract_stars_checkbox.setToolTip(
+            "When a loaded folder has no CALSTARS file, automatically detect stars on all\n"
+            "frames and write one. Uncheck to load the folder without star data instead\n"
+            "(stars can still be detected later from the Star Detection tab).")
+        self.extract_stars_checkbox.setChecked(getattr(self.plate_tool, 'auto_extract_calstars', True))
+        self.extract_stars_checkbox.toggled.connect(self._onExtractStarsToggled)
+        station_vlayout.addWidget(self.extract_stars_checkbox)
+
         layout.addWidget(station_group)
 
         # --- File sections ---
@@ -1256,6 +1265,10 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
         self._refreshAll()
 
     # --- Open folder / file methods ---
+
+    def _onExtractStarsToggled(self, checked):
+        """Remember whether to auto-extract stars when a folder has no CALSTARS file."""
+        self.plate_tool.auto_extract_calstars = checked
 
     def _onOpenFolder(self):
         """Prompt to select a folder, warn about unsaved changes, and reload."""
@@ -2440,6 +2453,10 @@ class PlateTool(QtWidgets.QMainWindow):
         self.label_mag_limit = 5.0
         self.show_constellations = False
         self.selected_stars_visible = True
+
+        # Extract stars automatically when a loaded folder has no CALSTARS file
+        # (toggled from the File Manager)
+        self.auto_extract_calstars = True
 
         # Star detection override parameters
         self.star_detection_override_enabled = False  # Use override parameters instead of CALSTARS
@@ -14441,6 +14458,15 @@ class PlateTool(QtWidgets.QMainWindow):
                 return None
 
 
+            # Skip the automatic extraction if disabled in the File Manager
+            elif not getattr(self, 'auto_extract_calstars', True):
+
+                print("The CALSTARS file is missing - automatic star extraction is disabled "
+                      "in the File Manager, loading without star data.")
+                self.calstars_chunk_frames = 256
+                calstars_list = []
+
+
             # Try generating CALSTARS automatically
             else:
 
@@ -14450,7 +14476,24 @@ class PlateTool(QtWidgets.QMainWindow):
                 # folder's value
                 self.calstars_chunk_frames = 256
                 try:
-                    calstars_list = extractStarsAndSave(self.config, self.dir_path)
+                    # Run in the background so the Stop button can skip the extraction. On the
+                    # initial load the status bar/Stop button don't exist yet - run directly
+                    if hasattr(self, 'stop_button'):
+                        self.status_bar.showMessage(
+                            "No CALSTARS file found - extracting stars (Stop loads without star data)...")
+                        calstars_list = self.runInBackground(
+                            extractStarsAndSave, self.config, self.dir_path)
+                    else:
+                        calstars_list = extractStarsAndSave(self.config, self.dir_path)
+
+                except OperationCancelled:
+                    # The abandoned extraction keeps running and will still write the CALSTARS
+                    # file to disk when it finishes - only this session ignores it
+                    print("Star extraction stopped - loading without star data. The extraction "
+                          "continues in the background and will still write a CALSTARS file.")
+                    self.status_bar.showMessage("Star extraction stopped - loaded without star data")
+                    calstars_list = []
+
                 except Exception as e:
                     print("ERROR: Star extraction failed: {:s}".format(str(e)))
                     calstars_list = []
