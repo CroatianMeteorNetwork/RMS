@@ -513,6 +513,39 @@ def timeSyncStatus(config, d, force_client=None):
 
     return ahead_ms
 
+
+def parseObsTimestamp(value):
+    """Parse an observation-database timestamp, or return None if there isn't one.
+
+    The observation-DB time columns are not NULL before they are first written --
+    they hold 0 -- so checking the row for None is not enough. str(0) is '0', and
+    strptime('0', "%Y-%m-%d %H:%M:%S") raises ValueError.
+
+    Arguments:
+        value: the raw column value (may be None, 0, or a timestamp string).
+
+    Return:
+        [datetime] the parsed time, or None if the column holds no usable timestamp.
+    """
+
+    if value is None:
+        return None
+
+    text = str(value).strip()
+
+    if (not text) or (text == "0"):
+        return None
+
+    # With and without microseconds
+    for time_format in ("%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d %H:%M:%S"):
+        try:
+            return datetime.datetime.strptime(text, time_format)
+        except ValueError:
+            continue
+
+    return None
+
+
 def getDaysSinceLastDetection(config, data_dir, d=None, debug=False):
     """Get the number of days since the last meteor detection
 
@@ -538,26 +571,30 @@ def getDaysSinceLastDetection(config, data_dir, d=None, debug=False):
         log.info("Last fits file for session SQL")
         log.info(last_fits_file_for_session_sql)
 
+    conn = None
     try:
         conn = getObsDBConn(config)
         result = conn.execute(last_fits_file_for_session_sql, (os.path.basename(data_dir),)).fetchone()
-        if result is None:
-            return "Unknown"
-        else:
-            result = str(result[0])
+
         log.info(f"SQL query is \n {last_fits_file_for_session_sql}")
         log.info(f"SQL query result is \n {result}")
-        # Keep microseconds
-        if '.' in result:
-            time_last_fits_file_for_session = datetime.datetime.strptime(result,  "%Y-%m-%d %H:%M:%S.%f")
-        else:
-            time_last_fits_file_for_session = datetime.datetime.strptime(result, "%Y-%m-%d %H:%M:%S")
-        conn.close()
+
+        # time_last_fits_file holds 0 until the session's first FITS file is recorded,
+        # so the row can exist while the column carries no timestamp. There is simply
+        # nothing to measure from yet -- that is not an error.
+        time_last_fits_file_for_session = parseObsTimestamp(result[0] if result else None)
+
+        if time_last_fits_file_for_session is None:
+            return "Unknown"
 
     except Exception as e:
         log.error('Failed to calculate time since last detection:' + repr(e))
         log.error("".join(traceback.format_exception(*sys.exc_info())))
         return "Error"
+
+    finally:
+        if conn is not None:
+            conn.close()
 
 
     last_detection_time_for_session_sql = ""
@@ -574,25 +611,36 @@ def getDaysSinceLastDetection(config, data_dir, d=None, debug=False):
 
     log.info("Write dict to db before doing SQL")
 
+    conn = None
     try:
         conn = getObsDBConn(config)
         storeDictInDB(conn,d, debug=False)
 
         cursor = conn.execute(last_detection_time_for_session_sql)
-        result =  cursor.fetchone()[0]
-        last_detection_time_for_session = datetime.datetime.strptime(result, "%Y-%m-%d %H:%M:%S")
+        row = cursor.fetchone()
+
+        # A station with no detections yet matches no row at all, so fetchone() returns
+        # None -- indexing straight into it raised TypeError. As above, the column may
+        # also carry no timestamp. Either way there is no last detection to measure to.
+        last_detection_time_for_session = parseObsTimestamp(row[0] if row else None)
+
+        if last_detection_time_for_session is None:
+            return "Unknown"
 
         # Guard against missing fits files causing negative time since last detection
         seconds_since_last_detection = max((time_last_fits_file_for_session - last_detection_time_for_session).total_seconds(), 0)
 
         # Express the gap in solar days (24 h), which is the intuitive unit for "days since".
         days_since_last_detection = seconds_since_last_detection / (60 * 60 * 24.0)
-        conn.close()
 
     except Exception as e:
         log.error('Failed to calculate time since last detection:' + repr(e))
         log.error("".join(traceback.format_exception(*sys.exc_info())))
         return "Error"
+
+    finally:
+        if conn is not None:
+            conn.close()
 
     log.info(f"Time since last detection is {days_since_last_detection} days")
 
