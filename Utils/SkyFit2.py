@@ -12,7 +12,7 @@ import collections
 import glob
 import sys
 import time
-from concurrent.futures import ThreadPoolExecutor
+import threading
 import copy
 import shutil
 import configparser
@@ -2458,6 +2458,10 @@ class PlateTool(QtWidgets.QMainWindow):
         # (toggled from the File Manager)
         self.auto_extract_calstars = True
 
+        # Last runInBackground worker thread - checked on window close so an abandoned
+        # operation doesn't keep the process alive
+        self._background_thread = None
+
         # Star detection override parameters
         self.star_detection_override_enabled = False  # Use override parameters instead of CALSTARS
         self.star_detection_override_data = {}  # Store re-detected stars per FF file
@@ -2631,6 +2635,15 @@ class PlateTool(QtWidgets.QMainWindow):
         """ Handle window close event to properly exit application. """
         event.accept()
         QtWidgets.QApplication.quit()
+
+        # A still-running background operation (e.g. an abandoned astrometry solve or star
+        # extraction) would keep the process alive in the terminal after the window closes -
+        # hard-exit instead. Orphaned extraction child processes die with the Manager
+        # process that feeds them their job queue.
+        thread = getattr(self, '_background_thread', None)
+        if (thread is not None) and thread.is_alive():
+            print("A background operation is still running - forcing exit.")
+            os._exit(0)
 
 
     def setFPS(self):
@@ -14572,26 +14585,40 @@ class PlateTool(QtWidgets.QMainWindow):
             OperationCancelled if the user presses Stop while waiting.
             Any exception raised by func.
         """
-        executor = ThreadPoolExecutor(max_workers=1)
-        future = executor.submit(func, *args, **kwargs)
+        result = {}
+
+        def worker():
+            try:
+                result['value'] = func(*args, **kwargs)
+            except BaseException as e:
+                result['error'] = e
+
+        # A daemon thread, unlike a ThreadPoolExecutor worker, does not block interpreter
+        # exit - concurrent.futures registers an atexit hook that joins its threads, so an
+        # operation abandoned by Stop (or still running when the window is closed) would
+        # keep the process alive in the terminal until it finishes
+        thread = threading.Thread(target=worker, daemon=True)
+        thread.start()
+        self._background_thread = thread
 
         # Show the Stop button while waiting. The worker thread cannot be interrupted
         # (the solver is blocking C code), so Stop abandons it: the thread keeps running
         # to completion in the background but its result is discarded.
         self._beginCancellableOperation()
         try:
-            while not future.done():
+            while thread.is_alive():
                 self._checkCancelled()
                 time.sleep(0.05)
         except OperationCancelled:
-            executor.shutdown(wait=False)
             print("Background operation cancelled - abandoning the worker thread.")
             raise
         finally:
             self._endCancellableOperation()
 
-        executor.shutdown(wait=True)
-        return future.result()
+        if 'error' in result:
+            raise result['error']
+
+        return result.get('value')
 
 
     def loadCatalogStars(self, lim_mag):
