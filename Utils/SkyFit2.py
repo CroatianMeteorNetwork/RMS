@@ -13194,6 +13194,9 @@ class PlateTool(QtWidgets.QMainWindow):
         self.platepar_modified = True
         self.error_overlay_needs_update = True
 
+        # Keep the pre-refit validation for the Before/After toggle on the result figure
+        validation_before = (self.night_validation, summary_before)
+
         # The stored validation no longer matches the new platepar
         self.night_validation = None
         self.tab.param_manager.refit_night_button.setEnabled(False)
@@ -13209,8 +13212,9 @@ class PlateTool(QtWidgets.QMainWindow):
         if len(self.paired_stars) > 0 and hasattr(self, 'computeResiduals'):
             self.computeResiduals()
 
-        # Re-validate so the before/after figure is immediately visible
-        self.validateFitAcrossFrames()
+        # Re-validate so the before/after comparison is immediately visible - one figure
+        # with a toggle, not a second window
+        self.validateFitAcrossFrames(compare_before=validation_before)
 
 
     def _nightValidationInputs(self):
@@ -13259,12 +13263,16 @@ class PlateTool(QtWidgets.QMainWindow):
         return merged, frames, catalog_val
 
 
-    def validateFitAcrossFrames(self):
+    def validateFitAcrossFrames(self, compare_before=None):
         """ Validate the current platepar against the detected stars of the whole night.
 
         Uses CALSTARS detections on a coverage-selected frame subset (corner cells are filled
         whenever the dataset has stars there), refits only the pointing per frame so mount
         drift is separated from distortion error, and shows spatially binned residuals.
+
+        Keyword arguments:
+            compare_before: [tuple] (results, summary) of a pre-refit validation. When given
+                (the night refit passes it), the result figure gets a Before/After toggle.
         """
 
         if self.platepar is None:
@@ -13363,15 +13371,71 @@ class PlateTool(QtWidgets.QMainWindow):
             else "no data", summary["n_corner"])
         self.status_bar.showMessage(headline)
 
-        ### Result figure ###
+        # Result figure - after a refit, one window with a Before/After toggle instead of
+        # a second window next to the pre-refit one
+        self._showValidationFigure(results, summary, before=compare_before)
+
+
+    def _showValidationFigure(self, results, summary, before=None):
+        """ Show the cross-frame validation figure.
+
+        Arguments:
+            results, summary: [dict] validateFit results and their summarizeValidation.
+
+        Keyword arguments:
+            before: [tuple] (results, summary) of the pre-refit validation. When given, the
+                figure gets a Before/After toggle button that redraws in place instead of
+                opening a separate window per run.
+        """
+
+        from matplotlib.widgets import Button
+
+        fig = plt.figure(figsize=(16, 5.6))
+
+        state = {"after": True}
+
+        def render():
+            fig.clf()
+
+            if state["after"] or (before is None):
+                tag = "AFTER refit" if before is not None else None
+                self._renderValidationPanels(fig, results, summary, tag=tag)
+            else:
+                self._renderValidationPanels(fig, before[0], before[1], tag="BEFORE refit")
+
+            if before is not None:
+                ax_btn = fig.add_axes([0.005, 0.925, 0.085, 0.06])
+                btn = Button(ax_btn, "Show before" if state["after"] else "Show after")
+
+                def flip(event):
+                    state["after"] = not state["after"]
+                    render()
+
+                btn.on_clicked(flip)
+                # Keep references alive - matplotlib widgets die with garbage collection
+                fig._toggle_btn = btn
+                fig._toggle_flip = flip
+
+            fig.canvas.draw_idle()
+
+        render()
+        fig.show()
+
+
+    def _renderValidationPanels(self, fig, results, summary, tag=None):
+        """ Draw the two validation panels (residual vs radius, spatial residual map) onto
+            the given (cleared) figure.
+
+        Keyword arguments:
+            tag: [str] Optional label ("BEFORE refit"/"AFTER refit") prefixed to the title.
+        """
 
         cx, cy = self.platepar.X_res/2.0, self.platepar.Y_res/2.0
         r_max = np.hypot(cx, cy)
         r_frac = np.hypot(results["star_x"] - cx, results["star_y"] - cy)/r_max
 
         # Two panels: the spatial map is the star of the show, give it the room
-        fig, (ax_r, ax_map) = plt.subplots(1, 2, figsize=(16, 5.6),
-                                           gridspec_kw={'width_ratios': [1, 2.2]})
+        ax_r, ax_map = fig.subplots(1, 2, gridspec_kw={'width_ratios': [1, 2.2]})
 
         # Fixed residual scale so runs are directly comparable side by side
         res_scale_px = 2.0
@@ -13447,16 +13511,20 @@ class PlateTool(QtWidgets.QMainWindow):
         fig.colorbar(hb, ax=ax_map, label='px (capped at {:.0f})'.format(res_scale_px))
 
         # Mount drift is reported in the title (per-frame values are in the console report)
-        fig_title = headline
+        fig_title = "Validation: global median {:.2f} px, corner median {} (n={})".format(
+            summary["median_global"],
+            "{:.2f} px".format(summary["median_corner"]) if summary["median_corner"] is not None
+            else "no data", summary["n_corner"])
         if summary["max_drift_arcmin"] is not None:
             fig_title += "  |  mount drift up to {:.1f} arcmin, compensated per frame".format(
                 summary["max_drift_arcmin"])
+        if tag is not None:
+            fig_title = "[{:s}]  ".format(tag) + fig_title
 
         fig.suptitle(fig_title, fontweight='bold')
         fig.tight_layout()
         # Leave room for the legend below the map
         fig.subplots_adjust(bottom=0.14)
-        fig.show()
 
 
     def findBestFrame(self):
