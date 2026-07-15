@@ -57,6 +57,8 @@ def selectValidationFrames(calstars, x_res, y_res, n_grid=8, min_per_cell=150, m
                            min_stars_frame=10):
     """ Select a subset of frames whose union of detected stars covers the image, with an
         explicit guarantee that the corner cells are filled whenever the dataset has stars there.
+        Budget left over after spatial coverage saturates is spent on frames spread evenly
+        across the night, so the validation samples temporal variation too.
 
     Arguments:
         calstars: [dict] {ff_name: star rows} as read from CALSTARS.
@@ -113,6 +115,20 @@ def selectValidationFrames(calstars, x_res, y_res, n_grid=8, min_per_cell=150, m
 
             coverage += remaining.pop(best_ff)
             selected.append(best_ff)
+
+    # Temporal spread pass: coverage often saturates on a handful of dense frames taken
+    # close together (the clearest stretch of the night), which leaves temporal variation
+    # unsampled. Spend the remaining budget on frames spread evenly across the night
+    # (FF names sort chronologically).
+    if (len(selected) < max_frames) and remaining:
+
+        pool = sorted(remaining)
+        n_fill = min(max_frames - len(selected), len(pool))
+        indices = sorted(set(np.linspace(0, len(pool) - 1, n_fill).astype(int)))
+
+        for i in indices:
+            coverage += remaining.pop(pool[i])
+            selected.append(pool[i])
 
     return selected, coverage
 

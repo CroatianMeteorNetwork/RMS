@@ -2296,7 +2296,9 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         self.validate_max_frames_spin.setToolTip(
             "Frame budget for the coverage-selected subset used by Validate Across Frames\n"
             "and Refit W/ Night. Frames are picked greedily so their union of detected stars\n"
-            "covers the image; the corner cells are always topped up, even past this budget.")
+            "covers the image; the corner cells are always topped up, even past this budget.\n"
+            "Budget left over after coverage saturates is spent on frames spread evenly\n"
+            "across the night, so temporal variation is sampled too.")
         validate_frames_label.setToolTip(self.validate_max_frames_spin.toolTip())
         validate_frames_hbox.addWidget(validate_frames_label)
         validate_frames_hbox.addStretch()
