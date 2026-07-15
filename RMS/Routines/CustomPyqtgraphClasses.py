@@ -2006,6 +2006,8 @@ class GeolocationWidget(QtWidgets.QWidget, ScaledSizeHelper):
 
         # Label to show residuals
         self.residuals_label = QtWidgets.QLabel("Residuals:\n")
+        # Wrap instead of clipping - font metrics differ across OSes
+        self.residuals_label.setWordWrap(True)
         box.addWidget(self.residuals_label)
         if self.gui.geo_points_obj is None:
             self.residuals_label.hide()
@@ -2332,6 +2334,7 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         # updated with the error overlay. Complements the RMSD, which only covers matched stars.
         self.roundtrip_label = QtWidgets.QLabel("")
         self.roundtrip_label.setStyleSheet("color: gray; font-size: 9pt;")
+        self.roundtrip_label.setWordWrap(True)
         box.addWidget(self.roundtrip_label)
 
         hbox = QtWidgets.QHBoxLayout()
@@ -3612,6 +3615,8 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
         # Status
         self.status_label = QtWidgets.QLabel('Using original CALSTARS')
         self.status_label.setStyleSheet("color: gray; font-size: 10pt;")
+        # Wrap instead of clipping - "(N stars, M candidates)" can outgrow the panel
+        self.status_label.setWordWrap(True)
         layout.addWidget(self.status_label)
 
         layout.addStretch()
