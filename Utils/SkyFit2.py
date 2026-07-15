@@ -306,6 +306,8 @@ if ASTRA_IMPORTED:
             pick_layout.addLayout(file_picker_layout)
 
             self.selected_file_label = QLabel("No file selected")
+            # Wrap instead of clipping - full file paths easily outgrow the dialog
+            self.selected_file_label.setWordWrap(True)
             pick_layout.addWidget(self.selected_file_label)
 
             pick_method_group.setLayout(pick_layout)
