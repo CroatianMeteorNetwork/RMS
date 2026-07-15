@@ -304,11 +304,11 @@ class InputTypeFRFF(InputType):
         # Total chunks (i.e. FF files)
         self.total_fr_chunks = len(self.ff_list)
 
-        # Cahcne for whole FF files
+        # Cache for whole FF files, bounded LRU. An FF struct holds 4 full image planes
+        # (~8 MB at 1080p 8-bit, double for 16-bit), so an unbounded cache exhausts
+        # memory on long nights - browsing 1000+ files used to accumulate many GB
         self.cache = {}
-
-        # Cache for individual frames
-        self.cache_frames = {}
+        self.cache_size = 10
 
         # Load the first chunk for initing parameters
         self.loadChunk()
@@ -350,6 +350,23 @@ class InputTypeFRFF(InputType):
     def beginning_datetime(self):
         return filenameToDatetime(self.name())
 
+    def _cacheGet(self, file_name):
+        """ Fetch an FF struct from the cache, refreshing its LRU recency. None on miss. """
+
+        ff = self.cache.pop(file_name, None)
+        if ff is not None:
+            self.cache[file_name] = ff
+
+        return ff
+
+    def _cacheStore(self, file_name, ff):
+        """ Store an FF struct in the cache, evicting the least recently used beyond
+            the cache size. """
+
+        self.cache[file_name] = ff
+        while len(self.cache) > self.cache_size:
+            self.cache.pop(next(iter(self.cache)))
+
     def nextChunk(self):
         """ Go to the next FF file. """
 
@@ -377,25 +394,23 @@ class InputTypeFRFF(InputType):
             file_name = self.name()
 
             # Save and load file from cache
-            if file_name in self.cache:
-                ff = self.cache[file_name]
+            ff = self._cacheGet(file_name)
+            if ff is None:
 
-            elif validFFName(file_name):
-                
-                # Load the FF file from disk
-                ff = readFF(self.dir_path, file_name)
+                if validFFName(file_name):
 
-                # Put the FF into separate cache
-                self.cache[file_name] = ff
+                    # Load the FF file from disk
+                    ff = readFF(self.dir_path, file_name)
 
-            else:
-                # Load the FR files from disk
-                ff = readFR(self.dir_path, file_name)
-                ff.nrows = self.nrows
-                ff.ncols = self.ncols
-                self.cache[file_name] = ff
+                else:
+                    # Load the FR files from disk
+                    ff = readFR(self.dir_path, file_name)
+                    ff.nrows = self.nrows
+                    ff.ncols = self.ncols
 
-                self.line_number[self.current_ff_index] = ff.lines
+                    self.line_number[self.current_ff_index] = ff.lines
+
+                self._cacheStore(file_name, ff)
 
             # when calling loadChunk on an image never called before, set the current frame to the start
             # if it's an FR file, otherwise set it to 0
@@ -577,9 +592,8 @@ class InputTypeFRFF(InputType):
         if self.ff is not None:
             self.ff.dtype = np.uint8
                 
-        # Store the loaded file to cache for faster loading (always just have a cache of 1)
-        self.cache = {}
-        self.cache[file_name] = self.ff
+        # Store the loaded file to the bounded LRU cache for faster loading
+        self._cacheStore(file_name, self.ff)
 
         return ff
     
@@ -680,25 +694,23 @@ class InputTypeFRFF(InputType):
         file_name = self.name()
 
         # Save and load file from cache
-        if file_name in self.cache:
-            ff_frame = self.cache[file_name]
+        ff_frame = self._cacheGet(file_name)
+        if ff_frame is None:
 
-        elif validFFName(file_name):
+            if validFFName(file_name):
 
-            # Load the FF file from disk
-            ff_frame = readFF(self.dir_path, file_name)
+                # Load the FF file from disk
+                ff_frame = readFF(self.dir_path, file_name)
 
-            # Put the FF into separate cache
-            self.cache[file_name] = ff_frame
+            # Read the FR file from disk
+            else:
+                ff_frame = readFR(self.dir_path, file_name)
+                ff_frame.nrows = self.nrows
+                ff_frame.ncols = self.ncols
 
-        # Read the FR file from disk
-        else:
-            ff_frame = readFR(self.dir_path, file_name)
-            ff_frame.nrows = self.nrows
-            ff_frame.ncols = self.ncols
-            self.cache[file_name] = ff_frame
+                # If there is a corresponding FF file in the folder, reconstruct the frame from it
 
-            # If there is a corresponding FF file in the folder, reconstruct the frame from it
+            self._cacheStore(file_name, ff_frame)
 
 
 
