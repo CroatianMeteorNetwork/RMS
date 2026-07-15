@@ -26,39 +26,47 @@ from RMS.Formats.FFfile import filenameToDatetime
 from RMS.Math import angularSeparation
 
 
-def _cellCounts(star_data, x_res, y_res, n_grid):
-    """ Count stars per cell of an n_grid x n_grid image grid.
+def _framePositions(star_data, x_res, y_res, n_grid, quant_px):
+    """ Distinct quantized star positions of a frame and their image grid cells.
 
     Arguments:
         star_data: [ndarray] CALSTARS rows, columns [y, x, ...].
         x_res, y_res: [int] Image dimensions.
         n_grid: [int] Grid divisions per axis.
+        quant_px: [int] Position quantization (px) - detections within the same quant cell
+            count as the same position.
 
     Return:
-        counts: [ndarray] (n_grid, n_grid) star counts, indexed [row, col].
+        keys: [ndarray] Unique int position keys.
+        cells: [ndarray] Flat grid cell index (row*n_grid + col) per key.
     """
-
-    counts = np.zeros((n_grid, n_grid), dtype=int)
-
-    if len(star_data) == 0:
-        return counts
 
     star_data = np.asarray(star_data)
     ys, xs = star_data[:, 0], star_data[:, 1]
 
+    keys = (ys/quant_px).astype(np.int64)*(x_res//quant_px + 2) + (xs/quant_px).astype(np.int64)
+
     cy = np.clip((ys*n_grid/y_res).astype(int), 0, n_grid - 1)
     cx = np.clip((xs*n_grid/x_res).astype(int), 0, n_grid - 1)
-    np.add.at(counts, (cy, cx), 1)
+    cells = cy*n_grid + cx
 
-    return counts
+    keys, idx = np.unique(keys, return_index=True)
+
+    return keys, cells[idx]
 
 
-def selectValidationFrames(calstars, x_res, y_res, n_grid=8, min_per_cell=150, max_frames=100,
-                           min_stars_frame=10):
+def selectValidationFrames(calstars, x_res, y_res, n_grid=8, min_per_cell=30, max_frames=100,
+                           min_stars_frame=10, quant_px=8):
     """ Select a subset of frames whose union of detected stars covers the image, with an
         explicit guarantee that the corner cells are filled whenever the dataset has stars there.
         Budget left over after spatial coverage saturates is spent on frames spread evenly
         across the night, so the validation samples temporal variation too.
+
+        Coverage counts DISTINCT star positions (quantized to quant_px): the camera is fixed,
+        so the same star detected on every frame lands in the same place and carries no new
+        spatial information - only sidereal drift (or a different star) does. Counting raw
+        detections instead lets a cell with a handful of bright stars read as "covered" after
+        a few dozen duplicate detections, while the FOV is in fact poorly filled.
 
     Arguments:
         calstars: [dict] {ff_name: star rows} as read from CALSTARS.
@@ -66,71 +74,102 @@ def selectValidationFrames(calstars, x_res, y_res, n_grid=8, min_per_cell=150, m
 
     Keyword arguments:
         n_grid: [int] Grid divisions per axis for the coverage accounting.
-        min_per_cell: [int] Target number of stars per grid cell.
+        min_per_cell: [int] Target number of DISTINCT star positions per grid cell.
         max_frames: [int] Frame budget for the general coverage pass. The corner top-up pass
             may exceed it - corner coverage takes priority over the budget.
         min_stars_frame: [int] Skip frames with fewer detected stars (clouds, gaps).
+        quant_px: [int] Position quantization (px) for the distinct-position accounting.
 
     Return:
         selected: [list] Selected FF names, in selection order.
-        coverage: [ndarray] (n_grid, n_grid) star counts of the selected union.
+        coverage: [ndarray] (n_grid, n_grid) distinct star position counts of the selection.
     """
 
-    # Precompute per-frame cell counts
-    frame_counts = {}
+    import heapq
+
+    # Precompute per-frame distinct positions and their cells
+    frame_pos = {}
     for ff_name, star_data in calstars.items():
-        star_data = np.asarray(star_data)
         if len(star_data) < min_stars_frame:
             continue
-        frame_counts[ff_name] = _cellCounts(star_data, x_res, y_res, n_grid)
+        frame_pos[ff_name] = _framePositions(star_data, x_res, y_res, n_grid, quant_px)
 
-    coverage = np.zeros((n_grid, n_grid), dtype=int)
+    seen = set()
+    cov_flat = np.zeros(n_grid*n_grid, dtype=int)
     selected = []
-    remaining = dict(frame_counts)
 
-    def gain(counts):
-        # How many still-needed stars this frame contributes
-        return int(np.minimum(counts, np.maximum(min_per_cell - coverage, 0)).sum())
+    def gain(ff, cell_filter=None):
+        # Number of not-yet-seen positions this frame contributes to still-needy cells
+        # (or to one specific cell when cell_filter is given)
+        keys, cells = frame_pos[ff]
+        g = 0
+        for k, c in zip(keys.tolist(), cells.tolist()):
+            if k in seen:
+                continue
+            if cell_filter is not None:
+                if c == cell_filter:
+                    g += 1
+            elif cov_flat[c] < min_per_cell:
+                g += 1
+        return g
 
-    # General coverage pass: greedily add the frame that fills the most still-needed cells
-    while (len(selected) < max_frames) and remaining and (coverage < min_per_cell).any():
+    def take(ff):
+        keys, cells = frame_pos.pop(ff)
+        for k, c in zip(keys.tolist(), cells.tolist()):
+            if k not in seen:
+                seen.add(k)
+                cov_flat[c] += 1
+        selected.append(ff)
 
-        best_ff = max(remaining, key=lambda ff: gain(remaining[ff]))
-        if gain(remaining[best_ff]) == 0:
-            break
+    # General coverage pass: greedily add the frame contributing the most new positions to
+    # still-needy cells. Lazy greedy: gains only shrink as coverage accumulates, so a frame
+    # is re-evaluated only when it reaches the top of the heap.
+    heap = [(-len(keys), ff) for ff, (keys, _) in frame_pos.items()]
+    heapq.heapify(heap)
 
-        coverage += remaining.pop(best_ff)
-        selected.append(best_ff)
+    while heap and (len(selected) < max_frames) and (cov_flat < min_per_cell).any():
+
+        _, ff = heapq.heappop(heap)
+
+        g = gain(ff)
+        if g == 0:
+            # Gains never grow - this frame is dead for the coverage pass
+            continue
+
+        if heap and (g < -heap[0][0]):
+            heapq.heappush(heap, (-g, ff))
+            continue
+
+        take(ff)
 
     # Corner top-up pass: the four corner cells get filled whenever ANY frame in the dataset
-    # still has stars there, regardless of the frame budget
-    corner_cells = [(0, 0), (0, n_grid - 1), (n_grid - 1, 0), (n_grid - 1, n_grid - 1)]
-    for cy, cx in corner_cells:
+    # still has new positions there, regardless of the frame budget
+    corner_cells = [0, n_grid - 1, (n_grid - 1)*n_grid, n_grid*n_grid - 1]
+    for cell in corner_cells:
 
-        while (coverage[cy, cx] < min_per_cell) and remaining:
+        while (cov_flat[cell] < min_per_cell) and frame_pos:
 
-            best_ff = max(remaining, key=lambda ff: remaining[ff][cy, cx])
-            if remaining[best_ff][cy, cx] == 0:
+            best_ff, best_g = max(((ff, gain(ff, cell_filter=cell)) for ff in frame_pos),
+                key=lambda t: t[1])
+            if best_g == 0:
                 break
 
-            coverage += remaining.pop(best_ff)
-            selected.append(best_ff)
+            take(best_ff)
 
     # Temporal spread pass: coverage often saturates on a handful of dense frames taken
     # close together (the clearest stretch of the night), which leaves temporal variation
     # unsampled. Spend the remaining budget on frames spread evenly across the night
     # (FF names sort chronologically).
-    if (len(selected) < max_frames) and remaining:
+    if (len(selected) < max_frames) and frame_pos:
 
-        pool = sorted(remaining)
+        pool = sorted(frame_pos)
         n_fill = min(max_frames - len(selected), len(pool))
         indices = sorted(set(np.linspace(0, len(pool) - 1, n_fill).astype(int)))
 
         for i in indices:
-            coverage += remaining.pop(pool[i])
-            selected.append(pool[i])
+            take(pool[i])
 
-    return selected, coverage
+    return selected, cov_flat.reshape((n_grid, n_grid))
 
 
 def validateFit(platepar, calstars, catalog_stars, frames=None, match_radius=10.0,
