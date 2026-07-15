@@ -194,6 +194,39 @@ def test_sibling_discovery(tmp_path, monkeypatch):
     assert [str(c.stationID) for c in findSiblingStationConfigs(solo)] == ["US1234"]
 
 
+def test_radiometric_anchor_pools_site_measurements(tmp_path):
+    # The anchor is a SITE property: measurements from all co-located cameras pool into
+    # one offset, so every camera's map shows the same site zenith
+    from RMS.LightDomeModel import LightDomeModel
+    from Utils.FitLightDome import _radiometricAnchorOffset, NATURAL_ZENITH_SQM
+
+    model = LightDomeModel(dict(cams=["US005X"], LM0=[5.5], k=0.2, s=0.32,
+        q0=-10.0, h0=20.0, norder=0, harmonics=[], model="vanrhijn_harmonics"))
+
+    def writeHistory(station, sqm):
+        d = os.path.join(str(tmp_path), station)
+        os.makedirs(d)
+        nights = {"%s_2026070%d" % (station, i): dict(sqm=sqm, absolute=True,
+                  az=0.0, alt=90.0) for i in range(1, 4)}
+        with open(os.path.join(d, "%s_sky_quality_history.json" % station), "w") as f:
+            json.dump(dict(nights=nights), f)
+        return DummyConfig(d, station_id=station)
+
+    cfg_a = writeHistory("US005X", 20.0)
+    cfg_b = writeHistory("US005Y", 21.0)
+
+    # Zenith measurements pass through untransposed: anchor = median(sqm) - model zenith
+    single = _radiometricAnchorOffset(model, cfg_a)
+    assert single == pytest.approx(20.0 - NATURAL_ZENITH_SQM, abs=1e-6)
+
+    pooled = _radiometricAnchorOffset(model, [cfg_a, cfg_b])
+    assert pooled == pytest.approx(20.5 - NATURAL_ZENITH_SQM, abs=1e-6)
+
+    # Order-independent, and identical for whichever camera's map is being drawn
+    assert pooled == pytest.approx(_radiometricAnchorOffset(model, [cfg_b, cfg_a]),
+        abs=1e-9)
+
+
 def _writeHistory(tmp_path, station, dratios, model_version):
     import json
     entries = {"%s_202606%02d" % (station, i + 1): dict(dratio=r, dmodel=model_version)

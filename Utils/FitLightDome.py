@@ -498,34 +498,60 @@ PLOT_SQM_MIN = 16.0         # fixed color scale so every station and site render
 PLOT_SQM_MAX = 22.0         # comparably (brighter sky = brighter color)
 
 
-def _radiometricAnchorOffset(model, config):
-    """ Offset (mag) that pins the model's soft absolute scale to the station's MEASURED
+ANCHOR_WINDOW_NIGHTS = 14   # recent SQM measurements per camera the anchor considers
+
+
+def _radiometricAnchorOffset(model, configs):
+    """ Offset (mag) that pins the model's soft absolute scale to the site's MEASURED
         sky quality history. The fit cannot separate camera depth from absolute sky
         brightness (LM0 degeneracy), so the model-implied zenith runs too dark; the
-        radiometric SQM measurements supply the missing anchor. Returns 0 when no usable
-        history exists (map stays model-relative, labeled).
+        radiometric SQM measurements supply the missing anchor.
+
+        The measurements of ALL co-located cameras are pooled: each camera measures its
+        own FOV patch, transposed to zenith through the shared glow field, so one site
+        anchor emerges and every camera's map shows the same site zenith - the anchor
+        analog of the pooled model fit. Returns 0 when no usable history exists (map
+        stays model-relative, labeled).
+
+    Arguments:
+        model: [LightDomeModel] The site model.
+        configs: [Config or list of Config] The site's station configs, whose sky
+            quality histories are pooled.
     """
 
-    try:
-        path = os.path.join(os.path.expanduser(config.data_dir),
-            "{:s}_sky_quality_history.json".format(str(config.stationID)))
-        with open(path) as f:
-            nights = json.load(f).get("nights", {})
+    if not isinstance(configs, (list, tuple)):
+        configs = [configs]
 
+    try:
         b_zen = float(model.skyBrightness(0.0, 90.0))
         measured = []
-        for entry in nights.values():
-            if entry.get("sqm") is None or not entry.get("absolute", False):
+
+        for config in configs:
+
+            try:
+                path = os.path.join(os.path.expanduser(config.data_dir),
+                    "{:s}_sky_quality_history.json".format(str(config.stationID)))
+                with open(path) as f:
+                    nights = json.load(f).get("nights", {})
+            except Exception:
                 continue
-            if (entry.get("az") is None) or (entry.get("alt") is None):
-                continue
-            b_patch = float(model.skyBrightness(float(entry["az"]), float(entry["alt"])))
-            measured.append(float(entry["sqm"]) + 2.5*np.log10(b_patch/b_zen))
+
+            station_measured = []
+            for entry in nights.values():
+                if entry.get("sqm") is None or not entry.get("absolute", False):
+                    continue
+                if (entry.get("az") is None) or (entry.get("alt") is None):
+                    continue
+                b_patch = float(model.skyBrightness(float(entry["az"]), float(entry["alt"])))
+                station_measured.append(float(entry["sqm"]) + 2.5*np.log10(b_patch/b_zen))
+
+            # Each camera contributes its recent window only (current atmospheric epoch)
+            measured += station_measured[-ANCHOR_WINDOW_NIGHTS:]
 
         if len(measured) < 3:
             return 0.0
 
-        measured_zenith = float(np.median(measured[-14:]))
+        measured_zenith = float(np.median(measured))
         model_zenith = NATURAL_ZENITH_SQM - 2.5*np.log10(b_zen)
 
         return measured_zenith - model_zenith
@@ -549,7 +575,9 @@ def renderLightDomeModel(model_dict, station_id, out_path, config=None):
         out_path: [str] Output PNG path.
 
     Keyword arguments:
-        config: [Config] Enables the radiometric anchor lookup. None = model-relative.
+        config: [Config or list of Config] Enables the radiometric anchor lookup; pass
+            ALL the site's configs so the anchor pools their measurements and every
+            camera's map shows the same site zenith. None = model-relative.
     """
 
     import matplotlib
@@ -932,8 +960,10 @@ def ensureLightDomeModel(config, platepar=None):
         print("Light-dome model auto-fitted and installed: {:s}".format(sib_model_path))
 
         try:
+            # Pass the whole site's configs so the radiometric anchor pools their SQM
+            # histories - one site zenith on every camera's map
             renderLightDomeModel(model_dict, sib_station,
-                os.path.splitext(sib_model_path)[0] + ".png", config=sib_config)
+                os.path.splitext(sib_model_path)[0] + ".png", config=station_configs)
         except Exception as e:
             print("Light-dome model plot failed ({}) - model itself is installed".format(e))
 
@@ -984,8 +1014,9 @@ if __name__ == "__main__":
             print("wrote {:s}".format(out_path))
 
             try:
+                # All configs, so the radiometric anchor pools the site's SQM histories
                 renderLightDomeModel(model_dict, str(config.stationID),
-                    os.path.splitext(out_path)[0] + ".png", config=config)
+                    os.path.splitext(out_path)[0] + ".png", config=configs)
                 print("wrote {:s}".format(os.path.splitext(out_path)[0] + ".png"))
             except Exception as e:
                 print("plot failed ({}) - model itself is written".format(e))
