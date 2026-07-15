@@ -1807,7 +1807,11 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
         for i, (label, path) in enumerate(self._locations):
             cb = QtWidgets.QCheckBox(self._locationMenuLabel(label, path))
             cb.setProperty("path", path)
-            if i == 0:
+            # Default targets: the Data Folder (keeps the calibration with the night) AND
+            # the matching Station folder (deploys it to the live pipeline) - saving to
+            # only one of them is the common mistake. A mismatched-ID station entry
+            # ("Station (ID: ...)") stays unchecked; that one is a deliberate choice.
+            if (i == 0) or (label == "Station"):
                 cb.setChecked(True)
             layout.addWidget(cb)
             checkboxes.append(cb)
