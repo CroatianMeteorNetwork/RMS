@@ -6290,89 +6290,85 @@ class PlateTool(QtWidgets.QMainWindow):
             },
         }
 
-        try:
-            # Read existing file
-            if os.path.exists(config_path):
-                with open(config_path, 'r') as f:
-                    lines = f.readlines()
+        # Any failure propagates to the File Manager's save path, which reports it (its
+        # status refresh and error dialog) - swallowing it here would falsely report a
+        # successful save
+
+        # Read existing file
+        if os.path.exists(config_path):
+            with open(config_path, 'r') as f:
+                lines = f.readlines()
+        else:
+            lines = []
+
+        # Track which updates were applied
+        applied = {section: {k: False for k in keys} for section, keys in updates.items()}
+        current_section = None
+
+        # Update existing lines
+        new_lines = []
+        for line in lines:
+            stripped = line.strip()
+
+            # Track current section
+            section_match = re.match(r'\s*\[([^\]]+)\]', stripped)
+            if section_match:
+                current_section = section_match.group(1)
+                new_lines.append(line)
+                continue
+
+            # Check if this line is a key we want to update
+            updated = False
+            if current_section and ': ' in stripped and not stripped.startswith((';', '#')):
+                key = stripped.split(': ')[0].strip()
+                if current_section in updates and key in updates[current_section]:
+                    value = updates[current_section][key]
+                    new_lines.append(f"{key}: {value}\n")
+                    applied[current_section][key] = True
+                    updated = True
+
+            if not updated:
+                new_lines.append(line)
+
+        # Add any missing sections/keys at the end
+        for section, keys in updates.items():
+            missing_keys = [k for k, was_applied in applied[section].items() if not was_applied]
+            if not missing_keys:
+                continue
+
+            # Check if section exists
+            section_exists = any(f'[{section}]' in line for line in new_lines)
+            if not section_exists:
+                new_lines.append(f"\n[{section}]\n")
+                for key in missing_keys:
+                    new_lines.append(f"{key}: {updates[section][key]}\n")
             else:
-                lines = []
-
-            # Track which updates were applied
-            applied = {section: {k: False for k in keys} for section, keys in updates.items()}
-            current_section = None
-
-            # Update existing lines
-            new_lines = []
-            for line in lines:
-                stripped = line.strip()
-
-                # Track current section
-                section_match = re.match(r'\s*\[([^\]]+)\]', stripped)
-                if section_match:
-                    current_section = section_match.group(1)
-                    new_lines.append(line)
-                    continue
-
-                # Check if this line is a key we want to update
-                updated = False
-                if current_section and ': ' in stripped and not stripped.startswith((';', '#')):
-                    key = stripped.split(': ')[0].strip()
-                    if current_section in updates and key in updates[current_section]:
-                        value = updates[current_section][key]
-                        new_lines.append(f"{key}: {value}\n")
-                        applied[current_section][key] = True
-                        updated = True
-
-                if not updated:
-                    new_lines.append(line)
-
-            # Add any missing sections/keys at the end
-            for section, keys in updates.items():
-                missing_keys = [k for k, was_applied in applied[section].items() if not was_applied]
-                if not missing_keys:
-                    continue
-
-                # Check if section exists
-                section_exists = any(f'[{section}]' in line for line in new_lines)
-                if not section_exists:
-                    new_lines.append(f"\n[{section}]\n")
-                    for key in missing_keys:
-                        new_lines.append(f"{key}: {updates[section][key]}\n")
-                else:
-                    # Find section end and insert keys
-                    insert_idx = None
-                    in_section = False
-                    for i, line in enumerate(new_lines):
-                        if f'[{section}]' in line:
-                            in_section = True
+                # Find section end and insert keys
+                insert_idx = None
+                in_section = False
+                for i, line in enumerate(new_lines):
+                    if f'[{section}]' in line:
+                        in_section = True
+                        insert_idx = i + 1
+                    elif in_section:
+                        if line.strip().startswith('['):
+                            break
+                        if line.strip() and not line.strip().startswith(';'):
                             insert_idx = i + 1
-                        elif in_section:
-                            if line.strip().startswith('['):
-                                break
-                            if line.strip() and not line.strip().startswith(';'):
-                                insert_idx = i + 1
 
-                    if insert_idx is not None:
-                        for key in reversed(missing_keys):
-                            new_lines.insert(insert_idx, f"{key}: {updates[section][key]}\n")
+                if insert_idx is not None:
+                    for key in reversed(missing_keys):
+                        new_lines.insert(insert_idx, f"{key}: {updates[section][key]}\n")
 
-            # Write back
-            with open(config_path, 'w') as f:
-                f.writelines(new_lines)
+        # Write back
+        with open(config_path, 'w') as f:
+            f.writelines(new_lines)
 
-            print(f"Saved star detection settings to: {config_path}")
-            print(f"  intensity_threshold: {self.override_intensity_threshold}")
-            print(f"  segment_radius: {self.override_segment_radius}")
-            print(f"  max_stars: {self.override_config_max_stars}")
-            print(f"  catalog_mag_limit: {catalog_mag_limit:.1f}")
-
-            qmessagebox(message=f"Star detection settings saved to:\n{config_path}",
-                       title="Settings Saved", message_type="info")
-
-        except Exception as e:
-            qmessagebox(message=f"Error saving config:\n{str(e)}",
-                       title="Save Error", message_type="warning")
+        print(f"Saved star detection settings to: {config_path}")
+        print(f"  intensity_threshold: {self.override_intensity_threshold}")
+        print(f"  segment_radius: {self.override_segment_radius}")
+        print(f"  max_stars: {self.override_config_max_stars}")
+        print(f"  catalog_mag_limit: {catalog_mag_limit:.1f}")
 
 
     ###################################################################################################
