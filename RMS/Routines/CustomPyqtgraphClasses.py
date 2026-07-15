@@ -2337,6 +2337,9 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         # label red when either trips (the detailed numbers are printed to the console).
         self.rmsd_label = QtWidgets.QLabel("--")
         self.rmsd_label.setStyleSheet("font-weight: bold; font-size: 12pt;")
+        # Wrap instead of clipping: font metrics differ across OSes, and the suffixes
+        # ("(on N of M)", health-check flags) can outgrow the fixed-width panel
+        self.rmsd_label.setWordWrap(True)
         box.addWidget(self.rmsd_label)
 
         # Max round-trip (forward vs reverse mapping) disagreement across the whole image,
