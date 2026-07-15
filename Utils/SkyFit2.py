@@ -13211,8 +13211,17 @@ class PlateTool(QtWidgets.QMainWindow):
         if len(merged) < 2:
             return None
 
-        # Select frames for spatial coverage - corners are topped up to dataset exhaustion
-        frames, _ = selectValidationFrames(merged, self.platepar.X_res, self.platepar.Y_res)
+        # Select frames for spatial coverage under the user's frame budget - corners are
+        # topped up to dataset exhaustion regardless of the budget
+        max_frames = 100
+        if hasattr(self, 'tab') and hasattr(self.tab, 'param_manager') \
+                and hasattr(self.tab.param_manager, 'validate_max_frames_spin'):
+            max_frames = self.tab.param_manager.validate_max_frames_spin.value()
+
+        frames, _ = selectValidationFrames(merged, self.platepar.X_res, self.platepar.Y_res,
+            max_frames=max_frames)
+        print("Validation frames: {:d} selected from {:d} usable (budget {:d})".format(
+            len(frames), len(merged), max_frames))
 
         # Match against a catalog deeper than the display LM: the star detector reaches
         # fainter than the displayed catalog, and real stars just past the LM cutoff

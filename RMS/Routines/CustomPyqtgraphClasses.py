@@ -2285,6 +2285,24 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         quick_align_hbox.addWidget(self.quick_align_button)
         box.addLayout(quick_align_hbox)
 
+        # Frame budget for the cross-frame validation/refit subset. Frames are picked
+        # greedily for spatial coverage, so a modest budget covers the image; validating
+        # thousands of frames takes minutes for no accuracy gain
+        validate_frames_hbox = QtWidgets.QHBoxLayout()
+        validate_frames_label = QtWidgets.QLabel("Validation max frames")
+        self.validate_max_frames_spin = QtWidgets.QSpinBox()
+        self.validate_max_frames_spin.setRange(10, 5000)
+        self.validate_max_frames_spin.setValue(100)
+        self.validate_max_frames_spin.setToolTip(
+            "Frame budget for the coverage-selected subset used by Validate Across Frames\n"
+            "and Refit W/ Night. Frames are picked greedily so their union of detected stars\n"
+            "covers the image; the corner cells are always topped up, even past this budget.")
+        validate_frames_label.setToolTip(self.validate_max_frames_spin.toolTip())
+        validate_frames_hbox.addWidget(validate_frames_label)
+        validate_frames_hbox.addStretch()
+        validate_frames_hbox.addWidget(self.validate_max_frames_spin)
+        box.addLayout(validate_frames_hbox)
+
         # Cross-frame validation buttons (stacked - side by side they overflow the panel)
         self.validate_fit_button = QtWidgets.QPushButton("Validate Across Frames")
         self.validate_fit_button.setToolTip(
