@@ -499,6 +499,9 @@ PLOT_SQM_MAX = 22.0         # comparably (brighter sky = brighter color)
 
 
 ANCHOR_WINDOW_NIGHTS = 14   # recent SQM measurements per camera the anchor considers
+ANCHOR_RESIDUAL_WARN = 0.3  # mag - a camera's median departing this far from the site
+                            # anchor suggests the glow field misallocates brightness
+                            # between the cameras' FOVs
 
 
 def _radiometricAnchorOffset(model, configs):
@@ -525,6 +528,7 @@ def _radiometricAnchorOffset(model, configs):
     try:
         b_zen = float(model.skyBrightness(0.0, 90.0))
         measured = []
+        per_station = {}
 
         for config in configs:
 
@@ -546,13 +550,28 @@ def _radiometricAnchorOffset(model, configs):
                 station_measured.append(float(entry["sqm"]) + 2.5*np.log10(b_patch/b_zen))
 
             # Each camera contributes its recent window only (current atmospheric epoch)
-            measured += station_measured[-ANCHOR_WINDOW_NIGHTS:]
+            if station_measured:
+                per_station[str(config.stationID)] = station_measured[-ANCHOR_WINDOW_NIGHTS:]
+                measured += station_measured[-ANCHOR_WINDOW_NIGHTS:]
 
         if len(measured) < 3:
             return 0.0
 
         measured_zenith = float(np.median(measured))
         model_zenith = NATURAL_ZENITH_SQM - 2.5*np.log10(b_zen)
+
+        # Per-camera residuals vs the site anchor. Every camera measures the same site
+        # zenith once transposed through the shared glow field, so a systematic residual
+        # is a diagnostic that the field misallocates brightness between the FOVs
+        if len(per_station) > 1:
+            print("Radiometric site anchor: zenith {:.2f} mag/arcsec^2 pooled from "
+                  "{:d} cameras".format(measured_zenith, len(per_station)))
+            for sid in sorted(per_station):
+                res = float(np.median(per_station[sid])) - measured_zenith
+                flag = "  <- check the glow field allocation" \
+                    if abs(res) > ANCHOR_RESIDUAL_WARN else ""
+                print("  {:s}: {:+.2f} mag vs site (n={:d}){:s}".format(
+                    sid, res, len(per_station[sid]), flag))
 
         return measured_zenith - model_zenith
 

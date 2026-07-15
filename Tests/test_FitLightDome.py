@@ -227,6 +227,40 @@ def test_radiometric_anchor_pools_site_measurements(tmp_path):
         abs=1e-9)
 
 
+def test_anchor_surfaces_per_camera_residuals(tmp_path, capsys):
+    # Cameras disagreeing about the site zenith (after transposition through the shared
+    # field) is a glow-field misallocation diagnostic - it must be printed, and flagged
+    # when beyond ANCHOR_RESIDUAL_WARN
+    from RMS.LightDomeModel import LightDomeModel
+    from Utils.FitLightDome import _radiometricAnchorOffset
+
+    model = LightDomeModel(dict(cams=["US005X"], LM0=[5.5], k=0.2, s=0.32,
+        q0=-10.0, h0=20.0, norder=0, harmonics=[], model="vanrhijn_harmonics"))
+
+    def writeHistory(station, sqm):
+        d = os.path.join(str(tmp_path), station)
+        os.makedirs(d)
+        nights = {"%s_2026070%d" % (station, i): dict(sqm=sqm, absolute=True,
+                  az=0.0, alt=90.0) for i in range(1, 4)}
+        with open(os.path.join(d, "%s_sky_quality_history.json" % station), "w") as f:
+            json.dump(dict(nights=nights), f)
+        return DummyConfig(d, station_id=station)
+
+    cfg_a = writeHistory("US005X", 20.0)
+    cfg_b = writeHistory("US005Y", 21.0)
+
+    _radiometricAnchorOffset(model, [cfg_a, cfg_b])
+    out = capsys.readouterr().out
+
+    assert "US005X: -0.50 mag vs site (n=3)" in out
+    assert "US005Y: +0.50 mag vs site (n=3)" in out
+    assert out.count("check the glow field allocation") == 2
+
+    # A single camera has no cross-check - nothing printed
+    _radiometricAnchorOffset(model, cfg_a)
+    assert "vs site" not in capsys.readouterr().out
+
+
 def _writeHistory(tmp_path, station, dratios, model_version):
     import json
     entries = {"%s_202606%02d" % (station, i + 1): dict(dratio=r, dmodel=model_version)
