@@ -140,6 +140,31 @@ def test_shadowed_legacy_file_does_not_refit_loop(tmp_path):
     assert not os.path.isfile(os.path.join(str(tmp_path), "US005X_" + AUTO_ATTEMPT_MARKER))
 
 
+def test_fresh_model_not_covering_siblings_triggers_refit(tmp_path, monkeypatch):
+    # A FRESH single-camera model on a multi-camera computer is superseded by the pooled
+    # site fit - it must not be kept until it ages out. With no archives the refit cannot
+    # run: the model is kept for now and the attempt marker is written.
+    import Utils.FitLightDome as fld
+
+    cfg = DummyConfig(str(tmp_path))
+    with open(os.path.join(str(tmp_path), "US005X_light_dome.json"), "w") as f:
+        json.dump(freshModelDict(), f)
+
+    sibling = DummyConfig(os.path.join(str(tmp_path), "sib"), station_id="US005Y")
+    monkeypatch.setattr(fld, "findSiblingStationConfigs", lambda c: [c, sibling])
+
+    assert ensureLightDomeModel(cfg, platepar=DummyPlatepar()) is True
+    assert os.path.isfile(os.path.join(str(tmp_path), "US005X_" + AUTO_ATTEMPT_MARKER))
+
+    # A fresh model that covers all siblings is kept - no refit attempt
+    os.remove(os.path.join(str(tmp_path), "US005X_" + AUTO_ATTEMPT_MARKER))
+    with open(os.path.join(str(tmp_path), "US005X_light_dome.json"), "w") as f:
+        json.dump(freshModelDict(cams=["US005X", "US005Y"], LM0=[5.5, 5.6]), f)
+
+    assert ensureLightDomeModel(cfg, platepar=DummyPlatepar()) is True
+    assert not os.path.isfile(os.path.join(str(tmp_path), "US005X_" + AUTO_ATTEMPT_MARKER))
+
+
 def test_no_model_no_archives_waits(tmp_path):
     # Fresh station with no archives: returns False (scalar fallback), writes the daily
     # attempt marker, and the second call the same day short-circuits

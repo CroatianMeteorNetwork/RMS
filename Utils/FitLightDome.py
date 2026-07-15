@@ -871,8 +871,9 @@ def ensureLightDomeModel(config, platepar=None):
         operator needed.
 
     Called nightly from detectClouds. If no model file exists, or the present one went
-    stale, or it is from the retired dome basis, the clearest recent archived nights are
-    selected and the model is refitted. All co-located sibling stations found on this
+    stale, or it is from the retired dome basis, or it does not cover every co-located
+    sibling station, the clearest recent archived nights are selected and the model is
+    refitted. All co-located sibling stations found on this
     computer (multi-camera layout: sibling config directories named by stationID) are
     pooled into one site fit, so every camera's FOV constrains the shared glow field and
     no camera relies on an extrapolation into sky it cannot see. A single-camera station
@@ -898,6 +899,9 @@ def ensureLightDomeModel(config, platepar=None):
     data_dir = os.path.expanduser(config.data_dir)
     station = str(config.stationID)
 
+    # Every co-located sibling station on this computer joins the site fit
+    station_configs = findSiblingStationConfigs(config)
+
     # A model file from the retired dome basis is refitted outright - the harmonic basis
     # is the only supported one, and old files no longer evaluate
     legacy_path = findLegacyModelFile(data_dir, station)
@@ -905,16 +909,26 @@ def ensureLightDomeModel(config, platepar=None):
         print("Light-dome model {:s} uses the retired dome basis - refitting with the "
               "harmonic basis".format(os.path.basename(legacy_path)))
 
-    # Existing harmonic model: keep it while it is fresh
+    # Existing harmonic model: keep it while it is fresh AND it covers every co-located
+    # sibling. A fresh-but-narrower model (e.g. a single-camera fit from before the
+    # siblings existed, or before pooling was automatic) is superseded by the pooled
+    # site fit rather than left to age out.
     model = LightDomeModel.load(config)
     if (model is not None) and (legacy_path is None):
 
         stale = modelIsStale(model.model, config, platepar=platepar)
 
-        if stale is None:
+        missing = [str(c.stationID) for c in station_configs
+                   if str(c.stationID) not in model.cams]
+
+        if (stale is None) and (not missing):
             return True
 
-        print("Light-dome model is stale ({:s}) - refitting".format(stale))
+        if stale is not None:
+            print("Light-dome model is stale ({:s}) - refitting".format(stale))
+        else:
+            print("Light-dome model does not cover co-located station(s) {:s} - "
+                  "refitting the site pooled".format(", ".join(missing)))
 
     # Rate-limit attempts to one per day
     marker_path = os.path.join(data_dir, "{:s}_{:s}".format(station, AUTO_ATTEMPT_MARKER))
@@ -948,8 +962,6 @@ def ensureLightDomeModel(config, platepar=None):
     print("Light-dome auto-fit from the {:d} clearest archived nights: {:s}".format(
         len(night_dirs), ", ".join(dates)))
 
-    # Pool every co-located sibling station on this computer into one site fit
-    station_configs = findSiblingStationConfigs(config)
     if len(station_configs) > 1:
         print("Pooling co-located stations for the site fit: {:s}".format(
             ", ".join(str(c.stationID) for c in station_configs)))
