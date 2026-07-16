@@ -410,6 +410,38 @@ class QueuedPool(object):
 
 
 
+    def _shutdownPool(self, graceful_timeout=30):
+        """ Close the pool, giving the workers time to exit on their own after receiving poison
+            pills. terminate() is only used as a last resort: killing a worker that is mid-write
+            on a queue it shares with other processes (e.g. the logging queue) can orphan the
+            queue's internal lock and permanently wedge every other process using it.
+
+        Keyword arguments:
+            graceful_timeout: [float] Seconds to wait for workers to exit before terminating.
+        """
+
+        self.printAndLog('Closing pool...')
+        self.pool.close()
+
+        # Wait for the workers to exit on their own (uses the private worker list, which is
+        # stable across all supported Python versions)
+        t_beg = time.time()
+        while any([w.is_alive() for w in self.pool._pool]):
+
+            if (time.time() - t_beg) > graceful_timeout:
+                self.printAndLog('Workers still alive after {:.0f} s, terminating pool...'.format(
+                    float(graceful_timeout)))
+                self.pool.terminate()
+                break
+
+            time.sleep(0.5)
+
+        self.printAndLog('Joining pool...')
+        self.pool.join()
+
+        self.active_workers.set(0)
+
+
     def closePool(self):
         """ Wait until all jobs are done and close the pool. """
 
@@ -452,6 +484,9 @@ class QueuedPool(object):
                 if (time.time() - output_qsize_last_change) > worker_timeout:
                     self.printAndLog('One of the workers got stuck longer than {:.1f} seconds, killing multiprocessing...'.format(float(worker_timeout)))
 
+                    # terminate() is unavoidable for a genuinely stuck worker, but it is a known
+                    # hazard: a worker killed mid-write on the shared logging queue wedges logging
+                    # station-wide. RMS.Logger.checkLoggingHealth() exists to recover from that.
                     self.printAndLog('Terminating pool...')
                     self.pool.terminate()
 
@@ -482,15 +517,14 @@ class QueuedPool(object):
                 if all_workers_idle_time is not None:
                     if (time.time() - all_workers_idle_time) > 100:
 
-                        self.printAndLog('All workers were idle for more than 100 seconds, killing multiprocessing...')
+                        self.printAndLog('All workers were idle for more than 100 seconds, shutting down the pool...')
 
-                        self.printAndLog('Terminating pool...')
-                        self.pool.terminate()
+                        # Wake the idle workers with poison pills so they exit cleanly instead of
+                        # being terminated mid-run
+                        for i in range(self.active_workers.value()):
+                            self.input_queue.put(None)
 
-                        self.printAndLog('Joining pool...')
-                        self.pool.join()
-
-                        self.active_workers.set(0)
+                        self._shutdownPool()
 
                         break
 
@@ -527,15 +561,9 @@ class QueuedPool(object):
                                 break
 
 
-                    # Close the pool and wait for all threads to terminate
-                    self.printAndLog('Closing pool...')
-                    self.pool.close()
-
-                    self.printAndLog('Terminating pool...')
-                    self.pool.terminate()
-
-                    self.printAndLog('Joining pool...')
-                    self.pool.join()
+                    # Close the pool and let the workers, which have swallowed their poison
+                    # pills, exit on their own
+                    self._shutdownPool()
 
                     break
 
@@ -576,13 +604,8 @@ class QueuedPool(object):
             if abs(time.time() - loop_start) > 100:
                 break
 
-        # Join the previous pool
-        self.printAndLog('Closing pool...')
-        self.pool.close()
-        self.printAndLog('Terminating pool...')
-        self.pool.terminate()
-        self.printAndLog('Joining pool...')
-        self.pool.join()
+        # Join the previous pool, terminating only if the workers did not exit on their own
+        self._shutdownPool()
 
         self.kill_workers.clear()
 
