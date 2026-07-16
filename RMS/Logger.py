@@ -353,6 +353,34 @@ class CustomHandler(logging.handlers.TimedRotatingFileHandler):
 
 
 
+# Upper bound on records buffered between producers and the listener. A stalled listener pipeline
+# otherwise grows every producer's queue feeder buffer without bound (observed as ~700 MB/process/day
+# in production when a process died while holding the queue's shared write lock)
+LOG_QUEUE_MAXSIZE = 30000
+
+# Backlog size above which the listener pipeline is considered stalled
+LOG_QUEUE_STALL_THRESHOLD = 500
+
+# Number of consecutive health checks the backlog must persist before the pipeline is restarted
+LOG_STALL_STRIKES = 3
+
+# The most recently initialized LoggingManager, used by the module-level health check
+_active_manager = None
+
+
+class _DroppingQueueHandler(logging.handlers.QueueHandler):
+    """ QueueHandler that silently drops records when the queue is full or broken.
+
+    The logging queue is bounded, so a stalled listener cannot grow producer memory without
+    bound. Blocking or raising here would stall capture, so dropping is the only safe option.
+    """
+    def enqueue(self, record):
+        try:
+            self.queue.put_nowait(record)
+        except Exception:
+            pass
+
+
 class LoggingManager:
     """Manages the lifecycle of the multiprocessing logger."""
     def __init__(self):
@@ -360,6 +388,12 @@ class LoggingManager:
         self.listener_process = None
         self.is_initialized = False
         self.init_lock = threading.Lock()
+
+        # Arguments used to spawn the listener, kept so a wedged listener can be respawned
+        self._listener_args = None
+
+        # Consecutive health checks with an excessive backlog
+        self._stall_strikes = 0
 
     def initLogging(self, config, log_file_prefix="", safedir=None, 
                     console_level=logging.INFO, file_level=logging.DEBUG):
@@ -404,16 +438,11 @@ class LoggingManager:
                 main_logger.removeHandler(handler)
 
             # Spawn the listener process
-            self.logging_queue = multiprocessing.Queue(-1)
-            self.listener_process = multiprocessing.Process(
-                target=_listener_process,
-                args=(self.logging_queue, config, log_file_prefix, safedir, console_level, file_level)
-            )
-            self.listener_process.daemon = True
-            self.listener_process.start()
-            
+            self._listener_args = (config, log_file_prefix, safedir, console_level, file_level)
+            self._spawnListener()
+
             # Configure the queue handler in the main process
-            qh = logging.handlers.QueueHandler(self.logging_queue)
+            qh = _DroppingQueueHandler(self.logging_queue)
             qh.setFormatter(logging.Formatter('%(message)s'))
             qh.addFilter(InRmsFilter(config))
 
@@ -430,8 +459,97 @@ class LoggingManager:
             self.is_initialized = True
             main_logger.debug("initLogging completed; queue listener started.")
 
+            # Make this manager visible to the module-level health check
+            global _active_manager
+            _active_manager = self
+
             # Register the instance's shutdown method for clean exit
             atexit.register(self.shutdownLogging)
+
+
+    def _spawnListener(self):
+        """ Create a fresh (bounded) logging queue and start a listener process draining it. """
+
+        self.logging_queue = multiprocessing.Queue(LOG_QUEUE_MAXSIZE)
+        self.listener_process = multiprocessing.Process(
+            target=_listener_process,
+            args=(self.logging_queue,) + self._listener_args
+        )
+        self.listener_process.daemon = True
+        self.listener_process.start()
+
+
+    def checkLoggingHealth(self):
+        """ Detect a dead or starved logging pipeline and restart it.
+
+        Two failure modes are covered:
+        - The listener process died (crash, OOM kill): trivially detectable.
+        - The listener is alive but records stopped reaching it. This happens when any
+          producer process dies (or is killed) while holding one of the queue's shared
+          internal locks - every producer then buffers records forever and the station
+          goes silently log-dark while continuing to run.
+
+        Call periodically from the main process (e.g. the capture watchdog).
+
+        Return:
+            [bool] True if the pipeline is healthy, False if a restart was triggered.
+        """
+
+        with self.init_lock:
+
+            if not self.is_initialized:
+                return True
+
+            # Listener process died
+            if (self.listener_process is None) or (not self.listener_process.is_alive()):
+                self._restartLogging('listener process is dead')
+                return False
+
+            # Listener alive - check that the queue is actually draining
+            try:
+                backlog = self.logging_queue.qsize()
+            except (NotImplementedError, OSError):
+                # qsize() is not implemented on some platforms (e.g. macOS)
+                return True
+
+            if backlog > LOG_QUEUE_STALL_THRESHOLD:
+                self._stall_strikes += 1
+            else:
+                self._stall_strikes = 0
+
+            if self._stall_strikes >= LOG_STALL_STRIKES:
+                self._restartLogging('backlog of {:d} records is not draining'.format(backlog))
+                return False
+
+            return True
+
+
+    def _restartLogging(self, reason):
+        """ Replace the queue and listener process. Must be called with init_lock held. """
+
+        # This goes to stderr directly - the logging pipeline is the thing that is broken
+        print('LOGGING WATCHDOG: {:s} - restarting the logging pipeline...'.format(reason))
+
+        try:
+            if (self.listener_process is not None) and self.listener_process.is_alive():
+                self.listener_process.terminate()
+                self.listener_process.join(timeout=2)
+        except Exception as e:
+            print('LOGGING WATCHDOG: could not stop the old listener: {}'.format(e))
+
+        # Abandon the old queue - it may be wedged beyond recovery. Records buffered in it are
+        # lost, and child processes forked before this point keep logging into the abandoned
+        # (bounded) queue, so their output is lost until they are restarted.
+        self._spawnListener()
+        self._stall_strikes = 0
+
+        # Point this process's queue handlers at the fresh queue
+        for handler in logging.getLogger().handlers:
+            if isinstance(handler, logging.handlers.QueueHandler):
+                handler.queue = self.logging_queue
+
+        logging.getLogger("rmslogger").warning(
+            'Logging pipeline restarted by watchdog ({:s}). Records logged during the stall are lost.'.format(reason))
 
     def shutdownLogging(self):
         """
@@ -444,13 +562,31 @@ class LoggingManager:
             # Stop the listener process
             if self.listener_process and self.listener_process.is_alive():
                 print("Shutting down logging...") # Added for visibility during shutdown
-                self.logging_queue.put(None)  # Sentinel to stop the listener loop
+                # Sentinel to stop the listener loop. Never block on a possibly wedged queue -
+                # the terminate() below handles a listener that does not get the sentinel.
+                try:
+                    self.logging_queue.put_nowait(None)
+                except Exception:
+                    pass
                 self.listener_process.join(timeout=5)
                 if self.listener_process.is_alive():
                     self.listener_process.terminate()
             
             self.is_initialized = False
             print("Logging shutdown complete.")
+
+
+def checkLoggingHealth():
+    """ Run a health check on the most recently initialized LoggingManager, if any.
+
+    Return:
+        [bool] True if the pipeline is healthy (or logging was never initialized).
+    """
+
+    if _active_manager is None:
+        return True
+
+    return _active_manager.checkLoggingHealth()
 
 
 ##############################################################################
