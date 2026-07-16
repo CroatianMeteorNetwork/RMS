@@ -18,7 +18,9 @@
 
 import math
 import time
-from multiprocessing import Process, Event
+from multiprocessing import Process
+
+from RMS.Misc import AtomicFlag
 
 import numpy as np
 
@@ -246,7 +248,7 @@ class Extractor(Process):
 
         """
         
-        self.exit = Event()
+        self.exit = AtomicFlag()
         
         self.frames = frames
         self.compressed = compressed

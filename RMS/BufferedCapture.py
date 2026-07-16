@@ -27,7 +27,7 @@ import time
 import datetime
 import copy
 import os.path
-from multiprocessing import Process, Event, Value, Array
+from multiprocessing import Process, Value, Array
 import threading
 from collections import deque
 import os
@@ -44,7 +44,7 @@ from RMS.Misc import obfuscatePassword
 from RMS.Routines.GstreamerCapture import GstVideoFile, getStructureValue
 from RMS.Formats.ObservationSummary import addObsParam, getObservationSummaryDict
 from RMS.RawFrameSave import RawFrameSaver
-from RMS.Misc import RmsDateTime, mkdirP, UTCFromTimestamp, runWithTimeout
+from RMS.Misc import RmsDateTime, mkdirP, UTCFromTimestamp, runWithTimeout, AtomicFlag
 from RMS.Formats import FTfile, FTStruct
 from RMS.Logger import LoggingManager, getLogger, gstDebugLogger
 from RMS.CaptureModeSwitcher import switchCameraMode
@@ -160,12 +160,12 @@ class BufferedCapture(Process):
 
         # make sure the flags are always real shared Values
         if daytime_mode is None:
-            self.daytime_mode = Value(ctypes.c_bool, False)       # default: "night"
+            self.daytime_mode = Value(ctypes.c_bool, False, lock=False)       # default: "night"
         else:
             self.daytime_mode = daytime_mode
 
         if camera_mode_switch_trigger is None:
-            self.camera_mode_switch_trigger = Value(ctypes.c_bool, False)
+            self.camera_mode_switch_trigger = Value(ctypes.c_bool, False, lock=False)
         else:
             self.camera_mode_switch_trigger = camera_mode_switch_trigger
 
@@ -189,8 +189,8 @@ class BufferedCapture(Process):
             # Frame saving block size - these many raw frames are written to buffer before saving to disk
             self.num_raw_frames = 10
 
-            self.start_raw_time1 = Value('d', 0.0)
-            self.start_raw_time2 = Value('d', 0.0)
+            self.start_raw_time1 = Value('d', 0.0, lock=False)
+            self.start_raw_time2 = Value('d', 0.0, lock=False)
             self.shared_timestamps_base = Array(ctypes.c_double, self.num_raw_frames)
             self.shared_timestamps_base2 = Array(ctypes.c_double, self.num_raw_frames)
 
@@ -200,10 +200,12 @@ class BufferedCapture(Process):
         self.dropped_frames_timestamps = deque()  # Track when frames were dropped for 10-min window
 
         # Flag for process control
-        self.exit = Event()
+        self.exit = AtomicFlag()
 
         # Heartbeat timestamp for watchdog - updated every frame block to detect hangs
-        self.heartbeat = Value('d', 0.0)
+        # lock=False: single writer, and a locked Value can deadlock the watchdog if this
+        # process is killed while holding the lock
+        self.heartbeat = Value('d', 0.0, lock=False)
 
         # Initialize sync tick
         self.last_sync_tick = -1
@@ -227,7 +229,7 @@ class BufferedCapture(Process):
         """
         
         self.cameraID = cameraID
-        self.exit = Event()
+        self.exit = AtomicFlag()
 
         self.start()
     

@@ -11,7 +11,7 @@ from multiprocessing import Manager
 import paramiko
 
 from RMS.Logger import LoggingManager, getLogger
-from RMS.Misc import mkdirP, UTCFromTimestamp, runWithTimeout
+from RMS.Misc import mkdirP, UTCFromTimestamp, runWithTimeout, AtomicFlag
 
 # Suppress Paramiko internal errors before they appear in logs
 getLogger("paramiko.transport").setLevel(logging.CRITICAL)
@@ -547,7 +547,9 @@ class UploadManager(multiprocessing.Process):
         # Construct the path to the queue backup file
         self.upload_queue_file_path = os.path.join(self.config.data_dir, self.config.upload_queue_file)
 
-        self.exit = multiprocessing.Event()
+        # Lock-free flag: stop() escalates to terminate(), which must not be able to
+        # orphan an Event lock (see AtomicFlag)
+        self.exit = AtomicFlag()
         self.upload_in_progress = multiprocessing.Value(ctypes.c_bool, False)
 
         # These timing variables must be shared between processes using multiprocessing.Value() because

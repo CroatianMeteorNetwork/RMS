@@ -31,7 +31,7 @@ from RMS.VideoExtraction import Extractor
 from RMS.Formats import FFfile, FFStruct
 from RMS.Formats import FieldIntensities
 from RMS.Logger import getLogger
-from RMS.Misc import UTCFromTimestamp
+from RMS.Misc import UTCFromTimestamp, AtomicFlag
 from RMS.Routines.Image import saveImage
 
 # Import Cython functions
@@ -42,29 +42,6 @@ from RMS.CompressionCy import compressFrames
 
 # Get the logger from the main module
 log = getLogger("rmslogger")
-
-
-class AtomicFlag(object):
-    """ Lock-free substitute for multiprocessing.Event, for flags that are only ever set and
-        polled (never waited on).
-
-        multiprocessing.Event guards its state with a shared semaphore - if any process sharing
-        the event dies while holding it (e.g. killed by the OOM killer), every later set() and
-        is_set() blocks forever. This was observed in production, wedging Compressor.stop() in
-        the capture main process. A plain shared byte cannot deadlock.
-    """
-
-    def __init__(self):
-        self._flag = multiprocessing.Value('b', 0, lock=False)
-
-    def set(self):
-        self._flag.value = 1
-
-    def clear(self):
-        self._flag.value = 0
-
-    def is_set(self):
-        return bool(self._flag.value)
 
 
 class Compressor(multiprocessing.Process):

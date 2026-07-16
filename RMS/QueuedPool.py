@@ -10,7 +10,7 @@ import multiprocessing.dummy
 
 from RMS.Pickling import savePickle, loadPickle
 from RMS.Logger import getLogger
-from RMS.Misc import randomCharacters, isListKeyInDict, listToTupleRecursive
+from RMS.Misc import randomCharacters, isListKeyInDict, listToTupleRecursive, AtomicFlag
 
 
 from errno import EPIPE
@@ -25,47 +25,85 @@ except NameError:
 
 
 
+# How long to wait for a SafeValue lock before proceeding without it. A process that dies while
+# holding the lock (OOM kill, terminate()) would otherwise wedge every other user forever
+SAFE_VALUE_LOCK_TIMEOUT = 5.0
+
+
 class SafeValue(object):
-    """ Thread safe value. Uses locks. 
-    
+    """ Thread safe value. Uses locks.
+
     Source: http://eli.thegreenplace.net/2012/01/04/shared-counter-with-pythons-multiprocessing
+
+    Lock acquisition is bounded: these counters are shared with worker processes that can be
+    OOM-killed or terminated mid-update. If the lock cannot be acquired within
+    SAFE_VALUE_LOCK_TIMEOUT, the operation proceeds without it - a possibly stale counter is
+    vastly preferable to permanently wedging the pool management code.
     """
 
     def __init__(self, initval=0, minval=None, maxval=None):
-        
-        self.val = multiprocessing.Value('i', initval)
+
+        self.val = multiprocessing.Value('i', initval, lock=False)
         self.lock = multiprocessing.Lock()
 
         self.minval = minval
         self.maxval = maxval
 
 
+    def _acquireLock(self):
+        """ Acquire the lock with a timeout. Returns True if the lock was actually acquired. """
+
+        acquired = self.lock.acquire(timeout=SAFE_VALUE_LOCK_TIMEOUT)
+
+        if not acquired:
+            print('SafeValue: lock not acquired after {:.0f} s - a process likely died while '
+                  'holding it. Proceeding without the lock.'.format(SAFE_VALUE_LOCK_TIMEOUT))
+
+        return acquired
+
+
     def increment(self):
-        with self.lock:
+        acquired = self._acquireLock()
+        try:
             self.val.value += 1
 
             if self.maxval is not None:
                 if self.val.value > self.maxval:
                     self.val.value = self.maxval
+        finally:
+            if acquired:
+                self.lock.release()
 
 
     def decrement(self):
-        with self.lock:
+        acquired = self._acquireLock()
+        try:
             self.val.value -= 1
 
             if self.minval is not None:
                 if self.val.value < self.minval:
                     self.val.value = self.minval
+        finally:
+            if acquired:
+                self.lock.release()
 
 
     def set(self, n):
-        with self.lock:
+        acquired = self._acquireLock()
+        try:
             self.val.value = n
+        finally:
+            if acquired:
+                self.lock.release()
 
 
     def value(self):
-        with self.lock:
+        acquired = self._acquireLock()
+        try:
             return self.val.value
+        finally:
+            if acquired:
+                self.lock.release()
 
 
 
@@ -175,7 +213,9 @@ class QueuedPool(object):
         self.results_counter = SafeValue(minval=0)
         self.active_workers = SafeValue(minval=0, maxval=multiprocessing.cpu_count())
         self.available_workers = SafeValue(self.cores.value(), minval=0, maxval=multiprocessing.cpu_count())
-        self.kill_workers = multiprocessing.Event()
+        # Lock-free flag: workers are OOM-killable and terminated when stuck, and a killed
+        # worker must not be able to orphan an Event lock (see AtomicFlag)
+        self.kill_workers = AtomicFlag()
 
 
         ### Backing up results

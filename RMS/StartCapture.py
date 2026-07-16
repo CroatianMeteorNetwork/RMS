@@ -459,12 +459,12 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     sharedArrayBase = multiprocessing.Array(ctypes.c_uint8, 256*(config.width + array_pad)*(config.height + array_pad))
     sharedArray = np.ctypeslib.as_array(sharedArrayBase.get_obj())
     sharedArray = sharedArray.reshape(256, (config.height + array_pad), (config.width + array_pad))
-    startTime = multiprocessing.Value('d', 0.0)
+    startTime = multiprocessing.Value('d', 0.0, lock=False)
 
     sharedArrayBase2 = multiprocessing.Array(ctypes.c_uint8, 256*(config.width + array_pad)*(config.height + array_pad))
     sharedArray2 = np.ctypeslib.as_array(sharedArrayBase2.get_obj())
     sharedArray2 = sharedArray2.reshape(256, (config.height + array_pad), (config.width + array_pad))
-    start_time2 = multiprocessing.Value('d', 0.0)
+    start_time2 = multiprocessing.Value('d', 0.0, lock=False)
 
     log.info('Initializing frame buffers done!')
 
@@ -1552,8 +1552,10 @@ if __name__ == "__main__":
                     log.warning('Previous capture mode switcher thread did not stop in time')
 
             # Setup shared value to communicate day/night switch between processes.
-            daytime_mode = multiprocessing.Value(ctypes.c_bool, False)
-            camera_mode_switch_trigger = multiprocessing.Value(ctypes.c_bool, True)
+            # lock=False on the shared flags: a locked Value can deadlock all sharers if any
+            # process is killed while holding the lock
+            daytime_mode = multiprocessing.Value(ctypes.c_bool, False, lock=False)
+            camera_mode_switch_trigger = multiprocessing.Value(ctypes.c_bool, True, lock=False)
 
             # Setup the capture mode switcher on another thread
             switcher_stop_event = threading.Event()

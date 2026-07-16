@@ -26,7 +26,7 @@ from math import floor
 import cv2
 
 from RMS.Logger import getLogger
-from RMS.Misc import mkdirP, setParentDeathSignal
+from RMS.Misc import mkdirP, setParentDeathSignal, AtomicFlag
 
 # Get the logger from the main module
 log = getLogger("rmslogger")
@@ -69,8 +69,10 @@ class RawFrameSaver(multiprocessing.Process):
         self.total_saved_frames = 0
         self.day_of_year = time.strftime("%j", time.gmtime())
 
-        self.exit = multiprocessing.Event()
-        self.run_exited = multiprocessing.Event()
+        # Lock-free flags: this process is terminated/SIGKILLed in the normal disconnect
+        # path, and a killed process must not be able to orphan an Event lock (see AtomicFlag)
+        self.exit = AtomicFlag()
+        self.run_exited = AtomicFlag()
 
         # PID of the logical parent (BufferedCapture). __init__ runs in the parent, so this
         # is captured correctly under fork, spawn AND forkserver - unlike os.getppid(),

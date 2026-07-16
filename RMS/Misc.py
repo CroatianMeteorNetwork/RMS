@@ -16,6 +16,8 @@ import datetime
 import tarfile
 import threading
 import signal
+import time
+import multiprocessing
 
 # tkinter import that works on both Python 2 and 3
 if sys.version_info[0] < 3:
@@ -43,6 +45,53 @@ if sys.version_info[0] < 3:
 
 # Get the logger from the main module
 log = getLogger("rmslogger")
+
+
+class AtomicFlag(object):
+    """ Lock-free substitute for multiprocessing.Event, for flags that are set and polled
+        across processes.
+
+        multiprocessing.Event guards its state with a shared semaphore - if any process
+        sharing the event dies while holding it (e.g. killed by the OOM killer, or by one of
+        our own terminate()/SIGKILL escalations), every later set()/is_set() blocks forever.
+        This wedged Compressor.stop() in production. A plain shared byte cannot deadlock.
+
+        wait() is provided for drop-in compatibility, implemented as a poll-sleep loop.
+    """
+
+    def __init__(self):
+        self._flag = multiprocessing.Value('b', 0, lock=False)
+
+    def set(self):
+        self._flag.value = 1
+
+    def clear(self):
+        self._flag.value = 0
+
+    def is_set(self):
+        return bool(self._flag.value)
+
+    def wait(self, timeout=None, poll_interval=1.0):
+        """ Block until the flag is set or the timeout (in seconds) expires.
+
+        Return:
+            [bool] True if the flag is set, False if the timeout expired.
+        """
+
+        t_beg = time.time()
+
+        while not self.is_set():
+
+            if (timeout is not None) and ((time.time() - t_beg) >= timeout):
+                break
+
+            if timeout is not None:
+                time_left = timeout - (time.time() - t_beg)
+                time.sleep(max(0.0, min(poll_interval, time_left)))
+            else:
+                time.sleep(poll_interval)
+
+        return self.is_set()
 
 
 def setParentDeathSignal(sig=9):

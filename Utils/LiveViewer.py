@@ -84,7 +84,7 @@ class LiveViewer(multiprocessing.Process):
         self.banner_text = banner_text
         self.update_interval = update_interval
 
-        self.exit = multiprocessing.Event()
+        self.exit = AtomicFlag()
 
         self.first_image = True
 

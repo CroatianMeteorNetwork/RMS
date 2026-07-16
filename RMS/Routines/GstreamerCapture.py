@@ -54,7 +54,7 @@ class GstCaptureTest(multiprocessing.Process):
 
         super(GstCaptureTest, self).__init__()
 
-        self.exit = multiprocessing.Event()
+        self.exit = AtomicFlag()
 
         self.device_url = device_url
         self.gst_decoder = gst_decoder
