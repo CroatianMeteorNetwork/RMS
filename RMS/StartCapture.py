@@ -29,6 +29,74 @@ import ctypes
 import threading
 import multiprocessing
 import traceback
+
+
+def _earlyStationLock():
+    """ Acquire the per-station single-instance lock BEFORE the heavy imports below.
+
+    A refused duplicate must exit here, in milliseconds, at a few MB of memory. If this
+    only ran after the imports, every duplicate would first load numpy/matplotlib and
+    compile Cython modules - observed in production as ~40 hung duplicates at ~700 MB
+    each. Best effort: if the station ID cannot be determined from the command line, the
+    full guard after config loading (acquireStationLock) still applies.
+    """
+
+    if (os.name != 'posix') or (__name__ != '__main__'):
+        return None
+
+    import re
+    import fcntl
+    import tempfile
+
+    # Peek at the config path from the command line without importing ConfigReader
+    config_path = None
+    argv = sys.argv[1:]
+    for i, arg in enumerate(argv):
+        if arg in ('-c', '--config') and (i + 1) < len(argv):
+            config_path = argv[i + 1]
+            break
+        if arg.startswith('--config='):
+            config_path = arg.split('=', 1)[1]
+            break
+
+    if (config_path is None) or (not os.path.isfile(config_path)):
+        return None
+
+    # Peek at the station ID
+    try:
+        with open(config_path) as f:
+            match = re.search(r'^\s*stationID\s*[:=]\s*(\S+)', f.read(), re.MULTILINE | re.IGNORECASE)
+    except (IOError, OSError):
+        return None
+
+    if not match:
+        return None
+
+    station_id = match.group(1).strip()
+
+    lock_path = os.path.join(tempfile.gettempdir(),
+        'rms_startcapture_{:s}.lock'.format(station_id))
+
+    lock_file = open(lock_path, 'w')
+
+    try:
+        fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+    except (IOError, OSError):
+        print('Another StartCapture instance is already running for station {:s} '
+              '(lock file: {:s}). Exiting.'.format(station_id, lock_path))
+        sys.exit(1)
+
+    lock_file.write(str(os.getpid()))
+    lock_file.flush()
+
+    return lock_file
+
+
+# Keep a reference for the process lifetime - the kernel releases the flock on process death
+_early_station_lock = _earlyStationLock()
+
+
 import git
 from RMS.Formats.ObservationSummary import addObsParam, getObservationSummaryDict
 
@@ -113,6 +181,11 @@ def acquireStationLock(config):
 
     if os.name != 'posix':
         return None
+
+    # The pre-import guard may have already taken the lock for this process - taking a
+    # second flock on the same file from a new fd would wrongly refuse ourselves
+    if _early_station_lock is not None:
+        return _early_station_lock
 
     import fcntl
     import tempfile
