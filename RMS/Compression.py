@@ -44,6 +44,29 @@ from RMS.CompressionCy import compressFrames
 log = getLogger("rmslogger")
 
 
+class AtomicFlag(object):
+    """ Lock-free substitute for multiprocessing.Event, for flags that are only ever set and
+        polled (never waited on).
+
+        multiprocessing.Event guards its state with a shared semaphore - if any process sharing
+        the event dies while holding it (e.g. killed by the OOM killer), every later set() and
+        is_set() blocks forever. This was observed in production, wedging Compressor.stop() in
+        the capture main process. A plain shared byte cannot deadlock.
+    """
+
+    def __init__(self):
+        self._flag = multiprocessing.Value('b', 0, lock=False)
+
+    def set(self):
+        self._flag.value = 1
+
+    def clear(self):
+        self._flag.value = 0
+
+    def is_set(self):
+        return bool(self._flag.value)
+
+
 class Compressor(multiprocessing.Process):
     """Compress list of numpy arrays (video frames).
 
@@ -81,9 +104,11 @@ class Compressor(multiprocessing.Process):
 
         self.detector = detector
 
-        self.exit = multiprocessing.Event()
+        # Lock-free flags: these are set/polled across processes and must never be able to
+        # deadlock, even if a process sharing them is killed (see AtomicFlag)
+        self.exit = AtomicFlag()
 
-        self.run_exited = multiprocessing.Event()
+        self.run_exited = AtomicFlag()
     
 
 
