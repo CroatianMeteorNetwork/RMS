@@ -38,7 +38,7 @@ import numpy as np
 from Utils.LiveViewer import LiveViewer
 
 import RMS.ConfigReader as cr
-from RMS.Logger import LoggingManager, getLogger
+from RMS.Logger import LoggingManager, getLogger, checkLoggingHealth
 from RMS.BufferedCapture import BufferedCapture
 from RMS.CaptureDuration import captureDuration
 from RMS.CaptureModeSwitcher import captureModeSwitcher
@@ -95,6 +95,47 @@ def resetSIGINT():
 HEARTBEAT_TIMEOUT = 180  # 3 minutes
 
 
+def acquireStationLock(config):
+    """ Ensure only one StartCapture instance runs per station.
+
+    An external supervisor that respawns stations it believes are down can otherwise pile up
+    duplicate instances - observed in production, where ~40 duplicates of two wedged stations
+    (~700 MB each) drove a machine into OOM. The lock is a flock() on a per-station file, so it
+    is released automatically by the kernel no matter how the process dies.
+
+    Arguments:
+        config: [Config] Station config object.
+
+    Return:
+        [file or None] The open lock file handle (keep a reference for the process lifetime),
+            or None on non-POSIX platforms. Exits the process if another instance holds the lock.
+    """
+
+    if os.name != 'posix':
+        return None
+
+    import fcntl
+    import tempfile
+
+    lock_path = os.path.join(tempfile.gettempdir(),
+        'rms_startcapture_{:s}.lock'.format(str(config.stationID)))
+
+    lock_file = open(lock_path, 'w')
+
+    try:
+        fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+    except (IOError, OSError):
+        print('Another StartCapture instance is already running for station {:s} '
+              '(lock file: {:s}). Exiting.'.format(str(config.stationID), lock_path))
+        sys.exit(1)
+
+    lock_file.write(str(os.getpid()))
+    lock_file.flush()
+
+    return lock_file
+
+
 def wait(duration, compressor, buffered_capture, video_file, daytime_mode=None):
     """ The function will wait for the specified time, or it will stop when Enter is pressed. If no time was
         given (in seconds), it will wait until Enter is pressed. Additionally, it will also stop when the camera mode
@@ -143,6 +184,14 @@ def wait(duration, compressor, buffered_capture, video_file, daytime_mode=None):
             log.debug('WATCHDOG: Status check - capture_alive={}, compressor_alive={}, daytime_mode_prev={}'.format(
                 bc_alive, comp_alive, daytime_mode_prev))
             last_watchdog_log = now
+
+            # Verify the logging pipeline is alive and draining, and restart it if it wedged.
+            # A wedged pipeline makes the station silently log-dark while it keeps running,
+            # which also fools external monitors into respawning duplicate instances
+            try:
+                checkLoggingHealth()
+            except Exception as e:
+                print('WATCHDOG: logging health check failed: {}'.format(e))
 
 
         # Break in case camera modes switched
@@ -1071,6 +1120,11 @@ if __name__ == "__main__":
 
     # Load the config file
     config = cr.loadConfigFromDirectory(cml_args.config, os.path.abspath('.'))
+
+
+    # Refuse to start if another instance is already running for this station. Do this before
+    # any heavy initialization so a refused duplicate exits quickly and cheaply
+    station_lock = acquireStationLock(config)
 
 
     # Initialize the logger
