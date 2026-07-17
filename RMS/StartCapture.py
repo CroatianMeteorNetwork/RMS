@@ -919,6 +919,11 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
                 dropped_frames = bc.stopCapture()
                 log.info('Total number of late or dropped frames: ' + str(dropped_frames))
 
+                # Record the dropped frame count in the observation summary, same as the
+                # normal stop path above
+                obs_dict = getObservationSummaryDict(night_data_dir)
+                addObsParam(obs_dict, "dropped_frames", dropped_frames)
+
             break
 
         ran_once = True
@@ -1276,11 +1281,28 @@ if __name__ == "__main__":
                     try:
                         exit_status = os.system('sudo shutdown -r now')
 
-                        # os.system returns a wait status, not the exit code directly
-                        if exit_status != 0:
+                        if exit_status == 0:
+
+                            # The reboot command was accepted - wait in place for the system to go
+                            # down. Don't re-run the command, as a repeat invocation during the
+                            # shutdown can return non-zero and falsely report a failure
+                            log.info('Reboot command accepted, waiting for the system to go down...')
+                            time.sleep(300)
+                            log.error('System still running 5 minutes after the reboot command '
+                                'succeeded, giving up on rebooting')
+
+                        else:
+
+                            # os.system returns a wait status, not the exit code directly
+                            if hasattr(os, 'waitstatus_to_exitcode'):
+                                exit_code = os.waitstatus_to_exitcode(exit_status)
+                            else:
+                                exit_code = exit_status >> 8
+
                             log.error('Reboot command failed with exit code {}, '
-                                'giving up on rebooting'.format(exit_status >> 8))
-                            break
+                                'giving up on rebooting'.format(exit_code))
+
+                        break
 
                     except Exception as e:
                         log.debug('Rebooting failed with message:\n' + repr(e))
