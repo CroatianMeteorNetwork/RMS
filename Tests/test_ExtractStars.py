@@ -90,3 +90,42 @@ def test_noisy_image_bright_stars_survive_raised_gate():
     img, pos = synthImage(4.0, [60.0, 30.0])
     adapt = found(extractStars(img), pos)
     assert all(adapt)
+
+
+def test_extractStarsFF_end_to_end(tmp_path):
+    # Regression guard: extractStarsFF must stay callable end-to-end (a merge once left
+    # it passing a keyword extractStars had dropped, crashing every nightly extraction)
+    from RMS.Formats import FFStruct, FFfits
+    from RMS.ExtractStars import extractStarsFF
+
+    rng = np.random.default_rng(2)
+    h, w = 128, 128
+    ave = (38 + rng.normal(0, 0.6, (h, w))).astype(np.float32)
+    yy, xx = np.mgrid[0:h, 0:w]
+    for x0, y0, amp in [(40, 40, 30.0), (90, 70, 12.0)]:
+        ave += amp*np.exp(-((xx - x0)**2 + (yy - y0)**2)/(2*1.6**2))
+    ave = np.clip(ave, 0, 255)
+
+    ff = FFStruct.FFStruct()
+    ff.nrows, ff.ncols = h, w
+    ff.nbits = 8
+    ff.nframes = 256
+    ff.first = 0
+    ff.camno = "TEST01"
+    ff.fps = 25.0
+    ff.starttime = "2026-01-01T00:00:00"
+    ff.avepixel = ave.astype(np.uint8)
+    ff.maxpixel = np.clip(ave + 5, 0, 255).astype(np.uint8)
+    ff.stdpixel = np.ones((h, w), dtype=np.uint8)
+    ff.maxframe = np.zeros((h, w), dtype=np.uint8)
+
+    name = "FF_TEST01_20260101_000000_000_0000000.fits"
+    FFfits.write(ff, str(tmp_path), name)
+
+    import RMS.ConfigReader as cr
+    config = cr.Config()
+    config.gamma = 1.0
+    config.bit_depth = 8
+
+    star_list = extractStarsFF(str(tmp_path), name, config=config)
+    assert star_list and len(star_list[1]) >= 1
