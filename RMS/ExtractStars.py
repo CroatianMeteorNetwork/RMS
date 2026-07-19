@@ -321,7 +321,7 @@ def extractStarsFF(
         max_global_intensity=150,
         neighborhood_size=10, intensity_threshold=18,
         segment_radius=4, roundness_threshold=0.5, max_feature_ratio=0.8,
-        extra_info=None
+        extra_info=None, adaptive_threshold=True
         ):
     """ Extracts stars on a given FF bin by searching for local maxima and applying PSF fit for star 
         confirmation.
@@ -405,7 +405,7 @@ def extractStarsFF(
         neighborhood_size=neighborhood_size, intensity_threshold=intensity_threshold,
         segment_radius=segment_radius, roundness_threshold=roundness_threshold,
         max_feature_ratio=max_feature_ratio, bit_depth=config.bit_depth,
-        extra_info=extra_info
+        extra_info=extra_info, adaptive_threshold=adaptive_threshold
     )
 
     # If the star extraction failed, return an empty list

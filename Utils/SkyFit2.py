@@ -5410,11 +5410,13 @@ class PlateTool(QtWidgets.QMainWindow):
             self.config.max_feature_ratio = self.override_max_feature_ratio
             self.config.roundness_threshold = self.override_roundness_threshold
 
-            # Run star detection
+            # Run star detection. The tuner sweeps the ABSOLUTE threshold, so the
+            # noise-adaptive gate (which would cap every sweep value at the image noise
+            # level) must stay out of the measurement
             star_list = extractStarsFF(
                 self.dir_path, ff_name, config=self.config,
                 flat_struct=self.flat_struct, dark=self.dark, mask=self.mask,
-                extra_info=extra_info
+                extra_info=extra_info, adaptive_threshold=False
             )
 
             if not star_list or len(star_list[1]) == 0:
