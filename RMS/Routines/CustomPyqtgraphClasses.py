@@ -3524,6 +3524,9 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
             self.slider_labels[key] = val_label
             self.slider_defaults[key] = default
 
+            # Keep the Reset to Defaults button color-coded as values move
+            slider.valueChanged.connect(self.updateDefaultsButton)
+
             # Add gamma preset buttons right after gamma slider
             if key == 'gamma':
                 gamma_presets = QtWidgets.QHBoxLayout()
@@ -3606,6 +3609,7 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
         self.defaults_button = QtWidgets.QPushButton('Reset to Defaults')
         self.defaults_button.setToolTip('Reset all star detection parameters to the recommended defaults')
         self.defaults_button.clicked.connect(self.resetToDefaults)
+        self.updateDefaultsButton()
         btn_layout.addWidget(self.defaults_button)
 
         self.save_config_button = QtWidgets.QPushButton('Save Config...')
@@ -3692,31 +3696,87 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
         self.config_max_stars_label.setText(str(value))
         self.sigConfigMaxStarsChanged.emit(value)
 
+    # Values set by the auto-tuner: Reset to Defaults must not clobber them (the
+    # catalog LM spinbox is tuned too and is likewise left untouched)
+    TUNED_KEYS = ('segment_radius',)
+
+    def _sliderRestoreTarget(self, key):
+        """ The value Reset to Defaults would set for a slider (in slider units), or
+            None for tuned values which are never restored. """
+
+        if key in self.TUNED_KEYS:
+            return None
+
+        cfg = getattr(self, '_loaded_config', None)
+
+        # Station-bound values return to the loaded config instead: gamma is a hardware
+        # property of the camera (resetting it to 1.0 would corrupt photometry the
+        # moment Save Config is pressed), and the config max stars is the station's
+        # pipeline budget, not a tuning preference
+        if key == 'gamma':
+            if cfg is not None and hasattr(cfg, 'gamma'):
+                return int(round(cfg.gamma*100))
+            return self.slider_defaults[key]
+
+        if key == 'config_max_stars':
+            if cfg is not None and hasattr(cfg, 'max_stars'):
+                return int(cfg.max_stars)
+            return self.slider_defaults[key]
+
+        return self.slider_defaults[key]
+
+    def isAtDefaults(self):
+        """ True when every non-tuned slider sits at its restore target. """
+
+        for key in self.slider_defaults:
+            target = self._sliderRestoreTarget(key)
+            if target is None:
+                continue
+            if self.sliders[key].value() != target:
+                return False
+
+        return True
+
+    def updateDefaultsButton(self):
+        """ Color-code Reset to Defaults: green at defaults, amber when values differ
+            (same convention as the Fit Parameters tab). """
+
+        if not hasattr(self, 'defaults_button'):
+            return
+
+        at_defaults = self.isAtDefaults()
+        if at_defaults:
+            self.defaults_button.setStyleSheet(
+                "QPushButton { background-color: #4CAF50; color: white; }"
+                "QPushButton:hover { background-color: #45a049; }"
+            )
+        else:
+            self.defaults_button.setStyleSheet(
+                "QPushButton { background-color: #FF9800; color: white; }"
+                "QPushButton:hover { background-color: #F57C00; }"
+            )
+        self.defaults_button.setEnabled(not at_defaults)
+
     def resetToDefaults(self):
-        """Reset the tuning sliders to the recommended defaults.
-
-        Station-bound values return to the loaded config instead: gamma is a hardware
-        property of the camera (resetting it to 1.0 would corrupt photometry the moment
-        Save Config is pressed), and the config max stars is the station's pipeline
-        budget, not a tuning preference.
+        """Reset every non-tuned slider to its restore target (widget default, or the
+        loaded config for station-bound values). Tuned values (TUNED_KEYS and the
+        catalog LM) are left untouched - retuning is the only way they should move.
         """
-        cfg = self._loaded_config
 
-        for key, default in self.slider_defaults.items():
-
-            if key == 'gamma':
-                if cfg is not None and hasattr(cfg, 'gamma'):
-                    self.gamma_slider.setValue(int(round(cfg.gamma*100)))
+        for key in self.slider_defaults:
+            target = self._sliderRestoreTarget(key)
+            if target is None:
                 continue
 
             if key == 'config_max_stars':
-                if cfg is not None and hasattr(cfg, 'max_stars'):
-                    self._seedSlider(self.config_max_stars_slider, cfg.max_stars)
+                self._seedSlider(self.config_max_stars_slider, target)
                 continue
 
             # setValue triggers each slider's callback, so labels and override
             # values in SkyFit update through the normal signal path
-            self.sliders[key].setValue(default)
+            self.sliders[key].setValue(target)
+
+        self.updateDefaultsButton()
 
     def _seedSlider(self, slider, value):
         """ Set a slider value programmatically, bypassing the snap-to-100 handlers so the
@@ -3794,6 +3854,8 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
 
         if hasattr(config, 'star_gate_factor'):
             self.star_gate_factor_slider.setValue(int(round(config.star_gate_factor*10)))
+
+        self.updateDefaultsButton()
         if hasattr(config, 'neighborhood_size'):
             self.neighborhood_size_slider.setValue(config.neighborhood_size)
         if hasattr(config, 'max_stars'):
@@ -3823,6 +3885,7 @@ class BrushCursorItem(pg.GraphicsObject):
     The radius is in image coordinates (scales with zoom) but the pen is cosmetic
     (always 1 px on screen) so the outline stays crisp at any zoom level.
     """
+
     def __init__(self):
         super().__init__()
         self._radius = 20.0
