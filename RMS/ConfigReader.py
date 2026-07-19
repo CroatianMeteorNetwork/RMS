@@ -548,6 +548,10 @@ class Config:
         # PSF fit and filtering
         self.segment_radius = 4 # radius (in pixels) of image segment around the detected star on which to perform the fit
         self.roundness_threshold = 0.5 # minimum ratio of 2D Gaussian sigma X and sigma Y to be taken as a stars (hot pixels are narrow, while stars are round)
+        self.star_gate_factor = 3.0 # star candidacy gate as a multiple of the measured
+                                    # image-noise contrast (dimensionless; the gate is
+                                    # noise-adaptive - lower = deeper + more false
+                                    # candidates, higher = shallower + cleaner)
         self.max_feature_ratio = 0.8 # maximum ratio between 2 sigma of the star and the image segment area
 
 
@@ -1650,6 +1654,9 @@ def parseStarExtraction(config, parser):
 
     if parser.has_option(section, "segment_radius"):
         config.segment_radius = parser.getint(section, "segment_radius")
+
+    if parser.has_option(section, "star_gate_factor"):
+        config.star_gate_factor = parser.getfloat(section, "star_gate_factor")
 
     if parser.has_option(section, "roundness_threshold"):
         config.roundness_threshold = parser.getfloat(section, "roundness_threshold")

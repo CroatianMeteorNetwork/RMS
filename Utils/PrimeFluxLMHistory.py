@@ -43,7 +43,10 @@ def primeFluxLMHistory(config, archive_dir):
         n_primed: [int] Number of nights that contributed a history entry.
     """
 
-    star_det_mag_corr = -2.5*np.log10(config.intensity_threshold/18) - 1.2
+    # Pinned to the historical network reference (threshold 18 -> -1.2 mag): the
+    # candidate gate is noise-adaptive and config.intensity_threshold no longer
+    # describes the detector (see Utils.Flux for the same pin)
+    star_det_mag_corr = -1.2
 
     night_dirs = sorted(
         d for d in os.listdir(archive_dir)
