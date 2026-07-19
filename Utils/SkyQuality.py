@@ -487,6 +487,32 @@ def estimateBiasByRegression(config, dir_path, dome_model, pps, mask):
     return float(np.median(biases))
 
 
+SUN_ALT_MAX = -18.0              # deg - matches the FitLightDome training gate: twilight
+                                 # boosts near-threshold detections and brightens the sky
+                                 # patch, so measurement frames must be fully dark
+
+
+def _sunTooHigh(jd, lat, lon):
+    """ True if the sun is above SUN_ALT_MAX (twilight or brighter). """
+
+    try:
+        import ephem
+        from RMS.Astrometry.Conversions import jd2Date
+
+        obs = ephem.Observer()
+        obs.lat = str(lat)
+        obs.lon = str(lon)
+        obs.date = jd2Date(jd, dt_obj=True)
+
+        sun = ephem.Sun()
+        sun.compute(obs)
+
+        return np.degrees(float(sun.alt)) > SUN_ALT_MAX
+
+    except Exception:
+        return False
+
+
 def _moonIsUp(jd, lat, lon):
     """ True if a moon brighter than MOON_PHASE_MAX percent is above the horizon. """
 
@@ -620,6 +646,8 @@ def measureSkyQuality(config, dir_path, dome_model, recalibrated_platepars, time
             continue
         date = FFfile.getMiddleTimeFF(ff_name, config.fps, ret_milliseconds=True)
         if _moonIsUp(date2JD(*date), pp0.lat, pp0.lon):
+            continue
+        if _sunTooHigh(date2JD(*date), pp0.lat, pp0.lon):
             continue
         usable.append(ff_name)
 

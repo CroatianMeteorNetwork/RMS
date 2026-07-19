@@ -1239,10 +1239,30 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
     # are not read as cloudy (both look like "no clear interval" otherwise)
     moon_excluded_files = sorted(set(pre_moon_files) - set(recorded_files))
 
-    # Keep the time-binned, moon-filtered list: the dense dome scoring below scores these
-    # frames directly (the reassignment of recorded_files to the recalibrated platepar keys
-    # further down would otherwise both undo the moon filter and drop every frame whose own
-    # recalibration failed)
+    # Twilight gate: score only frames as dark as the ones the model was trained on
+    # (Utils.FitLightDome gates trials at SUN_ALT_MAX but nothing gated scoring). In
+    # twilight the rising sky noise pushes real near-threshold stars over the fixed ADU
+    # detection threshold (the max-of-256-frames statistic rides ~3 sigma above the
+    # mean), so detection DEEPENS before it washes out and the dark-calibrated ratio
+    # spikes above 1 at the dawn/dusk edges. Validated on a 6-camera site over 16
+    # nights: the surges lock to sun altitude -15 +/- 2 deg on every camera regardless
+    # of pointing (drift -0.5 min/day vs the -3.9 a celestial cause would show).
+    from Utils.FitLightDome import sunAltitude, SUN_ALT_MAX
+    pre_sun_files = list(recorded_files)
+    recorded_files = [
+        ff for ff in recorded_files
+        if sunAltitude(date2JD(*FFfile.getMiddleTimeFF(ff, config.fps, ret_milliseconds=True)),
+                       platepar.lat, platepar.lon) <= SUN_ALT_MAX
+    ]
+    sun_excluded_files = sorted(set(pre_sun_files) - set(recorded_files))
+    if sun_excluded_files:
+        log.info("Twilight gate: {:d} frame(s) excluded from cloud scoring "
+                 "(sun above {:.0f} deg)".format(len(sun_excluded_files), SUN_ALT_MAX))
+
+    # Keep the time-binned, moon- and twilight-filtered list: the dense dome scoring
+    # below scores these frames directly (the reassignment of recorded_files to the
+    # recalibrated platepar keys further down would otherwise both undo the filters and
+    # drop every frame whose own recalibration failed)
     recorded_files_dense = list(recorded_files)
 
     # Try loading previously recalibrated platepars on N minute intervals
@@ -1273,7 +1293,16 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
         return None
 
 
-    recorded_files = list(recalibrated_platepars.keys())
+    # Re-derive the scored list from the recalibrated platepars, but re-apply the moon
+    # and twilight gates: when the platepar file was loaded from disk (rather than
+    # recalibrated fresh from the already-gated list), its keys carry whatever frames
+    # the writer used, silently bypassing both filters on this path
+    recorded_files = [
+        ff for ff in recalibrated_platepars
+        if sunAltitude(date2JD(*FFfile.getMiddleTimeFF(ff, config.fps, ret_milliseconds=True)),
+                       platepar.lat, platepar.lon) <= SUN_ALT_MAX
+    ]
+    recorded_files = detectMoon(recorded_files, platepar, config)
 
 
     # Extract the number of matches stars between the catalog and the image
@@ -1286,13 +1315,18 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
     star_det_mag_corr = -2.5*np.log10(config.intensity_threshold/18) - 1.2
 
     # Compute the limiting magnitude of the star detector
+    # None marks frames the prediction must skip: failed recalibrations AND frames
+    # outside the moon/twilight gates (predictStarNumberInFOV iterates the full platepar
+    # dict, so gated frames need an explicit None, not a missing key)
+    recorded_files_set = set(recorded_files)
     ff_limiting_magnitude = {
         ff_file: (
             stellarLMModel(recalibrated_platepars[ff_file].mag_lev) + star_det_mag_corr
-            if recalibrated_platepars[ff_file].auto_recalibrated
+            if (ff_file in recorded_files_set
+                and recalibrated_platepars[ff_file].auto_recalibrated)
             else None
         )
-        for ff_file in recorded_files
+        for ff_file in recalibrated_platepars
     }
 
     # Self-prime the light-dome model from this station's own archives if none exists (or
