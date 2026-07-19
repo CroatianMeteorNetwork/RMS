@@ -80,8 +80,8 @@ log = getLogger("rmslogger")
 # with the noise (twilight, moonlight), both in the statistically correct direction.
 # The configured intensity_threshold is NOT applied on the adaptive path (station
 # validation showed capping the gate at the configured value reintroduces the twilight
-# surge the moment noise exceeds it); it keeps its meaning only where adaptive_threshold
-# is False (the threshold-sweeping auto extractor and the SkyFit tuner).
+# surge the moment noise exceeds it). There is no fixed-threshold path; the configured
+# value is retained in signatures for API compatibility only.
 NOISE_CONTRAST_FACTOR = 3.0
 MIN_CONTRAST_FLOOR = 4.0     # 8-bit ADU - absolute floor so a clipped/flat image
                              # (near-zero median contrast) cannot open the gate entirely
@@ -343,7 +343,7 @@ def extractStarsFF(
         max_global_intensity=230,
         neighborhood_size=10, intensity_threshold=18,
         segment_radius=4, roundness_threshold=0.5, max_feature_ratio=0.8,
-        extra_info=None, adaptive_threshold=True
+        extra_info=None
         ):
     """ Extracts stars on a given FF bin by searching for local maxima and applying PSF fit for star 
         confirmation.
@@ -430,7 +430,7 @@ def extractStarsFF(
         neighborhood_size=neighborhood_size, intensity_threshold=intensity_threshold,
         segment_radius=segment_radius, roundness_threshold=roundness_threshold,
         max_feature_ratio=max_feature_ratio, bit_depth=config.bit_depth,
-        extra_info=extra_info, adaptive_threshold=adaptive_threshold
+        extra_info=extra_info
     )
 
     # If the star extraction failed, return an empty list
