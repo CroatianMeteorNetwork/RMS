@@ -68,8 +68,8 @@ log = getLogger("rmslogger")
 # with the noise (twilight, moonlight), both in the statistically correct direction.
 # The configured intensity_threshold is NOT applied on the adaptive path (station
 # validation showed capping the gate at the configured value reintroduces the twilight
-# surge the moment noise exceeds it); it keeps its meaning only where adaptive_threshold
-# is False (the threshold-sweeping auto extractor and the SkyFit tuner).
+# surge the moment noise exceeds it). There is no fixed-threshold path; the configured
+# value is retained in signatures for API compatibility only.
 NOISE_CONTRAST_FACTOR = 3.0
 MIN_CONTRAST_FLOOR = 4.0     # 8-bit ADU - absolute floor so a clipped/flat image
                              # (near-zero median contrast) cannot open the gate entirely
