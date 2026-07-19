@@ -90,7 +90,8 @@ def moonAltPhase(jd, lat, lon):
     return np.degrees(float(moon.alt)), float(moon.phase)
 
 
-def buildStationTrials(config, night_dirs, n_ff=FF_PER_NIGHT, moon_phase_max=MOON_PHASE_MAX):
+def buildStationTrials(config, night_dirs, n_ff=FF_PER_NIGHT, moon_phase_max=MOON_PHASE_MAX,
+        lim_mag=DOME_CATALOG_LIM_MAG):
     """ Build hit/miss trials for one station over the given night directories.
 
     Arguments:
@@ -102,6 +103,8 @@ def buildStationTrials(config, night_dirs, n_ff=FF_PER_NIGHT, moon_phase_max=MOO
         n_ff: [int] Frames sampled per night.
         moon_phase_max: [float] Exclude frames with a moon above the horizon illuminated
             more than this (percent). 100 disables the filter.
+        lim_mag: [float] Catalog depth for the trials. Must match the depth the model is
+            scored with (see LightDomeModel.catalogLimMag).
 
     Return:
         trials: [dict of ndarray] az, alt, mag, det - or None if no usable data.
@@ -111,7 +114,7 @@ def buildStationTrials(config, night_dirs, n_ff=FF_PER_NIGHT, moon_phase_max=MOO
     footprint = None
 
     catalog_stars, _, _ = StarCatalog.readStarCatalog(config.star_catalog_path,
-        config.star_catalog_file, lim_mag=DOME_CATALOG_LIM_MAG,
+        config.star_catalog_file, lim_mag=lim_mag,
         mag_band_ratios=config.star_catalog_band_ratios)
     cat_ra, cat_dec, cat_mag = catalog_stars[:, 0], catalog_stars[:, 1], catalog_stars[:, 2]
 
@@ -300,7 +303,8 @@ def selectNightDirs(config, dates=None, window=30, max_nights=4, min_rel_clarity
     return [os.path.join(archive_dir, d) for _, d in scored]
 
 
-def fitLightDome(station_configs, dates=None, max_order=3, moon_phase_max=MOON_PHASE_MAX):
+def fitLightDome(station_configs, dates=None, max_order=3, moon_phase_max=MOON_PHASE_MAX,
+        lim_mag=None, _depth_iter=0):
     """ Fit the site model over multiple co-located stations.
 
     Arguments:
@@ -312,10 +316,21 @@ def fitLightDome(station_configs, dates=None, max_order=3, moon_phase_max=MOON_P
             ...). Each order is kept only if it clears the significance gate.
         moon_phase_max: [float] Exclude frames with a moon above the horizon illuminated
             more than this (percent). 100 disables the filter.
+        lim_mag: [float] Catalog depth for trials and fit bounds. None (default) starts at
+            DOME_CATALOG_LIM_MAG; if the fitted LM demands a deeper catalog (the logistic
+            tail must be fully sampled or LM0 saturates against the catalog ceiling and
+            the fit degenerates - observed fleet-wide as LM0 pinned at the old 7.0 bound
+            with inflated s), the fit is repeated once at the required depth. The depth
+            actually used is stored in the model as catalog_lim_mag, and scoring MUST use
+            that stored value (LightDomeModel.catalogLimMag) so expected counts stay
+            calibrated to the fit.
 
     Return:
         model_dict: [dict] Fitted site model (LightDomeModel format), or None.
     """
+
+    if lim_mag is None:
+        lim_mag = DOME_CATALOG_LIM_MAG
 
     az_l, alt_l, mag_l, det_l, ci_l = [], [], [], [], []
     fit_nights = []
@@ -334,7 +349,8 @@ def fitLightDome(station_configs, dates=None, max_order=3, moon_phase_max=MOON_P
 
         night_dirs = selectNightDirs(config, dates=dates)
 
-        trials = buildStationTrials(config, night_dirs, moon_phase_max=moon_phase_max)
+        trials = buildStationTrials(config, night_dirs, moon_phase_max=moon_phase_max,
+            lim_mag=lim_mag)
 
         if trials is None:
             print("{:s}: no usable trials, station excluded from fit".format(station))
@@ -395,7 +411,10 @@ def fitLightDome(station_configs, dates=None, max_order=3, moon_phase_max=MOON_P
         pr = np.clip(pr, 1e-6, 1 - 1e-6)
         return -np.sum(det*np.log(pr) + (1 - det)*np.log(1 - pr))
 
-    base_bounds = [(4.0, 7.0)]*ncam + [(0.0, 1.5), (0.12, 1.2), (-2.0, 3.0), (5.0, 60.0)]
+    # LM0 may exceed the catalog depth by a little (the logistic tail still constrains
+    # it there), but far beyond it the trials carry no information - bound accordingly
+    base_bounds = [(4.0, lim_mag + 1.0)]*ncam \
+        + [(0.0, 1.5), (0.12, 1.2), (-2.0, 3.0), (5.0, 60.0)]
     order_bounds = [(-2.0, 3.5), (-360.0, 720.0), (3.0, 60.0)]   # log10 A, phase, alt scale
 
     results = {}
@@ -463,7 +482,31 @@ def fitLightDome(station_configs, dates=None, max_order=3, moon_phase_max=MOON_P
         nll={str(kk): v["nll"] for kk, v in results.items()},
     )
 
-    print("\nFitted model ({:d} harmonic order(s)):".format(use))
+    model_dict["catalog_lim_mag"] = float(lim_mag)
+
+    # Adaptive catalog depth: the logistic tail must be fully sampled or the fit
+    # saturates. If the fitted LM wants a deeper catalog than was used, refit once at
+    # the required depth (recursion depth-limited; the deeper fit re-derives everything
+    # so trials, bounds and stored depth stay consistent)
+    from RMS.LightDomeModel import domeCatalogLimMag
+    wanted = domeCatalogLimMag(model_dict["LM0"], model_dict["s"])
+    if (wanted > lim_mag + 0.25) and (_depth_iter < 2):
+        print("\nCatalog depth {:.2f} too shallow for the fitted LM "
+              "(max LM0 {:.2f}, s {:.2f}) - refitting at depth {:.2f}".format(
+              lim_mag, max(model_dict["LM0"]), model_dict["s"], wanted))
+        return fitLightDome(station_configs, dates=dates, max_order=max_order,
+            moon_phase_max=moon_phase_max, lim_mag=wanted, _depth_iter=_depth_iter + 1)
+
+    # Ceiling guard: catches both a saturated final fit and any future regression of
+    # the adaptive-depth logic (this exact symptom - LM0 pinned with inflated s - went
+    # unnoticed fleet-wide against the old fixed depth)
+    if max(model_dict["LM0"]) + 2.0*model_dict["s"] > lim_mag - 0.25:
+        print("WARNING: fitted LM0 approaches the catalog depth ({:.2f} + 2s vs "
+              "{:.2f}) - the model may be saturated against the catalog ceiling".format(
+              max(model_dict["LM0"]), lim_mag))
+
+    print("\nFitted model ({:d} harmonic order(s), catalog depth {:.2f}):".format(
+        use, lim_mag))
     for i, cam in enumerate(cams):
         print("  LM0[{:s}] = {:.2f}".format(cam, model_dict["LM0"][i]))
     print("  k={:.2f}  s={:.2f}  LP bowl B={:.1f} (h0={:.0f} deg)".format(

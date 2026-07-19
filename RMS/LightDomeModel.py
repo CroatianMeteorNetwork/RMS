@@ -43,9 +43,39 @@ import numpy as np
 # light_dome.json, both in the station's data directory
 LIGHT_DOME_FILE_SUFFIX = "light_dome.json"
 
-# Catalog depth used when computing expected counts with the dome model. Fixed and
-# deeper than any plausible LM so the logistic tail is always fully sampled.
+# Default catalog depth for dome-model trials and expected counts. This is a STARTING
+# depth, not a ceiling: dark stations reach LM 6+ and the fit adapts the depth so the
+# logistic tail is fully sampled (see domeCatalogLimMag and Utils.FitLightDome). The
+# depth actually used at fit time is stored in the model file (catalog_lim_mag) and
+# scoring must read it from there (catalogLimMag) so expected counts stay calibrated.
 DOME_CATALOG_LIM_MAG = 6.0
+
+# Hard cap on the adaptive depth: bounded by the shipped catalog files and by the
+# extractor's practical reach; nothing physical lives beyond LM + 4s anyway
+DOME_CATALOG_MAX_LIM_MAG = 9.0
+
+# The logistic tail is sampled to LM + this many s (P ~ 2% there)
+DOME_CATALOG_TAIL_SIGMA = 4.0
+
+
+def domeCatalogLimMag(lm0_list, s):
+    """ Catalog depth required to fully sample the detection rolloff of a fitted model.
+
+    Arguments:
+        lm0_list: [list of float] Per-camera LM0 values.
+        s: [float] Logistic rolloff width.
+
+    Return:
+        lim_mag: [float] Required catalog depth, clamped to
+            [DOME_CATALOG_LIM_MAG, DOME_CATALOG_MAX_LIM_MAG].
+    """
+
+    if not lm0_list:
+        return DOME_CATALOG_LIM_MAG
+
+    wanted = max(lm0_list) + DOME_CATALOG_TAIL_SIGMA*float(s)
+
+    return float(np.clip(wanted, DOME_CATALOG_LIM_MAG, DOME_CATALOG_MAX_LIM_MAG))
 
 # (R/(R+h))^2 for an airglow emission layer at ~100 km
 _VAN_RHIJN_C = 0.97
@@ -78,6 +108,13 @@ class LightDomeModel(object):
         # Nightly aerosol scale on the light-pollution terms (1.0 = fit epoch)
         self.amplitude = 1.0
 
+
+    def catalogLimMag(self):
+        """ The catalog depth this model was FIT with - scoring must use the same depth
+            so expected counts stay calibrated to the fit. Legacy models without the
+            stored field were fit at the old fixed depth. """
+
+        return float(self.model.get("catalog_lim_mag") or DOME_CATALOG_LIM_MAG)
 
     @classmethod
     def load(cls, config):

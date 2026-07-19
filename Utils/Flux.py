@@ -1781,11 +1781,12 @@ def denseDomeRatios(config, dome_model, ff_list, calstars_positions, recalibrate
     valid_times = [t for t, _ in valid_pps]
     valid_times_arr = np.array(valid_times)
 
-    # Fixed deep catalog cut so the logistic tail is fully sampled
+    # Catalog cut at the depth the model was FIT with (stored in the model file), so
+    # the expected counts stay calibrated to the fit
     catalog_stars, _, _ = StarCatalog.readStarCatalog(
         config.star_catalog_path,
         config.star_catalog_file,
-        lim_mag=DOME_CATALOG_LIM_MAG,
+        lim_mag=dome_model.catalogLimMag(),
         mag_band_ratios=config.star_catalog_band_ratios,
     )
 
@@ -1867,14 +1868,14 @@ def predictStarNumberInFOV(recalibrated_platepars, ff_limiting_magnitude, config
                 recalibrated_platepars[ff_files[0]].Y_res)
 
 
-        # With a dome model the catalog cut is fixed and deep (the logistic tail needs
-        # stars below the limit), so read the catalog once instead of per frame
+        # With a dome model the catalog cut is the depth the model was fit with (the
+        # logistic tail needs stars below the limit), read once instead of per frame
         catalog_stars_deep = None
         if dome_model is not None:
             catalog_stars_deep, _, _ = StarCatalog.readStarCatalog(
                 config.star_catalog_path,
                 config.star_catalog_file,
-                lim_mag=DOME_CATALOG_LIM_MAG,
+                lim_mag=dome_model.catalogLimMag(),
                 mag_band_ratios=config.star_catalog_band_ratios,
             )
 
