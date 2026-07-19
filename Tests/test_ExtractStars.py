@@ -129,3 +129,23 @@ def test_extractStarsFF_end_to_end(tmp_path):
 
     star_list = extractStarsFF(str(tmp_path), name, config=config)
     assert star_list and len(star_list[1]) >= 1
+
+
+def test_gate_factor_knob():
+    # The sensitivity knob: a lower factor deepens detection on the same image
+    from RMS.ExtractStars import adaptiveContrastThreshold
+    c = contrastField(2.2)
+    assert adaptiveContrastThreshold(c, factor=2.0) < adaptiveContrastThreshold(c, factor=3.0)
+    assert adaptiveContrastThreshold(c) == adaptiveContrastThreshold(c, factor=NOISE_CONTRAST_FACTOR)
+
+    img, pos = synthImage(0.6, [25.0, 4.5, 4.5])
+    deep = found(extractStars(img, gate_factor=2.0), pos)
+    default = found(extractStars(img, gate_factor=3.0), pos)
+    assert sum(deep) >= sum(default)
+
+
+def test_gate_factor_from_config(tmp_path):
+    # extractStarsFF must honor config.star_gate_factor
+    import RMS.ConfigReader as cr
+    config = cr.Config()
+    assert config.star_gate_factor == pytest.approx(3.0)

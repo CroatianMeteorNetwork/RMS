@@ -75,7 +75,7 @@ MIN_CONTRAST_FLOOR = 4.0     # 8-bit ADU - absolute floor so a clipped/flat imag
                              # (near-zero median contrast) cannot open the gate entirely
 
 
-def adaptiveContrastThreshold(contrast, bit_depth=8):
+def adaptiveContrastThreshold(contrast, bit_depth=8, factor=None):
     """ Noise-adaptive candidate threshold for the local-contrast statistic.
 
     Arguments:
@@ -84,21 +84,26 @@ def adaptiveContrastThreshold(contrast, bit_depth=8):
 
     Keyword arguments:
         bit_depth: [int] Image bit depth, scales the absolute floor.
+        factor: [float] Gate as a multiple of the contrast-field median (the sensitivity
+            knob, config option star_gate_factor). None uses NOISE_CONTRAST_FACTOR.
 
     Return:
         threshold: [float] Contrast threshold in image ADU.
     """
 
+    if factor is None:
+        factor = NOISE_CONTRAST_FACTOR
+
     scale = 2.0**(bit_depth - 8)
     noise_level = float(np.median(contrast))
 
-    return max(NOISE_CONTRAST_FACTOR*noise_level, MIN_CONTRAST_FLOOR*scale)
+    return max(factor*noise_level, MIN_CONTRAST_FLOOR*scale)
 
 
 def extractStars(img, img_median=None, mask=None, gamma=1.0, max_star_candidates=1000, border=10,
                  neighborhood_size=10, intensity_threshold=18,
                  segment_radius=4, roundness_threshold=0.5, max_feature_ratio=0.8, bit_depth=8,
-                 extra_info=None):
+                 extra_info=None, gate_factor=None):
     """ Extracts stars on a given image by searching for local maxima and applying PSF fit for star 
         confirmation.
 
@@ -117,6 +122,8 @@ def extractStars(img, img_median=None, mask=None, gamma=1.0, max_star_candidates
         intensity_threshold: [float] IGNORED - the candidate gate is derived from the
             measured image noise (see adaptiveContrastThreshold). Retained for API
             compatibility only.
+        gate_factor: [float] Sensitivity knob: gate as a multiple of the measured noise
+            contrast (config star_gate_factor). None uses the module default.
         segment_radius: [int] Radius (in pixels) of image segment around the detected star on which to 
             perform the fit.
         roundness_threshold: [float] Minimum ratio of 2D Gaussian sigma X and sigma Y to be taken as a stars
@@ -150,7 +157,8 @@ def extractStars(img, img_median=None, mask=None, gamma=1.0, max_star_candidates
 
     # Noise-adaptive gate (see adaptiveContrastThreshold): deepens on quiet images and
     # rises with the noise - there is no fixed-threshold path
-    threshold = adaptiveContrastThreshold(contrast, bit_depth=bit_depth)
+    threshold = adaptiveContrastThreshold(contrast, bit_depth=bit_depth,
+        factor=gate_factor)
 
     diff = (contrast > threshold)
     maxima[diff == 0] = 0
@@ -330,7 +338,10 @@ def extractStarsFF(
         segment_radius = config.segment_radius
         roundness_threshold = config.roundness_threshold
         max_feature_ratio = config.max_feature_ratio
-        
+        gate_factor = getattr(config, 'star_gate_factor', None)
+    else:
+        gate_factor = None
+
     # Load the FF bin file
     ff = FFfile.read(ff_dir, ff_name)
 
@@ -372,7 +383,7 @@ def extractStarsFF(
         neighborhood_size=neighborhood_size, intensity_threshold=intensity_threshold,
         segment_radius=segment_radius, roundness_threshold=roundness_threshold,
         max_feature_ratio=max_feature_ratio, bit_depth=config.bit_depth,
-        extra_info=extra_info
+        extra_info=extra_info, gate_factor=gate_factor
     )
 
     # If the star extraction failed, return an empty list
@@ -439,6 +450,9 @@ def extractStarsImgHandle(img_handle,
         segment_radius = config.segment_radius
         roundness_threshold = config.roundness_threshold
         max_feature_ratio = config.max_feature_ratio
+        gate_factor = getattr(config, 'star_gate_factor', None)
+    else:
+        gate_factor = None
 
 
     star_list = []

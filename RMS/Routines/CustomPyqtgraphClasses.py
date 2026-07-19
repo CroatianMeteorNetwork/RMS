@@ -3278,7 +3278,7 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
     sigSaveToConfig = QtCore.pyqtSignal()
     sigCatalogLMChanged = QtCore.pyqtSignal(float)
     sigUseOverrideToggled = QtCore.pyqtSignal()
-    sigIntensityThresholdChanged = QtCore.pyqtSignal(int)
+    sigStarGateFactorChanged = QtCore.pyqtSignal(float)
     sigNeighborhoodSizeChanged = QtCore.pyqtSignal(int)
     sigMaxStarsChanged = QtCore.pyqtSignal(int)
     sigGammaChanged = QtCore.pyqtSignal(float)
@@ -3312,7 +3312,7 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
 
         row = 0
         slider_data = [
-            ('Intensity Threshold', 1, 200, 18, '18', self.onIntensityThresholdChanged),
+            ('Star Gate Factor', 15, 60, 30, '3.0', self.onStarGateFactorChanged),
             ('Neighborhood Size', 5, 40, 10, '10', self.onNeighborhoodSizeChanged),
             ('Max Stars', 50, 5000, 200, '200', self.onMaxStarsChanged),
             ('Gamma', 45, 200, 100, '1.00', self.onGammaChanged),
@@ -3369,8 +3369,8 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
                 row += 1
 
         # Create named references for compatibility
-        self.intensity_threshold_slider = self.sliders['intensity_threshold']
-        self.intensity_threshold_label = self.slider_labels['intensity_threshold']
+        self.star_gate_factor_slider = self.sliders['star_gate_factor']
+        self.star_gate_factor_label = self.slider_labels['star_gate_factor']
         self.neighborhood_size_slider = self.sliders['neighborhood_size']
         self.neighborhood_size_label = self.slider_labels['neighborhood_size']
         self.max_stars_slider = self.sliders['max_stars']
@@ -3442,9 +3442,10 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
         layout.addStretch()
 
 
-    def onIntensityThresholdChanged(self, value):
-        self.intensity_threshold_label.setText(str(value))
-        self.sigIntensityThresholdChanged.emit(value)
+    def onStarGateFactorChanged(self, value):
+        factor = value/10.0
+        self.star_gate_factor_label.setText(f'{factor:.1f}')
+        self.sigStarGateFactorChanged.emit(factor)
 
     def onNeighborhoodSizeChanged(self, value):
         self.neighborhood_size_label.setText(str(value))
@@ -3507,21 +3508,8 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
 
     def loadFromConfig(self, config):
         """Initialize sliders from config values."""
-        if hasattr(config, 'intensity_threshold'):
-            # Give the threshold slider a bit-depth-appropriate maximum before setting the
-            # value, otherwise a high-bit-depth config threshold is silently clamped to the
-            # pre-existing default slider max (200, an arbitrary ceiling -- the 8-bit threshold
-            # range is nominally 0-255, with realistic values in the tens) at load, and the
-            # user has no headroom to adjust up without first running auto-tune. Raw-ADU
-            # thresholds scale with bit depth (~tens at 8-bit, hundreds-to-thousands at 16-bit),
-            # so use a gentle per-2-bit doubling (8->200, 12->800, 16->3200) and ensure headroom
-            # over the configured value. Never lower the existing max, so 8-bit keeps its 200.
-            bit_depth = getattr(config, 'bit_depth', 8)
-            bitdepth_default_max = 200*2**max(0, (bit_depth - 8)//2)
-            thr_max = max(self.intensity_threshold_slider.maximum(), bitdepth_default_max,
-                          int(config.intensity_threshold*3))
-            self.intensity_threshold_slider.setMaximum(thr_max)
-            self.intensity_threshold_slider.setValue(config.intensity_threshold)
+        if hasattr(config, 'star_gate_factor'):
+            self.star_gate_factor_slider.setValue(int(round(config.star_gate_factor*10)))
         if hasattr(config, 'neighborhood_size'):
             self.neighborhood_size_slider.setValue(config.neighborhood_size)
         if hasattr(config, 'max_stars'):
