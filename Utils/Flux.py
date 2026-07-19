@@ -1614,7 +1614,7 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
             pad = datetime.timedelta(minutes=2.5)
             for i, (beg, end) in enumerate(moon_spans):
                 for axis in ax:
-                    axis.axvspan(beg - pad, end + pad, alpha=0.3, color='khaki', zorder=3,
+                    axis.axvspan(beg - pad, end + pad, alpha=0.45, color='thistle', zorder=3,
                         label=('Moon excluded' if (i == 0 and axis is ax[0]) else None))
 
         # Shade the periods excluded by the twilight gate, so out-of-domain time is not
@@ -1635,7 +1635,7 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
             pad = datetime.timedelta(minutes=2.5)
             for i, (beg, end) in enumerate(sun_spans):
                 for axis in ax:
-                    axis.axvspan(beg - pad, end + pad, alpha=0.35, color='navajowhite',
+                    axis.axvspan(beg - pad, end + pad, alpha=0.45, color='peachpuff',
                         zorder=3,
                         label=('Twilight excluded' if (i == 0 and axis is ax[0]) else None))
 
