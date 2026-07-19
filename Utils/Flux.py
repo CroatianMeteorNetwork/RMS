@@ -1240,13 +1240,14 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
     moon_excluded_files = sorted(set(pre_moon_files) - set(recorded_files))
 
     # Twilight gate: score only frames as dark as the ones the model was trained on
-    # (Utils.FitLightDome gates trials at SUN_ALT_MAX but nothing gated scoring). In
-    # twilight the rising sky noise pushes real near-threshold stars over the fixed ADU
-    # detection threshold (the max-of-256-frames statistic rides ~3 sigma above the
-    # mean), so detection DEEPENS before it washes out and the dark-calibrated ratio
-    # spikes above 1 at the dawn/dusk edges. Validated on a 6-camera site over 16
-    # nights: the surges lock to sun altitude -15 +/- 2 deg on every camera regardless
-    # of pointing (drift -0.5 min/day vs the -3.9 a celestial cause would show).
+    # (Utils.FitLightDome gates trials at SUN_ALT_MAX). This is a DOMAIN boundary, not
+    # an artifact quarantine: the noise-adaptive extractor made twilight detection
+    # monotone-correct, but the dome model is still dark-trained (scoring twilight is
+    # extrapolation), the meteor chain's sensitivity degrades through twilight (counting
+    # it as observing time biases flux low), and SQM must never measure twilight glow.
+    # History: with the old fixed extraction threshold, twilight caused detection
+    # SURGES locked to sun altitude -15 +/- 2 deg fleet-wide - cured at the source by
+    # the adaptive gate, but the domain arguments above stand on their own.
     from Utils.FitLightDome import sunAltitude, SUN_ALT_MAX
     pre_sun_files = list(recorded_files)
     recorded_files = [
@@ -1615,6 +1616,28 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
                 for axis in ax:
                     axis.axvspan(beg - pad, end + pad, alpha=0.3, color='khaki', zorder=3,
                         label=('Moon excluded' if (i == 0 and axis is ax[0]) else None))
+
+        # Shade the periods excluded by the twilight gate, so out-of-domain time is not
+        # read as cloudy (same treatment as the moon shading above)
+        if sun_excluded_files:
+
+            sun_times = sorted(FFfile.filenameToDatetime(ff) for ff in sun_excluded_files)
+
+            sun_spans = []
+            span_beg = span_end = sun_times[0]
+            for t in sun_times[1:]:
+                if (t - span_end).total_seconds() > 15*60:
+                    sun_spans.append((span_beg, span_end))
+                    span_beg = t
+                span_end = t
+            sun_spans.append((span_beg, span_end))
+
+            pad = datetime.timedelta(minutes=2.5)
+            for i, (beg, end) in enumerate(sun_spans):
+                for axis in ax:
+                    axis.axvspan(beg - pad, end + pad, alpha=0.35, color='navajowhite',
+                        zorder=3,
+                        label=('Twilight excluded' if (i == 0 and axis is ax[0]) else None))
 
         ax[0].legend()
         ax[0].set_ylim(ymin=0)
