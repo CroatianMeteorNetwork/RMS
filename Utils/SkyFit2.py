@@ -5046,6 +5046,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Store original config values
             original_intensity_threshold = self.config.intensity_threshold
+            original_star_gate_factor = getattr(self.config, 'star_gate_factor', 3.0)
             original_segment_radius = self.config.segment_radius
 
             # Temporarily increase max_stars limit during tuning
@@ -5241,6 +5242,7 @@ class PlateTool(QtWidgets.QMainWindow):
             print(f"\n  Selected catalog LM: {best_lm:.1f}")
 
             # Restore original config
+            self.config.intensity_threshold = original_intensity_threshold
             self.config.star_gate_factor = original_star_gate_factor
             self.config.segment_radius = original_segment_radius
             self.config.max_stars = original_max_stars
