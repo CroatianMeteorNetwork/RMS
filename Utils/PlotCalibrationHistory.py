@@ -31,6 +31,7 @@ import os
 import numpy as np
 
 from Utils.SkyQuality import RADIOMETRIC_FILE_SUFFIX, loadRadiometricCalibration, \
+    resolveApertureCorrection, \
     resolveWorkingBias
 
 # The LM history estimator constants live in Utils.Flux, which is heavy to import;
@@ -85,6 +86,7 @@ def replayBiasHistory(cal):
               if isinstance(v, dict) and (parseNightDate(k) is not None)}
 
     state = dict(seed=cal.get("seed"), nights={})
+    ap_state = dict(seed=None, nights={})
     records = []
 
     for key in sorted(nights):
@@ -95,8 +97,12 @@ def replayBiasHistory(cal):
         bias, source, state = resolveWorkingBias(state, entry.get("bias"), entry["floor"],
             night_key=key)
 
+        f_ap, _, ap_state = resolveApertureCorrection(ap_state, entry.get("aperture"),
+            night_key=key)
+
         records.append(dict(date=parseNightDate(key), obs=entry.get("bias"),
-            floor=entry["floor"], bias=bias, source=(source or "")))
+            floor=entry["floor"], bias=bias, source=(source or ""),
+            aperture_obs=entry.get("aperture"), aperture=f_ap))
 
     return records, state.get("handover")
 
@@ -268,6 +274,8 @@ def plotCalibrationHistory(station_id, data_dir, nights_dir=None, output=None):
         panels.append("ratio")
     if any(("sqm" in r) or ("mag_lev" in r) for r in night_records):
         panels.append("nights")
+    if any(r.get("aperture_obs") is not None for r in bias_records):
+        panels.append("aperture")
 
     if not panels:
         print("No calibration history found for {:s} in {:s}".format(
@@ -320,6 +328,21 @@ def plotCalibrationHistory(station_id, data_dir, nights_dir=None, output=None):
 
             ax.set_ylabel("bias (ADU)")
             ax.legend(loc="best", fontsize=8, ncol=3)
+
+        elif panel == "aperture":
+            ap_obs = [(r["date"], r["aperture_obs"]) for r in bias_records
+                      if r.get("aperture_obs") is not None]
+            ap_work = [(r["date"], r["aperture"]) for r in bias_records
+                       if r.get("aperture") is not None]
+            if ap_obs:
+                ax.plot(*zip(*ap_obs), ls="none", marker=".", color="tab:green",
+                    label="nightly capture fraction f")
+            if ap_work:
+                ax.plot(*zip(*ap_work), drawstyle="steps-post", color="tab:green",
+                    lw=1.6, alpha=0.7, label="working f (trailing median)")
+            ax.set_ylabel("PSF capture fraction")
+            ax.set_ylim(0.3, 1.2)
+            ax.legend(loc="upper left", fontsize=8)
 
         elif panel == "depth":
             ax.plot(*zip(*lm_series["depth"]), ls="none", marker=".", color="tab:purple",
