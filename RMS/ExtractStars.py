@@ -77,22 +77,22 @@ log = getLogger("rmslogger")
 # the median of the contrast field is noise-dominated (star neighborhoods are a tiny
 # minority of pixels), so NOISE_CONTRAST_FACTOR times the median tracks the noise floor
 # with a constant false-admission margin - the gate deepens on quiet cameras and RISES
-# during twilight, both in the statistically correct direction. The configured absolute
-# threshold is kept as a CEILING so noisy (light-polluted) cameras retain their exact
-# current behavior.
+# with the noise (twilight, moonlight), both in the statistically correct direction.
+# The configured intensity_threshold is NOT applied on the adaptive path (station
+# validation showed capping the gate at the configured value reintroduces the twilight
+# surge the moment noise exceeds it); it keeps its meaning only where adaptive_threshold
+# is False (the threshold-sweeping auto extractor and the SkyFit tuner).
 NOISE_CONTRAST_FACTOR = 3.0
 MIN_CONTRAST_FLOOR = 4.0     # 8-bit ADU - absolute floor so a clipped/flat image
                              # (near-zero median contrast) cannot open the gate entirely
 
 
-def adaptiveContrastThreshold(contrast, intensity_threshold_scaled, bit_depth=8):
+def adaptiveContrastThreshold(contrast, bit_depth=8):
     """ Noise-adaptive candidate threshold for the local-contrast statistic.
 
     Arguments:
         contrast: [ndarray] The (local max - local min) contrast field of the smoothed
             image, in image ADU.
-        intensity_threshold_scaled: [float] The configured absolute threshold, already
-            scaled to the image bit depth. Acts as a ceiling.
 
     Keyword arguments:
         bit_depth: [int] Image bit depth, scales the absolute floor.
@@ -103,15 +103,14 @@ def adaptiveContrastThreshold(contrast, intensity_threshold_scaled, bit_depth=8)
 
     scale = 2.0**(bit_depth - 8)
     noise_level = float(np.median(contrast))
-    threshold = max(NOISE_CONTRAST_FACTOR*noise_level, MIN_CONTRAST_FLOOR*scale)
 
-    return min(float(intensity_threshold_scaled), threshold)
+    return max(NOISE_CONTRAST_FACTOR*noise_level, MIN_CONTRAST_FLOOR*scale)
 
 
 def extractStars(img, img_median=None, mask=None, gamma=1.0, max_star_candidates=1000, border=10,
                  neighborhood_size=10, intensity_threshold=18,
                  segment_radius=4, roundness_threshold=0.5, max_feature_ratio=0.8, bit_depth=8,
-                 extra_info=None, adaptive_threshold=True):
+                 extra_info=None):
     """ Extracts stars on a given image by searching for local maxima and applying PSF fit for star 
         confirmation.
 
@@ -128,11 +127,9 @@ def extractStars(img, img_median=None, mask=None, gamma=1.0, max_star_candidates
         border: [int] apply a mask on the detections by removing all that are too close to the given image 
             border (in pixels)
         neighborhood_size: [int] size of the neighbourhood for the maximum search (in pixels)
-        intensity_threshold: [float] a threshold for cutting the detections which are too faint (0-255).
-            With adaptive_threshold on this is a CEILING: the working gate is the
-            noise-adaptive value, never higher than this.
-        adaptive_threshold: [bool] Scale the candidate gate to the measured image noise
-            (see adaptiveContrastThreshold). True by default.
+        intensity_threshold: [float] IGNORED - the candidate gate is derived from the
+            measured image noise (see adaptiveContrastThreshold). Retained for API
+            compatibility only.
         segment_radius: [int] Radius (in pixels) of image segment around the detected star on which to 
             perform the fit.
         roundness_threshold: [float] Minimum ratio of 2D Gaussian sigma X and sigma Y to be taken as a stars
@@ -162,17 +159,13 @@ def extractStars(img, img_median=None, mask=None, gamma=1.0, max_star_candidates
     img_max = filters.maximum_filter(img_convolved, neighborhood_size)
     maxima = (img_convolved == img_max)
     img_min = filters.minimum_filter(img_convolved, neighborhood_size)
-    # Scale the threshold from the 8-bit reference range to the image bit depth
-    intensity_threshold_scaled = intensity_threshold*(2**(bit_depth - 8))
     contrast = img_max - img_min
 
-    # Noise-adaptive gate (see adaptiveContrastThreshold): deepens on quiet images,
-    # rises with the noise, and never exceeds the configured absolute threshold
-    if adaptive_threshold:
-        intensity_threshold_scaled = adaptiveContrastThreshold(contrast,
-            intensity_threshold_scaled, bit_depth=bit_depth)
+    # Noise-adaptive gate (see adaptiveContrastThreshold): deepens on quiet images and
+    # rises with the noise - there is no fixed-threshold path
+    threshold = adaptiveContrastThreshold(contrast, bit_depth=bit_depth)
 
-    diff = (contrast > intensity_threshold_scaled)
+    diff = (contrast > threshold)
     maxima[diff == 0] = 0
 
     # Apply a border mask
@@ -322,48 +315,22 @@ def extractStarsAuto(img, mask=None,
     intensity = []
     fwhm = []
 
-    # Try different intensity thresholds until the greatest number of stars is found
-    # (the reference list is for 8-bit, scale it to the image bit depth)
-    intens_thresh_list = [t*(2**(bit_depth - 8)) for t in [70, 50, 40, 30, 20, 10, 5]]
+    # The historical intensity-threshold sweep is obsolete: the candidate gate is
+    # noise-adaptive, so a single extraction already operates at the depth the image
+    # statistically supports
+    background = snr = saturated_count = None
 
-    # Repeat the process until the number of returned stars falls within the range
-    min_stars_detect = 50
-    max_stars_detect = 150
-    for intens_thresh in intens_thresh_list:
+    status = extractStars(img, img_median=img_median, mask=mask,
+                            max_star_candidates=max_star_candidates,
+                            segment_radius=segment_radius, bit_depth=bit_depth)
 
-        if verbose:
-            print("Detecting stars with intensity threshold: ", intens_thresh)
-
-        # The sweep tunes the absolute threshold itself, so the adaptive gate (which
-        # would cap every sweep value at the noise level) must stay out of the loop
-        status = extractStars(img, img_median=img_median, mask=mask,
-                                max_star_candidates=max_star_candidates, segment_radius=segment_radius,
-                                intensity_threshold=intens_thresh, bit_depth=bit_depth,
-                                adaptive_threshold=False)
-
-        if status == False:
-            continue
-
+    if status is not False:
         x_data, y_data, amplitude, intensity, fwhm, background, snr, saturated_count = status
         x_data = np.array(x_data)
         y_data = np.array(y_data)
 
-        if len(x_data) < min_stars_detect:
-
-            if verbose:
-                print("Skipping, the number of stars {:d} outside {:d} - {:d} range".format(
-                    len(x_data), min_stars_detect, max_stars_detect))
-            
-            continue
-        
-        elif len(x_data) > max_stars_detect:
-            
-            # If too many stars are found even with the first very high threshold, take that solution
-            break
-
-        else:
-            break
-
+        if verbose:
+            print("Adaptive gate found {:d} stars".format(len(x_data)))
 
     return x_data, y_data, amplitude, intensity, fwhm, background, snr, saturated_count
 

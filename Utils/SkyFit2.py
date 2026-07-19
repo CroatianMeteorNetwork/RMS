@@ -5340,6 +5340,10 @@ class PlateTool(QtWidgets.QMainWindow):
                 title="Tuning Error", message_type="warning")
             return
 
+        print("NOTE: the star candidacy gate is noise-adaptive; intensity_threshold no "
+              "longer affects extraction. The intensity sweep below is retained for "
+              "diagnostics only - segment_radius tuning remains meaningful.")
+
         # Update button text and disable during tuning
         self.tab.star_detection.tune_button.setText("Tuning...")
         self.tab.star_detection.tune_button.setEnabled(False)
@@ -5709,13 +5713,12 @@ class PlateTool(QtWidgets.QMainWindow):
             self.config.max_feature_ratio = self.override_max_feature_ratio
             self.config.roundness_threshold = self.override_roundness_threshold
 
-            # Run star detection. The tuner sweeps the ABSOLUTE threshold, so the
-            # noise-adaptive gate (which would cap every sweep value at the image noise
-            # level) must stay out of the measurement
+            # Run star detection (the candidate gate is noise-adaptive; the swept
+            # intensity_threshold no longer affects extraction - see tune notice)
             star_list = extractStarsFF(
                 self.dir_path, ff_name, config=self.config,
                 flat_struct=self.flat_struct, dark=self.dark, mask=self.mask,
-                extra_info=extra_info, adaptive_threshold=False
+                extra_info=extra_info
             )
 
             if not star_list or len(star_list[1]) == 0:
