@@ -1263,10 +1263,15 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
     matched_count = {ff: len(recalibrated_platepars[ff].star_list) \
         if recalibrated_platepars[ff].star_list is not None else 0 for ff in recorded_files}
 
-    # Compute the correction between the visible limiting magnitude and the LM produced by the star detector
-    #   - normalize the LM to intensity_threshold of 18
-    #   - correct for the sensitivity at intensity threshold of 18 (empirical), which translates to -1.2 mag
-    star_det_mag_corr = -2.5*np.log10(config.intensity_threshold/18) - 1.2
+    # Correction between the visible limiting magnitude and the LM produced by the star
+    # detector, pinned to the historical network reference (intensity_threshold 18,
+    # empirically -1.2 mag). The config value no longer describes the detector - the
+    # candidate gate is noise-adaptive and extraction ignores intensity_threshold - so
+    # scaling by it would inject a spurious LM shift (a tuner writing e.g. 3 would swing
+    # this by +1.9 mag and flag clear nights cloudy). The per-camera empirical LM
+    # correction downstream absorbs residuals; the real repair belongs to the planned
+    # scalar-path depth alignment.
+    star_det_mag_corr = -1.2
 
     # Compute the limiting magnitude of the star detector
     ff_limiting_magnitude = {
