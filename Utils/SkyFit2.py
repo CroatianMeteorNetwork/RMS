@@ -5310,15 +5310,17 @@ class PlateTool(QtWidgets.QMainWindow):
 
     def tuneStarDetection(self):
         """
-        Auto-tune star detection parameters by sweeping intensity_threshold downward
-        and finding where false detections start to explode, then optimizing segment_radius.
+        Auto-tune star detection parameters: segment_radius from measured bright-star
+        FWHMs, and the catalog limiting magnitude from matched detections. The intensity
+        threshold is NOT tuned - the candidate gate is noise-adaptive (see
+        RMS.ExtractStars.adaptiveContrastThreshold) and extraction ignores the
+        configured value; the tuner reports the measured adaptive gate instead.
 
         Algorithm:
         1. Use current catalog stars projected to image
-        2. Sweep intensity_threshold from 40 down to 3
+        2. Determine segment_radius from bright-star FWHMs
         3. Count true positives (within 2px of catalog) vs false positives
-        4. Find threshold where false positive ratio starts exploding
-        5. Sweep segment_radius 3-20 to potentially recover more bright stars
+        4. Find the catalog LM that accounts for the detected true positives
         """
         # Validate platepar exists
         if self.platepar is None:
@@ -5340,9 +5342,9 @@ class PlateTool(QtWidgets.QMainWindow):
                 title="Tuning Error", message_type="warning")
             return
 
-        print("NOTE: the star candidacy gate is noise-adaptive; intensity_threshold no "
-              "longer affects extraction. The intensity sweep below is retained for "
-              "diagnostics only - segment_radius tuning remains meaningful.")
+        print("NOTE: the star candidacy gate is noise-adaptive; intensity_threshold is "
+              "not tuned (extraction ignores it). Tuning covers segment_radius and the "
+              "catalog limiting magnitude.")
 
         # Update button text and disable during tuning
         self.tab.star_detection.tune_button.setText("Tuning...")
@@ -5456,69 +5458,31 @@ class PlateTool(QtWidgets.QMainWindow):
                     title="Tuning Aborted", message_type="warning")
                 return
 
-            # Phase 2: Sweep intensity threshold from high to low with best segment
-            # Continue until we see clear degradation, then analyze all results
-            print(f"\n  Phase 2: Intensity threshold sweep (segment_radius={best_segment})")
+            # Phase 2 (retired): the candidate gate is noise-adaptive, so an intensity
+            # sweep tunes a parameter extraction no longer reads - and recommending one
+            # is actively hazardous while legacy consumers still read the config value.
+            # Report the measured adaptive gate for the current frame instead, and keep
+            # the configured value untouched.
+            print("\n  Phase 2 (retired): candidate gate is noise-adaptive; "
+                  "intensity_threshold is not tuned and will not be changed.")
+            best_threshold = self.config.intensity_threshold
 
-            # Scale the 8-bit sweep range (40..3) to the camera's working threshold so it
-            # brackets the usable range on high-bit-depth data. A fixed 8-bit sweep lands
-            # below the noise on 16-bit, floods the candidate list past max_stars, and aborts
-            # on the first step. 8-bit configs are unchanged (scale = 1, sweep = 40..3).
-            if getattr(self.config, 'bit_depth', 8) > 8:
-                thr_scale = max(1.0, self.config.intensity_threshold/20.0)
-            else:
-                thr_scale = 1.0
-            intensity_values = sorted({max(3, int(round(v*thr_scale))) for v in range(40, 2, -1)},
-                                      reverse=True)  # high -> low
+            try:
+                import scipy.ndimage as _ndi
+                from RMS.ExtractStars import adaptiveContrastThreshold
 
-            # Collect results - we'll analyze the full curve to find optimal point
-            results = []  # (threshold, n_true_pos, n_false_pos, n_detected)
-            max_true_pos_seen = 0
-            true_pos_plateau_count = 0
-
-            for i, intensity in enumerate(intensity_values):
-                self.status_bar.showMessage(f"Tuning... threshold sweep {intensity}")
-                QtWidgets.QApplication.processEvents()
-
-                n_true_pos, n_false_pos, n_detected = self._countTrueFalsePositives(
-                    ff_name, intensity, best_segment, visible_cat_x, visible_cat_y)
-
-                results.append((intensity, n_true_pos, n_false_pos, n_detected))
-
-                if n_detected > 0:
-                    fp_ratio = n_false_pos / n_detected
-                    print(f"    threshold={intensity:2d}: detected={n_detected:3d}, "
-                          f"true_pos={n_true_pos:3d}, false_pos={n_false_pos:3d}, fp_ratio={fp_ratio:.2f}")
-
-                    # Track if true_pos has plateaued (not increasing)
-                    if n_true_pos > max_true_pos_seen:
-                        max_true_pos_seen = n_true_pos
-                        true_pos_plateau_count = 0
-                    else:
-                        true_pos_plateau_count += 1
-
-                    # Smart exit conditions:
-                    # 1. fp_ratio > 0.7 - too much noise, unlikely to improve
-                    # 2. true_pos plateaued for 5+ steps AND fp_ratio > 0.4 - diminishing returns
-                    # 3. precision < 0.3 - mostly detecting noise
-                    precision = n_true_pos / n_detected
-                    if fp_ratio > 0.7:
-                        print(f"    -> Stopping: fp_ratio {fp_ratio:.2f} > 0.7 (too noisy)")
-                        break
-                    if true_pos_plateau_count >= 5 and fp_ratio > 0.4:
-                        print(f"    -> Stopping: true_pos plateaued for {true_pos_plateau_count} steps, fp_ratio={fp_ratio:.2f}")
-                        break
-                    if precision < 0.3:
-                        print(f"    -> Stopping: precision {precision:.2f} < 0.3 (mostly noise)")
-                        break
-                else:
-                    # No detections (too many candidates) - stop here
-                    print(f"    threshold={intensity:2d}: no detections (too many candidates)")
-                    break
-
-            # Find optimal threshold from collected results
-            best_threshold = self._findOptimalThreshold(results)
-            print(f"\n  Selected intensity_threshold: {best_threshold}")
+                _img = self.img.data.astype(np.float32) if hasattr(self.img, 'data') \
+                    else None
+                if _img is not None and _img.ndim == 2:
+                    _conv = _ndi.convolve(_img, np.full((2, 2), 0.25))
+                    _contrast = (_ndi.maximum_filter(_conv, 10)
+                                 - _ndi.minimum_filter(_conv, 10))
+                    _gate = adaptiveContrastThreshold(_contrast,
+                        bit_depth=getattr(self.config, 'bit_depth', 8))
+                    print(f"    measured adaptive gate on this frame: {_gate:.1f} ADU "
+                          f"(configured legacy value: {best_threshold})")
+            except Exception as e:
+                print(f"    (could not measure the adaptive gate: {e})")
 
             # Get final stats with current detection parameters, including true positive positions
             detection_info = {}
@@ -5603,9 +5567,7 @@ class PlateTool(QtWidgets.QMainWindow):
             # can still override upward. Scale the headroom to the tuned value itself, since a
             # reasonable ceiling differs greatly between 8-bit and 16-bit. Never lower the
             # existing max, so 8-bit keeps its default 200.
-            thr_slider = self.tab.star_detection.intensity_threshold_slider
-            thr_slider.setMaximum(max(thr_slider.maximum(), int(best_threshold*3)))
-            thr_slider.setValue(int(best_threshold))
+            # intensity_threshold is not tuned (adaptive gate) - leave the slider alone
             self.tab.star_detection.segment_radius_slider.setValue(best_segment)
 
             # Update catalog LM and reload catalog
@@ -5660,7 +5622,7 @@ class PlateTool(QtWidgets.QMainWindow):
             precision = n_true_pos / n_detected if n_detected > 0 else 0
             result_msg = (
                 f"Optimal parameters found:\n\n"
-                f"  Intensity Threshold: {best_threshold}\n"
+                f"  Intensity Threshold: {best_threshold} (unchanged - adaptive gate)\n"
                 f"  Segment Radius: {best_segment}\n"
                 f"  Catalog LM: {best_lm:.1f}\n\n"
                 f"Results:\n"
@@ -5672,7 +5634,7 @@ class PlateTool(QtWidgets.QMainWindow):
             )
 
             self.status_bar.showMessage(
-                f"Tuning complete: {n_true_pos} matched, threshold={best_threshold}, "
+                f"Tuning complete: {n_true_pos} matched, "
                 f"radius={best_segment}, LM={best_lm:.1f}")
 
             print(f"\n  Final: {n_true_pos} true positives, {n_false_pos} false positives, "
