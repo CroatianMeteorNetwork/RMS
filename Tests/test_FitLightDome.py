@@ -314,3 +314,58 @@ def test_drift_ignores_other_model_versions(tmp_path):
     model = freshModelDict()
     _writeHistory(tmp_path, "US005X", [0.5]*8, "2001-01-01")
     assert modelIsStale(model, cfg, DummyPlatepar()) is None
+
+
+def test_fit_quality_issues():
+    from Utils.FitLightDome import fitQualityIssues, S_FIT_MAX
+
+    # Healthy fit: no issues
+    assert fitQualityIssues(freshModelDict(catalog_lim_mag=6.0)) == []
+
+    # LM0 pinned at the lower fit bound (all-cloudy fit window)
+    issues = fitQualityIssues(freshModelDict(LM0=[4.05], catalog_lim_mag=6.0))
+    assert len(issues) == 1 and "lower fit bound" in issues[0]
+
+    # LM0 pinned at the upper bound (saturated against the catalog depth)
+    issues = fitQualityIssues(freshModelDict(LM0=[6.95], catalog_lim_mag=6.0))
+    assert len(issues) == 1 and "upper fit bound" in issues[0]
+
+    # Models without a stored depth are judged against the default depth
+    issues = fitQualityIssues(freshModelDict(LM0=[6.95]))
+    assert len(issues) == 1 and "upper fit bound" in issues[0]
+
+    # s pinned at its bound: no depth discrimination
+    issues = fitQualityIssues(freshModelDict(s=S_FIT_MAX))
+    assert len(issues) == 1 and "s=" in issues[0]
+
+
+def test_degenerate_installed_model_triggers_refit_attempt(tmp_path):
+    # A fresh but saturated model (LM0 at the upper bound - the old fixed-depth fleet
+    # symptom) is refit outright rather than left to poison verdicts. With no archives
+    # available the model is kept and the attempt marker is written.
+    cfg = DummyConfig(str(tmp_path))
+    model = freshModelDict(LM0=[6.95], catalog_lim_mag=6.0)
+
+    path = os.path.join(str(tmp_path), "US005X_light_dome.json")
+    with open(path, "w") as f:
+        json.dump(model, f)
+    before = open(path).read()
+
+    assert ensureLightDomeModel(cfg, platepar=DummyPlatepar()) is True
+    assert open(path).read() == before
+    assert os.path.isfile(os.path.join(str(tmp_path), "US005X_" + AUTO_ATTEMPT_MARKER))
+
+
+def test_lower_pinned_installed_model_falls_back_to_scalar(tmp_path):
+    # A model with LM0 at the LOWER bound is refused by LightDomeModel.load itself, so
+    # with no archives to refit from, ensureLightDomeModel reports no usable model and
+    # the caller falls back to the scalar path
+    cfg = DummyConfig(str(tmp_path))
+    model = freshModelDict(LM0=[4.0], catalog_lim_mag=6.0)
+
+    path = os.path.join(str(tmp_path), "US005X_light_dome.json")
+    with open(path, "w") as f:
+        json.dump(model, f)
+
+    assert ensureLightDomeModel(cfg, platepar=DummyPlatepar()) is False
+    assert os.path.isfile(os.path.join(str(tmp_path), "US005X_" + AUTO_ATTEMPT_MARKER))

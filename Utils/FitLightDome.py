@@ -41,7 +41,8 @@ from RMS.Astrometry.ApplyAstrometry import raDecToXYPP, xyToRaDecPP
 from RMS.Astrometry.Conversions import date2JD, jd2Date, raDec2AltAz
 from RMS.Routines.MaskImage import getMaskFile
 from RMS.Math import pointInsideConvexPolygonSphere
-from RMS.LightDomeModel import DOME_CATALOG_LIM_MAG, LIGHT_DOME_FILE_SUFFIX, LightDomeModel
+from RMS.LightDomeModel import (DOME_CATALOG_LIM_MAG, FIT_BOUND_TOL, LIGHT_DOME_FILE_SUFFIX,
+    LM0_FIT_MIN, LightDomeModel)
 
 
 # Trial building
@@ -303,6 +304,52 @@ def selectNightDirs(config, dates=None, window=30, max_nights=4, min_rel_clarity
     return [os.path.join(archive_dir, d) for _, d in scored]
 
 
+# LM0_FIT_MIN and FIT_BOUND_TOL live in RMS.LightDomeModel (load() rejects models pinned
+# at the lower bound - the symptom observed on the AUC0A pod, LM0 4.00 fit on overcast
+# nights). The logistic-width bound is only a fit concern, so it lives here.
+S_FIT_MAX = 1.2        # upper logistic-width fit bound; s pinned here means the fit found
+                       # no depth discrimination at all
+
+
+def fitQualityIssues(model_dict):
+    """ Diagnose degenerate-fit symptoms in a fitted (or loaded) dome model.
+
+    A degenerate fit is one whose optimizer solution sits on a fit bound: the data did
+    not constrain the parameter, so the model reflects the bound, not the sky. Adopting
+    such a model corrupts every downstream verdict (an LM0 at the lower bound predicts
+    almost no stars, so cloudy nights score as clear).
+
+    Arguments:
+        model_dict: [dict] Fitted model dict (or LightDomeModel.model of a loaded one).
+
+    Return:
+        issues: [list of str] One message per symptom; empty for a healthy fit.
+    """
+
+    issues = []
+
+    lim_mag = float(model_dict.get("catalog_lim_mag", DOME_CATALOG_LIM_MAG))
+    lm0_max = lim_mag + 1.0
+
+    for cam, lm0 in zip(model_dict.get("cams", []), model_dict.get("LM0", [])):
+
+        if float(lm0) <= LM0_FIT_MIN + FIT_BOUND_TOL:
+            issues.append("LM0[{:s}]={:.2f} pinned at the lower fit bound {:.1f} - no "
+                "depth signal in that camera's training trials (cloudy/foggy/obstructed "
+                "fit nights)".format(str(cam), float(lm0), LM0_FIT_MIN))
+
+        elif float(lm0) >= lm0_max - FIT_BOUND_TOL:
+            issues.append("LM0[{:s}]={:.2f} pinned at the upper fit bound {:.1f} - "
+                "saturated against the catalog depth {:.1f}".format(
+                str(cam), float(lm0), lm0_max, lim_mag))
+
+    if float(model_dict.get("s", 0.0)) >= S_FIT_MAX - FIT_BOUND_TOL:
+        issues.append("s={:.2f} pinned at the upper fit bound {:.1f} - the logistic "
+            "has no depth discrimination".format(float(model_dict["s"]), S_FIT_MAX))
+
+    return issues
+
+
 def fitLightDome(station_configs, dates=None, max_order=3, moon_phase_max=MOON_PHASE_MAX,
         lim_mag=None, _depth_iter=0):
     """ Fit the site model over multiple co-located stations.
@@ -413,8 +460,8 @@ def fitLightDome(station_configs, dates=None, max_order=3, moon_phase_max=MOON_P
 
     # LM0 may exceed the catalog depth by a little (the logistic tail still constrains
     # it there), but far beyond it the trials carry no information - bound accordingly
-    base_bounds = [(4.0, lim_mag + 1.0)]*ncam \
-        + [(0.0, 1.5), (0.12, 1.2), (-2.0, 3.0), (5.0, 60.0)]
+    base_bounds = [(LM0_FIT_MIN, lim_mag + 1.0)]*ncam \
+        + [(0.0, 1.5), (0.12, S_FIT_MAX), (-2.0, 3.0), (5.0, 60.0)]
     order_bounds = [(-2.0, 3.5), (-360.0, 720.0), (3.0, 60.0)]   # log10 A, phase, alt scale
 
     results = {}
@@ -504,6 +551,12 @@ def fitLightDome(station_configs, dates=None, max_order=3, moon_phase_max=MOON_P
         print("WARNING: fitted LM0 approaches the catalog depth ({:.2f} + 2s vs "
               "{:.2f}) - the model may be saturated against the catalog ceiling".format(
               max(model_dict["LM0"]), lim_mag))
+
+    # Degenerate-fit diagnosis travels with the model - the auto-fit path refuses to
+    # adopt a model with issues, and a manual fit prints them for the operator
+    model_dict["quality_issues"] = fitQualityIssues(model_dict)
+    for msg in model_dict["quality_issues"]:
+        print("WARNING: degenerate fit: {:s}".format(msg))
 
     print("\nFitted model ({:d} harmonic order(s), catalog depth {:.2f}):".format(
         use, lim_mag))
@@ -961,13 +1014,22 @@ def ensureLightDomeModel(config, platepar=None):
 
         stale = modelIsStale(model.model, config, platepar=platepar)
 
+        # An installed degenerate model (fit at a bound - e.g. LM0 pinned low by an
+        # all-cloudy fit window, or saturated against the old fixed catalog depth) is
+        # refit outright rather than left to poison verdicts until the drift check trips
+        degenerate = fitQualityIssues(model.model)
+
         missing = [str(c.stationID) for c in station_configs
                    if str(c.stationID) not in model.cams]
 
-        if (stale is None) and (not missing):
+        if (stale is None) and (not missing) and (not degenerate):
             return True
 
-        if stale is not None:
+        if degenerate:
+            print("Light-dome model is degenerate - refitting:")
+            for msg in degenerate:
+                print("  " + msg)
+        elif stale is not None:
             print("Light-dome model is stale ({:s}) - refitting".format(stale))
         else:
             print("Light-dome model does not cover co-located station(s) {:s} - "
@@ -1013,6 +1075,14 @@ def ensureLightDomeModel(config, platepar=None):
 
     if (model_dict is None) or (model_dict.get("n_trials", 0) < AUTO_MIN_TRIALS):
         print("Light-dome auto-fit produced insufficient trials - keeping previous behavior")
+        return model is not None
+
+    # Never adopt a degenerate fit - keep whatever was in place (the previous model, or
+    # the scalar fallback) and let the daily attempt marker retry when new nights arrive
+    if model_dict.get("quality_issues"):
+        print("Light-dome auto-fit is degenerate - not installing it:")
+        for msg in model_dict["quality_issues"]:
+            print("  " + msg)
         return model is not None
 
     model_dict["auto_fitted"] = True

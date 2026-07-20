@@ -153,3 +153,33 @@ def test_load_rejects_legacy_basis(model_dict, tmp_path):
     model = LightDomeModel.load(DummyConfig())
     assert model is not None
     assert model.lm0_map["US005A"] == 6.0
+
+
+def test_load_rejects_lower_pinned_lm0(model_dict, tmp_path):
+    # An LM0 pinned at the lower fit bound is a degenerate all-cloudy fit: it predicts
+    # almost no stars, so ratios inflate and cloudy nights read as clear. The scalar
+    # fallback is strictly better - load() must refuse the model for that station.
+    model_dict["LM0"] = [4.05, 5.5]
+
+    path = os.path.join(str(tmp_path), "US005A_light_dome.json")
+    with open(path, "w") as f:
+        json.dump(model_dict, f)
+
+    class PinnedConfig(object):
+        data_dir = str(tmp_path)
+        stationID = "US005A"
+
+    assert LightDomeModel.load(PinnedConfig()) is None
+
+    # The sibling with a healthy LM0 keeps using the site model
+    path_b = os.path.join(str(tmp_path), "US005B_light_dome.json")
+    with open(path_b, "w") as f:
+        json.dump(model_dict, f)
+
+    class HealthyConfig(object):
+        data_dir = str(tmp_path)
+        stationID = "US005B"
+
+    model = LightDomeModel.load(HealthyConfig())
+    assert model is not None
+    assert model.lm0_map["US005B"] == 5.5

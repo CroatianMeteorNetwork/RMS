@@ -57,6 +57,14 @@ DOME_CATALOG_MAX_LIM_MAG = 9.0
 # The logistic tail is sampled to LM + this many s (P ~ 2% there)
 DOME_CATALOG_TAIL_SIGMA = 4.0
 
+# Lower LM0 fit bound (Utils.FitLightDome builds the optimizer bounds from this). An LM0
+# pinned within FIT_BOUND_TOL of it means the fit nights carried no depth signal for that
+# camera (overcast/fog/obstruction): the model predicts almost no stars, ratios inflate
+# several-fold, and cloudy nights read as clear - so load() refuses such a model for the
+# affected station and the scalar fallback takes over until a healthy refit lands
+LM0_FIT_MIN = 4.0
+FIT_BOUND_TOL = 0.1
+
 
 def domeCatalogLimMag(lm0_list, s):
     """ Catalog depth required to fully sample the detection rolloff of a fitted model.
@@ -154,6 +162,23 @@ class LightDomeModel(object):
             # Only the harmonic basis is supported - a file from the retired dome basis is
             # left in place for ensureLightDomeModel to detect and refit
             if model_dict.get("model") != "vanrhijn_harmonics":
+                continue
+
+            # Refuse a model whose LM0 for THIS station is pinned at the lower fit bound
+            # (degenerate all-cloudy fit): the scalar fallback is strictly better than
+            # several-fold inflated ratios. The file stays in place for
+            # ensureLightDomeModel to diagnose and refit the site.
+            cams = [str(c) for c in model_dict.get("cams", [])]
+            lm0 = model_dict.get("LM0", [])
+            station = str(config.stationID)
+            if station in cams and lm0:
+                lm0_here = float(lm0[cams.index(station)])
+            else:
+                lm0_here = float(np.mean(lm0)) if lm0 else LM0_FIT_MIN
+            if lm0_here <= LM0_FIT_MIN + FIT_BOUND_TOL:
+                print("Light-dome model {:s} has LM0={:.2f} pinned at the lower fit "
+                      "bound (degenerate fit) - ignoring it, scalar fallback in "
+                      "effect".format(name, lm0_here))
                 continue
 
             return cls(model_dict)
