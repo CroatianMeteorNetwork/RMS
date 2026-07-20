@@ -72,7 +72,7 @@ def saveStarScoring(dir_path, night_name, header, frames, stars):
     np.savez_compressed(
         path.replace(".npz", ""),
         header=json.dumps(header),
-        frame_names=np.array(frames["frame_names"], dtype=np.str_),
+        frame_names=np.array([str(n) for n in frames["frame_names"]]),
         frame_time_unix=np.asarray(frames["frame_time_unix"], dtype=np.float64),
         sun_alt=np.asarray(frames["sun_alt"], dtype=np.float32),
         moon_alt=np.asarray(frames["moon_alt"], dtype=np.float32),
