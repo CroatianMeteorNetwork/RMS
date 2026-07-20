@@ -1248,7 +1248,7 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
     # History: with the old fixed extraction threshold, twilight caused detection
     # SURGES locked to sun altitude -15 +/- 2 deg fleet-wide - cured at the source by
     # the adaptive gate, but the domain arguments above stand on their own.
-    from Utils.FitLightDome import sunAltitude, SUN_ALT_MAX
+    from Utils.FitLightDome import sunAltitude, moonAltPhase, SUN_ALT_MAX
     pre_sun_files = list(recorded_files)
     recorded_files = [
         ff for ff in recorded_files
@@ -1453,10 +1453,13 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
     #     plt.show()
 
 
+    matched_all = predicted_all = None
+    ratio_norm = 1.0
+
     if dome_model is not None:
 
-        # Dense dome-model path: score EVERY time-binned, moon-filtered frame directly from
-        # its CALSTARS detections against catalog stars projected with the nearest valid
+        # Dense dome-model path: score EVERY time-binned frame directly from its
+        # CALSTARS detections against catalog stars projected with the nearest valid
         # platepar - independent of whether the frame's own recalibration succeeded. This
         # measures cloudy frames as cloudy (instead of leaving them as interval gaps) and
         # keeps genuinely clear frames scoreable even when sparse recalibrations (e.g. a
@@ -1467,12 +1470,73 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
             for ff_name, star_data in calstars_list
         }
 
-        matched_count, predicted_stars = denseDomeRatios(config, dome_model,
-            recorded_files_dense, calstars_positions, recalibrated_platepars, mask)
+        # Score EVERY binned frame, gated ones included: scoring is a measurement,
+        # gating is a per-consumer judgment (see RMS.Formats.StarScoring). The flux
+        # verdict below consumes only the dark/moonless domain subset - bit-identical
+        # to gating before scoring - while the full product is persisted for
+        # downstream consumers (segmented cloud detection, diagnostics).
+        matched_all, predicted_all, star_records = denseDomeRatios(config, dome_model,
+            pre_moon_files, calstars_positions, recalibrated_platepars, mask,
+            collect_stars=True)
 
-        if not predicted_stars:
+        if not predicted_all:
             log.warning("No valid recalibrated platepar this night - "
                         "cannot score frames with the dome model")
+
+        # Verdict subset: ONLY the gated (dark, moonless) frames feed the ratio,
+        # the normalization and the clear-sky intervals
+        domain_set = set(recorded_files_dense)
+        matched_count = {ff: m for ff, m in matched_all.items() if ff in domain_set}
+        predicted_stars = {ff: e for ff, e in predicted_all.items() if ff in domain_set}
+
+        # Persist the ungated scoring product - never blocks the pipeline
+        try:
+            from RMS.Formats.StarScoring import saveStarScoring
+
+            night_name = os.path.basename(os.path.normpath(dir_path))
+            epoch = datetime.datetime(1970, 1, 1)
+            f_meta = dict(frame_names=[], frame_time_unix=[], sun_alt=[], moon_alt=[],
+                          moon_phase=[], n_detected=[], in_flux_domain=[])
+            s_arrs = dict(star_frame=[], star_x=[], star_y=[], star_mag=[], star_p=[],
+                          calstars_row=[])
+            pp_ref = platepar
+
+            for k, ff in enumerate(sorted(star_records.keys())):
+                t = FFfile.filenameToDatetime(ff)
+                date = FFfile.getMiddleTimeFF(ff, config.fps, ret_milliseconds=True)
+                jd_f = date2JD(*date)
+                m_alt, m_phase = moonAltPhase(jd_f, pp_ref.lat, pp_ref.lon)
+                f_meta["frame_names"].append(ff)
+                f_meta["frame_time_unix"].append((t - epoch).total_seconds())
+                f_meta["sun_alt"].append(sunAltitude(jd_f, pp_ref.lat, pp_ref.lon))
+                f_meta["moon_alt"].append(m_alt)
+                f_meta["moon_phase"].append(m_phase)
+                f_meta["n_detected"].append(len(calstars_positions.get(ff, [])))
+                f_meta["in_flux_domain"].append(ff in domain_set)
+
+                rec = star_records[ff]
+                n_s = len(rec["x"])
+                s_arrs["star_frame"].extend([k]*n_s)
+                s_arrs["star_x"].extend(rec["x"])
+                s_arrs["star_y"].extend(rec["y"])
+                s_arrs["star_mag"].extend(rec["mag"])
+                s_arrs["star_p"].extend(rec["p"])
+                s_arrs["calstars_row"].extend(rec["calstars_row"])
+
+            header = dict(
+                stationID=str(config.stationID),
+                night=night_name,
+                match_radius_px=DENSE_MATCH_RADIUS_PX,
+                dome_fit_date=str(dome_model.model.get("fit_date")),
+                catalog_lim_mag=dome_model.catalogLimMag(),
+                star_gate_factor=float(getattr(config, "star_gate_factor", 3.0)),
+            )
+            out_path = saveStarScoring(dir_path, night_name, header, f_meta, s_arrs)
+            log.info("Star scoring product written: {:s} ({:d} frames, {:d} star "
+                     "records)".format(os.path.basename(out_path),
+                     len(f_meta["frame_names"]), len(s_arrs["star_x"])))
+        except Exception as e:
+            log.warning("Could not write the star scoring product: {}".format(e))
 
         # The expected counts are calibrated per sky position, so no cap or deficit
         # correction applies - the clear-sky ratio is ~1 by construction at the fit epoch.
@@ -1582,6 +1646,23 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
         # Plot the computed ratio
         ax[0].scatter([FFfile.filenameToDatetime(x) for x in ratio.keys()], list(ratio.values()), \
             marker='o', s=5, c='k', zorder=6, label='Measurements')
+
+        # Scored-but-gated frames (moon/twilight): the measurement exists, the verdict
+        # ignores it - hollow gray points so the shaded regions carry their data
+        if matched_all:
+            gated_ffs = [ff for ff in matched_all
+                         if (ff not in ratio) and (predicted_all.get(ff, 0) > 0.001)]
+            if gated_ffs:
+                gtimes = [FFfile.filenameToDatetime(ff) for ff in gated_ffs]
+                ax[0].scatter(gtimes,
+                    [matched_all[ff]/predicted_all[ff]/ratio_norm for ff in gated_ffs],
+                    marker='o', s=9, facecolors='none', edgecolors='0.5',
+                    linewidths=0.8, zorder=5,
+                    label='Gated frames (not used for verdicts)')
+                ax[1].scatter(gtimes, [matched_all[ff] for ff in gated_ffs],
+                    marker='+', color='0.55', zorder=4)
+                ax[1].scatter(gtimes, [predicted_all[ff] for ff in gated_ffs],
+                    marker='x', color='0.7', zorder=4)
         ax[0].set_ylabel("Matched/Expected stars")
 
         # Plot the radio threshold
@@ -1770,7 +1851,8 @@ DENSE_MATCH_RADIUS_PX = 3.0   # px - a predicted star counts as matched if a CAL
                               # dome model is fitted with, see Utils.FitLightDome)
 
 
-def denseDomeRatios(config, dome_model, ff_list, calstars_positions, recalibrated_platepars, mask):
+def denseDomeRatios(config, dome_model, ff_list, calstars_positions, recalibrated_platepars, mask,
+        collect_stars=False):
     """ Score EVERY frame with the light-dome model, independent of its own recalibration.
 
     The per-frame recalibration fails preferentially on cloudy frames (too few stars to
@@ -1792,9 +1874,14 @@ def denseDomeRatios(config, dome_model, ff_list, calstars_positions, recalibrate
             are used as projection sources.
         mask: [Mask object]
 
+    Keyword arguments:
+        collect_stars: [bool] Also return per-star outcome arrays for the scoring
+            product (see RMS.Formats.StarScoring). False by default.
+
     Return:
-        (matched, expected): [dict, dict] ff_name -> matched count / expected count. Empty
-            if the night has no valid platepar at all.
+        (matched, expected[, star_records]): [dict, dict(, dict)] ff_name -> matched
+            count / expected count(, per-star arrays: x, y, mag, p, calstars_row with
+            -1 = unmatched). Empty if the night has no valid platepar at all.
     """
 
     # Time-sorted valid platepars to source projections from
@@ -1804,7 +1891,7 @@ def denseDomeRatios(config, dome_model, ff_list, calstars_positions, recalibrate
     )
 
     if not valid_pps:
-        return {}, {}
+        return ({}, {}, {}) if collect_stars else ({}, {})
 
     valid_times = [t for t, _ in valid_pps]
     valid_times_arr = np.array(valid_times)
@@ -1820,6 +1907,7 @@ def denseDomeRatios(config, dome_model, ff_list, calstars_positions, recalibrate
 
     matched = {}
     expected = {}
+    star_records = {}
 
     for ff_file in sorted(ff_list):
 
@@ -1850,11 +1938,24 @@ def denseDomeRatios(config, dome_model, ff_list, calstars_positions, recalibrate
         if len(detections):
             dist2 = (x[:, None] - detections[None, :, 0])**2 \
                 + (y[:, None] - detections[None, :, 1])**2
-            matched[ff_file] = int(np.sum(dist2.min(axis=1) <= DENSE_MATCH_RADIUS_PX**2))
+            nearest = np.argmin(dist2, axis=1)
+            hit = dist2[np.arange(len(x)), nearest] <= DENSE_MATCH_RADIUS_PX**2
+            matched[ff_file] = int(np.sum(hit))
         else:
+            nearest = np.zeros(len(x), dtype=int)
+            hit = np.zeros(len(x), dtype=bool)
             matched[ff_file] = 0
 
-    return matched, expected
+        if collect_stars:
+            star_records[ff_file] = dict(
+                x=np.asarray(x, dtype=np.float32),
+                y=np.asarray(y, dtype=np.float32),
+                mag=np.asarray(mag, dtype=np.float32),
+                p=np.asarray(p_det, dtype=np.float32),
+                calstars_row=np.where(hit, nearest, -1).astype(np.int32),
+            )
+
+    return (matched, expected, star_records) if collect_stars else (matched, expected)
 
 
 def predictStarNumberInFOV(recalibrated_platepars, ff_limiting_magnitude, config, mask=None, \

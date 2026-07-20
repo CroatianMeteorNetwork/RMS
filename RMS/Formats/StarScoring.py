@@ -1,0 +1,108 @@
+""" Nightly star-scoring product: per-star matched/expected records for ALL scored
+frames, ungated (see the score-everything / gate-at-the-verdict design).
+
+CALSTARS is the upstream, catalog-blind detection product with external consumers -
+its format and content contract are frozen, and this product is derived FROM it (plus
+platepars, the light-dome model and the star catalog), never the reverse. Matched
+stars reference their CALSTARS row (calstars_row) instead of duplicating detection
+data; CALSTARS remains the canonical detection store.
+
+Consumers apply their own domain gates: the flux verdict path uses only frames with
+in_flux_domain (dark, moonless - the same gate outcomes the verdict actually used,
+recorded here as flags); SQM applies its own gates; a segmented cloud detector may
+define its own domain and spatial cells from the per-star records.
+
+Schema (npz, versioned):
+    header          - JSON string: schema_version, stationID, night, match_radius_px,
+                      dome model provenance (fit_date, catalog_lim_mag), gate factor.
+    frame_names     - [n_frames] FF file names (unicode).
+    frame_time_unix - [n_frames] float64, FF timestamp (UTC, from the file name).
+    sun_alt         - [n_frames] float32, deg.
+    moon_alt        - [n_frames] float32, deg.
+    moon_phase      - [n_frames] float32, percent illuminated.
+    n_detected      - [n_frames] int32, CALSTARS detections on the frame.
+    in_flux_domain  - [n_frames] bool, True where the flux verdict path scored the
+                      frame (dark + moonless, per the gates in effect that night).
+    star_frame      - [n_stars] int32, index into the frame arrays.
+    star_x, star_y  - [n_stars] float32, projected catalog position (px).
+    star_mag        - [n_stars] float16, catalog magnitude.
+    star_p          - [n_stars] float16, model detection probability (expected count
+                      contribution).
+    calstars_row    - [n_stars] int32, row index into that frame's CALSTARS entry for
+                      the matched detection, -1 if unmatched.
+"""
+
+from __future__ import absolute_import, division, print_function
+
+import json
+import os
+
+import numpy as np
+
+SCHEMA_VERSION = 1
+
+FILE_SUFFIX = "star_scoring.npz"
+
+
+def scoringFileName(night_name):
+    return "{:s}_{:s}".format(night_name, FILE_SUFFIX)
+
+
+def saveStarScoring(dir_path, night_name, header, frames, stars):
+    """ Write the nightly scoring product.
+
+    Arguments:
+        dir_path: [str] Night directory.
+        night_name: [str] Night directory name (used in the file name).
+        header: [dict] Provenance fields; schema_version is added automatically.
+        frames: [dict of lists/arrays] frame_names, frame_time_unix, sun_alt, moon_alt,
+            moon_phase, n_detected, in_flux_domain - equal lengths.
+        stars: [dict of lists/arrays] star_frame, star_x, star_y, star_mag, star_p,
+            calstars_row - equal lengths.
+
+    Return:
+        path: [str] Written file path.
+    """
+
+    header = dict(header)
+    header["schema_version"] = SCHEMA_VERSION
+
+    path = os.path.join(dir_path, scoringFileName(night_name))
+
+    np.savez_compressed(
+        path.replace(".npz", ""),
+        header=json.dumps(header),
+        frame_names=np.array(frames["frame_names"], dtype=np.str_),
+        frame_time_unix=np.asarray(frames["frame_time_unix"], dtype=np.float64),
+        sun_alt=np.asarray(frames["sun_alt"], dtype=np.float32),
+        moon_alt=np.asarray(frames["moon_alt"], dtype=np.float32),
+        moon_phase=np.asarray(frames["moon_phase"], dtype=np.float32),
+        n_detected=np.asarray(frames["n_detected"], dtype=np.int32),
+        in_flux_domain=np.asarray(frames["in_flux_domain"], dtype=bool),
+        star_frame=np.asarray(stars["star_frame"], dtype=np.int32),
+        star_x=np.asarray(stars["star_x"], dtype=np.float32),
+        star_y=np.asarray(stars["star_y"], dtype=np.float32),
+        star_mag=np.asarray(stars["star_mag"], dtype=np.float16),
+        star_p=np.asarray(stars["star_p"], dtype=np.float16),
+        calstars_row=np.asarray(stars["calstars_row"], dtype=np.int32),
+    )
+
+    return path
+
+
+def loadStarScoring(path):
+    """ Load a scoring product.
+
+    Return:
+        (header, frames, stars): header dict and dicts of ndarrays as in the schema.
+    """
+
+    with np.load(path, allow_pickle=False) as z:
+        header = json.loads(str(z["header"]))
+        frames = {k: z[k] for k in ("frame_names", "frame_time_unix", "sun_alt",
+                                    "moon_alt", "moon_phase", "n_detected",
+                                    "in_flux_domain")}
+        stars = {k: z[k] for k in ("star_frame", "star_x", "star_y", "star_mag",
+                                   "star_p", "calstars_row")}
+
+    return header, frames, stars
