@@ -1645,7 +1645,7 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
 
         # Plot the computed ratio
         ax[0].scatter([FFfile.filenameToDatetime(x) for x in ratio.keys()], list(ratio.values()), \
-            marker='o', s=5, c='k', zorder=6, label='Measurements')
+            marker='o', s=5, c='k', zorder=6)
 
         # Scored-but-gated frames (moon/twilight): the measurement exists, the verdict
         # ignores it - hollow gray points so the shaded regions carry their data
@@ -1657,8 +1657,7 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
                 ax[0].scatter(gtimes,
                     [matched_all[ff]/predicted_all[ff]/ratio_norm for ff in gated_ffs],
                     marker='o', s=9, facecolors='none', edgecolors='0.5',
-                    linewidths=0.8, zorder=5,
-                    label='Gated frames (not used for verdicts)')
+                    linewidths=0.8, zorder=5)
                 ax[1].scatter(gtimes, [matched_all[ff] for ff in gated_ffs],
                     marker='+', color='0.55', zorder=4)
                 ax[1].scatter(gtimes, [predicted_all[ff] for ff in gated_ffs],
@@ -1675,7 +1674,7 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
         # Shade the regions with clear skies
         for i, (beg, end) in enumerate(time_intervals):
             ax[0].axvspan(beg, end, alpha=0.5, color='lightblue', zorder=4,
-                label='Clear interval' if i == 0 else None)
+                label='Clear' if i == 0 else None)
 
         # Shade the periods excluded because of the moon, so they are not read as cloudy
         if moon_excluded_files:
@@ -1696,7 +1695,7 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
             for i, (beg, end) in enumerate(moon_spans):
                 for axis in ax:
                     axis.axvspan(beg - pad, end + pad, alpha=0.45, color='thistle', zorder=3,
-                        label=('Moon excluded' if (i == 0 and axis is ax[0]) else None))
+                        label=('Moon' if (i == 0 and axis is ax[0]) else None))
 
         # Shade the periods excluded by the twilight gate, so out-of-domain time is not
         # read as cloudy (same treatment as the moon shading above)
@@ -1718,9 +1717,9 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
                 for axis in ax:
                     axis.axvspan(beg - pad, end + pad, alpha=0.45, color='peachpuff',
                         zorder=3,
-                        label=('Twilight excluded' if (i == 0 and axis is ax[0]) else None))
+                        label=('Twilight' if (i == 0 and axis is ax[0]) else None))
 
-        ax[0].legend()
+        ax[0].legend(fontsize=8, loc='lower right', ncol=4)
         ax[0].set_ylim(ymin=0)
 
 
