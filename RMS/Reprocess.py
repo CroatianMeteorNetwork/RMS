@@ -568,8 +568,9 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
             if ("flux" in file_name) and (file_name.endswith(".json") or file_name.endswith(".ecsv")):
                 extra_files.append(os.path.join(night_data_dir, file_name))
 
-            # Sky model provenance and sky quality records travel with the night
-            elif file_name.endswith(("_light_dome.json", "_sky_quality.json")):
+            # Sky model provenance, sky quality and star scoring records travel with the night
+            elif file_name.endswith(("_light_dome.json", "_sky_quality.json",
+                                     "_star_scoring.npz")):
                 extra_files.append(os.path.join(night_data_dir, file_name))
 
 
