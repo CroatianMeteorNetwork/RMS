@@ -1485,8 +1485,10 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
             collect_stars=True)
 
         if not predicted_all:
-            log.warning("No valid recalibrated platepar this night - "
-                        "cannot score frames with the dome model")
+            # Expected on fully overcast nights (nothing recalibrates without stars),
+            # so info, not warning - the verdict correctly yields no clear intervals
+            log.info("No valid recalibrated platepar this night - "
+                     "cannot score frames with the dome model")
 
         # Verdict subset: ONLY the gated (dark, moonless) frames feed the ratio,
         # the normalization and the clear-sky intervals
