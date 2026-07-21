@@ -65,6 +65,64 @@ DOME_CATALOG_TAIL_SIGMA = 4.0
 LM0_FIT_MIN = 4.0
 FIT_BOUND_TOL = 0.1
 
+# Upper logistic-width fit bound; s pinned here means the fit found no depth
+# discrimination at all
+S_FIT_MAX = 1.2
+
+
+def fitQualityIssues(model_dict):
+    """ Diagnose degenerate-fit symptoms in a fitted (or loaded) dome model.
+
+    A degenerate fit is one whose optimizer solution sits on a fit bound: the data did
+    not constrain the parameter, so the model reflects the bound, not the sky. Adopting
+    such a model corrupts every downstream verdict (an LM0 at the lower bound predicts
+    almost no stars, so cloudy nights score as clear).
+
+    Arguments:
+        model_dict: [dict] Fitted model dict (or LightDomeModel.model of a loaded one).
+
+    Return:
+        issues: [list of str] One message per symptom; empty for a healthy fit.
+    """
+
+    issues = []
+
+    lim_mag = float(model_dict.get("catalog_lim_mag", DOME_CATALOG_LIM_MAG))
+    lm0_max = lim_mag + 1.0
+
+    for cam, lm0 in zip(model_dict.get("cams", []), model_dict.get("LM0", [])):
+
+        if float(lm0) <= LM0_FIT_MIN + FIT_BOUND_TOL:
+            issues.append("LM0[{:s}]={:.2f} pinned at the lower fit bound {:.1f} - no "
+                "depth signal in that camera's training trials (cloudy/foggy/obstructed "
+                "fit nights)".format(str(cam), float(lm0), LM0_FIT_MIN))
+
+        elif float(lm0) >= lm0_max - FIT_BOUND_TOL:
+            issues.append("LM0[{:s}]={:.2f} pinned at the upper fit bound {:.1f} - "
+                "saturated against the catalog depth {:.1f}".format(
+                str(cam), float(lm0), lm0_max, lim_mag))
+
+    if float(model_dict.get("s", 0.0)) >= S_FIT_MAX - FIT_BOUND_TOL:
+        issues.append("s={:.2f} pinned at the upper fit bound {:.1f} - the logistic "
+            "has no depth discrimination".format(float(model_dict["s"]), S_FIT_MAX))
+
+    return issues
+
+
+def blockingQualityIssues(model_dict):
+    """ The subset of quality issues that make a model UNUSABLE for scoring, for
+    every camera in it - not just the flagged one. A joint site fit with any camera
+    pinned at the LOWER bound (or s at its ceiling) was optimized against garbage
+    data: the shared harmonics and logistic width are co-fit, so no station's slice
+    of that model is trustworthy. (Observed: AUC0A6 scored a night against a fit
+    whose siblings were pinned at 4.00 - its own LM0 of 4.31 passed a per-station
+    check while the model predicted a ridiculous star count.) Upper-bound saturation
+    is NOT blocking: the ratio normalization compensates until the refit lands.
+    """
+
+    return [i for i in fitQualityIssues(model_dict)
+            if ("lower fit bound" in i) or i.startswith("s=")]
+
 
 def domeCatalogLimMag(lm0_list, s):
     """ Catalog depth required to fully sample the detection rolloff of a fitted model.
@@ -164,21 +222,18 @@ class LightDomeModel(object):
             if model_dict.get("model") != "vanrhijn_harmonics":
                 continue
 
-            # Refuse a model whose LM0 for THIS station is pinned at the lower fit bound
-            # (degenerate all-cloudy fit): the scalar fallback is strictly better than
-            # several-fold inflated ratios. The file stays in place for
-            # ensureLightDomeModel to diagnose and refit the site.
-            cams = [str(c) for c in model_dict.get("cams", [])]
-            lm0 = model_dict.get("LM0", [])
-            station = str(config.stationID)
-            if station in cams and lm0:
-                lm0_here = float(lm0[cams.index(station)])
-            else:
-                lm0_here = float(np.mean(lm0)) if lm0 else LM0_FIT_MIN
-            if lm0_here <= LM0_FIT_MIN + FIT_BOUND_TOL:
-                print("Light-dome model {:s} has LM0={:.2f} pinned at the lower fit "
-                      "bound (degenerate fit) - ignoring it, scalar fallback in "
-                      "effect".format(name, lm0_here))
+            # Refuse a degenerate model OUTRIGHT - for every station, not just the
+            # camera whose parameter is pinned: the joint fit's shared terms were
+            # optimized against that camera's garbage data, so no slice of the model
+            # is trustworthy. The scalar fallback is strictly better than several-fold
+            # inflated ratios. The file stays in place for ensureLightDomeModel to
+            # diagnose and refit the site.
+            blocking = blockingQualityIssues(model_dict)
+            if blocking:
+                print("Light-dome model {:s} is degenerate - ignoring it, scalar "
+                      "fallback in effect:".format(name))
+                for msg in blocking:
+                    print("  " + msg)
                 continue
 
             return cls(model_dict)

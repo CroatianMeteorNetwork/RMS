@@ -42,7 +42,7 @@ from RMS.Astrometry.Conversions import date2JD, jd2Date, raDec2AltAz
 from RMS.Routines.MaskImage import getMaskFile
 from RMS.Math import pointInsideConvexPolygonSphere
 from RMS.LightDomeModel import (DOME_CATALOG_LIM_MAG, FIT_BOUND_TOL, LIGHT_DOME_FILE_SUFFIX,
-    LM0_FIT_MIN, LightDomeModel)
+    LM0_FIT_MIN, S_FIT_MAX, LightDomeModel, fitQualityIssues)
 
 
 # Trial building
@@ -304,50 +304,6 @@ def selectNightDirs(config, dates=None, window=30, max_nights=4, min_rel_clarity
     return [os.path.join(archive_dir, d) for _, d in scored]
 
 
-# LM0_FIT_MIN and FIT_BOUND_TOL live in RMS.LightDomeModel (load() rejects models pinned
-# at the lower bound - the symptom observed on the AUC0A pod, LM0 4.00 fit on overcast
-# nights). The logistic-width bound is only a fit concern, so it lives here.
-S_FIT_MAX = 1.2        # upper logistic-width fit bound; s pinned here means the fit found
-                       # no depth discrimination at all
-
-
-def fitQualityIssues(model_dict):
-    """ Diagnose degenerate-fit symptoms in a fitted (or loaded) dome model.
-
-    A degenerate fit is one whose optimizer solution sits on a fit bound: the data did
-    not constrain the parameter, so the model reflects the bound, not the sky. Adopting
-    such a model corrupts every downstream verdict (an LM0 at the lower bound predicts
-    almost no stars, so cloudy nights score as clear).
-
-    Arguments:
-        model_dict: [dict] Fitted model dict (or LightDomeModel.model of a loaded one).
-
-    Return:
-        issues: [list of str] One message per symptom; empty for a healthy fit.
-    """
-
-    issues = []
-
-    lim_mag = float(model_dict.get("catalog_lim_mag", DOME_CATALOG_LIM_MAG))
-    lm0_max = lim_mag + 1.0
-
-    for cam, lm0 in zip(model_dict.get("cams", []), model_dict.get("LM0", [])):
-
-        if float(lm0) <= LM0_FIT_MIN + FIT_BOUND_TOL:
-            issues.append("LM0[{:s}]={:.2f} pinned at the lower fit bound {:.1f} - no "
-                "depth signal in that camera's training trials (cloudy/foggy/obstructed "
-                "fit nights)".format(str(cam), float(lm0), LM0_FIT_MIN))
-
-        elif float(lm0) >= lm0_max - FIT_BOUND_TOL:
-            issues.append("LM0[{:s}]={:.2f} pinned at the upper fit bound {:.1f} - "
-                "saturated against the catalog depth {:.1f}".format(
-                str(cam), float(lm0), lm0_max, lim_mag))
-
-    if float(model_dict.get("s", 0.0)) >= S_FIT_MAX - FIT_BOUND_TOL:
-        issues.append("s={:.2f} pinned at the upper fit bound {:.1f} - the logistic "
-            "has no depth discrimination".format(float(model_dict["s"]), S_FIT_MAX))
-
-    return issues
 
 
 MAX_FIT_TRIALS = 300000    # star trials the optimizer sees; larger sets are randomly

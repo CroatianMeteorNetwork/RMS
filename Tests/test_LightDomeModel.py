@@ -155,31 +155,52 @@ def test_load_rejects_legacy_basis(model_dict, tmp_path):
     assert model.lm0_map["US005A"] == 6.0
 
 
-def test_load_rejects_lower_pinned_lm0(model_dict, tmp_path):
-    # An LM0 pinned at the lower fit bound is a degenerate all-cloudy fit: it predicts
-    # almost no stars, so ratios inflate and cloudy nights read as clear. The scalar
-    # fallback is strictly better - load() must refuse the model for that station.
+def test_load_rejects_degenerate_model_for_all_stations(model_dict, tmp_path):
+    # A joint fit with ANY camera pinned at the lower bound was optimized against
+    # garbage data - the shared harmonics and s are co-fit, so NO station's slice is
+    # trustworthy (observed: AUC0A6 at LM0=4.31 passed a per-station check while its
+    # siblings sat at 4.00, and the model predicted a ridiculous star count).
     model_dict["LM0"] = [4.05, 5.5]
+
+    for station in ("US005A", "US005B"):
+        path = os.path.join(str(tmp_path), "{}_light_dome.json".format(station))
+        with open(path, "w") as f:
+            json.dump(model_dict, f)
+
+        class Cfg(object):
+            data_dir = str(tmp_path)
+            stationID = station
+
+        assert LightDomeModel.load(Cfg()) is None, station
+
+
+def test_load_rejects_s_at_ceiling(model_dict, tmp_path):
+    # s pinned at its upper bound = no depth discrimination; the fit is degenerate
+    # even if every LM0 looks plausible
+    model_dict["s"] = 1.15
 
     path = os.path.join(str(tmp_path), "US005A_light_dome.json")
     with open(path, "w") as f:
         json.dump(model_dict, f)
 
-    class PinnedConfig(object):
+    class Cfg(object):
         data_dir = str(tmp_path)
         stationID = "US005A"
 
-    assert LightDomeModel.load(PinnedConfig()) is None
+    assert LightDomeModel.load(Cfg()) is None
 
-    # The sibling with a healthy LM0 keeps using the site model
-    path_b = os.path.join(str(tmp_path), "US005B_light_dome.json")
-    with open(path_b, "w") as f:
+
+def test_load_accepts_upper_saturated_model(model_dict, tmp_path):
+    # Upper-bound saturation is NOT blocking: ratio normalization compensates until
+    # the refit lands, and rejecting would flip whole fleets to scalar overnight
+    model_dict["LM0"] = [6.95, 5.5]
+
+    path = os.path.join(str(tmp_path), "US005A_light_dome.json")
+    with open(path, "w") as f:
         json.dump(model_dict, f)
 
-    class HealthyConfig(object):
+    class Cfg(object):
         data_dir = str(tmp_path)
-        stationID = "US005B"
+        stationID = "US005A"
 
-    model = LightDomeModel.load(HealthyConfig())
-    assert model is not None
-    assert model.lm0_map["US005B"] == 5.5
+    assert LightDomeModel.load(Cfg()) is not None

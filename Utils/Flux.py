@@ -1493,8 +1493,30 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
         # Verdict subset: ONLY the gated (dark, moonless) frames feed the ratio,
         # the normalization and the clear-sky intervals
         domain_set = set(recorded_files_dense)
+        matched_count_scalar = matched_count
         matched_count = {ff: m for ff, m in matched_all.items() if ff in domain_set}
         predicted_stars = {ff: e for ff, e in predicted_all.items() if ff in domain_set}
+
+        # Output sanity backstop: detections can never legitimately exceed a
+        # calibrated expectation by more than the trailing normalization could
+        # correct. A night-median ratio beyond that bound means the model is broken
+        # in a way the parameter guards did not catch (observed: a degenerate site
+        # fit predicting a ridiculous star count) - discard the model for this
+        # night, fall back to the scalar path, and keep the insane ratio OUT of the
+        # normalization history and the scoring product.
+        _sanity_vals = [matched_count[ff]/predicted_stars[ff]
+                        for ff in predicted_stars if predicted_stars[ff] > 0.001]
+        _sanity_med = float(np.median([r for r in _sanity_vals if r > 0])) \
+            if any(r > 0 for r in _sanity_vals) else None
+        if (_sanity_med is not None) and (_sanity_med > DOME_RATIO_NORM_MAX):
+            log.warning("Dome model rejected for this night: median matched/expected "
+                        "= {:.2f} exceeds the physical bound {:.1f} - falling back "
+                        "to the scalar path".format(_sanity_med, DOME_RATIO_NORM_MAX))
+            dome_model = None
+            matched_count = matched_count_scalar
+            matched_all = predicted_all = None
+
+    if dome_model is not None and matched_all is not None:
 
         # Persist the ungated scoring product - never blocks the pipeline
         try:
@@ -1571,7 +1593,7 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
 
         ratio = {ff: r/ratio_norm for ff, r in ratio_raw.items()}
 
-    else:
+    if dome_model is None:
 
         # Compute the predicted number of stars on every recalibrated FF file
         predicted_stars = predictStarNumberInFOV(
