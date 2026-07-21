@@ -202,6 +202,142 @@ def _rollingMedian(a, window):
     return out
 
 
+def extinctionSeries(frames, stars, result, dome_s):
+    """ Invert each cell's pooled star-count deficit into an extinction estimate.
+
+    A uniform extinction dm over a cell shifts every star's detection argument:
+    P_i(dm) = sigmoid(logit(P_i) - dm/s). Per frame and cell, the dm that makes the
+    expected count match the observed count is found by bisection (the expectation is
+    monotone in dm). This is a TRANSPARENCY score in magnitudes - far more informative
+    in the thin-cloud regime than a count ratio, whose response saturates through the
+    logistic. Cells with a count excess get dm = 0 (no negative extinction).
+
+    Note: the per-cell normalization is applied to P before inversion, so static
+    image-plane sensitivity structure does not read as extinction.
+
+    Arguments:
+        frames, stars: [dict] Arrays from loadStarScoring.
+        result: [dict] Output of computeCellSeries (same grid).
+        dome_s: [float] Logistic rolloff width of the night's dome model (mag) -
+            converts the logit shift into magnitudes.
+
+    Return:
+        dm: [ndarray n_frames, ny, nx] Extinction (mag); NaN where exp < EXP_MIN.
+    """
+
+    n_frames = len(frames["frame_names"])
+    nx, ny = result["nx"], result["ny"]
+    width, height = result["width"], result["height"]
+
+    x = np.asarray(stars["star_x"], dtype=np.float64)
+    y = np.asarray(stars["star_y"], dtype=np.float64)
+    p_raw = np.asarray(stars["star_p"], dtype=np.float64)
+    fidx = np.asarray(stars["star_frame"], dtype=np.int64)
+
+    cx = np.clip((x/(width/nx)).astype(np.int64), 0, nx - 1)
+    cy = np.clip((y/(height/ny)).astype(np.int64), 0, ny - 1)
+    cell = cy*nx + cx
+
+    cell_norm = result["cell_norm"].ravel()
+    p_s = np.clip(p_raw*cell_norm[cell], 1e-4, 0.999)
+    logit = np.log(p_s/(1.0 - p_s))
+
+    # Group star records by (frame, cell) for the per-bin inversions
+    flat = fidx*(ny*nx) + cell
+    order = np.argsort(flat, kind="stable")
+    flat_sorted = flat[order]
+    logit_sorted = logit[order]
+    bin_starts = np.searchsorted(flat_sorted, np.arange(n_frames*ny*nx))
+    bin_ends = np.searchsorted(flat_sorted, np.arange(n_frames*ny*nx) + 1)
+
+    obs = result["obs"].reshape(-1)
+    exp = result["exp"].reshape(-1)
+
+    dm = np.full(n_frames*ny*nx, np.nan)
+    for b in range(len(dm)):
+
+        if exp[b] < EXP_MIN:
+            continue
+
+        l = logit_sorted[bin_starts[b]:bin_ends[b]]
+        n_obs = obs[b]
+
+        # No deficit: fully transparent
+        if np.sum(1.0/(1.0 + np.exp(-l))) <= n_obs:
+            dm[b] = 0.0
+            continue
+
+        # Bisection on the logit shift (expectation is monotone decreasing in it)
+        lo, hi = 0.0, 25.0
+        for _ in range(40):
+            mid = 0.5*(lo + hi)
+            if np.sum(1.0/(1.0 + np.exp(-(l - mid)))) > n_obs:
+                lo = mid
+            else:
+                hi = mid
+        dm[b] = 0.5*(lo + hi)*dome_s
+
+    return dm.reshape(n_frames, ny, nx)
+
+
+def animateTransparency(frames, result, dm, out_path, fps=6, title=None):
+    """ Animated per-cell extinction map over the night (GIF).
+
+    Arguments:
+        frames: [dict] Frame arrays from loadStarScoring.
+        result: [dict] Output of computeCellSeries.
+        dm: [ndarray] Output of extinctionSeries.
+        out_path: [str] Output .gif path.
+    """
+
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.animation import FuncAnimation, PillowWriter
+    import datetime
+
+    n_frames = dm.shape[0]
+    times = [datetime.datetime.utcfromtimestamp(t) for t in frames["frame_time_unix"]]
+    sun = frames["sun_alt"]
+
+    fig, (ax, ax_t) = plt.subplots(2, 1, figsize=(8, 6.2),
+        gridspec_kw=dict(height_ratios=[5, 1]))
+
+    cmap = plt.get_cmap("YlGnBu").copy()
+    cmap.set_bad("lightgray")
+    im = ax.imshow(np.ma.masked_invalid(dm[0]), cmap=cmap, vmin=0.0, vmax=3.0,
+        interpolation="nearest", aspect="auto",
+        extent=[0, result["width"], result["height"], 0])
+    fig.colorbar(im, ax=ax, fraction=0.04, pad=0.02, label="Extinction (mag)")
+    ax.set_xlabel("X (px)")
+    ax.set_ylabel("Y (px)")
+    txt = ax.set_title("")
+
+    # Time strip: mean extinction with a moving cursor
+    with np.errstate(all="ignore"):
+        mean_dm = np.nanmean(dm.reshape(n_frames, -1), axis=1)
+    ax_t.plot(times, mean_dm, "-", color="steelblue", lw=1.0)
+    ax_t.set_ylabel("Mean\n(mag)", fontsize=8)
+    ax_t.set_ylim(bottom=0)
+    cursor = ax_t.axvline(times[0], color="red", lw=1.2)
+    for lbl in ax_t.get_xticklabels():
+        lbl.set_fontsize(7)
+
+    def update(i):
+        im.set_array(np.ma.masked_invalid(dm[i]))
+        txt.set_text("{:s}{:s} UTC   sun {:+.1f} deg".format(
+            (title + "   ") if title else "",
+            times[i].strftime("%H:%M:%S"), float(sun[i])))
+        cursor.set_xdata([times[i], times[i]])
+        return im, txt, cursor
+
+    anim = FuncAnimation(fig, update, frames=n_frames, blit=False)
+    anim.save(out_path, writer=PillowWriter(fps=fps))
+    plt.close(fig)
+
+    return out_path
+
+
 def cloudCoverageSeries(result):
     """ Per-frame cloud coverage: fraction of judged cells that are cloudy.
 
@@ -297,6 +433,11 @@ def main():
     parser.add_argument("--grid", default="8x5", help="Cell grid as NXxNY (default 8x5)")
     parser.add_argument("--plot", default=None, help="Output plot path (default: "
         "alongside the npz)")
+    parser.add_argument("--animate", default=None, help="Also write a transparency "
+        "animation (GIF) to this path")
+    parser.add_argument("--dome-s", type=float, default=0.5, help="Logistic width s of "
+        "the night's dome model (mag), used to express extinction in magnitudes "
+        "(default 0.5; read it from the night's light_dome.json)")
     args = parser.parse_args()
 
     nx, ny = (int(v) for v in args.grid.lower().split("x"))
@@ -319,6 +460,12 @@ def main():
         title="{:s} - segmented cloud detection (norm {:.2f})".format(
             str(header.get("night", "?")), result["norm"]))
     print("Plot: {:s}".format(out_path))
+
+    if args.animate:
+        dm = extinctionSeries(frames, stars, result, args.dome_s)
+        animateTransparency(frames, result, dm, args.animate,
+            title=str(header.get("stationID", "")))
+        print("Animation: {:s}".format(args.animate))
 
 
 if __name__ == "__main__":
