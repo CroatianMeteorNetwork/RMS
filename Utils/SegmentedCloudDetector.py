@@ -80,10 +80,14 @@ NORM_FRAME_EXP_MIN = 5.0   # frames with less total expectation don't inform the
 
 SMOOTH_FRAMES = 3      # median-filter window (frames) applied to z per cell
 
-DM_EXP_MIN = 5.0       # minimum summed expectation for an extinction estimate - stricter
-                       # than the verdict floor: inverting a count into magnitudes is
-                       # much noisier than judging a deficit, and a 2-3 star cell can
-                       # flash a spurious multi-magnitude value on one empty frame
+DM_WINDOW = 3          # bins pooled (centered) per extinction estimate - clouds
+                       # persist across bins, and pooling is what buys the inversion
+                       # its statistics at depth-6 star densities
+DM_MIN_STARS = 10      # pooled star RECORDS the inversion needs. A raw count, not an
+                       # expectation: the per-cell norm (capped at 3) can inflate a
+                       # mostly-obstructed cell's few-star expectation over any
+                       # expectation floor, while an honest mid-sky cell with many
+                       # faint stars fails it - the record count cannot be gamed
 
 
 def computeCellSeries(frames, stars, nx=8, ny=5, width=None, height=None):
@@ -256,35 +260,42 @@ def extinctionSeries(frames, stars, result, dome_s):
     bin_ends = np.searchsorted(flat_sorted, np.arange(n_frames*ny*nx) + 1)
 
     obs = result["obs"].reshape(-1)
-    exp = result["exp"].reshape(-1)
 
-    dm = np.full(n_frames*ny*nx, np.nan)
-    for b in range(len(dm)):
+    n_cells = ny*nx
+    half = DM_WINDOW//2
 
-        if exp[b] < DM_EXP_MIN:
-            continue
+    dm = np.full(n_frames*n_cells, np.nan)
+    for f in range(n_frames):
+        for c in range(n_cells):
 
-        l = logit_sorted[bin_starts[b]:bin_ends[b]]
-        n_obs = obs[b]
+            # Pool the centered window of bins for this cell
+            pool = []
+            n_obs = 0.0
+            for k in range(max(0, f - half), min(n_frames, f + half + 1)):
+                b = k*n_cells + c
+                pool.append(logit_sorted[bin_starts[b]:bin_ends[b]])
+                n_obs += obs[b]
+            l = np.concatenate(pool) if pool else np.array([])
 
-        # No deficit: fully transparent
-        if np.sum(1.0/(1.0 + np.exp(-l))) <= n_obs:
-            dm[b] = 0.0
-            continue
+            if len(l) < DM_MIN_STARS:
+                continue
 
-        # Bisection on the logit shift (expectation is monotone decreasing in it)
-        lo, hi = 0.0, 25.0
-        for _ in range(40):
-            mid = 0.5*(lo + hi)
-            if np.sum(1.0/(1.0 + np.exp(-(l - mid)))) > n_obs:
-                lo = mid
-            else:
-                hi = mid
-        dm[b] = 0.5*(lo + hi)*dome_s
+            # No deficit: fully transparent
+            if np.sum(1.0/(1.0 + np.exp(-l))) <= n_obs:
+                dm[f*n_cells + c] = 0.0
+                continue
 
-    # Temporal median smoothing: a per-frame inversion from a few dozen stars carries
-    # a few tenths of a magnitude of counting noise; clouds persist across bins
-    return _rollingMedian(dm.reshape(n_frames, ny, nx), SMOOTH_FRAMES)
+            # Bisection on the logit shift (expectation is monotone decreasing in it)
+            lo, hi = 0.0, 25.0
+            for _ in range(40):
+                mid = 0.5*(lo + hi)
+                if np.sum(1.0/(1.0 + np.exp(-(l - mid)))) > n_obs:
+                    lo = mid
+                else:
+                    hi = mid
+            dm[f*n_cells + c] = 0.5*(lo + hi)*dome_s
+
+    return dm.reshape(n_frames, ny, nx)
 
 
 def animateTransparency(frames, result, dm, out_path, fps=6, title=None):
