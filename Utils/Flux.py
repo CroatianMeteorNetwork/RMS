@@ -1146,7 +1146,7 @@ def detectMoon(file_list, platepar, config):
 
 
 def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=False, ratio_threshold=None, 
-    only_recalibrate_pp=False):
+    only_recalibrate_pp=False, allow_model_fit=True):
     """Detect clouds based on the number of stars detected in images compared to how many are
     predicted.
 
@@ -1337,12 +1337,17 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
 
     # Self-prime the light-dome model from this station's own archives if none exists (or
     # an auto-fitted one went stale) - no operator needed after an update. Never blocks:
-    # any failure logs and falls through to the scalar behavior below.
-    try:
-        from Utils.FitLightDome import ensureLightDomeModel
-        ensureLightDomeModel(config, platepar=platepar)
-    except Exception as e:
-        log.warning("Light-dome auto-fit unavailable: {}".format(e))
+    # any failure logs and falls through to the scalar behavior below. The crash-recovery
+    # path passes allow_model_fit=False: a refit can take a long time, and there it sits
+    # between a reboot and the resumption of capture (observed costing a full observing
+    # day) - the existing model or the scalar fallback is used instead, and the fit runs
+    # at the normal post-capture slot.
+    if allow_model_fit:
+        try:
+            from Utils.FitLightDome import ensureLightDomeModel
+            ensureLightDomeModel(config, platepar=platepar)
+        except Exception as e:
+            log.warning("Light-dome auto-fit unavailable: {}".format(e))
 
     # Load the fitted site light-dome model, if one is available. It supersedes the scalar
     # LM prediction below: the limiting magnitude varies by over a magnitude across a
@@ -4410,7 +4415,8 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
 
 
 
-def prepareFluxFiles(config, dir_path, ftpdetectinfo_path, mask=None, platepar=None):
+def prepareFluxFiles(config, dir_path, ftpdetectinfo_path, mask=None, platepar=None,
+    allow_model_fit=True):
     """ Prepare files necessary for quickly computing the flux. 
     
     Arguments:
@@ -4467,7 +4473,8 @@ def prepareFluxFiles(config, dir_path, ftpdetectinfo_path, mask=None, platepar=N
     # Run cloud detection and store the appropriate files (don't finish if Python 2 is used, 
     #   just recalibrate the platepar)
     log.info("Detecting clouds...")
-    time_intervals = detectClouds(config, dir_path, mask=mask, save_plots=True, show_plots=False, 
+    time_intervals = detectClouds(config, dir_path, mask=mask, save_plots=True, show_plots=False,
+        allow_model_fit=allow_model_fit, 
         only_recalibrate_pp=(sys.version_info[0] < 3))
 
 

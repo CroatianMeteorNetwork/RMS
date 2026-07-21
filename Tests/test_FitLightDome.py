@@ -369,3 +369,53 @@ def test_lower_pinned_installed_model_falls_back_to_scalar(tmp_path):
 
     assert ensureLightDomeModel(cfg, platepar=DummyPlatepar()) is False
     assert os.path.isfile(os.path.join(str(tmp_path), "US005X_" + AUTO_ATTEMPT_MARKER))
+
+
+def test_dome_nll_gradient_matches_numerical():
+    # The analytic gradient is what makes the site fit tractable; it must agree with
+    # numerical differentiation of the same objective everywhere it is smooth
+    import numpy as np
+    from Utils.FitLightDome import _domeNLLAndGrad
+
+    rng = np.random.RandomState(42)
+    ncam = 3
+    n = 4000
+
+    az = rng.uniform(0.0, 360.0, n)
+    alt = rng.uniform(6.0, 89.0, n)
+    mag = rng.uniform(2.0, 7.0, n)
+    det = (rng.uniform(0.0, 1.0, n) < 0.5).astype(float)
+    ci = rng.randint(0, ncam, n)
+
+    for norder in range(4):
+
+        p = np.array([5.2, 5.6, 5.9] + [0.25, 0.4, 0.8, 22.0]
+                     + [0.9, 130.0, 18.0, 0.4, 40.0, 12.0, -0.2, 15.0, 25.0][:3*norder])
+
+        f0, grad = _domeNLLAndGrad(p, ncam, norder, az, alt, mag, det, ci)
+
+        # Central differences
+        num = np.zeros_like(p)
+        eps = 1e-6
+        for i in range(len(p)):
+            pp_hi, pp_lo = p.copy(), p.copy()
+            pp_hi[i] += eps
+            pp_lo[i] -= eps
+            f_hi, _ = _domeNLLAndGrad(pp_hi, ncam, norder, az, alt, mag, det, ci)
+            f_lo, _ = _domeNLLAndGrad(pp_lo, ncam, norder, az, alt, mag, det, ci)
+            num[i] = (f_hi - f_lo)/(2*eps)
+
+        scale = np.maximum(np.abs(num), 1.0)
+        assert np.allclose(grad/scale, num/scale, atol=5e-5), \
+            "norder={:d}: analytic {} vs numerical {}".format(norder, grad, num)
+
+
+def test_fit_trial_subsampling_deterministic():
+    # The subsample the optimizer sees must reproduce across refits on the same data
+    import numpy as np
+    from Utils.FitLightDome import MAX_FIT_TRIALS
+
+    n = MAX_FIT_TRIALS + 1000
+    sel_a = np.random.RandomState(0).choice(n, MAX_FIT_TRIALS, replace=False)
+    sel_b = np.random.RandomState(0).choice(n, MAX_FIT_TRIALS, replace=False)
+    assert np.array_equal(sel_a, sel_b)

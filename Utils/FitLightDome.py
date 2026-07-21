@@ -350,6 +350,109 @@ def fitQualityIssues(model_dict):
     return issues
 
 
+MAX_FIT_TRIALS = 300000    # star trials the optimizer sees; larger sets are randomly
+                           # subsampled (deterministic seed). ~20 fit parameters need
+                           # nowhere near this many binomial trials, and an uncapped
+                           # 6-camera site fit on adaptive-depth CALSTARS reaches
+                           # millions of trials (observed: 8 h of CPU on a pod computer)
+
+_LN10 = np.log(10.0)
+
+
+def _domeModelLM(p, ncam, norder, az, alt, ci):
+    """ Evaluate the dome model LM per trial (see fitLightDome for the parameter layout).
+
+    Harmonics basis: LP = bowl + sum_k A_k*cos(k*(az - phi_k))*exp(-alt/h_k), clamped
+    non-negative (the cosine terms go negative on the dark side). The dipole (k=1) is
+    the leading term for an observer EMBEDDED in the glow field; for a distant city,
+    higher orders approximate a localized dome.
+    """
+
+    k = p[ncam]
+    q0, hb = p[ncam + 2], p[ncam + 3]
+    alt_c = np.clip(alt, 5.0, 90.0)
+    z2 = np.sin(np.radians(90.0 - alt_c))**2
+    vr = 1.0/np.sqrt(1.0 - 0.97*z2)
+    lp = (10.0**q0)*np.exp(-alt_c/hb)
+    for j in range(norder):
+        qa, phi, hh = p[ncam + 4 + 3*j:ncam + 4 + 3*j + 3]
+        lp = lp + (10.0**qa)*np.cos(np.radians((j + 1)*(az - phi)))*np.exp(-alt_c/hh)
+    B = vr + np.maximum(lp, 0.0)
+    return p[ci] - k*(1.0/np.sin(np.radians(alt_c)) - 1.0) - 1.25*np.log10(B)
+
+
+def _domeNLLAndGrad(p, ncam, norder, az, alt, mag, det, ci):
+    """ Binomial negative log-likelihood of the dome model AND its analytic gradient.
+
+    The closed-form gradient is what makes the fit tractable: L-BFGS-B with numerical
+    differentiation costs (n_params + 1) full likelihood evaluations per gradient - a
+    ~20x multiplier on a 6-camera site fit that once kept a pod computer at 100% CPU
+    for 8 hours. Correctness is pinned against numerical differentiation in the tests.
+
+    Return:
+        (f, grad): NLL value and d(NLL)/dp, same layout as p.
+    """
+
+    k = p[ncam]
+    s = p[ncam + 1]
+    q0, hb = p[ncam + 2], p[ncam + 3]
+
+    alt_c = np.clip(alt, 5.0, 90.0)
+    z2 = np.sin(np.radians(90.0 - alt_c))**2
+    vr = 1.0/np.sqrt(1.0 - 0.97*z2)
+
+    bowl = (10.0**q0)*np.exp(-alt_c/hb)
+    lp = bowl.copy()
+    harmonic_terms = []
+    for j in range(norder):
+        qa, phi, hh = p[ncam + 4 + 3*j:ncam + 4 + 3*j + 3]
+        cosj = np.cos(np.radians((j + 1)*(az - phi)))
+        expj = np.exp(-alt_c/hh)
+        tj = (10.0**qa)*cosj*expj
+        harmonic_terms.append((qa, phi, hh, expj, tj))
+        lp = lp + tj
+
+    pos = lp > 0.0
+    B = vr + np.where(pos, lp, 0.0)
+    airmass = 1.0/np.sin(np.radians(alt_c)) - 1.0
+
+    lm = p[ci] - k*airmass - 1.25*np.log10(B)
+
+    u = (lm - mag)/s
+    pr = 1.0/(1.0 + np.exp(-u))
+    prc = np.clip(pr, 1e-6, 1.0 - 1e-6)
+    f = -np.sum(det*np.log(prc) + (1 - det)*np.log(1 - prc))
+
+    # dNLL/du = pr - det; zero where the clip flattens the likelihood (matches what the
+    # clipped objective actually does there)
+    r = np.where((pr > 1e-6) & (pr < 1.0 - 1e-6), pr - det, 0.0)
+    rs = r/s
+
+    grad = np.zeros_like(p)
+
+    # Per-camera LM0: dLM/dLM0_c = 1 on that camera's trials
+    np.add.at(grad, ci, rs)
+
+    grad[ncam] = -np.sum(rs*airmass)
+    grad[ncam + 1] = -np.sum(r*(lm - mag))/s**2
+
+    # Shared chain factor for every brightness-field parameter:
+    # dLM/dB = -1.25/(ln10 * B), through the non-negativity clamp
+    dB = np.where(pos, -1.25/(_LN10*B), 0.0)
+
+    grad[ncam + 2] = np.sum(rs*dB*_LN10*bowl)
+    grad[ncam + 3] = np.sum(rs*dB*bowl*alt_c/hb**2)
+
+    for j, (qa, phi, hh, expj, tj) in enumerate(harmonic_terms):
+        base = ncam + 4 + 3*j
+        grad[base] = np.sum(rs*dB*_LN10*tj)
+        sinj = np.sin(np.radians((j + 1)*(az - phi)))
+        grad[base + 1] = np.sum(rs*dB*(10.0**qa)*expj*sinj*np.radians(j + 1))
+        grad[base + 2] = np.sum(rs*dB*tj*alt_c/hh**2)
+
+    return f, grad
+
+
 def fitLightDome(station_configs, dates=None, max_order=3, moon_phase_max=MOON_PHASE_MAX,
         lim_mag=None, _depth_iter=0):
     """ Fit the site model over multiple co-located stations.
@@ -433,30 +536,19 @@ def fitLightDome(station_configs, dates=None, max_order=3, moon_phase_max=MOON_P
     det = np.concatenate(det_l)
     ci = np.concatenate(ci_l)
 
-    print("TOTAL: {:d} trials".format(len(az)))
+    n_trials_total = len(az)
+    print("TOTAL: {:d} trials".format(n_trials_total))
 
-    def modelLM(p, azv, altv, civ, norder):
-        # Harmonics basis: LP = bowl + sum_k A_k*cos(k*(az - phi_k))*exp(-alt/h_k),
-        # clamped non-negative (the cosine terms go negative on the dark side). The
-        # dipole (k=1) is the leading term for an observer EMBEDDED in the glow field;
-        # for a distant city, higher orders approximate a localized dome.
-        k = p[ncam]
-        q0, hb = p[ncam + 2], p[ncam + 3]
-        alt_c = np.clip(altv, 5.0, 90.0)
-        z2 = np.sin(np.radians(90.0 - alt_c))**2
-        vr = 1.0/np.sqrt(1.0 - 0.97*z2)
-        lp = (10.0**q0)*np.exp(-alt_c/hb)
-        for j in range(norder):
-            qa, phi, hh = p[ncam + 4 + 3*j:ncam + 4 + 3*j + 3]
-            lp = lp + (10.0**qa)*np.cos(np.radians((j + 1)*(azv - phi)))*np.exp(-alt_c/hh)
-        B = vr + np.maximum(lp, 0.0)
-        return p[civ] - k*(1.0/np.sin(np.radians(alt_c)) - 1.0) - 1.25*np.log10(B)
+    # Cap the trial count the optimizer sees - the parameters are constrained just as
+    # well by a large random subsample, at a fraction of the cost (deterministic seed
+    # so refits on the same data reproduce)
+    if n_trials_total > MAX_FIT_TRIALS:
+        sel = np.random.RandomState(0).choice(n_trials_total, MAX_FIT_TRIALS, replace=False)
+        az, alt, mag, det, ci = az[sel], alt[sel], mag[sel], det[sel], ci[sel]
+        print("Subsampled to {:d} trials for the fit".format(len(az)))
 
     def nll(p, norder):
-        s = p[ncam + 1]
-        pr = 1.0/(1.0 + np.exp(-(modelLM(p, az, alt, ci, norder) - mag)/s))
-        pr = np.clip(pr, 1e-6, 1 - 1e-6)
-        return -np.sum(det*np.log(pr) + (1 - det)*np.log(1 - pr))
+        return _domeNLLAndGrad(p, ncam, norder, az, alt, mag, det, ci)
 
     # LM0 may exceed the catalog depth by a little (the logistic tail still constrains
     # it there), but far beyond it the trials carry no information - bound accordingly
@@ -486,12 +578,12 @@ def fitLightDome(station_configs, dates=None, max_order=3, moon_phase_max=MOON_P
         best = None
         for p0 in starts:
             r = minimize(nll, np.array(p0), args=(norder,), method="L-BFGS-B",
-                bounds=bounds, options=dict(maxiter=120))
+                jac=True, bounds=bounds, options=dict(maxiter=120))
             if (best is None) or (r.fun < best.fun):
                 best = r
 
-        r = minimize(nll, best.x, args=(norder,), method="L-BFGS-B", bounds=bounds,
-            options=dict(maxiter=500))
+        r = minimize(nll, best.x, args=(norder,), method="L-BFGS-B", jac=True,
+            bounds=bounds, options=dict(maxiter=500))
 
         results[norder] = {"p": r.x, "nll": float(r.fun)}
         print("order={:d}  NLL={:.0f}".format(norder, r.fun))
@@ -523,6 +615,7 @@ def fitLightDome(station_configs, dates=None, max_order=3, moon_phase_max=MOON_P
         fit_nights=sorted(set(fit_nights)),
         fit_date=datetime.datetime.utcnow().strftime("%Y-%m-%d"),
         n_trials=int(len(az)),
+        n_trials_total=int(n_trials_total),
         pointing=pointing,
         intensity_threshold=thresholds,
         footprints=footprints,
@@ -574,7 +667,7 @@ def fitLightDome(station_configs, dates=None, max_order=3, moon_phase_max=MOON_P
     # must be ~1.00 for every camera; a deviation means the shared terms misallocate
     print("Training calibration (detected/expected per camera, want ~1.00):")
     s_soft = model_dict["s"]
-    lm_all = modelLM(p, az, alt, ci, use)
+    lm_all = _domeModelLM(p, ncam, use, az, alt, ci)
     p_det = 1.0/(1.0 + np.exp(-(lm_all - mag)/s_soft))
     for i, cam in enumerate(cams):
         sel = ci == i

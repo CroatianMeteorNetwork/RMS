@@ -153,7 +153,8 @@ def getPlatepar(config, night_data_dir):
 
 
 
-def processNight(night_data_dir, config, detection_results=None, nodetect=False):
+def processNight(night_data_dir, config, detection_results=None, nodetect=False,
+    allow_model_fit=True):
     """ Given the directory with FF files, run detection and archiving.  
     
     Arguments:  
@@ -348,7 +349,7 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
             log.info("Preparing flux files...")
             try:
                 prepareFluxFiles(config, night_data_dir, os.path.join(night_data_dir, ftpdetectinfo_name),
-                                 mask=mask, platepar=platepar)
+                                 mask=mask, platepar=platepar, allow_model_fit=allow_model_fit)
 
             except Exception as e:
                 log.debug("Preparing flux files failed with the message:\n" + repr(e))

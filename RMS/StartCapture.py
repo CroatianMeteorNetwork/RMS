@@ -986,9 +986,13 @@ def processIncompleteCaptures(config, upload_manager):
         log.info("Found partially-processed data in {:s}".format(captured_dir_path))
         try:
 
-            # Reprocess the night
+            # Reprocess the night. The light-dome auto-fit is disallowed here: this call
+            # sits between a reboot and the start of capture, and a long refit (hours on
+            # a pooled multi-camera site) would silently cost the observing night. The
+            # fit runs at the normal post-capture processing slot instead.
             night_archive_dir, archive_name, imgdata_archive_name, metadata_archive_name, detector = \
-                                                        processNight(captured_dir_path, config)
+                                                        processNight(captured_dir_path, config,
+                                                                     allow_model_fit=False)
 
             # Upload the archive, if upload is enabled
             if upload_manager is not None:
