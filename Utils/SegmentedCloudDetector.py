@@ -338,6 +338,149 @@ def animateTransparency(frames, result, dm, out_path, fps=6, title=None):
     return out_path
 
 
+def loadFrameTimes(json_path):
+    """ Load a frames-timelapse sidecar (see Utils.GenerateTimelapse): a dict mapping
+        frame index (as string) to a timestamp string derived from the frame file name,
+        e.g. "20260718_051032_123" (a trailing day/night letter is ignored).
+
+    Return:
+        times_unix: [ndarray] Frame times (unix seconds, UTC), ordered by frame index.
+    """
+
+    import datetime
+    import calendar
+
+    with open(json_path) as f:
+        data = json.load(f)
+
+    times = []
+    for idx in sorted(data, key=int):
+        parts = str(data[idx]).split("_")
+        dt = datetime.datetime.strptime(parts[0] + parts[1], "%Y%m%d%H%M%S")
+        ms = int(parts[2]) if (len(parts) > 2 and parts[2].isdigit()) else 0
+        times.append(calendar.timegm(dt.timetuple()) + ms/1000.0)
+
+    return np.array(times)
+
+
+def _renderExtinctionPanel(dm_frame, width_px, height_px, vmax=3.0):
+    """ Render one extinction map as a BGR image (matplotlib -> array). """
+
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    dpi = 100
+    fig, ax = plt.subplots(figsize=(width_px/dpi, height_px/dpi), dpi=dpi)
+    cmap = plt.get_cmap("YlGnBu").copy()
+    cmap.set_bad("lightgray")
+    im = ax.imshow(np.ma.masked_invalid(dm_frame), cmap=cmap, vmin=0.0, vmax=vmax,
+        interpolation="nearest", aspect="auto")
+    ax.set_xticks([])
+    ax.set_yticks([])
+    fig.colorbar(im, ax=ax, fraction=0.05, pad=0.02, label="Extinction (mag)")
+    fig.tight_layout(pad=0.4)
+
+    fig.canvas.draw()
+    buf = np.asarray(fig.canvas.buffer_rgba())[:, :, :3]
+    plt.close(fig)
+
+    # RGB -> BGR for OpenCV, and force the exact requested size
+    import cv2
+    return cv2.resize(buf[:, :, ::-1].copy(), (width_px, height_px))
+
+
+def sideBySideVideo(video_path, frame_times_unix, frames, dm, out_path,
+        fps=None, max_gap=900.0, vmax=3.0):
+    """ Compose the camera timelapse next to the per-cell transparency map, frame by
+        frame - the contrail-attribution view: was that part of the FOV transparent
+        enough at that moment.
+
+    Each timelapse frame is matched to the nearest scored bin in time; frames farther
+    than max_gap from any bin get a "no transparency data" panel instead of a stale map.
+
+    Arguments:
+        video_path: [str] Camera timelapse (e.g. <night>_frames_timelapse.mp4).
+        frame_times_unix: [ndarray] Per-video-frame times (see loadFrameTimes), same
+            order and count as the video frames.
+        frames: [dict] Frame arrays from loadStarScoring (bin times).
+        dm: [ndarray n_bins, ny, nx] Output of extinctionSeries.
+        out_path: [str] Output .mp4.
+
+    Keyword arguments:
+        fps: [float] Output frame rate; source rate when None.
+        max_gap: [float] Seconds beyond which no scored bin is considered current.
+        vmax: [float] Color scale ceiling (mag).
+
+    Return:
+        out_path: [str]
+    """
+
+    import cv2
+    import datetime
+
+    bin_times = np.asarray(frames["frame_time_unix"], dtype=np.float64)
+
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        raise IOError("Could not open video: {:s}".format(video_path))
+
+    src_fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
+    vw = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    vh = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+    panel_w = vh  # square-ish right panel, same height as the video
+    out_size = (vw + panel_w, vh)
+
+    writer = cv2.VideoWriter(out_path, cv2.VideoWriter_fourcc(*"mp4v"),
+        fps if fps else src_fps, out_size)
+
+    # Pre-render one panel per scored bin, plus the no-data panel
+    panels = [_renderExtinctionPanel(dm[j], panel_w, vh, vmax=vmax)
+              for j in range(dm.shape[0])]
+    no_data = np.full((vh, panel_w, 3), 40, dtype=np.uint8)
+    cv2.putText(no_data, "no transparency data", (panel_w//8, vh//2),
+        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (200, 200, 200), 2, cv2.LINE_AA)
+
+    i = 0
+    n_written = 0
+    while True:
+        ok, frame = cap.read()
+        if not ok:
+            break
+
+        if i >= len(frame_times_unix):
+            break
+        t = frame_times_unix[i]
+
+        j = int(np.argmin(np.abs(bin_times - t)))
+        if abs(bin_times[j] - t) <= max_gap:
+            panel = panels[j]
+        else:
+            panel = no_data
+
+        if frame.ndim == 2:
+            frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
+
+        combo = np.hstack([frame, panel])
+
+        stamp = datetime.datetime.utcfromtimestamp(t).strftime("%Y-%m-%d %H:%M:%S UTC")
+        cv2.putText(combo, stamp, (vw + 10, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.55,
+            (0, 0, 0), 3, cv2.LINE_AA)
+        cv2.putText(combo, stamp, (vw + 10, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.55,
+            (255, 255, 255), 1, cv2.LINE_AA)
+
+        writer.write(combo)
+        n_written += 1
+        i += 1
+
+    cap.release()
+    writer.release()
+
+    print("Side-by-side video: {:d} frames -> {:s}".format(n_written, out_path))
+    return out_path
+
+
 def cloudCoverageSeries(result):
     """ Per-frame cloud coverage: fraction of judged cells that are cloudy.
 
@@ -438,6 +581,14 @@ def main():
     parser.add_argument("--dome-s", type=float, default=0.5, help="Logistic width s of "
         "the night's dome model (mag), used to express extinction in magnitudes "
         "(default 0.5; read it from the night's light_dome.json)")
+    parser.add_argument("--video", default=None, help="Camera timelapse mp4 to compose "
+        "side by side with the transparency map")
+    parser.add_argument("--frametimes", default=None, help="Frames-timelapse sidecar "
+        "JSON with per-frame timestamps (see Utils.GenerateTimelapse)")
+    parser.add_argument("--uniform", default=None, help="Fallback frame timing as "
+        "START_ISO,DT_SECONDS (e.g. 2026-07-18T05:03:10,10.24) when no sidecar exists")
+    parser.add_argument("--sidebyside", default=None, help="Output mp4 path for the "
+        "side-by-side composition (requires --video and timing)")
     args = parser.parse_args()
 
     nx, ny = (int(v) for v in args.grid.lower().split("x"))
@@ -461,11 +612,36 @@ def main():
             str(header.get("night", "?")), result["norm"]))
     print("Plot: {:s}".format(out_path))
 
-    if args.animate:
+    dm = None
+    if args.animate or args.sidebyside:
         dm = extinctionSeries(frames, stars, result, args.dome_s)
+
+    if args.animate:
         animateTransparency(frames, result, dm, args.animate,
             title=str(header.get("stationID", "")))
         print("Animation: {:s}".format(args.animate))
+
+    if args.sidebyside:
+        if not args.video:
+            parser.error("--sidebyside requires --video")
+
+        if args.frametimes:
+            frame_times = loadFrameTimes(args.frametimes)
+        elif args.uniform:
+            import calendar
+            import datetime
+            start_str, dt_str = args.uniform.split(",")
+            start_dt = datetime.datetime.strptime(start_str, "%Y-%m-%dT%H:%M:%S")
+            start_unix = calendar.timegm(start_dt.timetuple())
+            import cv2
+            cap = cv2.VideoCapture(args.video)
+            n = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            cap.release()
+            frame_times = start_unix + np.arange(n)*float(dt_str)
+        else:
+            parser.error("--sidebyside requires --frametimes or --uniform")
+
+        sideBySideVideo(args.video, frame_times, frames, dm, args.sidebyside)
 
 
 if __name__ == "__main__":
