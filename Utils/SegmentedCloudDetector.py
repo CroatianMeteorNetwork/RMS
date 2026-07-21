@@ -80,6 +80,11 @@ NORM_FRAME_EXP_MIN = 5.0   # frames with less total expectation don't inform the
 
 SMOOTH_FRAMES = 3      # median-filter window (frames) applied to z per cell
 
+DM_EXP_MIN = 5.0       # minimum summed expectation for an extinction estimate - stricter
+                       # than the verdict floor: inverting a count into magnitudes is
+                       # much noisier than judging a deficit, and a 2-3 star cell can
+                       # flash a spurious multi-magnitude value on one empty frame
+
 
 def computeCellSeries(frames, stars, nx=8, ny=5, width=None, height=None):
     """ Pool the scoring product into per-frame, per-cell statistics and verdicts.
@@ -256,7 +261,7 @@ def extinctionSeries(frames, stars, result, dome_s):
     dm = np.full(n_frames*ny*nx, np.nan)
     for b in range(len(dm)):
 
-        if exp[b] < EXP_MIN:
+        if exp[b] < DM_EXP_MIN:
             continue
 
         l = logit_sorted[bin_starts[b]:bin_ends[b]]
@@ -277,7 +282,9 @@ def extinctionSeries(frames, stars, result, dome_s):
                 hi = mid
         dm[b] = 0.5*(lo + hi)*dome_s
 
-    return dm.reshape(n_frames, ny, nx)
+    # Temporal median smoothing: a per-frame inversion from a few dozen stars carries
+    # a few tenths of a magnitude of counting noise; clouds persist across bins
+    return _rollingMedian(dm.reshape(n_frames, ny, nx), SMOOTH_FRAMES)
 
 
 def animateTransparency(frames, result, dm, out_path, fps=6, title=None):
@@ -363,8 +370,15 @@ def loadFrameTimes(json_path):
     return np.array(times)
 
 
-def _renderExtinctionPanel(dm_frame, width_px, height_px, vmax=3.0):
-    """ Render one extinction map as a BGR image (matplotlib -> array). """
+def _renderExtinctionPanel(dm_frame, width_px, height_px, vmax=3.0, mask_img=None,
+        img_size=None):
+    """ Render one extinction map as a BGR image (matplotlib -> array).
+
+    mask_img (station mask, 0 = obstructed) is drawn as an opaque dark overlay: a cell
+    verdict only speaks for the sky it can see, and the per-cell normalization absorbs
+    static obstruction - without the overlay, terrain inside a partially-open cell
+    would inherit the cell's sky color and read as "transparent ground".
+    """
 
     import matplotlib
     matplotlib.use("Agg")
@@ -374,8 +388,15 @@ def _renderExtinctionPanel(dm_frame, width_px, height_px, vmax=3.0):
     fig, ax = plt.subplots(figsize=(width_px/dpi, height_px/dpi), dpi=dpi)
     cmap = plt.get_cmap("YlGnBu").copy()
     cmap.set_bad("lightgray")
+    ext = None
+    if img_size is not None:
+        ext = [0, img_size[0], img_size[1], 0]
     im = ax.imshow(np.ma.masked_invalid(dm_frame), cmap=cmap, vmin=0.0, vmax=vmax,
-        interpolation="nearest", aspect="auto")
+        interpolation="nearest", aspect="auto", extent=ext)
+    if (mask_img is not None) and (ext is not None):
+        over = np.zeros(mask_img.shape + (4,))
+        over[mask_img < 128] = (0.25, 0.25, 0.25, 1.0)
+        ax.imshow(over, extent=ext, interpolation="nearest", aspect="auto")
     ax.set_xticks([])
     ax.set_yticks([])
     fig.colorbar(im, ax=ax, fraction=0.05, pad=0.02, label="Extinction (mag)")
@@ -391,7 +412,7 @@ def _renderExtinctionPanel(dm_frame, width_px, height_px, vmax=3.0):
 
 
 def sideBySideVideo(video_path, frame_times_unix, frames, dm, out_path,
-        fps=None, max_gap=900.0, vmax=3.0):
+        fps=None, max_gap=900.0, vmax=3.0, mask_img=None, img_size=None):
     """ Compose the camera timelapse next to the per-cell transparency map, frame by
         frame - the contrail-attribution view: was that part of the FOV transparent
         enough at that moment.
@@ -435,8 +456,12 @@ def sideBySideVideo(video_path, frame_times_unix, frames, dm, out_path,
     writer = cv2.VideoWriter(out_path, cv2.VideoWriter_fourcc(*"mp4v"),
         fps if fps else src_fps, out_size)
 
+    if img_size is None:
+        img_size = (vw, vh)
+
     # Pre-render one panel per scored bin, plus the no-data panel
-    panels = [_renderExtinctionPanel(dm[j], panel_w, vh, vmax=vmax)
+    panels = [_renderExtinctionPanel(dm[j], panel_w, vh, vmax=vmax, mask_img=mask_img,
+                                     img_size=img_size)
               for j in range(dm.shape[0])]
     no_data = np.full((vh, panel_w, 3), 40, dtype=np.uint8)
     cv2.putText(no_data, "no transparency data", (panel_w//8, vh//2),
@@ -589,6 +614,8 @@ def main():
         "START_ISO,DT_SECONDS (e.g. 2026-07-18T05:03:10,10.24) when no sidecar exists")
     parser.add_argument("--sidebyside", default=None, help="Output mp4 path for the "
         "side-by-side composition (requires --video and timing)")
+    parser.add_argument("--mask", default=None, help="Station mask image (mask.bmp); "
+        "obstructed regions are drawn opaque on the transparency panels")
     args = parser.parse_args()
 
     nx, ny = (int(v) for v in args.grid.lower().split("x"))
@@ -641,7 +668,14 @@ def main():
         else:
             parser.error("--sidebyside requires --frametimes or --uniform")
 
-        sideBySideVideo(args.video, frame_times, frames, dm, args.sidebyside)
+        mask_img = None
+        if args.mask:
+            import cv2
+            mask_img = cv2.imread(args.mask, 0)
+
+        sideBySideVideo(args.video, frame_times, frames, dm, args.sidebyside,
+            mask_img=mask_img,
+            img_size=(int(result["width"]), int(result["height"])))
 
 
 if __name__ == "__main__":

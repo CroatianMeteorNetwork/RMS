@@ -113,3 +113,23 @@ def test_empty_cells_carry_no_verdict():
     assert np.all(result["verdict"][:, :, 3] == CELL_NO_DATA)
     left = result["verdict"][:, :, 0]
     assert np.all(left[left != CELL_NO_DATA] == CELL_CLEAR)
+
+
+def test_extinction_inversion_localizes_cloud():
+    from Utils.SegmentedCloudDetector import extinctionSeries
+
+    cloud_frames = set(range(10, 20))
+    frames, stars = _syntheticProduct(cloud_frames=cloud_frames,
+        cloud_box=(0, 0, 640, 360))
+    result = computeCellSeries(frames, stars, nx=4, ny=2,
+        width=1280.0, height=720.0)
+
+    dm = extinctionSeries(frames, stars, result, dome_s=0.4)
+
+    # Inside the cloud window and box: strong extinction (total star loss reads as
+    # at least a couple of magnitudes)
+    assert np.nanmin(dm[12:18, 0, :2]) > 1.0
+
+    # Clear cells and clear times: at or near zero
+    assert np.nanmax(dm[12:18, 1, 2:]) < 0.3
+    assert np.nanmax(dm[:8]) < 0.3
