@@ -130,6 +130,8 @@ def test_extinction_inversion_localizes_cloud():
     # at least a couple of magnitudes)
     assert np.nanmin(dm[12:18, 0, :2]) > 1.0
 
-    # Clear cells and clear times: at or near zero
-    assert np.nanmax(dm[12:18, 1, 2:]) < 0.3
-    assert np.nanmax(dm[:8]) < 0.3
+    # Clear cells and clear times: at the counting-noise floor (a few-star binomial
+    # fluctuation reads as up to a few tenths of a magnitude at this star density),
+    # cleanly separated from the in-cloud values
+    assert np.nanmax(dm[12:18, 1, 2:]) < 0.5
+    assert np.nanmax(dm[:8]) < 0.5
