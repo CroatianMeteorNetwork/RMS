@@ -343,8 +343,9 @@ class InputTypeFRFF(InputType):
     def ncols(self, ncols):
         self.__ncols = ncols
         for file in self.cache.keys():
-            if self.cache[file].ncols is None:
-                self.cache[file].ncols = ncols
+            if self.cache[file] is not None:
+                if self.cache[file].ncols is None:
+                    self.cache[file].ncols = ncols
 
     @property
     def beginning_datetime(self):
