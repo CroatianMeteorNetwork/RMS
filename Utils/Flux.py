@@ -26,6 +26,7 @@ import matplotlib.dates as mdates
 from matplotlib import scale as mscale
 import matplotlib.pyplot as plt
 import numpy as np
+import scipy.spatial
 import scipy.stats
 from RMS.Logger import LoggingManager, getLogger
 
@@ -1534,6 +1535,11 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
                           calstars_row=[])
             pp_ref = platepar
 
+            # Accumulate per-frame ARRAYS and concatenate once. Extending Python
+            # lists with numpy scalars boxes every element (~30 bytes each) - at
+            # tens of millions of records that is gigabytes of pure overhead and
+            # got the capture process OOM-killed. Frames are consumed (popped)
+            # as they are appended so the night is never held twice.
             for k, ff in enumerate(sorted(star_records.keys())):
                 t = FFfile.filenameToDatetime(ff)
                 date = FFfile.getMiddleTimeFF(ff, config.fps, ret_milliseconds=True)
@@ -1546,16 +1552,23 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
                 f_meta["moon_phase"].append(m_phase)
                 f_meta["n_detected"].append(len(calstars_positions.get(ff, [])))
                 f_meta["in_flux_domain"].append(ff in domain_set)
-                f_meta["p_chance"].append(float(star_records[ff].get("p_chance", 0.0)))
 
-                rec = star_records[ff]
-                n_s = len(rec["x"])
-                s_arrs["star_frame"].extend([k]*n_s)
-                s_arrs["star_x"].extend(rec["x"])
-                s_arrs["star_y"].extend(rec["y"])
-                s_arrs["star_mag"].extend(rec["mag"])
-                s_arrs["star_p"].extend(rec["p"])
-                s_arrs["calstars_row"].extend(rec["calstars_row"])
+                rec = star_records.pop(ff)
+                f_meta["p_chance"].append(float(rec.get("p_chance", 0.0)))
+
+                # Records arrive already floored at STORE_P_MIN (cut at collection
+                # in denseDomeRatios so the faint tail is never held in memory)
+                s_arrs["star_frame"].append(
+                    np.full(len(rec["x"]), k, dtype=np.int32))
+                s_arrs["star_x"].append(rec["x"])
+                s_arrs["star_y"].append(rec["y"])
+                s_arrs["star_mag"].append(rec["mag"])
+                s_arrs["star_p"].append(rec["p"])
+                s_arrs["calstars_row"].append(rec["calstars_row"])
+
+            s_arrs = {key: (np.concatenate(chunks) if chunks
+                            else np.zeros(0, dtype=np.float32))
+                      for key, chunks in s_arrs.items()}
 
             header = dict(
                 stationID=str(config.stationID),
@@ -1566,6 +1579,7 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
                 dome_s=float(dome_model.s),
                 cadence="per_ff",
                 star_gate_factor=float(getattr(config, "star_gate_factor", 3.0)),
+                store_p_min=STORE_P_MIN,
             )
             out_path = saveStarScoring(dir_path, night_name, header, f_meta, s_arrs)
             log.info("Star scoring product written: {:s} ({:d} frames, {:d} star "
@@ -1573,6 +1587,17 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
                      len(f_meta["frame_names"]), len(s_arrs["star_x"])))
         except Exception as e:
             log.warning("Could not write the star scoring product: {}".format(e))
+
+        # Release the build-time structures BEFORE the transparency step re-loads
+        # the product from disk - holding both was part of the OOM that killed a
+        # station's capture process right at this point
+        star_records = None
+        try:
+            del s_arrs, f_meta
+        except NameError:
+            pass
+        import gc
+        gc.collect()
 
         # Transparency-map product for downstream consumers (contrail attribution):
         # per-frame, per-cell extinction computed on station so consumers just read
@@ -1905,6 +1930,16 @@ DENSE_MATCH_RADIUS_PX = 3.0   # px - a predicted star counts as matched if a CAL
                               # detection lies within this radius (same radius the light
                               # dome model is fitted with, see Utils.FitLightDome)
 
+STORE_P_MIN = 0.02            # persisted-product floor on the model detection probability.
+                              # An adaptive-depth fit can go very deep (catalog mag ~9,
+                              # >10k stars/frame); below this floor a star's matches are
+                              # dominated by the chance-coincidence channel, which the
+                              # per-cell consumers do not model - such records add bias and
+                              # bulk (observed: 38M records -> ~400 MB npz -> OOM-killed
+                              # capture), not information. The cut is match-independent, so
+                              # the observed and expected channels shrink consistently. The
+                              # VERDICT path is unaffected: it uses the full catalog above.
+
 
 def denseDomeRatios(config, dome_model, ff_list, calstars_positions, recalibrated_platepars, mask,
         collect_stars=False):
@@ -2006,10 +2041,14 @@ def denseDomeRatios(config, dome_model, ff_list, calstars_positions, recalibrate
         expected[ff_file] = float(np.sum(p_match))
 
         if len(detections):
-            dist2 = (x[:, None] - detections[None, :, 0])**2 \
-                + (y[:, None] - detections[None, :, 1])**2
-            nearest = np.argmin(dist2, axis=1)
-            hit = dist2[np.arange(len(x)), nearest] <= DENSE_MATCH_RADIUS_PX**2
+            # KD-tree nearest detection per predicted star. The full pairwise
+            # distance matrix (n_stars x n_detections float64) used here before
+            # allocated up to hundreds of MB per frame; thousands of those
+            # transients interleaved with the retained per-frame records
+            # fragmented the heap to a multi-GB peak RSS (OOM-killed a station)
+            dist, nearest = scipy.spatial.cKDTree(detections).query(
+                np.column_stack([x, y]), k=1)
+            hit = dist <= DENSE_MATCH_RADIUS_PX
             matched[ff_file] = int(np.sum(hit))
         else:
             nearest = np.zeros(len(x), dtype=int)
@@ -2017,13 +2056,17 @@ def denseDomeRatios(config, dome_model, ff_list, calstars_positions, recalibrate
             matched[ff_file] = 0
 
         if collect_stars:
+            # Persist only stars above the store floor (see STORE_P_MIN) - the
+            # chance-dominated faint tail is dropped HERE, not at save time, so
+            # a deep-catalog night never holds it in memory
+            keep = p_det >= STORE_P_MIN
             star_records[ff_file] = dict(
-                x=np.asarray(x, dtype=np.float32),
-                y=np.asarray(y, dtype=np.float32),
-                mag=np.asarray(mag, dtype=np.float32),
-                p=np.asarray(p_det, dtype=np.float32),
+                x=np.asarray(x[keep], dtype=np.float32),
+                y=np.asarray(y[keep], dtype=np.float32),
+                mag=np.asarray(mag[keep], dtype=np.float32),
+                p=np.asarray(p_det[keep], dtype=np.float32),
                 p_chance=float(p_chance),
-                calstars_row=np.where(hit, nearest, -1).astype(np.int32),
+                calstars_row=np.where(hit[keep], nearest[keep], -1).astype(np.int32),
             )
 
     return (matched, expected, star_records) if collect_stars else (matched, expected)

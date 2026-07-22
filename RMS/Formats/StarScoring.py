@@ -39,8 +39,16 @@ import os
 
 import numpy as np
 
-SCHEMA_VERSION = 2   # v2: per-FF cadence; frames gain p_chance (per-frame chance-match
-                     # floor); header gains dome_s and cadence
+# v2: per-FF cadence; frames gain p_chance (per-frame chance-match floor); header
+#     gains dome_s and cadence.
+# v3: star records are floored at header store_p_min - stars whose model detection
+#     probability is below it are not persisted. Their matches are chance-dominated
+#     (bias for consumers that treat a match as a real detection) and an
+#     adaptive-depth fit can push the catalog deep enough that they dominate the
+#     product (>10k stars/frame, hundreds of MB, an OOM-killed station). The cut is
+#     independent of the match outcome, so observed and expected shrink consistently
+#     and ratio consumers need no change.
+SCHEMA_VERSION = 3
 
 FILE_SUFFIX = "star_scoring.npz"
 
