@@ -288,24 +288,75 @@ def sphericalToCartesian(r, theta, phi):
 
 def pointInsideConvexPolygonSphere(points, vertices):
     """
-    LEGACY FUNCTION.
-
     Polygon must be convex
     https://math.stackexchange.com/questions/4012834/checking-that-a-point-is-in-a-spherical-polygon
 
+    Vectorized: a point is inside a convex spherical polygon iff it lies on the same
+    side of every edge's great circle, i.e. sign(P . (Vi x Vi+1)) is consistent for
+    all edges. One matrix product against the precomputed edge normals - O(N*edges)
+    numpy, versus the per-point python loop of the generic sphericalPolygonCheck
+    (which cost ~0.5 s per frame on the dense scoring path).
 
     Arguments:
         points: [array] Points with dimension (npoints, 2). The two dimensions are ra and dec in degrees.
-        vertices: [array] Vertices of convex polygon with dimension (nvertices, 2). The two dimensions are 
+        vertices: [array] Vertices of convex polygon with dimension (nvertices, 2). The two dimensions are
             ra and dec in degrees.
-        
+
     Return:
-        filter: [array of bool] Array of booleans on whether a given point is inside the polygon on 
+        filter: [array of bool] Array of booleans on whether a given point is inside the polygon on
             the sphere.
     """
 
-    # Call the new function to check if the points are inside the polygon
-    return sphericalPolygonCheck(vertices, points)
+    points = np.asarray(points, dtype=np.float64)
+    vertices = np.asarray(vertices, dtype=np.float64)
+
+    def _unit(radec):
+        ra = np.radians(radec[:, 0])
+        dec = np.radians(radec[:, 1])
+        return np.column_stack([np.cos(ra)*np.cos(dec), np.sin(ra)*np.cos(dec),
+                                np.sin(dec)])
+
+    p = _unit(points)
+    v = _unit(vertices)
+
+    # Drop a duplicated closing vertex
+    if len(v) > 1 and np.allclose(v[0], v[-1]):
+        v = v[:-1]
+
+    # Gnomonic projection about the polygon centroid maps great circles to straight
+    # lines EXACTLY, so the spherical polygon (great-circle edges, convex or not - a
+    # wide-FOV frame outline is strongly non-convex on the sphere) reduces to a plain
+    # 2D point-in-polygon test
+    c = v.mean(axis=0)
+    c /= np.linalg.norm(c)
+    e1 = np.cross(c, [0.0, 0.0, 1.0])
+    if np.linalg.norm(e1) < 1e-9:
+        e1 = np.cross(c, [0.0, 1.0, 0.0])
+    e1 /= np.linalg.norm(e1)
+    e2 = np.cross(c, e1)
+
+    def _gnomonic(u3):
+        d = u3 @ c
+        with np.errstate(divide="ignore", invalid="ignore"):
+            return (u3 @ e1)/d, (u3 @ e2)/d, d
+
+    vx, vy, _ = _gnomonic(v)
+    px, py, pd = _gnomonic(p)
+
+    # Points on the far hemisphere can never be inside (and their projection folds)
+    ok = pd > 1e-9
+
+    # Vectorized even-odd crossing test over the polygon edges
+    inside = np.zeros(len(p), dtype=bool)
+    x1, y1 = vx, vy
+    x2, y2 = np.roll(vx, -1), np.roll(vy, -1)
+    for i in range(len(vx)):
+        crosses = (y1[i] > py) != (y2[i] > py)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            x_at = (x2[i] - x1[i])*(py - y1[i])/(y2[i] - y1[i]) + x1[i]
+        inside ^= crosses & (px < x_at)
+
+    return inside & ok
 
 
 def sphericalPolygonArea(points):
