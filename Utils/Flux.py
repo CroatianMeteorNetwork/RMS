@@ -1529,7 +1529,7 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
             night_name = os.path.basename(os.path.normpath(dir_path))
             epoch = datetime.datetime(1970, 1, 1)
             f_meta = dict(frame_names=[], frame_time_unix=[], sun_alt=[], moon_alt=[],
-                          moon_phase=[], n_detected=[], in_flux_domain=[])
+                          moon_phase=[], n_detected=[], in_flux_domain=[], p_chance=[])
             s_arrs = dict(star_frame=[], star_x=[], star_y=[], star_mag=[], star_p=[],
                           calstars_row=[])
             pp_ref = platepar
@@ -1546,6 +1546,7 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
                 f_meta["moon_phase"].append(m_phase)
                 f_meta["n_detected"].append(len(calstars_positions.get(ff, [])))
                 f_meta["in_flux_domain"].append(ff in domain_set)
+                f_meta["p_chance"].append(float(star_records[ff].get("p_chance", 0.0)))
 
                 rec = star_records[ff]
                 n_s = len(rec["x"])
@@ -1943,6 +1944,15 @@ def denseDomeRatios(config, dome_model, ff_list, calstars_positions, recalibrate
     expected = {}
     star_records = {}
 
+    # Usable area for the chance-match floor (same floor the fit models: a catalog
+    # star matches either by true detection or by a random detection within the
+    # match radius - scoring must include it or expected counts run low exactly
+    # where the fit learned the floor)
+    if (mask is not None) and (getattr(mask, "img", None) is not None):
+        usable_px = float(np.count_nonzero(mask.img > 0))
+    else:
+        usable_px = None
+
     for ff_file in sorted(ff_list):
 
         detections = calstars_positions.get(ff_file)
@@ -1967,7 +1977,13 @@ def denseDomeRatios(config, dome_model, ff_list, calstars_positions, recalibrate
             continue
 
         p_det = dome_model.detectionProbability(mag, az, alt, station_id=config.stationID)
-        expected[ff_file] = float(np.sum(p_det))
+
+        area = usable_px if usable_px is not None \
+            else float(platepar.X_res*platepar.Y_res)
+        p_chance = 1.0 - np.exp(-len(detections)*np.pi*DENSE_MATCH_RADIUS_PX**2
+                                /max(area, 1.0))
+        p_match = p_chance + p_det*(1.0 - p_chance)
+        expected[ff_file] = float(np.sum(p_match))
 
         if len(detections):
             dist2 = (x[:, None] - detections[None, :, 0])**2 \
@@ -1986,6 +2002,7 @@ def denseDomeRatios(config, dome_model, ff_list, calstars_positions, recalibrate
                 y=np.asarray(y, dtype=np.float32),
                 mag=np.asarray(mag, dtype=np.float32),
                 p=np.asarray(p_det, dtype=np.float32),
+                p_chance=float(p_chance),
                 calstars_row=np.where(hit, nearest, -1).astype(np.int32),
             )
 

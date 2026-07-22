@@ -387,12 +387,15 @@ def test_dome_nll_gradient_matches_numerical():
     det = (rng.uniform(0.0, 1.0, n) < 0.5).astype(float)
     ci = rng.randint(0, ncam, n)
 
+    # Per-frame-style chance floor, nonzero so the floored gradient path is exercised
+    pc = rng.uniform(0.0, 0.03, n)
+
     for norder in range(4):
 
         p = np.array([5.2, 5.6, 5.9] + [0.25, 0.4, 0.8, 22.0]
                      + [0.9, 130.0, 18.0, 0.4, 40.0, 12.0, -0.2, 15.0, 25.0][:3*norder])
 
-        f0, grad = _domeNLLAndGrad(p, ncam, norder, az, alt, mag, det, ci)
+        f0, grad = _domeNLLAndGrad(p, ncam, norder, az, alt, mag, det, ci, pc)
 
         # Central differences
         num = np.zeros_like(p)
@@ -401,8 +404,8 @@ def test_dome_nll_gradient_matches_numerical():
             pp_hi, pp_lo = p.copy(), p.copy()
             pp_hi[i] += eps
             pp_lo[i] -= eps
-            f_hi, _ = _domeNLLAndGrad(pp_hi, ncam, norder, az, alt, mag, det, ci)
-            f_lo, _ = _domeNLLAndGrad(pp_lo, ncam, norder, az, alt, mag, det, ci)
+            f_hi, _ = _domeNLLAndGrad(pp_hi, ncam, norder, az, alt, mag, det, ci, pc)
+            f_lo, _ = _domeNLLAndGrad(pp_lo, ncam, norder, az, alt, mag, det, ci, pc)
             num[i] = (f_hi - f_lo)/(2*eps)
 
         scale = np.maximum(np.abs(num), 1.0)

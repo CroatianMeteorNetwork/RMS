@@ -119,7 +119,7 @@ def buildStationTrials(config, night_dirs, n_ff=FF_PER_NIGHT, moon_phase_max=MOO
         mag_band_ratios=config.star_catalog_band_ratios)
     cat_ra, cat_dec, cat_mag = catalog_stars[:, 0], catalog_stars[:, 1], catalog_stars[:, 2]
 
-    az_all, alt_all, mag_all, det_all = [], [], [], []
+    az_all, alt_all, mag_all, det_all, pchance_all = [], [], [], [], []
 
     for night_dir in night_dirs:
 
@@ -218,10 +218,22 @@ def buildStationTrials(config, night_dirs, n_ff=FF_PER_NIGHT, moon_phase_max=MOO
             dist2 = (x[:, None] - sx[None, :])**2 + (y[:, None] - sy[None, :])**2
             detected = (dist2.min(axis=1) <= MATCH_RADIUS_PX**2).astype(np.int8)
 
+            # Chance-match floor of this frame: a catalog star with no true detection
+            # still "matches" a random detection within the radius. At adaptive depths
+            # the faint trials are numerous enough (hundreds of thousands) that this
+            # ~1% floor, left unmodeled, teaches the fit a fat logistic tail - the
+            # July-22 refit wave over-predicted faint expectations ~2-7x this way.
+            if (mask is not None) and (getattr(mask, "img", None) is not None):
+                usable_px = float(np.count_nonzero(mask.img > 0))
+            else:
+                usable_px = float(w*h)
+            p_chance = 1.0 - np.exp(-len(sx)*np.pi*MATCH_RADIUS_PX**2/max(usable_px, 1.0))
+
             az_all.append(az)
             alt_all.append(alt)
             mag_all.append(m)
             det_all.append(detected)
+            pchance_all.append(np.full(len(m), p_chance))
 
     if n_moon_excluded:
         print("  moon filter: excluded {:d} frame(s) (moon up, phase > {:.0f}%)".format(
@@ -232,6 +244,7 @@ def buildStationTrials(config, night_dirs, n_ff=FF_PER_NIGHT, moon_phase_max=MOO
 
     return dict(az=np.concatenate(az_all), alt=np.concatenate(alt_all),
         mag=np.concatenate(mag_all), det=np.concatenate(det_all),
+        pchance=np.concatenate(pchance_all),
         pointing=(float(pp.az_centre), float(pp.alt_centre)),
         footprint=footprint)
 
@@ -337,8 +350,17 @@ def _domeModelLM(p, ncam, norder, az, alt, ci):
     return p[ci] - k*(1.0/np.sin(np.radians(alt_c)) - 1.0) - 1.25*np.log10(B)
 
 
-def _domeNLLAndGrad(p, ncam, norder, az, alt, mag, det, ci):
+def _domeNLLAndGrad(p, ncam, norder, az, alt, mag, det, ci, pchance=None):
     """ Binomial negative log-likelihood of the dome model AND its analytic gradient.
+
+    The observation model includes the per-frame chance-match floor: a catalog star
+    matches either by true detection (logistic in the model LM) or by a random
+    detection landing within the match radius,
+
+        P_match = p_c + (1 - p_c) * P_det(LM, m)
+
+    Omitting p_c lets hundreds of thousands of faint deep-catalog trials (matched at
+    the ~1% chance rate) inflate the fitted logistic tail.
 
     The closed-form gradient is what makes the fit tractable: L-BFGS-B with numerical
     differentiation costs (n_params + 1) full likelihood evaluations per gradient - a
@@ -348,6 +370,9 @@ def _domeNLLAndGrad(p, ncam, norder, az, alt, mag, det, ci):
     Return:
         (f, grad): NLL value and d(NLL)/dp, same layout as p.
     """
+
+    if pchance is None:
+        pchance = np.zeros(len(az))
 
     k = p[ncam]
     s = p[ncam + 1]
@@ -376,12 +401,16 @@ def _domeNLLAndGrad(p, ncam, norder, az, alt, mag, det, ci):
 
     u = (lm - mag)/s
     pr = 1.0/(1.0 + np.exp(-u))
-    prc = np.clip(pr, 1e-6, 1.0 - 1e-6)
-    f = -np.sum(det*np.log(prc) + (1 - det)*np.log(1 - prc))
+    pm = pchance + pr*(1.0 - pchance)
+    pmc = np.clip(pm, 1e-6, 1.0 - 1e-6)
+    f = -np.sum(det*np.log(pmc) + (1 - det)*np.log(1 - pmc))
 
-    # dNLL/du = pr - det; zero where the clip flattens the likelihood (matches what the
-    # clipped objective actually does there)
-    r = np.where((pr > 1e-6) & (pr < 1.0 - 1e-6), pr - det, 0.0)
+    # dNLL/du = w*(pm - det) with w = pr*(1-pr)*(1-p_c)/(pm*(1-pm)); reduces to the
+    # familiar (pr - det) when p_c = 0. Zeroed where the clip flattens the likelihood.
+    inside = (pm > 1e-6) & (pm < 1.0 - 1e-6)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        w = pr*(1.0 - pr)*(1.0 - pchance)/(pm*(1.0 - pm))
+    r = np.where(inside, w*(pm - det), 0.0)
     rs = r/s
 
     grad = np.zeros_like(p)
@@ -438,7 +467,7 @@ def fitLightDome(station_configs, dates=None, max_order=3, moon_phase_max=MOON_P
     if lim_mag is None:
         lim_mag = DOME_CATALOG_LIM_MAG
 
-    az_l, alt_l, mag_l, det_l, ci_l = [], [], [], [], []
+    az_l, alt_l, mag_l, det_l, ci_l, pchance_l = [], [], [], [], [], []
     fit_nights = []
     pointing = {}
     thresholds = {}
@@ -472,6 +501,7 @@ def fitLightDome(station_configs, dates=None, max_order=3, moon_phase_max=MOON_P
         alt_l.append(trials["alt"])
         mag_l.append(trials["mag"])
         det_l.append(trials["det"])
+        pchance_l.append(trials["pchance"])
         ci_l.append(np.full(n, len(cams), dtype=np.int64))
 
         # Metadata for staleness detection (see ensureLightDomeModel) and the model plot
@@ -491,6 +521,7 @@ def fitLightDome(station_configs, dates=None, max_order=3, moon_phase_max=MOON_P
     mag = np.concatenate(mag_l)
     det = np.concatenate(det_l)
     ci = np.concatenate(ci_l)
+    pchance = np.concatenate(pchance_l)
 
     n_trials_total = len(az)
     print("TOTAL: {:d} trials".format(n_trials_total))
@@ -500,11 +531,15 @@ def fitLightDome(station_configs, dates=None, max_order=3, moon_phase_max=MOON_P
     # so refits on the same data reproduce)
     if n_trials_total > MAX_FIT_TRIALS:
         sel = np.random.RandomState(0).choice(n_trials_total, MAX_FIT_TRIALS, replace=False)
-        az, alt, mag, det, ci = az[sel], alt[sel], mag[sel], det[sel], ci[sel]
+        az, alt, mag, det, ci, pchance = (az[sel], alt[sel], mag[sel], det[sel],
+                                          ci[sel], pchance[sel])
         print("Subsampled to {:d} trials for the fit".format(len(az)))
 
+    print("Chance-match floor: median {:.4f}, p90 {:.4f}".format(
+        float(np.median(pchance)), float(np.percentile(pchance, 90))))
+
     def nll(p, norder):
-        return _domeNLLAndGrad(p, ncam, norder, az, alt, mag, det, ci)
+        return _domeNLLAndGrad(p, ncam, norder, az, alt, mag, det, ci, pchance)
 
     # LM0 may exceed the catalog depth by a little (the logistic tail still constrains
     # it there), but far beyond it the trials carry no information - bound accordingly
@@ -625,10 +660,37 @@ def fitLightDome(station_configs, dates=None, max_order=3, moon_phase_max=MOON_P
     s_soft = model_dict["s"]
     lm_all = _domeModelLM(p, ncam, use, az, alt, ci)
     p_det = 1.0/(1.0 + np.exp(-(lm_all - mag)/s_soft))
+    p_match = pchance + p_det*(1.0 - pchance)
     for i, cam in enumerate(cams):
         sel = ci == i
         if np.any(sel):
-            print("  {:s}: {:.2f}".format(cam, float(np.sum(det[sel])/np.sum(p_det[sel]))))
+            print("  {:s}: {:.2f}".format(cam,
+                float(np.sum(det[sel])/np.sum(p_match[sel]))))
+
+    # Magnitude-resolved empirical calibration: parameters at their bounds are one
+    # failure class (fitQualityIssues); a model that fits its parameters comfortably
+    # while lying about the sky is another. Compare claimed match probability against
+    # the measured rate per magnitude bin on the training trials - the July-22 refit
+    # wave (P=0.33 claimed vs 0.14 delivered at mag 5-6) is exactly what this catches.
+    # The table travels in the model file; gross bins block adoption via
+    # quality_issues.
+    calibration = []
+    for lo in np.arange(np.floor(mag.min()), np.ceil(lim_mag)):
+        b = (mag >= lo) & (mag < lo + 1)
+        if b.sum() < 500:
+            continue
+        mean_pm = float(np.mean(p_match[b]))
+        rate = float(np.mean(det[b]))
+        calibration.append(dict(mag_lo=float(lo), n=int(b.sum()),
+            expected=round(mean_pm, 4), measured=round(rate, 4)))
+        if (mean_pm >= 0.02) and (abs(rate - mean_pm) > max(0.05, 0.5*mean_pm)):
+            model_dict["quality_issues"].append(
+                "calibration: mag {:.0f}-{:.0f} claims P={:.3f} but measures "
+                "{:.3f} on the training trials".format(lo, lo + 1, mean_pm, rate))
+    model_dict["calibration"] = calibration
+    for msg in model_dict["quality_issues"]:
+        if msg.startswith("calibration"):
+            print("WARNING: " + msg)
 
     return model_dict
 

@@ -39,7 +39,8 @@ import os
 
 import numpy as np
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2   # v2: per-FF cadence; frames gain p_chance (per-frame chance-match
+                     # floor); header gains dome_s and cadence
 
 FILE_SUFFIX = "star_scoring.npz"
 
@@ -79,6 +80,8 @@ def saveStarScoring(dir_path, night_name, header, frames, stars):
         moon_phase=np.asarray(frames["moon_phase"], dtype=np.float32),
         n_detected=np.asarray(frames["n_detected"], dtype=np.int32),
         in_flux_domain=np.asarray(frames["in_flux_domain"], dtype=bool),
+        p_chance=np.asarray(frames.get("p_chance",
+            np.zeros(len(frames["frame_names"]))), dtype=np.float32),
         star_frame=np.asarray(stars["star_frame"], dtype=np.int32),
         star_x=np.asarray(stars["star_x"], dtype=np.float32),
         star_y=np.asarray(stars["star_y"], dtype=np.float32),
@@ -99,10 +102,10 @@ def loadStarScoring(path):
 
     with np.load(path, allow_pickle=False) as z:
         header = json.loads(str(z["header"]))
-        frames = {k: z[k] for k in ("frame_names", "frame_time_unix", "sun_alt",
-                                    "moon_alt", "moon_phase", "n_detected",
-                                    "in_flux_domain")}
-        stars = {k: z[k] for k in ("star_frame", "star_x", "star_y", "star_mag",
-                                   "star_p", "calstars_row")}
+        # Tolerant of schema growth in both directions: load the keys present
+        frames = {k: z[k] for k in z.files
+                  if not k.startswith("star_") and k not in ("header", "calstars_row")}
+        stars = {k: z[k] for k in z.files
+                 if k.startswith("star_") or k == "calstars_row"}
 
     return header, frames, stars
