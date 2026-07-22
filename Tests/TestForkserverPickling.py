@@ -14,6 +14,7 @@ process rather than calling pickle.dumps() directly.
 """
 
 import multiprocessing
+import sys
 
 import pytest
 
@@ -58,9 +59,20 @@ def test_setMultiprocessingStartMethod_returns_valid_method():
     method = setMultiprocessingStartMethod()
     assert method in multiprocessing.get_all_start_methods()
 
-    # forkserver is preferred where available (Linux/macOS)
+    # The default keeps each platform's existing default: fork on Linux through 3.13
+    # (copy-on-write memory sharing matters on small stations), forkserver on Linux from
+    # 3.14 (the new upstream default), spawn on Windows/macOS.
+    if sys.platform.startswith('linux'):
+        if sys.version_info < (3, 14):
+            assert method == 'fork'
+        else:
+            assert method == 'forkserver'
+    else:
+        assert method == 'spawn'
+
+    # An explicit preference is honored where available
     if 'forkserver' in multiprocessing.get_all_start_methods():
-        assert method == 'forkserver'
+        assert setMultiprocessingStartMethod(preferred='forkserver') == 'forkserver'
 
 
 def test_queuedpool_getstate_is_clean():

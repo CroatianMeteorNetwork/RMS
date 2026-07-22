@@ -70,22 +70,26 @@ def frameBufferShape(config):
     return (256, config.height + array_pad, config.width + array_pad)
 
 
-def setMultiprocessingStartMethod(preferred="forkserver"):
+def setMultiprocessingStartMethod(preferred=None):
     """ Pin the multiprocessing start method for consistent behavior across Python versions.
 
     RMS uses multiprocessing throughout the capture pipeline. Historically it relied on the
     platform default, which on Linux was 'fork' up to Python 3.13 and becomes 'forkserver'
-    in Python 3.14. To get one consistent, well-tested behavior on every supported version
-    (3.6-3.14), we explicitly select 'forkserver' where available (it has existed since
-    Python 3.4), falling back to 'spawn' on platforms that lack it (e.g. Windows). This also
-    silences the Python 3.12/3.13 DeprecationWarning about relying on the implicit 'fork'
-    default.
+    in Python 3.14. By default this function pins each platform's existing default rather
+    than forcing a change: 'fork' children share the parent's memory copy-on-write, while a
+    'forkserver'/'spawn' worker re-imports the whole RMS stack, costing tens of MB of
+    private RSS and seconds of import time per worker on small stations (RPi). Linux
+    stations on Python <= 3.13 therefore stay on 'fork'; 'forkserver' is only selected on
+    Python 3.14+, where it is the upstream default anyway. Pinning explicitly keeps
+    behavior deterministic and silences the Python 3.12/3.13 DeprecationWarning about
+    relying on the implicit 'fork' default.
 
     Call this once, early, from an entry point's __main__ block, before any Process or Pool
     is created. It is safe to call more than once.
 
     Keyword arguments:
-        preferred: [str] Preferred start method. 'forkserver' by default.
+        preferred: [str] Start method to use, overriding the platform-default selection.
+            None by default (keep the platform default for this Python version).
 
     Return:
         [str] The start method now in effect.
@@ -93,6 +97,18 @@ def setMultiprocessingStartMethod(preferred="forkserver"):
     import multiprocessing as mp
 
     available = mp.get_all_start_methods()
+
+    if preferred is None:
+        # Keep the long-soaked platform defaults: fork on Linux through 3.13, forkserver on
+        # Linux from 3.14 (the new upstream default), spawn on Windows/macOS (fork has never
+        # been safe on macOS since 3.8 due to the Objective-C runtime).
+        if sys.platform.startswith("linux") and "fork" in available \
+                and sys.version_info < (3, 14):
+            preferred = "fork"
+        elif sys.platform.startswith("linux") and "forkserver" in available:
+            preferred = "forkserver"
+        else:
+            preferred = "spawn"
 
     if preferred in available:
         method = preferred
