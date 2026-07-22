@@ -135,3 +135,30 @@ def test_extinction_inversion_localizes_cloud():
     # cleanly separated from the in-cloud values
     assert np.nanmax(dm[12:18, 1, 2:]) < 0.5
     assert np.nanmax(dm[:8]) < 0.5
+
+
+def test_transparency_map_product_roundtrip(tmp_path):
+    import os
+    from RMS.Formats.TransparencyMap import (computeTransparencyMap,
+        saveTransparencyMap, loadTransparencyMap, transparencyAt, FLAG_NO_DATA)
+
+    frames, stars = _syntheticProduct(cloud_frames=set(range(10, 20)),
+        cloud_box=(0, 0, 640, 360))
+    header = dict(dome_s=0.4, dome_fit_date="2026-07-22", cadence="per_ff")
+
+    t, dm, ratio, flags = computeTransparencyMap(header, frames, stars, nx=4, ny=2)
+    assert dm.shape == (30, 2, 4)
+
+    path = saveTransparencyMap(str(tmp_path), "TEST_night", "US005X", header,
+        t, dm, ratio, flags, nx=4, ny=2)
+    h2, t2, dm2, ratio2, flags2 = loadTransparencyMap(path)
+    assert h2["stationID"] == "US005X"
+    assert np.allclose(t2, t)
+
+    # Cloud window and box read as extinction through the consumer call
+    dm_q, fl_q, dt = transparencyAt(path, float(t[14]), max_gap=30.0)
+    assert dt == 0.0
+    assert np.nanmin(dm_q[0, :2]) > 1.0
+    # And a query far outside the night returns no data
+    none_dm, _, _ = transparencyAt(path, float(t[-1]) + 3600.0)
+    assert none_dm is None

@@ -1574,6 +1574,26 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
         except Exception as e:
             log.warning("Could not write the star scoring product: {}".format(e))
 
+        # Transparency-map product for downstream consumers (contrail attribution):
+        # per-frame, per-cell extinction computed on station so consumers just read
+        # a file. Guarded like the scoring product - never blocks the pipeline.
+        try:
+            from RMS.Formats.StarScoring import loadStarScoring
+            from RMS.Formats.TransparencyMap import (computeTransparencyMap,
+                saveTransparencyMap)
+
+            sc_header, sc_frames, sc_stars = loadStarScoring(out_path)
+            t_unix, dm_map, ratio_map, flag_map = computeTransparencyMap(
+                sc_header, sc_frames, sc_stars)
+            tm_path = saveTransparencyMap(dir_path, night_name, config.stationID,
+                sc_header, t_unix, dm_map, ratio_map, flag_map,
+                nx=dm_map.shape[2], ny=dm_map.shape[1])
+            log.info("Transparency map written: {:s} ({:d} frames, {:d}x{:d} "
+                     "cells)".format(os.path.basename(tm_path), dm_map.shape[0],
+                     dm_map.shape[2], dm_map.shape[1]))
+        except Exception as e:
+            log.warning("Could not write the transparency map: {}".format(e))
+
         # The expected counts are calibrated per sky position, so no cap or deficit
         # correction applies - the clear-sky ratio is ~1 by construction at the fit epoch.
         # What remains is the slow drift of the light-pollution amplitude (aerosols, e.g.
