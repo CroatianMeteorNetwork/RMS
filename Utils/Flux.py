@@ -1475,13 +1475,17 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
             for ff_name, star_data in calstars_list
         }
 
-        # Score EVERY binned frame, gated ones included: scoring is a measurement,
+        # Score EVERY FF frame, gated ones included: scoring is a measurement,
         # gating is a per-consumer judgment (see RMS.Formats.StarScoring). The flux
-        # verdict below consumes only the dark/moonless domain subset - bit-identical
-        # to gating before scoring - while the full product is persisted for
-        # downstream consumers (segmented cloud detection, diagnostics).
+        # verdict below consumes only the binned dark/moonless domain subset -
+        # bit-identical to the previous binned behavior - while the full-cadence
+        # (10 s) product is persisted for downstream consumers (transparency maps
+        # for contrail attribution, segmented cloud detection, diagnostics). Full
+        # cadence became affordable when the FOV polygon check was vectorized
+        # (~5 ms/frame; a whole night scores in under a minute).
+        all_scored_files = sorted(calstars_positions.keys())
         matched_all, predicted_all, star_records = denseDomeRatios(config, dome_model,
-            pre_moon_files, calstars_positions, recalibrated_platepars, mask,
+            all_scored_files, calstars_positions, recalibrated_platepars, mask,
             collect_stars=True)
 
         if not predicted_all:
@@ -1558,6 +1562,8 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
                 match_radius_px=DENSE_MATCH_RADIUS_PX,
                 dome_fit_date=str(dome_model.model.get("fit_date")),
                 catalog_lim_mag=dome_model.catalogLimMag(),
+                dome_s=float(dome_model.s),
+                cadence="per_ff",
                 star_gate_factor=float(getattr(config, "star_gate_factor", 3.0)),
             )
             out_path = saveStarScoring(dir_path, night_name, header, f_meta, s_arrs)
