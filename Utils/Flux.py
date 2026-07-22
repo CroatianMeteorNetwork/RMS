@@ -2733,6 +2733,15 @@ def domeRatioNormalization(config, night_id, night_median_ratio, model_version=N
     if len(prior_ratios) >= LM_HISTORY_MIN_NIGHTS:
         norm = float(np.clip(np.percentile(prior_ratios, DOME_RATIO_NORM_PCT),
             DOME_RATIO_NORM_MIN, DOME_RATIO_NORM_MAX))
+    elif len(prior_ratios) >= 1:
+        # Warmup after a refit: a fresh model can carry a constant calibration
+        # offset from night one (observed: adaptive-depth refits over-predict the
+        # faint tail via chance-coincidence contamination of the training trials,
+        # parking clear nights at ratio ~0.6 - a fleet-wide interval blackout for
+        # the whole 5-night warmup). Use what history exists, under a TIGHTER
+        # clamp: an overcast early night (raw ~0.3) can boost itself to at most
+        # 0.3/0.5 = 0.6, still safely below the clear threshold.
+        norm = float(np.clip(np.median(prior_ratios), 0.5, 1.5))
 
     # Record tonight for future runs, merging with any existing entry so the depth field
     # written by the scalar path is preserved if a station switches paths
