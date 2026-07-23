@@ -611,6 +611,10 @@ def fitLightDome(station_configs, dates=None, max_order=3, moon_phase_max=MOON_P
         intensity_threshold=thresholds,
         footprints=footprints,
         nll={str(kk): v["nll"] for kk, v in results.items()},
+        # Feature marker: this fit models the chance-match floor. Models without
+        # it (the 2026-07-22 refit wave) are chance-contaminated at depth -
+        # inflated s, dragged-down LM0 - and isStale retires them on sight.
+        floor_modeled=True,
     )
 
     model_dict["catalog_lim_mag"] = float(lim_mag)
@@ -1023,6 +1027,17 @@ def modelIsStale(model_dict, config, platepar=None):
     """
 
     station = str(config.stationID)
+
+    # Fit predates the chance-match floor: without the floor term, deep-catalog
+    # fits are contaminated by chance coincidences (inflated s, dragged-down
+    # LM0 - the 2026-07-22 refit wave; USV001 read normalized ratios of 3).
+    # The nightly normalization absorbs the level error but not the shape
+    # error, so retire these models on sight rather than waiting for the
+    # drift check to accumulate history. Scoped to machine-fit models (ones
+    # carrying fit metadata): bare pre-metadata/manual models stay never-stale.
+    if (model_dict.get("fit_date") is not None) \
+            and not model_dict.get("floor_modeled", False):
+        return "fit predates the chance-match floor"
 
     # Age
     fit_date = model_dict.get("fit_date")

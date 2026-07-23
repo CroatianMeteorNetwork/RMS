@@ -41,6 +41,7 @@ def freshModelDict(**overrides):
         pointing={"US005X": [180.0, 45.0]},
         intensity_threshold={"US005X": 10.0},
         auto_fitted=True,
+        floor_modeled=True,
     )
     model.update(overrides)
     return model
