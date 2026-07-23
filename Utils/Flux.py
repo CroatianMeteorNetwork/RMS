@@ -1743,7 +1743,14 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
                     marker='+', color='0.55', zorder=4)
                 ax[1].scatter(gtimes, [predicted_all[ff] for ff in gated_ffs],
                     marker='x', color='0.7', zorder=4)
-        ax[0].set_ylabel("Matched/Expected stars")
+        # The plotted ratio includes the trailing-nights normalization, the counts
+        # panel below shows RAW counts - say so, or the two panels look contradictory
+        # whenever the norm is far from 1 (e.g. the post-refit warmup nights)
+        if abs(ratio_norm - 1.0) > 0.01:
+            ax[0].set_ylabel("Matched/Expected stars\n(norm {:.2f} applied)".format(
+                ratio_norm))
+        else:
+            ax[0].set_ylabel("Matched/Expected stars")
 
         # Plot the radio threshold
         times = [FFfile.filenameToDatetime(x) for x in ratio.keys()]
@@ -1778,25 +1785,42 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
                     axis.axvspan(beg - pad, end + pad, alpha=0.45, color='thistle', zorder=3,
                         label=('Moon' if (i == 0 and axis is ax[0]) else None))
 
-        # Shade the periods excluded by the twilight gate, so out-of-domain time is not
-        # read as cloudy (same treatment as the moon shading above)
-        if sun_excluded_files:
+        # Shade the twilight periods from sun GEOMETRY, so out-of-domain time is not
+        # read as cloudy. Grouping the gated frames (as the moon shading does) breaks
+        # here: in bright twilight star extraction yields no CALSTARS entries at all,
+        # so the gated-frame list has gaps and the single dusk/dawn band fragments
+        # into several unphysical stripes. Twilight is a time range, not a property
+        # of which frames happened to still contain stars.
+        plot_ffs = list(matched_all) if matched_all else list(ratio.keys())
+        if plot_ffs:
 
-            sun_times = sorted(FFfile.filenameToDatetime(ff) for ff in sun_excluded_files)
+            tt = sorted(FFfile.filenameToDatetime(ff) for ff in plot_ffs)
+            grid = []
+            t = tt[0]
+            while t <= tt[-1]:
+                grid.append(t)
+                t += datetime.timedelta(minutes=1)
+
+            sun_up = [
+                sunAltitude(date2JD(g.year, g.month, g.day, g.hour, g.minute,
+                    g.second, 0), platepar.lat, platepar.lon) > SUN_ALT_MAX
+                for g in grid
+            ]
 
             sun_spans = []
-            span_beg = span_end = sun_times[0]
-            for t in sun_times[1:]:
-                if (t - span_end).total_seconds() > 15*60:
-                    sun_spans.append((span_beg, span_end))
-                    span_beg = t
-                span_end = t
-            sun_spans.append((span_beg, span_end))
+            beg = None
+            for g, up in zip(grid, sun_up):
+                if up and beg is None:
+                    beg = g
+                elif not up and beg is not None:
+                    sun_spans.append((beg, g))
+                    beg = None
+            if beg is not None:
+                sun_spans.append((beg, grid[-1]))
 
-            pad = datetime.timedelta(minutes=2.5)
             for i, (beg, end) in enumerate(sun_spans):
                 for axis in ax:
-                    axis.axvspan(beg - pad, end + pad, alpha=0.45, color='peachpuff',
+                    axis.axvspan(beg, end, alpha=0.45, color='peachpuff',
                         zorder=3,
                         label=('Twilight' if (i == 0 and axis is ax[0]) else None))
 
@@ -1829,6 +1853,18 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
                 [expected_stars[ff] for ff in expected_stars],
                 label='Expected stars',
                 marker='x', color='gray', zorder=5,
+            )
+
+        # When the trailing-nights normalization is far from 1, also show the
+        # norm-scaled prediction: it is what the ratio panel effectively compares
+        # the matched counts against (post-refit warmup nights read 2-3x off
+        # otherwise, and the two panels look contradictory)
+        if abs(ratio_norm - 1.0) > 0.05:
+            ax[1].scatter(
+                [FFfile.filenameToDatetime(ff) for ff in predicted_stars],
+                [predicted_stars[ff]*ratio_norm for ff in predicted_stars],
+                label='Predicted x norm ({:.2f})'.format(ratio_norm),
+                marker='.', s=6, color='tab:blue', zorder=5,
             )
         
 
