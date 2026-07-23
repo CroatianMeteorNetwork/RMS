@@ -119,7 +119,11 @@ def computeCellSeries(frames, stars, nx=8, ny=5, width=None, height=None):
     x = np.asarray(stars["star_x"], dtype=np.float64)
     y = np.asarray(stars["star_y"], dtype=np.float64)
     p = np.asarray(stars["star_p"], dtype=np.float64)
-    fidx = np.asarray(stars["star_frame"], dtype=np.int64)
+    # np.intp, not int64: bincount needs platform-native indices, and 32-bit
+    # stations (intp == int32) refuse the int64 -> int32 'safe' cast outright
+    # (observed: USV001 wrote no transparency map). The values are tiny
+    # (frames x cells ~ 1e5), so intp is safe everywhere.
+    fidx = np.asarray(stars["star_frame"], dtype=np.intp)
     matched = np.asarray(stars["calstars_row"], dtype=np.int64) >= 0
 
     if width is None:
@@ -127,8 +131,8 @@ def computeCellSeries(frames, stars, nx=8, ny=5, width=None, height=None):
     if height is None:
         height = float(np.ceil(np.max(y)/16.0)*16.0) if len(y) else 720.0
 
-    cx = np.clip((x/(width/nx)).astype(np.int64), 0, nx - 1)
-    cy = np.clip((y/(height/ny)).astype(np.int64), 0, ny - 1)
+    cx = np.clip((x/(width/nx)).astype(np.intp), 0, nx - 1)
+    cy = np.clip((y/(height/ny)).astype(np.intp), 0, ny - 1)
 
     # Flat bin index over (frame, cell_y, cell_x) for one-pass accumulation
     cell = cy*nx + cx
@@ -241,10 +245,10 @@ def extinctionSeries(frames, stars, result, dome_s):
     x = np.asarray(stars["star_x"], dtype=np.float64)
     y = np.asarray(stars["star_y"], dtype=np.float64)
     p_raw = np.asarray(stars["star_p"], dtype=np.float64)
-    fidx = np.asarray(stars["star_frame"], dtype=np.int64)
+    fidx = np.asarray(stars["star_frame"], dtype=np.intp)
 
-    cx = np.clip((x/(width/nx)).astype(np.int64), 0, nx - 1)
-    cy = np.clip((y/(height/ny)).astype(np.int64), 0, ny - 1)
+    cx = np.clip((x/(width/nx)).astype(np.intp), 0, nx - 1)
+    cy = np.clip((y/(height/ny)).astype(np.intp), 0, ny - 1)
     cell = cy*nx + cx
 
     cell_norm = result["cell_norm"].ravel()
