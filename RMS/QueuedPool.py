@@ -194,6 +194,33 @@ class QueuedPool(object):
         self.print_state = print_state
 
 
+    def __getstate__(self):
+        """ Return a picklable snapshot of this instance for the 'spawn' start method
+            (Windows). On Linux (fork) this is never called, so the capture pipeline is
+            unaffected.
+
+            Under spawn, the Pool initializer (the bound method self._workerFunc) forces
+            the whole QueuedPool to be pickled and sent to each worker. The SyncManager
+            (self.manager) has no pickle reducer and holds a weakref -> "cannot pickle
+            'weakref' object"; workers never use it (they use the already-created Queue
+            proxies), so drop it. The live Pool handle (self.pool) also must not and need
+            not cross the process boundary. Everything else (Manager Queue proxies,
+            SafeValue Value/Lock counters, the kill Event, bkup_dict) reduces correctly
+            during a real spawn and is needed by the workers.
+        """
+        state = self.__dict__.copy()
+        state['manager'] = None
+        state['pool'] = None
+        return state
+
+
+    def __setstate__(self, state):
+        """ Restore state in a spawned worker. manager/pool stay None in the child; the
+            worker reconnects to the parent's manager server through the pickled Queue
+            proxies. """
+        self.__dict__.update(state)
+
+
     def printAndLog(self, *args):
         """ Print and log the given message. """
 
