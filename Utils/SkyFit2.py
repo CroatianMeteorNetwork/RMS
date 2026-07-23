@@ -3310,6 +3310,10 @@ class PlateTool(QtWidgets.QMainWindow):
         else:
             self.tab.hist.setLevels(0, 255)
 
+        # Turn on auto levels by default (Ctrl + A toggles back to manual)
+        if not self.tab.hist.auto_levels:
+            self.tab.hist.toggleAutoLevels()
+
         self.tab.settings.updateInvertColours()
         self.tab.settings.updateImageGamma()
         self.tab.star_detection.setCatalogLM(self.cat_lim_mag)
@@ -3636,7 +3640,13 @@ class PlateTool(QtWidgets.QMainWindow):
             # Update ImageItems with new handle before loading platepar (which triggers drawing)
             self.img.changeHandle(self.img_handle)
             self.img_zoom.changeHandle(self.img_handle)
-            self.tab.hist.setLevels(0, 2**(8*self.img.data.itemsize) - 1)
+            if not self.tab.hist.auto_levels:
+                self.tab.hist.setLevels(0, 2**(8*self.img.data.itemsize) - 1)
+
+            # Sync both image items to the histogram levels (setImage assigns each item independent
+            #   min/max levels, and an unchanged histogram won't re-emit them)
+            self.img.setLevels(self.tab.hist.getLevels())
+            self.img_zoom.setLevels(self.tab.hist.getLevels())
 
             # Now that the new image dimensions are available, load this station's mask (or clear a
             #   previous station's mask if this one has none), then render the overlay
@@ -9580,7 +9590,14 @@ class PlateTool(QtWidgets.QMainWindow):
             self.img.changeHandle(self.img_handle)
             self.img_zoom.changeHandle(self.img_handle)
 
-            self.tab.hist.setLevels(0, 2**(8*self.img.data.itemsize) - 1)
+            if not self.tab.hist.auto_levels:
+                self.tab.hist.setLevels(0, 2**(8*self.img.data.itemsize) - 1)
+
+            # Sync both image items to the histogram levels (setImage assigns each item independent
+            #   min/max levels, and an unchanged histogram won't re-emit them)
+            self.img.setLevels(self.tab.hist.getLevels())
+            self.img_zoom.setLevels(self.tab.hist.getLevels())
+
             self.img_frame.autoRange(padding=0)
 
             self.updateCalstars()
@@ -12449,10 +12466,12 @@ class PlateTool(QtWidgets.QMainWindow):
             # Build star_dict_ff in the format recalibrateFF expects: {jd: calstars_array}
             star_dict_ff = {jd: detected_stars}
 
-            # Run recalibrateFF — fits pointing + scale via Nelder-Mead, preserves distortion
+            # Run recalibrateFF — fits pointing + scale via Nelder-Mead, preserves distortion.
+            # Disable the star coverage gate - it guards the unattended nightly pipeline against
+            # chaining bad fits forward, but here the fit is user-triggered and visually inspected
             result, min_match_radius = recalibrateFF(
                 self.config, self.platepar, jd, star_dict_ff, self.catalog_stars,
-                ignore_distance_threshold=True
+                ignore_distance_threshold=True, min_match_fraction=0.0
             )
 
             if result is None:

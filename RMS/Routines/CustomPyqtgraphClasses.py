@@ -854,13 +854,25 @@ class ImageItem(pg.ImageItem):
         #   gradient). Keep it as the base so gamma/inversion can be re-composed on top
         #   whenever they change, then hand pyqtgraph the effective LUT.
         self._base_lut = lut
-        super().setLookupTable(self._composeDisplayLut(lut), update=update)
+        self._applyDisplayLut(update=update)
 
     def _applyDisplayLut(self, update=True):
         """ Rebuild and apply the effective display LUT from the current base LUT,
             gamma and inversion. Used instead of overriding render(), so we no longer
             depend on pyqtgraph render internals. """
-        super().setLookupTable(self._composeDisplayLut(self._base_lut), update=update)
+        base_lut = self._base_lut
+
+        # The base LUT may be a callable rather than an array: pyqtgraph <= 0.11
+        #   HistogramLUTItem.setImageItem() always passes its getLookupTable method, and
+        #   newer versions still do so for non-grayscale gradients. pyqtgraph resolves a
+        #   callable LUT at render time by calling it with the image, so wrap it and
+        #   compose gamma/inversion on whatever it returns.
+        if callable(base_lut):
+            effective_lut = lambda img: self._composeDisplayLut(base_lut(img))
+        else:
+            effective_lut = self._composeDisplayLut(base_lut)
+
+        super().setLookupTable(effective_lut, update=update)
 
     def _composeDisplayLut(self, base_lut):
         """ Build the grayscale lookup table that bakes in gamma and inversion.
@@ -1204,6 +1216,7 @@ class HistogramLUTWidget(pg.HistogramLUTWidget):
         modifier = QtWidgets.QApplication.keyboardModifiers()
         pos = self.vb.mapSceneToView(event.pos())
         if self.item.region.movable and modifier == QtCore.Qt.ControlModifier:
+            self.item.exitAutoLevels()
             if event.button() == QtCore.Qt.LeftButton:
                 self.setLevels(pos.y(), self.getLevels()[1])
             elif event.button() == QtCore.Qt.RightButton:
@@ -1248,14 +1261,26 @@ class HistogramLUTItem(pg.HistogramLUTItem):
         else:
             self.setLevels(*self.saved_manual_levels)
         self.auto_levels = not self.auto_levels
-        self.region.setMovable(not self.auto_levels)
+
+    def exitAutoLevels(self):
+        """
+        Drop out of auto levels mode, keeping the auto-determined levels as the manual levels
+        """
+        if self.auto_levels:
+            self.auto_levels = False
+            self.saved_manual_levels = self.getLevels()
 
     def paint(self, p, *args):
         # tbh this is an improvement
         pass
 
     def regionChanging(self):
-        pass  # doesn't update when moving it
+        # Doesn't update the image when moving the region, only on release
+
+        # A user drag on the region while auto levels are on drops to manual mode, keeping the
+        #   auto-determined levels as the starting point
+        if self.auto_levels and (self.region.moving or any(l.moving for l in self.region.lines)):
+            self.exitAutoLevels()
 
     def imageChanged(self, autoLevel=False, autoRange=False):
         if not self.auto_levels:

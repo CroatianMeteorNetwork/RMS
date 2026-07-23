@@ -600,6 +600,11 @@ class Config:
         # Maximum number of stars to use for recalibration on a single FF
         self.recalibration_max_stars = 200
 
+        # Minimum fraction of detected stars that a per-FF recalibration fit
+        #   must match to be accepted (guards against sparse spurious fits
+        #   chaining forward on cloudy nights)
+        self.recalibration_min_match_fraction = 0.6
+
         ##### Thumbnails
         self.thumb_bin = 4
         self.thumb_stack = 5
@@ -1749,6 +1754,10 @@ def parseCalibration(config, parser):
 
     if parser.has_option(section, "recalibration_max_stars"):
         config.recalibration_max_stars = parser.getint(section, "recalibration_max_stars")
+
+    if parser.has_option(section, "recalibration_min_match_fraction"):
+        config.recalibration_min_match_fraction = parser.getfloat(
+            section, "recalibration_min_match_fraction")
 
     if parser.has_option(section, "mask_download_permissive"):
         config.mask_download_permissive = parser.getboolean(section, "mask_download_permissive")
