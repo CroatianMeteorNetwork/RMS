@@ -124,7 +124,10 @@ def computeCellSeries(frames, stars, nx=8, ny=5, width=None, height=None):
     # (observed: USV001 wrote no transparency map). The values are tiny
     # (frames x cells ~ 1e5), so intp is safe everywhere.
     fidx = np.asarray(stars["star_frame"], dtype=np.intp)
-    matched = np.asarray(stars["calstars_row"], dtype=np.int64) >= 0
+    # A star is DETECTED if either channel saw it: a CALSTARS row (>= 0) or the
+    # forced-photometry class (-2, schema v4 - saturated/extractor-culled stars
+    # recovered by aperture flux). Only -1 means genuinely absent.
+    matched = np.asarray(stars["calstars_row"], dtype=np.int64) != -1
 
     if width is None:
         width = float(np.ceil(np.max(x)/16.0)*16.0) if len(x) else 1280.0

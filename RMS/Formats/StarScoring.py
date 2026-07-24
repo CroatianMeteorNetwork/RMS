@@ -48,7 +48,19 @@ import numpy as np
 #     product (>10k stars/frame, hundreds of MB, an OOM-killed station). The cut is
 #     independent of the match outcome, so observed and expected shrink consistently
 #     and ratio consumers need no change.
-SCHEMA_VERSION = 3
+# v4: stars gain a stable identity and a second evidence channel.
+#     star_cat_id     - row index into the star catalog as read at
+#                       header catalog_lim_mag: the star's identity across frames
+#                       (and across nights while the catalog depth is unchanged).
+#     star_flux_snr   - forced patch photometry SNR on the FF avepixel for the
+#                       bright set (model p >= forced_p_bootstrap), NaN elsewhere.
+#     calstars_row -2 - matched by forced photometry only: the extractor missed
+#                       the star (saturation, shape gates, max_stars culling) but
+#                       its aperture flux passed both detection floors (see
+#                       RMS.PatchPhotometry). Cloud/transparency consumers count
+#                       -2 as a detection; astrometry and photometry consumers
+#                       must use only rows >= 0 (a real CALSTARS reference).
+SCHEMA_VERSION = 4
 
 FILE_SUFFIX = "star_scoring.npz"
 
@@ -91,6 +103,10 @@ def saveStarScoring(dir_path, night_name, header, frames, stars):
         p_chance=np.asarray(frames.get("p_chance",
             np.zeros(len(frames["frame_names"]))), dtype=np.float32),
         star_frame=np.asarray(stars["star_frame"], dtype=np.int32),
+        star_cat_id=np.asarray(stars.get("star_cat_id",
+            np.full(len(stars["star_frame"]), -1)), dtype=np.int32),
+        star_flux_snr=np.asarray(stars.get("star_flux_snr",
+            np.full(len(stars["star_frame"]), np.nan)), dtype=np.float16),
         star_x=np.asarray(stars["star_x"], dtype=np.float32),
         star_y=np.asarray(stars["star_y"], dtype=np.float32),
         star_mag=np.asarray(stars["star_mag"], dtype=np.float16),

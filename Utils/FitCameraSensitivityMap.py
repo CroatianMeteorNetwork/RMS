@@ -117,7 +117,7 @@ def fitSensitivityMap(config, night_dirs, nbx=4, nby=3, lim_mag=TRIAL_LIM_MAG):
             pp = pps[valid[j][1]]
             w, h = pp.X_res, pp.Y_res
 
-            x, y, mag, az, alt = projectCatalogStarsInFOV(pp, date, jd, catalog_stars,
+            x, y, mag, az, alt, _ = projectCatalogStarsInFOV(pp, date, jd, catalog_stars,
                 mask=mask)
             if not len(x):
                 continue

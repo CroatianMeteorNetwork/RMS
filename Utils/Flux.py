@@ -1487,7 +1487,7 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
         all_scored_files = sorted(calstars_positions.keys())
         matched_all, predicted_all, star_records = denseDomeRatios(config, dome_model,
             all_scored_files, calstars_positions, recalibrated_platepars, mask,
-            collect_stars=True)
+            collect_stars=True, dir_path=dir_path)
 
         if not predicted_all:
             # Expected on fully overcast nights (nothing recalibrates without stars),
@@ -1531,8 +1531,8 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
             epoch = datetime.datetime(1970, 1, 1)
             f_meta = dict(frame_names=[], frame_time_unix=[], sun_alt=[], moon_alt=[],
                           moon_phase=[], n_detected=[], in_flux_domain=[], p_chance=[])
-            s_arrs = dict(star_frame=[], star_x=[], star_y=[], star_mag=[], star_p=[],
-                          calstars_row=[])
+            s_arrs = dict(star_frame=[], star_cat_id=[], star_x=[], star_y=[],
+                          star_mag=[], star_p=[], star_flux_snr=[], calstars_row=[])
             pp_ref = platepar
 
             # Accumulate per-frame ARRAYS and concatenate once. Extending Python
@@ -1560,10 +1560,13 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
                 # in denseDomeRatios so the faint tail is never held in memory)
                 s_arrs["star_frame"].append(
                     np.full(len(rec["x"]), k, dtype=np.int32))
+                s_arrs["star_cat_id"].append(rec["cat_id"])
                 s_arrs["star_x"].append(rec["x"])
                 s_arrs["star_y"].append(rec["y"])
                 s_arrs["star_mag"].append(rec["mag"])
                 s_arrs["star_p"].append(rec["p"])
+                s_arrs["star_flux_snr"].append(rec.get("flux_snr",
+                    np.full(len(rec["x"]), np.nan, dtype=np.float16)))
                 s_arrs["calstars_row"].append(rec["calstars_row"])
 
             s_arrs = {key: (np.concatenate(chunks) if chunks
@@ -1923,8 +1926,11 @@ def projectCatalogStarsInFOV(platepar, date, jd, catalog_stars, mask=None, borde
         alt_min: [float] Minimum altitude (deg).
 
     Return:
-        (x, y, mag, az, alt): [ndarrays] Image coordinates, catalog magnitudes and
-            horizontal coordinates of the catalog stars inside the usable FOV.
+        (x, y, mag, az, alt, cat_idx): [ndarrays] Image coordinates, catalog
+            magnitudes, horizontal coordinates, and the row index into
+            catalog_stars of each returned star. The index is the star's stable
+            identity across frames of a night (the catalog read is deterministic
+            at a fixed depth), which the per-star evidence channels require.
     """
 
     w, h = platepar.X_res, platepar.Y_res
@@ -1940,6 +1946,7 @@ def projectCatalogStarsInFOV(platepar, date, jd, catalog_stars, mask=None, borde
     ra_catalog, dec_catalog, mag = catalog_stars.T
     inside = pointInsideConvexPolygonSphere(np.array([ra_catalog, dec_catalog]).T,
         np.array([ra_vert, dec_vert]).T)
+    cat_idx = np.where(inside)[0]
 
     x, y = raDecToXYPP(ra_catalog[inside], dec_catalog[inside], jd, platepar)
     mag = mag[inside]
@@ -1954,12 +1961,13 @@ def projectCatalogStarsInFOV(platepar, date, jd, catalog_stars, mask=None, borde
         in_frame &= mask.img[y_int, x_int] > 0
 
     x, y, mag = x[in_frame], y[in_frame], mag[in_frame]
+    cat_idx = cat_idx[in_frame]
     az, alt = raDec2AltAz(ra_inside[in_frame], dec_inside[in_frame], jd, platepar.lat,
         platepar.lon)
 
     up = alt >= alt_min
 
-    return x[up], y[up], mag[up], az[up], alt[up]
+    return x[up], y[up], mag[up], az[up], alt[up], cat_idx[up]
 
 
 DENSE_MATCH_RADIUS_PX = 3.0   # px - a predicted star counts as matched if a CALSTARS
@@ -1977,8 +1985,14 @@ STORE_P_MIN = 0.02            # persisted-product floor on the model detection p
                               # VERDICT path is unaffected: it uses the full catalog above.
 
 
+FORCED_P_BOOTSTRAP = 0.9      # forced-photometry bright set: stars the model expects at
+                              # this probability or better. Bootstrap only - once the
+                              # trailing per-star calibration exists, the set comes from
+                              # measured single-frame SNR (no magnitude constants)
+
+
 def denseDomeRatios(config, dome_model, ff_list, calstars_positions, recalibrated_platepars, mask,
-        collect_stars=False):
+        collect_stars=False, dir_path=None):
     """ Score EVERY frame with the light-dome model, independent of its own recalibration.
 
     The per-frame recalibration fails preferentially on cloudy frames (too few stars to
@@ -2003,11 +2017,18 @@ def denseDomeRatios(config, dome_model, ff_list, calstars_positions, recalibrate
     Keyword arguments:
         collect_stars: [bool] Also return per-star outcome arrays for the scoring
             product (see RMS.Formats.StarScoring). False by default.
+        dir_path: [str] Night directory holding the FF files. When given (and
+            collect_stars is on), bright-set stars that CALSTARS missed are
+            re-examined by forced patch photometry on the FF avepixel -
+            saturated and extractor-culled stars become the calstars_row = -2
+            evidence class instead of false absences. The VERDICT channel
+            (matched counts) never includes these; only the persisted product.
 
     Return:
         (matched, expected[, star_records]): [dict, dict(, dict)] ff_name -> matched
-            count / expected count(, per-star arrays: x, y, mag, p, calstars_row with
-            -1 = unmatched). Empty if the night has no valid platepar at all.
+            count / expected count(, per-star arrays: cat_id, x, y, mag, p,
+            flux_snr, calstars_row with -1 = unmatched, -2 = forced-photometry
+            match). Empty if the night has no valid platepar at all.
     """
 
     # Time-sorted valid platepars to source projections from
@@ -2061,8 +2082,8 @@ def denseDomeRatios(config, dome_model, ff_list, calstars_positions, recalibrate
         date = FFfile.getMiddleTimeFF(ff_file, config.fps, ret_milliseconds=True)
         jd = date2JD(*date)
 
-        x, y, mag, az, alt = projectCatalogStarsInFOV(platepar, date, jd, catalog_stars,
-            mask=mask)
+        x, y, mag, az, alt, cat_idx = projectCatalogStarsInFOV(platepar, date, jd,
+            catalog_stars, mask=mask)
 
         if not len(x):
             continue
@@ -2096,14 +2117,73 @@ def denseDomeRatios(config, dome_model, ff_list, calstars_positions, recalibrate
             # chance-dominated faint tail is dropped HERE, not at save time, so
             # a deep-catalog night never holds it in memory
             keep = p_det >= STORE_P_MIN
+
+            # Forced patch photometry on the bright set: measure EVERY bright
+            # star's aperture flux on the FF avepixel (matched ones supply the
+            # clear-flux calibration, unmatched ones are detection candidates).
+            # Detection bits are decided in a post-pass once the night's noise
+            # floor and per-star clear medians exist (see the loop below).
+            forced_flux = np.full(int(np.count_nonzero(keep)), np.nan,
+                dtype=np.float32)
+            frame_noise = np.nan
+            if dir_path is not None:
+                try:
+                    bright = p_det[keep] >= FORCED_P_BOOTSTRAP
+                    if np.any(bright):
+                        ff = FFfile.read(dir_path, ff_file)
+                        ave = getattr(ff, "avepixel", None)
+                        if ave is not None:
+                            from RMS.PatchPhotometry import measurePatchFluxes
+                            fl, frame_noise = measurePatchFluxes(
+                                ave, x[keep][bright], y[keep][bright])
+                            forced_flux[bright] = fl
+                except Exception:
+                    # A single unreadable FF must never break the scoring pass
+                    pass
+
             star_records[ff_file] = dict(
+                cat_id=np.asarray(cat_idx[keep], dtype=np.int32),
                 x=np.asarray(x[keep], dtype=np.float32),
                 y=np.asarray(y[keep], dtype=np.float32),
                 mag=np.asarray(mag[keep], dtype=np.float32),
                 p=np.asarray(p_det[keep], dtype=np.float32),
                 p_chance=float(p_chance),
                 calstars_row=np.where(hit[keep], nearest[keep], -1).astype(np.int32),
+                forced_flux=forced_flux,
+                frame_noise=float(frame_noise),
             )
+
+    # Forced-photometry post-pass: with the whole night measured, derive the
+    # non-collapsible noise floor and each star's clear-flux median (its flux on
+    # frames where CALSTARS itself matched it - visible moments by definition),
+    # then promote unmatched bright stars that pass BOTH floors to the -2 class
+    if collect_stars and (dir_path is not None) and star_records:
+
+        from RMS.PatchPhotometry import detectStars, nightNoiseFloor
+
+        floor = nightNoiseFloor([rec["frame_noise"] for rec in star_records.values()])
+
+        flux_acc = {}
+        for rec in star_records.values():
+            m = (rec["calstars_row"] >= 0) & np.isfinite(rec["forced_flux"])
+            for cid, fl in zip(rec["cat_id"][m], rec["forced_flux"][m]):
+                flux_acc.setdefault(int(cid), []).append(float(fl))
+        clear_med = {cid: float(np.median(v)) for cid, v in flux_acc.items()
+                     if len(v) >= 5}
+
+        n_forced = 0
+        for rec in star_records.values():
+            cfm = np.array([clear_med.get(int(c), np.nan) for c in rec["cat_id"]])
+            det, snr = detectStars(rec["forced_flux"], rec["frame_noise"], floor,
+                clear_flux_median=cfm)
+            promote = det & (rec["calstars_row"] == -1)
+            rec["calstars_row"][promote] = -2
+            rec["flux_snr"] = snr.astype(np.float16)
+            n_forced += int(promote.sum())
+            del rec["forced_flux"], rec["frame_noise"]
+
+        log.info("Forced photometry: {:d} bright-star matches recovered "
+                 "(noise floor {:.1f} ADU)".format(n_forced, floor))
 
     return (matched, expected, star_records) if collect_stars else (matched, expected)
 
@@ -2181,7 +2261,7 @@ def predictStarNumberInFOV(recalibrated_platepars, ff_limiting_magnitude, config
             # probabilities at each star's own sky position
             if dome_model is not None:
 
-                x_fov, y_fov, mag_fov, star_az, star_alt = projectCatalogStarsInFOV(
+                x_fov, y_fov, mag_fov, star_az, star_alt, _ = projectCatalogStarsInFOV(
                     platepar, date, jd, catalog_stars_deep, mask=mask)
 
                 p_det = dome_model.detectionProbability(mag_fov, star_az, star_alt, \
