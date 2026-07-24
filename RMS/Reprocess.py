@@ -768,6 +768,26 @@ def processFramesFiles(config):
 
         image_blocks = listImageBlocksBefore(cutoff_utc, frame_dir)
 
+        # Instantaneous star states from the stills, BEFORE the timelapse step
+        # consumes/deletes them. Guarded: sampling can never block the frames
+        # pipeline. The sidecar rides the same upload path as the archives.
+        stills_sidecar = None
+        try:
+            from Utils.GenerateTimelapse import _modeFromName, _timestampFromName
+            from Utils.StillsSampler import (findNightDirForStills,
+                sampleStillsForNight)
+
+            night_stills_t = sorted(_timestampFromName(p)
+                for block in image_blocks for p in block
+                if _modeFromName(p) == 'n')
+            if night_stills_t:
+                night_dir = findNightDirForStills(config, night_stills_t[0])
+                if night_dir is not None:
+                    stills_sidecar = sampleStillsForNight(config, image_blocks,
+                        night_dir)
+        except Exception:
+            log.exception("Stills sampler failed - continuing with the timelapse")
+
         timelapse_results = generateTimelapseFromFrameBlocks(
             image_blocks,
             frame_dir,
@@ -786,6 +806,13 @@ def processFramesFiles(config):
         timelapse_results,
         remove_source=(config.frame_cleanup == "delete")
     )
+
+    # The stills sidecar uploads alongside the frame archives (the night's own
+    # archive was already built and enqueued before the frames step ran)
+    if stills_sidecar is not None:
+        if archive_paths is None:
+            archive_paths = []
+        archive_paths.append(stills_sidecar)
 
     # -- 4. prune empty directories left behind by per-block cleanup --------
     # Per-block cleanup may fail to rmdir shared parent directories (e.g. year
