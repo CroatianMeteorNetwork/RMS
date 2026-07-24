@@ -1622,6 +1622,16 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
         except Exception as e:
             log.warning("Could not write the transparency map: {}".format(e))
 
+        # Fold the night into the trailing per-star calibration (measured
+        # rates/baselines per star per channel + the nightly extinction slope).
+        # Needs the map just written for its clear conditioning. Guarded -
+        # never blocks the pipeline.
+        try:
+            from Utils.StarCalibration import updateStarCalibration
+            updateStarCalibration(config, dir_path)
+        except Exception as e:
+            log.warning("Could not update the star calibration: {}".format(e))
+
         # The expected counts are calibrated per sky position, so no cap or deficit
         # correction applies - the clear-sky ratio is ~1 by construction at the fit epoch.
         # What remains is the slow drift of the light-pollution amplitude (aerosols, e.g.
