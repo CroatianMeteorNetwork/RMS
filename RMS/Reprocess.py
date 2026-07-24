@@ -785,6 +785,17 @@ def processFramesFiles(config):
                 if night_dir is not None:
                     stills_sidecar = sampleStillsForNight(config, image_blocks,
                         night_dir)
+
+                    # Human-judgeable demo video (stays on station, never
+                    # uploads) - rendered while the stills still exist
+                    if (stills_sidecar is not None) \
+                            and getattr(config, "transparency_demo_video", False):
+                        try:
+                            from Utils.TransparencyDemoVideo import generateDemoVideo
+                            generateDemoVideo(config, night_dir, stills_sidecar)
+                        except Exception:
+                            log.exception("Transparency demo video failed - "
+                                          "continuing")
         except Exception:
             log.exception("Stills sampler failed - continuing with the timelapse")
 

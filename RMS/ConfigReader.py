@@ -621,6 +621,11 @@ class Config:
         self.timelapse_generate_captured = True
         self.timelapse_generate_from_frames = True
 
+        # Render the transparency demo video (stills side-by-side with the
+        # transparency overlay and per-star evidence markers) during morning
+        # processing. Kept on station, never uploaded.
+        self.transparency_demo_video = True
+
 
         #### Shower association
 
@@ -1819,6 +1824,9 @@ def parseTimelapse(config, parser):
 
     if parser.has_option(section, "timelapse_generate_from_frames"):
         config.timelapse_generate_from_frames = parser.getboolean(section, "timelapse_generate_from_frames")
+
+    if parser.has_option(section, "transparency_demo_video"):
+        config.transparency_demo_video = parser.getboolean(section, "transparency_demo_video")
 
 
 def parseColors(config, parser):
