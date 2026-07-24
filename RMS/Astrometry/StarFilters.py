@@ -141,8 +141,46 @@ def filterBlendedStars(paired_stars, catalog_stars, platepar, jd, lim_mag,
     if len(paired_stars) < 5 or catalog_stars is None:
         return paired_stars, 0
 
-    # Only consider catalog stars bright enough to be detectable
-    max_mag = lim_mag + mag_margin
+    # Collect matched star data first - their magnitudes and blend radii bound which
+    # catalog stars can possibly matter, which keeps the catalog small before the
+    # all-pairs distance computation below
+    check_indices = []
+    matched_ra_list = []
+    matched_dec_list = []
+    blend_radii = []
+    matched_mag_list = []
+    for i, (x, y, fwhm, intens_acc, obj, snr, saturated) in enumerate(paired_stars.paired_stars):
+        if hasattr(obj, 'pick_type') and obj.pick_type == "geopoint":
+            continue
+        ra, dec, mag = obj.coords()
+        check_indices.append(i)
+        matched_ra_list.append(ra)
+        matched_dec_list.append(dec)
+        matched_mag_list.append(mag)
+        blend_radii.append(fwhm_mult*fwhm)
+
+    if len(check_indices) == 0:
+        return paired_stars, 0
+
+    blend_radii = np.array(blend_radii)
+    matched_mags = np.array(matched_mag_list)
+
+    # The photocentre pull of a neighbour with flux ratio f at separation s is
+    # s*f/(1 + f), so within the largest blend radius r_max the pull can only exceed
+    # pull_px if f > pull_px/(r_max - pull_px). If even an equal-brightness neighbour
+    # at r_max cannot pull enough, nothing can - and otherwise the flux condition
+    # translates to a hard catalog magnitude cutoff. Without this cutoff a deep
+    # catalog (e.g. the full LM12 file at an inferred LM) feeds millions of stars
+    # into the pairwise matrices below and the process gets OOM-killed.
+    r_max = np.max(blend_radii)
+    if r_max <= pull_px:
+        return paired_stars, 0
+    min_flux_ratio = pull_px/(r_max - pull_px)
+    threat_max_mag = np.max(matched_mags) + 2.5*np.log10(1.0/min_flux_ratio)
+
+    # Only consider catalog stars bright enough to be detectable AND bright enough
+    # to produce a threatening photocentre pull
+    max_mag = min(lim_mag + mag_margin, threat_max_mag)
     bright_mask = catalog_stars[:, 2] < max_mag
 
     if np.sum(bright_mask) == 0:
@@ -167,9 +205,9 @@ def filterBlendedStars(paired_stars, catalog_stars, platepar, jd, lim_mag,
     cos_ang_dist = np.clip(cos_ang_dist, -1, 1)
     ang_dist_deg = np.degrees(np.arccos(cos_ang_dist))
 
-    # Estimate FOV radius from platepar (diagonal / 2 * scale, with margin)
+    # Estimate FOV radius from platepar (F_scale is px/deg), with margin
     fov_diagonal = np.sqrt(platepar.X_res**2 + platepar.Y_res**2)
-    fov_radius = (fov_diagonal / 2) * platepar.F_scale * 1.5  # 50% margin
+    fov_radius = (fov_diagonal / 2) / platepar.F_scale * 1.5  # 50% margin
     fov_radius = min(fov_radius, 90)  # Cap at 90 degrees
 
     in_fov = ang_dist_deg < fov_radius
@@ -185,33 +223,21 @@ def filterBlendedStars(paired_stars, catalog_stars, platepar, jd, lim_mag,
 
     blended_indices = set()
 
-    # Collect matched star data for batch projection
-    check_indices = []
-    matched_ra_list = []
-    matched_dec_list = []
-    blend_radii = []
-    matched_mag_list = []
-    for i, (x, y, fwhm, intens_acc, obj, snr, saturated) in enumerate(paired_stars.paired_stars):
-        if hasattr(obj, 'pick_type') and obj.pick_type == "geopoint":
-            continue
-        ra, dec, mag = obj.coords()
-        check_indices.append(i)
-        matched_ra_list.append(ra)
-        matched_dec_list.append(dec)
-        matched_mag_list.append(mag)
-        blend_radii.append(fwhm_mult * fwhm)
+    # Batch project all matched stars to pixel coordinates in one call
+    all_matched_x, all_matched_y = raDecToXYPP(
+        np.array(matched_ra_list), np.array(matched_dec_list), jd, platepar)
 
-    if len(check_indices) > 0:
-        # Batch project all matched stars to pixel coordinates in one call
-        all_matched_x, all_matched_y = raDecToXYPP(
-            np.array(matched_ra_list), np.array(matched_dec_list), jd, platepar)
-        blend_radii = np.array(blend_radii)
-        matched_mags = np.array(matched_mag_list)
-
-        # Compute distance from each matched star to all bright catalog stars using broadcasting
-        # Shape: (n_matched, n_catalog)
-        dx = all_matched_x[:, np.newaxis] - catalog_x[np.newaxis, :]
-        dy = all_matched_y[:, np.newaxis] - catalog_y[np.newaxis, :]
+    # Compute distance from each matched star to all bright catalog stars using
+    # broadcasting, in catalog chunks so peak memory stays bounded no matter how
+    # many catalog stars survived the pre-filters
+    # Shape per chunk: (n_matched, chunk)
+    n_matched = len(check_indices)
+    chunk_size = max(1, int(5e6) // n_matched)
+    threat = np.zeros(n_matched, dtype=bool)
+    for c0 in range(0, len(catalog_x), chunk_size):
+        c1 = c0 + chunk_size
+        dx = all_matched_x[:, np.newaxis] - catalog_x[np.newaxis, c0:c1]
+        dy = all_matched_y[:, np.newaxis] - catalog_y[np.newaxis, c0:c1]
         dist_matrix = np.sqrt(dx**2 + dy**2)
 
         # Physical blend criterion: a neighbour is a threat only if it pulls the blended
@@ -221,15 +247,15 @@ def filterBlendedStars(paired_stars, catalog_stars, platepar, jd, lim_mag,
         # scales with a deep catalog (2x FWHM can be tens of arcminutes of sky, and some
         # faint neighbour is almost always inside it - but a mag 9 speck cannot move the
         # centroid of a mag 3 star).
-        flux_ratio = 10.0**(-0.4*(catalog_mag[np.newaxis, :] - matched_mags[:, np.newaxis]))
+        flux_ratio = 10.0**(-0.4*(catalog_mag[np.newaxis, c0:c1] - matched_mags[:, np.newaxis]))
         pull_px_matrix = dist_matrix*flux_ratio/(1.0 + flux_ratio)
-        threat = np.any(
+        threat |= np.any(
             (dist_matrix < blend_radii[:, np.newaxis]) & (dist_matrix > 0.1)
             & (pull_px_matrix > pull_px), axis=1)
 
-        for k, idx in enumerate(check_indices):
-            if threat[k]:
-                blended_indices.add(idx)
+    for k, idx in enumerate(check_indices):
+        if threat[k]:
+            blended_indices.add(idx)
 
     if len(blended_indices) > 0:
         new_paired_stars = PairedStars()
