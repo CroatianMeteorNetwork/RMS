@@ -5895,8 +5895,9 @@ class PlateTool(QtWidgets.QMainWindow):
             ang_dist_deg = np.degrees(np.arccos(cos_ang_dist))
 
             # FOV radius with margin (stars behind camera have ang_dist > 90)
+            # F_scale is px/deg, so divide to convert the pixel diagonal to degrees
             fov_diagonal = np.sqrt(self.platepar.X_res**2 + self.platepar.Y_res**2)
-            fov_radius = (fov_diagonal / 2) * self.platepar.F_scale * 1.5
+            fov_radius = (fov_diagonal / 2) / self.platepar.F_scale * 1.5
             fov_radius = min(fov_radius, 90)
 
             in_fov = ang_dist_deg < fov_radius

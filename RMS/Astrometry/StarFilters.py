@@ -161,9 +161,9 @@ def filterBlendedStars(paired_stars, catalog_stars, platepar, jd, lim_mag,
     cos_ang_dist = np.clip(cos_ang_dist, -1, 1)
     ang_dist_deg = np.degrees(np.arccos(cos_ang_dist))
 
-    # Estimate FOV radius from platepar (diagonal / 2 * scale, with margin)
+    # Estimate FOV radius from platepar (F_scale is px/deg), with margin
     fov_diagonal = np.sqrt(platepar.X_res**2 + platepar.Y_res**2)
-    fov_radius = (fov_diagonal / 2) * platepar.F_scale * 1.5  # 50% margin
+    fov_radius = (fov_diagonal / 2) / platepar.F_scale * 1.5  # 50% margin
     fov_radius = min(fov_radius, 90)  # Cap at 90 degrees
 
     in_fov = ang_dist_deg < fov_radius
@@ -198,15 +198,24 @@ def filterBlendedStars(paired_stars, catalog_stars, platepar, jd, lim_mag,
             np.array(matched_ra_list), np.array(matched_dec_list), jd, platepar)
         blend_radii = np.array(blend_radii)
 
-        # Compute distance from each matched star to all bright catalog stars using broadcasting
-        # Shape: (n_matched, n_catalog)
-        dx = all_matched_x[:, np.newaxis] - catalog_x[np.newaxis, :]
-        dy = all_matched_y[:, np.newaxis] - catalog_y[np.newaxis, :]
-        dist_matrix = np.sqrt(dx**2 + dy**2)
+        # Compute distance from each matched star to all bright catalog stars using
+        # broadcasting, in catalog chunks so peak memory stays bounded no matter how
+        # many catalog stars survived the pre-filters (a deep catalog fed through the
+        # broken FOV pre-filter above used to allocate multi-GB matrices here and get
+        # the process OOM-killed)
+        # Shape per chunk: (n_matched, chunk)
+        n_matched = len(check_indices)
+        chunk_size = max(1, int(5e6) // n_matched)
+        has_neighbor = np.zeros(n_matched, dtype=bool)
+        for c0 in range(0, len(catalog_x), chunk_size):
+            c1 = c0 + chunk_size
+            dx = all_matched_x[:, np.newaxis] - catalog_x[np.newaxis, c0:c1]
+            dy = all_matched_y[:, np.newaxis] - catalog_y[np.newaxis, c0:c1]
+            dist_matrix = np.sqrt(dx**2 + dy**2)
 
-        # Check for neighbors within each star's blend radius (excluding self)
-        has_neighbor = np.any(
-            (dist_matrix < blend_radii[:, np.newaxis]) & (dist_matrix > 0.1), axis=1)
+            # Check for neighbors within each star's blend radius (excluding self)
+            has_neighbor |= np.any(
+                (dist_matrix < blend_radii[:, np.newaxis]) & (dist_matrix > 0.1), axis=1)
 
         for k, idx in enumerate(check_indices):
             if has_neighbor[k]:
