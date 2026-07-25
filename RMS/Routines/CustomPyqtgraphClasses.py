@@ -15,7 +15,7 @@ from RMS.Astrometry.Conversions import AER2LatLonAlt
 from RMS.Formats.FFfile import reconstructFrame as reconstructFrameFF
 from RMS.Routines import Image
 from RMS.Routines.DebruijnSequence import findAllInDeBruijnSequence, generateDeBruijnSequence
-from RMS.Routines.SkyFitHelp import HELP_STYLE, buildHelpHome, buildHelpTopic
+from RMS.Routines.SkyFitHelp import HELP_STYLE, buildHelpHome, buildHelpTopic, shortcutsTopicId
 
 import time
 import re
@@ -1466,8 +1466,16 @@ class HelpWidget(QtWidgets.QWidget, ScaledSizeHelper):
         self.home_button.clicked.connect(self.showHome)
         self.back_button = QtWidgets.QPushButton("Back")
         self.back_button.clicked.connect(self.goBack)
+
+        # The keyboard reference is the most asked-for page, so it gets a button of its own that
+        # is reachable from every topic page, not just from the home list
+        self.keys_button = QtWidgets.QPushButton("Keys")
+        self.keys_button.setToolTip("Keyboard shortcut reference")
+        self.keys_button.clicked.connect(self.showShortcuts)
+
         nav.addWidget(self.home_button)
         nav.addWidget(self.back_button)
+        nav.addWidget(self.keys_button)
         layout.addLayout(nav)
 
         # Search box: filters the home topic list as you type
@@ -1547,6 +1555,11 @@ class HelpWidget(QtWidgets.QWidget, ScaledSizeHelper):
         else:
             self.showHome()
         self._updateBackButton()
+
+
+    def showShortcuts(self):
+        """ Show the keyboard reference for the mode the GUI is currently in. """
+        self.showTopic(shortcutsTopicId(self.gui))
 
 
     def _updateBackButton(self):
