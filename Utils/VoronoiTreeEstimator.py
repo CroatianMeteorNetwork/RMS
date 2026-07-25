@@ -127,12 +127,18 @@ def computeTreeSeries(config, night_dir, header, frames, stars, calibration=None
             sigma[:n] = cal["sigma_mag"][:n]
             k_ext = float(cal_h.get("k_ema", 0.0))
 
-    # In-night fallback rates (whole-night; first night of a station)
+    # Night-1 fallback: the MODEL detection probability, not the in-night
+    # measured rate. In-night rates conflate weather with detectability - on a
+    # night overcast from dusk they make the overcast the baseline and the
+    # whole deck reads dm ~ 0 (observed on a recovered CAWEC4 night). The dome
+    # model was fit on clear archived nights, so its per-star p IS a clear-sky
+    # baseline; the trailing calibration replaces it from night 2 on.
+    p_sum = np.bincount(cat_id, weights=stars["star_p"].astype(np.float64),
+        minlength=n_cat)
     seen_n = np.bincount(cat_id, minlength=n_cat)
-    det_n = np.bincount(cat_id[detected], minlength=n_cat)
     with np.errstate(invalid="ignore"):
-        rate_night = np.where(seen_n >= 10, det_n/np.maximum(seen_n, 1), np.nan)
-    rate = np.where(np.isfinite(rate), rate, rate_night)
+        p_model = np.where(seen_n >= 10, p_sum/np.maximum(seen_n, 1), np.nan)
+    rate = np.where(np.isfinite(rate), rate, p_model)
 
     qualified = np.isfinite(rate) & (rate >= RATE_MIN_LEAF)
     if qualified.sum() < 30:
