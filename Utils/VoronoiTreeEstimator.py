@@ -232,28 +232,83 @@ def computeTreeSeries(config, night_dir, header, frames, stars, calibration=None
         mag_band_ratios=config.star_catalog_band_ratios)
     pos_all = _unitVectors(catalog_stars[:, 0], catalog_stars[:, 1])
 
+    # Airmass consistency: the calibration stores baselines at reference
+    # airmass (it subtracts k*(X-1) before fitting) - the evidence residuals
+    # must live in the same frame or every low-elevation star reads its own
+    # extinction as dimming
+    if abs(k_ext) > 1e-3 and np.any(np.isfinite(inst_resid)):
+        from RMS.Astrometry.Conversions import raDec2AltAz
+        lat = lon = None
+        try:
+            with open(os.path.join(night_dir,
+                    config.platepars_flux_recalibrated_name)) as f:
+                _ppr = json.load(f)
+            for v in _ppr.values():
+                if isinstance(v, dict) and ("lat" in v):
+                    lat, lon = float(v["lat"]), float(v["lon"])
+                    break
+        except Exception:
+            pass
+        if lat is not None:
+            t_all = np.asarray(frames["frame_time_unix"], dtype=np.float64)
+            jd_frame = t_all/86400.0 + 2440587.5
+            r_ok = np.isfinite(inst_resid)
+            for fi in np.unique(sf[r_ok]):
+                m_ = r_ok & (sf == fi)
+                _, alt_ = raDec2AltAz(
+                    catalog_stars[cat_id[m_], 0], catalog_stars[cat_id[m_], 1],
+                    float(jd_frame[fi]), lat, lon)
+                h_ = np.maximum(np.asarray(alt_), 2.0)
+                X_ = 1.0/(np.sin(np.radians(h_))
+                          + 0.50572*(h_ + 6.07995)**-1.6364)
+                inst_resid[m_] = inst_resid[m_] - k_ext*(X_ - 1.0)
+
+
     q_ids = np.where(qualified)[0]
     q_ids = q_ids[q_ids < len(pos_all)]
     pos = pos_all[q_ids]
 
-    # Strata by measured reliability: leaves = all qualified; mid = upper half;
-    # root level = the most reliable, thinned for coverage (cap for BP cost)
+    # Upper strata must be SPATIALLY BALANCED, not globally rate-ranked: seeded
+    # rates fall with altitude (the dome model predicts lower p at low
+    # elevation), so a global rate cut concentrates every parent anchor in the
+    # high-altitude field. Children in an uncovered region then attach to
+    # far-away parents whose sibling majority is clear, and BP's sibling flood
+    # crushes a locally-covered minority to dm 0 (observed: a half-covered
+    # USV001 night reading fully clear). Greedy best-rate-first selection with
+    # a minimum angular separation gives every region its own parents - the
+    # spatial spread the harness got for free from magnitude strata.
     r_q = rate[q_ids]
-    mid_thr = np.nanmedian(r_q)
-    l1_mask = r_q >= mid_thr
-    l0_thr = np.nanpercentile(r_q, 90)
-    l0_mask = r_q >= l0_thr
-    if l0_mask.sum() > 250:
-        keep = np.zeros(len(q_ids), dtype=bool)
-        idx0 = np.where(l0_mask)[0]
-        keep[idx0[::max(1, len(idx0)//250)]] = True
-        l0_mask = keep
-    if l1_mask.sum() < 10 or l0_mask.sum() < 3:
-        return None
 
+    def _spreadSelect(min_sep_chord, max_n):
+        order = np.argsort(-np.nan_to_num(r_q))
+        chosen = []
+        for i in order:
+            if len(chosen) >= max_n:
+                break
+            if chosen:
+                d2 = np.sum((pos[np.array(chosen)] - pos[i])**2, axis=1)
+                if d2.min() < min_sep_chord**2:
+                    continue
+            chosen.append(int(i))
+        return np.array(chosen, dtype=np.int64)
+
+    # Footprint angular radius from the qualified stars themselves
+    centroid = pos.mean(axis=0)
+    centroid /= np.linalg.norm(centroid)
+    max_chord = float(np.sqrt(np.max(np.sum((pos - centroid)**2, axis=1))))
+
+    # Stratum densities match the validated harness geometry (leaf:L1:L0 ~
+    # 15:5:1). Coarser parents aggregate too many siblings and BP's sibling
+    # flood crushes locally-covered minorities (measured on the A6 A/B:
+    # record-level likelihoods agreed while leaf modes read 0 - the crush was
+    # pure tree geometry). Separation radii follow uniform-coverage scaling.
     A2 = np.arange(len(q_ids))
-    A1 = np.where(l1_mask)[0]
-    A0 = np.where(l0_mask)[0]
+    n0 = max(20, len(q_ids)//15)
+    n1 = max(100, len(q_ids)//3)
+    A0 = _spreadSelect(max_chord*np.sqrt(2.0/n0), n0)
+    A1 = _spreadSelect(max_chord*np.sqrt(2.0/n1), n1)
+    if len(A1) < 10 or len(A0) < 3:
+        return None
 
     leaf_parent = A1[cKDTree(pos[A1]).query(pos)[1]]      # leaf -> L1 anchor
     l1_parent = A0[cKDTree(pos[A0]).query(pos[A1])[1]]    # L1 -> L0 anchor
@@ -263,95 +318,103 @@ def computeTreeSeries(config, night_dir, header, frames, stars, calibration=None
     l1_parent_i = np.array([l0_index[a] for a in l1_parent])
     n_leaf, n_l1, n_l0 = len(A2), len(A1), len(A0)
 
+    # EVERY star with a usable rate feeds its nearest leaf (the harness pooled
+    # all calibrated stars this way) - the anchor gate selects LEAVES, it must
+    # not discard the sub-anchor stars' evidence, which on deep catalogs is a
+    # large fraction of the total
     leaf_of_cat = np.full(n_cat, -1, dtype=np.int64)
     leaf_of_cat[q_ids] = A2
+    other = np.where(np.isfinite(rate) & ~qualified)[0]
+    other = other[other < len(pos_all)]
+    if len(other):
+        leaf_of_cat[other] = A2[cKDTree(pos).query(pos_all[other])[1]]
 
     NG = len(GRID_DM)
 
-    # ---- Per-frame star evidence, accumulated to leaves ----------------------
-    rec_leaf = leaf_of_cat[cat_id]
-    usable = rec_leaf >= 0
-
-    def frameLeafLL(fi):
-        out = np.zeros((n_leaf, NG))
-        m = usable & (sf == fi)
-        if not np.any(m):
-            return out
-        cid = cat_id[m]
-        lg = logit0[cid][:, None]
-        det = detected[m].astype(np.float64)[:, None]
-        pr = 1.0/(1.0 + np.exp(-(lg - GRID_DM[None, :]/dome_s)))
-        pr = np.clip(pr, 1e-6, 1 - 1e-6)
-        q = det*pr + (1 - det)*(1 - pr)
-        ll = np.log(EVIDENCE_MIX*q + (1 - EVIDENCE_MIX)/2)
-        pm = m & (row >= 0) & np.isfinite(inst_resid) & phot_ok[cat_id]
-        if np.any(pm):
-            sel = pm[m]
-            rr = (inst_resid[pm] - base[cat_id[pm]])[:, None]
-            ss = sigma[cat_id[pm]][:, None]
-            ll[sel] += -0.5*np.minimum(((rr - GRID_DM[None, :])/ss)**2, 9.0)
-        np.add.at(out, rec_leaf[m], ll)
-        return out
-
-    # ---- BP over the night with a ring cache for the +/- window --------------
     t_unix = np.asarray(frames["frame_time_unix"], dtype=np.float64)
-    dm_cells = np.full((n_frames, CELL_NY, CELL_NX), np.nan, dtype=np.float32)
-    leaf_dm_all = np.full((n_frames, n_leaf), np.nan, dtype=np.float32)
-
-    # Leaf -> cell assignment per frame from the stars' image positions: a
-    # leaf's cell is where its own star currently sits (median if several recs)
     width = float(np.ceil(np.nanmax(sx)/16.0)*16.0)
     height = float(np.ceil(np.nanmax(sy)/16.0)*16.0)
     cxr = np.clip((sx/(width/CELL_NX)).astype(np.intp), 0, CELL_NX - 1)
     cyr = np.clip((sy/(height/CELL_NY)).astype(np.intp), 0, CELL_NY - 1)
 
-    cache = {}
-    for fi in range(n_frames):
+    rec_leaf = leaf_of_cat[cat_id]
+    usable = rec_leaf >= 0
 
-        lls = None
-        for k in range(fi - WINDOW_FRAMES, fi + WINDOW_FRAMES + 1):
-            if not (0 <= k < n_frames):
+    def runBP(logit0v, basev, sigmav, phot_okv):
+        """ One full BP sweep of the night with the given per-star weights. """
+
+        def frameLeafLL(fi):
+            out = np.zeros((n_leaf, NG))
+            m = usable & (sf == fi)
+            if not np.any(m):
+                return out
+            cid = cat_id[m]
+            lg = logit0v[cid][:, None]
+            det = detected[m].astype(np.float64)[:, None]
+            pr = 1.0/(1.0 + np.exp(-(lg - GRID_DM[None, :]/dome_s)))
+            pr = np.clip(pr, 1e-6, 1 - 1e-6)
+            q = det*pr + (1 - det)*(1 - pr)
+            ll = np.log(EVIDENCE_MIX*q + (1 - EVIDENCE_MIX)/2)
+            pm = m & (row >= 0) & np.isfinite(inst_resid) & phot_okv[cat_id]
+            if np.any(pm):
+                sel = pm[m]
+                rr = (inst_resid[pm] - basev[cat_id[pm]])[:, None]
+                ss = sigmav[cat_id[pm]][:, None]
+                ll[sel] += -0.5*np.minimum(((rr - GRID_DM[None, :])/ss)**2, 9.0)
+            np.add.at(out, rec_leaf[m], ll)
+            return out
+
+        dm_cells = np.full((n_frames, CELL_NY, CELL_NX), np.nan, dtype=np.float32)
+        leaf_dm_all = np.full((n_frames, n_leaf), np.nan, dtype=np.float32)
+        cache = {}
+        for fi in range(n_frames):
+            lls = None
+            for k in range(fi - WINDOW_FRAMES, fi + WINDOW_FRAMES + 1):
+                if not (0 <= k < n_frames):
+                    continue
+                if k not in cache:
+                    cache[k] = frameLeafLL(k)
+                lls = cache[k] if lls is None else lls + cache[k]
+            for k in list(cache):
+                if k < fi - WINDOW_FRAMES:
+                    del cache[k]
+
+            up2 = _smooth(lls, TAU[2])
+            l1_in = np.zeros((n_l1, NG))
+            np.add.at(l1_in, leaf_parent_i, up2)
+            up1 = _smooth(l1_in, TAU[1])
+            l0_in = np.zeros((n_l0, NG))
+            np.add.at(l0_in, l1_parent_i, up1)
+            up0 = _smooth(l0_in, TAU[0])
+            root = up0.sum(axis=0)
+
+            down0 = _smooth(root[None, :] - up0, TAU[0])
+            down1 = _smooth((l0_in + down0)[l1_parent_i] - up1, TAU[1])
+            down2 = _smooth((l1_in + down1)[leaf_parent_i] - up2, TAU[2])
+
+            belief = lls + down2
+            leaf_dm = np.maximum(0.0, GRID_DM[np.argmax(belief, axis=1)])
+            has_ev = np.abs(lls).sum(axis=1) > 0
+            leaf_dm_all[fi, has_ev] = leaf_dm[has_ev]
+
+            m = usable & (sf == fi)
+            if not np.any(m):
                 continue
-            if k not in cache:
-                cache[k] = frameLeafLL(k)
-            lls = cache[k] if lls is None else lls + cache[k]
-        for k in list(cache):
-            if k < fi - WINDOW_FRAMES:
-                del cache[k]
+            lf = rec_leaf[m]
+            vals = leaf_dm[lf]
+            flat = cyr[m]*CELL_NX + cxr[m]
+            cell = np.full(CELL_NY*CELL_NX, np.nan, dtype=np.float64)
+            order = np.argsort(flat)
+            fs, vs = flat[order], vals[order]
+            uniq, starts = np.unique(fs, return_index=True)
+            bounds = np.append(starts, len(fs))
+            for u, s0, s1 in zip(uniq, bounds[:-1], bounds[1:]):
+                cell[u] = np.median(vs[s0:s1])
+            dm_cells[fi] = cell.reshape(CELL_NY, CELL_NX)
 
-        # Upward pass
-        up2 = _smooth(lls, TAU[2])
-        l1_in = np.zeros((n_l1, NG))
-        np.add.at(l1_in, leaf_parent_i, up2)
-        up1 = _smooth(l1_in, TAU[1])
-        l0_in = np.zeros((n_l0, NG))
-        np.add.at(l0_in, l1_parent_i, up1)
-        up0 = _smooth(l0_in, TAU[0])
-        root = up0.sum(axis=0)
+        return dm_cells, leaf_dm_all
 
-        # Downward pass
-        down0 = _smooth(root[None, :] - up0, TAU[0])
-        down1 = _smooth((l0_in + down0)[l1_parent_i] - up1, TAU[1])
-        down2 = _smooth((l1_in + down1)[leaf_parent_i] - up2, TAU[2])
-
-        belief = lls + down2
-        leaf_dm = np.maximum(0.0, GRID_DM[np.argmax(belief, axis=1)])
-        # A leaf with no in-window evidence has a flat belief - do not report it
-        has_ev = np.abs(lls).sum(axis=1) > 0
-        leaf_dm_all[fi, has_ev] = leaf_dm[has_ev]
-
-        # Aggregate leaves to cells by the leaves' current image positions
-        m = usable & (sf == fi)
-        if not np.any(m):
-            continue
-        lf = rec_leaf[m]
-        vals = leaf_dm[lf]
-        flat = cyr[m]*CELL_NX + cxr[m]
-        sums = np.bincount(flat, weights=vals, minlength=CELL_NY*CELL_NX)
-        cnts = np.bincount(flat, minlength=CELL_NY*CELL_NX)
-        with np.errstate(invalid="ignore"):
-            cell = np.where(cnts > 0, sums/np.maximum(cnts, 1), np.nan)
-        dm_cells[fi] = cell.reshape(CELL_NY, CELL_NX)
+    dm_cells, leaf_dm_all = runBP(logit0, base, sigma, phot_ok)
 
     # ---- Flags (same semantics as the grid product) --------------------------
     flags = np.zeros(dm_cells.shape, dtype=np.uint8)
@@ -390,8 +453,39 @@ def computeAndSaveTreeMap(config, night_dir):
             calibrationFileName(config.stationID))
         if os.path.isfile(cal_path):
             calibration = loadStarCalibration(cal_path)
+            if abs(calibration[0].get("catalog_lim_mag", -99)
+                    - float(header["catalog_lim_mag"])) >= 0.01:
+                calibration = None
     except Exception:
         calibration = None
+
+    # Night-1 (no usable trailing file): measure THIS night's per-star stats,
+    # clear-conditioned on the GRID detector's map - the harness's recipe.
+    # The grid map is thin-cloud sensitive, so the conditioning excludes
+    # cloudy frames properly (a tree-pass-1 conditioner inherits the seed's
+    # own thin-blindness; the model-p seed alone is too mushy - measured on
+    # the A6 A/B: thin-cloud band harness 0.55, seed 0.00). The overcast
+    # guard inside computeNightStarStats keeps unlearnable nights on the
+    # saturating seed path.
+    if calibration is None:
+        try:
+            from Utils.StarCalibration import computeNightStarStats
+            stats = computeNightStarStats(config, night_dir)
+            if stats is not None:
+                calibration = (
+                    dict(catalog_lim_mag=stats["catalog_lim_mag"],
+                         k_ema=stats["k_fit"]),
+                    dict(rate_calstars=stats["rate_calstars"],
+                         rate_forced=stats["rate_forced"],
+                         base_mag=stats["base_mag"],
+                         sigma_mag=stats["sigma_mag"]),
+                )
+                print("Tree estimator: in-night grid-conditioned calibration "
+                      "({} stars)".format(
+                      int(np.isfinite(stats["rate_calstars"]).sum())))
+        except Exception as e:
+            print("Tree estimator: in-night calibration failed ({}), "
+                  "seeded path".format(e))
 
     result = computeTreeSeries(config, night_dir, header, frames, stars,
         calibration=calibration)
