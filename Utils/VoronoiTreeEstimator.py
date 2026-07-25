@@ -469,6 +469,36 @@ def computeAndSaveTreeMap(config, night_dir):
 
     header, frames, stars = loadStarScoring(scoring_path)
 
+    # Fuse the stills sidecar's instantaneous detections into the detection
+    # bits (calstars_row -1 -> -2 where a still saw the star within the FF
+    # window). The union channel is what the validated harness consumed; the
+    # FF window alone under-reads thin fast cloud.
+    try:
+        from Utils.StillsSampler import loadStillStarStates, sidecarFileName
+        sc_path = os.path.join(night_dir, sidecarFileName(night_name))
+        if os.path.isfile(sc_path):
+            _, sc = loadStillStarStates(sc_path)
+            cat_id_f = np.asarray(stars["star_cat_id"], dtype=np.int64)
+            sf_f = np.asarray(stars["star_frame"], dtype=np.int64)
+            row_f = np.asarray(stars["calstars_row"], dtype=np.int64).copy()
+            t_ff = np.asarray(frames["frame_time_unix"], dtype=np.float64)
+            b_ids = sc["bright_cat_id"].astype(np.int64)
+            b_det = sc["bright_detected"]
+            t_st = sc["t_unix"]
+            smap = np.argmin(np.abs(t_ff[None, :] - t_st[:, None]), axis=1)
+            ok_s = np.abs(t_ff[smap] - t_st) < 8.0
+            det_ff = np.zeros((int(cat_id_f.max()) + 1, len(t_ff)), dtype=bool)
+            for si in np.where(ok_s)[0]:
+                det_ff[b_ids[b_det[:, si]], smap[si]] = True
+            fused = (row_f == -1) & det_ff[cat_id_f, sf_f]
+            row_f[fused] = -2
+            stars = dict(stars)
+            stars["calstars_row"] = row_f
+            print("Tree estimator: fused {:d} stills detections".format(
+                int(fused.sum())))
+    except Exception as e:
+        print("Tree estimator: stills fusion skipped ({})".format(e))
+
     calibration = None
     try:
         from Utils.StarCalibration import calibrationFileName, loadStarCalibration

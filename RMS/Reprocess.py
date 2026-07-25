@@ -783,8 +783,15 @@ def processFramesFiles(config):
             if night_stills_t:
                 night_dir = findNightDirForStills(config, night_stills_t[0])
                 if night_dir is not None:
-                    stills_sidecar = sampleStillsForNight(config, image_blocks,
-                        night_dir)
+                    from Utils.StillsSampler import sidecarFileName
+                    _existing = os.path.join(night_dir, sidecarFileName(
+                        os.path.basename(os.path.normpath(night_dir))))
+                    if os.path.isfile(_existing):
+                        # already sampled at scoring time (detectClouds)
+                        stills_sidecar = _existing
+                    else:
+                        stills_sidecar = sampleStillsForNight(config,
+                            image_blocks, night_dir)
 
                     # Human-judgeable demo video (stays on station, never
                     # uploads) - rendered while the stills still exist

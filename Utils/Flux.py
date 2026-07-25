@@ -1594,6 +1594,28 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
         except Exception as e:
             log.warning("Could not write the star scoring product: {}".format(e))
 
+        # Sample the night's stills NOW, while they are still on disk and the
+        # scoring product + recalibrated platepars exist: the tree estimator
+        # fuses the instantaneous stills detections into its evidence (the
+        # 10 s maxpixel window alone under-reads thin fast cloud - measured
+        # on the A6 parity lab). The frames step later reuses this sidecar
+        # for the demo video instead of re-sampling. Guarded - never blocks.
+        try:
+            import datetime as _dt
+            from Utils.GenerateTimelapse import listImageBlocksBefore
+            from Utils.StillsSampler import sampleStillsForNight, sidecarFileName
+            _night_name = os.path.basename(os.path.normpath(dir_path))
+            if not os.path.isfile(os.path.join(dir_path,
+                    sidecarFileName(_night_name))):
+                _fdir = os.path.join(config.data_dir, config.frame_dir)
+                if os.path.isdir(_fdir):
+                    _blocks = listImageBlocksBefore(
+                        _dt.datetime.utcnow() + _dt.timedelta(days=1), _fdir)
+                    if _blocks:
+                        sampleStillsForNight(config, _blocks, dir_path)
+        except Exception as e:
+            log.warning("Stills sampling at scoring time failed: {}".format(e))
+
         # Release the build-time structures BEFORE the transparency step re-loads
         # the product from disk - holding both was part of the OOM that killed a
         # station's capture process right at this point
@@ -1625,25 +1647,28 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
         except Exception as e:
             log.warning("Could not write the transparency map: {}".format(e))
 
-        # Fold the night into the trailing per-star calibration (measured
-        # rates/baselines per star per channel + the nightly extinction slope).
-        # Needs the map just written for its clear conditioning. Guarded -
-        # never blocks the pipeline.
-        try:
-            from Utils.StarCalibration import updateStarCalibration
-            updateStarCalibration(config, dir_path)
-        except Exception as e:
-            log.warning("Could not update the star calibration: {}".format(e))
-
-        # The Voronoi tree estimator (parallel-run dual-write): the estimator
-        # selected by the ground-truth benchmark, writing its own map product
-        # alongside the grid one until the flip. Runs AFTER the calibration
-        # update so night 1 already benefits from tonight's measured rates.
+        # The Voronoi tree estimator (parallel-run dual-write) runs BEFORE the
+        # calibration update, consuming the trailing file as it existed before
+        # tonight. The reverse order is circular: a calibration folded from
+        # tonight's own weather encodes detection-under-cloud as each star's
+        # normal, and the tree goes blind to exactly tonight's clouds
+        # (observed: a recovered overcast night reading clear). Night 1 with
+        # no file uses the normalized model-p seed.
         try:
             from Utils.VoronoiTreeEstimator import computeAndSaveTreeMap
             computeAndSaveTreeMap(config, dir_path)
         except Exception as e:
             log.warning("Could not compute the tree transparency map: {}".format(e))
+
+        # Fold the night into the trailing per-star calibration (measured
+        # rates/baselines per star per channel + the nightly extinction slope)
+        # FOR FUTURE NIGHTS. Needs the map just written for its clear
+        # conditioning. Guarded - never blocks the pipeline.
+        try:
+            from Utils.StarCalibration import updateStarCalibration
+            updateStarCalibration(config, dir_path)
+        except Exception as e:
+            log.warning("Could not update the star calibration: {}".format(e))
 
         # The expected counts are calibrated per sky position, so no cap or deficit
         # correction applies - the clear-sky ratio is ~1 by construction at the fit epoch.
