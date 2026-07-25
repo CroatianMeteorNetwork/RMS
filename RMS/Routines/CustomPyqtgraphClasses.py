@@ -1302,6 +1302,9 @@ class RightOptionsTab(QtWidgets.QTabWidget, ScaledSizeHelper):
 
     # Tab width in characters (scales with font)
     TAB_WIDTH_CHARS = 32
+
+    # Floor for the collapsed width, in characters. The real collapsed width is measured from the
+    # tab bar (see minimizedWidth); this only guards against a bogus measurement.
     TAB_MINIMIZED_CHARS = 2
 
     # The Help tab is shown at this multiple of the normal width (more readable docs)
@@ -1354,12 +1357,28 @@ class RightOptionsTab(QtWidgets.QTabWidget, ScaledSizeHelper):
             return self.TAB_WIDTH_CHARS*self.HELP_WIDTH_MULT
         return self.TAB_WIDTH_CHARS
 
+    def minimizedWidth(self):
+        """ Collapsed panel width, in pixels: just wide enough to show the whole tab bar.
+
+        setFixedWidth() sizes the tab bar and the page together, so a collapsed width guessed in
+        characters clipped the (vertical, East-side) tab labels on systems whose style or font
+        makes the bar wider than the guess. Ask the bar what it needs instead, and add the pane
+        frame drawn around it.
+        """
+
+        bar_width = self.tabBar().sizeHint().width()
+
+        # Frame drawn on either side of the tab pane
+        frame = 2*self.style().pixelMetric(QtWidgets.QStyle.PM_DefaultFrameWidth, None, self)
+
+        return max(bar_width + frame, self.scaledWidth(self.TAB_MINIMIZED_CHARS))
+
     def applyTabWidth(self):
         """ Resize the panel to match the current maximized/minimized state and selected tab. """
         if self.maximized:
             self.setFixedWidth(self.scaledWidth(self.maximizedWidthChars()))
         else:
-            self.setFixedWidth(self.scaledWidth(self.TAB_MINIMIZED_CHARS))
+            self.setFixedWidth(self.minimizedWidth())
 
     def onTabBarClicked(self, index):
         old_index = self.index
