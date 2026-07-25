@@ -122,6 +122,16 @@ def computeNightStarStats(config, night_dir):
     cell_dm = dm[sf, cy, cx]
     clear = np.isfinite(cell_dm) & (cell_dm < CLEAR_DM_MAX)
 
+    # A night with essentially no clear sky teaches nothing about clear-sky
+    # behavior - and worse, the map's own zero point can normalize a full
+    # overcast to "clear", so the rates learned would encode detection under
+    # cloud as normal. Skip such nights entirely (the EMA just waits).
+    clear_frac = float(np.mean(np.bincount(sf[clear], minlength=n_frames) > 0))
+    if clear_frac < 0.15:
+        print("Star calibration: only {:.0%} of frames have any clear cell - "
+              "skipping this night".format(clear_frac))
+        return None
+
     n_cat = int(cat_id.max()) + 1
 
     # Channel rates on clear frames
@@ -132,8 +142,33 @@ def computeNightStarStats(config, night_dir):
     seen_fo = np.bincount(cat_id[meas_f], minlength=n_cat)
     det_fo = np.bincount(cat_id[meas_f & (snr >= 5.0)], minlength=n_cat)
 
-    # Photometry: instrumental magnitudes joined from CALSTARS by row index
+    # Photometry: instrumental magnitudes joined from CALSTARS by row index,
+    # zero-pointed with the NEAREST RECALIBRATED KNOT's mag_lev. The knots are
+    # fitted on clear moments, so this removes the night's photometric
+    # zero-point drift while preserving cloud dimming - with a raw
+    # -2.5log10(I) the drift smears every baseline (measured: the harness's
+    # thin-cloud photometric engine lived entirely in this convention).
     inst_mag = np.full(len(row), np.nan, dtype=np.float32)
+    knot_t, knot_ml = [], []
+    pp_path = os.path.join(night_dir, config.platepars_flux_recalibrated_name)
+    if os.path.isfile(pp_path):
+        with open(pp_path) as f:
+            _ppr = json.load(f)
+        from RMS.Formats import FFfile as _FF
+        import calendar as _cal
+        for ffn, v in _ppr.items():
+            if isinstance(v, dict) and v.get("auto_recalibrated")                     and ("mag_lev" in v):
+                knot_t.append(_cal.timegm(
+                    _FF.filenameToDatetime(ffn).timetuple()))
+                knot_ml.append(float(v["mag_lev"]))
+    knot_t = np.asarray(knot_t, dtype=np.float64)
+    knot_ml = np.asarray(knot_ml, dtype=np.float64)
+    t_fr = np.asarray(frames["frame_time_unix"], dtype=np.float64)
+    if len(knot_t):
+        ml_frame = knot_ml[np.argmin(np.abs(knot_t[None, :]
+            - t_fr[:, None]), axis=1)]
+    else:
+        ml_frame = np.zeros(len(t_fr))
     calstars_files = [f for f in sorted(os.listdir(night_dir))
                       if f.startswith("CALSTARS") and f.endswith(".txt")]
     if calstars_files:
@@ -154,7 +189,7 @@ def computeNightStarStats(config, night_dir):
             inten = data[rows_here[valid], 2]
             good = inten > 0
             idx = np.where(m)[0][valid][good]
-            inst_mag[idx] = -2.5*np.log10(inten[good])
+            inst_mag[idx] = ml_frame[fi] - 2.5*np.log10(inten[good])
 
     # Airmass per clear matched record, from catalog positions and frame times
     resid_ok = clear & (row >= 0) & np.isfinite(inst_mag)

@@ -189,6 +189,28 @@ def computeTreeSeries(config, night_dir, header, frames, stars, calibration=None
                      for ff, d in calstars_list if len(d)}
             fnames = [str(n) for n in frames["frame_names"]]
             smag = np.asarray(stars["star_mag"], dtype=np.float64)
+            # Per-knot mag_lev zero point (clear-moment fits): removes the
+            # night's photometric drift while preserving cloud dimming - the
+            # same convention as the calibration baselines
+            knot_t, knot_ml = [], []
+            pp_path = os.path.join(night_dir,
+                config.platepars_flux_recalibrated_name)
+            if os.path.isfile(pp_path):
+                with open(pp_path) as f:
+                    _ppr = json.load(f)
+                from RMS.Formats import FFfile as _FF
+                import calendar as _cal
+                for ffn, v in _ppr.items():
+                    if isinstance(v, dict) and v.get("auto_recalibrated")                             and ("mag_lev" in v):
+                        knot_t.append(_cal.timegm(
+                            _FF.filenameToDatetime(ffn).timetuple()))
+                        knot_ml.append(float(v["mag_lev"]))
+            knot_t = np.asarray(knot_t, dtype=np.float64)
+            knot_ml = np.asarray(knot_ml, dtype=np.float64)
+            t_fr = np.asarray(frames["frame_time_unix"], dtype=np.float64)
+            ml_frame = (knot_ml[np.argmin(np.abs(knot_t[None, :]
+                - t_fr[:, None]), axis=1)] if len(knot_t)
+                else np.zeros(len(t_fr)))
             for fi, ff_name in enumerate(fnames):
                 data = by_ff.get(ff_name)
                 if data is None:
@@ -201,7 +223,8 @@ def computeTreeSeries(config, night_dir, header, frames, stars, calibration=None
                 inten = data[rows_here[valid], 2]
                 good = inten > 0
                 idx = np.where(m)[0][valid][good]
-                inst_resid[idx] = -2.5*np.log10(inten[good]) - smag[idx]
+                inst_resid[idx] = (ml_frame[fi]
+                    - 2.5*np.log10(inten[good])) - smag[idx]
     except Exception:
         pass
 
