@@ -143,6 +143,29 @@ def computeTreeSeries(config, night_dir, header, frames, stars, calibration=None
     seen_n = np.bincount(cat_id, minlength=n_cat)
     with np.errstate(invalid="ignore"):
         p_model = np.where(seen_n >= 10, p_sum/np.maximum(seen_n, 1), np.nan)
+
+    # Normalize the model seed to the NIGHT'S OWN clear level (the same
+    # high-percentile scheme as the grid detector's norms): the fleet's
+    # models sit anywhere from 2.5x over-prediction (fresh refit, warmup
+    # norm ~0.4 - raw seeding paints clear sky solid) to 1.5x under-
+    # prediction (MW transit - thin clouds become invisible because stars
+    # beat expectations). A high percentile of the per-frame ratio tracks
+    # the clearest moments, so ordinary cloud does not drag the zero point;
+    # a night overcast END TO END clamps at NORM_MIN and still saturates.
+    # The trailing calibration (measured rates) needs none of this.
+    sp = stars["star_p"].astype(np.float64)
+    dark = np.asarray(frames["sun_alt"], dtype=np.float64) <= -18.0
+    fr_exp = np.bincount(sf, weights=sp, minlength=n_frames)
+    fr_det = np.bincount(sf[detected], weights=np.ones(int(detected.sum())),
+        minlength=n_frames)
+    informative = dark & (fr_exp >= 5.0)
+    if np.any(informative):
+        seed_norm = float(np.clip(np.percentile(
+            fr_det[informative]/fr_exp[informative], 80), 0.5, 3.0))
+    else:
+        seed_norm = 1.0
+    p_model = np.clip(p_model*seed_norm, 0.0, 0.97)
+
     rate = np.where(np.isfinite(rate), rate, p_model)
 
     qualified = np.isfinite(rate) & (rate >= RATE_MIN_LEAF)
@@ -193,7 +216,11 @@ def computeTreeSeries(config, night_dir, header, frames, stars, calibration=None
         for u, s0, s1 in zip(uniq, bounds[:-1], bounds[1:]):
             if not np.isfinite(base[u]) and (s1 - s0) >= 10:
                 vals = rv[s0:s1]
-                med = np.median(vals)
+                # Clear-biased baseline: the 30th percentile tracks the star's
+                # BRIGHT (clear) states - a whole-night median on a cloudy
+                # night absorbs the dimming into the baseline and kills the
+                # photometric channel's thin-cloud sensitivity
+                med = np.percentile(vals, 30)
                 base[u] = med
                 sigma[u] = max(1.4826*np.median(np.abs(vals - med)), 0.05)
     phot_ok = np.isfinite(base) & np.isfinite(sigma)

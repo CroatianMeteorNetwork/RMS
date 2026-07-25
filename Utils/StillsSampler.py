@@ -74,6 +74,26 @@ def sidecarFileName(night_name):
     return "{:s}_{:s}".format(night_name, FILE_SUFFIX)
 
 
+def inFrontOfCamera(pp, ra_deg, dec_deg, jd):
+    """ Behind-camera guard for plain raDecToXYPP projections: the distortion
+        polynomial folds far-off-axis stars back INTO frame bounds (the phantom
+        star bug, third sighting - 11% of in-bounds member positions on a
+        CAWEC4 night were folds). A star more than ~72 deg from the optical
+        axis cannot be genuinely inside any RMS FOV (widest half-diagonal is
+        ~55 deg), so anything in-bounds beyond that is a fold. """
+
+    from RMS.Astrometry.Conversions import raDec2AltAz
+
+    az, alt = raDec2AltAz(ra_deg, dec_deg, jd, pp.lat, pp.lon)
+    az = np.radians(np.asarray(az))
+    alt = np.radians(np.asarray(alt))
+    az_c, alt_c = np.radians(pp.az_centre), np.radians(pp.alt_centre)
+    cos_sep = (np.sin(alt)*np.sin(alt_c)
+               + np.cos(alt)*np.cos(alt_c)*np.cos(az - az_c))
+
+    return cos_sep > 0.3
+
+
 def sampleStillsForNight(config, image_blocks, night_dir):
     """ Measure the night's stills and write the sidecar into the night directory.
 
@@ -208,6 +228,10 @@ def sampleStillsForNight(config, image_blocks, night_dir):
         # below only trims edge drift.
         ids = np.concatenate([bright_ids, stack_ids])
         x, y = raDecToXYPP(cat_ra[ids], cat_dec[ids], jd, pp)
+
+        front = inFrontOfCamera(pp, cat_ra[ids], cat_dec[ids], jd)
+        x = np.where(front, x, np.nan)
+        y = np.where(front, y, np.nan)
 
         flux, nz = measurePatchFluxes(img, x, y)
         frame_noise[j] = nz

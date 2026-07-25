@@ -115,7 +115,7 @@ def generateDemoVideo(config, night_dir, sidecar_path, max_stills=None):
     from RMS.Astrometry.ApplyAstrometry import raDecToXYPP
     from RMS.Astrometry.Conversions import date2JD
     from RMS.Formats import FFfile
-    from Utils.StillsSampler import loadStillStarStates
+    from Utils.StillsSampler import inFrontOfCamera, loadStillStarStates
 
     night_name = os.path.basename(os.path.normpath(night_dir))
 
@@ -218,7 +218,9 @@ def generateDemoVideo(config, night_dir, sidecar_path, max_stills=None):
         d = _dt.datetime.utcfromtimestamp(t)
         jd = date2JD(d.year, d.month, d.day, d.hour, d.minute, d.second,
             d.microsecond/1000.0)
-        return raDecToXYPP(cat_ra[leaf_cat_id], cat_dec[leaf_cat_id], jd, pp)
+        x, y = raDecToXYPP(cat_ra[leaf_cat_id], cat_dec[leaf_cat_id], jd, pp)
+        front = inFrontOfCamera(pp, cat_ra[leaf_cat_id], cat_dec[leaf_cat_id], jd)
+        return np.where(front, x, np.nan), np.where(front, y, np.nan)
 
     _grid_pts = _grid_shape = None
 
@@ -299,7 +301,8 @@ def generateDemoVideo(config, night_dir, sidecar_path, max_stills=None):
         jd = date2JD(dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second,
             dt.microsecond/1000.0)
         x, y = raDecToXYPP(cat_ra[bright_ids], cat_dec[bright_ids], jd, pp)
-        in_frame = (x > 8) & (x < W - 8) & (y > 8) & (y < H - 8)
+        front = inFrontOfCamera(pp, cat_ra[bright_ids], cat_dec[bright_ids], jd)
+        in_frame = front & (x > 8) & (x < W - 8) & (y > 8) & (y < H - 8)
 
         det = bright_det[:, j]
         m_flux = bright_flux[:, j]
