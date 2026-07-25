@@ -84,10 +84,8 @@ def computeNightStarStats(config, night_dir):
     """
 
     from RMS.Formats import CALSTARS as CALSTARSFormat
-    from RMS.Formats import FFfile
     from RMS.Formats.StarScoring import loadStarScoring, scoringFileName
     from RMS.Formats.TransparencyMap import loadTransparencyMap, mapFileName
-    from RMS.Formats.Platepar import Platepar
     from RMS.Astrometry.Conversions import raDec2AltAz
     from RMS.Formats import StarCatalog
 

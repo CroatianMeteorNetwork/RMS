@@ -1635,6 +1635,16 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
         except Exception as e:
             log.warning("Could not update the star calibration: {}".format(e))
 
+        # The Voronoi tree estimator (parallel-run dual-write): the estimator
+        # selected by the ground-truth benchmark, writing its own map product
+        # alongside the grid one until the flip. Runs AFTER the calibration
+        # update so night 1 already benefits from tonight's measured rates.
+        try:
+            from Utils.VoronoiTreeEstimator import computeAndSaveTreeMap
+            computeAndSaveTreeMap(config, dir_path)
+        except Exception as e:
+            log.warning("Could not compute the tree transparency map: {}".format(e))
+
         # The expected counts are calibrated per sky position, so no cap or deficit
         # correction applies - the clear-sky ratio is ~1 by construction at the fit epoch.
         # What remains is the slow drift of the light-pollution amplitude (aerosols, e.g.

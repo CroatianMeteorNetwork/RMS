@@ -35,7 +35,6 @@ FILE_SUFFIX = "transparency_demo.mp4"
 
 DEAD_BAND_MAG = 0.3    # overlay invisible below this dm
 OVERLAY_ALPHA = 0.5
-DM_VMAX = 3.0          # colorbar top
 DIMMED_FLUX_FRAC = 0.6 # detected but flux below this fraction of clear median
                        # draws the "dimmed" marker (~0.55 mag)
 STRONG_RATE = 0.5      # member rate above which an absence is "reliable missing"
@@ -84,7 +83,7 @@ def generateDemoVideo(config, night_dir, sidecar_path, max_stills=None):
     from RMS.Formats import StarCatalog
     from RMS.Formats.Platepar import Platepar
     from RMS.Formats.StarScoring import scoringFileName
-    from RMS.Formats.TransparencyMap import loadTransparencyMap, mapFileName
+    from RMS.Formats.TransparencyMap import mapFileName
     from RMS.Astrometry.ApplyAstrometry import raDecToXYPP
     from RMS.Astrometry.Conversions import date2JD
     from RMS.Formats import FFfile
@@ -92,11 +91,20 @@ def generateDemoVideo(config, night_dir, sidecar_path, max_stills=None):
 
     night_name = os.path.basename(os.path.normpath(night_dir))
 
-    map_path = os.path.join(night_dir, mapFileName(night_name))
+    # Overlay the TREE map when it exists - the estimator being judged. The
+    # grid map is only the fallback while the tree product is absent.
+    from Utils.VoronoiTreeEstimator import treeMapFileName
+    tree_path = os.path.join(night_dir, treeMapFileName(night_name))
+    map_path = tree_path if os.path.isfile(tree_path)         else os.path.join(night_dir, mapFileName(night_name))
     if not (os.path.isfile(map_path) and os.path.isfile(sidecar_path)):
         return None
 
-    _, t_map, dm, _, map_flags = loadTransparencyMap(map_path)
+    import numpy as _np
+    with _np.load(map_path, allow_pickle=False) as _z:
+        _mh = json.loads(str(_z["header"]))
+        t_map = _z["t_unix"]
+        dm = _z["dm"].astype(_np.float32)
+    estimator_tag = _mh.get("estimator", "grid")
     sc_header, sc = loadStillStarStates(sidecar_path)
 
     t_unix = sc["t_unix"]
@@ -241,7 +249,8 @@ def generateDemoVideo(config, night_dir, sidecar_path, max_stills=None):
             cv2.putText(combo, stamp, (xoff, 26), cv2.FONT_HERSHEY_SIMPLEX,
                 0.6, (255, 255, 255), 1, cv2.LINE_AA)
         leg = ("o detected   o dimmed   o forced-phot(sat)   . reliable missing"
-               "   . weak missing")
+               "   . weak missing   [{}]".format(
+                   "TREE" if "tree" in estimator_tag else "GRID"))
         # Above the stills' own burned-in banner
         cv2.putText(combo, leg, (W + 10, H - 30), cv2.FONT_HERSHEY_SIMPLEX,
             0.45, (0, 0, 0), 3, cv2.LINE_AA)

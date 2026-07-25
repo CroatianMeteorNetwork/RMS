@@ -572,7 +572,7 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False,
             # Sky model provenance, sky quality, star scoring and transparency map
             # products travel with the night
             elif file_name.endswith(("_light_dome.json", "_sky_quality.json",
-                                     "_star_scoring.npz", "_transparency_map.npz")):
+                                     "_star_scoring.npz", "_transparency_map.npz", "_transparency_map_tree.npz")):
                 extra_files.append(os.path.join(night_data_dir, file_name))
 
 
