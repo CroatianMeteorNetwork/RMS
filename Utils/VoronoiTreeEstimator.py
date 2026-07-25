@@ -59,14 +59,24 @@ def _unitVectors(ra_deg, dec_deg):
     return np.column_stack([np.cos(d)*np.cos(r), np.cos(d)*np.sin(r), np.sin(d)])
 
 
-def _smooth(p, tau):
-    """ Gaussian smoothing along the dm axis plus the robust flat mixture. """
+def _smooth(msgs, tau):
+    """ BP message smoothing: exponentiate, Gaussian-smooth along the dm axis
+    in probability space, NORMALIZE, then apply the robust flat mixture and
+    return to log space. The normalization is load-bearing: it caps every
+    node's message at log((1-eps)*NG/eps) nats regardless of how many records
+    the branch aggregates, which is what stops a well-observed clear region
+    from flooding a covered minority through the root (smoothing raw
+    log-likelihoods instead lets message strength grow without bound with
+    record count).
+    """
 
     from scipy.ndimage import gaussian_filter1d
 
-    q = gaussian_filter1d(p, tau/0.03, axis=-1, mode="nearest")
-    q = (1.0 - EPS_MIX)*q + EPS_MIX/p.shape[-1]
-    return q
+    p = np.exp(msgs - msgs.max(axis=-1, keepdims=True))
+    p = gaussian_filter1d(p, tau/0.03, axis=-1, mode="nearest")
+    p /= np.maximum(p.sum(axis=-1, keepdims=True), 1e-300)
+    p = (1.0 - EPS_MIX)*p + EPS_MIX/p.shape[-1]
+    return np.log(np.maximum(p, 1e-300))
 
 
 def computeTreeSeries(config, night_dir, header, frames, stars, calibration=None):

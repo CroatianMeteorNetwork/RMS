@@ -85,25 +85,25 @@ def computeNightStarStats(config, night_dir):
 
     from RMS.Formats import CALSTARS as CALSTARSFormat
     from RMS.Formats.StarScoring import loadStarScoring, scoringFileName
-    from RMS.Formats.TransparencyMap import loadTransparencyMap, mapFileName
     from RMS.Astrometry.Conversions import raDec2AltAz
     from RMS.Formats import StarCatalog
 
     night_name = os.path.basename(os.path.normpath(night_dir))
 
     scoring_path = os.path.join(night_dir, scoringFileName(night_name))
-    map_path = os.path.join(night_dir, mapFileName(night_name))
-    if not (os.path.isfile(scoring_path) and os.path.isfile(map_path)):
+    if not os.path.isfile(scoring_path):
         return None
 
     header, frames, stars = loadStarScoring(scoring_path)
     if int(header.get("schema_version", 0)) < 4 or "star_cat_id" not in stars:
         return None
 
-    _, t_map, dm, _, _ = loadTransparencyMap(map_path)
-    n_frames, ny, nx = dm.shape
-    if n_frames != len(frames["frame_names"]):
-        return None
+    # Union channel: fuse the stills sidecar's instantaneous detections first,
+    # so rates and conditioning see the same evidence the tree consumes
+    from Utils.StillsSampler import fuseSidecarDetections
+    stars = fuseSidecarDetections(night_dir, frames, stars)
+
+    n_frames = len(frames["frame_names"])
 
     cat_id = np.asarray(stars["star_cat_id"], dtype=np.int64)
     sf = np.asarray(stars["star_frame"], dtype=np.int64)
@@ -112,42 +112,12 @@ def computeNightStarStats(config, night_dir):
     row = np.asarray(stars["calstars_row"], dtype=np.int64)
     smag = np.asarray(stars["star_mag"], dtype=np.float32)
     snr = np.asarray(stars["star_flux_snr"], dtype=np.float32)
-
-    # Image size consistent with the map's cell grid
-    width = float(np.ceil(np.nanmax(sx)/16.0)*16.0)
-    height = float(np.ceil(np.nanmax(sy)/16.0)*16.0)
-
-    cx = np.clip((sx/(width/nx)).astype(np.intp), 0, nx - 1)
-    cy = np.clip((sy/(height/ny)).astype(np.intp), 0, ny - 1)
-    cell_dm = dm[sf, cy, cx]
-    clear = np.isfinite(cell_dm) & (cell_dm < CLEAR_DM_MAX)
-
-    # A night with essentially no clear sky teaches nothing about clear-sky
-    # behavior - and worse, the map's own zero point can normalize a full
-    # overcast to "clear", so the rates learned would encode detection under
-    # cloud as normal. Skip such nights entirely (the EMA just waits).
-    clear_frac = float(np.mean(np.bincount(sf[clear], minlength=n_frames) > 0))
-    if clear_frac < 0.15:
-        print("Star calibration: only {:.0%} of frames have any clear cell - "
-              "skipping this night".format(clear_frac))
-        return None
-
     n_cat = int(cat_id.max()) + 1
 
-    # Channel rates on clear frames
-    seen_cs = np.bincount(cat_id[clear], minlength=n_cat)
-    match_cs = np.bincount(cat_id[clear & (row >= 0)], minlength=n_cat)
-
-    meas_f = clear & np.isfinite(snr)
-    seen_fo = np.bincount(cat_id[meas_f], minlength=n_cat)
-    det_fo = np.bincount(cat_id[meas_f & (snr >= 5.0)], minlength=n_cat)
-
-    # Photometry: instrumental magnitudes joined from CALSTARS by row index,
-    # zero-pointed with the NEAREST RECALIBRATED KNOT's mag_lev. The knots are
-    # fitted on clear moments, so this removes the night's photometric
-    # zero-point drift while preserving cloud dimming - with a raw
-    # -2.5log10(I) the drift smears every baseline (measured: the harness's
-    # thin-cloud photometric engine lived entirely in this convention).
+    # ---- Instrumental magnitudes: CALSTARS join, per-knot mag_lev zero ------
+    # The knots are fitted on clear moments, so this removes the night's
+    # photometric zero-point drift while preserving cloud dimming (the
+    # harness's thin-cloud photometric engine lived in this convention).
     inst_mag = np.full(len(row), np.nan, dtype=np.float32)
     knot_t, knot_ml = [], []
     pp_path = os.path.join(night_dir, config.platepars_flux_recalibrated_name)
@@ -157,7 +127,8 @@ def computeNightStarStats(config, night_dir):
         from RMS.Formats import FFfile as _FF
         import calendar as _cal
         for ffn, v in _ppr.items():
-            if isinstance(v, dict) and v.get("auto_recalibrated")                     and ("mag_lev" in v):
+            if isinstance(v, dict) and v.get("auto_recalibrated") \
+                    and ("mag_lev" in v):
                 knot_t.append(_cal.timegm(
                     _FF.filenameToDatetime(ffn).timetuple()))
                 knot_ml.append(float(v["mag_lev"]))
@@ -190,6 +161,102 @@ def computeNightStarStats(config, night_dir):
             good = inten > 0
             idx = np.where(m)[0][valid][good]
             inst_mag[idx] = ml_frame[fi] - 2.5*np.log10(inten[good])
+
+    # ---- Fine conditioning map (16x9 cumsum, the harness scheme) ------------
+    # The 8x5 product map is too thin-cloud-blind to condition a calibration
+    # on (mislabeled thin frames poison every rate and baseline - measured on
+    # the A6 parity lab). This internal fine map uses per-record model p as
+    # logits and drift-free photometric residuals; its only job is a clean
+    # "clear" mask.
+    width = float(np.ceil(np.nanmax(sx)/16.0)*16.0)
+    height = float(np.ceil(np.nanmax(sy)/16.0)*16.0)
+    NXF, NYF = 16, 9
+    dome_s = 0.4
+    grid_dm = np.arange(-0.3, 4.501, 0.03)
+    ngd = len(grid_dm)
+    sp = np.asarray(stars["star_p"], dtype=np.float64)
+    lgm = np.log(np.clip(sp, 1e-4, 0.999)/(1 - np.clip(sp, 1e-4, 0.999)))
+    detected_u = row != -1
+    res_w = inst_mag - smag
+    base_w = np.full(n_cat, np.nan)
+    sig_w = np.full(n_cat, np.nan)
+    mw = np.isfinite(res_w)
+    if np.any(mw):
+        order = np.argsort(cat_id[mw])
+        cids = cat_id[mw][order]
+        rvw = res_w[mw][order]
+        uniq, starts = np.unique(cids, return_index=True)
+        bounds = np.append(starts, len(cids))
+        for u, a0, a1 in zip(uniq, bounds[:-1], bounds[1:]):
+            if a1 - a0 >= MIN_PHOT_FRAMES:
+                med = np.median(rvw[a0:a1])
+                base_w[u] = med
+                sig_w[u] = max(1.4826*np.median(np.abs(rvw[a0:a1] - med)), 0.05)
+    cxf = np.clip((sx/(width/NXF)).astype(np.intp), 0, NXF - 1)
+    cyf = np.clip((sy/(height/NYF)).astype(np.intp), 0, NYF - 1)
+    cellf = cyf*NXF + cxf
+    usable_rec = sp >= 0.03
+    resid_wr = res_w - base_w[cat_id]
+    ll_cf = np.zeros((n_frames, NYF*NXF, ngd), dtype=np.float32)
+    cnt_cf = np.zeros((n_frames, NYF*NXF), dtype=np.int32)
+    for j in range(n_frames):
+        m = usable_rec & (sf == j)
+        if not np.any(m):
+            continue
+        lg = lgm[m][:, None]
+        det = detected_u[m].astype(np.float64)[:, None]
+        pr = np.clip(1.0/(1.0 + np.exp(-(lg - grid_dm[None, :]/dome_s))),
+            1e-6, 1 - 1e-6)
+        q = det*pr + (1 - det)*(1 - pr)
+        ll = np.log(0.98*q + 0.01)
+        pm = m & np.isfinite(resid_wr) & (row >= 0)
+        if np.any(pm):
+            selp = pm[m]
+            rr = resid_wr[pm][:, None]
+            ss_ = sig_w[cat_id[pm]][:, None]
+            ll[selp] += -0.5*np.minimum(((rr - grid_dm[None, :])/ss_)**2, 9.0)
+        np.add.at(ll_cf[j], cellf[m], ll.astype(np.float32))
+        np.add.at(cnt_cf[j], cellf[m], 1)
+    cum_ll = np.concatenate([np.zeros((1, NYF*NXF, ngd), dtype=np.float32),
+                             np.cumsum(ll_cf, axis=0)])
+    cum_n = np.concatenate([np.zeros((1, NYF*NXF), dtype=np.int64),
+                            np.cumsum(cnt_cf, axis=0)])
+    del ll_cf, cnt_cf
+    dm_fine = np.full((n_frames, NYF*NXF), np.nan, dtype=np.float32)
+    for j in range(n_frames):
+        done = np.zeros(NYF*NXF, dtype=bool)
+        for half in range(1, 7):
+            lo, hi2 = max(0, j - half), min(n_frames - 1, j + half)
+            nwin = cum_n[hi2 + 1] - cum_n[lo]
+            ready = (~done) & (nwin >= 12)
+            if np.any(ready):
+                llw = cum_ll[hi2 + 1, ready] - cum_ll[lo, ready]
+                dm_fine[j, ready] = np.maximum(0.0,
+                    grid_dm[np.argmax(llw, axis=1)])
+                done |= ready
+            if done.all():
+                break
+    del cum_ll, cum_n
+
+    cell_dm = dm_fine[sf, cellf]
+    clear = np.isfinite(cell_dm) & (cell_dm < CLEAR_DM_MAX)
+
+    # A night with essentially no clear sky teaches nothing about clear-sky
+    # behavior. Skip such nights entirely (the EMA just waits).
+    clear_frac = float(np.mean(np.bincount(sf[clear], minlength=n_frames) > 0))
+    if clear_frac < 0.15:
+        print("Star calibration: only {:.0%} of frames have any clear cell - "
+              "skipping this night".format(clear_frac))
+        return None
+
+    # Channel rates on clear frames: the UNION channel is what the tree
+    # consumes (CALSTARS + FF-forced + stills)
+    seen_cs = np.bincount(cat_id[clear], minlength=n_cat)
+    match_cs = np.bincount(cat_id[clear & (row != -1)], minlength=n_cat)
+
+    meas_f = clear & np.isfinite(snr)
+    seen_fo = np.bincount(cat_id[meas_f], minlength=n_cat)
+    det_fo = np.bincount(cat_id[meas_f & (snr >= 5.0)], minlength=n_cat)
 
     # Airmass per clear matched record, from catalog positions and frame times
     resid_ok = clear & (row >= 0) & np.isfinite(inst_mag)
@@ -273,6 +340,13 @@ def computeNightStarStats(config, night_dir):
         k_fit=k_fit,
         catalog_lim_mag=float(header["catalog_lim_mag"]),
         night=night_name,
+        # Diagnostic view of the internal conditioner (not persisted -
+        # updateStarCalibration only saves its named fields). The parity
+        # regression test diffs these against a harness reference.
+        _dm_fine=dm_fine,
+        _clear=clear,
+        _rec_sf=sf,
+        _rec_cat_id=cat_id,
     )
 
 

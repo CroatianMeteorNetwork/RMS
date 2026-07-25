@@ -310,6 +310,42 @@ def sampleStillsForNight(config, image_blocks, night_dir):
     return path
 
 
+def fuseSidecarDetections(night_dir, frames, stars):
+    """ Fuse the sidecar's instantaneous detections into a scoring product's
+        detection bits: calstars_row -1 -> -2 for stars a still saw within the
+        FF window. Returns a NEW stars dict (input untouched); returns the
+        input unchanged when no sidecar exists. The union channel is what the
+        validated harness consumed - the 10 s maxpixel window alone
+        under-reads thin fast cloud. """
+
+    night_name = os.path.basename(os.path.normpath(night_dir))
+    sc_path = os.path.join(night_dir, sidecarFileName(night_name))
+    if not os.path.isfile(sc_path):
+        return stars
+
+    _, sc = loadStillStarStates(sc_path)
+    cat_id = np.asarray(stars["star_cat_id"], dtype=np.int64)
+    sf = np.asarray(stars["star_frame"], dtype=np.int64)
+    row = np.asarray(stars["calstars_row"], dtype=np.int64).copy()
+    t_ff = np.asarray(frames["frame_time_unix"], dtype=np.float64)
+    b_ids = sc["bright_cat_id"].astype(np.int64)
+    b_det = sc["bright_detected"]
+    t_st = sc["t_unix"]
+    smap = np.argmin(np.abs(t_ff[None, :] - t_st[:, None]), axis=1)
+    ok_s = np.abs(t_ff[smap] - t_st) < 8.0
+    det_ff = np.zeros((int(cat_id.max()) + 1, len(t_ff)), dtype=bool)
+    for si in np.where(ok_s)[0]:
+        det_ff[b_ids[b_det[:, si]], smap[si]] = True
+    fused = (row == -1) & det_ff[cat_id, sf]
+    row[fused] = -2
+    out = dict(stars)
+    out["calstars_row"] = row
+    if fused.sum():
+        print("Stills fusion: {:d} instantaneous detections added".format(
+            int(fused.sum())))
+    return out
+
+
 def loadStillStarStates(path):
     """ Load a sidecar.
 
