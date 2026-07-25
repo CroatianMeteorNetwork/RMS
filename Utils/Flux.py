@@ -1476,6 +1476,28 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
             for ff_name, star_data in calstars_list
         }
 
+        # FF files on disk with NO CALSTARS entry were seen by the star
+        # extractor and yielded nothing. On a dark frame that absence IS the
+        # measurement - fully obstructed - not missing data, so include them
+        # as zero-detection frames and let the transparency map saturate
+        # instead of leaving a hole (observed: 101 min of "no data" on an
+        # overcast CAWEC4 night). Twilight frames stay out (a bright sky also
+        # yields nothing); FF files genuinely absent from disk (capture gap)
+        # correctly remain holes.
+        n_synth = 0
+        for ff in file_list:
+            if FFfile.validFFName(ff) and (ff not in calstars_positions):
+                date_s = FFfile.getMiddleTimeFF(ff, config.fps,
+                    ret_milliseconds=True)
+                if sunAltitude(date2JD(*date_s), platepar.lat,
+                        platepar.lon) <= SUN_ALT_MAX:
+                    calstars_positions[ff] = np.zeros((0, 2))
+                    n_synth += 1
+        if n_synth:
+            log.info("Cloud scoring: {:d} dark FF file(s) absent from "
+                     "CALSTARS scored as zero-detection (fully obstructed) "
+                     "frames".format(n_synth))
+
         # Score EVERY FF frame, gated ones included: scoring is a measurement,
         # gating is a per-consumer judgment (see RMS.Formats.StarScoring). The flux
         # verdict below consumes only the binned dark/moonless domain subset -

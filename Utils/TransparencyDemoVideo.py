@@ -239,7 +239,7 @@ def generateDemoVideo(config, night_dir, sidecar_path, max_stills=None):
     # grid, so the reuse is visually lossless.
     ov_k = -1
     ov_inv = ov_add = ov_gray = None
-    hole_gz = None
+    hole_gz = hole_inv = hole_add = None
 
     n_stills = len(t_unix) if max_stills is None else min(len(t_unix), max_stills)
     writer = None
@@ -278,13 +278,36 @@ def generateDemoVideo(config, night_dir, sidecar_path, max_stills=None):
         k = int(np.argmin(np.abs(t_map - t_unix[j])))
         map_current = abs(t_map[k] - t_unix[j]) <= 40.0
         if not map_current:
-            # The FF product has a hole here (heavily overcast frames can
-            # yield no CALSTARS entry at all, so they were never scored).
-            # An absent estimate must be VISIBLY absent - hatch the whole
-            # sky; a blank overlay reads as "clear", which is a lie.
-            if hole_gz is None:
-                hole_gz = hatch if mask_img is None else (hatch & (mask_img > 0))
-            right[hole_gz] = (right[hole_gz] >> 1) + 90
+            # The scored product has a hole here. Consult this very still's
+            # own detections: capture was demonstrably running (we are
+            # rendering its frame), so if the dark sky shows ZERO bright
+            # stars the absence IS the measurement - fully obstructed, paint
+            # ceiling. If stars ARE visible the map is genuinely missing -
+            # hatch, because an "obstructed" overlay would be a lie. (On
+            # stations the scoring product now synthesizes zero-detection
+            # frames for un-extracted FFs, so the ceiling branch mostly
+            # serves recovered nights and FF-writer failures.)
+            from Utils.FitLightDome import sunAltitude, SUN_ALT_MAX
+            jd_s = float(t_unix[j])/86400.0 + 2440587.5
+            dark_s = sunAltitude(jd_s, knot_pps[0].lat,
+                knot_pps[0].lon) <= SUN_ALT_MAX
+            if dark_s and (len(bright_ids) >= 10) \
+                    and (int(bright_det[:, j].sum()) == 0):
+                if hole_inv is None:
+                    fov = np.ones((H, W), dtype=bool) if mask_img is None \
+                        else (mask_img > 0)
+                    a_ = np.where(fov, OVERLAY_ALPHA, 0.0)
+                    hole_inv = np.rint((1.0 - a_)*256.0).astype(np.uint16)
+                    hole_add = np.rint(lut[254].astype(np.float64)
+                        *a_[..., None]).astype(np.uint8)
+                right = cv2.add(
+                    ((right.astype(np.uint16)*hole_inv[..., None]) >> 8)
+                    .astype(np.uint8), hole_add)
+            else:
+                if hole_gz is None:
+                    hole_gz = hatch if mask_img is None \
+                        else (hatch & (mask_img > 0))
+                right[hole_gz] = (right[hole_gz] >> 1) + 90
         if map_current:
             if ov_k != k:
                 big = None
