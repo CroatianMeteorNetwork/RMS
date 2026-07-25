@@ -39,6 +39,34 @@ DIMMED_FLUX_FRAC = 0.6 # detected but flux below this fraction of clear median
                        # draws the "dimmed" marker (~0.55 mag)
 STRONG_RATE = 0.5      # member rate above which an absence is "reliable missing"
 FPS = 30
+CRF = 25               # H.264 quality (same as the frames timelapse)
+
+
+def _openEncoder(out_path, width, height):
+    # Streaming H.264 encoder: raw BGR frames piped into ffmpeg stdin - the
+    # same pattern (and rate caps) as the frames-timelapse encoder, which
+    # produces files ~10x smaller than OpenCV's mp4v writer at equal quality.
+    # Returns (proc, temp_path), or (None, None) if ffmpeg is unavailable.
+    import subprocess
+    from Utils.GenerateTimelapse import isFfmpegWorking
+
+    ffmpeg_path = isFfmpegWorking()
+    if not ffmpeg_path:
+        return None, None
+
+    maxrate, bufsize = ("4M", "8M") if width*height > 1280*720 else ("2M", "4M")
+    temp_path = out_path + ".tmp.mp4"
+    cmd = [ffmpeg_path, "-y", "-nostdin", "-hide_banner",
+           "-loglevel", "error",
+           "-f", "rawvideo", "-vcodec", "rawvideo",
+           "-s", "{}x{}".format(width, height),
+           "-pix_fmt", "bgr24", "-r", str(FPS), "-i", "-",
+           "-c:v", "libx264", "-crf", str(CRF),
+           "-maxrate", maxrate, "-bufsize", bufsize,
+           "-preset", "medium", "-pix_fmt", "yuv420p",
+           "-movflags", "faststart", "-threads", "1", "-g", "120",
+           temp_path]
+    return subprocess.Popen(cmd, stdin=subprocess.PIPE), temp_path
 
 
 def demoVideoFileName(night_name):
@@ -186,8 +214,12 @@ def generateDemoVideo(config, night_dir, sidecar_path, max_stills=None):
         H, W = frame.shape[:2]
 
         if writer is None:
-            writer = cv2.VideoWriter(out_path,
-                cv2.VideoWriter_fourcc(*"mp4v"), FPS, (2*W, H))
+            writer, temp_path = _openEncoder(out_path, 2*W, H)
+            if writer is None:
+                # No ffmpeg on this machine: OpenCV fallback (larger files)
+                writer = cv2.VideoWriter(out_path,
+                    cv2.VideoWriter_fourcc(*"mp4v"), FPS, (2*W, H))
+                temp_path = None
             hatch = ((np.add.outer(np.arange(H), np.arange(W))) % 28) < 4
 
         right = frame.copy()
@@ -257,11 +289,19 @@ def generateDemoVideo(config, night_dir, sidecar_path, max_stills=None):
         cv2.putText(combo, leg, (W + 10, H - 30), cv2.FONT_HERSHEY_SIMPLEX,
             0.45, (230, 230, 230), 1, cv2.LINE_AA)
 
-        writer.write(combo)
+        if temp_path is not None:
+            writer.stdin.write(np.ascontiguousarray(combo).tobytes())
+        else:
+            writer.write(combo)
 
     if writer is None:
         return None
-    writer.release()
+    if temp_path is not None:
+        writer.stdin.close()
+        writer.wait()
+        os.replace(temp_path, out_path)
+    else:
+        writer.release()
 
     print("Transparency demo video: {:s}".format(os.path.basename(out_path)))
 
