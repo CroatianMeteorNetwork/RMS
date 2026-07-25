@@ -1530,7 +1530,8 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
             night_name = os.path.basename(os.path.normpath(dir_path))
             epoch = datetime.datetime(1970, 1, 1)
             f_meta = dict(frame_names=[], frame_time_unix=[], sun_alt=[], moon_alt=[],
-                          moon_phase=[], n_detected=[], in_flux_domain=[], p_chance=[])
+                          moon_phase=[], n_detected=[], in_flux_domain=[], p_chance=[],
+                          cell_bg=[])
             s_arrs = dict(star_frame=[], star_cat_id=[], star_x=[], star_y=[],
                           star_mag=[], star_p=[], star_flux_snr=[], calstars_row=[])
             pp_ref = platepar
@@ -1555,6 +1556,8 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
 
                 rec = star_records.pop(ff)
                 f_meta["p_chance"].append(float(rec.get("p_chance", 0.0)))
+                f_meta["cell_bg"].append(rec.pop("cell_bg",
+                    np.full((5, 8), np.nan, dtype=np.float32)))
 
                 # Records arrive already floored at STORE_P_MIN (cut at collection
                 # in denseDomeRatios so the faint tail is never held in memory)
@@ -2136,6 +2139,7 @@ def denseDomeRatios(config, dome_model, ff_list, calstars_positions, recalibrate
             forced_flux = np.full(int(np.count_nonzero(keep)), np.nan,
                 dtype=np.float32)
             frame_noise = np.nan
+            cell_bg = np.full((5, 8), np.nan, dtype=np.float32)
             if dir_path is not None:
                 try:
                     bright = p_det[keep] >= FORCED_P_BOOTSTRAP
@@ -2147,6 +2151,27 @@ def denseDomeRatios(config, dome_model, ff_list, calstars_positions, recalibrate
                             fl, frame_noise = measurePatchFluxes(
                                 ave, x[keep][bright], y[keep][bright])
                             forced_flux[bright] = fl
+
+                            # Per-cell median background radiance (ADU), same
+                            # 8x5 grid as the transparency map. Clouds read
+                            # brighter or darker than the clear sky depending
+                            # on the illumination at THEIR position - jointly
+                            # with dm this makes every cloud a probe of the
+                            # light-pollution field (the SQM channel measures
+                            # one patch and deliberately excludes clouds).
+                            sub = ave[2::5, 2::5].astype(np.float32)
+                            if (mask is not None)                                     and (getattr(mask, "img", None) is not None):
+                                msub = mask.img[2::5, 2::5]
+                                sub = np.where(msub > 0, sub, np.nan)
+                            hh, ww = sub.shape
+                            ys = np.linspace(0, hh, 6).astype(int)
+                            xs = np.linspace(0, ww, 9).astype(int)
+                            with np.errstate(all="ignore"):
+                                for iy in range(5):
+                                    for ix in range(8):
+                                        cell_bg[iy, ix] = np.nanmedian(
+                                            sub[ys[iy]:ys[iy + 1],
+                                                xs[ix]:xs[ix + 1]])
                 except Exception:
                     # A single unreadable FF must never break the scoring pass
                     pass
@@ -2161,6 +2186,7 @@ def denseDomeRatios(config, dome_model, ff_list, calstars_positions, recalibrate
                 calstars_row=np.where(hit[keep], nearest[keep], -1).astype(np.int32),
                 forced_flux=forced_flux,
                 frame_noise=float(frame_noise),
+                cell_bg=cell_bg,
             )
 
     # Forced-photometry post-pass: with the whole night measured, derive the

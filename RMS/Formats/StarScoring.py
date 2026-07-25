@@ -54,6 +54,12 @@ import numpy as np
 #                       (and across nights while the catalog depth is unchanged).
 #     star_flux_snr   - forced patch photometry SNR on the FF avepixel for the
 #                       bright set (model p >= forced_p_bootstrap), NaN elsewhere.
+#     cell_bg         - [n_frames, 5, 8] float16 per-cell median avepixel level
+#                       (ADU, mask-excluded; NaN when the FF was unreadable).
+#                       Jointly with the transparency map this makes every
+#                       cloud a probe of the light-pollution field: cloud
+#                       radiance contrast vs dm per cell encodes the upward
+#                       flux at the cloud's position.
 #     calstars_row -2 - matched by forced photometry only: the extractor missed
 #                       the star (saturation, shape gates, max_stars culling) but
 #                       its aperture flux passed both detection floors (see
@@ -102,6 +108,9 @@ def saveStarScoring(dir_path, night_name, header, frames, stars):
         in_flux_domain=np.asarray(frames["in_flux_domain"], dtype=bool),
         p_chance=np.asarray(frames.get("p_chance",
             np.zeros(len(frames["frame_names"]))), dtype=np.float32),
+        cell_bg=np.asarray(frames.get("cell_bg",
+            np.full((len(frames["frame_names"]), 5, 8), np.nan)),
+            dtype=np.float16),
         star_frame=np.asarray(stars["star_frame"], dtype=np.int32),
         star_cat_id=np.asarray(stars.get("star_cat_id",
             np.full(len(stars["star_frame"]), -1)), dtype=np.int32),
