@@ -128,11 +128,22 @@ def generateDemoVideo(config, night_dir, sidecar_path, max_stills=None):
         return None
 
     import numpy as _np
+    leaf_cat_id = leaf_dm = None
     with _np.load(map_path, allow_pickle=False) as _z:
         _mh = json.loads(str(_z["header"]))
         t_map = _z["t_unix"]
         dm = _z["dm"].astype(_np.float32)
+        if "leaf_dm" in _z.files:
+            leaf_cat_id = _z["leaf_cat_id"].astype(_np.int64)
+            leaf_dm = _z["leaf_dm"].astype(_np.float32)
     estimator_tag = _mh.get("estimator", "grid")
+
+    # Station mask: masked pixels (terrain, obstructions) are hatched, never
+    # painted - a cell/leaf value only means anything on sky
+    mask_img = None
+    for mp_ in (os.path.join(night_dir, "mask.bmp"),):
+        if os.path.isfile(mp_):
+            mask_img = cv2.imread(mp_, cv2.IMREAD_GRAYSCALE)
     sc_header, sc = loadStillStarStates(sidecar_path)
 
     t_unix = sc["t_unix"]
@@ -197,6 +208,20 @@ def generateDemoVideo(config, night_dir, sidecar_path, max_stills=None):
 
     lut = _viridisLut()
 
+    import datetime as _dt
+
+    def _leafPositions(j):
+        """ Leaf anchor image positions at still j (same projection as markers). """
+        t = float(t_unix[j])
+        ki = int(np.argmin(np.abs(knot_times - t)))
+        pp = knot_pps[ki]
+        d = _dt.datetime.utcfromtimestamp(t)
+        jd = date2JD(d.year, d.month, d.day, d.hour, d.minute, d.second,
+            d.microsecond/1000.0)
+        return raDecToXYPP(cat_ra[leaf_cat_id], cat_dec[leaf_cat_id], jd, pp)
+
+    _grid_pts = _grid_shape = None
+
     n_stills = len(t_unix) if max_stills is None else min(len(t_unix), max_stills)
     writer = None
     out_path = os.path.join(night_dir, demoVideoFileName(night_name))
@@ -221,21 +246,45 @@ def generateDemoVideo(config, night_dir, sidecar_path, max_stills=None):
                     cv2.VideoWriter_fourcc(*"mp4v"), FPS, (2*W, H))
                 temp_path = None
             hatch = ((np.add.outer(np.arange(H), np.arange(W))) % 28) < 4
+            gy_, gx_ = np.mgrid[0:H:4, 0:W:4]
+            _grid_shape = gy_.shape
+            _grid_pts = np.column_stack([gx_.ravel(), gy_.ravel()])
 
         right = frame.copy()
 
-        # Transparency overlay from the nearest map frame
+        # Transparency overlay from the nearest map frame. With the tree's
+        # leaf channel: TRUE nearest-leaf rendering at pixel resolution (the
+        # estimator's native Voronoi structure - the thing being judged).
+        # Cell-resize is only the fallback for leafless (grid) maps.
         k = int(np.argmin(np.abs(t_map - t_unix[j])))
         if abs(t_map[k] - t_unix[j]) <= 15.0:
-            cell = dm[k].astype(np.float32)
-            nan_cells = ~np.isfinite(cell)
-            big = cv2.resize(np.nan_to_num(cell), (W, H),
-                interpolation=cv2.INTER_LINEAR)
-            nan_big = cv2.resize(nan_cells.astype(np.float32), (W, H),
-                interpolation=cv2.INTER_LINEAR) > 0.5
-            u = 1.0 - 10.0**(-0.4*np.maximum(big, 0.0))
+            big = None
+            if leaf_dm is not None:
+                lx, ly = _leafPositions(j)
+                lv = leaf_dm[k]
+                okl = (np.isfinite(lx) & np.isfinite(ly) & np.isfinite(lv)
+                       & (lx > -50) & (lx < W + 50) & (ly > -50) & (ly < H + 50))
+                if okl.sum() > 30:
+                    from scipy.spatial import cKDTree
+                    tr_ = cKDTree(np.column_stack([lx[okl], ly[okl]]))
+                    _, nn = tr_.query(_grid_pts, k=1)
+                    small = lv[okl][nn].reshape(_grid_shape)
+                    big = cv2.resize(small.astype(np.float32), (W, H),
+                        interpolation=cv2.INTER_NEAREST)
+                    nan_big = ~np.isfinite(big)
+            if big is None:
+                cell = dm[k].astype(np.float32)
+                nan_cells = ~np.isfinite(cell)
+                big = cv2.resize(np.nan_to_num(cell), (W, H),
+                    interpolation=cv2.INTER_LINEAR)
+                nan_big = cv2.resize(nan_cells.astype(np.float32), (W, H),
+                    interpolation=cv2.INTER_LINEAR) > 0.5
+            if mask_img is not None:
+                nan_big = nan_big | (mask_img == 0)
+            u = 1.0 - 10.0**(-0.4*np.nan_to_num(np.maximum(big, 0.0)))
             color = lut[np.clip(u*254, 0, 254).astype(np.uint8)]
-            alpha = np.where(big > DEAD_BAND_MAG, OVERLAY_ALPHA, 0.0)
+            alpha = np.where(np.nan_to_num(big) > DEAD_BAND_MAG,
+                OVERLAY_ALPHA, 0.0)
             alpha[nan_big] = 0.0
             right = (right*(1 - alpha[..., None])
                      + color*alpha[..., None]).astype(np.uint8)
@@ -246,7 +295,6 @@ def generateDemoVideo(config, night_dir, sidecar_path, max_stills=None):
         t = t_unix[j]
         ki = int(np.argmin(np.abs(knot_times - t)))
         pp = knot_pps[ki]
-        import datetime as _dt
         dt = _dt.datetime.utcfromtimestamp(t)
         jd = date2JD(dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second,
             dt.microsecond/1000.0)

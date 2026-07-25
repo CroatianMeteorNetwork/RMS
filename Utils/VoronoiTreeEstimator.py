@@ -84,8 +84,13 @@ def computeTreeSeries(config, night_dir, header, frames, stars, calibration=None
             absent or the catalog depth mismatches.
 
     Return:
-        (t_unix, dm_cells, flags): per the TransparencyMap schema - or None if
-            the product predates schema v4.
+        (t_unix, dm_cells, flags, leaf_cat_id, leaf_dm): the cell arrays per
+            the TransparencyMap schema, plus the LEAF channel - each leaf's
+            anchor star id and its per-frame posterior-mode dm. The cells are
+            the consumer product; the leaves are the estimator's native
+            resolution (rendered by the demo video, and the basis of any
+            future finer-grained consumer). None if the product predates
+            schema v4.
     """
 
     from scipy.spatial import cKDTree
@@ -264,6 +269,7 @@ def computeTreeSeries(config, night_dir, header, frames, stars, calibration=None
     # ---- BP over the night with a ring cache for the +/- window --------------
     t_unix = np.asarray(frames["frame_time_unix"], dtype=np.float64)
     dm_cells = np.full((n_frames, CELL_NY, CELL_NX), np.nan, dtype=np.float32)
+    leaf_dm_all = np.full((n_frames, n_leaf), np.nan, dtype=np.float32)
 
     # Leaf -> cell assignment per frame from the stars' image positions: a
     # leaf's cell is where its own star currently sits (median if several recs)
@@ -303,6 +309,9 @@ def computeTreeSeries(config, night_dir, header, frames, stars, calibration=None
 
         belief = lls + down2
         leaf_dm = np.maximum(0.0, GRID_DM[np.argmax(belief, axis=1)])
+        # A leaf with no in-window evidence has a flat belief - do not report it
+        has_ev = np.abs(lls).sum(axis=1) > 0
+        leaf_dm_all[fi, has_ev] = leaf_dm[has_ev]
 
         # Aggregate leaves to cells by the leaves' current image positions
         m = usable & (sf == fi)
@@ -327,7 +336,10 @@ def computeTreeSeries(config, night_dir, header, frames, stars, calibration=None
         & (np.asarray(frames["moon_phase"]) > MOON_PHASE_BRIGHT)
     flags[moon, :, :] |= FLAG_MOON_DOMAIN
 
-    return t_unix, dm_cells.astype(np.float16), flags
+    leaf_cat_id = q_ids[A2]
+
+    return (t_unix, dm_cells.astype(np.float16), flags,
+        leaf_cat_id.astype(np.int32), leaf_dm_all.astype(np.float16))
 
 
 def computeAndSaveTreeMap(config, night_dir):
@@ -358,7 +370,7 @@ def computeAndSaveTreeMap(config, night_dir):
         calibration=calibration)
     if result is None:
         return None
-    t_unix, dm_cells, flags = result
+    t_unix, dm_cells, flags, leaf_cat_id, leaf_dm = result
 
     out_header = dict(
         schema_version=1,
@@ -379,7 +391,9 @@ def computeAndSaveTreeMap(config, night_dir):
         header=json.dumps(out_header),
         t_unix=t_unix,
         dm=dm_cells,
-        flags=flags)
+        flags=flags,
+        leaf_cat_id=leaf_cat_id,
+        leaf_dm=leaf_dm)
 
     print("Tree transparency map: {:s}".format(os.path.basename(path)))
 
