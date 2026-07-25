@@ -543,7 +543,7 @@ def computeAndSaveTreeMap(config, night_dir):
                          base_mag=stats["base_mag"],
                          sigma_mag=stats["sigma_mag"]),
                 )
-                print("Tree estimator: in-night grid-conditioned calibration "
+                print("Tree estimator: in-night fine-map-conditioned calibration "
                       "({} stars)".format(
                       int(np.isfinite(stats["rate_calstars"]).sum())))
         except Exception as e:
