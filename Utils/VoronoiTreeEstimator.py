@@ -59,6 +59,9 @@ def _unitVectors(ra_deg, dec_deg):
     return np.column_stack([np.cos(d)*np.cos(r), np.cos(d)*np.sin(r), np.sin(d)])
 
 
+_SMOOTH_MAT = {}
+
+
 def _smooth(msgs, tau):
     """ BP message smoothing: exponentiate, Gaussian-smooth along the dm axis
     in probability space, NORMALIZE, then apply the robust flat mixture and
@@ -68,15 +71,25 @@ def _smooth(msgs, tau):
     from flooding a covered minority through the root (smoothing raw
     log-likelihoods instead lets message strength grow without bound with
     record count).
+
+    The grid is fixed, so each tau's filter (with its boundary handling) is a
+    constant linear operator - one precomputed matrix per tau, applied as a
+    BLAS matmul. The taps-based filter was the BP hot spot: tau 3.0 on the
+    0.03 grid is an 801-tap kernel over a 161-bin axis.
     """
 
-    from scipy.ndimage import gaussian_filter1d
-
-    p = np.exp(msgs - msgs.max(axis=-1, keepdims=True))
-    p = gaussian_filter1d(p, tau/0.03, axis=-1, mode="nearest")
-    p /= np.maximum(p.sum(axis=-1, keepdims=True), 1e-300)
-    p = (1.0 - EPS_MIX)*p + EPS_MIX/p.shape[-1]
-    return np.log(np.maximum(p, 1e-300))
+    ng = msgs.shape[-1]
+    M = _SMOOTH_MAT.get((tau, ng))
+    if M is None:
+        from scipy.ndimage import gaussian_filter1d
+        M = gaussian_filter1d(np.eye(ng), tau/0.03, axis=0,
+            mode="nearest").T.astype(np.float32)
+        _SMOOTH_MAT[(tau, ng)] = M
+    p = np.exp(msgs - msgs.max(axis=-1, keepdims=True)).astype(np.float32)
+    p = p @ M
+    p /= np.maximum(p.sum(axis=-1, keepdims=True), 1e-30)
+    p = (1.0 - EPS_MIX)*p + EPS_MIX/ng
+    return np.log(p)
 
 
 def computeTreeSeries(config, night_dir, header, frames, stars, calibration=None):
@@ -399,6 +412,13 @@ def computeTreeSeries(config, night_dir, header, frames, stars, calibration=None
 
         dm_cells = np.full((n_frames, CELL_NY, CELL_NX), np.nan, dtype=np.float32)
         leaf_dm_all = np.full((n_frames, n_leaf), np.nan, dtype=np.float32)
+        # Parent topology is fixed for the whole night: presorted group
+        # boundaries turn the per-frame scatter-adds into reduceat segment
+        # sums (np.add.at is an unbuffered scatter and much slower)
+        l1_ord = np.argsort(leaf_parent_i, kind="stable")
+        l1_grp, l1_starts = np.unique(leaf_parent_i[l1_ord], return_index=True)
+        l0_ord = np.argsort(l1_parent_i, kind="stable")
+        l0_grp, l0_starts = np.unique(l1_parent_i[l0_ord], return_index=True)
         cache = {}
         for fi in range(n_frames):
             lls = None
@@ -414,10 +434,10 @@ def computeTreeSeries(config, night_dir, header, frames, stars, calibration=None
 
             up2 = _smooth(lls, TAU[2])
             l1_in = np.zeros((n_l1, NG))
-            np.add.at(l1_in, leaf_parent_i, up2)
+            l1_in[l1_grp] = np.add.reduceat(up2[l1_ord], l1_starts, axis=0)
             up1 = _smooth(l1_in, TAU[1])
             l0_in = np.zeros((n_l0, NG))
-            np.add.at(l0_in, l1_parent_i, up1)
+            l0_in[l0_grp] = np.add.reduceat(up1[l0_ord], l0_starts, axis=0)
             up0 = _smooth(l0_in, TAU[0])
             root = up0.sum(axis=0)
 

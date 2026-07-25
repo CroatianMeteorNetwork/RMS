@@ -63,7 +63,7 @@ def _openEncoder(out_path, width, height):
            "-pix_fmt", "bgr24", "-r", str(FPS), "-i", "-",
            "-c:v", "libx264", "-crf", str(CRF),
            "-maxrate", maxrate, "-bufsize", bufsize,
-           "-preset", "medium", "-pix_fmt", "yuv420p",
+           "-preset", "veryfast", "-pix_fmt", "yuv420p",
            "-movflags", "faststart", "-threads", "1", "-g", "120",
            temp_path]
     return subprocess.Popen(cmd, stdin=subprocess.PIPE), temp_path
@@ -136,6 +136,15 @@ def generateDemoVideo(config, night_dir, sidecar_path, max_stills=None):
         if "leaf_dm" in _z.files:
             leaf_cat_id = _z["leaf_cat_id"].astype(_np.int64)
             leaf_dm = _z["leaf_dm"].astype(_np.float32)
+            # Display smoothing: zero-phase median over +/-1 map frame kills
+            # the dead-band shimmer (5 s stills alternate between adjacent
+            # 10 s map frames; leaves hovering at the threshold blink). The
+            # PRODUCT stays unsmoothed - this is presentation only; the real
+            # temporal layer is its own benchmarked roadmap item.
+            if len(leaf_dm) >= 3:
+                stack = _np.stack([leaf_dm[:-2], leaf_dm[1:-1], leaf_dm[2:]])
+                with _np.errstate(all="ignore"):
+                    leaf_dm[1:-1] = _np.nanmedian(stack, axis=0)
     estimator_tag = _mh.get("estimator", "grid")
 
     # Station mask: masked pixels (terrain, obstructions) are hatched, never
@@ -223,6 +232,14 @@ def generateDemoVideo(config, night_dir, sidecar_path, max_stills=None):
         return np.where(front, x, np.nan), np.where(front, y, np.nan)
 
     _grid_pts = _grid_shape = None
+    # Overlay layers depend only on the MAP frame, not the still: rebuild on
+    # map-frame change (~every other still) and reuse between. The KDTree
+    # pixel-grid labeling and colorizing were the render hot spot; leaf
+    # anchors drift only a few pixels per still, well under the 4 px label
+    # grid, so the reuse is visually lossless.
+    ov_k = -1
+    ov_inv = ov_add = ov_gray = None
+    hole_gz = None
 
     n_stills = len(t_unix) if max_stills is None else min(len(t_unix), max_stills)
     writer = None
@@ -259,39 +276,56 @@ def generateDemoVideo(config, night_dir, sidecar_path, max_stills=None):
         # estimator's native Voronoi structure - the thing being judged).
         # Cell-resize is only the fallback for leafless (grid) maps.
         k = int(np.argmin(np.abs(t_map - t_unix[j])))
-        if abs(t_map[k] - t_unix[j]) <= 15.0:
-            big = None
-            if leaf_dm is not None:
-                lx, ly = _leafPositions(j)
-                lv = leaf_dm[k]
-                okl = (np.isfinite(lx) & np.isfinite(ly) & np.isfinite(lv)
-                       & (lx > -50) & (lx < W + 50) & (ly > -50) & (ly < H + 50))
-                if okl.sum() > 30:
-                    from scipy.spatial import cKDTree
-                    tr_ = cKDTree(np.column_stack([lx[okl], ly[okl]]))
-                    _, nn = tr_.query(_grid_pts, k=1)
-                    small = lv[okl][nn].reshape(_grid_shape)
-                    big = cv2.resize(small.astype(np.float32), (W, H),
-                        interpolation=cv2.INTER_NEAREST)
-                    nan_big = ~np.isfinite(big)
-            if big is None:
-                cell = dm[k].astype(np.float32)
-                nan_cells = ~np.isfinite(cell)
-                big = cv2.resize(np.nan_to_num(cell), (W, H),
-                    interpolation=cv2.INTER_LINEAR)
-                nan_big = cv2.resize(nan_cells.astype(np.float32), (W, H),
-                    interpolation=cv2.INTER_LINEAR) > 0.5
-            if mask_img is not None:
-                nan_big = nan_big | (mask_img == 0)
-            u = 1.0 - 10.0**(-0.4*np.nan_to_num(np.maximum(big, 0.0)))
-            color = lut[np.clip(u*254, 0, 254).astype(np.uint8)]
-            alpha = np.where(np.nan_to_num(big) > DEAD_BAND_MAG,
-                OVERLAY_ALPHA, 0.0)
-            alpha[nan_big] = 0.0
-            right = (right*(1 - alpha[..., None])
-                     + color*alpha[..., None]).astype(np.uint8)
-            gray_zone = nan_big & hatch
-            right[gray_zone] = (right[gray_zone]*0.5 + 90).astype(np.uint8)
+        map_current = abs(t_map[k] - t_unix[j]) <= 40.0
+        if not map_current:
+            # The FF product has a hole here (heavily overcast frames can
+            # yield no CALSTARS entry at all, so they were never scored).
+            # An absent estimate must be VISIBLY absent - hatch the whole
+            # sky; a blank overlay reads as "clear", which is a lie.
+            if hole_gz is None:
+                hole_gz = hatch if mask_img is None else (hatch & (mask_img > 0))
+            right[hole_gz] = (right[hole_gz] >> 1) + 90
+        if map_current:
+            if ov_k != k:
+                big = None
+                if leaf_dm is not None:
+                    lx, ly = _leafPositions(j)
+                    lv = leaf_dm[k]
+                    okl = (np.isfinite(lx) & np.isfinite(ly) & np.isfinite(lv)
+                           & (lx > -50) & (lx < W + 50)
+                           & (ly > -50) & (ly < H + 50))
+                    if okl.sum() > 30:
+                        from scipy.spatial import cKDTree
+                        tr_ = cKDTree(np.column_stack([lx[okl], ly[okl]]))
+                        _, nn = tr_.query(_grid_pts, k=1)
+                        small = lv[okl][nn].reshape(_grid_shape)
+                        big = cv2.resize(small.astype(np.float32), (W, H),
+                            interpolation=cv2.INTER_NEAREST)
+                        nan_big = ~np.isfinite(big)
+                if big is None:
+                    cell = dm[k].astype(np.float32)
+                    nan_cells = ~np.isfinite(cell)
+                    big = cv2.resize(np.nan_to_num(cell), (W, H),
+                        interpolation=cv2.INTER_LINEAR)
+                    nan_big = cv2.resize(nan_cells.astype(np.float32), (W, H),
+                        interpolation=cv2.INTER_LINEAR) > 0.5
+                if mask_img is not None:
+                    nan_big = nan_big | (mask_img == 0)
+                u = 1.0 - 10.0**(-0.4*np.nan_to_num(np.maximum(big, 0.0)))
+                color = lut[np.clip(u*254, 0, 254).astype(np.uint8)]
+                alpha = np.where(np.nan_to_num(big) > DEAD_BAND_MAG,
+                    OVERLAY_ALPHA, 0.0)
+                alpha[nan_big] = 0.0
+                # Integer blend layers: the float form promoted the whole
+                # frame to float64 every still and was the render hot spot
+                ov_inv = np.rint((1.0 - alpha)*256.0).astype(np.uint16)
+                ov_add = np.rint(color*alpha[..., None]).astype(np.uint8)
+                ov_gray = nan_big & hatch
+                ov_k = k
+            right = cv2.add(
+                ((right.astype(np.uint16)*ov_inv[..., None]) >> 8)
+                .astype(np.uint8), ov_add)
+            right[ov_gray] = (right[ov_gray] >> 1) + 90
 
         # Evidence markers
         t = t_unix[j]

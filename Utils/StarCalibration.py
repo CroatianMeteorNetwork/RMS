@@ -197,46 +197,65 @@ def computeNightStarStats(config, night_dir):
     cellf = cyf*NXF + cxf
     usable_rec = sp >= 0.03
     resid_wr = res_w - base_w[cat_id]
-    ll_cf = np.zeros((n_frames, NYF*NXF, ngd), dtype=np.float32)
-    cnt_cf = np.zeros((n_frames, NYF*NXF), dtype=np.int32)
-    for j in range(n_frames):
-        m = usable_rec & (sf == j)
-        if not np.any(m):
-            continue
-        lg = lgm[m][:, None]
-        det = detected_u[m].astype(np.float64)[:, None]
-        pr = np.clip(1.0/(1.0 + np.exp(-(lg - grid_dm[None, :]/dome_s))),
-            1e-6, 1 - 1e-6)
-        q = det*pr + (1 - det)*(1 - pr)
-        ll = np.log(0.98*q + 0.01)
-        pm = m & np.isfinite(resid_wr) & (row >= 0)
-        if np.any(pm):
-            selp = pm[m]
-            rr = resid_wr[pm][:, None]
-            ss_ = sig_w[cat_id[pm]][:, None]
-            ll[selp] += -0.5*np.minimum(((rr - grid_dm[None, :])/ss_)**2, 9.0)
-        np.add.at(ll_cf[j], cellf[m], ll.astype(np.float32))
-        np.add.at(cnt_cf[j], cellf[m], 1)
-    cum_ll = np.concatenate([np.zeros((1, NYF*NXF, ngd), dtype=np.float32),
-                             np.cumsum(ll_cf, axis=0)])
-    cum_n = np.concatenate([np.zeros((1, NYF*NXF), dtype=np.int64),
-                            np.cumsum(cnt_cf, axis=0)])
-    del ll_cf, cnt_cf
+
+    # Records presorted by frame: per-frame indexing is a slice, not a
+    # whole-night boolean scan per frame
+    u_idx = np.where(usable_rec)[0]
+    u_idx = u_idx[np.argsort(sf[u_idx], kind="stable")]
+    frame_bounds = np.searchsorted(sf[u_idx], np.arange(n_frames + 1))
+
+    def _frameCellLL(j):
+        """ Per-cell (log-likelihood, count) contribution of one frame. """
+        cll = np.zeros((NYF*NXF, ngd), dtype=np.float32)
+        cn = np.zeros(NYF*NXF, dtype=np.int32)
+        ridx = u_idx[frame_bounds[j]:frame_bounds[j + 1]]
+        if len(ridx):
+            lg = lgm[ridx][:, None]
+            det = detected_u[ridx].astype(np.float64)[:, None]
+            pr = np.clip(1.0/(1.0 + np.exp(-(lg - grid_dm[None, :]/dome_s))),
+                1e-6, 1 - 1e-6)
+            q = det*pr + (1 - det)*(1 - pr)
+            ll = np.log(0.98*q + 0.01)
+            selp = np.isfinite(resid_wr[ridx]) & (row[ridx] >= 0)
+            if np.any(selp):
+                rr = resid_wr[ridx][selp][:, None]
+                ss_ = sig_w[cat_id[ridx][selp]][:, None]
+                ll[selp] += -0.5*np.minimum(
+                    ((rr - grid_dm[None, :])/ss_)**2, 9.0)
+            np.add.at(cll, cellf[ridx], ll.astype(np.float32))
+            np.add.at(cn, cellf[ridx], 1)
+        return cll, cn
+
+    # Rolling +-6-frame windows instead of a whole-night cumsum: the adaptive
+    # windows never reach further, so a 13-frame ring cache replaces the
+    # [n_frames, cells, grid] tensor whose cumsum peaked over a gigabyte on a
+    # long night - a Pi-class OOM hazard
+    MAX_HALF = 6
+    cache = {}
     dm_fine = np.full((n_frames, NYF*NXF), np.nan, dtype=np.float32)
     for j in range(n_frames):
+        for k in range(max(0, j - MAX_HALF), min(n_frames, j + MAX_HALF + 1)):
+            if k not in cache:
+                cache[k] = _frameCellLL(k)
+        for k in list(cache):
+            if k < j - MAX_HALF:
+                del cache[k]
+        s_ll = cache[j][0].copy()
+        s_n = cache[j][1].astype(np.int64)
         done = np.zeros(NYF*NXF, dtype=bool)
-        for half in range(1, 7):
-            lo, hi2 = max(0, j - half), min(n_frames - 1, j + half)
-            nwin = cum_n[hi2 + 1] - cum_n[lo]
-            ready = (~done) & (nwin >= 12)
+        for half in range(1, MAX_HALF + 1):
+            for k in (j - half, j + half):
+                if 0 <= k < n_frames:
+                    s_ll += cache[k][0]
+                    s_n += cache[k][1]
+            ready = (~done) & (s_n >= 12)
             if np.any(ready):
-                llw = cum_ll[hi2 + 1, ready] - cum_ll[lo, ready]
                 dm_fine[j, ready] = np.maximum(0.0,
-                    grid_dm[np.argmax(llw, axis=1)])
+                    grid_dm[np.argmax(s_ll[ready], axis=1)])
                 done |= ready
             if done.all():
                 break
-    del cum_ll, cum_n
+    del cache
 
     cell_dm = dm_fine[sf, cellf]
     clear = np.isfinite(cell_dm) & (cell_dm < CLEAR_DM_MAX)
