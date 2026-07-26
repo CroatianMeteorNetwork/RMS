@@ -415,13 +415,36 @@ def generateDemoVideo(config, night_dir, sidecar_path, max_stills=None):
                 0.6, (0, 0, 0), 3, cv2.LINE_AA)
             cv2.putText(combo, stamp, (xoff, 26), cv2.FONT_HERSHEY_SIMPLEX,
                 0.6, (255, 255, 255), 1, cv2.LINE_AA)
-        leg = ("o detected   o dimmed   o forced-phot(sat)   . reliable missing"
-               "   . weak missing   [{}]".format(
-                   "TREE" if "tree" in estimator_tag else "GRID"))
-        # Above the stills' own burned-in banner
-        cv2.putText(combo, leg, (W + 10, H - 30), cv2.FONT_HERSHEY_SIMPLEX,
+        # Color-coded legend: each label carries its actual marker glyph
+        # (same radius, thickness and color as the evidence markers above).
+        # Drawn above the stills' own burned-in banner.
+        legend_items = [
+            ("detected", 5, 1, (80, 255, 80)),
+            ("dimmed", 5, 1, (60, 165, 255)),
+            ("forced-phot (sat)", 6, 1, (255, 220, 80)),
+            ("reliable missing", 2, -1, (50, 50, 255)),
+            ("weak missing", 1, -1, (40, 40, 170)),
+        ]
+        lx, ly = W + 10, H - 34
+        for label, r, th, col in legend_items:
+            cx = lx + 7
+            if th > 0:
+                cv2.circle(combo, (cx, ly), r, (0, 0, 0), th + 2, cv2.LINE_AA)
+            else:
+                cv2.circle(combo, (cx, ly), r + 2, (0, 0, 0), -1, cv2.LINE_AA)
+            cv2.circle(combo, (cx, ly), r, col, th, cv2.LINE_AA)
+            tx = cx + 11
+            cv2.putText(combo, label, (tx, ly + 5), cv2.FONT_HERSHEY_SIMPLEX,
+                0.45, (0, 0, 0), 3, cv2.LINE_AA)
+            cv2.putText(combo, label, (tx, ly + 5), cv2.FONT_HERSHEY_SIMPLEX,
+                0.45, (230, 230, 230), 1, cv2.LINE_AA)
+            (tw, _), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX,
+                0.45, 1)
+            lx = tx + tw + 14
+        tag = "[{}]".format("TREE" if "tree" in estimator_tag else "GRID")
+        cv2.putText(combo, tag, (lx, ly + 5), cv2.FONT_HERSHEY_SIMPLEX,
             0.45, (0, 0, 0), 3, cv2.LINE_AA)
-        cv2.putText(combo, leg, (W + 10, H - 30), cv2.FONT_HERSHEY_SIMPLEX,
+        cv2.putText(combo, tag, (lx, ly + 5), cv2.FONT_HERSHEY_SIMPLEX,
             0.45, (230, 230, 230), 1, cv2.LINE_AA)
 
         if temp_path is not None:
