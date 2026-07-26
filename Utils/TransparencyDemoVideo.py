@@ -241,6 +241,20 @@ def generateDemoVideo(config, night_dir, sidecar_path, max_stills=None):
     ov_inv = ov_add = ov_gray = None
     hole_gz = hole_inv = hole_add = None
 
+    # Per-still "essentially opaque" verdict for map holes, from the still's
+    # own measurements: >=95% of in-FOV measured stars undetected. A couple
+    # of spurious or pinhole detections must not flip the verdict, and the
+    # raw per-still test flickers (measured: 129 transitions over a 528-still
+    # hole, median run 2 stills), so a +-3-still majority vote smooths it -
+    # display smoothing only, same spirit as the leaf_dm median.
+    _nfov_s = np.isfinite(bright_flux).sum(axis=0)
+    _ndet_s = bright_det.sum(axis=0)
+    _obs_raw = ((_nfov_s >= 10)
+                & (_ndet_s <= np.maximum(2, 0.05*_nfov_s))).astype(float)
+    _kk = np.ones(7)
+    _obscured_still = (np.convolve(_obs_raw, _kk, "same")
+                       /np.convolve(np.ones(len(_obs_raw)), _kk, "same")) >= 0.5
+
     n_stills = len(t_unix) if max_stills is None else min(len(t_unix), max_stills)
     writer = None
     out_path = os.path.join(night_dir, demoVideoFileName(night_name))
@@ -291,8 +305,7 @@ def generateDemoVideo(config, night_dir, sidecar_path, max_stills=None):
             jd_s = float(t_unix[j])/86400.0 + 2440587.5
             dark_s = sunAltitude(jd_s, knot_pps[0].lat,
                 knot_pps[0].lon) <= SUN_ALT_MAX
-            if dark_s and (len(bright_ids) >= 10) \
-                    and (int(bright_det[:, j].sum()) == 0):
+            if dark_s and _obscured_still[j]:
                 if hole_inv is None:
                     fov = np.ones((H, W), dtype=bool) if mask_img is None \
                         else (mask_img > 0)
