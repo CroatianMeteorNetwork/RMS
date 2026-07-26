@@ -179,7 +179,11 @@ def generateDemoVideo(config, night_dir, sidecar_path, max_stills=None):
         still_rate = (bright_det & meas).sum(axis=1)/np.maximum(meas.sum(axis=1), 1)
         clear_med = np.nanmedian(np.where(bright_det, bright_flux, np.nan), axis=1)
 
-    # Forced-class members (recovered saturated stars) from the scoring product
+    # Forced-class members from the scoring product: stars the extractor
+    # misses MOST of the night (saturated or persistently culled), by
+    # MAJORITY vote. "Ever forced" painted 74% of a lit-site bright channel
+    # cyan because ordinary stars dip into forced recovery during hazy
+    # stretches - only 6% were genuinely extractor-invisible.
     forced_ids = set()
     try:
         from RMS.Formats.StarScoring import loadStarScoring
@@ -187,7 +191,11 @@ def generateDemoVideo(config, night_dir, sidecar_path, max_stills=None):
             scoringFileName(night_name)))
         cid = np.asarray(stars["star_cat_id"], dtype=np.int64)
         row = np.asarray(stars["calstars_row"], dtype=np.int64)
-        forced_ids = set(int(i) for i in np.unique(cid[row == -2]))
+        n_cat_f = int(cid.max()) + 1
+        n_match_f = np.bincount(cid[row >= 0], minlength=n_cat_f)
+        n_forced_f = np.bincount(cid[row == -2], minlength=n_cat_f)
+        forced_ids = set(int(i) for i in
+                         np.where(n_forced_f > n_match_f)[0])
     except Exception:
         pass
     is_forced = np.array([int(i) in forced_ids for i in bright_ids])
