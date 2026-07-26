@@ -148,11 +148,20 @@ def generateDemoVideo(config, night_dir, sidecar_path, max_stills=None):
     estimator_tag = _mh.get("estimator", "grid")
 
     # Station mask: masked pixels (terrain, obstructions) are hatched, never
-    # painted - a cell/leaf value only means anything on sky
+    # painted - a cell/leaf value only means anything on sky. Resolved the
+    # same way the rest of the pipeline does (night dir first, then the
+    # configured station mask): a bare night-dir read misses the mask
+    # entirely on stations, where it lives in the config directory.
     mask_img = None
-    for mp_ in (os.path.join(night_dir, "mask.bmp"),):
-        if os.path.isfile(mp_):
-            mask_img = cv2.imread(mp_, cv2.IMREAD_GRAYSCALE)
+    try:
+        from RMS.Routines.MaskImage import getMaskFile
+        _mask = getMaskFile(night_dir, config, default_as_backup=True)
+        if _mask is not None and getattr(_mask, "img", None) is not None:
+            mask_img = np.asarray(_mask.img)
+            if mask_img.ndim == 3:
+                mask_img = mask_img[..., 0]
+    except Exception:
+        pass
     sc_header, sc = loadStillStarStates(sidecar_path)
 
     t_unix = sc["t_unix"]
@@ -297,6 +306,9 @@ def generateDemoVideo(config, night_dir, sidecar_path, max_stills=None):
             gy_, gx_ = np.mgrid[0:H:4, 0:W:4]
             _grid_shape = gy_.shape
             _grid_pts = np.column_stack([gx_.ravel(), gy_.ravel()])
+            if mask_img is not None and mask_img.shape != (H, W):
+                mask_img = cv2.resize(mask_img, (W, H),
+                    interpolation=cv2.INTER_NEAREST)
 
         right = frame.copy()
 
