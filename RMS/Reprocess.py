@@ -905,29 +905,35 @@ if __name__ == "__main__":
         # Run the external script
         runExternalScript(cml_args.dir_path[0], night_archive_dir, config)
 
-    # Upload the archive, if upload is enabled
-    if config.upload_enabled:
+    try:
 
-        # Add metadata archive first, so it might get uploaded first
-        files_to_add_list_unfiltered = [metadata_archive_name, imgdata_archive_name, archive_name]
-        files_to_add_list = [f for f in files_to_add_list_unfiltered if f is not None]
+        # Upload the archive, if upload is enabled
+        if config.upload_enabled:
 
-        # Init the upload manager
-        log.info('Starting the upload manager...')
+            # Add metadata archive first, so it might get uploaded first
+            files_to_add_list_unfiltered = [metadata_archive_name, imgdata_archive_name, archive_name]
+            files_to_add_list = [f for f in files_to_add_list_unfiltered if f is not None]
 
-        upload_manager = UploadManager(config)
-        upload_manager.start()
+            # Init the upload manager
+            log.info('Starting the upload manager...')
 
-        # Add file for upload
-        log.info(f'Adding files to upload list: {files_to_add_list}')
-        upload_manager.addFiles(files_to_add_list)
+            upload_manager = UploadManager(config)
+            upload_manager.start()
 
-        # Stop the upload manager
-        if upload_manager.is_alive():
-            upload_manager.stop()
-            log.info('Closing upload manager...')
+            # Add file for upload
+            log.info(f'Adding files to upload list: {files_to_add_list}')
+            upload_manager.addFiles(files_to_add_list)
 
+            # Stop the upload manager
+            if upload_manager.is_alive():
+                upload_manager.stop()
+                log.info('Closing upload manager...')
 
-        # Delete detection backup files
+    finally:
+
+        # Delete detection backup files. This has to happen whether or not uploading is enabled and
+        #   whether or not it succeeded: any rms_queue_bkup_*.pickle left in the captured directory
+        #   makes StartCapture treat the night as partially processed and reprocess it all over
+        #   again on the next start.
         if detector is not None:
             detector.deleteBackupFiles()
