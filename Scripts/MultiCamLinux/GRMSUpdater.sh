@@ -125,7 +125,17 @@ should_reboot() {
         # Fallback: compare running kernel to latest installed (works on RPi OS / Debian).
         local running latest last_target
         running="$(uname -r)"
-        latest="$(ls /lib/modules/ | sort -V | tail -1)"
+        # /lib/modules/ is not only kernel version directories: the NVIDIA driver
+        # packages own a literal /lib/modules/kernel/, and purged kernels can leave
+        # a version-shaped directory behind. Keep only entries that start with a
+        # digit and carry a modules.dep (written by depmod for every installed
+        # kernel), otherwise "kernel" sorts last and every run reports a mismatch.
+        latest="$(for d in /lib/modules/*/; do
+                      d="${d%/}"; d="${d##*/}"
+                      [[ "$d" =~ ^[0-9] ]] || continue
+                      [[ -f "/lib/modules/$d/modules.dep" ]] || continue
+                      echo "$d"
+                  done | sort -V | tail -1)"
         if [[ -n "$latest" && "$running" != "$latest" ]]; then
             # Loop guard: if the latest installed kernel never becomes the running one
             # (unbootable kernel, bootloader pinned to an older version, RPi
