@@ -503,6 +503,7 @@ def computeAndSaveTreeMap(config, night_dir):
     # bits (calstars_row -1 -> -2 where a still saw the star within the FF
     # window). The union channel is what the validated harness consumed; the
     # FF window alone under-reads thin fast cloud.
+    n_fused = 0
     try:
         from Utils.StillsSampler import loadStillStarStates, sidecarFileName
         sc_path = os.path.join(night_dir, sidecarFileName(night_name))
@@ -524,10 +525,16 @@ def computeAndSaveTreeMap(config, night_dir):
             row_f[fused] = -2
             stars = dict(stars)
             stars["calstars_row"] = row_f
+            n_fused = int(fused.sum())
             print("Tree estimator: fused {:d} stills detections".format(
-                int(fused.sum())))
+                n_fused))
     except Exception as e:
         print("Tree estimator: stills fusion skipped ({})".format(e))
+
+    # Provenance for the product header: which expectations the tree ran on
+    # ("trailing" EMA file / "in_night" same-night stats / "seeded" model-p
+    # only) - answerable from any harvested product, not just station logs
+    cal_prov = dict(source="seeded", n_rate_stars=0, k=0.0)
 
     calibration = None
     try:
@@ -539,6 +546,12 @@ def computeAndSaveTreeMap(config, night_dir):
             if abs(calibration[0].get("catalog_lim_mag", -99)
                     - float(header["catalog_lim_mag"])) >= 0.01:
                 calibration = None
+            else:
+                cal_prov = dict(source="trailing",
+                    n_rate_stars=int(np.isfinite(
+                        calibration[1]["rate_calstars"]).sum()),
+                    k=float(calibration[0].get("k_ema", 0.0)),
+                    last_night=str(calibration[0].get("last_night", "")))
     except Exception:
         calibration = None
 
@@ -563,9 +576,12 @@ def computeAndSaveTreeMap(config, night_dir):
                          base_mag=stats["base_mag"],
                          sigma_mag=stats["sigma_mag"]),
                 )
+                cal_prov = dict(source="in_night",
+                    n_rate_stars=int(np.isfinite(
+                        stats["rate_calstars"]).sum()),
+                    k=float(stats["k_fit"]))
                 print("Tree estimator: in-night fine-map-conditioned calibration "
-                      "({} stars)".format(
-                      int(np.isfinite(stats["rate_calstars"]).sum())))
+                      "({} stars)".format(cal_prov["n_rate_stars"]))
         except Exception as e:
             print("Tree estimator: in-night calibration failed ({}), "
                   "seeded path".format(e))
@@ -585,6 +601,8 @@ def computeAndSaveTreeMap(config, night_dir):
         dome_s=float(header.get("dome_s", S_DEFAULT)),
         catalog_lim_mag=float(header["catalog_lim_mag"]),
         cadence=str(header.get("cadence", "per_ff")),
+        calibration=cal_prov,
+        stills_fused=n_fused,
         note="dm is extinction (mag) vs the night's clear baseline; "
              "flags: 1=no_data 2=moon_domain 4=ceiling(lower bound); "
              "multiscale Voronoi tree estimator (parallel-run product)",
