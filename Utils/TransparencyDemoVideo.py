@@ -308,10 +308,17 @@ def generateDemoVideo(config, night_dir, sidecar_path, max_stills=None):
             # stations the scoring product now synthesizes zero-detection
             # frames for un-extracted FFs, so the ceiling branch mostly
             # serves recovered nights and FF-writer failures.)
-            from Utils.FitLightDome import sunAltitude, SUN_ALT_MAX
+            # Night-mode gate, NOT the dome model's -18 deg training bound:
+            # when clear, these cameras demonstrably detect stars through
+            # nautical twilight (measured medians at sun -12..-9: 63 stars
+            # USV001, 23 CAWEC4, 13 US005A), so a near-zero count there is
+            # obstruction, not brightness. Most of a real overcast hole sits
+            # exactly in that band (CAWEC4: 449 of 528 hole stills), which a
+            # -18 gate silently hatched.
+            from Utils.FitLightDome import sunAltitude
             jd_s = float(t_unix[j])/86400.0 + 2440587.5
             dark_s = sunAltitude(jd_s, knot_pps[0].lat,
-                knot_pps[0].lon) <= SUN_ALT_MAX
+                knot_pps[0].lon) <= -9.0
             if dark_s and _obscured_still[j]:
                 if hole_inv is None:
                     fov = np.ones((H, W), dtype=bool) if mask_img is None \
