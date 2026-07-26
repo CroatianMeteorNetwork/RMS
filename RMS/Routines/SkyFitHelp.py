@@ -911,6 +911,8 @@ def _topic_frfiles(gui):
 def _topic_shortcuts_skyfit(gui):
     c = _ctrl(gui)
     nav = _shortcut_table([
+        (c + " + /", "Open this keyboard reference"),
+        ("SHIFT + F1", "Open the help guide"),
         ("F1", "Show / hide the on-image info panel"),
         ("Left / Right", "Previous / next image"),
         (c + " + Left / Right", "+/- 10 images"),
@@ -1138,6 +1140,8 @@ def _topic_debruijn(gui):
 def _topic_shortcuts_mr(gui):
     c = _ctrl(gui)
     nav = _shortcut_table([
+        (c + " + /", "Open this keyboard reference"),
+        ("SHIFT + F1", "Open the help guide"),
         ("F1", "Show / hide the on-image info panel"),
         ("Left / Right", "Previous / next frame"),
         (c + " + Left / Right", "+/- 10 frames"),
@@ -1238,6 +1242,11 @@ HELP_TOPICS = [
 _TOPIC_MAP = dict(HELP_TOPICS)
 
 
+def shortcutsTopicId(gui):
+    """ Id of the keyboard reference topic for the mode the GUI is currently in. """
+    return 'shortcuts_skyfit' if _mode(gui) == 'skyfit' else 'shortcuts_mr'
+
+
 def _enabled_topics(gui, mode_filter=True):
     """ Return (id, meta) topics whose feature gate is satisfied. If mode_filter is True, also
         restrict to the current mode; otherwise return all enabled topics across modes. """
@@ -1311,12 +1320,20 @@ def buildHelpHome(gui, query=None):
             sections_html += ("<h3>" + section + "</h3>"
                               "<table cellspacing=\"0\" cellpadding=\"0\">" + rows + "</table>")
 
+    # The keyboard reference is the most asked-for page, so pin it above the section list as well
+    # as leaving it in its Reference section - at the bottom of a long list it was being missed.
+    pinned = ("<p class=\"lead\"><b><a href=\"topic:" + shortcutsTopicId(gui) + "\">Keyboard "
+              "reference</a></b> &ndash; every shortcut, grouped (" + _key(_ctrl(gui) + " + /")
+              + ").</p>")
+
     body = (
         intro
+        + pinned
         + sections_html
         + "<hr>"
         "<p class=\"lead\">Every tab has an <b>i</b> button in its top-right corner for help on "
         "that tab. Open this guide any time from the <b>Help</b> menu or <b>Shift+F1</b>; "
+        + _key(_ctrl(gui) + " + /") + " jumps straight to the keyboard reference, and "
         "<b>F1</b> shows/hides the on-image info panel.</p>"
         "<p>Switch between SkyFit and Manual Reduction with the buttons under the image; this "
         "Help updates to match.</p>"
