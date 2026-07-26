@@ -134,7 +134,7 @@ def generateDemoVideo(config, night_dir, sidecar_path, max_stills=None):
         t_map = _z["t_unix"]
         dm = _z["dm"].astype(_np.float32)
         if "leaf_dm" in _z.files:
-            leaf_cat_id = _z["leaf_cat_id"].astype(_np.int64)
+            leaf_cat_id = _z["leaf_cat_id"].astype(_np.intp)
             leaf_dm = _z["leaf_dm"].astype(_np.float32)
             # Display smoothing: zero-phase median over +/-1 map frame kills
             # the dead-band shimmer (5 s stills alternate between adjacent
@@ -165,7 +165,7 @@ def generateDemoVideo(config, night_dir, sidecar_path, max_stills=None):
     sc_header, sc = loadStillStarStates(sidecar_path)
 
     t_unix = sc["t_unix"]
-    bright_ids = sc["bright_cat_id"].astype(np.int64)
+    bright_ids = sc["bright_cat_id"].astype(np.intp)
     bright_flux = sc["bright_flux"].astype(np.float32)
     bright_det = sc["bright_detected"]
 
@@ -198,8 +198,8 @@ def generateDemoVideo(config, night_dir, sidecar_path, max_stills=None):
         from RMS.Formats.StarScoring import loadStarScoring
         _, _, stars = loadStarScoring(os.path.join(night_dir,
             scoringFileName(night_name)))
-        cid = np.asarray(stars["star_cat_id"], dtype=np.int64)
-        row = np.asarray(stars["calstars_row"], dtype=np.int64)
+        cid = np.asarray(stars["star_cat_id"], dtype=np.intp)
+        row = np.asarray(stars["calstars_row"], dtype=np.intp)
         n_cat_f = int(cid.max()) + 1
         n_match_f = np.bincount(cid[row >= 0], minlength=n_cat_f)
         n_forced_f = np.bincount(cid[row == -2], minlength=n_cat_f)
