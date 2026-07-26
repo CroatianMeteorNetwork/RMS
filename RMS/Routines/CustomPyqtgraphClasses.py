@@ -846,13 +846,25 @@ class ImageItem(pg.ImageItem):
         #   gradient). Keep it as the base so gamma/inversion can be re-composed on top
         #   whenever they change, then hand pyqtgraph the effective LUT.
         self._base_lut = lut
-        super().setLookupTable(self._composeDisplayLut(lut), update=update)
+        self._applyDisplayLut(update=update)
 
     def _applyDisplayLut(self, update=True):
         """ Rebuild and apply the effective display LUT from the current base LUT,
             gamma and inversion. Used instead of overriding render(), so we no longer
             depend on pyqtgraph render internals. """
-        super().setLookupTable(self._composeDisplayLut(self._base_lut), update=update)
+        base_lut = self._base_lut
+
+        # The base LUT may be a callable rather than an array: pyqtgraph <= 0.11
+        #   HistogramLUTItem.setImageItem() always passes its getLookupTable method, and
+        #   newer versions still do so for non-grayscale gradients. pyqtgraph resolves a
+        #   callable LUT at render time by calling it with the image, so wrap it and
+        #   compose gamma/inversion on whatever it returns.
+        if callable(base_lut):
+            effective_lut = lambda img: self._composeDisplayLut(base_lut(img))
+        else:
+            effective_lut = self._composeDisplayLut(base_lut)
+
+        super().setLookupTable(effective_lut, update=update)
 
     def _composeDisplayLut(self, base_lut):
         """ Build the grayscale lookup table that bakes in gamma and inversion.

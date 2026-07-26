@@ -107,6 +107,16 @@ echo "Created $SYSCTL_DROP_IN with:"
 echo "  net.core.rmem_max=$RECOMMENDED_SIZE"
 echo "  net.core.wmem_max=$RECOMMENDED_SIZE"
 
+# Comment out any rmem_max/wmem_max lines left in /etc/sysctl.conf.
+# It loads after our drop-in at boot and would otherwise override it.
+SYSCTL_CONF="/etc/sysctl.conf"
+if [ -f "$SYSCTL_CONF" ] && grep -Eq '^[[:space:]]*net\.core\.(rmem|wmem)_max[[:space:]]*=' "$SYSCTL_CONF"; then
+    echo -e "\nFound conflicting UDP buffer settings in $SYSCTL_CONF; disabling them so the drop-in wins at boot."
+    cp -n "$SYSCTL_CONF" "${SYSCTL_CONF}.rms.bak" && echo "Backed up to ${SYSCTL_CONF}.rms.bak"
+    sed -i -E 's@^([[:space:]]*net\.core\.(rmem|wmem)_max[[:space:]]*=.*)@# Disabled by UpdateBuffers.sh: \1@' "$SYSCTL_CONF"
+    echo "Commented out stale rmem_max/wmem_max lines in $SYSCTL_CONF"
+fi
+
 # Apply changes immediately
 echo "Applying changes..."
 sysctl -p "$SYSCTL_DROP_IN" >/dev/null 2>&1
