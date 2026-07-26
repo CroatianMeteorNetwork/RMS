@@ -421,7 +421,7 @@ def generateDemoVideo(config, night_dir, sidecar_path, max_stills=None):
         legend_items = [
             ("detected", 5, 1, (80, 255, 80)),
             ("dimmed", 5, 1, (60, 165, 255)),
-            ("forced-phot (sat)", 6, 1, (255, 220, 80)),
+            ("forced-phot", 6, 1, (255, 220, 80)),
             ("reliable missing", 2, -1, (50, 50, 255)),
             ("weak missing", 1, -1, (40, 40, 170)),
         ]
