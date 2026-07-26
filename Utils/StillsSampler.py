@@ -145,8 +145,8 @@ def sampleStillsForNight(config, image_blocks, night_dir):
         return None
 
     # Per-star channel membership from MEASURED behavior this night
-    cat_id = np.asarray(stars["star_cat_id"], dtype=np.int64)
-    row = np.asarray(stars["calstars_row"], dtype=np.int64)
+    cat_id = np.asarray(stars["star_cat_id"], dtype=np.intp)
+    row = np.asarray(stars["calstars_row"], dtype=np.intp)
 
     n_seen = np.bincount(cat_id)
     n_matched = np.bincount(cat_id, weights=(row >= 0).astype(np.float64))
@@ -258,7 +258,7 @@ def sampleStillsForNight(config, image_blocks, night_dir):
         sel = (cat_id == cid) & (row >= 0)
         if np.any(sel):
             matched_times[int(cid)] = ff_t[np.asarray(
-                stars["star_frame"], dtype=np.int64)[sel]]
+                stars["star_frame"], dtype=np.intp)[sel]]
 
     clear_med = np.full(n_bright, np.nan, dtype=np.float32)
     for b, cid in enumerate(bright_ids):
@@ -324,11 +324,11 @@ def fuseSidecarDetections(night_dir, frames, stars):
         return stars
 
     _, sc = loadStillStarStates(sc_path)
-    cat_id = np.asarray(stars["star_cat_id"], dtype=np.int64)
-    sf = np.asarray(stars["star_frame"], dtype=np.int64)
-    row = np.asarray(stars["calstars_row"], dtype=np.int64).copy()
+    cat_id = np.asarray(stars["star_cat_id"], dtype=np.intp)
+    sf = np.asarray(stars["star_frame"], dtype=np.intp)
+    row = np.asarray(stars["calstars_row"], dtype=np.intp).copy()
     t_ff = np.asarray(frames["frame_time_unix"], dtype=np.float64)
-    b_ids = sc["bright_cat_id"].astype(np.int64)
+    b_ids = sc["bright_cat_id"].astype(np.intp)
     b_det = sc["bright_detected"]
     t_st = sc["t_unix"]
     smap = np.argmin(np.abs(t_ff[None, :] - t_st[:, None]), axis=1)

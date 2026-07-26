@@ -105,11 +105,11 @@ def computeNightStarStats(config, night_dir):
 
     n_frames = len(frames["frame_names"])
 
-    cat_id = np.asarray(stars["star_cat_id"], dtype=np.int64)
-    sf = np.asarray(stars["star_frame"], dtype=np.int64)
+    cat_id = np.asarray(stars["star_cat_id"], dtype=np.intp)
+    sf = np.asarray(stars["star_frame"], dtype=np.intp)
     sx = np.asarray(stars["star_x"], dtype=np.float64)
     sy = np.asarray(stars["star_y"], dtype=np.float64)
-    row = np.asarray(stars["calstars_row"], dtype=np.int64)
+    row = np.asarray(stars["calstars_row"], dtype=np.intp)
     smag = np.asarray(stars["star_mag"], dtype=np.float32)
     snr = np.asarray(stars["star_flux_snr"], dtype=np.float32)
     n_cat = int(cat_id.max()) + 1

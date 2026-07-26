@@ -124,11 +124,11 @@ def computeTreeSeries(config, night_dir, header, frames, stars, calibration=None
     if int(header.get("schema_version", 0)) < 4 or "star_cat_id" not in stars:
         return None
 
-    cat_id = np.asarray(stars["star_cat_id"], dtype=np.int64)
-    sf = np.asarray(stars["star_frame"], dtype=np.int64)
+    cat_id = np.asarray(stars["star_cat_id"], dtype=np.intp)
+    sf = np.asarray(stars["star_frame"], dtype=np.intp)
     sx = np.asarray(stars["star_x"], dtype=np.float64)
     sy = np.asarray(stars["star_y"], dtype=np.float64)
-    row = np.asarray(stars["calstars_row"], dtype=np.int64)
+    row = np.asarray(stars["calstars_row"], dtype=np.intp)
     n_frames = len(frames["frame_names"])
     n_cat = int(cat_id.max()) + 1
 
@@ -336,7 +336,7 @@ def computeTreeSeries(config, night_dir, header, frames, stars, calibration=None
                 if d2.min() < min_sep_chord**2:
                     continue
             chosen.append(int(i))
-        return np.array(chosen, dtype=np.int64)
+        return np.array(chosen, dtype=np.intp)
 
     # Footprint angular radius from the qualified stars themselves
     centroid = pos.mean(axis=0)
@@ -368,7 +368,7 @@ def computeTreeSeries(config, night_dir, header, frames, stars, calibration=None
     # all calibrated stars this way) - the anchor gate selects LEAVES, it must
     # not discard the sub-anchor stars' evidence, which on deep catalogs is a
     # large fraction of the total
-    leaf_of_cat = np.full(n_cat, -1, dtype=np.int64)
+    leaf_of_cat = np.full(n_cat, -1, dtype=np.intp)
     leaf_of_cat[q_ids] = A2
     other = np.where(np.isfinite(rate) & ~qualified)[0]
     other = other[other < len(pos_all)]
@@ -508,11 +508,11 @@ def computeAndSaveTreeMap(config, night_dir):
         sc_path = os.path.join(night_dir, sidecarFileName(night_name))
         if os.path.isfile(sc_path):
             _, sc = loadStillStarStates(sc_path)
-            cat_id_f = np.asarray(stars["star_cat_id"], dtype=np.int64)
-            sf_f = np.asarray(stars["star_frame"], dtype=np.int64)
-            row_f = np.asarray(stars["calstars_row"], dtype=np.int64).copy()
+            cat_id_f = np.asarray(stars["star_cat_id"], dtype=np.intp)
+            sf_f = np.asarray(stars["star_frame"], dtype=np.intp)
+            row_f = np.asarray(stars["calstars_row"], dtype=np.intp).copy()
             t_ff = np.asarray(frames["frame_time_unix"], dtype=np.float64)
-            b_ids = sc["bright_cat_id"].astype(np.int64)
+            b_ids = sc["bright_cat_id"].astype(np.intp)
             b_det = sc["bright_detected"]
             t_st = sc["t_unix"]
             smap = np.argmin(np.abs(t_ff[None, :] - t_st[:, None]), axis=1)
