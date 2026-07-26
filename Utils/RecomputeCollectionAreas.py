@@ -4,6 +4,7 @@ from __future__ import print_function, division, absolute_import
 
 import os
 import multiprocessing
+from functools import partial
 
 from RMS.Routines.MaskImage import getMaskFile
 from RMS.ConfigReader import loadConfigFromDirectory
@@ -95,19 +96,25 @@ def recomputeCollectionAreas(root_dir_path, ncores=1):
 
     else:
 
+        # Bind the shared flux_config so each job only needs a dir_path. functools.partial is
+        # picklable (unlike a lambda), so it can be sent to workers under the
+        # 'forkserver'/'spawn' start methods (the default on Linux from Python 3.14).
+        worker = partial(updateCollectionAreaNight, flux_config=flux_config)
+
         # Run in parallel
         pool = multiprocessing.Pool(ncores)
 
-        # Use tqdm to show a progress bar if available
+        # Use tqdm to show a progress bar if available. tqdm must wrap the *iterable*, not the
+        # worker function - a tqdm object is not picklable and cannot be sent to workers. The
+        # iterator is consumed so the jobs are actually dispatched.
         try:
             from tqdm import tqdm
-            pool.imap_unordered(
-                tqdm(updateCollectionAreaNight, total=len(dir_list)), 
-                    [(dir_path, flux_config) for dir_path in dir_list]
-            )
-            
+            for _ in tqdm(pool.imap_unordered(worker, dir_list), total=len(dir_list)):
+                pass
+
         except ImportError:
-            pool.imap_unordered(updateCollectionAreaNight, [(dir_path, flux_config) for dir_path in dir_list])
+            for _ in pool.imap_unordered(worker, dir_list):
+                pass
 
         pool.close()
         pool.join()

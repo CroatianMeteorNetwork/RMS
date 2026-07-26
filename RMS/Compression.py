@@ -30,8 +30,8 @@ import cv2
 from RMS.VideoExtraction import Extractor
 from RMS.Formats import FFfile, FFStruct
 from RMS.Formats import FieldIntensities
-from RMS.Logger import getLogger
-from RMS.Misc import UTCFromTimestamp
+from RMS.Logger import getLogger, getLoggingQueue, initChildProcess
+from RMS.Misc import UTCFromTimestamp, frameBufferShape
 from RMS.Routines.Image import saveImage
 
 # Import Cython functions
@@ -73,9 +73,14 @@ class Compressor(multiprocessing.Process):
         super(Compressor, self).__init__()
         
         self.data_dir = data_dir
-        self.array1 = array1
+        # array1/array2 are multiprocessing.Array BASE objects (picklable across forkserver/spawn).
+        # The numpy views over them are rebuilt in run() so they stay backed by the same shared
+        # memory the capture process writes into; a numpy view passed here would pickle by value.
+        self.array1_base = array1
+        self.array2_base = array2
+        self.array1 = None
+        self.array2 = None
         self.start_time1 = start_time1
-        self.array2 = array2
         self.start_time2 = start_time2
         self.config = config
 
@@ -84,7 +89,11 @@ class Compressor(multiprocessing.Process):
         self.exit = multiprocessing.Event()
 
         self.run_exited = multiprocessing.Event()
-    
+
+        # Grab the logging queue on the parent side so the child can re-attach logging
+        # under the 'forkserver'/'spawn' start methods (handlers are not inherited there)
+        self.logging_queue = getLoggingQueue()
+
 
 
     def compress(self, frames):
@@ -259,7 +268,17 @@ class Compressor(multiprocessing.Process):
     def run(self):
         """ Retrieve frames from list, convert, compress and save them.
         """
-        
+
+        # Re-establish logging and signal handling in the child (no-op under 'fork')
+        initChildProcess(self.logging_queue, self.config)
+
+        # Rebuild numpy views over the shared frame buffers in this process. Under forkserver/spawn
+        # the views cannot be inherited, so build them here from the shared multiprocessing.Array
+        # base objects - this is the same shared memory the capture process writes frames into.
+        frame_buffer_shape = frameBufferShape(self.config)
+        self.array1 = np.ctypeslib.as_array(self.array1_base.get_obj()).reshape(frame_buffer_shape)
+        self.array2 = np.ctypeslib.as_array(self.array2_base.get_obj()).reshape(frame_buffer_shape)
+
         n = 0
         exit_wait_start = None
         

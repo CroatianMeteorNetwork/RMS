@@ -9,7 +9,7 @@ import multiprocessing
 import multiprocessing.dummy
 
 from RMS.Pickling import savePickle, loadPickle
-from RMS.Logger import getLogger
+from RMS.Logger import getLogger, getLoggingQueue, initChildProcess
 from RMS.Misc import randomCharacters, isListKeyInDict, listToTupleRecursive
 
 
@@ -148,6 +148,10 @@ class QueuedPool(object):
         self.cores = SafeValue(cores, minval=1, maxval=multiprocessing.cpu_count())
         self.log = log
 
+        # Grab the logging queue on the parent side so each worker can re-attach logging
+        # under the 'forkserver'/'spawn' start methods (handlers are not inherited there)
+        self.logging_queue = getLoggingQueue()
+
         self.start_time = time.time()
         self.delay_start = delay_start
         self.worker_timeout = worker_timeout
@@ -195,30 +199,35 @@ class QueuedPool(object):
 
 
     def __getstate__(self):
-        """ Return a picklable snapshot of this instance for the 'spawn' start method
-            (Windows). On Linux (fork) this is never called, so the capture pipeline is
-            unaffected.
+        """ Return a picklable representation of the pool.
 
-            Under spawn, the Pool initializer (the bound method self._workerFunc) forces
-            the whole QueuedPool to be pickled and sent to each worker. The SyncManager
-            (self.manager) has no pickle reducer and holds a weakref -> "cannot pickle
-            'weakref' object"; workers never use it (they use the already-created Queue
-            proxies), so drop it. The live Pool handle (self.pool) also must not and need
-            not cross the process boundary. Everything else (Manager Queue proxies,
-            SafeValue Value/Lock counters, the kill Event, bkup_dict) reduces correctly
-            during a real spawn and is needed by the workers.
+        Required under the 'spawn' (Windows/macOS default) and 'forkserver' (Linux default
+        from Python 3.14) start methods, where the Pool initializer (the bound method
+        self._workerFunc) is pickled and sent to each worker process. The SyncManager
+        (self.manager) and the Pool handle (self.pool) are neither picklable nor needed in
+        workers; the Manager queue/value proxies ARE picklable and transparently reconnect
+        on the worker side. Everything else (SafeValue Value/Lock counters, the kill Event,
+        bkup_dict) reduces correctly during a real spawn and is needed by the workers.
+        A logging.Logger is not picklable before Python 3.7, so it is reduced to its name
+        and re-fetched in the worker (handlers are not inherited across processes anyway).
+
+        Under 'fork' no pickling occurs, so this method is never called and behavior is
+        unchanged.
         """
         state = self.__dict__.copy()
         state['manager'] = None
         state['pool'] = None
+        state['log'] = self.log.name if self.log is not None else None
         return state
 
 
     def __setstate__(self, state):
-        """ Restore state in a spawned worker. manager/pool stay None in the child; the
-            worker reconnects to the parent's manager server through the pickled Queue
-            proxies. """
+        """ Restore state in a worker process, re-fetching the logger by name. manager/pool
+            stay None in the child; the worker reconnects to the parent's manager server
+            through the pickled Queue proxies. """
+        log_name = state.get('log')
         self.__dict__.update(state)
+        self.log = getLogger(log_name) if log_name is not None else None
 
 
     def printAndLog(self, *args):
@@ -313,7 +322,14 @@ class QueuedPool(object):
 
     def _workerFunc(self, func):
         """ A wrapper function for the given worker function. Handles the queue operations. """
-        
+
+        # Re-attach logging in this worker process. Under 'forkserver'/'spawn' (the default on
+        # Linux from Python 3.14) a worker does not inherit the parent's root logger handlers,
+        # so records from the worker function (and printAndLog) would otherwise never reach the
+        # listener. The listener applies its own InRmsFilter, so no filter is needed here. This
+        # also sets SIGINT to be ignored so the parent coordinates shutdown.
+        initChildProcess(self.logging_queue, None)
+
         # Set lower priority, if given
         if self.low_priority:
 

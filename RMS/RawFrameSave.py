@@ -24,8 +24,9 @@ import multiprocessing
 from math import floor
 
 import cv2
+import numpy as np
 
-from RMS.Logger import getLogger
+from RMS.Logger import getLogger, getLoggingQueue, initChildProcess
 from RMS.Misc import mkdirP, setParentDeathSignal
 
 # Get the logger from the main module
@@ -38,31 +39,40 @@ class RawFrameSaver(multiprocessing.Process):
 
     running = False
     
-    def __init__(self, saved_frames_dir, array1, start_time1, array2, start_time2, tsArray1, tsArray2, daytime_mode, config):
+    def __init__(self, saved_frames_dir, array1, start_time1, array2, start_time2, tsArray1, tsArray2, daytime_mode, config, raw_array_shape):
         """
 
         Arguments:
             saved_frames_dir: directory to save raw frames to
-            array1: first numpy array in shared memory of raw video frames
+            array1: multiprocessing.Array base for the first raw-frame buffer (shared memory)
             start_time1: float in shared memory that holds time of first raw frame in array1
-            array2: second numpy array in shared memory
+            array2: multiprocessing.Array base for the second raw-frame buffer
             start_time1: float in shared memory that holds time of first raw frame in array2
-            tsArray1: first numpy array in shared memory for timestamps
-            tsArray2: second numpy array in shared memory for timestamps
+            tsArray1: multiprocessing.Array base for the first timestamp buffer
+            tsArray2: multiprocessing.Array base for the second timestamp buffer
             config: configuration class
             daytime_mode: [bool] True if the camera is in daytime mode, False if in nightime mode
+            raw_array_shape: [tuple] Shape of the raw-frame buffer, used to rebuild the numpy view.
 
         """
-        
+
         super(RawFrameSaver, self).__init__()
-        
+
         self.saved_frames_dir = saved_frames_dir
-        self.array1 = array1
+        # array1/array2 and the timestamp arrays are multiprocessing.Array BASE objects (picklable
+        # across forkserver/spawn). The numpy views over them are rebuilt in run() so they stay
+        # backed by the same shared memory the capture process writes into.
+        self.array1_base = array1
+        self.array2_base = array2
+        self.timeStamps1_base = tsArray1
+        self.timeStamps2_base = tsArray2
+        self.raw_array_shape = raw_array_shape
+        self.array1 = None
+        self.array2 = None
+        self.timeStamps1 = None
+        self.timeStamps2 = None
         self.start_time1 = start_time1
-        self.array2 = array2
         self.start_time2 = start_time2
-        self.timeStamps1 = tsArray1
-        self.timeStamps2 = tsArray2
         self.daytime_mode = daytime_mode
         self.config = config
 
@@ -71,6 +81,10 @@ class RawFrameSaver(multiprocessing.Process):
 
         self.exit = multiprocessing.Event()
         self.run_exited = multiprocessing.Event()
+
+        # Grab the logging queue on the parent side so the child can re-attach logging
+        # under the 'forkserver'/'spawn' start methods (handlers are not inherited there)
+        self.logging_queue = getLoggingQueue()
 
         # PID of the logical parent (BufferedCapture). __init__ runs in the parent, so this
         # is captured correctly under fork, spawn AND forkserver - unlike os.getppid(),
@@ -179,6 +193,21 @@ class RawFrameSaver(multiprocessing.Process):
             self.total_saved_frames += 1
 
 
+    def ensureViews(self):
+        """ Build numpy views over the shared multiprocessing.Array bases if not already built.
+
+        Both the capture process (which calls stop() to flush tail-end frames) and this saver
+        process (run()) need a view backed by the same shared memory. Under forkserver/spawn a
+        numpy view cannot be inherited or pickled, so each process builds its own view from the
+        shared base here. Idempotent.
+        """
+        if self.array1 is None:
+            self.array1 = np.ctypeslib.as_array(self.array1_base.get_obj()).reshape(self.raw_array_shape)
+            self.array2 = np.ctypeslib.as_array(self.array2_base.get_obj()).reshape(self.raw_array_shape)
+            self.timeStamps1 = np.ctypeslib.as_array(self.timeStamps1_base.get_obj())
+            self.timeStamps2 = np.ctypeslib.as_array(self.timeStamps2_base.get_obj())
+
+
     def stop(self):
         """ Stop saving frames.
         """
@@ -186,15 +215,21 @@ class RawFrameSaver(multiprocessing.Process):
         self.exit.set()
         log.debug('Raw frame saver exit flag set')
 
-        # Flush any frames whose TS array still has data.
-        #
-        # The shared arrays may already be gone by the time we get here: stop() frees
-        # them itself (see the `del`s below), and BufferedCapture.releaseRawArrays()
-        # calls stop() both on shutdown AND on every day/night mode switch, where the
-        # saver is torn down before the arrays are re-created for the new frame shape.
-        # Zipping None then raised "TypeError: 'NoneType' object is not iterable" out
-        # of a teardown path, which RMS logged as a traceback on a perfectly healthy
-        # station (twice a day, per camera). There is nothing to flush in that case.
+        # Build views over the shared buffers in this (capture) process so the
+        # tail-end flush reads the same shared memory the saver process wrote
+        # into (under forkserver/spawn views are not inherited - see
+        # ensureViews). The bases may already be gone by the time we get here:
+        # stop() frees them itself (see the `del`s below), and
+        # BufferedCapture.releaseRawArrays() calls stop() both on shutdown AND
+        # on every day/night mode switch, where the saver is torn down before
+        # the arrays are re-created for the new frame shape. Zipping None then
+        # raised "TypeError: 'NoneType' object is not iterable" out of a
+        # teardown path, logged as a traceback on a perfectly healthy station
+        # (twice a day, per camera). There is nothing to flush in that case.
+        try:
+            self.ensureViews()
+        except Exception:
+            pass
         array1 = getattr(self, 'array1', None)
         array2 = getattr(self, 'array2', None)
         timestamps1 = getattr(self, 'timeStamps1', None)
@@ -222,10 +257,10 @@ class RawFrameSaver(multiprocessing.Process):
         # Free shared memory after the raw frame saver is done
         try:
             log.debug('Freeing frame buffers in raw frame saver...')
-            del self.array1
-            del self.array2
-            del self.timeStamps1
-            del self.timeStamps2
+            self.array1 = None
+            self.array2 = None
+            self.timeStamps1 = None
+            self.timeStamps2 = None
 
         except Exception as e:
             log.debug('Freeing raw frame buffers failed with error:' + repr(e))
@@ -246,7 +281,18 @@ class RawFrameSaver(multiprocessing.Process):
         # Die if our parent BufferedCapture dies (e.g. watchdog force-kill). Without this
         # the orphaned saver loops forever on a shared exit Event that is never set,
         # leaking its inherited ~450 MB buffer; hundreds accumulate and OOM the box.
+        # Set as early as possible. Note that under forkserver this fires on the wrong
+        # parent's death, which is why the os.kill() liveness probe in the wait loop below
+        # complements it.
         setParentDeathSignal()
+
+        # Re-establish logging and signal handling in the child (no-op under 'fork')
+        initChildProcess(self.logging_queue, self.config)
+
+        # Rebuild numpy views over the shared raw-frame and timestamp buffers in this process.
+        # Under forkserver/spawn the views cannot be inherited, so build them here from the
+        # shared multiprocessing.Array base objects (same memory the capture process writes).
+        self.ensureViews()
 
         try:
             # Repeat until the raw frame saver is killed from the outside

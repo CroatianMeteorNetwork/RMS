@@ -23,6 +23,7 @@ from RMS.Routines.MaskImage import loadMask, MaskStructure
 import multiprocessing as mp
 import ctypes
 from RMS.QueuedPool import QueuedPool
+from RMS.Misc import setMultiprocessingStartMethod
 import time
 import datetime
 
@@ -486,6 +487,11 @@ def getArray(size, shared_arr):
 
 
 if __name__ == "__main__":
+
+    # Pin the multiprocessing start method for consistent behavior across Python versions
+    # (3.6-3.14). Must be done before any Process/Pool is created.
+    setMultiprocessingStartMethod()
+
     # ## PARSE INPUT ARGUMENTS ###
     # Init the command line arguments parser
     arg_parser = argparse.ArgumentParser(description=""" Generate a stack with aligned stars.

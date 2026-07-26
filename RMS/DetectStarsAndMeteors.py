@@ -36,7 +36,7 @@ from RMS.Detection import detectMeteors
 from RMS.DetectionTools import loadImageCalibration
 from RMS.QueuedPool import QueuedPool
 from RMS.Logger import LoggingManager, getLogger
-from RMS.Misc import RmsDateTime
+from RMS.Misc import RmsDateTime, setMultiprocessingStartMethod
 
 
 # Get the logger from the main module
@@ -457,6 +457,10 @@ def detectStarsAndMeteorsDirectory(dir_path, config, output_suffix=''):
 
 
 if __name__ == "__main__":
+
+    # Pin the multiprocessing start method for consistent behavior across Python versions
+    # (3.6-3.14). Must be done before any Process/Pool is created.
+    setMultiprocessingStartMethod()
 
     time_start = RmsDateTime.utcnow()
 

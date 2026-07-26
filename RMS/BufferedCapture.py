@@ -44,9 +44,9 @@ from RMS.Misc import obfuscatePassword
 from RMS.Routines.GstreamerCapture import GstVideoFile, getStructureValue
 from RMS.Formats.ObservationSummary import addObsParam, getObservationSummaryDict
 from RMS.RawFrameSave import RawFrameSaver
-from RMS.Misc import RmsDateTime, mkdirP, UTCFromTimestamp, runWithTimeout
+from RMS.Misc import RmsDateTime, mkdirP, UTCFromTimestamp, frameBufferShape, runWithTimeout
 from RMS.Formats import FTfile, FTStruct
-from RMS.Logger import LoggingManager, getLogger, gstDebugLogger
+from RMS.Logger import LoggingManager, getLogger, gstDebugLogger, getLoggingQueue, initChildProcess
 from RMS.CaptureModeSwitcher import switchCameraMode
 import Utils.CameraControl as cc
 
@@ -169,10 +169,15 @@ class BufferedCapture(Process):
         else:
             self.camera_mode_switch_trigger = camera_mode_switch_trigger
 
-        # Store shared memory arrays and values for compressor (these are designed for multiprocessing)
-        self.array1 = array1
+        # Store shared memory arrays and values for compressor (these are designed for multiprocessing).
+        # array1/array2 are multiprocessing.Array BASE objects (picklable across forkserver/spawn).
+        # The numpy views over them are rebuilt in run() so they stay backed by shared memory; a
+        # numpy view passed here would pickle by value and disconnect this process from the buffer.
+        self.array1_base = array1
+        self.array2_base = array2
+        self.array1 = None
+        self.array2 = None
         self.start_time1 = start_time1
-        self.array2 = array2
         self.start_time2 = start_time2
         self.start_time1.value = 0
         self.start_time2.value = 0
@@ -216,6 +221,10 @@ class BufferedCapture(Process):
         # handle for the Gst bus-poller thread
         self._bus_should_exit = False
         self._bus_thread = None
+
+        # Grab the logging queue on the parent side so the child can re-attach logging
+        # under the 'forkserver'/'spawn' start methods (handlers are not inherited there)
+        self.logging_queue = getLoggingQueue()
 
 
     def startCapture(self, cameraID=0):
@@ -1789,8 +1798,9 @@ class BufferedCapture(Process):
 
             # Store current array configuration
             self.current_raw_frame_shape = frame_shape
+            self.raw_array_shape = array_shape
             self.current_mode = self.daytime_mode.value if self.daytime_mode is not None else False
-            
+
             return True
 
         except Exception as e:
@@ -1803,6 +1813,16 @@ class BufferedCapture(Process):
         """ Main process function - initializes all process-specific resources and runs capture loop.
         """
         try:
+            # Re-establish logging and signal handling in the child (no-op under 'fork')
+            initChildProcess(self.logging_queue, self.config)
+
+            # Rebuild numpy views over the shared frame buffers in this process. Under
+            # forkserver/spawn the views cannot be inherited, so build them here from the
+            # shared multiprocessing.Array base objects (same shared memory the Compressor maps).
+            frame_buffer_shape = frameBufferShape(self.config)
+            self.array1 = np.ctypeslib.as_array(self.array1_base.get_obj()).reshape(frame_buffer_shape)
+            self.array2 = np.ctypeslib.as_array(self.array2_base.get_obj()).reshape(frame_buffer_shape)
+
             log.debug("Initializing process-specific resources...")
 
             # Initialize heartbeat for watchdog
@@ -2135,13 +2155,17 @@ class BufferedCapture(Process):
 
                         else:
                             # Initialize new frame saver
+                            # Pass the multiprocessing.Array base objects (not numpy views), so the
+                            # saver rebuilds its own views over the same shared memory under
+                            # forkserver/spawn (a view would pickle by value and disconnect it).
                             self.raw_frame_saver = RawFrameSaver(
                                 self.saved_frames_dir,
-                                self.shared_raw_array, self.start_raw_time1,
-                                self.shared_raw_array2, self.start_raw_time2,
-                                self.sharedTimestamps, self.sharedTimestamps2,
+                                self.shared_raw_array_base, self.start_raw_time1,
+                                self.shared_raw_array_base2, self.start_raw_time2,
+                                self.shared_timestamps_base, self.shared_timestamps_base2,
                                 self.daytime_mode.value,
-                                self.config
+                                self.config,
+                                self.raw_array_shape
                             )
                             self.raw_frame_saver.start()
                             self.raw_frame_count = 0
@@ -2492,10 +2516,13 @@ if __name__ == "__main__":
     print('Media backend: {}'.format(config.media_backend))
 
 
-    # Init dummy shared memory
-    sharedArrayBase = multiprocessing.Array(ctypes.c_uint8, 256*(config.width)*(config.height))
-    sharedArray = np.ctypeslib.as_array(sharedArrayBase.get_obj())
-    sharedArray = sharedArray.reshape(256, (config.height), (config.width))
+    # Init dummy shared memory. Pass the multiprocessing.Array base (not a numpy view) to
+    # BufferedCapture, which rebuilds its own view in run() - matching the production path and
+    # keeping it working under the forkserver/spawn start methods.
+    frame_buffer_shape = frameBufferShape(config)
+    frame_buffer_len = frame_buffer_shape[0]*frame_buffer_shape[1]*frame_buffer_shape[2]
+    sharedArrayBase = multiprocessing.Array(ctypes.c_uint8, frame_buffer_len)
+    sharedArray = sharedArrayBase
     startTime = multiprocessing.Value('d', 0.0)
 
 
