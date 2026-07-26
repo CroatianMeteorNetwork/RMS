@@ -242,15 +242,22 @@ def generateDemoVideo(config, night_dir, sidecar_path, max_stills=None):
     hole_gz = hole_inv = hole_add = None
 
     # Per-still "essentially opaque" verdict for map holes, from the still's
-    # own measurements: >=95% of in-FOV measured stars undetected. A couple
-    # of spurious or pinhole detections must not flip the verdict, and the
-    # raw per-still test flickers (measured: 129 transitions over a 528-still
-    # hole, median run 2 stills), so a +-3-still majority vote smooths it -
-    # display smoothing only, same spirit as the leaf_dm median.
+    # own measurements. The yardstick is the NIGHT'S OWN demonstrated
+    # detection level (p80 of per-still detected counts), not the in-FOV
+    # star count: even clear sky never detects the whole channel, and a
+    # marginal camera detects few stars at the best of times (measured on
+    # CAWEC4, night p80 = 20: map-opaque stills still catch 1-6 pinhole
+    # stars while mere thin cloud detects ~45). A still at or below a
+    # quarter of the night's own level is essentially opaque.
+    # The raw per-still test flickers (129 transitions
+    # over a 528-still hole, median run 2 stills), so a +-3-still majority
+    # vote smooths it - display smoothing only, same spirit as the leaf_dm
+    # median.
     _nfov_s = np.isfinite(bright_flux).sum(axis=0)
     _ndet_s = bright_det.sum(axis=0)
+    _p80 = float(np.percentile(_ndet_s, 80)) if len(_ndet_s) else 0.0
     _obs_raw = ((_nfov_s >= 10)
-                & (_ndet_s <= np.maximum(2, 0.05*_nfov_s))).astype(float)
+                & (_ndet_s <= max(2.0, 0.25*_p80))).astype(float)
     _kk = np.ones(7)
     _obscured_still = (np.convolve(_obs_raw, _kk, "same")
                        /np.convolve(np.ones(len(_obs_raw)), _kk, "same")) >= 0.5
