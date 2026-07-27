@@ -85,7 +85,7 @@ class BackupContainer(object):
 class QueuedPool(object):
     def __init__(self, func, cores=None, log=None, delay_start=0, worker_timeout=2000, backup_dir='.', \
         input_queue_maxsize=None, low_priority=False, func_extra_args=None, func_kwargs=None, 
-        worker_wait_inbetween_jobs=0.1, print_state=True):
+        worker_wait_inbetween_jobs=0.1, print_state=True, config=None):
         """ Provides capability of creating a pool of workers which will process jobs in a given queue, and 
         the input queue can be updated in another thread. 
 
@@ -173,6 +173,7 @@ class QueuedPool(object):
         self.output_queue = self.manager.Queue()
 
         self.func = func
+        self.config = config
         self.pool = None
 
         self.total_jobs = SafeValue(minval=0)
@@ -326,9 +327,12 @@ class QueuedPool(object):
         # Re-attach logging in this worker process. Under 'forkserver'/'spawn' (the default on
         # Linux from Python 3.14) a worker does not inherit the parent's root logger handlers,
         # so records from the worker function (and printAndLog) would otherwise never reach the
-        # listener. The listener applies its own InRmsFilter, so no filter is needed here. This
-        # also sets SIGINT to be ignored so the parent coordinates shutdown.
-        initChildProcess(self.logging_queue, None)
+        # listener. Pass the config when the caller provided one so the worker-side
+        # InRmsFilter engages: without it every third-party DEBUG record is pickled and
+        # pushed across the queue only to be discarded by the listener's filter (review
+        # finding - wasted IPC on the smallest boxes). This also sets SIGINT to be ignored
+        # so the parent coordinates shutdown.
+        initChildProcess(self.logging_queue, self.config)
 
         # Set lower priority, if given
         if self.low_priority:
