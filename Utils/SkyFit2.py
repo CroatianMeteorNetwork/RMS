@@ -6091,32 +6091,19 @@ class PlateTool(QtWidgets.QMainWindow):
             if test_catalog is None or len(test_catalog) == 0:
                 return 0, 0
 
-            # Filter catalog to stars actually in front of camera (prevent back-projection)
-            # Use angular distance in celestial coordinates, not self.filterCatalogStarsInsideFOV
-            # which incorrectly uses self.cat_lim_mag instead of the test catalog's LM
-            catalog_ra = test_catalog[:, 0]
-            catalog_dec = test_catalog[:, 1]
-            ra_rad = np.radians(catalog_ra)
-            dec_rad = np.radians(catalog_dec)
-            ra_center = np.radians(self.platepar.RA_d)
-            dec_center = np.radians(self.platepar.dec_d)
+            # Filter catalog to stars actually in front of the camera (prevents the
+            # back-projection fold). Use filterCatalogStarsInsideFOV with an explicit
+            # lim_mag - it centres the FOV cone via computeCentreRADec() at the CURRENT
+            # image time. A previous hand-rolled filter here centred on
+            # platepar.RA_d/dec_d, which are only valid at platepar.JD: after a
+            # whole-night refit that epoch can sit hours from the displayed frame, the
+            # cone then points at the wrong sky, the true FOV stars are excluded, and
+            # only back-projection folds survive - Phase 3 matched ~nothing against a
+            # perfectly good platepar.
+            _, test_catalog = self.filterCatalogStarsInsideFOV(test_catalog,
+                lim_mag=test_lm)
 
-            # Spherical angular distance from camera pointing to each catalog star
-            cos_ang_dist = (np.sin(dec_center) * np.sin(dec_rad) +
-                            np.cos(dec_center) * np.cos(dec_rad) * np.cos(ra_rad - ra_center))
-            cos_ang_dist = np.clip(cos_ang_dist, -1, 1)
-            ang_dist_deg = np.degrees(np.arccos(cos_ang_dist))
-
-            # FOV radius with margin (stars behind camera have ang_dist > 90)
-            # F_scale is px/deg, so divide to convert the pixel diagonal to degrees
-            fov_diagonal = np.sqrt(self.platepar.X_res**2 + self.platepar.Y_res**2)
-            fov_radius = (fov_diagonal / 2) / self.platepar.F_scale * 1.5
-            fov_radius = min(fov_radius, 90)
-
-            in_fov = ang_dist_deg < fov_radius
-            test_catalog = test_catalog[in_fov]
-
-            if len(test_catalog) == 0:
+            if (test_catalog is None) or (len(test_catalog) == 0):
                 return 0, 0
 
             cat_x, cat_y, _ = getCatalogStarsImagePositions(test_catalog, jd, self.platepar)
