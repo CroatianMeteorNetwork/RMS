@@ -200,6 +200,10 @@ class RawFrameSaver(multiprocessing.Process):
         timestamps1 = getattr(self, 'timeStamps1', None)
         timestamps2 = getattr(self, 'timeStamps2', None)
 
+        if array1 is None and array2 is None:
+            log.debug('Raw frame saver buffers already released - '
+                      'nothing to flush')
+
         leftovers = []
         if (array1 is not None) and (timestamps1 is not None):
             for frame, ts in zip(array1, timestamps1):
