@@ -125,7 +125,15 @@ def generateDemoVideo(config, night_dir, sidecar_path, max_stills=None):
     tree_path = os.path.join(night_dir, treeMapFileName(night_name))
     map_path = tree_path if os.path.isfile(tree_path)         else os.path.join(night_dir, mapFileName(night_name))
     if not (os.path.isfile(map_path) and os.path.isfile(sidecar_path)):
+        print("Transparency demo video: missing prerequisites (map: {} "
+              "sidecar: {}) - skipping".format(os.path.isfile(map_path),
+              os.path.isfile(sidecar_path)))
         return None
+
+    # Idempotent: the video may already have been rendered at scoring time
+    out_path_early = os.path.join(night_dir, demoVideoFileName(night_name))
+    if os.path.isfile(out_path_early):
+        return out_path_early
 
     import numpy as _np
     leaf_cat_id = leaf_dm = None
@@ -180,6 +188,8 @@ def generateDemoVideo(config, night_dir, sidecar_path, max_stills=None):
                 key = calendar.timegm(ts.timetuple()) + ts.microsecond/1e6
                 stills_by_t[round(key, 1)] = os.path.join(root, fname)
     if not stills_by_t:
+        print("Transparency demo video: no stills found under {} - "
+              "skipping".format(frame_dir))
         return None
 
     # Member stats measured on this night's stills (rates weight the markers)
@@ -227,6 +237,8 @@ def generateDemoVideo(config, night_dir, sidecar_path, max_stills=None):
             knots.append((calendar.timegm(
                 FFfile.filenameToDatetime(ff_name).timetuple()), pp))
     if not knots:
+        print("Transparency demo video: no recalibrated platepar knots - "
+              "skipping")
         return None
     knots.sort()
     knot_times = np.array([t for t, _ in knots])

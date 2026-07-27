@@ -1716,6 +1716,28 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
         except Exception as e:
             log.warning("Could not compute the tree transparency map: {}".format(e))
 
+        # Render the demo video HERE, where its prerequisites provably exist:
+        # the map was just written, the sidecar was sampled above, and the
+        # stills are still on disk (the sampler read them moments ago). The
+        # frames-step call in Reprocess remains as a fallback but its timing
+        # relative to scoring varies by capture mode - on continuous stations
+        # it can run before the map exists and skip silently (observed: no
+        # station videos while every prerequisite passed individually).
+        # generateDemoVideo is idempotent, so double invocation is harmless.
+        if getattr(config, "transparency_demo_video", False):
+            try:
+                from Utils.StillsSampler import sidecarFileName as _scName
+                _sc = os.path.join(dir_path, _scName(
+                    os.path.basename(os.path.normpath(dir_path))))
+                if os.path.isfile(_sc):
+                    from Utils.TransparencyDemoVideo import generateDemoVideo
+                    _v = generateDemoVideo(config, dir_path, _sc)
+                    if _v:
+                        log.info("Transparency demo video: {:s}".format(
+                            os.path.basename(_v)))
+            except Exception as e:
+                log.warning("Transparency demo video failed: {}".format(e))
+
         # Fold the night into the trailing per-star calibration (measured
         # rates/baselines per star per channel + the nightly extinction slope)
         # FOR FUTURE NIGHTS. Needs the map just written for its clear
