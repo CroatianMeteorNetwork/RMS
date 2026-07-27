@@ -1326,7 +1326,6 @@ class RightOptionsTab(QtWidgets.QTabWidget, ScaledSizeHelper):
 
         self.index = 0
         self.maximized = True
-        self.setFixedWidth(self.scaledWidth(self.TAB_WIDTH_CHARS))
 
         self.addTab(self.hist, 'Levels')
         self.addTab(self.param_manager, 'Fit Parameters')
@@ -1338,6 +1337,10 @@ class RightOptionsTab(QtWidgets.QTabWidget, ScaledSizeHelper):
 
         self.setCurrentIndex(self.index)  # redundant
         self.setTabPosition(QtWidgets.QTabWidget.East)
+
+        # Set the initial width once the tabs exist and the bar is on the East side, so the
+        # measurement in barWidth() is meaningful
+        self.applyTabWidth()
 
         self.tabBarClicked.connect(self.onTabBarClicked)
 
@@ -1357,13 +1360,12 @@ class RightOptionsTab(QtWidgets.QTabWidget, ScaledSizeHelper):
             return self.TAB_WIDTH_CHARS*self.HELP_WIDTH_MULT
         return self.TAB_WIDTH_CHARS
 
-    def minimizedWidth(self):
-        """ Collapsed panel width, in pixels: just wide enough to show the whole tab bar.
+    def barWidth(self):
+        """ Horizontal space the tab bar needs, in pixels, including the pane frame.
 
-        setFixedWidth() sizes the tab bar and the page together, so a collapsed width guessed in
-        characters clipped the (vertical, East-side) tab labels on systems whose style or font
-        makes the bar wider than the guess. Ask the bar what it needs instead, and add the pane
-        frame drawn around it.
+        With TabPosition.East the bar's width is driven by the tab *height* (rotated labels: font
+        ascent/descent plus the style's tab padding), which has nothing to do with the character
+        widths the panel size is expressed in. Measure it instead of guessing.
         """
 
         bar_width = self.tabBar().sizeHint().width()
@@ -1371,12 +1373,25 @@ class RightOptionsTab(QtWidgets.QTabWidget, ScaledSizeHelper):
         # Frame drawn on either side of the tab pane
         frame = 2*self.style().pixelMetric(QtWidgets.QStyle.PM_DefaultFrameWidth, None, self)
 
-        return max(bar_width + frame, self.scaledWidth(self.TAB_MINIMIZED_CHARS))
+        return bar_width + frame
+
+    def minimizedWidth(self):
+        """ Collapsed panel width, in pixels: just wide enough to show the whole tab bar.
+
+        setFixedWidth() sizes the tab bar and the page together, so a collapsed width guessed in
+        characters clipped the (vertical, East-side) tab labels on systems whose style or font
+        makes the bar wider than the guess. TAB_MINIMIZED_CHARS is only a floor guarding against
+        a bogus measurement.
+        """
+
+        return max(self.barWidth(), self.scaledWidth(self.TAB_MINIMIZED_CHARS))
 
     def applyTabWidth(self):
         """ Resize the panel to match the current maximized/minimized state and selected tab. """
         if self.maximized:
-            self.setFixedWidth(self.scaledWidth(self.maximizedWidthChars()))
+            # The tab bar eats into the fixed width, so add it on top of the requested character
+            # width - otherwise the page is a bar's worth narrower than asked for
+            self.setFixedWidth(self.scaledWidth(self.maximizedWidthChars()) + self.barWidth())
         else:
             self.setFixedWidth(self.minimizedWidth())
 
