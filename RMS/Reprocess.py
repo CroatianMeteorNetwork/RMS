@@ -799,8 +799,8 @@ def processFramesFiles(config):
 if __name__ == "__main__":
 
     # Pin the multiprocessing start method for consistent behavior across Python versions
-    # (3.6-3.14). Must be done before any Process/Pool is created. 'forkserver' where
-    # available, else 'spawn'.
+    # (3.6-3.14). Must be done before any Process/Pool is created. Keeps the platform
+    # default where it is safe: fork on Linux through 3.13.
     setMultiprocessingStartMethod()
 
     ### COMMAND LINE ARGUMENTS

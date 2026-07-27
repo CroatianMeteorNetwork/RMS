@@ -135,9 +135,10 @@ class BufferedCapture(Process):
         """ Populate arrays with (startTime, frames) after startCapture is called.
         
         Arguments:
-            array1: numpy array in shared memory that is going to be filled with frames
+            array1: multiprocessing.Array base for the frame buffer that is going to be
+                filled with frames (numpy views are rebuilt per-process)
             start_time1: float in shared memory that holds time of first frame in array1
-            array2: second numpy array in shared memory
+            array2: multiprocessing.Array base for the second frame buffer
             start_time2: float in shared memory that holds time of first frame in array2
 
         Keyword arguments:

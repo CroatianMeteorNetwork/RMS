@@ -58,9 +58,10 @@ class Compressor(multiprocessing.Process):
         """
 
         Arguments:
-            array1: first numpy array in shared memory of grayscale video frames
+            array1: multiprocessing.Array base for the first frame buffer (the numpy
+                view is rebuilt per-process via frameBufferShape - see RMS.Misc)
             start_time1: float in shared memory that holds time of first frame in array1
-            array2: second numpy array in shared memory
+            array2: multiprocessing.Array base for the second frame buffer
             start_time2: float in shared memory that holds time of first frame in array2
             config: configuration class
 
