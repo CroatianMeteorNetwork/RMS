@@ -124,6 +124,11 @@ def computeTreeSeries(config, night_dir, header, frames, stars, calibration=None
     if int(header.get("schema_version", 0)) < 4 or "star_cat_id" not in stars:
         return None
 
+    # Empty product (no scored frames / no records): nothing to estimate
+    if (len(frames.get("frame_names", [])) == 0) \
+            or (len(np.asarray(stars["star_cat_id"])) == 0):
+        return None
+
     cat_id = np.asarray(stars["star_cat_id"], dtype=np.intp)
     sf = np.asarray(stars["star_frame"], dtype=np.intp)
     sx = np.asarray(stars["star_x"], dtype=np.float64)
@@ -498,6 +503,15 @@ def computeAndSaveTreeMap(config, night_dir):
         return None
 
     header, frames, stars = loadStarScoring(scoring_path)
+
+    # A night with zero recalibrated platepars produces a scoring product
+    # with no frames and no records (observed on marginal stations after a
+    # fully rejected recalibration night) - nothing to estimate from
+    if (len(frames.get("frame_names", [])) == 0) \
+            or (len(stars.get("star_cat_id", [])) == 0):
+        print("Tree estimator: empty scoring product (no scored frames) - "
+              "skipping")
+        return None
 
     # Fuse the stills sidecar's instantaneous detections into the detection
     # bits (calstars_row -1 -> -2 where a still saw the star within the FF

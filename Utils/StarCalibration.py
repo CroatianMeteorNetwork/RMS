@@ -98,6 +98,11 @@ def computeNightStarStats(config, night_dir):
     if int(header.get("schema_version", 0)) < 4 or "star_cat_id" not in stars:
         return None
 
+    # Empty product (a fully rejected recalibration night scores nothing)
+    if (len(frames.get("frame_names", [])) == 0) \
+            or (len(np.asarray(stars["star_cat_id"])) == 0):
+        return None
+
     # Union channel: fuse the stills sidecar's instantaneous detections first,
     # so rates and conditioning see the same evidence the tree consumes
     from Utils.StillsSampler import fuseSidecarDetections

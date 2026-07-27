@@ -144,6 +144,12 @@ def sampleStillsForNight(config, image_blocks, night_dir):
               "identity) - skipping")
         return None
 
+    if (len(frames.get("frame_names", [])) == 0) \
+            or (len(np.asarray(stars["star_cat_id"])) == 0):
+        print("Stills sampler: empty scoring product (no scored frames) - "
+              "skipping")
+        return None
+
     # Per-star channel membership from MEASURED behavior this night
     cat_id = np.asarray(stars["star_cat_id"], dtype=np.intp)
     row = np.asarray(stars["calstars_row"], dtype=np.intp)
@@ -321,6 +327,10 @@ def fuseSidecarDetections(night_dir, frames, stars):
     night_name = os.path.basename(os.path.normpath(night_dir))
     sc_path = os.path.join(night_dir, sidecarFileName(night_name))
     if not os.path.isfile(sc_path):
+        return stars
+
+    # Empty product: nothing to fuse into
+    if len(np.asarray(stars.get("star_cat_id", []))) == 0:
         return stars
 
     _, sc = loadStillStarStates(sc_path)
