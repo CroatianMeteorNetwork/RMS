@@ -47,6 +47,30 @@ if sys.version_info[0] < 3:
 log = getLogger("rmslogger")
 
 
+def stableDoubleRead(shared_val, attempts=3):
+    """ Read a lock-free c_double written by another process, tolerating torn reads.
+
+    On 32-bit platforms a double store/load is two word accesses, so a read racing the
+    writer can pair a new high word with an old low word - for an epoch-magnitude
+    timestamp that yields a value wrong by up to ~1024 s that still passes a `> 0` gate.
+    Two consecutive equal reads cannot both be torn by the same in-flight store.
+
+    Arguments:
+        shared_val: [multiprocessing.Value] A c_double created with lock=False.
+
+    Return:
+        [float] The stable value (falls back to the last read if never stable).
+    """
+
+    v2 = shared_val.value
+    for _ in range(attempts):
+        v1 = shared_val.value
+        v2 = shared_val.value
+        if v1 == v2:
+            return v1
+    return v2
+
+
 class BoundedLock(object):
     """ A multiprocessing.Lock wrapper whose acquisition is BOUNDED.
 
