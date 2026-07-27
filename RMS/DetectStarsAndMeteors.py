@@ -411,7 +411,7 @@ def detectStarsAndMeteorsDirectory(dir_path, config, output_suffix=''):
 
     # Initialize the detector
     detector = QueuedPool(detectStarsAndMeteors, cores=config.num_cores, log=log, backup_dir=ff_dir, \
-        input_queue_maxsize=None)
+        input_queue_maxsize=None, config=config)
 
     # Start the detection
     detector.startPool()

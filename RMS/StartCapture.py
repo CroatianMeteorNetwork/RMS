@@ -1224,7 +1224,8 @@ if __name__ == "__main__":
 
     # Pin the multiprocessing start method for consistent behavior across Python versions
     # (3.6-3.14). Must be done before any Process/Pool is created (including the logging
-    # listener below). 'forkserver' where available, else 'spawn'.
+    # listener below). Keeps the platform default where it is safe: fork on Linux
+    # through 3.13; forkserver/spawn only where fork is unavailable or unsafe.
     setMultiprocessingStartMethod()
 
     ### COMMAND LINE ARGUMENTS

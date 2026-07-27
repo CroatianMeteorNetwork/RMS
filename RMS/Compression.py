@@ -21,6 +21,7 @@ import traceback
 import time
 import datetime
 import multiprocessing
+import ctypes
 import signal
 from math import floor
 import numpy as np
@@ -58,9 +59,10 @@ class Compressor(multiprocessing.Process):
         """
 
         Arguments:
-            array1: first numpy array in shared memory of grayscale video frames
+            array1: multiprocessing.Array base for the first frame buffer (the numpy
+                view is rebuilt per-process via frameBufferShape - see RMS.Misc)
             start_time1: float in shared memory that holds time of first frame in array1
-            array2: second numpy array in shared memory
+            array2: multiprocessing.Array base for the second frame buffer
             start_time2: float in shared memory that holds time of first frame in array2
             config: configuration class
 
@@ -369,7 +371,21 @@ class Compressor(multiprocessing.Process):
             # Run the compression
             compressed, field_intensities = self.compress(frames)
 
-            
+            # Snapshot the raw block for the extractor BEFORE releasing the capture
+            # handshake: once start_time returns to 0 the buffer is eligible for refill,
+            # and the extractor reads it seconds later - the old code raced the refill
+            # under 'fork' and pickled the whole ~236 MB block by value under
+            # 'forkserver'/'spawn' (stalling compression and spiking RSS). A shared
+            # mp.Array snapshot costs one memcpy while the handshake is held and crosses
+            # the process boundary without pickling.
+            frames_snapshot_base = None
+            if self.config.enable_fireball_detection:
+                frames_snapshot_base = multiprocessing.Array(
+                    ctypes.c_uint8, int(frames.size), lock=False)
+                snapshot_view = np.frombuffer(frames_snapshot_base,
+                    dtype=np.uint8).reshape(frames.shape)
+                np.copyto(snapshot_view, frames)
+
             # Once the compression is done, tell the capture thread to keep filling the buffer
             if buffer_one:
                 self.start_time1.value = 0
@@ -400,10 +416,11 @@ class Compressor(multiprocessing.Process):
             # Save the extracted intensities per every field
             FieldIntensities.saveFieldIntensitiesBin(field_intensities, self.data_dir, filename_micros)
 
-            # Run the extractor
+            # Run the extractor (on the pre-handshake snapshot, never the live buffer)
             if self.config.enable_fireball_detection:
                 extractor = Extractor(self.config, self.data_dir)
-                extractor.start(frames, compressed, filename_millis)
+                extractor.start(frames_snapshot_base, frames.shape, compressed,
+                    filename_millis)
 
                 log.debug('Extractor started for: ' + filename_millis)
 

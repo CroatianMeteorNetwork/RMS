@@ -242,11 +242,16 @@ class Extractor(Process):
         
 
 
-    def start(self, frames, compressed, filename):
+    def start(self, frames_base, frames_shape, compressed, filename):
         """ Start the extractor.
 
         Arguments:
-            frame: [int] frame number
+            frames_base: [multiprocessing.Array] base of the SNAPSHOT frame buffer (a
+                private copy made by the compressor before it releases the capture
+                handshake - the live buffer may be refilled at any time after that).
+                Passing the base instead of a numpy view avoids pickling the whole
+                ~256-frame block by value under the 'forkserver'/'spawn' start methods.
+            frames_shape: [tuple] Shape (256, H, W) to rebuild the numpy view.
             compressed: [ndarray] array with FTP compressed frames
             filename: [str] name of the FF file which is being processed
 
@@ -254,7 +259,9 @@ class Extractor(Process):
         
         self.exit = AtomicFlag()
         
-        self.frames = frames
+        self.frames_base = frames_base
+        self.frames_shape = frames_shape
+        self.frames = None      # numpy view rebuilt in run() (per-process)
         self.compressed = compressed
         self.filename = filename
         
@@ -268,6 +275,11 @@ class Extractor(Process):
 
         # Re-establish logging and signal handling in the child (no-op under 'fork')
         initChildProcess(self.logging_queue, self.config)
+
+        # Rebuild the numpy view over the shared snapshot buffer in this process
+        # (a view cannot cross the process boundary under forkserver/spawn)
+        self.frames = np.frombuffer(self.frames_base, dtype=np.uint8).reshape(
+            self.frames_shape)
 
         self.executeAll()
     
