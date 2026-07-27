@@ -48,7 +48,7 @@ from RMS.Formats.FFfile import validFFName
 from RMS.Misc import mkdirP, RmsDateTime, UTCFromTimestamp
 from RMS.QueuedPool import QueuedPool
 from RMS.Reprocess import getPlatepar, processNight, processFramesFiles, nightProcessingState, \
-    NIGHT_PROCESSED, NIGHT_LEGACY_PROCESSED
+    readProcessingStatus, updateProcessingStatus, NIGHT_PROCESSED, NIGHT_LEGACY_PROCESSED
 from RMS.RunExternalScript import runExternalScript
 from RMS.UploadManager import UploadManager
 from RMS.EventMonitor import EventMonitor
@@ -929,14 +929,13 @@ def getReprocessAttempts(config, captured_dir_path):
         [int] Number of previous attempts, 0 if unknown.
     """
 
-    attempts_path = os.path.join(captured_dir_path, config.reprocess_attempts_file)
+    attempts = readProcessingStatus(config, captured_dir_path).get('failed_reprocess_attempts', 0)
 
     try:
-        with open(attempts_path) as f:
-            return max(0, int(f.read().strip()))
+        return max(0, int(attempts))
 
-    # A missing or unreadable stamp just means no attempts are on record
-    except Exception:
+    # A record written by hand or by a future version could hold anything
+    except (TypeError, ValueError):
         return 0
 
 
@@ -950,36 +949,7 @@ def setReprocessAttempts(config, captured_dir_path, attempts):
         attempts: [int] Number of attempts to record.
     """
 
-    attempts_path = os.path.join(captured_dir_path, config.reprocess_attempts_file)
-
-    try:
-        with open(attempts_path, 'w') as f:
-            f.write("{:d}\n".format(attempts))
-
-    # Never let the guard's own bookkeeping stop the reprocessing it guards
-    except Exception as e:
-        log.error("Could not record the reprocess attempt count in {:s}: {:s}"\
-            .format(attempts_path, repr(e)))
-
-
-
-def clearReprocessAttempts(config, captured_dir_path):
-    """ Remove the auto-reprocess attempt stamp after a successful reprocess.
-
-    Arguments:
-        config: [config object] Configuration read from the .config file.
-        captured_dir_path: [str] Full path to the directory in CapturedFiles.
-    """
-
-    attempts_path = os.path.join(captured_dir_path, config.reprocess_attempts_file)
-
-    try:
-        if os.path.isfile(attempts_path):
-            os.remove(attempts_path)
-
-    except Exception as e:
-        log.error("Could not remove the reprocess attempt stamp {:s}: {:s}"\
-            .format(attempts_path, repr(e)))
+    updateProcessingStatus(config, captured_dir_path, failed_reprocess_attempts=attempts)
 
 
 
@@ -1056,7 +1026,7 @@ def processIncompleteCaptures(config, upload_manager):
         if config.auto_reprocess_max_attempts and (attempts >= config.auto_reprocess_max_attempts):
             log.warning("Folder {:s} already failed to reprocess {:d} time(s) - skipping. Fix the "
                 "underlying problem and delete {:s} in that folder to retry."\
-                .format(captured_subdir, attempts, config.reprocess_attempts_file))
+                .format(captured_subdir, attempts, config.processing_status_file))
             continue
 
 
@@ -1091,8 +1061,9 @@ def processIncompleteCaptures(config, upload_manager):
 
             log.info("Folder {:s} reprocessed with success!".format(captured_dir_path))
 
-            # The night is done, so the failure count is no longer meaningful
-            clearReprocessAttempts(config, captured_dir_path)
+            # The night is done, so the failure count is no longer meaningful. processNight has
+            #   already marked the night complete, so this only tidies the record
+            setReprocessAttempts(config, captured_dir_path, 0)
 
 
         except Exception as e:

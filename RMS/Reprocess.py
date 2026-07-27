@@ -7,6 +7,7 @@ from __future__ import print_function, division, absolute_import
 import os
 import sys
 import glob
+import json
 import collections
 import traceback
 import argparse
@@ -671,10 +672,19 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
 
 
     log.info('Archiving detections to ' + night_archive_dir)
-    
+
+    # Record that archiving is under way. archiveDetections creates the destination directory before
+    #   it finishes copying into it, so the directory existing is not proof the night was archived -
+    #   this is what tells a later run that an interrupted archive has to be redone
+    updateProcessingStatus(config, night_data_dir, archiving='started')
+
     # Archive the detections
     archive_name, imgdata_archive_name, metadata_archive_name = archiveDetections(night_data_dir,
                                             night_archive_dir, ff_detected, config, extra_files=extra_files)
+
+    # Processing is complete. Nothing after this point can leave the night needing a reprocess
+    updateProcessingStatus(config, night_data_dir, archiving='completed',
+        completed_utc=RmsDateTime.utcnow().strftime("%Y-%m-%d %H:%M:%S"))
 
 
     return night_archive_dir, archive_name, imgdata_archive_name, metadata_archive_name, detector
@@ -688,26 +698,98 @@ NIGHT_INCOMPLETE = 'incomplete'
 
 
 NightProcessingState = collections.namedtuple('NightProcessingState',
-    ['state', 'has_final_summary', 'has_working_summary', 'has_ftpdetectinfo', 'pickle_files',
-     'has_archive_dir'])
+    ['state', 'archiving', 'has_final_summary', 'has_working_summary', 'has_ftpdetectinfo',
+     'pickle_files', 'has_archive_dir'])
+
+
+
+def readProcessingStatus(config, captured_dir_path):
+    """ Read the processing status record from a captured night directory.
+
+    Arguments:
+        config: [Config obj]
+        captured_dir_path: [str] Full path to the directory in CapturedFiles.
+
+    Return:
+        [dict] The record, or an empty dict if it is missing or unreadable.
+    """
+
+    status_path = os.path.join(captured_dir_path, config.processing_status_file)
+
+    try:
+        with open(status_path) as f:
+            status = json.load(f)
+
+        if isinstance(status, dict):
+            return status
+
+    # A missing, truncated or corrupt record simply means nothing is known about this night
+    except Exception:
+        pass
+
+    return {}
+
+
+
+def updateProcessingStatus(config, captured_dir_path, **entries):
+    """ Merge entries into the processing status record of a captured night directory.
+
+    The record is written to a temporary file and moved into place, so a crash midway cannot leave
+    a half-written record behind.
+
+    Arguments:
+        config: [Config obj]
+        captured_dir_path: [str] Full path to the directory in CapturedFiles.
+        entries: Key/value pairs to merge into the record.
+
+    Return:
+        [dict] The record as written, or the unmodified record if writing failed.
+    """
+
+    status_path = os.path.join(captured_dir_path, config.processing_status_file)
+
+    status = readProcessingStatus(config, captured_dir_path)
+    status.update(entries)
+
+    try:
+        tmp_path = status_path + '.tmp'
+        with open(tmp_path, 'w') as f:
+            json.dump(status, f, indent=4, sort_keys=True)
+            f.flush()
+            os.fsync(f.fileno())
+
+        os.replace(tmp_path, status_path)
+
+    # Never let the bookkeeping break the processing it is tracking. A night whose status cannot be
+    #   written looks unprocessed, which is the safe direction
+    except Exception as e:
+        log.error('Writing the processing status to {:s} failed with message:\n{:s}'\
+            .format(status_path, repr(e)))
+
+    return status
 
 
 
 def nightProcessingState(config, captured_dir_path):
     """ Determine how far processing got on a captured night directory.
 
-    The authoritative marker is the observation summary. startObservationSummaryReport() writes
-    the working JSON when processing begins, and finalizeObservationSummary() replaces it with the
-    final JSON at the end of processNight(). Both live in the captured directory, so unlike the
-    ArchivedFiles directory they are not removed by retention or quota management.
+    The authoritative marker is the processing status record that processNight() writes into the
+    captured directory: 'started' before archiveDetections() and 'completed' once it returns.
+    Archiving is the last step which can leave a night needing another run, and archiveDetections()
+    creates its destination directory before it finishes writing into it, so neither the observation
+    summary nor the presence of an ArchivedFiles directory is sufficient on its own. The record
+    lives with the captured data, so unlike ArchivedFiles it is not removed by retention or quota
+    management.
+
+    Nights processed before this record existed are recognised from the observation summary, or
+    failing that an FTPdetectinfo, so that upgrading does not reprocess every captured directory
+    already on disk. For those the archive cannot be told apart from one deleted by retention,
+    which is why acting on a missing archive is left to reprocess_if_archive_missing.
 
     Detection backups (rms_queue_bkup_*.pickle) are deliberately NOT treated as evidence of
     incomplete processing. They are a resume aid for detection, and a caller which finishes the
     night but fails to delete them would otherwise make a complete night look partial - this was
     the cause of issue #418.
-
-    Note that the summary is finalized before archiveDetections() runs, so a 'processed' night is
-    one which completed detection and the summary, not necessarily one which was archived.
 
     Arguments:
         config: [Config obj]
@@ -715,12 +797,15 @@ def nightProcessingState(config, captured_dir_path):
 
     Return:
         [NightProcessingState] Named tuple with the individual observations and a derived state of
-            'processed', 'legacy_processed' (finished before this marker existed) or 'incomplete'.
+            'processed', 'legacy_processed' (finished before the record existed) or 'incomplete'.
     """
 
     night_dir_name = os.path.basename(os.path.abspath(captured_dir_path))
 
-    # Check for the observation summary written at the end of processNight
+    # Read how far processNight got, if it left a record
+    archiving = readProcessingStatus(config, captured_dir_path).get('archiving')
+
+    # Check for the observation summary written near the end of processNight
     has_final_summary = os.path.isfile(
         getRMSStyleFileName(captured_dir_path, OBSERVATION_SUMMARY_NAME_JSON))
 
@@ -736,27 +821,33 @@ def nightProcessingState(config, captured_dir_path):
 
     # Check whether the night was archived. Retention and quota management delete ArchivedFiles
     #   independently of CapturedFiles, so a missing archive does not on its own mean the night was
-    #   never processed
+    #   never processed - and a present one does not mean archiving finished
     has_archive_dir = os.path.isdir(
         os.path.join(config.data_dir, config.archived_dir, night_dir_name))
 
 
-    if has_final_summary:
+    # processNight ran to the end
+    if archiving == 'completed':
         state = NIGHT_PROCESSED
 
-    # Nights processed before the summary existed, or by a version which did not write it, only
-    #   have their detection outputs to go on. Treating them as incomplete would reprocess every
-    #   captured directory on the first start after upgrading
-    elif (not has_working_summary) and has_ftpdetectinfo:
+    # processNight started archiving and did not come back, so the archive is incomplete no matter
+    #   what the summary says or whether the destination directory exists
+    elif archiving is not None:
+        state = NIGHT_INCOMPLETE
+
+    # No record: a night from before this was written. Fall back to the outputs it does have, so
+    #   upgrading does not reprocess every captured directory on the first start
+    elif has_final_summary or ((not has_working_summary) and has_ftpdetectinfo):
         state = NIGHT_LEGACY_PROCESSED
 
     else:
         state = NIGHT_INCOMPLETE
 
 
-    return NightProcessingState(state=state, has_final_summary=has_final_summary,
-        has_working_summary=has_working_summary, has_ftpdetectinfo=has_ftpdetectinfo,
-        pickle_files=pickle_files, has_archive_dir=has_archive_dir)
+    return NightProcessingState(state=state, archiving=archiving,
+        has_final_summary=has_final_summary, has_working_summary=has_working_summary,
+        has_ftpdetectinfo=has_ftpdetectinfo, pickle_files=pickle_files,
+        has_archive_dir=has_archive_dir)
 
 
 

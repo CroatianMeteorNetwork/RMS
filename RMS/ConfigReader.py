@@ -385,8 +385,9 @@ class Config:
         #   of CapturedFiles, so a missing archive does not reliably mean the night is unprocessed
         self.reprocess_if_archive_missing = False
 
-        # File in the captured directory which counts failed auto-reprocess attempts
-        self.reprocess_attempts_file = ".rms_reprocess_attempts"
+        # File in the captured directory which records how far processing got and how many
+        #   auto-reprocess attempts have failed
+        self.processing_status_file = ".rms_processing_status"
 
         # Flag file which indicates that the previously processed files are loaded during capture resume
         self.capture_resume_flag_file = ".capture_resuming"
