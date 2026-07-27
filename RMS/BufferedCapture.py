@@ -195,7 +195,13 @@ class BufferedCapture(Process):
             self.shared_timestamps_base2 = Array(ctypes.c_double, self.num_raw_frames)
 
         # Initialize shared counter for dropped frames
-        self.dropped_frames = Value('i', 0)
+        # lock=False: the capture child is the only writer (increments), the
+        # main process only reads - and stopCapture() SIGKILLs the child before
+        # reading, so a locked Value could be orphaned mid-increment and wedge
+        # the read forever (same class as the Compressor.stop() deadlock).
+        # A 32-bit int store/load is single-copy atomic on all supported
+        # platforms, including ARMv7.
+        self.dropped_frames = Value('i', 0, lock=False)
         self.last_daytime_mode = None  # Track day/night transitions
         self.dropped_frames_timestamps = deque()  # Track when frames were dropped for 10-min window
 
