@@ -123,20 +123,29 @@ should_reboot() {
             return 0
         fi
         # Fallback: compare running kernel to latest installed (works on RPi OS / Debian).
-        local running latest last_target
+        local running latest last_target flavour d f
         running="$(uname -r)"
-        # /lib/modules/ is not only kernel version directories: the NVIDIA driver
-        # packages own a literal /lib/modules/kernel/, and purged kernels can leave
-        # a version-shaped directory behind. Keep only entries that start with a
-        # digit and carry a modules.dep (written by depmod for every installed
-        # kernel), otherwise "kernel" sorts last and every run reports a mismatch.
-        latest="$(for d in /lib/modules/*/; do
-                      d="${d%/}"; d="${d##*/}"
-                      [[ "$d" =~ ^[0-9] ]] || continue
-                      [[ -f "/lib/modules/$d/modules.dep" ]] || continue
+        # /lib/modules/ is not a clean list of kernel version directories. The NVIDIA
+        # driver packages own a literal /lib/modules/kernel/, purged kernels can leave a
+        # version-shaped directory behind, and every installed *flavour* gets its own
+        # tree (Raspberry Pi OS 64-bit ships both rpi-v8 and rpi-2712; Ubuntu can carry
+        # generic alongside lowlatency). Only a same-flavour, fully installed kernel is a
+        # valid reboot target: without the version/modules.dep filters "kernel" sorts
+        # last, and without the flavour filter a Pi 5 running rpi-2712 would compare
+        # itself against the rpi-v8 tree - both report a mismatch on every run.
+        # modules.dep is written by depmod for every properly installed kernel.
+        flavour=""
+        [[ "$running" =~ ^[0-9][^-]*(-[0-9]+)?-(.+)$ ]] && flavour="${BASH_REMATCH[2]}"
+        latest="$(for f in /lib/modules/[0-9]*/modules.dep; do
+                      [[ -f "$f" ]] || continue
+                      d="${f%/modules.dep}"; d="${d##*/}"
+                      [[ -z "$flavour" || "$d" == *"-$flavour" ]] || continue
                       echo "$d"
                   done | sort -V | tail -1)"
-        if [[ -n "$latest" && "$running" != "$latest" ]]; then
+        # Require the candidate to be strictly newer, so a purged running-kernel tree
+        # (leaving only older versions behind) cannot trigger a "downgrade" reboot.
+        if [[ -n "$latest" && "$running" != "$latest" \
+              && "$(printf '%s\n%s\n' "$running" "$latest" | sort -V | tail -1)" == "$latest" ]]; then
             # Loop guard: if the latest installed kernel never becomes the running one
             # (unbootable kernel, bootloader pinned to an older version, RPi
             # firmware/modules mismatch), an unattended cron run would otherwise reboot
