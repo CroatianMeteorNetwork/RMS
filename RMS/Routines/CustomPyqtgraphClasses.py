@@ -1229,6 +1229,12 @@ class HistogramLUTWidget(pg.HistogramLUTWidget):
 class HistogramLUTItem(pg.HistogramLUTItem):
     def __init__(self, *args, **kwargs):
         pg.HistogramLUTItem.__init__(self, *args, **kwargs)
+
+        # pyqtgraph caps the histogram plot at 152 px wide, so on a panel wider than the axis plus
+        # that cap plus the gradient bar (~219 px) the rest of the tab was left as empty
+        # GraphicsView background. Lift the cap and let the plot use the width it is given.
+        self.vb.setMaximumWidth(QtWidgets.QWIDGETSIZE_MAX)
+
         self.level_images = []
         self.auto_levels = False
         self.saved_manual_levels = None
