@@ -47,6 +47,42 @@ if sys.version_info[0] < 3:
 log = getLogger("rmslogger")
 
 
+class BoundedLock(object):
+    """ A multiprocessing.Lock wrapper whose acquisition is BOUNDED.
+
+    For locks shared with processes that can be OOM-killed or terminated: a kill while the
+    lock is held orphans it forever, and a plain `with lock:` then wedges every process that
+    touches it. Acquisition times out (5 s first time, 0.5 s once broken), warns once, and
+    proceeds without the lock - stale/racy data beats a permanent wedge for the counters and
+    timestamps this protects. Usable as a context manager, releasing only if acquired.
+    """
+
+    def __init__(self, name='lock', timeout=5.0):
+        self._lock = multiprocessing.Lock()
+        self._name = name
+        self._timeout = timeout
+        self._broken = False        # per-process memo of an orphaned lock
+        self._acquired_here = False
+
+    def __enter__(self):
+        timeout = 0.5 if self._broken else self._timeout
+        self._acquired_here = self._lock.acquire(timeout=timeout)
+        if not self._acquired_here and not self._broken:
+            self._broken = True
+            print('BoundedLock({:s}): not acquired after {:.1f} s - a process likely died '
+                  'holding it. Proceeding without the lock.'.format(self._name, timeout),
+                  file=sys.__stderr__)
+        if self._acquired_here:
+            self._broken = False
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self._acquired_here:
+            self._lock.release()
+            self._acquired_here = False
+        return False
+
+
 class AtomicFlag(object):
     """ Lock-free substitute for multiprocessing.Event, for flags that are set and polled
         across processes.

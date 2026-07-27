@@ -1410,7 +1410,7 @@ if __name__ == "__main__":
                 if upload_manager is not None:
 
                     # Prevent rebooting if the upload manager is uploading
-                    if upload_manager.upload_in_progress.value:
+                    if upload_manager.upload_in_progress.is_set():
                         log.info("Reboot delayed for 1 minute due to upload...")
                         reboot_go = False
 
