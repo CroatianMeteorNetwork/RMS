@@ -757,8 +757,10 @@ class ImageItem(pg.ImageItem):
             return 0, 255
 
         # Ignore the top 10% of the image pixel brightness (from the maximum) to avoid auto leveling on
-        #  saturated pixels
-        max_level = np.max(self.image)
+        #  saturated pixels. Cast to a Python int: under NumPy 2 (NEP 50) the
+        # narrow array scalar no longer promotes, and 99*65535 overflows
+        # uint16 - which silently broke auto-levels on 16-bit imagery.
+        max_level = int(np.max(self.image))
         ignore_level = (100 - ignoretopperc)*max_level/100
         
         img_filtered = self.image[self.image < ignore_level]
