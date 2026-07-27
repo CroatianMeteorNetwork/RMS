@@ -1511,11 +1511,44 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
             all_scored_files, calstars_positions, recalibrated_platepars, mask,
             collect_stars=True, dir_path=dir_path)
 
+        scoring_records = star_records
+        scoring_platepar_source = "recalibrated"
+
         if not predicted_all:
             # Expected on fully overcast nights (nothing recalibrates without stars),
             # so info, not warning - the verdict correctly yields no clear intervals
             log.info("No valid recalibrated platepar this night - "
                      "cannot score frames with the dome model")
+
+            # SCORING-ONLY fallback to the static nightly platepar. The
+            # transparency/cloud products are most valuable on exactly these
+            # nights and need pixel-level star positions, not the arc-second
+            # astrometry the recalibration gate protects. The flux verdict,
+            # the normalization history and meteor astrometry keep requiring
+            # recalibrated knots (matched_all/predicted_all stay empty); only
+            # the persisted scoring product uses this, and its header records
+            # the provenance. Caveat noted in the header: if the camera was
+            # bumped, the static platepar mislabels a clear night as opaque -
+            # but on such a night recalibration would have succeeded.
+            if platepar is not None and len(all_scored_files):
+                try:
+                    import copy
+                    pp_fb = copy.deepcopy(platepar)
+                    pp_fb.auto_recalibrated = True
+                    fb_pps = {all_scored_files[0]: pp_fb}
+                    _, _, scoring_records = denseDomeRatios(config, dome_model,
+                        all_scored_files, calstars_positions, fb_pps, mask,
+                        collect_stars=True, dir_path=dir_path)
+                    if scoring_records:
+                        scoring_platepar_source = "static_fallback"
+                        log.info("Cloud scoring: falling back to the static "
+                                 "nightly platepar for the scoring product "
+                                 "only ({:d} frames)".format(
+                                 len(scoring_records)))
+                except Exception as e:
+                    log.warning("Static-platepar scoring fallback failed: "
+                                "{}".format(e))
+                    scoring_records = star_records
 
         # Verdict subset: ONLY the gated (dark, moonless) frames feed the ratio,
         # the normalization and the clear-sky intervals
@@ -1563,7 +1596,7 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
             # tens of millions of records that is gigabytes of pure overhead and
             # got the capture process OOM-killed. Frames are consumed (popped)
             # as they are appended so the night is never held twice.
-            for k, ff in enumerate(sorted(star_records.keys())):
+            for k, ff in enumerate(sorted(scoring_records.keys())):
                 t = FFfile.filenameToDatetime(ff)
                 date = FFfile.getMiddleTimeFF(ff, config.fps, ret_milliseconds=True)
                 jd_f = date2JD(*date)
@@ -1576,7 +1609,7 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
                 f_meta["n_detected"].append(len(calstars_positions.get(ff, [])))
                 f_meta["in_flux_domain"].append(ff in domain_set)
 
-                rec = star_records.pop(ff)
+                rec = scoring_records.pop(ff)
                 f_meta["p_chance"].append(float(rec.get("p_chance", 0.0)))
                 f_meta["cell_bg"].append(rec.pop("cell_bg",
                     np.full((5, 8), np.nan, dtype=np.float32)))
@@ -1608,6 +1641,7 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
                 cadence="per_ff",
                 star_gate_factor=float(getattr(config, "star_gate_factor", 3.0)),
                 store_p_min=STORE_P_MIN,
+                platepar_source=scoring_platepar_source,
             )
             out_path = saveStarScoring(dir_path, night_name, header, f_meta, s_arrs)
             log.info("Star scoring product written: {:s} ({:d} frames, {:d} star "
