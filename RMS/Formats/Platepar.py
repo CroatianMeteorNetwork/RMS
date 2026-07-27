@@ -1042,12 +1042,43 @@ class Platepar(object):
                 self.x_poly_rev = np.array(xf[4:])
                 self.updateRefAltAz()
 
-                # Fit the forward mapping to the refined pointing. Seed from both the
-                # existing forward coefficients and the reverse ones (forward ~ reverse for
-                # the distortion) and keep the lower-cost fit - a stale or garbage forward
-                # seed can strand the fit in a far minimum (diff_step: the angular residuals
-                # sit near the transform's numerical noise floor, so the default finite-
-                # difference step produces a noise Jacobian)
+                # Fit the forward mapping as the numerical INVERSE of the freshly
+                # fitted reverse mapping over the WHOLE frame, not against the sparse
+                # star set. Consistency is the forward map's only job here - the
+                # reverse carries the validated astrometry - and a star-fitted forward
+                # extrapolates independently beyond the outermost stars, so the
+                # round-trip diverged by many pixels in the starless extreme corners
+                # and the refit was rejected on consistency precisely when the
+                # reverse improved the corners most. Synthetic pairs: spread sky
+                # samples across the FOV (generated through the pre-refit forward,
+                # which only needs to be roughly right - the pairs themselves are
+                # exact by construction), map them to pixels with the NEW reverse,
+                # and fit the forward on those.
+                gsx, gsy = np.meshgrid(np.linspace(0, self.X_res, 20),
+                                       np.linspace(0, self.Y_res, 14))
+                gsx, gsy = gsx.ravel(), gsy.ravel()
+                _, syn_ra, syn_dec, _ = RMS.Astrometry.ApplyAstrometry.xyToRaDecPP(
+                    np.full(len(gsx), self.JD), gsx, gsy, np.ones(len(gsx)),
+                    self, extinction_correction=False, jd_time=True,
+                    precompute_pointing_corr=True)
+                syn_ra, syn_dec = np.array(syn_ra), np.array(syn_dec)
+                syn_x, syn_y = RMS.Astrometry.ApplyAstrometry.raDecToXYPP(
+                    syn_ra, syn_dec, self.JD, self)
+                syn_keep = ((syn_x > -50) & (syn_x < self.X_res + 50)
+                            & (syn_y > -50) & (syn_y < self.Y_res + 50))
+                group_fwd_data = [(np.full(int(syn_keep.sum()), self.JD),
+                    syn_x[syn_keep].astype(np.float64),
+                    syn_y[syn_keep].astype(np.float64),
+                    np.ones(int(syn_keep.sum())))]
+                flat_ra_cat = np.radians(syn_ra[syn_keep])
+                flat_dec_cat = np.radians(syn_dec[syn_keep])
+
+                # Seed from both the existing forward coefficients and the reverse ones
+                # (forward ~ reverse for the distortion) and keep the lower-cost fit - a
+                # stale or garbage forward seed can strand the fit in a far minimum
+                # (diff_step: the angular residuals sit near the transform's numerical
+                # noise floor, so the default finite-difference step produces a noise
+                # Jacobian)
                 best_fwd = None
                 for fwd_seed in (self.x_poly_fwd, np.array(self.x_poly_rev)):
                     res_fwd = _lstsqFit(
