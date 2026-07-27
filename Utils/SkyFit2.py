@@ -173,6 +173,7 @@ from RMS.Pickling import loadPickle, savePickle
 from RMS.Math import angularSeparation, RMSD, vectNorm
 from RMS.Misc import decimalDegreesToSexHours
 from RMS.Routines.AddCelestialGrid import updateRaDecGrid, updateAzAltGrid
+from RMS.Routines.SkyFitHelp import shortcutsTopicId
 from RMS.Routines.CustomPyqtgraphClasses import ViewBox, TextItem, TextItemList, Crosshair, Plus, Cross, CursorItem, BrushCursorItem, ImageItem, RightOptionsTab, qmessagebox, PointingIndicator
 from RMS.Routines.GreatCircle import fitGreatCircle, greatCircle
 from RMS.Routines.SphericalPolygonCheck import sphericalPolygonCheck
@@ -2677,12 +2678,24 @@ class PlateTool(QtWidgets.QMainWindow):
         self.open_help_action.triggered.connect(self.openHelp)
         self.open_help_action.setShortcut('Shift+F1')
 
+        # Jump straight to the keyboard reference. F1 is where users look for the shortcut list,
+        # but it toggles the info panel, so give the cheat sheet its own key and menu entry.
+        self.keyboard_shortcuts_action = QtWidgets.QAction("Keyboard Shortcuts")
+        self.keyboard_shortcuts_action.triggered.connect(self.openKeyboardReference)
+
+        # CTRL + ? as an alias: on layouts where / is a shifted key (German, French, ...) the
+        # CTRL + / sequence can never be produced. The first sequence is the one Qt shows in the
+        # menu, so the advertised shortcut stays CTRL + /.
+        self.keyboard_shortcuts_action.setShortcuts([QtGui.QKeySequence('Ctrl+/'),
+                                                     QtGui.QKeySequence('Ctrl+?')])
+
         self.file_menu = menu.addMenu('File')
         self.view_menu = menu.addMenu('View')
 
         # Persistent Help menu (not rebuilt on mode change)
         self.help_menu = menu.addMenu('Help')
         self.help_menu.addAction(self.open_help_action)
+        self.help_menu.addAction(self.keyboard_shortcuts_action)
 
         # TESTING
         self.i = 0
@@ -3445,7 +3458,8 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.showCalibrationFilesDialog()
         else:
             # Show empty-state message
-            self.label1.setText("No data loaded.\nUse File > File Manager to open a folder.")
+            self.label1.setText("No data loaded.\nUse File > File Manager to open a folder."
+                                "\n\nSHIFT+F1 Help   {:s}+/ Shortcuts".format(self.ctrl_label))
             self.image_navigation_slider.hide()
             self.image_navigation_label.hide()
 
@@ -3991,6 +4005,10 @@ class PlateTool(QtWidgets.QMainWindow):
             text_str += 'Image gamma = {:.2f}\n'.format(self.img.gamma)
             text_str += 'Camera gamma = {:.2f}\n'.format(self.config.gamma)
             text_str += 'Refraction = {:s}'.format(str(self.platepar.refraction))
+
+        # F1 is the key people press when they want the shortcut list, but it only toggles this
+        # panel - the list itself lives in the Help tab, so say where it is
+        text_str += "\n\nSHIFT+F1 Help   {:s}+/ Shortcuts".format(self.ctrl_label)
 
         # Only update the text; visibility of the top-left panel is controlled by F1 (toggleInfo)
         self.label1.setText(text_str)
@@ -11838,6 +11856,12 @@ class PlateTool(QtWidgets.QMainWindow):
 
         if self._raiseHelpTab():
             self.tab.help.showTopic(topic_id)
+
+
+    def openKeyboardReference(self):
+        """ Open the keyboard reference for the current mode (Help menu / Ctrl+/). """
+
+        self.openHelpTopic(shortcutsTopicId(self))
 
 
     def toggleImageType(self):

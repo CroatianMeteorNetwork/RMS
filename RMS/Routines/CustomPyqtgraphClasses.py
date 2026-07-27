@@ -15,7 +15,7 @@ from RMS.Astrometry.Conversions import AER2LatLonAlt
 from RMS.Formats.FFfile import reconstructFrame as reconstructFrameFF
 from RMS.Routines import Image
 from RMS.Routines.DebruijnSequence import findAllInDeBruijnSequence, generateDeBruijnSequence
-from RMS.Routines.SkyFitHelp import HELP_STYLE, buildHelpHome, buildHelpTopic
+from RMS.Routines.SkyFitHelp import HELP_STYLE, buildHelpHome, buildHelpTopic, shortcutsTopicId
 
 import time
 import re
@@ -1229,6 +1229,12 @@ class HistogramLUTWidget(pg.HistogramLUTWidget):
 class HistogramLUTItem(pg.HistogramLUTItem):
     def __init__(self, *args, **kwargs):
         pg.HistogramLUTItem.__init__(self, *args, **kwargs)
+
+        # pyqtgraph caps the histogram plot at 152 px wide, so on a panel wider than the axis plus
+        # that cap plus the gradient bar (~219 px) the rest of the tab was left as empty
+        # GraphicsView background. Lift the cap and let the plot use the width it is given.
+        self.vb.setMaximumWidth(QtWidgets.QWIDGETSIZE_MAX)
+
         self.level_images = []
         self.auto_levels = False
         self.saved_manual_levels = None
@@ -1302,6 +1308,9 @@ class RightOptionsTab(QtWidgets.QTabWidget, ScaledSizeHelper):
 
     # Tab width in characters (scales with font)
     TAB_WIDTH_CHARS = 32
+
+    # Floor for the collapsed width, in characters. The real collapsed width is measured from the
+    # tab bar (see minimizedWidth); this only guards against a bogus measurement.
     TAB_MINIMIZED_CHARS = 2
 
     # The Help tab is shown at this multiple of the normal width (more readable docs)
@@ -1323,7 +1332,6 @@ class RightOptionsTab(QtWidgets.QTabWidget, ScaledSizeHelper):
 
         self.index = 0
         self.maximized = True
-        self.setFixedWidth(self.scaledWidth(self.TAB_WIDTH_CHARS))
 
         self.addTab(self.hist, 'Levels')
         self.addTab(self.param_manager, 'Fit Parameters')
@@ -1335,6 +1343,10 @@ class RightOptionsTab(QtWidgets.QTabWidget, ScaledSizeHelper):
 
         self.setCurrentIndex(self.index)  # redundant
         self.setTabPosition(QtWidgets.QTabWidget.East)
+
+        # Set the initial width once the tabs exist and the bar is on the East side, so the
+        # measurement in barWidth() is meaningful
+        self.applyTabWidth()
 
         self.tabBarClicked.connect(self.onTabBarClicked)
 
@@ -1354,12 +1366,40 @@ class RightOptionsTab(QtWidgets.QTabWidget, ScaledSizeHelper):
             return self.TAB_WIDTH_CHARS*self.HELP_WIDTH_MULT
         return self.TAB_WIDTH_CHARS
 
+    def barWidth(self):
+        """ Horizontal space the tab bar needs, in pixels, including the pane frame.
+
+        With TabPosition.East the bar's width is driven by the tab *height* (rotated labels: font
+        ascent/descent plus the style's tab padding), which has nothing to do with the character
+        widths the panel size is expressed in. Measure it instead of guessing.
+        """
+
+        bar_width = self.tabBar().sizeHint().width()
+
+        # Frame drawn on either side of the tab pane
+        frame = 2*self.style().pixelMetric(QtWidgets.QStyle.PM_DefaultFrameWidth, None, self)
+
+        return bar_width + frame
+
+    def minimizedWidth(self):
+        """ Collapsed panel width, in pixels: just wide enough to show the whole tab bar.
+
+        setFixedWidth() sizes the tab bar and the page together, so a collapsed width guessed in
+        characters clipped the (vertical, East-side) tab labels on systems whose style or font
+        makes the bar wider than the guess. TAB_MINIMIZED_CHARS is only a floor guarding against
+        a bogus measurement.
+        """
+
+        return max(self.barWidth(), self.scaledWidth(self.TAB_MINIMIZED_CHARS))
+
     def applyTabWidth(self):
         """ Resize the panel to match the current maximized/minimized state and selected tab. """
         if self.maximized:
-            self.setFixedWidth(self.scaledWidth(self.maximizedWidthChars()))
+            # The tab bar eats into the fixed width, so add it on top of the requested character
+            # width - otherwise the page is a bar's worth narrower than asked for
+            self.setFixedWidth(self.scaledWidth(self.maximizedWidthChars()) + self.barWidth())
         else:
-            self.setFixedWidth(self.scaledWidth(self.TAB_MINIMIZED_CHARS))
+            self.setFixedWidth(self.minimizedWidth())
 
     def onTabBarClicked(self, index):
         old_index = self.index
@@ -1447,8 +1487,16 @@ class HelpWidget(QtWidgets.QWidget, ScaledSizeHelper):
         self.home_button.clicked.connect(self.showHome)
         self.back_button = QtWidgets.QPushButton("Back")
         self.back_button.clicked.connect(self.goBack)
+
+        # The keyboard reference is the most asked-for page, so it gets a button of its own that
+        # is reachable from every topic page, not just from the home list
+        self.keys_button = QtWidgets.QPushButton("Keys")
+        self.keys_button.setToolTip("Keyboard shortcut reference")
+        self.keys_button.clicked.connect(self.showShortcuts)
+
         nav.addWidget(self.home_button)
         nav.addWidget(self.back_button)
+        nav.addWidget(self.keys_button)
         layout.addLayout(nav)
 
         # Search box: filters the home topic list as you type
@@ -1528,6 +1576,11 @@ class HelpWidget(QtWidgets.QWidget, ScaledSizeHelper):
         else:
             self.showHome()
         self._updateBackButton()
+
+
+    def showShortcuts(self):
+        """ Show the keyboard reference for the mode the GUI is currently in. """
+        self.showTopic(shortcutsTopicId(self.gui))
 
 
     def _updateBackButton(self):
