@@ -22,6 +22,7 @@ except:
     import Tkinter as tkinter
 
 from RMS.Formats.FFfile import read as readFF
+from RMS.Misc import AtomicFlag
 from RMS.Formats.FFfile import validFFName
 from RMS.Routines.Image import loadImage
 

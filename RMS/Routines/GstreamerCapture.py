@@ -6,6 +6,8 @@ import time
 import numpy as np
 import multiprocessing
 
+from RMS.Misc import AtomicFlag
+
 GST_IMPORTED = False
 try:
     import gi
