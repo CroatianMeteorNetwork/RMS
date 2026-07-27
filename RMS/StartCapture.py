@@ -341,9 +341,20 @@ def wait(duration, compressor, buffered_capture, video_file, daytime_mode=None):
             if hasattr(buffered_capture, 'heartbeat') and buffered_capture.heartbeat.value > 0:
                 heartbeat_age = time.time() - buffered_capture.heartbeat.value
                 if heartbeat_age > HEARTBEAT_TIMEOUT:
-                    log.warning('WATCHDOG: BufferedCapture heartbeat stale ({:.1f}s old, timeout={:d}s)! Process appears hung...'.format(
-                        heartbeat_age, HEARTBEAT_TIMEOUT))
-                    return "capture_hung"
+
+                    # Re-read before declaring the process hung: on 32-bit ARM a
+                    # c_double store is two word accesses, and a read torn across
+                    # the writer's update can look up to ~1024 s stale (the low
+                    # mantissa words of an epoch-magnitude double). A single
+                    # confirming re-read after a short sleep eliminates acting on
+                    # a torn value - a genuinely hung process stays stale on both
+                    # reads (review finding).
+                    time.sleep(0.1)
+                    heartbeat_age = time.time() - buffered_capture.heartbeat.value
+                    if heartbeat_age > HEARTBEAT_TIMEOUT:
+                        log.warning('WATCHDOG: BufferedCapture heartbeat stale ({:.1f}s old, timeout={:d}s)! Process appears hung...'.format(
+                            heartbeat_age, HEARTBEAT_TIMEOUT))
+                        return "capture_hung"
 
 
         # If some wait time was given, check if it passed

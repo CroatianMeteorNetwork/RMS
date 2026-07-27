@@ -110,19 +110,25 @@ class AtomicFlag(object):
     def wait(self, timeout=None, poll_interval=1.0):
         """ Block until the flag is set or the timeout (in seconds) expires.
 
+        NOTE: unlike multiprocessing.Event.wait, wake-up after set() is polled, so it can
+        lag by up to poll_interval - fine for the shutdown flags this replaces, but a
+        surprise for latency-sensitive uses.
+
         Return:
             [bool] True if the flag is set, False if the timeout expired.
         """
 
-        t_beg = time.time()
+        # monotonic: an NTP clock step (routine at Pi boot) must not stretch or
+        # truncate the timeout
+        t_beg = time.monotonic()
 
         while not self.is_set():
 
-            if (timeout is not None) and ((time.time() - t_beg) >= timeout):
+            if (timeout is not None) and ((time.monotonic() - t_beg) >= timeout):
                 break
 
             if timeout is not None:
-                time_left = timeout - (time.time() - t_beg)
+                time_left = timeout - (time.monotonic() - t_beg)
                 time.sleep(max(0.0, min(poll_interval, time_left)))
             else:
                 time.sleep(poll_interval)
