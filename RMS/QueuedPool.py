@@ -7,6 +7,8 @@ import time
 import functools
 import multiprocessing
 import multiprocessing.dummy
+import queue as queue_module
+import signal
 
 from RMS.Pickling import savePickle, loadPickle
 from RMS.Logger import getLogger
@@ -49,15 +51,29 @@ class SafeValue(object):
         self.minval = minval
         self.maxval = maxval
 
+        # Set (per process) once an acquisition timed out: the lock is likely
+        # orphaned by a dead process and will never be released, so later
+        # operations use a much shorter timeout and stop repeating the warning
+        # - otherwise every counter op in every process pays the full timeout
+        # plus a console line, forever (review finding)
+        self._lock_broken = False
+
 
     def _acquireLock(self):
         """ Acquire the lock with a timeout. Returns True if the lock was actually acquired. """
 
-        acquired = self.lock.acquire(timeout=SAFE_VALUE_LOCK_TIMEOUT)
+        timeout = 0.5 if self._lock_broken else SAFE_VALUE_LOCK_TIMEOUT
+        acquired = self.lock.acquire(timeout=timeout)
 
-        if not acquired:
+        if not acquired and not self._lock_broken:
+            self._lock_broken = True
             print('SafeValue: lock not acquired after {:.0f} s - a process likely died while '
-                  'holding it. Proceeding without the lock.'.format(SAFE_VALUE_LOCK_TIMEOUT))
+                  'holding it. Proceeding without the lock (later operations retry with a '
+                  'short timeout, without repeating this warning).'.format(
+                      SAFE_VALUE_LOCK_TIMEOUT))
+
+        if acquired and self._lock_broken:
+            self._lock_broken = False
 
         return acquired
 
@@ -349,10 +365,19 @@ class QueuedPool(object):
 
         while True:
 
-            # Get the function arguments (block until available, handle possible errors)
+            # Get the function arguments. The get is TIMED so an idle worker
+            # wakes periodically and can honor kill_workers - a worker blocked
+            # in get() forever never sees the flag, and every graceful
+            # shutdown path then degrades to terminate() (review finding).
             try:
-                args = self.input_queue.get(True)
-            
+                args = self.input_queue.get(True, 5)
+
+            except queue_module.Empty:
+                if self.kill_workers.is_set():
+                    self.printAndLog('Worker exiting on kill request while idle')
+                    break
+                continue
+
             except:
                 tb = traceback.format_exc()
                 self.printAndLog('Failed retrieving inputs...')
@@ -461,6 +486,12 @@ class QueuedPool(object):
         """
 
         self.printAndLog('Closing pool...')
+
+        # Let idle workers exit via their periodic kill_workers check (the
+        # timed input_queue.get); callers that must reuse the pool afterwards
+        # (updateCoreNumber) clear the flag themselves
+        self.kill_workers.set()
+
         self.pool.close()
 
         # Wait for the workers to exit on their own (uses the private worker list, which is
@@ -475,6 +506,27 @@ class QueuedPool(object):
                 break
 
             time.sleep(0.5)
+
+        # pool.join() joins every worker with no timeout - a worker stuck in
+        # uninterruptible I/O (hung camera/USB) would hang shutdown forever.
+        # Bound the wait and escalate to SIGKILL for anything that survived
+        # terminate() (review finding).
+        t_beg = time.time()
+        while any([w.is_alive() for w in self.pool._pool]) \
+                and ((time.time() - t_beg) < 10):
+            time.sleep(0.25)
+
+        for w in self.pool._pool:
+            if w.is_alive():
+                self.printAndLog('Worker {} survived terminate(), sending '
+                    'SIGKILL...'.format(w.pid))
+                try:
+                    if hasattr(signal, 'SIGKILL'):
+                        os.kill(w.pid, signal.SIGKILL)
+                    else:
+                        w.terminate()
+                except (OSError, AttributeError):
+                    pass
 
         self.printAndLog('Joining pool...')
         self.pool.join()
@@ -524,16 +576,12 @@ class QueuedPool(object):
                 if (time.time() - output_qsize_last_change) > worker_timeout:
                     self.printAndLog('One of the workers got stuck longer than {:.1f} seconds, killing multiprocessing...'.format(float(worker_timeout)))
 
-                    # terminate() is unavoidable for a genuinely stuck worker, but it is a known
-                    # hazard: a worker killed mid-write on the shared logging queue wedges logging
-                    # station-wide. RMS.Logger.checkLoggingHealth() exists to recover from that.
-                    self.printAndLog('Terminating pool...')
-                    self.pool.terminate()
-
-                    self.printAndLog('Joining pool...')
-                    self.pool.join()
-
-                    self.active_workers.set(0)
+                    # Only the stuck worker needs terminate() - the N-1 healthy
+                    # ones exit on kill_workers within their 5 s get() timeout,
+                    # so they are never killed mid-write on a shared queue
+                    # (review finding). _shutdownPool sets the flag, waits, and
+                    # escalates for the genuinely stuck one.
+                    self._shutdownPool(graceful_timeout=10)
 
                     break
 
@@ -560,8 +608,13 @@ class QueuedPool(object):
                         self.printAndLog('All workers were idle for more than 100 seconds, shutting down the pool...')
 
                         # Wake the idle workers with poison pills so they exit cleanly instead of
-                        # being terminated mid-run
-                        for i in range(self.active_workers.value()):
+                        # being terminated mid-run. Count pills from the real
+                        # spawned-worker list: with total_jobs == 0 and
+                        # delay_start, active_workers can still be 0 here and
+                        # zero pills would silently degrade the shutdown to the
+                        # terminate path (review finding).
+                        for i in range(max(self.active_workers.value(),
+                                len(self.pool._pool))):
                             self.input_queue.put(None)
 
                         self._shutdownPool()
@@ -578,7 +631,9 @@ class QueuedPool(object):
                     self.printAndLog('Inserting poison pills...')
 
                     # Insert the 'poison pill' to the queue, to kill all workers
-                    for i in range(self.active_workers.value()):
+                    # (counted from the real spawned-worker list - see above)
+                    for i in range(max(self.active_workers.value(),
+                            len(self.pool._pool))):
                         self.printAndLog('Inserting pill', i + 1)
                         self.input_queue.put(None)
 
@@ -595,10 +650,17 @@ class QueuedPool(object):
 
                         timeout_count += 1
 
-                        # If all workers are idle after timeout, break the swallowing loop
+                        # Wall-clock escape: an OOM-killed worker permanently
+                        # skews the counters (its decrement never runs), and
+                        # the conditional break below can then never fire -
+                        # closePool hung forever before reaching _shutdownPool
+                        # (review finding). Bail out unconditionally at
+                        # timeout; _shutdownPool bounds everything after.
                         if timeout_count > timeout:
-                            if self.available_workers.value() >= self.cores.value():
-                                break
+                            if self.available_workers.value() < self.cores.value():
+                                self.printAndLog('Pill swallowing timed out with skewed '
+                                    'worker counters - proceeding to shutdown anyway')
+                            break
 
 
                     # Close the pool and let the workers, which have swallowed their poison
@@ -645,6 +707,7 @@ class QueuedPool(object):
                 break
 
         # Join the previous pool, terminating only if the workers did not exit on their own
+        # (_shutdownPool sets kill_workers; cleared below before the new pool starts)
         self._shutdownPool()
 
         self.kill_workers.clear()
