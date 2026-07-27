@@ -73,7 +73,7 @@ from Utils.StackFFs import stackFFs
 from Utils.FRbinViewer import view
 from Utils.BatchFFtoImage import batchFFtoImage
 from RMS.CaptureDuration import captureDuration
-from RMS.Misc import sanitise, RmsDateTime, getRmsRootDir, mkdirP
+from RMS.Misc import sanitise, RmsDateTime, getRmsRootDir, mkdirP, AtomicFlag
 from RMS.Formats.FFfile import read
 from matplotlib.dates import DateFormatter
 
@@ -765,7 +765,7 @@ class EventMonitor(multiprocessing.Process):
         self.db_conn = self.getConnectionToEventMonitorDB()
         self.upgradeDB(self.db_conn)
         self.check_interval = self.syscon.event_monitor_check_interval
-        self.exit = multiprocessing.Event()
+        self.exit = AtomicFlag()
 
         # Grab the logging queue on the parent side so the child can re-attach logging
         # under the 'forkserver'/'spawn' start methods (handlers are not inherited there)

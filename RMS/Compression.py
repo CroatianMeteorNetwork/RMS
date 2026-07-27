@@ -31,7 +31,7 @@ from RMS.VideoExtraction import Extractor
 from RMS.Formats import FFfile, FFStruct
 from RMS.Formats import FieldIntensities
 from RMS.Logger import getLogger, getLoggingQueue, initChildProcess
-from RMS.Misc import UTCFromTimestamp, frameBufferShape
+from RMS.Misc import UTCFromTimestamp, frameBufferShape, AtomicFlag, stableDoubleRead
 from RMS.Routines.Image import saveImage
 
 # Import Cython functions
@@ -86,9 +86,11 @@ class Compressor(multiprocessing.Process):
 
         self.detector = detector
 
-        self.exit = multiprocessing.Event()
+        # Lock-free flags: these are set/polled across processes and must never be able to
+        # deadlock, even if a process sharing them is killed (see AtomicFlag)
+        self.exit = AtomicFlag()
 
-        self.run_exited = multiprocessing.Event()
+        self.run_exited = AtomicFlag()
 
         # Grab the logging queue on the parent side so the child can re-attach logging
         # under the 'forkserver'/'spawn' start methods (handlers are not inherited there)
@@ -319,10 +321,17 @@ class Compressor(multiprocessing.Process):
 
             
             buffer_one = True
-            if self.start_time1.value > 0:
+
+            # Stable reads: the 0 -> t transition of these lock-free doubles can
+            # tear on 32-bit ARM and a torn value passes the > 0 gate with a
+            # timestamp wrong by up to ~1024 s (review finding)
+            start_time1_val = stableDoubleRead(self.start_time1)
+            start_time2_val = stableDoubleRead(self.start_time2)
+
+            if start_time1_val > 0:
 
                 # Retrieve time of first frame
-                startTime = float(self.start_time1.value)
+                startTime = float(start_time1_val)
 
                 # Copy frames
                 frames = self.array1
@@ -331,10 +340,10 @@ class Compressor(multiprocessing.Process):
                 self.start_time1.value = -1
                 buffer_one = True
 
-            elif self.start_time2.value > 0:
+            elif start_time2_val > 0:
 
                 # Retrieve time of first frame
-                startTime = float(self.start_time2.value)
+                startTime = float(start_time2_val)
 
                 # Copy frames
                 frames = self.array2
