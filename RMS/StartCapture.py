@@ -31,6 +31,75 @@ import multiprocessing
 import traceback
 
 
+def _closeStationLockInChild(lock_file):
+    """ Close the inherited lock fd in a freshly forked child (see _takeStationLock). """
+    try:
+        lock_file.close()
+    except (IOError, OSError):
+        pass
+
+
+def _takeStationLock(station_id):
+    """ Take the per-station single-instance flock, or exit with a clear refusal.
+
+    The lock file lives in tempfile.gettempdir(). NOTE: under a systemd unit with
+    PrivateTmp=true that is a private namespace - a service instance and a manually
+    launched debug instance cannot see each other's locks and will both run. Disable
+    PrivateTmp for the unit if manual runs must be excluded too.
+
+    Return:
+        [file] The open lock file handle (keep a reference for the process lifetime).
+            Exits the process if the lock cannot be acquired.
+    """
+
+    import fcntl
+    import tempfile
+    from multiprocessing import util as mp_util
+
+    lock_path = os.path.join(tempfile.gettempdir(),
+        'rms_startcapture_{:s}.lock'.format(station_id))
+
+    try:
+        # 'a+' never truncates, so on refusal the holder's recorded PID survives for
+        # diagnostics; everything sits in the try so a stale lock file owned by another
+        # user (sticky /tmp) refuses cleanly instead of raising a raw PermissionError
+        lock_file = open(lock_path, 'a+')
+        fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+    except (IOError, OSError) as e:
+        holder = ''
+        try:
+            with open(lock_path) as f:
+                holder = f.read().strip()
+        except (IOError, OSError):
+            pass
+        print('Another StartCapture instance appears to be running for station {:s} '
+              '(lock file: {:s}{:s}; error: {!r:s}). Exiting.'.format(
+                  station_id, lock_path,
+                  ', holder PID {:s}'.format(holder) if holder else '', e),
+              file=sys.__stderr__)
+        sys.exit(1)
+
+    # We own the lock now - record our PID (truncating only as the owner)
+    try:
+        lock_file.truncate(0)
+        lock_file.seek(0)
+        lock_file.write(str(os.getpid()))
+        lock_file.flush()
+    except (IOError, OSError):
+        pass
+
+    # The flock is attached to this open file description, which every child forked
+    # from here on inherits. Without this, an orphaned child left behind after the
+    # main process dies keeps holding the lock and every supervisor restart is
+    # refused forever - the incident failure mode, inverted. Closing the inherited
+    # fd right after fork leaves the parent as the sole holder, and the kernel
+    # releases the flock however the parent dies.
+    mp_util.register_after_fork(lock_file, _closeStationLockInChild)
+
+    return lock_file
+
+
 def _earlyStationLock():
     """ Acquire the per-station single-instance lock BEFORE the heavy imports below.
 
@@ -45,8 +114,6 @@ def _earlyStationLock():
         return None
 
     import re
-    import fcntl
-    import tempfile
 
     # Peek at the config path from the command line without importing ConfigReader
     config_path = None
@@ -58,6 +125,11 @@ def _earlyStationLock():
         if arg.startswith('--config='):
             config_path = arg.split('=', 1)[1]
             break
+
+    # Default deployment launches without -c and reads ./.config from the RMS
+    # directory - peek there so the early lock engages for standard stations too
+    if config_path is None and os.path.isfile('.config'):
+        config_path = '.config'
 
     if (config_path is None) or (not os.path.isfile(config_path)):
         return None
@@ -74,23 +146,7 @@ def _earlyStationLock():
 
     station_id = match.group(1).strip()
 
-    lock_path = os.path.join(tempfile.gettempdir(),
-        'rms_startcapture_{:s}.lock'.format(station_id))
-
-    lock_file = open(lock_path, 'w')
-
-    try:
-        fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
-
-    except (IOError, OSError):
-        print('Another StartCapture instance is already running for station {:s} '
-              '(lock file: {:s}). Exiting.'.format(station_id, lock_path))
-        sys.exit(1)
-
-    lock_file.write(str(os.getpid()))
-    lock_file.flush()
-
-    return lock_file
+    return _takeStationLock(station_id)
 
 
 # Keep a reference for the process lifetime - the kernel releases the flock on process death
@@ -187,26 +243,7 @@ def acquireStationLock(config):
     if _early_station_lock is not None:
         return _early_station_lock
 
-    import fcntl
-    import tempfile
-
-    lock_path = os.path.join(tempfile.gettempdir(),
-        'rms_startcapture_{:s}.lock'.format(str(config.stationID)))
-
-    lock_file = open(lock_path, 'w')
-
-    try:
-        fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
-
-    except (IOError, OSError):
-        print('Another StartCapture instance is already running for station {:s} '
-              '(lock file: {:s}). Exiting.'.format(str(config.stationID), lock_path))
-        sys.exit(1)
-
-    lock_file.write(str(os.getpid()))
-    lock_file.flush()
-
-    return lock_file
+    return _takeStationLock(str(config.stationID))
 
 
 def wait(duration, compressor, buffered_capture, video_file, daytime_mode=None):
