@@ -1866,7 +1866,17 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
                 try:
                     src = pt.config.config_file_name
                     dest = os.path.join(target_dir, os.path.basename(src))
-                    config_catalog_lm = max(3.0, pt.cat_lim_mag - 1.0)
+                    # Write the tuned catalog LM as-is. This used to subtract 1.0 to
+                    #   compensate for the "+ 1" in ApplyRecalibrate, but that margin only
+                    #   controls how deep readStarCatalog() pulls the catalog file into
+                    #   memory (ApplyRecalibrate.py:813-827); the limit stars are actually
+                    #   matched against is config.catalog_mag_limit itself, taken raw by
+                    #   subsetCatalog (ApplyRecalibrate.py:229), and likewise by CheckFit,
+                    #   AutoPlatepar and SkyFit2 on the next start. So there was nothing to
+                    #   compensate for, and subtracting a magnitude left every one of those
+                    #   consumers a magnitude shallower than what was tuned. Recalibration
+                    #   still reads one magnitude deeper than it matches, as intended.
+                    config_catalog_lm = max(3.0, pt.cat_lim_mag)
                     if os.path.realpath(src) != os.path.realpath(dest):
                         # Copy the config to the target, then write overrides into the copy
                         shutil.copy2(src, dest)
