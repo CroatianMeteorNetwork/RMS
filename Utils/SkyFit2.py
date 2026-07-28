@@ -2731,7 +2731,12 @@ class PlateTool(QtWidgets.QMainWindow):
         # but it toggles the info panel, so give the cheat sheet its own key and menu entry.
         self.keyboard_shortcuts_action = QtWidgets.QAction("Keyboard Shortcuts")
         self.keyboard_shortcuts_action.triggered.connect(self.openKeyboardReference)
-        self.keyboard_shortcuts_action.setShortcut('Ctrl+/')
+
+        # CTRL + ? as an alias: on layouts where / is a shifted key (German, French, ...) the
+        # CTRL + / sequence can never be produced. The first sequence is the one Qt shows in the
+        # menu, so the advertised shortcut stays CTRL + /.
+        self.keyboard_shortcuts_action.setShortcuts([QtGui.QKeySequence('Ctrl+/'),
+                                                     QtGui.QKeySequence('Ctrl+?')])
 
         self.file_menu = menu.addMenu('File')
         self.view_menu = menu.addMenu('View')
@@ -3522,8 +3527,7 @@ class PlateTool(QtWidgets.QMainWindow):
         else:
             # Show empty-state message (the panel is otherwise hidden by default)
             self.label1.setText("No data loaded.\nUse File > File Manager to open a folder."
-                                "\n\nSHIFT+F1 Help   {:s}+/ Shortcuts".format(
-                                    getattr(self, 'ctrl_label', 'CTRL')))
+                                "\n\nSHIFT+F1 Help   {:s}+/ Shortcuts".format(self.ctrl_label))
             self.label1.show()
             self._label1_empty_hint = True
             self.image_navigation_slider.hide()
@@ -4093,7 +4097,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # F1 is the key people press when they want the shortcut list, but it only toggles this
         # panel - the list itself lives in the Help tab, so say where it is
-        text_str += "\n\nSHIFT+F1 Help   {:s}+/ Shortcuts".format(getattr(self, 'ctrl_label', 'CTRL'))
+        text_str += "\n\nSHIFT+F1 Help   {:s}+/ Shortcuts".format(self.ctrl_label)
 
         # Only update the text; visibility of the top-left panel is controlled by F1 (toggleInfo)
         self.label1.setText(text_str)
