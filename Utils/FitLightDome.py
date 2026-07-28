@@ -1071,6 +1071,40 @@ def modelIsStale(model_dict, config, platepar=None):
             and not model_dict.get("floor_modeled", False):
         return "fit predates the chance-match floor"
 
+    # Harmonics beyond what the station's azimuth coverage can identify: an
+    # order-k harmonic needs no circular coverage gap wider than 180/k deg,
+    # or amplitude and phase trade off freely (observed: a single-camera
+    # station carrying a dipole 57x its bowl, cutting an LM cliff through
+    # its own FOV edge). The fit now gates the order; retire models fitted
+    # before the gate existed.
+    harmonics = model_dict.get("harmonics") or []
+    footprints = model_dict.get("footprints") or {}
+    if harmonics and footprints:
+        az_bins = np.zeros(36, dtype=bool)
+        for fp in footprints.values():
+            try:
+                fp_az = np.asarray(fp[0], dtype=np.float64) % 360.0
+            except (IndexError, TypeError, ValueError):
+                continue
+            # Sweep each polygon edge's azimuth interval along the shorter arc
+            for a0, a1 in zip(fp_az, np.roll(fp_az, -1)):
+                d = (a1 - a0 + 180.0) % 360.0 - 180.0
+                for f in np.linspace(0.0, 1.0, 8):
+                    az_bins[int(((a0 + f*d) % 360.0)/10.0) % 36] = True
+        if az_bins.all():
+            max_az_gap = 0.0
+        else:
+            empty = np.concatenate([~az_bins, ~az_bins])
+            run, max_run = 0, 0
+            for e in empty:
+                run = run + 1 if e else 0
+                max_run = max(max_run, run)
+            max_az_gap = min(max_run, 36)*10.0
+        max_fit_order = max(int(h.get("order", 1)) for h in harmonics)
+        if max_az_gap > 180.0/max_fit_order:
+            return ("order-{:d} harmonic with a {:.0f} deg azimuth coverage "
+                    "gap (unidentifiable)".format(max_fit_order, max_az_gap))
+
     # Age
     fit_date = model_dict.get("fit_date")
     if fit_date is not None:
