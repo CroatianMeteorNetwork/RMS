@@ -37,6 +37,29 @@ CONFIGREADER_PATH = os.path.join(getRmsRootDir(), "RMS", "ConfigReader.py")
 # Extract valid options from ConfigReader.py
 VALID_OPTIONS = extractConfigOptions(CONFIGREADER_PATH)
 
+# Attribute lines look like "key: value", but the value may be empty (e.g. "win_pc_weave:") and
+# the space after the colon is optional. Keys never contain a colon, values may.
+ATTRIBUTE_PATTERN = re.compile(r'^([^:]+?)\s*:\s*(.*)$')
+
+
+def parseAttributeLine(line):
+    """Split a stripped config line into an attribute name and value.
+
+    Arguments:
+        line: [str] Stripped line from a .config or .configTemplate file.
+
+    Return:
+        [tuple] (name, value), both stripped, or None if the line is not an attribute. The value
+            is an empty string for attributes such as "win_pc_weave:".
+    """
+
+    match = ATTRIBUTE_PATTERN.match(line)
+
+    if match is None:
+        return None
+
+    return match.group(1), match.group(2).strip()
+
 
 def logMessage(message):
     """Print and write log messages to buffer"""
@@ -128,13 +151,12 @@ def updateConfig(original_config_file, template_config_file, args, backup=True):
             section = m.group(1)
             continue
 
-        bits = re.split(": ", l)
-        cnt = len(bits)
-        if cnt > 1:
-            if (section + bits[0]) in attributes_dict:
-                logMessage("WARNING - duplicate value for {}, assuming last value".format(bits[0]))
-            i = l.index(": ") + 2 
-            attributes_dict[section + bits[0]] = l[i:].strip()
+        parsed = parseAttributeLine(l)
+        if parsed is not None:
+            attr_name, attr_value = parsed
+            if (section + attr_name) in attributes_dict:
+                logMessage("WARNING - duplicate value for {}, assuming last value".format(attr_name))
+            attributes_dict[section + attr_name] = attr_value
 
     # --- SPECIAL-CASE: legacy 'quota_management_disabled' > 'quota_management_enabled' ---
     for legacy_key in list(attributes_dict.keys()):
@@ -199,13 +221,14 @@ def updateConfig(original_config_file, template_config_file, args, backup=True):
                 newfile.flush()
                 continue
 
-            bits = re.split(": ", l)  # is it an attribute?
-            cnt = len(bits)
+            parsed = parseAttributeLine(l)  # is it an attribute?
 
-            if cnt != 2:  # no it isn't
+            if parsed is None:  # no it isn't
                 newfile.write("{}\n".format(l))
                 newfile.flush()
                 continue
+
+            attr_name, new_default_value = parsed
 
             # insert our original .config value if we have one
             # and its not the default value
@@ -213,8 +236,8 @@ def updateConfig(original_config_file, template_config_file, args, backup=True):
             # perhaps we need an exclude list so some old values aren't carried forward
             # and new defaults (from template) apply ???
 
-            if (section + bits[0]) in attributes_dict:
-                original_value = attributes_dict[section + bits[0]]
+            if (section + attr_name) in attributes_dict:
+                original_value = attributes_dict[section + attr_name]
                 bits2 = original_value.split(";")
                 if len(bits2) == 2:
                     original_value = bits2[
@@ -222,27 +245,26 @@ def updateConfig(original_config_file, template_config_file, args, backup=True):
                     ].strip()  # trim comments from attribute line
 
                 del attributes_dict[
-                    section + bits[0]
+                    section + attr_name
                 ]  # remove so we can list unrecognised later
-                new_default_value = bits[1].strip()
                 if original_value != new_default_value:
                     if not (
-                        (section + bits[0]) in recent_defaults_list and args.recent
+                        (section + attr_name) in recent_defaults_list and args.recent
                     ):
                         newfile.write(
-                            "{}: {}\n".format(bits[0],original_value)
+                            "{}\n".format("{}: {}".format(attr_name, original_value).rstrip())
                         )  # write original attribute/value pair
                         newfile.flush()
                         logMessage(
                             "  {}{}: template default '{}' => kept '{}'"
-                                    .format(section, bits[0], new_default_value, original_value)
+                                    .format(section, attr_name, new_default_value, original_value)
                         )
                         custom_cnt += 1
                         continue
 
                     logMessage(
                         "  {}{}: '{}' => RECENT template default '{}'"
-                                .format(section, bits[0], original_value, new_default_value)
+                                .format(section, attr_name, original_value, new_default_value)
                     )
 
             # if we don't need to update the template line write it out as is
@@ -262,8 +284,10 @@ def updateConfig(original_config_file, template_config_file, args, backup=True):
         with open(new_config_file, "r") as newfile:
             new_config_lines = newfile.readlines()
 
-        # Track section positions (last non-blank, non-comment option in each section)
+        # Track section positions (last non-blank, non-comment option in each section) and which
+        # options the new config already holds, so nothing gets written twice
         section_positions = {}
+        existing_options = set()
         current_section = None
 
         for idx, line in enumerate(new_config_lines):
@@ -277,6 +301,10 @@ def updateConfig(original_config_file, template_config_file, args, backup=True):
                 if current_section:
                     section_positions[current_section]["last_option"] = idx  # Update last valid option
 
+                    parsed = parseAttributeLine(stripped)
+                    if parsed is not None:
+                        existing_options.add((current_section, parsed[0].lower()))
+
         # Dictionary to track whether a comment was added per section
         added_comment = {}
 
@@ -288,6 +316,12 @@ def updateConfig(original_config_file, template_config_file, args, backup=True):
             # **Only preserve attributes that are valid (found in ConfigReader.py)**
             if attr_name.lower() not in VALID_OPTIONS:
                 logMessage("  IGNORING: {} {} => {} (Not supported by RMS)".format(section, attr_name.strip(), value))
+                continue  # Skip this attribute
+
+            # Writing an option twice makes configparser raise DuplicateOptionError and RMS
+            # refuses to start, so never duplicate one the new config already carries
+            if (section, attr_name.strip().lower()) in existing_options:
+                logMessage("  IGNORING: {} {} => {} (Already in the new config)".format(section, attr_name.strip(), value))
                 continue  # Skip this attribute
 
             # Find where to insert the attribute
@@ -309,6 +343,7 @@ def updateConfig(original_config_file, template_config_file, args, backup=True):
 
             # Insert attribute at the correct position **after the last attribute in the section**
             new_config_lines.insert(insert_position + 2, "{}: {}\n".format(attr_name.strip(), value))
+            existing_options.add((section, attr_name.strip().lower()))
             logMessage("  PRESERVING: {} {} => {} (Supported by RMS)".format(section, attr_name.strip(), value))
 
         # Write the modified config back to disk
