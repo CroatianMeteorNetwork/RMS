@@ -91,7 +91,7 @@ create_station() {
     cp ~/source/RMS/mask.bmp ~/source/Stations/${item} 2>/dev/null
 
     # Launch entry for the station. On the Pi images, FirstRun runs at boot
-    # and starts captures through RMS_StartCapture_MCP.sh, so only a Desktop
+    # and starts captures through RMS_StartCapture.sh, so only a Desktop
     # launcher is created there; elsewhere the entry goes into XDG autostart
     # with a Desktop symlink, so captures start at login. (A PC may carry the
     # autorun flag from running FirstRun, but nothing launches FirstRun at
@@ -422,12 +422,11 @@ if [[ $total -gt 1 ]]; then
     fi
 fi
 
-# Point the Desktop StartCapture entry at the multi-camera launcher, which
-# starts every configured station. The legacy entry it replaces reads
-# ~/source/RMS/.config, which after a conversion is just the template.
+# Make sure the Desktop StartCapture entry points at RMS_StartCapture.sh,
+# which handles both the legacy and the multi-camera data structure (the
+# entry may be a stale copy rather than a symlink on older installs).
 # On the Pi images FirstRun also runs this launcher at boot.
-rm -f "${Desktop}/RMS_StartCapture.sh"
-ln -sf ~/source/RMS/Scripts/MultiCamLinux/Pi/RMS_StartCapture_MCP.sh "${Desktop}/RMS_StartCapture.sh"
+ln -sf ~/source/RMS/Scripts/RMS_StartCapture.sh "${Desktop}/RMS_StartCapture.sh"
 
 # Generate SSH keys if not present
 if [[ ! -f ~/.ssh/id_rsa ]]; then

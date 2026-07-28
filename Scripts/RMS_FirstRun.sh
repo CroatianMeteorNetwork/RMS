@@ -18,9 +18,9 @@ RMSCONFIG=~/source/RMS/.config
 # Auto run enable flag file
 RMSAUTORUNFILE=~/.rmsautorunflag
 
-# The StartCapture Desktop entry is a symlink that add_Station.sh retargets
-# to the multi-camera launcher after a conversion, so it is used on purpose
-RMSSTARTCAPTURE=~/Desktop/RMS_StartCapture.sh
+# RMS_StartCapture.sh handles both the legacy and the multi-camera data
+# structure, so the same launcher is used before and after a conversion
+RMSSTARTCAPTURE=~/source/RMS/Scripts/RMS_StartCapture.sh
 RMSUPDATESCRIPT=~/source/RMS/Scripts/RMS_Update.sh
 
 
