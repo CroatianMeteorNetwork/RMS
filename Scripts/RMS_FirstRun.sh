@@ -102,7 +102,7 @@ read -p ""
 
 echo ""
 echo "This is a brief overview of this guide:"
-echo "  0. Expand the file system (if you flashed this SD card yourself)."
+echo "  0. Expand the file system (checked automatically)."
 echo "  1. Connect your Pi to the Internet. "
 echo "  2. Change the default password for security reasons."
 echo "  3. Generate a new SSH key."
@@ -118,31 +118,57 @@ if command -v raspi-config >/dev/null 2>&1; then
 echo "
 0) Expanding the file system
 ----------------------------
-If you have bought a system that was already assembled, or the file system
-has already been expanded, press any key to skip this step.
-"
+Checking if the file system needs to be expanded..."
 
-read -n1 -r -p 'If you have flashed this SD card yourself, press ENTER.' key
+# Compare the root file system to the device it lives on to see if there
+# is unallocated space left - a freshly flashed image is much smaller
+# than the SD card it was written to
+fs_gb=$(( $(df --output=size -B1 / | tail -1) / 1000000000 ))
+root_part=$(findmnt -n -o SOURCE / 2>/dev/null)
+root_dev=$(lsblk -n -o PKNAME "$root_part" 2>/dev/null | head -1)
+if [[ -n "$root_dev" ]]; then
+    dev_gb=$(( $(lsblk -b -d -n -o SIZE "/dev/$root_dev") / 1000000000 ))
+else
+    dev_gb=$fs_gb
+fi
 
-if [[ "$key" = "" ]]; then
-    lxterminal -e "sudo raspi-config"
+# clear the input buffer
+while read -t 0.01; do :; done
+
+if (( dev_gb - fs_gb >= 2 )); then
 
     echo "
-    Another window has opened where you can expand the file system.
+The file system takes up ${fs_gb} GB of the ${dev_gb} GB storage device.
+RMS needs the whole device for data capture: 64 GB at minimum, 128 GB or
+more is recommended. The usable size is always a bit smaller than the
+rated size, e.g. a 64 GB card gives about 62 GB.
+"
+    read -n1 -r -p 'Press ENTER to expand the file system to the full device (recommended), or any other key to skip this step...' key
 
-    Go to:
+    if [[ "$key" = "" ]]; then
+        echo ""
+        echo "Expanding the file system, then the system will reboot."
+        echo "This guide will start again after the reboot."
+        sudo raspi-config --expand-rootfs
+        echo "Rebooting in 5 seconds, please wait..."
+        sleep 5
+        sudo reboot
+        exit 0
+    else
+        echo ""
+        echo "The file system was not expanded, so part of the storage device"
+        echo "will stay unused and there may not be enough room for data capture!"
+    fi
 
-    7 ADVANCED OPTIONS -->
-      A1 EXPAND FILE SYSTEM -->
-        < OK >
-
-    < FINISH > (at the bottom) -->
-      < YES > (reboot)
-
-    Your Raspberry Pi will reboot.
-    "
-
-    read -p "Press ENTER to continue..."
+elif (( fs_gb < 61 )); then
+    echo ""
+    echo "The whole ${dev_gb} GB storage device is already in use, but it is smaller"
+    echo "than the 64 GB minimum RMS needs for data capture (128 GB or more is"
+    echo "recommended). Please consider moving to a larger storage device."
+    read -p "Press ENTER to continue anyway..."
+else
+    echo ""
+    echo "${fs_gb} GB of space is available, no expansion needed."
 fi
 
 fi  # raspi-config available
