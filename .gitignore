@@ -96,15 +96,20 @@ target/
 
 camerasettings/*.json
 
-# these files are created by cython and should not be tracked
-RMS/Astrometry/CyFunctions.c
-RMS/CompressionCy.c
-RMS/Routines/BinImageCy.c
-RMS/Routines/DynamicFTPCompressionCy.c
-RMS/Routines/Grouping3Dcy.c
-RMS/Routines/MorphCy.c
-RMS/Routines/Kht.cpp
-Utils/SaturationTools.c
+# Cython writes a .c (or .cpp) next to every .pyx when the extensions are built.
+# Matched by pattern rather than listed one by one, so adding a .pyx cannot leak its
+# generated source into the repo - the old per-file list had to be edited by hand for
+# every new module, and a missed entry is easy to commit by accident.
+# Native/Hough holds the only hand-written C/C++ in the tree, so it is kept.
+*.c
+*.cpp
+!Native/Hough/*.c
+!Native/Hough/*.cpp
+
+# Detection backups written by QueuedPool. These belong next to the captured night,
+# but land in the working directory when the tests or a manual run are started from
+# the repo root.
+rms_queue_bkup_*.pickle
 
 # Large GMN catalog that's too big for GitHub
 Catalogs/GMN_StarCatalog_LM12.0.bin
