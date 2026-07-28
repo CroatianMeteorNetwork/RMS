@@ -12,6 +12,9 @@ These functions are used by both SkyFit2 and AutoPlatepar.
 from __future__ import print_function, division, absolute_import
 
 import numpy as np
+
+from scipy.spatial import cKDTree
+
 from RMS.Astrometry.StarClasses import PairedStars
 from RMS.Astrometry.ApplyAstrometry import extinctionCorrectionTrueToApparent, raDecToXYPP, \
     getFOVSelectionRadius, xyToRaDecPP
@@ -231,24 +234,35 @@ def filterBlendedStars(paired_stars, catalog_stars, platepar, jd, lim_mag,
             np.array(matched_ra_list), np.array(matched_dec_list), jd, platepar)
         blend_radii = np.array(blend_radii)
 
-        # Compute distance from each matched star to all bright catalog stars using
-        # broadcasting, in catalog chunks so peak memory stays bounded no matter how
-        # many catalog stars survived the pre-filters (a deep catalog fed through the
-        # broken FOV pre-filter above used to allocate multi-GB matrices here and get
-        # the process OOM-killed)
-        # Shape per chunk: (n_matched, chunk)
-        n_matched = len(check_indices)
-        chunk_size = max(1, int(5e6) // n_matched)
-        has_neighbor = np.zeros(n_matched, dtype=bool)
-        for c0 in range(0, len(catalog_x), chunk_size):
-            c1 = c0 + chunk_size
-            dx = all_matched_x[:, np.newaxis] - catalog_x[np.newaxis, c0:c1]
-            dy = all_matched_y[:, np.newaxis] - catalog_y[np.newaxis, c0:c1]
-            dist_matrix = np.sqrt(dx**2 + dy**2)
+        # Every matched star is inside the image, so a catalog star further outside the
+        # frame than the largest blend radius can never be a blend neighbour. This is
+        # exact in the units that matter (pixels) and removes most of what the cone
+        # pre-filter necessarily lets through.
+        edge_margin = np.max(blend_radii)
+        in_img = ((catalog_x > -edge_margin) & (catalog_x < platepar.X_res + edge_margin)
+                  & (catalog_y > -edge_margin) & (catalog_y < platepar.Y_res + edge_margin))
+        catalog_x = catalog_x[in_img]
+        catalog_y = catalog_y[in_img]
 
-            # Check for neighbors within each star's blend radius (excluding self)
-            has_neighbor |= np.any(
-                (dist_matrix < blend_radii[:, np.newaxis]) & (dist_matrix > 0.1), axis=1)
+        if len(catalog_x) == 0:
+            return paired_stars, 0
+
+        # Nearest-neighbour lookup rather than an (n_matched x n_catalog) distance matrix.
+        # O(N log M) with constant memory, so a deep catalog cannot allocate the multi-GB
+        # matrices that used to get the process OOM-killed, and there is no chunk size to
+        # tune. Same reasoning as RMS/Astrometry/MatchStars.py.
+        tree = cKDTree(np.column_stack([catalog_x, catalog_y]))
+
+        # A matched star normally coincides with its own catalog entry (d ~ 0), which the
+        # d > 0.1 test below drops. Ask for a few neighbours rather than one so the search
+        # still reaches a genuine neighbour when the catalog holds duplicate entries at
+        # that position. Missing neighbours come back as inf, which fails both tests.
+        n_neighbors = min(3, len(catalog_x))
+        nn_dist, _ = tree.query(np.column_stack([all_matched_x, all_matched_y]), k=n_neighbors)
+        nn_dist = np.reshape(nn_dist, (len(check_indices), n_neighbors))
+
+        # Neighbours within each star's own blend radius (excluding self)
+        has_neighbor = np.any((nn_dist < blend_radii[:, np.newaxis]) & (nn_dist > 0.1), axis=1)
 
         for k, idx in enumerate(check_indices):
             if has_neighbor[k]:
