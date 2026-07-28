@@ -70,7 +70,11 @@ echo "Wrote $SYSCTL_DROP_IN (rmem_max=wmem_max=$RECOMMENDED_SIZE)"
 SYSCTL_CONF="/etc/sysctl.conf"
 if [ -f "$SYSCTL_CONF" ] && grep -Eq '^[[:space:]]*net\.core\.(rmem|wmem)_max[[:space:]]*=' "$SYSCTL_CONF"; then
     echo "Found conflicting settings in $SYSCTL_CONF; disabling them so the drop-in wins at boot."
-    cp -n "$SYSCTL_CONF" "${SYSCTL_CONF}.rms.bak" && echo "Backed up to ${SYSCTL_CONF}.rms.bak"
+    # Back up only once, preserving the true pre-edit original. Avoid 'cp -n',
+    # whose behavior is non-portable and warns on newer coreutils.
+    if [ ! -e "${SYSCTL_CONF}.rms.bak" ]; then
+        cp "$SYSCTL_CONF" "${SYSCTL_CONF}.rms.bak" && echo "Backed up to ${SYSCTL_CONF}.rms.bak"
+    fi
     sed -i -E 's@^([[:space:]]*net\.core\.(rmem|wmem)_max[[:space:]]*=.*)@# Disabled by UpdateBuffers.sh: \1@' "$SYSCTL_CONF"
 fi
 
