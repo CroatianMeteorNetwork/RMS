@@ -154,7 +154,8 @@ from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP, \
     limitingMagnitude, screenNudgeToAzAltDelta, fovCentreZenithDirection
 from RMS.Astrometry.AtmosphericExtinction import atmosphericExtinctionCorrection
 from RMS.Astrometry.StarClasses import CatalogStar, GeoPoint, PlanetPoint, PairedStars
-from RMS.Astrometry.StarFilters import filterPhotometricOutliers, filterBlendedStars
+from RMS.Astrometry.StarFilters import filterPhotometricOutliers, filterBlendedStars, \
+    catalogStarsInFOV
 from RMS.Astrometry.Conversions import date2JD, JD2HourAngle, trueRaDec2ApparentAltAz, \
     apparentAltAz2TrueRADec, J2000_JD, jd2Date, datetime2JD, JD2LST, geo2Cartesian, vector2RaDec, raDec2Vector
 from RMS.Astrometry.AstrometryNet import astrometryNetSolve
@@ -5881,26 +5882,7 @@ class PlateTool(QtWidgets.QMainWindow):
             # Filter catalog to stars actually in front of camera (prevent back-projection)
             # Use angular distance in celestial coordinates, not self.filterCatalogStarsInsideFOV
             # which incorrectly uses self.cat_lim_mag instead of the test catalog's LM
-            catalog_ra = test_catalog[:, 0]
-            catalog_dec = test_catalog[:, 1]
-            ra_rad = np.radians(catalog_ra)
-            dec_rad = np.radians(catalog_dec)
-            ra_center = np.radians(self.platepar.RA_d)
-            dec_center = np.radians(self.platepar.dec_d)
-
-            # Spherical angular distance from camera pointing to each catalog star
-            cos_ang_dist = (np.sin(dec_center) * np.sin(dec_rad) +
-                            np.cos(dec_center) * np.cos(dec_rad) * np.cos(ra_rad - ra_center))
-            cos_ang_dist = np.clip(cos_ang_dist, -1, 1)
-            ang_dist_deg = np.degrees(np.arccos(cos_ang_dist))
-
-            # FOV radius with margin (stars behind camera have ang_dist > 90)
-            # F_scale is px/deg, so divide to convert the pixel diagonal to degrees
-            fov_diagonal = np.sqrt(self.platepar.X_res**2 + self.platepar.Y_res**2)
-            fov_radius = (fov_diagonal / 2) / self.platepar.F_scale * 1.5
-            fov_radius = min(fov_radius, 90)
-
-            in_fov = ang_dist_deg < fov_radius
+            in_fov = catalogStarsInFOV(test_catalog[:, 0], test_catalog[:, 1], self.platepar, jd)
             test_catalog = test_catalog[in_fov]
 
             if len(test_catalog) == 0:

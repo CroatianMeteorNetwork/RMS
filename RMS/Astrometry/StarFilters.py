@@ -12,15 +12,64 @@ These functions are used by both SkyFit2 and AutoPlatepar.
 from __future__ import print_function, division, absolute_import
 
 import numpy as np
-
 from RMS.Astrometry.StarClasses import PairedStars
-from RMS.Astrometry.ApplyAstrometry import extinctionCorrectionTrueToApparent, raDecToXYPP
+from RMS.Astrometry.ApplyAstrometry import extinctionCorrectionTrueToApparent, raDecToXYPP, \
+    getFOVSelectionRadius, xyToRaDecPP
 
 
 # Default filtering parameters
 DEFAULT_PHOTOMETRIC_SIGMA = 2.5
 DEFAULT_BLEND_FWHM_MULT = 2.0  # Multiplier of FWHM for blending detection radius
 DEFAULT_BLEND_MAG_MARGIN = 0.3  # Margin above limiting magnitude for blend check
+
+# Margin applied to the FOV selection radius when pre-filtering the catalog. The radius
+#   already circumscribes the image corners, so the margin only has to cover neighbours
+#   sitting a few pixels outside the frame - it is generous rather than tight.
+DEFAULT_FOV_RADIUS_MARGIN = 1.5
+
+
+def catalogStarsInFOV(catalog_ra, catalog_dec, platepar, jd, margin=DEFAULT_FOV_RADIUS_MARGIN):
+    """ Mask of the catalog stars which lie inside the FOV cone at the given time.
+
+    Stars behind the camera can reverse-project into valid-looking pixel coordinates, so a
+    cone around the pointing direction is used to reject them before projecting.
+
+    Arguments:
+        catalog_ra: [ndarray] Catalog star right ascensions (deg).
+        catalog_dec: [ndarray] Catalog star declinations (deg).
+        platepar: [Platepar] Platepar for the FOV geometry.
+        jd: [float] Julian date.
+
+    Keyword arguments:
+        margin: [float] Multiplier applied to the FOV selection radius.
+            Default is DEFAULT_FOV_RADIUS_MARGIN.
+
+    Returns:
+        in_fov: [ndarray] Boolean mask, True for stars inside the cone.
+    """
+    # Radius which includes the image corners, computed by projecting them through the
+    #   platepar (distortion included) instead of assuming the central F_scale holds all
+    #   the way out to the corners
+    fov_radius = min(getFOVSelectionRadius(platepar)*margin, 90)
+
+    # Centre the cone on the pointing at THIS jd. platepar.RA_d/dec_d is the pointing at
+    #   platepar.JD, and on an alt-az camera the two drift ~15 deg/hour apart, which would
+    #   eat the margin above whenever a platepar is reused across a night.
+    _, ra_centre, dec_centre, _ = xyToRaDecPP([jd], [platepar.X_res/2.0], [platepar.Y_res/2.0], [1],
+                                              platepar, extinction_correction=False, jd_time=True)
+
+    ra_centre = np.radians(ra_centre[0])
+    dec_centre = np.radians(dec_centre[0])
+
+    ra_rad = np.radians(catalog_ra)
+    dec_rad = np.radians(catalog_dec)
+
+    # Spherical angular distance from the pointing direction to each catalog star
+    cos_ang_dist = (np.sin(dec_centre)*np.sin(dec_rad)
+                    + np.cos(dec_centre)*np.cos(dec_rad)*np.cos(ra_rad - ra_centre))
+    cos_ang_dist = np.clip(cos_ang_dist, -1, 1)
+
+    return np.degrees(np.arccos(cos_ang_dist)) < fov_radius
 
 
 def filterPhotometricOutliers(paired_stars, platepar, jd, sigma_threshold=DEFAULT_PHOTOMETRIC_SIGMA,
@@ -150,23 +199,7 @@ def filterBlendedStars(paired_stars, catalog_stars, platepar, jd, lim_mag,
     # Filter to stars actually in front of the camera (within FOV + margin)
     # This prevents false positives from stars behind the camera that could
     # project to valid-looking pixel coordinates
-    ra_rad = np.radians(catalog_ra)
-    dec_rad = np.radians(catalog_dec)
-    ra_center = np.radians(platepar.RA_d)
-    dec_center = np.radians(platepar.dec_d)
-
-    # Spherical angular distance from camera pointing to each catalog star
-    cos_ang_dist = (np.sin(dec_center) * np.sin(dec_rad) +
-                    np.cos(dec_center) * np.cos(dec_rad) * np.cos(ra_rad - ra_center))
-    cos_ang_dist = np.clip(cos_ang_dist, -1, 1)
-    ang_dist_deg = np.degrees(np.arccos(cos_ang_dist))
-
-    # Estimate FOV radius from platepar (F_scale is px/deg), with margin
-    fov_diagonal = np.sqrt(platepar.X_res**2 + platepar.Y_res**2)
-    fov_radius = (fov_diagonal / 2) / platepar.F_scale * 1.5  # 50% margin
-    fov_radius = min(fov_radius, 90)  # Cap at 90 degrees
-
-    in_fov = ang_dist_deg < fov_radius
+    in_fov = catalogStarsInFOV(catalog_ra, catalog_dec, platepar, jd)
     catalog_ra = catalog_ra[in_fov]
     catalog_dec = catalog_dec[in_fov]
 
