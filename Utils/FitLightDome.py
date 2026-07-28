@@ -547,6 +547,38 @@ def fitLightDome(station_configs, dates=None, max_order=3, moon_phase_max=MOON_P
         + [(0.0, 1.5), (0.12, S_FIT_MAX), (-2.0, 3.0), (5.0, 60.0)]
     order_bounds = [(-2.0, 3.5), (-360.0, 720.0), (3.0, 60.0)]   # log10 A, phase, alt scale
 
+    # Identifiability gate: an order-k azimuthal harmonic is only measurable if
+    # the trials' azimuth coverage leaves no gap wider than half its period
+    # (180/k deg) - otherwise amplitude and phase trade off freely, and the fit
+    # buys a small in-FOV likelihood gain with an unphysical global harmonic
+    # (observed on a single-camera station: a 57x-the-bowl dipole whose
+    # non-negativity clamp cut an LM cliff through the FOV's own edge). A
+    # single ~90 deg FOV therefore gets the azimuth-symmetric bowl only, while
+    # multi-camera rings that surround the compass keep their harmonics.
+    az_bins = np.zeros(36, dtype=bool)
+    az_bins[(np.asarray(az, dtype=np.float64)%360.0/10.0).astype(np.intp) % 36] = True
+    if az_bins.all():
+        max_az_gap = 0.0
+    else:
+        # Largest circular run of empty 10 deg bins
+        empty = np.concatenate([~az_bins, ~az_bins])
+        run, max_run = 0, 0
+        for e in empty:
+            run = run + 1 if e else 0
+            max_run = max(max_run, run)
+        max_az_gap = min(max_run, 36)*10.0
+    identifiable_order = 0
+    for j in range(1, max_order + 1):
+        if max_az_gap <= 180.0/j:
+            identifiable_order = j
+        else:
+            break
+    if identifiable_order < max_order:
+        print("Azimuth coverage gap {:.0f} deg: harmonics above order {:d} are "
+              "unidentifiable - capping (was {:d})".format(
+              max_az_gap, identifiable_order, max_order))
+    max_order = identifiable_order
+
     results = {}
     for norder in range(max_order + 1):
 
