@@ -5,123 +5,93 @@
 # Purpose: Configures system UDP buffer sizes for GStreamer UDP streaming
 # Usage: sudo ./Scripts/UpdateBuffers.sh
 #
-# This script checks and optionally updates UDP buffer sizes to handle
-# GStreamer's UDP source requirements (rtspsrc udp-buffer-size, default 16MB).
-# Default Linux settings are often too small, causing dropped frames.
+# GStreamer's rtspsrc udp-buffer-size defaults to 16MB, but the Linux default
+# net.core.rmem_max/wmem_max are much smaller, causing dropped frames.
 #
-# The script will:
-# - Show current buffer sizes
-# - Warn if below recommended values (1MB min, 16MB recommended)
-# - Create backup of original settings
-# - Update settings if confirmed
-# - Show before/after comparison
-
+# This script:
+# - Writes a systemd sysctl drop-in so 16MB persists across reboots
+# - Disables any stale rmem_max/wmem_max lines in /etc/sysctl.conf that would
+#   otherwise override the drop-in at boot
+# - Re-applies all config the way boot does, then verifies the result
+#
+# It is idempotent and non-interactive, so it is safe to re-run.
 
 # Check if running as root
-if [ "$EUID" -ne 0 ]; then 
+if [ "$EUID" -ne 0 ]; then
     echo "Please run as root (sudo)"
     exit 1
 fi
 
 # Configuration
 RECOMMENDED_SIZE=16777216  # 16MB in bytes - must be >= rtspsrc udp-buffer-size in BufferedCapture.py
-MIN_RECOMMENDED=1048576    # 1MB in bytes (old default; below this UDP RtspSrc bursts overflow)
 
-# Function to convert bytes to human readable format
+# Convert bytes to human readable format
 human_readable() {
     local bytes=$1
-    if [ $bytes -ge 1048576 ]; then
+    if [ "$bytes" -ge 1048576 ]; then
         echo "$(( bytes / 1048576 )) MB"
     else
         echo "$(( bytes / 1024 )) KB"
     fi
 }
 
-# Function to display buffer settings
+# Display current buffer settings
 show_settings() {
-    local current_rmem_max=$(sysctl -n net.core.rmem_max)
-    local current_wmem_max=$(sysctl -n net.core.wmem_max)
-
-    echo "Current buffer settings:"
-    echo "----------------------"
-    echo "Receive buffer max (rmem_max): $current_rmem_max bytes ($(human_readable $current_rmem_max))"
-    echo "Send buffer max (wmem_max): $current_wmem_max bytes ($(human_readable $current_wmem_max))"
-    echo "----------------------"
-
-    # Check if buffers are below recommended size
-    local update_needed=false
-    if [ $current_rmem_max -lt $MIN_RECOMMENDED ] || [ $current_wmem_max -lt $MIN_RECOMMENDED ]; then
-        echo -e "WARNING: Current buffer sizes are below the minimum recommended size ($(human_readable $MIN_RECOMMENDED))"
-        echo "This may cause issues with GStreamer UDP buffer allocation."
-        update_needed=true
-    elif [ $current_rmem_max -lt $RECOMMENDED_SIZE ] || [ $current_wmem_max -lt $RECOMMENDED_SIZE ]; then
-        echo -e "NOTE: Current buffer sizes are below the recommended size ($(human_readable $RECOMMENDED_SIZE))"
-        echo "Increasing them would provide more headroom for UDP operations."
-        update_needed=true
-    fi
-
-    if [ "$update_needed" = true ]; then
-        echo -e "\nWould you like to update the buffer sizes to the recommended values? (y/n)"
-        read -r response
-        if [[ "$response" =~ ^[Yy]$ ]]; then
-            return 0  # proceed with update
-        else
-            echo "No changes made. Exiting..."
-            exit 0
-        fi
-    else
-        echo -e "Current buffer sizes are at or above recommended values."
-        exit 0
-    fi
+    local r=$(sysctl -n net.core.rmem_max)
+    local w=$(sysctl -n net.core.wmem_max)
+    echo "  rmem_max: $r bytes ($(human_readable $r))"
+    echo "  wmem_max: $w bytes ($(human_readable $w))"
 }
 
-# Show initial settings and check if update is needed
-echo "CHECKING CURRENT SETTINGS:"
+echo "BEFORE:"
 show_settings
 echo
 
-# Use drop-in file in /etc/sysctl.d/ for systemd compatibility
-# The 99- prefix ensures this loads last and won't be overridden
-# This method works on all modern Linux distributions (Debian 7+, Ubuntu 12.04+, all Raspberry Pi OS)
+# 1. Write the drop-in so the setting persists across reboots.
+# The 99- prefix loads it late; /etc/sysctl.d works on all systemd distros
+# (Raspberry Pi OS, Ubuntu, Debian).
 SYSCTL_DROP_IN="/etc/sysctl.d/99-rms-udp-buffers.conf"
-
-# Ensure the directory exists (should always exist on supported systems)
-if [ ! -d /etc/sysctl.d ]; then
-    echo "Warning: /etc/sysctl.d not found, creating it..."
-    mkdir -p /etc/sysctl.d
-fi
-
-echo "Creating sysctl drop-in file: $SYSCTL_DROP_IN"
-
-# Write the drop-in configuration file
+[ -d /etc/sysctl.d ] || mkdir -p /etc/sysctl.d
 cat > "$SYSCTL_DROP_IN" << EOF
 # RMS UDP Buffer Configuration
-# Created by UpdateBuffers.sh on $(date)
+# Created by UpdateBuffers.sh
 # Required for GStreamer UDP streaming (rtspsrc udp-buffer-size, default 16MB)
 
 net.core.rmem_max=$RECOMMENDED_SIZE
 net.core.wmem_max=$RECOMMENDED_SIZE
 EOF
+echo "Wrote $SYSCTL_DROP_IN (rmem_max=wmem_max=$RECOMMENDED_SIZE)"
 
-echo "Created $SYSCTL_DROP_IN with:"
-echo "  net.core.rmem_max=$RECOMMENDED_SIZE"
-echo "  net.core.wmem_max=$RECOMMENDED_SIZE"
-
-# Comment out any rmem_max/wmem_max lines left in /etc/sysctl.conf.
-# It loads after our drop-in at boot and would otherwise override it.
+# 2. Disable any rmem_max/wmem_max lines left in /etc/sysctl.conf. It is loaded
+# after our drop-in at boot (via the 99-sysctl.conf symlink), so a stale line
+# there - e.g. from an older version of this script - would override the
+# drop-in on every reboot. Run this unconditionally: persistence depends on the
+# config files, not on the current live value.
 SYSCTL_CONF="/etc/sysctl.conf"
 if [ -f "$SYSCTL_CONF" ] && grep -Eq '^[[:space:]]*net\.core\.(rmem|wmem)_max[[:space:]]*=' "$SYSCTL_CONF"; then
-    echo -e "\nFound conflicting UDP buffer settings in $SYSCTL_CONF; disabling them so the drop-in wins at boot."
+    echo "Found conflicting settings in $SYSCTL_CONF; disabling them so the drop-in wins at boot."
     cp -n "$SYSCTL_CONF" "${SYSCTL_CONF}.rms.bak" && echo "Backed up to ${SYSCTL_CONF}.rms.bak"
     sed -i -E 's@^([[:space:]]*net\.core\.(rmem|wmem)_max[[:space:]]*=.*)@# Disabled by UpdateBuffers.sh: \1@' "$SYSCTL_CONF"
-    echo "Commented out stale rmem_max/wmem_max lines in $SYSCTL_CONF"
 fi
 
-# Apply changes immediately
-echo "Applying changes..."
-sysctl -p "$SYSCTL_DROP_IN" >/dev/null 2>&1
+# 3. Re-apply all sysctl config the same way systemd does at boot, so the values
+# shown below reflect what will actually survive a reboot.
+echo "Applying..."
+sysctl --system >/dev/null 2>&1
 
-echo -e "\nAFTER CHANGES:"
+echo
+echo "AFTER:"
 show_settings
+echo
 
-echo -e "\nDone! Settings will persist across reboots via $SYSCTL_DROP_IN"
+# 4. Verify the effective value is what we want. If something still overrides it,
+# report every file that defines it so the culprit is easy to find.
+current=$(sysctl -n net.core.rmem_max)
+if [ "$current" -ge "$RECOMMENDED_SIZE" ]; then
+    echo "Done! net.core.rmem_max is $(human_readable $current); it will persist across reboots via $SYSCTL_DROP_IN"
+else
+    echo "WARNING: net.core.rmem_max is still $(human_readable $current) after applying all config."
+    echo "Something sets it lower after our drop-in. Files that define it:"
+    grep -rnE 'net\.core\.(rmem|wmem)_max' /etc/sysctl.conf /etc/sysctl.d/ /run/sysctl.d/ /usr/lib/sysctl.d/ /lib/sysctl.d/ 2>/dev/null
+    exit 1
+fi
