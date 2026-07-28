@@ -13,8 +13,11 @@ from __future__ import print_function, division, absolute_import
 
 import numpy as np
 
+from scipy.spatial import cKDTree
+
 from RMS.Astrometry.StarClasses import PairedStars
-from RMS.Astrometry.ApplyAstrometry import extinctionCorrectionTrueToApparent, raDecToXYPP
+from RMS.Astrometry.ApplyAstrometry import extinctionCorrectionTrueToApparent, raDecToXYPP, \
+    getFOVSelectionRadius, xyToRaDecPP
 
 
 # Default filtering parameters
@@ -22,6 +25,55 @@ DEFAULT_PHOTOMETRIC_SIGMA = 2.5
 DEFAULT_BLEND_FWHM_MULT = 2.0  # Multiplier of FWHM for blending detection radius
 DEFAULT_BLEND_MAG_MARGIN = 0.3  # Margin above limiting magnitude for blend check
 DEFAULT_BLEND_PULL_PX = 0.5  # Photocentre pull (px) above which a neighbour makes a blend
+
+# Margin applied to the FOV selection radius when pre-filtering the catalog. The radius
+#   already circumscribes the image corners, so the margin only has to cover neighbours
+#   sitting a few pixels outside the frame - it is generous rather than tight.
+DEFAULT_FOV_RADIUS_MARGIN = 1.5
+
+
+def catalogStarsInFOV(catalog_ra, catalog_dec, platepar, jd, margin=DEFAULT_FOV_RADIUS_MARGIN):
+    """ Mask of the catalog stars which lie inside the FOV cone at the given time.
+
+    Stars behind the camera can reverse-project into valid-looking pixel coordinates, so a
+    cone around the pointing direction is used to reject them before projecting.
+
+    Arguments:
+        catalog_ra: [ndarray] Catalog star right ascensions (deg).
+        catalog_dec: [ndarray] Catalog star declinations (deg).
+        platepar: [Platepar] Platepar for the FOV geometry.
+        jd: [float] Julian date.
+
+    Keyword arguments:
+        margin: [float] Multiplier applied to the FOV selection radius.
+            Default is DEFAULT_FOV_RADIUS_MARGIN.
+
+    Returns:
+        in_fov: [ndarray] Boolean mask, True for stars inside the cone.
+    """
+    # Radius which includes the image corners, computed by projecting them through the
+    #   platepar (distortion included) instead of assuming the central F_scale holds all
+    #   the way out to the corners
+    fov_radius = min(getFOVSelectionRadius(platepar)*margin, 90)
+
+    # Centre the cone on the pointing at THIS jd. platepar.RA_d/dec_d is the pointing at
+    #   platepar.JD, and on an alt-az camera the two drift ~15 deg/hour apart, which would
+    #   eat the margin above whenever a platepar is reused across a night.
+    _, ra_centre, dec_centre, _ = xyToRaDecPP([jd], [platepar.X_res/2.0], [platepar.Y_res/2.0], [1],
+                                              platepar, extinction_correction=False, jd_time=True)
+
+    ra_centre = np.radians(ra_centre[0])
+    dec_centre = np.radians(dec_centre[0])
+
+    ra_rad = np.radians(catalog_ra)
+    dec_rad = np.radians(catalog_dec)
+
+    # Spherical angular distance from the pointing direction to each catalog star
+    cos_ang_dist = (np.sin(dec_centre)*np.sin(dec_rad)
+                    + np.cos(dec_centre)*np.cos(dec_rad)*np.cos(ra_rad - ra_centre))
+    cos_ang_dist = np.clip(cos_ang_dist, -1, 1)
+
+    return np.degrees(np.arccos(cos_ang_dist)) < fov_radius
 
 
 def filterPhotometricOutliers(paired_stars, platepar, jd, sigma_threshold=DEFAULT_PHOTOMETRIC_SIGMA,
@@ -194,23 +246,7 @@ def filterBlendedStars(paired_stars, catalog_stars, platepar, jd, lim_mag,
     # Filter to stars actually in front of the camera (within FOV + margin)
     # This prevents false positives from stars behind the camera that could
     # project to valid-looking pixel coordinates
-    ra_rad = np.radians(catalog_ra)
-    dec_rad = np.radians(catalog_dec)
-    ra_center = np.radians(platepar.RA_d)
-    dec_center = np.radians(platepar.dec_d)
-
-    # Spherical angular distance from camera pointing to each catalog star
-    cos_ang_dist = (np.sin(dec_center) * np.sin(dec_rad) +
-                    np.cos(dec_center) * np.cos(dec_rad) * np.cos(ra_rad - ra_center))
-    cos_ang_dist = np.clip(cos_ang_dist, -1, 1)
-    ang_dist_deg = np.degrees(np.arccos(cos_ang_dist))
-
-    # Estimate FOV radius from platepar (F_scale is px/deg), with margin
-    fov_diagonal = np.sqrt(platepar.X_res**2 + platepar.Y_res**2)
-    fov_radius = (fov_diagonal / 2) / platepar.F_scale * 1.5  # 50% margin
-    fov_radius = min(fov_radius, 90)  # Cap at 90 degrees
-
-    in_fov = ang_dist_deg < fov_radius
+    in_fov = catalogStarsInFOV(catalog_ra, catalog_dec, platepar, jd)
     catalog_ra = catalog_ra[in_fov]
     catalog_dec = catalog_dec[in_fov]
     catalog_mag = catalog_mag[in_fov]
@@ -227,18 +263,36 @@ def filterBlendedStars(paired_stars, catalog_stars, platepar, jd, lim_mag,
     all_matched_x, all_matched_y = raDecToXYPP(
         np.array(matched_ra_list), np.array(matched_dec_list), jd, platepar)
 
-    # Compute distance from each matched star to all bright catalog stars using
-    # broadcasting, in catalog chunks so peak memory stays bounded no matter how
-    # many catalog stars survived the pre-filters
-    # Shape per chunk: (n_matched, chunk)
+    # Every matched star is inside the image, so a catalog star further outside the frame
+    # than the largest blend radius can never be a blend neighbour. This is exact in the
+    # units that matter (pixels) and removes most of what the cone pre-filter lets through.
+    in_img = ((catalog_x > -r_max) & (catalog_x < platepar.X_res + r_max)
+              & (catalog_y > -r_max) & (catalog_y < platepar.Y_res + r_max))
+    catalog_x = catalog_x[in_img]
+    catalog_y = catalog_y[in_img]
+    catalog_mag = catalog_mag[in_img]
+
+    if len(catalog_x) == 0:
+        return paired_stars, 0
+
+    # Look up only the catalog stars within reach of each matched star instead of forming an
+    # (n_matched x n_catalog) distance matrix, so a deep catalog cannot allocate the multi-GB
+    # arrays that used to get the process OOM-killed, and there is no chunk size to tune.
+    # A radius query rather than k-nearest: the threat criterion below depends on brightness,
+    # so a more distant but brighter neighbour can be the one that matters.
+    tree = cKDTree(np.column_stack([catalog_x, catalog_y]))
+    neighbour_lists = tree.query_ball_point(np.column_stack([all_matched_x, all_matched_y]), r_max)
+
     n_matched = len(check_indices)
-    chunk_size = max(1, int(5e6) // n_matched)
     threat = np.zeros(n_matched, dtype=bool)
-    for c0 in range(0, len(catalog_x), chunk_size):
-        c1 = c0 + chunk_size
-        dx = all_matched_x[:, np.newaxis] - catalog_x[np.newaxis, c0:c1]
-        dy = all_matched_y[:, np.newaxis] - catalog_y[np.newaxis, c0:c1]
-        dist_matrix = np.sqrt(dx**2 + dy**2)
+    for k, neighbour_idx in enumerate(neighbour_lists):
+
+        if not len(neighbour_idx):
+            continue
+
+        neighbour_idx = np.asarray(neighbour_idx, dtype=int)
+        dist = np.hypot(catalog_x[neighbour_idx] - all_matched_x[k],
+                        catalog_y[neighbour_idx] - all_matched_y[k])
 
         # Physical blend criterion: a neighbour is a threat only if it pulls the blended
         # photocentre enough to corrupt the astrometry. A neighbour with flux ratio f at
@@ -247,11 +301,11 @@ def filterBlendedStars(paired_stars, catalog_stars, platepar, jd, lim_mag,
         # scales with a deep catalog (2x FWHM can be tens of arcminutes of sky, and some
         # faint neighbour is almost always inside it - but a mag 9 speck cannot move the
         # centroid of a mag 3 star).
-        flux_ratio = 10.0**(-0.4*(catalog_mag[np.newaxis, c0:c1] - matched_mags[:, np.newaxis]))
-        pull_px_matrix = dist_matrix*flux_ratio/(1.0 + flux_ratio)
-        threat |= np.any(
-            (dist_matrix < blend_radii[:, np.newaxis]) & (dist_matrix > 0.1)
-            & (pull_px_matrix > pull_px), axis=1)
+        flux_ratio = 10.0**(-0.4*(catalog_mag[neighbour_idx] - matched_mags[k]))
+        pull_px_arr = dist*flux_ratio/(1.0 + flux_ratio)
+
+        # Distances are already within r_max; apply this star's own blend radius
+        threat[k] = np.any((dist < blend_radii[k]) & (dist > 0.1) & (pull_px_arr > pull_px))
 
     for k, idx in enumerate(check_indices):
         if threat[k]:
