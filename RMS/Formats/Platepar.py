@@ -1042,6 +1042,54 @@ class Platepar(object):
                 self.x_poly_rev = np.array(xf[4:])
                 self.updateRefAltAz()
 
+                # Outlier rejection + warm-started refit, mirroring the
+                # single-image auto-fit's final step. The night pairs arrive
+                # pre-filtered for blends and photometric outliers, but
+                # geometric outliers (mismatches, double stars matched to the
+                # wrong component) still reach the fit - and they carry high
+                # leverage, in the corners especially. Clip against the fitted
+                # model at 3x global RMSD (floored at 1 px so genuine corner
+                # stars survive) and refit; at most two rounds.
+                for _rej_round in range(2):
+                    resid_groups = []
+                    for _, g_jd, g_img, g_cat in image_groups:
+                        g_cx, g_cy, _ = getCatalogStarsImagePositions(
+                            g_cat, g_jd, self)
+                        resid_groups.append(np.hypot(g_cx - g_img[:, 0],
+                                                     g_cy - g_img[:, 1]))
+                    all_res = np.concatenate(resid_groups)
+                    rej_thr = max(3.0*float(np.sqrt(np.mean(all_res**2))), 1.0)
+                    n_reject = int(np.sum(all_res > rej_thr))
+                    if n_reject == 0:
+                        break
+
+                    pruned = []
+                    for (g_id, g_jd, g_img, g_cat), g_res in zip(image_groups,
+                            resid_groups):
+                        g_keep = g_res <= rej_thr
+                        if int(g_keep.sum()) >= 3:
+                            pruned.append((g_id, g_jd, g_img[g_keep],
+                                           g_cat[g_keep]))
+                    if not pruned:
+                        break
+                    image_groups = pruned
+
+                    print("  Outlier rejection: removed {:d} star(s) above "
+                          "{:.2f} px, refitting...".format(n_reject, rej_thr))
+                    p0 = [self.RA_d/360, self.dec_d/90,
+                          self.pos_angle_ref/360, abs(self.F_scale)]
+                    p0 += self.x_poly_rev.tolist()
+                    res = _lstsqFit(
+                        _calcImageResidualsAstroAndDistortionRadialVectMulti,
+                        p0, (self, image_groups))
+                    xf = res.x
+                    self.RA_d = (360*xf[0]) % 360
+                    self.dec_d = -90 + (90*xf[1] + 90) % (180.000001)
+                    self.pos_angle_ref = (360*xf[2]) % 360
+                    self.F_scale = abs(xf[3])
+                    self.x_poly_rev = np.array(xf[4:])
+                    self.updateRefAltAz()
+
                 # Fit the forward mapping as the numerical INVERSE of the freshly
                 # fitted reverse mapping over the WHOLE frame, not against the sparse
                 # star set. Consistency is the forward map's only job here - the
