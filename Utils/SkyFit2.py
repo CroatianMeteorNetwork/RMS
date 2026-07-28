@@ -154,8 +154,7 @@ from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP, \
     limitingMagnitude, screenNudgeToAzAltDelta, fovCentreZenithDirection
 from RMS.Astrometry.AtmosphericExtinction import atmosphericExtinctionCorrection
 from RMS.Astrometry.StarClasses import CatalogStar, GeoPoint, PlanetPoint, PairedStars
-from RMS.Astrometry.StarFilters import filterPhotometricOutliers, filterBlendedStars, \
-    catalogStarsInFOV
+from RMS.Astrometry.StarFilters import filterPhotometricOutliers, filterBlendedStars
 from RMS.Astrometry.Conversions import date2JD, JD2HourAngle, trueRaDec2ApparentAltAz, \
     apparentAltAz2TrueRADec, J2000_JD, jd2Date, datetime2JD, JD2LST, geo2Cartesian, vector2RaDec, raDec2Vector
 from RMS.Astrometry.AstrometryNet import astrometryNetSolve
@@ -5879,13 +5878,17 @@ class PlateTool(QtWidgets.QMainWindow):
             if test_catalog is None or len(test_catalog) == 0:
                 return 0, 0
 
-            # Filter catalog to stars actually in front of camera (prevent back-projection)
-            # Use angular distance in celestial coordinates, not self.filterCatalogStarsInsideFOV
-            # which incorrectly uses self.cat_lim_mag instead of the test catalog's LM
-            in_fov = catalogStarsInFOV(test_catalog[:, 0], test_catalog[:, 1], self.platepar, jd)
-            test_catalog = test_catalog[in_fov]
+            # Filter the catalog to stars actually in front of the camera, which prevents the
+            #   back-projection fold. filterCatalogStarsInsideFOV takes an explicit lim_mag, so
+            #   the test catalog's own LM is applied rather than self.cat_lim_mag, and it centres
+            #   the cone via computeCentreRADec() at the CURRENT image time. Centring on
+            #   platepar.RA_d/dec_d instead is only valid at platepar.JD: after a whole-night
+            #   refit that epoch can sit hours away from the displayed frame, and the cone then
+            #   points at the wrong sky, so the true FOV stars are excluded and only
+            #   back-projection folds survive.
+            _, test_catalog = self.filterCatalogStarsInsideFOV(test_catalog, lim_mag=test_lm)
 
-            if len(test_catalog) == 0:
+            if (test_catalog is None) or (len(test_catalog) == 0):
                 return 0, 0
 
             cat_x, cat_y, _ = getCatalogStarsImagePositions(test_catalog, jd, self.platepar)
