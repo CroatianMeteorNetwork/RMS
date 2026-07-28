@@ -237,9 +237,23 @@ def generateDemoVideo(config, night_dir, sidecar_path, max_stills=None):
             knots.append((calendar.timegm(
                 FFfile.filenameToDatetime(ff_name).timetuple()), pp))
     if not knots:
-        print("Transparency demo video: no recalibrated platepar knots - "
-              "skipping")
-        return None
+        # A gate-rejected (fully overcast) night has zero recalibrated knots,
+        # but the scoring product was still built against the STATIC nightly
+        # platepar (Cloud scoring falls back for exactly these nights) - and
+        # these are the nights the obstruction verdict is most worth watching.
+        # Render with the same static platepar as a single knot.
+        try:
+            from RMS.Formats.Platepar import findBestPlatepar
+            pp_static = findBestPlatepar(config, night_dir)
+        except Exception:
+            pp_static = None
+        if pp_static is None:
+            print("Transparency demo video: no recalibrated platepar knots "
+                  "and no static platepar - skipping")
+            return None
+        print("Transparency demo video: no recalibrated knots - using the "
+              "static nightly platepar (matches the scoring fallback)")
+        knots.append((float(np.median(t_unix)), pp_static))
     knots.sort()
     knot_times = np.array([t for t, _ in knots])
     knot_pps = [pp for _, pp in knots]
