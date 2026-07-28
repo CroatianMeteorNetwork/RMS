@@ -67,6 +67,11 @@ if sys.version_info.major == 3:
     unicode = str
 
 
+# The minimum number of stars that has to remain in the robust photometric fit. Rejecting below this
+#   number makes the fit degenerate (the standard deviation of a fit on 0 or 1 stars is not defined)
+MIN_PHOTOM_FIT_STARS = 3
+
+
 def limitVignettingCoefficient(x_res, y_res, vignetting_coeff, delta_mag=2.5):
     """ Limit the vignetting coefficient so that the drop in brightness in the corner of the image is not
         does not exceed delta_mag magnitudes.
@@ -445,12 +450,30 @@ def photometryFitRobust(px_intens_list, radius_list, catalog_mags, fixed_vignett
         # Skip the rejection in the last iteration
         if i < reject_iters - 1:
 
+            # If the fit is degenerate (e.g. a single star, or a perfect fit), the rejection threshold is
+            #   zero or undefined and would reject every star, leaving nothing to fit in the next
+            #   iteration (which produces a NaN standard deviation). Keep the current fit instead.
+            if (not np.isfinite(fit_stddev)) or (fit_stddev <= 0):
+                break
+
             # Reject all 2 sigma residuals and all larger than 1.0 mag, and re-fit the photometry
             filter_indices = (np.abs(fit_resid) < 2*fit_stddev) & (np.abs(fit_resid) < 1.0)
+
+            # Don't reject if too few stars would remain for a meaningful fit
+            if np.count_nonzero(filter_indices) < min(MIN_PHOTOM_FIT_STARS, len(px_intens_list)):
+                break
+
             px_intens_list = px_intens_list[filter_indices]
             radius_list = radius_list[filter_indices]
             catalog_mags = catalog_mags[filter_indices]
 
+
+    # Make sure that a non-finite standard deviation is never returned, as it would poison every
+    #   computation downstream (e.g. the photometric offset plots and the averaging of the offset
+    #   between neighbouring FF files). A zero standard deviation is treated as "not calibrated"
+    #   by the callers, which is the correct interpretation of a degenerate fit.
+    if not np.isfinite(fit_stddev):
+        fit_stddev = 0.0
 
     return photom_params, fit_stddev, fit_resid, px_intens_list, radius_list, catalog_mags
 
