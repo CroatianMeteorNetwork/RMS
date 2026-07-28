@@ -1891,6 +1891,11 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
                     pt.config.segment_radius = pt.override_segment_radius
                     pt.config.max_feature_ratio = pt.override_max_feature_ratio
                     pt.config.roundness_threshold = pt.override_roundness_threshold
+                    # Sync the LM to the value actually written, not to pt.cat_lim_mag: the
+                    #   file holds it to one decimal, and isConfigModified() compares against
+                    #   this attribute, so storing the unrounded value would report the config
+                    #   as modified again the moment it was saved
+                    pt.config.catalog_mag_limit = config_catalog_lm
                     pt._updateConfigSaveButtonState()
                     results.append("Config saved to: " + dest)
                 except Exception as e:
@@ -4749,6 +4754,13 @@ class PlateTool(QtWidgets.QMainWindow):
             or self.override_segment_radius != getattr(cfg, 'segment_radius', self.override_segment_radius)
             or abs(self.override_max_feature_ratio - getattr(cfg, 'max_feature_ratio', self.override_max_feature_ratio)) > 1e-6
             or abs(self.override_roundness_threshold - getattr(cfg, 'roundness_threshold', self.override_roundness_threshold)) > 1e-6
+            # The catalog LM is written to the config too, so a tuned or hand-set LM has to
+            #   count as an unsaved change - otherwise Save Config stays disabled and there is
+            #   no way to persist it. Compared at the precision it is written with (one
+            #   decimal), so the rounding in _writeStarDetectionConfig cannot leave the config
+            #   looking permanently modified after a save.
+            or abs(getattr(self, 'cat_lim_mag', 0.0)
+                   - getattr(cfg, 'catalog_mag_limit', getattr(self, 'cat_lim_mag', 0.0))) > 0.05
         )
 
     def _updateConfigSaveButtonState(self):
@@ -4769,6 +4781,10 @@ class PlateTool(QtWidgets.QMainWindow):
 
         self.updateLeftLabels()
         self.updateStars()
+
+        # The LM is part of what Save Config writes, so refresh the save button and the
+        #   File Manager's unsaved indicator
+        self._updateConfigSaveButtonState()
 
 
     def toggleStarDetectionOverride(self):
@@ -5328,6 +5344,11 @@ class PlateTool(QtWidgets.QMainWindow):
             # Store tuned LM for restoration after fitting (balancing may change it)
             self.tuned_cat_lim_mag = best_lm
             self.catalog_lm_tuned = True
+
+            # The tuned LM is an unsaved config change in its own right. It usually rides
+            #   along with the tuned segment_radius, but flag it explicitly so a tune that
+            #   only moves the LM still offers to save.
+            self._updateConfigSaveButtonState()
 
             # Count visible catalog stars at new LM (filter to FOV first to prevent back-projection)
             _, catalog_in_fov = self.filterCatalogStarsInsideFOV(self.catalog_stars)
