@@ -204,3 +204,25 @@ def test_load_accepts_upper_saturated_model(model_dict, tmp_path):
         stationID = "US005A"
 
     assert LightDomeModel.load(Cfg()) is not None
+
+
+def test_fit_quality_warnings_bowl_degeneracy(model_dict):
+    # A q0 pinned at its upper bound (LP bowl collinear with LM0 - the USC0K
+    # symptom: fake extreme light pollution on the render at a pristine site)
+    # must warn without blocking
+    from RMS.LightDomeModel import (blockingQualityIssues, fitQualityWarnings)
+
+    model_dict["q0"] = 2.97
+    model_dict["h0"] = 38.0
+    warnings = fitQualityWarnings(model_dict)
+    assert len(warnings) == 1 and "q0=" in warnings[0]
+    assert blockingQualityIssues(model_dict) == []
+
+    # Healthy bowl: clean
+    model_dict["q0"] = 1.0
+    assert fitQualityWarnings(model_dict) == []
+
+    # Harmonic amplitude at its bound
+    model_dict["harmonics"] = [dict(order=1, A=10.0**3.45, phi=100.0, h=20.0)]
+    warnings = fitQualityWarnings(model_dict)
+    assert len(warnings) == 1 and "harmonic order 1 amplitude" in warnings[0]

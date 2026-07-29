@@ -109,6 +109,61 @@ def fitQualityIssues(model_dict):
     return issues
 
 
+def fitQualityWarnings(model_dict):
+    """ Non-blocking degeneracy diagnostics: symptoms that corrupt the model's
+    INTERPRETATION (renders, absolute brightness, extrapolation) but not its
+    detection scoring, because a compensating parameter keeps the fitted
+    combination calibrated where the trials are.
+
+    The canonical case (observed on USC0K, the darkest site in the fleet): a
+    broad LP bowl is nearly flat across the FOV, collinear with a constant LM0
+    offset - the optimizer ran q0 to its upper bound (a fictitious ~1000x
+    light-pollution dome, ~2.9 mag) and inflated every LM0 to compensate. The
+    dome RENDER showed extreme light pollution while the measured SQM correctly
+    read a pristine sky. Scoring was fine; the picture lied.
+
+    These must never block adoption or evict a model (that would push a
+    working station to the scalar path over a cosmetic defect) - they travel
+    in the model file for fleet visibility and print at fit time.
+
+    Return:
+        warnings: [list of str] One message per symptom; empty when clean.
+    """
+
+    warnings = []
+
+    # Bounds mirror the optimizer bounds in Utils.FitLightDome (base_bounds /
+    # order_bounds); q0 and log10(A) are log10 brightness amplitudes
+    q0 = float(model_dict.get("q0", 0.0))
+    if q0 >= 3.0 - FIT_BOUND_TOL:
+        warnings.append("q0={:.2f} pinned at the upper fit bound 3.0 - the LP "
+            "bowl ({:.0f}x zenith-natural, {:.1f} mag) is degenerate with a "
+            "constant LM0 offset (broad bowl, h0={:.0f} deg); brightness "
+            "renders and extrapolation are unreliable".format(
+            q0, 10.0**q0, 1.25*np.log10(1.0 + 10.0**q0),
+            float(model_dict.get("h0", 0.0))))
+    # A q0 at the LOWER bound is the optimizer correctly turning the bowl off
+    # at a dark site - expected, not flagged. The bowl-shape bounds are only
+    # meaningful when the bowl itself carries brightness.
+    h0 = float(model_dict.get("h0", 20.0))
+    if (q0 > -2.0 + FIT_BOUND_TOL) and ((h0 <= 5.0 + 0.5) or (h0 >= 60.0 - 0.5)):
+        warnings.append("h0={:.1f} deg at a fit bound - the bowl altitude "
+            "profile is unconstrained".format(h0))
+
+    for h in model_dict.get("harmonics", []):
+        log_a = np.log10(max(float(h.get("A", 0.0)), 1e-12))
+        if log_a >= 3.5 - FIT_BOUND_TOL:
+            warnings.append("harmonic order {:d} amplitude at the fit bound "
+                "(log10 A={:.2f}) - degenerate azimuthal term".format(
+                int(h.get("order", 0)), log_a))
+        hh = float(h.get("h", 20.0))
+        if (hh <= 3.0 + 0.5) or (hh >= 60.0 - 0.5):
+            warnings.append("harmonic order {:d} alt scale {:.1f} deg at a "
+                "fit bound".format(int(h.get("order", 0)), hh))
+
+    return warnings
+
+
 def blockingQualityIssues(model_dict):
     """ The subset of quality issues that make a model UNUSABLE for scoring, for
     every camera in it - not just the flagged one. A joint site fit with any camera

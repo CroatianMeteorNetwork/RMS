@@ -41,7 +41,7 @@ from RMS.Astrometry.ApplyAstrometry import raDecToXYPP, xyToRaDecPP
 from RMS.Astrometry.Conversions import date2JD, jd2Date, raDec2AltAz
 from RMS.Routines.MaskImage import getMaskFile
 from RMS.Math import pointInsideConvexPolygonSphere
-from RMS.LightDomeModel import (DOME_CATALOG_LIM_MAG, FIT_BOUND_TOL, LIGHT_DOME_FILE_SUFFIX,
+from RMS.LightDomeModel import (fitQualityWarnings, DOME_CATALOG_LIM_MAG, FIT_BOUND_TOL, LIGHT_DOME_FILE_SUFFIX,
     LM0_FIT_MIN, S_FIT_MAX, LightDomeModel, fitQualityIssues)
 
 
@@ -677,6 +677,13 @@ def fitLightDome(station_configs, dates=None, max_order=3, moon_phase_max=MOON_P
     model_dict["quality_issues"] = fitQualityIssues(model_dict)
     for msg in model_dict["quality_issues"]:
         print("WARNING: degenerate fit: {:s}".format(msg))
+
+    # Interpretation-level degeneracies (e.g. the LP bowl collinear with LM0):
+    # recorded and printed, never blocking - scoring stays calibrated, but
+    # brightness renders and extrapolation from this model are unreliable
+    model_dict["quality_warnings"] = fitQualityWarnings(model_dict)
+    for msg in model_dict["quality_warnings"]:
+        print("NOTE: fit degeneracy (non-blocking): {:s}".format(msg))
 
     print("\nFitted model ({:d} harmonic order(s), catalog depth {:.2f}):".format(
         use, lim_mag))
