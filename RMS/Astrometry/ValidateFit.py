@@ -21,9 +21,18 @@ import numpy as np
 from scipy.spatial import cKDTree
 
 from RMS.Astrometry.ApplyAstrometry import raDecToXYPP, xyToRaDecPP
-from RMS.Astrometry.Conversions import date2JD, trueRaDec2ApparentAltAz, apparentAltAz2TrueRADec
+from RMS.Astrometry.Conversions import date2JD
 from RMS.Formats.FFfile import filenameToDatetime
 from RMS.Math import angularSeparation
+
+
+def _skyUnitVectors(ra_deg, dec_deg):
+    """ Unit vectors of the given equatorial coordinates (degrees), one row per point. """
+
+    ra = np.radians(ra_deg)
+    dec = np.radians(dec_deg)
+
+    return np.column_stack([np.cos(dec)*np.cos(ra), np.cos(dec)*np.sin(ra), np.sin(dec)])
 
 
 def _framePositions(star_data, x_res, y_res, n_grid, quant_px):
@@ -301,8 +310,7 @@ def validateFit(platepar, calstars, catalog_stars, frames=None, match_radius=10.
             continue
 
         drift_arcmin = None
-        centre_radec_ref = None
-        centre_radec_frame = None
+        pointing_frame = None
         pp_frame = platepar
 
         if pointing_refit:
@@ -333,8 +341,11 @@ def validateFit(platepar, calstars, catalog_stars, frames=None, match_radius=10.
                     extinction_correction=False)
                 drift_arcmin = 60*np.degrees(angularSeparation(np.radians(ra0[0]),
                     np.radians(dec0[0]), np.radians(ra1[0]), np.radians(dec1[0])))
-                centre_radec_ref = (float(ra0[0]), float(dec0[0]))
-                centre_radec_frame = (float(ra1[0]), float(dec1[0]))
+
+                # The frame's full fitted pointing (roll included), so buildRefitGroups can
+                # reconstruct pp_frame and transfer the whole pointing delta to the pairs
+                pointing_frame = (float(pp_frame.RA_d), float(pp_frame.dec_d),
+                                  float(pp_frame.pos_angle_ref))
 
                 # Re-project and re-match with the drift-corrected pointing
                 cat_x, cat_y, inside = projectCatalog(pp_frame)
@@ -458,8 +469,7 @@ def validateFit(platepar, calstars, catalog_stars, frames=None, match_radius=10.
                                   n_blend_rejected=n_blend, n_photometric_rejected=n_phot,
                                   n_quality_culled=n_culled,
                                   n_contention=n_contention, drift_arcmin=drift_arcmin,
-                                  centre_radec_ref=centre_radec_ref,
-                                  centre_radec_frame=centre_radec_frame))
+                                  pointing_frame=pointing_frame))
 
     # Per-frame sanity gate: a frame whose pointing refit converged to the wrong place
     # (clouds, star-poor field, contaminated initial matching) carries a systematic offset
@@ -608,9 +618,11 @@ def buildRefitGroups(results, platepar, max_per_cell=15, n_grid=8, drift_correct
     mount drifts over the night (validateFit measures this per frame, often an arcminute).
     Left uncorrected, that drift enters the fit as a systematic per-frame offset and can
     make the refit worse than the platepar it started from on already-good calibrations.
-    Each group's catalog stars are therefore shifted by the frame's measured pointing
-    offset (first order, in apparent alt/az - the space the mount actually moves in), the
-    same compensation validateFit's per-frame pointing refit applies when measuring.
+    Each group's catalog stars are therefore rotated by the frame's measured pointing
+    delta - the exact rigid rotation between the frame's fitted pointing and the reference
+    pointing, roll included (a roll delta alone moves corner stars by r*droll, the same
+    order as the centre drift) - the same compensation validateFit's per-frame pointing
+    refit applies when measuring.
 
     The set is spatially balanced with a per-cell cap so the star-rich image centre does
     not dominate the fit; corner cells rarely reach the cap, so their pairs are all kept.
@@ -657,15 +669,12 @@ def buildRefitGroups(results, platepar, max_per_cell=15, n_grid=8, drift_correct
         if report is None:
             continue
         g = groups.setdefault(i, dict(ff_name=report["ff_name"], jd=report["jd"],
-                                      centre_ref=report.get("centre_radec_ref"),
-                                      centre_frame=report.get("centre_radec_frame"),
+                                      pointing_frame=report.get("pointing_frame"),
                                       img=[], cat=[]))
         g["img"].append([results["star_x"][k], results["star_y"][k],
                          results["star_intens"][k]])
         g["cat"].append([results["star_ra"][k], results["star_dec"][k],
                          results["star_mag"][k]])
-
-    lat, lon = platepar.lat, platepar.lon
 
     image_groups = []
     for i in sorted(groups):
@@ -675,27 +684,45 @@ def buildRefitGroups(results, platepar, max_per_cell=15, n_grid=8, drift_correct
 
         cat_arr = np.array(g["cat"])
 
-        # First-order drift compensation: shift the catalog by the frame's measured pointing
-        # offset in apparent alt/az, so the single fitted pointing is consistent with every
-        # frame's pairs
-        if drift_correction and (g["centre_ref"] is not None) and (g["centre_frame"] is not None):
+        # Drift compensation: rotate the catalog by the exact rigid rotation between the
+        # frame's fitted pointing and the reference pointing, so the single fitted pointing
+        # is consistent with every frame's pairs. The rotation is recovered from anchor
+        # points projected through both pointings (Kabsch), which carries the full pointing
+        # delta - centre shift AND roll - with no small-angle approximation.
+        if drift_correction and (g["pointing_frame"] is not None):
             jd_f = g["jd"]
 
-            # refraction=False throughout: the correction is a rigid geometric rotation, and
-            # the refraction model does not invert exactly (up to ~4 arcsec of round-trip
-            # bias at low altitude, which would be baked into every corrected pair)
-            az_r, alt_r = trueRaDec2ApparentAltAz(g["centre_ref"][0], g["centre_ref"][1],
-                                                  jd_f, lat, lon, refraction=False)
-            az_f, alt_f = trueRaDec2ApparentAltAz(g["centre_frame"][0], g["centre_frame"][1],
-                                                  jd_f, lat, lon, refraction=False)
-            daz = (az_r - az_f + 180.0)%360.0 - 180.0
-            dalt = alt_r - alt_f
+            # refraction=False on both projections: the two platepars share distortion and
+            # scale, so their refraction-free sky mappings differ by an exact rotation. The
+            # refraction model does not invert exactly (up to ~4 arcsec of round-trip bias
+            # at low altitude, which would be baked into every corrected pair); it is
+            # instead applied once, at fit time, at each star's compensated position.
+            pp_ref = copy.deepcopy(platepar)
+            pp_ref.refraction = False
+            pp_frm = copy.deepcopy(pp_ref)
+            pp_frm.RA_d, pp_frm.dec_d, pp_frm.pos_angle_ref = g["pointing_frame"]
 
-            for row in cat_arr:
-                azim, alt = trueRaDec2ApparentAltAz(row[0], row[1], jd_f, lat, lon,
-                                                    refraction=False)
-                row[0], row[1] = apparentAltAz2TrueRADec((azim + daz)%360.0, alt + dalt,
-                                                         jd_f, lat, lon, refraction=False)
+            ax = np.array([0.5, 0.2, 0.8, 0.2, 0.8])*platepar.X_res
+            ay = np.array([0.5, 0.2, 0.2, 0.8, 0.8])*platepar.Y_res
+            jd_arr = np.full(len(ax), jd_f)
+            lvl = np.ones(len(ax))
+            _, ra_f, dec_f, _ = xyToRaDecPP(jd_arr, ax, ay, lvl, pp_frm,
+                extinction_correction=False, jd_time=True, precompute_pointing_corr=True)
+            _, ra_r, dec_r, _ = xyToRaDecPP(jd_arr, ax, ay, lvl, pp_ref,
+                extinction_correction=False, jd_time=True, precompute_pointing_corr=True)
+
+            # Kabsch: the rotation mapping the frame-pointing directions onto the
+            # reference-pointing directions
+            vec_f = _skyUnitVectors(np.array(ra_f), np.array(dec_f))
+            vec_r = _skyUnitVectors(np.array(ra_r), np.array(dec_r))
+            H = vec_f.T.dot(vec_r)
+            U, _, Vt = np.linalg.svd(H)
+            d = np.sign(np.linalg.det(Vt.T.dot(U.T)))
+            rot = Vt.T.dot(np.diag([1.0, 1.0, d])).dot(U.T)
+
+            v_corr = _skyUnitVectors(cat_arr[:, 0], cat_arr[:, 1]).dot(rot.T)
+            cat_arr[:, 0] = np.degrees(np.arctan2(v_corr[:, 1], v_corr[:, 0]))%360.0
+            cat_arr[:, 1] = np.degrees(np.arcsin(np.clip(v_corr[:, 2], -1.0, 1.0)))
 
         image_groups.append((g["ff_name"], g["jd"], np.array(g["img"]), cat_arr))
 

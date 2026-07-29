@@ -13102,8 +13102,8 @@ class PlateTool(QtWidgets.QMainWindow):
                                              self.platepar.X_res, self.platepar.Y_res)
 
         # The pair set is drift-compensated: the multi-image fit uses a single pointing for
-        # all frames, so each frame's measured pointing offset is removed from its pairs
-        # first (refraction-free rigid rotation - see buildRefitGroups)
+        # all frames, so each frame's measured pointing delta - centre shift and roll - is
+        # removed from its pairs first (refraction-free rigid rotation - see buildRefitGroups)
         image_groups = buildRefitGroups(self.night_validation, self.platepar,
                                         drift_correction=True)
         n_pairs = sum(len(img_stars) for _, _, img_stars, _ in image_groups)
