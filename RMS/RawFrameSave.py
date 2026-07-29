@@ -186,19 +186,40 @@ class RawFrameSaver(multiprocessing.Process):
         self.exit.set()
         log.debug('Raw frame saver exit flag set')
 
-        # flush any frames whose TS array still has data
+        # Flush any frames whose TS array still has data.
+        #
+        # The shared arrays may already be gone by the time we get here: stop() frees
+        # them itself (see the `del`s below), and BufferedCapture.releaseRawArrays()
+        # calls stop() both on shutdown AND on every day/night mode switch, where the
+        # saver is torn down before the arrays are re-created for the new frame shape.
+        # Zipping None then raised "TypeError: 'NoneType' object is not iterable" out
+        # of a teardown path, which RMS logged as a traceback on a perfectly healthy
+        # station (twice a day, per camera). There is nothing to flush in that case.
+        array1 = getattr(self, 'array1', None)
+        array2 = getattr(self, 'array2', None)
+        timestamps1 = getattr(self, 'timeStamps1', None)
+        timestamps2 = getattr(self, 'timeStamps2', None)
+
+        if array1 is None and array2 is None:
+            log.debug('Raw frame saver buffers already released - '
+                      'nothing to flush')
+
         leftovers = []
-        for frame, ts in zip(self.array1, self.timeStamps1):
-            if ts: leftovers.append((frame.copy(), float(ts)))
-        for frame, ts in zip(self.array2, self.timeStamps2):
-            if ts: leftovers.append((frame.copy(), float(ts)))
+        if (array1 is not None) and (timestamps1 is not None):
+            for frame, ts in zip(array1, timestamps1):
+                if ts: leftovers.append((frame.copy(), float(ts)))
+        if (array2 is not None) and (timestamps2 is not None):
+            for frame, ts in zip(array2, timestamps2):
+                if ts: leftovers.append((frame.copy(), float(ts)))
         if leftovers:
             log.info("Flushing %d tail-end raw frames before shutdown", len(leftovers))
             self.saveFramesToDisk(leftovers, self.daytime_mode)
 
             # mark buffers consumed so run() won’t resave them
-            self.timeStamps1.fill(0)
-            self.timeStamps2.fill(0)
+            if timestamps1 is not None:
+                timestamps1.fill(0)
+            if timestamps2 is not None:
+                timestamps2.fill(0)
             self.start_time1.value = 0
             self.start_time2.value = 0
 
