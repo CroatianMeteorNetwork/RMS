@@ -5004,7 +5004,9 @@ class PlateTool(QtWidgets.QMainWindow):
     def isConfigModified(self):
         """Check if Star Detection overrides differ from the loaded config."""
         cfg = self.config
-        return (
+        # bool() guards against numpy scalars leaking through the or-chain (e.g. a tuned
+        # cat_lim_mag is a numpy float, and PyQt's setEnabled rejects numpy.bool)
+        return bool(
             abs(self.override_star_gate_factor - getattr(cfg, 'star_gate_factor', self.override_star_gate_factor)) > 1e-6
             or self.override_neighborhood_size != getattr(cfg, 'neighborhood_size', self.override_neighborhood_size)
             or self.override_config_max_stars != getattr(cfg, 'max_stars', self.override_config_max_stars)
@@ -6271,7 +6273,9 @@ class PlateTool(QtWidgets.QMainWindow):
             return None
 
         print(f"    -> Selected LM={final_lm:.1f} with {final_matches} matches")
-        return final_lm
+        # Plain float: the LM candidates come from np.arange, and a leaked np.float64 here
+        # propagates into cat_lim_mag, the config, and Qt calls that reject numpy scalars
+        return float(final_lm)
 
 
     def _writeStarDetectionConfig(self, config_path, catalog_mag_limit):
