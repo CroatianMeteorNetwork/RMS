@@ -575,6 +575,14 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False,
                                      "_star_scoring.npz", "_transparency_map.npz", "_transparency_map_tree.npz")):
                 extra_files.append(os.path.join(night_data_dir, file_name))
 
+        # The trailing star calibration travels with the night: it is the state
+        # seed an offline replay needs (post-night snapshot), and it makes
+        # calibration health (accumulation, resets) visible fleet-wide
+        calibration_path = os.path.join(os.path.expanduser(config.data_dir),
+            "{:s}_star_calibration.npz".format(str(config.stationID)))
+        if os.path.isfile(calibration_path):
+            extra_files.append(calibration_path)
+
 
     # If FFs are not uploaded, choose two to upload
     if config.upload_mode > 1:

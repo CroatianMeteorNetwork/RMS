@@ -66,7 +66,14 @@ import numpy as np
 #                       RMS.PatchPhotometry). Cloud/transparency consumers count
 #                       -2 as a detection; astrometry and photometry consumers
 #                       must use only rows >= 0 (a real CALSTARS reference).
-SCHEMA_VERSION = 4
+# v5: the raw forced-photometry channel is persisted, making the product
+#     sufficient to replay the scoring pass without the FF files (offline
+#     fleet replay; also the source for rebuilding calibrations off-station).
+#     star_forced_flux - [n_stars] float32 aperture flux (ADU) on the FF
+#                        avepixel for the bright set, NaN where unmeasured.
+#     frame_noise      - [n_frames] float32 patch-photometry noise scale of
+#                        the frame (NaN when the FF was unreadable).
+SCHEMA_VERSION = 5
 
 FILE_SUFFIX = "star_scoring.npz"
 
@@ -106,6 +113,8 @@ def saveStarScoring(dir_path, night_name, header, frames, stars):
         moon_phase=np.asarray(frames["moon_phase"], dtype=np.float32),
         n_detected=np.asarray(frames["n_detected"], dtype=np.int32),
         in_flux_domain=np.asarray(frames["in_flux_domain"], dtype=bool),
+        frame_noise=np.asarray(frames.get("frame_noise",
+            np.full(len(frames["frame_names"]), np.nan)), dtype=np.float32),
         p_chance=np.asarray(frames.get("p_chance",
             np.zeros(len(frames["frame_names"]))), dtype=np.float32),
         cell_bg=np.asarray(frames.get("cell_bg",
@@ -116,6 +125,8 @@ def saveStarScoring(dir_path, night_name, header, frames, stars):
             np.full(len(stars["star_frame"]), -1)), dtype=np.int32),
         star_flux_snr=np.asarray(stars.get("star_flux_snr",
             np.full(len(stars["star_frame"]), np.nan)), dtype=np.float16),
+        star_forced_flux=np.asarray(stars.get("star_forced_flux",
+            np.full(len(stars["star_frame"]), np.nan)), dtype=np.float32),
         star_x=np.asarray(stars["star_x"], dtype=np.float32),
         star_y=np.asarray(stars["star_y"], dtype=np.float32),
         star_mag=np.asarray(stars["star_mag"], dtype=np.float16),
@@ -142,3 +153,45 @@ def loadStarScoring(path):
                  if k.startswith("star_") or k == "calstars_row"}
 
     return header, frames, stars
+
+
+FORCED_CACHE_SUFFIX = "forced_flux_cache.npz"
+
+
+def loadForcedFluxCache(path):
+    """ Per-frame forced-photometry channel from a schema >= 5 scoring product.
+
+    Lets the scoring pass replay a night without the FF files: a prior product
+    (typically the station's own, renamed <night>_forced_flux_cache.npz in a
+    replay corpus) supplies the aperture fluxes the FF avepixels produced.
+
+    Return:
+        cache: [dict] ff_name -> dict(cat_id, flux, frame_noise, cell_bg);
+            empty when the product predates v5 or carries no measured fluxes.
+    """
+
+    header, frames, stars = loadStarScoring(path)
+
+    if (int(header.get("schema_version", 0)) < 5)             or ("star_forced_flux" not in stars):
+        return {}
+
+    names = [str(n) for n in frames["frame_names"]]
+    sf = np.asarray(stars["star_frame"], dtype=np.int64)
+    order = np.argsort(sf, kind="stable")
+    bounds = np.searchsorted(sf[order], np.arange(len(names) + 1))
+
+    noise = np.asarray(frames.get("frame_noise", np.full(len(names), np.nan)),
+        dtype=np.float64)
+    cell_bg = np.asarray(frames.get("cell_bg",
+        np.full((len(names), 5, 8), np.nan)), dtype=np.float32)
+    flux = np.asarray(stars["star_forced_flux"], dtype=np.float32)[order]
+    cid = np.asarray(stars["star_cat_id"], dtype=np.int64)[order]
+
+    cache = {}
+    for i, name in enumerate(names):
+        fl = flux[bounds[i]:bounds[i + 1]]
+        if np.any(np.isfinite(fl)):
+            cache[name] = dict(cat_id=cid[bounds[i]:bounds[i + 1]], flux=fl,
+                frame_noise=float(noise[i]), cell_bg=cell_bg[i])
+
+    return cache

@@ -1586,9 +1586,10 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
             epoch = datetime.datetime(1970, 1, 1)
             f_meta = dict(frame_names=[], frame_time_unix=[], sun_alt=[], moon_alt=[],
                           moon_phase=[], n_detected=[], in_flux_domain=[], p_chance=[],
-                          cell_bg=[])
+                          cell_bg=[], frame_noise=[])
             s_arrs = dict(star_frame=[], star_cat_id=[], star_x=[], star_y=[],
-                          star_mag=[], star_p=[], star_flux_snr=[], calstars_row=[])
+                          star_mag=[], star_p=[], star_flux_snr=[], calstars_row=[],
+                          star_forced_flux=[])
             pp_ref = platepar
 
             # Accumulate per-frame ARRAYS and concatenate once. Extending Python
@@ -1613,6 +1614,7 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
                 f_meta["p_chance"].append(float(rec.get("p_chance", 0.0)))
                 f_meta["cell_bg"].append(rec.pop("cell_bg",
                     np.full((5, 8), np.nan, dtype=np.float32)))
+                f_meta["frame_noise"].append(float(rec.pop("frame_noise", np.nan)))
 
                 # Records arrive already floored at STORE_P_MIN (cut at collection
                 # in denseDomeRatios so the faint tail is never held in memory)
@@ -1625,6 +1627,8 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
                 s_arrs["star_p"].append(rec["p"])
                 s_arrs["star_flux_snr"].append(rec.get("flux_snr",
                     np.full(len(rec["x"]), np.nan, dtype=np.float16)))
+                s_arrs["star_forced_flux"].append(rec.pop("forced_flux",
+                    np.full(len(rec["x"]), np.nan, dtype=np.float32)))
                 s_arrs["calstars_row"].append(rec["calstars_row"])
 
             s_arrs = {key: (np.concatenate(chunks) if chunks
@@ -2182,6 +2186,23 @@ def denseDomeRatios(config, dome_model, ff_list, calstars_positions, recalibrate
     expected = {}
     star_records = {}
 
+    # FF-less replay support: a prior scoring product renamed to the cache file
+    # supplies the forced-photometry channel the FF avepixels would have
+    forced_cache = None
+    if collect_stars and (dir_path is not None):
+        from RMS.Formats.StarScoring import FORCED_CACHE_SUFFIX, loadForcedFluxCache
+        cache_path = os.path.join(dir_path, "{:s}_{:s}".format(
+            os.path.basename(os.path.normpath(dir_path)), FORCED_CACHE_SUFFIX))
+        if os.path.isfile(cache_path):
+            try:
+                forced_cache = loadForcedFluxCache(cache_path) or None
+            except Exception as e:
+                log.warning("Forced-flux cache unreadable ({}) - falling back "
+                            "to FF reads".format(e))
+            if forced_cache:
+                log.info("Forced-flux cache loaded: {:d} frames (FF-less "
+                         "replay)".format(len(forced_cache)))
+
     # Usable area for the chance-match floor (same floor the fit models: a catalog
     # star matches either by true detection or by a random detection within the
     # match radius - scoring must include it or expected counts run low exactly
@@ -2256,7 +2277,7 @@ def denseDomeRatios(config, dome_model, ff_list, calstars_positions, recalibrate
             if dir_path is not None:
                 try:
                     bright = p_det[keep] >= FORCED_P_BOOTSTRAP
-                    if np.any(bright):
+                    if np.any(bright) and (forced_cache is None):
                         ff = FFfile.read(dir_path, ff_file)
                         ave = getattr(ff, "avepixel", None)
                         if ave is not None:
@@ -2288,6 +2309,20 @@ def denseDomeRatios(config, dome_model, ff_list, calstars_positions, recalibrate
                 except Exception:
                     # A single unreadable FF must never break the scoring pass
                     pass
+
+            # FF-less replay: source the forced channel from a prior product
+            # (see RMS.Formats.StarScoring.loadForcedFluxCache), joined by the
+            # stable catalog id - the replay's predicted set can differ
+            if (forced_cache is not None) and (ff_file in forced_cache):
+                ce = forced_cache[ff_file]
+                order_c = np.argsort(ce["cat_id"])
+                sc = ce["cat_id"][order_c]
+                kidx = np.asarray(cat_idx[keep], dtype=np.int64)
+                pos = np.searchsorted(sc, kidx)
+                ok = (pos < len(sc)) & (sc[np.minimum(pos, len(sc) - 1)] == kidx)
+                forced_flux[ok] = ce["flux"][order_c][pos[ok]]
+                frame_noise = ce["frame_noise"]
+                cell_bg = ce["cell_bg"].astype(np.float32)
 
             star_records[ff_file] = dict(
                 cat_id=np.asarray(cat_idx[keep], dtype=np.int32),
@@ -2329,7 +2364,8 @@ def denseDomeRatios(config, dome_model, ff_list, calstars_positions, recalibrate
             rec["calstars_row"][promote] = -2
             rec["flux_snr"] = snr.astype(np.float16)
             n_forced += int(promote.sum())
-            del rec["forced_flux"], rec["frame_noise"]
+            # forced_flux and frame_noise stay on the record: the product
+            # persists them (schema v5) so replays never need the FF files
 
         log.info("Forced photometry: {:d} bright-star matches recovered "
                  "(noise floor {:.1f} ADU)".format(n_forced, floor))

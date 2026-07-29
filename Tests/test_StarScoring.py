@@ -56,3 +56,38 @@ def test_unmatched_convention(tmp_path):
     path = saveStarScoring(str(tmp_path), "N", {}, frames, stars)
     _, _, s = loadStarScoring(path)
     assert (s["calstars_row"] >= 0).sum() == 0
+
+
+def test_forced_flux_cache_roundtrip(tmp_path):
+    # v5 persists the forced channel; the cache loader must reproduce it per
+    # frame, and refuse products that predate it
+    import numpy as np
+    from RMS.Formats.StarScoring import (loadForcedFluxCache, saveStarScoring,
+        scoringFileName)
+
+    frames = dict(
+        frame_names=["FF_T_0.fits", "FF_T_1.fits"],
+        frame_time_unix=[0.0, 10.0], sun_alt=[-30, -30], moon_alt=[-5, -5],
+        moon_phase=[0, 0], n_detected=[2, 2], in_flux_domain=[True, True],
+        frame_noise=[3.5, np.nan],
+    )
+    stars = dict(
+        star_frame=[0, 0, 1], star_cat_id=[7, 9, 7], star_x=[1, 2, 1],
+        star_y=[1, 2, 1], star_mag=[3, 4, 3], star_p=[0.9, 0.8, 0.9],
+        calstars_row=[0, -1, 0], star_forced_flux=[1200.0, 800.0, np.nan],
+    )
+    path = saveStarScoring(str(tmp_path), "T", {}, frames, stars)
+
+    cache = loadForcedFluxCache(path)
+    assert list(cache.keys()) == ["FF_T_0.fits"]   # frame 1 has no finite flux
+    e = cache["FF_T_0.fits"]
+    assert set(e["cat_id"]) == {7, 9}
+    assert e["frame_noise"] == 3.5
+
+    # A pre-v5 product yields an empty cache, not an error
+    import json
+    z = dict(np.load(path, allow_pickle=False))
+    hdr = json.loads(str(z["header"])); hdr["schema_version"] = 4
+    z["header"] = json.dumps(hdr)
+    np.savez_compressed(path.replace(".npz", ""), **z)
+    assert loadForcedFluxCache(path) == {}

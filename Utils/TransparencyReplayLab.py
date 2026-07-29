@@ -189,6 +189,15 @@ def replayStation(corpus_dir, station_id, lab_dir, fresh=False):
             for f in glob.glob(os.path.join(src, pattern)):
                 shutil.copy(f, dst)
 
+        # The station's own scoring product doubles as the forced-photometry
+        # cache: the replay has no FF files, so the scoring pass sources the
+        # forced channel from what the station measured (schema v5)
+        ref_scoring = os.path.join(src, night_name + "_star_scoring.npz")
+        if os.path.isfile(ref_scoring):
+            from RMS.Formats.StarScoring import FORCED_CACHE_SUFFIX
+            shutil.copy(ref_scoring, os.path.join(dst,
+                "{:s}_{:s}".format(night_name, FORCED_CACHE_SUFFIX)))
+
         config = _labConfig(dst, station_id, repo_root)
         config.data_dir = state_dir
 
