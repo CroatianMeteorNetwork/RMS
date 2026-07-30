@@ -1597,29 +1597,51 @@ def xyHt2Geo(platepar, x, y, h):
         measurement=False # Disables refraction correction
         )
         
-    # Iterate through the altitudes and azimuths and compute the geo coordinates
-    lat_arr = np.zeros_like(ra_arr)
-    lon_arr = np.zeros_like(ra_arr)
+    # Vectorised path (2026-07-30): the previous per-point Python loop cost
+    # ~30 us/point (cy scalar call boxing + per-point AEGeoidH2LatLonAlt numpy
+    # scalars); on contrail-pipeline workloads (millions of contour points)
+    # this dominated whole processing phases. Identical math:
+    #  - alt/az via the cython-internal loop over the SAME scalar function
+    #  - AEGeoidH2LatLonAlt's lat/lon algebra broadcast over N (its altitude
+    #    output was never used here)
+    from RMS.Astrometry.CyFunctions import cyTrueRaDec2ApparentAltAz_vect
+    from RMS.Astrometry.Conversions import latLonAlt2ECEF, EARTH
 
-    for i in range(len(ra_arr)):
+    jd_np = np.asarray(jd_arr, dtype=np.float64)
+    az_arr, elev_arr = cyTrueRaDec2ApparentAltAz_vect(
+        np.radians(np.asarray(ra_arr, dtype=np.float64)),
+        np.radians(np.asarray(dec_arr, dtype=np.float64)),
+        jd_np, np.radians(platepar.lat), np.radians(platepar.lon),
+        False # Disable refraction correction
+        )
 
-        # Compute the apparent alt/az
-        az, elev = cyTrueRaDec2ApparentAltAz(
-            np.radians(ra_arr[i]), np.radians(dec_arr[i]), jd_arr[i], \
-            np.radians(platepar.lat), np.radians(platepar.lon), 
-            False # Disable refraction correction
-            )
+    lat0 = np.radians(platepar.lat)
+    lon0 = np.radians(platepar.lon)
+    obs_x, obs_y, obs_z = latLonAlt2ECEF(lat0, lon0, platepar.height_wgs84)
 
-        # Convert the apparent alt/az to geo coordinates
-        lat, lon = AEGeoidH2LatLonAlt(
-            np.degrees(az), np.degrees(elev), h[i], 
-            platepar.lat, platepar.lon, platepar.height_wgs84
-            )
-        
-        lat_arr[i] = lat
-        lon_arr[i] = lon
-    
-    return lat_arr, lon_arr
+    # Line-of-sight unit vectors in ENU, rotated to ECEF (explicit rows of the
+    # same R_enu2ecef used by AEGeoidH2LatLonAlt)
+    ce = np.cos(elev_arr); se = np.sin(elev_arr)
+    E_ = ce*np.sin(az_arr); N_ = ce*np.cos(az_arr); U_ = se
+    los_x = -np.sin(lon0)*E_ + (-np.sin(lat0)*np.cos(lon0))*N_ + (np.cos(lat0)*np.cos(lon0))*U_
+    los_y =  np.cos(lon0)*E_ + (-np.sin(lat0)*np.sin(lon0))*N_ + (np.cos(lat0)*np.sin(lon0))*U_
+    los_z =                    (np.cos(lat0))*N_ + (np.sin(lat0))*U_
+
+    h_np = np.asarray(h, dtype=np.float64)
+    r = (h_np - platepar.height_wgs84)/se
+    tx = obs_x + r*los_x
+    ty = obs_y + r*los_y
+    tz = obs_z + r*los_z
+
+    # ecef2LatLonAlt lat/lon algebra, broadcast (altitude part omitted - unused)
+    ep = np.sqrt((EARTH.EQUATORIAL_RADIUS**2 - EARTH.POLAR_RADIUS**2)/(EARTH.POLAR_RADIUS**2))
+    lon_t = np.arctan2(ty, tx)
+    p_ = np.sqrt(tx**2 + ty**2)
+    theta = np.arctan2(tz*EARTH.EQUATORIAL_RADIUS, p_*EARTH.POLAR_RADIUS)
+    lat_t = np.arctan2(tz + (ep**2)*EARTH.POLAR_RADIUS*np.sin(theta)**3, \
+        p_ - (EARTH.E**2)*EARTH.EQUATORIAL_RADIUS*np.cos(theta)**3)
+
+    return np.degrees(lat_t), np.degrees(lon_t)
 
 
 
