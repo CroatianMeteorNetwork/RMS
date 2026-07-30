@@ -204,6 +204,16 @@ def plotStationSkyQuality(config, dome_model=None):
     if lx:
         ax.plot(lx, ly, "v", color="#888", ms=7, fillstyle="none", label="limit (no bias)")
 
+    # A station with ONLY limits (new pod, bias never calibrated) still scans as
+    # "dark site" at a glance - the triangles read as data points unless the
+    # banner says otherwise (observed: a polluted-site pod read as Bortle 3)
+    if lx and not xs:
+        ax.text(0.5, 0.96, "NO ABSOLUTE MEASUREMENTS YET - every point is an "
+            "upper limit (bias uncalibrated); the true sky is BRIGHTER than shown",
+            transform=ax.transAxes, ha="center", va="top", fontsize=10,
+            color="#a03030", fontweight="bold",
+            bbox=dict(boxstyle="round", facecolor="#fff2f2", edgecolor="#a03030"))
+
     ax.invert_yaxis()
     median_alt = float(np.median([a for a in alts if a is not None])) if alts else None
 
