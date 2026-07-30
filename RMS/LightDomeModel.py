@@ -115,12 +115,13 @@ def fitQualityWarnings(model_dict):
     detection scoring, because a compensating parameter keeps the fitted
     combination calibrated where the trials are.
 
-    The canonical case (observed on USC0K, the darkest site in the fleet): a
-    broad LP bowl is nearly flat across the FOV, collinear with a constant LM0
-    offset - the optimizer ran q0 to its upper bound (a fictitious ~1000x
-    light-pollution dome, ~2.9 mag) and inflated every LM0 to compensate. The
-    dome RENDER showed extreme light pollution while the measured SQM correctly
-    read a pristine sky. Scoring was fine; the picture lied.
+    The canonical case (observed on USC0K, a light-polluted site): a broad LP
+    bowl is nearly flat across the FOV, collinear with a constant LM0 offset -
+    the optimizer ran q0 to its upper bound and inflated every LM0 to
+    compensate (LM0 ~8.3 at a polluted site is unphysical; the SPLIT between
+    bowl and LM0 is arbitrary even when the total sky brightness is real).
+    Scoring stays calibrated because only the fitted combination enters it;
+    the render and any extrapolation inherit the arbitrary split.
 
     These must never block adoption or evict a model (that would push a
     working station to the scalar path over a cosmetic defect) - they travel
