@@ -1088,7 +1088,7 @@ def updateCommitHistoryDirectory(remote_urls, target_directory):
     """ Clone only the commit history of a remote repository.
 
     Arguments:
-        remote_urls: [url] the remote url to be cloned/
+        remote_urls: [url] the remote url to be cloned
         target_directory: [path] the directory into which to clone.
 
     Return:
@@ -1108,14 +1108,24 @@ def updateCommitHistoryDirectory(remote_urls, target_directory):
             first_remote = False
             p = subprocess.Popen(["git", "clone", url, "--filter=blob:none", "--no-checkout"], cwd=target_directory,
                              stdout=subprocess.PIPE)
-            p.wait()
-            # this first remote might have been pulled in with the wrong local_name so rename it
+            try:
+                p.wait(timeout=120)
+            except subprocess.TimeoutExpired:
+                p.kill()
+                raise
+
+            # this first remote might have been pulled in with the wrong local_name so check and rename if required
             commit_repo_directory = os.path.join(target_directory, os.listdir(target_directory)[0])
             downloaded_remote_name = subprocess.check_output(["git", "remote"], cwd = commit_repo_directory).strip().decode('utf-8')
 
             if downloaded_remote_name != local_name:
                 p = subprocess.Popen(["git", "remote", "rename", downloaded_remote_name, local_name], cwd = commit_repo_directory)
-                p.wait()
+
+                try:
+                    p.wait(timeout=120)
+                except subprocess.TimeoutExpired:
+                    p.kill()
+                    raise
 
         else:
             # this is not the first remote so add another remote
@@ -1247,9 +1257,8 @@ def getRemoteBranchNameForCommit(repo, commit):
         if branch_stripped.startswith("remotes/"):
             remote_branch_name = branch_stripped
 
-    # If we are not at the HEAD, then get all the branches which contain the commit.
+    # Get all the branches that contain the commit and pick the most likely
 
-    # 2. Branches that *contain* the commit
     try:
         contains = subprocess.check_output(
             ["git", "branch", "-r", "--contains", commit],
@@ -1258,7 +1267,8 @@ def getRemoteBranchNameForCommit(repo, commit):
     except Exception:
         contains = []
 
-    contains = [c.strip() for c in contains if c.strip()]
+    # Eliminate any symbolic references
+    contains = [c.strip() for c in contains if c.strip() and "->" not in c.strip()]
 
     if contains:
         # If the branch is origin/main or origin/pre-release; then that is almost certainly where we are
