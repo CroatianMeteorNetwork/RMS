@@ -16,6 +16,8 @@
 
 
 
+from __future__ import division
+
 import math
 import time
 from multiprocessing import Process, Event
@@ -31,6 +33,93 @@ from RMS.Formats import FRbin
 
 # Get the logger from the main module
 log = getLogger("rmslogger")
+
+
+# --- Fireball stdpixel decontamination tuning constants ---
+# A bright fireball inflates stdpixel along its trail within the 256-frame FF block.
+# The fireball threshold (avepixel + k1*stdpixel + j1) then exceeds the uint8 range and
+# gets clipped, so thresholdAndSubsample keeps only the near-saturated trail core and
+# drops the fainter trail edges -- exactly where recall is lost. These constants control
+# how that self-contamination is detected and neutralised before thresholding.
+BRIGHT_PERCENTILE = 90            # maxpixel percentile above which a pixel is a bright/trail candidate
+CONTAMINATION_STD_FACTOR = 3.0    # stdpixel above this * background median counts as contaminated
+MIN_BACKGROUND_PIXELS = 100       # need at least this many background pixels to trust their median
+
+
+def decontaminateStdpixel(compressed, mask_img=None):
+    """ Replace stdpixel at fireball-contaminated pixels with the background median.
+
+    A bright fireball inflates stdpixel along its trail, pushing the detection threshold
+    (avepixel + k1*stdpixel + j1) past the uint8 ceiling where it is clipped.
+    thresholdAndSubsample then keeps only the near-saturated trail core and drops the
+    fainter edges. Replacing the inflated stdpixel with the frame's background median lets
+    the whole trail threshold normally, which is the change that actually recovers recall.
+
+    Pure numpy, no Cython, Python 2/Pi compatible. The 4-plane compressed array is copied
+    only when contamination is actually present, so the common (no-fireball) path is
+    zero-copy.
+
+    Arguments:
+        compressed: [ndarray] (4, H, W) FTP-compressed frames
+            (maxpixel, maxframe, avepixel, stdpixel).
+
+    Keyword arguments:
+        mask_img: [ndarray or None] mask image (H, W); pixels where it is 0 are excluded
+            from the background and contamination sets. Ignored when its shape does not
+            match the compressed frames (e.g. a binned mask on a full-resolution
+            extractor), mirroring maskImage()'s silent shape guard.
+
+    Return:
+        [ndarray] compressed array with stdpixel decontaminated. The input array is
+            returned unchanged (same object) when no contamination is detected.
+    """
+
+    maxpix = compressed[0]
+    stdpix = compressed[3]
+
+    # Only trust the mask when it matches the frame resolution. Extractor.__init__ bins
+    # the mask via binImageCalibration(), but the extractor runs on capture-resolution
+    # frames, so on stations with detection_binning_factor > 1 the shapes disagree. Skip
+    # the mask then instead of crashing on the boolean-and below (mirrors maskImage()).
+    if (mask_img is not None) and (mask_img.shape == maxpix.shape):
+        mask_valid = mask_img > 0
+    else:
+        mask_valid = None
+
+    # Brightness cut for the background sample. executeAll() fills masked-out pixels of
+    # maxpixel with the image mean before this runs, so restrict the percentile to
+    # mask-valid pixels to avoid skewing it on heavily-masked cameras.
+    maxpix_valid = maxpix[mask_valid] if mask_valid is not None else maxpix.ravel()
+    if maxpix_valid.size == 0:
+        return compressed
+
+    # O(n) partition instead of an O(n log n) full sort for the percentile
+    n_bright = max(1, (maxpix_valid.size*(100 - BRIGHT_PERCENTILE))//100)
+    bright_threshold = np.partition(maxpix_valid, -n_bright)[-n_bright]
+
+    bright_mask = maxpix >= bright_threshold
+    bg_mask = ~bright_mask
+    if mask_valid is not None:
+        bg_mask &= mask_valid
+
+    if np.count_nonzero(bg_mask) > MIN_BACKGROUND_PIXELS:
+        std_ref = float(np.median(stdpix[bg_mask]))
+    else:
+        std_ref = float(np.median(stdpix))
+
+    contaminated = bright_mask & (stdpix > CONTAMINATION_STD_FACTOR*max(std_ref, 1))
+    if mask_valid is not None:
+        contaminated &= mask_valid
+
+    if not np.any(contaminated):
+        return compressed
+
+    # np.array() deep-copies all 4 planes; only plane 3 (stdpixel) is then modified.
+    compressed = np.array(compressed)
+    replacement = max(1, int(round(min(std_ref, 255))))
+    compressed[3][contaminated] = np.uint8(replacement)
+
+    return compressed
 
 
 class Extractor(Process):
@@ -68,8 +157,13 @@ class Extractor(Process):
             (y, x, z): [tuple] Coordinates of points that form the fireball, where Z is the frame number.
         """
 
+        # Decontaminate stdpixel before thresholding so bright fireball trails are not
+        # suppressed by their own inflated stdpixel (see decontaminateStdpixel).
+        mask_img = self.mask.img if self.mask is not None else None
+        compressed = decontaminateStdpixel(self.compressed, mask_img)
+
         # Threshold and subsample frames
-        length, x, y, z = Grouping3D.thresholdAndSubsample(self.frames, self.compressed, \
+        length, x, y, z = Grouping3D.thresholdAndSubsample(self.frames, compressed, \
             self.config.min_level, self.config.min_pixels, self.config.k1, self.config.j1, self.config.f)
 
 
@@ -302,7 +396,7 @@ class Extractor(Process):
         t = time.time()
 
         # Find the parameters of the line in the 3D point cloud
-        coeff = Grouping3D.findCoefficients(line_list)
+        coeff = Grouping3D.findCoefficients(line_list, self.config)
         log.debug("[" + self.filename + "] Time for finding coefficients: " + str(time.time() - t) + "s")
         
         if len(coeff) == 0:

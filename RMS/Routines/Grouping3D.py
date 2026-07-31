@@ -138,21 +138,56 @@ def find3DLines(point_list, start_time, config, fireball_detection=True):
 
 
 
-def findCoefficients(line_list):
+def findCoefficients(line_list, config=None):
     """ Extract coefficients from list of lines that can be consumed by RMS.VideoExtraction.
-    
+
     Arguments:
         line_list: [list] list of detected lines
-    
+        config: [config object] configuration parameters (optional). Used to convert the
+            fireball_max_ang_vel limit (deg/s) into a per-sensor px/frame threshold via
+            fps and the average deg/pixel scale (fov_h/height + fov_w/width)/2.
+
     Return:
-        coeff: [list] coefficients for each detected line in format: [first point, slope of XZ, slope of YZ, 
+        coeff: [list] coefficients for each detected line in format: [first point, slope of XZ, slope of YZ,
             first frame, last frame]
     """
-    
+
+    # Fallback px/frame cap matches the legacy hard-coded value when no config is available
+    # (e.g. unit tests, external callers). At default 720p/25fps/f=16 this is ~39 deg/s --
+    # tighter than the production default of 60 deg/s, so tests get conservative behavior.
+    max_velocity_px = 2.0
+
+    if config is not None:
+        max_ang_vel = getattr(config, 'fireball_max_ang_vel', None)
+        fps = getattr(config, 'fps', None)
+        fov_h = getattr(config, 'fov_h', None)
+        fov_w = getattr(config, 'fov_w', None)
+        height = getattr(config, 'height', None)
+        width = getattr(config, 'width', None)
+        f = getattr(config, 'f', None)
+
+        # Check each required attribute individually for clearer diagnostics
+        missing = [name for name, val in [('fireball_max_ang_vel', max_ang_vel),
+                                           ('fps', fps), ('fov_h', fov_h), ('fov_w', fov_w),
+                                           ('height', height), ('width', width), ('f', f)]
+                   if not val]
+
+        if not missing:
+            # deg/s -> original px/frame via the average deg/pixel scale and fps,
+            # then -> subsampled px/frame via the decimation factor f (thresholdAndSubsample
+            # divides x,y by f, so slopes are in subsampled coordinates).
+            scale = (fov_h/float(height) + fov_w/float(width))/2.0
+            if scale > 0:
+                max_velocity_px = (max_ang_vel/scale)/float(fps)/float(f)
+        else:
+            log.warning("findCoefficients: fireball_max_ang_vel conversion skipped "
+                        "(missing/zero: %s); using fallback %.2f px/frame",
+                        ', '.join(missing), max_velocity_px)
+
     coeff = []
-    
+
     for detected_line in line_list:
-        
+
         if detected_line[0][2] < detected_line[1][2]:
             point1 = np.array(detected_line[0], dtype=np.float64)
             point2 = np.array(detected_line[1], dtype=np.float64)
@@ -160,30 +195,21 @@ def findCoefficients(line_list):
             point1 = np.array(detected_line[1], dtype=np.float64)
             point2 = np.array(detected_line[0], dtype=np.float64)
         else:
-        # skip if points are on the same frame (that shouldn't happen, though)
             log.debug("Points on the same frame!")
             continue
-        
-        # difference between last point and first point that represent a line
-        point3 = point2 - point1
-        
-        # slope
-        slopeXZ = point3[1]/point3[2] # speed on X axis
-        slopeYZ = point3[0]/point3[2] # speed on Y axis
-        
-        # length of velocity vector
-        total = sqrt(slopeXZ**2 + slopeYZ**2)
-        
-        #print('Fireball slope:', total)
 
-        # ignore line if too fast
-        # TODO: this limit should be read from config file and calculated for FOV
-        # 1.6 is better estimate on upper speed limit, set to 2 for safety
-        if total > 2:
+        point3 = point2 - point1
+
+        slopeXZ = point3[1]/point3[2]
+        slopeYZ = point3[0]/point3[2]
+
+        total = sqrt(slopeXZ**2 + slopeYZ**2)
+
+        if total > max_velocity_px:
             continue
-        
-        coeff.append([point1, slopeXZ, slopeYZ, detected_line[4], detected_line[5]]) #first point, slope of XZ, slope of YZ, first frame, last frame
-        
+
+        coeff.append([point1, slopeXZ, slopeYZ, detected_line[4], detected_line[5]])
+
     return coeff
 
 
