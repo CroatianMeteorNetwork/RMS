@@ -322,13 +322,19 @@ def generateDemoVideo(config, night_dir, sidecar_path, max_stills=None):
 
     ny, nx = dm.shape[1], dm.shape[2]
 
+    import sys as _sys
+    from RMS.Misc import RmsDateTime as _RmsDT
+    t_start = _RmsDT.utcnow()
+
     for j in range(n_stills):
 
-        # The render is minutes of otherwise-silent work on a full night
-        # (compositing + H.264 encode of thousands of stills) - heartbeat so
-        # the log shows liveness and per-stage duration
-        if j and (j % 1000 == 0):
-            log.info("Demo video: {:d}/{:d} stills rendered".format(j, n_stills))
+        # Same live-progress convention as the frames timelapse: a console
+        # carriage-return ticker (print, deliberately NOT the logger - terminal
+        # liveness without log spam); the total elapsed goes to the log below
+        if j and (j % 100 == 0):
+            print("{:>5d}/{:>5d}, Elapsed: {:s}".format(j, n_stills,
+                str(_RmsDT.utcnow() - t_start)), end="\r")
+            _sys.stdout.flush()
 
         path = stills_by_t.get(round(float(t_unix[j]), 1))
         if path is None:
@@ -524,6 +530,7 @@ def generateDemoVideo(config, night_dir, sidecar_path, max_stills=None):
     else:
         writer.release()
 
-    log.info("Transparency demo video: {:s}".format(os.path.basename(out_path)))
+    log.info("Transparency demo video: {:s} ({:d} stills, total time {:s})".format(
+        os.path.basename(out_path), n_stills, str(_RmsDT.utcnow() - t_start)))
 
     return out_path
