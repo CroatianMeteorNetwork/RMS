@@ -52,6 +52,13 @@ import os
 
 import numpy as np
 
+from RMS.Logger import getLogger
+
+# On-station the capture process owns the handlers and these messages land
+# in the nightly log with timestamps (bare print() lines do not - an 8-hour
+# fit once ran invisibly because of that); CLI mains add a stdout handler
+log = getLogger("rmslogger")
+
 from RMS.Formats import FFfile, StarCatalog
 from RMS.Formats.Platepar import Platepar
 from RMS.PatchPhotometry import (detectStars, measurePatchFluxes,
@@ -123,7 +130,7 @@ def sampleStillsForNight(config, image_blocks, night_dir):
     stills.sort()
 
     if len(stills) < MIN_NIGHT_STILLS:
-        print("Stills sampler: only {:d} night stills - skipping".format(len(stills)))
+        log.info("Stills sampler: only {:d} night stills - skipping".format(len(stills)))
         return None
 
     # Prerequisites from the processed night
@@ -134,19 +141,19 @@ def sampleStillsForNight(config, image_blocks, night_dir):
     pp_path = os.path.join(night_dir, config.platepars_flux_recalibrated_name)
 
     if not (os.path.isfile(scoring_path) and os.path.isfile(pp_path)):
-        print("Stills sampler: no scoring product or recalibrated platepars - skipping")
+        log.info("Stills sampler: no scoring product or recalibrated platepars - skipping")
         return None
 
     header, frames, stars = loadStarScoring(scoring_path)
 
     if int(header.get("schema_version", 0)) < 4 or "star_cat_id" not in stars:
-        print("Stills sampler: scoring product predates schema v4 (no star "
+        log.info("Stills sampler: scoring product predates schema v4 (no star "
               "identity) - skipping")
         return None
 
     if (len(frames.get("frame_names", [])) == 0) \
             or (len(np.asarray(stars["star_cat_id"])) == 0):
-        print("Stills sampler: empty scoring product (no scored frames) - "
+        log.info("Stills sampler: empty scoring product (no scored frames) - "
               "skipping")
         return None
 
@@ -165,7 +172,7 @@ def sampleStillsForNight(config, image_blocks, night_dir):
                           | forced_ever)[0]
 
     if len(bright_ids) < 5:
-        print("Stills sampler: {:d} per-star channel members - skipping".format(
+        log.info("Stills sampler: {:d} per-star channel members - skipping".format(
             len(bright_ids)))
         return None
 
@@ -188,7 +195,7 @@ def sampleStillsForNight(config, image_blocks, night_dir):
     knots.sort(key=lambda kv: kv[0])
 
     if not knots:
-        print("Stills sampler: no valid recalibrated platepar - skipping")
+        log.info("Stills sampler: no valid recalibrated platepar - skipping")
         return None
 
     knot_times = np.array([calendar.timegm(t.timetuple()) for t, _ in knots])
@@ -309,7 +316,7 @@ def sampleStillsForNight(config, image_blocks, night_dir):
         cell_flux=cell_flux,
         cell_count=cell_count)
 
-    print("Stills sampler: {:s} ({:d} stills, {:d} per-star, stack over "
+    log.info("Stills sampler: {:s} ({:d} stills, {:d} per-star, stack over "
           "{:d} stars)".format(os.path.basename(path), n_stills, n_bright,
           len(stack_ids)))
 
@@ -351,7 +358,7 @@ def fuseSidecarDetections(night_dir, frames, stars):
     out = dict(stars)
     out["calstars_row"] = row
     if fused.sum():
-        print("Stills fusion: {:d} instantaneous detections added".format(
+        log.info("Stills fusion: {:d} instantaneous detections added".format(
             int(fused.sum())))
     return out
 

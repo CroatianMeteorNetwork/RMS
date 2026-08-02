@@ -34,6 +34,13 @@ import os
 
 import numpy as np
 
+from RMS.Logger import getLogger
+
+# On-station the capture process owns the handlers and these messages land
+# in the nightly log with timestamps (bare print() lines do not - an 8-hour
+# fit once ran invisibly because of that); CLI mains add a stdout handler
+log = getLogger("rmslogger")
+
 
 GRID_DM = np.arange(-0.3, 4.501, 0.03)     # extinction grid (mag)
 TAU = (3.0, 0.6, 0.3)                      # scale-transition widths, root first
@@ -509,7 +516,7 @@ def computeAndSaveTreeMap(config, night_dir):
     # fully rejected recalibration night) - nothing to estimate from
     if (len(frames.get("frame_names", [])) == 0) \
             or (len(stars.get("star_cat_id", [])) == 0):
-        print("Tree estimator: empty scoring product (no scored frames) - "
+        log.info("Tree estimator: empty scoring product (no scored frames) - "
               "skipping")
         return None
 
@@ -540,10 +547,10 @@ def computeAndSaveTreeMap(config, night_dir):
             stars = dict(stars)
             stars["calstars_row"] = row_f
             n_fused = int(fused.sum())
-            print("Tree estimator: fused {:d} stills detections".format(
+            log.info("Tree estimator: fused {:d} stills detections".format(
                 n_fused))
     except Exception as e:
-        print("Tree estimator: stills fusion skipped ({})".format(e))
+        log.info("Tree estimator: stills fusion skipped ({})".format(e))
 
     # Provenance for the product header: which expectations the tree ran on
     # ("trailing" EMA file / "in_night" same-night stats / "seeded" model-p
@@ -594,10 +601,10 @@ def computeAndSaveTreeMap(config, night_dir):
                     n_rate_stars=int(np.isfinite(
                         stats["rate_calstars"]).sum()),
                     k=float(stats["k_fit"]))
-                print("Tree estimator: in-night fine-map-conditioned calibration "
+                log.info("Tree estimator: in-night fine-map-conditioned calibration "
                       "({} stars)".format(cal_prov["n_rate_stars"]))
         except Exception as e:
-            print("Tree estimator: in-night calibration failed ({}), "
+            log.info("Tree estimator: in-night calibration failed ({}), "
                   "seeded path".format(e))
 
     result = computeTreeSeries(config, night_dir, header, frames, stars,
@@ -631,6 +638,6 @@ def computeAndSaveTreeMap(config, night_dir):
         leaf_cat_id=leaf_cat_id,
         leaf_dm=leaf_dm)
 
-    print("Tree transparency map: {:s}".format(os.path.basename(path)))
+    log.info("Tree transparency map: {:s}".format(os.path.basename(path)))
 
     return path

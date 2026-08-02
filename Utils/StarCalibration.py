@@ -49,6 +49,13 @@ import os
 
 import numpy as np
 
+from RMS.Logger import getLogger
+
+# On-station the capture process owns the handlers and these messages land
+# in the nightly log with timestamps (bare print() lines do not - an 8-hour
+# fit once ran invisibly because of that); CLI mains add a stdout handler
+log = getLogger("rmslogger")
+
 
 SCHEMA_VERSION = 1
 
@@ -269,7 +276,7 @@ def computeNightStarStats(config, night_dir):
     # behavior. Skip such nights entirely (the EMA just waits).
     clear_frac = float(np.mean(np.bincount(sf[clear], minlength=n_frames) > 0))
     if clear_frac < 0.15:
-        print("Star calibration: only {:.0%} of frames have any clear cell - "
+        log.info("Star calibration: only {:.0%} of frames have any clear cell - "
               "skipping this night".format(clear_frac))
         return None
 
@@ -450,7 +457,7 @@ def updateStarCalibration(config, night_dir):
         n_nights=n_nights,
         **merged)
 
-    print("Star calibration updated: {:d} stars with rates, k_fit {:.2f} "
+    log.info("Star calibration updated: {:d} stars with rates, k_fit {:.2f} "
           "(EMA {:.2f})".format(int(np.isfinite(merged["rate_calstars"]).sum()),
           stats["k_fit"], k_ema))
 

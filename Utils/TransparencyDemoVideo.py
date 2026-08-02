@@ -30,6 +30,13 @@ import os
 
 import numpy as np
 
+from RMS.Logger import getLogger
+
+# On-station the capture process owns the handlers and these messages land
+# in the nightly log with timestamps (bare print() lines do not - an 8-hour
+# fit once ran invisibly because of that); CLI mains add a stdout handler
+log = getLogger("rmslogger")
+
 
 FILE_SUFFIX = "transparency_demo.mp4"
 
@@ -125,7 +132,7 @@ def generateDemoVideo(config, night_dir, sidecar_path, max_stills=None):
     tree_path = os.path.join(night_dir, treeMapFileName(night_name))
     map_path = tree_path if os.path.isfile(tree_path)         else os.path.join(night_dir, mapFileName(night_name))
     if not (os.path.isfile(map_path) and os.path.isfile(sidecar_path)):
-        print("Transparency demo video: missing prerequisites (map: {} "
+        log.info("Transparency demo video: missing prerequisites (map: {} "
               "sidecar: {}) - skipping".format(os.path.isfile(map_path),
               os.path.isfile(sidecar_path)))
         return None
@@ -192,7 +199,7 @@ def generateDemoVideo(config, night_dir, sidecar_path, max_stills=None):
                 key = calendar.timegm(ts.timetuple()) + ts.microsecond/1e6
                 stills_by_t[round(key, 1)] = os.path.join(root, fname)
     if not stills_by_t:
-        print("Transparency demo video: no stills found under {} - "
+        log.info("Transparency demo video: no stills found under {} - "
               "skipping".format(frame_dir))
         return None
 
@@ -252,10 +259,10 @@ def generateDemoVideo(config, night_dir, sidecar_path, max_stills=None):
         except Exception:
             pp_static = None
         if pp_static is None:
-            print("Transparency demo video: no recalibrated platepar knots "
+            log.info("Transparency demo video: no recalibrated platepar knots "
                   "and no static platepar - skipping")
             return None
-        print("Transparency demo video: no recalibrated knots - using the "
+        log.info("Transparency demo video: no recalibrated knots - using the "
               "static nightly platepar (matches the scoring fallback)")
         knots.append((float(np.median(t_unix)), pp_static))
     knots.sort()
@@ -511,6 +518,6 @@ def generateDemoVideo(config, night_dir, sidecar_path, max_stills=None):
     else:
         writer.release()
 
-    print("Transparency demo video: {:s}".format(os.path.basename(out_path)))
+    log.info("Transparency demo video: {:s}".format(os.path.basename(out_path)))
 
     return out_path

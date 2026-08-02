@@ -32,6 +32,13 @@ import re
 
 import ephem
 import numpy as np
+
+from RMS.Logger import getLogger
+
+# On-station the capture process owns the handlers and these messages land
+# in the nightly log with timestamps (bare print() lines do not - an 8-hour
+# fit once ran invisibly because of that); CLI mains add a stdout handler
+log = getLogger("rmslogger")
 from scipy.optimize import minimize
 
 import RMS.ConfigReader as cr
@@ -236,7 +243,7 @@ def buildStationTrials(config, night_dirs, n_ff=FF_PER_NIGHT, moon_phase_max=MOO
             pchance_all.append(np.full(len(m), p_chance))
 
     if n_moon_excluded:
-        print("  moon filter: excluded {:d} frame(s) (moon up, phase > {:.0f}%)".format(
+        log.info("  moon filter: excluded {:d} frame(s) (moon up, phase > {:.0f}%)".format(
             n_moon_excluded, moon_phase_max))
 
     if not az_all:
@@ -488,11 +495,11 @@ def fitLightDome(station_configs, dates=None, max_order=3, moon_phase_max=MOON_P
             lim_mag=lim_mag)
 
         if trials is None:
-            print("{:s}: no usable trials, station excluded from fit".format(station))
+            log.info("{:s}: no usable trials, station excluded from fit".format(station))
             continue
 
         n = len(trials["az"])
-        print("{:s}: {:d} trials from {:d} night dir(s), detected fraction {:.2f}".format(
+        log.info("{:s}: {:d} trials from {:d} night dir(s), detected fraction {:.2f}".format(
             station, n, len(night_dirs), float(np.mean(trials["det"]))))
 
         fit_nights += [os.path.basename(d) for d in night_dirs]
@@ -524,7 +531,7 @@ def fitLightDome(station_configs, dates=None, max_order=3, moon_phase_max=MOON_P
     pchance = np.concatenate(pchance_l)
 
     n_trials_total = len(az)
-    print("TOTAL: {:d} trials".format(n_trials_total))
+    log.info("TOTAL: {:d} trials".format(n_trials_total))
 
     # Cap the trial count the optimizer sees - the parameters are constrained just as
     # well by a large random subsample, at a fraction of the cost (deterministic seed
@@ -533,9 +540,9 @@ def fitLightDome(station_configs, dates=None, max_order=3, moon_phase_max=MOON_P
         sel = np.random.RandomState(0).choice(n_trials_total, MAX_FIT_TRIALS, replace=False)
         az, alt, mag, det, ci, pchance = (az[sel], alt[sel], mag[sel], det[sel],
                                           ci[sel], pchance[sel])
-        print("Subsampled to {:d} trials for the fit".format(len(az)))
+        log.info("Subsampled to {:d} trials for the fit".format(len(az)))
 
-    print("Chance-match floor: median {:.4f}, p90 {:.4f}".format(
+    log.info("Chance-match floor: median {:.4f}, p90 {:.4f}".format(
         float(np.median(pchance)), float(np.percentile(pchance, 90))))
 
     def nll(p, norder):
@@ -574,7 +581,7 @@ def fitLightDome(station_configs, dates=None, max_order=3, moon_phase_max=MOON_P
         else:
             break
     if identifiable_order < max_order:
-        print("Azimuth coverage gap {:.0f} deg: harmonics above order {:d} are "
+        log.info("Azimuth coverage gap {:.0f} deg: harmonics above order {:d} are "
               "unidentifiable - capping (was {:d})".format(
               max_az_gap, identifiable_order, max_order))
     max_order = identifiable_order
@@ -609,7 +616,7 @@ def fitLightDome(station_configs, dates=None, max_order=3, moon_phase_max=MOON_P
             bounds=bounds, options=dict(maxiter=500))
 
         results[norder] = {"p": r.x, "nll": float(r.fun)}
-        print("order={:d}  NLL={:.0f}".format(norder, r.fun))
+        log.info("order={:d}  NLL={:.0f}".format(norder, r.fun))
 
     # Keep adding harmonic orders only while each one earns its keep
     use = 0
@@ -658,7 +665,7 @@ def fitLightDome(station_configs, dates=None, max_order=3, moon_phase_max=MOON_P
     from RMS.LightDomeModel import domeCatalogLimMag
     wanted = domeCatalogLimMag(model_dict["LM0"], model_dict["s"])
     if (wanted > lim_mag + 0.25) and (_depth_iter < 2):
-        print("\nCatalog depth {:.2f} too shallow for the fitted LM "
+        log.info("\nCatalog depth {:.2f} too shallow for the fitted LM "
               "(max LM0 {:.2f}, s {:.2f}) - refitting at depth {:.2f}".format(
               lim_mag, max(model_dict["LM0"]), model_dict["s"], wanted))
         return fitLightDome(station_configs, dates=dates, max_order=max_order,
@@ -668,7 +675,7 @@ def fitLightDome(station_configs, dates=None, max_order=3, moon_phase_max=MOON_P
     # the adaptive-depth logic (this exact symptom - LM0 pinned with inflated s - went
     # unnoticed fleet-wide against the old fixed depth)
     if max(model_dict["LM0"]) + 2.0*model_dict["s"] > lim_mag - 0.25:
-        print("WARNING: fitted LM0 approaches the catalog depth ({:.2f} + 2s vs "
+        log.info("WARNING: fitted LM0 approaches the catalog depth ({:.2f} + 2s vs "
               "{:.2f}) - the model may be saturated against the catalog ceiling".format(
               max(model_dict["LM0"]), lim_mag))
 
@@ -676,30 +683,30 @@ def fitLightDome(station_configs, dates=None, max_order=3, moon_phase_max=MOON_P
     # adopt a model with issues, and a manual fit prints them for the operator
     model_dict["quality_issues"] = fitQualityIssues(model_dict)
     for msg in model_dict["quality_issues"]:
-        print("WARNING: degenerate fit: {:s}".format(msg))
+        log.info("WARNING: degenerate fit: {:s}".format(msg))
 
     # Interpretation-level degeneracies (e.g. the LP bowl collinear with LM0):
     # recorded and printed, never blocking - scoring stays calibrated, but
     # brightness renders and extrapolation from this model are unreliable
     model_dict["quality_warnings"] = fitQualityWarnings(model_dict)
     for msg in model_dict["quality_warnings"]:
-        print("NOTE: fit degeneracy (non-blocking): {:s}".format(msg))
+        log.info("NOTE: fit degeneracy (non-blocking): {:s}".format(msg))
 
-    print("\nFitted model ({:d} harmonic order(s), catalog depth {:.2f}):".format(
+    log.info("\nFitted model ({:d} harmonic order(s), catalog depth {:.2f}):".format(
         use, lim_mag))
     for i, cam in enumerate(cams):
-        print("  LM0[{:s}] = {:.2f}".format(cam, model_dict["LM0"][i]))
-    print("  k={:.2f}  s={:.2f}  LP bowl B={:.1f} (h0={:.0f} deg)".format(
+        log.info("  LM0[{:s}] = {:.2f}".format(cam, model_dict["LM0"][i]))
+    log.info("  k={:.2f}  s={:.2f}  LP bowl B={:.1f} (h0={:.0f} deg)".format(
         model_dict["k"], model_dict["s"], 10.0**model_dict["q0"], model_dict["h0"]))
     for h in harmonics:
         name = {1: "dipole", 2: "quadrupole", 3: "octupole"}.get(h["order"],
             "order {:d}".format(h["order"]))
-        print("  {:s}: A={:.1f}  toward az {:.0f} deg  alt_scale={:.0f} deg".format(
+        log.info("  {:s}: A={:.1f}  toward az {:.0f} deg  alt_scale={:.0f} deg".format(
             name, h["A"], h["phi"], h["h"]))
 
     # Per-camera calibration sanity: aggregate detected/expected on the training trials
     # must be ~1.00 for every camera; a deviation means the shared terms misallocate
-    print("Training calibration (detected/expected per camera, want ~1.00):")
+    log.info("Training calibration (detected/expected per camera, want ~1.00):")
     s_soft = model_dict["s"]
     lm_all = _domeModelLM(p, ncam, use, az, alt, ci)
     p_det = 1.0/(1.0 + np.exp(-(lm_all - mag)/s_soft))
@@ -707,7 +714,7 @@ def fitLightDome(station_configs, dates=None, max_order=3, moon_phase_max=MOON_P
     for i, cam in enumerate(cams):
         sel = ci == i
         if np.any(sel):
-            print("  {:s}: {:.2f}".format(cam,
+            log.info("  {:s}: {:.2f}".format(cam,
                 float(np.sum(det[sel])/np.sum(p_match[sel]))))
 
     # Magnitude-resolved empirical calibration: parameters at their bounds are one
@@ -733,7 +740,7 @@ def fitLightDome(station_configs, dates=None, max_order=3, moon_phase_max=MOON_P
     model_dict["calibration"] = calibration
     for msg in model_dict["quality_issues"]:
         if msg.startswith("calibration"):
-            print("WARNING: " + msg)
+            log.info("WARNING: " + msg)
 
     return model_dict
 
@@ -814,13 +821,13 @@ def _radiometricAnchorOffset(model, configs):
         # zenith once transposed through the shared glow field, so a systematic residual
         # is a diagnostic that the field misallocates brightness between the FOVs
         if len(per_station) > 1:
-            print("Radiometric site anchor: zenith {:.2f} mag/arcsec^2 pooled from "
+            log.info("Radiometric site anchor: zenith {:.2f} mag/arcsec^2 pooled from "
                   "{:d} cameras".format(measured_zenith, len(per_station)))
             for sid in sorted(per_station):
                 res = float(np.median(per_station[sid])) - measured_zenith
                 flag = "  <- check the glow field allocation" \
                     if abs(res) > ANCHOR_RESIDUAL_WARN else ""
-                print("  {:s}: {:+.2f} mag vs site (n={:d}){:s}".format(
+                log.info("  {:s}: {:+.2f} mag vs site (n={:d}){:s}".format(
                     sid, res, len(per_station[sid]), flag))
 
         return measured_zenith - model_zenith
@@ -1201,7 +1208,7 @@ def ensureLightDomeModel(config, platepar=None):
     # is the only supported one, and old files no longer evaluate
     legacy_path = findLegacyModelFile(data_dir, station)
     if legacy_path is not None:
-        print("Light-dome model {:s} uses the retired dome basis - refitting with the "
+        log.info("Light-dome model {:s} uses the retired dome basis - refitting with the "
               "harmonic basis".format(os.path.basename(legacy_path)))
 
     # Existing harmonic model: keep it while it is fresh AND it covers every co-located
@@ -1225,13 +1232,13 @@ def ensureLightDomeModel(config, platepar=None):
             return True
 
         if degenerate:
-            print("Light-dome model is degenerate - refitting:")
+            log.info("Light-dome model is degenerate - refitting:")
             for msg in degenerate:
-                print("  " + msg)
+                log.info("  " + msg)
         elif stale is not None:
-            print("Light-dome model is stale ({:s}) - refitting".format(stale))
+            log.info("Light-dome model is stale ({:s}) - refitting".format(stale))
         else:
-            print("Light-dome model does not cover co-located station(s) {:s} - "
+            log.info("Light-dome model does not cover co-located station(s) {:s} - "
                   "refitting the site pooled".format(", ".join(missing)))
 
     # Rate-limit attempts to one per day
@@ -1257,31 +1264,31 @@ def ensureLightDomeModel(config, platepar=None):
         night_dirs = selectNightDirs(config, window=30,
             max_nights=AUTO_MAX_NIGHTS, min_rel_clarity=AUTO_REL_CLARITY)
     if len(night_dirs) < AUTO_MIN_NIGHTS:
-        print("Light-dome auto-fit: only {:d} usable archived night(s), need {:d} - "
+        log.info("Light-dome auto-fit: only {:d} usable archived night(s), need {:d} - "
               "waiting for more history".format(len(night_dirs), AUTO_MIN_NIGHTS))
         return model is not None
 
     dates = sorted(set(m.group(1) for m in
         (re.search(r"_(\d{8})(?:_|$)", os.path.basename(d)) for d in night_dirs) if m))
-    print("Light-dome auto-fit from the {:d} clearest archived nights: {:s}".format(
+    log.info("Light-dome auto-fit from the {:d} clearest archived nights: {:s}".format(
         len(night_dirs), ", ".join(dates)))
 
     if len(station_configs) > 1:
-        print("Pooling co-located stations for the site fit: {:s}".format(
+        log.info("Pooling co-located stations for the site fit: {:s}".format(
             ", ".join(str(c.stationID) for c in station_configs)))
 
     model_dict = fitLightDome(station_configs, dates=dates)
 
     if (model_dict is None) or (model_dict.get("n_trials", 0) < AUTO_MIN_TRIALS):
-        print("Light-dome auto-fit produced insufficient trials - keeping previous behavior")
+        log.info("Light-dome auto-fit produced insufficient trials - keeping previous behavior")
         return model is not None
 
     # Never adopt a degenerate fit - keep whatever was in place (the previous model, or
     # the scalar fallback) and let the daily attempt marker retry when new nights arrive
     if model_dict.get("quality_issues"):
-        print("Light-dome auto-fit is degenerate - not installing it:")
+        log.info("Light-dome auto-fit is degenerate - not installing it:")
         for msg in model_dict["quality_issues"]:
-            print("  " + msg)
+            log.info("  " + msg)
         return model is not None
 
     model_dict["auto_fitted"] = True
@@ -1300,7 +1307,7 @@ def ensureLightDomeModel(config, platepar=None):
 
         with open(sib_model_path, "w") as f:
             json.dump(model_dict, f, indent=1)
-        print("Light-dome model auto-fitted and installed: {:s}".format(sib_model_path))
+        log.info("Light-dome model auto-fitted and installed: {:s}".format(sib_model_path))
 
         try:
             # Pass the whole site's configs so the radiometric anchor pools their SQM
@@ -1308,7 +1315,7 @@ def ensureLightDomeModel(config, platepar=None):
             renderLightDomeModel(model_dict, sib_station,
                 os.path.splitext(sib_model_path)[0] + ".png", config=station_configs)
         except Exception as e:
-            print("Light-dome model plot failed ({}) - model itself is installed".format(e))
+            log.info("Light-dome model plot failed ({}) - model itself is installed".format(e))
 
         try:
             with open(os.path.join(sib_data_dir,
@@ -1321,6 +1328,11 @@ def ensureLightDomeModel(config, platepar=None):
 
 
 if __name__ == "__main__":
+
+    # Manual CLI run: no capture process has configured handlers, so route the
+    # log to the console (otherwise INFO messages vanish silently)
+    getLogger("rmslogger", stdout=True)
+
 
     parser = argparse.ArgumentParser(
         description="Fit the site light-dome LM model from archived nights.")
@@ -1347,19 +1359,19 @@ if __name__ == "__main__":
         moon_phase_max=args.moon_phase_max)
 
     if model_dict is None:
-        print("No usable data - nothing written.")
+        log.info("No usable data - nothing written.")
     else:
         for config in configs:
             out_path = os.path.join(os.path.expanduser(config.data_dir),
                 "{:s}_{:s}".format(str(config.stationID), LIGHT_DOME_FILE_SUFFIX))
             with open(out_path, "w") as f:
                 json.dump(model_dict, f, indent=1)
-            print("wrote {:s}".format(out_path))
+            log.info("wrote {:s}".format(out_path))
 
             try:
                 # All configs, so the radiometric anchor pools the site's SQM histories
                 renderLightDomeModel(model_dict, str(config.stationID),
                     os.path.splitext(out_path)[0] + ".png", config=configs)
-                print("wrote {:s}".format(os.path.splitext(out_path)[0] + ".png"))
+                log.info("wrote {:s}".format(os.path.splitext(out_path)[0] + ".png"))
             except Exception as e:
-                print("plot failed ({}) - model itself is written".format(e))
+                log.info("plot failed ({}) - model itself is written".format(e))

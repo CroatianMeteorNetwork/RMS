@@ -253,10 +253,11 @@ def test_radiometric_anchor_pools_site_measurements(tmp_path):
         abs=1e-9)
 
 
-def test_anchor_surfaces_per_camera_residuals(tmp_path, capsys):
+def test_anchor_surfaces_per_camera_residuals(tmp_path, caplog):
     # Cameras disagreeing about the site zenith (after transposition through the shared
-    # field) is a glow-field misallocation diagnostic - it must be printed, and flagged
-    # when beyond ANCHOR_RESIDUAL_WARN
+    # field) is a glow-field misallocation diagnostic - it must be logged, and flagged
+    # when beyond ANCHOR_RESIDUAL_WARN (via the rmslogger, so it lands in the
+    # nightly station log with timestamps, not on bare stdout)
     from RMS.LightDomeModel import LightDomeModel
     from Utils.FitLightDome import _radiometricAnchorOffset
 
@@ -275,16 +276,20 @@ def test_anchor_surfaces_per_camera_residuals(tmp_path, capsys):
     cfg_a = writeHistory("US005X", 20.0)
     cfg_b = writeHistory("US005Y", 21.0)
 
-    _radiometricAnchorOffset(model, [cfg_a, cfg_b])
-    out = capsys.readouterr().out
+    import logging
+    with caplog.at_level(logging.INFO, logger="rmslogger"):
+        _radiometricAnchorOffset(model, [cfg_a, cfg_b])
+    out = caplog.text
 
     assert "US005X: -0.50 mag vs site (n=3)" in out
     assert "US005Y: +0.50 mag vs site (n=3)" in out
     assert out.count("check the glow field allocation") == 2
 
-    # A single camera has no cross-check - nothing printed
-    _radiometricAnchorOffset(model, cfg_a)
-    assert "vs site" not in capsys.readouterr().out
+    # A single camera has no cross-check - nothing logged
+    caplog.clear()
+    with caplog.at_level(logging.INFO, logger="rmslogger"):
+        _radiometricAnchorOffset(model, cfg_a)
+    assert "vs site" not in caplog.text
 
 
 def _writeHistory(tmp_path, station, dratios, model_version):
