@@ -1646,6 +1646,11 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
                 star_gate_factor=float(getattr(config, "star_gate_factor", 3.0)),
                 store_p_min=STORE_P_MIN,
                 platepar_source=scoring_platepar_source,
+                # Provenance: star_p includes the scattered-moonlight LM penalty
+                # (LightDomeModel.moonPenalty) - products written before this
+                # field lack the correction, and replay diffs across the
+                # boundary WILL differ on moonlit frames
+                moon_corrected=True,
             )
             out_path = saveStarScoring(dir_path, night_name, header, f_meta, s_arrs)
             log.info("Star scoring product written: {:s} ({:d} frames, {:d} star "
