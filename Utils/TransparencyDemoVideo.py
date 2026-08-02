@@ -324,6 +324,12 @@ def generateDemoVideo(config, night_dir, sidecar_path, max_stills=None):
 
     for j in range(n_stills):
 
+        # The render is minutes of otherwise-silent work on a full night
+        # (compositing + H.264 encode of thousands of stills) - heartbeat so
+        # the log shows liveness and per-stage duration
+        if j and (j % 1000 == 0):
+            log.info("Demo video: {:d}/{:d} stills rendered".format(j, n_stills))
+
         path = stills_by_t.get(round(float(t_unix[j]), 1))
         if path is None:
             continue
