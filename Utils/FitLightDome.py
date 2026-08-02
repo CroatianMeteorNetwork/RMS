@@ -119,6 +119,7 @@ def buildStationTrials(config, night_dirs, n_ff=FF_PER_NIGHT, moon_phase_max=MOO
     """
 
     n_moon_excluded = 0
+    n_frames_used = 0
     footprint = None
 
     catalog_stars, _, _ = StarCatalog.readStarCatalog(config.star_catalog_path,
@@ -241,6 +242,7 @@ def buildStationTrials(config, night_dirs, n_ff=FF_PER_NIGHT, moon_phase_max=MOO
             mag_all.append(m)
             det_all.append(detected)
             pchance_all.append(np.full(len(m), p_chance))
+            n_frames_used += 1
 
     if n_moon_excluded:
         log.info("  moon filter: excluded {:d} frame(s) (moon up, phase > {:.0f}%)".format(
@@ -252,6 +254,7 @@ def buildStationTrials(config, night_dirs, n_ff=FF_PER_NIGHT, moon_phase_max=MOO
     return dict(az=np.concatenate(az_all), alt=np.concatenate(alt_all),
         mag=np.concatenate(mag_all), det=np.concatenate(det_all),
         pchance=np.concatenate(pchance_all),
+        n_frames=n_frames_used,
         pointing=(float(pp.az_centre), float(pp.alt_centre)),
         footprint=footprint)
 
@@ -475,6 +478,7 @@ def fitLightDome(station_configs, dates=None, max_order=3, moon_phase_max=MOON_P
         lim_mag = DOME_CATALOG_LIM_MAG
 
     az_l, alt_l, mag_l, det_l, ci_l, pchance_l = [], [], [], [], [], []
+    n_frames_total = 0
     fit_nights = []
     pointing = {}
     thresholds = {}
@@ -509,6 +513,7 @@ def fitLightDome(station_configs, dates=None, max_order=3, moon_phase_max=MOON_P
         mag_l.append(trials["mag"])
         det_l.append(trials["det"])
         pchance_l.append(trials["pchance"])
+        n_frames_total += int(trials.get("n_frames", 0))
         ci_l.append(np.full(n, len(cams), dtype=np.int64))
 
         # Metadata for staleness detection (see ensureLightDomeModel) and the model plot
@@ -646,6 +651,7 @@ def fitLightDome(station_configs, dates=None, max_order=3, moon_phase_max=MOON_P
         fit_date=datetime.datetime.utcnow().strftime("%Y-%m-%d"),
         n_trials=int(len(az)),
         n_trials_total=int(n_trials_total),
+        n_frames_used=int(n_frames_total),
         pointing=pointing,
         intensity_threshold=thresholds,
         footprints=footprints,
@@ -755,7 +761,10 @@ PLOT_SQM_MIN = 16.0         # fixed color scale so every station and site render
 PLOT_SQM_MAX = 22.0         # comparably (brighter sky = brighter color)
 
 
-ANCHOR_WINDOW_NIGHTS = 14   # recent SQM measurements per camera the anchor considers
+ANCHOR_WINDOW_NIGHTS = 14   # recent SQM measurements per camera the anchor considers.
+                            # Counted in ENTRIES, not calendar nights - moonlit nights
+                            # simply do not append, so the anchor is lunar-cycle-robust
+                            # as-is and widening it would only dilute epoch currency
 ANCHOR_RESIDUAL_WARN = 0.3  # mag - a camera's median departing this far from the site
                             # anchor suggests the glow field misallocates brightness
                             # between the cameras' FOVs
@@ -937,6 +946,13 @@ def renderLightDomeModel(model_dict, station_id, out_path, config=None):
 # Self-priming (see ensureLightDomeModel)
 AUTO_MIN_NIGHTS = 3        # usable archived nights required before an auto-fit is attempted
 AUTO_MIN_TRIALS = 10000    # star trials required for the fit to be trusted
+MIN_FIT_FRAMES = 60        # gated frames (all cameras pooled) a fit must stand on.
+                           # Trial COUNT rarely binds (each frame contributes thousands
+                           # of catalog trials) - frame DIVERSITY does: a full-moon
+                           # window can pass 300k trials from a handful of moonset
+                           # slivers, and fits from such nights raced to divergent,
+                           # degenerate solutions (the July-29 wave). Refit when the
+                           # data exists, not when the calendar says.
 AUTO_REFIT_DAYS = 45       # dead-man backstop only - the PRIMARY refit trigger is
                            # measured: the nightly ratio normalization drifting
                            # persistently away from 1 (see modelIsStale), which detects
@@ -946,7 +962,12 @@ NORM_DRIFT_LIMIT = 0.25    # |median dratio - 1| beyond this = the model no long
                            # represents the current sky epoch
 NORM_DRIFT_MIN_NIGHTS = 5  # dratio entries (for the current model) needed to call drift
 LM_HISTORY_WINDOW_DRIFT = 14   # trailing dratio entries the drift check considers
-AUTO_SELECT_WINDOW = 14    # nights - auto-fits train on the clearest of the RECENT nights
+AUTO_SELECT_WINDOW = 28    # nights - one full lunar cycle, so the window always
+                           # contains a dark fortnight: at 14 (half a cycle) a refit
+                           # falling near full moon trained on moon-crippled slivers
+                           # (observed: the July-29 forced-refit wave landed at full
+                           # moon). Still recent enough to track the aerosol epoch;
+                           # auto-fits train on the clearest of the RECENT nights
                            # only: picking the clearest nights of a long window selects the
                            # most transparent atmospheric epoch ever seen, and a model fit
                            # there under-scores every hazier (but clear) night that follows
@@ -1281,6 +1302,15 @@ def ensureLightDomeModel(config, platepar=None):
 
     if (model_dict is None) or (model_dict.get("n_trials", 0) < AUTO_MIN_TRIALS):
         log.info("Light-dome auto-fit produced insufficient trials - keeping previous behavior")
+        return model is not None
+
+    # Thin-fit deferral: enough trials but too few distinct gated frames (e.g. a
+    # refit falling in the bright fortnight training on moonset slivers). Keep
+    # whatever is in place; the daily attempt marker retries as dark nights arrive.
+    if model_dict.get("n_frames_used", MIN_FIT_FRAMES) < MIN_FIT_FRAMES:
+        log.info("Light-dome auto-fit stood on only {:d} gated frame(s) (< {:d}) - "
+                 "deferring adoption until darker nights accumulate".format(
+                 int(model_dict["n_frames_used"]), MIN_FIT_FRAMES))
         return model is not None
 
     # Never adopt a degenerate fit - keep whatever was in place (the previous model, or

@@ -69,6 +69,17 @@ FIT_BOUND_TOL = 0.1
 # discrimination at all
 S_FIT_MAX = 1.2
 
+# Lunar scattered-light model (Krisciunas & Schaefer 1991, PASP 103, 1033):
+# extinction coefficient for the moonlight path (a clean-atmosphere V value -
+# NOT the fitted site k, which absorbs vignette and edge-PSF losses) and the
+# dark-zenith reference brightness that converts nanoLamberts to this model's
+# relative units (zenith natural sky = 1).
+MOON_K_EXT = 0.25
+MOON_B0_NL = 79.0
+MOON_RHO_MIN = 5.0     # deg - clamp the star-moon separation; inside this the
+                       # scattering function diverges and the sky is saturated
+                       # glare anyway (detection there is hopeless regardless)
+
 
 def fitQualityIssues(model_dict):
     """ Diagnose degenerate-fit symptoms in a fitted (or loaded) dome model.
@@ -347,7 +358,60 @@ class LightDomeModel(object):
         return lm0 - self.k*(airmass - 1.0) - 1.25*np.log10(self.skyBrightness(az, alt))
 
 
-    def detectionProbability(self, mag, az, alt, station_id=None):
+    def moonPenalty(self, az, alt, moon_az, moon_alt, moon_phase):
+        """ Limiting-magnitude penalty from scattered moonlight at the given sky
+        positions (Krisciunas & Schaefer 1991 brightness model).
+
+        The moon brightness adds to the site brightness field in flux space, so
+        the penalty is 1.25*log10(1 + B_moon/B_site) - large near a bright moon,
+        vanishing when the moon is below the horizon. Used by the SCORING side
+        (per-star expected detection probabilities on moonlit frames); the model
+        FIT remains dark-sky only and the flux verdict domain still excludes
+        bright-moon frames - this term exists so the transparency products stop
+        reading moonlight as cloud.
+
+        Arguments:
+            az, alt: [ndarray/float] Sky positions (deg).
+            moon_az, moon_alt: [float] Moon horizontal coordinates (deg).
+            moon_phase: [float] Illuminated fraction (percent, 0-100).
+
+        Return:
+            penalty: [ndarray/float] Magnitudes of LM lost to moonlight (>= 0).
+        """
+
+        az = np.asarray(az, dtype=np.float64)
+        alt = np.asarray(alt, dtype=np.float64)
+
+        if (moon_alt is None) or (moon_alt <= 0.0) or (moon_phase is None):
+            return np.zeros_like(az)
+
+        # Phase angle from the illuminated fraction
+        frac = np.clip(float(moon_phase)/100.0, 0.0, 1.0)
+        alpha = np.degrees(np.arccos(np.clip(2.0*frac - 1.0, -1.0, 1.0)))
+
+        # Moon magnitude and normalized illuminance
+        m_moon = -12.73 + 0.026*abs(alpha) + 4e-9*alpha**4
+        i_star = 10.0**(-0.4*(m_moon + 16.57))
+
+        # Star-moon angular separation on the sky
+        a1, a2 = np.radians(alt), np.radians(float(moon_alt))
+        daz = np.radians(az - float(moon_az))
+        cos_rho = np.sin(a1)*np.sin(a2) + np.cos(a1)*np.cos(a2)*np.cos(daz)
+        rho = np.degrees(np.arccos(np.clip(cos_rho, -1.0, 1.0)))
+        rho = np.maximum(rho, MOON_RHO_MIN)
+
+        # Scattering function (Rayleigh + Mie), optical path lengths
+        f_rho = 10.0**5.36*(1.06 + np.cos(np.radians(rho))**2)             + 10.0**(6.15 - rho/40.0)
+        x_star = (1.0 - 0.96*np.sin(np.radians(90.0 - np.clip(alt, 5.0, 90.0)))**2)**-0.5
+        x_moon = (1.0 - 0.96*np.sin(np.radians(90.0 - max(float(moon_alt), 5.0)))**2)**-0.5
+
+        b_moon_nl = f_rho*i_star*10.0**(-0.4*MOON_K_EXT*x_moon)             *(1.0 - 10.0**(-0.4*MOON_K_EXT*x_star))
+
+        b_site = np.asarray(self.skyBrightness(az, alt), dtype=np.float64)
+        return 1.25*np.log10(1.0 + (b_moon_nl/MOON_B0_NL)/np.maximum(b_site, 1e-6))
+
+
+    def detectionProbability(self, mag, az, alt, station_id=None, moon=None):
         """ Probability that a star of the given catalog magnitude is detected and matched
             at the given sky position, under clear skies.
 
@@ -357,11 +421,16 @@ class LightDomeModel(object):
 
         Keyword arguments:
             station_id: [str] Station whose LM0 to use.
+            moon: [tuple] (moon_az, moon_alt, moon_phase) of the frame - applies the
+                scattered-moonlight LM penalty (moonPenalty). None = dark sky.
 
         Return:
             p: [ndarray/float] Detection probability in [0, 1].
         """
 
         lm = self.limitingMagnitude(az, alt, station_id=station_id)
+
+        if moon is not None:
+            lm = lm - self.moonPenalty(az, alt, *moon)
 
         return 1.0/(1.0 + np.exp(-(lm - mag)/self.s))

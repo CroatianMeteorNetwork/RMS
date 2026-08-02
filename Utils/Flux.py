@@ -2235,7 +2235,23 @@ def denseDomeRatios(config, dome_model, ff_list, calstars_positions, recalibrate
         if not len(x):
             continue
 
-        p_det = dome_model.detectionProbability(mag, az, alt, station_id=config.stationID)
+        # Scattered-moonlight LM penalty (Krisciunas & Schaefer via the model):
+        # scoring covers ALL frames including moonlit ones, and without this the
+        # transparency consumers read moonlight as cloud. The verdict domain
+        # still excludes bright-moon frames; this only makes the ungated
+        # expectations honest.
+        obs_m = ephem.Observer()
+        obs_m.lat, obs_m.lon = str(platepar.lat), str(platepar.lon)
+        obs_m.date = jd2Date(jd, dt_obj=True)
+        moon_eph = ephem.Moon()
+        moon_eph.compute(obs_m)
+        moon_ctx = None
+        if float(np.degrees(moon_eph.alt)) > 0.0:
+            moon_ctx = (float(np.degrees(moon_eph.az)),
+                        float(np.degrees(moon_eph.alt)), float(moon_eph.phase))
+
+        p_det = dome_model.detectionProbability(mag, az, alt, station_id=config.stationID,
+            moon=moon_ctx)
 
         area = usable_px if usable_px is not None \
             else float(platepar.X_res*platepar.Y_res)

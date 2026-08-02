@@ -12,8 +12,11 @@ and index the cell grid. Semantics consumers MUST respect:
 - flags per cell/frame:
     FLAG_OK          - measured value
     FLAG_NO_DATA     - too few stars to judge (dm is NaN)
-    FLAG_MOON_DOMAIN - moon above horizon and bright; the count channel reads
-                       moonlight as extinction, treat dm as an upper bound
+    FLAG_MOON_DOMAIN - moon above horizon and bright. Since the scoring pass
+                       applies the scattered-moonlight LM penalty to the
+                       expectations, dm on these frames is a model-corrected
+                       estimate rather than a raw upper bound; the flag stays
+                       as provenance (the lunar model carries its own error)
     (INTERPOLATED is reserved for future spatial fill - v1 never interpolates.)
 
 Schema (npz):

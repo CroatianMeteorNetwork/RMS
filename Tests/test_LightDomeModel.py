@@ -226,3 +226,35 @@ def test_fit_quality_warnings_bowl_degeneracy(model_dict):
     model_dict["harmonics"] = [dict(order=1, A=10.0**3.45, phi=100.0, h=20.0)]
     warnings = fitQualityWarnings(model_dict)
     assert len(warnings) == 1 and "harmonic order 1 amplitude" in warnings[0]
+
+
+def test_moon_penalty_physics(model_dict):
+    # Krisciunas & Schaefer scattered-moonlight term: zero with the moon down,
+    # grows with phase and with proximity to the moon, and detectionProbability
+    # drops accordingly on moonlit frames
+    import numpy as np
+    model = LightDomeModel(model_dict)
+
+    az = np.array([180.0, 180.0])
+    alt = np.array([60.0, 60.0])
+
+    # Moon below the horizon: no penalty
+    assert np.allclose(model.moonPenalty(az, alt, 180.0, -10.0, 100.0), 0.0)
+
+    # Full moon at alt 40, az 180: nearby star suffers far more than one 120 deg away
+    pen_near = model.moonPenalty(np.array([180.0]), np.array([50.0]), 180.0, 40.0, 100.0)
+    pen_far = model.moonPenalty(np.array([0.0]), np.array([50.0]), 180.0, 40.0, 100.0)
+    assert pen_near[0] > pen_far[0] > 0.0
+    assert pen_near[0] > 1.0        # bright moon nearby costs magnitudes
+
+    # Quarter moon costs less than full at the same geometry
+    pen_quarter = model.moonPenalty(np.array([180.0]), np.array([50.0]), 180.0, 40.0, 50.0)
+    assert pen_quarter[0] < pen_near[0]
+
+    # Detection probability drops under the moon and is unchanged without it
+    p_dark = model.detectionProbability(5.0, 180.0, 50.0, station_id="US005A")
+    p_moon = model.detectionProbability(5.0, 180.0, 50.0, station_id="US005A",
+        moon=(180.0, 40.0, 100.0))
+    p_none = model.detectionProbability(5.0, 180.0, 50.0, station_id="US005A", moon=None)
+    assert p_moon < p_dark
+    assert p_none == p_dark
