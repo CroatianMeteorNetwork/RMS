@@ -208,12 +208,18 @@ def _rollingMedian(a, window):
     if window <= 1:
         return a
 
+    import warnings
+
     half = window//2
     out = np.empty_like(a)
     n = a.shape[0]
-    for i in range(n):
-        lo, hi = max(0, i - half), min(n, i + half + 1)
-        with np.errstate(all="ignore"):
+    # nanmedian emits a warnings-module RuntimeWarning on all-NaN slices (which
+    # np.errstate does NOT cover) - all-NaN windows are expected here and stay
+    # NaN by design, so the warning is pure log noise on-station
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        for i in range(n):
+            lo, hi = max(0, i - half), min(n, i + half + 1)
             out[i] = np.nanmedian(a[lo:hi], axis=0)
     return out
 

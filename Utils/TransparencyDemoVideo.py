@@ -150,8 +150,12 @@ def generateDemoVideo(config, night_dir, sidecar_path, max_stills=None):
             # PRODUCT stays unsmoothed - this is presentation only; the real
             # temporal layer is its own benchmarked roadmap item.
             if len(leaf_dm) >= 3:
+                import warnings as _warnings
                 stack = _np.stack([leaf_dm[:-2], leaf_dm[1:-1], leaf_dm[2:]])
-                with _np.errstate(all="ignore"):
+                # errstate does not cover nanmedian's all-NaN RuntimeWarning
+                # (warnings module); all-NaN triples are expected and stay NaN
+                with _warnings.catch_warnings():
+                    _warnings.simplefilter("ignore", RuntimeWarning)
                     leaf_dm[1:-1] = _np.nanmedian(stack, axis=0)
     estimator_tag = _mh.get("estimator", "grid")
 
