@@ -500,36 +500,60 @@ class QueuedPool(object):
         while any([w.is_alive() for w in self.pool._pool]):
 
             if (time.time() - t_beg) > graceful_timeout:
-                self.printAndLog('Workers still alive after {:.0f} s, terminating pool...'.format(
+                self.printAndLog('Workers still alive after {:.0f} s, terminating...'.format(
                     float(graceful_timeout)))
-                self.pool.terminate()
                 break
 
             time.sleep(0.5)
 
-        # pool.join() joins every worker with no timeout - a worker stuck in
-        # uninterruptible I/O (hung camera/USB) would hang shutdown forever.
-        # Bound the wait and escalate to SIGKILL for anything that survived
-        # terminate() (review finding).
-        t_beg = time.time()
-        while any([w.is_alive() for w in self.pool._pool]) \
-                and ((time.time() - t_beg) < 10):
-            time.sleep(0.25)
+        # pool.terminate() cannot run yet: CPython's _terminate_pool ends with an
+        # unbounded join() over every live worker, so a SIGTERM-ignoring worker
+        # would hang shutdown inside terminate() before any escalation is reached
+        # (review finding). Escalate manually first - SIGTERM, bounded wait,
+        # SIGKILL - and only hand the pool to terminate()/join() once every
+        # worker is confirmed dead.
+        if any([w.is_alive() for w in self.pool._pool]):
 
-        for w in self.pool._pool:
-            if w.is_alive():
-                self.printAndLog('Worker {} survived terminate(), sending '
-                    'SIGKILL...'.format(w.pid))
-                try:
-                    if hasattr(signal, 'SIGKILL'):
-                        os.kill(w.pid, signal.SIGKILL)
-                    else:
+            for w in self.pool._pool:
+                if w.is_alive():
+                    try:
                         w.terminate()
-                except (OSError, AttributeError):
-                    pass
+                    except (OSError, AttributeError):
+                        pass
 
-        self.printAndLog('Joining pool...')
-        self.pool.join()
+            t_beg = time.time()
+            while any([w.is_alive() for w in self.pool._pool]) \
+                    and ((time.time() - t_beg) < 10):
+                time.sleep(0.25)
+
+            for w in self.pool._pool:
+                if w.is_alive():
+                    self.printAndLog('Worker {} survived terminate(), sending '
+                        'SIGKILL...'.format(w.pid))
+                    try:
+                        if hasattr(signal, 'SIGKILL'):
+                            os.kill(w.pid, signal.SIGKILL)
+                        else:
+                            w.terminate()
+                    except (OSError, AttributeError):
+                        pass
+
+            # Give SIGKILL a moment to be delivered and the workers reaped
+            t_beg = time.time()
+            while any([w.is_alive() for w in self.pool._pool]) \
+                    and ((time.time() - t_beg) < 5):
+                time.sleep(0.25)
+
+        if any([w.is_alive() for w in self.pool._pool]):
+            # A worker stuck in uninterruptible I/O (hung camera/USB) survives even
+            # SIGKILL, and terminate()/join() would hang on it forever - abandon the
+            # pool instead of wedging shutdown
+            self.printAndLog('A worker survived SIGKILL (uninterruptible I/O), '
+                'abandoning the pool without joining...')
+        else:
+            self.pool.terminate()
+            self.printAndLog('Joining pool...')
+            self.pool.join()
 
         self.active_workers.set(0)
 

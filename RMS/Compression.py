@@ -229,14 +229,25 @@ class Compressor(multiprocessing.Process):
                     self.terminate()
                 else:
                     log.info("Compression process exited gracefully after interrupt")
-                    
+
             except ProcessLookupError:
                 log.info("Compression process already terminated")
             except Exception as e:
                 log.error("Error during graceful compression shutdown: {}".format(e))
                 log.info("Falling back to terminate()")
                 self.terminate()
-            
+
+            # A bare join() would hang forever on a process that ignores SIGTERM -
+            # bound the wait and escalate to SIGKILL (review finding)
+            self.join(5)
+
+            if self.is_alive():
+                log.warning("Compression process survived terminate, sending SIGKILL...")
+                try:
+                    os.kill(self.pid, signal.SIGKILL)
+                except (OSError, AttributeError):
+                    pass
+
             # Always join to reap zombie (returns instantly if already dead)
             self.join()
 
