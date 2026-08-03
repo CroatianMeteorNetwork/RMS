@@ -10,6 +10,9 @@
     
     ["SetParam", "Encode", "Video", "Compression", "H.264"],
     ["SetParam", "Encode", "Video", "Resolution", "1080P"],
+    ["SetParam", "Encode", "Video", "BitRateControl", "CBR"],
+    ["SetParam", "Encode", "Video", "BitRate", "16384"],
+    ["SetParam", "Encode", "Video", "GOP", "1"],
     ["SetParam", "Encode", "Video", "FPS", "25"],
     ["SetParam", "Encode", "Video", "Quality", "6"],
     ["SetParam", "Encode", "AudioEnable", "0"],
