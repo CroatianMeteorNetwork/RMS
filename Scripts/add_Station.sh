@@ -337,6 +337,12 @@ if [[ -n "${CSV_FILE}" ]]; then
         item="${VALUES[$station_id_col]}"
         [[ -z "$item" ]] && continue
 
+        # reject IDs that would break directory names or the sed edits
+        if [[ ! "$item" =~ ^[A-Za-z0-9_-]+$ ]]; then
+            echo "Skipping invalid station ID from CSV: ${item}"
+            continue
+        fi
+
         create_station "$item" || continue
 
         config_file=~/source/Stations/${item}/.config
@@ -385,10 +391,27 @@ else
                 break
             fi
         fi
-        read -p "Enter station ID, <cr> to end: " this_Station
+        # drop buffered keypresses (e.g. the tail of an arrow key escape
+        # sequence left by a single-key read) before taking a typed entry
+        while read -t 0.01; do :; done
+        read -r -p "Enter station ID, <cr> to end: " this_Station
         this_Station=$(uppercase "$(trim "$this_Station")")
         if [[ -z "$this_Station" ]]; then
             break
+        fi
+        if [[ ! "$this_Station" =~ ^[A-Z]{2}[A-Z0-9]{4}$ ]]; then
+            echo "  A station code has 2 country letters followed by 4 characters, e.g. US01AB."
+            # Only offer to keep a nonstandard entry when it is still safe
+            # to use as a directory name and a .config value
+            if [[ "$this_Station" =~ ^[A-Z0-9_-]+$ ]]; then
+                read -n1 -r -p "  Use '${this_Station}' anyway? Press Y to accept it, any other key to retype: " key
+                echo ""
+                if [[ "$key" != "y" && "$key" != "Y" ]]; then
+                    continue
+                fi
+            else
+                continue
+            fi
         fi
         Station+=("$this_Station")
     done
