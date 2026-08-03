@@ -30,6 +30,22 @@ isNumberInRange () {   # $1 = value, $2 = min, $3 = max
   awk -v v="$1" -v lo="$2" -v hi="$3" 'BEGIN { exit !(v >= lo && v <= hi) }'
 }
 
+# Strip leading/trailing whitespace. Used instead of xargs, which aborts
+# with an error when the input contains a stray quote or backslash
+trimSpaces () {
+  local s="$*"
+  s="${s#"${s%%[![:space:]]*}"}"
+  s="${s%"${s##*[![:space:]]}"}"
+  printf '%s' "$s"
+}
+
+# Discard buffered keypresses (e.g. the tail of an arrow key escape
+# sequence left behind by a single-key read) so they cannot pollute the
+# next typed entry
+flushInput () {
+  while read -t 0.01; do :; done
+}
+
 
 
 # If the autorun file does not exist, create it and run the configuration
@@ -120,22 +136,36 @@ echo "
 ----------------------------
 Checking if the file system needs to be expanded..."
 
-# Compare the root file system to the device it lives on to see if there
-# is unallocated space left - a freshly flashed image is much smaller
-# than the SD card it was written to
+# Compare the root file system to the partition and the device it lives
+# on. A freshly flashed image is much smaller than the SD card it was
+# written to: expanding first grows the partition to fill the device
+# (raspi-config + reboot), then a boot-time resize2fs grows the file
+# system to fill the partition. On large cards that second step can still
+# be running in the background when this guide starts again after the
+# reboot, so the two are checked separately.
 fs_gb=$(( $(df --output=size -B1 / | tail -1) / 1000000000 ))
 root_part=$(findmnt -n -o SOURCE / 2>/dev/null)
 root_dev=$(lsblk -n -o PKNAME "$root_part" 2>/dev/null | head -1)
+part_gb=$(( $(lsblk -b -d -n -o SIZE "$root_part" 2>/dev/null || echo 0) / 1000000000 ))
+if (( part_gb == 0 )); then
+    part_gb=$fs_gb
+fi
 if [[ -n "$root_dev" ]]; then
     dev_gb=$(( $(lsblk -b -d -n -o SIZE "/dev/$root_dev") / 1000000000 ))
 else
-    dev_gb=$fs_gb
+    dev_gb=$part_gb
 fi
+
+# The file system reported by df is always a few percent smaller than its
+# partition (ext4 keeps inode tables and a journal), and that overhead
+# grows with the card size - so the comparison slack must scale too, or
+# large cards get flagged as unexpanded forever
+slack_gb=$(( part_gb / 20 + 2 ))
 
 # clear the input buffer
 while read -t 0.01; do :; done
 
-if (( dev_gb - fs_gb >= 2 )); then
+if (( dev_gb - part_gb >= 2 )); then
 
     echo "
 The file system takes up ${fs_gb} GB of the ${dev_gb} GB storage device.
@@ -159,6 +189,28 @@ rated size, e.g. a 64 GB card gives about 62 GB.
         echo "The file system was not expanded, so part of the storage device"
         echo "will stay unused and there may not be enough room for data capture!"
     fi
+
+elif (( part_gb - fs_gb >= slack_gb )); then
+
+    # The partition already fills the device but the file system does not,
+    # so the resize scheduled by raspi-config is still running (or failed)
+    echo "
+The file system is still being expanded to fill the ${dev_gb} GB storage
+device - on large cards this takes a few minutes after the resize reboot.
+Waiting for it to finish..."
+    while pgrep -x resize2fs >/dev/null 2>&1; do
+        printf '.'
+        sleep 2
+    done
+    echo ""
+    fs_gb=$(( $(df --output=size -B1 / | tail -1) / 1000000000 ))
+    if (( part_gb - fs_gb >= slack_gb )); then
+        # The scheduled resize never ran or did not finish the job -
+        # resize directly, which is safe online on a mounted ext4 root
+        sudo resize2fs "$root_part"
+        fs_gb=$(( $(df --output=size -B1 / | tail -1) / 1000000000 ))
+    fi
+    echo "${fs_gb} GB of space is now available."
 
 elif (( fs_gb < 61 )); then
     echo ""
@@ -258,13 +310,16 @@ while true; do
 
   # Station ID
   while true; do
-    read -p "Station ID (e.g. US01AB): " statID || exit 1
-    statID=$(echo "$statID" | xargs | tr '[:lower:]' '[:upper:]')
+    flushInput
+    read -r -p "Station ID (e.g. US01AB): " statID || exit 1
+    statID=$(trimSpaces "$statID" | tr '[:lower:]' '[:upper:]')
     if [[ "$statID" =~ ^[A-Z]{2}[A-Z0-9]{4}$ && "$statID" != "XX0001" ]]; then
       break
     fi
     echo "  A station code has 2 country letters followed by 4 characters, e.g. US01AB."
-    if [[ -n "$statID" ]]; then
+    # Only offer to keep a nonstandard entry when it is still safe to use
+    # as a directory name and a .config value
+    if [[ "$statID" =~ ^[A-Z0-9_-]+$ ]]; then
       read -n1 -r -p "  Use '$statID' anyway? Press Y to accept it, any other key to retype... " key
       echo ""
       if [[ "$key" = "y" || "$key" = "Y" ]]; then
@@ -275,24 +330,27 @@ while true; do
 
   # Latitude
   while true; do
-    read -p "Latitude (+N, in degrees, e.g. 40.689298): " lat || exit 1
-    lat=$(echo "$lat" | xargs)
+    flushInput
+    read -r -p "Latitude (+N, in degrees, e.g. 40.689298): " lat || exit 1
+    lat=$(trimSpaces "$lat")
     isNumberInRange "$lat" -90 90 && break
     echo "  The latitude must be a number between -90 and 90."
   done
 
   # Longitude
   while true; do
-    read -p "Longitude (+E, in degrees, NEGATIVE in the western hemisphere, e.g. -74.044479): " lon || exit 1
-    lon=$(echo "$lon" | xargs)
+    flushInput
+    read -r -p "Longitude (+E, in degrees, NEGATIVE in the western hemisphere, e.g. -74.044479): " lon || exit 1
+    lon=$(trimSpaces "$lon")
     isNumberInRange "$lon" -180 180 && break
     echo "  The longitude must be a number between -180 and 180."
   done
 
   # Elevation
   while true; do
-    read -p "Elevation (mean sea level, in meters, NOT feet): " elev || exit 1
-    elev=$(echo "$elev" | xargs)
+    flushInput
+    read -r -p "Elevation (mean sea level, in meters, NOT feet): " elev || exit 1
+    elev=$(trimSpaces "$elev")
     isNumberInRange "$elev" -500 9000 && break
     echo "  The elevation must be a number in meters, e.g. 95.3."
   done
