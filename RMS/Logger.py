@@ -364,6 +364,11 @@ LOG_QUEUE_STALL_THRESHOLD = 500
 # Number of consecutive health checks the backlog must persist before the pipeline is restarted
 LOG_STALL_STRIKES = 3
 
+# Minimum spacing between two strike-eligible samples. Both the capture watchdog and the
+# manager's own health thread call the check every 60 s, so without this the samples can land
+# seconds apart and all LOG_STALL_STRIKES accumulate inside a single burst
+LOG_STALL_SAMPLE_INTERVAL = 45
+
 # Exponential backoff between pipeline restarts (a persistent failure - e.g. an
 # unwritable log directory - must not leak an abandoned queue's fds every 60 s)
 LOG_RESTART_BACKOFF_BASE = 120
@@ -389,6 +394,21 @@ class _DroppingQueueHandler(logging.handlers.QueueHandler):
             self.queue.put_nowait(record)
         except Exception:
             self.dropped += 1
+            return
+
+        # Report drops as soon as the queue has room again: forked children never run the
+        # health check, so without this their drop counts would stay invisible while the
+        # children were the heavy producers (review finding)
+        if self.dropped:
+            n, self.dropped = self.dropped, 0
+            report = logging.LogRecord(
+                'rmslogger', logging.WARNING, __file__, 0,
+                '{:d} log records from process {:d} were dropped while the '
+                'logging queue was full'.format(n, os.getpid()), None, None)
+            try:
+                self.queue.put_nowait(report)
+            except Exception:
+                self.dropped += n
 
     def takeDroppedCount(self):
         """ Return and reset this process's dropped-record count. """
@@ -402,14 +422,23 @@ class LoggingManager:
         self.logging_queue = None
         self.listener_process = None
         self.is_initialized = False
+
+        # The health thread holds this for the duration of every periodic check, so it can
+        # be held at fork time - a child inheriting it locked would deadlock on any
+        # LoggingManager call. Nothing forked calls one today (every initLogging call lives
+        # in a __main__ block); keep it that way, or fork before initLogging.
         self.init_lock = threading.Lock()
 
         # Arguments used to spawn the listener, kept so a wedged listener can be respawned
         self._listener_args = None
 
-        # Consecutive health checks with an excessive, non-draining backlog
+        # Consecutive health checks with an excessive backlog and no listener progress
         self._stall_strikes = 0
-        self._last_backlog = None
+        self._last_processed = None
+        self._last_sample_time = None
+
+        # Records the current listener has taken off the queue (lock-free, single writer)
+        self._records_processed = None
 
         # Restart pacing (see checkLoggingHealth)
         self._restart_count = 0
@@ -506,9 +535,16 @@ class LoggingManager:
         """ Create a fresh (bounded) logging queue and start a listener process draining it. """
 
         self.logging_queue = multiprocessing.Queue(LOG_QUEUE_MAXSIZE)
+
+        # Progress counter for the health check. Created fresh with every listener, so a
+        # restart starts from zero. lock=False: the listener is the only writer and the health
+        # check only ever compares it against its own previous reading, so a locked Value
+        # would add a semaphore a dying listener could orphan for no benefit
+        self._records_processed = multiprocessing.Value('l', 0, lock=False)
+
         self.listener_process = multiprocessing.Process(
             target=_listener_process,
-            args=(self.logging_queue,) + self._listener_args
+            args=(self.logging_queue, self._records_processed) + self._listener_args
         )
         self.listener_process.daemon = True
         self.listener_process.start()
@@ -567,6 +603,14 @@ class LoggingManager:
                     + LOG_RESTART_BACKOFF_MAX):
                 self._restart_count = 0
 
+            # Space the samples out: this check has two callers (the capture
+            # watchdog and the always-on health thread), each on its own 60 s
+            # cycle, so back-to-back samples are possible and three strikes
+            # could otherwise be collected within a single burst
+            if (self._last_sample_time is not None) \
+                    and ((now - self._last_sample_time) < LOG_STALL_SAMPLE_INTERVAL):
+                return True
+
             # Listener alive - check that the queue is actually draining
             try:
                 backlog = self.logging_queue.qsize()
@@ -574,17 +618,22 @@ class LoggingManager:
                 # qsize() is not implemented on some platforms (e.g. macOS)
                 return True
 
-            # Drain-rate test, not an absolute threshold: a healthy listener
-            # slowly draining a large burst must not be killed mid-write
-            # (review finding). Strike only when the backlog is high AND not
-            # shrinking against the previous reading.
+            processed = self._records_processed.value
+
+            # A stall is the listener not CONSUMING - not a large backlog, and not even a
+            # backlog that keeps growing: producers can legitimately outrun the listener for
+            # a while (a detection burst on a slow SD card), and killing it then discards
+            # everything queued. The listener's own progress counter separates the two cases
+            # exactly: it stops advancing only when nothing is being taken off the queue.
             if (backlog > LOG_QUEUE_STALL_THRESHOLD) \
-                    and (self._last_backlog is not None) \
-                    and (backlog >= self._last_backlog):
+                    and (self._last_processed is not None) \
+                    and (processed == self._last_processed):
                 self._stall_strikes += 1
             else:
                 self._stall_strikes = 0
-            self._last_backlog = backlog
+
+            self._last_processed = processed
+            self._last_sample_time = now
 
             if self._stall_strikes >= LOG_STALL_STRIKES:
                 if now < self._next_restart_allowed:
@@ -593,7 +642,8 @@ class LoggingManager:
                           self._next_restart_allowed - now),
                           file=sys.__stderr__)
                     return False
-                self._restartLogging('backlog of {:d} records is not draining'.format(backlog))
+                self._restartLogging('backlog of {:d} records with no listener progress in '
+                    '{:d} checks'.format(backlog, LOG_STALL_STRIKES))
                 return False
 
             return True
@@ -629,10 +679,11 @@ class LoggingManager:
 
         # Abandon the old queue - it may be wedged beyond recovery. Records buffered in it are
         # lost, and child processes forked before this point keep logging into the abandoned
-        # (bounded) queue, so their output is lost until they are restarted. Close OUR end:
-        # that releases this process's two pipe fds and its feeder thread, so repeated
-        # restarts cannot exhaust the fd limit (review finding); earlier-forked children
-        # still hold their own ends.
+        # (bounded) queue, so their output is lost until they are restarted. close() asks our
+        # end's feeder thread to exit, releasing this process's pipe fds - best-effort only:
+        # a feeder blocked on the very lock that wedged the queue never gets the message and
+        # keeps its fds, thread and buffered records. The restart backoff is what bounds that
+        # leak (review finding); earlier-forked children still hold their own ends.
         old_queue = self.logging_queue
         try:
             old_queue.close()
@@ -647,7 +698,8 @@ class LoggingManager:
 
         self._spawnListener()
         self._stall_strikes = 0
-        self._last_backlog = None
+        self._last_processed = None
+        self._last_sample_time = None
 
         # Point this process's queue handlers at the fresh queue
         for handler in logging.getLogger().handlers:
@@ -785,9 +837,14 @@ def _listener_configurer(config, log_file_prefix, safedir, console_level=logging
     root_logger.debug("Log listener configured. Current file: %s", full_path)
 
 
-def _listener_process(queue, config, log_file_prefix, safedir, console_level=logging.INFO, file_level=logging.DEBUG):
+def _listener_process(queue, records_processed, config, log_file_prefix, safedir,
+                      console_level=logging.INFO, file_level=logging.DEBUG):
     """ Target function for the logging listener process.
     Ignores SIGINT and processes messages in strict FIFO order.
+
+    records_processed is a lock-free shared counter of the records taken off the queue. It is
+    the health check's only reliable "the listener is consuming" signal - the queue backlog
+    alone cannot distinguish a wedged pipeline from producers outrunning a healthy listener.
     """
     import signal
     signal.signal(signal.SIGINT, signal.SIG_IGN)
@@ -803,6 +860,12 @@ def _listener_process(queue, config, log_file_prefix, safedir, console_level=log
     while True:
         try:
             record = queue.get()
+
+            # Count progress as soon as the record leaves the queue: the backlog the health
+            # check reads shrinks at this point, so the two readings stay consistent even if
+            # a handler write is slow
+            records_processed.value += 1
+
             if record is None:       # shutdown sentinel
                 break
             # Process record through each handler that accepts its level
