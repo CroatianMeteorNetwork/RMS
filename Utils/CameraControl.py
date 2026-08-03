@@ -863,6 +863,7 @@ def switchMode(cam, mode_name, path='./camera_settings.json'):
                          .format(mode_name, path, list(modes.keys())))
 
     # Loop over each command array in the specified mode
+    failed = []
     for param in modes[mode_name]:
         cmd = param[0]
         opts = param[1:]
@@ -872,8 +873,25 @@ def switchMode(cam, mode_name, path='./camera_settings.json'):
             log.warning("Ignoring SwitchMode command inside JSON to prevent recursion.")
             continue
 
-        # Pass everything else directly to dvripCall
-        dvripCall(cam, cmd, opts)
+        # Pass everything else directly to dvripCall.
+        # Guard each entry: without this, a single unsupported command aborts the
+        # whole loop and every later setting is silently skipped. That happened
+        # with a 5-element DayNightSwitch entry against a build of this file that
+        # had no handler for it, which dropped the last 7 settings of "init"
+        # (IRCUTMode, IrcutSwap, Night_nfLevel, RejectFlicker, WhiteBalance,
+        # PictureFlip, PictureMirror) behind one generic error line.
+        try:
+            dvripCall(cam, cmd, opts)
+        except Exception as e:
+            failed.append((param, e))
+            log.error('Skipping %s %s: %s', cmd, opts, e)
+
+    if failed:
+        log.error('%d of %d "%s" commands failed:', len(failed), len(modes[mode_name]), mode_name)
+        for param, e in failed:
+            log.error('    %s -> %s', param, e)
+    else:
+        log.info('All %d "%s" commands applied', len(modes[mode_name]), mode_name)
 
 
 def dvripCall(cam, cmd, opts, camera_settings_path='./camera_settings.json'):
