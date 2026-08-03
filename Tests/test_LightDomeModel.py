@@ -258,3 +258,23 @@ def test_moon_penalty_physics(model_dict):
     p_none = model.detectionProbability(5.0, 180.0, 50.0, station_id="US005A", moon=None)
     assert p_moon < p_dark
     assert p_none == p_dark
+
+
+def test_moon_gain_scaling(model_dict):
+    # gain scales the brightness ratio inside the log: 0 disables, monotone up
+    import numpy as np
+    model = LightDomeModel(model_dict)
+    args = (np.array([200.0]), np.array([50.0]), 180.0, 40.0, 100.0)
+    assert model.moonPenalty(*args, gain=0.0)[0] == 0.0
+    p_half = model.moonPenalty(*args, gain=0.5)[0]
+    p_full = model.moonPenalty(*args, gain=1.0)[0]
+    assert 0.0 < p_half < p_full
+
+    # detectionProbability honors the gain; gain 0 equals no moon
+    p_dark = model.detectionProbability(5.0, 200.0, 50.0, station_id="US005A")
+    p_g0 = model.detectionProbability(5.0, 200.0, 50.0, station_id="US005A",
+        moon=(180.0, 40.0, 100.0), moon_gain=0.0)
+    p_g1 = model.detectionProbability(5.0, 200.0, 50.0, station_id="US005A",
+        moon=(180.0, 40.0, 100.0), moon_gain=1.0)
+    assert p_g0 == p_dark
+    assert p_g1 < p_dark

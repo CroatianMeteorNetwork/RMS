@@ -12,11 +12,13 @@ and index the cell grid. Semantics consumers MUST respect:
 - flags per cell/frame:
     FLAG_OK          - measured value
     FLAG_NO_DATA     - too few stars to judge (dm is NaN)
-    FLAG_MOON_DOMAIN - moon above horizon and bright. Since the scoring pass
-                       applies the scattered-moonlight LM penalty to the
-                       expectations, dm on these frames is a model-corrected
-                       estimate rather than a raw upper bound; the flag stays
-                       as provenance (the lunar model carries its own error)
+    FLAG_MOON_DOMAIN - moon above horizon and bright. The scoring pass applies
+                       the scattered-moonlight penalty at the PER-SITE
+                       CALIBRATED gain (scoring header moon_gain_applied);
+                       at gain 0 (warmup, and the currently measured value)
+                       dm on these frames reads moonlight as extinction and
+                       is an upper bound; at a calibrated nonzero gain it is
+                       a corrected estimate. The flag stays as provenance.
     (INTERPOLATED is reserved for future spatial fill - v1 never interpolates.)
 
 Schema (npz):

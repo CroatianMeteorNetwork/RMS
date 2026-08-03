@@ -358,17 +358,17 @@ class LightDomeModel(object):
         return lm0 - self.k*(airmass - 1.0) - 1.25*np.log10(self.skyBrightness(az, alt))
 
 
-    def moonPenalty(self, az, alt, moon_az, moon_alt, moon_phase):
-        """ Limiting-magnitude penalty from scattered moonlight at the given sky
-        positions (Krisciunas & Schaefer 1991 brightness model).
+    def moonBrightnessRatio(self, az, alt, moon_az, moon_alt, moon_phase):
+        """ Scattered-moonlight brightness as a fraction of the model's site
+        brightness at each sky position (Krisciunas & Schaefer 1991), BEFORE
+        the per-site gain.
 
-        The moon brightness adds to the site brightness field in flux space, so
-        the penalty is 1.25*log10(1 + B_moon/B_site) - large near a bright moon,
-        vanishing when the moon is below the horizon. Used by the SCORING side
-        (per-star expected detection probabilities on moonlit frames); the model
-        FIT remains dark-sky only and the flux verdict domain still excludes
-        bright-moon frames - this term exists so the transparency products stop
-        reading moonlight as cloud.
+        The gain exists because the model's B_site carries the unidentifiable
+        LM0/bowl split: its absolute scale is arbitrary without an anchor, so
+        B_moon/B_site must be calibrated per site from archived moonlit-clear
+        frames (see Utils.Flux.fitMoonGain). Measured with gain 1 the penalty
+        over-corrected by 40-190% on three dark-site nights whose uncorrected
+        expectations were already right - the fitted gains were ~0.
 
         Arguments:
             az, alt: [ndarray/float] Sky positions (deg).
@@ -376,7 +376,7 @@ class LightDomeModel(object):
             moon_phase: [float] Illuminated fraction (percent, 0-100).
 
         Return:
-            penalty: [ndarray/float] Magnitudes of LM lost to moonlight (>= 0).
+            q: [ndarray] B_moon/B_site in the model's relative units (>= 0).
         """
 
         az = np.asarray(az, dtype=np.float64)
@@ -408,10 +408,26 @@ class LightDomeModel(object):
         b_moon_nl = f_rho*i_star*10.0**(-0.4*MOON_K_EXT*x_moon)             *(1.0 - 10.0**(-0.4*MOON_K_EXT*x_star))
 
         b_site = np.asarray(self.skyBrightness(az, alt), dtype=np.float64)
-        return 1.25*np.log10(1.0 + (b_moon_nl/MOON_B0_NL)/np.maximum(b_site, 1e-6))
+        return (b_moon_nl/MOON_B0_NL)/np.maximum(b_site, 1e-6)
 
 
-    def detectionProbability(self, mag, az, alt, station_id=None, moon=None):
+    def moonPenalty(self, az, alt, moon_az, moon_alt, moon_phase, gain=1.0):
+        """ Limiting-magnitude penalty from scattered moonlight at the given sky
+        positions: 1.25*log10(1 + gain*B_moon/B_site). gain scales the
+        brightness RATIO (see moonBrightnessRatio) and is calibrated per site;
+        gain 0 disables the correction (warmup, and the measured value at
+        current dark-site model splits).
+
+        Return:
+            penalty: [ndarray/float] Magnitudes of LM lost to moonlight (>= 0).
+        """
+
+        q = self.moonBrightnessRatio(az, alt, moon_az, moon_alt, moon_phase)
+        return 1.25*np.log10(1.0 + float(gain)*q)
+
+
+    def detectionProbability(self, mag, az, alt, station_id=None, moon=None,
+            moon_gain=1.0):
         """ Probability that a star of the given catalog magnitude is detected and matched
             at the given sky position, under clear skies.
 
@@ -431,6 +447,6 @@ class LightDomeModel(object):
         lm = self.limitingMagnitude(az, alt, station_id=station_id)
 
         if moon is not None:
-            lm = lm - self.moonPenalty(az, alt, *moon)
+            lm = lm - self.moonPenalty(az, alt, *moon, gain=moon_gain)
 
         return 1.0/(1.0 + np.exp(-(lm - mag)/self.s))

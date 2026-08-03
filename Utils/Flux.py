@@ -1647,10 +1647,12 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
                 store_p_min=STORE_P_MIN,
                 platepar_source=scoring_platepar_source,
                 # Provenance: star_p includes the scattered-moonlight LM penalty
-                # (LightDomeModel.moonPenalty) - products written before this
-                # field lack the correction, and replay diffs across the
-                # boundary WILL differ on moonlit frames
+                # at the PER-SITE CALIBRATED gain below (0 = no correction -
+                # the warmup and the currently measured value). Products
+                # without these fields predate the calibrated term.
                 moon_corrected=True,
+                **{("moon_gain_" + k): v for k, v in
+                   getattr(denseDomeRatios, "last_moon_gain", {}).items()},
             )
             out_path = saveStarScoring(dir_path, night_name, header, f_meta, s_arrs)
             log.info("Star scoring product written: {:s} ({:d} frames, {:d} star "
@@ -2126,6 +2128,128 @@ FORCED_P_BOOTSTRAP = 0.9      # forced-photometry bright set: stars the model ex
                               # measured single-frame SNR (no magnitude constants)
 
 
+MOON_GAIN_SAMPLE = 120       # star records sampled per moonlit frame for the gain fit
+MOON_GAIN_MIN_FRAMES = 50    # moonlit dark frames a night needs to fit a gain
+MOON_GAIN_MIN_NIGHTS = 3     # fitted nights required before a gain is applied
+MOON_GAIN_MAX = 2.0          # bound on the applied gain
+MOON_GAIN_PCT = 80           # envelope percentile - the moonlit CLEAR level (a cloudy
+                             # minority pulls ratios down, never up, so the upper
+                             # envelope is cloud-immune like the ratio normalization)
+
+
+def fitMoonGain(samples, r_dark, dome_s):
+    """ Fit the per-site moon gain from one night's moonlit frames.
+
+    Finds g >= 0 such that the MOON_GAIN_PCT percentile of per-frame
+    matched/expected ratios (expectations penalized at gain g) equals the dark
+    reference level: the moonlit clear envelope must sit exactly where the dark
+    clear envelope sits. Bisection - the envelope is monotone decreasing in g.
+
+    Arguments:
+        samples: [list of (logit_dark, q, n_det)] Per-frame sampled star
+            records: dark-sky logit of P, moon brightness ratio, detections.
+        r_dark: [float] Dark-clear reference ratio (same-night 80th pct, or
+            1.0 when the night has no dark moonless window).
+        dome_s: [float] Logistic width of the dome model (mag).
+
+    Return:
+        g: [float] Fitted gain in [0, 2*MOON_GAIN_MAX], or None with too few
+            frames.
+    """
+
+    if len(samples) < MOON_GAIN_MIN_FRAMES:
+        return None
+
+    def envelope(g):
+        r = []
+        for logit, q, det in samples:
+            pen = 1.25*np.log10(1.0 + g*np.asarray(q, dtype=np.float64))
+            pr = 1.0/(1.0 + np.exp(-(np.asarray(logit, dtype=np.float64)
+                - pen/dome_s)))
+            s = pr.sum()
+            if s > 5:
+                r.append(det/s)
+        if len(r) < MOON_GAIN_MIN_FRAMES:
+            return None
+        return float(np.percentile(r, MOON_GAIN_PCT))
+
+    # The envelope RISES with gain: a larger penalty shrinks expectations, so
+    # matched/expected grows. Gain 0 is correct when the uncorrected envelope
+    # already sits at or above the dark reference (any penalty overshoots).
+    hi_bound = 2.0*MOON_GAIN_MAX
+    e0 = envelope(0.0)
+    if e0 is None:
+        return None
+    if e0 >= r_dark:
+        return 0.0
+    if envelope(hi_bound) <= r_dark:
+        return hi_bound
+
+    lo, hi = 0.0, hi_bound
+    for _ in range(40):
+        mid = 0.5*(lo + hi)
+        if envelope(mid) < r_dark:
+            lo = mid
+        else:
+            hi = mid
+    return 0.5*(lo + hi)
+
+
+def moonGainApplied(config):
+    """ The moon gain to apply tonight: robust median of trailing fitted gains
+    from PRIOR nights (mgain entries in the LM history), bounded, with a
+    warmup of 0 (no correction) until MOON_GAIN_MIN_NIGHTS have been fitted.
+    0 is also the measured value at current dark-site model splits, so warmup
+    and steady state currently agree.
+
+    Return:
+        gain: [float] Applied gain in [0, MOON_GAIN_MAX].
+    """
+
+    try:
+        history_path = os.path.join(os.path.expanduser(config.data_dir),
+            "{:s}_{:s}".format(str(config.stationID), LM_HISTORY_FILE))
+        with open(history_path) as f:
+            history = json.load(f)
+    except Exception:
+        return 0.0
+
+    gains = [v["mgain"] for k, v in sorted(history.items())[-LM_HISTORY_WINDOW:]
+             if isinstance(v, dict) and ("mgain" in v)]
+    if len(gains) < MOON_GAIN_MIN_NIGHTS:
+        return 0.0
+
+    return float(np.clip(np.median(gains), 0.0, MOON_GAIN_MAX))
+
+
+def recordMoonGain(config, night_id, g_star, ref_src):
+    """ Record tonight's fitted moon gain in the LM history (merge-safe, same
+        pattern as the ratio normalization entries). """
+
+    try:
+        data_dir = os.path.expanduser(config.data_dir)
+        if not os.path.isdir(data_dir):
+            return
+        history_path = os.path.join(data_dir, "{:s}_{:s}".format(
+            str(config.stationID), LM_HISTORY_FILE))
+        history = {}
+        if os.path.isfile(history_path):
+            with open(history_path) as f:
+                history = json.load(f)
+        night_key = _nightKey(night_id)
+        entry = history.get(night_key, {})
+        if not isinstance(entry, dict):
+            entry = {}
+        entry["mgain"] = round(float(g_star), 3)
+        entry["mgain_ref"] = str(ref_src)
+        history[night_key] = entry
+        history = dict(sorted(history.items())[-LM_HISTORY_KEEP:])
+        with open(history_path, "w") as f:
+            json.dump(history, f, indent=1)
+    except Exception as e:
+        log.debug("Could not record the moon gain: {}".format(e))
+
+
 def denseDomeRatios(config, dome_model, ff_list, calstars_positions, recalibrated_platepars, mask,
         collect_stars=False, dir_path=None):
     """ Score EVERY frame with the light-dome model, independent of its own recalibration.
@@ -2191,6 +2315,12 @@ def denseDomeRatios(config, dome_model, ff_list, calstars_positions, recalibrate
     expected = {}
     star_records = {}
 
+    # Per-site moon gain: applied value from PRIOR nights' calibration history;
+    # tonight's own fit accumulates below and is recorded for future nights
+    mg_applied = moonGainApplied(config) if collect_stars else 0.0
+    mg_samples = []
+    mg_dark_ratios = []
+
     # FF-less replay support: a prior scoring product renamed to the cache file
     # supplies the forced-photometry channel the FF avepixels would have
     forced_cache = None
@@ -2240,11 +2370,14 @@ def denseDomeRatios(config, dome_model, ff_list, calstars_positions, recalibrate
         if not len(x):
             continue
 
-        # Scattered-moonlight LM penalty (Krisciunas & Schaefer via the model):
-        # scoring covers ALL frames including moonlit ones, and without this the
-        # transparency consumers read moonlight as cloud. The verdict domain
-        # still excludes bright-moon frames; this only makes the ungated
-        # expectations honest.
+        # Scattered-moonlight LM penalty (Krisciunas & Schaefer via the model),
+        # scaled by the PER-SITE CALIBRATED gain: the model's B_site carries the
+        # unidentifiable LM0/bowl split, so the physical penalty at gain 1
+        # over-corrected 40-190% on nights whose uncorrected expectations were
+        # already right. The gain is fitted nightly from moonlit frames (see
+        # fitMoonGain below) and applied from PRIOR nights' history; warmup and
+        # currently-measured value is 0 (no correction). The verdict domain
+        # still excludes bright-moon frames either way.
         obs_m = ephem.Observer()
         obs_m.lat, obs_m.lon = str(platepar.lat), str(platepar.lon)
         obs_m.date = jd2Date(jd, dt_obj=True)
@@ -2256,7 +2389,27 @@ def denseDomeRatios(config, dome_model, ff_list, calstars_positions, recalibrate
                         float(np.degrees(moon_eph.alt)), float(moon_eph.phase))
 
         p_det = dome_model.detectionProbability(mag, az, alt, station_id=config.stationID,
-            moon=moon_ctx)
+            moon=moon_ctx, moon_gain=mg_applied)
+
+        # Moon-gain calibration bookkeeping: stash the frame's dark-sky logits
+        # and brightness ratios now; the detection counts join after matching
+        mg_pending = None
+        if collect_stars:
+            from Utils.FitLightDome import sunAltitude as _sunAlt, SUN_ALT_MAX as _SUN_MAX
+            sun_now = _sunAlt(jd, platepar.lat, platepar.lon)
+            if sun_now <= _SUN_MAX:
+                if (moon_ctx is not None) and (moon_ctx[2] > 25.0):
+                    p_dark = dome_model.detectionProbability(mag, az, alt,
+                        station_id=config.stationID)
+                    step = max(1, len(p_dark)//MOON_GAIN_SAMPLE)
+                    smp = np.arange(0, len(p_dark), step)
+                    p0 = np.clip(p_dark[smp], 1e-4, 1 - 1e-4)
+                    mg_pending = ("moon", smp,
+                        np.log(p0/(1 - p0)).astype(np.float32),
+                        dome_model.moonBrightnessRatio(az[smp], alt[smp],
+                            *moon_ctx).astype(np.float32))
+                elif moon_ctx is None:
+                    mg_pending = ("dark", None, p_det, None)
 
         area = usable_px if usable_px is not None \
             else float(platepar.X_res*platepar.Y_res)
@@ -2279,6 +2432,13 @@ def denseDomeRatios(config, dome_model, ff_list, calstars_positions, recalibrate
             nearest = np.zeros(len(x), dtype=int)
             hit = np.zeros(len(x), dtype=bool)
             matched[ff_file] = 0
+
+        if mg_pending is not None:
+            kind, smp, arr_a, arr_b = mg_pending
+            if kind == "moon":
+                mg_samples.append((arr_a, arr_b, int(np.sum(hit[smp]))))
+            elif np.sum(arr_a) > 5:
+                mg_dark_ratios.append(float(np.sum(hit)/np.sum(arr_a)))
 
         if collect_stars:
             # Persist only stars above the store floor (see STORE_P_MIN) - the
@@ -2390,6 +2550,30 @@ def denseDomeRatios(config, dome_model, ff_list, calstars_positions, recalibrate
 
         log.info("Forced photometry: {:d} bright-star matches recovered "
                  "(noise floor {:.1f} ADU)".format(n_forced, floor))
+
+    # Fit tonight's moon gain and record it for FUTURE nights (tonight already
+    # ran on the prior-nights value). Stashed on the function for the scoring
+    # header (read immediately after the call in detectClouds - single thread).
+    if collect_stars:
+        mg_fitted = None
+        ref_src = "night" if len(mg_dark_ratios) >= 10 else "default"
+        r_dark = float(np.percentile(mg_dark_ratios, MOON_GAIN_PCT)) \
+            if len(mg_dark_ratios) >= 10 else 1.0
+        try:
+            mg_fitted = fitMoonGain(mg_samples, r_dark, float(dome_model.s))
+            if mg_fitted is not None:
+                night_id = os.path.basename(os.path.normpath(dir_path)) \
+                    if dir_path else "unknown"
+                recordMoonGain(config, night_id, mg_fitted, ref_src)
+                log.info("Moon gain: fitted {:.2f} tonight ({:d} moonlit frames, "
+                         "ref {:.3f} [{:s}]); applied {:.2f} from prior "
+                         "nights".format(mg_fitted, len(mg_samples), r_dark,
+                         ref_src, mg_applied))
+        except Exception as e:
+            log.warning("Moon gain fit failed ({}) - continuing".format(e))
+        denseDomeRatios.last_moon_gain = dict(applied=round(float(mg_applied), 3),
+            fitted=(round(float(mg_fitted), 3) if mg_fitted is not None else None),
+            ref=ref_src)
 
     return (matched, expected, star_records) if collect_stars else (matched, expected)
 
