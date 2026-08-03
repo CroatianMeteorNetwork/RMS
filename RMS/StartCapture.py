@@ -113,6 +113,11 @@ def _earlyStationLock():
     if (os.name != 'posix') or (__name__ != '__main__'):
         return None
 
+    # Let --help through: argparse only prints and exits, no capture is started, so a
+    # running station must not turn -h into an exit-1 refusal (review finding)
+    if ('-h' in sys.argv[1:]) or ('--help' in sys.argv[1:]):
+        return None
+
     import re
 
     # Peek at the config path from the command line without importing ConfigReader
@@ -301,7 +306,10 @@ def wait(duration, compressor, buffered_capture, video_file, daytime_mode=None):
             try:
                 checkLoggingHealth()
             except Exception as e:
-                print('WATCHDOG: logging health check failed: {}'.format(e))
+                # Bypass the stream redirect: with log_stdout, plain print() goes into the
+                # very pipeline whose failure is being reported (review finding)
+                print('WATCHDOG: logging health check failed: {}'.format(e),
+                      file=sys.__stderr__)
 
 
         # Break in case camera modes switched
