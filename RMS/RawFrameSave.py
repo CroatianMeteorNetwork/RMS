@@ -217,21 +217,19 @@ class RawFrameSaver(multiprocessing.Process):
         self.exit.set()
         log.debug('Raw frame saver exit flag set')
 
-        # Build views over the shared buffers in this (capture) process so the
-        # tail-end flush reads the same shared memory the saver process wrote
-        # into (under forkserver/spawn views are not inherited - see
-        # ensureViews). The bases may already be gone by the time we get here:
-        # stop() frees them itself (see the `del`s below), and
-        # BufferedCapture.releaseRawArrays() calls stop() both on shutdown AND
-        # on every day/night mode switch, where the saver is torn down before
-        # the arrays are re-created for the new frame shape. Zipping None then
-        # raised "TypeError: 'NoneType' object is not iterable" out of a
-        # teardown path, logged as a traceback on a perfectly healthy station
-        # (twice a day, per camera). There is nothing to flush in that case.
-        try:
-            self.ensureViews()
-        except Exception:
-            pass
+        # Build views over the shared buffers in this (capture) process so the tail-end flush
+        # reads the same shared memory the saver process wrote into. ensureViews() rebuilds
+        # from the persistent mp.Array bases, so the views are non-None here even after a
+        # previous stop() nulled them (idempotent across the twice-daily mode switches).
+        self.ensureViews()
+
+        # Flush any frames whose TS array still has data.
+        #
+        # Defensive read: BufferedCapture.releaseRawArrays() calls stop() both on shutdown AND
+        # on every day/night mode switch. Guard against a released/None buffer so a teardown
+        # path can never zip None ("TypeError: 'NoneType' object is not iterable"), which RMS
+        # would otherwise log as a traceback on a perfectly healthy station (twice a day, per
+        # camera). There is nothing to flush in that case.
         array1 = getattr(self, 'array1', None)
         array2 = getattr(self, 'array2', None)
         timestamps1 = getattr(self, 'timeStamps1', None)

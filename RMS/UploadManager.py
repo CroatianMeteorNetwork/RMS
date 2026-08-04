@@ -603,7 +603,6 @@ class UploadManager(multiprocessing.Process):
 
 
 
-
     def start(self):
         """ Starts the upload manager. """
 

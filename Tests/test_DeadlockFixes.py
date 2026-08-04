@@ -341,3 +341,135 @@ def testQueuedPoolZeroJobClose():
     qp.closePool()
     assert (time.monotonic() - t_beg) < 30
     qp.shutdownManager()
+
+
+# ---------------------------------------------------------------------------
+# Logging stall detection
+
+
+class _FakeQueue(object):
+    """ Serves a scripted sequence of qsize() readings, holding the last one. """
+
+    def __init__(self, sizes):
+        self.sizes = list(sizes)
+
+    def qsize(self):
+        return self.sizes.pop(0) if len(self.sizes) > 1 else self.sizes[0]
+
+
+class _FakeCounter(object):
+    """ Serves a scripted sequence of listener progress counts. """
+
+    def __init__(self, counts):
+        self.counts = list(counts)
+
+    @property
+    def value(self):
+        return self.counts.pop(0) if len(self.counts) > 1 else self.counts[0]
+
+
+class _AliveListener(object):
+    def is_alive(self):
+        return True
+
+
+def _stallManager(backlogs, processed):
+    """ A LoggingManager wired to scripted readings, with the restart stubbed out. """
+
+    from RMS.Logger import LoggingManager
+
+    mgr = LoggingManager()
+    mgr.is_initialized = True
+    mgr.listener_process = _AliveListener()
+    mgr.logging_queue = _FakeQueue(backlogs)
+    mgr._records_processed = _FakeCounter(processed)
+
+    mgr.restarts = []
+    mgr._restartLogging = lambda reason: mgr.restarts.append(reason)
+
+    return mgr
+
+
+def _sample(mgr):
+    """ Take one strike-eligible sample (pretend enough time has passed since the last). """
+
+    mgr._last_sample_time = None
+    mgr.checkLoggingHealth()
+
+
+def testLoggingStallIgnoresGrowingBacklogWhileListenerConsumes():
+    """ A backlog that keeps GROWING is not a stall if the listener is still taking records
+        off the queue - producers can legitimately outrun it during a burst, and restarting
+        then discards everything queued. """
+
+    mgr = _stallManager(backlogs=[1000, 5000, 12000, 20000, 25000],
+                        processed=[500, 4000, 9000, 15000, 21000])
+
+    for _ in range(5):
+        _sample(mgr)
+
+    assert mgr.restarts == []
+    assert mgr._stall_strikes == 0
+
+
+def testLoggingStallRestartsOnFrozenListener():
+    """ A high backlog with a listener that consumes nothing is the real wedge. """
+
+    mgr = _stallManager(backlogs=[5000], processed=[77])
+
+    for _ in range(1 + 3):      # first sample only establishes the baseline
+        _sample(mgr)
+
+    assert len(mgr.restarts) == 1
+    assert 'no listener progress' in mgr.restarts[0]
+
+
+def testLoggingStallSamplesAreSpacedOut():
+    """ Both the capture watchdog and the always-on health thread call the check, so
+        back-to-back calls must not each count as a strike. """
+
+    mgr = _stallManager(backlogs=[5000], processed=[77])
+
+    _sample(mgr)                    # baseline
+    for _ in range(10):             # no clock advance: all of these must be ignored
+        mgr.checkLoggingHealth()
+
+    assert mgr._stall_strikes == 0
+    assert mgr.restarts == []
+
+    _sample(mgr)
+    assert mgr._stall_strikes == 1
+
+
+class _DeadListener(object):
+    def is_alive(self):
+        return False
+
+
+def testLoggingRestartBackoffPacesDeadListenerRestarts():
+    """ A listener that dies instantly on every respawn (e.g. unwritable log dir) must be
+        restarted on the backoff schedule, not on every check - each unpaced cycle leaks
+        the abandoned queue's fds. Runs the real _restartLogging with only the spawn
+        stubbed out. """
+
+    from RMS.Logger import LoggingManager
+
+    mgr = LoggingManager()
+    mgr.is_initialized = True
+    mgr.listener_process = _DeadListener()
+    mgr.logging_queue = _FakeQueue([0])
+
+    spawns = []
+    mgr._spawnListener = lambda: spawns.append(1)
+
+    # First check: dead listener, no backoff armed yet - must restart immediately
+    assert mgr.checkLoggingHealth() is False
+    assert len(spawns) == 1
+    assert mgr._restart_count == 1
+    assert mgr._next_restart_allowed > time.monotonic()
+
+    # The spawn was stubbed so the listener is still dead - checks inside the backoff
+    # window must report failure without restarting again
+    for _ in range(5):
+        assert mgr.checkLoggingHealth() is False
+    assert len(spawns) == 1

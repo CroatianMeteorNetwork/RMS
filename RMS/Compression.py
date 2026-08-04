@@ -92,12 +92,13 @@ class Compressor(multiprocessing.Process):
         # deadlock, even if a process sharing them is killed (see AtomicFlag)
         self.exit = AtomicFlag()
 
+        # Lock-free flag: an mp.Event deadlocks if a process sharing it is OOM-killed while
+        # holding its internal semaphore (see AtomicFlag). Only .set()/.is_set() are used here.
         self.run_exited = AtomicFlag()
 
         # Grab the logging queue on the parent side so the child can re-attach logging
         # under the 'forkserver'/'spawn' start methods (handlers are not inherited there)
         self.logging_queue = getLoggingQueue()
-
 
 
     def compress(self, frames):
@@ -240,14 +241,25 @@ class Compressor(multiprocessing.Process):
                     self.terminate()
                 else:
                     log.info("Compression process exited gracefully after interrupt")
-                    
+
             except ProcessLookupError:
                 log.info("Compression process already terminated")
             except Exception as e:
                 log.error("Error during graceful compression shutdown: {}".format(e))
                 log.info("Falling back to terminate()")
                 self.terminate()
-            
+
+            # A bare join() would hang forever on a process that ignores SIGTERM -
+            # bound the wait and escalate to SIGKILL (review finding)
+            self.join(5)
+
+            if self.is_alive():
+                log.warning("Compression process survived terminate, sending SIGKILL...")
+                try:
+                    os.kill(self.pid, signal.SIGKILL)
+                except (OSError, AttributeError):
+                    pass
+
             # Always join to reap zombie (returns instantly if already dead)
             self.join()
 

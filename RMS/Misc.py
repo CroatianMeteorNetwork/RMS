@@ -127,6 +127,7 @@ def setMultiprocessingStartMethod(preferred=None):
 
     return mp.get_start_method()
 
+
 def stableDoubleRead(shared_val, attempts=3):
     """ Read a lock-free c_double written by another process, tolerating torn reads.
 

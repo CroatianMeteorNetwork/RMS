@@ -113,6 +113,11 @@ def _earlyStationLock():
     if (os.name != 'posix') or (__name__ != '__main__'):
         return None
 
+    # Let --help through: argparse only prints and exits, no capture is started, so a
+    # running station must not turn -h into an exit-1 refusal (review finding)
+    if ('-h' in sys.argv[1:]) or ('--help' in sys.argv[1:]):
+        return None
+
     import re
 
     # Peek at the config path from the command line without importing ConfigReader
@@ -301,7 +306,10 @@ def wait(duration, compressor, buffered_capture, video_file, daytime_mode=None):
             try:
                 checkLoggingHealth()
             except Exception as e:
-                print('WATCHDOG: logging health check failed: {}'.format(e))
+                # Bypass the stream redirect: with log_stdout, plain print() goes into the
+                # very pipeline whose failure is being reported (review finding)
+                print('WATCHDOG: logging health check failed: {}'.format(e),
+                      file=sys.__stderr__)
 
 
         # Break in case camera modes switched
@@ -580,8 +588,8 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     # numpy view over shared memory pickles by value under the 'forkserver'/'spawn' start
     # methods, which would give each child a private, disconnected copy. The children rebuild
     # their own numpy view over this shared memory in their run() via frameBufferShape().
-    # The start-time doubles are lock=False (set/poll handoff; a killed process must not
-    # orphan an implicit semaphore) - consumers use stableDoubleRead against torn reads.
+    # The start-time Values are lock-free (read via stableDoubleRead) so a process OOM-killed
+    # mid-write can never orphan a lock the other process then blocks on.
     sharedArrayBase = multiprocessing.Array(ctypes.c_uint8, frame_buffer_len)
     sharedArray = sharedArrayBase
     startTime = multiprocessing.Value('d', 0.0, lock=False)
@@ -610,6 +618,9 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
     # Initialize the detector
     detector = None
+
+    # Path to the archive directory of the processed night (stays None if the night was never processed)
+    night_archive_dir = None
 
     # Loop to handle both continuous and standard capture modes
     while True:
@@ -1011,28 +1022,46 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
                 detection_results = []
 
             # Save detection to disk and archive detection
-            night_archive_dir, archive_name, imgdata_archive_name, metadata_archive_name, _ =  \
-                processNight(night_data_dir, config, detection_results=detection_results, nodetect=nodetect)
+            #   Never let a failure here propagate, as it would terminate the capture loop and no
+            #   further nights would be captured until RMS is restarted. The detection backup files are
+            #   kept on failure, so the night is automatically reprocessed on the next startup
+            night_archive_dir = None
+            night_processed = False
+            try:
+                night_archive_dir, archive_name, imgdata_archive_name, metadata_archive_name, _ =  \
+                    processNight(night_data_dir, config, detection_results=detection_results, \
+                        nodetect=nodetect)
 
-            files_to_add_list_unfiltered = [archive_name, metadata_archive_name, imgdata_archive_name]
-            files_to_add_list = [f for f in files_to_add_list_unfiltered if f is not None]
+                night_processed = True
 
-            # Put the archive up for upload
-            if upload_manager is not None:
-                log.info(f"Adding files to upload list: {files_to_add_list}")
-                upload_manager.addFiles(files_to_add_list)
-                if files_to_add_list:
-                    if len(files_to_add_list) == 1:
-                        log.info("File added.")
-                    else:
-                        log.info("Files added.")
+            except Exception as e:
+                log.error("An error occurred when processing the night directory {:s}!".format(
+                    night_data_dir))
+                log.error(repr(e))
+                log.error(repr(traceback.format_exception(*sys.exc_info())))
 
-                # optional delay (minutes in .config, converted to seconds)
-                upload_manager.delayNextUpload(delay=60*config.upload_delay)
 
-            # Delete detector backup files
-            if detector is not None:
-                detector.deleteBackupFiles()
+            if night_processed:
+
+                files_to_add_list_unfiltered = [archive_name, metadata_archive_name, imgdata_archive_name]
+                files_to_add_list = [f for f in files_to_add_list_unfiltered if f is not None]
+
+                # Put the archive up for upload
+                if upload_manager is not None:
+                    log.info(f"Adding files to upload list: {files_to_add_list}")
+                    upload_manager.addFiles(files_to_add_list)
+                    if files_to_add_list:
+                        if len(files_to_add_list) == 1:
+                            log.info("File added.")
+                        else:
+                            log.info("Files added.")
+
+                    # optional delay (minutes in .config, converted to seconds)
+                    upload_manager.delayNextUpload(delay=60*config.upload_delay)
+
+                # Delete detector backup files
+                if detector is not None:
+                    detector.deleteBackupFiles()
 
 
             # frames -> timelapse(s) -> archive(s) -> upload
@@ -1057,8 +1086,13 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
                         log.exception("Frames upload failed")
 
 
-            # Run the external script
-            runExternalScript(night_data_dir, night_archive_dir, config)
+            # Run the external script (skip it if the night was not archived, as it takes the archive
+            #   directory as an argument)
+            if night_archive_dir is not None:
+                runExternalScript(night_data_dir, night_archive_dir, config)
+
+            else:
+                log.warning("Skipping the external script, the night was not successfully processed!")
 
 
         # If capture is terminated manually, or the disk is full, exit program
