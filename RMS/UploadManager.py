@@ -11,7 +11,7 @@ from multiprocessing import Manager
 import paramiko
 
 from RMS.Logger import LoggingManager, getLogger
-from RMS.Misc import mkdirP, UTCFromTimestamp, runWithTimeout
+from RMS.Misc import mkdirP, UTCFromTimestamp, runWithTimeout, AtomicFlag, BoundedLock
 
 # Suppress Paramiko internal errors before they appear in logs
 getLogger("paramiko.transport").setLevel(logging.CRITICAL)
@@ -547,8 +547,16 @@ class UploadManager(multiprocessing.Process):
         # Construct the path to the queue backup file
         self.upload_queue_file_path = os.path.join(self.config.data_dir, self.config.upload_queue_file)
 
-        self.exit = multiprocessing.Event()
-        self.upload_in_progress = multiprocessing.Value(ctypes.c_bool, False)
+        # Lock-free flag: stop() escalates to terminate(), which must not be able to
+        # orphan an Event lock (see AtomicFlag)
+        self.exit = AtomicFlag()
+
+        # Same hazard class as `exit`: this is a set/poll bool written by the
+        # child (which stop() can terminate() and the OOM killer can SIGKILL)
+        # and polled by the main process to gate the pre-reboot wait - a kill
+        # mid-assignment on a locked Value orphans the semaphore and the
+        # reboot poll blocks forever (review finding)
+        self.upload_in_progress = AtomicFlag()
 
         # These timing variables must be shared between processes using multiprocessing.Value() because
         # 
@@ -563,13 +571,16 @@ class UploadManager(multiprocessing.Process):
         # Value format: 'd' = double precision float (for timestamp storage)
         # Convention: 0.0 = None/not set, >0.0 = unix timestamp
         
-        # Time when the upload was run last
-        self.last_runtime = multiprocessing.Value('d', 0.0)
-        self.last_runtime_lock = multiprocessing.Lock()
+        # Time when the upload was run last. The locks are BOUNDED: they are
+        # acquired by both processes and the child can die by terminate()/OOM
+        # kill while holding one - a plain Lock then wedges the survivor
+        # forever (review finding); a stale timestamp read is harmless
+        self.last_runtime = multiprocessing.Value('d', 0.0, lock=False)
+        self.last_runtime_lock = BoundedLock('upload last_runtime')
 
         # Time when the next upload should be run (used for delaying the upload)
-        self.next_runtime = multiprocessing.Value('d', 0.0)
-        self.next_runtime_lock = multiprocessing.Lock() 
+        self.next_runtime = multiprocessing.Value('d', 0.0, lock=False)
+        self.next_runtime_lock = BoundedLock('upload next_runtime')
 
         
 
@@ -768,12 +779,12 @@ class UploadManager(multiprocessing.Process):
         """
 
         # Skip uploading if the upload is already in progress
-        if self.upload_in_progress.value:
+        if self.upload_in_progress.is_set():
             return
 
 
         # Set flag that the upload as in progress
-        self.upload_in_progress.value = True
+        self.upload_in_progress.set()
 
         try:
             # Read the file list from disk
@@ -833,7 +844,7 @@ class UploadManager(multiprocessing.Process):
 
         finally:
             # Set the flag that the upload is done
-            self.upload_in_progress.value = False
+            self.upload_in_progress.clear()
 
 
     def delayNextUpload(self, delay=0):

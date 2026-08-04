@@ -26,7 +26,7 @@ from math import floor
 import cv2
 
 from RMS.Logger import getLogger
-from RMS.Misc import mkdirP, setParentDeathSignal
+from RMS.Misc import mkdirP, setParentDeathSignal, AtomicFlag, stableDoubleRead
 
 # Get the logger from the main module
 log = getLogger("rmslogger")
@@ -69,8 +69,10 @@ class RawFrameSaver(multiprocessing.Process):
         self.total_saved_frames = 0
         self.day_of_year = time.strftime("%j", time.gmtime())
 
-        self.exit = multiprocessing.Event()
-        self.run_exited = multiprocessing.Event()
+        # Lock-free flags: this process is terminated/SIGKILLed in the normal disconnect
+        # path, and a killed process must not be able to orphan an Event lock (see AtomicFlag)
+        self.exit = AtomicFlag()
+        self.run_exited = AtomicFlag()
 
         # PID of the logical parent (BufferedCapture). __init__ runs in the parent, so this
         # is captured correctly under fork, spawn AND forkserver - unlike os.getppid(),
@@ -287,10 +289,15 @@ class RawFrameSaver(multiprocessing.Process):
 
                 raw_buffer_one = True
 
-                if self.start_time1.value > 0:
+                # Stable reads - see Compression: torn 32-bit reads of the
+                # 0 -> t transition must not be accepted as timestamps
+                start_time1_val = stableDoubleRead(self.start_time1)
+                start_time2_val = stableDoubleRead(self.start_time2)
+
+                if start_time1_val > 0:
 
                     # Retrieve time of first frame
-                    startTime = float(self.start_time1.value)
+                    startTime = float(start_time1_val)
 
                     # Copy raw (frames, timestamps)
                     # Clear out the timestamp array so it can be used by 
@@ -299,10 +306,10 @@ class RawFrameSaver(multiprocessing.Process):
                     self.timeStamps1.fill(0)
                     raw_buffer_one = True
 
-                elif self.start_time2.value > 0:
+                elif start_time2_val > 0:
 
                     # Retrieve time of first frame
-                    startTime = float(self.start_time2.value)
+                    startTime = float(start_time2_val)
 
                     # Copy raw (frames, timestamps)
                     # Clear out the timestamp array so it can be used by 

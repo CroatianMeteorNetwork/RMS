@@ -31,7 +31,7 @@ from RMS.VideoExtraction import Extractor
 from RMS.Formats import FFfile, FFStruct
 from RMS.Formats import FieldIntensities
 from RMS.Logger import getLogger
-from RMS.Misc import UTCFromTimestamp
+from RMS.Misc import UTCFromTimestamp, AtomicFlag, stableDoubleRead
 from RMS.Routines.Image import saveImage
 
 # Import Cython functions
@@ -81,9 +81,11 @@ class Compressor(multiprocessing.Process):
 
         self.detector = detector
 
-        self.exit = multiprocessing.Event()
+        # Lock-free flags: these are set/polled across processes and must never be able to
+        # deadlock, even if a process sharing them is killed (see AtomicFlag)
+        self.exit = AtomicFlag()
 
-        self.run_exited = multiprocessing.Event()
+        self.run_exited = AtomicFlag()
     
 
 
@@ -227,14 +229,25 @@ class Compressor(multiprocessing.Process):
                     self.terminate()
                 else:
                     log.info("Compression process exited gracefully after interrupt")
-                    
+
             except ProcessLookupError:
                 log.info("Compression process already terminated")
             except Exception as e:
                 log.error("Error during graceful compression shutdown: {}".format(e))
                 log.info("Falling back to terminate()")
                 self.terminate()
-            
+
+            # A bare join() would hang forever on a process that ignores SIGTERM -
+            # bound the wait and escalate to SIGKILL (review finding)
+            self.join(5)
+
+            if self.is_alive():
+                log.warning("Compression process survived terminate, sending SIGKILL...")
+                try:
+                    os.kill(self.pid, signal.SIGKILL)
+                except (OSError, AttributeError):
+                    pass
+
             # Always join to reap zombie (returns instantly if already dead)
             self.join()
 
@@ -300,10 +313,17 @@ class Compressor(multiprocessing.Process):
 
             
             buffer_one = True
-            if self.start_time1.value > 0:
+
+            # Stable reads: the 0 -> t transition of these lock-free doubles can
+            # tear on 32-bit ARM and a torn value passes the > 0 gate with a
+            # timestamp wrong by up to ~1024 s (review finding)
+            start_time1_val = stableDoubleRead(self.start_time1)
+            start_time2_val = stableDoubleRead(self.start_time2)
+
+            if start_time1_val > 0:
 
                 # Retrieve time of first frame
-                startTime = float(self.start_time1.value)
+                startTime = float(start_time1_val)
 
                 # Copy frames
                 frames = self.array1
@@ -312,10 +332,10 @@ class Compressor(multiprocessing.Process):
                 self.start_time1.value = -1
                 buffer_one = True
 
-            elif self.start_time2.value > 0:
+            elif start_time2_val > 0:
 
                 # Retrieve time of first frame
-                startTime = float(self.start_time2.value)
+                startTime = float(start_time2_val)
 
                 # Copy frames
                 frames = self.array2

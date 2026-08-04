@@ -29,6 +29,135 @@ import ctypes
 import threading
 import multiprocessing
 import traceback
+
+
+def _closeStationLockInChild(lock_file):
+    """ Close the inherited lock fd in a freshly forked child (see _takeStationLock). """
+    try:
+        lock_file.close()
+    except (IOError, OSError):
+        pass
+
+
+def _takeStationLock(station_id):
+    """ Take the per-station single-instance flock, or exit with a clear refusal.
+
+    The lock file lives in tempfile.gettempdir(). NOTE: under a systemd unit with
+    PrivateTmp=true that is a private namespace - a service instance and a manually
+    launched debug instance cannot see each other's locks and will both run. Disable
+    PrivateTmp for the unit if manual runs must be excluded too.
+
+    Return:
+        [file] The open lock file handle (keep a reference for the process lifetime).
+            Exits the process if the lock cannot be acquired.
+    """
+
+    import fcntl
+    import tempfile
+    from multiprocessing import util as mp_util
+
+    lock_path = os.path.join(tempfile.gettempdir(),
+        'rms_startcapture_{:s}.lock'.format(station_id))
+
+    try:
+        # 'a+' never truncates, so on refusal the holder's recorded PID survives for
+        # diagnostics; everything sits in the try so a stale lock file owned by another
+        # user (sticky /tmp) refuses cleanly instead of raising a raw PermissionError
+        lock_file = open(lock_path, 'a+')
+        fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+    except (IOError, OSError) as e:
+        holder = ''
+        try:
+            with open(lock_path) as f:
+                holder = f.read().strip()
+        except (IOError, OSError):
+            pass
+        print('Another StartCapture instance appears to be running for station {:s} '
+              '(lock file: {:s}{:s}; error: {!r:s}). Exiting.'.format(
+                  station_id, lock_path,
+                  ', holder PID {:s}'.format(holder) if holder else '', e),
+              file=sys.__stderr__)
+        sys.exit(1)
+
+    # We own the lock now - record our PID (truncating only as the owner)
+    try:
+        lock_file.truncate(0)
+        lock_file.seek(0)
+        lock_file.write(str(os.getpid()))
+        lock_file.flush()
+    except (IOError, OSError):
+        pass
+
+    # The flock is attached to this open file description, which every child forked
+    # from here on inherits. Without this, an orphaned child left behind after the
+    # main process dies keeps holding the lock and every supervisor restart is
+    # refused forever - the incident failure mode, inverted. Closing the inherited
+    # fd right after fork leaves the parent as the sole holder, and the kernel
+    # releases the flock however the parent dies.
+    mp_util.register_after_fork(lock_file, _closeStationLockInChild)
+
+    return lock_file
+
+
+def _earlyStationLock():
+    """ Acquire the per-station single-instance lock BEFORE the heavy imports below.
+
+    A refused duplicate must exit here, in milliseconds, at a few MB of memory. If this
+    only ran after the imports, every duplicate would first load numpy/matplotlib and
+    compile Cython modules - observed in production as ~40 hung duplicates at ~700 MB
+    each. Best effort: if the station ID cannot be determined from the command line, the
+    full guard after config loading (acquireStationLock) still applies.
+    """
+
+    if (os.name != 'posix') or (__name__ != '__main__'):
+        return None
+
+    # Let --help through: argparse only prints and exits, no capture is started, so a
+    # running station must not turn -h into an exit-1 refusal (review finding)
+    if ('-h' in sys.argv[1:]) or ('--help' in sys.argv[1:]):
+        return None
+
+    import re
+
+    # Peek at the config path from the command line without importing ConfigReader
+    config_path = None
+    argv = sys.argv[1:]
+    for i, arg in enumerate(argv):
+        if arg in ('-c', '--config') and (i + 1) < len(argv):
+            config_path = argv[i + 1]
+            break
+        if arg.startswith('--config='):
+            config_path = arg.split('=', 1)[1]
+            break
+
+    # Default deployment launches without -c and reads ./.config from the RMS
+    # directory - peek there so the early lock engages for standard stations too
+    if config_path is None and os.path.isfile('.config'):
+        config_path = '.config'
+
+    if (config_path is None) or (not os.path.isfile(config_path)):
+        return None
+
+    # Peek at the station ID
+    try:
+        with open(config_path) as f:
+            match = re.search(r'^\s*stationID\s*[:=]\s*(\S+)', f.read(), re.MULTILINE | re.IGNORECASE)
+    except (IOError, OSError):
+        return None
+
+    if not match:
+        return None
+
+    station_id = match.group(1).strip()
+
+    return _takeStationLock(station_id)
+
+
+# Keep a reference for the process lifetime - the kernel releases the flock on process death
+_early_station_lock = _earlyStationLock()
+
+
 import git
 from RMS.Formats.ObservationSummary import addObsParam, getObservationSummaryDict
 
@@ -38,7 +167,7 @@ import numpy as np
 from Utils.LiveViewer import LiveViewer
 
 import RMS.ConfigReader as cr
-from RMS.Logger import LoggingManager, getLogger
+from RMS.Logger import LoggingManager, getLogger, checkLoggingHealth
 from RMS.BufferedCapture import BufferedCapture
 from RMS.CaptureDuration import captureDuration
 from RMS.CaptureModeSwitcher import captureModeSwitcher
@@ -95,6 +224,33 @@ def resetSIGINT():
 HEARTBEAT_TIMEOUT = 180  # 3 minutes
 
 
+def acquireStationLock(config):
+    """ Ensure only one StartCapture instance runs per station.
+
+    An external supervisor that respawns stations it believes are down can otherwise pile up
+    duplicate instances - observed in production, where ~40 duplicates of two wedged stations
+    (~700 MB each) drove a machine into OOM. The lock is a flock() on a per-station file, so it
+    is released automatically by the kernel no matter how the process dies.
+
+    Arguments:
+        config: [Config] Station config object.
+
+    Return:
+        [file or None] The open lock file handle (keep a reference for the process lifetime),
+            or None on non-POSIX platforms. Exits the process if another instance holds the lock.
+    """
+
+    if os.name != 'posix':
+        return None
+
+    # The pre-import guard may have already taken the lock for this process - taking a
+    # second flock on the same file from a new fd would wrongly refuse ourselves
+    if _early_station_lock is not None:
+        return _early_station_lock
+
+    return _takeStationLock(str(config.stationID))
+
+
 def wait(duration, compressor, buffered_capture, video_file, daytime_mode=None):
     """ The function will wait for the specified time, or it will stop when Enter is pressed. If no time was
         given (in seconds), it will wait until Enter is pressed. Additionally, it will also stop when the camera mode
@@ -144,6 +300,17 @@ def wait(duration, compressor, buffered_capture, video_file, daytime_mode=None):
                 bc_alive, comp_alive, daytime_mode_prev))
             last_watchdog_log = now
 
+            # Verify the logging pipeline is alive and draining, and restart it if it wedged.
+            # A wedged pipeline makes the station silently log-dark while it keeps running,
+            # which also fools external monitors into respawning duplicate instances
+            try:
+                checkLoggingHealth()
+            except Exception as e:
+                # Bypass the stream redirect: with log_stdout, plain print() goes into the
+                # very pipeline whose failure is being reported (review finding)
+                print('WATCHDOG: logging health check failed: {}'.format(e),
+                      file=sys.__stderr__)
+
 
         # Break in case camera modes switched
         if (daytime_mode is not None) and (daytime_mode_prev != daytime_mode.value):
@@ -182,9 +349,20 @@ def wait(duration, compressor, buffered_capture, video_file, daytime_mode=None):
             if hasattr(buffered_capture, 'heartbeat') and buffered_capture.heartbeat.value > 0:
                 heartbeat_age = time.time() - buffered_capture.heartbeat.value
                 if heartbeat_age > HEARTBEAT_TIMEOUT:
-                    log.warning('WATCHDOG: BufferedCapture heartbeat stale ({:.1f}s old, timeout={:d}s)! Process appears hung...'.format(
-                        heartbeat_age, HEARTBEAT_TIMEOUT))
-                    return "capture_hung"
+
+                    # Re-read before declaring the process hung: on 32-bit ARM a
+                    # c_double store is two word accesses, and a read torn across
+                    # the writer's update can look up to ~1024 s stale (the low
+                    # mantissa words of an epoch-magnitude double). A single
+                    # confirming re-read after a short sleep eliminates acting on
+                    # a torn value - a genuinely hung process stays stale on both
+                    # reads (review finding).
+                    time.sleep(0.1)
+                    heartbeat_age = time.time() - buffered_capture.heartbeat.value
+                    if heartbeat_age > HEARTBEAT_TIMEOUT:
+                        log.warning('WATCHDOG: BufferedCapture heartbeat stale ({:.1f}s old, timeout={:d}s)! Process appears hung...'.format(
+                            heartbeat_age, HEARTBEAT_TIMEOUT))
+                        return "capture_hung"
 
 
         # If some wait time was given, check if it passed
@@ -410,12 +588,12 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     sharedArrayBase = multiprocessing.Array(ctypes.c_uint8, 256*(config.width + array_pad)*(config.height + array_pad))
     sharedArray = np.ctypeslib.as_array(sharedArrayBase.get_obj())
     sharedArray = sharedArray.reshape(256, (config.height + array_pad), (config.width + array_pad))
-    startTime = multiprocessing.Value('d', 0.0)
+    startTime = multiprocessing.Value('d', 0.0, lock=False)
 
     sharedArrayBase2 = multiprocessing.Array(ctypes.c_uint8, 256*(config.width + array_pad)*(config.height + array_pad))
     sharedArray2 = np.ctypeslib.as_array(sharedArrayBase2.get_obj())
     sharedArray2 = sharedArray2.reshape(256, (config.height + array_pad), (config.width + array_pad))
-    start_time2 = multiprocessing.Value('d', 0.0)
+    start_time2 = multiprocessing.Value('d', 0.0, lock=False)
 
     log.info('Initializing frame buffers done!')
 
@@ -1073,6 +1251,11 @@ if __name__ == "__main__":
     config = cr.loadConfigFromDirectory(cml_args.config, os.path.abspath('.'))
 
 
+    # Refuse to start if another instance is already running for this station. Do this before
+    # any heavy initialization so a refused duplicate exits quickly and cheaply
+    station_lock = acquireStationLock(config)
+
+
     # Initialize the logger
     log_manager = LoggingManager()
     log_manager.initLogging(config)
@@ -1246,7 +1429,7 @@ if __name__ == "__main__":
                 if upload_manager is not None:
 
                     # Prevent rebooting if the upload manager is uploading
-                    if upload_manager.upload_in_progress.value:
+                    if upload_manager.upload_in_progress.is_set():
                         log.info("Reboot delayed for 1 minute due to upload...")
                         reboot_go = False
 
@@ -1498,8 +1681,10 @@ if __name__ == "__main__":
                     log.warning('Previous capture mode switcher thread did not stop in time')
 
             # Setup shared value to communicate day/night switch between processes.
-            daytime_mode = multiprocessing.Value(ctypes.c_bool, False)
-            camera_mode_switch_trigger = multiprocessing.Value(ctypes.c_bool, True)
+            # lock=False on the shared flags: a locked Value can deadlock all sharers if any
+            # process is killed while holding the lock
+            daytime_mode = multiprocessing.Value(ctypes.c_bool, False, lock=False)
+            camera_mode_switch_trigger = multiprocessing.Value(ctypes.c_bool, True, lock=False)
 
             # Setup the capture mode switcher on another thread
             switcher_stop_event = threading.Event()
