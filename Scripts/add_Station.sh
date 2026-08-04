@@ -436,6 +436,16 @@ total=$(count_stations)
 # accounted for
 for dir in ~/source/Stations/*/; do
     [[ -f "${dir}/.config" ]] || continue
+    station=$(basename "$dir")
+
+    # Remove launch entries left over from the pre-merge per-platform
+    # scripts - their different file names would otherwise double-launch
+    # the station at login
+    rm -f ~/.config/autostart/"${station}_StartCap.desktop" \
+          "${Desktop}/${station}_StartCap.desktop" \
+          "${Desktop}/Show_LiveStream-${station}.desktop" \
+          "${Desktop}/${station}-Show_LiveStream.desktop"
+
     if [[ $total -gt 1 ]]; then
         # scale the reserved free space with the number of stations
         sed -i "s/^extra_space_gb:.*$/extra_space_gb: $(( total * 20 ))/g" "${dir}/.config"
