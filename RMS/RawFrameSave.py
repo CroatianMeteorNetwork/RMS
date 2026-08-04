@@ -27,7 +27,7 @@ import cv2
 import numpy as np
 
 from RMS.Logger import getLogger, getLoggingQueue, initChildProcess
-from RMS.Misc import mkdirP, setParentDeathSignal
+from RMS.Misc import mkdirP, setParentDeathSignal, AtomicFlag, stableDoubleRead
 
 # Get the logger from the main module
 log = getLogger("rmslogger")
@@ -79,8 +79,10 @@ class RawFrameSaver(multiprocessing.Process):
         self.total_saved_frames = 0
         self.day_of_year = time.strftime("%j", time.gmtime())
 
-        self.exit = multiprocessing.Event()
-        self.run_exited = multiprocessing.Event()
+        # Lock-free flags: this process is terminated/SIGKILLed in the normal disconnect
+        # path, and a killed process must not be able to orphan an Event lock (see AtomicFlag)
+        self.exit = AtomicFlag()
+        self.run_exited = AtomicFlag()
 
         # Grab the logging queue on the parent side so the child can re-attach logging
         # under the 'forkserver'/'spawn' start methods (handlers are not inherited there)
@@ -216,22 +218,43 @@ class RawFrameSaver(multiprocessing.Process):
         log.debug('Raw frame saver exit flag set')
 
         # Build views over the shared buffers in this (capture) process so the tail-end flush
-        # reads the same shared memory the saver process wrote into.
+        # reads the same shared memory the saver process wrote into. ensureViews() rebuilds
+        # from the persistent mp.Array bases, so the views are non-None here even after a
+        # previous stop() nulled them (idempotent across the twice-daily mode switches).
         self.ensureViews()
 
-        # flush any frames whose TS array still has data
+        # Flush any frames whose TS array still has data.
+        #
+        # Defensive read: BufferedCapture.releaseRawArrays() calls stop() both on shutdown AND
+        # on every day/night mode switch. Guard against a released/None buffer so a teardown
+        # path can never zip None ("TypeError: 'NoneType' object is not iterable"), which RMS
+        # would otherwise log as a traceback on a perfectly healthy station (twice a day, per
+        # camera). There is nothing to flush in that case.
+        array1 = getattr(self, 'array1', None)
+        array2 = getattr(self, 'array2', None)
+        timestamps1 = getattr(self, 'timeStamps1', None)
+        timestamps2 = getattr(self, 'timeStamps2', None)
+
+        if array1 is None and array2 is None:
+            log.debug('Raw frame saver buffers already released - '
+                      'nothing to flush')
+
         leftovers = []
-        for frame, ts in zip(self.array1, self.timeStamps1):
-            if ts: leftovers.append((frame.copy(), float(ts)))
-        for frame, ts in zip(self.array2, self.timeStamps2):
-            if ts: leftovers.append((frame.copy(), float(ts)))
+        if (array1 is not None) and (timestamps1 is not None):
+            for frame, ts in zip(array1, timestamps1):
+                if ts: leftovers.append((frame.copy(), float(ts)))
+        if (array2 is not None) and (timestamps2 is not None):
+            for frame, ts in zip(array2, timestamps2):
+                if ts: leftovers.append((frame.copy(), float(ts)))
         if leftovers:
             log.info("Flushing %d tail-end raw frames before shutdown", len(leftovers))
             self.saveFramesToDisk(leftovers, self.daytime_mode)
 
             # mark buffers consumed so run() won’t resave them
-            self.timeStamps1.fill(0)
-            self.timeStamps2.fill(0)
+            if timestamps1 is not None:
+                timestamps1.fill(0)
+            if timestamps2 is not None:
+                timestamps2.fill(0)
             self.start_time1.value = 0
             self.start_time2.value = 0
 
@@ -310,10 +333,15 @@ class RawFrameSaver(multiprocessing.Process):
 
                 raw_buffer_one = True
 
-                if self.start_time1.value > 0:
+                # Stable reads - see Compression: torn 32-bit reads of the
+                # 0 -> t transition must not be accepted as timestamps
+                start_time1_val = stableDoubleRead(self.start_time1)
+                start_time2_val = stableDoubleRead(self.start_time2)
+
+                if start_time1_val > 0:
 
                     # Retrieve time of first frame
-                    startTime = float(self.start_time1.value)
+                    startTime = float(start_time1_val)
 
                     # Copy raw (frames, timestamps)
                     # Clear out the timestamp array so it can be used by 
@@ -322,10 +350,10 @@ class RawFrameSaver(multiprocessing.Process):
                     self.timeStamps1.fill(0)
                     raw_buffer_one = True
 
-                elif self.start_time2.value > 0:
+                elif start_time2_val > 0:
 
                     # Retrieve time of first frame
-                    startTime = float(self.start_time2.value)
+                    startTime = float(start_time2_val)
 
                     # Copy raw (frames, timestamps)
                     # Clear out the timestamp array so it can be used by 

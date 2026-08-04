@@ -854,33 +854,51 @@ if __name__ == "__main__":
     night_archive_dir, archive_name, imgdata_archive_name, metadata_archive_name, detector =  \
                                                     processNight(cml_args.dir_path[0], config)
 
-    if cml_args.run_extl_script:
-        # Run the external script
-        runExternalScript(cml_args.dir_path[0], night_archive_dir, config)
+    upload_manager = None
 
-    # Upload the archive, if upload is enabled
-    if config.upload_enabled:
+    # The night is fully processed by this point, so the steps below all have to be followed by the
+    #   backup cleanup in the finally block, whether they succeed or not
+    try:
 
-        # Add metadata archive first, so it might get uploaded first
-        files_to_add_list_unfiltered = [metadata_archive_name, imgdata_archive_name, archive_name]
-        files_to_add_list = [f for f in files_to_add_list_unfiltered if f is not None]
+        if cml_args.run_extl_script:
+            # Run the external script
+            runExternalScript(cml_args.dir_path[0], night_archive_dir, config)
 
-        # Init the upload manager
-        log.info('Starting the upload manager...')
+        # Upload the archive, if upload is enabled
+        if config.upload_enabled:
 
-        upload_manager = UploadManager(config)
-        upload_manager.start()
+            # Add metadata archive first, so it might get uploaded first
+            files_to_add_list_unfiltered = [metadata_archive_name, imgdata_archive_name, archive_name]
+            files_to_add_list = [f for f in files_to_add_list_unfiltered if f is not None]
 
-        # Add file for upload
-        log.info(f'Adding files to upload list: {files_to_add_list}')
-        upload_manager.addFiles(files_to_add_list)
+            # Init the upload manager
+            log.info('Starting the upload manager...')
 
-        # Stop the upload manager
-        if upload_manager.is_alive():
-            upload_manager.stop()
+            upload_manager = UploadManager(config)
+            upload_manager.start()
+
+            # Add file for upload
+            log.info(f'Adding files to upload list: {files_to_add_list}')
+            upload_manager.addFiles(files_to_add_list)
+
+    finally:
+
+        # Stop the upload manager. It is a non-daemon process which loops until told to exit, so
+        #   leaving it running on an error path would hang the script at interpreter shutdown
+        if (upload_manager is not None) and upload_manager.is_alive():
             log.info('Closing upload manager...')
+            upload_manager.stop()
 
 
-        # Delete detection backup files
+        # Delete detection backup files. This has to happen whether or not uploading is enabled and
+        #   whether or not it succeeded: any rms_queue_bkup_*.pickle left in the captured directory
+        #   makes StartCapture treat the night as partially processed and reprocess it all over
+        #   again on the next start.
         if detector is not None:
-            detector.deleteBackupFiles()
+
+            # Never let a cleanup failure mask an exception which is already propagating
+            try:
+                detector.deleteBackupFiles()
+
+            except Exception as e:
+                log.error('Deleting the detection backup files failed with message:\n' + repr(e))

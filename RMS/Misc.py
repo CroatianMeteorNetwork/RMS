@@ -16,6 +16,8 @@ import datetime
 import tarfile
 import threading
 import signal
+import time
+import multiprocessing
 
 # tkinter import that works on both Python 2 and 3
 if sys.version_info[0] < 3:
@@ -124,6 +126,119 @@ def setMultiprocessingStartMethod(preferred=None):
         pass
 
     return mp.get_start_method()
+
+
+def stableDoubleRead(shared_val, attempts=3):
+    """ Read a lock-free c_double written by another process, tolerating torn reads.
+
+    On 32-bit platforms a double store/load is two word accesses, so a read racing the
+    writer can pair a new high word with an old low word - for an epoch-magnitude
+    timestamp that yields a value wrong by up to ~1024 s that still passes a `> 0` gate.
+    Two consecutive equal reads cannot both be torn by the same in-flight store.
+
+    Arguments:
+        shared_val: [multiprocessing.Value] A c_double created with lock=False.
+
+    Return:
+        [float] The stable value (falls back to the last read if never stable).
+    """
+
+    v2 = shared_val.value
+    for _ in range(attempts):
+        v1 = shared_val.value
+        v2 = shared_val.value
+        if v1 == v2:
+            return v1
+    return v2
+
+
+class BoundedLock(object):
+    """ A multiprocessing.Lock wrapper whose acquisition is BOUNDED.
+
+    For locks shared with processes that can be OOM-killed or terminated: a kill while the
+    lock is held orphans it forever, and a plain `with lock:` then wedges every process that
+    touches it. Acquisition times out (5 s first time, 0.5 s once broken), warns once, and
+    proceeds without the lock - stale/racy data beats a permanent wedge for the counters and
+    timestamps this protects. Usable as a context manager, releasing only if acquired.
+    """
+
+    def __init__(self, name='lock', timeout=5.0):
+        self._lock = multiprocessing.Lock()
+        self._name = name
+        self._timeout = timeout
+        self._broken = False        # per-process memo of an orphaned lock
+        self._acquired_here = False
+
+    def __enter__(self):
+        timeout = 0.5 if self._broken else self._timeout
+        self._acquired_here = self._lock.acquire(timeout=timeout)
+        if not self._acquired_here and not self._broken:
+            self._broken = True
+            print('BoundedLock({:s}): not acquired after {:.1f} s - a process likely died '
+                  'holding it. Proceeding without the lock.'.format(self._name, timeout),
+                  file=sys.__stderr__)
+        if self._acquired_here:
+            self._broken = False
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self._acquired_here:
+            self._lock.release()
+            self._acquired_here = False
+        return False
+
+
+class AtomicFlag(object):
+    """ Lock-free substitute for multiprocessing.Event, for flags that are set and polled
+        across processes.
+
+        multiprocessing.Event guards its state with a shared semaphore - if any process
+        sharing the event dies while holding it (e.g. killed by the OOM killer, or by one of
+        our own terminate()/SIGKILL escalations), every later set()/is_set() blocks forever.
+        This wedged Compressor.stop() in production. A plain shared byte cannot deadlock.
+
+        wait() is provided for drop-in compatibility, implemented as a poll-sleep loop.
+    """
+
+    def __init__(self):
+        self._flag = multiprocessing.Value('b', 0, lock=False)
+
+    def set(self):
+        self._flag.value = 1
+
+    def clear(self):
+        self._flag.value = 0
+
+    def is_set(self):
+        return bool(self._flag.value)
+
+    def wait(self, timeout=None, poll_interval=1.0):
+        """ Block until the flag is set or the timeout (in seconds) expires.
+
+        NOTE: unlike multiprocessing.Event.wait, wake-up after set() is polled, so it can
+        lag by up to poll_interval - fine for the shutdown flags this replaces, but a
+        surprise for latency-sensitive uses.
+
+        Return:
+            [bool] True if the flag is set, False if the timeout expired.
+        """
+
+        # monotonic: an NTP clock step (routine at Pi boot) must not stretch or
+        # truncate the timeout
+        t_beg = time.monotonic()
+
+        while not self.is_set():
+
+            if (timeout is not None) and ((time.monotonic() - t_beg) >= timeout):
+                break
+
+            if timeout is not None:
+                time_left = timeout - (time.monotonic() - t_beg)
+                time.sleep(max(0.0, min(poll_interval, time_left)))
+            else:
+                time.sleep(poll_interval)
+
+        return self.is_set()
 
 
 def setParentDeathSignal(sig=9):

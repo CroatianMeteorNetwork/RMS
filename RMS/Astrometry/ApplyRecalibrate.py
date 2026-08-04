@@ -11,6 +11,7 @@ import json
 import os
 import shutil
 import sys
+import traceback
 import logging
 from collections import OrderedDict
 
@@ -974,9 +975,25 @@ def recalibrateIndividualFFsAndApplyAstrometry(
                         if ff_name_tmp in recalibrated_platepars:
 
                             # Get the computed photometric offset and stddev
-                            photom_offset_tmp_list.append(recalibrated_platepars[ff_name_tmp].mag_lev)
-                            photom_offset_std_tmp_list.append(recalibrated_platepars[ff_name_tmp].mag_lev_stddev)
+                            mag_lev_tmp = recalibrated_platepars[ff_name_tmp].mag_lev
+                            mag_lev_stddev_tmp = recalibrated_platepars[ff_name_tmp].mag_lev_stddev
+
+                            # Only use neighbours with a usable photometric solution. Averaging in a
+                            #   non-finite value would make the average non-finite and, as the average is
+                            #   written back to all neighbours, the non-finite value would spread to all
+                            #   FF files of the night through overlapping neighbourhoods
+                            if not (np.isfinite(mag_lev_tmp) and np.isfinite(mag_lev_stddev_tmp)):
+                                continue
+
+                            photom_offset_tmp_list.append(mag_lev_tmp)
+                            photom_offset_std_tmp_list.append(mag_lev_stddev_tmp)
                             neighboring_ffs.append(ff_name_tmp)
+
+                # If no neighbour had a usable photometric solution, keep the individual values as they are
+                if len(photom_offset_tmp_list) == 0:
+                    log.warning('No finite photometric offsets among the neighbours of {:s}, skipping the '
+                                'photometric offset averaging!'.format(ff_name))
+                    continue
 
                 # Compute the new photometric offset and improved standard deviation (assume equal sample size)
                 #   Source: https://stats.stackexchange.com/questions/55999/is-it-possible-to-find-the-combined-standard-deviation
@@ -1152,84 +1169,115 @@ def recalibrateIndividualFFsAndApplyAstrometry(
         photom_offset_std_list.append(pp_temp.mag_lev_stddev)
 
 
+    # The plots are only informative, so a failure to generate them must never abort the processing of
+    #   the night (the astrometry has already been applied and the recalibrated platepars written out)
     if generate_plot:
 
-        # Generate the name the plots
-        plot_name = os.path.basename(ftpdetectinfo_path).replace('FTPdetectinfo_', '').replace('.txt', '')
+        try:
 
-        ### Plot difference from reference platepar in angular distance from (0, 0) vs rotation ###
+            # Generate the name the plots
+            plot_name = os.path.basename(ftpdetectinfo_path).replace('FTPdetectinfo_', '').replace('.txt', '')
 
-        plt.figure(figsize=(6, 5))
+            ### Plot difference from reference platepar in angular distance from (0, 0) vs rotation ###
 
-        plt.scatter(0, 0, marker='o', edgecolor='k', label='Reference platepar', s=100, c='none', zorder=3)
+            plt.figure(figsize=(6, 5))
 
-        plt.scatter(ang_dists, rot_angles, c=hour_list, zorder=3)
-        plt.colorbar(label="Hours from first FF file")
+            plt.scatter(0, 0, marker='o', edgecolor='k', label='Reference platepar', s=100, c='none', \
+                zorder=3)
 
-        plt.xlabel("Angular distance from reference (arcmin)")
-        plt.ylabel("Rotation from reference (arcmin)")
+            plt.scatter(ang_dists, rot_angles, c=hour_list, zorder=3)
+            plt.colorbar(label="Hours from first FF file")
 
-        plt.title("FOV centre drift starting at {:s}".format(first_dt.strftime("%Y/%m/%d %H:%M:%S")))
+            plt.xlabel("Angular distance from reference (arcmin)")
+            plt.ylabel("Rotation from reference (arcmin)")
 
-        plt.grid()
-        plt.legend()
+            plt.title("FOV centre drift starting at {:s}".format(first_dt.strftime("%Y/%m/%d %H:%M:%S")))
 
-        # Scale the aspect ratio so X and Y units are the same but the plot is not too narrow
-        plt.axis('scaled')
+            plt.grid()
+            plt.legend()
 
-        # Make the plot square by adjusting the limits to the maximum
-        min_lim = min(plt.xlim()[0], plt.ylim()[0])
-        max_lim = max(plt.xlim()[1], plt.ylim()[1])
-        abs_lim = max_lim - min_lim
-        plt.xlim(-0.1*abs_lim, 0.9*abs_lim)
-        plt.ylim(min_lim, max_lim)
+            # Scale the aspect ratio so X and Y units are the same but the plot is not too narrow
+            plt.axis('scaled')
+
+            # Make the plot square by adjusting the limits to the maximum
+            min_lim = min(plt.xlim()[0], plt.ylim()[0])
+            max_lim = max(plt.xlim()[1], plt.ylim()[1])
+            abs_lim = max_lim - min_lim
+            plt.xlim(-0.1*abs_lim, 0.9*abs_lim)
+            plt.ylim(min_lim, max_lim)
 
 
-        plt.tight_layout()
+            plt.tight_layout()
 
-        plt.savefig(os.path.join(dir_path, plot_name + '_calibration_variation.png'), dpi=150)
+            plt.savefig(os.path.join(dir_path, plot_name + '_calibration_variation.png'), dpi=150)
 
-        # plt.show()
+            # plt.show()
 
-        plt.clf()
-        plt.close()
+            plt.clf()
+            plt.close()
 
-        ### ###
+            ### ###
 
-        ### Plot the photometric offset variation ###
+            ### Plot the photometric offset variation ###
 
-        plt.figure()
+            # Skip the plot if there are not enough points (platepars which failed the fit are skipped
+            #   above, so fewer points can remain than there are recalibrated platepars)
+            if len(dt_list) < 2:
 
-        plt.errorbar(
-            dt_list,
-            photom_offset_list,
-            yerr=photom_offset_std_list,
-            fmt="o",
-            ecolor='lightgray',
-            elinewidth=2,
-            capsize=0,
-            ms=2,
-        )
+                log.info('Less than 2 photometric offsets available, skipping the photometry plot...')
 
-        # Format datetimes
-        plt.gca().xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
+            else:
 
-        # rotate and align the tick labels so they look better
-        plt.gcf().autofmt_xdate()
+                # Sanitize the error bars. Non-finite values break the error bar plotting in older
+                #   versions of matplotlib (they raise a StopIteration), so replace them with zeros and
+                #   omit the error bars completely if none of the values are usable
+                photom_offset_std_arr = np.array(photom_offset_std_list, dtype=np.float64)
+                if np.any(np.isfinite(photom_offset_std_arr)):
+                    yerr = np.where(np.isfinite(photom_offset_std_arr), photom_offset_std_arr, 0.0)
 
-        plt.xlabel("UTC time")
-        plt.ylabel("Photometric offset")
+                else:
+                    yerr = None
 
-        plt.title("Photometric offset variation")
+                plt.figure()
 
-        plt.grid()
+                plt.errorbar(
+                    dt_list,
+                    photom_offset_list,
+                    yerr=yerr,
+                    fmt="o",
+                    ecolor='lightgray',
+                    elinewidth=2,
+                    capsize=0,
+                    ms=2,
+                )
 
-        plt.tight_layout()
+                # Format datetimes
+                plt.gca().xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
 
-        plt.savefig(os.path.join(dir_path, plot_name + '_photometry_variation.png'), dpi=150)
+                # rotate and align the tick labels so they look better
+                plt.gcf().autofmt_xdate()
 
-        plt.clf()
-        plt.close()
+                plt.xlabel("UTC time")
+                plt.ylabel("Photometric offset")
+
+                plt.title("Photometric offset variation")
+
+                plt.grid()
+
+                plt.tight_layout()
+
+                plt.savefig(os.path.join(dir_path, plot_name + '_photometry_variation.png'), dpi=150)
+
+                plt.clf()
+                plt.close()
+
+        except Exception as e:
+
+            log.warning('Generating the recalibration plots failed with the message:\n' + repr(e))
+            log.debug(repr(traceback.format_exception(*sys.exc_info())))
+
+            # Close any half-built figure so that it doesn't leak into the plots generated later
+            plt.close('all')
 
     ### ###
 
