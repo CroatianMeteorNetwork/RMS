@@ -121,7 +121,7 @@ def readFrame(st, fid, metadata_only=False):
     st.exposure = int(np.fromfile(fid, dtype=np.uint32, count=1))
     st.reserved2 = int(np.fromfile(fid, dtype=np.uint32, count=1))
     
-    st.text = np.fromfile(fid, dtype=np.uint8, count=64).tostring().decode("ascii").replace('\0', '')
+    st.text = np.fromfile(fid, dtype=np.uint8, count=64).tobytes().decode("ascii").replace('\0', '')
 
     ##########################################################################################################
 

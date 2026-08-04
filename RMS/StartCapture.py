@@ -175,7 +175,7 @@ from RMS.Compression import Compressor
 from RMS.DeleteOldObservations import deleteOldObservations
 from RMS.DetectStarsAndMeteors import detectStarsAndMeteors
 from RMS.Formats.FFfile import validFFName
-from RMS.Misc import mkdirP, RmsDateTime, UTCFromTimestamp
+from RMS.Misc import mkdirP, RmsDateTime, UTCFromTimestamp, setMultiprocessingStartMethod, frameBufferShape
 from RMS.QueuedPool import QueuedPool
 from RMS.Reprocess import getPlatepar, processNight, processFramesFiles
 from RMS.RunExternalScript import runExternalScript
@@ -577,22 +577,25 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     ### then usual. We are applying a dirty fix here where we just add an extra image row and column
     ### if such a memory chunk will be created. The compression is performed, and the image is cropped
     ### back to its original dimensions.
-    array_pad = 0
+    # Compute the shared frame buffer shape (padded to avoid an L2-cache aliasing slowdown).
+    # frameBufferShape() is the single source of truth shared with the child processes.
+    frame_buffer_shape = frameBufferShape(config)
+    frame_buffer_len = frame_buffer_shape[0]*frame_buffer_shape[1]*frame_buffer_shape[2]
 
-    # Check if the image dimensions are divisible by RPi3 L2 cache size and add padding
-    if (256*config.width*config.height)%(512*1024) == 0:
-        array_pad = 1
 
-
-    # Init arrays for parallel compression on 2 cores
-    sharedArrayBase = multiprocessing.Array(ctypes.c_uint8, 256*(config.width + array_pad)*(config.height + array_pad))
-    sharedArray = np.ctypeslib.as_array(sharedArrayBase.get_obj())
-    sharedArray = sharedArray.reshape(256, (config.height + array_pad), (config.width + array_pad))
+    # Init arrays for parallel compression on 2 cores.
+    # NOTE: pass the multiprocessing.Array base objects (not numpy views) to the children. A
+    # numpy view over shared memory pickles by value under the 'forkserver'/'spawn' start
+    # methods, which would give each child a private, disconnected copy. The children rebuild
+    # their own numpy view over this shared memory in their run() via frameBufferShape().
+    # The start-time Values are lock-free (read via stableDoubleRead) so a process OOM-killed
+    # mid-write can never orphan a lock the other process then blocks on.
+    sharedArrayBase = multiprocessing.Array(ctypes.c_uint8, frame_buffer_len)
+    sharedArray = sharedArrayBase
     startTime = multiprocessing.Value('d', 0.0, lock=False)
 
-    sharedArrayBase2 = multiprocessing.Array(ctypes.c_uint8, 256*(config.width + array_pad)*(config.height + array_pad))
-    sharedArray2 = np.ctypeslib.as_array(sharedArrayBase2.get_obj())
-    sharedArray2 = sharedArray2.reshape(256, (config.height + array_pad), (config.width + array_pad))
+    sharedArrayBase2 = multiprocessing.Array(ctypes.c_uint8, frame_buffer_len)
+    sharedArray2 = sharedArrayBase2
     start_time2 = multiprocessing.Value('d', 0.0, lock=False)
 
     log.info('Initializing frame buffers done!')
@@ -1233,6 +1236,12 @@ def processIncompleteCaptures(config, upload_manager):
 
 
 if __name__ == "__main__":
+
+    # Pin the multiprocessing start method for consistent behavior across Python versions
+    # (3.6-3.14). Must be done before any Process/Pool is created (including the logging
+    # listener below). Keeps the platform default where it is safe: fork on Linux
+    # through 3.13; forkserver/spawn only where fork is unavailable or unsafe.
+    setMultiprocessingStartMethod()
 
     ### COMMAND LINE ARGUMENTS
 

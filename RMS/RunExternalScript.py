@@ -10,28 +10,60 @@ import multiprocessing
 import traceback
 
 import RMS.ConfigReader as cr
-from RMS.Logger import getLogger
+from RMS.Logger import getLogger, getLoggingQueue
 
 # Get the logger from the main module
 log = getLogger("rmslogger")
 
 
-def externalFunctionWrapper(func, captured_night_dir, archived_night_dir, config):
-    """ Wrapper for the external function that removes all log handlers in the external process if needed. """
-    
-    # Check if logging is loaded
-    if 'logging' in sys.modules:
-        import logging
+def _runExternalInChild(external_script_dir, module_name, function_name, captured_night_dir,
+                        archived_night_dir, config, inhibit_logging, logging_queue):
+    """ Runs in the child process: re-establishes sys.path, imports the user module and calls
+        the requested function.
 
-        # Remove all handlers from the root logger
+        Importing the user module inside the child (rather than pickling the already-imported
+        function object) is what keeps this working under the 'forkserver'/'spawn' start
+        methods (the default on Linux from Python 3.14). There the child is a fresh
+        interpreter that does NOT inherit the parent's sys.path, so a function pickled by
+        reference (module.func) would fail to import.
+
+    Arguments:
+        external_script_dir: [str] Directory containing the user script (added to sys.path).
+        module_name: [str] Importable module name of the user script.
+        function_name: [str] Name of the function to call within the module.
+        captured_night_dir: [str] Path to the Captured night directory.
+        archived_night_dir: [str] Path to the Archived night directory.
+        config: [Config instance]
+        inhibit_logging: [bool] If True, remove inherited log handlers in this process.
+        logging_queue: [multiprocessing.Queue] Shared logging queue, or None. Used to
+            re-attach logging when it is not inhibited (handlers are not inherited under
+            'forkserver'/'spawn').
+    """
+
+    if external_script_dir not in sys.path:
+        sys.path.insert(0, external_script_dir)
+
+    if inhibit_logging:
+        # Remove any (inherited) handlers so the external script does not log to the RMS log
+        import logging
         root = logging.getLogger()
         if root.handlers:
             for handler in root.handlers[:]:
                 root.removeHandler(handler)
                 handler.close()
+    else:
+        # Re-attach logging so the external script's records reach the listener, which under
+        # 'forkserver'/'spawn' a fresh child does not inherit. Logging only - signal handling
+        # is left untouched for the user script.
+        from RMS.Logger import initChildLogging
+        initChildLogging(logging_queue, config)
+
+    # Import the user module and resolve the function in the child process
+    module = importlib.import_module(module_name)
+    external_function = getattr(module, function_name)
 
     # Call the external function
-    func(captured_night_dir, archived_night_dir, config)
+    external_function(captured_night_dir, archived_night_dir, config)
 
 
 
@@ -67,31 +99,31 @@ def runExternalScript(captured_night_dir, archived_night_dir, config):
 
         # Extract the name of the folder and the script
         external_script_dir, external_script_file = os.path.split(os.path.expanduser(config.external_script_path))
+        module_name = external_script_file.replace('.py', '').replace('.PY', '')
 
-        # Insert the path to the script
-        sys.path.insert(0, external_script_dir)
+        # Insert the path to the script (in the parent, so the validation import below works)
+        if external_script_dir not in sys.path:
+            sys.path.insert(0, external_script_dir)
 
-        # Import the function from the external script
-        module = importlib.import_module(external_script_file.replace('.py', '').replace('.PY', ''))
+        # Validate that the module and function exist before spawning, so any error is logged
+        # clearly in the parent. The child re-imports independently (see _runExternalInChild).
+        module = importlib.import_module(module_name)
         externalFunction = getattr(module, config.external_function_name)
 
-        # Call the external function in a separate process, protecting the main process from potential crashes
-        
-        # If logging is disabled, create a wrapper function which removes all log handlers in the external 
-        # process
-        if not config.external_script_log:
-            # Use the wrapper function
+        # Call the external function in a separate process, protecting the main process from
+        # potential crashes. The module name and function name (not the function object) are
+        # passed so the child can re-import them under any multiprocessing start method.
+        inhibit_logging = not config.external_script_log
+        if inhibit_logging:
             log.info('Starting function "{}" from external script "{}" with logging inhibited'.format(externalFunction, module))
-            target_function = externalFunctionWrapper
-            args = (externalFunction, captured_night_dir, archived_night_dir, config)
-
         else:
             log.info('Starting function "{}" from external script "{}"'.format(externalFunction, module))
-            target_function = externalFunction
-            args = (captured_night_dir, archived_night_dir, config)
 
-
-        p = multiprocessing.Process(target=target_function, args=args)
+        p = multiprocessing.Process(
+            target=_runExternalInChild,
+            args=(external_script_dir, module_name, config.external_function_name,
+                  captured_night_dir, archived_night_dir, config, inhibit_logging,
+                  getLoggingQueue()))
         p.start()
 
         if config.external_script_log:

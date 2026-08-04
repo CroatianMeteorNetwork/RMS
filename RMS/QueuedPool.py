@@ -11,7 +11,7 @@ import queue as queue_module
 import signal
 
 from RMS.Pickling import savePickle, loadPickle
-from RMS.Logger import getLogger
+from RMS.Logger import getLogger, getLoggingQueue, initChildProcess
 from RMS.Misc import randomCharacters, isListKeyInDict, listToTupleRecursive, AtomicFlag
 
 
@@ -139,7 +139,7 @@ class BackupContainer(object):
 class QueuedPool(object):
     def __init__(self, func, cores=None, log=None, delay_start=0, worker_timeout=2000, backup_dir='.', \
         input_queue_maxsize=None, low_priority=False, func_extra_args=None, func_kwargs=None, 
-        worker_wait_inbetween_jobs=0.1, print_state=True):
+        worker_wait_inbetween_jobs=0.1, print_state=True, config=None):
         """ Provides capability of creating a pool of workers which will process jobs in a given queue, and 
         the input queue can be updated in another thread. 
 
@@ -202,6 +202,10 @@ class QueuedPool(object):
         self.cores = SafeValue(cores, minval=1, maxval=multiprocessing.cpu_count())
         self.log = log
 
+        # Grab the logging queue on the parent side so each worker can re-attach logging
+        # under the 'forkserver'/'spawn' start methods (handlers are not inherited there)
+        self.logging_queue = getLoggingQueue()
+
         self.start_time = time.time()
         self.delay_start = delay_start
         self.worker_timeout = worker_timeout
@@ -223,6 +227,7 @@ class QueuedPool(object):
         self.output_queue = self.manager.Queue()
 
         self.func = func
+        self.config = config
         self.pool = None
 
         self.total_jobs = SafeValue(minval=0)
@@ -251,30 +256,35 @@ class QueuedPool(object):
 
 
     def __getstate__(self):
-        """ Return a picklable snapshot of this instance for the 'spawn' start method
-            (Windows). On Linux (fork) this is never called, so the capture pipeline is
-            unaffected.
+        """ Return a picklable representation of the pool.
 
-            Under spawn, the Pool initializer (the bound method self._workerFunc) forces
-            the whole QueuedPool to be pickled and sent to each worker. The SyncManager
-            (self.manager) has no pickle reducer and holds a weakref -> "cannot pickle
-            'weakref' object"; workers never use it (they use the already-created Queue
-            proxies), so drop it. The live Pool handle (self.pool) also must not and need
-            not cross the process boundary. Everything else (Manager Queue proxies,
-            SafeValue Value/Lock counters, the kill Event, bkup_dict) reduces correctly
-            during a real spawn and is needed by the workers.
+        Required under the 'spawn' (Windows/macOS default) and 'forkserver' (Linux default
+        from Python 3.14) start methods, where the Pool initializer (the bound method
+        self._workerFunc) is pickled and sent to each worker process. The SyncManager
+        (self.manager) and the Pool handle (self.pool) are neither picklable nor needed in
+        workers; the Manager queue/value proxies ARE picklable and transparently reconnect
+        on the worker side. Everything else (SafeValue Value/Lock counters, the kill Event,
+        bkup_dict) reduces correctly during a real spawn and is needed by the workers.
+        A logging.Logger is not picklable before Python 3.7, so it is reduced to its name
+        and re-fetched in the worker (handlers are not inherited across processes anyway).
+
+        Under 'fork' no pickling occurs, so this method is never called and behavior is
+        unchanged.
         """
         state = self.__dict__.copy()
         state['manager'] = None
         state['pool'] = None
+        state['log'] = self.log.name if self.log is not None else None
         return state
 
 
     def __setstate__(self, state):
-        """ Restore state in a spawned worker. manager/pool stay None in the child; the
-            worker reconnects to the parent's manager server through the pickled Queue
-            proxies. """
+        """ Restore state in a worker process, re-fetching the logger by name. manager/pool
+            stay None in the child; the worker reconnects to the parent's manager server
+            through the pickled Queue proxies. """
+        log_name = state.get('log')
         self.__dict__.update(state)
+        self.log = getLogger(log_name) if log_name is not None else None
 
 
     def printAndLog(self, *args):
@@ -369,7 +379,17 @@ class QueuedPool(object):
 
     def _workerFunc(self, func):
         """ A wrapper function for the given worker function. Handles the queue operations. """
-        
+
+        # Re-attach logging in this worker process. Under 'forkserver'/'spawn' (the default on
+        # Linux from Python 3.14) a worker does not inherit the parent's root logger handlers,
+        # so records from the worker function (and printAndLog) would otherwise never reach the
+        # listener. Pass the config when the caller provided one so the worker-side
+        # InRmsFilter engages: without it every third-party DEBUG record is pickled and
+        # pushed across the queue only to be discarded by the listener's filter (review
+        # finding - wasted IPC on the smallest boxes). This also sets SIGINT to be ignored
+        # so the parent coordinates shutdown.
+        initChildProcess(self.logging_queue, self.config)
+
         # Set lower priority, if given
         if self.low_priority:
 

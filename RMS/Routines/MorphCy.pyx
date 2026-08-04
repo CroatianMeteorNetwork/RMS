@@ -4,6 +4,9 @@ import cv2
 
 # Cython import
 cimport numpy as np
+
+# Initialize the NumPy C API (explicit for clarity: Cython 3 (required to build against NumPy 2) emits it itself)
+np.import_array()
 cimport cython
 
 # Define numpy types

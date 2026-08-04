@@ -286,6 +286,10 @@ try:
         """
 
         height, width = img_avg_sub.shape
+        # np.bool_ (NOT the builtin bool): this function is @njit-compiled and
+        # Numba cannot type the Python builtin as a dtype - dtype=bool raises a
+        # TypingError on first call wherever numba is installed. np.bool_ exists
+        # on both NumPy 1 and 2 (only the np.bool alias ever went away).
         img_thresh = np.zeros((height, width), dtype=np.bool_)
 
         for i in range(height):
