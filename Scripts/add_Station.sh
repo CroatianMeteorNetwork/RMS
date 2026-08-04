@@ -431,18 +431,25 @@ fi
 
 total=$(count_stations)
 
-if [[ $total -gt 1 ]]; then
-    for dir in ~/source/Stations/*/; do
+# Recompute the per-station settings from the current station count on
+# every run, so cameras added (or removed) since the last run are
+# accounted for
+for dir in ~/source/Stations/*/; do
+    [[ -f "${dir}/.config" ]] || continue
+    if [[ $total -gt 1 ]]; then
         # scale the reserved free space with the number of stations
         sed -i "s/^extra_space_gb:.*$/extra_space_gb: $(( total * 20 ))/g" "${dir}/.config"
         # disable the daily post processing reboot, it would kill the other captures
         sed -i "s/^\(reboot_after_processing:\).*/\1 false/g" "${dir}/.config"
-    done
-
-    # remove comment from last line of wayfire.ini to enable window cascade (Pi image)
-    if [[ -f ~/.config/wayfire.ini ]]; then
-        sed -i s/#mode/mode/ ~/.config/wayfire.ini
+    else
+        # a single camera keeps the standard daily post processing reboot
+        sed -i "s/^\(reboot_after_processing:\).*/\1 true/g" "${dir}/.config"
     fi
+done
+
+# remove comment from last line of wayfire.ini to enable window cascade (Pi image)
+if [[ $total -gt 1 && -f ~/.config/wayfire.ini ]]; then
+    sed -i s/#mode/mode/ ~/.config/wayfire.ini
 fi
 
 # Make sure the Desktop StartCapture entry points at RMS_StartCapture.sh,
