@@ -180,8 +180,12 @@ rated size, e.g. a 64 GB card gives about 62 GB.
         echo "Expanding the file system, then the system will reboot."
         echo "This guide will start again after the reboot."
         sudo raspi-config --expand-rootfs
-        echo "Rebooting in 5 seconds, please wait..."
-        sleep 5
+        echo ""
+        flushInput
+        read -n1 -s -r -p 'Take your time to review the output above, then press any key to reboot... '
+        echo ""
+        echo "Rebooting..."
+        sleep 2
         sudo reboot
         exit 0
     else
