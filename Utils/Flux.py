@@ -2182,13 +2182,21 @@ def fitMoonGain(samples, r_dark, dome_s):
         return None
     if e0 >= r_dark:
         return 0.0
-    if envelope(hi_bound) <= r_dark:
+    # None here means the max-gain penalty starved too many frames below the
+    # expectation floor - the night cannot bracket the fit
+    e_hi = envelope(hi_bound)
+    if e_hi is None:
+        return None
+    if e_hi <= r_dark:
         return hi_bound
 
     lo, hi = 0.0, hi_bound
     for _ in range(40):
         mid = 0.5*(lo + hi)
-        if envelope(mid) < r_dark:
+        e_mid = envelope(mid)
+        # None: the penalty starved the frame count at this gain, so the gain
+        # is unsupportably high - bisect downward like an above-reference step
+        if (e_mid is not None) and (e_mid < r_dark):
             lo = mid
         else:
             hi = mid
