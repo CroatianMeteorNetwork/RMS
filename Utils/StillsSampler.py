@@ -140,8 +140,8 @@ def sampleStillsForNight(config, image_blocks, night_dir):
     scoring_path = os.path.join(night_dir, scoringFileName(night_name))
     pp_path = os.path.join(night_dir, config.platepars_flux_recalibrated_name)
 
-    if not (os.path.isfile(scoring_path) and os.path.isfile(pp_path)):
-        log.info("Stills sampler: no scoring product or recalibrated platepars - skipping")
+    if not os.path.isfile(scoring_path):
+        log.info("Stills sampler: no scoring product - skipping")
         return None
 
     header, frames, stars = loadStarScoring(scoring_path)
@@ -183,20 +183,38 @@ def sampleStillsForNight(config, image_blocks, night_dir):
         mag_band_ratios=config.star_catalog_band_ratios)
     cat_ra, cat_dec = catalog_stars[:, 0], catalog_stars[:, 1]
 
-    # Platepar knots
-    with open(pp_path) as f:
-        ppr = json.load(f)
+    # Platepar knots from the recalibration when it exists
     knots = []
-    for ff_name, pp_dict in ppr.items():
-        if isinstance(pp_dict, dict) and pp_dict.get("auto_recalibrated"):
-            pp = Platepar()
-            pp.loadFromDict(pp_dict, use_flat=config.use_flat)
-            knots.append((FFfile.filenameToDatetime(ff_name), pp))
-    knots.sort(key=lambda kv: kv[0])
+    if os.path.isfile(pp_path):
+        with open(pp_path) as f:
+            ppr = json.load(f)
+        for ff_name, pp_dict in ppr.items():
+            if isinstance(pp_dict, dict) and pp_dict.get("auto_recalibrated"):
+                pp = Platepar()
+                pp.loadFromDict(pp_dict, use_flat=config.use_flat)
+                knots.append((FFfile.filenameToDatetime(ff_name), pp))
+        knots.sort(key=lambda kv: kv[0])
 
+    # Static fallback, same rationale as the scoring pass and the demo
+    # renderer: on nights too starved to recalibrate, pixel-level positions
+    # from the nightly platepar are plenty for stills membership - and those
+    # are exactly the nights whose transparency evidence is most valuable.
+    # Without this the whole chain died here: scoring and both maps fell back
+    # fine, but no sidecar meant no demo video (observed fleet-wide on
+    # overcast nights). Provenance travels in the sidecar header.
+    pp_source = "recalibrated"
     if not knots:
-        log.info("Stills sampler: no valid recalibrated platepar - skipping")
-        return None
+        from RMS.Formats.Platepar import findBestPlatepar
+        pp_static = findBestPlatepar(config, night_dir)
+        if pp_static is None:
+            log.info("Stills sampler: no recalibrated platepars and no static "
+                     "platepar - skipping")
+            return None
+        knots = [(FFfile.filenameToDatetime(str(frames["frame_names"][0])),
+                  pp_static)]
+        pp_source = "static_fallback"
+        log.info("Stills sampler: no valid recalibrated platepar - using the "
+                 "static nightly platepar as a single knot")
 
     knot_times = np.array([calendar.timegm(t.timetuple()) for t, _ in knots])
     knot_pps = [pp for _, pp in knots]
@@ -300,6 +318,7 @@ def sampleStillsForNight(config, image_blocks, night_dir):
         n_bright=int(n_bright),
         n_stills=int(n_stills),
         n_platepar_knots=len(knots),
+        platepar_source=pp_source,
         note="bright_detected applies both PatchPhotometry floors; "
              "bright_flux NaN = not measurable on that still",
     )

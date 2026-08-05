@@ -1662,7 +1662,8 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
             log.warning("Could not write the star scoring product: {}".format(e))
 
         # Sample the night's stills NOW, while they are still on disk and the
-        # scoring product + recalibrated platepars exist: the tree estimator
+        # scoring product exists (the sampler falls back to the static platepar
+        # on recalibration-starved nights, like the scoring pass): the tree estimator
         # fuses the instantaneous stills detections into its evidence (the
         # 10 s maxpixel window alone under-reads thin fast cloud - measured
         # on the A6 parity lab). The frames step later reuses this sidecar
