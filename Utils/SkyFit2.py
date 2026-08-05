@@ -13,6 +13,8 @@ import glob
 import sys
 import time
 import random
+import html
+import re
 from concurrent.futures import ThreadPoolExecutor
 import copy
 import shutil
@@ -216,8 +218,6 @@ from RMS.Astrometry.Conversions import datetime2JD
 
 # Load the ASTRA module
 try:
-    import html, re
-
     from Utils.Astra import ASTRA, PYSWARMS_AVAILABLE
 
     if not PYSWARMS_AVAILABLE:
