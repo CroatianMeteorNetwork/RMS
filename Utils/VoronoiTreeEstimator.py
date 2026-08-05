@@ -50,6 +50,23 @@ EVIDENCE_MIX = 0.98                        # per-star likelihood robustness floo
 RATE_MIN_LEAF = 0.15                       # measured clear rate to carry evidence
 RATE_CLIP = (0.03, 0.97)
 WINDOW_FRAMES = 1                          # +/- frames pooled per BP solve
+
+# OPEN ITEM - deep uniform layers saturate to the ceiling instead of reading
+# the bright-star bound. When a solid semi-transparent layer covers the FOV
+# and only the brightest star is barely visible, the correct inference is
+# dm ~ that star's bound for the WHOLE field - the effective cell is the
+# whole FOV. The uniform-layer suite (built on a real night's geometry;
+# see tests and the investigation notes) measures: uniform 1.0/2.0 read
+# correctly with the trailing-history seed norm, but uniform 3.0 and the
+# brightest-only case read the 4.5 ceiling ("at least" - conservative, so
+# verdicts err opaque). Three global-anchor designs were measured and
+# rejected: a root prior (the tau-3 down smoothing smears a 0.25-mag anchor
+# ~12x - no effect), the same scaled by consistency^2 (no effect), and a
+# belief-level anchor at the pooled pure argmax (fixed deep layers but
+# dragged the half-disc scenario from 1.80/0.00 to 0.42/0.30 - per-star
+# leaves hold too few records to out-argue even a capped bump). The right
+# construction is a structure-aware uniform component (consistent-subset
+# refit), not a global bump; until built, the ceiling is the honest answer.
 S_DEFAULT = 0.4                            # logistic width fallback (mag)
 
 CELL_NX, CELL_NY = 8, 5
@@ -179,26 +196,44 @@ def computeTreeSeries(config, night_dir, header, frames, stars, calibration=None
     with np.errstate(invalid="ignore"):
         p_model = np.where(seen_n >= 10, p_sum/np.maximum(seen_n, 1), np.nan)
 
-    # Normalize the model seed to the NIGHT'S OWN clear level (the same
-    # high-percentile scheme as the grid detector's norms): the fleet's
-    # models sit anywhere from 2.5x over-prediction (fresh refit, warmup
-    # norm ~0.4 - raw seeding paints clear sky solid) to 1.5x under-
-    # prediction (MW transit - thin clouds become invisible because stars
-    # beat expectations). A high percentile of the per-frame ratio tracks
-    # the clearest moments, so ordinary cloud does not drag the zero point;
-    # a night overcast END TO END clamps at NORM_MIN and still saturates.
-    # The trailing calibration (measured rates) needs none of this.
-    sp = stars["star_p"].astype(np.float64)
-    dark = np.asarray(frames["sun_alt"], dtype=np.float64) <= -18.0
-    fr_exp = np.bincount(sf, weights=sp, minlength=n_frames)
-    fr_det = np.bincount(sf[detected], weights=np.ones(int(detected.sum())),
-        minlength=n_frames)
-    informative = dark & (fr_exp >= 5.0)
-    if np.any(informative):
-        seed_norm = float(np.clip(np.percentile(
-            fr_det[informative]/fr_exp[informative], 80), 0.5, 3.0))
-    else:
-        seed_norm = 1.0
+    # Normalize the model seed to the site's clear level - from the TRAILING
+    # ratio history (prior nights, cloud-immune), NOT from tonight's own
+    # frames: tonight's percentile absorbs any uniform semi-transparent layer
+    # into the baseline (measured on the synthetic suite: a uniform 1.0 mag
+    # layer read 0.30, a 2.0 layer read 1.17). The model-miscalibration this
+    # norm exists to fix (2.5x fresh-refit over-prediction, MW-transit
+    # under-prediction) is a property of the MODEL, not of tonight - so
+    # prior nights measure it correctly and tonight's weather cannot leak in.
+    # True night 1 (no history) falls back to tonight's percentile with the
+    # documented limitation: a uniform layer on the station's very first
+    # night partially reads as the baseline.
+    seed_norm = None
+    try:
+        history_path = os.path.join(os.path.expanduser(config.data_dir),
+            "{:s}_flux_lm_history.json".format(str(config.stationID)))
+        with open(history_path) as f:
+            _hist = json.load(f)
+        _ver = str(header.get("dome_fit_date"))
+        _drs = [v["dratio"] for k, v in sorted(_hist.items())[-30:]
+                if isinstance(v, dict) and ("dratio" in v)
+                and (str(v.get("dmodel", "")) == _ver)]
+        if len(_drs) >= 5:
+            seed_norm = float(np.clip(np.percentile(_drs, 80), 0.5, 3.0))
+    except Exception:
+        seed_norm = None
+
+    if seed_norm is None:
+        sp = stars["star_p"].astype(np.float64)
+        dark = np.asarray(frames["sun_alt"], dtype=np.float64) <= -18.0
+        fr_exp = np.bincount(sf, weights=sp, minlength=n_frames)
+        fr_det = np.bincount(sf[detected], weights=np.ones(int(detected.sum())),
+            minlength=n_frames)
+        informative = dark & (fr_exp >= 5.0)
+        if np.any(informative):
+            seed_norm = float(np.clip(np.percentile(
+                fr_det[informative]/fr_exp[informative], 80), 0.5, 3.0))
+        else:
+            seed_norm = 1.0
     p_model = np.clip(p_model*seed_norm, 0.0, 0.97)
 
     rate = np.where(np.isfinite(rate), rate, p_model)
