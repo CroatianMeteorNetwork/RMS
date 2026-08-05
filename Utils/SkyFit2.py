@@ -1263,7 +1263,7 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
         # Pick folder
         dir_path = str(QtWidgets.QFileDialog.getExistingDirectory(
             self, "Select folder with FF/image files",
-            pt.dir_path, QtWidgets.QFileDialog.ShowDirsOnly))
+            pt.dir_path, QtWidgets.QFileDialog.Option.ShowDirsOnly))
         if not dir_path:
             return
 
@@ -1292,11 +1292,11 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
             reply = QtWidgets.QMessageBox.question(
                 self, "Unsaved Changes",
                 "The current platepar has unsaved changes.\nSave before changing station?",
-                QtWidgets.QMessageBox.Save | QtWidgets.QMessageBox.Discard | QtWidgets.QMessageBox.Cancel,
-                QtWidgets.QMessageBox.Save)
-            if reply == QtWidgets.QMessageBox.Cancel:
+                QtWidgets.QMessageBox.StandardButton.Save | QtWidgets.QMessageBox.StandardButton.Discard | QtWidgets.QMessageBox.StandardButton.Cancel,
+                QtWidgets.QMessageBox.StandardButton.Save)
+            if reply == QtWidgets.QMessageBox.StandardButton.Cancel:
                 return
-            if reply == QtWidgets.QMessageBox.Save:
+            if reply == QtWidgets.QMessageBox.StandardButton.Save:
                 pt.savePlatepar()
 
         # Reload via changeStation
@@ -1636,7 +1636,7 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
             # Use folder picker — _loadFile will find .config in the selected directory
             path = str(QtWidgets.QFileDialog.getExistingDirectory(
                 self, "Select folder containing config", start_dir,
-                QtWidgets.QFileDialog.ShowDirsOnly))
+                QtWidgets.QFileDialog.Option.ShowDirsOnly))
             return path
         elif ftype == "Mask":
             path, _ = QtWidgets.QFileDialog.getOpenFileName(
@@ -1798,10 +1798,10 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
 
         # OK / Cancel
         btn_box = QtWidgets.QDialogButtonBox(
-            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel)
+            QtWidgets.QDialogButtonBox.StandardButton.Ok | QtWidgets.QDialogButtonBox.StandardButton.Cancel)
         btn_box.accepted.connect(dlg.accept)
         btn_box.rejected.connect(dlg.reject)
-        ok_btn = btn_box.button(QtWidgets.QDialogButtonBox.Ok)
+        ok_btn = btn_box.button(QtWidgets.QDialogButtonBox.StandardButton.Ok)
 
         def updateOkButton():
             ok_btn.setEnabled(any(cb.isChecked() for cb in checkboxes))
@@ -1842,7 +1842,7 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
 
         layout.addWidget(btn_box)
 
-        if dlg.exec_() == QtWidgets.QDialog.Accepted:
+        if dlg.exec_() == QtWidgets.QDialog.DialogCode.Accepted:
             paths = [cb.property("path") for cb in checkboxes if cb.isChecked()]
             if paths:
                 self._saveFile(ftype, paths)
@@ -1946,7 +1946,7 @@ class QFOVinputDialog(QtWidgets.QDialog):
 
         self.setWindowTitle("Pointing information")
 
-        btn = QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel
+        btn = QtWidgets.QDialogButtonBox.StandardButton.Ok | QtWidgets.QDialogButtonBox.StandardButton.Cancel
 
         buttonBox = QtWidgets.QDialogButtonBox(btn)
         buttonBox.accepted.connect(self.accept)
@@ -1958,15 +1958,15 @@ class QFOVinputDialog(QtWidgets.QDialog):
 
 
         azim_validator = QtGui.QDoubleValidator(-180, 360, 9)
-        azim_validator.setNotation(QtGui.QDoubleValidator.StandardNotation)
+        azim_validator.setNotation(QtGui.QDoubleValidator.Notation.StandardNotation)
         self.azim_edit.setValidator(azim_validator)
 
         alt_validator = QtGui.QDoubleValidator(0, 90, 9)
-        alt_validator.setNotation(QtGui.QDoubleValidator.StandardNotation)
+        alt_validator.setNotation(QtGui.QDoubleValidator.Notation.StandardNotation)
         self.alt_edit.setValidator(alt_validator)
 
         rot_validator = QtGui.QDoubleValidator(-180, 360, 9)
-        rot_validator.setNotation(QtGui.QDoubleValidator.StandardNotation)
+        rot_validator.setNotation(QtGui.QDoubleValidator.Notation.StandardNotation)
         self.rot_edit.setValidator(rot_validator)
 
         layout = QtWidgets.QVBoxLayout(self)
@@ -3173,7 +3173,7 @@ class PlateTool(QtWidgets.QMainWindow):
                                            anchor=(0.5, 0.5), 
                                            color=(0, 0, 0), 
                                            fill=(255, 255, 255, 200))
-        self.sat_computing_text.setFont(QtGui.QFont('Arial', 24, QtGui.QFont.Bold))
+        self.sat_computing_text.setFont(QtGui.QFont('Arial', 24, QtGui.QFont.Weight.Bold))
         self.sat_computing_text.hide()
         self.sat_computing_text.setZValue(100)  # Very high z-value to be on top
         self.img_frame.addItem(self.sat_computing_text)
@@ -3269,19 +3269,19 @@ class PlateTool(QtWidgets.QMainWindow):
 
         lut = np.array([[0, 0, 0, 0], [0, 255, 0, 76]], dtype=np.ubyte)
         self.region = pg.ImageItem(lut=lut)
-        self.region.setCompositionMode(QtGui.QPainter.CompositionMode_SourceOver)
+        self.region.setCompositionMode(QtGui.QPainter.CompositionMode.CompositionMode_SourceOver)
         self.region.setZValue(10)
         self.img_frame.addItem(self.region)
 
         self.region_zoom = pg.ImageItem(lut=lut)
-        self.region_zoom.setCompositionMode(QtGui.QPainter.CompositionMode_SourceOver)
+        self.region_zoom.setCompositionMode(QtGui.QPainter.CompositionMode.CompositionMode_SourceOver)
         self.region_zoom.setZValue(10)
         self.zoom_window.addItem(self.region_zoom)
 
         # Mask overlay (red tint over masked areas)
         mask_lut = np.array([[0, 0, 0, 0], [255, 0, 0, 80]], dtype=np.ubyte)
         self.mask_overlay = pg.ImageItem(lut=mask_lut)
-        self.mask_overlay.setCompositionMode(QtGui.QPainter.CompositionMode_SourceOver)
+        self.mask_overlay.setCompositionMode(QtGui.QPainter.CompositionMode.CompositionMode_SourceOver)
         self.mask_overlay.setZValue(8)
         self.img_frame.addItem(self.mask_overlay)
         self.mask_overlay.hide()
@@ -3610,7 +3610,7 @@ class PlateTool(QtWidgets.QMainWindow):
         """
         if dir_path is None:
             dir_path = str(QtWidgets.QFileDialog.getExistingDirectory(self, "Select new station folder",
-                                                                  self.dir_path, QtWidgets.QFileDialog.ShowDirsOnly))
+                                                                  self.dir_path, QtWidgets.QFileDialog.Option.ShowDirsOnly))
 
         if not dir_path:
             return False
@@ -12903,9 +12903,9 @@ class PlateTool(QtWidgets.QMainWindow):
             )
 
             auto_fit_label = "Auto Fit (placeholder)" if not best_ff_available else "Auto Fit"
-            auto_fit_btn = msg_box.addButton(auto_fit_label, QtWidgets.QMessageBox.ActionRole)
-            navigate_btn = msg_box.addButton("Go to Best Image", QtWidgets.QMessageBox.ActionRole)
-            msg_box.addButton(QtWidgets.QMessageBox.Cancel)
+            auto_fit_btn = msg_box.addButton(auto_fit_label, QtWidgets.QMessageBox.ButtonRole.ActionRole)
+            navigate_btn = msg_box.addButton("Go to Best Image", QtWidgets.QMessageBox.ButtonRole.ActionRole)
+            msg_box.addButton(QtWidgets.QMessageBox.StandardButton.Cancel)
 
             msg_box.setDefaultButton(auto_fit_btn)
             msg_box.exec_()
@@ -13276,10 +13276,10 @@ class PlateTool(QtWidgets.QMainWindow):
                 "Replace Matched Stars?",
                 "You have {} matched star pair(s) that will be replaced by auto-fit.\n\n"
                 "Do you want to continue?".format(len(self.paired_stars)),
-                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
-                QtWidgets.QMessageBox.No
+                QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No,
+                QtWidgets.QMessageBox.StandardButton.No
             )
-            if reply != QtWidgets.QMessageBox.Yes:
+            if reply != QtWidgets.QMessageBox.StandardButton.Yes:
                 return
 
         # Show busy state on button
@@ -13454,15 +13454,15 @@ class PlateTool(QtWidgets.QMainWindow):
             msgbox = QtWidgets.QMessageBox(self)
             msgbox.setWindowTitle('Astrometry.net Solution - FOV Mismatch')
             msgbox.setText(msg)
-            msgbox.setIcon(QtWidgets.QMessageBox.Warning)
-            msgbox.setStandardButtons(QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
-            msgbox.setDefaultButton(QtWidgets.QMessageBox.Yes)
+            msgbox.setIcon(QtWidgets.QMessageBox.Icon.Warning)
+            msgbox.setStandardButtons(QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No)
+            msgbox.setDefaultButton(QtWidgets.QMessageBox.StandardButton.Yes)
             reply = msgbox.exec_()
         else:
             reply = QtWidgets.QMessageBox.question(self, 'Astrometry.net Solution', msg,
-                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No, QtWidgets.QMessageBox.Yes)
+                QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No, QtWidgets.QMessageBox.StandardButton.Yes)
 
-        if reply == QtWidgets.QMessageBox.No:
+        if reply == QtWidgets.QMessageBox.StandardButton.No:
             self.status_bar.showMessage("Astrometry.net solution applied (no refinement)")
             return self.platepar
 
@@ -14101,9 +14101,9 @@ class PlateTool(QtWidgets.QMainWindow):
         msg = QtWidgets.QMessageBox(self)
         msg.setWindowTitle("No platepar found")
         msg.setText("No platepar files were found in the folder.")
-        browse_btn = msg.addButton("Browse...", QtWidgets.QMessageBox.ActionRole)
-        create_btn = msg.addButton("Create new", QtWidgets.QMessageBox.ActionRole)
-        msg.addButton(QtWidgets.QMessageBox.Cancel)
+        browse_btn = msg.addButton("Browse...", QtWidgets.QMessageBox.ButtonRole.ActionRole)
+        create_btn = msg.addButton("Create new", QtWidgets.QMessageBox.ButtonRole.ActionRole)
+        msg.addButton(QtWidgets.QMessageBox.StandardButton.Cancel)
         msg.exec_()
 
         if msg.clickedButton() == browse_btn:
