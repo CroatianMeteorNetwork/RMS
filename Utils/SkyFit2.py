@@ -1883,17 +1883,13 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
                 try:
                     src = pt.config.config_file_name
                     dest = os.path.join(target_dir, os.path.basename(src))
-                    # Write the tuned catalog LM as is. ApplyRecalibrate reads the catalog one
-                    #   magnitude deeper than this, but it matches stars down to the raw
-                    #   catalog_mag_limit, so nothing has to be subtracted here.
-                    config_catalog_lm = max(3.0, pt.cat_lim_mag)
                     if os.path.realpath(src) != os.path.realpath(dest):
                         # Copy the config to the target, then write overrides into the copy
                         shutil.copy2(src, dest)
-                        pt._writeStarDetectionConfig(dest, config_catalog_lm)
+                        pt._writeStarDetectionConfig(dest)
                     else:
                         # Same file — write overrides in-place (backup handled by _writeStarDetectionConfig)
-                        pt._writeStarDetectionConfig(dest, config_catalog_lm)
+                        pt._writeStarDetectionConfig(dest)
                     # Sync in-memory config attrs so modified state is cleared
                     pt.config.intensity_threshold = pt.override_intensity_threshold
                     pt.config.neighborhood_size = pt.override_neighborhood_size
@@ -1901,8 +1897,6 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
                     pt.config.segment_radius = pt.override_segment_radius
                     pt.config.max_feature_ratio = pt.override_max_feature_ratio
                     pt.config.roundness_threshold = pt.override_roundness_threshold
-                    # Keep the in-memory LM in sync, so the config isn't flagged as modified again
-                    pt.config.catalog_mag_limit = config_catalog_lm
                     pt._updateConfigSaveButtonState()
                     results.append("Config saved to: " + dest)
                 except Exception as e:
@@ -4771,10 +4765,6 @@ class PlateTool(QtWidgets.QMainWindow):
             or self.override_segment_radius != getattr(cfg, 'segment_radius', self.override_segment_radius)
             or abs(self.override_max_feature_ratio - getattr(cfg, 'max_feature_ratio', self.override_max_feature_ratio)) > 1e-6
             or abs(self.override_roundness_threshold - getattr(cfg, 'roundness_threshold', self.override_roundness_threshold)) > 1e-6
-            # The LM is saved to the config too. Compare it at the precision it's written with
-            #   (one decimal), so a save doesn't leave the config looking modified.
-            or abs(getattr(self, 'cat_lim_mag', 0.0)
-                   - getattr(cfg, 'catalog_mag_limit', getattr(self, 'cat_lim_mag', 0.0))) > 0.05
         )
 
     def _updateConfigSaveButtonState(self):
@@ -4795,9 +4785,6 @@ class PlateTool(QtWidgets.QMainWindow):
 
         self.updateLeftLabels()
         self.updateStars()
-
-        # The LM is saved to the config, so refresh the unsaved indicators
-        self._updateConfigSaveButtonState()
 
 
     def toggleStarDetectionOverride(self):
@@ -5357,9 +5344,6 @@ class PlateTool(QtWidgets.QMainWindow):
             # Store tuned LM for restoration after fitting (balancing may change it)
             self.tuned_cat_lim_mag = best_lm
             self.catalog_lm_tuned = True
-
-            # The tuned LM is an unsaved config change on its own, flag it
-            self._updateConfigSaveButtonState()
 
             # Count visible catalog stars at new LM (filter to FOV first to prevent back-projection)
             _, catalog_in_fov = self.filterCatalogStarsInsideFOV(self.catalog_stars)
@@ -6098,7 +6082,7 @@ class PlateTool(QtWidgets.QMainWindow):
         return final_lm
 
 
-    def _writeStarDetectionConfig(self, config_path, catalog_mag_limit):
+    def _writeStarDetectionConfig(self, config_path):
         """Write star detection parameters to the specified config file.
 
         Preserves comments and formatting by doing surgical line updates.
@@ -6116,6 +6100,9 @@ class PlateTool(QtWidgets.QMainWindow):
             print("Config backed up to:", backup_path)
 
         # Values to update: (section, key, value)
+        # The catalog limiting magnitude is deliberately not written. It is a working value in
+        #   SkyFit2, and saving it back would shift the LM that recalibration uses every time
+        #   the config is saved.
         updates = {
             "StarExtraction": {
                 "intensity_threshold": str(self.override_intensity_threshold),
@@ -6124,9 +6111,6 @@ class PlateTool(QtWidgets.QMainWindow):
                 "neighborhood_size": str(self.override_neighborhood_size),
                 "max_feature_ratio": str(self.override_max_feature_ratio),
                 "roundness_threshold": str(self.override_roundness_threshold),
-            },
-            "Calibration": {
-                "catalog_mag_limit": f"{catalog_mag_limit:.1f}",
             },
         }
 
@@ -6205,7 +6189,6 @@ class PlateTool(QtWidgets.QMainWindow):
             print(f"  intensity_threshold: {self.override_intensity_threshold}")
             print(f"  segment_radius: {self.override_segment_radius}")
             print(f"  max_stars: {self.override_max_stars}")
-            print(f"  catalog_mag_limit: {catalog_mag_limit:.1f}")
 
             qmessagebox(message=f"Star detection settings saved to:\n{config_path}",
                        title="Settings Saved", message_type="info")
@@ -10410,9 +10393,6 @@ class PlateTool(QtWidgets.QMainWindow):
             self.updateStars()
             self.tab.settings.updateLimMag()
 
-            # The LM is saved to the config, so refresh the unsaved indicators
-            self._updateConfigSaveButtonState()
-
         elif event.key() == QtCore.Qt.Key.Key_F:
             self.cat_lim_mag -= 0.1
             self.catalog_stars = self.loadCatalogStars(self.cat_lim_mag)
@@ -10420,8 +10400,6 @@ class PlateTool(QtWidgets.QMainWindow):
             self.updateLeftLabels()
             self.updateStars()
             self.tab.settings.updateLimMag()
-
-            self._updateConfigSaveButtonState()
 
 
         # Increase image gamma

@@ -4335,9 +4335,6 @@ class SettingsWidget(QtWidgets.QWidget, ScaledSizeHelper):
         # Sync with Star Detection panel
         self.gui.tab.star_detection.setCatalogLM(self.gui.cat_lim_mag)
 
-        # The LM is saved to the config, so refresh the unsaved indicators
-        self.gui._updateConfigSaveButtonState()
-
     def populateCatalogList(self):
         """Populate the catalog combo box with available catalogs."""
         import os
