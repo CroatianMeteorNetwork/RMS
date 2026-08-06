@@ -3969,6 +3969,7 @@ class SettingsWidget(QtWidgets.QWidget, ScaledSizeHelper):
     sigStarNamesToggled = QtCore.pyqtSignal()
     sigApparentMagCorrToggled = QtCore.pyqtSignal()
     sigLabelMagLimitChanged = QtCore.pyqtSignal(float)
+    sigGeoMarkerScaleChanged = QtCore.pyqtSignal(float)
     sigConstellationToggled = QtCore.pyqtSignal()
     sigCalStarsToggled = QtCore.pyqtSignal()
     sigDistortionToggled = QtCore.pyqtSignal()
@@ -4040,6 +4041,28 @@ class SettingsWidget(QtWidgets.QWidget, ScaledSizeHelper):
         label_mag_layout.addWidget(self.label_mag_spinbox)
         label_mag_layout.addStretch()
         vbox.addLayout(label_mag_layout)
+
+        # Geo point marker size multiplier (the base size is computed automatically from the size of
+        #   the image frame, this only scales it)
+        geo_marker_layout = QtWidgets.QHBoxLayout()
+        self.geo_marker_label = QtWidgets.QLabel('Geo Point Size:')
+        geo_marker_layout.addWidget(self.geo_marker_label)
+        self.geo_marker_spinbox = QtWidgets.QDoubleSpinBox()
+        self.geo_marker_spinbox.setRange(0.1, 5.0)
+        self.geo_marker_spinbox.setSingleStep(0.1)
+        self.geo_marker_spinbox.setDecimals(1)
+        self.geo_marker_spinbox.setToolTip('Scale the geo point markers relative to their '
+                                           'automatically computed size')
+        self.updateGeoMarkerScale()
+        self.geo_marker_spinbox.valueChanged.connect(self.sigGeoMarkerScaleChanged.emit)
+        geo_marker_layout.addWidget(self.geo_marker_spinbox)
+        geo_marker_layout.addStretch()
+        vbox.addLayout(geo_marker_layout)
+
+        # Only show the control if geo points are loaded
+        if self.gui.geo_points_obj is None:
+            self.geo_marker_label.hide()
+            self.geo_marker_spinbox.hide()
 
         self.show_constellations = QtWidgets.QCheckBox('Show Constellation Lines')
         self.show_constellations.released.connect(self.sigConstellationToggled.emit)
@@ -4212,6 +4235,13 @@ class SettingsWidget(QtWidgets.QWidget, ScaledSizeHelper):
 
     def updateShowStarNames(self):
         self.show_star_names.setChecked(self.gui.show_star_names)
+
+    def updateGeoMarkerScale(self):
+
+        # Block the signals so that syncing the widget with the GUI state doesn't trigger a redraw
+        self.geo_marker_spinbox.blockSignals(True)
+        self.geo_marker_spinbox.setValue(self.gui.geo_marker_scale)
+        self.geo_marker_spinbox.blockSignals(False)
 
     def updateShowConstellations(self):
         self.show_constellations.setChecked(self.gui.show_constellations)
