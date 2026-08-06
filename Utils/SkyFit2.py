@@ -1866,16 +1866,9 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
                 try:
                     src = pt.config.config_file_name
                     dest = os.path.join(target_dir, os.path.basename(src))
-                    # Write the tuned catalog LM as-is. This used to subtract 1.0 to
-                    #   compensate for the "+ 1" in ApplyRecalibrate, but that margin only
-                    #   controls how deep readStarCatalog() pulls the catalog file into
-                    #   memory (ApplyRecalibrate.py:813-827); the limit stars are actually
-                    #   matched against is config.catalog_mag_limit itself, taken raw by
-                    #   subsetCatalog (ApplyRecalibrate.py:229), and likewise by CheckFit,
-                    #   AutoPlatepar and SkyFit2 on the next start. So there was nothing to
-                    #   compensate for, and subtracting a magnitude left every one of those
-                    #   consumers a magnitude shallower than what was tuned. Recalibration
-                    #   still reads one magnitude deeper than it matches, as intended.
+                    # Write the tuned catalog LM as is. ApplyRecalibrate reads the catalog one
+                    #   magnitude deeper than this, but it matches stars down to the raw
+                    #   catalog_mag_limit, so nothing has to be subtracted here.
                     config_catalog_lm = max(3.0, pt.cat_lim_mag)
                     if os.path.realpath(src) != os.path.realpath(dest):
                         # Copy the config to the target, then write overrides into the copy
@@ -1891,10 +1884,7 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
                     pt.config.segment_radius = pt.override_segment_radius
                     pt.config.max_feature_ratio = pt.override_max_feature_ratio
                     pt.config.roundness_threshold = pt.override_roundness_threshold
-                    # Sync the LM to the value actually written, not to pt.cat_lim_mag: the
-                    #   file holds it to one decimal, and isConfigModified() compares against
-                    #   this attribute, so storing the unrounded value would report the config
-                    #   as modified again the moment it was saved
+                    # Keep the in-memory LM in sync, so the config isn't flagged as modified again
                     pt.config.catalog_mag_limit = config_catalog_lm
                     pt._updateConfigSaveButtonState()
                     results.append("Config saved to: " + dest)
@@ -4754,11 +4744,8 @@ class PlateTool(QtWidgets.QMainWindow):
             or self.override_segment_radius != getattr(cfg, 'segment_radius', self.override_segment_radius)
             or abs(self.override_max_feature_ratio - getattr(cfg, 'max_feature_ratio', self.override_max_feature_ratio)) > 1e-6
             or abs(self.override_roundness_threshold - getattr(cfg, 'roundness_threshold', self.override_roundness_threshold)) > 1e-6
-            # The catalog LM is written to the config too, so a tuned or hand-set LM has to
-            #   count as an unsaved change - otherwise Save Config stays disabled and there is
-            #   no way to persist it. Compared at the precision it is written with (one
-            #   decimal), so the rounding in _writeStarDetectionConfig cannot leave the config
-            #   looking permanently modified after a save.
+            # The LM is saved to the config too. Compare it at the precision it's written with
+            #   (one decimal), so a save doesn't leave the config looking modified.
             or abs(getattr(self, 'cat_lim_mag', 0.0)
                    - getattr(cfg, 'catalog_mag_limit', getattr(self, 'cat_lim_mag', 0.0))) > 0.05
         )
@@ -4782,8 +4769,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.updateLeftLabels()
         self.updateStars()
 
-        # The LM is part of what Save Config writes, so refresh the save button and the
-        #   File Manager's unsaved indicator
+        # The LM is saved to the config, so refresh the unsaved indicators
         self._updateConfigSaveButtonState()
 
 
@@ -5345,9 +5331,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self.tuned_cat_lim_mag = best_lm
             self.catalog_lm_tuned = True
 
-            # The tuned LM is an unsaved config change in its own right. It usually rides
-            #   along with the tuned segment_radius, but flag it explicitly so a tune that
-            #   only moves the LM still offers to save.
+            # The tuned LM is an unsaved config change on its own, flag it
             self._updateConfigSaveButtonState()
 
             # Count visible catalog stars at new LM (filter to FOV first to prevent back-projection)
@@ -10327,6 +10311,9 @@ class PlateTool(QtWidgets.QMainWindow):
             self.updateStars()
             self.tab.settings.updateLimMag()
 
+            # The LM is saved to the config, so refresh the unsaved indicators
+            self._updateConfigSaveButtonState()
+
         elif event.key() == QtCore.Qt.Key_F:
             self.cat_lim_mag -= 0.1
             self.catalog_stars = self.loadCatalogStars(self.cat_lim_mag)
@@ -10334,6 +10321,8 @@ class PlateTool(QtWidgets.QMainWindow):
             self.updateLeftLabels()
             self.updateStars()
             self.tab.settings.updateLimMag()
+
+            self._updateConfigSaveButtonState()
 
 
         # Increase image gamma

@@ -4296,8 +4296,7 @@ class SettingsWidget(QtWidgets.QWidget, ScaledSizeHelper):
         # Sync with Star Detection panel
         self.gui.tab.star_detection.setCatalogLM(self.gui.cat_lim_mag)
 
-        # The LM is part of what Save Config writes, so refresh the save button and the
-        #   File Manager's unsaved indicator
+        # The LM is saved to the config, so refresh the unsaved indicators
         self.gui._updateConfigSaveButtonState()
 
     def populateCatalogList(self):
