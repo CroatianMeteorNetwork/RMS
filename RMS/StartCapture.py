@@ -18,7 +18,6 @@ from __future__ import print_function, absolute_import
 
 import os
 import sys
-import glob
 import argparse
 import time
 import datetime
@@ -177,7 +176,8 @@ from RMS.DetectStarsAndMeteors import detectStarsAndMeteors
 from RMS.Formats.FFfile import validFFName
 from RMS.Misc import mkdirP, RmsDateTime, UTCFromTimestamp, setMultiprocessingStartMethod, frameBufferShape
 from RMS.QueuedPool import QueuedPool
-from RMS.Reprocess import getPlatepar, processNight, processFramesFiles
+from RMS.Reprocess import getPlatepar, processNight, processFramesFiles, nightProcessingState, \
+    readProcessingStatus, updateProcessingStatus, NIGHT_PROCESSED, NIGHT_LEGACY_PROCESSED
 from RMS.RunExternalScript import runExternalScript
 from RMS.UploadManager import UploadManager
 from RMS.EventMonitor import EventMonitor
@@ -1125,6 +1125,41 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
 
 
+def getReprocessAttempts(config, captured_dir_path):
+    """ Read how many times auto-reprocessing has already been attempted on a captured directory.
+
+    Arguments:
+        config: [config object] Configuration read from the .config file.
+        captured_dir_path: [str] Full path to the directory in CapturedFiles.
+
+    Return:
+        [int] Number of previous attempts, 0 if unknown.
+    """
+
+    attempts = readProcessingStatus(config, captured_dir_path).get('failed_reprocess_attempts', 0)
+
+    try:
+        return max(0, int(attempts))
+
+    # A record written by hand or by a future version could hold anything
+    except (TypeError, ValueError):
+        return 0
+
+
+
+def setReprocessAttempts(config, captured_dir_path, attempts):
+    """ Record the number of auto-reprocess attempts made on a captured directory.
+
+    Arguments:
+        config: [config object] Configuration read from the .config file.
+        captured_dir_path: [str] Full path to the directory in CapturedFiles.
+        attempts: [int] Number of attempts to record.
+    """
+
+    updateProcessingStatus(config, captured_dir_path, failed_reprocess_attempts=attempts)
+
+
+
 def processIncompleteCaptures(config, upload_manager):
     """ Reprocess broken capture folders.
     Arguments:
@@ -1160,37 +1195,53 @@ def processIncompleteCaptures(config, upload_manager):
         captured_dir_path = os.path.join(config.data_dir, config.captured_dir, captured_subdir)
         log.debug("Checking folder: {:s}".format(captured_subdir))
 
-        # Check if there are any backup pickle files in the capture directory
-        pickle_files = glob.glob("{:s}/rms_queue_bkup_*.pickle".format(captured_dir_path))
-        any_pickle_files = False
-        if len(pickle_files) > 0:
-            any_pickle_files = True
+        # Work out how far processing got on this night. The observation summary is the marker,
+        #   not the detection backups - a night which finished but failed to delete its backups
+        #   used to be reprocessed all over again (issue #418)
+        night_state = nightProcessingState(config, captured_dir_path)
 
-        # Check if there is an FTPdetectinfo file in the directory, indicating the folder was fully
-        #   processed
-        FTPdetectinfo_files = glob.glob('{:s}/FTPdetectinfo_*.txt'.format(captured_dir_path))
-        any_ftpdetectinfo_files = False
-        if len(FTPdetectinfo_files) > 0:
-            any_ftpdetectinfo_files = True
+        if night_state.state in (NIGHT_PROCESSED, NIGHT_LEGACY_PROCESSED):
 
-        # Auto reprocess criteria:
-        #   - Any backup pickle files
-        #   - No pickle and no FTPdetectinfo files
+            # Detection backups left behind by a run which did finish. They are only a resume aid
+            #   for detection, so remove them instead of reprocessing a completed night
+            if night_state.pickle_files:
+                log.info("Removing {:d} stale detection backup(s) from the processed folder {:s}"\
+                    .format(len(night_state.pickle_files), captured_subdir))
 
-        run_reprocess = False
-        if any_pickle_files:
-            run_reprocess = True
-        else:
-            if not any_ftpdetectinfo_files:
-                run_reprocess = True
+                for pickle_file in night_state.pickle_files:
+                    try:
+                        os.remove(pickle_file)
 
-        # Skip the folder if it doesn't need to be reprocessed
-        if not run_reprocess:
-            log.debug("    ... fully processed!")
+                    except Exception as e:
+                        log.error("Could not remove the stale detection backup {:s}: {:s}"\
+                            .format(pickle_file, repr(e)))
+
+            # A missing ArchivedFiles directory only counts as unprocessed if the station asked for
+            #   that, as retention and quota management delete archives on their own schedule
+            if night_state.has_archive_dir or (not config.reprocess_if_archive_missing):
+                log.debug("    ... fully processed!")
+                continue
+
+            log.warning("Folder {:s} looks processed but has no directory in {:s} - reprocessing "
+                "because reprocess_if_archive_missing is enabled"\
+                .format(captured_subdir, config.archived_dir))
+
+
+        # Stop retrying a folder which keeps failing, so it cannot eat the pre-capture window on
+        #   every single start
+        attempts = getReprocessAttempts(config, captured_dir_path)
+        if config.auto_reprocess_max_attempts and (attempts >= config.auto_reprocess_max_attempts):
+            log.warning("Folder {:s} already failed to reprocess {:d} time(s) - skipping. Fix the "
+                "underlying problem and delete {:s} in that folder to retry."\
+                .format(captured_subdir, attempts, config.processing_status_file))
             continue
 
 
         log.info("Found partially-processed data in {:s}".format(captured_dir_path))
+
+        # Count the attempt up front, so a hard crash during reprocessing is counted too
+        setReprocessAttempts(config, captured_dir_path, attempts + 1)
+
         try:
 
             # Reprocess the night
@@ -1217,9 +1268,14 @@ def processIncompleteCaptures(config, upload_manager):
 
             log.info("Folder {:s} reprocessed with success!".format(captured_dir_path))
 
+            # The night is done, so the failure count is no longer meaningful. processNight has
+            #   already marked the night complete, so this only tidies the record
+            setReprocessAttempts(config, captured_dir_path, 0)
+
 
         except Exception as e:
-            log.error("An error occurred when trying to reprocess partially processed data!")
+            log.error("An error occurred when trying to reprocess partially processed data in {:s} "
+                "(attempt {:d})!".format(captured_dir_path, attempts + 1))
             log.error(repr(e))
             log.error(repr(traceback.format_exception(*sys.exc_info())))
 

@@ -376,6 +376,19 @@ class Config:
         # Automatically reprocess broken capture directories
         self.auto_reprocess = True
 
+        # Give up on a capture directory after this many failed auto-reprocess attempts. 0 disables
+        #   the guard and retries forever
+        self.auto_reprocess_max_attempts = 3
+
+        # Also auto-reprocess nights which look processed but have no directory in ArchivedFiles.
+        #   Off by default because retention and quota management delete ArchivedFiles independently
+        #   of CapturedFiles, so a missing archive does not reliably mean the night is unprocessed
+        self.reprocess_if_archive_missing = False
+
+        # File in the captured directory which records how far processing got and how many
+        #   auto-reprocess attempts have failed
+        self.processing_status_file = ".rms_processing_status"
+
         # Flag file which indicates that the previously processed files are loaded during capture resume
         self.capture_resume_flag_file = ".capture_resuming"
 
@@ -1246,6 +1259,18 @@ def parseCapture(config, parser):
     # Enable/disable auto reprocessing
     if parser.has_option(section, "auto_reprocess"):
         config.auto_reprocess = parser.getboolean(section, "auto_reprocess")
+
+    # Load the cap on failed auto-reprocess attempts per capture directory
+    if parser.has_option(section, "auto_reprocess_max_attempts"):
+        config.auto_reprocess_max_attempts = int(parser.get(section, "auto_reprocess_max_attempts"))
+
+        if config.auto_reprocess_max_attempts < 0:
+            config.auto_reprocess_max_attempts = 0
+
+    # Enable/disable reprocessing nights whose ArchivedFiles directory is missing
+    if parser.has_option(section, "reprocess_if_archive_missing"):
+        config.reprocess_if_archive_missing = parser.getboolean(section,
+            "reprocess_if_archive_missing")
 
     # Load name of the capture resume flag file
     if parser.has_option(section, "capture_resume_flag_file"):

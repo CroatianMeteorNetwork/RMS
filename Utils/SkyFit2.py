@@ -2446,6 +2446,9 @@ class PlateTool(QtWidgets.QMainWindow):
         self.show_constellations = False
         self.selected_stars_visible = True
 
+        # User multiplier for the automatically computed geo point marker size
+        self.geo_marker_scale = 1.0
+
         # Star detection override parameters
         self.star_detection_override_enabled = False  # Use override parameters instead of CALSTARS
         self.star_detection_override_data = {}  # Store re-detected stars per FF file
@@ -3418,6 +3421,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.settings.sigStarNamesToggled.connect(self.toggleShowStarNames)
         self.tab.settings.sigApparentMagCorrToggled.connect(self.toggleApparentMagCorr)
         self.tab.settings.sigLabelMagLimitChanged.connect(self.onLabelMagLimitChanged)
+        self.tab.settings.sigGeoMarkerScaleChanged.connect(self.onGeoMarkerScaleChanged)
         self.tab.settings.sigConstellationToggled.connect(self.toggleShowConstellations)
         self.tab.settings.sigCalStarsToggled.connect(self.toggleShowCalStars)
         self.tab.settings.sigSelStarsToggled.connect(self.toggleShowSelectedStars)
@@ -3857,6 +3861,9 @@ class PlateTool(QtWidgets.QMainWindow):
                                      yMin=0,
                                      yMax=self.config.height)
 
+        # The geo point markers are sized relative to the displayed image, so they have to be rescaled
+        self.updateGeoMarkerSize()
+
     def mouseOverStatus(self, x, y):
         """ Format the status message which will be printed in the status bar below the plot.
 
@@ -4118,11 +4125,13 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Plot geo points
             if self.catalog_stars_visible:
-                geo_size = 20
+
+                # The marker size is scaled with the frame size so that the markers look the same
+                #   regardless of the screen resolution and the display scaling
                 self.geo_markers.setData(x=self.geo_x_filtered + 0.5, y=self.geo_y_filtered + 0.5, \
-                    size=geo_size)
+                    size=self.geoMarkerSize())
                 self.geo_markers2.setData(x=self.geo_x_filtered + 0.5, y=self.geo_y_filtered + 0.5, \
-                    size=geo_size)
+                    size=self.geoMarkerSizeZoom())
 
 
         ### Draw catalog stars on the image using the current platepar ###
@@ -7310,6 +7319,64 @@ class PlateTool(QtWidgets.QMainWindow):
         return base_dpi*scale
 
 
+    def geoMarkerSize(self):
+        """ Compute the size of the geo point markers in the main window in screen pixels.
+
+            The markers are drawn in screen pixels (pyqtgraph's pxMode is on by default), while the
+            image is fit into the image frame. The number of screen pixels per image pixel thus
+            depends on the screen resolution, the display scale factor and the window size, which
+            made a fixed marker size look right on some machines and far too large on others.
+            Scaling the size with the size of the displayed image keeps the markers at the same
+            visual fraction of the image everywhere. The size can be additionally scaled by the user
+            in the Settings tab.
+
+        Return:
+            [float] Marker size in screen pixels.
+        """
+
+        # Frame size in screen pixels (0 before the window is shown for the first time)
+        frame_width = self.img_frame.width()
+        frame_height = self.img_frame.height()
+
+        if (frame_width <= 0) or (frame_height <= 0):
+            base_size = 10.0
+
+        else:
+            # Height of the displayed image in screen pixels. The view is aspect locked, so the image
+            #   is constrained by whichever frame dimension runs out first - only using the frame
+            #   height would rescale the markers when the window is resized in the other direction.
+            image_height = min(frame_height, frame_width*self.config.height/self.config.width)
+
+            # The reference look is 10 px on a 650 px tall image, clamped so the markers stay visible
+            #   on tiny windows and don't become unwieldy on very large ones
+            base_size = min(max(image_height/65.0, 5.0), 30.0)
+
+        # Keep the markers visible even at the smallest user scale
+        return max(base_size*self.geo_marker_scale, 3.0)
+
+
+    def geoMarkerSizeZoom(self):
+        """ Compute the size of the geo point markers in the zoom window in screen pixels.
+
+            The zoom window has a fixed size and a fixed view range, so its scale in screen pixels
+            per image pixel is always the same and needs no automatic scaling. Only the user
+            multiplier from the Settings tab is applied.
+
+        Return:
+            [float] Marker size in screen pixels.
+        """
+
+        # Keep the markers visible even at the smallest user scale
+        return max(20.0*self.geo_marker_scale, 3.0)
+
+
+    def updateGeoMarkerSize(self):
+        """ Apply the current geo point marker size without redrawing all the overlays. """
+
+        self.geo_markers.setSize(self.geoMarkerSize())
+        self.geo_markers2.setSize(self.geoMarkerSizeZoom())
+
+
     def photometry(self, show_plot=False, force_update=False):
         """
         Perform the photometry on selected stars. Updates residual text above and below picked stars
@@ -9441,6 +9508,10 @@ class PlateTool(QtWidgets.QMainWindow):
         if not hasattr(self, "geo_points_obj"):
             self.geo_points_obj = None
 
+        # Update the possibly missing params
+        if not hasattr(self, "geo_marker_scale"):
+            self.geo_marker_scale = 1.0
+
 
         # Update the possibly missing begin time
         if not hasattr(self, "beginning_time"):
@@ -9640,6 +9711,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
             self.tab.param_manager.updatePlatepar()
             self.tab.debruijn.updateTable()
+            self.tab.settings.updateGeoMarkerScale()
             self.changeMode(self.mode)
 
             self.updateLeftLabels()
@@ -12072,6 +12144,14 @@ class PlateTool(QtWidgets.QMainWindow):
         # Redraw if labels are visible
         if self.show_star_names or self.show_spectral_type:
             self.updateStars()
+
+    def onGeoMarkerScaleChanged(self, value):
+        """ Handle change in the geo point marker size multiplier. """
+
+        self.geo_marker_scale = value
+
+        # Only the marker size changes, so there is no need for a full redraw
+        self.updateGeoMarkerSize()
 
     def toggleShowConstellations(self):
         """ Toggle showing/hiding constellation lines. """
