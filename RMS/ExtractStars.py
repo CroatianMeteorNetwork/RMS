@@ -40,6 +40,7 @@ from RMS.Math import twoDGaussian
 from RMS.Routines import MaskImage
 from RMS.Routines import Image
 from RMS.QueuedPool import QueuedPool
+from RMS.Misc import setMultiprocessingStartMethod
 
 # Morphology - Cython init
 import pyximport
@@ -952,6 +953,10 @@ def extractStarsAndSave(config, ff_dir):
 
 
 if __name__ == "__main__":
+
+    # Pin the multiprocessing start method for consistent behavior across Python versions
+    # (3.6-3.14). Must be done before any Process/Pool is created.
+    setMultiprocessingStartMethod()
 
     ### COMMAND LINE ARGUMENTS
 

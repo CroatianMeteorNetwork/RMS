@@ -37,7 +37,7 @@ class _CornerHelpOverlay(QtCore.QObject):
         self.button.raise_()
 
     def eventFilter(self, obj, event):
-        if obj is self.host and event.type() in (QtCore.QEvent.Resize, QtCore.QEvent.Show):
+        if obj is self.host and event.type() in (QtCore.QEvent.Type.Resize, QtCore.QEvent.Type.Show):
             self.reposition()
         return False
 
@@ -97,8 +97,8 @@ class ScaledSizeHelper:
         btn = QtWidgets.QToolButton()
         btn.setText("i")
         btn.setToolTip(tooltip)
-        btn.setCursor(QtCore.Qt.PointingHandCursor)
-        btn.setFocusPolicy(QtCore.Qt.NoFocus)
+        btn.setCursor(QtCore.Qt.CursorShape.PointingHandCursor)
+        btn.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
         d = max(self.scaledHeight(1.0), 13)
         btn.setFixedSize(d, d)
         btn.setStyleSheet(
@@ -132,15 +132,15 @@ class ScaledSizeHelper:
 def qmessagebox(message="", title="Error", message_type="warning"):
     msg = QtWidgets.QMessageBox()
     if message_type == "warning":
-        msg.setIcon(QtWidgets.QMessageBox.Warning)
+        msg.setIcon(QtWidgets.QMessageBox.Icon.Warning)
     elif message_type == "error":
-        msg.setIcon(QtWidgets.QMessageBox.Critical)
+        msg.setIcon(QtWidgets.QMessageBox.Icon.Critical)
     else:
-        msg.setIcon(QtWidgets.QMessageBox.Information)
+        msg.setIcon(QtWidgets.QMessageBox.Icon.Information)
     msg.setText(message)
     msg.setWindowTitle(title)
-    msg.setStandardButtons(QtWidgets.QMessageBox.Ok)
-    msg.exec_()
+    msg.setStandardButtons(QtWidgets.QMessageBox.StandardButton.Ok)
+    msg.exec()
 
 
 class QHSeparationLine(QtWidgets.QFrame):
@@ -149,9 +149,9 @@ class QHSeparationLine(QtWidgets.QFrame):
     super().__init__()
     self.setMinimumWidth(1)
     self.setFixedHeight(20)
-    self.setFrameShape(QtWidgets.QFrame.HLine)
-    self.setFrameShadow(QtWidgets.QFrame.Sunken)
-    self.setSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Minimum)
+    self.setFrameShape(QtWidgets.QFrame.Shape.HLine)
+    self.setFrameShadow(QtWidgets.QFrame.Shadow.Sunken)
+    self.setSizePolicy(QtWidgets.QSizePolicy.Policy.Preferred, QtWidgets.QSizePolicy.Policy.Minimum)
     return
 
 
@@ -412,10 +412,10 @@ class TextItem(pg.TextItem):
         pg.TextItem.__init__(self, text, color, html, anchor, border, fill, angle, rotateAxis)
         if interaction:
             self.textItem.setOpenExternalLinks(True)
-            self.textItem.setTextInteractionFlags(QtCore.Qt.TextBrowserInteraction)
+            self.textItem.setTextInteractionFlags(QtCore.Qt.TextInteractionFlag.TextBrowserInteraction)
         else:
             self.textItem.setOpenExternalLinks(False)
-            self.textItem.setTextInteractionFlags(QtCore.Qt.NoTextInteraction)
+            self.textItem.setTextInteractionFlags(QtCore.Qt.TextInteractionFlag.NoTextInteraction)
 
     def setInteraction(self, enabled):
         """
@@ -426,10 +426,10 @@ class TextItem(pg.TextItem):
         """
         if enabled:
             self.textItem.setOpenExternalLinks(True)
-            self.textItem.setTextInteractionFlags(QtCore.Qt.TextBrowserInteraction)
+            self.textItem.setTextInteractionFlags(QtCore.Qt.TextInteractionFlag.TextBrowserInteraction)
         else:
             self.textItem.setOpenExternalLinks(False)
-            self.textItem.setTextInteractionFlags(QtCore.Qt.NoTextInteraction)
+            self.textItem.setTextInteractionFlags(QtCore.Qt.TextInteractionFlag.NoTextInteraction)
 
     def setAlign(self, align):
         """
@@ -757,8 +757,10 @@ class ImageItem(pg.ImageItem):
             return 0, 255
 
         # Ignore the top 10% of the image pixel brightness (from the maximum) to avoid auto leveling on
-        #  saturated pixels
-        max_level = np.max(self.image)
+        #  saturated pixels. Cast to a Python int: under NumPy 2 (NEP 50) the
+        # narrow array scalar no longer promotes, and 99*65535 overflows
+        # uint16 - which silently broke auto-levels on 16-bit imagery.
+        max_level = int(np.max(self.image))
         ignore_level = (100 - ignoretopperc)*max_level/100
         
         img_filtered = self.image[self.image < ignore_level]
@@ -970,23 +972,23 @@ class CursorItem(pg.GraphicsObject):
 
         painter = QtGui.QPainter(self.picture)
         if self.mode == 0:
-            pen = QtGui.QPen(QtCore.Qt.yellow, self.thickness, QtCore.Qt.SolidLine)
+            pen = QtGui.QPen(QtCore.Qt.GlobalColor.yellow, self.thickness, QtCore.Qt.PenStyle.SolidLine)
             painter.setPen(pen)
-            painter.setBrush(QtCore.Qt.NoBrush)
+            painter.setBrush(QtCore.Qt.BrushStyle.NoBrush)
             painter.drawEllipse(QtCore.QPoint(0, 0), r, r)
 
             # pen.setStyle(Qt.DotLine)
             painter.setPen(pen)
             painter.drawEllipse(QtCore.QPoint(0, 0), 2*r, 2*r)
-            painter.setPen(QtGui.QPen(QtCore.Qt.blue, 2*self.thickness))
+            painter.setPen(QtGui.QPen(QtCore.Qt.GlobalColor.blue, 2*self.thickness))
             painter.drawPoint(QtCore.QPoint(0, 0))
         elif self.mode == 1:
-            pen = QtGui.QPen(QtGui.QColor(128, 0, 128), self.thickness, QtCore.Qt.SolidLine)
+            pen = QtGui.QPen(QtGui.QColor(128, 0, 128), self.thickness, QtCore.Qt.PenStyle.SolidLine)
             painter.setPen(pen)
-            painter.setBrush(QtCore.Qt.NoBrush)
+            painter.setBrush(QtCore.Qt.BrushStyle.NoBrush)
             painter.drawEllipse(QtCore.QPoint(0, 0), 2*r, 2*r)
         else:
-            pen = QtGui.QPen(QtGui.QColor(255, 0, 0), self.thickness, QtCore.Qt.SolidLine)
+            pen = QtGui.QPen(QtGui.QColor(255, 0, 0), self.thickness, QtCore.Qt.PenStyle.SolidLine)
             painter.setPen(pen)
             painter.setBrush(QtGui.QColor(255, 0, 0, 100))
             painter.drawEllipse(QtCore.QPoint(0, 0), r, r)
@@ -1034,7 +1036,7 @@ class PointingIndicator(pg.GraphicsObject):
         super().__init__()
 
         # Keep the glyph a constant device-pixel size, anchored at setPos()
-        self.setFlag(QtGui.QGraphicsItem.ItemIgnoresTransformations, True)
+        self.setFlag(QtWidgets.QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations, True)
 
         self.arrow_length = float(arrow_length)
 
@@ -1102,7 +1104,7 @@ class PointingIndicator(pg.GraphicsObject):
 
     def paint(self, painter, option, widget=None):
 
-        painter.setRenderHint(QtGui.QPainter.Antialiasing, True)
+        painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing, True)
 
         L = self.arrow_length
 
@@ -1117,7 +1119,7 @@ class PointingIndicator(pg.GraphicsObject):
             ux, uy = np.cos(ea), -np.sin(ea)         # unit toward East along the horizon (device coords)
             px_, py_ = -uy, ux                       # unit perpendicular (for the notch ticks)
 
-            pen = QtGui.QPen(self.step_color, 2.0, QtCore.Qt.SolidLine)
+            pen = QtGui.QPen(self.step_color, 2.0, QtCore.Qt.PenStyle.SolidLine)
             painter.setPen(pen)
             painter.drawLine(QtCore.QPointF(-half*ux, -half*uy), QtCore.QPointF(half*ux, half*uy))
             # End caps
@@ -1136,13 +1138,13 @@ class PointingIndicator(pg.GraphicsObject):
                                      QtCore.QPointF(bx + length*px_, by + length*py_))
 
                 # Little reference notches: West (-90 deg) and East (+90 deg) at +/- half the bar
-                ref_pen = QtGui.QPen(self.step_color, 1.5, QtCore.Qt.SolidLine)
+                ref_pen = QtGui.QPen(self.step_color, 1.5, QtCore.Qt.PenStyle.SolidLine)
                 _notch(-0.5, 3.0, ref_pen)
                 _notch(+0.5, 3.0, ref_pen)
 
                 # Current-azimuth notch (azimuth wrapped to +/-180 deg, mapped over the bar)
                 az_frac = (((self.azimuth + 180.0)%360.0) - 180.0)/180.0
-                _notch(az_frac, 6.0, QtGui.QPen(self.notch_color, 2.2, QtCore.Qt.SolidLine))
+                _notch(az_frac, 6.0, QtGui.QPen(self.notch_color, 2.2, QtCore.Qt.PenStyle.SolidLine))
 
         # Az/Alt readout, in the middle just left of the optical-axis plus (right-aligned, two lines).
         # 'Az' = azimuth (+E of due N), 'Alt' = altitude/elevation. The decimal precision scales with the
@@ -1157,9 +1159,9 @@ class PointingIndicator(pg.GraphicsObject):
         painter.setPen(QtGui.QPen(self.text_color))
         # Two well-separated lines straddling the centre (Alt above, Az below)
         painter.drawText(QtCore.QRectF(tx, -30.0, tw, th),
-                         QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter, alt_str)
+                         QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignVCenter, alt_str)
         painter.drawText(QtCore.QRectF(tx, 2.0, tw, th),
-                         QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter, az_str)
+                         QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignVCenter, az_str)
 
         # Direction in device coordinates (screen-up = device -Y)
         ang = np.radians(self.angle)
@@ -1167,16 +1169,16 @@ class PointingIndicator(pg.GraphicsObject):
 
         if not self.valid_zenith:
             # Near the zenith the direction is undefined: draw a dashed ring instead of an arrow
-            pen = QtGui.QPen(self.arrow_color, 1.6, QtCore.Qt.DashLine)
+            pen = QtGui.QPen(self.arrow_color, 1.6, QtCore.Qt.PenStyle.DashLine)
             painter.setPen(pen)
-            painter.setBrush(QtCore.Qt.NoBrush)
+            painter.setBrush(QtCore.Qt.BrushStyle.NoBrush)
             painter.drawEllipse(QtCore.QPointF(0.0, 0.0), 0.5*L, 0.5*L)
             return
 
         # Shaft (originates from the centre of the optical-axis plus, points toward the zenith)
         x1, y1 = L*dx, L*dy
-        pen = QtGui.QPen(self.arrow_color, 2.2, QtCore.Qt.SolidLine)
-        pen.setCapStyle(QtCore.Qt.RoundCap)
+        pen = QtGui.QPen(self.arrow_color, 2.2, QtCore.Qt.PenStyle.SolidLine)
+        pen.setCapStyle(QtCore.Qt.PenCapStyle.RoundCap)
         painter.setPen(pen)
         painter.drawLine(QtCore.QPointF(0.0, 0.0), QtCore.QPointF(x1, y1))
 
@@ -1196,7 +1198,7 @@ class PointingIndicator(pg.GraphicsObject):
         perp = ang + np.pi/2.0
         pwx, pwy = np.cos(perp), -np.sin(perp)
         nw = 6.0
-        painter.setPen(QtGui.QPen(self.notch_color, 2.2, QtCore.Qt.SolidLine))
+        painter.setPen(QtGui.QPen(self.notch_color, 2.2, QtCore.Qt.PenStyle.SolidLine))
         painter.drawLine(QtCore.QPointF(px - nw*pwx, py - nw*pwy),
                          QtCore.QPointF(px + nw*pwx, py + nw*pwy))
 
@@ -1215,11 +1217,11 @@ class HistogramLUTWidget(pg.HistogramLUTWidget):
         super().mousePressEvent(event)
         modifier = QtWidgets.QApplication.keyboardModifiers()
         pos = self.vb.mapSceneToView(event.pos())
-        if self.item.region.movable and modifier == QtCore.Qt.ControlModifier:
+        if self.item.region.movable and modifier == QtCore.Qt.KeyboardModifier.ControlModifier:
             self.item.exitAutoLevels()
-            if event.button() == QtCore.Qt.LeftButton:
+            if event.button() == QtCore.Qt.MouseButton.LeftButton:
                 self.setLevels(pos.y(), self.getLevels()[1])
-            elif event.button() == QtCore.Qt.RightButton:
+            elif event.button() == QtCore.Qt.MouseButton.RightButton:
                 self.setLevels(self.getLevels()[0], pos.y())
 
         # Set focus back on the image window
@@ -1342,7 +1344,7 @@ class RightOptionsTab(QtWidgets.QTabWidget, ScaledSizeHelper):
         self.addTab(self.help, 'ⓘ Help')
 
         self.setCurrentIndex(self.index)  # redundant
-        self.setTabPosition(QtWidgets.QTabWidget.East)
+        self.setTabPosition(QtWidgets.QTabWidget.TabPosition.East)
 
         # Set the initial width once the tabs exist and the bar is on the East side, so the
         # measurement in barWidth() is meaningful
@@ -1355,7 +1357,7 @@ class RightOptionsTab(QtWidgets.QTabWidget, ScaledSizeHelper):
             on the main widget
         """
 
-        if event.key() == QtCore.Qt.Key_Escape:
+        if event.key() == QtCore.Qt.Key.Key_Escape:
             self.gui.view_widget.setFocus()
 
 
@@ -1377,7 +1379,7 @@ class RightOptionsTab(QtWidgets.QTabWidget, ScaledSizeHelper):
         bar_width = self.tabBar().sizeHint().width()
 
         # Frame drawn on either side of the tab pane
-        frame = 2*self.style().pixelMetric(QtWidgets.QStyle.PM_DefaultFrameWidth, None, self)
+        frame = 2*self.style().pixelMetric(QtWidgets.QStyle.PixelMetric.PM_DefaultFrameWidth, None, self)
 
         return bar_width + frame
 
@@ -1474,7 +1476,7 @@ class HelpWidget(QtWidgets.QWidget, ScaledSizeHelper):
         self._history = []
 
         layout = QtWidgets.QVBoxLayout()
-        layout.setAlignment(QtCore.Qt.AlignTop)
+        layout.setAlignment(QtCore.Qt.AlignmentFlag.AlignTop)
         layout.setContentsMargins(*self.scaledMargins(0.5, 0.25))
         layout.setSpacing(self.scaledSpacing(0.25))
         self.setLayout(layout)
@@ -1618,8 +1620,8 @@ class DebruijnSequenceManager(QtWidgets.QWidget, ScaledSizeHelper):
         self.table.setColumnWidth(2, self.scaledWidth(5))   # value
         self.table.setHorizontalHeaderLabels(['break', 'time', 'value'])
         # self.table.verticalHeader().hide()
-        self.table.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
-        self.table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
+        self.table.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.SingleSelection)
+        self.table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.currentCellChanged.connect(self.onCurrentCellChanged)
         self.table.cellChanged.connect(self.onCellChanged)
         self.updateTable()
@@ -1650,12 +1652,12 @@ class DebruijnSequenceManager(QtWidgets.QWidget, ScaledSizeHelper):
         if test is None:
             msg = QtWidgets.QMessageBox()
             msg.setWindowTitle('DFN Manual Reduction Error')
-            msg.setIcon(QtWidgets.QMessageBox.Information)
+            msg.setIcon(QtWidgets.QMessageBox.Icon.Information)
             msg.setText('Sequence is incorrect')
             msg.setInformativeText('Inputted sequence must be a sequence of 11 or 10. '
                                    'The inputted sequence does not.')
-            msg.setStandardButtons(QtWidgets.QMessageBox.Ok)
-            msg.exec_()
+            msg.setStandardButtons(QtWidgets.QMessageBox.StandardButton.Ok)
+            msg.exec()
             return
 
         forward, backward = findAllInDeBruijnSequence(test, self.sequence, unknowns=True, reverse=reversed)
@@ -1667,11 +1669,12 @@ class DebruijnSequenceManager(QtWidgets.QWidget, ScaledSizeHelper):
             msg.setWindowTitle('DFN Manual Reduction Solution Selection')
             msg.setText('There are multiple possible matches of the given sequence to the De Bruijn Sequence.\n'
                         'Select one.')
-            msg.setStandardButtons(QtWidgets.QMessageBox.Ok | QtWidgets.QMessageBox.Cancel)
+            msg.setStandardButtons(QtWidgets.QMessageBox.StandardButton.Ok
+                                   | QtWidgets.QMessageBox.StandardButton.Cancel)
             msg.buttons()[0].setDisabled(True)
             table = QtWidgets.QTableWidget(len(forward) + len(backward), 4)
-            table.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
-            table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
+            table.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.SingleSelection)
+            table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectionBehavior.SelectRows)
             table.setHorizontalHeaderLabels(['break', 'start time', 'direction', 'pattern'])
             table.setColumnWidth(0, self.scaledWidth(8))
             table.setColumnWidth(3, self.scaledWidth(22))
@@ -1684,21 +1687,21 @@ class DebruijnSequenceManager(QtWidgets.QWidget, ScaledSizeHelper):
                 break_ = 2*frame + (not paired_first_bit)
 
                 item1 = QtWidgets.QTableWidgetItem(str(break_))
-                item1.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled)
+                item1.setFlags(QtCore.Qt.ItemFlag.ItemIsSelectable | QtCore.Qt.ItemFlag.ItemIsEnabled)
                 table.setItem(row, 0, item1)
 
                 item2 = QtWidgets.QTableWidgetItem(
                     self.gui.img.img_handle.currentFrameTime(dt_obj=True, frame_no=break_).strftime("%H:%M:%S.%f")[:-3])
-                item2.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled)
+                item2.setFlags(QtCore.Qt.ItemFlag.ItemIsSelectable | QtCore.Qt.ItemFlag.ItemIsEnabled)
                 table.setItem(row, 1, item2)
 
                 item3 = QtWidgets.QTableWidgetItem('forward')
-                item3.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled)
+                item3.setFlags(QtCore.Qt.ItemFlag.ItemIsSelectable | QtCore.Qt.ItemFlag.ItemIsEnabled)
                 table.setItem(row, 2, item3)
 
                 item4 = QtWidgets.QTableWidgetItem(
                     ''.join(str(x) for x in self.sequence[frame - 4:frame + len(test) + 4]))
-                item4.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled)
+                item4.setFlags(QtCore.Qt.ItemFlag.ItemIsSelectable | QtCore.Qt.ItemFlag.ItemIsEnabled)
                 table.setItem(row, 3, item4)
 
             for row, frame in enumerate(backward[::-1]):
@@ -1706,24 +1709,24 @@ class DebruijnSequenceManager(QtWidgets.QWidget, ScaledSizeHelper):
                 break_ = 1024 - 2*frame - (not paired_first_bit) - self.table.rowCount() + 1
 
                 item1 = QtWidgets.QTableWidgetItem(str(break_))
-                item1.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled)
+                item1.setFlags(QtCore.Qt.ItemFlag.ItemIsSelectable | QtCore.Qt.ItemFlag.ItemIsEnabled)
                 table.setItem(row, 0, item1)
 
                 item2 = QtWidgets.QTableWidgetItem(
                     self.gui.img.img_handle.currentFrameTime(dt_obj=True, frame_no=break_).strftime("%H:%M:%S.%f")[:-3])
-                item2.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled)
+                item2.setFlags(QtCore.Qt.ItemFlag.ItemIsSelectable | QtCore.Qt.ItemFlag.ItemIsEnabled)
                 table.setItem(row, 1, item2)
 
                 item3 = QtWidgets.QTableWidgetItem('backward')
-                item3.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled)
+                item3.setFlags(QtCore.Qt.ItemFlag.ItemIsSelectable | QtCore.Qt.ItemFlag.ItemIsEnabled)
                 table.setItem(row, 2, item3)
 
                 item4 = QtWidgets.QTableWidgetItem(
                     ''.join(str(x) for x in self.sequence[::-1][frame - 4:frame + len(test) + 4]))
-                item4.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled)
+                item4.setFlags(QtCore.Qt.ItemFlag.ItemIsSelectable | QtCore.Qt.ItemFlag.ItemIsEnabled)
                 table.setItem(row, 3, item4)
 
-            result = msg.exec_()
+            result = msg.exec()
             if result == msg.standardButton(msg.buttons()[0]):
                 index = table.currentIndex().row()
                 if index < len(forward):
@@ -1745,11 +1748,11 @@ class DebruijnSequenceManager(QtWidgets.QWidget, ScaledSizeHelper):
             print('Neither were found')
             msg = QtWidgets.QMessageBox()
             msg.setWindowTitle('DFN Manual Reduction Error')
-            msg.setIcon(QtWidgets.QMessageBox.Information)
+            msg.setIcon(QtWidgets.QMessageBox.Icon.Information)
             msg.setText('Sequence could not be found')
             msg.setInformativeText('The sequence given is incorrect.')
-            msg.setStandardButtons(QtWidgets.QMessageBox.Ok)
-            msg.exec_()
+            msg.setStandardButtons(QtWidgets.QMessageBox.StandardButton.Ok)
+            msg.exec()
             return
 
         self.gui.img.setFrame(f(self.gui.img.getFrame()))
@@ -1847,12 +1850,12 @@ class DebruijnSequenceManager(QtWidgets.QWidget, ScaledSizeHelper):
                 self.table.insertRow(row)
 
                 item1 = QtWidgets.QTableWidgetItem(str(frame))
-                item1.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled)
+                item1.setFlags(QtCore.Qt.ItemFlag.ItemIsSelectable | QtCore.Qt.ItemFlag.ItemIsEnabled)
                 self.table.setItem(row, 0, item1)
 
                 item2 = QtWidgets.QTableWidgetItem(
                     self.gui.img.img_handle.currentFrameTime(dt_obj=True, frame_no=frame).strftime("%H:%M:%S.%f")[:-3])
-                item2.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled)
+                item2.setFlags(QtCore.Qt.ItemFlag.ItemIsSelectable | QtCore.Qt.ItemFlag.ItemIsEnabled)
                 self.table.setItem(row, 1, item2)
 
                 item3 = QtWidgets.QTableWidgetItem(str(value))
@@ -1863,12 +1866,12 @@ class DebruijnSequenceManager(QtWidgets.QWidget, ScaledSizeHelper):
         self.table.insertRow(row)
 
         item1 = QtWidgets.QTableWidgetItem(str(frame))
-        item1.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled)
+        item1.setFlags(QtCore.Qt.ItemFlag.ItemIsSelectable | QtCore.Qt.ItemFlag.ItemIsEnabled)
         self.table.setItem(row, 0, item1)
 
         item2 = QtWidgets.QTableWidgetItem(
             self.gui.img.img_handle.currentFrameTime(dt_obj=True, frame_no=frame).strftime("%H:%M:%S.%f")[:-3])
-        item2.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled)
+        item2.setFlags(QtCore.Qt.ItemFlag.ItemIsSelectable | QtCore.Qt.ItemFlag.ItemIsEnabled)
         self.table.setItem(row, 1, item2)
 
         item3 = QtWidgets.QTableWidgetItem(str(value))
@@ -1916,7 +1919,7 @@ class GeolocationWidget(QtWidgets.QWidget, ScaledSizeHelper):
         self.gui = gui
 
         full_layout = QtWidgets.QVBoxLayout()
-        full_layout.setAlignment(QtCore.Qt.AlignTop)
+        full_layout.setAlignment(QtCore.Qt.AlignmentFlag.AlignTop)
         self.setLayout(full_layout)
 
         # Tab help button (top-right)
@@ -1924,7 +1927,7 @@ class GeolocationWidget(QtWidgets.QWidget, ScaledSizeHelper):
 
         # Station geo position input boxes
         form = QtWidgets.QFormLayout()
-        form.setLabelAlignment(QtCore.Qt.AlignRight)
+        form.setLabelAlignment(QtCore.Qt.AlignmentFlag.AlignRight)
 
         group = QtWidgets.QGroupBox('Station coordinates')
         group.setLayout(form)
@@ -1940,7 +1943,7 @@ class GeolocationWidget(QtWidgets.QWidget, ScaledSizeHelper):
         self.lat.setFixedWidth(self.scaledWidth(self.COORD_INPUT_CHARS))
         self.lat.valueModified.connect(self.onLatChanged)
         hbox.addWidget(self.lat)
-        hbox.addWidget(QtWidgets.QLabel(u"\N{DEGREE SIGN}", alignment=QtCore.Qt.AlignLeft))
+        hbox.addWidget(QtWidgets.QLabel(u"\N{DEGREE SIGN}", alignment=QtCore.Qt.AlignmentFlag.AlignLeft))
         form.addRow(QtWidgets.QLabel('Lat'), hbox)
 
         hbox = QtWidgets.QHBoxLayout()
@@ -1952,7 +1955,7 @@ class GeolocationWidget(QtWidgets.QWidget, ScaledSizeHelper):
         self.lon.setFixedWidth(self.scaledWidth(self.COORD_INPUT_CHARS))
         self.lon.valueModified.connect(self.onLonChanged)
         hbox.addWidget(self.lon)
-        hbox.addWidget(QtWidgets.QLabel(u"\N{DEGREE SIGN}", alignment=QtCore.Qt.AlignLeft))
+        hbox.addWidget(QtWidgets.QLabel(u"\N{DEGREE SIGN}", alignment=QtCore.Qt.AlignmentFlag.AlignLeft))
         form.addRow(QtWidgets.QLabel('Lon'), hbox)
 
         hbox = QtWidgets.QHBoxLayout()
@@ -1964,7 +1967,7 @@ class GeolocationWidget(QtWidgets.QWidget, ScaledSizeHelper):
         self.elev.setFixedWidth(self.scaledWidth(self.COORD_INPUT_CHARS))
         self.elev.valueModified.connect(self.onElevChanged)
         hbox.addWidget(self.elev)
-        hbox.addWidget(QtWidgets.QLabel('m', alignment=QtCore.Qt.AlignLeft))
+        hbox.addWidget(QtWidgets.QLabel('m', alignment=QtCore.Qt.AlignmentFlag.AlignLeft))
         form.addRow(QtWidgets.QLabel('Elev'), hbox)
 
         form.addRow(QtWidgets.QLabel("Press Enter to accept value"))
@@ -2026,7 +2029,7 @@ class GeolocationWidget(QtWidgets.QWidget, ScaledSizeHelper):
         self.dist_box.valueModified.connect(self.onDistanceChanged)
         hbox.addWidget(QtWidgets.QLabel('Distance'))
         hbox.addWidget(self.dist_box)
-        hbox.addWidget(QtWidgets.QLabel('m', alignment=QtCore.Qt.AlignLeft))
+        hbox.addWidget(QtWidgets.QLabel('m', alignment=QtCore.Qt.AlignmentFlag.AlignLeft))
         box.addLayout(hbox)
         box.addWidget(QtWidgets.QLabel("Press Enter to accept value"))
 
@@ -2376,7 +2379,7 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
 
         # spin boxes
         form = QtWidgets.QFormLayout()
-        form.setLabelAlignment(QtCore.Qt.AlignRight)
+        form.setLabelAlignment(QtCore.Qt.AlignmentFlag.AlignRight)
         full_layout.addLayout(form)
 
         hbox = QtWidgets.QHBoxLayout()
@@ -2388,7 +2391,7 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         self.az_centre.setFixedWidth(self.scaledWidth(self.PARAM_INPUT_CHARS))
         self.az_centre.valueModified.connect(self.onAzChanged)
         hbox.addWidget(self.az_centre)
-        hbox.addWidget(QtWidgets.QLabel(u"\N{DEGREE SIGN}", alignment=QtCore.Qt.AlignLeft))
+        hbox.addWidget(QtWidgets.QLabel(u"\N{DEGREE SIGN}", alignment=QtCore.Qt.AlignmentFlag.AlignLeft))
         form.addRow(QtWidgets.QLabel('Azim'), hbox)
 
         hbox = QtWidgets.QHBoxLayout()
@@ -2400,7 +2403,7 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         self.alt_centre.setFixedWidth(self.scaledWidth(self.PARAM_INPUT_CHARS))
         self.alt_centre.valueModified.connect(self.onAltChanged)
         hbox.addWidget(self.alt_centre)
-        hbox.addWidget(QtWidgets.QLabel(u"\N{DEGREE SIGN}", alignment=QtCore.Qt.AlignLeft))
+        hbox.addWidget(QtWidgets.QLabel(u"\N{DEGREE SIGN}", alignment=QtCore.Qt.AlignmentFlag.AlignLeft))
         form.addRow(QtWidgets.QLabel('Alt'), hbox)
 
         hbox = QtWidgets.QHBoxLayout()
@@ -2412,7 +2415,7 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         self.rotation_from_horiz.setFixedWidth(self.scaledWidth(self.PARAM_INPUT_CHARS))
         self.rotation_from_horiz.valueModified.connect(self.onRotChanged)
         hbox.addWidget(self.rotation_from_horiz)
-        hbox.addWidget(QtWidgets.QLabel(u"\N{DEGREE SIGN}", alignment=QtCore.Qt.AlignLeft))
+        hbox.addWidget(QtWidgets.QLabel(u"\N{DEGREE SIGN}", alignment=QtCore.Qt.AlignmentFlag.AlignLeft))
         form.addRow(QtWidgets.QLabel('Horiz rot'), hbox)
 
         hbox = QtWidgets.QHBoxLayout()
@@ -2424,7 +2427,7 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         self.F_scale.setFixedWidth(self.scaledWidth(self.PARAM_INPUT_CHARS))
         self.F_scale.valueModified.connect(self.onScaleChanged)
         hbox.addWidget(self.F_scale)
-        hbox.addWidget(QtWidgets.QLabel('\'/px', alignment=QtCore.Qt.AlignLeft))
+        hbox.addWidget(QtWidgets.QLabel('\'/px', alignment=QtCore.Qt.AlignmentFlag.AlignLeft))
         form.addRow(QtWidgets.QLabel('Scale'), hbox)
 
         form.addRow(QtWidgets.QLabel("Press Enter to accept value"))
@@ -2438,7 +2441,7 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         # self.lat.setFixedWidth(100)
         # self.lat.valueModified.connect(self.onLatChanged)
         # hbox.addWidget(self.lat)
-        # hbox.addWidget(QtWidgets.QLabel(u"\N{DEGREE SIGN}", alignment=QtCore.Qt.AlignLeft))
+        # hbox.addWidget(QtWidgets.QLabel(u"\N{DEGREE SIGN}", alignment=QtCore.Qt.AlignmentFlag.AlignLeft))
         # form.addRow(QtWidgets.QLabel('Lat'), hbox)
 
         # hbox = QtWidgets.QHBoxLayout()
@@ -2450,7 +2453,7 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         # self.lon.setFixedWidth(100)
         # self.lon.valueModified.connect(self.onLonChanged)
         # hbox.addWidget(self.lon)
-        # hbox.addWidget(QtWidgets.QLabel(u"\N{DEGREE SIGN}", alignment=QtCore.Qt.AlignLeft))
+        # hbox.addWidget(QtWidgets.QLabel(u"\N{DEGREE SIGN}", alignment=QtCore.Qt.AlignmentFlag.AlignLeft))
         # form.addRow(QtWidgets.QLabel('Lon'), hbox)
 
         # hbox = QtWidgets.QHBoxLayout()
@@ -2462,7 +2465,7 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         # self.elev.setFixedWidth(100)
         # self.elev.valueModified.connect(self.onElevChanged)
         # hbox.addWidget(self.elev)
-        # hbox.addWidget(QtWidgets.QLabel('m', alignment=QtCore.Qt.AlignLeft))
+        # hbox.addWidget(QtWidgets.QLabel('m', alignment=QtCore.Qt.AlignmentFlag.AlignLeft))
         # form.addRow(QtWidgets.QLabel('Elev'), hbox)
 
         self.distortion_type = QtWidgets.QComboBox(self)
@@ -2509,11 +2512,11 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         self.extinction_scale.setFixedWidth(self.scaledWidth(self.PARAM_INPUT_CHARS - 4))
         self.extinction_scale.valueModified.connect(self.onExtinctionChanged)
         hbox.addWidget(self.extinction_scale)
-        hbox.addWidget(QtWidgets.QLabel('', alignment=QtCore.Qt.AlignLeft))
+        hbox.addWidget(QtWidgets.QLabel('', alignment=QtCore.Qt.AlignmentFlag.AlignLeft))
         form.addRow(QtWidgets.QLabel('Extinction'), hbox)
 
         hbox = QtWidgets.QHBoxLayout()
-        hbox.setAlignment(QtCore.Qt.AlignVCenter)
+        hbox.setAlignment(QtCore.Qt.AlignmentFlag.AlignVCenter)
         self.vignetting_coeff = DoubleSpinBox()
         self.vignetting_coeff.setMinimum(0)
         self.vignetting_coeff.setMaximum(0.1)
@@ -2530,13 +2533,13 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         info_font.setBold(True)
         vignetting_info.setFont(info_font)
         vignetting_info.setStyleSheet("QToolButton { color: #0066cc; border: none; } QToolButton:hover { color: #0044aa; }")
-        vignetting_info.setCursor(QtCore.Qt.PointingHandCursor)
+        vignetting_info.setCursor(QtCore.Qt.CursorShape.PointingHandCursor)
         vignetting_info.clicked.connect(self.showVignettingInfo)
         hbox.addWidget(vignetting_info)
         form.addRow(QtWidgets.QLabel("Vignetting"), hbox)
 
         hbox_fixed = QtWidgets.QHBoxLayout()
-        hbox_fixed.setAlignment(QtCore.Qt.AlignVCenter)
+        hbox_fixed.setAlignment(QtCore.Qt.AlignmentFlag.AlignVCenter)
         self.vignetting_fixed = QtWidgets.QCheckBox('Fixed vignetting')
         self.vignetting_fixed.setChecked(True)
         self.vignetting_fixed.released.connect(self.onVignettingFixedToggled)
@@ -2548,7 +2551,7 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         info_font.setBold(True)
         vignetting_fixed_info.setFont(info_font)
         vignetting_fixed_info.setStyleSheet("QToolButton { color: #0066cc; border: none; } QToolButton:hover { color: #0044aa; }")
-        vignetting_fixed_info.setCursor(QtCore.Qt.PointingHandCursor)
+        vignetting_fixed_info.setCursor(QtCore.Qt.CursorShape.PointingHandCursor)
         vignetting_fixed_info.clicked.connect(self.showVignettingFixedInfo)
         hbox_fixed.addWidget(vignetting_fixed_info)
         hbox_fixed.addStretch()
@@ -2780,7 +2783,7 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
 
     def showVignettingInfo(self):
         msg = QtWidgets.QMessageBox(self)
-        msg.setIcon(QtWidgets.QMessageBox.Information)
+        msg.setIcon(QtWidgets.QMessageBox.Icon.Information)
         msg.setWindowTitle("Vignetting Coefficient")
         msg.setText("Vignetting coefficient (radians per pixel)")
         msg.setInformativeText(
@@ -2793,11 +2796,11 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
             "(see info next to Fixed Vignetting), or reach out to\n"
             "the GMN community for known good values for your lens."
         )
-        msg.exec_()
+        msg.exec()
 
     def showVignettingFixedInfo(self):
         msg = QtWidgets.QMessageBox(self)
-        msg.setIcon(QtWidgets.QMessageBox.Information)
+        msg.setIcon(QtWidgets.QMessageBox.Icon.Information)
         msg.setWindowTitle("Measuring Vignetting Coefficient")
         msg.setText("Measuring vignetting requires ideal conditions:")
         msg.setInformativeText(
@@ -2810,7 +2813,7 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
             "If these conditions are not met, it is best to leave\n"
             "Fixed Vignetting checked and use the default value."
         )
-        msg.exec_()
+        msg.exec()
 
     def onVignettingFixedToggled(self):
         self.gui.platepar.vignetting_fixed = self.vignetting_fixed.isChecked()
@@ -3396,12 +3399,12 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
             grid.addWidget(QtWidgets.QLabel(name), row, 0)
             val_label = QtWidgets.QLabel(default_str)
             val_label.setFixedSize(self.scaledWidth(6), self.scaledHeight(1))
-            val_label.setAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
+            val_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignVCenter)
             grid.addWidget(val_label, row, 1)
             row += 1
 
             # Row with slider spanning both columns
-            slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+            slider = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
             slider.setRange(min_val, max_val)
             slider.setValue(default)
             slider.valueChanged.connect(callback)
@@ -3624,7 +3627,7 @@ class BrushCursorItem(pg.GraphicsObject):
 
     def paint(self, painter, option, widget=None):
         painter.setPen(self._pen)
-        painter.setBrush(QtCore.Qt.NoBrush)
+        painter.setBrush(QtCore.Qt.BrushStyle.NoBrush)
         painter.drawEllipse(QtCore.QPointF(0, 0), self._radius, self._radius)
 
     def boundingRect(self):
@@ -3713,7 +3716,7 @@ class MaskWidget(QtWidgets.QWidget, ScaledSizeHelper):
         self.brush_size_label = QtWidgets.QLabel('Brush size:')
         brush_size_layout.addWidget(self.brush_size_label)
 
-        self.brush_size_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+        self.brush_size_slider = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
         self.brush_size_slider.setRange(1, 200)
         self.brush_size_slider.setValue(20)
         self.brush_size_slider.valueChanged.connect(self._onBrushSizeChanged)
@@ -3899,16 +3902,18 @@ class MaskWidget(QtWidgets.QWidget, ScaledSizeHelper):
         """Confirm and clear all polygons."""
         reply = QtWidgets.QMessageBox.question(self, 'Clear All',
             'Delete all mask polygons?',
-            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No, QtWidgets.QMessageBox.No)
-        if reply == QtWidgets.QMessageBox.Yes:
+            QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No,
+            QtWidgets.QMessageBox.StandardButton.No)
+        if reply == QtWidgets.QMessageBox.StandardButton.Yes:
             self.sigClearPolygons.emit()
 
     def onClearBrush(self):
         """Confirm and clear all brush strokes."""
         reply = QtWidgets.QMessageBox.question(self, 'Clear Brush Strokes',
             'Delete all brush strokes?',
-            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No, QtWidgets.QMessageBox.No)
-        if reply == QtWidgets.QMessageBox.Yes:
+            QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No,
+            QtWidgets.QMessageBox.StandardButton.No)
+        if reply == QtWidgets.QMessageBox.StandardButton.Yes:
             self.sigClearBrushStrokes.emit()
 
     def updateStatus(self, polygon_count, drawing_points=0, has_brush_strokes=False):
@@ -3967,6 +3972,7 @@ class SettingsWidget(QtWidgets.QWidget, ScaledSizeHelper):
     sigStarNamesToggled = QtCore.pyqtSignal()
     sigApparentMagCorrToggled = QtCore.pyqtSignal()
     sigLabelMagLimitChanged = QtCore.pyqtSignal(float)
+    sigGeoMarkerScaleChanged = QtCore.pyqtSignal(float)
     sigConstellationToggled = QtCore.pyqtSignal()
     sigCalStarsToggled = QtCore.pyqtSignal()
     sigDistortionToggled = QtCore.pyqtSignal()
@@ -3991,7 +3997,7 @@ class SettingsWidget(QtWidgets.QWidget, ScaledSizeHelper):
         self.gui = gui
 
         vbox = QtWidgets.QVBoxLayout()
-        vbox.setAlignment(QtCore.Qt.AlignTop)
+        vbox.setAlignment(QtCore.Qt.AlignmentFlag.AlignTop)
         self.setLayout(vbox)
 
         # Tab help button (top-right)
@@ -4038,6 +4044,26 @@ class SettingsWidget(QtWidgets.QWidget, ScaledSizeHelper):
         label_mag_layout.addWidget(self.label_mag_spinbox)
         label_mag_layout.addStretch()
         vbox.addLayout(label_mag_layout)
+
+        # Geo point marker size multiplier (the base size is computed automatically from the size of
+        #   the image frame, this only scales it)
+        geo_marker_layout = QtWidgets.QHBoxLayout()
+        self.geo_marker_label = QtWidgets.QLabel('Geo Point Size:')
+        geo_marker_layout.addWidget(self.geo_marker_label)
+        self.geo_marker_spinbox = QtWidgets.QDoubleSpinBox()
+        self.geo_marker_spinbox.setRange(0.1, 5.0)
+        self.geo_marker_spinbox.setSingleStep(0.1)
+        self.geo_marker_spinbox.setDecimals(1)
+        self.geo_marker_spinbox.setToolTip('Scale the geo point markers relative to their '
+                                           'automatically computed size')
+        self.geo_marker_spinbox.valueChanged.connect(self.sigGeoMarkerScaleChanged.emit)
+        geo_marker_layout.addWidget(self.geo_marker_spinbox)
+        geo_marker_layout.addStretch()
+        vbox.addLayout(geo_marker_layout)
+
+        # Sync only after the layout is in place, as setting the visibility of a widget which has no
+        #   parent yet would briefly show it as a window of its own
+        self.updateGeoMarkerScale()
 
         self.show_constellations = QtWidgets.QCheckBox('Show Constellation Lines')
         self.show_constellations.released.connect(self.sigConstellationToggled.emit)
@@ -4210,6 +4236,19 @@ class SettingsWidget(QtWidgets.QWidget, ScaledSizeHelper):
 
     def updateShowStarNames(self):
         self.show_star_names.setChecked(self.gui.show_star_names)
+
+    def updateGeoMarkerScale(self):
+
+        # The control is only relevant when geo points are loaded, which can change when a state is
+        #   loaded into an already constructed GUI
+        show_control = self.gui.geo_points_obj is not None
+        self.geo_marker_label.setVisible(show_control)
+        self.geo_marker_spinbox.setVisible(show_control)
+
+        # Block the signals so that syncing the widget with the GUI state doesn't trigger a redraw
+        self.geo_marker_spinbox.blockSignals(True)
+        self.geo_marker_spinbox.setValue(self.gui.geo_marker_scale)
+        self.geo_marker_spinbox.blockSignals(False)
 
     def updateShowConstellations(self):
         self.show_constellations.setChecked(self.gui.show_constellations)
@@ -4433,11 +4472,11 @@ def valid_float_string(string):
 class FloatValidator(QtGui.QValidator):
     def validate(self, string, position):
         if valid_float_string(string):
-            state = QtGui.QValidator.Acceptable
+            state = QtGui.QValidator.State.Acceptable
         elif string == "" or string[position - 1] in 'e.-+':
-            state = QtGui.QValidator.Intermediate
+            state = QtGui.QValidator.State.Intermediate
         else:
-            state = QtGui.QValidator.Invalid
+            state = QtGui.QValidator.State.Invalid
         return state, string, position
 
     def fixup(self, text):
@@ -4463,7 +4502,7 @@ class DoubleSpinBox(QtWidgets.QDoubleSpinBox):
 
     def keyPressEvent(self, e):
         super().keyPressEvent(e)
-        if (e.key() == QtCore.Qt.Key_Return) or (e.key() == QtCore.Qt.Key_Enter):
+        if (e.key() == QtCore.Qt.Key.Key_Return) or (e.key() == QtCore.Qt.Key.Key_Enter):
             self.valueModified.emit()
 
 
@@ -4509,7 +4548,7 @@ class ScientificDoubleSpinBox(QtWidgets.QDoubleSpinBox):
 
     def keyPressEvent(self, e):
         super().keyPressEvent(e)
-        if e.key() == QtCore.Qt.Key_Return:
+        if e.key() == QtCore.Qt.Key.Key_Return:
             self.valueModified.emit()
 
 

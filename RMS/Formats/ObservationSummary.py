@@ -80,6 +80,10 @@ OBSERVATIONS_TABLE_NAME = "observations"
 OBSERVATION_DB_FILE_NAME = "observation.db"
 NIGHT_DATA_DIR_COL = "night_data_dir"
 
+# Ceiling on any git call made while measuring how far the repository lags the remote. Without it, a dropped
+# network connection leaves git waiting on the socket forever and stalls the whole observation summary.
+GIT_TIMEOUT_SEC = 300
+
 
 def pingOnce(host):
     """Quickly detect if a host is pingable
@@ -513,6 +517,39 @@ def timeSyncStatus(config, d, force_client=None):
 
     return ahead_ms
 
+
+def parseObsTimestamp(value):
+    """Parse an observation-database timestamp, or return None if there isn't one.
+
+    The observation-DB time columns are not NULL before they are first written --
+    they hold 0 -- so checking the row for None is not enough. str(0) is '0', and
+    strptime('0', "%Y-%m-%d %H:%M:%S") raises ValueError.
+
+    Arguments:
+        value: the raw column value (may be None, 0, or a timestamp string).
+
+    Return:
+        [datetime] the parsed time, or None if the column holds no usable timestamp.
+    """
+
+    if value is None:
+        return None
+
+    text = str(value).strip()
+
+    if (not text) or (text == "0"):
+        return None
+
+    # With and without microseconds
+    for time_format in ("%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d %H:%M:%S"):
+        try:
+            return datetime.datetime.strptime(text, time_format)
+        except ValueError:
+            continue
+
+    return None
+
+
 def getDaysSinceLastDetection(config, data_dir, d=None, debug=False):
     """Get the number of days since the last meteor detection
 
@@ -538,26 +575,30 @@ def getDaysSinceLastDetection(config, data_dir, d=None, debug=False):
         log.info("Last fits file for session SQL")
         log.info(last_fits_file_for_session_sql)
 
+    conn = None
     try:
         conn = getObsDBConn(config)
         result = conn.execute(last_fits_file_for_session_sql, (os.path.basename(data_dir),)).fetchone()
-        if result is None:
-            return "Unknown"
-        else:
-            result = str(result[0])
+
         log.info(f"SQL query is \n {last_fits_file_for_session_sql}")
         log.info(f"SQL query result is \n {result}")
-        # Keep microseconds
-        if '.' in result:
-            time_last_fits_file_for_session = datetime.datetime.strptime(result,  "%Y-%m-%d %H:%M:%S.%f")
-        else:
-            time_last_fits_file_for_session = datetime.datetime.strptime(result, "%Y-%m-%d %H:%M:%S")
-        conn.close()
+
+        # time_last_fits_file holds 0 until the session's first FITS file is recorded,
+        # so the row can exist while the column carries no timestamp. There is simply
+        # nothing to measure from yet -- that is not an error.
+        time_last_fits_file_for_session = parseObsTimestamp(result[0] if result else None)
+
+        if time_last_fits_file_for_session is None:
+            return "Unknown"
 
     except Exception as e:
         log.error('Failed to calculate time since last detection:' + repr(e))
         log.error("".join(traceback.format_exception(*sys.exc_info())))
         return "Error"
+
+    finally:
+        if conn is not None:
+            conn.close()
 
 
     last_detection_time_for_session_sql = ""
@@ -574,25 +615,36 @@ def getDaysSinceLastDetection(config, data_dir, d=None, debug=False):
 
     log.info("Write dict to db before doing SQL")
 
+    conn = None
     try:
         conn = getObsDBConn(config)
         storeDictInDB(conn,d, debug=False)
 
         cursor = conn.execute(last_detection_time_for_session_sql)
-        result =  cursor.fetchone()[0]
-        last_detection_time_for_session = datetime.datetime.strptime(result, "%Y-%m-%d %H:%M:%S")
+        row = cursor.fetchone()
+
+        # A station with no detections yet matches no row at all, so fetchone() returns
+        # None -- indexing straight into it raised TypeError. As above, the column may
+        # also carry no timestamp. Either way there is no last detection to measure to.
+        last_detection_time_for_session = parseObsTimestamp(row[0] if row else None)
+
+        if last_detection_time_for_session is None:
+            return "Unknown"
 
         # Guard against missing fits files causing negative time since last detection
         seconds_since_last_detection = max((time_last_fits_file_for_session - last_detection_time_for_session).total_seconds(), 0)
 
         # Express the gap in solar days (24 h), which is the intuitive unit for "days since".
         days_since_last_detection = seconds_since_last_detection / (60 * 60 * 24.0)
-        conn.close()
 
     except Exception as e:
         log.error('Failed to calculate time since last detection:' + repr(e))
         log.error("".join(traceback.format_exception(*sys.exc_info())))
         return "Error"
+
+    finally:
+        if conn is not None:
+            conn.close()
 
     log.info(f"Time since last detection is {days_since_last_detection} days")
 
@@ -1035,12 +1087,42 @@ def nightSummaryData(config, night_data_dir):
             fits_file_shortfall_as_time, fits_file_shortfall_as_time_ephemeris, \
             time_first_fits_file, time_last_fits_file, total_expected_fits, total_expected_fits_ephemeris
 
+def runGitCommand(command, cwd):
+    """ Run a git command, failing rather than blocking forever if the network drops.
+
+    Standard output is discarded, so this is only for commands run for their effect and not for their output.
+    A command that times out is logged and re-raised, one that merely fails is logged along with its stderr.
+
+    Arguments:
+        command: [list] the git command and its arguments.
+        cwd: [path] the directory in which to run the command.
+
+    Return:
+        None
+    """
+
+    try:
+        # run() drains the pipes and reaps the child itself, so neither a full pipe nor a stalled socket can
+        # leave this waiting indefinitely
+        result = subprocess.run(command, cwd=cwd, timeout=GIT_TIMEOUT_SEC,
+                                stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+
+    except subprocess.TimeoutExpired:
+        # The caller reports the repository lag as undetermined, so say here which command stalled
+        log.warning("git command timed out after {} s: {}".format(GIT_TIMEOUT_SEC, " ".join(command)))
+        raise
+
+    # Nothing here can recover from a failed git call, but the reason should not be swallowed
+    if result.returncode != 0:
+        log.warning("git command failed with code {}: {}".format(result.returncode, " ".join(command)))
+        log.warning(result.stderr.decode("utf-8", errors="replace").strip())
+
 def updateCommitHistoryDirectory(remote_urls, target_directory):
 
     """ Clone only the commit history of a remote repository.
 
     Arguments:
-        remote_urls: [url] the remote url to be cloned/
+        remote_urls: [url] the remote url to be cloned
         target_directory: [path] the directory into which to clone.
 
     Return:
@@ -1058,24 +1140,23 @@ def updateCommitHistoryDirectory(remote_urls, target_directory):
 
         if first_remote:
             first_remote = False
-            p = subprocess.Popen(["git", "clone", url, "--filter=blob:none", "--no-checkout"], cwd=target_directory,
-                             stdout=subprocess.PIPE)
-            p.wait()
-            # this first remote might have been pulled in with the wrong local_name so rename it
+            runGitCommand(["git", "clone", url, "--filter=blob:none", "--no-checkout"], target_directory)
+
+            # this first remote might have been pulled in with the wrong local_name so check and rename if required
             commit_repo_directory = os.path.join(target_directory, os.listdir(target_directory)[0])
             downloaded_remote_name = subprocess.check_output(["git", "remote"], cwd = commit_repo_directory).strip().decode('utf-8')
 
             if downloaded_remote_name != local_name:
-                p = subprocess.Popen(["git", "remote", "rename", downloaded_remote_name, local_name], cwd = commit_repo_directory)
-                p.wait()
+                runGitCommand(["git", "remote", "rename", downloaded_remote_name, local_name], commit_repo_directory)
 
         else:
             # this is not the first remote so add another remote
 
-            p = subprocess.Popen(["git", "remote", "add", local_name, url], cwd = commit_repo_directory)
-            p.wait()
-            p = subprocess.Popen(["git", "fetch", "--filter=blob:none", local_name], cwd = commit_repo_directory)
-            p.wait()
+            runGitCommand(["git", "remote", "add", local_name, url], commit_repo_directory)
+
+            # Like the clone above, this reaches out over the network and so must not be left to block forever
+            runGitCommand(["git", "fetch", "--filter=blob:none", local_name], commit_repo_directory)
+
     return commit_repo_directory
 
 def getCommit(repo):
@@ -1184,7 +1265,8 @@ def getRemoteBranchNameForCommit(repo, commit):
     """
 
 
-    # This is the simple case, our latest commit is the HEAD
+    # This is the simple case, our latest commit is the HEAD. Only used as the fall back below, as the
+    # branches containing the commit give a better answer when one of them is a tracked branch.
 
     local_branch_list = []
     try:
@@ -1199,9 +1281,7 @@ def getRemoteBranchNameForCommit(repo, commit):
         if branch_stripped.startswith("remotes/"):
             remote_branch_name = branch_stripped
 
-    # If we are not at the HEAD, then get all the branches which contain the commit.
-
-    # 2. Branches that *contain* the commit
+    # Get all the branches that contain the commit and pick the most likely
     try:
         contains = subprocess.check_output(
             ["git", "branch", "-r", "--contains", commit],
@@ -1210,7 +1290,9 @@ def getRemoteBranchNameForCommit(repo, commit):
     except Exception:
         contains = []
 
-    contains = [c.strip() for c in contains if c.strip()]
+    # Drop symbolic references. Git lists these as "origin/HEAD -> origin/master", which is not a name that
+    # can be handed to any later git call. Match on the spaced arrow, since a branch may legally be named a->b.
+    contains = [c.strip() for c in contains if c.strip() and " -> " not in c]
 
     if contains:
         # If the branch is origin/main or origin/pre-release; then that is almost certainly where we are
@@ -1235,19 +1317,22 @@ def daysBehind():
 
     latest_local_commit = getCommit(os.getcwd())
     latest_local_date = getDateOfCommit(os.getcwd(), latest_local_commit)
-    target_directory_obj = tempfile.TemporaryDirectory()
-    target_directory = target_directory_obj.name
     remote_urls = getRemoteUrls(os.getcwd())
-    commit_repo_directory = updateCommitHistoryDirectory(remote_urls, target_directory)
-    remote_branch_of_commit = getRemoteBranchNameForCommit(commit_repo_directory, latest_local_commit)
-    if not remote_branch_of_commit is None:
-        latest_remote_date = getDateOfCommit(commit_repo_directory, remote_branch_of_commit)
-        days_behind = (latest_remote_date - latest_local_date).total_seconds()/(60 * 60 * 24)
-        target_directory_obj.cleanup()
-        return days_behind, remote_branch_of_commit
-    else:
-        target_directory_obj.cleanup()
-        return "Unable to determine"
+
+    # The clone is only needed to read dates out of, so hold it in a temporary directory. Cleaning up in a
+    # with block means a git timeout below does not leave a partial clone of the history behind.
+    with tempfile.TemporaryDirectory() as target_directory:
+
+        commit_repo_directory = updateCommitHistoryDirectory(remote_urls, target_directory)
+        remote_branch_of_commit = getRemoteBranchNameForCommit(commit_repo_directory, latest_local_commit)
+
+        if not remote_branch_of_commit is None:
+            latest_remote_date = getDateOfCommit(commit_repo_directory, remote_branch_of_commit)
+            days_behind = (latest_remote_date - latest_local_date).total_seconds()/(60 * 60 * 24)
+            return days_behind, remote_branch_of_commit
+
+        else:
+            return "Unable to determine"
 
 def serialize(config, format_nicely=True, as_json=False, night_directory=None, drop_keys_list=None, ordering=None, final=False):
     """ Returns the data from the most recent observation session as either colon

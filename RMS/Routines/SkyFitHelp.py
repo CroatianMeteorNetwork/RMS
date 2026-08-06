@@ -673,6 +673,12 @@ def _topic_settings(gui):
         ("Single Click Photometry", "Measure photometry with a single click while picking."),
     ]
 
+    if _has_geopoints(gui):
+        display_rows.append(
+            ("Geo Point Size", "Scale the geo point markers. Their base size is computed "
+             "automatically from the size of the image frame, so they look the same at any screen "
+             "resolution and display scaling."))
+
     catalog_rows = [
         ("Gamma", "Display gamma of the image (visual only &ndash; not the camera gamma)."),
         ("Lim Mag", "Catalog limiting magnitude: how faint to load catalog stars."),
