@@ -1307,7 +1307,9 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
             reply = QtWidgets.QMessageBox.question(
                 self, "Unsaved Changes",
                 "The current platepar has unsaved changes.\nSave before changing station?",
-                QtWidgets.QMessageBox.StandardButton.Save | QtWidgets.QMessageBox.StandardButton.Discard | QtWidgets.QMessageBox.StandardButton.Cancel,
+                QtWidgets.QMessageBox.StandardButton.Save
+                | QtWidgets.QMessageBox.StandardButton.Discard
+                | QtWidgets.QMessageBox.StandardButton.Cancel,
                 QtWidgets.QMessageBox.StandardButton.Save)
             if reply == QtWidgets.QMessageBox.StandardButton.Cancel:
                 return
@@ -3629,7 +3631,8 @@ class PlateTool(QtWidgets.QMainWindow):
         """
         if dir_path is None:
             dir_path = str(QtWidgets.QFileDialog.getExistingDirectory(self, "Select new station folder",
-                                                                  self.dir_path, QtWidgets.QFileDialog.Option.ShowDirsOnly))
+                                                                      self.dir_path,
+                                                                      QtWidgets.QFileDialog.Option.ShowDirsOnly))
 
         if not dir_path:
             return False
@@ -10022,7 +10025,8 @@ class PlateTool(QtWidgets.QMainWindow):
                     mode = 1
 
                     if modifiers & QtCore.Qt.KeyboardModifier.ControlModifier or \
-                            ((modifiers & QtCore.Qt.KeyboardModifier.AltModifier or QtCore.Qt.Key.Key_0 in self.keys_pressed) and
+                            ((modifiers & QtCore.Qt.KeyboardModifier.AltModifier
+                              or QtCore.Qt.Key.Key_0 in self.keys_pressed) and
                              self.img.img_handle.input_type == 'dfn'):
 
                         self.x_centroid, self.y_centroid = self.mouse_x - 0.5, self.mouse_y - 0.5
@@ -10038,7 +10042,8 @@ class PlateTool(QtWidgets.QMainWindow):
                             print("Skipping detection: non-positive intensity ({:.1f})".format(source_intens))
                             return
 
-                    if (modifiers & QtCore.Qt.KeyboardModifier.AltModifier or QtCore.Qt.Key.Key_0 in self.keys_pressed) and \
+                    if (modifiers & QtCore.Qt.KeyboardModifier.AltModifier
+                            or QtCore.Qt.Key.Key_0 in self.keys_pressed) and \
                             self.img.img_handle.input_type == 'dfn':
                         mode = 0
 
@@ -10288,7 +10293,9 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
         # Fit spectral band ratios (hidden feature)
-        elif event.key() == QtCore.Qt.Key.Key_B and modifiers == (QtCore.Qt.KeyboardModifier.ControlModifier | QtCore.Qt.KeyboardModifier.ShiftModifier):
+        elif event.key() == QtCore.Qt.Key.Key_B \
+                and modifiers == (QtCore.Qt.KeyboardModifier.ControlModifier
+                                  | QtCore.Qt.KeyboardModifier.ShiftModifier):
             self.fitBandRatio()
 
         # Toggle satellite tracks
@@ -10533,7 +10540,8 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Do a fit on the selected stars while in the star picking mode
             elif (event.key() == QtCore.Qt.Key.Key_Z) and ((modifiers == QtCore.Qt.KeyboardModifier.ControlModifier) \
-                or (modifiers == (QtCore.Qt.KeyboardModifier.ControlModifier | QtCore.Qt.KeyboardModifier.ShiftModifier))):
+                or (modifiers == (QtCore.Qt.KeyboardModifier.ControlModifier
+                                  | QtCore.Qt.KeyboardModifier.ShiftModifier))):
 
                 # If shift was pressed, reset distortion parameters to zero
                 if modifiers == (QtCore.Qt.KeyboardModifier.ControlModifier | QtCore.Qt.KeyboardModifier.ShiftModifier):
@@ -10836,7 +10844,8 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Get initial parameters from astrometry.net (same as Auto Fit button)
             elif (event.key() == QtCore.Qt.Key.Key_X) and ((modifiers == QtCore.Qt.KeyboardModifier.ControlModifier) \
-                or (modifiers == (QtCore.Qt.KeyboardModifier.ControlModifier | QtCore.Qt.KeyboardModifier.ShiftModifier))):
+                or (modifiers == (QtCore.Qt.KeyboardModifier.ControlModifier
+                                  | QtCore.Qt.KeyboardModifier.ShiftModifier))):
 
                 # Use the same auto-fit path as the button (includes catalog balancing, quick alignment)
                 self.autoFitAstrometryNet()
@@ -13555,12 +13564,14 @@ class PlateTool(QtWidgets.QMainWindow):
             msgbox.setWindowTitle('Astrometry.net Solution - FOV Mismatch')
             msgbox.setText(msg)
             msgbox.setIcon(QtWidgets.QMessageBox.Icon.Warning)
-            msgbox.setStandardButtons(QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No)
+            msgbox.setStandardButtons(QtWidgets.QMessageBox.StandardButton.Yes
+                                      | QtWidgets.QMessageBox.StandardButton.No)
             msgbox.setDefaultButton(QtWidgets.QMessageBox.StandardButton.Yes)
             reply = msgbox.exec()
         else:
             reply = QtWidgets.QMessageBox.question(self, 'Astrometry.net Solution', msg,
-                QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No, QtWidgets.QMessageBox.StandardButton.Yes)
+                QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No,
+                QtWidgets.QMessageBox.StandardButton.Yes)
 
         if reply == QtWidgets.QMessageBox.StandardButton.No:
             self.status_bar.showMessage("Astrometry.net solution applied (no refinement)")
