@@ -1874,7 +1874,7 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
 
 
     def _addConfigPreview(self, layout):
-        """ List the values a config save will write, as old -> new.
+        """ Tabulate the values a config save will write, as current -> new.
 
         The tuned catalog limiting magnitude gets a checkbox of its own, as it is only written on
         request. Returns that checkbox, or None if the LM was not tuned in this session.
@@ -1882,9 +1882,43 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
         pt = self.plate_tool
 
         group = QtWidgets.QGroupBox("Values written to the config")
-        group_layout = QtWidgets.QVBoxLayout(group)
+        grid = QtWidgets.QGridLayout(group)
+        grid.setHorizontalSpacing(10)
+        grid.setColumnStretch(4, 1)
+
+        for col, title in [(0, "Parameter"), (1, "Current"), (3, "New")]:
+            header = QtWidgets.QLabel(title)
+            header.setFont(self._boldFont(header))
+            if col == 1:
+                header.setAlignment(QtCore.Qt.AlignmentFlag.AlignRight
+                                    | QtCore.Qt.AlignmentFlag.AlignVCenter)
+            grid.addWidget(header, 0, col)
+
+        def addRow(row, name_widget, old_str, new_str, note=""):
+            """ Fill one table row, bolding the new value when it differs from the current one. """
+
+            grid.addWidget(name_widget, row, 0)
+
+            old_label = QtWidgets.QLabel(old_str)
+            old_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignRight
+                                   | QtCore.Qt.AlignmentFlag.AlignVCenter)
+            grid.addWidget(old_label, row, 1)
+
+            # Unchanged values are written too, but showing "400 -> 400" is only noise
+            if old_str != new_str:
+                grid.addWidget(QtWidgets.QLabel("->"), row, 2)
+
+                new_label = QtWidgets.QLabel(new_str)
+                new_label.setFont(self._boldFont(new_label))
+                grid.addWidget(new_label, row, 3)
+
+            if note:
+                note_label = QtWidgets.QLabel(note)
+                note_label.setFont(self._italicFont(note_label))
+                grid.addWidget(note_label, row, 4)
 
         # Star extraction parameters, always written
+        row = 1
         for key, new_value in [
                 ("intensity_threshold", pt.override_intensity_threshold),
                 ("segment_radius", pt.override_segment_radius),
@@ -1893,20 +1927,15 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
                 ("max_feature_ratio", pt.override_max_feature_ratio),
                 ("roundness_threshold", pt.override_roundness_threshold)]:
 
-            # Compare the strings that end up in the file, not the numbers
-            old_str = str(getattr(pt.config, key, "?"))
-            new_str = str(new_value)
-
-            if old_str == new_str:
-                text = "{}: {} (unchanged)".format(key, new_str)
-            else:
-                text = "{}: {} -> {}".format(key, old_str, new_str)
-
             # Say so when the floor, rather than the tuning, set the value
+            note = ""
             if key == "max_stars" and pt.override_max_stars < MIN_CONFIG_MAX_STARS:
-                text += " (raised to the minimum for processing)"
+                note = "raised to the minimum for processing"
 
-            group_layout.addWidget(QtWidgets.QLabel(text))
+            # Compare the strings that end up in the file, not the numbers
+            addRow(row, QtWidgets.QLabel(key), str(getattr(pt.config, key, "?")), str(new_value),
+                   note=note)
+            row += 1
 
         # The catalog LM is only offered when the tuner found one. Everything else that moves the LM
         #   (the spinboxes, the R/F keys, plate fitting) is a working value that must not be saved,
@@ -1914,16 +1943,33 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
         lm_checkbox = None
         if getattr(pt, 'catalog_lm_tuned', False) and hasattr(pt, 'tuned_cat_lim_mag'):
 
-            lm_checkbox = QtWidgets.QCheckBox("catalog_mag_limit: {} -> {:.1f} (tuned)".format(
-                getattr(pt.config, 'catalog_mag_limit', "?"), pt.tuned_cat_lim_mag))
+            lm_checkbox = QtWidgets.QCheckBox("catalog_mag_limit")
             lm_checkbox.setChecked(True)
             lm_checkbox.setToolTip("Recalibration matches stars down to this magnitude. "
                                    "Uncheck to keep the value already in the config.")
-            group_layout.addWidget(lm_checkbox)
+
+            addRow(row, lm_checkbox, str(getattr(pt.config, 'catalog_mag_limit', "?")),
+                   "{:.1f}".format(pt.tuned_cat_lim_mag), note="tuned")
 
         layout.addWidget(group)
 
         return lm_checkbox
+
+
+    @staticmethod
+    def _boldFont(widget):
+        """ Return the widget's font, in bold. """
+        font = widget.font()
+        font.setBold(True)
+        return font
+
+
+    @staticmethod
+    def _italicFont(widget):
+        """ Return the widget's font, in italics. """
+        font = widget.font()
+        font.setItalic(True)
+        return font
 
 
     def _saveFile(self, ftype, target_dirs, save_lm=False):
