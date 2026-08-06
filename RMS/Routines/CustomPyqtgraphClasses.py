@@ -4053,16 +4053,14 @@ class SettingsWidget(QtWidgets.QWidget, ScaledSizeHelper):
         self.geo_marker_spinbox.setDecimals(1)
         self.geo_marker_spinbox.setToolTip('Scale the geo point markers relative to their '
                                            'automatically computed size')
-        self.updateGeoMarkerScale()
         self.geo_marker_spinbox.valueChanged.connect(self.sigGeoMarkerScaleChanged.emit)
         geo_marker_layout.addWidget(self.geo_marker_spinbox)
         geo_marker_layout.addStretch()
         vbox.addLayout(geo_marker_layout)
 
-        # Only show the control if geo points are loaded
-        if self.gui.geo_points_obj is None:
-            self.geo_marker_label.hide()
-            self.geo_marker_spinbox.hide()
+        # Sync only after the layout is in place, as setting the visibility of a widget which has no
+        #   parent yet would briefly show it as a window of its own
+        self.updateGeoMarkerScale()
 
         self.show_constellations = QtWidgets.QCheckBox('Show Constellation Lines')
         self.show_constellations.released.connect(self.sigConstellationToggled.emit)
@@ -4237,6 +4235,12 @@ class SettingsWidget(QtWidgets.QWidget, ScaledSizeHelper):
         self.show_star_names.setChecked(self.gui.show_star_names)
 
     def updateGeoMarkerScale(self):
+
+        # The control is only relevant when geo points are loaded, which can change when a state is
+        #   loaded into an already constructed GUI
+        show_control = self.gui.geo_points_obj is not None
+        self.geo_marker_label.setVisible(show_control)
+        self.geo_marker_spinbox.setVisible(show_control)
 
         # Block the signals so that syncing the widget with the GUI state doesn't trigger a redraw
         self.geo_marker_spinbox.blockSignals(True)
