@@ -52,18 +52,21 @@ def messagebox(title, message):
         # Qt binding into the process.
         from pyqtgraph.Qt import QtWidgets
 
-        # Check if a QApplication instance already exists
-        if QtWidgets.QApplication.instance():
-            # If it exists, we can safely create and show a message box
-            msg_box = QtWidgets.QMessageBox()
-            msg_box.setWindowTitle(title)
-            msg_box.setText(message)
-            msg_box.exec()
-            return # Success, so we exit the function
-    except ImportError:
-        # This means no Qt binding (or pyqtgraph) is installed.
-        # We'll just pass and try the next option.
-        pass
+    except Exception:
+        # This means no Qt binding (or pyqtgraph) is installed. pyqtgraph raises a plain
+        # Exception rather than an ImportError when it cannot find a binding, so catch broadly
+        # here. We'll just fall through and try the next option.
+        QtWidgets = None
+
+    # Check if a QApplication instance already exists
+    if (QtWidgets is not None) and QtWidgets.QApplication.instance():
+
+        # If it exists, we can safely create and show a message box
+        msg_box = QtWidgets.QMessageBox()
+        msg_box.setWindowTitle(title)
+        msg_box.setText(message)
+        msg_box.exec()
+        return # Success, so we exit the function
 
     # Second, check for a display and try Tkinter as a fallback
     if os.environ.get('DISPLAY'):
