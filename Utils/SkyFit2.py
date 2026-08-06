@@ -132,7 +132,7 @@ try:
     from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 except Exception as exc:
     message = [
-        "SkyFit requires PyQtGraph/PyQt5 for its GUI components, but the import failed.",
+        "SkyFit requires PyQtGraph/Qt for its GUI components, but the import failed.",
         "The most common causes are missing GUI dependencies or Windows being unable to allocate enough",
         "virtual memory (e.g. the paging file is too small).",
         f"Original import error: {exc}",
@@ -9127,7 +9127,9 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Remove other PlotCurveItem objects which cannot be pickled
         # Generic scrubber for pyqtgraph/qt items
-        unpicklable_modules = ('pyqtgraph', 'PyQt5', 'RMS.Routines.CustomPyqtgraphClasses', 'matplotlib')
+        # Cover every Qt binding pyqtgraph might have selected, not just PyQt5
+        unpicklable_modules = ('pyqtgraph', 'PyQt5', 'PyQt6', 'PySide2', 'PySide6',
+                               'RMS.Routines.CustomPyqtgraphClasses', 'matplotlib')
         keys_to_remove = []
         for k, v in dic.items():
 
@@ -10221,9 +10223,12 @@ class PlateTool(QtWidgets.QMainWindow):
         modifiers = QtWidgets.QApplication.keyboardModifiers()
         qmodifiers = QtWidgets.QApplication.queryKeyboardModifiers()
 
-        # Strip the GroupSwitchModifier (constantly pressed on some systems for some reason, not used in SkyFit)
-        modifiers &= ~int(QtCore.Qt.KeyboardModifier.GroupSwitchModifier)
-        qmodifiers &= ~int(QtCore.Qt.KeyboardModifier.GroupSwitchModifier)
+        # Strip the GroupSwitchModifier (constantly pressed on some systems for some reason, not used in SkyFit).
+        # Invert the enum member itself instead of an int() of it - on Qt6 bindings the modifier flags are
+        # enum.Flag members, which do not convert to int.
+        group_switch = QtCore.Qt.KeyboardModifier.GroupSwitchModifier
+        modifiers &= ~group_switch
+        qmodifiers &= ~group_switch
 
         self.keys_pressed.append(event.key())
 
