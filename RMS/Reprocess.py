@@ -183,6 +183,16 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
     # Extract the name of the night
     night_data_dir_name = os.path.basename(os.path.abspath(night_data_dir))
 
+    # Mark the night as being processed before any real work starts. The record has to exist on disk
+    #   before the observation summary is finalized: if the 'started' write were left until just
+    #   before archiving (a full disk being the obvious cause of it failing) and archiving then also
+    #   failed, the night would be left with a final summary and no record, and a later start would
+    #   mistake that for a pre-record legacy night and never retry it. Writing it here means the
+    #   absence of a record reliably means "legacy". Only 'completed' (set once archiveDetections
+    #   returns) counts as processed - archiveDetections creates its destination directory before it
+    #   finishes copying, so that directory existing is not proof the night was archived either.
+    updateProcessingStatus(config, night_data_dir, archiving='started')
+
     platepar = None
     kml_files = []
     recalibrated_platepars = None
@@ -673,11 +683,6 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
 
     log.info('Archiving detections to ' + night_archive_dir)
 
-    # Record that archiving is under way. archiveDetections creates the destination directory before
-    #   it finishes copying into it, so the directory existing is not proof the night was archived -
-    #   this is what tells a later run that an interrupted archive has to be redone
-    updateProcessingStatus(config, night_data_dir, archiving='started')
-
     # Archive the detections
     archive_name, imgdata_archive_name, metadata_archive_name = archiveDetections(night_data_dir,
                                             night_archive_dir, ff_detected, config, extra_files=extra_files)
@@ -1066,9 +1071,10 @@ if __name__ == "__main__":
 
 
         # Delete detection backup files. This has to happen whether or not uploading is enabled and
-        #   whether or not it succeeded: any rms_queue_bkup_*.pickle left in the captured directory
-        #   makes StartCapture treat the night as partially processed and reprocess it all over
-        #   again on the next start.
+        #   whether or not it succeeded: any rms_queue_bkup_*.pickle left in the captured directory is
+        #   dead weight once the night is archived, so tidy it up defensively. The auto-reprocess
+        #   decision no longer keys off these backups (it uses the processing status record), but
+        #   leaving them behind still wastes space and was the original cause of issue #418.
         if detector is not None:
 
             # Never let a cleanup failure mask an exception which is already propagating
