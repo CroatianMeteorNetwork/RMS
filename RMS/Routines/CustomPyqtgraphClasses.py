@@ -4053,11 +4053,14 @@ class SettingsWidget(QtWidgets.QWidget, ScaledSizeHelper):
         self.geo_marker_spinbox.setDecimals(1)
         self.geo_marker_spinbox.setToolTip('Scale the geo point markers relative to their '
                                            'automatically computed size')
-        self.updateGeoMarkerScale()
         self.geo_marker_spinbox.valueChanged.connect(self.sigGeoMarkerScaleChanged.emit)
         geo_marker_layout.addWidget(self.geo_marker_spinbox)
         geo_marker_layout.addStretch()
         vbox.addLayout(geo_marker_layout)
+
+        # Sync only after the layout is in place, as setting the visibility of a widget which has no
+        #   parent yet would briefly show it as a window of its own
+        self.updateGeoMarkerScale()
 
         self.show_constellations = QtWidgets.QCheckBox('Show Constellation Lines')
         self.show_constellations.released.connect(self.sigConstellationToggled.emit)
