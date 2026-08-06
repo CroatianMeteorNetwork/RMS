@@ -1804,6 +1804,9 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
         dlg.setMinimumWidth(400)
         layout = QtWidgets.QVBoxLayout(dlg)
 
+        # Show what the save will write into the config, so nothing changes behind the user's back
+        lm_checkbox = self._addConfigPreview(layout) if ftype == "Config" else None
+
         checkboxes = []
         for i, (label, path) in enumerate(self._locations):
             cb = QtWidgets.QCheckBox(self._locationMenuLabel(label, path))
@@ -1862,9 +1865,58 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
         if dlg.exec() == QtWidgets.QDialog.DialogCode.Accepted:
             paths = [cb.property("path") for cb in checkboxes if cb.isChecked()]
             if paths:
-                self._saveFile(ftype, paths)
+                save_lm = (lm_checkbox is not None) and lm_checkbox.isChecked()
+                self._saveFile(ftype, paths, save_lm=save_lm)
 
-    def _saveFile(self, ftype, target_dirs):
+
+    def _addConfigPreview(self, layout):
+        """ List the values a config save will write, as old -> new.
+
+        The tuned catalog limiting magnitude gets a checkbox of its own, as it is only written on
+        request. Returns that checkbox, or None if the LM was not tuned in this session.
+        """
+        pt = self.plate_tool
+
+        group = QtWidgets.QGroupBox("Values written to the config")
+        group_layout = QtWidgets.QVBoxLayout(group)
+
+        # Star extraction parameters, always written
+        for key, new_value in [
+                ("intensity_threshold", pt.override_intensity_threshold),
+                ("segment_radius", pt.override_segment_radius),
+                ("max_stars", pt.override_max_stars),
+                ("neighborhood_size", pt.override_neighborhood_size),
+                ("max_feature_ratio", pt.override_max_feature_ratio),
+                ("roundness_threshold", pt.override_roundness_threshold)]:
+
+            # Compare the strings that end up in the file, not the numbers
+            old_str = str(getattr(pt.config, key, "?"))
+            new_str = str(new_value)
+
+            if old_str == new_str:
+                group_layout.addWidget(QtWidgets.QLabel("{}: {} (unchanged)".format(key, new_str)))
+            else:
+                group_layout.addWidget(QtWidgets.QLabel("{}: {} -> {}".format(key, old_str, new_str)))
+
+        # The catalog LM is only offered when the tuner found one. Everything else that moves the LM
+        #   (the spinboxes, the R/F keys, plate fitting) is a working value that must not be saved,
+        #   or the LM that recalibration uses would drift with every save.
+        lm_checkbox = None
+        if getattr(pt, 'catalog_lm_tuned', False) and hasattr(pt, 'tuned_cat_lim_mag'):
+
+            lm_checkbox = QtWidgets.QCheckBox("catalog_mag_limit: {} -> {:.1f} (tuned)".format(
+                getattr(pt.config, 'catalog_mag_limit', "?"), pt.tuned_cat_lim_mag))
+            lm_checkbox.setChecked(True)
+            lm_checkbox.setToolTip("Recalibration matches stars down to this magnitude. "
+                                   "Uncheck to keep the value already in the config.")
+            group_layout.addWidget(lm_checkbox)
+
+        layout.addWidget(group)
+
+        return lm_checkbox
+
+
+    def _saveFile(self, ftype, target_dirs, save_lm=False):
         """Save a single file type to one or more target directories."""
         pt = self.plate_tool
         results = []
@@ -1883,13 +1935,17 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
                 try:
                     src = pt.config.config_file_name
                     dest = os.path.join(target_dir, os.path.basename(src))
+
+                    # Only write the catalog LM if it was tuned and the user kept it checked
+                    catalog_lm = pt.tuned_cat_lim_mag if save_lm else None
+
                     if os.path.realpath(src) != os.path.realpath(dest):
                         # Copy the config to the target, then write overrides into the copy
                         shutil.copy2(src, dest)
-                        pt._writeStarDetectionConfig(dest)
+                        pt._writeStarDetectionConfig(dest, catalog_mag_limit=catalog_lm)
                     else:
                         # Same file — write overrides in-place (backup handled by _writeStarDetectionConfig)
-                        pt._writeStarDetectionConfig(dest)
+                        pt._writeStarDetectionConfig(dest, catalog_mag_limit=catalog_lm)
                     # Sync in-memory config attrs so modified state is cleared
                     pt.config.intensity_threshold = pt.override_intensity_threshold
                     pt.config.neighborhood_size = pt.override_neighborhood_size
@@ -1897,6 +1953,9 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
                     pt.config.segment_radius = pt.override_segment_radius
                     pt.config.max_feature_ratio = pt.override_max_feature_ratio
                     pt.config.roundness_threshold = pt.override_roundness_threshold
+                    if catalog_lm is not None:
+                        # Match the one decimal the file holds
+                        pt.config.catalog_mag_limit = round(catalog_lm, 1)
                     pt._updateConfigSaveButtonState()
                     results.append("Config saved to: " + dest)
                 except Exception as e:
@@ -4765,7 +4824,22 @@ class PlateTool(QtWidgets.QMainWindow):
             or self.override_segment_radius != getattr(cfg, 'segment_radius', self.override_segment_radius)
             or abs(self.override_max_feature_ratio - getattr(cfg, 'max_feature_ratio', self.override_max_feature_ratio)) > 1e-6
             or abs(self.override_roundness_threshold - getattr(cfg, 'roundness_threshold', self.override_roundness_threshold)) > 1e-6
+            or self.isTunedCatalogLMUnsaved()
         )
+
+    def isTunedCatalogLMUnsaved(self):
+        """Check if the tuner found a catalog LM that is not the one in the config.
+
+        Only the tuned LM counts. The working LM (the spinboxes, the R/F keys, plate fitting) is
+        never saved, so it must not mark the config as modified either.
+        """
+        if not getattr(self, 'catalog_lm_tuned', False) or not hasattr(self, 'tuned_cat_lim_mag'):
+            return False
+
+        # Compare at the one decimal the config is written with
+        cfg_lm = getattr(self.config, 'catalog_mag_limit', self.tuned_cat_lim_mag)
+
+        return abs(round(self.tuned_cat_lim_mag, 1) - cfg_lm) > 0.05
 
     def _updateConfigSaveButtonState(self):
         """Enable/disable the Save Config button based on whether overrides differ from config."""
@@ -5344,6 +5418,9 @@ class PlateTool(QtWidgets.QMainWindow):
             # Store tuned LM for restoration after fitting (balancing may change it)
             self.tuned_cat_lim_mag = best_lm
             self.catalog_lm_tuned = True
+
+            # The tuned LM can now be saved, so offer it even if nothing else was tuned
+            self._updateConfigSaveButtonState()
 
             # Count visible catalog stars at new LM (filter to FOV first to prevent back-projection)
             _, catalog_in_fov = self.filterCatalogStarsInsideFOV(self.catalog_stars)
@@ -6082,11 +6159,18 @@ class PlateTool(QtWidgets.QMainWindow):
         return final_lm
 
 
-    def _writeStarDetectionConfig(self, config_path):
+    def _writeStarDetectionConfig(self, config_path, catalog_mag_limit=None):
         """Write star detection parameters to the specified config file.
 
         Preserves comments and formatting by doing surgical line updates.
         Uses ': ' separator like the RMS config format.
+
+        Arguments:
+            config_path: [str] Path to the config file to update.
+
+        Keyword arguments:
+            catalog_mag_limit: [float] Catalog limiting magnitude to write. None (default) leaves
+                the one in the config alone.
         """
         import re
         from datetime import datetime
@@ -6100,9 +6184,6 @@ class PlateTool(QtWidgets.QMainWindow):
             print("Config backed up to:", backup_path)
 
         # Values to update: (section, key, value)
-        # The catalog limiting magnitude is deliberately not written. It is a working value in
-        #   SkyFit2, and saving it back would shift the LM that recalibration uses every time
-        #   the config is saved.
         updates = {
             "StarExtraction": {
                 "intensity_threshold": str(self.override_intensity_threshold),
@@ -6113,6 +6194,11 @@ class PlateTool(QtWidgets.QMainWindow):
                 "roundness_threshold": str(self.override_roundness_threshold),
             },
         }
+
+        # The LM is only written when the tuner found one and the user asked to keep it. Writing it
+        #   on every save would shift the LM that recalibration matches stars at, save after save.
+        if catalog_mag_limit is not None:
+            updates["Calibration"] = {"catalog_mag_limit": "{:.1f}".format(catalog_mag_limit)}
 
         try:
             # Read existing file
@@ -6189,6 +6275,8 @@ class PlateTool(QtWidgets.QMainWindow):
             print(f"  intensity_threshold: {self.override_intensity_threshold}")
             print(f"  segment_radius: {self.override_segment_radius}")
             print(f"  max_stars: {self.override_max_stars}")
+            if catalog_mag_limit is not None:
+                print(f"  catalog_mag_limit: {catalog_mag_limit:.1f}")
 
             qmessagebox(message=f"Star detection settings saved to:\n{config_path}",
                        title="Settings Saved", message_type="info")
