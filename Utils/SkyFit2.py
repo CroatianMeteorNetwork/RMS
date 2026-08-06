@@ -232,6 +232,10 @@ except Exception as e:
     print(f'ASTRA import error: {e}')
 
 
+# Smallest max_stars a config save is allowed to write. Tuning for interactive work can settle on
+#   far fewer stars than the nightly processing needs.
+MIN_CONFIG_MAX_STARS = 800
+
 
 ##############################################################################################################
 # ASTRA GUI Code
@@ -1884,7 +1888,7 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
         for key, new_value in [
                 ("intensity_threshold", pt.override_intensity_threshold),
                 ("segment_radius", pt.override_segment_radius),
-                ("max_stars", pt.override_max_stars),
+                ("max_stars", pt.configMaxStars()),
                 ("neighborhood_size", pt.override_neighborhood_size),
                 ("max_feature_ratio", pt.override_max_feature_ratio),
                 ("roundness_threshold", pt.override_roundness_threshold)]:
@@ -1894,9 +1898,15 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
             new_str = str(new_value)
 
             if old_str == new_str:
-                group_layout.addWidget(QtWidgets.QLabel("{}: {} (unchanged)".format(key, new_str)))
+                text = "{}: {} (unchanged)".format(key, new_str)
             else:
-                group_layout.addWidget(QtWidgets.QLabel("{}: {} -> {}".format(key, old_str, new_str)))
+                text = "{}: {} -> {}".format(key, old_str, new_str)
+
+            # Say so when the floor, rather than the tuning, set the value
+            if key == "max_stars" and pt.override_max_stars < MIN_CONFIG_MAX_STARS:
+                text += " (raised to the minimum for processing)"
+
+            group_layout.addWidget(QtWidgets.QLabel(text))
 
         # The catalog LM is only offered when the tuner found one. Everything else that moves the LM
         #   (the spinboxes, the R/F keys, plate fitting) is a working value that must not be saved,
@@ -1949,7 +1959,7 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
                     # Sync in-memory config attrs so modified state is cleared
                     pt.config.intensity_threshold = pt.override_intensity_threshold
                     pt.config.neighborhood_size = pt.override_neighborhood_size
-                    pt.config.max_stars = pt.override_max_stars
+                    pt.config.max_stars = pt.configMaxStars()
                     pt.config.segment_radius = pt.override_segment_radius
                     pt.config.max_feature_ratio = pt.override_max_feature_ratio
                     pt.config.roundness_threshold = pt.override_roundness_threshold
@@ -4820,12 +4830,20 @@ class PlateTool(QtWidgets.QMainWindow):
         return (
             self.override_intensity_threshold != getattr(cfg, 'intensity_threshold', self.override_intensity_threshold)
             or self.override_neighborhood_size != getattr(cfg, 'neighborhood_size', self.override_neighborhood_size)
-            or self.override_max_stars != getattr(cfg, 'max_stars', self.override_max_stars)
+            or self.configMaxStars() != getattr(cfg, 'max_stars', self.configMaxStars())
             or self.override_segment_radius != getattr(cfg, 'segment_radius', self.override_segment_radius)
             or abs(self.override_max_feature_ratio - getattr(cfg, 'max_feature_ratio', self.override_max_feature_ratio)) > 1e-6
             or abs(self.override_roundness_threshold - getattr(cfg, 'roundness_threshold', self.override_roundness_threshold)) > 1e-6
             or self.isTunedCatalogLMUnsaved()
         )
+
+    def configMaxStars(self):
+        """Return the max_stars value that a config save writes.
+
+        Tuning for interactive work can settle on far fewer stars than the nightly processing
+        needs, so the saved value is never allowed below MIN_CONFIG_MAX_STARS.
+        """
+        return max(self.override_max_stars, MIN_CONFIG_MAX_STARS)
 
     def isTunedCatalogLMUnsaved(self):
         """Check if the tuner found a catalog LM that is not the one in the config.
@@ -6188,7 +6206,7 @@ class PlateTool(QtWidgets.QMainWindow):
             "StarExtraction": {
                 "intensity_threshold": str(self.override_intensity_threshold),
                 "segment_radius": str(self.override_segment_radius),
-                "max_stars": str(self.override_max_stars),
+                "max_stars": str(self.configMaxStars()),
                 "neighborhood_size": str(self.override_neighborhood_size),
                 "max_feature_ratio": str(self.override_max_feature_ratio),
                 "roundness_threshold": str(self.override_roundness_threshold),
@@ -6274,7 +6292,7 @@ class PlateTool(QtWidgets.QMainWindow):
             print(f"Saved star detection settings to: {config_path}")
             print(f"  intensity_threshold: {self.override_intensity_threshold}")
             print(f"  segment_radius: {self.override_segment_radius}")
-            print(f"  max_stars: {self.override_max_stars}")
+            print(f"  max_stars: {self.configMaxStars()}")
             if catalog_mag_limit is not None:
                 print(f"  catalog_mag_limit: {catalog_mag_limit:.1f}")
 
