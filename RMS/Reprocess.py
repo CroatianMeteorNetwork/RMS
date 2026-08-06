@@ -292,8 +292,8 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
                 generateCalibrationReport(config, night_data_dir, platepar=platepar)
 
             except Exception as e:
-                log.debug('Generating calibration report failed with the message:\n' + repr(e))
-                log.debug(repr(traceback.format_exception(*sys.exc_info())))
+                log.warning('Generating calibration report failed with the message:\n' + repr(e))
+                log.warning(repr(traceback.format_exception(*sys.exc_info())))
 
 
 
@@ -305,8 +305,8 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
                     sporadic_color=config.sporadic_color)
 
             except Exception as e:
-                log.debug('Shower association failed with the message:\n' + repr(e))
-                log.debug(repr(traceback.format_exception(*sys.exc_info())))
+                log.warning('Shower association failed with the message:\n' + repr(e))
+                log.warning(repr(traceback.format_exception(*sys.exc_info())))
 
 
 
@@ -354,8 +354,8 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
 
 
             except Exception as e:
-                log.debug("Generating a FOV KML file failed with the message:\n" + repr(e))
-                log.debug(repr(traceback.format_exception(*sys.exc_info())))
+                log.warning("Generating a FOV KML file failed with the message:\n" + repr(e))
+                log.warning(repr(traceback.format_exception(*sys.exc_info())))
 
 
 
@@ -366,8 +366,8 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
                                  mask=mask, platepar=platepar)
 
             except Exception as e:
-                log.debug("Preparing flux files failed with the message:\n" + repr(e))
-                log.debug(repr(traceback.format_exception(*sys.exc_info())))
+                log.warning("Preparing flux files failed with the message:\n" + repr(e))
+                log.warning(repr(traceback.format_exception(*sys.exc_info())))
 
 
     else:
@@ -384,8 +384,8 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
         plotFieldsums(night_data_dir, config)
 
     except Exception as e:
-        log.debug('Plotting field sums failed with message:\n' + repr(e))
-        log.debug(repr(traceback.format_exception(*sys.exc_info())))
+        log.warning('Plotting field sums failed with message:\n' + repr(e))
+        log.warning(repr(traceback.format_exception(*sys.exc_info())))
 
 
 
@@ -444,8 +444,8 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
                     except Exception as e:
                         print("Error in archiving process: {}".format(e))
         except Exception as e:
-            log.debug('Archiving FT files failed with message:\n' + repr(e))
-            log.debug(repr(traceback.format_exception(*sys.exc_info())))
+            log.warning('Archiving FT files failed with message:\n' + repr(e))
+            log.warning(repr(traceback.format_exception(*sys.exc_info())))
 
 
     log.info('Making a flat...')
@@ -455,8 +455,8 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
         flat_img = makeFlat(night_data_dir, config)
 
     except Exception as e:
-        log.debug('Making a flat failed with message:\n' + repr(e))
-        log.debug(repr(traceback.format_exception(*sys.exc_info())))
+        log.warning('Making a flat failed with message:\n' + repr(e))
+        log.warning(repr(traceback.format_exception(*sys.exc_info())))
         flat_img = None
         
 
@@ -494,8 +494,8 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
             extra_files.append(timelapse_path)
 
         except Exception as e:
-            log.debug('Generating a timelapse failed with message:\n' + repr(e))
-            log.debug(repr(traceback.format_exception(*sys.exc_info())))
+            log.warning('Generating a timelapse failed with message:\n' + repr(e))
+            log.warning(repr(traceback.format_exception(*sys.exc_info())))
 
     log.info('Plotting timestamp intervals...')
 
@@ -519,8 +519,8 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
 
 
     except Exception as e:
-        log.debug('Plotting timestamp interval failed with message:\n' + repr(e))
-        log.debug(repr(traceback.format_exception(*sys.exc_info())))
+        log.warning('Plotting timestamp interval failed with message:\n' + repr(e))
+        log.warning(repr(traceback.format_exception(*sys.exc_info())))
 
     # Generate a config audit report
     log.info('Generate config audit report')
@@ -543,8 +543,8 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
         extra_files.append(audit_file_path)
 
     except Exception as e:
-        log.debug('Generating config audit failed with message:\n' + repr(e))
-        log.debug(repr(traceback.format_exception(*sys.exc_info())))
+        log.warning('Generating config audit failed with message:\n' + repr(e))
+        log.warning(repr(traceback.format_exception(*sys.exc_info())))
 
 
     ### Add extra files to archive
@@ -670,8 +670,8 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
 
 
     except Exception as e:
-        log.debug('Finalizing Observation Summary failed with message:\n' + repr(e))
-        log.debug(repr(traceback.format_exception(*sys.exc_info())))
+        log.warning('Finalizing Observation Summary failed with message:\n' + repr(e))
+        log.warning(repr(traceback.format_exception(*sys.exc_info())))
 
     obs_summary_to_log = serialize(config, night_directory=night_data_dir, final=True)
     log.info("\n\nObservation Summary\n===================\n\n" + obs_summary_to_log + "\n\n")
