@@ -4059,11 +4059,6 @@ class SettingsWidget(QtWidgets.QWidget, ScaledSizeHelper):
         geo_marker_layout.addStretch()
         vbox.addLayout(geo_marker_layout)
 
-        # Only show the control if geo points are loaded
-        if self.gui.geo_points_obj is None:
-            self.geo_marker_label.hide()
-            self.geo_marker_spinbox.hide()
-
         self.show_constellations = QtWidgets.QCheckBox('Show Constellation Lines')
         self.show_constellations.released.connect(self.sigConstellationToggled.emit)
         self.updateShowConstellations()
@@ -4237,6 +4232,12 @@ class SettingsWidget(QtWidgets.QWidget, ScaledSizeHelper):
         self.show_star_names.setChecked(self.gui.show_star_names)
 
     def updateGeoMarkerScale(self):
+
+        # The control is only relevant when geo points are loaded, which can change when a state is
+        #   loaded into an already constructed GUI
+        show_control = self.gui.geo_points_obj is not None
+        self.geo_marker_label.setVisible(show_control)
+        self.geo_marker_spinbox.setVisible(show_control)
 
         # Block the signals so that syncing the widget with the GUI state doesn't trigger a redraw
         self.geo_marker_spinbox.blockSignals(True)

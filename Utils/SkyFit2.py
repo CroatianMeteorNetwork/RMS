@@ -3846,7 +3846,7 @@ class PlateTool(QtWidgets.QMainWindow):
                                      yMin=0,
                                      yMax=self.config.height)
 
-        # The geo point markers are sized relative to the frame height, so they have to be rescaled
+        # The geo point markers are sized relative to the displayed image, so they have to be rescaled
         self.updateGeoMarkerSize()
 
     def mouseOverStatus(self, x, y):
@@ -7311,23 +7311,30 @@ class PlateTool(QtWidgets.QMainWindow):
             image is fit into the image frame. The number of screen pixels per image pixel thus
             depends on the screen resolution, the display scale factor and the window size, which
             made a fixed marker size look right on some machines and far too large on others.
-            Scaling the size with the frame height keeps the markers at the same visual fraction of
-            the view everywhere. The size can be additionally scaled by the user in the Settings tab.
+            Scaling the size with the size of the displayed image keeps the markers at the same
+            visual fraction of the image everywhere. The size can be additionally scaled by the user
+            in the Settings tab.
 
         Return:
             [float] Marker size in screen pixels.
         """
 
-        # Frame height in screen pixels (0 before the window is shown for the first time)
+        # Frame size in screen pixels (0 before the window is shown for the first time)
+        frame_width = self.img_frame.width()
         frame_height = self.img_frame.height()
 
-        if frame_height <= 0:
+        if (frame_width <= 0) or (frame_height <= 0):
             base_size = 10.0
 
         else:
-            # The reference look is 10 px on a 700 px tall frame, clamped so the markers stay visible
+            # Height of the displayed image in screen pixels. The view is aspect locked, so the image
+            #   is constrained by whichever frame dimension runs out first - only using the frame
+            #   height would rescale the markers when the window is resized in the other direction.
+            image_height = min(frame_height, frame_width*self.config.height/self.config.width)
+
+            # The reference look is 10 px on a 650 px tall image, clamped so the markers stay visible
             #   on tiny windows and don't become unwieldy on very large ones
-            base_size = min(max(frame_height/70.0, 5.0), 30.0)
+            base_size = min(max(image_height/65.0, 5.0), 30.0)
 
         # Keep the markers visible even at the smallest user scale
         return max(base_size*self.geo_marker_scale, 3.0)
@@ -9689,6 +9696,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
             self.tab.param_manager.updatePlatepar()
             self.tab.debruijn.updateTable()
+            self.tab.settings.updateGeoMarkerScale()
             self.changeMode(self.mode)
 
             self.updateLeftLabels()
