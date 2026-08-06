@@ -27,7 +27,7 @@ import time
 import datetime
 import copy
 import os.path
-from multiprocessing import Process, Event, Value, Array
+from multiprocessing import Process, Value, Array
 import threading
 from collections import deque
 import os
@@ -44,9 +44,9 @@ from RMS.Misc import obfuscatePassword
 from RMS.Routines.GstreamerCapture import GstVideoFile, getStructureValue
 from RMS.Formats.ObservationSummary import addObsParam, getObservationSummaryDict
 from RMS.RawFrameSave import RawFrameSaver
-from RMS.Misc import RmsDateTime, mkdirP, UTCFromTimestamp, runWithTimeout
+from RMS.Misc import RmsDateTime, mkdirP, UTCFromTimestamp, frameBufferShape, runWithTimeout, AtomicFlag
 from RMS.Formats import FTfile, FTStruct
-from RMS.Logger import LoggingManager, getLogger, gstDebugLogger
+from RMS.Logger import LoggingManager, getLogger, gstDebugLogger, getLoggingQueue, initChildProcess
 from RMS.CaptureModeSwitcher import switchCameraMode
 import Utils.CameraControl as cc
 
@@ -135,9 +135,10 @@ class BufferedCapture(Process):
         """ Populate arrays with (startTime, frames) after startCapture is called.
         
         Arguments:
-            array1: numpy array in shared memory that is going to be filled with frames
+            array1: multiprocessing.Array base for the frame buffer that is going to be
+                filled with frames (numpy views are rebuilt per-process)
             start_time1: float in shared memory that holds time of first frame in array1
-            array2: second numpy array in shared memory
+            array2: multiprocessing.Array base for the second frame buffer
             start_time2: float in shared memory that holds time of first frame in array2
 
         Keyword arguments:
@@ -160,19 +161,24 @@ class BufferedCapture(Process):
 
         # make sure the flags are always real shared Values
         if daytime_mode is None:
-            self.daytime_mode = Value(ctypes.c_bool, False)       # default: "night"
+            self.daytime_mode = Value(ctypes.c_bool, False, lock=False)       # default: "night"
         else:
             self.daytime_mode = daytime_mode
 
         if camera_mode_switch_trigger is None:
-            self.camera_mode_switch_trigger = Value(ctypes.c_bool, False)
+            self.camera_mode_switch_trigger = Value(ctypes.c_bool, False, lock=False)
         else:
             self.camera_mode_switch_trigger = camera_mode_switch_trigger
 
-        # Store shared memory arrays and values for compressor (these are designed for multiprocessing)
-        self.array1 = array1
+        # Store shared memory arrays and values for compressor (these are designed for multiprocessing).
+        # array1/array2 are multiprocessing.Array BASE objects (picklable across forkserver/spawn).
+        # The numpy views over them are rebuilt in run() so they stay backed by shared memory; a
+        # numpy view passed here would pickle by value and disconnect this process from the buffer.
+        self.array1_base = array1
+        self.array2_base = array2
+        self.array1 = None
+        self.array2 = None
         self.start_time1 = start_time1
-        self.array2 = array2
         self.start_time2 = start_time2
         self.start_time1.value = 0
         self.start_time2.value = 0
@@ -189,21 +195,29 @@ class BufferedCapture(Process):
             # Frame saving block size - these many raw frames are written to buffer before saving to disk
             self.num_raw_frames = 10
 
-            self.start_raw_time1 = Value('d', 0.0)
-            self.start_raw_time2 = Value('d', 0.0)
+            self.start_raw_time1 = Value('d', 0.0, lock=False)
+            self.start_raw_time2 = Value('d', 0.0, lock=False)
             self.shared_timestamps_base = Array(ctypes.c_double, self.num_raw_frames)
             self.shared_timestamps_base2 = Array(ctypes.c_double, self.num_raw_frames)
 
         # Initialize shared counter for dropped frames
-        self.dropped_frames = Value('i', 0)
+        # lock=False: the capture child is the only writer (increments), the
+        # main process only reads - and stopCapture() SIGKILLs the child before
+        # reading, so a locked Value could be orphaned mid-increment and wedge
+        # the read forever (same class as the Compressor.stop() deadlock).
+        # A 32-bit int store/load is single-copy atomic on all supported
+        # platforms, including ARMv7.
+        self.dropped_frames = Value('i', 0, lock=False)
         self.last_daytime_mode = None  # Track day/night transitions
         self.dropped_frames_timestamps = deque()  # Track when frames were dropped for 10-min window
 
         # Flag for process control
-        self.exit = Event()
+        self.exit = AtomicFlag()
 
         # Heartbeat timestamp for watchdog - updated every frame block to detect hangs
-        self.heartbeat = Value('d', 0.0)
+        # lock=False: single writer, and a locked Value can deadlock the watchdog if this
+        # process is killed while holding the lock
+        self.heartbeat = Value('d', 0.0, lock=False)
 
         # Initialize sync tick
         self.last_sync_tick = -1
@@ -217,6 +231,10 @@ class BufferedCapture(Process):
         self._bus_should_exit = False
         self._bus_thread = None
 
+        # Grab the logging queue on the parent side so the child can re-attach logging
+        # under the 'forkserver'/'spawn' start methods (handlers are not inherited there)
+        self.logging_queue = getLoggingQueue()
+
 
     def startCapture(self, cameraID=0):
         """ Start capture using specified camera.
@@ -227,7 +245,7 @@ class BufferedCapture(Process):
         """
         
         self.cameraID = cameraID
-        self.exit = Event()
+        self.exit = AtomicFlag()
 
         self.start()
     
@@ -1789,8 +1807,9 @@ class BufferedCapture(Process):
 
             # Store current array configuration
             self.current_raw_frame_shape = frame_shape
+            self.raw_array_shape = array_shape
             self.current_mode = self.daytime_mode.value if self.daytime_mode is not None else False
-            
+
             return True
 
         except Exception as e:
@@ -1803,6 +1822,16 @@ class BufferedCapture(Process):
         """ Main process function - initializes all process-specific resources and runs capture loop.
         """
         try:
+            # Re-establish logging and signal handling in the child (no-op under 'fork')
+            initChildProcess(self.logging_queue, self.config)
+
+            # Rebuild numpy views over the shared frame buffers in this process. Under
+            # forkserver/spawn the views cannot be inherited, so build them here from the
+            # shared multiprocessing.Array base objects (same shared memory the Compressor maps).
+            frame_buffer_shape = frameBufferShape(self.config)
+            self.array1 = np.ctypeslib.as_array(self.array1_base.get_obj()).reshape(frame_buffer_shape)
+            self.array2 = np.ctypeslib.as_array(self.array2_base.get_obj()).reshape(frame_buffer_shape)
+
             log.debug("Initializing process-specific resources...")
 
             # Initialize heartbeat for watchdog
@@ -2135,13 +2164,17 @@ class BufferedCapture(Process):
 
                         else:
                             # Initialize new frame saver
+                            # Pass the multiprocessing.Array base objects (not numpy views), so the
+                            # saver rebuilds its own views over the same shared memory under
+                            # forkserver/spawn (a view would pickle by value and disconnect it).
                             self.raw_frame_saver = RawFrameSaver(
                                 self.saved_frames_dir,
-                                self.shared_raw_array, self.start_raw_time1,
-                                self.shared_raw_array2, self.start_raw_time2,
-                                self.sharedTimestamps, self.sharedTimestamps2,
+                                self.shared_raw_array_base, self.start_raw_time1,
+                                self.shared_raw_array_base2, self.start_raw_time2,
+                                self.shared_timestamps_base, self.shared_timestamps_base2,
                                 self.daytime_mode.value,
-                                self.config
+                                self.config,
+                                self.raw_array_shape
                             )
                             self.raw_frame_saver.start()
                             self.raw_frame_count = 0
@@ -2492,10 +2525,13 @@ if __name__ == "__main__":
     print('Media backend: {}'.format(config.media_backend))
 
 
-    # Init dummy shared memory
-    sharedArrayBase = multiprocessing.Array(ctypes.c_uint8, 256*(config.width)*(config.height))
-    sharedArray = np.ctypeslib.as_array(sharedArrayBase.get_obj())
-    sharedArray = sharedArray.reshape(256, (config.height), (config.width))
+    # Init dummy shared memory. Pass the multiprocessing.Array base (not a numpy view) to
+    # BufferedCapture, which rebuilds its own view in run() - matching the production path and
+    # keeping it working under the forkserver/spawn start methods.
+    frame_buffer_shape = frameBufferShape(config)
+    frame_buffer_len = frame_buffer_shape[0]*frame_buffer_shape[1]*frame_buffer_shape[2]
+    sharedArrayBase = multiprocessing.Array(ctypes.c_uint8, frame_buffer_len)
+    sharedArray = sharedArrayBase
     startTime = multiprocessing.Value('d', 0.0)
 
 

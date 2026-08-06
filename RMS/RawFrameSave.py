@@ -24,9 +24,10 @@ import multiprocessing
 from math import floor
 
 import cv2
+import numpy as np
 
-from RMS.Logger import getLogger
-from RMS.Misc import mkdirP, setParentDeathSignal
+from RMS.Logger import getLogger, getLoggingQueue, initChildProcess
+from RMS.Misc import mkdirP, setParentDeathSignal, AtomicFlag, stableDoubleRead
 
 # Get the logger from the main module
 log = getLogger("rmslogger")
@@ -38,39 +39,54 @@ class RawFrameSaver(multiprocessing.Process):
 
     running = False
     
-    def __init__(self, saved_frames_dir, array1, start_time1, array2, start_time2, tsArray1, tsArray2, daytime_mode, config):
+    def __init__(self, saved_frames_dir, array1, start_time1, array2, start_time2, tsArray1, tsArray2, daytime_mode, config, raw_array_shape):
         """
 
         Arguments:
             saved_frames_dir: directory to save raw frames to
-            array1: first numpy array in shared memory of raw video frames
+            array1: multiprocessing.Array base for the first raw-frame buffer (shared memory)
             start_time1: float in shared memory that holds time of first raw frame in array1
-            array2: second numpy array in shared memory
+            array2: multiprocessing.Array base for the second raw-frame buffer
             start_time1: float in shared memory that holds time of first raw frame in array2
-            tsArray1: first numpy array in shared memory for timestamps
-            tsArray2: second numpy array in shared memory for timestamps
+            tsArray1: multiprocessing.Array base for the first timestamp buffer
+            tsArray2: multiprocessing.Array base for the second timestamp buffer
             config: configuration class
             daytime_mode: [bool] True if the camera is in daytime mode, False if in nightime mode
+            raw_array_shape: [tuple] Shape of the raw-frame buffer, used to rebuild the numpy view.
 
         """
-        
+
         super(RawFrameSaver, self).__init__()
-        
+
         self.saved_frames_dir = saved_frames_dir
-        self.array1 = array1
+        # array1/array2 and the timestamp arrays are multiprocessing.Array BASE objects (picklable
+        # across forkserver/spawn). The numpy views over them are rebuilt in run() so they stay
+        # backed by the same shared memory the capture process writes into.
+        self.array1_base = array1
+        self.array2_base = array2
+        self.timeStamps1_base = tsArray1
+        self.timeStamps2_base = tsArray2
+        self.raw_array_shape = raw_array_shape
+        self.array1 = None
+        self.array2 = None
+        self.timeStamps1 = None
+        self.timeStamps2 = None
         self.start_time1 = start_time1
-        self.array2 = array2
         self.start_time2 = start_time2
-        self.timeStamps1 = tsArray1
-        self.timeStamps2 = tsArray2
         self.daytime_mode = daytime_mode
         self.config = config
 
         self.total_saved_frames = 0
         self.day_of_year = time.strftime("%j", time.gmtime())
 
-        self.exit = multiprocessing.Event()
-        self.run_exited = multiprocessing.Event()
+        # Lock-free flags: this process is terminated/SIGKILLed in the normal disconnect
+        # path, and a killed process must not be able to orphan an Event lock (see AtomicFlag)
+        self.exit = AtomicFlag()
+        self.run_exited = AtomicFlag()
+
+        # Grab the logging queue on the parent side so the child can re-attach logging
+        # under the 'forkserver'/'spawn' start methods (handlers are not inherited there)
+        self.logging_queue = getLoggingQueue()
 
         # PID of the logical parent (BufferedCapture). __init__ runs in the parent, so this
         # is captured correctly under fork, spawn AND forkserver - unlike os.getppid(),
@@ -179,6 +195,21 @@ class RawFrameSaver(multiprocessing.Process):
             self.total_saved_frames += 1
 
 
+    def ensureViews(self):
+        """ Build numpy views over the shared multiprocessing.Array bases if not already built.
+
+        Both the capture process (which calls stop() to flush tail-end frames) and this saver
+        process (run()) need a view backed by the same shared memory. Under forkserver/spawn a
+        numpy view cannot be inherited or pickled, so each process builds its own view from the
+        shared base here. Idempotent.
+        """
+        if self.array1 is None:
+            self.array1 = np.ctypeslib.as_array(self.array1_base.get_obj()).reshape(self.raw_array_shape)
+            self.array2 = np.ctypeslib.as_array(self.array2_base.get_obj()).reshape(self.raw_array_shape)
+            self.timeStamps1 = np.ctypeslib.as_array(self.timeStamps1_base.get_obj())
+            self.timeStamps2 = np.ctypeslib.as_array(self.timeStamps2_base.get_obj())
+
+
     def stop(self):
         """ Stop saving frames.
         """
@@ -186,29 +217,54 @@ class RawFrameSaver(multiprocessing.Process):
         self.exit.set()
         log.debug('Raw frame saver exit flag set')
 
-        # flush any frames whose TS array still has data
+        # Build views over the shared buffers in this (capture) process so the tail-end flush
+        # reads the same shared memory the saver process wrote into. ensureViews() rebuilds
+        # from the persistent mp.Array bases, so the views are non-None here even after a
+        # previous stop() nulled them (idempotent across the twice-daily mode switches).
+        self.ensureViews()
+
+        # Flush any frames whose TS array still has data.
+        #
+        # Defensive read: BufferedCapture.releaseRawArrays() calls stop() both on shutdown AND
+        # on every day/night mode switch. Guard against a released/None buffer so a teardown
+        # path can never zip None ("TypeError: 'NoneType' object is not iterable"), which RMS
+        # would otherwise log as a traceback on a perfectly healthy station (twice a day, per
+        # camera). There is nothing to flush in that case.
+        array1 = getattr(self, 'array1', None)
+        array2 = getattr(self, 'array2', None)
+        timestamps1 = getattr(self, 'timeStamps1', None)
+        timestamps2 = getattr(self, 'timeStamps2', None)
+
+        if array1 is None and array2 is None:
+            log.debug('Raw frame saver buffers already released - '
+                      'nothing to flush')
+
         leftovers = []
-        for frame, ts in zip(self.array1, self.timeStamps1):
-            if ts: leftovers.append((frame.copy(), float(ts)))
-        for frame, ts in zip(self.array2, self.timeStamps2):
-            if ts: leftovers.append((frame.copy(), float(ts)))
+        if (array1 is not None) and (timestamps1 is not None):
+            for frame, ts in zip(array1, timestamps1):
+                if ts: leftovers.append((frame.copy(), float(ts)))
+        if (array2 is not None) and (timestamps2 is not None):
+            for frame, ts in zip(array2, timestamps2):
+                if ts: leftovers.append((frame.copy(), float(ts)))
         if leftovers:
             log.info("Flushing %d tail-end raw frames before shutdown", len(leftovers))
             self.saveFramesToDisk(leftovers, self.daytime_mode)
 
             # mark buffers consumed so run() won’t resave them
-            self.timeStamps1.fill(0)
-            self.timeStamps2.fill(0)
+            if timestamps1 is not None:
+                timestamps1.fill(0)
+            if timestamps2 is not None:
+                timestamps2.fill(0)
             self.start_time1.value = 0
             self.start_time2.value = 0
 
         # Free shared memory after the raw frame saver is done
         try:
             log.debug('Freeing frame buffers in raw frame saver...')
-            del self.array1
-            del self.array2
-            del self.timeStamps1
-            del self.timeStamps2
+            self.array1 = None
+            self.array2 = None
+            self.timeStamps1 = None
+            self.timeStamps2 = None
 
         except Exception as e:
             log.debug('Freeing raw frame buffers failed with error:' + repr(e))
@@ -229,7 +285,18 @@ class RawFrameSaver(multiprocessing.Process):
         # Die if our parent BufferedCapture dies (e.g. watchdog force-kill). Without this
         # the orphaned saver loops forever on a shared exit Event that is never set,
         # leaking its inherited ~450 MB buffer; hundreds accumulate and OOM the box.
+        # Set as early as possible. Note that under forkserver this fires on the wrong
+        # parent's death, which is why the os.kill() liveness probe in the wait loop below
+        # complements it.
         setParentDeathSignal()
+
+        # Re-establish logging and signal handling in the child (no-op under 'fork')
+        initChildProcess(self.logging_queue, self.config)
+
+        # Rebuild numpy views over the shared raw-frame and timestamp buffers in this process.
+        # Under forkserver/spawn the views cannot be inherited, so build them here from the
+        # shared multiprocessing.Array base objects (same memory the capture process writes).
+        self.ensureViews()
 
         try:
             # Repeat until the raw frame saver is killed from the outside
@@ -266,10 +333,15 @@ class RawFrameSaver(multiprocessing.Process):
 
                 raw_buffer_one = True
 
-                if self.start_time1.value > 0:
+                # Stable reads - see Compression: torn 32-bit reads of the
+                # 0 -> t transition must not be accepted as timestamps
+                start_time1_val = stableDoubleRead(self.start_time1)
+                start_time2_val = stableDoubleRead(self.start_time2)
+
+                if start_time1_val > 0:
 
                     # Retrieve time of first frame
-                    startTime = float(self.start_time1.value)
+                    startTime = float(start_time1_val)
 
                     # Copy raw (frames, timestamps)
                     # Clear out the timestamp array so it can be used by 
@@ -278,10 +350,10 @@ class RawFrameSaver(multiprocessing.Process):
                     self.timeStamps1.fill(0)
                     raw_buffer_one = True
 
-                elif self.start_time2.value > 0:
+                elif start_time2_val > 0:
 
                     # Retrieve time of first frame
-                    startTime = float(self.start_time2.value)
+                    startTime = float(start_time2_val)
 
                     # Copy raw (frames, timestamps)
                     # Clear out the timestamp array so it can be used by 

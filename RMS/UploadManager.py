@@ -10,8 +10,8 @@ from multiprocessing import Manager
 
 import paramiko
 
-from RMS.Logger import LoggingManager, getLogger
-from RMS.Misc import mkdirP, UTCFromTimestamp, runWithTimeout
+from RMS.Logger import LoggingManager, getLogger, getLoggingQueue, initChildProcess
+from RMS.Misc import mkdirP, UTCFromTimestamp, runWithTimeout, AtomicFlag, BoundedLock
 
 # Suppress Paramiko internal errors before they appear in logs
 getLogger("paramiko.transport").setLevel(logging.CRITICAL)
@@ -547,8 +547,16 @@ class UploadManager(multiprocessing.Process):
         # Construct the path to the queue backup file
         self.upload_queue_file_path = os.path.join(self.config.data_dir, self.config.upload_queue_file)
 
-        self.exit = multiprocessing.Event()
-        self.upload_in_progress = multiprocessing.Value(ctypes.c_bool, False)
+        # Lock-free flag: stop() escalates to terminate(), which must not be able to
+        # orphan an Event lock (see AtomicFlag)
+        self.exit = AtomicFlag()
+
+        # Same hazard class as `exit`: this is a set/poll bool written by the
+        # child (which stop() can terminate() and the OOM killer can SIGKILL)
+        # and polled by the main process to gate the pre-reboot wait - a kill
+        # mid-assignment on a locked Value orphans the semaphore and the
+        # reboot poll blocks forever (review finding)
+        self.upload_in_progress = AtomicFlag()
 
         # These timing variables must be shared between processes using multiprocessing.Value() because
         # 
@@ -563,15 +571,36 @@ class UploadManager(multiprocessing.Process):
         # Value format: 'd' = double precision float (for timestamp storage)
         # Convention: 0.0 = None/not set, >0.0 = unix timestamp
         
-        # Time when the upload was run last
-        self.last_runtime = multiprocessing.Value('d', 0.0)
-        self.last_runtime_lock = multiprocessing.Lock()
+        # Time when the upload was run last. The locks are BOUNDED: they are
+        # acquired by both processes and the child can die by terminate()/OOM
+        # kill while holding one - a plain Lock then wedges the survivor
+        # forever (review finding); a stale timestamp read is harmless
+        self.last_runtime = multiprocessing.Value('d', 0.0, lock=False)
+        self.last_runtime_lock = BoundedLock('upload last_runtime')
 
         # Time when the next upload should be run (used for delaying the upload)
-        self.next_runtime = multiprocessing.Value('d', 0.0)
-        self.next_runtime_lock = multiprocessing.Lock() 
+        self.next_runtime = multiprocessing.Value('d', 0.0, lock=False)
+        self.next_runtime_lock = BoundedLock('upload next_runtime')
 
-        
+        # Grab the logging queue on the parent side so the child can re-attach logging
+        # under the 'forkserver'/'spawn' start methods (handlers are not inherited there)
+        self.logging_queue = getLoggingQueue()
+
+
+    def __getstate__(self):
+        """ Return a picklable representation of the manager.
+
+        Required under the 'forkserver'/'spawn' start methods (the default on Linux from
+        Python 3.14), where .start() pickles self and sends it to the child. The SyncManager
+        instance (self._mgr) is not picklable and is not needed in the child - the parent
+        keeps it alive, and the Queue/Lock proxies it created (self.file_queue,
+        self.file_queue_lock) are picklable and reconnect on the child side. Under 'fork' no
+        pickling occurs, so this is never called and behavior is unchanged.
+        """
+        state = self.__dict__.copy()
+        state['_mgr'] = None
+        return state
+
 
 
     def start(self):
@@ -592,8 +621,9 @@ class UploadManager(multiprocessing.Process):
         self.join(timeout)
         if not self.is_alive():
             log.info("UploadManager stopped successfully.")
+            self._shutdownManager()
             return
-        
+
         log.warning("UploadManager did not stop within the timeout period of {} seconds.".format(timeout))
         self.terminate()
 
@@ -610,6 +640,22 @@ class UploadManager(multiprocessing.Process):
 
         # Always join to reap zombie (returns instantly if already dead)
         self.join()
+        self._shutdownManager()
+
+
+    def _shutdownManager(self):
+        """ Shut down the Manager server process (parent side) so its semaphores are released
+            at shutdown instead of being reclaimed by the resource_tracker (which warns under
+            the 'forkserver'/'spawn' start methods). A no-op in child processes, where _mgr is
+            None (see __getstate__). Safe to call more than once.
+        """
+        mgr = getattr(self, '_mgr', None)
+        if mgr is not None:
+            try:
+                mgr.shutdown()
+            except Exception:
+                pass
+            self._mgr = None
 
 
 
@@ -768,12 +814,12 @@ class UploadManager(multiprocessing.Process):
         """
 
         # Skip uploading if the upload is already in progress
-        if self.upload_in_progress.value:
+        if self.upload_in_progress.is_set():
             return
 
 
         # Set flag that the upload as in progress
-        self.upload_in_progress.value = True
+        self.upload_in_progress.set()
 
         try:
             # Read the file list from disk
@@ -833,7 +879,7 @@ class UploadManager(multiprocessing.Process):
 
         finally:
             # Set the flag that the upload is done
-            self.upload_in_progress.value = False
+            self.upload_in_progress.clear()
 
 
     def delayNextUpload(self, delay=0):
@@ -855,6 +901,9 @@ class UploadManager(multiprocessing.Process):
 
     def run(self):
         """ Try uploading the files every 15 minutes. """
+
+        # Re-establish logging and signal handling in the child (no-op under 'fork')
+        initChildProcess(self.logging_queue, self.config)
 
         # Load the file queue from disk
         self.loadQueue()

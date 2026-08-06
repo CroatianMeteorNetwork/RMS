@@ -6,6 +6,9 @@ from time import time
 
 import numpy as np
 cimport numpy as np
+
+# Initialize the NumPy C API (explicit for clarity: Cython 3 (required to build against NumPy 2) emits it itself)
+np.import_array()
 cimport cython
 
 

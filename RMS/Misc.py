@@ -16,6 +16,8 @@ import datetime
 import tarfile
 import threading
 import signal
+import time
+import multiprocessing
 
 # tkinter import that works on both Python 2 and 3
 if sys.version_info[0] < 3:
@@ -43,6 +45,200 @@ if sys.version_info[0] < 3:
 
 # Get the logger from the main module
 log = getLogger("rmslogger")
+
+
+def frameBufferShape(config):
+    """ Return the shape of the shared frame buffer used for FF compression: (256, H, W).
+
+    The width/height are padded by one pixel in the rare case the buffer size is an exact
+    multiple of 512 KiB, to avoid a CPU-cache aliasing performance issue.
+
+    This is the single source of truth for the buffer shape, used both by the parent (which
+    allocates the multiprocessing.Array) and by the child processes (which rebuild a numpy
+    view over that shared memory in their own run()). Under the 'forkserver'/'spawn' start
+    methods a numpy view cannot be passed between processes (it pickles by value and becomes
+    a private copy), so each process must build its own view from the shared mp.Array base.
+
+    Arguments:
+        config: [Config] Configuration object (uses width and height).
+
+    Return:
+        [tuple] (256, height [+1], width [+1])
+    """
+    array_pad = 0
+    if (256*config.width*config.height) % (512*1024) == 0:
+        array_pad = 1
+
+    return (256, config.height + array_pad, config.width + array_pad)
+
+
+def setMultiprocessingStartMethod(preferred=None):
+    """ Pin the multiprocessing start method for consistent behavior across Python versions.
+
+    RMS uses multiprocessing throughout the capture pipeline. Historically it relied on the
+    platform default, which on Linux was 'fork' up to Python 3.13 and becomes 'forkserver'
+    in Python 3.14. By default this function pins each platform's existing default rather
+    than forcing a change: 'fork' children share the parent's memory copy-on-write, while a
+    'forkserver'/'spawn' worker re-imports the whole RMS stack, costing tens of MB of
+    private RSS and seconds of import time per worker on small stations (RPi). Linux
+    stations on Python <= 3.13 therefore stay on 'fork'; 'forkserver' is only selected on
+    Python 3.14+, where it is the upstream default anyway. Pinning explicitly keeps
+    behavior deterministic and silences the Python 3.12/3.13 DeprecationWarning about
+    relying on the implicit 'fork' default.
+
+    Call this once, early, from an entry point's __main__ block, before any Process or Pool
+    is created. It is safe to call more than once.
+
+    Keyword arguments:
+        preferred: [str] Start method to use, overriding the platform-default selection.
+            None by default (keep the platform default for this Python version).
+
+    Return:
+        [str] The start method now in effect.
+    """
+    import multiprocessing as mp
+
+    available = mp.get_all_start_methods()
+
+    if preferred is None:
+        # Keep the long-soaked platform defaults: fork on Linux through 3.13, forkserver on
+        # Linux from 3.14 (the new upstream default), spawn on Windows/macOS (fork has never
+        # been safe on macOS since 3.8 due to the Objective-C runtime).
+        if sys.platform.startswith("linux") and "fork" in available \
+                and sys.version_info < (3, 14):
+            preferred = "fork"
+        elif sys.platform.startswith("linux") and "forkserver" in available:
+            preferred = "forkserver"
+        else:
+            preferred = "spawn"
+
+    if preferred in available:
+        method = preferred
+    elif "spawn" in available:
+        method = "spawn"
+    else:
+        method = available[0]
+
+    try:
+        mp.set_start_method(method, force=True)
+    except RuntimeError:
+        # Context already fixed by an earlier call; keep the existing one
+        pass
+
+    return mp.get_start_method()
+
+
+def stableDoubleRead(shared_val, attempts=3):
+    """ Read a lock-free c_double written by another process, tolerating torn reads.
+
+    On 32-bit platforms a double store/load is two word accesses, so a read racing the
+    writer can pair a new high word with an old low word - for an epoch-magnitude
+    timestamp that yields a value wrong by up to ~1024 s that still passes a `> 0` gate.
+    Two consecutive equal reads cannot both be torn by the same in-flight store.
+
+    Arguments:
+        shared_val: [multiprocessing.Value] A c_double created with lock=False.
+
+    Return:
+        [float] The stable value (falls back to the last read if never stable).
+    """
+
+    v2 = shared_val.value
+    for _ in range(attempts):
+        v1 = shared_val.value
+        v2 = shared_val.value
+        if v1 == v2:
+            return v1
+    return v2
+
+
+class BoundedLock(object):
+    """ A multiprocessing.Lock wrapper whose acquisition is BOUNDED.
+
+    For locks shared with processes that can be OOM-killed or terminated: a kill while the
+    lock is held orphans it forever, and a plain `with lock:` then wedges every process that
+    touches it. Acquisition times out (5 s first time, 0.5 s once broken), warns once, and
+    proceeds without the lock - stale/racy data beats a permanent wedge for the counters and
+    timestamps this protects. Usable as a context manager, releasing only if acquired.
+    """
+
+    def __init__(self, name='lock', timeout=5.0):
+        self._lock = multiprocessing.Lock()
+        self._name = name
+        self._timeout = timeout
+        self._broken = False        # per-process memo of an orphaned lock
+        self._acquired_here = False
+
+    def __enter__(self):
+        timeout = 0.5 if self._broken else self._timeout
+        self._acquired_here = self._lock.acquire(timeout=timeout)
+        if not self._acquired_here and not self._broken:
+            self._broken = True
+            print('BoundedLock({:s}): not acquired after {:.1f} s - a process likely died '
+                  'holding it. Proceeding without the lock.'.format(self._name, timeout),
+                  file=sys.__stderr__)
+        if self._acquired_here:
+            self._broken = False
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self._acquired_here:
+            self._lock.release()
+            self._acquired_here = False
+        return False
+
+
+class AtomicFlag(object):
+    """ Lock-free substitute for multiprocessing.Event, for flags that are set and polled
+        across processes.
+
+        multiprocessing.Event guards its state with a shared semaphore - if any process
+        sharing the event dies while holding it (e.g. killed by the OOM killer, or by one of
+        our own terminate()/SIGKILL escalations), every later set()/is_set() blocks forever.
+        This wedged Compressor.stop() in production. A plain shared byte cannot deadlock.
+
+        wait() is provided for drop-in compatibility, implemented as a poll-sleep loop.
+    """
+
+    def __init__(self):
+        self._flag = multiprocessing.Value('b', 0, lock=False)
+
+    def set(self):
+        self._flag.value = 1
+
+    def clear(self):
+        self._flag.value = 0
+
+    def is_set(self):
+        return bool(self._flag.value)
+
+    def wait(self, timeout=None, poll_interval=1.0):
+        """ Block until the flag is set or the timeout (in seconds) expires.
+
+        NOTE: unlike multiprocessing.Event.wait, wake-up after set() is polled, so it can
+        lag by up to poll_interval - fine for the shutdown flags this replaces, but a
+        surprise for latency-sensitive uses.
+
+        Return:
+            [bool] True if the flag is set, False if the timeout expired.
+        """
+
+        # monotonic: an NTP clock step (routine at Pi boot) must not stretch or
+        # truncate the timeout
+        t_beg = time.monotonic()
+
+        while not self.is_set():
+
+            if (timeout is not None) and ((time.monotonic() - t_beg) >= timeout):
+                break
+
+            if timeout is not None:
+                time_left = timeout - (time.monotonic() - t_beg)
+                time.sleep(max(0.0, min(poll_interval, time_left)))
+            else:
+                time.sleep(poll_interval)
+
+        return self.is_set()
 
 
 def setParentDeathSignal(sig=9):

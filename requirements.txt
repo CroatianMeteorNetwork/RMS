@@ -6,10 +6,16 @@ bcrypt<4.0; python_version<'3.8'
 cryptography<4.0; python_version<'3.8'
 numpy>=1.19.0,<1.21.0 ; python_version=='3.6'
 numpy>=1.21.0,<1.24.0 ; python_version>='3.7' and python_version<'3.10'
-numpy>=1.26.0,<2.0.0 ; python_version>='3.10'
+numpy>=1.26.0,<2.0.0 ; python_version>='3.10' and python_version<'3.13'
+# numpy 1.26 never supported Python 3.13+; on 3.14 its temporary-elision refcount
+# heuristic breaks under borrowed stack references and silently corrupts large-array
+# arithmetic in function frames (all-black stacks). 2.3 is the first release with 3.14 wheels.
+numpy>=2.3.0,<3.0.0 ; python_version>='3.13'
 matplotlib>=2.1.1
 pyephem>=3.7.6.0
-cython>=0.27.3
+cython>=0.27.3 ; python_version<'3.13'
+# NumPy 2 headers require Cython >= 3.0.6 to build the .pyx modules
+cython>=3.0.6 ; python_version>='3.13'
 scipy>=1.0.0
 Pillow>=4.3.0
 astropy>=2.0.3
