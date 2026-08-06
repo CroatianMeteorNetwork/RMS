@@ -923,7 +923,7 @@ class Platepar(object):
             pp_copy.RA_d = (360 * ra_ref) % (360)
             pp_copy.dec_d = -90 + (90 * dec_ref + 90) % (180.000001)
             pp_copy.pos_angle_ref = (360 * pos_angle_ref) % (360)
-            pp_copy.F_scale = abs(F_scale)
+            pp_copy.F_scale = f_scale_fixed if fixed_scale else abs(F_scale)
 
             # Assign distortion parameters
             pp_copy.x_poly_rev = params[4:]
@@ -947,7 +947,7 @@ class Platepar(object):
             pp_copy.RA_d = (360 * ra_ref) % (360)
             pp_copy.dec_d = -90 + (90 * dec_ref + 90) % (180.000001)
             pp_copy.pos_angle_ref = (360 * pos_angle_ref) % (360)
-            pp_copy.F_scale = abs(F_scale)
+            pp_copy.F_scale = f_scale_fixed if fixed_scale else abs(F_scale)
             pp_copy.x_poly_rev = np.array(params[4:])
 
             img_x, img_y, _ = img_stars.T
@@ -973,7 +973,7 @@ class Platepar(object):
             pp_copy.RA_d = (360 * ra_ref) % (360)
             pp_copy.dec_d = -90 + (90 * dec_ref + 90) % (180.000001)
             pp_copy.pos_angle_ref = (360 * pos_angle_ref) % (360)
-            pp_copy.F_scale = abs(F_scale)
+            pp_copy.F_scale = f_scale_fixed if fixed_scale else abs(F_scale)
 
             # Assign distortion parameters
             pp_copy.x_poly_fwd = np.array(params[4:])
@@ -1009,7 +1009,7 @@ class Platepar(object):
             pp_copy.RA_d = (360 * ra_ref) % (360)
             pp_copy.dec_d = -90 + (90 * dec_ref + 90) % (180.000001)
             pp_copy.pos_angle_ref = (360 * pos_angle_ref) % (360)
-            pp_copy.F_scale = abs(F_scale)
+            pp_copy.F_scale = f_scale_fixed if fixed_scale else abs(F_scale)
             pp_copy.x_poly_fwd = np.array(params[4:])
 
             img_x, img_y, _ = img_stars.T
@@ -1048,7 +1048,7 @@ class Platepar(object):
             pp_copy.RA_d = (360 * ra_ref) % (360)
             pp_copy.dec_d = -90 + (90 * dec_ref + 90) % (180.000001)
             pp_copy.pos_angle_ref = (360 * pos_angle_ref) % (360)
-            pp_copy.F_scale = abs(F_scale)
+            pp_copy.F_scale = f_scale_fixed if fixed_scale else abs(F_scale)
 
             # Assign distortion parameters
             pp_copy.x_poly_fwd = np.array(params[4:])
@@ -1187,6 +1187,11 @@ class Platepar(object):
 
                 # Fitting the pointing direction below! - if used, it should be put BEFORE the reverse fit!
                 # Initial parameters for the pointing and distortion fit (normalize to the 0-1 range)
+                # Hold F_scale when fixed_scale is set. The radial joint fit below otherwise carries F_scale
+                # as a free parameter; the patched residual functions make the objective independent of it,
+                # and every extraction/temporary below reads this held value instead of the (drifting under
+                # Nelder-Mead) parameter. fixed_scale is forwarded through the recursive matched-pair fit too.
+                f_scale_fixed = abs(self.F_scale)
                 p0 = [self.RA_d / 360, self.dec_d / 90, self.pos_angle_ref / 360, abs(self.F_scale)]
                 p0 += self.x_poly_fwd.tolist()
 
@@ -1315,7 +1320,7 @@ class Platepar(object):
                                 self.RA_d = (360 * ra_ref) % (360)
                                 self.dec_d = -90 + (90 * dec_ref + 90) % (180.000001)
                                 self.pos_angle_ref = (360 * pos_angle_ref) % (360)
-                                self.F_scale = abs(F_scale)
+                                self.F_scale = f_scale_fixed if fixed_scale else abs(F_scale)
                                 # Update x_poly_fwd with best radial3-odd coefficients
                                 self.x_poly_fwd = np.array(best_res.x[4:])
                                 self.x_poly_rev = self.x_poly_fwd.copy()
@@ -1347,7 +1352,7 @@ class Platepar(object):
                                 self.RA_d = (360 * ra_ref) % (360)
                                 self.dec_d = -90 + (90 * dec_ref + 90) % (180.000001)
                                 self.pos_angle_ref = (360 * pos_angle_ref) % (360)
-                                self.F_scale = abs(F_scale)
+                                self.F_scale = f_scale_fixed if fixed_scale else abs(F_scale)
                                 # Update x_poly_fwd with best radial5-odd coefficients
                                 self.x_poly_fwd = np.array(best_res.x[4:])
                                 self.x_poly_rev = self.x_poly_fwd.copy()
@@ -1426,7 +1431,7 @@ class Platepar(object):
                         pp_filter.RA_d = (360 * start_params[0]) % 360
                         pp_filter.dec_d = -90 + (90 * start_params[1] + 90) % (180.000001)
                         pp_filter.pos_angle_ref = (360 * start_params[2]) % 360
-                        pp_filter.F_scale = abs(start_params[3])
+                        pp_filter.F_scale = f_scale_fixed if fixed_scale else abs(start_params[3])
                         ra_cat_all, dec_cat_all, _ = catalog_stars.T
                         cat_x, cat_y = RMS.Astrometry.ApplyAstrometry.raDecToXYPP(
                             ra_cat_all, dec_cat_all, jd, pp_filter
@@ -1473,7 +1478,7 @@ class Platepar(object):
                         pp_temp.RA_d = (360 * ra_ref) % (360)
                         pp_temp.dec_d = -90 + (90 * dec_ref + 90) % (180.000001)
                         pp_temp.pos_angle_ref = (360 * pos_angle_ref) % (360)
-                        pp_temp.F_scale = abs(F_scale)
+                        pp_temp.F_scale = f_scale_fixed if fixed_scale else abs(F_scale)
                         pp_temp.x_poly_fwd = np.array(res.x[4:])
 
                         img_x, img_y, _ = img_stars.T
@@ -1541,7 +1546,7 @@ class Platepar(object):
                             pp_iter.RA_d = iter_ra
                             pp_iter.dec_d = iter_dec
                             pp_iter.pos_angle_ref = (360 * res.x[2]) % 360
-                            pp_iter.F_scale = abs(res.x[3])
+                            pp_iter.F_scale = f_scale_fixed if fixed_scale else abs(res.x[3])
                             if len(res.x) > 4:
                                 pp_iter.x_poly_fwd = np.array(res.x[4:])
                                 pp_iter.x_poly_rev = np.array(res.x[4:])
@@ -1598,7 +1603,7 @@ class Platepar(object):
                     self.RA_d = (360 * ra_ref) % (360)
                     self.dec_d = -90 + (90 * dec_ref + 90) % (180.000001)
                     self.pos_angle_ref = (360 * pos_angle_ref) % (360)
-                    self.F_scale = abs(F_scale)
+                    self.F_scale = f_scale_fixed if fixed_scale else abs(F_scale)
                     self.x_poly_fwd = np.array(best_res.x[4:])  # Ensure numpy array
                     self.x_poly_rev = np.array(self.x_poly_fwd)  # Sync reverse with forward!
                     self.updateRefAltAz()
@@ -1655,7 +1660,7 @@ class Platepar(object):
                     print("    Final fit on {} matched stars with {} (recursive call)...".format(
                         len(img_stars_clean), original_dist_type))
                     self.fitAstrometry(jd, img_stars_clean, matched_catalog,
-                                       first_platepar_fit=False, use_nn_cost=False)
+                                       first_platepar_fit=False, use_nn_cost=False, fixed_scale=fixed_scale)
 
                     # Return the actual matched pairs from RANSAC
                     return (img_stars_clean, matched_catalog)
