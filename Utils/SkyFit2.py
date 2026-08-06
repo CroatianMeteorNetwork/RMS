@@ -13,6 +13,8 @@ import glob
 import sys
 import time
 import random
+import html
+import re
 from concurrent.futures import ThreadPoolExecutor
 import copy
 import shutil
@@ -127,10 +129,10 @@ import scipy.optimize
 from scipy.spatial import cKDTree
 try:
     import pyqtgraph as pg
-    from pyqtgraph.Qt import QtWidgets, QtGui
+    from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 except Exception as exc:
     message = [
-        "SkyFit requires PyQtGraph/PyQt5 for its GUI components, but the import failed.",
+        "SkyFit requires PyQtGraph/Qt for its GUI components, but the import failed.",
         "The most common causes are missing GUI dependencies or Windows being unable to allocate enough",
         "virtual memory (e.g. the paging file is too small).",
         f"Original import error: {exc}",
@@ -145,6 +147,29 @@ except Exception as exc:
 
     print("\n".join(message))
     sys.exit(1)
+
+
+# Names used unqualified further down. They are taken from the binding that pyqtgraph already
+# selected, so this process never ends up with two Qt bindings loaded at once.
+Qt = QtCore.Qt
+QObject = QtCore.QObject
+QThread = QtCore.QThread
+pyqtSignal = QtCore.Signal
+QFont = QtGui.QFont
+QComboBox = QtWidgets.QComboBox
+QDialog = QtWidgets.QDialog
+QFileDialog = QtWidgets.QFileDialog
+QGridLayout = QtWidgets.QGridLayout
+QGroupBox = QtWidgets.QGroupBox
+QHBoxLayout = QtWidgets.QHBoxLayout
+QLabel = QtWidgets.QLabel
+QLineEdit = QtWidgets.QLineEdit
+QProgressBar = QtWidgets.QProgressBar
+QPushButton = QtWidgets.QPushButton
+QVBoxLayout = QtWidgets.QVBoxLayout
+
+# Qt6 moved QAction from QtWidgets to QtGui, and PyQt5 only has it in QtWidgets.
+QAction = getattr(QtGui, 'QAction', None) or QtWidgets.QAction
 
 
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP, \
@@ -193,16 +218,6 @@ from RMS.Astrometry.Conversions import datetime2JD
 
 # Load the ASTRA module
 try:
-    import html, re
-
-    from PyQt5.QtWidgets import (
-        QDialog, QLabel, QVBoxLayout, QHBoxLayout, QPushButton, QLineEdit, QGroupBox, QComboBox, QFileDialog,
-        QProgressBar, QGridLayout
-    )
-    from PyQt5.QtCore import Qt, QThread, pyqtSignal, QObject
-    from PyQt5 import QtCore
-    from PyQt5.QtGui import QFont
-
     from Utils.Astra import ASTRA, PYSWARMS_AVAILABLE
 
     if not PYSWARMS_AVAILABLE:
@@ -249,19 +264,19 @@ if ASTRA_IMPORTED:
             super().__init__(parent)
 
             # Allow ASTRA to be minimized
-            self.setWindowFlag(QtCore.Qt.Window, True)
-            self.setWindowFlag(QtCore.Qt.WindowSystemMenuHint, True)
-            self.setWindowFlag(QtCore.Qt.WindowMinimizeButtonHint, True)
-            self.setWindowFlag(QtCore.Qt.WindowMaximizeButtonHint, True)
-            self.setWindowFlag(QtCore.Qt.WindowCloseButtonHint, True)
+            self.setWindowFlag(QtCore.Qt.WindowType.Window, True)
+            self.setWindowFlag(QtCore.Qt.WindowType.WindowSystemMenuHint, True)
+            self.setWindowFlag(QtCore.Qt.WindowType.WindowMinimizeButtonHint, True)
+            self.setWindowFlag(QtCore.Qt.WindowType.WindowMaximizeButtonHint, True)
+            self.setWindowFlag(QtCore.Qt.WindowType.WindowCloseButtonHint, True)
             self.setWindowFlags(
-                QtCore.Qt.Window
-                | QtCore.Qt.WindowSystemMenuHint
-                | QtCore.Qt.WindowMinimizeButtonHint
-                | QtCore.Qt.WindowMaximizeButtonHint
-                | QtCore.Qt.WindowCloseButtonHint
+                QtCore.Qt.WindowType.Window
+                | QtCore.Qt.WindowType.WindowSystemMenuHint
+                | QtCore.Qt.WindowType.WindowMinimizeButtonHint
+                | QtCore.Qt.WindowType.WindowMaximizeButtonHint
+                | QtCore.Qt.WindowType.WindowCloseButtonHint
             )
-            self.setWindowModality(QtCore.Qt.NonModal)
+            self.setWindowModality(QtCore.Qt.WindowModality.NonModal)
 
             # Make ASTRAGUI close gracefully
             self.on_close_callback = on_close_callback
@@ -287,14 +302,14 @@ if ASTRA_IMPORTED:
                 "<b>ASTRA: Astrometric Streak Tracking and Refinement Algorithm</b> <br> ASTRA is an algoritm for automating manual EMCCD picking/photometry, and can also be used to refine manual picks/photometry."
             )
             intro_label.setWordWrap(True)
-            intro_label.setAlignment(Qt.AlignCenter)
+            intro_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             pick_layout.addWidget(intro_label)
 
             info_label = QLabel(
                 "<b>ASTRA requires (at least) 3 frame-adjacent leading-edge picks at a good-SNR section AND 2 leading edge picks at the frames marking the start/end of the event. These can be loaded through ECSV/txt files, or done manually.</b> <br> Hover over parameters and READY/NOT READY icons for info."
             )
             info_label.setWordWrap(True)
-            info_label.setAlignment(Qt.AlignCenter)
+            info_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             pick_layout.addWidget(info_label)
 
             # Create two rows: first for file picker, second for revert button
@@ -762,7 +777,7 @@ if ASTRA_IMPORTED:
                 color = "#4CAF50" if ready else "#F44336"  # Green or Red
                 enable_btn = bool(ready)
             self.astra_status_dot.setText(status_text)
-            self.astra_status_dot.setAlignment(Qt.AlignCenter)
+            self.astra_status_dot.setAlignment(Qt.AlignmentFlag.AlignCenter)
             self.astra_status_dot.setStyleSheet(
                 f"background-color: {color}; color: white; border-radius: 6px; min-width: 80px; min-height: 20px;"
                 "max-height: 40px; font-weight: bold;"
@@ -790,7 +805,7 @@ if ASTRA_IMPORTED:
                 color = "#4CAF50" if ready else "#F44336"  # Green or Red
                 enable_btn = bool(ready)
             self.kalman_status_dot.setText(status_text)
-            self.kalman_status_dot.setAlignment(Qt.AlignCenter)
+            self.kalman_status_dot.setAlignment(Qt.AlignmentFlag.AlignCenter)
             self.kalman_status_dot.setStyleSheet(
                 f"background-color: {color}; color: white; border-radius: 6px; min-width: 80px; min-height: 20px;" 
                 "max-height: 40px; font-weight: bold;"
@@ -882,7 +897,7 @@ if ASTRA_IMPORTED:
 
             self.worker.results_ready.connect(
                 self.skyfit_instance.integrateASTRAResults, 
-                QtCore.Qt.QueuedConnection
+                QtCore.Qt.ConnectionType.QueuedConnection
             )
 
             # Clean up and re-enable UI
@@ -1040,7 +1055,7 @@ if ASTRA_IMPORTED:
             self.kalman_worker.progress.connect(self.updateProgress)
             self.kalman_worker.results_ready.connect(
                 self.skyfit_instance.applyKalmanResults,
-                QtCore.Qt.QueuedConnection
+                QtCore.Qt.ConnectionType.QueuedConnection
             )
 
             # Restore interactivity
@@ -1292,7 +1307,9 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
             reply = QtWidgets.QMessageBox.question(
                 self, "Unsaved Changes",
                 "The current platepar has unsaved changes.\nSave before changing station?",
-                QtWidgets.QMessageBox.StandardButton.Save | QtWidgets.QMessageBox.StandardButton.Discard | QtWidgets.QMessageBox.StandardButton.Cancel,
+                QtWidgets.QMessageBox.StandardButton.Save
+                | QtWidgets.QMessageBox.StandardButton.Discard
+                | QtWidgets.QMessageBox.StandardButton.Cancel,
                 QtWidgets.QMessageBox.StandardButton.Save)
             if reply == QtWidgets.QMessageBox.StandardButton.Cancel:
                 return
@@ -1427,7 +1444,7 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
         name_label = QtWidgets.QLabel(ftype)
         name_label.setStyleSheet("font-weight: bold;")
         status_label = QtWidgets.QLabel("")
-        status_label.setAlignment(QtCore.Qt.AlignRight)
+        status_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignRight)
         top.addWidget(name_label)
         top.addStretch()
         top.addWidget(status_label)
@@ -1842,7 +1859,7 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
 
         layout.addWidget(btn_box)
 
-        if dlg.exec_() == QtWidgets.QDialog.DialogCode.Accepted:
+        if dlg.exec() == QtWidgets.QDialog.DialogCode.Accepted:
             paths = [cb.property("path") for cb in checkboxes if cb.isChecked()]
             if paths:
                 self._saveFile(ftype, paths)
@@ -1974,7 +1991,7 @@ class QFOVinputDialog(QtWidgets.QDialog):
         layout.addWidget(QtWidgets.QLabel("Please enter FOV centre (degrees),\nAzimuth +E of due N\nRotation from vertical"))
 
         formlayout = QtWidgets.QFormLayout()
-        formlayout.setLabelAlignment(QtCore.Qt.AlignLeft)
+        formlayout.setLabelAlignment(QtCore.Qt.AlignmentFlag.AlignLeft)
 
         formlayout.addRow("Azimuth", self.azim_edit)
         formlayout.addRow("Altitude", self.alt_edit)
@@ -2635,55 +2652,55 @@ class PlateTool(QtWidgets.QMainWindow):
 
         menu = self.menuBar()
 
-        self.new_platepar_action = QtWidgets.QAction("New platepar")
+        self.new_platepar_action = QAction("New platepar")
         self.new_platepar_action.setShortcut("Ctrl+N")  # key bindings here do not get passed to keypress
         self.new_platepar_action.triggered.connect(self.makeNewPlatepar)
 
-        self.save_reduction_action = QtWidgets.QAction('Save state and reduction')
+        self.save_reduction_action = QAction('Save state and reduction')
         self.save_reduction_action.setShortcut('Ctrl+S')
         self.save_reduction_action.triggered.connect(lambda: [self.saveState(),
                                                               self.saveFTPdetectinfo(ECSV_saved=self.saveECSV())])
 
-        self.save_current_frame_action = QtWidgets.QAction('Save current frame')
+        self.save_current_frame_action = QAction('Save current frame')
         self.save_current_frame_action.setShortcut('Ctrl+W')
         self.save_current_frame_action.triggered.connect(self.saveCurrentFrame)
 
-        self.calibration_files_action = QtWidgets.QAction("File Manager...")
+        self.calibration_files_action = QAction("File Manager...")
         self.calibration_files_action.triggered.connect(self.showCalibrationFilesDialog)
 
-        self.quick_save_platepar_action = QtWidgets.QAction("Save platepar to data folder")
+        self.quick_save_platepar_action = QAction("Save platepar to data folder")
         self.quick_save_platepar_action.setShortcut('Ctrl+Shift+S')
         self.quick_save_platepar_action.triggered.connect(self.savePlatepar)
 
-        self.save_state_platepar_action = QtWidgets.QAction("Save state and platepar")
+        self.save_state_platepar_action = QAction("Save state and platepar")
         self.save_state_platepar_action.triggered.connect(lambda: [self.saveState(), self.savePlatepar()])
         self.save_state_platepar_action.setShortcut('Ctrl+S')
 
-        self.load_state_action = QtWidgets.QAction("Load state")
+        self.load_state_action = QAction("Load state")
         self.load_state_action.triggered.connect(self.findLoadState)
 
-        self.save_pairs_action = QtWidgets.QAction("Save matched pairs")
+        self.save_pairs_action = QAction("Save matched pairs")
         self.save_pairs_action.triggered.connect(self.savePairs)
 
-        self.load_pairs_action = QtWidgets.QAction("Load matched pairs")
+        self.load_pairs_action = QAction("Load matched pairs")
         self.load_pairs_action.triggered.connect(self.loadPairs)
 
-        self.toggle_info_action = QtWidgets.QAction("Toggle Info")
+        self.toggle_info_action = QAction("Toggle Info")
         self.toggle_info_action.triggered.connect(self.toggleInfo)
         self.toggle_info_action.setShortcut('F1')
 
-        self.toggle_zoom_window = QtWidgets.QAction("Toggle zoom window")
+        self.toggle_zoom_window = QAction("Toggle zoom window")
         self.toggle_zoom_window.triggered.connect(self.toggleZoomWindow)
         self.toggle_zoom_window.setShortcut('shift+Z')
 
         # Open the in-app Help tab
-        self.open_help_action = QtWidgets.QAction("SkyFit2 Guide")
+        self.open_help_action = QAction("SkyFit2 Guide")
         self.open_help_action.triggered.connect(self.openHelp)
         self.open_help_action.setShortcut('Shift+F1')
 
         # Jump straight to the keyboard reference. F1 is where users look for the shortcut list,
         # but it toggles the info panel, so give the cheat sheet its own key and menu entry.
-        self.keyboard_shortcuts_action = QtWidgets.QAction("Keyboard Shortcuts")
+        self.keyboard_shortcuts_action = QAction("Keyboard Shortcuts")
         self.keyboard_shortcuts_action.triggered.connect(self.openKeyboardReference)
 
         # CTRL + ? as an alias: on layouts where / is a shifted key (German, French, ...) the
@@ -2732,7 +2749,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.image_navigation_label.setMinimumWidth(80)
         self.status_bar.addPermanentWidget(self.image_navigation_label)
 
-        self.image_navigation_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+        self.image_navigation_slider = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
         self.image_navigation_slider.setMinimum(1)
         self.image_navigation_slider.setMaximum(1)
         self.image_navigation_slider.setValue(1)
@@ -3112,7 +3129,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.star_pick_info_text_str += "P - Photometry fit plot"
         self.star_pick_info = TextItem(self.star_pick_info_text_str, anchor=(0.0, 0.75), color=(0, 0, 0), fill=(255, 255, 255, 100))
         self.star_pick_info.setFont(QtGui.QFont('monospace', 8))
-        self.star_pick_info.setAlign(QtCore.Qt.AlignLeft)
+        self.star_pick_info.setAlign(QtCore.Qt.AlignmentFlag.AlignLeft)
         self.star_pick_info.hide()
         self.star_pick_info.setZValue(10)
         self.star_pick_info.setParentItem(self.img_frame)
@@ -3142,26 +3159,26 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Celestial grid
         self.grid_visible = 1
-        self.celestial_grid = pg.PlotCurveItem(pen=pg.mkPen((255, 255, 255, 150), style=QtCore.Qt.DotLine))
+        self.celestial_grid = pg.PlotCurveItem(pen=pg.mkPen((255, 255, 255, 150), style=QtCore.Qt.PenStyle.DotLine))
         self.celestial_grid.setZValue(1)
         self.img_frame.addItem(self.celestial_grid)
 
 
         # Great circle fit
-        self.great_circle_line = pg.PlotCurveItem(pen=pg.mkPen((138, 43, 226, 255), style=QtCore.Qt.DotLine))
+        self.great_circle_line = pg.PlotCurveItem(pen=pg.mkPen((138, 43, 226, 255), style=QtCore.Qt.PenStyle.DotLine))
         self.great_circle_line.setZValue(1)
         self.img_frame.addItem(self.great_circle_line)
 
 
         # Fit residuals (image, orange)
         self.residual_lines_img = pg.PlotCurveItem(connect='pairs', pen=pg.mkPen((255, 128, 0),
-                                                                             style=QtCore.Qt.DashLine))
+                                                                             style=QtCore.Qt.PenStyle.DashLine))
         self.img_frame.addItem(self.residual_lines_img)
         self.residual_lines_img.setZValue(2)
         
         # Fit residuals (astrometric, yellow)
         self.residual_lines_astro = pg.PlotCurveItem(connect='pairs', pen=pg.mkPen((255, 255, 0),
-                                                                             style=QtCore.Qt.DashLine))
+                                                                             style=QtCore.Qt.PenStyle.DashLine))
         self.img_frame.addItem(self.residual_lines_astro)
         self.residual_lines_astro.setZValue(2)
 
@@ -3291,7 +3308,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Current polygon being drawn (yellow dashed line)
         self.mask_current_line = pg.PlotCurveItem(
-            pen=pg.mkPen((255, 255, 0), width=2, style=QtCore.Qt.DashLine))
+            pen=pg.mkPen((255, 255, 0), width=2, style=QtCore.Qt.PenStyle.DashLine))
         self.mask_current_line.setZValue(15)
         self.img_frame.addItem(self.mask_current_line)
 
@@ -3614,7 +3631,8 @@ class PlateTool(QtWidgets.QMainWindow):
         """
         if dir_path is None:
             dir_path = str(QtWidgets.QFileDialog.getExistingDirectory(self, "Select new station folder",
-                                                                  self.dir_path, QtWidgets.QFileDialog.Option.ShowDirsOnly))
+                                                                      self.dir_path,
+                                                                      QtWidgets.QFileDialog.Option.ShowDirsOnly))
 
         if not dir_path:
             return False
@@ -4462,7 +4480,7 @@ class PlateTool(QtWidgets.QMainWindow):
                             # Anchor (1.0, 0.5) places text right edge at anchor point
                             # Small offset clears the marker without drifting too much on zoom
                             text_item = TextItem(html=html_text, anchor=(1.0, 0.5))
-                            text_item.setAlign(QtCore.Qt.AlignRight)
+                            text_item.setAlign(QtCore.Qt.AlignmentFlag.AlignRight)
                             text_item.setPos(self.catalog_x_filtered[i] - 3,
                                              self.catalog_y_filtered[i] + 0.5)
                             # Cache for reuse
@@ -7559,7 +7577,7 @@ class PlateTool(QtWidgets.QMainWindow):
                     text_resid.setPos(star_x, star_y)
                     text_resid.setFont(QtGui.QFont('Arial', photom_resid_size))
                     text_resid.setColor(QtGui.QColor(255, 255, 255))
-                    text_resid.setAlign(QtCore.Qt.AlignCenter)
+                    text_resid.setAlign(QtCore.Qt.AlignmentFlag.AlignCenter)
                     self.residual_text.addTextItem(text_resid)
 
                     # Add the star magnitude above the star
@@ -7567,7 +7585,7 @@ class PlateTool(QtWidgets.QMainWindow):
                     text_mag.setPos(star_x, star_y)
                     text_mag.setFont(QtGui.QFont('Arial', 10))
                     text_mag.setColor(QtGui.QColor(0, 255, 0))
-                    text_mag.setAlign(QtCore.Qt.AlignCenter)
+                    text_mag.setAlign(QtCore.Qt.AlignmentFlag.AlignCenter)
                     self.residual_text.addTextItem(text_mag)
 
                     # Add SNR to the right of the star
@@ -7575,7 +7593,7 @@ class PlateTool(QtWidgets.QMainWindow):
                     text_snr.setPos(star_x, star_y)
                     text_snr.setFont(QtGui.QFont('Arial', 8))
                     text_snr.setColor(snr_color)
-                    text_snr.setAlign(QtCore.Qt.AlignCenter)
+                    text_snr.setAlign(QtCore.Qt.AlignmentFlag.AlignCenter)
                     self.residual_text.addTextItem(text_snr)
 
 
@@ -9112,7 +9130,9 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Remove other PlotCurveItem objects which cannot be pickled
         # Generic scrubber for pyqtgraph/qt items
-        unpicklable_modules = ('pyqtgraph', 'PyQt5', 'RMS.Routines.CustomPyqtgraphClasses', 'matplotlib')
+        # Cover every Qt binding pyqtgraph might have selected, not just PyQt5
+        unpicklable_modules = ('pyqtgraph', 'PyQt5', 'PyQt6', 'PySide2', 'PySide6',
+                               'RMS.Routines.CustomPyqtgraphClasses', 'matplotlib')
         keys_to_remove = []
         for k, v in dic.items():
 
@@ -9730,7 +9750,7 @@ class PlateTool(QtWidgets.QMainWindow):
         """Event filter to catch mouse release and global keyboard shortcuts."""
 
         # Handle mouse release on view_widget viewport (ViewBox doesn't receive it during panning)
-        if event.type() == QtCore.QEvent.MouseButtonRelease:
+        if event.type() == QtCore.QEvent.Type.MouseButtonRelease:
             # Only handle if obj is the view_widget viewport
             if obj == self.view_widget.viewport():
                 # Convert widget coords to scene coords
@@ -9739,35 +9759,35 @@ class PlateTool(QtWidgets.QMainWindow):
             return False  # Don't consume the event
 
         # Handle global keyboard shortcuts
-        if event.type() == QtCore.QEvent.KeyPress:
+        if event.type() == QtCore.QEvent.Type.KeyPress:
             modifiers = event.modifiers()
             key = event.key()
 
             # While typing in a text input (e.g. the Help search box), let the widget keep the
             # keystrokes. Escape still falls through so it can return focus to the image.
-            if key != QtCore.Qt.Key_Escape and self._isTextInputFocused():
+            if key != QtCore.Qt.Key.Key_Escape and self._isTextInputFocused():
                 return False
 
             # Check if this is a shortcut we want to handle globally
             should_intercept = False
 
             # Intercept Ctrl+key combinations (but not when in a text input that needs Ctrl+C/V/X/A)
-            if modifiers & QtCore.Qt.ControlModifier:
+            if modifiers & QtCore.Qt.KeyboardModifier.ControlModifier:
                 # Don't intercept standard text editing shortcuts in text widgets
                 if isinstance(obj, (QtWidgets.QLineEdit, QtWidgets.QTextEdit, QtWidgets.QPlainTextEdit)):
-                    if key in (QtCore.Qt.Key_C, QtCore.Qt.Key_V, QtCore.Qt.Key_X, QtCore.Qt.Key_A):
+                    if key in (QtCore.Qt.Key.Key_C, QtCore.Qt.Key.Key_V, QtCore.Qt.Key.Key_X, QtCore.Qt.Key.Key_A):
                         return False  # Let text widget handle copy/paste/cut/select-all
                 should_intercept = True
 
             # Intercept arrow keys (for image navigation and scale adjustment)
-            elif key in (QtCore.Qt.Key_Left, QtCore.Qt.Key_Right, QtCore.Qt.Key_Up, QtCore.Qt.Key_Down):
+            elif key in (QtCore.Qt.Key.Key_Left, QtCore.Qt.Key.Key_Right, QtCore.Qt.Key.Key_Up, QtCore.Qt.Key.Key_Down):
                 # Don't intercept if focus is on a spinbox (arrows change values)
                 if not isinstance(obj, (QtWidgets.QSpinBox, QtWidgets.QDoubleSpinBox,
                                        QtWidgets.QAbstractSpinBox)):
                     should_intercept = True
 
             # Intercept Escape key to return focus to image
-            elif key == QtCore.Qt.Key_Escape:
+            elif key == QtCore.Qt.Key.Key_Escape:
                 self.img_frame.setFocus()
                 if self.star_pick_mode:
                     # Let the event propagate to keyPressEvent for star pick handling
@@ -9776,9 +9796,9 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Intercept single-letter shortcuts that should work globally
             # (but not when typing in text inputs or spinboxes)
-            elif key in (QtCore.Qt.Key_M, QtCore.Qt.Key_R, QtCore.Qt.Key_F, QtCore.Qt.Key_H,
-                         QtCore.Qt.Key_I, QtCore.Qt.Key_P, QtCore.Qt.Key_C, QtCore.Qt.Key_D,
-                         QtCore.Qt.Key_B, QtCore.Qt.Key_V):
+            elif key in (QtCore.Qt.Key.Key_M, QtCore.Qt.Key.Key_R, QtCore.Qt.Key.Key_F, QtCore.Qt.Key.Key_H,
+                         QtCore.Qt.Key.Key_I, QtCore.Qt.Key.Key_P, QtCore.Qt.Key.Key_C, QtCore.Qt.Key.Key_D,
+                         QtCore.Qt.Key.Key_B, QtCore.Qt.Key.Key_V):
                 # Don't intercept if focus is on a text/spin widget
                 # Check the widget and its parent (spinbox line edits have spinbox as parent)
                 widget = obj
@@ -9859,12 +9879,12 @@ class PlateTool(QtWidgets.QMainWindow):
         if self.mode == 'skyfit':
 
             # Add star
-            if button == QtCore.Qt.LeftButton:
+            if button == QtCore.Qt.MouseButton.LeftButton:
 
                 if self.cursor.mode == 0:
 
                     # If CTRL is pressed, place the pick manually - NOTE: the intensity might be off then!!!
-                    if modifiers & QtCore.Qt.ControlModifier:
+                    if modifiers & QtCore.Qt.KeyboardModifier.ControlModifier:
                         self.x_centroid = self.mouse_x - 0.5
                         self.y_centroid = self.mouse_y - 0.5
 
@@ -9982,7 +10002,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
             # Remove star pair on right click
-            elif button == QtCore.Qt.RightButton:
+            elif button == QtCore.Qt.MouseButton.RightButton:
                 if self.cursor.mode == 0:
 
                     # Remove the closest picked star from the list
@@ -9999,13 +10019,14 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Add centroid in manual reduction
         else:
-            if button == QtCore.Qt.LeftButton:
+            if button == QtCore.Qt.MouseButton.LeftButton:
 
                 if self.cursor.mode == 0:
                     mode = 1
 
-                    if modifiers & QtCore.Qt.ControlModifier or \
-                            ((modifiers & QtCore.Qt.AltModifier or QtCore.Qt.Key_0 in self.keys_pressed) and
+                    if modifiers & QtCore.Qt.KeyboardModifier.ControlModifier or \
+                            ((modifiers & QtCore.Qt.KeyboardModifier.AltModifier
+                              or QtCore.Qt.Key.Key_0 in self.keys_pressed) and
                              self.img.img_handle.input_type == 'dfn'):
 
                         self.x_centroid, self.y_centroid = self.mouse_x - 0.5, self.mouse_y - 0.5
@@ -10021,7 +10042,8 @@ class PlateTool(QtWidgets.QMainWindow):
                             print("Skipping detection: non-positive intensity ({:.1f})".format(source_intens))
                             return
 
-                    if (modifiers & QtCore.Qt.AltModifier or QtCore.Qt.Key_0 in self.keys_pressed) and \
+                    if (modifiers & QtCore.Qt.KeyboardModifier.AltModifier
+                            or QtCore.Qt.Key.Key_0 in self.keys_pressed) and \
                             self.img.img_handle.input_type == 'dfn':
                         mode = 0
 
@@ -10043,7 +10065,7 @@ class PlateTool(QtWidgets.QMainWindow):
                                           add_photometry=True)
                     self.drawPhotometryColoring()
 
-            elif button == QtCore.Qt.RightButton:
+            elif button == QtCore.Qt.MouseButton.RightButton:
                 if self.cursor.mode == 0:
                     self.removeCentroid(self.img.getFrame())
                     self.updatePicks()
@@ -10136,11 +10158,11 @@ class PlateTool(QtWidgets.QMainWindow):
 
     def onMousePressed(self, event):
 
-        if event.button() == QtCore.Qt.LeftButton:
+        if event.button() == QtCore.Qt.MouseButton.LeftButton:
             self.clicked = 1
-        elif event.button() == QtCore.Qt.MiddleButton:
+        elif event.button() == QtCore.Qt.MouseButton.MiddleButton:
             self.clicked = 2
-        elif event.button() == QtCore.Qt.RightButton:
+        elif event.button() == QtCore.Qt.MouseButton.RightButton:
             self.clicked = 3
 
         modifiers = QtWidgets.QApplication.keyboardModifiers()
@@ -10159,8 +10181,8 @@ class PlateTool(QtWidgets.QMainWindow):
             mp = self.img_frame.mapSceneToView(pos)
             click_x, click_y = mp.x() - 0.5, mp.y() - 0.5
 
-            if event.button() in (QtCore.Qt.LeftButton, QtCore.Qt.RightButton):
-                self.mask_brush_erasing = (event.button() == QtCore.Qt.RightButton)
+            if event.button() in (QtCore.Qt.MouseButton.LeftButton, QtCore.Qt.MouseButton.RightButton):
+                self.mask_brush_erasing = (event.button() == QtCore.Qt.MouseButton.RightButton)
                 self.mask_brush_painting = True
                 self.mask_brush_last_pos = None
                 self.brushStrokeBegin()
@@ -10176,11 +10198,11 @@ class PlateTool(QtWidgets.QMainWindow):
 
             vertex_hit = self.findNearestMaskVertex(click_x, click_y, threshold=15)
 
-            if event.button() == QtCore.Qt.LeftButton:
+            if event.button() == QtCore.Qt.MouseButton.LeftButton:
                 if vertex_hit is not None:
                     self.mask_dragging_vertex = vertex_hit
                     return
-                elif modifiers & QtCore.Qt.ControlModifier:
+                elif modifiers & QtCore.Qt.KeyboardModifier.ControlModifier:
                     edge_hit = self.findNearestMaskEdge(click_x, click_y, threshold=15)
                     if edge_hit is not None:
                         self.insertMaskVertex(edge_hit, click_x, click_y)
@@ -10188,7 +10210,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 elif self.mask_draw_mode:
                     self.addMaskPoint(click_x, click_y)
                     return
-            elif event.button() == QtCore.Qt.RightButton:
+            elif event.button() == QtCore.Qt.MouseButton.RightButton:
                 if vertex_hit is not None:
                     self.deleteMaskVertex(vertex_hit)
                     return
@@ -10199,28 +10221,31 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Don't run shortcuts while typing in a text input (e.g. the Help search box). Escape is
         # still allowed through (it returns focus to the image).
-        if event.key() != QtCore.Qt.Key_Escape and self._isTextInputFocused():
+        if event.key() != QtCore.Qt.Key.Key_Escape and self._isTextInputFocused():
             return
 
         # Read modifiers (e.g. CTRL, SHIFT)
         modifiers = QtWidgets.QApplication.keyboardModifiers()
         qmodifiers = QtWidgets.QApplication.queryKeyboardModifiers()
 
-        # Strip the GroupSwitchModifier (constantly pressed on some systems for some reason, not used in SkyFit)
-        modifiers &= ~int(QtCore.Qt.GroupSwitchModifier)
-        qmodifiers &= ~int(QtCore.Qt.GroupSwitchModifier)
+        # Strip the GroupSwitchModifier (constantly pressed on some systems for some reason, not used in SkyFit).
+        # Invert the enum member itself instead of an int() of it - on Qt6 bindings the modifier flags are
+        # enum.Flag members, which do not convert to int.
+        group_switch = QtCore.Qt.KeyboardModifier.GroupSwitchModifier
+        modifiers &= ~group_switch
+        qmodifiers &= ~group_switch
 
         self.keys_pressed.append(event.key())
 
         # Handle mask drawing - Space or Enter to close polygon
         if self.mask_draw_mode and len(self.mask_current_polygon) >= 3:
-            if event.key() in (QtCore.Qt.Key_Space, QtCore.Qt.Key_Return, QtCore.Qt.Key_Enter):
-                if modifiers == QtCore.Qt.NoModifier:
+            if event.key() in (QtCore.Qt.Key.Key_Space, QtCore.Qt.Key.Key_Return, QtCore.Qt.Key.Key_Enter):
+                if modifiers == QtCore.Qt.KeyboardModifier.NoModifier:
                     self.closeMaskPolygon()
                     return
 
         # Handle brush undo - Ctrl+Z when on mask tab
-        if event.key() == QtCore.Qt.Key_Z and (modifiers == QtCore.Qt.ControlModifier):
+        if event.key() == QtCore.Qt.Key.Key_Z and (modifiers == QtCore.Qt.KeyboardModifier.ControlModifier):
             mask_tab_index = self.tab.indexOf(self.tab.mask)
             if self.tab.currentIndex() == mask_tab_index and self.mask_brush_stroke_history:
                 self.undoBrushStroke()
@@ -10231,13 +10256,13 @@ class PlateTool(QtWidgets.QMainWindow):
             return
 
         # Toggle auto levels
-        if event.key() == QtCore.Qt.Key_A and (modifiers == QtCore.Qt.ControlModifier):
+        if event.key() == QtCore.Qt.Key.Key_A and (modifiers == QtCore.Qt.KeyboardModifier.ControlModifier):
 
             self.tab.hist.toggleAutoLevels()
             # This updates image automatically
 
         # Load the dark
-        elif event.key() == QtCore.Qt.Key_D and (modifiers == QtCore.Qt.ControlModifier):
+        elif event.key() == QtCore.Qt.Key.Key_D and (modifiers == QtCore.Qt.KeyboardModifier.ControlModifier):
             
             dark_file, self.dark = self.loadDark(force_dialog=True)
             if dark_file:
@@ -10261,24 +10286,26 @@ class PlateTool(QtWidgets.QMainWindow):
             self.img.reloadImage()
 
         # Jump to the next star
-        elif event.key() == QtCore.Qt.Key_Space and (modifiers == QtCore.Qt.ShiftModifier):
+        elif event.key() == QtCore.Qt.Key.Key_Space and (modifiers == QtCore.Qt.KeyboardModifier.ShiftModifier):
 
             self.jumpNextStar(miss_this_one=True)
             self.updateBottomLabel()
 
 
         # Fit spectral band ratios (hidden feature)
-        elif event.key() == QtCore.Qt.Key_B and modifiers == (QtCore.Qt.ControlModifier | QtCore.Qt.ShiftModifier):
+        elif event.key() == QtCore.Qt.Key.Key_B \
+                and modifiers == (QtCore.Qt.KeyboardModifier.ControlModifier
+                                  | QtCore.Qt.KeyboardModifier.ShiftModifier):
             self.fitBandRatio()
 
         # Toggle satellite tracks
-        elif event.key() == QtCore.Qt.Key_T and (modifiers == QtCore.Qt.ControlModifier):
+        elif event.key() == QtCore.Qt.Key.Key_T and (modifiers == QtCore.Qt.KeyboardModifier.ControlModifier):
              self.toggleSatelliteTracks()
 
 
 
         # Load the flat
-        elif event.key() == QtCore.Qt.Key_F and (modifiers == QtCore.Qt.ControlModifier):
+        elif event.key() == QtCore.Qt.Key.Key_F and (modifiers == QtCore.Qt.KeyboardModifier.ControlModifier):
 
             flat_file, self.flat_struct = self.loadFlat(force_dialog=True)
             if flat_file:
@@ -10294,7 +10321,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self.img.reloadImage()
 
         # Toggle the star picking mode
-        elif event.key() == QtCore.Qt.Key_R and (modifiers == QtCore.Qt.ControlModifier):
+        elif event.key() == QtCore.Qt.Key.Key_R and (modifiers == QtCore.Qt.KeyboardModifier.ControlModifier):
 
             self.star_pick_mode = not self.star_pick_mode
             self.updateBottomLabel()
@@ -10323,44 +10350,44 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
         # Toggle grid
-        elif (event.key() == QtCore.Qt.Key_G) and (modifiers == QtCore.Qt.ControlModifier):
+        elif (event.key() == QtCore.Qt.Key.Key_G) and (modifiers == QtCore.Qt.KeyboardModifier.ControlModifier):
             self.grid_visible = (self.grid_visible + 1)%3
             self.onGridChanged()
             self.tab.settings.updateShowGrid()
 
 
         # Previous image/frame
-        elif event.key() == QtCore.Qt.Key_Left:
+        elif event.key() == QtCore.Qt.Key.Key_Left:
 
             n = -1
 
             # Skip 10 images back if CTRL is pressed
-            if modifiers == QtCore.Qt.ControlModifier:
+            if modifiers == QtCore.Qt.KeyboardModifier.ControlModifier:
                 n = -10
 
             self.nextImg(n=n)
 
 
         # Next image/frame
-        elif event.key() == QtCore.Qt.Key_Right:
+        elif event.key() == QtCore.Qt.Key.Key_Right:
 
             n = 1
 
             # Skip 10 images forward if CTRL is pressed
-            if modifiers == QtCore.Qt.ControlModifier:
+            if modifiers == QtCore.Qt.KeyboardModifier.ControlModifier:
                 n = 10
 
             self.nextImg(n=n)
 
 
         # Switch between maxpixel and avepixel
-        elif event.key() == QtCore.Qt.Key_M:
+        elif event.key() == QtCore.Qt.Key.Key_M:
             self.toggleImageType()
             self.tab.settings.updateMaxAvePixel()
 
 
         # Change catalog limiting magnitude
-        elif event.key() == QtCore.Qt.Key_R:
+        elif event.key() == QtCore.Qt.Key.Key_R:
             self.cat_lim_mag += 0.1
             self.catalog_stars = self.loadCatalogStars(self.cat_lim_mag)
 
@@ -10368,7 +10395,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self.updateStars()
             self.tab.settings.updateLimMag()
 
-        elif event.key() == QtCore.Qt.Key_F:
+        elif event.key() == QtCore.Qt.Key.Key_F:
             self.cat_lim_mag -= 0.1
             self.catalog_stars = self.loadCatalogStars(self.cat_lim_mag)
 
@@ -10378,7 +10405,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
         # Increase image gamma
-        elif event.key() == QtCore.Qt.Key_U and not modifiers == QtCore.Qt.ControlModifier:
+        elif event.key() == QtCore.Qt.Key.Key_U and not modifiers == QtCore.Qt.KeyboardModifier.ControlModifier:
 
             # Increase image gamma by a factor of 1.1x
             self.img.updateGamma(1/0.9)
@@ -10387,7 +10414,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self.updateLeftLabels()
             self.tab.settings.updateImageGamma()
 
-        elif event.key() == QtCore.Qt.Key_J and not modifiers == QtCore.Qt.ControlModifier:
+        elif event.key() == QtCore.Qt.Key.Key_J and not modifiers == QtCore.Qt.KeyboardModifier.ControlModifier:
 
             # Decrease image gamma by a factor of 0.9x
             self.img.updateGamma(0.9)
@@ -10398,7 +10425,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self.tab.settings.updateImageGamma()
 
         # Toggle refraction
-        elif event.key() == QtCore.Qt.Key_T:
+        elif event.key() == QtCore.Qt.Key.Key_T:
             if self.platepar is not None:
                 self.platepar.refraction = not self.platepar.refraction
 
@@ -10406,12 +10433,12 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.tab.param_manager.updatePlatepar()
 
         # Toggle showing the catalog stars
-        elif event.key() == QtCore.Qt.Key_H and not (modifiers == QtCore.Qt.ShiftModifier):
+        elif event.key() == QtCore.Qt.Key.Key_H and not (modifiers == QtCore.Qt.KeyboardModifier.ShiftModifier):
             self.toggleShowCatStars()
             self.tab.settings.updateShowCatStars()
 
         # Toggle showing astrometry.net matched stars (Shift+H)
-        elif event.key() == QtCore.Qt.Key_H and (modifiers == QtCore.Qt.ShiftModifier):
+        elif event.key() == QtCore.Qt.Key.Key_H and (modifiers == QtCore.Qt.KeyboardModifier.ShiftModifier):
             self.toggleShowAstrometryNetStars()
             if self.astrometry_solution_info is not None:
                 matched_count = len(self.astrometry_solution_info.get('matched_pairs', []))
@@ -10423,7 +10450,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 print("No astrometry.net solution available. Run 'CTRL+X' or 'CTRL+SHIFT+X' first.")
 
         # Toggle inverting colors
-        elif (event.key() == QtCore.Qt.Key_I) and not (modifiers == QtCore.Qt.ControlModifier):
+        elif (event.key() == QtCore.Qt.Key.Key_I) and not (modifiers == QtCore.Qt.KeyboardModifier.ControlModifier):
             self.toggleInvertColours()
             self.tab.settings.updateInvertColours()
 
@@ -10432,7 +10459,7 @@ class PlateTool(QtWidgets.QMainWindow):
         elif self.mode == 'skyfit':
 
             # Change distortion type to poly3+radial
-            if (event.key() == QtCore.Qt.Key_1) and (modifiers == QtCore.Qt.ControlModifier):
+            if (event.key() == QtCore.Qt.Key.Key_1) and (modifiers == QtCore.Qt.KeyboardModifier.ControlModifier):
 
                 self.dist_type_index = 0
                 self.changeDistortionType()
@@ -10442,7 +10469,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.updateStars()
 
             # Change distortion type to poly3+radial3
-            if (event.key() == QtCore.Qt.Key_2) and (modifiers == QtCore.Qt.ControlModifier):
+            if (event.key() == QtCore.Qt.Key.Key_2) and (modifiers == QtCore.Qt.KeyboardModifier.ControlModifier):
 
                 self.dist_type_index = 1
                 self.changeDistortionType()
@@ -10452,7 +10479,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.updateStars()
 
             # Change distortion type to poly3+radial5
-            if (event.key() == QtCore.Qt.Key_3) and (modifiers == QtCore.Qt.ControlModifier):
+            if (event.key() == QtCore.Qt.Key.Key_3) and (modifiers == QtCore.Qt.KeyboardModifier.ControlModifier):
 
                 self.dist_type_index = 6
                 self.changeDistortionType()
@@ -10462,7 +10489,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.updateStars()
 
             # Change distortion type to radial3
-            elif (event.key() == QtCore.Qt.Key_4) and (modifiers == QtCore.Qt.ControlModifier):
+            elif (event.key() == QtCore.Qt.Key.Key_4) and (modifiers == QtCore.Qt.KeyboardModifier.ControlModifier):
 
                 self.dist_type_index = 7
                 self.changeDistortionType()
@@ -10472,7 +10499,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.updateStars()
 
             # Change distortion type to radial5
-            elif (event.key() == QtCore.Qt.Key_5) and (modifiers == QtCore.Qt.ControlModifier):
+            elif (event.key() == QtCore.Qt.Key.Key_5) and (modifiers == QtCore.Qt.KeyboardModifier.ControlModifier):
 
                 self.dist_type_index = 8
                 self.changeDistortionType()
@@ -10482,7 +10509,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.updateStars()
 
             # Change distortion type to radial7
-            elif (event.key() == QtCore.Qt.Key_6) and (modifiers == QtCore.Qt.ControlModifier):
+            elif (event.key() == QtCore.Qt.Key.Key_6) and (modifiers == QtCore.Qt.KeyboardModifier.ControlModifier):
 
                 self.dist_type_index = 9
                 self.changeDistortionType()
@@ -10492,7 +10519,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.updateStars()
 
             # Change distortion type to radial9
-            elif (event.key() == QtCore.Qt.Key_7) and (modifiers == QtCore.Qt.ControlModifier):
+            elif (event.key() == QtCore.Qt.Key.Key_7) and (modifiers == QtCore.Qt.KeyboardModifier.ControlModifier):
 
                 self.dist_type_index = 10
                 self.changeDistortionType()
@@ -10502,21 +10529,22 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.updateStars()
 
             # Make new platepar
-            elif (event.key() == QtCore.Qt.Key_N) and (modifiers == QtCore.Qt.ControlModifier):
+            elif (event.key() == QtCore.Qt.Key.Key_N) and (modifiers == QtCore.Qt.KeyboardModifier.ControlModifier):
                 self.makeNewPlatepar()
 
             # Show distortion
-            elif (event.key() == QtCore.Qt.Key_I) and (modifiers == QtCore.Qt.ControlModifier):
+            elif (event.key() == QtCore.Qt.Key.Key_I) and (modifiers == QtCore.Qt.KeyboardModifier.ControlModifier):
                 self.toggleDistortion()
                 self.tab.settings.updateShowDistortion()
 
 
             # Do a fit on the selected stars while in the star picking mode
-            elif (event.key() == QtCore.Qt.Key_Z) and ((modifiers == QtCore.Qt.ControlModifier) \
-                or (modifiers == (QtCore.Qt.ControlModifier | QtCore.Qt.ShiftModifier))):
+            elif (event.key() == QtCore.Qt.Key.Key_Z) and ((modifiers == QtCore.Qt.KeyboardModifier.ControlModifier) \
+                or (modifiers == (QtCore.Qt.KeyboardModifier.ControlModifier
+                                  | QtCore.Qt.KeyboardModifier.ShiftModifier))):
 
                 # If shift was pressed, reset distortion parameters to zero
-                if modifiers == (QtCore.Qt.ControlModifier | QtCore.Qt.ShiftModifier):
+                if modifiers == (QtCore.Qt.KeyboardModifier.ControlModifier | QtCore.Qt.KeyboardModifier.ShiftModifier):
                     print("Resetting the distortion coeffs and refitting...")
                     self.platepar.resetDistortionParameters()
                     self.first_platepar_fit = True
@@ -10526,28 +10554,28 @@ class PlateTool(QtWidgets.QMainWindow):
                 print('Plate fitted!')
 
             # Pan the view left on screen (roll-aware)
-            elif event.key() == QtCore.Qt.Key_A:
+            elif event.key() == QtCore.Qt.Key.Key_A:
                 self.nudgeReferenceScreen(-1, 0)
 
             # Pan the view right on screen (roll-aware)
-            elif event.key() == QtCore.Qt.Key_D:
+            elif event.key() == QtCore.Qt.Key.Key_D:
                 self.nudgeReferenceScreen(+1, 0)
 
             # Pan the view up on screen (roll-aware)
-            elif event.key() == QtCore.Qt.Key_W:
+            elif event.key() == QtCore.Qt.Key.Key_W:
                 self.nudgeReferenceScreen(0, +1)
 
             # Pan the view down on screen (roll-aware)
-            elif event.key() == QtCore.Qt.Key_S:
+            elif event.key() == QtCore.Qt.Key.Key_S:
                 self.nudgeReferenceScreen(0, -1)
 
             # Pan to unmatched star most distant from all other matched stars
 
-            elif event.key() == QtCore.Qt.Key_U and modifiers == QtCore.Qt.ControlModifier:
+            elif event.key() == QtCore.Qt.Key.Key_U and modifiers == QtCore.Qt.KeyboardModifier.ControlModifier:
 
                 self.jumpNextStar(miss_this_one=False)
 
-            elif event.key() == QtCore.Qt.Key_O and modifiers == QtCore.Qt.ControlModifier:
+            elif event.key() == QtCore.Qt.Key.Key_O and modifiers == QtCore.Qt.KeyboardModifier.ControlModifier:
 
                 self.toggleAutoPan()
                 self.tab.settings.updateAutoPan()
@@ -10556,7 +10584,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
             # Move rotation parameter (plain Q only, not Shift+Q)
-            elif event.key() == QtCore.Qt.Key_Q and not (modifiers == QtCore.Qt.ShiftModifier):
+            elif event.key() == QtCore.Qt.Key.Key_Q and not (modifiers == QtCore.Qt.KeyboardModifier.ShiftModifier):
                 self.platepar.pos_angle_ref -= self.key_increment
                 self.platepar.rotation_from_horiz = rotationWrtHorizon(self.platepar)
 
@@ -10564,7 +10592,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.updateStars()
                 self.tab.param_manager.updatePlatepar()
 
-            elif event.key() == QtCore.Qt.Key_E:
+            elif event.key() == QtCore.Qt.Key.Key_E:
                 self.platepar.pos_angle_ref += self.key_increment
                 self.platepar.rotation_from_horiz = rotationWrtHorizon(self.platepar)
 
@@ -10574,14 +10602,14 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
             # Change image scale
-            elif event.key() == QtCore.Qt.Key_Up:
+            elif event.key() == QtCore.Qt.Key.Key_Up:
                 self.platepar.F_scale *= 1.0 + self.key_increment/100.0
 
                 self.updateLeftLabels()
                 self.updateStars()
                 self.tab.param_manager.updatePlatepar()
 
-            elif event.key() == QtCore.Qt.Key_Down:
+            elif event.key() == QtCore.Qt.Key.Key_Down:
                 self.platepar.F_scale *= 1.0 - self.key_increment/100.0
 
                 self.updateLeftLabels()
@@ -10589,7 +10617,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.tab.param_manager.updatePlatepar()
 
 
-            elif event.key() == QtCore.Qt.Key_1:
+            elif event.key() == QtCore.Qt.Key.Key_1:
 
                 # Increment X offset
                 self.platepar.x_poly_rev[0] += 0.5
@@ -10601,7 +10629,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.updateStars()
                 self.updateDistortion()
 
-            elif event.key() == QtCore.Qt.Key_2:
+            elif event.key() == QtCore.Qt.Key.Key_2:
 
                 # Decrement X offset
                 self.platepar.x_poly_rev[0] -= 0.5
@@ -10613,7 +10641,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.updateStars()
                 self.updateDistortion()
 
-            elif event.key() == QtCore.Qt.Key_3:
+            elif event.key() == QtCore.Qt.Key.Key_3:
 
                 # Increment Y offset
                 self.platepar.y_poly_rev[0] += 0.5
@@ -10625,7 +10653,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.updateStars()
                 self.updateDistortion()
 
-            elif event.key() == QtCore.Qt.Key_4:
+            elif event.key() == QtCore.Qt.Key.Key_4:
 
                 # Decrement Y offset
                 self.platepar.y_poly_rev[0] -= 0.5
@@ -10637,7 +10665,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.updateStars()
                 self.updateDistortion()
 
-            elif event.key() == QtCore.Qt.Key_5:
+            elif event.key() == QtCore.Qt.Key.Key_5:
 
                 # Decrement X 1st order distortion
                 self.platepar.x_poly_rev[1] -= 0.01
@@ -10649,7 +10677,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.updateStars()
                 self.updateDistortion()
 
-            elif event.key() == QtCore.Qt.Key_6:
+            elif event.key() == QtCore.Qt.Key.Key_6:
 
                 # Increment X 1st order distortion
                 self.platepar.x_poly_rev[1] += 0.01
@@ -10661,7 +10689,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.updateStars()
                 self.updateDistortion()
 
-            elif event.key() == QtCore.Qt.Key_7:
+            elif event.key() == QtCore.Qt.Key.Key_7:
 
                 # Decrement Y 1st order distortion
                 self.platepar.y_poly_rev[2] -= 0.01
@@ -10673,7 +10701,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.updateStars()
                 self.updateDistortion()
 
-            elif event.key() == QtCore.Qt.Key_8:
+            elif event.key() == QtCore.Qt.Key.Key_8:
 
                 # Increment Y 1st order distortion
                 self.platepar.y_poly_rev[2] += 0.01
@@ -10687,14 +10715,14 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
             # Change extinction scale
-            elif event.key() == QtCore.Qt.Key_9:
+            elif event.key() == QtCore.Qt.Key.Key_9:
                 
                 self.platepar.extinction_scale += 0.1
 
                 self.tab.param_manager.updatePlatepar()
                 self.onExtinctionChanged()
 
-            elif event.key() == QtCore.Qt.Key_0:
+            elif event.key() == QtCore.Qt.Key.Key_0:
 
                 self.platepar.extinction_scale -= 0.1
 
@@ -10706,7 +10734,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
             # Key increment
-            elif event.key() == QtCore.Qt.Key_Plus:
+            elif event.key() == QtCore.Qt.Key.Key_Plus:
 
                 if self.key_increment <= 0.091:
                     self.key_increment += 0.01
@@ -10721,7 +10749,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
                 self.updateLeftLabels()
 
-            elif event.key() == QtCore.Qt.Key_Minus:
+            elif event.key() == QtCore.Qt.Key.Key_Minus:
 
                 if self.key_increment <= 0.11:
                     self.key_increment -= 0.01
@@ -10738,7 +10766,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
             # Enter FOV centre
-            elif event.key() == QtCore.Qt.Key_V:
+            elif event.key() == QtCore.Qt.Key.Key_V:
 
                 # Load the new FOV centre
                 data = self.getFOVcentre()
@@ -10771,7 +10799,7 @@ class PlateTool(QtWidgets.QMainWindow):
             
 
             # Force distortion centre to image centre
-            elif event.key() == QtCore.Qt.Key_B:
+            elif event.key() == QtCore.Qt.Key.Key_B:
                 if self.platepar is not None:
                     # Use remapCoeffsForFlagChange to preserve distortion coefficients
                     new_value = not self.platepar.force_distortion_centre
@@ -10785,7 +10813,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
             # Toggle equal aspect ratio for radial distortions
-            elif event.key() == QtCore.Qt.Key_G:
+            elif event.key() == QtCore.Qt.Key.Key_G:
 
                 if self.platepar is not None:
                     # Use remapCoeffsForFlagChange to preserve distortion coefficients
@@ -10800,7 +10828,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
             # Toggle asymmetry correction for radial distortions
-            elif event.key() == QtCore.Qt.Key_Y:
+            elif event.key() == QtCore.Qt.Key.Key_Y:
 
                 if self.platepar is not None:
                     # Use remapCoeffsForFlagChange to preserve distortion coefficients
@@ -10815,19 +10843,20 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
             # Get initial parameters from astrometry.net (same as Auto Fit button)
-            elif (event.key() == QtCore.Qt.Key_X) and ((modifiers == QtCore.Qt.ControlModifier) \
-                or (modifiers == (QtCore.Qt.ControlModifier | QtCore.Qt.ShiftModifier))):
+            elif (event.key() == QtCore.Qt.Key.Key_X) and ((modifiers == QtCore.Qt.KeyboardModifier.ControlModifier) \
+                or (modifiers == (QtCore.Qt.KeyboardModifier.ControlModifier
+                                  | QtCore.Qt.KeyboardModifier.ShiftModifier))):
 
                 # Use the same auto-fit path as the button (includes catalog balancing, quick alignment)
                 self.autoFitAstrometryNet()
 
             # Test quick align with config mag limit (Shift+Q) - simulates CheckFit/ApplyRecalibrate
-            elif (event.key() == QtCore.Qt.Key_Q) and (modifiers == QtCore.Qt.ShiftModifier):
+            elif (event.key() == QtCore.Qt.Key.Key_Q) and (modifiers == QtCore.Qt.KeyboardModifier.ShiftModifier):
                 self.testQuickAlignWithConfigMagLimit()
 
 
             # Toggle showing detected stars
-            elif event.key() == QtCore.Qt.Key_C:
+            elif event.key() == QtCore.Qt.Key.Key_C:
                 self.toggleShowCalStars()
                 self.tab.settings.updateShowCalStars()
                 # updates image automatically
@@ -10836,14 +10865,14 @@ class PlateTool(QtWidgets.QMainWindow):
             # Save the point to the matched stars list by pressing Enter or Space or to the
             # unsuitable stars
 
-            elif (event.key() == QtCore.Qt.Key_Return) or (event.key() == QtCore.Qt.Key_Enter) \
-                or (event.key() == QtCore.Qt.Key_Space):
+            elif (event.key() == QtCore.Qt.Key.Key_Return) or (event.key() == QtCore.Qt.Key.Key_Enter) \
+                or (event.key() == QtCore.Qt.Key.Key_Space):
 
                 if self.star_pick_mode:
                     
                     # Check if the star has been skipped
                     unsuitable = False
-                    if modifiers == QtCore.Qt.ControlModifier:
+                    if modifiers == QtCore.Qt.KeyboardModifier.ControlModifier:
                         
                         # If a star has been skipped, mark it as unsuitable
                         if (self.old_autopan_x is not None) and (self.old_autopan_y is not None):
@@ -10927,12 +10956,12 @@ class PlateTool(QtWidgets.QMainWindow):
                     else:
 
                         # Jump to next star if CTRL + SPACE is pressed
-                        if modifiers == QtCore.Qt.ControlModifier:
+                        if modifiers == QtCore.Qt.KeyboardModifier.ControlModifier:
                             print("Jumping to the next star")
                             self.jumpNextStar(miss_this_one=False)
 
 
-            elif event.key() == QtCore.Qt.Key_Escape:
+            elif event.key() == QtCore.Qt.Key.Key_Escape:
                 if self.star_pick_mode:
                     
                     # If the ESC is pressed when the star has been centroided, reset the centroid
@@ -10940,11 +10969,11 @@ class PlateTool(QtWidgets.QMainWindow):
                     self.updatePairedStars()
 
             # Show the photometry plot
-            elif event.key() == QtCore.Qt.Key_P and not modifiers == QtCore.Qt.ControlModifier:
+            elif event.key() == QtCore.Qt.Key.Key_P and not modifiers == QtCore.Qt.KeyboardModifier.ControlModifier:
                 self.photometry(show_plot=True)
 
             # Show astrometry residuals plot
-            elif event.key() == QtCore.Qt.Key_L:
+            elif event.key() == QtCore.Qt.Key.Key_L:
                 if self.star_pick_mode:
                     self.showAstrometryFitPlots()
 
@@ -10953,36 +10982,36 @@ class PlateTool(QtWidgets.QMainWindow):
         elif self.mode == 'manualreduction':
 
             # Set photometry mode
-            if (qmodifiers & QtCore.Qt.ShiftModifier):
+            if (qmodifiers & QtCore.Qt.KeyboardModifier.ShiftModifier):
                 self.cursor.setMode(2)
 
-            if event.key() == QtCore.Qt.Key_P:
+            if event.key() == QtCore.Qt.Key.Key_P:
                 self.showLightcurve()
 
-            elif event.key() == QtCore.Qt.Key_D or event.key() == QtCore.Qt.Key_Space:
+            elif event.key() == QtCore.Qt.Key.Key_D or event.key() == QtCore.Qt.Key.Key_Space:
                 self.nextImg(n=1)
 
-            elif event.key() == QtCore.Qt.Key_A:
+            elif event.key() == QtCore.Qt.Key.Key_A:
                 self.nextImg(n=-1)
 
-            elif event.key() == QtCore.Qt.Key_Up:
+            elif event.key() == QtCore.Qt.Key.Key_Up:
                 self.nextImg(n=25)
 
-            elif event.key() == QtCore.Qt.Key_Down:
+            elif event.key() == QtCore.Qt.Key.Key_Down:
                 self.nextImg(n=-25)
 
-            elif event.key() == QtCore.Qt.Key_Comma:
+            elif event.key() == QtCore.Qt.Key.Key_Comma:
                 if hasattr(self.img.img_handle, 'current_line'):
                     print('Current line: {}'.format(self.img.img_handle.current_line))
                     self.img.prevLine()
 
-            elif event.key() == QtCore.Qt.Key_Period:
+            elif event.key() == QtCore.Qt.Key.Key_Period:
                 if hasattr(self.img.img_handle, 'current_line'):
                     print('Current line: {}'.format(self.img.img_handle.current_line))
                     self.img.nextLine()
 
             # Launch ASTRA GUI
-            elif (event.key() == QtCore.Qt.Key_K) and (modifiers == QtCore.Qt.ControlModifier):
+            elif (event.key() == QtCore.Qt.Key.Key_K) and (modifiers == QtCore.Qt.KeyboardModifier.ControlModifier):
                 
                 if ASTRA_IMPORTED:
                     
@@ -11688,7 +11717,7 @@ class PlateTool(QtWidgets.QMainWindow):
         if self.mode == 'skyfit':
             pass
         else:
-            if qmodifiers != QtCore.Qt.ShiftModifier:
+            if qmodifiers != QtCore.Qt.KeyboardModifier.ShiftModifier:
                 self.cursor.setMode(0)
 
 
@@ -11707,7 +11736,7 @@ class PlateTool(QtWidgets.QMainWindow):
         if self.img_frame.sceneBoundingRect().contains(event.pos()):
 
             # Brush mode + Shift: scroll changes brush size; bare scroll falls through to zoom
-            if self.mask_brush_mode and (modifier & QtCore.Qt.ShiftModifier):
+            if self.mask_brush_mode and (modifier & QtCore.Qt.KeyboardModifier.ShiftModifier):
                 step = max(1, self.mask_brush_radius // 10)
                 if delta > 0:
                     self.mask_brush_radius = min(200, self.mask_brush_radius + step)
@@ -11721,7 +11750,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 return
 
             # If control is pressed in star picking mode, change the size of the aperture
-            elif (modifier & QtCore.Qt.ControlModifier) and self.star_pick_mode:
+            elif (modifier & QtCore.Qt.KeyboardModifier.ControlModifier) and self.star_pick_mode:
 
                 # Increase aperture size
                 if delta < 0:
@@ -12988,7 +13017,7 @@ class PlateTool(QtWidgets.QMainWindow):
             msg_box.addButton(QtWidgets.QMessageBox.StandardButton.Cancel)
 
             msg_box.setDefaultButton(auto_fit_btn)
-            msg_box.exec_()
+            msg_box.exec()
 
             clicked = msg_box.clickedButton()
 
@@ -13535,12 +13564,14 @@ class PlateTool(QtWidgets.QMainWindow):
             msgbox.setWindowTitle('Astrometry.net Solution - FOV Mismatch')
             msgbox.setText(msg)
             msgbox.setIcon(QtWidgets.QMessageBox.Icon.Warning)
-            msgbox.setStandardButtons(QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No)
+            msgbox.setStandardButtons(QtWidgets.QMessageBox.StandardButton.Yes
+                                      | QtWidgets.QMessageBox.StandardButton.No)
             msgbox.setDefaultButton(QtWidgets.QMessageBox.StandardButton.Yes)
-            reply = msgbox.exec_()
+            reply = msgbox.exec()
         else:
             reply = QtWidgets.QMessageBox.question(self, 'Astrometry.net Solution', msg,
-                QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No, QtWidgets.QMessageBox.StandardButton.Yes)
+                QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No,
+                QtWidgets.QMessageBox.StandardButton.Yes)
 
         if reply == QtWidgets.QMessageBox.StandardButton.No:
             self.status_bar.showMessage("Astrometry.net solution applied (no refinement)")
@@ -13755,7 +13786,7 @@ class PlateTool(QtWidgets.QMainWindow):
         d.loadLensTemplates(self.config, self.dir_path, self.config.width, self.config.height)
 
         # Get inputs regardless of OK or Cancel - both use same defaults if empty
-        d.exec_()
+        d.exec()
         data = d.getInputs()
 
         self.azim_centre, self.alt_centre, rot_horizontal, lenses_template_file = data
@@ -14184,7 +14215,7 @@ class PlateTool(QtWidgets.QMainWindow):
         browse_btn = msg.addButton("Browse...", QtWidgets.QMessageBox.ButtonRole.ActionRole)
         create_btn = msg.addButton("Create new", QtWidgets.QMessageBox.ButtonRole.ActionRole)
         msg.addButton(QtWidgets.QMessageBox.StandardButton.Cancel)
-        msg.exec_()
+        msg.exec()
 
         if msg.clickedButton() == browse_btn:
             platepar_file = QtWidgets.QFileDialog.getOpenFileName(
@@ -14315,7 +14346,7 @@ class PlateTool(QtWidgets.QMainWindow):
             dlg._showSaveDialog(save_ftype)
             dlg.close()
         else:
-            dlg.exec_()
+            dlg.exec()
 
     def saveCurrentFrame(self):
         """ Saves the current frame to disk. """
@@ -17729,4 +17760,4 @@ if __name__ == '__main__':
 
 
     # Run the GUI app
-    sys.exit(app.exec_())
+    sys.exit(app.exec())
