@@ -561,27 +561,12 @@ def computeAndSaveTreeMap(config, night_dir):
     # FF window alone under-reads thin fast cloud.
     n_fused = 0
     try:
-        from Utils.StillsSampler import loadStillStarStates, sidecarFileName
-        sc_path = os.path.join(night_dir, sidecarFileName(night_name))
-        if os.path.isfile(sc_path):
-            _, sc = loadStillStarStates(sc_path)
-            cat_id_f = np.asarray(stars["star_cat_id"], dtype=np.intp)
-            sf_f = np.asarray(stars["star_frame"], dtype=np.intp)
-            row_f = np.asarray(stars["calstars_row"], dtype=np.intp).copy()
-            t_ff = np.asarray(frames["frame_time_unix"], dtype=np.float64)
-            b_ids = sc["bright_cat_id"].astype(np.intp)
-            b_det = sc["bright_detected"]
-            t_st = sc["t_unix"]
-            smap = np.argmin(np.abs(t_ff[None, :] - t_st[:, None]), axis=1)
-            ok_s = np.abs(t_ff[smap] - t_st) < 8.0
-            det_ff = np.zeros((int(cat_id_f.max()) + 1, len(t_ff)), dtype=bool)
-            for si in np.where(ok_s)[0]:
-                det_ff[b_ids[b_det[:, si]], smap[si]] = True
-            fused = (row_f == -1) & det_ff[cat_id_f, sf_f]
-            row_f[fused] = -2
-            stars = dict(stars)
-            stars["calstars_row"] = row_f
-            n_fused = int(fused.sum())
+        from Utils.StillsSampler import fuseSidecarDetections
+        n_before = int((np.asarray(stars["calstars_row"]) == -2).sum())
+        stars = fuseSidecarDetections(night_dir, frames, stars)
+        n_fused = int((np.asarray(stars["calstars_row"]) == -2).sum()) \
+            - n_before
+        if n_fused:
             log.info("Tree estimator: fused {:d} stills detections".format(
                 n_fused))
     except Exception as e:

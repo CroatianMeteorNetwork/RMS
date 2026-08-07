@@ -367,12 +367,30 @@ def fuseSidecarDetections(night_dir, frames, stars):
     b_ids = sc["bright_cat_id"].astype(np.intp)
     b_det = sc["bright_detected"]
     t_st = sc["t_unix"]
-    smap = np.argmin(np.abs(t_ff[None, :] - t_st[:, None]), axis=1)
+
+    # Nearest FF frame per still by bisection on the sorted frame times. The
+    # outer-difference matrix this replaces was ~n_stills x n_ff float64 -
+    # about 190 MB on a full night, and six pod siblings hit it in the same
+    # morning minutes (the E-pod OOM sweep of 2026-08-05). Ties resolve to
+    # the lower index, matching the argmin it replaces.
+    smap = np.clip(np.searchsorted(t_ff, t_st), 0, len(t_ff) - 1)
+    left = np.maximum(smap - 1, 0)
+    use_left = np.abs(t_ff[left] - t_st) <= np.abs(t_ff[smap] - t_st)
+    smap = np.where(use_left, left, smap).astype(np.intp)
     ok_s = np.abs(t_ff[smap] - t_st) < 8.0
-    det_ff = np.zeros((int(cat_id.max()) + 1, len(t_ff)), dtype=bool)
+
+    # Detection table over the bright-channel ids only (~1000 rows), not the
+    # full catalog id range (ids run to ~1e5: that table was another ~300 MB)
+    det_c = np.zeros((len(b_ids), len(t_ff)), dtype=bool)
     for si in np.where(ok_s)[0]:
-        det_ff[b_ids[b_det[:, si]], smap[si]] = True
-    fused = (row == -1) & det_ff[cat_id, sf]
+        det_c[b_det[:, si], smap[si]] = True
+    b_order = np.argsort(b_ids, kind="stable")
+    b_sorted = b_ids[b_order]
+    pos = np.searchsorted(b_sorted, cat_id)
+    pos = np.clip(pos, 0, len(b_sorted) - 1)
+    in_bright = b_sorted[pos] == cat_id
+    b_row = b_order[pos]
+    fused = (row == -1) & in_bright & det_c[b_row, sf]
     row[fused] = -2
     out = dict(stars)
     out["calstars_row"] = row
