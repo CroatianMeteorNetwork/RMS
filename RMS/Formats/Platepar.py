@@ -1692,7 +1692,10 @@ class Platepar(object):
                         self.RA_d = (360 * ra_ref) % (360)
                         self.dec_d = -90 + (90 * dec_ref + 90) % (180.000001)
                         self.pos_angle_ref = (360 * pos_angle_ref) % (360)
-                        self.F_scale = abs(F_scale)
+                        # Hold the scale when fixed_scale is set. The patched residual makes the fit
+                        # objective independent of the F_scale parameter, so LM leaves res.x[3] at its
+                        # seed; read the held value explicitly rather than relying on that.
+                        self.F_scale = f_scale_fixed if fixed_scale else abs(F_scale)
 
                         self.updateRefAltAz()
 
@@ -1748,7 +1751,8 @@ class Platepar(object):
                     self.RA_d = (360*xf[0]) % 360
                     self.dec_d = -90 + (90*xf[1] + 90) % (180.000001)
                     self.pos_angle_ref = (360*xf[2]) % 360
-                    self.F_scale = abs(xf[3])
+                    # Hold the scale when fixed_scale is set (see fwd-rev loop note above).
+                    self.F_scale = f_scale_fixed if fixed_scale else abs(xf[3])
                     self.x_poly_rev = np.array(xf[4:])
                     self.updateRefAltAz()
 
