@@ -69,6 +69,20 @@ WINDOW_FRAMES = 1                          # +/- frames pooled per BP solve
 # refit), not a global bump; until built, the ceiling is the honest answer.
 S_DEFAULT = 0.4                            # logistic width fallback (mag)
 
+# Kriging fusion of the leaf posteriors: ordinary kriging over each frame's
+# (mean, sigma) in image coordinates, GLS constant mean. Neighboring leaves
+# see the same sky, but their raw posteriors carry independent per-star
+# noise and calibration error - fusing them with uncertainty weights is
+# what turned the leaf quilt into coherent fields (and halved the
+# rotating-with-the-sky identity artifact) in the offline validation. The
+# solve is subsampled: at KRIG_ELL the FOV holds ~15 independent patches,
+# so ~350 lowest-sigma leaves saturate the resolvable structure and keep
+# the per-frame Cholesky Pi-priced; prediction covers every evidence leaf.
+KRIG_ELL = 250.0        # px - exponential kernel length scale
+KRIG_MAX_OBS = 350      # leaves entering the solve (lowest sigma first)
+KRIG_MIN_OBS = 40       # below this the frame keeps its raw posteriors
+KRIG_NUGGET_FLOOR = 0.05  # mag - minimum per-leaf observation noise
+
 CELL_NX, CELL_NY = 8, 5
 
 TREE_MAP_SUFFIX = "transparency_map_tree.npz"
@@ -244,6 +258,20 @@ def computeTreeSeries(config, night_dir, header, frames, stars, calibration=None
 
     p_clear = np.clip(rate, *RATE_CLIP)
     logit0 = np.log(p_clear/(1.0 - p_clear))
+
+    # PROTOTYPE - uniform-component channel: uncapped logits (the RATE_CLIP /
+    # seed caps amputate bright-star bits precisely where a deep uniform layer
+    # is measured; the pooled whole-FOV estimator needs their full leverage)
+    rate_unc = np.where(np.isfinite(rate), rate, np.nan)
+    if calibration is None:
+        # the seed path capped p_model at 0.97; recover the uncapped medians
+        with np.errstate(invalid="ignore"):
+            p_model_unc = np.where(seen_n >= 10, p_sum/np.maximum(seen_n, 1), np.nan)
+        p_model_unc = np.clip(p_model_unc*(seed_norm if seed_norm else 1.0),
+            0.0, 0.9995)
+        rate_unc = np.where(np.isfinite(rate_unc), rate_unc, p_model_unc)
+    p_unc = np.clip(rate_unc, 1e-3, 0.9995)
+    logit0_unc = np.log(p_unc/(1.0 - p_unc))
     dome_s = float(header.get("dome_s", S_DEFAULT)) or S_DEFAULT
 
     # ---- Photometric channel: CALSTARS intensity join ------------------------
@@ -433,14 +461,38 @@ def computeTreeSeries(config, night_dir, header, frames, stars, calibration=None
     rec_leaf = leaf_of_cat[cat_id]
     usable = rec_leaf >= 0
 
+    # Per-frame anchor pixel positions for the kriging distance matrix,
+    # filled from the anchor stars' own records (+/-2 frame tolerance). The
+    # sky rotates hundreds of px over a night - a static position degrades
+    # the geometry (measured as sliver leaves and a corrupted kriging
+    # kernel in the offline validation). float32: 2 x n_frames x n_leaf.
+    anchor_of_cat = np.full(n_cat, -1, dtype=np.intp)
+    anchor_of_cat[q_ids] = A2
+    rec_anchor = anchor_of_cat[cat_id]
+    ma = rec_anchor >= 0
+    kx = np.full((n_frames, n_leaf), np.nan, dtype=np.float32)
+    ky = np.full((n_frames, n_leaf), np.nan, dtype=np.float32)
+    kx[sf[ma], rec_anchor[ma]] = sx[ma]
+    ky[sf[ma], rec_anchor[ma]] = sy[ma]
+    for arr in (kx, ky):
+        for shift in (1, -1, 2, -2):
+            src_ = np.roll(arr, shift, axis=0)
+            if shift > 0:
+                src_[:shift] = np.nan
+            else:
+                src_[shift:] = np.nan
+            gap = np.isnan(arr)
+            arr[gap] = src_[gap]
+
     def runBP(logit0v, basev, sigmav, phot_okv):
         """ One full BP sweep of the night with the given per-star weights. """
 
         def frameLeafLL(fi):
             out = np.zeros((n_leaf, NG))
+            g_unif = np.zeros(NG)
             m = usable & (sf == fi)
             if not np.any(m):
-                return out
+                return out, g_unif
             cid = cat_id[m]
             lg = logit0v[cid][:, None]
             det = detected[m].astype(np.float64)[:, None]
@@ -449,16 +501,29 @@ def computeTreeSeries(config, night_dir, header, frames, stars, calibration=None
             q = det*pr + (1 - det)*(1 - pr)
             ll = np.log(EVIDENCE_MIX*q + (1 - EVIDENCE_MIX)/2)
             pm = m & (row >= 0) & np.isfinite(inst_resid) & phot_okv[cat_id]
+
+            # Uniform-component channel: pure pooled likelihood, uncapped
+            # logits, flux with a 4-sigma robustness clamp
+            lg_u = logit0_unc[cid][:, None]
+            pr_u = np.clip(1.0/(1.0 + np.exp(-(lg_u - GRID_DM[None, :]/dome_s))),
+                1e-9, 1 - 1e-9)
+            q_u = det*pr_u + (1 - det)*(1 - pr_u)
+            g_unif = np.log(q_u).sum(axis=0)
+
             if np.any(pm):
                 sel = pm[m]
                 rr = (inst_resid[pm] - basev[cat_id[pm]])[:, None]
                 ss = sigmav[cat_id[pm]][:, None]
                 ll[sel] += -0.5*np.minimum(((rr - GRID_DM[None, :])/ss)**2, 9.0)
+                g_unif = g_unif + (-0.5*np.minimum(
+                    ((rr - GRID_DM[None, :])/ss)**2, 16.0)).sum(axis=0)
             np.add.at(out, rec_leaf[m], ll)
-            return out
+            return out, g_unif
 
         dm_cells = np.full((n_frames, CELL_NY, CELL_NX), np.nan, dtype=np.float32)
         leaf_dm_all = np.full((n_frames, n_leaf), np.nan, dtype=np.float32)
+        dm_u_all = np.full(n_frames, np.nan, dtype=np.float32)
+        leaf_sd_all = np.full((n_frames, n_leaf), np.nan, dtype=np.float32)
         # Parent topology is fixed for the whole night: presorted group
         # boundaries turn the per-frame scatter-adds into reduceat segment
         # sums (np.add.at is an unbuffered scatter and much slower)
@@ -469,12 +534,15 @@ def computeTreeSeries(config, night_dir, header, frames, stars, calibration=None
         cache = {}
         for fi in range(n_frames):
             lls = None
+            g_unif = None
             for k in range(fi - WINDOW_FRAMES, fi + WINDOW_FRAMES + 1):
                 if not (0 <= k < n_frames):
                     continue
                 if k not in cache:
                     cache[k] = frameLeafLL(k)
-                lls = cache[k] if lls is None else lls + cache[k]
+                c_ll, c_g = cache[k]
+                lls = c_ll if lls is None else lls + c_ll
+                g_unif = c_g if g_unif is None else g_unif + c_g
             for k in list(cache):
                 if k < fi - WINDOW_FRAMES:
                     del cache[k]
@@ -493,9 +561,79 @@ def computeTreeSeries(config, night_dir, header, frames, stars, calibration=None
             down2 = _smooth((l1_in + down1)[leaf_parent_i] - up2, TAU[2])
 
             belief = lls + down2
-            leaf_dm = np.maximum(0.0, GRID_DM[np.argmax(belief, axis=1)])
+
+            # Whole-FOV pooled uniform level, kept as a per-frame
+            # diagnostic (the shrinkage that used it was superseded by the
+            # kriging fusion below)
+            if g_unif is not None:
+                pu = np.exp(g_unif - g_unif.max())
+                pu /= max(pu.sum(), 1e-30)
+                dm_u_all[fi] = max(0.0, float(pu @ GRID_DM))
+
+            # Posterior mean + sigma per leaf (the belief carries a full
+            # curve; the argmax discarded its shape - on censored plateaus
+            # that was the arbitrary-edge/ceiling behavior)
+            pb = np.exp(belief - belief.max(axis=1, keepdims=True))
+            pb /= np.maximum(pb.sum(axis=1, keepdims=True), 1e-30)
+            mu = pb @ GRID_DM
+            sd = np.sqrt(np.maximum((pb @ (GRID_DM**2)) - mu**2, 1e-6))
             has_ev = np.abs(lls).sum(axis=1) > 0
+
+            # Kriging fusion (see the constants block). Observations: the
+            # lowest-sigma evidence leaves with a position this frame;
+            # prediction: every evidence leaf with a position. Leaves
+            # without a position this frame keep their raw posterior.
+            okk = has_ev & np.isfinite(mu) & np.isfinite(sd) \
+                & np.isfinite(kx[fi]) & np.isfinite(ky[fi])
+            if okk.sum() >= KRIG_MIN_OBS:
+                cand = np.where(okk)[0]
+                if len(cand) > KRIG_MAX_OBS:
+                    # Spatially stratified subsample: lowest-sigma-first
+                    # selection starved whole regions (under a half-field
+                    # layer the occluded side's censored posteriors carry
+                    # the largest sigmas - the suite read its opaque half
+                    # as CLEAR). Cap picks per image tile instead: coverage
+                    # first, precision within a neighborhood.
+                    tx = np.clip((kx[fi][cand]/max(width, 1.0)*16).astype(
+                        np.intp), 0, 15)
+                    ty = np.clip((ky[fi][cand]/max(height, 1.0)*9).astype(
+                        np.intp), 0, 8)
+                    tile = ty*16 + tx
+                    order = np.lexsort((sd[cand], tile))
+                    t_sorted = tile[order]
+                    new_tile = np.r_[True, t_sorted[1:] != t_sorted[:-1]]
+                    grp = np.cumsum(new_tile) - 1
+                    starts = np.where(new_tile)[0]
+                    rank = np.arange(len(order)) - starts[grp]
+                    per_tile = max(2, KRIG_MAX_OBS//max(
+                        int(new_tile.sum()), 1))
+                    cand = cand[order[rank < per_tile]]
+                ox_, oy_ = kx[fi][cand], ky[fi][cand]
+                om, on = mu[cand], np.maximum(sd[cand], KRIG_NUGGET_FLOOR)
+                dxk = ox_[:, None] - ox_[None, :]
+                dyk = oy_[:, None] - oy_[None, :]
+                Kb = np.exp(-np.hypot(dxk, dyk)/KRIG_ELL)
+                sf2 = max(float(np.var(om) - np.mean(on**2)), 0.03**2)
+                Kn = sf2*Kb + np.diag(on**2)
+                try:
+                    from scipy.linalg import cho_factor, cho_solve
+                    cf = cho_factor(Kn, lower=True)
+                    one = np.ones(len(om))
+                    beta = float(one @ cho_solve(cf, om)) \
+                        / max(float(one @ cho_solve(cf, one)), 1e-9)
+                    alpha = cho_solve(cf, om - beta)
+                    pxk = kx[fi][okk], ky[fi][okk]
+                    ddx = pxk[0][:, None] - ox_[None, :]
+                    ddy = pxk[1][:, None] - oy_[None, :]
+                    Ks = sf2*np.exp(-np.hypot(ddx, ddy)/KRIG_ELL)
+                    mu = mu.copy()
+                    mu[okk] = beta + Ks @ alpha
+                except Exception:
+                    pass
+
+            leaf_dm = np.maximum(0.0, mu)
             leaf_dm_all[fi, has_ev] = leaf_dm[has_ev]
+            leaf_sd_all[fi, has_ev] = sd[has_ev]
 
             m = usable & (sf == fi)
             if not np.any(m):
@@ -512,6 +650,8 @@ def computeTreeSeries(config, night_dir, header, frames, stars, calibration=None
                 cell[u] = np.median(vs[s0:s1])
             dm_cells[fi] = cell.reshape(CELL_NY, CELL_NX)
 
+        computeTreeSeries.last_dm_u = dm_u_all
+        computeTreeSeries.last_leaf_sd = leaf_sd_all
         return dm_cells, leaf_dm_all
 
     dm_cells, leaf_dm_all = runBP(logit0, base, sigma, phot_ok)
