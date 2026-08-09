@@ -259,6 +259,9 @@ class Config:
         self.gamma = 1.0
 
         self.ff_format = 'fits'
+
+        # Also store the average frame at full precision as a 16-bit FITS plane
+        self.ff_avepixel16 = True
         
         self.fov_w = 64.0
         self.fov_h = 35.0
@@ -1157,6 +1160,9 @@ def parseCapture(config, parser):
 
     if parser.has_option(section, "ff_format"):
         config.ff_format = parser.get(section, "ff_format")
+
+    if parser.has_option(section, "ff_avepixel16"):
+        config.ff_avepixel16 = parser.getboolean(section, "ff_avepixel16")
 
     if parser.has_option(section, "fov_w"):
         config.fov_w = parser.getfloat(section, "fov_w")

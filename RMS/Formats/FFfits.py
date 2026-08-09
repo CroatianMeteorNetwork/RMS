@@ -91,6 +91,16 @@ def read(directory, filename, array=False, full_filename=False, memmap=True):
     # Init an empty FF structure
     ff = FFStruct()
 
+    # Unsigned 16-bit planes (the full-precision average, or all planes of native 16-bit
+    # camera files) carry BZERO scaling, which astropy refuses to read lazily from an
+    # explicitly requested memory map. Fall back to a plain read for such files - all planes
+    # are copied out below anyway, so nothing is lost. 8-bit files keep the memmap path
+    if memmap:
+        with fits.open(file_path, memmap=True) as hdulist:
+            if any(('BZERO' in hdu.header) or ('BSCALE' in hdu.header) or ('BLANK' in hdu.header)
+                    for hdu in hdulist[1:5]):
+                memmap = False
+
     # Read in the FITS. Pass the path (not a pre-opened handle) so astropy owns and closes
     # the file, and use a context manager so the file/memmap is always released, even on
     # error. The image data is copied out of the HDUs (below) so it stays valid after the
@@ -123,6 +133,14 @@ def read(directory, filename, array=False, full_filename=False, memmap=True):
         ff.maxframe = hdulist[2].data.copy()
         ff.avepixel = hdulist[3].data.copy()
         ff.stdpixel = hdulist[4].data.copy()
+
+        # If the file declares fractional bits, the average plane is uint16 fixed point at full
+        # precision. Keep it in avepixel16 and derive the legacy 8-bit view, which is bit-identical
+        # to the avepixel of files written without this option
+        avefrac = head.get('AVEFRAC', 0)
+        if avefrac:
+            ff.avepixel16 = ff.avepixel
+            ff.avepixel = (ff.avepixel16 >> avefrac).astype(np.uint8)
 
     if array:
         ff.array = np.dstack([ff.maxpixel, ff.maxframe, ff.avepixel, ff.stdpixel])
@@ -178,9 +196,17 @@ def write(ff, directory, filename):
     # Add the maxpixel to the list
     maxpixel_hdu = fits.ImageHDU(ff.maxpixel, name='MAXPIXEL')
     maxframe_hdu = fits.ImageHDU(ff.maxframe, name='MAXFRAME')
-    avepixel_hdu = fits.ImageHDU(ff.avepixel, name='AVEPIXEL')
     stdpixel_hdu = fits.ImageHDU(ff.stdpixel, name='STDPIXEL')
-    
+
+    # Write the average at full precision (uint16, 8.8 fixed point) if available, and declare the
+    # number of fractional bits in the header so readers know to scale it. Otherwise write the
+    # legacy 8-bit average
+    if getattr(ff, 'avepixel16', None) is not None:
+        head['AVEFRAC'] = (8, 'AVEPIXEL fractional bits (uint16, ADU*256)')
+        avepixel_hdu = fits.ImageHDU(ff.avepixel16, name='AVEPIXEL')
+    else:
+        avepixel_hdu = fits.ImageHDU(ff.avepixel, name='AVEPIXEL')
+
     # Create the primary part
     prim = fits.PrimaryHDU(header=head)
     

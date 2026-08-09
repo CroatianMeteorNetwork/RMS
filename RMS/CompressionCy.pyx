@@ -8,6 +8,9 @@ cimport cython
 INT8_TYPE = np.uint8
 ctypedef np.uint8_t INT8_TYPE_t
 
+INT16_TYPE = np.uint16
+ctypedef np.uint16_t INT16_TYPE_t
+
 INT32_TYPE = np.uint32
 ctypedef np.uint32_t INT32_TYPE_t
 
@@ -26,8 +29,14 @@ cdef extern from "math.h":
 def compressFrames(np.ndarray[INT8_TYPE_t, ndim=3] frames, int deinterlace_order):
 
     # Init the output four frame temporal pixel array
-    cdef np.ndarray[INT8_TYPE_t, ndim=3] ftp_array = np.empty([4, frames.shape[1], frames.shape[2]], 
+    cdef np.ndarray[INT8_TYPE_t, ndim=3] ftp_array = np.empty([4, frames.shape[1], frames.shape[2]],
         dtype=INT8_TYPE)
+
+    # Full-precision average in 8.8 fixed point (units of 1/256 ADU). The 8-bit average in ftp_array
+    # floors away the sub-ADU precision of the 256-frame mean; this plane keeps it. Guaranteed
+    # consistent with the 8-bit plane: ave16 >> 8 always equals the floored 8-bit average
+    cdef np.ndarray[INT16_TYPE_t, ndim=2] ave16_array = np.empty([frames.shape[1], frames.shape[2]],
+        dtype=INT16_TYPE)
 
 
     # Array for field/frame intensity sums. If the video is interlaced, then there with will twice the number 
@@ -145,7 +154,11 @@ def compressFrames(np.ndarray[INT8_TYPE_t, ndim=3] frames, int deinterlace_order
             # Calculate mean without top 4 max values
             acc -= max_val + max_val_2 + max_val_3 + max_val_4
             mean = acc/frames_num_minus_four
-            
+
+            # Full-precision mean, rounded to 1/256 ADU. No overflow: acc <= 252*255, so
+            # 256*acc fits comfortably in 32 bits, and the result is at most 255*256
+            ave16_array[y, x] = <unsigned short>((256*acc + frames_num_minus_four/2)/frames_num_minus_four)
+
 
 
             
@@ -174,4 +187,4 @@ def compressFrames(np.ndarray[INT8_TYPE_t, ndim=3] frames, int deinterlace_order
             ftp_array[3, y, x] = var
 
 
-    return ftp_array, fieldsum[:frames_num*deinterlace_multiplier]
+    return ftp_array, ave16_array, fieldsum[:frames_num*deinterlace_multiplier]

@@ -96,26 +96,33 @@ class Compressor(multiprocessing.Process):
         
         Arguments:
             frames: [3D ndarray] grayscale frames stored as 3d numpy array
-        
+
         Return:
-            [3D ndarray]: in format: (N, y, x) where N is a member of [0, 1, 2, 3]
+            (ftp_array, ave16, fieldsum):
+                - ftp_array: [3D ndarray] in format: (N, y, x) where N is a member of [0, 1, 2, 3]
+                - ave16: [2D ndarray] average pixel image in 8.8 fixed point (uint16, 1/256 ADU units)
+                - fieldsum: [ndarray] sums of intensities per every field
 
         """
-        
-        # Run cythonized compression
-        ftp_array, fieldsum = compressFrames(frames, self.config.deinterlace_order)
 
-        return ftp_array, fieldsum
+        # Run cythonized compression
+        ftp_array, ave16, fieldsum = compressFrames(frames, self.config.deinterlace_order)
+
+        return ftp_array, ave16, fieldsum
     
 
 
-    def saveFF(self, arr, startTime, N):
+    def saveFF(self, arr, startTime, N, ave16=None):
         """ Write metadata and data array to FF file and return filenames for FF and FS files
-        
+
         Arguments:
             arr: [3D ndarray] 3D numpy array in format: (N, y, x) where N is [0, 4)
             startTime: [float] seconds and fractions of a second from epoch to first frame
             N: [int] frame counter (ie. 0000512)
+
+        Keyword arguments:
+            ave16: [2D ndarray] average pixel image in 8.8 fixed point (uint16). Written to the FF
+                file as a full-precision average plane if ff_avepixel16 is enabled in the config.
         """
         
         # Generate the name for the file
@@ -134,6 +141,12 @@ class Compressor(multiprocessing.Process):
 
         ff = FFStruct.FFStruct()
         ff.array = arr
+
+        # Attach the full-precision average so it gets written as a 16-bit plane. Only the FITS
+        # format can carry it; the legacy bin writer ignores it
+        if (ave16 is not None) and self.config.ff_avepixel16:
+            ff.avepixel16 = ave16
+
         ff.nrows = arr.shape[1]
         ff.ncols = arr.shape[2]
         ff.nbits = self.config.bit_depth
@@ -339,9 +352,9 @@ class Compressor(multiprocessing.Process):
             
             
             # Run the compression
-            compressed, field_intensities = self.compress(frames)
+            compressed, ave16, field_intensities = self.compress(frames)
 
-            
+
             # Once the compression is done, tell the capture thread to keep filling the buffer
             if buffer_one:
                 self.start_time1.value = 0
@@ -352,12 +365,13 @@ class Compressor(multiprocessing.Process):
 
             # Cut out the compressed frames to the proper size
             compressed = compressed[:, :self.config.height, :self.config.width]
-            
+            ave16 = ave16[:self.config.height, :self.config.width]
+
             log.info("Compression time: {:.3f} s".format(time.time() - t))
             t = time.time()
-            
+
             # Save the compressed image
-            filename_millis, filename_micros = self.saveFF(compressed, startTime, n*256)
+            filename_millis, filename_micros = self.saveFF(compressed, startTime, n*256, ave16=ave16)
             n += 1
             
             log.info("Saving time: {:.3f} s".format(time.time() - t))
