@@ -851,7 +851,15 @@ class BufferedCapture(Process):
     """
     
     running = False
-    
+
+    # Grayscale latch tuning, see isGrayscaleRobust() and updateGrayscaleLatch().
+    # Class level so they are defined on every construction path, including the
+    # __main__ harness which calls initVideoDevice() without going through run().
+    gray_latch_seconds = 30.0     # sustained agreement needed to flip
+    gray_saturation_level = 250   # at or above this a channel counts as clipped
+    gray_dark_level = 16          # below this chroma has been quantised away
+    gray_min_usable = 0.10        # fraction of samples that must be usable to judge
+
     def __init__(self, array1, start_time1, array2, start_time2, config, video_file=None, night_data_dir=None,
                  saved_frames_dir=None, daytime_mode=None, camera_mode_switch_trigger=None):
         """ Populate arrays with (startTime, frames) after startCapture is called.
@@ -1902,6 +1910,88 @@ class BufferedCapture(Process):
             is_gray = True
 
         return is_gray
+
+
+    def isGrayscaleRobust(self, frame, stride=64):
+        """
+        Decide colour vs mono, refusing to answer when the frame carries no colour
+        evidence.
+
+        isGrayscale() answers on every frame, which is unsafe here. A saturated pixel
+        clips all three channels to the same value, so a frame washed out by a PPS
+        LED flash or a bright fireball reads as mono no matter what the camera is
+        actually doing. Very dark pixels are unreliable for the opposite reason: the
+        encoder quantises their chroma residual to zero. Both kinds are excluded from
+        the vote rather than counted, so a transient cannot force a verdict however
+        long it lasts.
+
+        Arguments:
+            frame: [ndarray] Image frame, BGR or single channel.
+
+        Keyword arguments:
+            stride: [int] Diagonal sampling step, as in isGrayscale(). 64 by default.
+
+        Return:
+            [bool or None] True if mono, False if colour, None if the frame carries
+                too little usable signal to judge.
+        """
+        if frame is None:
+            return None
+
+        sampled = frame[::stride, ::stride]
+
+        # A single channel frame is inherently mono
+        if sampled.ndim < 3:
+            return True
+
+        # Compare across colour channels only, ignoring any alpha
+        sampled = sampled[..., :3].astype(np.int16)
+        hi = sampled.max(axis=2)
+        lo = sampled.min(axis=2)
+
+        # Keep only pixels that are neither clipped nor too dark to carry chroma
+        usable = (hi < self.gray_saturation_level) & (hi >= self.gray_dark_level)
+        if np.count_nonzero(usable) < self.gray_min_usable*usable.size:
+            return None
+
+        # Mono pins chroma to exactly 128, so the channels match exactly
+        return bool(np.all(hi[usable] == lo[usable]))
+
+
+    def updateGrayscaleLatch(self, frame):
+        """
+        Update self.convert_to_gray, but only on sustained, informative evidence.
+
+        A flip changes the frame from (H, W, 3) to (H, W) and forces the raw frame
+        arrays to be reinitialised, so transients must never cause one. Uninformative
+        frames cast no vote at all, and a disagreeing verdict must persist for
+        gray_latch_seconds before it is acted on. Any agreeing or uninformative frame
+        resets the tally, so the window is of consecutive contrary evidence.
+
+        Arguments:
+            frame: [ndarray] Image frame to judge.
+        """
+        verdict = self.isGrayscaleRobust(frame)
+
+        # No usable evidence, or it already matches the latch: reset and wait
+        if verdict is None or verdict == self.convert_to_gray:
+            self.gray_pending = None
+            self.gray_votes = 0
+            return
+
+        # Count consecutive informative frames disagreeing with the current state
+        if verdict == self.gray_pending:
+            self.gray_votes += 1
+        else:
+            self.gray_pending = verdict
+            self.gray_votes = 1
+
+        if self.gray_votes >= self.gray_latch_votes:
+            log.info("Grayscale latch: switching to {} after {:.0f} s of agreement".format(
+                "mono" if verdict else "colour", self.gray_votes*self.gray_vote_interval))
+            self.convert_to_gray = verdict
+            self.gray_pending = None
+            self.gray_votes = 0
 
 
     def handleGrayscaleConversion(self, frame):
@@ -3258,12 +3348,16 @@ class BufferedCapture(Process):
                     # Unmap the buffer
                     buffer.unmap(map_info)
                     
-                    # Check if frame is grayscale and set flag
-                    # gray_result = self.isGrayscale(frame)
-                    # if gray_result is not None:
-                    #     self.convert_to_gray = gray_result
-                    pass
-                    log.info("Video format: {}, {}P, color: {}".format(self.config.gst_colorspace, height, 
+                    # Adopt the initial decision outright if this first frame carries
+                    # usable signal. Nothing downstream has committed to a frame shape
+                    # yet, so there is no reinit cost here and no need to wait out the
+                    # latch window. If the frame is uninformative the default stands
+                    # and the latch converges during capture.
+                    initial_gray = self.isGrayscaleRobust(frame)
+                    if initial_gray is not None:
+                        self.convert_to_gray = initial_gray
+
+                    log.info("Video format: {}, {}P, color: {}".format(self.config.gst_colorspace, height,
                                                                        not self.convert_to_gray))
 
                     # Set the video device type
@@ -3602,7 +3696,33 @@ class BufferedCapture(Process):
             self.pipeline = None
             self.start_timestamp = 0
             self.frame_shape = None
-            self.convert_to_gray = True  # Force grayscale — IMX307 IR cameras are always mono
+            # Colour/mono flag. Defaults to mono: the fleet runs DayNightColor=2
+            # round the clock, which pins chroma to exactly 128.
+            self.convert_to_gray = True
+
+            # Grayscale latch tuning. The naive per-frame check (isGrayscale) cannot
+            # be used here: a saturated frame clips every channel to the same value,
+            # so it reads as mono even when the camera is in colour mode. A PPS LED
+            # flash or a bright fireball does exactly that, and a flip is expensive --
+            # it changes the frame from (H, W, 3) to (H, W), which forces the raw
+            # frame arrays to be reinitialised in the capture loop below. At 1 Hz that
+            # is a reinit every second. So the latch (a) refuses to vote on frames
+            # that carry no colour evidence, which covers a transient of any duration,
+            # and (b) requires sustained agreement before flipping. Genuine day/night
+            # transitions take minutes, so a long window costs nothing. Thresholds are
+            # class attributes; only the derived and mutable state is set up here.
+            #
+            # The latch is driven from the frame-saving path, so votes arrive once per
+            # frame_save_aligned_interval (5 s by default), NOT once per frame.
+            # Convert the window using that cadence, and keep a floor of a few votes
+            # so the latch stays meaningful if the interval is configured very long.
+            self.gray_vote_interval = max(1e-3, getattr(self.config,
+                                                        'frame_save_aligned_interval',
+                                                        5.0))
+            self.gray_latch_votes = max(3, int(self.gray_latch_seconds
+                                               /self.gray_vote_interval + 0.999))
+            self.gray_pending = None
+            self.gray_votes = 0
             self.last_pts_correction_ns = 0
             self.last_running_time_ns = None
 
@@ -3882,12 +4002,11 @@ class BufferedCapture(Process):
                                    self.shouldSaveFrame(frame_timestamp)
                                    )
 
-                # Check if frame contains color information
+                # Check if frame contains color information. Guarded against transient
+                # saturation, which would otherwise flip the frame shape -- see
+                # updateGrayscaleLatch().
                 if save_this_frame:
-                    # gray_result = self.isGrayscale(frame)
-                    # if gray_result is not None:
-                    #     self.convert_to_gray = gray_result
-                    pass
+                    self.updateGrayscaleLatch(frame)
 
                 # Handling for grayscale conversion
                 frame = self.handleGrayscaleConversion(frame)
