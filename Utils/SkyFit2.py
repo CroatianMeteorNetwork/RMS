@@ -5521,8 +5521,12 @@ class PlateTool(QtWidgets.QMainWindow):
                 print("  No image data loaded")
                 return []
 
-            # Get the average pixel image (this is the currently displayed stack)
-            img = ff.avepixel.copy().astype(np.float32)
+            # Get the average pixel image (this is the currently displayed stack), preferring the
+            # full-precision average if the FF file carries one
+            if getattr(ff, 'avepixel16', None) is not None:
+                img = ff.avepixel16.astype(np.float32)/256.0
+            else:
+                img = ff.avepixel.copy().astype(np.float32)
 
             # Apply dark frame
             if hasattr(self, 'dark') and self.dark is not None:
@@ -14621,8 +14625,12 @@ class PlateTool(QtWidgets.QMainWindow):
         # In SkyFit mode: use avepixel for FF files to match calstars extraction
         # In ManualReduction mode: use current displayed frame (individual frame data)
         if self.mode == 'skyfit' and hasattr(self.img_handle, 'ff') and self.img_handle.ff is not None:
-            # For FF files in SkyFit mode, use avepixel (same as calstars extraction)
-            avepixel_data = self.img_handle.ff.avepixel.T
+            # For FF files in SkyFit mode, use avepixel (same as calstars extraction), preferring
+            # the full-precision average if the FF file carries one
+            if getattr(self.img_handle.ff, 'avepixel16', None) is not None:
+                avepixel_data = self.img_handle.ff.avepixel16.T.astype(np.float32)/256.0
+            else:
+                avepixel_data = self.img_handle.ff.avepixel.T
             # Apply dark and flat if available (same processing as displayed image)
             if self.dark is not None:
                 avepixel_data = applyDark(avepixel_data, self.dark)
@@ -15931,8 +15939,13 @@ class PlateTool(QtWidgets.QMainWindow):
             # Subtract the background using the avepixel
             else:
 
-                # Get the avepixel image and apply a dark and flat to it if needed
-                avepixel = self.img_handle.ff.avepixel.T
+                # Get the avepixel image and apply a dark and flat to it if needed, preferring the
+                # full-precision average if the FF file carries one. The background median then
+                # resolves sub-ADU levels, which the quantized 8-bit average cannot
+                if getattr(self.img_handle.ff, 'avepixel16', None) is not None:
+                    avepixel = self.img_handle.ff.avepixel16.T.astype(np.float32)/256.0
+                else:
+                    avepixel = self.img_handle.ff.avepixel.T
 
                 if self.dark is not None:
                     avepixel = applyDark(avepixel, self.dark)
