@@ -12708,7 +12708,6 @@ class PlateTool(QtWidgets.QMainWindow):
         user_force_distortion_centre = self.platepar.force_distortion_centre
         user_refraction = self.platepar.refraction
         user_fit_only_pointing = self.fit_only_pointing
-        user_fixed_scale = self.fixed_scale
 
         # Filter catalog stars to those in FOV (prevents back-projection issues)
         _, catalog_stars_fov = self.filterCatalogStarsInsideFOV(self.catalog_stars)
@@ -12897,7 +12896,6 @@ class PlateTool(QtWidgets.QMainWindow):
         self.platepar.remapCoeffsForFlagChange('force_distortion_centre', user_force_distortion_centre)
         self.platepar.refraction = user_refraction
         self.fit_only_pointing = user_fit_only_pointing
-        self.fixed_scale = user_fixed_scale
         # Now set distortion type which will adjust poly_length and pad coefficients
         # Use reset_params=False to preserve the fitted coefficients, just add zeros for new terms
         self.platepar.setDistortionType(user_distortion_type, reset_params=False)
@@ -13619,7 +13617,6 @@ class PlateTool(QtWidgets.QMainWindow):
         user_force_distortion_centre = self.platepar.force_distortion_centre
         user_refraction = self.platepar.refraction
         user_fit_only_pointing = self.fit_only_pointing
-        user_fixed_scale = self.fixed_scale
 
         # Set intermediate fitting parameters (simple, robust settings)
         # Use simple settings for stability with few stars during initial passes
@@ -13867,7 +13864,6 @@ class PlateTool(QtWidgets.QMainWindow):
             self.platepar.setDistortionType(user_distortion_type, reset_params=False)
             self.platepar.refraction = user_refraction
             self.fit_only_pointing = user_fit_only_pointing
-            self.fixed_scale = user_fixed_scale
 
             # Filter photometric outliers before final fit
             if len(self.paired_stars) >= 15:
@@ -13908,7 +13904,6 @@ class PlateTool(QtWidgets.QMainWindow):
             self.platepar.setDistortionType(user_distortion_type, reset_params=True)
             self.platepar.refraction = user_refraction
             self.fit_only_pointing = user_fit_only_pointing
-            self.fixed_scale = user_fixed_scale
 
             print("  Not enough matched stars for fitting (need >= 10)")
             self.updateStars()
