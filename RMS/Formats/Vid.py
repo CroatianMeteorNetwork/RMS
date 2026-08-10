@@ -86,40 +86,40 @@ def readFrame(st, fid, metadata_only=False):
     #### Read the header ###
     ##########################################################################################################
 
-    st.magic = int(np.fromfile(fid, dtype=np.uint32, count=1))
+    st.magic = int(np.fromfile(fid, dtype=np.uint32, count=1)[0])
 
     # Size of one frame in bytes
-    st.seqlen = int(np.fromfile(fid, dtype=np.uint32, count=1))
+    st.seqlen = int(np.fromfile(fid, dtype=np.uint32, count=1)[0])
 
     # Header length in bytes
-    st.headlen = int(np.fromfile(fid, dtype=np.uint32, count=1))
+    st.headlen = int(np.fromfile(fid, dtype=np.uint32, count=1)[0])
 
-    st.flags = int(np.fromfile(fid, dtype=np.uint32, count=1))
-    st.seq = int(np.fromfile(fid, dtype=np.uint32, count=1))
+    st.flags = int(np.fromfile(fid, dtype=np.uint32, count=1)[0])
+    st.seq = int(np.fromfile(fid, dtype=np.uint32, count=1)[0])
 
     # Beginning UNIX time
-    st.ts = int(np.fromfile(fid, dtype=np.int32, count=1))
-    st.tu = int(np.fromfile(fid, dtype=np.int32, count=1))
+    st.ts = int(np.fromfile(fid, dtype=np.int32, count=1)[0])
+    st.tu = int(np.fromfile(fid, dtype=np.int32, count=1)[0])
 
     # Station number
-    st.station_id = int(np.fromfile(fid, dtype=np.int16, count=1))
+    st.station_id = int(np.fromfile(fid, dtype=np.int16, count=1)[0])
 
     # Image dimensions
-    st.wid = int(np.fromfile(fid, dtype=np.int16, count=1))
-    st.ht = int(np.fromfile(fid, dtype=np.int16, count=1))
+    st.wid = int(np.fromfile(fid, dtype=np.int16, count=1)[0])
+    st.ht = int(np.fromfile(fid, dtype=np.int16, count=1)[0])
 
     # Image depth
-    st.depth = int(np.fromfile(fid, dtype=np.int16, count=1))
+    st.depth = int(np.fromfile(fid, dtype=np.int16, count=1)[0])
 
-    st.hx = int(np.fromfile(fid, dtype=np.uint16, count=1))
-    st.hy = int(np.fromfile(fid, dtype=np.uint16, count=1))
+    st.hx = int(np.fromfile(fid, dtype=np.uint16, count=1)[0])
+    st.hy = int(np.fromfile(fid, dtype=np.uint16, count=1)[0])
 
     # Camera stream identifier, where 0 = 'A', 1 = 'B', etc
-    st.str_num = int(np.fromfile(fid, dtype=np.uint16, count=1))
+    st.str_num = int(np.fromfile(fid, dtype=np.uint16, count=1)[0])
 
-    st.reserved0 = int(np.fromfile(fid, dtype=np.uint16, count=1))
-    st.exposure = int(np.fromfile(fid, dtype=np.uint32, count=1))
-    st.reserved2 = int(np.fromfile(fid, dtype=np.uint32, count=1))
+    st.reserved0 = int(np.fromfile(fid, dtype=np.uint16, count=1)[0])
+    st.exposure = int(np.fromfile(fid, dtype=np.uint32, count=1)[0])
+    st.reserved2 = int(np.fromfile(fid, dtype=np.uint32, count=1)[0])
     
     st.text = np.fromfile(fid, dtype=np.uint8, count=64).tobytes().decode("ascii").replace('\0', '')
 

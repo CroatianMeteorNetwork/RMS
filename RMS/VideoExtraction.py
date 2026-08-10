@@ -246,9 +246,10 @@ class Extractor(Process):
         """ Start the extractor.
 
         Arguments:
-            frames_base: [multiprocessing.Array] base of the SNAPSHOT frame buffer (a
-                private copy made by the compressor before it releases the capture
-                handshake - the live buffer may be refilled at any time after that).
+            frames_base: [multiprocessing.Array] base of the LIVE ping-pong frame buffer
+                (array1_base/array2_base). No private copy is made - capture may refill
+                this buffer once its grace window elapses, so a slow extraction can race
+                the refill and corrupt its FR clip (accepted trade-off for fixed memory).
                 Passing the base instead of a numpy view avoids pickling the whole
                 ~256-frame block by value under the 'forkserver'/'spawn' start methods.
             frames_shape: [tuple] Shape (256, H, W) to rebuild the numpy view.
@@ -276,9 +277,11 @@ class Extractor(Process):
         # Re-establish logging and signal handling in the child (no-op under 'fork')
         initChildProcess(self.logging_queue, self.config)
 
-        # Rebuild the numpy view over the shared snapshot buffer in this process
-        # (a view cannot cross the process boundary under forkserver/spawn)
-        self.frames = np.frombuffer(self.frames_base, dtype=np.uint8).reshape(
+        # Rebuild the numpy view over the shared live buffer in this process (a view
+        # cannot cross the process boundary under forkserver/spawn). The base is a locked
+        # multiprocessing.Array, so go through .get_obj() - same pattern the compressor
+        # and capture use (Compression.py, BufferedCapture.py).
+        self.frames = np.ctypeslib.as_array(self.frames_base.get_obj()).reshape(
             self.frames_shape)
 
         self.executeAll()
