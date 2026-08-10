@@ -383,21 +383,6 @@ class Compressor(multiprocessing.Process):
             # Run the compression
             compressed, field_intensities = self.compress(frames)
 
-            # Snapshot the raw block for the extractor BEFORE releasing the capture
-            # handshake: once start_time returns to 0 the buffer is eligible for refill,
-            # and the extractor reads it seconds later - the old code raced the refill
-            # under 'fork' and pickled the whole ~236 MB block by value under
-            # 'forkserver'/'spawn' (stalling compression and spiking RSS). A shared
-            # mp.Array snapshot costs one memcpy while the handshake is held and crosses
-            # the process boundary without pickling.
-            frames_snapshot_base = None
-            if self.config.enable_fireball_detection:
-                frames_snapshot_base = multiprocessing.Array(
-                    ctypes.c_uint8, int(frames.size), lock=False)
-                snapshot_view = np.frombuffer(frames_snapshot_base,
-                    dtype=np.uint8).reshape(frames.shape)
-                np.copyto(snapshot_view, frames)
-
             # Once the compression is done, tell the capture thread to keep filling the buffer
             if buffer_one:
                 self.start_time1.value = 0
@@ -428,11 +413,24 @@ class Compressor(multiprocessing.Process):
             # Save the extracted intensities per every field
             FieldIntensities.saveFieldIntensitiesBin(field_intensities, self.data_dir, filename_micros)
 
-            # Run the extractor (on the pre-handshake snapshot, never the live buffer)
+            # Run the extractor on the LIVE ping-pong buffer (fixed memory: no per-block
+            # copy). With two buffers the extractor has at most about one block before
+            # capture, having filled the other buffer, wraps back and starts overwriting
+            # this one - and less than that in practice, since the handshake was released
+            # (start_time -> 0) and the FF/JPG/intensities saved above before we get here.
+            # A normal-night extraction finishes inside that window; a slow one (noisy sky,
+            # long find3DLines) can outrun it, and then capture overwrites the block
+            # mid-read and that single FR clip is corrupted. That is the original pre-#935
+            # behavior, kept deliberately: on memory-limited Raspberry Pis a rare lost
+            # fireball clip is cheaper than a per-block snapshot copy, and FF files and
+            # detection are unaffected. Pass the mp.Array BASE, not a numpy view - the base
+            # crosses the process boundary by handle under 'fork' and 'forkserver'/'spawn'
+            # alike, while a view would be pickled by value (~236 MB, stalling compression
+            # and spiking RSS).
             if self.config.enable_fireball_detection:
+                frames_base = self.array1_base if buffer_one else self.array2_base
                 extractor = Extractor(self.config, self.data_dir)
-                extractor.start(frames_snapshot_base, frames.shape, compressed,
-                    filename_millis)
+                extractor.start(frames_base, frames.shape, compressed, filename_millis)
 
                 log.debug('Extractor started for: ' + filename_millis)
 
