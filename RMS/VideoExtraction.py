@@ -20,7 +20,7 @@ import math
 import time
 from multiprocessing import Process
 
-from RMS.Misc import AtomicFlag
+from RMS.Misc import AtomicFlag, setParentDeathSignal
 
 import numpy as np
 
@@ -246,25 +246,26 @@ class Extractor(Process):
         """ Start the extractor.
 
         Arguments:
-            frames_base: [multiprocessing.Array] base of the SNAPSHOT frame buffer (a
-                private copy made by the compressor before it releases the capture
-                handshake - the live buffer may be refilled at any time after that).
-                Passing the base instead of a numpy view avoids pickling the whole
-                ~256-frame block by value under the 'forkserver'/'spawn' start methods.
+            frames_base: [multiprocessing.Array] base of the SNAPSHOT frame buffer - a copy
+                of the block made by the compressor before it released the capture handshake,
+                drawn from a small reusable pool. The compressor never refills it while this
+                process is alive, so there is no race with the live buffer; passing the base
+                instead of a numpy view avoids pickling the whole ~256-frame block by value
+                under the 'forkserver'/'spawn' start methods.
             frames_shape: [tuple] Shape (256, H, W) to rebuild the numpy view.
             compressed: [ndarray] array with FTP compressed frames
             filename: [str] name of the FF file which is being processed
 
         """
-        
+
         self.exit = AtomicFlag()
-        
+
         self.frames_base = frames_base
         self.frames_shape = frames_shape
         self.frames = None      # numpy view rebuilt in run() (per-process)
         self.compressed = compressed
         self.filename = filename
-        
+
         super(Extractor, self).start()
     
 
@@ -272,6 +273,14 @@ class Extractor(Process):
     def run(self):
         """ Retrieve frames from list, convert, compress and save them.
         """
+
+        # Die if our parent Compressor dies (e.g. watchdog force-kill), so a hung
+        # extraction cannot be orphaned pinning its ~236 MB snapshot forever. The
+        # compressor's exit paths join live extractors (bounded) first, so a healthy
+        # extractor finishes its FR write before this can fire. Note that under forkserver
+        # this fires on the wrong parent's death (see RawFrameSaver.run), but the
+        # extractor is short-lived so this is only a safety net.
+        setParentDeathSignal()
 
         # Re-establish logging and signal handling in the child (no-op under 'fork')
         initChildProcess(self.logging_queue, self.config)
