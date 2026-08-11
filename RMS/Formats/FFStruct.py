@@ -37,6 +37,10 @@ class FFStruct:
         # by rounding off the fractional bits: (avepixel16 + 128) >> 8
         self.avepixel16 = None
 
+        # Camera gamma used to average avepixel16 in the linear domain (the stored plane is
+        # re-encoded, i.e. stays in the gamma-encoded domain). 1.0 means encoded-domain averaging
+        self.avegamma = 1.0
+
         self.array = None
 
 

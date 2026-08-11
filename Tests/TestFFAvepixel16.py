@@ -24,28 +24,43 @@ from RMS.Formats import FFfile, FFfits
 from RMS.Formats.FFStruct import FFStruct
 
 
-def referencePlanes(frames):
+def referencePlanes(frames, gamma=1.0):
     """ Exact numpy reference of the compressor's trimmed average and standard deviation. """
 
     frames_sorted = np.sort(frames.astype(np.uint64), axis=0)
-    trimmed = frames_sorted[:-4]
 
-    # Sum without the top 4 max values
+    # Symmetric trim: drop the top 4 and the bottom 4 values
+    trimmed = frames_sorted[4:-4]
+
     acc = trimmed.sum(axis=0)
-    n = frames.shape[0] - 4
+    n = trimmed.shape[0]
 
-    # Fixed-point mean (rounded), and the 8-bit mean derived from it by rounding
-    ave16 = (256*acc + n//2)//n
-    ave8 = (ave16 + 128) >> 8
+    if gamma == 1.0:
 
-    # Sample variance and rounded standard deviation, matching the compressor's double math
+        # Fixed-point mean (rounded)
+        ave16 = (256*acc + n//2)//n
+
+    else:
+
+        # Linear-domain average, re-encoded into the gamma domain
+        decode_lut = 255.0*(np.arange(256)/255.0)**(1.0/gamma)
+        mean_lin = decode_lut[trimmed].sum(axis=0)/n
+        ave16 = np.floor(256.0*255.0*(mean_lin/255.0)**gamma + 0.5)
+
+    ave16 = ave16.astype(np.uint16)
+
+    # The 8-bit mean derived from the fixed-point mean by rounding
+    ave8 = (ave16.astype(np.uint32) + 128) >> 8
+
+    # Sample variance (encoded domain) and rounded standard deviation, matching the
+    # compressor's double math
     sq_sum = (trimmed**2).sum(axis=0).astype(np.float64)
     var = (sq_sum - acc.astype(np.float64)**2/n)/(n - 1)
     var = np.clip(var, 0, None)
     std = np.floor(np.sqrt(var) + 0.5)
     std[std < 1] = 1
 
-    return ave8.astype(np.uint8), ave16.astype(np.uint16), std.astype(np.uint8)
+    return ave8.astype(np.uint8), ave16, std.astype(np.uint8)
 
 
 def makeFF(ave16=None, dtype=np.uint8):
@@ -93,6 +108,39 @@ def testCompressorConsistency():
         assert np.array_equal(ftp[2], ref8)
         assert np.array_equal((ave16 + 128) >> 8, ftp[2].astype(np.uint16))
         assert np.array_equal(ftp[3], ref_std)
+
+
+def testCompressorGammaPath():
+    """ The linear-domain (gamma) averaging path matches the reference. """
+
+    rng = np.random.default_rng(13)
+
+    test_stacks = [
+        np.clip(np.rint(40.4 + rng.normal(0, 4.5, (256, 24, 24))), 0, 255).astype(np.uint8),
+        rng.integers(0, 256, (256, 16, 16)).astype(np.uint8),
+        np.zeros((256, 8, 8), np.uint8),
+        np.full((256, 8, 8), 255, np.uint8),
+    ]
+
+    for gamma in [0.6, 0.45, 0.9]:
+        for frames in test_stacks:
+
+            ftp, ave16, _ = compressFrames(frames, -1, gamma)
+            ref8, ref16, ref_std = referencePlanes(frames, gamma=gamma)
+
+            # The float accumulation order differs between the Cython loop and the numpy
+            # reference, so allow a 1 LSB (1/256 ADU) tolerance on the fixed-point mean
+            assert np.abs(ave16.astype(np.int64) - ref16.astype(np.int64)).max() <= 1
+
+            # The 8-bit plane must be derived from the fixed-point plane exactly, and the
+            # standard deviation (integer accumulators) must be exact
+            assert np.array_equal((ave16.astype(np.uint32) + 128) >> 8,
+                ftp[2].astype(np.uint32))
+            assert np.array_equal(ftp[3], ref_std)
+
+            # The gamma path must reduce to the identity at the extremes
+            if frames.min() == frames.max():
+                assert np.array_equal(ave16, ref16)
 
 
 def testFitsRoundTrip():
@@ -233,6 +281,9 @@ if __name__ == '__main__':
 
     testCompressorConsistency()
     print('testCompressorConsistency OK')
+
+    testCompressorGammaPath()
+    print('testCompressorGammaPath OK')
 
     testFitsRoundTrip()
     print('testFitsRoundTrip OK')

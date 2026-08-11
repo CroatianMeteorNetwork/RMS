@@ -140,6 +140,7 @@ def read(directory, filename, array=False, full_filename=False, memmap=True):
         avefrac = head.get('AVEFRAC', 0)
         if avefrac:
             ff.avepixel16 = ff.avepixel
+            ff.avegamma = head.get('AVEGAMMA', 1.0)
             ff.avepixel = np.clip(
                 (ff.avepixel16.astype(np.uint32) + (1 << (avefrac - 1))) >> avefrac,
                 0, 255).astype(np.uint8)
@@ -205,6 +206,8 @@ def write(ff, directory, filename):
     # legacy 8-bit average
     if getattr(ff, 'avepixel16', None) is not None:
         head['AVEFRAC'] = (8, 'AVEPIXEL fractional bits (uint16, ADU*256)')
+        head['AVEGAMMA'] = (float(getattr(ff, 'avegamma', 1.0) or 1.0),
+            'gamma used for linear-domain averaging')
         avepixel_hdu = fits.ImageHDU(ff.avepixel16, name='AVEPIXEL')
     else:
         avepixel_hdu = fits.ImageHDU(ff.avepixel, name='AVEPIXEL')

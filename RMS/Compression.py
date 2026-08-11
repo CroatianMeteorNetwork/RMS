@@ -101,8 +101,11 @@ class Compressor(multiprocessing.Process):
 
         """
 
-        # Run cythonized compression
-        ftp_array, ave16, fieldsum = compressFrames(frames, self.config.deinterlace_order)
+        # Run cythonized compression. The camera gamma is passed so the average is computed in
+        # the linear domain (and re-encoded), removing the Jensen bias of averaging
+        # gamma-encoded samples
+        ftp_array, ave16, fieldsum = compressFrames(frames, self.config.deinterlace_order,
+            self.config.gamma)
 
         return ftp_array, ave16, fieldsum
     
@@ -142,6 +145,9 @@ class Compressor(multiprocessing.Process):
         # format can carry it; the legacy bin writer ignores it
         if (ave16 is not None) and self.config.ff_avepixel16:
             ff.avepixel16 = ave16
+
+            # Record the gamma used for the linear-domain averaging (provenance)
+            ff.avegamma = self.config.gamma
 
         ff.nrows = arr.shape[1]
         ff.ncols = arr.shape[2]
