@@ -31,7 +31,16 @@ class FFStruct:
         self.maxframe = None
         self.avepixel = None
         self.stdpixel = None
-        
+
+        # Average pixel image at full precision, in 8.8 fixed point (uint16, units of 1/256 ADU).
+        # None if the FF file only carries the 8-bit average. The 8-bit avepixel is derived from it
+        # by rounding off the fractional bits: (avepixel16 + 128) >> 8
+        self.avepixel16 = None
+
+        # Camera gamma used to average avepixel16 in the linear domain (the stored plane is
+        # re-encoded, i.e. stays in the gamma-encoded domain). 1.0 means encoded-domain averaging
+        self.avegamma = 1.0
+
         self.array = None
 
 
