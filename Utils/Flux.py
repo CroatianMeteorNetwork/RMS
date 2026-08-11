@@ -2470,6 +2470,12 @@ def denseDomeRatios(config, dome_model, ff_list, calstars_positions, recalibrate
                     if np.any(bright) and (forced_cache is None):
                         ff = FFfile.read(dir_path, ff_file)
                         ave = getattr(ff, "avepixel", None)
+
+                        # Use the full-precision average when the FF file carries one - the
+                        # forced patch fluxes and per-cell backgrounds then resolve sub-ADU
+                        if getattr(ff, "avepixel16", None) is not None:
+                            ave = ff.avepixel16.astype(np.float32)/256.0
+
                         if ave is not None:
                             from RMS.PatchPhotometry import measurePatchFluxes
                             fl, frame_noise = measurePatchFluxes(

@@ -123,6 +123,17 @@ def bortleClass(sqm):
     return "9"
 
 
+def preciseAvepixel(ff):
+    """ The FF average as float ADU, using the full-precision 16-bit plane when the file
+        carries one. The 8-bit average quantizes the sky to 1 ADU, which staircases the
+        patch medians this module measures; the 16-bit plane resolves sub-ADU levels. """
+
+    if getattr(ff, 'avepixel16', None) is not None:
+        return ff.avepixel16.astype(float)/256.0
+
+    return ff.avepixel.astype(float)
+
+
 def _radiometricPath(config):
     return os.path.join(os.path.expanduser(config.data_dir),
         "{:s}_{:s}".format(str(config.stationID), RADIOMETRIC_FILE_SUFFIX))
@@ -434,7 +445,7 @@ def estimateBiasByRegression(config, dir_path, dome_model, pps, mask):
         if ff is None:
             continue
 
-        ave = ff.avepixel.astype(float)
+        ave = preciseAvepixel(ff)
         w, h = pp.X_res, pp.Y_res
         date = FFfile.getMiddleTimeFF(ff_name, config.fps, ret_milliseconds=True)
         jd = date2JD(*date)
@@ -663,7 +674,7 @@ def measureSkyQuality(config, dir_path, dome_model, recalibrated_platepars, time
         ff = FFfile.read(dir_path, ff_name)
         if ff is None:
             continue
-        ave = ff.avepixel.astype(float)
+        ave = preciseAvepixel(ff)
         levels.append((ff_name,
             float(np.median(ave[y0 - SKY_PATCH_HALF:y0 + SKY_PATCH_HALF,
                                 x0 - SKY_PATCH_HALF:x0 + SKY_PATCH_HALF]))))

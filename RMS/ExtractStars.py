@@ -538,13 +538,21 @@ def extractStarsImgHandle(img_handle,
         # Load one video frame chunk
         ff_tmp = img_handle.loadChunk()
 
-        # Extract the image to work on
-        avepixel = ff_tmp.avepixel
+        # Extract the image to work on, preferring the full-precision average if the chunk
+        # carries one (16-bit fixed point, 1/256 ADU units)
+        if getattr(ff_tmp, 'avepixel16', None) is not None:
+            avepixel = ff_tmp.avepixel16.astype(np.float32)/256.0
+        else:
+            avepixel = ff_tmp.avepixel
 
 
         # Apply the dark frame
         if dark is not None:
             avepixel = Image.applyDark(avepixel, dark)
+
+            # cv2.subtract only clips at zero for integer types; do the same on the float path
+            if avepixel.dtype != np.uint8:
+                avepixel = np.clip(avepixel, 0, None)
 
         # Apply the flat
         if flat_struct is not None:
