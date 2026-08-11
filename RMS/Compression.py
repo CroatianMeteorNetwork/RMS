@@ -45,6 +45,15 @@ from RMS.CompressionCy import compressFrames
 log = getLogger("rmslogger")
 
 
+# Maximum number of shared-memory snapshot buffers for the fireball extractor. Each holds a full
+# raw frame block (~236 MB at 720p), so this bounds the extractor's total memory. Two buffers
+# tolerate one over-cadence extraction with no loss - the case of a bright fireball whose own
+# extraction runs long, immediately followed by the block with its continuation. A backlog deeper
+# than that means extraction has fallen behind capture for a sustained stretch (in practice a
+# noise night - clouds, rain, insects), and further blocks are skipped to keep memory bounded.
+MAX_EXTRACTOR_SNAPSHOTS = 2
+
+
 class Compressor(multiprocessing.Process):
     """Compress list of numpy arrays (video frames).
 
@@ -312,7 +321,34 @@ class Compressor(multiprocessing.Process):
 
         n = 0
         exit_wait_start = None
-        
+
+        # Fireball-extractor snapshot pool. Each extractor gets a SNAPSHOT of the frame block,
+        # copied before the capture handshake is released, so it can never race the ping-pong
+        # buffer refill and never pickles the block by value under 'forkserver'/'spawn' (review
+        # finding B2). The snapshots come from a small REUSABLE pool: a buffer is only handed
+        # out again after its extractor has exited, and at most MAX_EXTRACTOR_SNAPSHOTS are ever
+        # allocated - an unbounded buffer-per-block scheme let slow extractions pile up, each
+        # pinning its own ~236 MB snapshot, and the OS OOM-killed capture mid-night.
+        snapshot_pool = []      # free (base, view) pairs, ready for reuse
+        extractors = []         # live (process, (base, view)) pairs
+        skipped_extractions = 0
+
+        def waitForExtractors(timeout=20):
+            """ Give still-running extractors a bounded chance to finish before this process
+                exits. Exiting fires the children's parent-death SIGKILL, and killing one
+                mid-FR-write loses the clip, while killing one mid-write on the shared logging
+                queue can orphan the queue's internal lock (the exact cascade PR #935 fixed).
+                A hung extractor must not block the exit, hence the shared bound.
+            """
+            deadline = time.time() + timeout
+            for ext, _ in extractors:
+                if ext.is_alive():
+                    log.info('Waiting for extractor {:s} to finish...'.format(str(ext.pid)))
+                    ext.join(max(0.1, deadline - time.time()))
+                    if ext.is_alive():
+                        log.warning('Extractor {:s} still running at compressor exit, '
+                            'it will be killed'.format(str(ext.pid)))
+
         # Repeat until the compressor is killed from the outside
         while True:
             # graceful-exit check
@@ -338,6 +374,8 @@ class Compressor(multiprocessing.Process):
                 if self.exit.is_set():
 
                     log.debug('Compression run exit')
+
+                    waitForExtractors()
 
                     self.run_exited.set()
                     os._exit(0)
@@ -399,20 +437,53 @@ class Compressor(multiprocessing.Process):
             compressed, ave16, field_intensities = self.compress(frames)
 
 
-            # Snapshot the raw block for the extractor BEFORE releasing the capture
-            # handshake: once start_time returns to 0 the buffer is eligible for refill,
-            # and the extractor reads it seconds later - the old code raced the refill
-            # under 'fork' and pickled the whole ~236 MB block by value under
-            # 'forkserver'/'spawn' (stalling compression and spiking RSS). A shared
-            # mp.Array snapshot costs one memcpy while the handshake is held and crosses
-            # the process boundary without pickling.
-            frames_snapshot_base = None
+            # Snapshot the raw block for the extractor BEFORE releasing the capture handshake:
+            # once start_time returns to 0 the buffer is eligible for refill, and the extractor
+            # reads it seconds later. The snapshot buffer comes from the bounded reusable pool
+            # (see its definition above); if the pool is exhausted, this block's extraction is
+            # skipped - memory must stay bounded, and a pool-deep backlog means the extractions
+            # being skipped are on a night too noisy to produce usable clips anyway.
+            snapshot = None
             if self.config.enable_fireball_detection:
-                frames_snapshot_base = multiprocessing.Array(
-                    ctypes.c_uint8, int(frames.size), lock=False)
-                snapshot_view = np.frombuffer(frames_snapshot_base,
-                    dtype=np.uint8).reshape(frames.shape)
-                np.copyto(snapshot_view, frames)
+
+                # Reap finished extractors and reclaim their snapshot buffers
+                still_running = []
+                for ext, buf in extractors:
+                    if ext.is_alive():
+                        still_running.append((ext, buf))
+                    else:
+                        ext.join()
+                        snapshot_pool.append(buf)
+                extractors = still_running
+
+                if snapshot_pool:
+                    snapshot = snapshot_pool.pop()
+
+                elif len(extractors) < MAX_EXTRACTOR_SNAPSHOTS:
+                    # Grow the pool lazily: on healthy nights only one buffer ever exists
+                    if extractors:
+                        log.info('Extraction running behind capture, allocating snapshot '
+                            'buffer {:d} of {:d}'.format(len(extractors) + 1,
+                            MAX_EXTRACTOR_SNAPSHOTS))
+                    snapshot_base = multiprocessing.Array(
+                        ctypes.c_uint8, int(frames.size), lock=False)
+                    snapshot = (snapshot_base, np.frombuffer(snapshot_base,
+                        dtype=np.uint8).reshape(frames.shape))
+
+                else:
+                    skipped_extractions += 1
+                    log.warning('All {:d} snapshot buffers in use, skipping fireball '
+                        'extraction for this block ({:d} skipped so far)'.format(
+                        MAX_EXTRACTOR_SNAPSHOTS, skipped_extractions))
+
+                if snapshot is not None:
+
+                    if skipped_extractions:
+                        log.info('Extraction caught up after {:d} skipped block(s)'.format(
+                            skipped_extractions))
+                        skipped_extractions = 0
+
+                    np.copyto(snapshot[1], frames)
 
             # Once the compression is done, tell the capture thread to keep filling the buffer
             if buffer_one:
@@ -445,11 +516,12 @@ class Compressor(multiprocessing.Process):
             # Save the extracted intensities per every field
             FieldIntensities.saveFieldIntensitiesBin(field_intensities, self.data_dir, filename_micros)
 
-            # Run the extractor (on the pre-handshake snapshot, never the live buffer)
-            if self.config.enable_fireball_detection:
+            # Run the extractor (on its pre-handshake snapshot, never the live buffer)
+            if snapshot is not None:
+
                 extractor = Extractor(self.config, self.data_dir)
-                extractor.start(frames_snapshot_base, frames.shape, compressed,
-                    filename_millis)
+                extractor.start(snapshot[0], frames.shape, compressed, filename_millis)
+                extractors.append((extractor, snapshot))
 
                 log.debug('Extractor started for: ' + filename_millis)
 
@@ -469,6 +541,8 @@ class Compressor(multiprocessing.Process):
 
 
         log.debug('Compression run exit')
+
+        waitForExtractors()
 
         time.sleep(1.0)
         self.run_exited.set()
