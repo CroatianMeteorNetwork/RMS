@@ -1488,7 +1488,7 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                     intensity_values = max_avg_corrected[half_frame_pixels_stripe[:,1], 
                             half_frame_pixels_stripe[:,0]]
 
-                    intensity = int(np.sum(intensity_values))
+                    intensity = int(round(np.sum(intensity_values)))
 
 
                     # Calculate the background intensity as the media of the pixel values on the avepixel

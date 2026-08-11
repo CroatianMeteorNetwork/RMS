@@ -566,7 +566,7 @@ class InputTypeFRFF(InputType):
             # calculate avepixel
             img_count[img_count <= 0] = 1
             img = np.sum(frame_list, axis=0)
-            ff.avepixel = np.swapaxes(img/img_count, 0, 1).astype(np.uint8)
+            ff.avepixel = np.rint(np.swapaxes(img/img_count, 0, 1)).astype(np.uint8)
 
             ff.stdpixel = np.zeros_like(ff.avepixel)
 

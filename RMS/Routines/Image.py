@@ -239,15 +239,35 @@ def binImage(img, bin_factor, method='avg'):
 
     input_type = img.dtype
 
+    # Bin float images in float directly - casting them to uint16 first would truncate the
+    # sub-ADU precision (e.g. of a flat field) before it is averaged
+    if np.issubdtype(input_type, np.floating):
+
+        crop_h = (img.shape[0]//bin_factor)*bin_factor
+        crop_w = (img.shape[1]//bin_factor)*bin_factor
+        img = img[:crop_h, :crop_w].reshape(crop_h//bin_factor, bin_factor,
+            crop_w//bin_factor, bin_factor)
+
+        if method == 'sum':
+            img = img.sum(axis=(1, 3))
+        else:
+            img = img.mean(axis=(1, 3))
+
+        return img.astype(input_type)
+
     # Make sure the input image is of the correct type
     if img.dtype != np.uint16:
         img = img.astype(np.uint16)
-    
+
     # Perform the binning
     img = binImageCy(img, bin_factor, method=method)
 
-    # Convert the image back to the input type
-    img = img.astype(input_type)
+    # Convert the image back to the input type. Sum-binned values exceed the range of narrow
+    # input types, so promote uint8 sums to uint16 instead of wrapping
+    if (method == 'sum') and (np.iinfo(input_type).max < 65535):
+        img = img.astype(np.uint16)
+    else:
+        img = img.astype(input_type)
 
     return img
 
@@ -345,8 +365,13 @@ def thresholdImg(img, avepixel, stdpixel, k1, j1, ff=False, mask=None, mask_ave_
     if mask_ave_bright:
 
         # Compute the average saturation mask and mask out everything that's saturating in avepixel
+        # (float averages, e.g. the full-precision avepixel16 path, have no integer cap)
+        if np.issubdtype(avepixel.dtype, np.integer):
+            saturation_cap = np.iinfo(avepixel.dtype).max
+        else:
+            saturation_cap = np.inf
         ave_saturation_mask = avepixel >= np.min([np.mean(avepixel) + 5*np.std(avepixel), \
-            np.iinfo(avepixel.dtype).max])
+            saturation_cap])
 
         # Dilate the mask 2 times
         input_type = ave_saturation_mask.dtype
@@ -457,10 +482,11 @@ def gammaCorrectionImage(intensity, gamma, bp=0, wp=255, out_type=None):
     # If the intensity was a numpy array, convert it back to the original type
     if (orig_type is not None) and (out_type is None):
 
-        # Clip the range to the range of the original type if the type is integer (leave float as is)
+        # Clip the range to the range of the original type if the type is integer (leave float
+        # as is), and round instead of truncating
         if np.issubdtype(orig_type, np.integer):
-            out = np.clip(out, 0, np.iinfo(orig_type).max)
-        
+            out = np.rint(np.clip(out, 0, np.iinfo(orig_type).max))
+
         # Convert the intensity back to the original type
         out = out.astype(orig_type)
 
@@ -756,7 +782,11 @@ def applyFlat(img, flat_struct):
         raise TypeError(f"Unsupported dtype: {input_type}")
     img = np.clip(img, info.min, info.max)
 
-    # Make sure the output array is the same as the input type
+    # Make sure the output array is the same as the input type, rounding instead of truncating
+    # when going back to an integer type
+    if np.issubdtype(input_type, np.integer):
+        img = np.rint(img)
+
     img = img.astype(input_type)
 
     return img

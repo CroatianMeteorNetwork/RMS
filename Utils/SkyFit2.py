@@ -16020,12 +16020,12 @@ class PlateTool(QtWidgets.QMainWindow):
                 # If the result is masked (i.e. error reading pixels), set the intensity sum to 1
                 intensity_sum = 1
 
-            # If the intensity sum is a numpy object, set it to int
+            # If the intensity sum is a numpy object, set it to int (rounded, not truncated)
             elif isinstance(intensity_sum, np.ndarray):
-                intensity_sum = intensity_sum.astype(int)
+                intensity_sum = np.rint(intensity_sum).astype(int)
 
             else:
-                intensity_sum = int(intensity_sum)
+                intensity_sum = int(round(intensity_sum))
 
             # Set the intensity sum to the pick
             pick['intensity_sum'] = intensity_sum

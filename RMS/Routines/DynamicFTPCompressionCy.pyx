@@ -98,24 +98,33 @@ cdef class FFMimickInterface:
         # If there are less than 3 frames, don't subtract the max from average
         if self.nframes < 3:
 
-            # Compute normal average
-            self.avepixel = self.acc//self.nframes
+            # Compute normal average, rounded
+            self.avepixel = (2*self.acc + self.nframes)//(2*self.nframes)
 
             # Don't compute the standard deviation
             self.stdpixel *= 0
 
 
         else:
-            
+
             # Remove the contribution of the maxpixel to the avepixel
             self.acc -= self.maxpixel
 
-            self.avepixel = self.acc//(self.nframes - 1)
-            
-            # Compute the max subtracted standard deviation
-            self.stdpixel -= (self.maxpixel.astype(np.uint64))**2
-            self.stdpixel -= self.acc*self.avepixel
-            self.stdpixel  = np.sqrt(self.stdpixel/(self.nframes - 2))
+            # Rounded average of the max-subtracted frames
+            self.avepixel = (2*self.acc + (self.nframes - 1))//(2*(self.nframes - 1))
+
+            # Compute the max subtracted standard deviation with the correct sample variance
+            # formula, in double precision. Using the truncated integer average in the acc**2/n
+            # term (as done previously) inflates the variance by ~mean*frac(mean) per pixel
+            var = (self.stdpixel.astype(np.float64)
+                - (self.maxpixel.astype(np.float64))**2
+                - (self.acc.astype(np.float64))**2/(self.nframes - 1))/(self.nframes - 2)
+
+            # Guard against small negative values from floating point rounding
+            np.clip(var, 0, None, out=var)
+
+            # Rounded standard deviation
+            self.stdpixel = np.floor(np.sqrt(var) + 0.5).astype(np.uint64)
 
 
         # Make sure there are no zeros in standard deviation

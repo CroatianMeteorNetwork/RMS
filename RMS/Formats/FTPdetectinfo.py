@@ -191,11 +191,11 @@ def writeFTPdetectinfo(meteor_list, ff_directory, file_name, cal_directory, cam_
 
 
                 ### Set default values if necessary and limit the values to the allowed range ###
-                level = int(level) \
+                level = int(round(level)) \
                     if (level is not None) and (not np.isnan(level)) \
                     else 1
-                
-                background = int(background) \
+
+                background = int(round(background)) \
                     if (background is not None) and (not np.isnan(background)) \
                     else 0
                 
