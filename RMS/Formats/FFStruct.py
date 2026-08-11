@@ -33,7 +33,8 @@ class FFStruct:
         self.stdpixel = None
 
         # Average pixel image at full precision, in 8.8 fixed point (uint16, units of 1/256 ADU).
-        # None if the FF file only carries the 8-bit average. avepixel16 >> 8 always equals avepixel
+        # None if the FF file only carries the 8-bit average. The 8-bit avepixel is derived from it
+        # by rounding off the fractional bits: (avepixel16 + 128) >> 8
         self.avepixel16 = None
 
         self.array = None

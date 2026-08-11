@@ -33,8 +33,9 @@ def compressFrames(np.ndarray[INT8_TYPE_t, ndim=3] frames, int deinterlace_order
         dtype=INT8_TYPE)
 
     # Full-precision average in 8.8 fixed point (units of 1/256 ADU). The 8-bit average in ftp_array
-    # floors away the sub-ADU precision of the 256-frame mean; this plane keeps it. Guaranteed
-    # consistent with the 8-bit plane: ave16 >> 8 always equals the floored 8-bit average
+    # rounds away the sub-ADU precision of the 256-frame mean; this plane keeps it. The 8-bit plane
+    # is derived from it by rounding off the fractional bits ((ave16 + 128) >> 8), the same way
+    # readers derive the 8-bit view
     cdef np.ndarray[INT16_TYPE_t, ndim=2] ave16_array = np.empty([frames.shape[1], frames.shape[2]],
         dtype=INT16_TYPE)
 
@@ -60,8 +61,9 @@ def compressFrames(np.ndarray[INT8_TYPE_t, ndim=3] frames, int deinterlace_order
     cdef unsigned short rand_count = 1
 
     cdef unsigned int var, max_val, max_val_2, max_val_3, max_val_4, max_frame, mean, pixel, n, num_equal
-    
-    cdef unsigned int x, y, acc
+
+    cdef unsigned int x, y, acc, ave16
+    cdef double var_d
     cdef unsigned int height = frames.shape[1]
     cdef unsigned int width = frames.shape[2]
     cdef unsigned int frames_num = frames.shape[0]
@@ -151,27 +153,35 @@ def compressFrames(np.ndarray[INT8_TYPE_t, ndim=3] frames, int deinterlace_order
 
             
             
-            # Calculate mean without top 4 max values
+            # Sum without the top 4 max values
             acc -= max_val + max_val_2 + max_val_3 + max_val_4
-            mean = acc/frames_num_minus_four
 
             # Full-precision mean, rounded to 1/256 ADU. No overflow: acc <= 252*255, so
             # 256*acc fits comfortably in 32 bits, and the result is at most 255*256
-            ave16_array[y, x] = <unsigned short>((256*acc + frames_num_minus_four/2)/frames_num_minus_four)
+            ave16 = (256*acc + frames_num_minus_four/2)/frames_num_minus_four
+            ave16_array[y, x] = <unsigned short>ave16
+
+            # 8-bit mean, rounded off the fixed-point mean - the same derivation readers use for
+            # the 8-bit view, so the two planes always agree
+            mean = (ave16 + 128) >> 8
 
 
 
-            
             ### Calculate stddev without top 4 max values ##
-            
+
             # Remove top 4 max values
             var -= max_val**2 + max_val_2**2 + max_val_3**2 + max_val_4**2
-            
-            # Subtract average squared sum of all values (acc*mean = acc*acc/frames_num_minus_four)
-            var -= acc*mean    
 
-            # Compute the standard deviation
-            var = <unsigned int> sqrt(var/frames_num_minus_five)
+            # Sample variance of the remaining values. acc**2 overflows 32 bits, so compute in
+            # double precision (exact: both terms are far below 2**53)
+            var_d = (var - (<double>acc)*acc/frames_num_minus_four)/frames_num_minus_five
+
+            # Guard against small negative values from floating point rounding
+            if var_d < 0:
+                var_d = 0
+
+            # Compute the standard deviation, rounded
+            var = <unsigned int>(sqrt(var_d) + 0.5)
 
             # Make sure that the stddev is not 0, to prevent divide by zero afterwards
             if var == 0:

@@ -135,12 +135,14 @@ def read(directory, filename, array=False, full_filename=False, memmap=True):
         ff.stdpixel = hdulist[4].data.copy()
 
         # If the file declares fractional bits, the average plane is uint16 fixed point at full
-        # precision. Keep it in avepixel16 and derive the legacy 8-bit view, which is bit-identical
-        # to the avepixel of files written without this option
+        # precision. Keep it in avepixel16 and derive the legacy 8-bit view by rounding off the
+        # fractional bits - the same derivation the compressor uses for its 8-bit plane
         avefrac = head.get('AVEFRAC', 0)
         if avefrac:
             ff.avepixel16 = ff.avepixel
-            ff.avepixel = (ff.avepixel16 >> avefrac).astype(np.uint8)
+            ff.avepixel = np.clip(
+                (ff.avepixel16.astype(np.uint32) + (1 << (avefrac - 1))) >> avefrac,
+                0, 255).astype(np.uint8)
 
     if array:
         ff.array = np.dstack([ff.maxpixel, ff.maxframe, ff.avepixel, ff.stdpixel])

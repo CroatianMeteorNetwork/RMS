@@ -90,10 +90,6 @@ class Compressor(multiprocessing.Process):
     def compress(self, frames):
         """ Compress frames to the FTP-compatible array and extract sums of intensities per every field.
 
-        NOTE: The standard deviation calculation is performed in a non-standard way due to performance 
-            concerns. The end result is the same as a proper calculation due to the usage of low-precision
-            8-bit unsigned integers, so the difference does not matter.
-        
         Arguments:
             frames: [3D ndarray] grayscale frames stored as 3d numpy array
 

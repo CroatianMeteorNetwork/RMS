@@ -1,8 +1,9 @@
 """ Tests for the full-precision (16-bit fixed point) FF average plane.
 
 Covers:
-    - the compressor's ave16 output matches an exact numpy reference and stays
-      consistent with the legacy 8-bit average (ave16 >> 8 == avepixel)
+    - the compressor's outputs match an exact numpy reference: rounded fixed-point
+      mean, the 8-bit mean derived from it ((ave16 + 128) >> 8), and the correct
+      rounded sample standard deviation
     - FITS round trip of the 16-bit plane, incl. the derived legacy 8-bit view
     - files without the plane and native 16-bit camera files are unaffected
     - extractStarsFF uses the full-precision plane when present
@@ -23,19 +24,28 @@ from RMS.Formats import FFfile, FFfits
 from RMS.Formats.FFStruct import FFStruct
 
 
-def referenceAverages(frames):
-    """ Exact numpy reference of the compressor's trimmed averages. """
+def referencePlanes(frames):
+    """ Exact numpy reference of the compressor's trimmed average and standard deviation. """
 
     frames_sorted = np.sort(frames.astype(np.uint64), axis=0)
+    trimmed = frames_sorted[:-4]
 
     # Sum without the top 4 max values
-    acc = frames_sorted[:-4].sum(axis=0)
+    acc = trimmed.sum(axis=0)
     n = frames.shape[0] - 4
 
-    ave8 = acc//n
+    # Fixed-point mean (rounded), and the 8-bit mean derived from it by rounding
     ave16 = (256*acc + n//2)//n
+    ave8 = (ave16 + 128) >> 8
 
-    return ave8.astype(np.uint8), ave16.astype(np.uint16)
+    # Sample variance and rounded standard deviation, matching the compressor's double math
+    sq_sum = (trimmed**2).sum(axis=0).astype(np.float64)
+    var = (sq_sum - acc.astype(np.float64)**2/n)/(n - 1)
+    var = np.clip(var, 0, None)
+    std = np.floor(np.sqrt(var) + 0.5)
+    std[std < 1] = 1
+
+    return ave8.astype(np.uint8), ave16.astype(np.uint16), std.astype(np.uint8)
 
 
 def makeFF(ave16=None, dtype=np.uint8):
@@ -62,13 +72,14 @@ def makeFF(ave16=None, dtype=np.uint8):
 
 
 def testCompressorConsistency():
-    """ ave16 matches the reference and ave16 >> 8 equals the 8-bit average. """
+    """ All planes match the numpy reference: rounded means and the correct sample std. """
 
     rng = np.random.default_rng(7)
 
     test_stacks = [
         rng.integers(0, 256, (256, 24, 24)).astype(np.uint8),
         np.clip(np.rint(40.4 + rng.normal(0, 4.5, (256, 24, 24))), 0, 255).astype(np.uint8),
+        np.clip(np.rint(40.4 + rng.normal(0, 1.5, (256, 24, 24))), 0, 255).astype(np.uint8),
         np.zeros((256, 8, 8), np.uint8),
         np.full((256, 8, 8), 255, np.uint8),
     ]
@@ -76,11 +87,12 @@ def testCompressorConsistency():
     for frames in test_stacks:
 
         ftp, ave16, _ = compressFrames(frames, -1)
-        ref8, ref16 = referenceAverages(frames)
+        ref8, ref16, ref_std = referencePlanes(frames)
 
-        assert np.array_equal(ftp[2], ref8)
         assert np.array_equal(ave16, ref16)
-        assert np.array_equal(ave16 >> 8, ftp[2].astype(np.uint16))
+        assert np.array_equal(ftp[2], ref8)
+        assert np.array_equal((ave16 + 128) >> 8, ftp[2].astype(np.uint16))
+        assert np.array_equal(ftp[3], ref_std)
 
 
 def testFitsRoundTrip():
@@ -102,9 +114,10 @@ def testFitsRoundTrip():
         assert ff_read.avepixel16.dtype == np.uint16
         assert np.array_equal(ff_read.avepixel16, ave16)
 
-        # The legacy view must be the fixed-point plane shifted down
+        # The legacy view must be the fixed-point plane with the fractional bits rounded off
         assert ff_read.avepixel.dtype == np.uint8
-        assert np.array_equal(ff_read.avepixel, (ave16 >> 8).astype(np.uint8))
+        ref_view = np.clip((ave16.astype(np.uint32) + 128) >> 8, 0, 255).astype(np.uint8)
+        assert np.array_equal(ff_read.avepixel, ref_view)
 
 
         # The array interface stays uint8
