@@ -277,6 +277,99 @@ def testExtractStarsPrecisePath():
         shutil.rmtree(tmp_dir)
 
 
+def testFFMimickParity():
+    """ FFMimickInterface matches a numpy reference: symmetric max/min trim, rounded average,
+        correct sample variance, gamma path, and the avepixel16 fixed-point plane. """
+
+    from RMS.Routines.DynamicFTPCompressionCy import FFMimickInterface
+
+    rng = np.random.default_rng(17)
+
+    def mimickRef(frames, gamma=1.0, wp=255.0):
+        frames_sorted = np.sort(frames.astype(np.uint64), axis=0)
+        trimmed = frames_sorted[1:-1]
+        acc = trimmed.sum(axis=0)
+        n = trimmed.shape[0]
+
+        if gamma == 1.0:
+            ave16 = (256*acc + n//2)//n
+        else:
+            lut = wp*(np.arange(65536)/wp)**(1.0/gamma)
+            mean_lin = lut[trimmed].sum(axis=0)/n
+            ave16 = np.floor(256.0*wp*((mean_lin/wp)**gamma) + 0.5)
+
+        ave8 = (ave16.astype(np.uint64) + 128) >> 8
+
+        sq = (trimmed**2).sum(axis=0).astype(np.float64)
+        var = np.clip((sq - acc.astype(np.float64)**2/n)/(n - 1), 0, None)
+        std = np.floor(np.sqrt(var) + 0.5)
+        std[std < 1] = 1
+
+        return ave8, ave16, std
+
+    # 8-bit content, gamma 1 (exact) and gamma 0.6 (1 LSB tolerance on the fixed point)
+    frames = np.clip(np.rint(40.4 + rng.normal(0, 4.5, (256, 24, 24))), 0, 255).astype(np.uint16)
+
+    for gamma in [1.0, 0.6]:
+
+        ff = FFMimickInterface(24, 24, np.uint8, gamma=gamma)
+        for i in range(frames.shape[0]):
+            ff.addFrame(frames[i])
+        ff.finish()
+
+        ref8, ref16, ref_std = mimickRef(frames, gamma=gamma)
+
+        assert ff.avepixel16 is not None
+        assert ff.avepixel16.dtype == np.uint16
+
+        if gamma == 1.0:
+            assert np.array_equal(ff.avepixel16, ref16.astype(np.uint16))
+        else:
+            assert np.abs(ff.avepixel16.astype(np.int64) - ref16.astype(np.int64)).max() <= 1
+
+        # The integer average must derive from the fixed point plane, and std must be exact
+        assert np.array_equal(ff.avepixel.astype(np.uint64),
+            (ff.avepixel16.astype(np.uint64) + 128) >> 8)
+        assert np.array_equal(ff.stdpixel.astype(np.float64), ref_std)
+
+    # 16-bit content: no fixed-point plane, rounded average
+    frames16 = np.clip(np.rint(10000.3 + rng.normal(0, 60, (64, 16, 16))), 0, 65535).astype(np.uint16)
+    ff = FFMimickInterface(16, 16, np.uint16)
+    for i in range(frames16.shape[0]):
+        ff.addFrame(frames16[i])
+    ff.finish()
+
+    s = np.sort(frames16.astype(np.uint64), axis=0)[1:-1]
+    acc = s.sum(axis=0)
+    n = s.shape[0]
+    assert ff.avepixel16 is None
+    assert np.array_equal(ff.avepixel.astype(np.uint64), (2*acc + n)//(2*n))
+
+    # Fewer than 4 frames: plain rounded average, std forced to 1
+    ff = FFMimickInterface(8, 8, np.uint8)
+    for i in range(3):
+        ff.addFrame(np.full((8, 8), 10 + i, np.uint16))
+    ff.finish()
+    assert np.all(ff.avepixel == 11)
+    assert np.all(ff.stdpixel == 1)
+
+    # The FrameInterface pattern: constructed with the default uint16 dtype and the camera bit
+    # depth, dtype updated only after the first frame - the fixed-point plane and the gamma
+    # white point must not depend on the late dtype
+    ff = FFMimickInterface(24, 24, np.uint16, gamma=0.6, bit_depth=8)
+    for i in range(frames.shape[0]):
+        ff.addFrame(frames[i])
+        if i == 0:
+            ff.dtype = np.uint8
+    ff.finish()
+
+    ref8, ref16, ref_std = mimickRef(frames, gamma=0.6)
+    assert ff.avepixel16 is not None
+    assert np.abs(ff.avepixel16.astype(np.int64) - ref16.astype(np.int64)).max() <= 1
+    assert ff.avepixel.dtype == np.uint8
+    assert np.array_equal(ff.stdpixel.astype(np.float64), ref_std)
+
+
 if __name__ == '__main__':
 
     testCompressorConsistency()
@@ -284,6 +377,9 @@ if __name__ == '__main__':
 
     testCompressorGammaPath()
     print('testCompressorGammaPath OK')
+
+    testFFMimickParity()
+    print('testFFMimickParity OK')
 
     testFitsRoundTrip()
     print('testFitsRoundTrip OK')
