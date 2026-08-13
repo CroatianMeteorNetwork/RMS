@@ -518,6 +518,11 @@ class ImageItem(pg.ImageItem):
         """
         self.img_handle = img_handle
 
+        # Scale the displayed values are expressed in. The full-precision average is shown as a
+        #   float in ADU (see chunkAvepixel), so anything that needs the range of the underlying
+        #   data must not infer it from the display buffer's itemsize
+        self.native_dtype = np.dtype(np.uint8)
+
         # Display-LUT state. Replaces the old copy-pasted render() override that
         #   reached into pyqtgraph internals (self._effectiveLut etc.), which broke on
         #   pyqtgraph >= 0.13. _base_lut holds any LUT pushed by the histogram (None for
@@ -564,8 +569,44 @@ class ImageItem(pg.ImageItem):
 
         self.img_showing = 'avepixel'
 
+    @staticmethod
+    def chunkAvepixel(ff):
+        """ Return the average pixel image of an FF (or FF-mimicking) structure, preferring the
+            full-precision average when the chunk carries one.
+
+        The 8-bit avepixel is the full-precision average with the fractional bits rounded off, so a
+        narrow level range (the usual case for the sky background) has only a handful of distinct
+        values in it and the display posterizes. The 16-bit plane is the same quantity at 1/256 ADU,
+        and the sub-ADU structure in it is real: it is the mean of 256 frames, so its standard error
+        is well under one ADU. It is returned as a float in the same ADU units as the 8-bit plane,
+        so levels, the histogram and the saturation threshold keep their meaning.
+
+        Arguments:
+            ff: [FFStruct or FFMimickInterface] Loaded chunk.
+
+        Return:
+            (avepixel, native_dtype): [tuple] The image to display, and the dtype of the integer
+                average it was derived from (i.e. the scale the levels are expressed in).
+        """
+        avepixel16 = getattr(ff, 'avepixel16', None)
+
+        # Only 8-bit content carries a fixed point average; 16-bit cameras have nothing to recover
+        if avepixel16 is not None:
+            return avepixel16.astype(np.float32)/256.0, ff.avepixel.dtype
+
+        return ff.avepixel, ff.avepixel.dtype
+
+
+    def fullScaleValue(self):
+        """ Maximum value of the scale the image levels are expressed in. Follows the integer image
+            the display buffer was derived from, which may be a float. """
+
+        return 2**(8*self.native_dtype.itemsize) - 1
+
+
     def maxpixel(self):
         maxpixel = self.img_handle.loadChunk().maxpixel
+        self.native_dtype = maxpixel.dtype
 
         # adding background to FR files
         if self.img_handle.name()[:2] == 'FR':
@@ -593,7 +634,7 @@ class ImageItem(pg.ImageItem):
         self.img_showing = 'maxpixel'
 
     def avepixel(self):
-        avepixel = self.img_handle.loadChunk().avepixel
+        avepixel, self.native_dtype = self.chunkAvepixel(self.img_handle.loadChunk())
 
         # adding background to FR files
         if self.img_handle.name()[:2] == 'FR':
@@ -605,7 +646,8 @@ class ImageItem(pg.ImageItem):
 
                 self.img_handle.current_ff_index = index
                 if original_time == self.img_handle.currentTime() and self.img_handle.name()[:2] == 'FF':
-                    avepixel = avepixel + self.img_handle.loadChunk().avepixel*(avepixel == 0)
+                    ff_avepixel, _ = self.chunkAvepixel(self.img_handle.loadChunk())
+                    avepixel = avepixel + ff_avepixel*(avepixel == 0)
                     break
 
             self.img_handle.current_ff_index = original_index
@@ -639,7 +681,7 @@ class ImageItem(pg.ImageItem):
                 elif self.img_handle is not None and hasattr(self.img_handle, 'config') and hasattr(self.img_handle.config, 'bit_depth'):
                     saturation_threshold = int(round(0.98*(2**self.img_handle.config.bit_depth - 1)))
                 else:
-                    saturation_threshold = int(round(0.98*(2**(8*img.itemsize) - 1)))
+                    saturation_threshold = int(round(0.98*self.fullScaleValue()))
 
                 saturates = img > saturation_threshold
 
@@ -685,6 +727,8 @@ class ImageItem(pg.ImageItem):
         frame = self.img_handle.loadFrame(avepixel=True)
 
         if frame is not None:
+
+            self.native_dtype = frame.dtype
 
             # Adding background to FR files
             if self.img_handle.name()[:2] == 'FR':

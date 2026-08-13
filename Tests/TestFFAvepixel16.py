@@ -7,6 +7,8 @@ Covers:
     - FITS round trip of the 16-bit plane, incl. the derived legacy 8-bit view
     - files without the plane and native 16-bit camera files are unaffected
     - extractStarsFF uses the full-precision plane when present
+    - SkyFit's image item displays the full-precision plane, without posterizing a narrow
+      level range
 
 Run directly (python -m Tests.TestFFAvepixel16) or via pytest.
 """
@@ -218,6 +220,71 @@ def testNative16BitFileNotMisread():
         shutil.rmtree(tmp_dir)
 
 
+def testDisplayUsesPrecisePlane():
+    """ SkyFit's image item displays the full-precision average, so a stretched level range is not
+        posterized, and it falls back to the 8-bit plane when the file carries none. """
+
+    os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
+
+    try:
+        from PyQt5 import QtWidgets
+        from RMS.Routines.CustomPyqtgraphClasses import ImageItem
+
+    except ImportError as e:
+        print('Skipping the display test, Qt is not available: {}'.format(e))
+        return
+
+    app = QtWidgets.QApplication.instance()
+    if app is None:
+        app = QtWidgets.QApplication([])
+
+    # A smooth sky gradient spanning a narrow range, i.e. the usual case for the background
+    ramp = np.linspace(12.0, 30.0, 320)[None, :]*np.ones((240, 1))
+
+    ff = FFStruct()
+    ff.avepixel16 = np.rint(ramp*256).astype(np.uint16)
+    ff.avepixel = np.clip((ff.avepixel16.astype(np.uint32) + 128) >> 8, 0, 255).astype(np.uint8)
+
+    # The precise plane is displayed as a float in the same ADU units as the 8-bit one
+    img, native_dtype = ImageItem.chunkAvepixel(ff)
+    assert img.dtype == np.float32
+    assert native_dtype == np.uint8
+    assert np.allclose(img, ramp, atol=1.0/256)
+
+    # Without the plane, the 8-bit average is passed through untouched
+    ff_legacy = FFStruct()
+    ff_legacy.avepixel = ff.avepixel
+    img_legacy, native_legacy = ImageItem.chunkAvepixel(ff_legacy)
+    assert img_legacy is ff.avepixel
+    assert native_legacy == np.uint8
+
+    def grayLevels(image):
+        """ Number of distinct gray levels the image renders to over the stretched range. """
+
+        item = ImageItem()
+        item.setImage(image)
+        item.setLevels((12, 30))
+        item.render()
+
+        qimg = item.qimage
+        ptr = qimg.constBits()
+        ptr.setsize(qimg.byteCount() if hasattr(qimg, 'byteCount') else qimg.sizeInBytes())
+        arr = np.frombuffer(ptr, np.uint8).reshape(qimg.height(), qimg.bytesPerLine()//4, 4)
+
+        return len(np.unique(arr[:, :qimg.width(), 0]))
+
+    # The 8-bit average has only ~19 distinct values inside the stretch, the precise one fills it
+    assert grayLevels(ff.avepixel) < 25
+    assert grayLevels(img) > 200
+
+    # The level scale follows the integer average, not the float display buffer
+    item = ImageItem()
+    item.native_dtype = native_dtype
+    assert item.fullScaleValue() == 255
+    item.native_dtype = np.dtype(np.uint16)
+    assert item.fullScaleValue() == 65535
+
+
 def testExtractStarsPrecisePath():
     """ extractStarsFF runs on both file variants and finds the injected stars. """
 
@@ -389,6 +456,9 @@ if __name__ == '__main__':
 
     testNative16BitFileNotMisread()
     print('testNative16BitFileNotMisread OK')
+
+    testDisplayUsesPrecisePlane()
+    print('testDisplayUsesPrecisePlane OK')
 
     testExtractStarsPrecisePath()
     print('testExtractStarsPrecisePath OK')

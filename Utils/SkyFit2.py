@@ -3393,7 +3393,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.hist.setImageItem(self.img)
         self.tab.hist.setImages(self.img_zoom)
         if self.img.data is not None:
-            self.tab.hist.setLevels(0, 2**(8*self.img.data.itemsize) - 1)
+            self.tab.hist.setLevels(0, self.img.fullScaleValue())
         else:
             self.tab.hist.setLevels(0, 255)
 
@@ -3740,7 +3740,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self.img.changeHandle(self.img_handle)
             self.img_zoom.changeHandle(self.img_handle)
             if not self.tab.hist.auto_levels:
-                self.tab.hist.setLevels(0, 2**(8*self.img.data.itemsize) - 1)
+                self.tab.hist.setLevels(0, self.img.fullScaleValue())
 
             # Sync both image items to the histogram levels (setImage assigns each item independent
             #   min/max levels, and an unchanged histogram won't re-emit them)
@@ -3974,7 +3974,16 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Write image X, Y coordinates and image intensity
         if 0 <= x <= self.img.data.shape[0] - 1 and 0 <= y <= self.img.data.shape[1] - 1:
-            status_str = "x={:7.2f}  y={:7.2f}  Intens={:5d}".format(x, y, self.img.data[int(x), int(y)])
+
+            intens = self.img.data[int(x), int(y)]
+
+            # The full-precision average is a float in ADU, the other views are integers
+            if np.issubdtype(self.img.data.dtype, np.floating):
+                intens_str = "{:7.2f}".format(intens)
+            else:
+                intens_str = "{:5d}".format(intens)
+
+            status_str = "x={:7.2f}  y={:7.2f}  Intens={:s}".format(x, y, intens_str)
         else:
             status_str = "x={:7.2f}  y={:7.2f}  Intens=--".format(x, y)
 
@@ -9844,7 +9853,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self.img_zoom.changeHandle(self.img_handle)
 
             if not self.tab.hist.auto_levels:
-                self.tab.hist.setLevels(0, 2**(8*self.img.data.itemsize) - 1)
+                self.tab.hist.setLevels(0, self.img.fullScaleValue())
 
             # Sync both image items to the histogram levels (setImage assigns each item independent
             #   min/max levels, and an unchanged histogram won't re-emit them)
@@ -13864,12 +13873,15 @@ class PlateTool(QtWidgets.QMainWindow):
             self.status_bar.showMessage("Uploading image to astrometry.net...")
             QtWidgets.QApplication.processEvents()
 
-            # If the image is 16bit or larger, rescale and convert it to 8 bit
-            if self.img.data.itemsize*8 > 8:
+            # If the image is not plain 8 bit (16 bit cameras, or the full-precision average, which
+            #   is displayed as a float in ADU), rescale and convert it to 8 bit
+            if self.img.data.dtype != np.uint8:
 
-                # Rescale the image to 8bit
+                # Rescale the image to 8bit. The bit depth follows the underlying integer image, as
+                #   a float display buffer has no meaningful itemsize
                 minv, maxv = self.tab.hist.getLevels()
-                img_data = adjustLevels(self.img.data, minv, self.img.gamma, maxv)
+                img_data = adjustLevels(self.img.data, minv, self.img.gamma, maxv,
+                                        nbits=8*self.img.native_dtype.itemsize)
                 img_data -= np.min(img_data)
                 img_data = 255*(img_data/np.max(img_data))
                 img_data = img_data.astype(np.uint8)
@@ -15255,7 +15267,9 @@ class PlateTool(QtWidgets.QMainWindow):
 
         try:
             # Load the flat, byteswap the flat if vid file is used or UWO png
-            flat = loadFlat(*os.path.split(flat_file), dtype=self.img.data.dtype,
+            # The calibration frames follow the camera's integer type, not the display buffer (the
+            #   full-precision average is displayed as a float)
+            flat = loadFlat(*os.path.split(flat_file), dtype=self.img.native_dtype,
                       byteswap=self.img_handle.byteswap)
             flat.flat_img = np.swapaxes(flat.flat_img, 0, 1)
 
@@ -15330,7 +15344,7 @@ class PlateTool(QtWidgets.QMainWindow):
         try:
 
             # Load the dark
-            dark = loadDark(*os.path.split(dark_file), dtype=self.img.data.dtype, \
+            dark = loadDark(*os.path.split(dark_file), dtype=self.img.native_dtype, \
                                   byteswap=self.img_handle.byteswap)
             
             print("Dark loaded successfully!")
@@ -15347,7 +15361,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
             return False, None
 
-        dark = dark.astype(self.img.data.dtype).T
+        dark = dark.astype(self.img.native_dtype).T
 
         # Check if the size of the file matches
         if self.img.data.shape != dark.shape:
