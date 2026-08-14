@@ -37,7 +37,7 @@ from matplotlib import scale as mscale
 from matplotlib import transforms as mtransforms
 from matplotlib.ticker import FixedLocator
 
-from RMS.Logger import getLogger
+from RMS.Logger import getLogger, flushLoggingQueue
 
 # Map FileNotFoundError to IOError in Python 2 as it does not exist
 if sys.version_info[0] < 3:
@@ -288,6 +288,14 @@ def setParentDeathSignal(sig=9):
         # If the parent already exited before we armed the signal we were reparented to
         # init (ppid == 1): exit now rather than linger as an orphan.
         if os.getppid() == 1:
+
+            # Nothing this process queued can be in flight today - callers invoke this as the
+            # first statement of run(), before any logging - but os._exit() kills the queue's
+            # feeder thread mid-write, and a truncated record wedges the listener for the whole
+            # station. Flush so the exit is safe by construction rather than by that ordering.
+            # A no-op when the queue was never touched, or absent under forkserver/spawn.
+            flushLoggingQueue()
+
             os._exit(0)
 
     except Exception as e:
