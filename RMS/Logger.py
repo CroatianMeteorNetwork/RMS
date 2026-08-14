@@ -1028,6 +1028,50 @@ def getLoggingQueue():
     return None
 
 
+def flushLoggingQueue(logging_queue=None, timeout=5.0):
+    """ Drain this process's end of the shared logging queue before an os._exit().
+
+    os._exit() skips multiprocessing's cleanup, so the queue's feeder thread is killed
+    wherever it happens to be. If that is mid-write on the pipe, a partially written record
+    is left behind and the listener process blocks forever inside queue.get(), waiting for
+    the body of a record that never arrives. The station then goes log-dark (alive, growing
+    backlog, zero drain) until the logging watchdog restarts the pipeline - which abandons
+    the queue and strands every child forked before the restart.
+
+    Any os._exit() that follows a log call needs this. The window is widest when records are
+    queued immediately before the exit, e.g. the compressor's waitForExtractors().
+
+    Bounded on purpose: a feeder that cannot drain (listener already wedged, pipe full) must
+    never stop the process from exiting, so hitting the timeout leaves the caller no worse
+    off than not flushing at all.
+
+    Keyword arguments:
+        logging_queue: [multiprocessing.Queue] Queue to flush. Defaults to this process's
+            shared logging queue.
+        timeout: [float] Maximum number of seconds to wait for the feeder thread to drain.
+    """
+    if logging_queue is None:
+        logging_queue = getLoggingQueue()
+
+    if logging_queue is None:
+        return
+
+    def _drain():
+        try:
+            # close() asks the feeder to flush what is buffered and exit, join_thread()
+            # waits for it to finish writing
+            logging_queue.close()
+            logging_queue.join_thread()
+
+        except Exception:
+            pass
+
+    flusher = threading.Thread(target=_drain, name='rms-log-flush')
+    flusher.daemon = True
+    flusher.start()
+    flusher.join(timeout)
+
+
 def initChildLogging(logging_queue, config):
     """ Attach a QueueHandler to the root logger inside a child process.
 
@@ -1049,7 +1093,11 @@ def initChildLogging(logging_queue, config):
     for handler in root.handlers[:]:
         root.removeHandler(handler)
 
-    qh = logging.handlers.QueueHandler(logging_queue)
+    # Must be the dropping variant: a plain QueueHandler lets a full or broken queue raise
+    # out of enqueue() into handleError(), which writes the traceback to sys.stderr - and
+    # sys.stderr is a LoggerWriter that logs straight back into the same queue. That loop
+    # is unbounded and floods the console at megabytes per second (see LoggerWriter.write)
+    qh = _DroppingQueueHandler(logging_queue)
     qh.setFormatter(logging.Formatter('%(message)s'))
     if config is not None:
         qh.addFilter(InRmsFilter(config))

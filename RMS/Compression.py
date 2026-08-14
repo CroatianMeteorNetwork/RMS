@@ -31,7 +31,7 @@ import cv2
 from RMS.VideoExtraction import Extractor
 from RMS.Formats import FFfile, FFStruct
 from RMS.Formats import FieldIntensities
-from RMS.Logger import getLogger, getLoggingQueue, initChildProcess
+from RMS.Logger import getLogger, getLoggingQueue, initChildProcess, flushLoggingQueue
 from RMS.Misc import UTCFromTimestamp, frameBufferShape, AtomicFlag, stableDoubleRead
 from RMS.Routines.Image import saveImage
 
@@ -378,6 +378,12 @@ class Compressor(multiprocessing.Process):
                     waitForExtractors()
 
                     self.run_exited.set()
+
+                    # waitForExtractors() queues records right before this exit, and
+                    # os._exit() would kill the feeder thread mid-write, truncating one in
+                    # the pipe and wedging the listener for the whole station
+                    flushLoggingQueue(self.logging_queue)
+
                     os._exit(0)
 
                 time.sleep(0.1)
@@ -546,6 +552,10 @@ class Compressor(multiprocessing.Process):
 
         time.sleep(1.0)
         self.run_exited.set()
+
+        # The sleep above happens to give the feeder thread time to drain, but it is not a
+        # guarantee - flush explicitly so this path cannot truncate a record either
+        flushLoggingQueue(self.logging_queue)
 
         # Force-exit the process. The forked QueuedPool Manager proxy threads
         # hold open socket connections that survive even after dropping all
