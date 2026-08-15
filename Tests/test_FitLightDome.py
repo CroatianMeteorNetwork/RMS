@@ -591,3 +591,86 @@ def test_concurrent_siblings_fit_once_and_share_one_model(tmp_path, monkeypatch)
     assert installed[0] == installed[1]
     assert installed[0]["fit_timestamp"] == "2026-08-15T01:00:00"
     assert installed[0]["q0"] == pytest.approx(1.1)
+
+
+def _warnedFitHarness(tmp_path, monkeypatch, installed_model):
+    """ One station whose nightly check reaches a fit that comes back unconstrained.
+
+    Returns (config, calls) where calls records the models actually installed.
+    """
+    import Utils.FitLightDome as fld
+
+    cfg = DummyConfig(str(tmp_path))
+    model_path = os.path.join(str(tmp_path), "US005X_light_dome.json")
+
+    if installed_model is not None:
+        with open(model_path, "w") as f:
+            json.dump(installed_model, f)
+
+    monkeypatch.setattr(fld, "findSiblingStationConfigs", lambda c: [cfg])
+    monkeypatch.setattr(fld, "selectNightDirs",
+        lambda config, **kw: ["/n/US005X_2026081{:d}_000000_000000".format(i)
+                              for i in range(4)])
+    monkeypatch.setattr(fld, "renderLightDomeModel", lambda *a, **kw: None)
+
+    # A smoke-epoch fit: the LP bowl runs to its altitude bound, so the model reports an
+    # unconstrained profile while still passing the blocking degeneracy checks
+    def fakeFit(station_configs, dates=None, **kwargs):
+        return freshModelDict(q0=1.14, h0=60.0, n_trials=50000, n_frames_used=200,
+            fit_timestamp="2026-08-15T01:00:00")
+
+    monkeypatch.setattr(fld, "fitLightDome", fakeFit)
+
+    fld.ensureLightDomeModel(cfg, platepar=DummyPlatepar())
+
+    try:
+        with open(model_path) as f:
+            return json.load(f)
+    except IOError:
+        return None
+
+
+def test_unconstrained_fit_does_not_displace_a_clean_model(tmp_path, monkeypatch):
+    # The smoke case: a haze epoch drives the bowl to its bound, and that fit must not
+    # overwrite a clean field that is still in epoch
+    from Utils.FitLightDome import fitQualityWarnings
+
+    stale = (datetime.datetime.utcnow() - datetime.timedelta(days=50)).strftime("%Y-%m-%d")
+    clean = freshModelDict(q0=0.13, h0=59.4, fit_date=stale)
+    assert fitQualityWarnings(clean) == []
+
+    kept = _warnedFitHarness(tmp_path, monkeypatch, clean)
+
+    assert kept["q0"] == pytest.approx(0.13)
+    assert kept["h0"] == pytest.approx(59.4)
+
+
+def test_unconstrained_fit_installs_when_there_is_nothing_better(tmp_path, monkeypatch):
+    # No model at all: an unconstrained fit still beats no model
+    installed = _warnedFitHarness(tmp_path, monkeypatch, None)
+    assert installed is not None and installed["h0"] == pytest.approx(60.0)
+
+
+def test_unconstrained_fit_installs_over_a_model_past_the_hold(tmp_path, monkeypatch):
+    # The hold is not permanent - a site whose bowl genuinely sits at the bound would
+    # otherwise never refit again
+    from Utils.FitLightDome import WARNED_REPLACE_HOLD_DAYS
+
+    ancient = (datetime.datetime.utcnow()
+               - datetime.timedelta(days=WARNED_REPLACE_HOLD_DAYS + 1)).strftime("%Y-%m-%d")
+    clean = freshModelDict(q0=0.13, h0=59.4, fit_date=ancient)
+
+    installed = _warnedFitHarness(tmp_path, monkeypatch, clean)
+    assert installed["h0"] == pytest.approx(60.0)
+
+
+def test_unconstrained_fit_replaces_an_equally_unconstrained_model(tmp_path, monkeypatch):
+    # The hold only protects a CLEAN model; a warned one has no claim to being better
+    from Utils.FitLightDome import fitQualityWarnings
+
+    stale = (datetime.datetime.utcnow() - datetime.timedelta(days=50)).strftime("%Y-%m-%d")
+    warned = freshModelDict(q0=0.9, h0=60.0, fit_date=stale)
+    assert fitQualityWarnings(warned) != []
+
+    installed = _warnedFitHarness(tmp_path, monkeypatch, warned)
+    assert installed["q0"] == pytest.approx(1.14)

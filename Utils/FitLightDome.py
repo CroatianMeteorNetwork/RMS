@@ -983,6 +983,30 @@ AUTO_POINTING_TOL = 3.0    # deg - pointing change that invalidates an auto-fitt
 AUTO_ATTEMPT_MARKER = "light_dome_fit_attempt.json"
 SITE_CLAIM_MARKER = "light_dome_fit_claim"   # + "_<date>.json"; see claimSiteFit
 
+WARNED_REPLACE_HOLD_DAYS = 2*AUTO_REFIT_DAYS
+                           # how long a clean model is held against a fit that reports an
+                           # unconstrained parameter. Past this the installed model is so
+                           # far out of epoch that even an unconstrained fit beats it, and
+                           # a site whose bowl genuinely sits at a bound can still refit
+
+
+def modelAgeDays(model_dict):
+    """ Age of a fitted model in days, or None if it carries no usable fit date.
+
+    Arguments:
+        model_dict: [dict] Fitted model.
+    """
+
+    fit_date = model_dict.get("fit_date")
+    if fit_date is None:
+        return None
+
+    try:
+        return (datetime.datetime.utcnow()
+                - datetime.datetime.strptime(str(fit_date), "%Y-%m-%d")).days
+    except ValueError:
+        return None
+
 
 def claimSiteFit(station_configs, today):
     """ Take the site's exclusive claim on today's light-dome fit.
@@ -1454,6 +1478,29 @@ def ensureLightDomeModel(config, platepar=None):
         for msg in model_dict["quality_issues"]:
             log.info("  " + msg)
         return model is not None
+
+    # An unconstrained fit must not displace a clean one. Under a haze or smoke epoch the
+    # LP bowl runs to its altitude bound and the static field absorbs the transient as
+    # permanent light pollution - CAC0B, Aug 2026: q0 0.13 -> 1.1 with h0 pinned at its
+    # 60 deg bound, moving the model zenith 1.3 mag in six days. These are non-blocking
+    # diagnostics by design (a site whose bowl genuinely is broad must still be able to
+    # refit), so the hold expires once the installed model is old enough that even an
+    # unconstrained fit beats keeping it.
+    fit_warnings = fitQualityWarnings(model_dict)
+    if fit_warnings and (model is not None) and (legacy_path is None) \
+            and (not fitQualityWarnings(model.model)) \
+            and (modelAgeDays(model.model) is not None) \
+            and (modelAgeDays(model.model) <= WARNED_REPLACE_HOLD_DAYS):
+
+        log.info("Light-dome auto-fit is unconstrained while the installed model "
+                 "({:d} d old) is not - keeping the installed model:".format(
+                 modelAgeDays(model.model)))
+        for msg in fit_warnings:
+            log.info("  " + msg)
+        return True
+
+    for msg in fit_warnings:
+        log.info("Light-dome auto-fit warning: {:s}".format(msg))
 
     model_dict["auto_fitted"] = True
 
