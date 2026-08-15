@@ -26,6 +26,7 @@ from __future__ import absolute_import, division, print_function
 
 import argparse
 import datetime
+import errno
 import json
 import os
 import re
@@ -649,6 +650,9 @@ def fitLightDome(station_configs, dates=None, max_order=3, moon_phase_max=MOON_P
         model="vanrhijn_harmonics",
         fit_nights=sorted(set(fit_nights)),
         fit_date=datetime.datetime.utcnow().strftime("%Y-%m-%d"),
+        # Second-resolution stamp so two fits from the same day can be ordered - the
+        # install guard needs to know which of them is newer (see _installIsNewer)
+        fit_timestamp=datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S"),
         n_trials=int(len(az)),
         n_trials_total=int(n_trials_total),
         n_frames_used=int(n_frames_total),
@@ -977,6 +981,124 @@ AUTO_REL_CLARITY = 0.5     # keep only nights at least this clear relative to th
                            # cloudy nights as clear)
 AUTO_POINTING_TOL = 3.0    # deg - pointing change that invalidates an auto-fitted model
 AUTO_ATTEMPT_MARKER = "light_dome_fit_attempt.json"
+SITE_CLAIM_MARKER = "light_dome_fit_claim"   # + "_<date>.json"; see claimSiteFit
+
+
+def claimSiteFit(station_configs, today):
+    """ Take the site's exclusive claim on today's light-dome fit.
+
+    The per-station attempt markers alone cannot serialize the fit: a station stamps its
+    own marker before fitting but its siblings' only after, and a six-camera site fit is
+    expensive, so every sibling that reaches the check inside that window starts its own
+    duplicate fit. Each of those then installs its own model over the whole site (see the
+    install loop in ensureLightDomeModel), leaving colocated cameras carrying different
+    "site" models - which is exactly what a pod is not allowed to do, since every camera's
+    sky brightness and zenith normalization are read off that shared field.
+
+    The claim is one file per site per day, created with O_CREAT|O_EXCL: the POSIX
+    guarantee makes exactly one process the winner, however the runs overlap. It lives in
+    the lexicographically first station's data directory so every sibling computes the
+    same path. Dating the NAME (rather than the contents) keeps the daily rollover free of
+    a read-modify-write race.
+
+    Degrades open, not closed: if the claim cannot be created for any reason other than
+    "already claimed" (missing directory, read-only volume), the fit proceeds as it did
+    before this guard. A site that cannot write a marker must still get a model.
+
+    Arguments:
+        station_configs: [list of Config] The site's stations.
+        today: [str] UTC date stamp, YYYY-MM-DD.
+
+    Return:
+        claimed: [bool] True if this process may run the fit.
+    """
+
+    ordered = sorted(station_configs, key=lambda c: str(c.stationID))
+    site_dir = os.path.expanduser(ordered[0].data_dir)
+    claim_path = os.path.join(site_dir,
+        "{:s}_{:s}.json".format(SITE_CLAIM_MARKER, today))
+
+    try:
+        fd = os.open(claim_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+
+    except OSError as e:
+
+        if e.errno == errno.EEXIST:
+            return False
+
+        log.debug("Light-dome site claim unavailable ({}) - fitting unserialized".format(e))
+        return True
+
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(dict(station=str(station_configs[0].stationID), date=today), f)
+    except Exception:
+        pass
+
+    # Yesterday's claims are dead weight
+    try:
+        for name in os.listdir(site_dir):
+            if name.startswith(SITE_CLAIM_MARKER) and name != os.path.basename(claim_path):
+                try:
+                    os.remove(os.path.join(site_dir, name))
+                except OSError:
+                    pass
+    except OSError:
+        pass
+
+    return True
+
+
+def stampAttemptMarkers(station_configs, today):
+    """ Stamp every station's daily attempt marker, so no sibling redoes today's fit.
+
+    Called BEFORE the fit runs. Stamping them afterwards (as the install loop also does,
+    for the stations that ended up in the model) leaves the whole duration of the fit open
+    for a sibling to start a duplicate one.
+
+    Arguments:
+        station_configs: [list of Config] The site's stations.
+        today: [str] UTC date stamp, YYYY-MM-DD.
+    """
+
+    for cfg in station_configs:
+        try:
+            path = os.path.join(os.path.expanduser(cfg.data_dir),
+                "{:s}_{:s}".format(str(cfg.stationID), AUTO_ATTEMPT_MARKER))
+            with open(path, "w") as f:
+                json.dump(dict(date=today), f)
+        except Exception:
+            # A sibling whose data directory is not writable simply keeps its own marker
+            pass
+
+
+def _installIsNewer(model_dict, installed_path):
+    """ May model_dict replace the model already at installed_path?
+
+    A slow fit must not clobber a fresher one that landed while it was running. Models
+    carry a second-resolution fit_timestamp; older ones only a fit_date, which sorts as
+    older than any timestamp of the same day (a plain date is the less precise, earlier
+    record), so a legacy model is always replaceable.
+
+    Arguments:
+        model_dict: [dict] The model about to be installed.
+        installed_path: [str] Path of the model file it would overwrite.
+
+    Return:
+        newer: [bool] True if the install should go ahead.
+    """
+
+    def stamp(d):
+        return str(d.get("fit_timestamp") or d.get("fit_date") or "")
+
+    try:
+        with open(installed_path) as f:
+            installed = json.load(f)
+    except Exception:
+        # Nothing readable in place - install
+        return True
+
+    return stamp(model_dict) >= stamp(installed)
 
 
 def findSiblingStationConfigs(config):
@@ -1298,6 +1420,18 @@ def ensureLightDomeModel(config, platepar=None):
         log.info("Pooling co-located stations for the site fit: {:s}".format(
             ", ".join(str(c.stationID) for c in station_configs)))
 
+    # One fit per site per day. Without this, siblings running concurrently each fit and
+    # each installs its own model over the whole site, so colocated cameras end up reading
+    # different glow fields (and different zenith normalizations) for the same sky
+    if not claimSiteFit(station_configs, today):
+        log.info("Light-dome site fit already claimed by a co-located station today - "
+                 "keeping the installed model")
+        return model is not None
+
+    # Stamp the siblings now rather than after the fit: the fit is long, and every moment
+    # of it is a window for a sibling to pass its own check and start a duplicate
+    stampAttemptMarkers(station_configs, today)
+
     model_dict = fitLightDome(station_configs, dates=dates)
 
     if (model_dict is None) or (model_dict.get("n_trials", 0) < AUTO_MIN_TRIALS):
@@ -1335,8 +1469,19 @@ def ensureLightDomeModel(config, platepar=None):
         sib_model_path = os.path.join(sib_data_dir,
             "{:s}_{:s}".format(sib_station, LIGHT_DOME_FILE_SUFFIX))
 
-        with open(sib_model_path, "w") as f:
+        # A fit that started before another one but finished after it must not roll the
+        # site back to its older field
+        if not _installIsNewer(model_dict, sib_model_path):
+            log.info("Light-dome model at {:s} is newer than this fit - not overwriting "
+                     "it".format(sib_model_path))
+            continue
+
+        # Write-then-rename: a reader (or a concurrent sibling) never sees a half-written
+        # model, and the replacement is atomic within the directory
+        tmp_path = sib_model_path + ".tmp"
+        with open(tmp_path, "w") as f:
             json.dump(model_dict, f, indent=1)
+        os.replace(tmp_path, sib_model_path)
         log.info("Light-dome model auto-fitted and installed: {:s}".format(sib_model_path))
 
         try:

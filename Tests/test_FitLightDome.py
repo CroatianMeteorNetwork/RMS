@@ -428,3 +428,166 @@ def test_fit_trial_subsampling_deterministic():
     sel_a = np.random.RandomState(0).choice(n, MAX_FIT_TRIALS, replace=False)
     sel_b = np.random.RandomState(0).choice(n, MAX_FIT_TRIALS, replace=False)
     assert np.array_equal(sel_a, sel_b)
+
+
+def test_site_claim_is_exclusive_per_day(tmp_path):
+    # One fit per site per day, whatever the overlap: the claim is what stops colocated
+    # cameras from each fitting and each installing its own "site" model
+    from Utils.FitLightDome import claimSiteFit, SITE_CLAIM_MARKER
+
+    today = datetime.datetime.utcnow().strftime("%Y-%m-%d")
+
+    configs = []
+    for station in ["US005X", "US005Y", "US005Z"]:
+        d = os.path.join(str(tmp_path), station)
+        os.makedirs(d)
+        configs.append(DummyConfig(d, station_id=station))
+
+    # Whoever calls first wins; the siblings are turned away
+    assert claimSiteFit(configs, today) is True
+    assert claimSiteFit(list(reversed(configs)), today) is False
+    assert claimSiteFit([configs[2], configs[0], configs[1]], today) is False
+
+    # The claim lives in the lexicographically first station's directory, so every
+    # sibling computes the same path no matter what order it sees them in
+    claim = os.path.join(str(tmp_path), "US005X",
+                         "{:s}_{:s}.json".format(SITE_CLAIM_MARKER, today))
+    assert os.path.isfile(claim)
+
+    # A new day claims again, and the stale claim is cleaned up
+    tomorrow = (datetime.datetime.utcnow() + datetime.timedelta(days=1)).strftime("%Y-%m-%d")
+    assert claimSiteFit(configs, tomorrow) is True
+    assert not os.path.isfile(claim)
+
+
+def test_site_claim_degrades_open(tmp_path):
+    # A site that cannot write the claim (missing/read-only directory) must still get a
+    # model - the guard may not be the reason a station never fits
+    from Utils.FitLightDome import claimSiteFit
+
+    today = datetime.datetime.utcnow().strftime("%Y-%m-%d")
+    missing = DummyConfig(os.path.join(str(tmp_path), "nonexistent"), station_id="US005X")
+
+    assert claimSiteFit([missing], today) is True
+
+
+def test_attempt_markers_stamped_before_the_fit(tmp_path):
+    from Utils.FitLightDome import stampAttemptMarkers, AUTO_ATTEMPT_MARKER
+
+    today = datetime.datetime.utcnow().strftime("%Y-%m-%d")
+
+    configs = []
+    for station in ["US005X", "US005Y"]:
+        d = os.path.join(str(tmp_path), station)
+        os.makedirs(d)
+        configs.append(DummyConfig(d, station_id=station))
+
+    # An unwritable sibling must not stop the others being stamped
+    configs.append(DummyConfig(os.path.join(str(tmp_path), "gone"), station_id="US005Z"))
+
+    stampAttemptMarkers(configs, today)
+
+    for station in ["US005X", "US005Y"]:
+        marker = os.path.join(str(tmp_path), station,
+                              "{:s}_{:s}".format(station, AUTO_ATTEMPT_MARKER))
+        assert json.load(open(marker))["date"] == today
+
+
+def test_install_never_rolls_back_a_newer_model(tmp_path):
+    # A slow fit finishing after a faster one must not reinstate its older field
+    from Utils.FitLightDome import _installIsNewer
+
+    path = os.path.join(str(tmp_path), "US005X_light_dome.json")
+
+    early = freshModelDict(fit_timestamp="2026-08-15T01:00:00")
+    late = freshModelDict(fit_timestamp="2026-08-15T02:00:00")
+
+    # Nothing in place yet
+    assert _installIsNewer(early, path) is True
+
+    with open(path, "w") as f:
+        json.dump(late, f)
+
+    # Same day, but ours is the older fit - refuse
+    assert _installIsNewer(early, path) is False
+    assert _installIsNewer(late, path) is True
+
+    # A legacy model carrying only a date is replaceable by a same-day timestamped fit
+    legacy = freshModelDict(fit_date="2026-08-15")
+    legacy.pop("fit_timestamp", None)
+    with open(path, "w") as f:
+        json.dump(legacy, f)
+    assert _installIsNewer(early, path) is True
+
+    # An unreadable file must not block the install
+    with open(path, "w") as f:
+        f.write("{ truncated")
+    assert _installIsNewer(early, path) is True
+
+
+def test_concurrent_siblings_fit_once_and_share_one_model(tmp_path, monkeypatch):
+    # The CAC0B failure: two colocated cameras both reached the fit, each installed its
+    # own model over the whole site, and the pod ended up carrying different glow fields
+    # for the same sky. Only one fit may run, and both cameras must end up identical.
+    import Utils.FitLightDome as fld
+
+    stations = ["US005X", "US005Y"]
+    configs = []
+    for station in stations:
+        d = os.path.join(str(tmp_path), station)
+        os.makedirs(d)
+        cfg = DummyConfig(d, station_id=station)
+        configs.append(cfg)
+
+        # Both carry a stale model, so both want to refit
+        old = (datetime.datetime.utcnow() - datetime.timedelta(days=90)).strftime("%Y-%m-%d")
+        with open(os.path.join(d, "{:s}_light_dome.json".format(station)), "w") as f:
+            json.dump(freshModelDict(cams=stations, LM0=[5.5, 5.6], fit_date=old,
+                pointing={s: [180.0, 45.0] for s in stations},
+                intensity_threshold={s: 10.0 for s in stations}), f)
+
+    monkeypatch.setattr(fld, "findSiblingStationConfigs", lambda c: list(configs))
+    monkeypatch.setattr(fld, "selectNightDirs",
+        lambda cfg, **kw: ["/n/{:s}_2026081{:d}_000000_000000".format(cfg.stationID, i)
+                           for i in range(4)])
+    monkeypatch.setattr(fld, "renderLightDomeModel",
+        lambda *a, **kw: None)
+
+    calls = []
+
+    def fakeFit(station_configs, dates=None, **kwargs):
+        calls.append([str(c.stationID) for c in station_configs])
+        n = len(calls)
+
+        # THE RACE: the sibling's nightly check falls inside this fit, which is where the
+        # real window is (a six-camera fit is long). Sequential calls never reproduce it -
+        # the first fit installs a fresh model and the second camera short-circuits.
+        if n == 1:
+            fld.ensureLightDomeModel(configs[1], platepar=DummyPlatepar())
+
+        # Two real fits land on different fields; whichever installs last would win
+        return freshModelDict(cams=stations, LM0=[5.5, 5.6],
+            q0=1.0 + 0.1*n, harmonics=[dict(order=1, A=1.0, phi=72.0*n, h=20.0)],
+            fit_timestamp="2026-08-15T0{:d}:00:00".format(n),
+            n_trials=50000, n_frames_used=200,
+            pointing={s: [180.0, 45.0] for s in stations},
+            intensity_threshold={s: 10.0 for s in stations})
+
+    monkeypatch.setattr(fld, "fitLightDome", fakeFit)
+
+    assert fld.ensureLightDomeModel(configs[0], platepar=DummyPlatepar()) is True
+
+    # Exactly one fit ran for the site, and it pooled both cameras
+    assert len(calls) == 1, calls
+    assert set(calls[0]) == set(stations)
+
+    # Both cameras carry the same field - the invariant the pod was violating
+    installed = []
+    for station in stations:
+        with open(os.path.join(str(tmp_path), station,
+                               "{:s}_light_dome.json".format(station))) as f:
+            installed.append(json.load(f))
+
+    assert installed[0] == installed[1]
+    assert installed[0]["fit_timestamp"] == "2026-08-15T01:00:00"
+    assert installed[0]["q0"] == pytest.approx(1.1)
