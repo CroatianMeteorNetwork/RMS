@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 from __future__ import print_function
 
 import os, sys
@@ -14,6 +15,7 @@ import RMS.ConfigReader as cr
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP
 from RMS.Astrometry.Conversions import date2JD, jd2Date
 from RMS.Formats.FFfile import validFFName, getMiddleTimeFF
+from RMS.Formats.FTPdetectinfo import readFTPdetectinfo
 from RMS.Formats.FFfile import read as readFF
 from RMS.Formats.Platepar import Platepar
 from RMS.Math import angularSeparation
@@ -26,11 +28,33 @@ from RMS.QueuedPool import QueuedPool
 import time
 import datetime
 
+def find_ftp_file(dir_path, config):
+    if os.path.isfile(os.path.join(dir_path,'.config')):
+        tmpcfg = cr.loadConfigFromDirectory('.config', dir_path)
+    else:
+        tmpcfg = config
+    ftp_list = glob(os.path.join(dir_path, 'FTPdetectinfo_{}*.txt'.format(tmpcfg.stationID)))
+    ftp_list = [x for x in ftp_list if 'backup' not in x and 'unfiltered' not in x]
+    ftp_list.sort()
+
+    if len(ftp_list) < 1:
+        print('unable to find FTPdetect file in {}'.format(dir_path))
+        return False
+
+    return ftp_list[0]
+
+def make_mask(ftp_points, initial_mask):
+    """Make a mask in which only the meteor is visible"""
+    meteor_mask = np.zeros_like(initial_mask.img)
+    meteor_mask = cv2.line(meteor_mask, (round(ftp_points[0][2]), round(ftp_points[0][3])),
+                          (round(ftp_points[-1][2]), round(ftp_points[-1][3])), 255, 1)
+    meteor_mask = cv2.dilate(meteor_mask, np.ones((150, 150)))
+    return np.minimum(meteor_mask, initial_mask.img)
 
 def trackStack(dir_paths, config, border=5, background_compensation=True, 
         hide_plot=False, showers=None, darkbackground=False, out_dir=None,
         scalefactor=None, draw_constellations=False, one_core_free=False,
-        textoption=0):
+        textoption=0, mask_meteors=False):
     """ Generate a stack with aligned stars, so the sky appears static. The folder should have a
         platepars_all_recalibrated.json file.
 
@@ -88,20 +112,7 @@ def trackStack(dir_paths, config, border=5, background_compensation=True,
         # Get FTP file so we can filter by shower
         for dir_path in dir_paths: 
 
-            if os.path.isfile(os.path.join(dir_path,'.config')):
-                tmpcfg = cr.loadConfigFromDirectory('.config', dir_path)
-            else:
-                tmpcfg = config
-
-            ftp_list = glob(os.path.join(dir_path, 'FTPdetectinfo_{}*.txt'.format(tmpcfg.stationID)))
-            ftp_list = [x for x in ftp_list if 'backup' not in x and 'unfiltered' not in x]
-            ftp_list.sort() 
-
-            if len(ftp_list) < 1:
-                print('unable to find FTPdetect file in {}'.format(dir_path))
-                return False
-            
-            ftp_file = ftp_list[0] 
+            ftp_file = find_ftp_file(dir_path, config)
 
             print('Performing shower association using {}'.format(ftp_file))
 
@@ -122,6 +133,13 @@ def trackStack(dir_paths, config, border=5, background_compensation=True,
                 if validFFName(file_name):
                     ff_list.append(file_name)    
     ff_list = list(set(ff_list))
+
+    ftp_points = {}
+    if mask_meteors:
+        for dir_path in dir_paths:
+            ftp_file = find_ftp_file(dir_path, config)
+            for ftp_entry in readFTPdetectinfo(os.path.dirname(ftp_file), os.path.basename(ftp_file)):
+                ftp_points[(ftp_entry[0], ftp_entry[2])] = ftp_entry[-1]
 
     # Take the platepar with the middle time as the reference one
     ff_found_list = []
@@ -272,7 +290,7 @@ def trackStack(dir_paths, config, border=5, background_compensation=True,
     thead_pool = QueuedPool(stackFrame, cores=cores, backup_dir=None, print_state=False, func_extra_args=(recalibrated_platepars, mask, border,
                                                                                    pp_ref, img_size, jd_middle, pp_stack, config,
                                                                                    avg_stack_sum_shared, avg_stack_count_shared, max_deaveraged_shared,
-                                                                                   background_compensation, finished_count, num_ffs))
+                                                                                   background_compensation, finished_count, num_ffs, ftp_points, mask_meteors))
     thead_pool.startPool()
     # add jobs
     for i, ff_name in enumerate(enumlist):
@@ -374,7 +392,7 @@ def trackStack(dir_paths, config, border=5, background_compensation=True,
 
 
 def stackFrame(ff_name, recalibrated_platepars, mask, border, pp_ref, img_size, jd_middle, pp_stack, conf, avg_stack_sum_arr,
-               avg_stack_count_arr, max_deaveraged_arr, background_compensation, finished_count, num_ffs):
+               avg_stack_count_arr, max_deaveraged_arr, background_compensation, finished_count, num_ffs, ftp_points, mask_meteors):
     ff_basename = os.path.basename(ff_name)
 
     avg_stack_sum = getArray(img_size, avg_stack_sum_arr)
@@ -411,11 +429,24 @@ def stackFrame(ff_name, recalibrated_platepars, mask, border, pp_ref, img_size, 
     stack_x = stack_x[filter_arr]
     stack_y = stack_y[filter_arr]
 
+    ff_mask = mask.img
+    if mask_meteors:
+        for i in range(1, 10):
+            # Attempt to make something work for multiple meteors in one frame.
+            # Some of them may not be in ftp_points because of a shower filter.
+            # This is not water tight.
+            try:
+                ff_mask = make_mask(ftp_points[(os.path.basename(ff_name), i * 1.0)], mask)
+                break
+            except KeyError:
+                raise RuntimeError(f"Can't find {(os.path.basename(ff_name), i * 1.0)} in {list(ftp_points.keys())}")
+                pass
+
     # Apply the mask to maxpixel and avepixel
     maxpixel = copy.deepcopy(ff.maxpixel)
-    maxpixel[mask.img == 0] = 0
+    maxpixel[ff_mask == 0] = 0
     avepixel = copy.deepcopy(ff.avepixel)
-    avepixel[mask.img == 0] = 0
+    avepixel[ff_mask == 0] = 0
 
     # Compute deaveraged maxpixel image
     max_deavg = maxpixel - avepixel
@@ -526,6 +557,9 @@ if __name__ == "__main__":
     arg_parser.add_argument('--freecore', action="store_true",
                             help="""Leave at least one core free""")
 
+    arg_parser.add_argument('--mask-meteors', action="store_true",
+                            help="""Render only the part of the image around the meteor to suppress planes and satellites (works best for large trackstacks""")
+
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
@@ -548,4 +582,4 @@ if __name__ == "__main__":
         hide_plot=cml_args.hideplot, showers=showers,
         darkbackground=cml_args.darkbackground, out_dir=cml_args.output, scalefactor=cml_args.scalefactor,
         draw_constellations=cml_args.constellations, one_core_free=cml_args.freecore,
-        textoption = text_option)
+        textoption = text_option, mask_meteors=cml_args.mask_meteors)
