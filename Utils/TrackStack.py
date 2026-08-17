@@ -38,8 +38,7 @@ def find_ftp_file(dir_path, config):
     ftp_list.sort()
 
     if len(ftp_list) < 1:
-        print('unable to find FTPdetect file in {}'.format(dir_path))
-        return False
+        raise FileNotFoundError('unable to find FTPdetect file in {}'.format(dir_path))
 
     return ftp_list[0]
 
@@ -112,7 +111,11 @@ def trackStack(dir_paths, config, border=5, background_compensation=True,
         # Get FTP file so we can filter by shower
         for dir_path in dir_paths: 
 
-            ftp_file = find_ftp_file(dir_path, config)
+            try:
+                ftp_file = find_ftp_file(dir_path, config)
+            except FileNotFoundError as e:
+                print(e)
+                return False
 
             print('Performing shower association using {}'.format(ftp_file))
 
@@ -137,7 +140,12 @@ def trackStack(dir_paths, config, border=5, background_compensation=True,
     ftp_points = {}
     if mask_meteors:
         for dir_path in dir_paths:
-            ftp_file = find_ftp_file(dir_path, config)
+            try:
+                ftp_file = find_ftp_file(dir_path, config)
+            except FileNotFoundError as e:
+                print(e)
+                return False
+
             for ftp_entry in readFTPdetectinfo(os.path.dirname(ftp_file), os.path.basename(ftp_file)):
                 ftp_points[(ftp_entry[0], ftp_entry[2])] = ftp_entry[-1]
 
@@ -432,15 +440,13 @@ def stackFrame(ff_name, recalibrated_platepars, mask, border, pp_ref, img_size, 
     ff_mask = mask.img
     if mask_meteors:
         for i in range(1, 10):
-            # Attempt to make something work for multiple meteors in one frame.
-            # Some of them may not be in ftp_points because of a shower filter.
-            # This is not water tight.
+            # In case there are multiple meteors in a frame, mask around the first one.
+            # When using a shower filter, this may be the wrong one, we'll live with that.
             try:
                 ff_mask = make_mask(ftp_points[(os.path.basename(ff_name), i * 1.0)], mask)
                 break
             except KeyError:
-                raise RuntimeError(f"Can't find {(os.path.basename(ff_name), i * 1.0)} in {list(ftp_points.keys())}")
-                pass
+                pass  # Fall back to using the entire image
 
     # Apply the mask to maxpixel and avepixel
     maxpixel = copy.deepcopy(ff.maxpixel)
