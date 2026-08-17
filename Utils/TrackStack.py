@@ -45,9 +45,11 @@ def find_ftp_file(dir_path, config):
 def make_mask(ftp_points, initial_mask):
     """Make a mask in which only the meteor is visible"""
     meteor_mask = np.zeros_like(initial_mask.img)
-    meteor_mask = cv2.line(meteor_mask, (round(ftp_points[0][2]), round(ftp_points[0][3])),
-                          (round(ftp_points[-1][2]), round(ftp_points[-1][3])), 255, 1)
-    meteor_mask = cv2.dilate(meteor_mask, np.ones((150, 150)))
+
+    pts = np.array([[round(p[2]), round(p[3])] for p in ftp_points], dtype=np.int32)
+    meteor_mask = cv2.polylines(meteor_mask, [pts], False, 255, 1)
+
+    meteor_mask = cv2.dilate(meteor_mask, np.ones((150, 150), np.uint8))
     return np.minimum(meteor_mask, initial_mask.img)
 
 def trackStack(dir_paths, config, border=5, background_compensation=True, 
@@ -74,6 +76,7 @@ def trackStack(dir_paths, config, border=5, background_compensation=True,
         draw_constellations: [bool] Show constellation lines on stacked image
         one_core_free: [bool] leave one core free whilst processing
         textoption: [int] 0 - no text, 1 - filename, 2 - stationID, date, meteor count overlayed
+        mask_meteors: [bool] use only a portion of the image around a detection
     """
     start_time = time.time()
     # normalise the path in a platform neutral way
@@ -437,25 +440,25 @@ def stackFrame(ff_name, recalibrated_platepars, mask, border, pp_ref, img_size, 
     stack_x = stack_x[filter_arr]
     stack_y = stack_y[filter_arr]
 
-    ff_mask = mask.img
+    # Apply the mask to maxpixel and avepixel
+    maxpixel = copy.deepcopy(ff.maxpixel)
+    maxpixel[mask.img == 0] = 0
+    avepixel = copy.deepcopy(ff.avepixel)
+    avepixel[mask.img == 0] = 0
+
+    # Compute deaveraged maxpixel image
+    max_deavg = maxpixel - avepixel
+
     if mask_meteors:
         for i in range(1, 10):
             # In case there are multiple meteors in a frame, mask around the first one.
             # When using a shower filter, this may be the wrong one, we'll live with that.
             try:
                 ff_mask = make_mask(ftp_points[(os.path.basename(ff_name), i * 1.0)], mask)
+                mask_deavg[ff_mask == 0] = 0
                 break
             except KeyError:
                 pass  # Fall back to using the entire image
-
-    # Apply the mask to maxpixel and avepixel
-    maxpixel = copy.deepcopy(ff.maxpixel)
-    maxpixel[ff_mask == 0] = 0
-    avepixel = copy.deepcopy(ff.avepixel)
-    avepixel[ff_mask == 0] = 0
-
-    # Compute deaveraged maxpixel image
-    max_deavg = maxpixel - avepixel
 
     # Normalize the background brightness by applying a large-kernel median filter to avepixel
     if background_compensation:
@@ -564,7 +567,7 @@ if __name__ == "__main__":
                             help="""Leave at least one core free""")
 
     arg_parser.add_argument('--mask-meteors', action="store_true",
-                            help="""Render only the part of the image around the meteor to suppress planes and satellites (works best for large trackstacks""")
+                            help="""Render only the part of the image around the meteor to suppress planes and satellites (works best for large trackstacks)""")
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
