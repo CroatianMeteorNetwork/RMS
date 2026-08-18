@@ -22,7 +22,7 @@ astropy>=2.0.3
 imreg_dft @ git+https://github.com/matejak/imreg_dft@master
 configparser==4.0.2
 imageio>=2.31
-python-dvr @ git+https://github.com/OpenIPC/python-dvr@master ; python_version >='3.6'
+python-dvr @ git+https://github.com/Cybis320/python-dvr@fix-stale-debug-var-in-upgrade ; python_version >='3.6'
 pyqtgraph>=0.12,<0.13 ; python_version >='3.6'
 pyyaml; python_version>='3.6'
 tflite-runtime; python_version >= '3.6' and python_version < '3.12' and sys_platform != 'darwin'
