@@ -820,6 +820,31 @@ def upgradeFirmware(cam, firmware_path, skip_confirm=False):
     log.info("Starting firmware upgrade...")
     log.info("Uploading firmware to camera...")
 
+    # Stop dvrip's keep-alive timer for the duration of the transfer.
+    #
+    # login() starts a threading.Timer that re-sends a KeepAlive every 20 s on
+    # the SAME socket the firmware upload uses. A transfer takes far longer than
+    # that, so the timer fires mid-upload, writes a KeepAlive into the middle of
+    # the binary stream and then tries to JSON-decode whatever comes back --
+    # firmware packets start with 0xFF, which surfaces as
+    #   UnicodeDecodeError: 'utf-8' codec can't decode byte 0xff
+    # from a background thread.
+    #
+    # The noise is the lesser problem. The thread also consumes replies the
+    # upload loop is waiting for, which can swallow the camera's own completion
+    # response -- including the Ret 515 confirmation. Whether it lands at a bad
+    # moment depends on file size and camera timing, which is why upgrade
+    # results looked erratic between runs.
+    #
+    # There is nothing to keep alive during an upgrade: the camera reboots at
+    # the end and the session goes with it.
+    if getattr(cam, 'alive', None) is not None:
+        try:
+            cam.alive.cancel()
+            log.info("Paused the keep-alive timer for the transfer.")
+        except Exception as e:
+            log.warning("Could not stop the keep-alive timer: %s", e)
+
     try:
         # Increase socket timeout — camera needs time to prepare flash for writing
         old_timeout = cam.socket.gettimeout()
