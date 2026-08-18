@@ -907,11 +907,9 @@ def upgradeFirmware(cam, firmware_path, skip_confirm=False):
                 log.info("Firmware upgrade successful - camera confirmed it and is back online.")
             else:
                 log.info("Camera is back online after the upgrade.")
-                log.info("The upgrade was not confirmed over the wire. Note "
-                         "GetDeviceInformation will NOT tell you: images built on "
-                         "the stock base inherit its Build Time, so that field "
-                         "reads the same before and after. Check something the new "
-                         "image actually has, e.g. 'echo gamma | nc <ip> 9600'.")
+                log.info("The upgrade was not confirmed over the wire. Verify with "
+                         "GetDeviceInformation - its Build Time is stamped from the "
+                         "image, so it should now match the build you flashed.")
             log.info("Remember: push 'SwitchMode init' now. Config stored on the "
                      "camera is not replaced by the new image's defaults.")
             return True
