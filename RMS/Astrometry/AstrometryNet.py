@@ -32,7 +32,7 @@ if os.environ.get('RMS_DISABLE_LOCAL_ASTROMETRY', '').lower() in ('1', 'true', '
 
 def astrometryNetSolveLocal(ff_file_path=None, img=None, mask=None, x_data=None, y_data=None,
                             fov_w_range=None, fov_w_hint=None, max_stars=100, verbose=False, x_center=None, y_center=None,
-                            lat=None, lon=None, jd=None, input_intensities=None):
+                            lat=None, lon=None, jd=None, input_intensities=None, position_hint=None):
     """ Find an astrometric solution of X, Y image coordinates of stars detected on an image using the
         local installation of astrometry.net.
 
@@ -52,6 +52,9 @@ def astrometryNetSolveLocal(ff_file_path=None, img=None, mask=None, x_data=None,
         lon: [float] Station longitude in degrees. Required for iterative matching.
         jd: [float] Julian date. Required for iterative matching.
         input_intensities: [ndarray] Star intensities for brightness-based matching. Optional.
+        position_hint: [tuple] Optional (ra_deg, dec_deg, radius_deg). When given, astrometry.net is
+            told roughly where the field is, collapsing the blind all-sky search to that patch --
+            which lets narrow-FOV / faint cameras solve with far fewer stars. None = blind (default).
 
     Returns:
         [tuple] A tuple containing the following elements:
@@ -324,6 +327,19 @@ def astrometryNetSolveLocal(ff_file_path=None, img=None, mask=None, x_data=None,
             )
     )
 
+    # Optional position hint: when the caller knows roughly where the camera points (e.g. a
+    # previous platepar, or a known station pointing), this collapses the blind all-sky search
+    # to a small patch, letting narrow-FOV / faint cameras solve with far fewer stars than a
+    # blind solve needs. None (the default) preserves the original blind behaviour.
+    position_hint_obj = None
+    if position_hint is not None:
+        ra_hint, dec_hint, radius_hint = position_hint
+        position_hint_obj = astrometry.PositionHint(
+            ra_deg=float(ra_hint), dec_deg=float(dec_hint), radius_deg=float(radius_hint))
+        if verbose:
+            print("Using position hint: RA={:.2f} Dec={:.2f} radius={:.1f} deg".format(
+                ra_hint, dec_hint, radius_hint))
+
     # If the solver.solve has the argument "stars", use a 2D array of stars instead of stars_xs and stars_ys
     solve_args = inspect.getfullargspec(solver.solve).args
     if "stars" in solve_args:
@@ -332,7 +348,7 @@ def astrometryNetSolveLocal(ff_file_path=None, img=None, mask=None, x_data=None,
         solution = solver.solve(
             stars=star_data,
             size_hint=size_hint,
-            position_hint=None,
+            position_hint=position_hint_obj,
             solution_parameters=solution_parameters
             )
 
@@ -342,7 +358,7 @@ def astrometryNetSolveLocal(ff_file_path=None, img=None, mask=None, x_data=None,
             stars_xs=x_data,
             stars_ys=y_data,
             size_hint=size_hint,
-            position_hint=None,
+            position_hint=position_hint_obj,
             solution_parameters=solution_parameters
             )
 
@@ -451,7 +467,7 @@ def astrometryNetSolveLocal(ff_file_path=None, img=None, mask=None, x_data=None,
 
 def astrometryNetSolve(ff_file_path=None, img=None, mask=None, x_data=None, y_data=None, fov_w_range=None,
                        fov_w_hint=None, max_stars=100, verbose=False, x_center=None, y_center=None,
-                       lat=None, lon=None, jd=None, input_intensities=None):
+                       lat=None, lon=None, jd=None, input_intensities=None, position_hint=None):
     """ Find an astrometric solution of X, Y image coordinates of stars detected on an image using the
         local installation of astrometry.net.
 
@@ -471,6 +487,9 @@ def astrometryNetSolve(ff_file_path=None, img=None, mask=None, x_data=None, y_da
         lon: [float] Station longitude in degrees. Required for iterative matching.
         jd: [float] Julian date. Required for iterative matching.
         input_intensities: [ndarray] Star intensities for brightness-based matching. Optional.
+        position_hint: [tuple] Optional (ra_deg, dec_deg, radius_deg). When given, astrometry.net is
+            told roughly where the field is, collapsing the blind all-sky search to that patch --
+            which lets narrow-FOV / faint cameras solve with far fewer stars. None = blind (default).
     """
 
     # Helper to try coordinate-only first, then fall back to image if available
@@ -540,7 +559,7 @@ def astrometryNetSolve(ff_file_path=None, img=None, mask=None, x_data=None, y_da
                 ff_file_path=ff_file_path, img=img, mask=mask, x_data=x_data, y_data=y_data,
                 fov_w_range=fov_w_range, fov_w_hint=fov_w_hint, max_stars=max_stars, verbose=verbose,
                 x_center=x_center, y_center=y_center,
-                lat=lat, lon=lon, jd=jd, input_intensities=input_intensities
+                lat=lat, lon=lon, jd=jd, input_intensities=input_intensities, position_hint=position_hint
                 )
 
         # If local fails, try remote APIs

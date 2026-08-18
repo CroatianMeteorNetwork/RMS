@@ -329,6 +329,7 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
                     photometric_sigma=DEFAULT_PHOTOMETRIC_SIGMA,
                     fwhm_mult=DEFAULT_BLEND_FWHM_MULT,
                     wide_fov_search=False,
+                    position_hint=None,
                     final_catalog_stars=None,
                     verbose=True):
     """
@@ -366,6 +367,9 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
 
         wide_fov_search: [bool] If True, use a wide FOV search range (2° to 200°) instead of
                          the config-based range. Used as fallback when the tight search fails.
+        position_hint: [tuple] Optional (ra_deg, dec_deg, radius_deg) forwarded to astrometry.net
+                       as a search-position hint. Lets star-starved / narrow-FOV cameras solve
+                       with fewer stars. None = blind all-sky search (default).
         verbose: [bool] Print progress information
 
     Returns:
@@ -533,6 +537,7 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
         lon=platepar.lon,
         jd=jd,
         input_intensities=input_intensities,
+        position_hint=position_hint,
         verbose=verbose
     )
 
