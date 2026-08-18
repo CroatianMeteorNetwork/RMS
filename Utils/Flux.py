@@ -1715,6 +1715,28 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
         except Exception as e:
             log.warning("Could not write the transparency map: {}".format(e))
 
+        finally:
+            # The tree estimator below loads the same scoring product again, so holding
+            # this copy keeps two full nights of records in memory at once. Nothing
+            # after this block reads them. Same release the scoring handoff above does,
+            # one step later.
+            #
+            # Context: on 2026-08-17 six co-located stations entered the tree build
+            # within ten minutes of each other and the site added 4.6 GB against a box
+            # with no swap. This drops one of the two copies; it does not on its own
+            # bound what six concurrent builds cost.
+            try:
+                del sc_header, sc_frames, sc_stars
+            except NameError:
+                pass
+
+            try:
+                del t_unix, dm_map, ratio_map, flag_map
+            except NameError:
+                pass
+
+            gc.collect()
+
         # The Voronoi tree estimator (parallel-run dual-write) runs BEFORE the
         # calibration update, consuming the trailing file as it existed before
         # tonight. The reverse order is circular: a calibration folded from
