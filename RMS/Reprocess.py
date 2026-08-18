@@ -10,6 +10,9 @@ import traceback
 import argparse
 import random
 import shutil
+import subprocess
+import tempfile
+import threading
 from datetime import timedelta
 
 from RMS.ArchiveDetections import archiveDetections, archiveFieldsums, archiveFrameTimelapse
@@ -30,7 +33,6 @@ from RMS.UploadManager import UploadManager
 from RMS.Routines.Image import saveImage
 from RMS.Routines.MaskImage import loadMask
 from Utils.CalibrationReport import generateCalibrationReport
-from Utils.Flux import prepareFluxFiles
 from Utils.FOVKML import fovKML
 from Utils.GenerateTimelapse import generateTimelapse, generateTimelapseFromFrameBlocks, listImageBlocksBefore, findLastNightFrameInWindow
 from RMS.CaptureModeSwitcher import lastNightToDaySwitch
@@ -44,10 +46,20 @@ from RMS.Formats.ObservationSummary import addObsParam, getObservationSummaryDic
 from RMS.Formats.ObservationSummary import serialize, finalizeObservationSummary
 from Utils.AuditConfig import compareConfigs
 from RMS.Misc import RmsDateTime, tarWithProgress, setMultiprocessingStartMethod
+from RMS.Pickling import savePickle
 from RMS.RunExternalScript import runExternalScript
+from RMS.RunFluxStage import STATE_FILE_NAME as FLUX_STATE_FILE_NAME
 
 # Get the logger from the main module
 log = getLogger("rmslogger")
+
+
+FLUX_STAGE_TIMEOUT = 4*3600
+                    # seconds before a wedged flux stage is killed. Only reachable now that
+                    # the stage runs in its own process - an in-process stage that never
+                    # returned hung the capture loop with no way out. Set far above any
+                    # observed run so a slow night is never truncated; this is a deadlock
+                    # backstop, not a schedule
 
 
 
@@ -151,6 +163,119 @@ def getPlatepar(config, night_data_dir):
     return platepar, platepar_path, platepar_fmt
 
 
+
+
+def _forwardStageLog(stream):
+    """ Forward a child stage's stdout into this process's log, one line at a time.
+
+    Arguments:
+        stream: [file] The child's stdout, opened in text mode.
+    """
+
+    try:
+        for line in iter(stream.readline, ''):
+
+            line = line.rstrip()
+
+            if line:
+                log.info(line)
+
+    except Exception:
+        # A broken pipe here must never take down the stage that is still running
+        pass
+
+    finally:
+        try:
+            stream.close()
+        except Exception:
+            pass
+
+
+def runFluxStage(config, night_data_dir, ftpdetectinfo_path, mask=None, platepar=None,
+    allow_model_fit=True, timeout=FLUX_STAGE_TIMEOUT):
+    """ Run the flux preparation stage in its own process.
+
+    The stage's peak is not transient: on a six-camera site every capture parent was left
+    holding ~3.4 GB of anonymous memory after its chain had finished - 19 GB of a 31 GB box
+    with no swap, at which point the kernel killed whichever parent was largest. Releasing
+    the arrays in Python does not give those pages back, so the stage is run in a process
+    whose exit does. See RMS.RunFluxStage for the handoff contract.
+
+    Failures are logged and swallowed, exactly as the in-process call they replace: a night
+    that cannot produce flux products must still be archived and uploaded.
+
+    Arguments:
+        config: [Config] Station config.
+        night_data_dir: [str] Path to the night directory.
+        ftpdetectinfo_path: [str] Path to the FTPdetectinfo file.
+
+    Keyword arguments:
+        mask: [MaskStructure] Mask in use, or None to let the stage load it.
+        platepar: [Platepar] Platepar in use, or None to let the stage load it.
+        allow_model_fit: [bool] Whether the stage may fit a light-dome model. True by default.
+        timeout: [float] Seconds before a wedged stage is killed.
+
+    Return:
+        [bool] True if the stage completed successfully.
+    """
+
+    # The handoff is kept out of the night directory: it pickles the config, and the night
+    # directory is what gets tarred and uploaded
+    state_dir = tempfile.mkdtemp(prefix="rms_flux_stage_")
+
+    # The parent's in-memory objects travel by pickle - they differ from the copies on disk
+    # (see the module docstring of RMS.RunFluxStage)
+    try:
+        savePickle(dict(config=config, mask=mask, platepar=platepar,
+                        allow_model_fit=allow_model_fit), state_dir,
+                   FLUX_STATE_FILE_NAME)
+
+    except Exception as e:
+        log.debug("Could not write the flux stage handoff state:\n" + repr(e))
+        shutil.rmtree(state_dir, ignore_errors=True)
+        return False
+
+    # Run from the repository root so that "-m RMS.RunFluxStage" resolves
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+    cmd = [sys.executable, "-m", "RMS.RunFluxStage", night_data_dir, ftpdetectinfo_path,
+           "--state-dir", state_dir]
+
+    try:
+        proc = subprocess.Popen(cmd, cwd=repo_root, stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT, universal_newlines=True)
+
+        forwarder = threading.Thread(target=_forwardStageLog, args=(proc.stdout,),
+                                     name="flux-stage-log")
+        forwarder.daemon = True
+        forwarder.start()
+
+        try:
+            returncode = proc.wait(timeout=timeout)
+
+        except subprocess.TimeoutExpired:
+            log.error("The flux stage did not finish within {:d} s - killing it".format(
+                int(timeout)))
+            proc.kill()
+            proc.wait()
+            return False
+
+        finally:
+            forwarder.join(timeout=10)
+
+        if returncode != 0:
+            log.debug("The flux stage exited with code {:d}".format(returncode))
+            return False
+
+        return True
+
+    except Exception as e:
+        log.debug("Running the flux stage failed with the message:\n" + repr(e))
+        log.debug(repr(traceback.format_exception(*sys.exc_info())))
+        return False
+
+    finally:
+        shutil.rmtree(state_dir, ignore_errors=True)
 
 
 def processNight(night_data_dir, config, detection_results=None, nodetect=False,
@@ -345,15 +470,16 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False,
 
 
 
-            # Prepare the flux files
+            # Prepare the flux files. Run in a separate process so that the stage's memory
+            # is returned to the kernel when it exits, and so a failure inside it cannot
+            # take the capture parent down with it (see runFluxStage)
             log.info("Preparing flux files...")
-            try:
-                prepareFluxFiles(config, night_data_dir, os.path.join(night_data_dir, ftpdetectinfo_name),
-                                 mask=mask, platepar=platepar, allow_model_fit=allow_model_fit)
+            if not runFluxStage(config, night_data_dir,
+                                os.path.join(night_data_dir, ftpdetectinfo_name),
+                                mask=mask, platepar=platepar,
+                                allow_model_fit=allow_model_fit):
 
-            except Exception as e:
-                log.debug("Preparing flux files failed with the message:\n" + repr(e))
-                log.debug(repr(traceback.format_exception(*sys.exc_info())))
+                log.warning("Preparing flux files failed - continuing without flux products")
 
 
     else:
