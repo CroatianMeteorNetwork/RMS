@@ -61,6 +61,7 @@ import os
 import ipaddress as ip
 import binascii
 import socket
+import time
 import argparse
 import json
 import pprint
@@ -695,6 +696,43 @@ def manageCloudConnection(cam, opts):
     log.info('Enabled %s', info['NatEnable'])
 
 
+def waitForCameraOnline(camera_ip, timeout=240, settle=8):
+    """Wait for a camera to answer on the DVRIP port again after a reboot.
+
+    Used to settle whether a firmware upgrade actually took: the upgrade
+    protocol does not reliably confirm itself, so the real test is that the
+    camera boots and its application starts serving again.
+
+    Port 34567 is a good liveness check specifically because it is served by the
+    application, not the bootloader -- when the application is dead the camera
+    answers on 12901 instead and 34567 stays shut.
+
+    Arguments:
+        camera_ip: [str] Address of the camera.
+
+    Keyword arguments:
+        timeout: [int] Seconds to wait for it to return. 240 by default.
+        settle: [int] Seconds to wait before polling, so we do not catch the
+            camera still up on the old firmware. 8 by default.
+
+    Return:
+        [bool] True if the camera answered again within the timeout.
+    """
+    sleep(settle)
+
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            s = socket.create_connection((camera_ip, 34567), timeout=3)
+            s.close()
+            return True
+
+        except OSError:
+            sleep(3)
+
+    return False
+
+
 def upgradeFirmware(cam, firmware_path, skip_confirm=False):
     """Upgrade the camera firmware via the DVRIP protocol.
 
@@ -788,32 +826,71 @@ def upgradeFirmware(cam, firmware_path, skip_confirm=False):
         cam.socket.settimeout(30)
         result = cam.upgrade(firmware_path, packetsize=0x8000, vprint=progress_callback)
 
-        if result is None:
-            log.info("Firmware upload completed.")
-            log.info("Camera is now applying the update and will reboot automatically.")
-            log.info("Please wait for the camera to come back online (this may take several minutes).")
-            return True
-        elif isinstance(result, dict):
+        # cam.upgrade() ends in one of two ways and they do NOT mean the same
+        # thing:
+        #
+        #   dict with Ret 515 - the camera explicitly confirmed the upgrade
+        #   None              - the connection ended with no confirmation
+        #
+        # None happens both when the camera reboots before it gets round to
+        # sending 515 (which is fine) and when it drops the transfer partway
+        # (which is not). Treating None as success is why upgrade results looked
+        # inconsistent: a flash that was never confirmed reported exactly the
+        # same as one that was. So None is treated as "unconfirmed" and settled
+        # by waiting for the camera to come back.
+        #
+        # Note the progress lines printed during the transfer are not a reliable
+        # status either -- dvrip's completion loop prints a stale variable, so
+        # the Ret values scrolling past can repeat or show a value the camera
+        # never sent.
+        confirmed = False
+
+        if isinstance(result, dict):
             ret_code = result.get('Ret', -1)
             if ret_code == 515:
-                log.info("Firmware upgrade successful!")
-                log.info("Camera will reboot automatically.")
-                return True
+                log.info("Camera confirmed the upgrade (Ret 515).")
+                confirmed = True
             elif ret_code in [512, 513, 514]:
                 error_msgs = {
                     512: "Upgrade not started",
                     513: "Data errors during transfer",
                     514: "Upgrade failed"
                 }
-                log.error("Firmware upgrade failed: %s (code %d)",
-                         error_msgs.get(ret_code, "Unknown error"), ret_code)
+                log.error("Firmware upgrade FAILED: %s (code %d)",
+                          error_msgs.get(ret_code, "Unknown error"), ret_code)
+                log.error("The camera kept its existing firmware.")
                 return False
             else:
-                log.warning("Upgrade returned unexpected code: %d", ret_code)
+                log.error("Upgrade returned unexpected code %d - treating as failed.",
+                          ret_code)
                 return False
-        else:
-            log.warning("Unexpected upgrade result: %s", result)
+
+        elif result is not None:
+            log.error("Unexpected upgrade result: %s", result)
             return False
+
+        else:
+            log.warning("Transfer ended without a confirmation from the camera.")
+            log.warning("That is normal if it rebooted early, but it has to be verified.")
+
+        # Either way, the camera is the authority on whether this worked.
+        log.info("Waiting for the camera to come back online...")
+        back = waitForCameraOnline(cam.ip)
+
+        if back:
+            if confirmed:
+                log.info("Firmware upgrade successful - camera confirmed it and is back online.")
+            else:
+                log.info("Camera is back online after the upgrade.")
+                log.info("The upgrade was not confirmed over the wire, so check the "
+                         "build with GetDeviceInformation before relying on it.")
+            log.info("Remember: push 'SwitchMode init' now. Config stored on the "
+                     "camera is not replaced by the new image's defaults.")
+            return True
+
+        log.error("Camera did not come back online within the timeout.")
+        log.error("Do not power-cycle it yet - it may still be writing flash.")
+        return False
 
     except Exception as e:
         log.error("Firmware upgrade failed with exception: %s", e)
