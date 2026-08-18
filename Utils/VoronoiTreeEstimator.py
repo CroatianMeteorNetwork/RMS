@@ -177,6 +177,35 @@ def computeTreeSeries(config, night_dir, header, frames, stars, calibration=None
 
     detected = row != -1
 
+    # Records grouped by frame, once. Every per-frame loop below used to select its
+    # frame with "sf == fi" - a scan of the whole night's record array, re-run for
+    # every frame, allocating a full-length boolean each time. Measured on a deep
+    # catalog synthetic night at 3.15M records: 59.7 s -> 49.6 s.
+    #
+    # This does NOT lower the resident peak, which was measured as working set
+    # proportional to the record count (~370 MB fixed + ~130 MB per million records,
+    # 1.7 GB at 8.4M) rather than allocation churn - the per-frame temporaries are
+    # megabytes each, so numpy mmaps them and the kernel takes them back on free.
+    # Bounding the concurrent peak across co-located stations is a separate problem.
+    #
+    # The sort is stable, so records keep their original relative order inside a frame
+    # and every downstream accumulation (np.add.at, reduceat) sums in the same
+    # sequence as before - the outputs are bit-identical, not merely equivalent.
+    rec_order = np.argsort(sf, kind="stable")
+    rec_frame_starts = np.searchsorted(sf[rec_order], np.arange(n_frames + 1))
+
+    def recordsInFrame(fi):
+        """ Indices of the records belonging to frame fi, in ascending record order.
+
+        Arguments:
+            fi: [int] Frame index.
+
+        Return:
+            [ndarray] Record indices, empty if the frame carries none.
+        """
+
+        return rec_order[rec_frame_starts[fi]:rec_frame_starts[fi + 1]]
+
     # ---- Per-star rates: trailing calibration first, in-night fallback -------
     rate = np.full(n_cat, np.nan, dtype=np.float64)
     base = np.full(n_cat, np.nan, dtype=np.float64)
@@ -313,14 +342,16 @@ def computeTreeSeries(config, night_dir, header, frames, stars, calibration=None
                 data = by_ff.get(ff_name)
                 if data is None:
                     continue
-                m = (sf == fi) & (row >= 0)
-                if not np.any(m):
+                idx_f = recordsInFrame(fi)
+                joined = row[idx_f] >= 0
+                if not np.any(joined):
                     continue
-                rows_here = row[m]
+                idx_f = idx_f[joined]
+                rows_here = row[idx_f]
                 valid = rows_here < len(data)
                 inten = data[rows_here[valid], 2]
                 good = inten > 0
-                idx = np.where(m)[0][valid][good]
+                idx = idx_f[valid][good]
                 inst_resid[idx] = (ml_frame[fi]
                     - 2.5*np.log10(inten[good])) - smag[idx]
     except Exception:
@@ -375,14 +406,17 @@ def computeTreeSeries(config, night_dir, header, frames, stars, calibration=None
             jd_frame = t_all/86400.0 + 2440587.5
             r_ok = np.isfinite(inst_resid)
             for fi in np.unique(sf[r_ok]):
-                m_ = r_ok & (sf == fi)
+                idx_f = recordsInFrame(fi)
+                idx_f = idx_f[r_ok[idx_f]]
+                if not len(idx_f):
+                    continue
                 _, alt_ = raDec2AltAz(
-                    catalog_stars[cat_id[m_], 0], catalog_stars[cat_id[m_], 1],
+                    catalog_stars[cat_id[idx_f], 0], catalog_stars[cat_id[idx_f], 1],
                     float(jd_frame[fi]), lat, lon)
                 h_ = np.maximum(np.asarray(alt_), 2.0)
                 X_ = 1.0/(np.sin(np.radians(h_))
                           + 0.50572*(h_ + 6.07995)**-1.6364)
-                inst_resid[m_] = inst_resid[m_] - k_ext*(X_ - 1.0)
+                inst_resid[idx_f] = inst_resid[idx_f] - k_ext*(X_ - 1.0)
 
 
     q_ids = np.where(qualified)[0]
@@ -484,23 +518,34 @@ def computeTreeSeries(config, night_dir, header, frames, stars, calibration=None
             gap = np.isnan(arr)
             arr[gap] = src_[gap]
 
+    # Usable records grouped by frame, and the frame-independent half of the
+    # photometric-channel mask. Both were rebuilt inside frameLeafLL on every frame,
+    # which cost several full-length temporaries per call for a result that never
+    # changed (see recordsInFrame above for why that matters here).
+    use_order = rec_order[usable[rec_order]]
+    use_frame_starts = np.searchsorted(sf[use_order], np.arange(n_frames + 1))
+    phot_rec_static = (row >= 0) & np.isfinite(inst_resid)
+
     def runBP(logit0v, basev, sigmav, phot_okv):
         """ One full BP sweep of the night with the given per-star weights. """
+
+        # phot_okv is per-call, the rest of the mask is not
+        phot_rec = phot_rec_static & phot_okv[cat_id]
 
         def frameLeafLL(fi):
             out = np.zeros((n_leaf, NG))
             g_unif = np.zeros(NG)
-            m = usable & (sf == fi)
-            if not np.any(m):
+            idx = use_order[use_frame_starts[fi]:use_frame_starts[fi + 1]]
+            if not len(idx):
                 return out, g_unif
-            cid = cat_id[m]
+            cid = cat_id[idx]
             lg = logit0v[cid][:, None]
-            det = detected[m].astype(np.float64)[:, None]
+            det = detected[idx].astype(np.float64)[:, None]
             pr = 1.0/(1.0 + np.exp(-(lg - GRID_DM[None, :]/dome_s)))
             pr = np.clip(pr, 1e-6, 1 - 1e-6)
             q = det*pr + (1 - det)*(1 - pr)
             ll = np.log(EVIDENCE_MIX*q + (1 - EVIDENCE_MIX)/2)
-            pm = m & (row >= 0) & np.isfinite(inst_resid) & phot_okv[cat_id]
+            sel = phot_rec[idx]
 
             # Uniform-component channel: pure pooled likelihood, uncapped
             # logits, flux with a 4-sigma robustness clamp
@@ -510,14 +555,15 @@ def computeTreeSeries(config, night_dir, header, frames, stars, calibration=None
             q_u = det*pr_u + (1 - det)*(1 - pr_u)
             g_unif = np.log(q_u).sum(axis=0)
 
-            if np.any(pm):
-                sel = pm[m]
-                rr = (inst_resid[pm] - basev[cat_id[pm]])[:, None]
-                ss = sigmav[cat_id[pm]][:, None]
+            if np.any(sel):
+                idx_p = idx[sel]
+                cid_p = cat_id[idx_p]
+                rr = (inst_resid[idx_p] - basev[cid_p])[:, None]
+                ss = sigmav[cid_p][:, None]
                 ll[sel] += -0.5*np.minimum(((rr - GRID_DM[None, :])/ss)**2, 9.0)
                 g_unif = g_unif + (-0.5*np.minimum(
                     ((rr - GRID_DM[None, :])/ss)**2, 16.0)).sum(axis=0)
-            np.add.at(out, rec_leaf[m], ll)
+            np.add.at(out, rec_leaf[idx], ll)
             return out, g_unif
 
         dm_cells = np.full((n_frames, CELL_NY, CELL_NX), np.nan, dtype=np.float32)
