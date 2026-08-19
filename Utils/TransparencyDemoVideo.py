@@ -237,9 +237,22 @@ def generateDemoVideo(config, night_dir, sidecar_path, max_stills=None):
         mag_band_ratios=config.star_catalog_band_ratios)
     cat_ra, cat_dec = catalog_stars[:, 0], catalog_stars[:, 1]
 
+    # A night that never ran the recalibration has no
+    # platepars_flux_recalibrated.json at all, which is the same situation as
+    # a file holding zero recalibrated knots - leave ppr empty and let the
+    # static-platepar fallback below handle both.
     pp_path = os.path.join(night_dir, config.platepars_flux_recalibrated_name)
-    with open(pp_path) as f:
-        ppr = json.load(f)
+    ppr = {}
+    if os.path.isfile(pp_path):
+        try:
+            with open(pp_path) as f:
+                ppr = json.load(f)
+        except Exception:
+            log.info("Transparency demo video: could not read {} - falling "
+                  "back to the static platepar".format(pp_path))
+    else:
+        log.info("Transparency demo video: no {} - falling back to the "
+              "static platepar".format(os.path.basename(pp_path)))
     knots = []
     for ff_name, pp_dict in ppr.items():
         if isinstance(pp_dict, dict) and pp_dict.get("auto_recalibrated"):
