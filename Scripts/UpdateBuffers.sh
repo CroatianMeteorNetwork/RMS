@@ -3,7 +3,13 @@
 # UDP Buffer Size Configuration Script
 # -----------------------------------
 # Purpose: Configures system UDP buffer sizes for GStreamer UDP streaming
-# Usage: sudo ./Scripts/UpdateBuffers.sh
+# Usage: sudo ./Scripts/UpdateBuffers.sh [--check] [--yes]
+#
+#   --check   Report whether the buffers are already big enough and exit. Needs
+#             no privileges and changes nothing, so a caller can ask first and
+#             only reach for sudo when there is work to do.
+#   --yes     Accepted for callers that expect to confirm a prompt. This script
+#             is non-interactive, so it changes nothing.
 #
 # GStreamer's rtspsrc udp-buffer-size defaults to 16MB, but the Linux default
 # net.core.rmem_max/wmem_max are much smaller, causing dropped frames.
@@ -16,14 +22,57 @@
 #
 # It is idempotent and non-interactive, so it is safe to re-run.
 
+# Configuration
+RECOMMENDED_SIZE=16777216  # 16MB in bytes - must be >= rtspsrc udp-buffer-size in BufferedCapture.py
+
+CHECK_ONLY=false
+
+# Parsed before the root check so --check works unprivileged
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --check)
+            CHECK_ONLY=true
+            shift
+            ;;
+        --yes|-y)
+            # Nothing to confirm - kept so callers written against the
+            # interactive version of this script keep working
+            shift
+            ;;
+        --help|-h)
+            sed -n '3,12p' "$0"
+            exit 0
+            ;;
+        *)
+            echo "Unknown argument: $1" >&2
+            echo "Usage: sudo $0 [--check] [--yes]" >&2
+            exit 1
+            ;;
+    esac
+done
+
+# Report only: are the live limits already at least what GStreamer asks for?
+# Persistence is not checked here - re-running the script is cheap and idempotent
+if [ "$CHECK_ONLY" = true ]; then
+    # A kernel without these knobs (or a non-Linux host) reports nothing rather
+    # than failing, so default the reading itself, not just the command
+    r=$(sysctl -n net.core.rmem_max 2>/dev/null || true)
+    w=$(sysctl -n net.core.wmem_max 2>/dev/null || true)
+    r=${r:-0}
+    w=${w:-0}
+    if [ "$r" -ge "$RECOMMENDED_SIZE" ] && [ "$w" -ge "$RECOMMENDED_SIZE" ]; then
+        echo "UDP buffers are already at least $RECOMMENDED_SIZE bytes (rmem_max=$r, wmem_max=$w)"
+        exit 0
+    fi
+    echo "UDP buffers are below $RECOMMENDED_SIZE bytes (rmem_max=$r, wmem_max=$w)"
+    exit 1
+fi
+
 # Check if running as root
 if [ "$EUID" -ne 0 ]; then
     echo "Please run as root (sudo)"
     exit 1
 fi
-
-# Configuration
-RECOMMENDED_SIZE=16777216  # 16MB in bytes - must be >= rtspsrc udp-buffer-size in BufferedCapture.py
 
 # Convert bytes to human readable format
 human_readable() {

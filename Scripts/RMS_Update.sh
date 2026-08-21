@@ -23,6 +23,7 @@ shopt -s inherit_errexit 2>/dev/null || true
 RMS_BRANCH="${RMS_BRANCH:-""}"  # Use environment variable if set, otherwise empty
 SWITCH_MODE=""  # Set by parse_args: "", "direct", or "interactive"
 FORCE_UPDATE=false  # Set by parse_args when --force is used
+SKIP_BUFFERS=false  # Set by parse_args when --skip-buffers is used
 readonly RMSSOURCEDIR=$HOME/source/RMS
 readonly RMSBACKUPDIR=$HOME/.rms_backup
 readonly CURRENT_CONFIG="$RMSSOURCEDIR/.config"
@@ -136,9 +137,10 @@ validate_rms_directory() {
 }
 
 usage() {
-    print_status "info" "Usage: $0 [--switch <branch>] [--force] [--help]"
+    print_status "info" "Usage: $0 [--switch <branch>] [--force] [--skip-buffers] [--help]"
     print_status "info" "  --switch <branch>  Interactively switch or switch to a specific branch"
     print_status "info" "  --force            Force update even if repository is up-to-date"
+    print_status "info" "  --skip-buffers     Do not check or raise system UDP buffer sizes"
     print_status "info" "  --help             Show usage info"
     print_status "info" ""
     print_status "info" "Environment:"
@@ -163,6 +165,10 @@ parse_args() {
                 ;;
             --force)
                 FORCE_UPDATE=true
+                shift 1
+                ;;
+            --skip-buffers)
+                SKIP_BUFFERS=true
                 shift 1
                 ;;
             --help|-h)
@@ -1137,6 +1143,51 @@ install_missing_dependencies() {
     done
 }
 
+# Raise the system UDP buffer limits if they are below what GStreamer needs.
+#
+# BufferedCapture.py asks rtspsrc for a 16MB udp-buffer-size, but the kernel
+# silently clamps that request to net.core.rmem_max. If the limit is lower the
+# request is a no-op and frames are dropped under load.
+#
+# This never fails the update - buffer sizing affects capture at runtime, it is
+# not a prerequisite for building RMS.
+update_udp_buffers() {
+    local buffers_script="$RMSSOURCEDIR/Scripts/UpdateBuffers.sh"
+
+    if [ "$SKIP_BUFFERS" = true ]; then
+        print_status "info" "Skipping UDP buffer check (--skip-buffers)."
+        return 0
+    fi
+
+    if [ ! -f "$buffers_script" ]; then
+        print_status "warning" "UpdateBuffers.sh not found, skipping UDP buffer check."
+        return 0
+    fi
+
+    # The check itself is unprivileged, so only reach for sudo if there is work
+    if bash "$buffers_script" --check >/dev/null 2>&1; then
+        print_status "success" "UDP buffers are already sized correctly."
+        return 0
+    fi
+
+    print_status "info" "UDP buffers are below the 16MB GStreamer requests, so the kernel is clamping it."
+
+    if ! ensure_sudo "UDP buffer configuration"; then
+        print_status "warning" "UDP buffers left unchanged. To apply them later, run:"
+        print_status "info" "  sudo $buffers_script --yes"
+        return 0
+    fi
+
+    if sudo bash "$buffers_script" --yes; then
+        print_status "success" "UDP buffers raised to the recommended size."
+    else
+        print_status "warning" "Could not raise UDP buffers. To retry, run:"
+        print_status "info" "  sudo $buffers_script --yes"
+    fi
+
+    return 0
+}
+
 get_commit_info() {
     local branch=${1:-""}
     local commit
@@ -1580,6 +1631,9 @@ PY
     # Install missing dependencies
     print_header "Installing Missing Dependencies"
     install_missing_dependencies
+
+    print_header "Checking UDP Buffer Sizes"
+    update_udp_buffers
 
     print_header "Installing Python Requirements"
     print_status "info" "This may take a few minutes..."
