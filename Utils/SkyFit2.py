@@ -10,6 +10,7 @@ import json
 import datetime
 import collections
 import glob
+import inspect
 import sys
 import time
 import threading
@@ -12812,7 +12813,8 @@ class PlateTool(QtWidgets.QMainWindow):
                         first_platepar_fit=True,
                         use_nn_cost=True,
                         final_catalog_stars=tuned_catalog,
-                        iteration_callback=iteration_callback
+                        iteration_callback=iteration_callback,
+                        progress_callback=self._checkCancelled
                     )
 
                     # Mark error overlay for recomputation after the platepar changed
@@ -12896,14 +12898,14 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.fit_only_pointing = True
             else:
                 print("Final refinement with user settings (distortion={})...".format(user_distortion_type))
-            self.fitPickedStars()
+            self._fitPickedStarsImpl()
 
             # Sigma-clip gross positional mispairs that survived NN/RANSAC (a detection matched to a
             #   wrong/duplicate catalog star inflates the RMSD), then refit once on the clean set.
             removed = self.filterPositionalOutliers(sigma_threshold=3.0, abs_floor_px=3.0)
             if removed > 0:
                 print("Pairs after positional filtering: {}".format(len(self.paired_stars)))
-                self.fitPickedStars()
+                self._fitPickedStarsImpl()
 
         # Restore fit_only_pointing after pointing-only fit
         self.fit_only_pointing = user_fit_only_pointing
@@ -13049,9 +13051,16 @@ class PlateTool(QtWidgets.QMainWindow):
         self.status_bar.showMessage("Stopping...")
 
     def _beginCancellableOperation(self):
-        """ Show the Stop button and reset the cancel flag. Pair with _endCancellableOperation
-            in a finally block. """
-        self._cancel_requested = False
+        """ Show the Stop button and open a cancellable scope. Pair with
+            _endCancellableOperation in a finally block.
+
+            A cancel request that is already pending is deliberately NOT cleared here. A
+            multi-stage operation (solve, then NN fit, then the final fit) opens one scope per
+            stage, and a click landing in the gap between two stages would otherwise be
+            swallowed - the user presses Stop, nothing happens, and the next stage runs to
+            completion. Every scope closes by clearing the flag, so nothing stale survives an
+            operation that ran to the end.
+        """
         self.stop_button.setVisible(True)
 
     def _checkCancelled(self):
@@ -14398,7 +14407,8 @@ class PlateTool(QtWidgets.QMainWindow):
                     first_platepar_fit=True,
                     use_nn_cost=True,
                     final_catalog_stars=tuned_catalog,
-                    iteration_callback=iteration_callback
+                    iteration_callback=iteration_callback,
+                    progress_callback=self._checkCancelled
                 )
 
                 # Mark error overlay for recomputation after the platepar changed
@@ -14473,13 +14483,13 @@ class PlateTool(QtWidgets.QMainWindow):
             self.status_bar.showMessage("Fitting astrometry with {:d} stars...".format(len(self.paired_stars)))
             QtWidgets.QApplication.processEvents()
             self.first_platepar_fit = True
-            self.fitPickedStars()
+            self._fitPickedStarsImpl()
 
             # Sigma-clip gross positional mispairs that survived NN/RANSAC, then refit once
             removed = self.filterPositionalOutliers(sigma_threshold=3.0, abs_floor_px=3.0)
             if removed > 0:
                 print("Pairs after positional filtering: {}".format(len(self.paired_stars)))
-                self.fitPickedStars()
+                self._fitPickedStarsImpl()
 
             # Note: catalog LM restoration is handled by the caller (autoFitAstrometryNet)
 
@@ -14735,7 +14745,10 @@ class PlateTool(QtWidgets.QMainWindow):
         Note: The function must NOT access Qt widgets or shared mutable state.
 
         Arguments:
-            func: [callable] Function to run.
+            func: [callable] Function to run. If it takes a `stop_event` keyword, it is handed
+                one: Stop then sets the event and the worker can wind itself up instead of
+                being merely abandoned. A worker without that keyword is still abandoned, so it
+                runs to completion in the background with its result discarded.
             *args, **kwargs: Arguments passed to the function.
 
         Returns:
@@ -14746,6 +14759,21 @@ class PlateTool(QtWidgets.QMainWindow):
             Any exception raised by func.
         """
         result = {}
+
+        # Hand the worker a stop event if it knows what to do with one. Abandoning the thread
+        # is not enough on its own: the astrometry.net solve is a five-second polling loop, so
+        # an abandoned worker keeps polling the server (and printing to the console) for
+        # another minute, which reads as "Stop did nothing".
+        stop_event = threading.Event()
+        cooperative = 'stop_event' in kwargs
+        if not cooperative:
+            try:
+                cooperative = 'stop_event' in inspect.signature(func).parameters
+            except (TypeError, ValueError):
+                cooperative = False
+
+        if cooperative:
+            kwargs['stop_event'] = stop_event
 
         def worker():
             try:
@@ -14770,7 +14798,11 @@ class PlateTool(QtWidgets.QMainWindow):
                 self._checkCancelled()
                 time.sleep(0.05)
         except OperationCancelled:
-            print("Background operation cancelled - abandoning the worker thread.")
+            stop_event.set()
+            if cooperative:
+                print("Background operation cancelled - asking the worker to stop.")
+            else:
+                print("Background operation cancelled - abandoning the worker thread.")
             raise
         finally:
             self._endCancellableOperation()
@@ -16479,9 +16511,27 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
     def fitPickedStars(self):
+        """ Slot-safe entry point for the picked-star fit: pressing Stop must not throw into
+            Qt's slot machinery (PyQt aborts the process on an exception raised in a slot
+            invoked from C++), so the cancellation is absorbed here. Pipeline code that has to
+            abort a whole multi-stage operation calls _fitPickedStarsImpl directly and lets
+            OperationCancelled propagate to its own entry-point guard.
+        """
+
+        try:
+            return self._fitPickedStarsImpl()
+
+        except OperationCancelled:
+            self.status_bar.showMessage("Fit cancelled - platepar restored")
+            return self.platepar
+
+
+    def _fitPickedStarsImpl(self):
         """ Fit stars that are manually picked. The function first only estimates the astrometry parameters
             without the distortion, then just the distortion parameters, then all together.
 
+        Raises:
+            OperationCancelled if the user presses Stop while the fit is running.
         """
 
         # Check if there are enough stars for the fit
@@ -16509,9 +16559,28 @@ class PlateTool(QtWidgets.QMainWindow):
         # Get the Julian date of the image that's being fit
         jd = date2JD(*self.img_handle.currentTime())
 
-        # Fit the platepar to paired stars
-        self.platepar.fitAstrometry(jd, img_stars, catalog_stars, first_platepar_fit=self.first_platepar_fit,\
-            fit_only_pointing=self.fit_only_pointing, fixed_scale=self.fixed_scale)
+        # Fit the platepar to paired stars. This is the longest single-threaded stage of a
+        # calibration run (minutes on a wide field with hundreds of pairs), so it carries the
+        # cancel hook: without it the window is frozen and the Stop button is not even shown.
+        # The fit mutates the platepar in place - keep a copy to restore on cancel.
+        platepar_backup = copy.deepcopy(self.platepar)
+        self._beginCancellableOperation()
+
+        try:
+            self.platepar.fitAstrometry(jd, img_stars, catalog_stars, first_platepar_fit=self.first_platepar_fit,\
+                fit_only_pointing=self.fit_only_pointing, fixed_scale=self.fixed_scale,
+                progress_callback=self._checkCancelled)
+
+        except OperationCancelled:
+            self.platepar = platepar_backup
+            self.tab.param_manager.setFitButtonBusy(False)
+            self.updateStars()
+            print("  Fit cancelled - platepar restored.")
+            raise
+
+        finally:
+            self._endCancellableOperation()
+
         self.first_platepar_fit = False
         self.platepar_modified = True
 

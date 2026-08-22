@@ -32,7 +32,7 @@ if os.environ.get('RMS_DISABLE_LOCAL_ASTROMETRY', '').lower() in ('1', 'true', '
 
 def astrometryNetSolveLocal(ff_file_path=None, img=None, mask=None, x_data=None, y_data=None,
                             fov_w_range=None, fov_w_hint=None, max_stars=100, verbose=False, x_center=None, y_center=None,
-                            lat=None, lon=None, jd=None, input_intensities=None):
+                            lat=None, lon=None, jd=None, input_intensities=None, stop_event=None):
     """ Find an astrometric solution of X, Y image coordinates of stars detected on an image using the
         local installation of astrometry.net.
 
@@ -52,6 +52,9 @@ def astrometryNetSolveLocal(ff_file_path=None, img=None, mask=None, x_data=None,
         lon: [float] Station longitude in degrees. Required for iterative matching.
         jd: [float] Julian date. Required for iterative matching.
         input_intensities: [ndarray] Star intensities for brightness-based matching. Optional.
+        stop_event: [threading.Event] Set by the caller to abandon the solve. The library only
+            yields control through its logodds callback, so this takes effect at the next match
+            candidate rather than immediately.
 
     Returns:
         [tuple] A tuple containing the following elements:
@@ -314,15 +317,25 @@ def astrometryNetSolveLocal(ff_file_path=None, img=None, mask=None, x_data=None,
         getLogger(level="INFO")
 
     # Init solution parameters
-    solution_parameters = astrometry.SolutionParameters(
-            # Return the first solution if the log odds ratio is greater than 60 (good solution)
-            # Lower threshold means faster solving - logodds > 50 is typically reliable
-            logodds_callback=lambda logodds_list: (
-            astrometry.Action.STOP
-            if logodds_list[0] > 60.0
-            else astrometry.Action.CONTINUE
-            )
-    )
+    #
+    # The logodds callback doubles as the abort hook: it is the only point the astrometry
+    # library hands back control mid-solve, so a stop request can only take effect when a
+    # match candidate turns up. That is coarse, but it beats running the solve to the end
+    # after the caller has stopped waiting for it.
+    def _logoddsCallback(logodds_list):
+
+        if (stop_event is not None) and stop_event.is_set():
+            print("Local astrometry.net solve abandoned - stop requested.")
+            return astrometry.Action.STOP
+
+        # Return the first solution if the log odds ratio is greater than 60 (good solution)
+        # Lower threshold means faster solving - logodds > 50 is typically reliable
+        if logodds_list[0] > 60.0:
+            return astrometry.Action.STOP
+
+        return astrometry.Action.CONTINUE
+
+    solution_parameters = astrometry.SolutionParameters(logodds_callback=_logoddsCallback)
 
     # If the solver.solve has the argument "stars", use a 2D array of stars instead of stars_xs and stars_ys
     solve_args = inspect.getfullargspec(solver.solve).args
@@ -451,7 +464,7 @@ def astrometryNetSolveLocal(ff_file_path=None, img=None, mask=None, x_data=None,
 
 def astrometryNetSolve(ff_file_path=None, img=None, mask=None, x_data=None, y_data=None, fov_w_range=None,
                        fov_w_hint=None, max_stars=100, verbose=False, x_center=None, y_center=None,
-                       lat=None, lon=None, jd=None, input_intensities=None):
+                       lat=None, lon=None, jd=None, input_intensities=None, stop_event=None):
     """ Find an astrometric solution of X, Y image coordinates of stars detected on an image using the
         local installation of astrometry.net.
 
@@ -471,11 +484,22 @@ def astrometryNetSolve(ff_file_path=None, img=None, mask=None, x_data=None, y_da
         lon: [float] Station longitude in degrees. Required for iterative matching.
         jd: [float] Julian date. Required for iterative matching.
         input_intensities: [ndarray] Star intensities for brightness-based matching. Optional.
+        stop_event: [threading.Event] Set by the caller to abandon the solve. Checked before
+            each remote attempt and honoured inside the remote polling loops, so a caller that
+            gives up (SkyFit's Stop button) is not left with a worker that keeps polling - and
+            keeps falling back to the next server - long after the user stopped waiting.
     """
+
+    def _stopRequested():
+        return (stop_event is not None) and stop_event.is_set()
+
 
     # Helper to try coordinate-only first, then fall back to image if available
     def _tryRemoteSolve(api_url, ff_path, image, x_coords, y_coords, fov_range, x_cen, y_cen):
         """Try coordinate-only solve first, fall back to image if that fails."""
+
+        if _stopRequested():
+            return None
 
         # If we have coordinates, try coordinate-only first (faster, less bandwidth)
         if x_coords is not None and y_coords is not None:
@@ -484,21 +508,22 @@ def astrometryNetSolve(ff_file_path=None, img=None, mask=None, x_data=None, y_da
                 result = novaAstrometryNetSolve(
                     ff_file_path=None, img=None, x_data=x_coords, y_data=y_coords,
                     fov_w_range=fov_range, x_center=x_cen, y_center=y_cen,
-                    api_url=api_url
+                    api_url=api_url, stop_event=stop_event
                 )
                 if result is not None:
                     return result
-                print("  Coordinate-only solve failed.")
+                if not _stopRequested():
+                    print("  Coordinate-only solve failed.")
             except Exception as e:
                 print(f"  Coordinate-only solve error: {e}")
 
             # Fall back to image if available
-            if image is not None or ff_path is not None:
+            if (image is not None or ff_path is not None) and not _stopRequested():
                 print("  Falling back to image upload...")
                 return novaAstrometryNetSolve(
                     ff_file_path=ff_path, img=image, x_data=None, y_data=None,
                     fov_w_range=fov_range, x_center=x_cen, y_center=y_cen,
-                    api_url=api_url
+                    api_url=api_url, stop_event=stop_event
                 )
             return None
 
@@ -506,7 +531,7 @@ def astrometryNetSolve(ff_file_path=None, img=None, mask=None, x_data=None, y_da
         return novaAstrometryNetSolve(
             ff_file_path=ff_path, img=image, x_data=x_coords, y_data=y_coords,
             fov_w_range=fov_range, x_center=x_cen, y_center=y_cen,
-            api_url=api_url
+            api_url=api_url, stop_event=stop_event
         )
 
     # If the local installation of astrometry.net is not available, use remote API
@@ -525,6 +550,9 @@ def astrometryNetSolve(ff_file_path=None, img=None, mask=None, x_data=None, y_da
         except Exception as e:
             print(f"Primary server failed: {e}")
 
+        if _stopRequested():
+            return None
+
         # Fall back to nova.astrometry.net
         print(f"Trying fallback server: {FALLBACK_API_URL}")
         return _tryRemoteSolve(
@@ -540,7 +568,8 @@ def astrometryNetSolve(ff_file_path=None, img=None, mask=None, x_data=None, y_da
                 ff_file_path=ff_file_path, img=img, mask=mask, x_data=x_data, y_data=y_data,
                 fov_w_range=fov_w_range, fov_w_hint=fov_w_hint, max_stars=max_stars, verbose=verbose,
                 x_center=x_center, y_center=y_center,
-                lat=lat, lon=lon, jd=jd, input_intensities=input_intensities
+                lat=lat, lon=lon, jd=jd, input_intensities=input_intensities,
+                stop_event=stop_event
                 )
 
         # If local fails, try remote APIs
@@ -560,6 +589,9 @@ def astrometryNetSolve(ff_file_path=None, img=None, mask=None, x_data=None, y_da
                     return result
             except Exception as e2:
                 print(f"Primary server failed: {e2}")
+
+            if _stopRequested():
+                return None
 
             # Fall back to nova.astrometry.net
             print(f"Trying fallback server: {FALLBACK_API_URL}")

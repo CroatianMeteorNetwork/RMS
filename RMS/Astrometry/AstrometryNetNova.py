@@ -282,7 +282,7 @@ class Client(object):
 
 
 def novaAstrometryNetSolve(ff_file_path=None, img=None, x_data=None, y_data=None, fov_w_range=None,
-    api_key=None, x_center=None, y_center=None, api_url=None):
+    api_key=None, x_center=None, y_center=None, api_url=None, stop_event=None):
     """ Find an astrometric solution of X, Y image coordinates of stars detected on an image using the
         nova.astrometry.net service or a compatible API.
 
@@ -299,11 +299,31 @@ def novaAstrometryNetSolve(ff_file_path=None, img=None, x_data=None, y_data=None
         y_center: [float] Y coordinate of the image center. If not given, the image center will be used.
         api_url: [str] Custom API URL. None by default, in which case nova.astrometry.net will be used.
             Can be set to use alternative servers like 'https://astro.contrailcast.com/api/'.
+        stop_event: [threading.Event] Set by the caller to abort the solve. The server does the
+            actual work, so the two waits below are where this function spends its time - both
+            return the moment the event is set, and the function then gives up and returns None.
+            Without it a caller that stops waiting for the result (SkyFit's Stop button) leaves
+            this polling on for another minute, printing to the console the whole way.
 
     Return:
         (ra, dec, orientation, scale, fov_w, fov_h, star_data): [tuple of floats] All in degrees,
             scale in px/deg.
     """
+
+
+    def _stopRequested():
+        """ True if the caller asked for the solve to be abandoned. """
+        return (stop_event is not None) and stop_event.is_set()
+
+
+    def _waitOrStop(seconds):
+        """ Wait between polls. Returns True if the caller asked to stop instead. """
+
+        if stop_event is None:
+            time.sleep(seconds)
+            return False
+
+        return stop_event.wait(seconds)
 
 
     def _printWebLink(stat, first_status=None):
@@ -437,6 +457,10 @@ def novaAstrometryNetSolve(ff_file_path=None, img=None, x_data=None, y_data=None
     tries = 0
     while True:
 
+        if _stopRequested():
+            print('Astrometry.net solve abandoned - stop requested.')
+            return None
+
         # Limit the number of checking if the field is solved, so the script does not get stuck
         if tries > solution_tries:
             _printWebLink(stat)
@@ -460,7 +484,9 @@ def novaAstrometryNetSolve(ff_file_path=None, img=None, x_data=None, y_data=None
                     solved_id = j
                     break
 
-        time.sleep(5)
+        if _waitOrStop(5):
+            print('Astrometry.net solve abandoned - stop requested.')
+            return None
 
         tries += 1
 
@@ -477,6 +503,10 @@ def novaAstrometryNetSolve(ff_file_path=None, img=None, x_data=None, y_data=None
     results_tries = 0
     solution_tries = 0
     while True:
+
+        if _stopRequested():
+            print('Astrometry.net solve abandoned - stop requested.')
+            return None
 
         # Limit the number of tries of getting the results, so the script does not get stuck
         if results_tries > get_results_tries:
@@ -510,13 +540,17 @@ def novaAstrometryNetSolve(ff_file_path=None, img=None, x_data=None, y_data=None
         # Wait until the job is solved
         elif stat.get('status','') in ['solving']:
             print('Solving... Try {:d}/{:d}'.format(solution_tries, get_solution_tries))
-            time.sleep(5)
+            if _waitOrStop(5):
+                print('Astrometry.net solve abandoned - stop requested.')
+                return None
             solution_tries += 1
             continue
 
         # Print other error messages
         else:
-            time.sleep(5)
+            if _waitOrStop(5):
+                print('Astrometry.net solve abandoned - stop requested.')
+                return None
             print('Got job status:', stat)
             results_tries += 1
 

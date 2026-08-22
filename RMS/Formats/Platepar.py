@@ -29,6 +29,7 @@ import copy
 import datetime
 import json
 import os
+import time
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -141,7 +142,37 @@ def getPairedStarsSkyPositions(img_x, img_y, jd, platepar):
     return ra_array, dec_array
 
 
-def _lstsqFit(residual_func, x0, args, max_nfev=None, diff_step=None):
+# Minimum wall-clock gap between progress callbacks during a fit. The callback exists so a
+# caller can stay responsive (a GUI pumps its event loop, and aborts the fit by raising from
+# the callback) - the optimizers evaluate their cost thousands of times a second, so calling
+# out on every evaluation would cost more than the fit itself.
+PROGRESS_CALLBACK_INTERVAL = 0.1
+
+
+def _withProgressCallback(func, progress_callback, interval=PROGRESS_CALLBACK_INTERVAL):
+    """ Wrap a cost or residual function so progress_callback() runs at most every `interval`
+        seconds of fitting.
+
+    An exception raised by the callback propagates out through the optimizer, which is how a
+    caller aborts a fit already in progress - scipy does not catch exceptions raised by the
+    function it is minimizing.
+    """
+
+    last_call = [time.time()]
+
+    def wrapped(*args, **kwargs):
+
+        now = time.time()
+        if now - last_call[0] >= interval:
+            last_call[0] = now
+            progress_callback()
+
+        return func(*args, **kwargs)
+
+    return wrapped
+
+
+def _lstsqFit(residual_func, x0, args, max_nfev=None, diff_step=None, progress_callback=None):
     """Levenberg-Marquardt least-squares fit on a vector-valued residual.
 
     Replaces Nelder-Mead on the smooth, matched-pair cost functions: it uses the residual's
@@ -163,11 +194,17 @@ def _lstsqFit(residual_func, x0, args, max_nfev=None, diff_step=None):
             default, ~1.5e-8) by default. Raise this for residuals whose numerical noise
             floor is above the default step (e.g. tiny angular separations), otherwise the
             Jacobian is noise and the optimizer thrashes until max_nfev without converging.
+        progress_callback: [callable] Called periodically while fitting (see
+            _withProgressCallback). Raise from it to abort the fit.
 
     Return:
         scipy.optimize.OptimizeResult
     """
     x0 = np.asarray(x0, dtype=float)
+
+    if progress_callback is not None:
+        residual_func = _withProgressCallback(residual_func, progress_callback)
+
     n_resid = len(np.atleast_1d(residual_func(x0, *args)))
     method = 'lm' if n_resid >= len(x0) else 'trf'
     return scipy.optimize.least_squares(
@@ -1196,6 +1233,7 @@ class Platepar(object):
         use_nn_cost=False,
         final_catalog_stars=None,
         iteration_callback=None,
+        progress_callback=None,
     ):
         """Fit astrometric parameters to the list of star image and celestial catalog coordinates.
         At least 4 stars are needed to fit the rigid body parameters.
@@ -1216,6 +1254,13 @@ class Platepar(object):
             iteration_callback: [callable] Optional callback called after each RANSAC iteration.
                                 Signature: callback(iteration, platepar_copy, outlier_mask, rmsd_arcmin)
                                 Used for visual debugging of the fitting process.
+            progress_callback: [callable] Optional no-argument callback run periodically while
+                                the optimizers are working (at most every
+                                PROGRESS_CALLBACK_INTERVAL seconds). A caller that needs to stay
+                                responsive during a long fit - or to abort one - hooks in here:
+                                an exception raised by the callback propagates out of the fit.
+                                The per-RANSAC-iteration hook above is far too coarse for that,
+                                since a single iteration can run for many seconds.
 
         """
 
@@ -1578,6 +1623,7 @@ class Platepar(object):
                     _calcImageResidualsDistortionVect,
                     self.x_poly_rev,
                     (self, jd, catalog_stars, img_stars, 'x'),
+                    progress_callback=progress_callback,
                 )
 
                 # Extract fitted X polynomial
@@ -1588,6 +1634,7 @@ class Platepar(object):
                     _calcImageResidualsDistortionVect,
                     self.y_poly_rev,
                     (self, jd, catalog_stars, img_stars, 'y'),
+                    progress_callback=progress_callback,
                 )
 
                 # Extract fitted Y polynomial
@@ -1612,6 +1659,7 @@ class Platepar(object):
                     _calcSkyResidualsDistortionVect,
                     self.x_poly_fwd,
                     (self, jd, catalog_stars, img_stars, 'x'),
+                    progress_callback=progress_callback,
                 )
 
                 # Extract fitted X polynomial
@@ -1622,6 +1670,7 @@ class Platepar(object):
                     _calcSkyResidualsDistortionVect,
                     self.y_poly_fwd,
                     (self, jd, catalog_stars, img_stars, 'y'),
+                    progress_callback=progress_callback,
                 )
 
                 # IMPORTANT NOTE - the X polynomial is used to store the fit parameters
@@ -1914,8 +1963,15 @@ class Platepar(object):
                         # ops/eval, identical nearest-neighbour result).
                         ra_cat_fov, dec_cat_fov, _ = catalog_stars_fov.T
                         cat_tree = cKDTree(_raDecToUnitVectors(ra_cat_fov, dec_cat_fov))
+                        # The NN cost is what runs long here, so the progress hook has to sit
+                        # on the cost function itself - the per-iteration callback below only
+                        # fires once this whole minimize returns
+                        ransac_cost_func = cost_func
+                        if progress_callback is not None:
+                            ransac_cost_func = _withProgressCallback(cost_func, progress_callback)
+
                         res = scipy.optimize.minimize(
-                            cost_func, start_params,
+                            ransac_cost_func, start_params,
                             args=(self, jd, catalog_stars_fov, img_stars_subset, cat_tree),
                             method='Nelder-Mead', options=ransac_opts,
                         )
@@ -2137,6 +2193,7 @@ class Platepar(object):
                             _calcSkyResidualsAstroAndDistortionRadialVect,
                             p0,
                             (self, jd, catalog_stars, img_stars),
+                            progress_callback=progress_callback,
                         )
                         fwd_status = "converged" if res.success else "stopped"
 
@@ -2167,6 +2224,7 @@ class Platepar(object):
                             _calcImageResidualsDistortionVect,
                             rev_init,
                             (self, jd, catalog_stars, img_stars, 'radial'),
+                            progress_callback=progress_callback,
                         )
                         rev_status = "converged" if res_rev.success else "stopped"
 
@@ -2196,6 +2254,7 @@ class Platepar(object):
                         _calcImageResidualsAstroAndDistortionRadialVect,
                         p_final,
                         (self, jd, catalog_stars, img_stars),
+                        progress_callback=progress_callback,
                     )
                     xf = res_final.x
                     self.RA_d = (360*xf[0]) % 360
@@ -2213,6 +2272,7 @@ class Platepar(object):
                         _calcSkyResidualsDistortionVect,
                         self.x_poly_fwd,
                         (self, jd, catalog_stars, img_stars, 'radial'),
+                        progress_callback=progress_callback,
                     )
                     self.x_poly_fwd = res_fwd.x
 
