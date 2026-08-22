@@ -149,3 +149,16 @@ def test_gate_factor_from_config(tmp_path):
     import RMS.ConfigReader as cr
     config = cr.Config()
     assert config.star_gate_factor == pytest.approx(3.0)
+
+
+def test_extra_info_reports_measured_gate():
+    # The tuner and the station logs need the gate in ADU: the factor alone cannot be
+    # turned back into a threshold without the frame's own contrast field
+    img, _ = synthImage(0.6, [25.0, 4.5, 4.5])
+    extra = {}
+    extractStars(img, gate_factor=5.0, extra_info=extra)
+    assert 'gate_adu' in extra
+
+    deep = {}
+    extractStars(img, gate_factor=2.0, extra_info=deep)
+    assert deep['gate_adu'] < extra['gate_adu']

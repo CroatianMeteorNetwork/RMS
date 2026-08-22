@@ -3572,7 +3572,11 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
         # and what only applies to this SkyFit session
         slider_data = [
             # (key, label, min, max, default, default label, callback, group)
-            ('star_gate_factor', 'Adaptive Gate Factor', 15, 60, 30, '3.0', self.onStarGateFactorChanged, 'config'),
+            # The gate factor ceiling is deliberately far above the 3.0 default: on a camera
+            # whose averaged frame is fixed-pattern dominated (very dark, low gain) the
+            # contrast-field median measures quantization rather than the noise tail, and the
+            # usable gate sits at 10-15. A 6.0 ceiling cannot even reach that regime.
+            ('star_gate_factor', 'Adaptive Gate Factor', 15, 200, 30, '3.0', self.onStarGateFactorChanged, 'config'),
             ('neighborhood_size', 'Neighborhood Size', 5, 40, 10, '10', self.onNeighborhoodSizeChanged, 'config'),
             ('config_max_stars', 'Max Stars', 100, 2000, 400, '400', self.onConfigMaxStarsChanged, 'config'),
             ('max_global_intensity', 'Max Global Intensity', 30, 255, 230, '230', self.onMaxGlobalIntensityChanged, 'config'),
@@ -3809,7 +3813,7 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
 
     # Values set by the auto-tuner: Reset to Defaults must not clobber them (the
     # catalog LM spinbox is tuned too and is likewise left untouched)
-    TUNED_KEYS = ('segment_radius',)
+    TUNED_KEYS = ('segment_radius', 'star_gate_factor')
 
     def _sliderRestoreTarget(self, key):
         """ The value Reset to Defaults would set for a slider (in slider units), or

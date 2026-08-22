@@ -5363,18 +5363,45 @@ class PlateTool(QtWidgets.QMainWindow):
             self.tab.star_detection.updateStatus(True)
 
 
+    # Gate factor sweep, high (bright stars only) down to deep. The candidate gate is
+    # noise-adaptive (RMS.ExtractStars.adaptiveContrastThreshold), so this factor - not the
+    # legacy intensity threshold - is what extraction reads, and it is per-camera.
+    GATE_SWEEP_FACTORS = (20.0, 15.0, 12.0, 10.0, 8.0, 7.0, 6.0, 5.0, 4.0, 3.5, 3.0, 2.5, 2.0)
+
+    # A detection counts as real only within this radius of a catalog star. Deliberately
+    # tighter than the FWHM-scaled radius used elsewhere: real centroids sit well under a
+    # pixel from their catalog position, and a wider window mostly buys chance matches.
+    GATE_SWEEP_MATCH_RADIUS = 2.0
+
+    # How far below the best measured precision the sweep will still go in exchange for
+    # depth. A camera whose precision curve is flat is not gate-limited at all, so the
+    # deepest gate wins; one that degrades as the gate opens is held near its own best.
+    # Deliberately tight: on a well-behaved camera the curve stays flat well past the 3.0
+    # network default, and a loose slack would walk the whole fleet deeper than the value
+    # the depth-dependent flux correction was calibrated against.
+    GATE_SWEEP_PRECISION_SLACK = 0.02
+
+    # Below this precision even the best gate is noise- or calibration-dominated, and no
+    # factor is worth recommending.
+    GATE_SWEEP_MIN_PRECISION = 0.50
+
+    # Precision drop (from the best factor seen) at which the sweep gives up on the
+    # remaining, deeper factors. Kept well clear of the selection slack: those steps are the
+    # slow ones (every admitted candidate gets a PSF fit) and nothing past a collapse of this
+    # size can win.
+    GATE_SWEEP_ABANDON_DROP = 0.15
+
     def tuneStarDetection(self):
         """
         Auto-tune star detection parameters: segment_radius from measured bright-star
-        FWHMs, and the catalog limiting magnitude from matched detections. The intensity
-        threshold is NOT tuned - the candidate gate is noise-adaptive (see
-        RMS.ExtractStars.adaptiveContrastThreshold) and extraction ignores the
-        configured value; the tuner reports the measured adaptive gate instead.
+        FWHMs, the adaptive gate factor from a precision sweep, and the catalog limiting
+        magnitude from matched detections.
 
         Algorithm:
         1. Use current catalog stars projected to image
         2. Determine segment_radius from bright-star FWHMs
-        3. Count true positives (within 2px of catalog) vs false positives
+        3. Sweep the adaptive gate factor, counting true positives (within
+           GATE_SWEEP_MATCH_RADIUS of a catalog star) against chance-corrected false ones
         4. Find the catalog LM that accounts for the detected true positives
         """
         # Validate platepar exists
@@ -5397,9 +5424,9 @@ class PlateTool(QtWidgets.QMainWindow):
                 title="Tuning Error", message_type="warning")
             return
 
-        print("NOTE: the star candidacy gate is noise-adaptive; intensity_threshold is "
-              "not tuned (extraction ignores it). Tuning covers segment_radius and the "
-              "catalog limiting magnitude.")
+        print("NOTE: the star candidacy gate is noise-adaptive; intensity_threshold is not "
+              "tuned (extraction ignores it). Tuning covers segment_radius, the adaptive "
+              "gate factor and the catalog limiting magnitude.")
 
         # Update button text and disable during tuning
         self.tab.star_detection.tune_button.setText("Tuning...")
@@ -5414,7 +5441,6 @@ class PlateTool(QtWidgets.QMainWindow):
             jd = date2JD(*self.img_handle.currentTime())
 
             # Store original config values
-            original_intensity_threshold = self.config.intensity_threshold
             original_star_gate_factor = getattr(self.config, 'star_gate_factor', 3.0)
             original_segment_radius = self.config.segment_radius
 
@@ -5514,37 +5540,51 @@ class PlateTool(QtWidgets.QMainWindow):
                     title="Tuning Aborted", message_type="warning")
                 return
 
-            # Phase 2 (retired): the candidate gate is noise-adaptive, so an intensity
-            # sweep tunes a parameter extraction no longer reads - and recommending one
-            # is actively hazardous while legacy consumers still read the config value.
-            # Report the measured adaptive gate for the current frame instead, and keep
-            # the configured value untouched.
-            print("\n  Phase 2 (retired): candidate gate is noise-adaptive; "
-                  "intensity_threshold is not tuned and will not be changed.")
-            best_threshold = self.config.intensity_threshold
+            # Phase 2: sweep the adaptive gate factor - the knob extraction actually reads.
+            # The old intensity sweep was retired because extraction ignores the configured
+            # threshold; the gate factor is its live equivalent, and it is genuinely
+            # per-camera. The 3.0 default assumes the contrast-field median tracks the noise
+            # tail, which holds while the averaged frame is temporal-noise dominated. On a
+            # dark, low-gain sensor the average is fixed-pattern dominated instead: the
+            # median collapses toward the quantization step while hot pixels keep a broad
+            # tail, so 3.0 gates deep inside that tail and the frame floods with static
+            # false positives. Such cameras need 10-15.
+            print(f"\n  Phase 2: Adaptive gate factor sweep (segment_radius={best_segment})")
+            self.status_bar.showMessage("Tuning... gate factor sweep")
+            QtWidgets.QApplication.processEvents()
 
-            try:
-                import scipy.ndimage as _ndi
-                from RMS.ExtractStars import adaptiveContrastThreshold
+            sweep_results = self._sweepGateFactor(
+                ff_name, best_segment, visible_cat_x, visible_cat_y)
+            best_factor = self._selectGateFactor(sweep_results)
 
-                _img = self.img.data.astype(np.float32) if hasattr(self.img, 'data') \
-                    else None
-                if _img is not None and _img.ndim == 2:
-                    _conv = _ndi.convolve(_img, np.full((2, 2), 0.25))
-                    _contrast = (_ndi.maximum_filter(_conv, 10)
-                                 - _ndi.minimum_filter(_conv, 10))
-                    _gate = adaptiveContrastThreshold(_contrast,
-                        bit_depth=getattr(self.config, 'bit_depth', 8))
-                    print(f"    measured adaptive gate on this frame: {_gate:.1f} ADU "
-                          f"(configured legacy value: {best_threshold})")
-            except Exception as e:
-                print(f"    (could not measure the adaptive gate: {e})")
+            if best_factor is None:
+                best_sweep_precision = max([p for _, n, p in sweep_results if n > 0], default=0.0)
+                print(f"\n  *** TUNING ABORTED ***")
+                print(f"  No gate factor reached {self.GATE_SWEEP_MIN_PRECISION:.0%} precision "
+                      f"(best: {best_sweep_precision:.0%}).")
+                self.status_bar.showMessage("Tuning aborted: no usable gate factor")
+                qmessagebox(
+                    message="Tuning aborted: no gate factor produced clean detections.\n\n"
+                            f"The best precision over the whole sweep was "
+                            f"{best_sweep_precision:.0%}.\n\n"
+                            "This usually means:\n"
+                            "\u2022 The platepar calibration is incorrect\n"
+                            "\u2022 The image has severe issues (clouds, daylight, etc.)\n\n"
+                            "Please verify your calibration before trying again.",
+                    title="Tuning Aborted", message_type="warning")
+                return
 
-            # Get final stats with current detection parameters, including true positive positions
+            print(f"\n  Selected star_gate_factor: {best_factor:.1f}")
+
+            # Get final stats at the selected gate factor, including true positive positions
             detection_info = {}
             n_true_pos, n_false_pos, n_detected, tp_x, tp_y = self._countTrueFalsePositives(
-                ff_name, best_threshold, best_segment, visible_cat_x, visible_cat_y,
+                ff_name, best_factor, best_segment, visible_cat_x, visible_cat_y,
                 return_positions=True, extra_info=detection_info)
+
+            if 'gate_adu' in detection_info:
+                print(f"    measured gate on this frame: {detection_info['gate_adu']:.1f} ADU "
+                      f"at factor {best_factor:.1f}")
 
             # Early bail-out check after Phase 2
             # If precision is very low, the calibration is likely wrong
@@ -5611,20 +5651,20 @@ class PlateTool(QtWidgets.QMainWindow):
             print(f"\n  Selected catalog LM: {best_lm:.1f}")
 
             # Restore original config
-            self.config.intensity_threshold = original_intensity_threshold
             self.config.star_gate_factor = original_star_gate_factor
             self.config.segment_radius = original_segment_radius
             self.config.max_stars = original_max_stars
 
-            # Update sliders to the optimal values. The threshold slider's default max (200)
-            # is an arbitrary pre-existing ceiling (the 8-bit threshold range is nominally
-            # 0-255, with realistic values in the tens), so on high-bit-depth data the tuned
-            # threshold can exceed it and be silently clamped (leaving the re-detect at the
-            # wrong threshold). Raise the max with headroom *above* the tuned value so the user
-            # can still override upward. Scale the headroom to the tuned value itself, since a
-            # reasonable ceiling differs greatly between 8-bit and 16-bit. Never lower the
-            # existing max, so 8-bit keeps its default 200.
-            # intensity_threshold is not tuned (adaptive gate) - leave the slider alone
+            # Update sliders to the optimal values. setValue drives each slider's normal
+            # signal path, so the override values and labels follow. Never let the tuned gate
+            # factor be silently clamped by the slider ceiling: raise the maximum first (and
+            # never lower it), so a camera that genuinely needs a deep gate keeps the value the
+            # sweep measured instead of quietly re-detecting at the ceiling.
+            gate_slider = self.tab.star_detection.star_gate_factor_slider
+            gate_value = int(round(best_factor*10))
+            gate_slider.setMaximum(max(gate_slider.maximum(), gate_value))
+            gate_slider.setValue(gate_value)
+
             self.tab.star_detection.segment_radius_slider.setValue(best_segment)
 
             # Update catalog LM and reload catalog
@@ -5684,7 +5724,7 @@ class PlateTool(QtWidgets.QMainWindow):
             precision = n_true_pos / n_detected if n_detected > 0 else 0
             result_msg = (
                 f"Optimal parameters found:\n\n"
-                f"  Intensity Threshold: {best_threshold} (unchanged - adaptive gate)\n"
+                f"  Adaptive Gate Factor: {best_factor:.1f}\n"
                 f"  Segment Radius: {best_segment}\n"
                 f"  Catalog LM: {best_lm:.1f}\n\n"
                 f"Results:\n"
@@ -5696,7 +5736,7 @@ class PlateTool(QtWidgets.QMainWindow):
             )
 
             self.status_bar.showMessage(
-                f"Tuning complete: {n_true_pos} matched, "
+                f"Tuning complete: {n_true_pos} matched, gate={best_factor:.1f}, "
                 f"radius={best_segment}, LM={best_lm:.1f}")
 
             print(f"\n  Final: {n_true_pos} true positives, {n_false_pos} false positives, "
@@ -5711,20 +5751,24 @@ class PlateTool(QtWidgets.QMainWindow):
             self.config.max_stars = original_max_stars
 
 
-    def _countTrueFalsePositives(self, ff_name, intensity_threshold, segment_radius,
+    def _countTrueFalsePositives(self, ff_name, gate_factor, segment_radius,
                                   catalog_x, catalog_y, match_radius=3.0, return_positions=False,
-                                  extra_info=None):
+                                  extra_info=None, scale_radius_with_fwhm=True):
         """
         Count true and false positive detections.
 
         Arguments:
             ff_name: [str] Name of the FF file.
-            intensity_threshold: [int] Intensity threshold for detection.
+            gate_factor: [float] Adaptive gate factor (config star_gate_factor) to detect with.
             segment_radius: [int] Segment radius for detection.
             catalog_x: [ndarray] X coordinates of visible catalog stars.
             catalog_y: [ndarray] Y coordinates of visible catalog stars.
             match_radius: [float] Maximum distance in pixels for a match.
             return_positions: [bool] If True, also return true positive coordinates.
+            scale_radius_with_fwhm: [bool] Widen the match radius to 1.5x the fitted FWHM
+                (forgiving, for wide-PSF cameras). The gate sweep turns this off: a radius
+                that grows with the PSF also collects chance matches in a dense field, which
+                is exactly the signal the sweep is trying to measure.
 
         Returns:
             (n_true_pos, n_false_pos, n_detected): Tuple of counts.
@@ -5732,13 +5776,12 @@ class PlateTool(QtWidgets.QMainWindow):
         """
         try:
             # Set detection parameters - must match what redetectStars uses
-            self.config.intensity_threshold = intensity_threshold
+            self.config.star_gate_factor = gate_factor
             self.config.segment_radius = segment_radius
             self.config.max_feature_ratio = self.override_max_feature_ratio
             self.config.roundness_threshold = self.override_roundness_threshold
 
-            # Run star detection (the candidate gate is noise-adaptive; the swept
-            # intensity_threshold no longer affects extraction - see tune notice)
+            # Run star detection at the requested gate factor
             star_list = extractStarsFF(
                 self.dir_path, ff_name, config=self.config,
                 flat_struct=self.flat_struct, dark=self.dark, mask=self.mask,
@@ -5767,7 +5810,10 @@ class PlateTool(QtWidgets.QMainWindow):
             det_coords = np.column_stack([x_arr, y_arr])
             nn_dist, _ = cat_tree.query(det_coords, k=1)
 
-            effective_radii = np.maximum(match_radius, 1.5 * fwhm_arr)
+            if scale_radius_with_fwhm:
+                effective_radii = np.maximum(match_radius, 1.5*fwhm_arr)
+            else:
+                effective_radii = match_radius
             matched = nn_dist <= effective_radii
 
             n_true_pos = int(np.sum(matched))
@@ -5874,7 +5920,8 @@ class PlateTool(QtWidgets.QMainWindow):
                 roundness_threshold=self.config.roundness_threshold,
                 max_feature_ratio=self.config.max_feature_ratio,
                 bit_depth=getattr(self.config, 'bit_depth', 8),
-                extra_info=extra_info
+                extra_info=extra_info,
+                gate_factor=getattr(self.config, 'star_gate_factor', None)
             )
 
             if status is False:
@@ -5912,39 +5959,49 @@ class PlateTool(QtWidgets.QMainWindow):
         # enough for almost any stellar PSF.
         probe_segment = 12
 
-        # Probe for bright stars. A hardcoded 8-bit threshold (25) lands far below the noise
-        # on high-bit-depth data, flooding the candidate list past max_stars so extractStars
-        # returns nothing. Start at least at the camera's configured threshold and escalate
-        # until a workable detection comes back. 8-bit configs (threshold ~18-25) are
-        # unaffected -- they start at 25 exactly as before.
-        base_threshold = max(25, self.config.intensity_threshold)
-        probe_thresholds = [base_threshold, 2*base_threshold, 4*base_threshold, 8*base_threshold]
+        # Probe for BRIGHT stars by raising the adaptive gate factor, not the intensity
+        # threshold - extraction derives its candidate gate from the measured noise and
+        # ignores the configured threshold entirely, so an escalating threshold probe
+        # detects the same flooded candidate list every time. On a camera whose gate is
+        # mistuned (fixed-pattern-dominated frames flood at the 3.0 default) that flood is
+        # what drove the caller's false-positive abort before tuning could correct it.
+        # Start high (bright stars only) and come down until enough stars come back.
+        base_factor = float(getattr(self.config, 'star_gate_factor', 3.0))
+        probe_factors = [f for f in (16.0, 12.0, 8.0, 6.0, 4.0, 3.0) if f >= base_factor]
+        if not probe_factors:
+            probe_factors = [base_factor]
+
+        # Enough matched stars for a stable 90th-percentile FWHM
+        min_probe_stars = 15
 
         try:
             # Save and set config
-            orig_intensity = self.config.intensity_threshold
+            orig_gate_factor = base_factor
             orig_segment = self.config.segment_radius
             self.config.segment_radius = probe_segment
             self.config.max_feature_ratio = self.override_max_feature_ratio
             self.config.roundness_threshold = self.override_roundness_threshold
 
-            # Escalate the threshold until extractStars returns stars. An empty result means
-            # either too many candidates (extractStars bails) or none detected; raising the
-            # threshold resolves the former, which is the high-bit-depth failure mode.
+            # Walk the gate down until the probe returns a workable sample. Keep the last
+            # non-empty result so a camera that never reaches min_probe_stars still gets
+            # FWHM statistics from whatever it did detect.
             star_data = []
-            high_threshold = base_threshold
-            for high_threshold in probe_thresholds:
-                self.config.intensity_threshold = high_threshold
-                star_data = self._extractStarsCurrentImage(ff_name)
-                if star_data:
-                    break
+            probe_factor = probe_factors[0]
+            for factor in probe_factors:
+                self.config.star_gate_factor = factor
+                probe_data = self._extractStarsCurrentImage(ff_name)
+                if probe_data:
+                    star_data = probe_data
+                    probe_factor = factor
+                    if len(probe_data) >= min_probe_stars:
+                        break
 
-            self.config.intensity_threshold = orig_intensity
+            self.config.star_gate_factor = orig_gate_factor
             self.config.segment_radius = orig_segment
 
             if not star_data or len(star_data) == 0:
-                print(f"    No bright stars detected (probed thresholds "
-                      f"{base_threshold}..{probe_thresholds[-1]}, segment={probe_segment})")
+                print(f"    No bright stars detected (probed gate factors "
+                      f"{probe_factors[0]:.0f}..{probe_factors[-1]:.0f}, segment={probe_segment})")
                 print(f"    Using default segment_radius=4")
                 return 4, 0, 1.0
 
@@ -5969,7 +6026,7 @@ class PlateTool(QtWidgets.QMainWindow):
             n_false_pos = n_detected - n_true_pos
             fp_ratio = n_false_pos / n_detected if n_detected > 0 else 1.0
 
-            print(f"    Probe detection (threshold={high_threshold}, segment={probe_segment}): "
+            print(f"    Probe detection (gate factor={probe_factor:.1f}, segment={probe_segment}): "
                   f"{n_detected} detected, {n_true_pos} matched catalog")
 
             if len(matched_fwhms) < 3:
@@ -6017,107 +6074,99 @@ class PlateTool(QtWidgets.QMainWindow):
             return 4, 0, 1.0
 
 
-    def _findOptimalThreshold(self, results):
+    def _sweepGateFactor(self, ff_name, segment_radius, catalog_x, catalog_y):
         """
-        Find the optimal intensity threshold from sweep results using the Kneedle
-        algorithm to detect the "knee" in the false positive curve.
+        Detect stars at each gate factor in GATE_SWEEP_FACTORS and score the result against
+        the catalog.
 
-        The Kneedle algorithm finds the point of maximum curvature in the false
-        positive curve — where noise transitions from gradual to rapid increase.
-        This is the same inflection point a human would visually identify, without
-        requiring any tunable parameters.
-
-        Algorithm:
-        1. Plot false_pos vs index (decreasing threshold)
-        2. Normalize both axes to [0, 1]
-        3. Draw a line from the first point to the last point
-        4. Find the point with maximum perpendicular distance from that line
+        Precision is chance-corrected: in a dense field a fraction of the junk lands within
+        the match radius of a catalog star by luck, and that fraction grows with the junk
+        count - uncorrected, a flooded frame scores better than it deserves.
 
         Arguments:
-            results: List of (threshold, n_true_pos, n_false_pos, n_detected) tuples,
-                    sorted from high threshold to low.
+            ff_name: [str] Name of the FF file.
+            segment_radius: [int] Segment radius to detect with.
+            catalog_x: [ndarray] X coordinates of visible catalog stars.
+            catalog_y: [ndarray] Y coordinates of visible catalog stars.
 
         Returns:
-            optimal_threshold: [int] The selected threshold value.
+            results: [list] (gate_factor, n_detected, precision) per swept factor, in sweep
+                order (high factor first).
         """
-        if not results:
-            return 20  # Default fallback
 
-        # Filter to results with detections
-        valid = [(t, tp, fp, det) for t, tp, fp, det in results if det > 0]
+        match_radius = self.GATE_SWEEP_MATCH_RADIUS
+        image_area = float(self.platepar.X_res*self.platepar.Y_res)
+        chance_per_detection = (len(catalog_x)*np.pi*match_radius**2/image_area
+                                if image_area > 0 else 0.0)
+
+        results = []
+        best_precision = 0.0
+
+        for factor in self.GATE_SWEEP_FACTORS:
+
+            self.status_bar.showMessage("Tuning... gate factor {:.1f}".format(factor))
+            QtWidgets.QApplication.processEvents()
+
+            n_true_pos, n_false_pos, n_detected = self._countTrueFalsePositives(
+                ff_name, factor, segment_radius, catalog_x, catalog_y,
+                match_radius=match_radius, scale_radius_with_fwhm=False)
+
+            if n_detected == 0:
+                print(f"    gate factor={factor:4.1f}: no detections")
+                results.append((factor, 0, 0.0))
+                continue
+
+            precision = max(0.0, n_true_pos - chance_per_detection*n_detected)/n_detected
+            results.append((factor, n_detected, precision))
+
+            print(f"    gate factor={factor:4.1f}: detected={n_detected:4d}, "
+                  f"matched={n_true_pos:4d}, precision={precision:.0%}")
+
+            # The curve falls monotonically once the gate opens into the noise, and the low
+            # end of the sweep is the slowest part (every candidate gets a PSF fit). Once
+            # precision has collapsed well past the best factor, nothing below it can win.
+            if precision > best_precision:
+                best_precision = precision
+
+            elif precision < best_precision - self.GATE_SWEEP_ABANDON_DROP:
+                print("    -> Stopping: precision has fallen well below the best gate factor")
+                break
+
+        return results
+
+
+    @classmethod
+    def _selectGateFactor(cls, results):
+        """
+        Pick the deepest gate factor that stays within GATE_SWEEP_PRECISION_SLACK of the best
+        precision the sweep measured.
+
+        Deepest-within-slack rather than best-precision outright: precision always improves as
+        the gate closes (eventually only the brightest stars survive), so maximizing it alone
+        would recommend the highest swept factor on every camera and throw away most of the
+        usable stars. The slack keeps a camera whose curve is flat - not gate-limited at all -
+        at its deepest setting, while a camera that floods is pulled back to its own knee.
+
+        Arguments:
+            results: [list] (gate_factor, n_detected, precision) tuples from _sweepGateFactor.
+
+        Returns:
+            gate_factor: [float] The selected factor, or None if no factor is usable.
+        """
+
+        valid = [(factor, n_det, prec) for factor, n_det, prec in results if n_det > 0]
+
         if not valid:
-            return 20
+            return None
 
-        # Extract false positive counts
-        thresholds = [t for t, tp, fp, det in valid]
-        false_pos = [fp for t, tp, fp, det in valid]
-        true_pos = [tp for t, tp, fp, det in valid]
+        best_precision = max(prec for _, _, prec in valid)
 
-        # If all false positives are 0, just pick the lowest threshold (most stars)
-        if max(false_pos) == 0:
-            best = valid[-1]
-            print(f"    -> No false positives detected, using lowest threshold")
-            print(f"    -> Selected: threshold={best[0]}, true_pos={best[1]}, "
-                  f"false_pos={best[2]}, precision=100%")
-            return best[0]
+        if best_precision < cls.GATE_SWEEP_MIN_PRECISION:
+            return None
 
-        # If the curve is too short for meaningful knee detection, use the last valid point
-        if len(valid) < 3:
-            best = valid[-1]
-            prec = best[1] / best[3] if best[3] > 0 else 0
-            print(f"    -> Too few data points, using threshold={best[0]}")
-            print(f"    -> Selected: threshold={best[0]}, true_pos={best[1]}, "
-                  f"false_pos={best[2]}, precision={prec:.0%}")
-            return best[0]
+        target = best_precision - cls.GATE_SWEEP_PRECISION_SLACK
 
-        # Kneedle algorithm on the false positive curve
-        x = np.arange(len(valid), dtype=float)
-        y = np.array(false_pos, dtype=float)
-
-        # Normalize to [0, 1]
-        x_range = x.max() - x.min()
-        y_range = y.max() - y.min()
-
-        if x_range == 0 or y_range == 0:
-            # Degenerate case — constant false positives
-            best = valid[-1]
-            prec = best[1] / best[3] if best[3] > 0 else 0
-            print(f"    -> Constant false positives, using threshold={best[0]}")
-            print(f"    -> Selected: threshold={best[0]}, true_pos={best[1]}, "
-                  f"false_pos={best[2]}, precision={prec:.0%}")
-            return best[0]
-
-        x_norm = (x - x.min()) / x_range
-        y_norm = (y - y.min()) / y_range
-
-        # Line from first point to last point
-        x0, y0 = x_norm[0], y_norm[0]
-        x1, y1 = x_norm[-1], y_norm[-1]
-
-        # Perpendicular distance from each point to the line
-        # Line equation: a*x + b*y + c = 0
-        a = y1 - y0
-        b = -(x1 - x0)
-        c = x1 * y0 - x0 * y1
-        denom = np.sqrt(a**2 + b**2)
-
-        distances = np.abs(a * x_norm + b * y_norm + c) / denom
-
-        # The knee is the point with maximum distance from the diagonal
-        knee_idx = np.argmax(distances)
-
-        best_threshold = thresholds[knee_idx]
-        best_tp = true_pos[knee_idx]
-        best_fp = false_pos[knee_idx]
-        best_det = valid[knee_idx][3]
-
-        prec = best_tp / best_det if best_det > 0 else 0
-        print(f"    -> Kneedle: knee at index {knee_idx}/{len(valid)-1} "
-              f"(distance={distances[knee_idx]:.3f})")
-        print(f"    -> Selected: threshold={best_threshold}, true_pos={best_tp}, "
-              f"false_pos={best_fp}, precision={prec:.0%}")
-
-        return best_threshold
+        return min(factor for factor, _, prec in valid if prec >= target)
 
 
     def _findOptimalCatalogLM(self, jd, detected_x, detected_y, target_matches, match_radius=2.0):

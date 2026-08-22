@@ -174,6 +174,11 @@ def extractStars(img, img_median=None, mask=None, gamma=1.0, max_star_candidates
     threshold = adaptiveContrastThreshold(contrast, bit_depth=bit_depth,
         factor=gate_factor)
 
+    # Report the gate actually applied - the tuner and the station logs need the ADU value,
+    # which depends on the frame's own noise and cannot be recovered from the factor alone
+    if extra_info is not None:
+        extra_info['gate_adu'] = float(threshold)
+
     diff = (contrast > threshold)
     maxima[diff == 0] = 0
 

@@ -554,7 +554,9 @@ class Config:
         self.star_gate_factor = 3.0 # star candidacy gate as a multiple of the measured
                                     # image-noise contrast (dimensionless; the gate is
                                     # noise-adaptive - lower = deeper + more false
-                                    # candidates, higher = shallower + cleaner)
+                                    # candidates, higher = shallower + cleaner). Per
+                                    # camera: fixed-pattern-dominated sensors need 10-15,
+                                    # measured by SkyFit2's star detection tuner
         self.max_feature_ratio = 0.8 # maximum ratio between 2 sigma of the star and the image segment area
 
 
