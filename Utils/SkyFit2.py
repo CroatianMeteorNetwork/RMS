@@ -12898,14 +12898,8 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.fit_only_pointing = True
             else:
                 print("Final refinement with user settings (distortion={})...".format(user_distortion_type))
+            # The fit sigma-clips gross positional mispairs and refits on the clean set
             self._fitPickedStarsImpl()
-
-            # Sigma-clip gross positional mispairs that survived NN/RANSAC (a detection matched to a
-            #   wrong/duplicate catalog star inflates the RMSD), then refit once on the clean set.
-            removed = self.filterPositionalOutliers(sigma_threshold=3.0, abs_floor_px=3.0)
-            if removed > 0:
-                print("Pairs after positional filtering: {}".format(len(self.paired_stars)))
-                self._fitPickedStarsImpl()
 
         # Restore fit_only_pointing after pointing-only fit
         self.fit_only_pointing = user_fit_only_pointing
@@ -14483,13 +14477,8 @@ class PlateTool(QtWidgets.QMainWindow):
             self.status_bar.showMessage("Fitting astrometry with {:d} stars...".format(len(self.paired_stars)))
             QtWidgets.QApplication.processEvents()
             self.first_platepar_fit = True
+            # The fit sigma-clips gross positional mispairs and refits on the clean set
             self._fitPickedStarsImpl()
-
-            # Sigma-clip gross positional mispairs that survived NN/RANSAC, then refit once
-            removed = self.filterPositionalOutliers(sigma_threshold=3.0, abs_floor_px=3.0)
-            if removed > 0:
-                print("Pairs after positional filtering: {}".format(len(self.paired_stars)))
-                self._fitPickedStarsImpl()
 
             # Note: catalog LM restoration is handled by the caller (autoFitAstrometryNet)
 
@@ -16526,6 +16515,25 @@ class PlateTool(QtWidgets.QMainWindow):
             return self.platepar
 
 
+    def _fitAstrometryToPairs(self, jd):
+        """ Run the astrometric fit on the current paired stars.
+
+        Arguments:
+            jd: [float] Julian date of the image being fit.
+
+        Raises:
+            OperationCancelled if the user presses Stop while the fit is running.
+        """
+
+        img_stars = np.array(self.paired_stars.imageCoords())
+        catalog_stars = np.array(self.paired_stars.skyCoords())
+
+        self.platepar.fitAstrometry(jd, img_stars, catalog_stars,
+            first_platepar_fit=self.first_platepar_fit,
+            fit_only_pointing=self.fit_only_pointing, fixed_scale=self.fixed_scale,
+            progress_callback=self._checkCancelled)
+
+
     def _fitPickedStarsImpl(self):
         """ Fit stars that are manually picked. The function first only estimates the astrometry parameters
             without the distortion, then just the distortion parameters, then all together.
@@ -16552,10 +16560,6 @@ class PlateTool(QtWidgets.QMainWindow):
         print("----------------------------------------")
         print("Fitting platepar...")
 
-        # Extract paired catalog stars and image coordinates separately
-        img_stars = np.array(self.paired_stars.imageCoords())
-        catalog_stars = np.array(self.paired_stars.skyCoords())
-
         # Get the Julian date of the image that's being fit
         jd = date2JD(*self.img_handle.currentTime())
 
@@ -16567,9 +16571,19 @@ class PlateTool(QtWidgets.QMainWindow):
         self._beginCancellableOperation()
 
         try:
-            self.platepar.fitAstrometry(jd, img_stars, catalog_stars, first_platepar_fit=self.first_platepar_fit,\
-                fit_only_pointing=self.fit_only_pointing, fixed_scale=self.fixed_scale,
-                progress_callback=self._checkCancelled)
+            self._fitAstrometryToPairs(jd)
+            self.first_platepar_fit = False
+
+            # Drop pairs whose position is a gross outlier against the freshly fitted platepar
+            # - a wrong or duplicate match that the matcher could not tell apart - and fit once
+            # more on the clean set. Auto Fit and Quick Align each used to do this themselves
+            # around their call to this method, which left every other route to a fit (the Fit
+            # button, Ctrl+Z, and Find Pairs followed by Fit) without it. The clip is floored
+            # at 3 px and needs at least 15 pairs, so a tight fit or a small hand-picked set is
+            # left alone.
+            if self.filterPositionalOutliers(sigma_threshold=3.0, abs_floor_px=3.0) > 0:
+                print("Pairs after positional filtering: {}".format(len(self.paired_stars)))
+                self._fitAstrometryToPairs(jd)
 
         except OperationCancelled:
             self.platepar = platepar_backup
@@ -16581,7 +16595,6 @@ class PlateTool(QtWidgets.QMainWindow):
         finally:
             self._endCancellableOperation()
 
-        self.first_platepar_fit = False
         self.platepar_modified = True
 
         # Mark error overlay for recomputation after the platepar changed
