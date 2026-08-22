@@ -2342,128 +2342,157 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
             'x_fwd': {}, 'x_rev': {}, 'y_fwd': {}, 'y_rev': {}
         }
 
+        # One gap value for everything inside a stage box - a row of two buttons has to use
+        # the same one as the column, or the row reads as a section break
+        self.STAGE_SPACING = self.scaledSpacing(0.1)
+
         full_layout = QtWidgets.QVBoxLayout()
         full_layout.setContentsMargins(*self.scaledMargins(0.5, 0.25))
         self.setLayout(full_layout)
 
+        # The stage boxes sit in their own column so their spacing can be tightened without
+        # touching the sections below, which keep the layout they have always had
+        stages_container = QtWidgets.QWidget()
+        stages_layout = QtWidgets.QVBoxLayout(stages_container)
+        stages_layout.setContentsMargins(0, 0, 0, 0)
+        stages_layout.setSpacing(self.scaledSpacing(0.2))
+        full_layout.addWidget(stages_container)
+
         # Tab help button (top-right)
         self.addCornerHelpButton('astrometry', "Help: fitting the astrometry")
 
-        # buttons
-        box = QtWidgets.QVBoxLayout()
-        box.setContentsMargins(*self.scaledMargins(0.5, 0.25))
-        box.setSpacing(self.scaledSpacing(0.25))
+        # The calibration controls are grouped by the stage of the workflow they belong to -
+        # prepare, fit, validate - so the order to work through them is visible instead of
+        # having to be known. Feedback on the single flat panel this replaced was that it read
+        # as a wall of equally-weighted buttons.
+        prep_box = self._stageGrid()
 
-        # Best Frame button row
-        best_frame_hbox = QtWidgets.QHBoxLayout()
-        best_frame_hbox.setSpacing(self.scaledSpacing(0.25))
+        box = prep_box
+
         self.find_best_frame_button = QtWidgets.QPushButton("Find Best Frame")
         self.find_best_frame_button.setToolTip(
             "Find the best frame for calibration: star distribution and quality,\n"
             "plus sky condition (darkest, most uniform background and sharpest stars,\n"
             "ranked against the rest of the night)")
         self.find_best_frame_button.clicked.connect(self.sigFindBestFramePressed.emit)
-        best_frame_hbox.addWidget(self.find_best_frame_button)
-        box.addLayout(best_frame_hbox)
+        self._addStageRow(box, self.find_best_frame_button)
 
-        # Fit buttons in a horizontal layout
-        fit_hbox = QtWidgets.QHBoxLayout()
-        fit_hbox.setSpacing(self.scaledSpacing(0.25))
+        # Pair finding is preparation: it produces the input the fit consumes
+        self.find_pairs_button = QtWidgets.QPushButton("Find Pairs")
+        self.find_pairs_button.setToolTip(
+            "Match detected stars to catalog stars using the current platepar.\n"
+            "Replaces the current pairs; does not fit anything.\n"
+            "Needs a roughly correct platepar - if few stars match, run Auto Pointing\n"
+            "or Auto Fit first, then find pairs again.")
+        self.find_pairs_button.clicked.connect(self.sigFindPairsPressed.emit)
+        self._addStageRow(prep_box, self.find_pairs_button)
+
+        self._addStageGroup(stages_layout, "1 \u00b7 Prepare", prep_box)
+
+        ### Stage 2: fit ###
+
+        fit_box = self._stageGrid()
+        box = fit_box
+
+        # Fit and Auto Fit share a row: in the stage grid a pair spans the same two columns
+        # a full-width button does, so their outer edges line up with the rows around them.
         self.fit_astrometry_button = QtWidgets.QPushButton("Fit")
         self.fit_astrometry_button.setToolTip(
             "Fit the platepar to the current star pairs (needs pairs)")
         self.fit_astrometry_button.clicked.connect(self.sigFitPressed.emit)
-        fit_hbox.addWidget(self.fit_astrometry_button)
 
         self.auto_fit_button = QtWidgets.QPushButton("Auto Fit")
         self.auto_fit_button.setToolTip("Automatic plate solving using astrometry.net (Ctrl+X)")
         self.auto_fit_button.clicked.connect(self.sigAutoFitPressed.emit)
-        fit_hbox.addWidget(self.auto_fit_button)
-        box.addLayout(fit_hbox)
+        self._addStageRow(box, self.fit_astrometry_button, self.auto_fit_button)
 
-        # Individual fit steps: pair finding and residuals, runnable independently of the fit
-        steps_hbox = QtWidgets.QHBoxLayout()
-        steps_hbox.setSpacing(self.scaledSpacing(0.25))
-        self.find_pairs_button = QtWidgets.QPushButton("Find Pairs")
-        self.find_pairs_button.setToolTip(
-            "Match detected stars to catalog stars using the current platepar.\n"
-            "Replaces the current pairs; does not fit anything (needs a decent platepar).")
-        self.find_pairs_button.clicked.connect(self.sigFindPairsPressed.emit)
-        steps_hbox.addWidget(self.find_pairs_button)
-
-        self.compute_residuals_button = QtWidgets.QPushButton("Residuals")
-        self.compute_residuals_button.setToolTip(
-            "Compute residuals of the current pairs against the current platepar.\n"
-            "Does not fit anything (needs pairs).")
-        self.compute_residuals_button.clicked.connect(self.sigComputeResidualsPressed.emit)
-        steps_hbox.addWidget(self.compute_residuals_button)
-        box.addLayout(steps_hbox)
-
-        # Quick Align button row
-        quick_align_hbox = QtWidgets.QHBoxLayout()
-        quick_align_hbox.setSpacing(self.scaledSpacing(0.25))
         self.quick_align_button = QtWidgets.QPushButton("Auto Pointing")
         self.quick_align_button.setToolTip(
             "Automatically re-estimate pointing from detected stars (existing distortion kept). "
             "Falls back to astrometry.net. Does not use your picked stars.")
         self.quick_align_button.clicked.connect(self.sigQuickAlignPressed.emit)
-        quick_align_hbox.addWidget(self.quick_align_button)
-        box.addLayout(quick_align_hbox)
+        self._addStageRow(box, self.quick_align_button)
+
+        self.refit_night_button = QtWidgets.QPushButton("Refit Multi-Frame")
+        self.refit_night_button.setToolTip(
+            "Complement the astrometric fit with star pairs from across the night\n"
+            "(spatially balanced, corner pairs kept in full, per-frame pointing drift\n"
+            "compensated). Validates the night first if that has not been done since the\n"
+            "platepar last changed, and keeps the refit only if it improves on the current\n"
+            "platepar. Photometry is not affected - it must come from a single frame.")
+        self.refit_night_button.clicked.connect(self.sigRefitNightPressed.emit)
+        self._addStageRow(box, self.refit_night_button)
+
+        self._addStageGroup(stages_layout, "2 \u00b7 Fit", fit_box)
+
+        ### Stage 3: validate ###
+
+        check_box = self._stageGrid()
+        box = check_box
+
+        # Residuals of the current frame's pairs - the first thing to look at after a fit
+        self.compute_residuals_button = QtWidgets.QPushButton("Residuals")
+        self.compute_residuals_button.setToolTip(
+            "Compute residuals of the current pairs against the current platepar.\n"
+            "Does not fit anything (needs pairs).")
+        self.compute_residuals_button.clicked.connect(self.sigComputeResidualsPressed.emit)
+        self._addStageRow(box, self.compute_residuals_button)
 
         # Frame budget for the cross-frame validation/refit subset. Frames are picked
         # greedily for spatial coverage, so a modest budget covers the image; validating
         # thousands of frames takes minutes for no accuracy gain
-        validate_frames_hbox = QtWidgets.QHBoxLayout()
-        validate_frames_label = QtWidgets.QLabel("Validation max frames")
-        self.validate_max_frames_spin = QtWidgets.QSpinBox()
-        self.validate_max_frames_spin.setRange(10, 5000)
-        self.validate_max_frames_spin.setValue(100)
-        self.validate_max_frames_spin.setToolTip(
-            "Frame budget for the coverage-selected subset used by Validate Across Frames\n"
-            "and Refit W/ Night. Frames are picked greedily so their union of detected stars\n"
-            "covers the image; the corner cells are always topped up, even past this budget.\n"
-            "Budget left over after coverage saturates is spent on frames spread evenly\n"
-            "across the night, so temporal variation is sampled too.")
-        validate_frames_label.setToolTip(self.validate_max_frames_spin.toolTip())
-        validate_frames_hbox.addWidget(validate_frames_label)
-        validate_frames_hbox.addStretch()
-        validate_frames_hbox.addWidget(self.validate_max_frames_spin)
-        box.addLayout(validate_frames_hbox)
-
         # Cross-frame validation buttons (stacked - side by side they overflow the panel)
-        self.validate_fit_button = QtWidgets.QPushButton("Validate Across Frames")
+        self.validate_fit_button = QtWidgets.QPushButton("Validate Multi-Frame")
         self.validate_fit_button.setToolTip(
             "Check how well the fit generalizes to other frames of the night, especially the\n"
             "image corners: matches detected stars (CALSTARS) to the catalog on a coverage-\n"
             "selected frame subset, refits only the pointing per frame so mount drift is\n"
             "separated from distortion error, and reports residuals by radius.")
         self.validate_fit_button.clicked.connect(self.sigValidateFitPressed.emit)
-        box.addWidget(self.validate_fit_button)
+        self._addStageRow(box, self.validate_fit_button)
 
-        self.refit_night_button = QtWidgets.QPushButton("Refit W/ Night")
-        self.refit_night_button.setToolTip(
-            "Complement the astrometric fit with the validated cross-frame star pairs\n"
-            "(spatially balanced, corner pairs kept in full, per-frame pointing drift\n"
-            "compensated). The refit is validated against the night and only kept if it\n"
-            "improves on the current platepar. Photometry is not affected - it must come\n"
-            "from a single frame. Run Validate Across Frames first.")
-        self.refit_night_button.setEnabled(False)
-        self.refit_night_button.clicked.connect(self.sigRefitNightPressed.emit)
-        box.addWidget(self.refit_night_button)
+        # The frame budget belongs to the button above it, so it is indented and quiet -
+        # inline in the button stack it read as another step in the sequence
+        validate_frames_hbox = QtWidgets.QHBoxLayout()
+        validate_frames_hbox.setContentsMargins(self.scaledWidth(1.0), 0, 0, 0)
+        validate_frames_label = QtWidgets.QLabel("max frames")
+        validate_frames_label.setStyleSheet("color: gray; font-size: 9pt;")
+        self.validate_max_frames_spin = QtWidgets.QSpinBox()
+        self.validate_max_frames_spin.setRange(10, 5000)
+        self.validate_max_frames_spin.setValue(100)
+        self.validate_max_frames_spin.setToolTip(
+            "Frame budget for the coverage-selected subset used by Validate Multi-Frame\n"
+            "and Refit Multi-Frame. Frames are picked greedily so their union of detected\n"
+            "stars covers the image; the corner cells are always topped up, even past this\n"
+            "budget. Budget left over after coverage saturates is spent on frames spread\n"
+            "evenly across the night, so temporal variation is sampled too.")
+        validate_frames_label.setToolTip(self.validate_max_frames_spin.toolTip())
+        validate_frames_hbox.addWidget(validate_frames_label)
+        validate_frames_hbox.addStretch()
+        validate_frames_hbox.addWidget(self.validate_max_frames_spin)
+        self._addStageRow(box, validate_frames_hbox)
 
-        self.show_night_pairs_checkbox = QtWidgets.QCheckBox('Show Night Pairs')
+        self.show_night_pairs_checkbox = QtWidgets.QCheckBox('Show Multi-Frame Pairs')
         self.show_night_pairs_checkbox.setToolTip(
             "Overlay the validated cross-frame star pairs on the current frame: circles mark\n"
             "detections from other frames of the night (the camera is fixed, so their pixel\n"
             "positions apply directly), needles point to their catalog positions projected at\n"
-            "each pair's own frame time (exaggerated). This is the pair set Refit W/ Night\n"
+            "each pair's own frame time (exaggerated). This is the pair set Refit Multi-Frame\n"
             "would fit - useful to eyeball corner coverage before refitting.")
         self.show_night_pairs_checkbox.setEnabled(False)
         self.show_night_pairs_checkbox.toggled.connect(self.sigShowNightPairsToggled.emit)
-        box.addWidget(self.show_night_pairs_checkbox)
+        self._addStageRow(box, self.show_night_pairs_checkbox)
 
+        # Why Refit and the overlay are greyed out. A disabled button with no explanation was
+        # the single most opaque thing on the panel
+        self.validation_status_label = QtWidgets.QLabel("no multi-frame validation yet")
+        self.validation_status_label.setStyleSheet("color: gray; font-size: 9pt;")
+        self.validation_status_label.setWordWrap(True)
+        self._addStageRow(box, self.validation_status_label)
 
-        box.addWidget(QtWidgets.QLabel("Residuals:"))
+        readout_line = QHSeparationLine()
+        readout_line.setFixedHeight(self.scaledHeight(0.4))
+        self._addStageRow(box, readout_line)
 
         # RMSD display label with color coding. Shows the simple px RMSD; the forward/reverse
         # consistency and held-out overfitting checks run internally on every fit and turn this
@@ -2473,14 +2502,14 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         # Wrap instead of clipping: font metrics differ across OSes, and the suffixes
         # ("(on N of M)", health-check flags) can outgrow the fixed-width panel
         self.rmsd_label.setWordWrap(True)
-        box.addWidget(self.rmsd_label)
+        self._addStageRow(box, self.rmsd_label)
 
         # Max round-trip (forward vs reverse mapping) disagreement across the whole image,
         # updated with the error overlay. Complements the RMSD, which only covers matched stars.
         self.roundtrip_label = QtWidgets.QLabel("")
         self.roundtrip_label.setStyleSheet("color: gray; font-size: 9pt;")
         self.roundtrip_label.setWordWrap(True)
-        box.addWidget(self.roundtrip_label)
+        self._addStageRow(box, self.roundtrip_label)
 
         hbox = QtWidgets.QHBoxLayout()
         hbox.setSpacing(self.scaledSpacing(0.25))  # Reduce spacing between buttons
@@ -2495,16 +2524,11 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         # Small circular "i" button: opens the Help page on reading the residual plots
         self.residuals_help_button = self.makeHelpButton('residuals', "How to read the residual plots")
         hbox.addWidget(self.residuals_help_button)
-        box.addLayout(hbox)
+        self._addStageRow(box, hbox)
 
         self.updatePairedStars()
-        group = QtWidgets.QGroupBox("Calibration")
-        # Dynamic stylesheet with scaled padding
-        pad_top = self.scaledHeight(0.75)
-        pad_side = self.scaledWidth(0.25)
-        group.setStyleSheet(f"QGroupBox {{ padding-top: {pad_top}px; padding-left: {pad_side}px; padding-right: {pad_side}px; }}")
-        group.setLayout(box)
-        full_layout.addWidget(group)
+
+        self._addStageGroup(stages_layout, "3 \u00b7 Validate", check_box)
 
         hline = QHSeparationLine()
         full_layout.addWidget(hline)
@@ -2731,6 +2755,98 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
 
         self.updatePlatepar()
         self.updateRestoreDefaultsButton()
+
+
+    def _stageGrid(self):
+        """ The layout every stage box uses: two equal columns, one gap value in both
+            directions.
+
+        A row of two buttons and a row of one have to line up exactly, and with separate
+        layouts they only do so if their widths happen to add up - which is fragile, and looked
+        wrong the moment a button's own frame inset entered the sum. In a grid the wide row
+        spans the same two columns the pair sits in, so they share their edges by construction.
+        """
+
+        grid = QtWidgets.QGridLayout()
+        grid.setContentsMargins(*self.scaledMargins(0.4, 0.1))
+        grid.setHorizontalSpacing(self.STAGE_SPACING)
+        grid.setVerticalSpacing(self.STAGE_SPACING)
+        grid.setColumnStretch(0, 1)
+        grid.setColumnStretch(1, 1)
+
+        return grid
+
+
+    def _addStageRow(self, grid, *widgets):
+        """ Add a row to a stage grid: one widget spans both columns, two take a column each.
+
+        Arguments:
+            grid: [QGridLayout] Stage grid from _stageGrid.
+            *widgets: [QWidget or QLayout] One or two items to place on the row.
+        """
+
+        row = grid.rowCount()
+
+        def place(item, col, span):
+            if isinstance(item, QtWidgets.QLayout):
+                grid.addLayout(item, row, col, 1, span)
+            else:
+                grid.addWidget(item, row, col, 1, span)
+
+        if len(widgets) == 1:
+            place(widgets[0], 0, 2)
+        else:
+            for col, item in enumerate(widgets):
+                place(item, col, 1)
+
+        return row
+
+
+    def _addStageGroup(self, parent_layout, title, inner_layout):
+        """ Wrap one workflow stage in a titled group box and add it to the panel. """
+
+        group = QtWidgets.QGroupBox(title)
+
+        # Dynamic stylesheet with scaled padding. The title needs an explicit transparent
+        # background: styling the box makes Qt paint the title's own patch from the window
+        # colour instead, which shows up as a lighter block sitting on the frame
+        # Just enough to clear the frame - the old 0.75-line padding put 45 px between the
+        # box edge and its first button, which is most of why the panel ran long
+        pad_top = self.scaledHeight(0.15)
+        pad_side = self.scaledWidth(0.25)
+        # The title sits in the margin ABOVE the frame rather than on it: with a transparent
+        # background the border would otherwise strike through the text, and painting a
+        # background behind it is what produced the lighter patch on some themes. The margin
+        # has to clear the title's own height for that to work
+        title_gap = self.fontMetrics().height() + self.scaledHeight(0.2)
+        group.setStyleSheet(
+            f"QGroupBox {{ border: 1px solid palette(mid); border-radius: 4px; "
+            f"margin-top: {title_gap}px; padding-top: {pad_top}px; "
+            f"padding-left: {pad_side}px; padding-right: {pad_side}px; }} "
+            f"QGroupBox::title {{ subcontrol-origin: margin; subcontrol-position: top left; "
+            f"left: {pad_side}px; padding: 0 {pad_side}px; "
+            f"background-color: transparent; }}")
+        group.setLayout(inner_layout)
+        parent_layout.addWidget(group)
+
+        return group
+
+
+    def setValidationStatus(self, text, stale=False):
+        """ Explain the state of the multi-frame validation - and with it why Refit
+            Multi-Frame and the pair overlay are enabled or greyed out.
+
+        Arguments:
+            text: [str] Status line to show.
+
+        Keyword arguments:
+            stale: [bool] Draw attention: the validation no longer matches the platepar.
+        """
+
+        self.validation_status_label.setText(text)
+        colour = "#b26500" if stale else "gray"
+        self.validation_status_label.setStyleSheet(
+            "color: {:s}; font-size: 9pt;".format(colour))
 
 
     def onFixScaleToggled(self):
@@ -3123,6 +3239,12 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
 
         # Update restore defaults button state
         self.updateRestoreDefaultsButton()
+
+        # A multi-frame validation is only valid for the platepar it was measured against, and
+        # this runs whenever that platepar changes - so the status line goes stale on its own
+        # rather than waiting for the user to press Refit and be told no
+        if hasattr(self.gui, 'updateValidationStatus'):
+            self.gui.updateValidationStatus()
 
     def isAtDefaults(self):
         """Check if current settings match the defaults."""
@@ -3653,9 +3775,9 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
                 btn_gamma_22.clicked.connect(lambda: self.setGammaPreset(1/2.2))
                 gamma_presets.addWidget(btn_gamma_22)
 
-                btn_gamma_18 = QtWidgets.QPushButton('1/1.8')
-                btn_gamma_18.clicked.connect(lambda: self.setGammaPreset(1/1.8))
-                gamma_presets.addWidget(btn_gamma_18)
+                btn_gamma_20 = QtWidgets.QPushButton('1/2.0')
+                btn_gamma_20.clicked.connect(lambda: self.setGammaPreset(1/2.0))
+                gamma_presets.addWidget(btn_gamma_20)
 
                 btn_gamma_lin = QtWidgets.QPushButton('Linear')
                 btn_gamma_lin.clicked.connect(lambda: self.setGammaPreset(1.0))
@@ -3767,7 +3889,7 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
         self.use_override_checkbox.released.connect(self.sigUseOverrideToggled.emit)
         layout.addWidget(self.use_override_checkbox)
 
-        # Whole-night steps (Validate Across Frames, Refit W/ Night, Find Best Frame, Save
+        # Whole-night steps (Validate Multi-Frame, Refit Multi-Frame, Find Best Frame, Save
         # CALSTARS) otherwise fall back to CALSTARS on every frame that was NOT re-detected -
         # and CALSTARS usually covers the whole night while only a subset of FF files is on
         # disk, so most of the pool stays as it was. Tick this when the CALSTARS detections
@@ -3905,6 +4027,13 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
                 self._seedSlider(self.config_max_stars_slider, target)
                 continue
 
+            # Gamma restores to the loaded config value, which the slider cannot always hold
+            if key == 'gamma':
+                cfg = getattr(self, '_loaded_config', None)
+                self.setGammaPreset(cfg.gamma if (cfg is not None and hasattr(cfg, 'gamma'))
+                                    else target/100.0)
+                continue
+
             # setValue triggers each slider's callback, so labels and override
             # values in SkyFit update through the normal signal path
             self.sliders[key].setValue(target)
@@ -3930,13 +4059,45 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
         self.sigMaxGlobalIntensityChanged.emit(value)
 
     def onGammaChanged(self, value):
-        gamma = value / 100.0
-        self.gamma_label.setText(f'{gamma:.2f}')
+        gamma = value/100.0
+        self._exact_gamma = gamma
+        self.gamma_label.setText(self._formatGamma(gamma))
         self.sigGammaChanged.emit(gamma)
 
+    @staticmethod
+    def _formatGamma(gamma):
+        """ Two decimals for a value the slider can hold exactly, four for one it cannot -
+            otherwise a stored 1/2.2 would read as 0.45. """
+
+        if abs(gamma*100 - round(gamma*100)) < 1e-9:
+            return '{:.2f}'.format(gamma)
+
+        return '{:.4f}'.format(gamma)
+
+    def _showGamma(self, gamma):
+        """ Move the slider to the nearest tick for the given gamma and label it, without
+            emitting - the slider is a coarse indicator, not the value's storage. """
+
+        self._exact_gamma = gamma
+
+        # setValue would otherwise re-enter onGammaChanged and hand back the quantised value
+        self.gamma_slider.blockSignals(True)
+        self.gamma_slider.setValue(int(round(gamma*100)))
+        self.gamma_slider.blockSignals(False)
+
+        self.gamma_label.setText(self._formatGamma(gamma))
+        self.updateDefaultsButton()
+
     def setGammaPreset(self, gamma):
-        """Set gamma to a preset value."""
-        self.gamma_slider.setValue(int(gamma * 100))
+        """ Set gamma to an exact preset value.
+
+        The slider steps in 0.01, so a preset like 1/2.2 = 0.4545 has no slider position of
+        its own. Gamma is a property of the camera rather than of the slider, so the exact
+        value is what gets emitted and stored; the slider only shows roughly where it sits.
+        """
+
+        self._showGamma(gamma)
+        self.sigGammaChanged.emit(gamma)
 
     def onSegmentRadiusChanged(self, value):
         self.segment_radius_label.setText(str(value))
@@ -4020,7 +4181,9 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
         if hasattr(config, 'max_global_intensity'):
             self.max_global_intensity_slider.setValue(config.max_global_intensity)
         if hasattr(config, 'gamma'):
-            self.gamma_slider.setValue(int(config.gamma * 100))
+            # Seeded, not emitted: SkyFit already holds the config value, and pushing it
+            # through the slider would quantise a gamma like 0.4545 down to 0.45
+            self._showGamma(config.gamma)
         if hasattr(config, 'segment_radius'):
             self.segment_radius_slider.setValue(config.segment_radius)
         if hasattr(config, 'max_feature_ratio'):

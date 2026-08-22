@@ -3813,9 +3813,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # The stored cross-frame validation belongs to the previous folder's night
             self.night_validation = None
-            self.tab.param_manager.refit_night_button.setEnabled(False)
-            if hasattr(self.tab.param_manager, 'show_night_pairs_checkbox'):
-                self.tab.param_manager.show_night_pairs_checkbox.setEnabled(False)
+            self.updateValidationStatus()
             self.updateNightPairsOverlay()
 
             # Clear the fit residual overlay (lines and the residual/mag/SNR labels) - it
@@ -5033,7 +5031,7 @@ class PlateTool(QtWidgets.QMainWindow):
             # the in-memory config.gamma is synced to the slider and would mask the change
             or abs(self.override_gamma - (self._original_config_gamma
                 if self._original_config_gamma is not None
-                else getattr(cfg, 'gamma', self.override_gamma))) > 0.005
+                else getattr(cfg, 'gamma', self.override_gamma))) > 0.00005
             # The catalog LM is written to the config too, so a tuned or hand-set LM has to
             #   count as an unsaved change - otherwise Save Config stays disabled and there is
             #   no way to persist it. Compared at the precision it is written with (one
@@ -6444,7 +6442,9 @@ class PlateTool(QtWidgets.QMainWindow):
                 "roundness_threshold": str(self.override_roundness_threshold),
             },
             "Capture": {
-                "gamma": f"{self.override_gamma:.2f}",
+                # Four decimals: gamma comes from the camera, and the useful presets
+                # (1/2.2 = 0.4545) are not representable at two
+                "gamma": f"{self.override_gamma:.4f}",
             },
             "Calibration": {
                 "catalog_mag_limit": f"{catalog_mag_limit:.1f}",
@@ -13137,6 +13137,43 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
 
+    def updateValidationStatus(self):
+        """ Say on the panel what state the multi-frame validation is in, and keep the
+            controls that depend on it in step.
+
+        The pair overlay is only meaningful against the platepar the validation was measured
+        with, so it is disabled otherwise - previously with no explanation on screen, which is
+        the thing users could not work out. Refit Multi-Frame is not gated: it measures the
+        night itself when there is nothing current to use.
+        """
+
+        # Reachable from the panel's own refresh, which runs while the window is still being
+        # built
+        if not hasattr(self, 'tab'):
+            return
+
+        panel = self.tab.param_manager
+        results = getattr(self, 'night_validation', None)
+
+        if results is None:
+            panel.setValidationStatus("no multi-frame validation yet")
+            usable = False
+
+        elif self._nightValidationKey() != self.night_validation_pp_key:
+            panel.setValidationStatus("validation is stale - the platepar changed since it "
+                                      "was measured", stale=True)
+            usable = False
+
+        else:
+            panel.setValidationStatus("validated on {:d} frames, {:d} star pairs".format(
+                len(results["frames"]), len(results["star_res"])))
+            usable = True
+
+        # Only the overlay depends on a current validation - Refit Multi-Frame runs one
+        # itself when it needs one, so it stays available
+        panel.show_night_pairs_checkbox.setEnabled(usable)
+
+
     def _nightValidationKey(self):
         """ Fingerprint of the platepar parameters the night validation was computed with. """
         pp = self.platepar
@@ -13177,7 +13214,7 @@ class PlateTool(QtWidgets.QMainWindow):
     def updateNightPairsOverlay(self):
         """ Draw or clear the validated cross-frame pair overlay on the current frame.
 
-        Shows the spatially balanced, drift-compensated pair set that Refit W/ Night would
+        Shows the spatially balanced, drift-compensated pair set that Refit Multi-Frame would
         fit: circles at the detected positions (from all over the night - valid on any frame
         because the camera is fixed), needles toward the catalog position projected at each
         pair's own frame time, exaggerated by the same factor as the residual lines.
@@ -13225,7 +13262,7 @@ class PlateTool(QtWidgets.QMainWindow):
     def refitWithNightStars(self):
         """ Complement the astrometric fit with the validated cross-frame star pairs.
 
-        The pairs come from the last Validate Across Frames run: catalog-matched, blend- and
+        The pairs come from the last Validate Multi-Frame run: catalog-matched, blend- and
         photometry-filtered detections from the whole night, spatially balanced so the image
         centre does not dominate (corner pairs are kept in full). The multi-image fit projects
         each frame's catalog stars at that frame's own time, so picks from different times
@@ -13233,18 +13270,28 @@ class PlateTool(QtWidgets.QMainWindow):
         single frame.
         """
 
-        if (self.platepar is None) or (getattr(self, 'night_validation', None) is None):
-            qmessagebox(title='Refit with night stars',
-                        message="Run Validate Across Frames first!",
+        if self.platepar is None:
+            qmessagebox(title='Refit multi-frame',
+                        message="A platepar is needed to refit!",
                         message_type="warning")
             return
 
-        if self._nightValidationKey() != self.night_validation_pp_key:
-            qmessagebox(title='Refit with night stars',
-                        message="The platepar has changed since the last validation.\n"
-                                "Run Validate Across Frames again first.",
-                        message_type="warning")
-            return
+        # The validation is an input to the refit, not a chore to hand to the user: measure
+        # the night now if that has not been done, or if the platepar has moved since it was.
+        # (Validation is what produces the pair set, so it has to be current, not merely
+        # present - a stale one describes a platepar that no longer exists.)
+        if (getattr(self, 'night_validation', None) is None
+                or self._nightValidationKey() != self.night_validation_pp_key):
+
+            print()
+            print("No current multi-frame validation - measuring the night first...")
+            self.validateFitAcrossFrames()
+
+            # Cancelled with Stop, or the night has no usable star data
+            if (getattr(self, 'night_validation', None) is None
+                    or self._nightValidationKey() != self.night_validation_pp_key):
+                print("Refit cancelled - no usable multi-frame validation.")
+                return
 
         inputs = self._nightValidationInputs()
         if inputs is None:
@@ -13393,7 +13440,10 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # The stored validation no longer matches the new platepar
         self.night_validation = None
-        self.tab.param_manager.refit_night_button.setEnabled(False)
+        # This function re-validates a few lines down, so say that rather than telling the
+        # user to run something that is already running
+        self.tab.param_manager.setValidationStatus("re-validating the refit...")
+        self.tab.param_manager.show_night_pairs_checkbox.setEnabled(False)
         self.updateNightPairsOverlay()
 
         self.updateDistortion()
@@ -13503,7 +13553,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         finally:
             self._endCancellableOperation()
-            self.tab.param_manager.validate_fit_button.setText("Validate Across Frames")
+            self.tab.param_manager.validate_fit_button.setText("Validate Multi-Frame")
             self.tab.param_manager.validate_fit_button.setEnabled(True)
 
         if not len(results["star_res"]):
@@ -13553,9 +13603,8 @@ class PlateTool(QtWidgets.QMainWindow):
         # Keep the results for the cross-frame refit, keyed to this exact platepar
         self.night_validation = results
         self.night_validation_pp_key = self._nightValidationKey()
-        self.tab.param_manager.show_night_pairs_checkbox.setEnabled(True)
+        self.updateValidationStatus()
         self.updateNightPairsOverlay()
-        self.tab.param_manager.refit_night_button.setEnabled(True)
 
         headline = "Validation: global median {:.2f} px, corner median {} (n={})".format(
             summary["median_global"],
