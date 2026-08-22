@@ -55,6 +55,7 @@ def makeResults(pp_ref, pp_true, jd):
         star_frame=np.zeros(len(gx), dtype=int),
         star_ra=np.array(ra), star_dec=np.array(dec),
         star_mag=np.full(len(gx), 5.0), star_intens=np.full(len(gx), 1000.0),
+        star_res=np.full(len(gx), 0.2),
         frames=[dict(ff_name="FF_TEST_20250504_022400_000_0000000.fits", jd=jd,
                      frame_index=0, drift_arcmin=1.0,
                      pointing_frame=(pp_true.RA_d, pp_true.dec_d, pp_true.pos_angle_ref))],
@@ -111,3 +112,108 @@ def test_no_compensation_without_frame_pointing():
     assert len(groups) == 1
     np.testing.assert_allclose(np.sort(groups[0][3][:, 0]), np.sort(results["star_ra"]))
     np.testing.assert_allclose(np.sort(groups[0][3][:, 1]), np.sort(results["star_dec"]))
+
+
+def test_gross_positional_outliers_are_dropped():
+    """ validateFit matches within a wide radius so it can measure a platepar that is off.
+        A pair that wide is a wrong catalog star, and it must not reach the fit. """
+
+    pp_ref = makePlatepar()
+    results = makeResults(pp_ref, pp_ref, JD_TEST)
+
+    n = len(results["star_x"])
+    results["star_res"] = np.full(n, 0.2)
+    results["star_res"][:3] = [9.5, 7.1, 6.0]      # matched to the wrong catalog star
+
+    info = {}
+    groups = buildRefitGroups(results, pp_ref, max_per_cell=100, drift_correction=False,
+                              info=info)
+
+    assert info["n_residual_outliers"] == 3
+    assert sum(len(img_stars) for _, _, img_stars, _ in groups) == n - 3
+
+
+def test_a_clean_night_keeps_every_pair():
+    """ The cut is floored, so a night whose residuals are all sub-pixel loses nothing -
+        without the floor a robust sigma on a tight set would trim its own good tail. """
+
+    pp_ref = makePlatepar()
+    results = makeResults(pp_ref, pp_ref, JD_TEST)
+
+    n = len(results["star_x"])
+    rng = np.random.default_rng(3)
+    results["star_res"] = np.abs(rng.normal(0.3, 0.15, n))
+
+    info = {}
+    groups = buildRefitGroups(results, pp_ref, max_per_cell=100, drift_correction=False,
+                              info=info)
+
+    assert info["n_residual_outliers"] == 0
+    assert sum(len(img_stars) for _, _, img_stars, _ in groups) == n
+
+
+def test_results_without_residuals_still_build():
+    """ Hand-built inputs (older callers, tests) carry no residuals - the cut is skipped
+        rather than failing. """
+
+    pp_ref = makePlatepar()
+    results = makeResults(pp_ref, pp_ref, JD_TEST)
+    del results["star_res"]
+
+    info = {}
+    groups = buildRefitGroups(results, pp_ref, max_per_cell=100, drift_correction=False,
+                              info=info)
+
+    assert "n_residual_outliers" not in info
+    assert sum(len(img_stars) for _, _, img_stars, _ in groups) == len(results["star_x"])
+
+
+def test_a_corner_wide_error_is_not_mistaken_for_outliers():
+    """ The platepar being replaced is usually worst in the corners - that is the reason to
+        refit. Judged against the whole frame those pairs look like a fat outlier tail, and
+        dropping them removes exactly the evidence the refit needs. """
+
+    pp_ref = makePlatepar()
+    results = makeResults(pp_ref, pp_ref, JD_TEST)
+
+    x = np.asarray(results["star_x"], dtype=float)
+    y = np.asarray(results["star_y"], dtype=float)
+    radius = np.hypot(x - pp_ref.X_res/2, y - pp_ref.Y_res/2) \
+        /np.hypot(pp_ref.X_res/2, pp_ref.Y_res/2)
+
+    # Sub-pixel everywhere, several pixels in the outer ring
+    outer = radius > 0.7
+    assert outer.sum() >= 3, "fixture must have outer-field pairs"
+    results["star_res"] = np.where(outer, 4.5, 0.3)
+
+    info = {}
+    # The fixture is small, so let each annulus speak for itself
+    groups = buildRefitGroups(results, pp_ref, max_per_cell=100, drift_correction=False,
+                              min_per_annulus=1, info=info)
+
+    assert info["n_residual_outliers"] == 0
+    assert sum(len(img_stars) for _, _, img_stars, _ in groups) == len(x)
+
+
+def test_a_wrong_star_match_in_the_outer_field_is_still_dropped():
+    """ ...but a pair that disagrees with its OWN annulus is a wrong catalog star, wherever
+        in the frame it sits. """
+
+    pp_ref = makePlatepar()
+    results = makeResults(pp_ref, pp_ref, JD_TEST)
+
+    x = np.asarray(results["star_x"], dtype=float)
+    y = np.asarray(results["star_y"], dtype=float)
+    radius = np.hypot(x - pp_ref.X_res/2, y - pp_ref.Y_res/2) \
+        /np.hypot(pp_ref.X_res/2, pp_ref.Y_res/2)
+
+    outer = np.where(radius > 0.7)[0]
+    results["star_res"] = np.where(radius > 0.7, 4.5, 0.3)
+    results["star_res"][outer[0]] = 9.5      # wrong catalog star, out in the corner
+
+    info = {}
+    groups = buildRefitGroups(results, pp_ref, max_per_cell=100, drift_correction=False,
+                              min_per_annulus=1, info=info)
+
+    assert info["n_residual_outliers"] == 1
+    assert sum(len(img_stars) for _, _, img_stars, _ in groups) == len(x) - 1

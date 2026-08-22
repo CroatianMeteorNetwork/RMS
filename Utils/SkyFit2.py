@@ -13195,9 +13195,17 @@ class PlateTool(QtWidgets.QMainWindow):
         # The pair set is drift-compensated: the multi-image fit uses a single pointing for
         # all frames, so each frame's measured pointing delta - centre shift and roll - is
         # removed from its pairs first (refraction-free rigid rotation - see buildRefitGroups)
+        refit_info = {}
         image_groups = buildRefitGroups(self.night_validation, self.platepar,
-                                        drift_correction=True)
+                                        drift_correction=True, info=refit_info)
         n_pairs = sum(len(img_stars) for _, _, img_stars, _ in image_groups)
+
+        if refit_info.get("n_residual_outliers"):
+            print()
+            print("Dropped {:d} positional outlier(s) from the refit set (> {:.1f} px) - the "
+                  "validation match radius is wide enough to catch the odd wrong catalog "
+                  "star".format(refit_info["n_residual_outliers"],
+                                refit_info["residual_threshold_px"]))
 
         if n_pairs < 20:
             qmessagebox(title='Refit with night stars',

@@ -609,7 +609,9 @@ def summarizeValidation(results, x_res, y_res, n_annuli=8, corner_radius_frac=No
     )
 
 
-def buildRefitGroups(results, platepar, max_per_cell=15, n_grid=8, drift_correction=True):
+def buildRefitGroups(results, platepar, max_per_cell=15, n_grid=8, drift_correction=True,
+                     residual_sigma=3.0, residual_floor_px=3.0, n_annuli=5,
+                     min_per_annulus=20, info=None):
     """ Turn the validated cross-frame matches into per-image groups for
         Platepar.fitAstrometryMultiImage.
 
@@ -627,6 +629,20 @@ def buildRefitGroups(results, platepar, max_per_cell=15, n_grid=8, drift_correct
     The set is spatially balanced with a per-cell cap so the star-rich image centre does
     not dominate the fit; corner cells rarely reach the cap, so their pairs are all kept.
 
+    Gross positional outliers are dropped first. validateFit matches within a wide radius
+    (10 px by default) because it has to measure a platepar that may be off - but that same
+    radius lets a detection be matched to the WRONG catalog star, and while such a pair costs
+    little in a measurement pooled over thousands, it pulls a fit.
+
+    The cut is made WITHIN radial annuli, not against the frame as a whole. Residuals here are
+    measured against the platepar being replaced, whose error typically grows with radius - a
+    platepar that is sub-pixel at the centre and several pixels out in the corners is the
+    normal reason to refit. Judged against the whole frame those corner pairs are a fat tail
+    of "outliers", and dropping them throws away exactly the evidence the refit needs; judged
+    against their own annulus they are the norm, while a wrong-star match still stands out.
+    Each annulus uses the robust rule the single-frame fit uses (median + sigma*MAD, floored),
+    so a clean night loses nothing.
+
     Arguments:
         results: [dict] Output of validateFit.
         platepar: [Platepar] Provides the image dimensions for the spatial cap and the
@@ -637,6 +653,14 @@ def buildRefitGroups(results, platepar, max_per_cell=15, n_grid=8, drift_correct
         n_grid: [int] Grid divisions per axis for the spatial cap.
         drift_correction: [bool] Compensate each frame's measured pointing drift. True by
             default; requires validateFit to have run with pointing_refit enabled.
+        residual_sigma: [float] Robust-sigma multiplier for the positional outlier cut.
+        residual_floor_px: [float] Residual (px) below which a pair is never treated as an
+            outlier, so a tight night is not trimmed.
+        n_annuli: [int] Number of radial annuli the outlier cut is made within.
+        min_per_annulus: [int] An annulus with fewer pairs than this is judged against the
+            whole frame instead - its own median and MAD would be noise.
+        info: [dict] Optional dict to receive 'residual_threshold_px' and
+            'n_residual_outliers'.
 
     Return:
         image_groups: [list] (image_id, jd, img_stars, catalog_stars) tuples, as expected by
@@ -649,9 +673,54 @@ def buildRefitGroups(results, platepar, max_per_cell=15, n_grid=8, drift_correct
     if n == 0:
         return []
 
+    # Positional outlier cut, before the spatial cap so an outlier cannot occupy a cell slot
+    # that a good pair would have filled. Skipped when the results carry no residuals (only
+    # hand-built inputs; validateFit always fills them).
+    star_res = np.asarray(results.get("star_res", []), dtype=float)
+    candidates = np.arange(n)
+
+    if len(star_res) == n:
+
+        # Normalised radius of every pair (1.0 at the image corner)
+        star_x = np.asarray(results["star_x"], dtype=float)
+        star_y = np.asarray(results["star_y"], dtype=float)
+        radius = np.hypot(star_x - platepar.X_res/2.0, star_y - platepar.Y_res/2.0) \
+            /np.hypot(platepar.X_res/2.0, platepar.Y_res/2.0)
+
+        def _robustThreshold(sample):
+            median_res = float(np.median(sample))
+            mad = float(np.median(np.abs(sample - median_res)))
+            return max(residual_floor_px, median_res + residual_sigma*1.4826*mad)
+
+        outlier = np.zeros(n, dtype=bool)
+        edges = np.linspace(0.0, 1.0 + 1e-6, n_annuli + 1)
+        thresholds = []
+
+        for lower, upper in zip(edges[:-1], edges[1:]):
+            in_annulus = (radius >= lower) & (radius < upper)
+            if not np.any(in_annulus):
+                continue
+
+            # Too few pairs for the annulus to speak for itself
+            sample = star_res[in_annulus] if np.count_nonzero(in_annulus) >= min_per_annulus \
+                else star_res
+
+            threshold = _robustThreshold(sample)
+            thresholds.append(threshold)
+            outlier |= in_annulus & (star_res > threshold)
+
+        candidates = np.where(~outlier)[0]
+
+        if info is not None:
+            info["residual_threshold_px"] = max(thresholds) if thresholds else residual_floor_px
+            info["n_residual_outliers"] = int(n - len(candidates))
+
+    if not len(candidates):
+        return []
+
     # Spatial cap: deterministic shuffle, keep up to max_per_cell per grid cell
     rng = np.random.default_rng(0)
-    order = rng.permutation(n)
+    order = rng.permutation(candidates)
     cell_counts = {}
     keep = []
     for k in order:
