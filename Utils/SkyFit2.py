@@ -8761,7 +8761,7 @@ class PlateTool(QtWidgets.QMainWindow):
         ra_list = []
         dec_list = []
 
-        for i, (x, y, fwhm, intens_acc, obj, snr, saturated) in enumerate(
+        for i, (x, y, fwhm, intens_acc, obj, snr, saturated, auto) in enumerate(
                 self.paired_stars.paired_stars):
 
             # Skip saturated stars
@@ -8817,10 +8817,10 @@ class PlateTool(QtWidgets.QMainWindow):
         # Remove outliers from paired_stars
         if len(outlier_indices) > 0:
             new_paired_stars = PairedStars()
-            for i, (x, y, fwhm, intens_acc, obj, snr, saturated) in enumerate(
+            for i, (x, y, fwhm, intens_acc, obj, snr, saturated, auto) in enumerate(
                     self.paired_stars.paired_stars):
                 if i not in outlier_indices:
-                    new_paired_stars.addPair(x, y, fwhm, intens_acc, obj, snr, saturated)
+                    new_paired_stars.addPair(x, y, fwhm, intens_acc, obj, snr, saturated, auto)
             self.paired_stars = new_paired_stars
 
         removed_count = len(outlier_indices)
@@ -8832,12 +8832,19 @@ class PlateTool(QtWidgets.QMainWindow):
 
     def filterPositionalOutliers(self, sigma_threshold=3.0, abs_floor_px=3.0):
         """
-        Remove paired stars whose image position is far from the catalog projection.
+        Remove automatically matched pairs whose image position is far from the catalog
+        projection.
 
         Run *after* a fit: re-projects each paired catalog star with the current platepar and drops
         pairs whose positional residual is a gross outlier - typically a wrong or duplicate match
         that survived NN/RANSAC and otherwise inflates the final RMSD. The threshold is robust
         (median + sigma*MAD) and floored at abs_floor_px so a tight fit is never over-clipped.
+
+        Only automatically matched pairs are candidates. A hand-picked pair is a deliberate
+        statement about where a star is, so removing it silently would be a worse failure than
+        the RMSD it costs - the user gets no signal that their pick was discarded. Hand-picked
+        pairs still count toward the robust threshold, so they inform the clip without being
+        subject to it.
 
         Arguments:
             sigma_threshold: [float] Robust-sigma multiplier for outlier detection.
@@ -8865,19 +8872,27 @@ class PlateTool(QtWidgets.QMainWindow):
         robust_std = 1.4826*mad
         thresh = max(abs_floor_px, med + sigma_threshold*robust_std)
 
-        outlier_indices = set(np.where(errs > thresh)[0].tolist())
+        auto_flags = np.array(self.paired_stars.autoFlags(), dtype=bool)
+        outlier_indices = set(np.where((errs > thresh) & auto_flags)[0].tolist())
 
         if len(outlier_indices) > 0:
             new_paired_stars = PairedStars()
-            for i, (x, y, fwhm, intens_acc, obj, snr, saturated) in enumerate(
+            for i, (x, y, fwhm, intens_acc, obj, snr, saturated, auto) in enumerate(
                     self.paired_stars.paired_stars):
                 if i not in outlier_indices:
-                    new_paired_stars.addPair(x, y, fwhm, intens_acc, obj, snr, saturated)
+                    new_paired_stars.addPair(x, y, fwhm, intens_acc, obj, snr, saturated, auto)
             self.paired_stars = new_paired_stars
 
         removed_count = len(outlier_indices)
         if removed_count > 0:
             print("Removed {} positional outliers (>{:.1f} px)".format(removed_count, thresh))
+
+        # A hand-picked pair beyond the threshold is kept, but say so - a large residual on a
+        # pick is usually a mis-click, and it is the user's call whether to redo it
+        n_kept_manual = int(np.sum((errs > thresh) & ~auto_flags))
+        if n_kept_manual > 0:
+            print("Kept {} hand-picked pair(s) beyond {:.1f} px - check them if the RMSD "
+                  "looks high".format(n_kept_manual, thresh))
 
         return removed_count
 
@@ -9416,14 +9431,14 @@ class PlateTool(QtWidgets.QMainWindow):
         # cannot be reconstructed standalone)
         pairs = []
         n_skipped = 0
-        for x, y, fwhm, intens_acc, obj, snr, saturated in self.paired_stars.paired_stars:
+        for x, y, fwhm, intens_acc, obj, snr, saturated, auto in self.paired_stars.paired_stars:
             if getattr(obj, 'pick_type', 'star') == 'geopoint':
                 n_skipped += 1
                 continue
             ra, dec, mag = obj.coords()
             pairs.append({'x': float(x), 'y': float(y), 'fwhm': float(fwhm),
                           'intens_acc': float(intens_acc), 'snr': float(snr),
-                          'saturated': bool(saturated),
+                          'saturated': bool(saturated), 'auto': bool(auto),
                           'ra': float(ra), 'dec': float(dec), 'mag': float(mag),
                           'type': getattr(obj, 'pick_type', 'star')})
 
@@ -9488,8 +9503,12 @@ class PlateTool(QtWidgets.QMainWindow):
         new_pairs = PairedStars()
         for p in images[key].get('pairs', []):
             star = CatalogStar(p['ra'], p['dec'], p['mag'])
+            # Pairs written before provenance was recorded load as hand-picked, so the
+            # automatic filters leave them alone rather than quietly dropping a pair the user
+            # may well have placed themselves
             new_pairs.addPair(p['x'], p['y'], p['fwhm'], p['intens_acc'], star,
-                              snr=p.get('snr', 0), saturated=p.get('saturated', False))
+                              snr=p.get('snr', 0), saturated=p.get('saturated', False),
+                              auto=p.get('auto', False))
 
         self.paired_stars = new_pairs
         self.updatePairedStars()
@@ -9855,6 +9874,12 @@ class PlateTool(QtWidgets.QMainWindow):
                 # If the FWHM is missing, add it to the 3rd index
                 if len(paired_star) == 6:
                     paired_star.insert(2, 0.0)
+
+                # Add the automatic-match flag if it's missing. Old states predate it and
+                # cannot say where their pairs came from, so treat them as hand-picked - the
+                # filters then leave them alone.
+                if len(paired_star) == 7:
+                    paired_star.append(False)
 
 
         if self.platepar is not None:
@@ -12735,7 +12760,7 @@ class PlateTool(QtWidgets.QMainWindow):
                     sky_obj = CatalogStar(cat_star[0], cat_star[1], cat_star[2])
                     self.paired_stars.addPair(
                         det_x[i], det_y[i], det_fwhm[i], det_intens[i], sky_obj,
-                        snr=det_snr[i], saturated=det_saturated[i] > 0
+                        snr=det_snr[i], saturated=det_saturated[i] > 0, auto=True
                     )
 
             print("  Matched {} star pairs for display".format(len(self.paired_stars)))
@@ -12861,7 +12886,8 @@ class PlateTool(QtWidgets.QMainWindow):
                         img_intens,
                         sky_obj,
                         snr=snr,
-                        saturated=saturated
+                        saturated=saturated,
+                        auto=True
                     )
 
             print("  Matched {} star pairs".format(len(self.paired_stars)))
@@ -14441,7 +14467,8 @@ class PlateTool(QtWidgets.QMainWindow):
                             snr = det_snr[closest_idx]
                             saturated = det_saturated[closest_idx] > 0
 
-                    self.paired_stars.addPair(x, y, fwhm, intensity, sky_obj, snr=snr, saturated=saturated)
+                    self.paired_stars.addPair(x, y, fwhm, intensity, sky_obj, snr=snr,
+                                              saturated=saturated, auto=True)
                 print("  Loaded {} matched pairs".format(len(self.platepar.star_list)))
 
         # Finalize the fit with user's settings
@@ -16195,7 +16222,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 sky_obj = CatalogStar(cat_star[0], cat_star[1], cat_star[2])
                 self.paired_stars.addPair(
                     det_x[i], det_y[i], det_fwhm[i], det_intens[i], sky_obj,
-                    snr=det_snr[i], saturated=det_saturated[i] > 0
+                    snr=det_snr[i], saturated=det_saturated[i] > 0, auto=True
                 )
 
         print("  Matched {} of {} detected stars to {} catalog stars in FOV".format(

@@ -105,7 +105,7 @@ class PairedStars(object):
         self.paired_stars = []
 
 
-    def addPair(self, x, y, fwhm, intens_acc, obj, snr=0, saturated=False):
+    def addPair(self, x, y, fwhm, intens_acc, obj, snr=0, saturated=False, auto=False):
         """ Add a pair between image coordinates and a star or a geo point.
 
         Arguments:
@@ -116,9 +116,19 @@ class PairedStars(object):
             obj: [object] Instance of CatalogStar or GeoPoint.
             snr: [float] Signal-to-noise ratio. Default is 0.
             saturated: [bool] Whether the star is saturated. Default is False.
+            auto: [bool] The pair was made by automatic matching (Find Pairs, NN/RANSAC)
+                rather than picked by hand. Automatic filters may drop these; a hand-picked
+                pair is deliberate and is never removed behind the user's back. Default is
+                False, so anything of unknown provenance is treated as hand-picked.
         """
 
-        self.paired_stars.append([x, y, fwhm, intens_acc, obj, snr, saturated])
+        self.paired_stars.append([x, y, fwhm, intens_acc, obj, snr, saturated, auto])
+
+
+    def autoFlags(self):
+        """ Return a list of per-pair "made by automatic matching" flags. """
+
+        return [bool(entry[7]) for entry in self.paired_stars]
 
 
     def removeGeoPoints(self):
@@ -182,7 +192,7 @@ class PairedStars(object):
         if draw:
             offset = 0.5
 
-        img_coords = [(x + offset, y + offset, intens_acc) for x, y, _, intens_acc, _, _, _
+        img_coords = [(x + offset, y + offset, intens_acc) for x, y, _, intens_acc, _, _, _, _
                       in self.paired_stars]
 
         return img_coords
@@ -195,7 +205,7 @@ class PairedStars(object):
             list: List of (ra, dec, mag) tuples.
         """
 
-        return [obj.coords() for _, _, _, _, obj, _, _ in self.paired_stars]
+        return [obj.coords() for _, _, _, _, obj, _, _, _ in self.paired_stars]
 
 
     def allCoords(self):
@@ -208,7 +218,7 @@ class PairedStars(object):
 
         return [
             [(x, y, fwhm, intens_acc, snr, saturated), obj.coords()]
-            for x, y, fwhm, intens_acc, obj, snr, saturated in self.paired_stars
+            for x, y, fwhm, intens_acc, obj, snr, saturated, _ in self.paired_stars
             ]
 
     def snr(self):
@@ -218,7 +228,7 @@ class PairedStars(object):
             list: List of SNR values.
         """
 
-        return [snr for _, _, _, _, _, snr, _ in self.paired_stars]
+        return [snr for _, _, _, _, _, snr, _, _ in self.paired_stars]
 
 
     def __len__(self):

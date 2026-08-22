@@ -106,7 +106,7 @@ def filterPhotometricOutliers(paired_stars, platepar, jd, sigma_threshold=DEFAUL
     ra_list = []
     dec_list = []
 
-    for i, (x, y, fwhm, intens_acc, obj, snr, saturated) in enumerate(paired_stars.paired_stars):
+    for i, (x, y, fwhm, intens_acc, obj, snr, saturated, auto) in enumerate(paired_stars.paired_stars):
         if saturated:
             continue
 
@@ -146,9 +146,9 @@ def filterPhotometricOutliers(paired_stars, platepar, jd, sigma_threshold=DEFAUL
 
     if len(outlier_indices) > 0:
         new_paired_stars = PairedStars()
-        for i, (x, y, fwhm, intens_acc, obj, snr, saturated) in enumerate(paired_stars.paired_stars):
+        for i, (x, y, fwhm, intens_acc, obj, snr, saturated, auto) in enumerate(paired_stars.paired_stars):
             if i not in outlier_indices:
-                new_paired_stars.addPair(x, y, fwhm, intens_acc, obj, snr, saturated)
+                new_paired_stars.addPair(x, y, fwhm, intens_acc, obj, snr, saturated, auto)
 
         if verbose:
             print("  Removed {:d} photometric outliers (>{:.1f} sigma)".format(
@@ -201,7 +201,7 @@ def filterBlendedStars(paired_stars, catalog_stars, platepar, jd, lim_mag,
     matched_dec_list = []
     blend_radii = []
     matched_mag_list = []
-    for i, (x, y, fwhm, intens_acc, obj, snr, saturated) in enumerate(paired_stars.paired_stars):
+    for i, (x, y, fwhm, intens_acc, obj, snr, saturated, auto) in enumerate(paired_stars.paired_stars):
         if hasattr(obj, 'pick_type') and obj.pick_type == "geopoint":
             continue
         ra, dec, mag = obj.coords()
@@ -313,9 +313,9 @@ def filterBlendedStars(paired_stars, catalog_stars, platepar, jd, lim_mag,
 
     if len(blended_indices) > 0:
         new_paired_stars = PairedStars()
-        for i, (x, y, fwhm, intens_acc, obj, snr, saturated) in enumerate(paired_stars.paired_stars):
+        for i, (x, y, fwhm, intens_acc, obj, snr, saturated, auto) in enumerate(paired_stars.paired_stars):
             if i not in blended_indices:
-                new_paired_stars.addPair(x, y, fwhm, intens_acc, obj, snr, saturated)
+                new_paired_stars.addPair(x, y, fwhm, intens_acc, obj, snr, saturated, auto)
 
         if verbose:
             print("  Removed {:d} blended stars (photocentre pull > {:.1f} px from neighbors "

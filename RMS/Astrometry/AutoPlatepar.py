@@ -738,7 +738,8 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
                     snr = input_snr[closest_idx]
                     saturated = input_saturated[closest_idx] > 0
 
-            paired_stars.addPair(img_x, img_y, fwhm, intensity, sky_obj, snr=snr, saturated=saturated)
+            paired_stars.addPair(img_x, img_y, fwhm, intensity, sky_obj, snr=snr,
+                                 saturated=saturated, auto=True)
 
         if verbose:
             print("  Matched pairs: {:d}".format(len(paired_stars)))
