@@ -3532,6 +3532,7 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
     sigSaveToConfig = QtCore.pyqtSignal()
     sigCatalogLMChanged = QtCore.pyqtSignal(float)
     sigUseOverrideToggled = QtCore.pyqtSignal()
+    sigIgnoreCalstarsToggled = QtCore.pyqtSignal()
     sigStarGateFactorChanged = QtCore.pyqtSignal(float)
     sigNeighborhoodSizeChanged = QtCore.pyqtSignal(int)
     sigMaxStarsChanged = QtCore.pyqtSignal(int)
@@ -3760,8 +3761,25 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
 
         # Checkbox
         self.use_override_checkbox = QtWidgets.QCheckBox('Use Override Detections')
+        self.use_override_checkbox.setToolTip(
+            "Use the re-detected stars instead of the station CALSTARS on frames that have "
+            "been re-detected")
         self.use_override_checkbox.released.connect(self.sigUseOverrideToggled.emit)
         layout.addWidget(self.use_override_checkbox)
+
+        # Whole-night steps (Validate Across Frames, Refit W/ Night, Find Best Frame, Save
+        # CALSTARS) otherwise fall back to CALSTARS on every frame that was NOT re-detected -
+        # and CALSTARS usually covers the whole night while only a subset of FF files is on
+        # disk, so most of the pool stays as it was. Tick this when the CALSTARS detections
+        # are the problem you re-detected to get away from.
+        self.ignore_calstars_checkbox = QtWidgets.QCheckBox('Ignore CALSTARS')
+        self.ignore_calstars_checkbox.setToolTip(
+            "Whole-night steps use ONLY the re-detected frames - frames that were not "
+            "re-detected are left out entirely instead of falling back to CALSTARS.\n"
+            "Re-Detect All ticks this for you.")
+        self.ignore_calstars_checkbox.setEnabled(False)
+        self.ignore_calstars_checkbox.released.connect(self.sigIgnoreCalstarsToggled.emit)
+        layout.addWidget(self.ignore_calstars_checkbox)
 
         layout.addSpacing(self.scaledSpacing(0.3))
 
@@ -3944,8 +3962,19 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
         self.catalog_lm_spinbox.setValue(value)
         self.catalog_lm_spinbox.blockSignals(False)
 
-    def updateStatus(self, using_override, star_count=None, candidate_count=None):
-        """Update the status label to show current detection source."""
+    def updateStatus(self, using_override, star_count=None, candidate_count=None,
+                     override_frames=None):
+        """Update the status label to show current detection source.
+
+        Arguments:
+            using_override: [bool] Override detections are in use.
+
+        Keyword arguments:
+            star_count: [int] Stars detected on the current frame.
+            candidate_count: [int] Raw candidates on the current frame.
+            override_frames: [int] Number of re-detected frames, shown when CALSTARS is being
+                ignored - that count is the whole pool the night-wide steps then work from.
+        """
         pad = self.scaledSpacing(0.3)
         if using_override:
             if star_count is not None:
@@ -3953,11 +3982,17 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
                 if candidate_count is not None:
                     text += f', {candidate_count} candidates'
                 text += ')'
-                self.status_label.setText(text)
-                self.status_label.setStyleSheet(f"color: green; font-size: 9pt; padding: {pad}px; font-weight: bold;")
             else:
-                self.status_label.setText('Using override detection')
-                self.status_label.setStyleSheet(f"color: green; font-size: 9pt; padding: {pad}px; font-weight: bold;")
+                text = 'Using override detection'
+
+            if self.ignore_calstars_checkbox.isChecked():
+                if override_frames is not None:
+                    text += f'\nCALSTARS ignored - night steps use {override_frames} re-detected frames'
+                else:
+                    text += '\nCALSTARS ignored - night steps use re-detected frames only'
+
+            self.status_label.setText(text)
+            self.status_label.setStyleSheet(f"color: green; font-size: 9pt; padding: {pad}px; font-weight: bold;")
         else:
             self.status_label.setText('Using original CALSTARS')
             self.status_label.setStyleSheet(f"color: gray; font-size: 9pt; padding: {pad}px;")

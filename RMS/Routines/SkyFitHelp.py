@@ -612,10 +612,14 @@ def _topic_calibration_files(gui):
 
 def _topic_stardetect(gui):
     params = _defn_table([
-        ("Intensity threshold <span class=\"tip\">(def. 18)</span>",
-         "How far above the local background a pixel must rise to count as a star. <b>Lower</b> "
-         "detects fainter stars but also more noise; <b>higher</b> keeps only the bright, confident "
-         "ones. The single most useful knob &ndash; tune it first."),
+        ("Adaptive gate factor <span class=\"tip\">(def. 3.0)</span>",
+         "How far above the frame's own measured noise a peak must rise to count as a star, as a "
+         "multiple of that noise. <b>Lower</b> detects fainter stars but also more noise; "
+         "<b>higher</b> keeps only the bright, confident ones. The single most useful knob &ndash; "
+         "tune it first. It is <b>per camera</b>: 3.0 suits most, but a dark, low-gain sensor whose "
+         "averaged frame is dominated by fixed-pattern noise (hot pixels) floods at 3.0 and "
+         "measures clean at 10&ndash;15. <b>Tune</b> sweeps it against the catalog and picks a "
+         "value."),
         ("Neighborhood size <span class=\"tip\">(def. 10 px)</span>",
          "Size of the local window used to pick one peak per star. <b>Larger</b> merges close stars "
          "(fewer detections); <b>smaller</b> separates them but can split one bright star into "
@@ -674,6 +678,13 @@ def _topic_stardetect(gui):
         "so the number of detected stars roughly matches the catalog stars in the field.</li>"
         "<li>Tick <b>Use Override Detections</b> to feed these detections into fitting and Auto "
         "Fit instead of CALSTARS.</li>"
+        "<li>Tick <b>Ignore CALSTARS</b> if the CALSTARS detections themselves are the problem. "
+        "Without it, the night-wide steps (Validate Across Frames, Refit W/ Night, Find Best "
+        "Frame, Save CALSTARS) substitute your detections <i>per frame</i> and keep the CALSTARS "
+        "entry for every frame you did not re-detect &ndash; and since Re-Detect All only reaches "
+        "the FF files on disk while CALSTARS usually covers the whole night, most of the pool can "
+        "stay as it was. With it ticked those frames are left out entirely. <b>Re-Detect All ticks "
+        "it for you</b>; untick it to go back to merging.</li>"
         "<li><b>Save Config</b> writes the parameters to your config file so the station pipeline "
         "reuses them. Note it saves <b>Config max stars</b>, not the SkyFit session budget &ndash; "
         "deep detection is for calibration here, while the nightly pipeline should stay cheap.</li>"

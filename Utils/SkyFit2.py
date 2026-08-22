@@ -2488,6 +2488,7 @@ class PlateTool(QtWidgets.QMainWindow):
         # Star detection override parameters
         self.star_detection_override_enabled = False  # Use override parameters instead of CALSTARS
         self.star_detection_override_data = {}  # Store re-detected stars per FF file
+        self.ignore_calstars = False  # Night-wide steps use only the re-detected frames
         self.override_star_gate_factor = 3.0
         self.override_neighborhood_size = 10
         self.override_max_stars = 800
@@ -3446,6 +3447,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.star_detection.sigRedetectStars.connect(self.redetectStars)
         self.tab.star_detection.sigRedetectAllImages.connect(self.redetectAllImages)
         self.tab.star_detection.sigUseOverrideToggled.connect(self.toggleStarDetectionOverride)
+        self.tab.star_detection.sigIgnoreCalstarsToggled.connect(self.toggleIgnoreCalstars)
         self.tab.star_detection.sigStarGateFactorChanged.connect(self.updateStarGateFactor)
         self.tab.star_detection.sigNeighborhoodSizeChanged.connect(self.updateNeighborhoodSize)
         self.tab.star_detection.sigMaxStarsChanged.connect(self.updateMaxStars)
@@ -3802,6 +3804,9 @@ class PlateTool(QtWidgets.QMainWindow):
             self.star_detection_override_data = {}
             self.star_detection_override_enabled = False
             self.tab.star_detection.use_override_checkbox.setChecked(False)
+            self.ignore_calstars = False
+            self.tab.star_detection.ignore_calstars_checkbox.setChecked(False)
+            self.tab.star_detection.ignore_calstars_checkbox.setEnabled(False)
 
             self.initStarDetectionOverrides()
             self.updateFindBestFrameButton()
@@ -5088,11 +5093,40 @@ class PlateTool(QtWidgets.QMainWindow):
         # Update the display
         self.updateCalstars()
 
-        # Update status in UI
+        # "Ignore CALSTARS" only means anything while the override detections are in use
+        self.tab.star_detection.ignore_calstars_checkbox.setEnabled(
+            self.star_detection_override_enabled)
+
+        self.updateDetectionSourceStatus()
+
+
+    def toggleIgnoreCalstars(self):
+        """ Toggle whether the night-wide steps fall back to CALSTARS on frames that were not
+            re-detected (see nightStarData). """
+
+        self.ignore_calstars = self.tab.star_detection.ignore_calstars_checkbox.isChecked()
+
+        n_frames = len(getattr(self, 'star_detection_override_data', None) or {})
+        if self.ignore_calstars:
+            print("Ignoring CALSTARS: night-wide steps will use the {:d} re-detected frame(s) "
+                  "only".format(n_frames))
+        else:
+            print("Using CALSTARS for frames that were not re-detected")
+
+        self.updateDetectionSourceStatus()
+
+
+    def updateDetectionSourceStatus(self):
+        """ Refresh the star detection panel's status line for the current frame. """
+
+        override_data = getattr(self, 'star_detection_override_data', None) or {}
         ff_name = self.img_handle.name()
-        if self.star_detection_override_enabled and ff_name in self.star_detection_override_data:
-            star_count = len(self.star_detection_override_data[ff_name])
-            self.tab.star_detection.updateStatus(True, star_count)
+
+        if self.star_detection_override_enabled and ff_name in override_data:
+            self.tab.star_detection.updateStatus(True, len(override_data[ff_name]),
+                                                 override_frames=len(override_data))
+        elif self.star_detection_override_enabled:
+            self.tab.star_detection.updateStatus(True, override_frames=len(override_data))
         else:
             self.tab.star_detection.updateStatus(False)
 
@@ -5171,9 +5205,12 @@ class PlateTool(QtWidgets.QMainWindow):
                 original_count = len(self.calstars.get(ff_name, []))
                 print(f"  Detected {len(star_data)} stars (original: {original_count})")
 
-                # Enable override mode and update display
+                # Enable override mode and update display. A single-frame re-detect does not
+                # touch "Ignore CALSTARS" - one frame is no reason to drop the night - but the
+                # checkbox becomes usable now that overrides are in play.
                 self.star_detection_override_enabled = True
                 self.tab.star_detection.use_override_checkbox.setChecked(True)
+                self.tab.star_detection.ignore_calstars_checkbox.setEnabled(True)
 
                 # Sync gamma: keep override gamma in config and platepar
                 if self._original_config_gamma is None:
@@ -5196,16 +5233,47 @@ class PlateTool(QtWidgets.QMainWindow):
             traceback.print_exc()
 
 
+    def nightStarData(self):
+        """ The star data the night-wide steps work from: CALSTARS with the re-detected
+            (override) frames laid on top.
+
+        The substitution is per frame, so frames that were never re-detected keep their
+        CALSTARS entry. That is usually what you want, but not when the CALSTARS detections
+        are themselves the problem: Re-Detect All only reaches the FF files present on disk,
+        while CALSTARS routinely covers the whole night, so most of the pool would stay as it
+        was. "Ignore CALSTARS" drops those frames instead of filling them in.
+
+        Frames with no stars are left out either way - a frame that re-detected to zero stars
+        must not fall back to its CALSTARS entry.
+
+        Return:
+            [dict] {ff_name: star_data}
+        """
+
+        override_enabled = getattr(self, 'star_detection_override_enabled', False)
+        override_data = getattr(self, 'star_detection_override_data', None) or {}
+
+        if override_enabled and getattr(self, 'ignore_calstars', False):
+            merged = dict(override_data)
+
+        else:
+            merged = dict(self.calstars) if (hasattr(self, 'calstars') and self.calstars) else {}
+            if override_enabled:
+                merged.update(override_data)
+
+            # Nothing loaded but re-detected frames in hand: they are all there is
+            elif override_data and not merged:
+                merged = dict(override_data)
+
+        return {ff: stars for ff, stars in merged.items() if len(stars) > 0}
+
+
     def saveOverrideCalstars(self):
         """ Write the current star data - CALSTARS merged with any re-detected (override)
-            frames - to a CALSTARS file for sharing or offline analysis. """
+            frames, or the re-detected frames alone when CALSTARS is being ignored - to a
+            CALSTARS file for sharing or offline analysis. """
 
-        merged = dict(self.calstars) if (hasattr(self, 'calstars') and self.calstars) else {}
-        if getattr(self, 'star_detection_override_enabled', False):
-            merged.update(self.star_detection_override_data)
-        elif getattr(self, 'star_detection_override_data', None) and not merged:
-            merged = dict(self.star_detection_override_data)
-        merged = {ff: stars for ff, stars in merged.items() if len(stars) > 0}
+        merged = self.nightStarData()
 
         if not merged:
             qmessagebox(title='Save CALSTARS', message="No star data to save!",
@@ -5347,6 +5415,17 @@ class PlateTool(QtWidgets.QMainWindow):
         self.star_detection_override_enabled = True
         self.tab.star_detection.use_override_checkbox.setChecked(True)
 
+        # A full re-detect is the case where falling back to CALSTARS is least likely to be
+        # wanted: the whole point was to replace those detections. Tick "Ignore CALSTARS" so
+        # the night-wide steps use these frames only - it stays visible and can be unticked.
+        self.ignore_calstars = True
+        self.tab.star_detection.ignore_calstars_checkbox.setEnabled(True)
+        self.tab.star_detection.ignore_calstars_checkbox.setChecked(True)
+        n_calstars = len(getattr(self, 'calstars', None) or {})
+        print("  Ignoring CALSTARS: night-wide steps will use the {:d} re-detected frame(s) "
+              "instead of {:d} CALSTARS frame(s)".format(
+                  len(self.star_detection_override_data), n_calstars))
+
         # Sync gamma: keep override gamma in config and platepar
         if self._original_config_gamma is None:
             self._original_config_gamma = original_gamma
@@ -5356,12 +5435,7 @@ class PlateTool(QtWidgets.QMainWindow):
         print(f"  Using override gamma={self.override_gamma:.3f} for photometry")
 
         self.updateCalstars()
-
-        ff_name = self.img_handle.name()
-        if ff_name in self.star_detection_override_data:
-            self.tab.star_detection.updateStatus(True, len(self.star_detection_override_data[ff_name]))
-        else:
-            self.tab.star_detection.updateStatus(True)
+        self.updateDetectionSourceStatus()
 
 
     # Gate factor sweep, high (bright stars only) down to deep. The candidate gate is
@@ -9889,6 +9963,11 @@ class PlateTool(QtWidgets.QMainWindow):
             self.updateMeasurementRefractionCorrection()
 
 
+        # Old states predate the CALSTARS bypass - they were saved when the night-wide steps
+        # always merged, so keep that behaviour on load
+        if not hasattr(self, "ignore_calstars"):
+            self.ignore_calstars = False
+
         # Add the missing mask drawing/brush state variables (old states predate them)
         if not hasattr(self, "mask_draw_mode"):
             self.mask_draw_mode = False
@@ -13340,11 +13419,9 @@ class PlateTool(QtWidgets.QMainWindow):
             (merged, frames, catalog_val) or None if there is no usable CALSTARS data.
         """
 
-        # Merge CALSTARS with any re-detected override data
-        merged = dict(self.calstars) if (hasattr(self, 'calstars') and self.calstars) else {}
-        if getattr(self, 'star_detection_override_enabled', False):
-            merged.update(self.star_detection_override_data)
-        merged = {ff: stars for ff, stars in merged.items() if len(stars) > 0}
+        # CALSTARS with any re-detected override data on top (or the re-detected frames
+        # alone, if CALSTARS is being ignored)
+        merged = self.nightStarData()
 
         if len(merged) < 2:
             return None
@@ -13675,11 +13752,9 @@ class PlateTool(QtWidgets.QMainWindow):
         img_width = self.config.width
         img_height = self.config.height
 
-        # Merge star data: start with original CALSTARS, override per-image
-        # where re-detected data exists
-        merged_calstars = dict(self.calstars) if has_calstars else {}
-        if has_overrides:
-            merged_calstars.update(self.star_detection_override_data)
+        # CALSTARS with the re-detected frames on top (or the re-detected frames alone, if
+        # CALSTARS is being ignored)
+        merged_calstars = self.nightStarData()
 
         # Build set of available image filenames (basenames only), excluding placeholders
         available_images = set()
