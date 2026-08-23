@@ -903,43 +903,59 @@ class BufferedCapture(Process):
               names the segment so that it makes no claim about its time.
         """
 
-        running_time_ns = None
+        def toTimestamp(running_time_ns):
+            """ Convert a running time to a wall-clock timestamp, or None if it is not
+                trustworthy.
+            """
+
+            if running_time_ns is None:
+                return None
+
+            # Same bound getFrame() applies before trusting a PTS
+            if not (0 < running_time_ns <= MAX_EXPECTED_PTS_NS):
+                return None
+
+            timestamp = self.start_timestamp + (running_time_ns + self.last_pts_correction_ns)/1e9
+
+            # Segments are cut live, so the derived time must land near now. This also
+            # catches a start_timestamp that was never established (it initializes to 0).
+            if abs(timestamp - time.time()) > 86400:
+                return None
+
+            return timestamp
+
+
+        candidates = []
 
         if first_sample is not None:
             buffer = first_sample.get_buffer()
             segment = first_sample.get_segment()
 
             if buffer is not None and buffer.pts != Gst.CLOCK_TIME_NONE:
-                running_time_ns = buffer.pts
 
                 if segment is not None:
                     converted = segment.to_running_time(Gst.Format.TIME, buffer.pts)
                     if converted != Gst.CLOCK_TIME_NONE:
-                        running_time_ns = converted
+                        candidates.append(converted)
 
-        # Fall back to the running time of the last frame pulled from the appsink
-        if running_time_ns is None:
-            running_time_ns = self.last_running_time_ns
+                candidates.append(buffer.pts)
 
-        if running_time_ns is None:
-            log.warning("No running time available for the new video segment")
-            return None
+        # The running time of the last frame pulled from the appsink, which getFrame() has
+        # already validated. Both branches are fed from the same tee, so this is the same
+        # running-time domain. Under UDP a lost packet can leave the fragment's first sample
+        # with a corrupt PTS while this one is still good, so it is tried whenever the
+        # sample cannot be trusted - not only when the sample carries no PTS at all.
+        candidates.append(self.last_running_time_ns)
 
-        # Same bound getFrame() applies before trusting a PTS
-        if not (0 < running_time_ns <= MAX_EXPECTED_PTS_NS):
-            log.warning("Unusable PTS for the new video segment: {}".format(running_time_ns))
-            return None
+        for running_time_ns in candidates:
+            segment_timestamp = toTimestamp(running_time_ns)
 
-        segment_timestamp = self.start_timestamp + (running_time_ns + self.last_pts_correction_ns)/1e9
+            if segment_timestamp is not None:
+                return segment_timestamp
 
-        # Segments are cut live, so the derived time must land near now. This also catches
-        # a start_timestamp that was never established (it is initialized to 0).
-        if abs(segment_timestamp - time.time()) > 86400:
-            log.warning("Implausible timestamp for the new video segment: {} (start_timestamp={})"
-                        .format(segment_timestamp, self.start_timestamp))
-            return None
-
-        return segment_timestamp
+        log.warning("No usable running time for the new video segment (rejected: {})"
+                    .format(candidates))
+        return None
 
 
     def moveSegment(self, splitmuxsink, fragment_id, first_sample=None):
