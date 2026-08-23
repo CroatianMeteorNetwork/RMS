@@ -46,9 +46,11 @@ Schema (npz, <night>_still_star_states.npz):
 from __future__ import absolute_import, division, print_function
 
 import calendar
+import datetime
 import glob
 import json
 import os
+import time
 
 import numpy as np
 
@@ -61,6 +63,7 @@ log = getLogger("rmslogger")
 
 from RMS.Formats import FFfile, StarCatalog
 from RMS.Formats.Platepar import Platepar
+from RMS.Misc import rssSuffix
 from RMS.PatchPhotometry import (detectStars, measurePatchFluxes,
     nightNoiseFloor)
 
@@ -75,6 +78,11 @@ BRIGHT_RATE_MIN = 0.5    # CALSTARS match rate (this night, measured) above whic
 CELL_NX, CELL_NY = 8, 5  # stack-channel grid - matches the transparency map
 
 MIN_NIGHT_STILLS = 20
+
+STILLS_PROGRESS_EVERY = 500  # stills between progress lines. A backlogged night
+                             # can reach ~21k stills, so this is ~43 lines and,
+                             # at the contended rate measured on the pods, under
+                             # a minute between them.
 
 
 def sidecarFileName(night_name):
@@ -237,7 +245,19 @@ def sampleStillsForNight(config, image_blocks, night_dir):
     bright_set = set(int(i) for i in bright_ids)
     W = H = None
 
+    # The second of the flux stage's long silent stretches, and the one both observed
+    # pod OOM kills landed inside (measured at 35 min for 21511 stills with six cameras
+    # contending, ~33 stills/s on the same box uncontended). Progress and resident size
+    # go out on the way through so the next kill can be placed.
+    t_sampling_start = time.time()
+
     for j, (t, path) in enumerate(stills):
+
+        if j and not j%STILLS_PROGRESS_EVERY:
+            log.info("Stills sampler: {:d}/{:d} stills, elapsed {:s}{:s}".format(
+                j, n_stills,
+                str(datetime.timedelta(seconds=int(time.time() - t_sampling_start))),
+                rssSuffix()))
 
         t_unix[j] = calendar.timegm(t.timetuple()) + t.microsecond/1e6
 

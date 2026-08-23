@@ -47,6 +47,48 @@ if sys.version_info[0] < 3:
 log = getLogger("rmslogger")
 
 
+def processRSSMiB():
+    """ Resident set size of THIS process in MiB, or None where it cannot be read.
+
+    The morning pipeline has no memory instrumentation at all, which is why a repeating
+    OOM on the multi-camera pods could only ever be reasoned about from stage timings:
+    the long stages log nothing, so a kill lands in a silent stretch and leaves no
+    record of how large the process had grown. Cheap enough (one small /proc read) to
+    sit inside a per-frame progress line.
+
+    Reads /proc/self/status rather than taking a psutil dependency, and returns None
+    off Linux so callers can format it away without branching on the platform.
+
+    Return:
+        [float | None] Resident set size in MiB.
+    """
+
+    try:
+        with open("/proc/self/status") as f:
+            for line in f:
+                if line.startswith("VmRSS:"):
+
+                    # The line reads "VmRSS:  <n> kB"
+                    return int(line.split()[1])/1024.0
+
+    except Exception:
+        pass
+
+    return None
+
+
+def rssSuffix():
+    """ Formatted RSS for appending to a progress line, empty where it is unavailable.
+
+    Return:
+        [str] e.g. ", RSS: 812 MiB", or "" off Linux.
+    """
+
+    rss = processRSSMiB()
+
+    return "" if rss is None else ", RSS: {:.0f} MiB".format(rss)
+
+
 def frameBufferShape(config):
     """ Return the shape of the shared frame buffer used for FF compression: (256, H, W).
 

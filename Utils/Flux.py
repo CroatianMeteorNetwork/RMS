@@ -15,6 +15,7 @@ import os
 import re
 import shutil
 import sys
+import time
 
 if sys.version_info[0] >= 3:
     import astropy.table
@@ -53,7 +54,8 @@ from RMS.Math import angularSeparation, pointInsideConvexPolygonSphere
 from RMS.Routines.FOVArea import fovArea, xyHt2Geo
 from RMS.Routines.MaskImage import MaskStructure, getMaskFile
 from RMS.Routines.SolarLongitude import jd2SolLonSteyaert, solLon2jdSteyaert, unwrapSol
-from RMS.Misc import SegmentedScale, mkdirP
+from RMS.Misc import SegmentedScale, mkdirP, rssSuffix
+from RMS.SlotGate import slotGate
 
 # Now that the Scale class has been defined, it must be registered so
 # that ``matplotlib`` can find it.
@@ -1661,6 +1663,22 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
         except Exception as e:
             log.warning("Could not write the star scoring product: {}".format(e))
 
+        # Release the build-time structures HERE, before the stills sampler runs.
+        # The sampler re-reads the product from disk (loadStarScoring in
+        # Utils.StillsSampler.sampleStillsForNight), so holding this copy across its
+        # run keeps the night's records resident twice for the whole sampling pass -
+        # measured at 35 min on a six-camera pod, and the stretch both observed pod
+        # OOM kills landed inside. This release used to sit below the sampler, which
+        # is the same double-hold it was added to prevent, one step too late.
+        # Nothing between here and the end of the block reads them.
+        star_records = None
+        try:
+            del s_arrs, f_meta
+        except NameError:
+            pass
+        import gc
+        gc.collect()
+
         # Sample the night's stills NOW, while they are still on disk and the
         # scoring product exists (the sampler falls back to the static platepar
         # on recalibration-starved nights, like the scoring pass): the tree estimator
@@ -1683,17 +1701,6 @@ def detectClouds(config, dir_path, N=5, mask=None, show_plots=True, save_plots=F
                         sampleStillsForNight(config, _blocks, dir_path)
         except Exception as e:
             log.warning("Stills sampling at scoring time failed: {}".format(e))
-
-        # Release the build-time structures BEFORE the transparency step re-loads
-        # the product from disk - holding both was part of the OOM that killed a
-        # station's capture process right at this point
-        star_records = None
-        try:
-            del s_arrs, f_meta
-        except NameError:
-            pass
-        import gc
-        gc.collect()
 
         # Transparency-map product for downstream consumers (contrail attribution):
         # per-frame, per-cell extinction computed on station so consumers just read
@@ -2134,6 +2141,10 @@ DENSE_MATCH_RADIUS_PX = 3.0   # px - a predicted star counts as matched if a CAL
                               # detection lies within this radius (same radius the light
                               # dome model is fitted with, see Utils.FitLightDome)
 
+SCORING_PROGRESS_EVERY = 100  # frames between progress lines out of the scoring loop.
+                              # A night is ~3400 frames, so this is ~34 lines - enough to
+                              # place a kill to the minute without bulking up the log.
+
 STORE_P_MIN = 0.02            # persisted-product floor on the model detection probability.
                               # An adaptive-depth fit can go very deep (catalog mag ~9,
                               # >10k stars/frame); below this floor a star's matches are
@@ -2378,7 +2389,21 @@ def denseDomeRatios(config, dome_model, ff_list, calstars_positions, recalibrate
     else:
         usable_px = None
 
-    for ff_file in sorted(ff_list):
+    # This loop is the first of the flux stage's two long silent stretches (measured at
+    # 33-35 min on a six-camera pod, 9 min on the same box uncontended). A kill landing
+    # inside it used to leave no record of where or how large the process was, so it
+    # reports progress and resident size on the way through.
+    ff_sorted = sorted(ff_list)
+    n_scored = len(ff_sorted)
+    t_scoring_start = time.time()
+
+    for i_ff, ff_file in enumerate(ff_sorted):
+
+        if i_ff and not i_ff%SCORING_PROGRESS_EVERY:
+            log.info("Cloud scoring: {:d}/{:d} frames, elapsed {:s}{:s}".format(
+                i_ff, n_scored,
+                str(datetime.timedelta(seconds=int(time.time() - t_scoring_start))),
+                rssSuffix()))
 
         detections = calstars_positions.get(ff_file)
 
@@ -5132,12 +5157,28 @@ def prepareFluxFiles(config, dir_path, ftpdetectinfo_path, mask=None, platepar=N
     # Compute collecting areas
     getCollectingArea(dir_path, config, flux_config, platepar, mask)
 
-    # Run cloud detection and store the appropriate files (don't finish if Python 2 is used, 
+    # Run cloud detection and store the appropriate files (don't finish if Python 2 is used,
     #   just recalibrate the platepar)
+    #
+    # Held under the machine-wide flux slot gate: everything expensive in the night's
+    # processing lives below this call - the dense per-frame scoring, the stills
+    # sampler, the transparency map, the tree estimator and the demo video - and
+    # co-located stations reach it within minutes of each other because they share a
+    # sunrise. Their peaks are set by star-record count, not camera resolution, so they
+    # do not shrink with the hardware and six of them coinciding is what OOM-kills a
+    # pod. See RMS.SlotGate; a station on its own is never gated.
+    #
+    # The gate sits at the call rather than around the heavy phases inside
+    # detectClouds because those phases are not one block: the body dedents between
+    # the scoring loop and the product/sampler/tree section, so no single `with` can
+    # span them. Consequence to revisit if the last wave's upload runs late: the demo
+    # video renders inside the gate too, rather than in parallel across all cameras.
     log.info("Detecting clouds...")
-    time_intervals = detectClouds(config, dir_path, mask=mask, save_plots=True, show_plots=False,
-        allow_model_fit=allow_model_fit, 
-        only_recalibrate_pp=(sys.version_info[0] < 3))
+
+    with slotGate("flux", getattr(config, "flux_stage_slots", 2)):
+        time_intervals = detectClouds(config, dir_path, mask=mask, save_plots=True, show_plots=False,
+            allow_model_fit=allow_model_fit,
+            only_recalibrate_pp=(sys.version_info[0] < 3))
 
 
     # Skip the flux part if running Python 2

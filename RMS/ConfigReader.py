@@ -632,6 +632,15 @@ class Config:
         # processing. Kept on station, never uploaded.
         self.transparency_demo_video = True
 
+        # Concurrent flux stages allowed per MACHINE, across every station on it.
+        # Co-located cameras share a sunrise, so their night processing reaches its
+        # heavy phase together, and that phase's cost is set by the night's star
+        # record count rather than by camera resolution - it does not shrink with
+        # smaller sensors. Six coinciding peaks is what OOM-kills a multi-camera
+        # box. A single-camera station always gets a slot, so this default is a
+        # no-op there. 0 disables the gate.
+        self.flux_stage_slots = 2
+
 
         #### Shower association
 
@@ -890,6 +899,9 @@ def parseSystem(config, parser):
 
     if parser.has_option(section, "reboot_lock_file"):
         config.reboot_lock_file = parser.get(section, "reboot_lock_file")
+
+    if parser.has_option(section, "flux_stage_slots"):
+        config.flux_stage_slots = max(0, parser.getint(section, "flux_stage_slots"))
 
     if parser.has_option(section, "time_server"):
         time_server = parser.get(section, "time_server").strip()

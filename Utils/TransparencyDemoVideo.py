@@ -226,6 +226,18 @@ def generateDemoVideo(config, night_dir, sidecar_path, max_stills=None):
         n_forced_f = np.bincount(cid[row == -2], minlength=n_cat_f)
         forced_ids = set(int(i) for i in
                          np.where(n_forced_f > n_match_f)[0])
+
+        # forced_ids is all this block produces, and the render below is a long
+        # streaming loop - on a backlogged night it runs for over an hour. Left bound,
+        # the night's records plus these two intp copies stay resident for all of it
+        # (a full scoring product is ~160 MB, and the intp upcasts add ~90 MB more)
+        # while the loop holds a flux slot it only needs for ffmpeg and one frame at
+        # a time. The frames are read one at a time precisely so this phase stays
+        # flat; holding the records would undo that.
+        del stars, cid, row, n_match_f, n_forced_f
+        import gc
+        gc.collect()
+
     except Exception:
         pass
     is_forced = np.array([int(i) in forced_ids for i in bright_ids])
