@@ -945,8 +945,27 @@ def getLogger(name=None, level="DEBUG", stdout=False):
 
     # Add stdout handler if requested
     if stdout:
-        out_hdlr = logging.StreamHandler(sys.stdout)
-        logger.addHandler(out_hdlr)
+
+        # Importing this module puts a stderr handler on the ROOT logger for pre-init
+        # messages (see the _pre_init_logger block at the top). A caller asking for
+        # stdout wants the console to be the terminal destination, so stop propagating:
+        # otherwise every record is written twice - once here, once to root's stderr -
+        # and a parent that merges the two streams (RMS.Reprocess.runFluxStage runs the
+        # flux stage with stderr=subprocess.STDOUT) forwards both copies into the
+        # station log. initLogging clears propagate for the capture parent already;
+        # the standalone entry points that pass stdout=True never call it.
+        logger.propagate = False
+
+        # logging.getLogger() returns a process-wide singleton, so a second call with
+        # stdout=True would stack another handler on the same logger and duplicate the
+        # output again. Adding the handler only once keeps the call idempotent.
+        already_on_stdout = any(
+            isinstance(h, logging.StreamHandler) and getattr(h, "stream", None) is sys.stdout
+            for h in logger.handlers)
+
+        if not already_on_stdout:
+            out_hdlr = logging.StreamHandler(sys.stdout)
+            logger.addHandler(out_hdlr)
 
     return logger
 
