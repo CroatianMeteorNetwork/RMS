@@ -1116,7 +1116,12 @@ def parseCapture(config, parser):
         config.media_backend = parser.get(section, "media_backend").strip().lower()
 
     if parser.has_option(section, "gst_colorspace"):
-        config.gst_colorspace = parser.get(section, "gst_colorspace").strip().upper()
+        gst_colorspace = parser.get(section, "gst_colorspace").strip()
+
+        # Normalize the formats explicitly supported by RMS, while preserving the case of other
+        # GStreamer formats (e.g. RGBx and v210) whose canonical names are case-sensitive.
+        supported_gst_colorspaces = {'bgr': 'BGR', 'gray8': 'GRAY8'}
+        config.gst_colorspace = supported_gst_colorspaces.get(gst_colorspace.lower(), gst_colorspace)
 
     if parser.has_option(section, "gst_decoder"):
         config.gst_decoder = parser.get(section, "gst_decoder")
