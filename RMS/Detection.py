@@ -364,8 +364,16 @@ def merge3DLines(line_list, vect_angle_thresh, last_count=0):
 
 
 
+# Count images rejected by the white ratio check to rate limit the warning below. QueuedPool
+# workers are long-lived and each process keeps its own count across images; this is not a
+# run-wide total and must not be reported as one.
+_white_ratio_reject_count = 0
+
+
 def checkWhiteRatio(img_thres, ff, max_white_ratio):
     """ Checks if there are too many threshold passers on an image. """
+
+    global _white_ratio_reject_count
 
     # Check if the image is too "white" and any further processing makes no sense
     # Compute the radio between the number of threshold passers and all pixels
@@ -375,8 +383,24 @@ def checkWhiteRatio(img_thres, ff, max_white_ratio):
 
     if white_ratio > max_white_ratio:
 
-        log.debug(("Too many threshold passers! White ratio is {:.2f}, which is higher than the "\
-            "max_white_ratio threshold: {:.2f}").format(white_ratio, max_white_ratio))
+        _white_ratio_reject_count += 1
+
+        msg = ("Too many threshold passers! White ratio is {:.4f}, which is higher than the "\
+            "max_white_ratio threshold: {:.4f}, so detection is skipped for this image. "\
+            "This is expected on bright or cloudy images, but "\
+            "if it happens on every image of a clear night the detection k1/j1 thresholds are "\
+            "too low for this camera (e.g. video paths that smooth per-pixel temporal noise, "\
+            "such as software re-encoded streams, can push the stdpixel-based threshold below "\
+            "the maxpixel noise floor).").format(white_ratio, max_white_ratio)
+
+        # Make the first rejection (and every 100th) visible at warning level - a station whose
+        # every image is rejected is effectively blind to meteors, and outside of debug logging
+        # this used to be completely silent
+        if (_white_ratio_reject_count == 1) or (_white_ratio_reject_count%100 == 0):
+            log.warning(msg)
+
+        else:
+            log.debug(msg)
 
         return False
 
