@@ -210,6 +210,7 @@ def astrometryNetSolveLocal(ff_file_path=None, img=None, mask=None, x_data=None,
     scales = {14, 15, 16, 17, 18, 19}
 
     size_hint = None
+    avg_fov_w = fov_h = None                 # set below when a FOV estimate is available
 
     if fov_w_range is not None:
 
@@ -334,10 +335,21 @@ def astrometryNetSolveLocal(ff_file_path=None, img=None, mask=None, x_data=None,
     position_hint_obj = None
     if position_hint is not None:
         ra_hint, dec_hint, radius_hint = position_hint
+
+        # The local solver restricts the reference catalog to within radius_hint of the hint
+        # centre. If that radius is smaller than the image's own angular field, the outer stars
+        # get excluded and the quad match fails - a regression on wide-FOV cameras (e.g. a 15 deg
+        # hint on a ~64 deg fisheye drops everything past 15 deg from centre). Never let the hint
+        # be tighter than the field's circum-radius (half-diagonal, small margin). Only when a
+        # FOV estimate is available (it always is from autoFitPlatepar).
+        if avg_fov_w is not None and fov_h is not None:
+            field_radius = np.hypot(avg_fov_w, fov_h)/2.0*1.1
+            radius_hint = max(float(radius_hint), field_radius)
+
         position_hint_obj = astrometry.PositionHint(
             ra_deg=float(ra_hint), dec_deg=float(dec_hint), radius_deg=float(radius_hint))
         if verbose:
-            print("Using position hint: RA={:.2f} Dec={:.2f} radius={:.1f} deg".format(
+            print("Using position hint: RA={:.2f} Dec={:.2f} radius={:.1f} deg (>= field radius)".format(
                 ra_hint, dec_hint, radius_hint))
 
     # If the solver.solve has the argument "stars", use a 2D array of stars instead of stars_xs and stars_ys
