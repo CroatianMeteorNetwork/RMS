@@ -489,7 +489,7 @@ def thresholdAndSubsample(np.ndarray[UINT8_TYPE_t, ndim=3] frames, \
 
             # Keep the original truncation order while making both narrowing conversions explicit.
             avg_std = <unsigned int> (
-                <int> (<double> compressed[2, y, x] + k1 * <double> compressed[3, y, x])
+                <int> (<double> compressed[2, y, x] + k1*<double> compressed[3, y, x])
                 + <double> j1
             )
 
