@@ -20,15 +20,18 @@ def _thresholdCount(max_value, average, stddev, k1, j1):
 
 
 @pytest.mark.parametrize(
-    "max_value, average, stddev, k1, j1",
+    "max_value, average, stddev, k1, j1, expected",
     [
-        # Truncate average + k1*stddev before adding the fractional offset.
-        (10, 10, 1, 0.6, 0.6),
+        # Production configs use integer j1 values, but the fractional value is intentional here to pin
+        # the truncation order for this function's float parameter.
+        (10, 10, 1, 0.6, 0.6, 1),
         # Preserve the normal integer-offset behavior.
-        (15, 10, 1, 0.6, 5.0),
+        (15, 10, 1, 0.6, 5.0, 1),
         # Clamp thresholds above the uint8 range to 255.
-        (255, 250, 10, 1.0, 0.0),
+        (255, 250, 10, 1.0, 0.0, 1),
+        # Reject a pixel below the threshold: avg_std = 10, max_value = 5.
+        (5, 10, 1, 0.6, 0.0, 0),
     ],
 )
-def testThresholdAndSubsampleThresholdConversion(max_value, average, stddev, k1, j1):
-    assert _thresholdCount(max_value, average, stddev, k1, j1) == 1
+def testThresholdAndSubsampleThresholdConversion(max_value, average, stddev, k1, j1, expected):
+    assert _thresholdCount(max_value, average, stddev, k1, j1) == expected
