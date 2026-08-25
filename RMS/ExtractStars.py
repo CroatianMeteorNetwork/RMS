@@ -817,7 +817,8 @@ def plotStars(img, x2, y2, bit_depth=None, title=None):
         y2: [array-like] Star Y coordinates.
 
     Keyword arguments:
-        bit_depth: [int] Image bit depth. Inferred from the image data type if not given.
+        bit_depth: [int] Image bit depth. Inferred for integer images if not given. Floating-point images
+            default to 8 bits because their source bit depth cannot be inferred from the data type.
         title: [str] Optional plot title.
     """
 
@@ -826,7 +827,10 @@ def plotStars(img, x2, y2, bit_depth=None, title=None):
         img = img.avepixel
 
     if bit_depth is None:
-        bit_depth = 8*img.dtype.itemsize
+        if np.issubdtype(img.dtype, np.integer):
+            bit_depth = np.iinfo(img.dtype).bits
+        else:
+            bit_depth = 8
 
     # Plot image with adjusted levels to better see stars
     max_level = 2**bit_depth - 1

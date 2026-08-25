@@ -133,3 +133,20 @@ def testPlotStarsSupportsFfStructuresAndBitDepth(monkeypatch):
     assert adjust_call['img'] is img
     assert adjust_call['maxv'] == 2**16 - 1
     assert adjust_call['nbits'] == 16
+
+
+def testPlotStarsDefaultsFloatingImagesToEightBits(monkeypatch):
+    adjust_call = {}
+    img = np.zeros((8, 8), dtype=np.float32)
+
+    def adjustLevels(input_img, minv, gamma, maxv, nbits=None):
+        adjust_call['maxv'] = maxv
+        adjust_call['nbits'] = nbits
+        return input_img
+
+    monkeypatch.setattr(ExtractStars.Image, 'adjustLevels', adjustLevels)
+    monkeypatch.setattr(ExtractStars.plt, 'show', lambda **kwargs: None)
+
+    ExtractStars.plotStars(img, [3], [4], title='Candidates')
+
+    assert adjust_call == {'maxv': 2**8 - 1, 'nbits': 8}
