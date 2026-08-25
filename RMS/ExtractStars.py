@@ -169,10 +169,13 @@ def extractStars(img, img_median=None, mask=None, gamma=1.0, max_star_candidates
     # plotStars(ff, x_arr, y_arr)
     
 
-    # Compute FWHM from one dimensional sigma
+    # Compute the FWHM from the RMS mean of the two axis sigmas, so it collapses to the standard
+    # 2.355*sigma for a circular star. The previous quadrature sum sqrt(sigma_x^2 + sigma_y^2)
+    # overestimated the FWHM by a factor of sqrt(2), and disagreed with the moment-based FWHM
+    # measured by SkyFit2 on manually picked stars.
     sigma_x_fitted = np.array(sigma_x_fitted)
     sigma_y_fitted = np.array(sigma_y_fitted)
-    sigma_fitted = np.sqrt(sigma_x_fitted**2 + sigma_y_fitted**2)
+    sigma_fitted = np.sqrt((sigma_x_fitted**2 + sigma_y_fitted**2)/2)
     fwhm = 2.355*sigma_fitted
 
     return x_arr, y_arr, amplitude, intensity, fwhm, background, snr, saturated_count
