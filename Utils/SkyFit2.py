@@ -179,7 +179,8 @@ from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP, \
     limitingMagnitude, screenNudgeToAzAltDelta, fovCentreZenithDirection
 from RMS.Astrometry.AtmosphericExtinction import atmosphericExtinctionCorrection
 from RMS.Astrometry.StarClasses import CatalogStar, GeoPoint, PlanetPoint, PairedStars
-from RMS.Astrometry.StarFilters import filterPhotometricOutliers, filterBlendedStars
+from RMS.Astrometry.StarFilters import filterPhotometricOutliers, filterBlendedStars, \
+    DEFAULT_BLEND_FWHM_MULT
 from RMS.Astrometry.Conversions import date2JD, JD2HourAngle, trueRaDec2ApparentAltAz, \
     apparentAltAz2TrueRADec, J2000_JD, jd2Date, datetime2JD, JD2LST, geo2Cartesian, vector2RaDec, raDec2Vector
 from RMS.Astrometry.AstrometryNet import astrometryNetSolve
@@ -5620,11 +5621,13 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Count matches using KD-tree for fast nearest-neighbor lookup
             # Dynamic match radius based on FWHM - wide stars have less precise centroids
+            # (multiplier rescaled 1.5 -> 2.1 to preserve the effective radius after the
+            # sqrt(2) FWHM convention fix in ExtractStars)
             cat_tree = cKDTree(np.column_stack([catalog_x, catalog_y]))
             det_coords = np.column_stack([x_arr, y_arr])
             nn_dist, _ = cat_tree.query(det_coords, k=1)
 
-            effective_radii = np.maximum(match_radius, 1.5 * fwhm_arr)
+            effective_radii = np.maximum(match_radius, 2.1 * fwhm_arr)
             matched = nn_dist <= effective_radii
 
             n_true_pos = int(np.sum(matched))
@@ -5749,8 +5752,10 @@ class PlateTool(QtWidgets.QMainWindow):
             segment_radius > 2 * sigma / sqrt(max_feature_ratio)
         where sigma = FWHM / 2.355.
 
-        Uses a multiplier of 1.5x the 90th percentile FWHM to provide margin for
-        the Gaussian fit while keeping the segment compact.
+        Uses a 2.1x margin on the minimum segment derived from the 90th percentile FWHM to
+        provide room for the Gaussian fit while keeping the segment compact (rescaled from
+        1.5x to preserve the selected segment_radius after the sqrt(2) FWHM convention fix
+        in ExtractStars).
 
         Arguments:
             ff_name: [str] Name of the FF file.
@@ -5813,7 +5818,9 @@ class PlateTool(QtWidgets.QMainWindow):
             matched_fwhms = []
             n_true_pos = 0
             for det_x, det_y, det_fwhm in zip(x_arr, y_arr, fwhm_arr):
-                effective_radius = max(match_radius, 1.5 * det_fwhm)
+                # Multiplier rescaled 1.5 -> 2.1 to preserve the effective radius after the
+                # sqrt(2) FWHM convention fix in ExtractStars
+                effective_radius = max(match_radius, 2.1 * det_fwhm)
                 distances = np.sqrt((visible_cat_x - det_x)**2 + (visible_cat_y - det_y)**2)
                 if np.min(distances) <= effective_radius:
                     n_true_pos += 1
@@ -5846,11 +5853,12 @@ class PlateTool(QtWidgets.QMainWindow):
             # Compute segment_radius from FWHM
             # Need: segment_radius > 2 * sigma / sqrt(max_feature_ratio)
             # sigma = FWHM / 2.355
-            # With 1.5x margin for robust fitting:
+            # With 2.1x margin for robust fitting (rescaled from 1.5x to preserve the selected
+            # segment_radius after the sqrt(2) FWHM convention fix in ExtractStars):
             max_feature_ratio = getattr(self.config, 'max_feature_ratio', 0.8)
             sigma_90 = fwhm_90 / 2.355
             min_segment = 2 * sigma_90 / np.sqrt(max_feature_ratio)
-            best_segment = int(np.ceil(min_segment * 1.5))
+            best_segment = int(np.ceil(min_segment * 2.1))
 
             # Clamp to valid range [4, 20]
             best_segment = max(4, min(20, best_segment))
@@ -5858,9 +5866,9 @@ class PlateTool(QtWidgets.QMainWindow):
             print(f"    FWHM stats ({len(all_fwhms)} stars): "
                   f"median={fwhm_median:.1f}, 90th={fwhm_90:.1f}, max={fwhm_max:.1f} px")
             print(f"    min segment for 90th FWHM: {min_segment:.1f} px "
-                  f"(with 1.5x margin: {min_segment * 1.5:.1f})")
+                  f"(with 2.1x margin: {min_segment * 2.1:.1f})")
             print(f"\n  Selected segment_radius: {best_segment} "
-                  f"(from 1.5x FWHM-derived minimum)")
+                  f"(from 2.1x FWHM-derived minimum)")
 
             return best_segment, n_true_pos, fp_ratio
 
@@ -8827,7 +8835,7 @@ class PlateTool(QtWidgets.QMainWindow):
         return removed_count
 
 
-    def filterBlendedStars(self, fwhm_mult=2.0, mag_margin=0.3):
+    def filterBlendedStars(self, fwhm_mult=DEFAULT_BLEND_FWHM_MULT, mag_margin=0.3):
         """
         Filter paired_stars by removing likely blended stars.
 
@@ -12869,7 +12877,7 @@ class PlateTool(QtWidgets.QMainWindow):
                     sky_obj = CatalogStar(cat_star[0], cat_star[1], cat_star[2])
 
                     # Look up FWHM, SNR, and saturation from detected stars
-                    fwhm, snr, saturated = 2.5, 1.0, False
+                    fwhm, snr, saturated = 1.8, 1.0, False
                     if len(det_x) > 0:
                         distances = np.sqrt((det_x - img_x)**2 + (det_y - img_y)**2)
                         closest_idx = np.argmin(distances)
@@ -12908,7 +12916,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Filter blended stars before final fit
         if len(self.paired_stars) >= 15:
-            removed = self.filterBlendedStars(fwhm_mult=2.0, mag_margin=0.3)
+            removed = self.filterBlendedStars(fwhm_mult=DEFAULT_BLEND_FWHM_MULT, mag_margin=0.3)
             if removed > 0:
                 print("Pairs after blend filtering: {}".format(len(self.paired_stars)))
 
@@ -13873,7 +13881,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Filter blended stars before final fit
             if len(self.paired_stars) >= 15:
-                removed = self.filterBlendedStars(fwhm_mult=2.0, mag_margin=0.3)
+                removed = self.filterBlendedStars(fwhm_mult=DEFAULT_BLEND_FWHM_MULT, mag_margin=0.3)
                 if removed > 0:
                     print("Pairs after blend filtering: {}".format(len(self.paired_stars)))
 
