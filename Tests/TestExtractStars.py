@@ -155,6 +155,26 @@ def testPlotStarsDefaultsFloatingImagesToEightBits(monkeypatch):
     assert adjust_call == {'maxv': 2**8 - 1, 'nbits': 8}
 
 
+def testPlotStarsAutomaticallyAdjustsBackgroundLevels(monkeypatch):
+    adjust_call = {}
+    img = np.arange(10000, dtype=np.uint16).reshape((100, 100))
+
+    def adjustLevels(input_img, minv, gamma, maxv, nbits=None):
+        adjust_call['minv'] = minv
+        adjust_call['gamma'] = gamma
+        adjust_call['maxv'] = maxv
+        return input_img
+
+    monkeypatch.setattr(ExtractStars.Image, 'adjustLevels', adjustLevels)
+    monkeypatch.setattr(ExtractStars.plt, 'show', lambda **kwargs: None)
+
+    ExtractStars.plotStars(img, [3], [4])
+
+    assert adjust_call['minv'] == np.percentile(img, 1.0)
+    assert adjust_call['gamma'] == 1.3
+    assert adjust_call['maxv'] == np.percentile(img, 99.99)
+
+
 def testPlotStarsMarksFittedPositions(monkeypatch):
     plot_data = {}
     original_subplots = ExtractStars.plt.subplots

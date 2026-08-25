@@ -844,9 +844,19 @@ def plotStars(img, x2, y2, bit_depth=None, title=None, x_fitted=None, y_fitted=N
         else:
             bit_depth = 8
 
-    # Plot image with adjusted levels to better see stars
+    # Automatically stretch the average-pixel background while retaining bright stars
     max_level = 2**bit_depth - 1
-    adjusted_img = Image.adjustLevels(img, 0, 1.3, max_level, nbits=bit_depth)
+    min_level = np.percentile(img, 1.0)
+    max_display_level = np.percentile(img, 99.99)
+
+    # Fall back to the full range for flat images where percentile levels are identical
+    if max_display_level <= min_level:
+        min_level = 0
+        max_display_level = max_level
+
+    adjusted_img = Image.adjustLevels(
+        img, min_level, 1.3, max_display_level, nbits=bit_depth
+    )
     fig, ax = plt.subplots()
     ax.imshow(adjusted_img, cmap='gray')
 
