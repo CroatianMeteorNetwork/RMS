@@ -2382,11 +2382,25 @@ def computeFluxCorrectionsOnBins(
                     if np.degrees(ang_vel) < flux_config.ang_vel_min:
                         area = 0.0
 
-                    # Compute the range correction
-                    range_correction = (1e5/r)**2
+                    # Compute the range correction (capped to an order of magnitude, as
+                    # blocks are excluded below 20 deg elevation anyway)
+                    range_correction = max((1e5/r)**2, 0.1)
 
-                    # Compute angular velocity correction relative to the nightly mean
-                    ang_vel_correction = ang_vel/ang_vel_mid
+                    # Compute the angular velocity correction relative to the middle of
+                    # the FOV. Meteors in blocks slower than the FOV middle are seen to a
+                    # deeper limiting magnitude, so those blocks must be boosted - the same
+                    # convention as the range correction, where the disadvantaged (farther)
+                    # block gets a correction < 1. This ratio used to be inverted
+                    # (ang_vel/ang_vel_mid), which suppressed slow blocks and boosted fast
+                    # ones, biasing the flux by up to a factor of ~2 with the sign depending
+                    # on where the radiant sits relative to the FOV.
+                    # The correction is capped to a factor of 10 to avoid unphysically large
+                    # boosts near the radiant (blocks within rad_dist_min are already
+                    # excluded).
+                    if ang_vel > 0:
+                        ang_vel_correction = min(max(ang_vel_mid/ang_vel, 0.1), 10)
+                    else:
+                        ang_vel_correction = 10.0
 
                     # Apply corrections
 
@@ -2396,8 +2410,7 @@ def computeFluxCorrectionsOnBins(
                     sensitivity_corr_arr.append(sensitivity_ratio)
                     correction_ratio *= sensitivity_ratio
 
-                    # Correct for the range (cap to an order of magnitude correction)
-                    # range_correction = max(range_correction, 0.1)
+                    # Correct for the range (capped above)
                     range_corr_arr.append(range_correction)
                     correction_ratio *= range_correction
 
@@ -2408,8 +2421,7 @@ def computeFluxCorrectionsOnBins(
                     radiant_elev_corr_arr.append(radiant_elev_correction)
                     correction_ratio *= radiant_elev_correction
 
-                    # Correct for angular velocity (cap to an order of magnitude correction)
-                    # ang_vel_correction = min(max(ang_vel_correction, 0.1), 10)
+                    # Correct for angular velocity (capped above)
                     correction_ratio *= ang_vel_correction
                     ang_vel_corr_arr.append(ang_vel_correction)
 
@@ -3006,7 +3018,9 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
         for meteor, shower in associations.values():
             meteor_date = jd2Date(meteor.jdt_ref, dt_obj=True)
 
-            # Filter out meteors ending too close to the radiant
+            # Filter out meteors beginning or ending too close to the radiant (blocks within
+            # rad_dist_min of the radiant are excluded from the effective collection area, so
+            # meteors seen there must not be counted either)
             ra, dec, _ = shower.computeApparentRadiant(platepar.lat, platepar.lon, meteor.jdt_ref, \
                 meteor_fixed_ht=meteor_ht)
             radiant_azim, radiant_elev = raDec2AltAz(ra, dec, meteor.jdt_ref, platepar.lat, platepar.lon)
@@ -3026,8 +3040,31 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
                     )
                 )
                 < flux_config.rad_dist_min
+                or np.degrees(
+                    angularSeparation(
+                        np.radians(radiant_azim),
+                        np.radians(radiant_elev),
+                        np.radians(meteor.beg_azim),
+                        np.radians(meteor.beg_alt),
+                    )
+                )
+                < flux_config.rad_dist_min
             ):
                 continue
+
+            # Skip meteors with an observed angular velocity below the minimum, mirroring the
+            # exclusion of slow blocks from the effective collection area. Without this,
+            # meteors detected in sky regions that contribute no collection area would still
+            # be counted, inflating the flux.
+            if (len(meteor.jd_array) >= 2) and (meteor.jd_array[-1] > meteor.jd_array[0]):
+
+                obs_ang_vel = np.degrees(angularSeparation(
+                    np.radians(meteor.ra_array[0]), np.radians(meteor.dec_array[0]),
+                    np.radians(meteor.ra_array[-1]), np.radians(meteor.dec_array[-1])
+                    ))/((meteor.jd_array[-1] - meteor.jd_array[0])*86400)
+
+                if obs_ang_vel < flux_config.ang_vel_min:
+                    continue
 
             num_meteors += 1
 
