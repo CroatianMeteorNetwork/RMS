@@ -30,7 +30,8 @@ def testCandidatesAreShownBeforePsfFit(monkeypatch):
     extra_info = {}
 
     def recordCandidates(img, x_data, y_data, **kwargs):
-        events.append(('plot', len(x_data), len(y_data)))
+        fitted_count = len(kwargs['x_fitted']) if kwargs.get('x_fitted') is not None else 0
+        events.append(('plot', len(x_data), len(y_data), fitted_count))
 
     def recordFit(*args, **kwargs):
         events.append(('fit', len(args[2]), len(args[3])))
@@ -46,8 +47,10 @@ def testCandidatesAreShownBeforePsfFit(monkeypatch):
 
     assert status is not False
     assert events == [
-        ('plot', extra_info['num_candidates'], extra_info['num_candidates']),
-        ('fit', extra_info['num_candidates'], extra_info['num_candidates'])
+        ('plot', extra_info['num_candidates'], extra_info['num_candidates'], 0),
+        ('fit', extra_info['num_candidates'], extra_info['num_candidates']),
+        ('plot', extra_info['num_candidates'], extra_info['num_candidates'],
+         extra_info['num_candidates'])
     ]
 
 
@@ -150,3 +153,27 @@ def testPlotStarsDefaultsFloatingImagesToEightBits(monkeypatch):
     ExtractStars.plotStars(img, [3], [4], title='Candidates')
 
     assert adjust_call == {'maxv': 2**8 - 1, 'nbits': 8}
+
+
+def testPlotStarsMarksFittedPositions(monkeypatch):
+    plot_data = {}
+    original_subplots = ExtractStars.plt.subplots
+
+    def recordSubplots():
+        fig, ax = original_subplots()
+        plot_data['ax'] = ax
+        return fig, ax
+
+    monkeypatch.setattr(ExtractStars.plt, 'subplots', recordSubplots)
+    monkeypatch.setattr(ExtractStars.plt, 'show', lambda **kwargs: None)
+
+    ExtractStars.plotStars(
+        np.zeros((8, 8), dtype=np.uint8), [3, 5], [4, 6],
+        x_fitted=[3.25], y_fitted=[4.25]
+    )
+
+    ax = plot_data['ax']
+    assert len(ax.patches) == 2
+    assert len(ax.lines) == 1
+    assert list(ax.lines[0].get_xdata()) == [3.25]
+    assert list(ax.lines[0].get_ydata()) == [4.25]

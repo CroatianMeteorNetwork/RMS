@@ -79,7 +79,8 @@ def extractStars(img, img_median=None, mask=None, gamma=1.0, max_star_candidates
             (hot pixels are narrow, while stars are round).
         max_feature_ratio: [float] Maximum ratio between 2 sigma of the star and the image segment area.
         bit_depth: [int] Bit depth of the image. 8 bits by default.
-        show_candidates: [bool] Show the raw star candidates before PSF fitting. False by default.
+        show_candidates: [bool] Show the raw star candidates before PSF fitting and the successfully fitted
+            stars afterwards. False by default.
     
     Return:
         x2, y2, background, intensity, fwhm: [list of ndarrays]
@@ -171,6 +172,14 @@ def extractStars(img, img_median=None, mask=None, gamma=1.0, max_star_candidates
         gamma=gamma,
         segment_radius=segment_radius, roundness_threshold=roundness_threshold, 
         max_feature_ratio=max_feature_ratio, bit_depth=bit_depth
+        )
+
+    # Compare all raw candidates with the stars which passed PSF fitting
+    if show_candidates:
+        plotStars(
+            img, x_init, y_init, bit_depth=bit_depth,
+            title='PSF fitting result ({:d}/{:d} fitted)'.format(len(x_arr), num_objects),
+            x_fitted=x_arr, y_fitted=y_arr
         )
     
     # x_arr, y_arr, amplitude, intensity = list(x), list(y), [], [] # Skip PSF fit
@@ -293,7 +302,8 @@ def extractStarsFF(
         flat_struct: [Flat struct] Structure containing the flat field. None by default.
         dark: [ndarray] Dark frame. None by default.
         mask: [ndarray] Mask image. None by default.
-        show_candidates: [bool] Show the raw star candidates before PSF fitting. False by default.
+        show_candidates: [bool] Show the raw star candidates before PSF fitting and the successfully fitted
+            stars afterwards. False by default.
 
     Return:
         x2, y2, background, intensity, fwhm: [list of ndarrays]
@@ -808,7 +818,7 @@ def fitPSF(img, img_median, x_init, y_init, gamma=1.0, segment_radius=4, roundne
 
 
 
-def plotStars(img, x2, y2, bit_depth=None, title=None):
+def plotStars(img, x2, y2, bit_depth=None, title=None, x_fitted=None, y_fitted=None):
     """ Plots detected stars on the input image.
 
     Arguments:
@@ -820,6 +830,8 @@ def plotStars(img, x2, y2, bit_depth=None, title=None):
         bit_depth: [int] Image bit depth. Inferred for integer images if not given. Floating-point images
             default to 8 bits because their source bit depth cannot be inferred from the data type.
         title: [str] Optional plot title.
+        x_fitted: [array-like] Successfully fitted star X coordinates. None by default.
+        y_fitted: [array-like] Successfully fitted star Y coordinates. None by default.
     """
 
     # Preserve compatibility with callers passing an FF structure
@@ -839,10 +851,21 @@ def plotStars(img, x2, y2, bit_depth=None, title=None):
     ax.imshow(adjusted_img, cmap='gray')
 
     # Plot stars
-    for star in zip(list(y2), list(x2)):
+    for i, star in enumerate(zip(list(y2), list(x2))):
         y, x = star
-        c = plt.Circle((x, y), 5, fill=False, color='r')
+        label = 'Raw candidates' if i == 0 else None
+        c = plt.Circle((x, y), 5, fill=False, color='r', label=label)
         ax.add_patch(c)
+
+    # Mark the successfully fitted stars separately so rejected candidates remain visible in red
+    if (x_fitted is not None) and (y_fitted is not None):
+        ax.plot(
+            list(x_fitted), list(y_fitted), linestyle='None', marker='+', markersize=8,
+            markeredgewidth=1.5, color='lime', label='PSF-fitted stars'
+        )
+
+    if len(x2) or ((x_fitted is not None) and len(x_fitted)):
+        ax.legend(loc='upper right')
 
     if title is not None:
         ax.set_title(title)
@@ -861,8 +884,8 @@ def extractStarsAndSave(config, ff_dir, show_candidates=False):
         ff_dir: [str] Path to directory where FF files are.
 
     Keyword arguments:
-        show_candidates: [bool] Show raw star candidates before PSF fitting and process FF files
-            sequentially. False by default.
+        show_candidates: [bool] Show raw star candidates before PSF fitting, show successfully fitted stars
+            afterwards, and process FF files sequentially. False by default.
 
     Return:
         star_list: [list] A list of [ff_name, star_data] entries, where star_data contains a list of 
@@ -1012,7 +1035,8 @@ if __name__ == "__main__":
     arg_parser.add_argument('-s', '--showstd', action="store_true", help="""Show a histogram of stddevs of PSFs of all detected stars. """)
 
     arg_parser.add_argument('--show-candidates', action="store_true", help="""Show raw star candidates
-        before PSF fitting. Files are processed sequentially and each window must be closed to continue. """)
+        before PSF fitting and successfully fitted stars afterwards. Files are processed sequentially and
+        each window must be closed to continue. """)
 
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
