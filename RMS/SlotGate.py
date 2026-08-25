@@ -50,10 +50,22 @@ DEFAULT_SLOT_DIR = "/tmp/.rms_flux_slots"
 # nothing measurable, short enough that a freed slot is picked up promptly.
 POLL_INTERVAL = 5.0
 
-# Cap on how long a station will wait before giving up and running ungated. Sized
-# against the caller's own ceiling: RMS.Reprocess.FLUX_STAGE_TIMEOUT kills a wedged
-# flux stage at 4 h, so a slot cannot credibly stay held longer than that.
+# Cap on how long a station will wait before giving up and running ungated. This is a
+# policy choice, not a bound derived from the holder: a holder gets its caller's full
+# work budget on the far side of its own wait (see GATE_WORK_START_MARKER), so it can
+# legitimately hold a slot for longer than any one budget. What the number trades is
+# waiting - free, if unnerving in a log - against running ungated, which is the
+# coinciding peak this gate exists to prevent. Waits of ~3 h are normal on a
+# six-camera pod, so anything much shorter would give the gate up on a routine night.
 DEFAULT_TIMEOUT = 4*3600
+
+# Token a waiter prints once its wait is over, on the paths where it actually waited.
+# A parent that timed the child started its clock before the child reached the gate,
+# so without this the queue is charged to the work budget - observed on a six-camera
+# pod: a 2 h 48 min wait left 1 h 12 min of a 4 h budget and the stage was killed with
+# its products unwritten. RMS.Reprocess.runFluxStage watches the forwarded stdout for
+# this token and restarts its clock there.
+GATE_WORK_START_MARKER = "[gate-work-start]"
 
 
 @contextmanager
@@ -159,6 +171,12 @@ def slotGate(name, slots, slot_dir=None, timeout=DEFAULT_TIMEOUT,
     if handle is not None:
         log.info("%s gate: slot %d/%d acquired after %.0f s%s", name, index + 1,
                  slots, time.time() - t_start, rssSuffix())
+
+    # Only when a wait actually happened: a caller that never queued has nothing to
+    # credit back, and the marker would be one more line in every night's log
+    if waited_logged:
+        log.info("%s gate: %s, work begins after %.0f s of waiting", name,
+                 GATE_WORK_START_MARKER, time.time() - t_start)
 
     try:
         yield index

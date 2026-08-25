@@ -15,6 +15,7 @@ to fall through to running ungated.
 
 from __future__ import absolute_import, division, print_function
 
+import logging
 import os
 import subprocess
 import sys
@@ -22,7 +23,7 @@ import time
 
 import pytest
 
-from RMS.SlotGate import slotGate
+from RMS.SlotGate import GATE_WORK_START_MARKER, slotGate
 
 
 # fcntl.flock is the whole mechanism
@@ -141,6 +142,37 @@ def test_exhaustedGateProceedsUngated(tmpdir):
             # None means the body runs, just without a slot
             assert second is None
             assert time.time() - t_start >= 0.2
+
+
+def test_waitingIsAnnouncedSoTheCallerCanCreditIt(tmpdir, caplog):
+    """ A caller timing this stage started its clock before the wait began.
+
+    Without the marker on the far side of the queue, hours spent waiting are charged to
+    the work budget and a stage that is nearly finished gets killed (observed on AUC0A2:
+    a 2 h 48 min wait inside a 4 h budget). See RMS.Reprocess.runFluxStage.
+    """
+
+    slot_dir = str(tmpdir.join("slots"))
+
+    with slotGate("t", 1, slot_dir=slot_dir, poll_interval=0.02):
+
+        with caplog.at_level(logging.INFO, logger="rmslogger"):
+            with slotGate("t", 1, slot_dir=slot_dir, timeout=0.2, poll_interval=0.02):
+                pass
+
+    assert any(GATE_WORK_START_MARKER in r.getMessage() for r in caplog.records)
+
+
+def test_anUncontestedGateStaysQuiet(tmpdir, caplog):
+    """ Nothing was queued, so there is nothing to credit - and no marker line. """
+
+    slot_dir = str(tmpdir.join("slots"))
+
+    with caplog.at_level(logging.INFO, logger="rmslogger"):
+        with slotGate("t", 2, slot_dir=slot_dir, poll_interval=0.02):
+            pass
+
+    assert not any(GATE_WORK_START_MARKER in r.getMessage() for r in caplog.records)
 
 
 def test_zeroSlotsDisablesTheGate(tmpdir):

@@ -13,6 +13,7 @@ import shutil
 import subprocess
 import tempfile
 import threading
+import time
 from datetime import timedelta
 
 from RMS.ArchiveDetections import archiveDetections, archiveFieldsums, archiveFrameTimelapse
@@ -49,17 +50,21 @@ from RMS.Misc import RmsDateTime, tarWithProgress, setMultiprocessingStartMethod
 from RMS.Pickling import savePickle
 from RMS.RunExternalScript import runExternalScript
 from RMS.RunFluxStage import STATE_FILE_NAME as FLUX_STATE_FILE_NAME
+from RMS.SlotGate import GATE_WORK_START_MARKER
 
 # Get the logger from the main module
 log = getLogger("rmslogger")
 
 
 FLUX_STAGE_TIMEOUT = 4*3600
-                    # seconds before a wedged flux stage is killed. Only reachable now that
-                    # the stage runs in its own process - an in-process stage that never
-                    # returned hung the capture loop with no way out. Set far above any
-                    # observed run so a slow night is never truncated; this is a deadlock
-                    # backstop, not a schedule
+                    # seconds of WORK before a wedged flux stage is killed - time the child
+                    # spends queueing on the flux slot gate is credited back and does not
+                    # count (see runFluxStage), so the ceiling on total wall time is this
+                    # plus RMS.SlotGate.DEFAULT_TIMEOUT. Only reachable now that the stage
+                    # runs in its own process - an in-process stage that never returned hung
+                    # the capture loop with no way out. Set far above any observed run so a
+                    # slow night is never truncated; this is a deadlock backstop, not a
+                    # schedule
 
 
 
@@ -165,20 +170,38 @@ def getPlatepar(config, night_data_dir):
 
 
 
-def _forwardStageLog(stream):
+def _forwardStageLog(stream, work_start=None):
     """ Forward a child stage's stdout into this process's log, one line at a time.
 
     Arguments:
         stream: [file] The child's stdout, opened in text mode.
+
+    Keyword arguments:
+        work_start: [list] Single-element list holding the time the stage's work
+            budget starts from. Rewritten to now when the child reports that it is
+            through the machine-wide flux slot gate, so that queueing behind other
+            stations is not charged against the budget the work itself needs.
     """
+
+    credited = False
 
     try:
         for line in iter(stream.readline, ''):
 
             line = line.rstrip()
 
-            if line:
-                log.info(line)
+            if not line:
+                continue
+
+            log.info(line)
+
+            # Only the first marker counts, so a stage cannot keep pushing its own
+            # deadline out - the point is to skip the queue, not to run unbounded
+            if (work_start is not None) and (not credited) \
+                    and (GATE_WORK_START_MARKER in line):
+
+                work_start[0] = time.time()
+                credited = True
 
     except Exception:
         # A broken pipe here must never take down the stage that is still running
@@ -213,7 +236,8 @@ def runFluxStage(config, night_data_dir, ftpdetectinfo_path, mask=None, platepar
         mask: [MaskStructure] Mask in use, or None to let the stage load it.
         platepar: [Platepar] Platepar in use, or None to let the stage load it.
         allow_model_fit: [bool] Whether the stage may fit a light-dome model. True by default.
-        timeout: [float] Seconds before a wedged stage is killed.
+        timeout: [float] Seconds of work before a wedged stage is killed. Time spent
+            waiting for a flux slot does not count against it.
 
     Return:
         [bool] True if the stage completed successfully.
@@ -245,20 +269,43 @@ def runFluxStage(config, night_data_dir, ftpdetectinfo_path, mask=None, platepar
         proc = subprocess.Popen(cmd, cwd=repo_root, stdout=subprocess.PIPE,
                                 stderr=subprocess.STDOUT, universal_newlines=True)
 
-        forwarder = threading.Thread(target=_forwardStageLog, args=(proc.stdout,),
+        # The budget below is for the stage's work. Before any of it runs, the child
+        # may queue on the machine-wide flux slot gate (RMS.SlotGate) - on a
+        # six-camera pod that wait is hours, and charging it here killed a stage that
+        # was only minutes from finishing. The forwarder moves this start time to the
+        # far side of that wait when the child reports clearing the gate.
+        work_start = [time.time()]
+
+        forwarder = threading.Thread(target=_forwardStageLog,
+                                     args=(proc.stdout, work_start),
                                      name="flux-stage-log")
         forwarder.daemon = True
         forwarder.start()
 
         try:
-            returncode = proc.wait(timeout=timeout)
+            budget_start = work_start[0]
 
-        except subprocess.TimeoutExpired:
-            log.error("The flux stage did not finish within {:d} s - killing it".format(
-                int(timeout)))
-            proc.kill()
-            proc.wait()
-            return False
+            while True:
+
+                try:
+                    returncode = proc.wait(timeout=max(budget_start + timeout - time.time(),
+                                                       0))
+                    break
+
+                except subprocess.TimeoutExpired:
+
+                    # What just elapsed may have been the gate wait rather than the
+                    # work. The forwarder moves the start time at most once, so this
+                    # gives the stage its budget over again at most once.
+                    if work_start[0] > budget_start:
+                        budget_start = work_start[0]
+                        continue
+
+                log.error("The flux stage did not finish within {:d} s of work - "
+                          "killing it".format(int(timeout)))
+                proc.kill()
+                proc.wait()
+                return False
 
         finally:
             forwarder.join(timeout=10)

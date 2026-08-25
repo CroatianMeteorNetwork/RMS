@@ -12,12 +12,14 @@ import logging
 import os
 import subprocess
 import sys
+import threading
 import types
 
 import pytest
 
 from RMS.Pickling import savePickle
 from RMS.RunFluxStage import STATE_FILE_NAME, runFluxStageFromState
+from RMS.SlotGate import GATE_WORK_START_MARKER
 
 
 class DummyPlatepar(object):
@@ -290,6 +292,95 @@ def test_wedgedStageIsKilled(tmpdir, monkeypatch):
     assert ok is False
     assert fake.killed
     assert not os.path.exists(stateDirOf(fake.cmd))
+
+
+class OneLineStream(object):
+    """ Child stdout that yields a single line, then signals EOF to the test.
+
+    The event fires only after the forwarder has come back for the next line, which
+    is how a test can know the first line has already been logged and acted upon.
+    """
+
+    def __init__(self, line, drained):
+        self.lines = [line]
+        self.drained = drained
+
+    def readline(self):
+
+        if self.lines:
+            return self.lines.pop(0)
+
+        self.drained.set()
+
+        return ''
+
+    def close(self):
+        pass
+
+
+class NeverFinishingPopen(object):
+    """ A stage that prints one line and then never exits, recording its budgets. """
+
+    def __init__(self, line):
+        self.drained = threading.Event()
+        self.waits = []
+        self.killed = False
+        self.cmd = None
+        self.cwd = None
+        self.stdout = OneLineStream(line, self.drained)
+
+    def wait(self, timeout=None):
+
+        # Let the forwarder deliver the line before the parent rules on the timeout
+        self.drained.wait(10)
+
+        if self.killed:
+            return -9
+
+        self.waits.append(timeout)
+
+        raise subprocess.TimeoutExpired("stage", timeout)
+
+    def kill(self):
+        self.killed = True
+
+
+def test_gateWaitIsNotChargedToTheStagesBudget(tmpdir, monkeypatch):
+    """ The stage's budget is for its work, and queueing for a slot is not work.
+
+    The parent starts its clock at Popen, but the child first waits on the machine-wide
+    flux slot gate - 2 h 48 min of a 4 h budget on a six-camera pod, which killed a stage
+    that had already written its scoring products. Once the child says it is through the
+    gate, the budget starts again from there.
+    """
+
+    night_dir = str(tmpdir)
+    fake = installFakePopen(monkeypatch, NeverFinishingPopen(
+        "flux gate: {:s}, work begins after 10085 s of waiting\n".format(
+            GATE_WORK_START_MARKER)))
+
+    ok = reprocess.runFluxStage(DummyConfig(), night_dir, "FTPdetectinfo.txt",
+                                timeout=0.05)
+
+    # It still dies - it never finishes - but only after a second, full budget
+    assert ok is False
+    assert fake.killed
+    assert len(fake.waits) == 2
+    assert fake.waits[1] > 0
+
+
+def test_theBudgetIsGrantedOnlyOnce(tmpdir, monkeypatch):
+    """ Ordinary output must not extend the deadline, or the backstop stops backstopping. """
+
+    night_dir = str(tmpdir)
+    fake = installFakePopen(monkeypatch, NeverFinishingPopen("Detecting clouds...\n"))
+
+    ok = reprocess.runFluxStage(DummyConfig(), night_dir, "FTPdetectinfo.txt",
+                                timeout=0.05)
+
+    assert ok is False
+    assert fake.killed
+    assert len(fake.waits) == 1
 
 
 def test_unstartableStageDoesNotPropagate(tmpdir, monkeypatch):

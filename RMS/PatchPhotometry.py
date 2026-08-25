@@ -71,10 +71,20 @@ def measurePatchFluxes(img, x, y, rng=None):
 
     x = np.asarray(x)
     y = np.asarray(y)
-    xi = np.round(x).astype(np.int64)
-    yi = np.round(y).astype(np.int64)
 
-    ok = (np.isfinite(x) & np.isfinite(y)
+    # Unfitted stars arrive here with NaN positions. Round only the finite ones:
+    # casting NaN to an integer is undefined, and numpy warns about it once per
+    # call - thousands of lines in a night's log for positions that are discarded
+    # two lines later anyway. The placeholder is outside every frame, so it fails
+    # the edge test on its own even before the finite mask is applied.
+    finite = np.isfinite(x) & np.isfinite(y)
+
+    xi = np.full(x.shape, -1, dtype=np.intp)
+    yi = np.full(y.shape, -1, dtype=np.intp)
+    xi[finite] = np.round(x[finite]).astype(np.intp)
+    yi[finite] = np.round(y[finite]).astype(np.intp)
+
+    ok = (finite
           & (xi >= EDGE_MARGIN) & (xi < w - EDGE_MARGIN)
           & (yi >= EDGE_MARGIN) & (yi < h - EDGE_MARGIN))
 
