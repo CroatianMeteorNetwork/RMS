@@ -3018,7 +3018,9 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
         for meteor, shower in associations.values():
             meteor_date = jd2Date(meteor.jdt_ref, dt_obj=True)
 
-            # Filter out meteors ending too close to the radiant
+            # Filter out meteors beginning or ending too close to the radiant (blocks within
+            # rad_dist_min of the radiant are excluded from the effective collection area, so
+            # meteors seen there must not be counted either)
             ra, dec, _ = shower.computeApparentRadiant(platepar.lat, platepar.lon, meteor.jdt_ref, \
                 meteor_fixed_ht=meteor_ht)
             radiant_azim, radiant_elev = raDec2AltAz(ra, dec, meteor.jdt_ref, platepar.lat, platepar.lon)
@@ -3035,6 +3037,15 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
                         np.radians(radiant_elev),
                         np.radians(meteor.end_azim),
                         np.radians(meteor.end_alt),
+                    )
+                )
+                < flux_config.rad_dist_min
+                or np.degrees(
+                    angularSeparation(
+                        np.radians(radiant_azim),
+                        np.radians(radiant_elev),
+                        np.radians(meteor.beg_azim),
+                        np.radians(meteor.beg_alt),
                     )
                 )
                 < flux_config.rad_dist_min
