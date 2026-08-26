@@ -166,6 +166,7 @@ from RMS.Astrometry.AutoPlatepar import selectBestFrame, autoFitPlatepar
 from RMS.Astrometry.NNalign import alignPlatepar
 import RMS.ConfigReader as cr
 from RMS.ExtractStars import extractStarsAndSave, extractStarsFF
+from RMS import HotPixels
 import RMS.Formats.CALSTARS as CALSTARS
 from RMS.Formats.Platepar import Platepar, getCatalogStarsImagePositions
 from RMS.Formats.FFfile import convertFRNameToFF, constructFFName, validFFName
@@ -3069,6 +3070,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.zoom_window.addItem(self.centroid_star_markers2)
 
         self.draw_calstars = True
+        self.draw_hotpixels = True
 
 
         # Distortion center marker (red cross) - main window
@@ -3137,6 +3139,51 @@ class PlateTool(QtWidgets.QMainWindow):
         self.calstar_markers2.setSymbol('o')
         self.calstar_markers2.setZValue(5)
         self.zoom_window.addItem(self.calstar_markers2)
+
+        # Hot pixel markers - same double-ring design as the calstar markers, but amber.
+        # Detections at blacklisted positions (hotpixels.json) are drawn with these instead of
+        # the green rings
+
+        # hot pixel markers outer rings (dark amber) - main window
+        self.hotpixel_markers_outer = pg.ScatterPlotItem()
+        self.hotpixel_markers_outer.setPen(pg.mkPen((150, 90, 0, 255), width=1.5))
+        self.hotpixel_markers_outer.setBrush((0, 0, 0, 0))
+        self.hotpixel_markers_outer.setSize(14)
+        self.hotpixel_markers_outer.setSymbol('o')
+        self.hotpixel_markers_outer.setZValue(2)
+        self.img_frame.addItem(self.hotpixel_markers_outer)
+
+        # hot pixel markers inner rings (bright amber) - main window
+        self.hotpixel_markers = pg.ScatterPlotItem()
+        self.hotpixel_markers.setPen(pg.mkPen((255, 180, 0, 255), width=1.1))
+        self.hotpixel_markers.setBrush((0, 0, 0, 0))
+        self.hotpixel_markers.setSize(10)
+        self.hotpixel_markers.setSymbol('o')
+        self.hotpixel_markers.setZValue(2)
+        self.img_frame.addItem(self.hotpixel_markers)
+
+        # hot pixel markers outer rings (dark amber) - zoom window
+        self.hotpixel_markers_outer2 = pg.ScatterPlotItem()
+        self.hotpixel_markers_outer2.setPen(pg.mkPen((150, 90, 0, 255), width=1.5))
+        self.hotpixel_markers_outer2.setBrush((0, 0, 0, 0))
+        self.hotpixel_markers_outer2.setSize(28)
+        self.hotpixel_markers_outer2.setSymbol('o')
+        self.hotpixel_markers_outer2.setZValue(5)
+        self.zoom_window.addItem(self.hotpixel_markers_outer2)
+
+        # hot pixel markers inner rings (bright amber) - zoom window
+        self.hotpixel_markers2 = pg.ScatterPlotItem()
+        self.hotpixel_markers2.setPen(pg.mkPen((255, 180, 0, 255), width=1.1))
+        self.hotpixel_markers2.setBrush((0, 0, 0, 0))
+        self.hotpixel_markers2.setSize(20)
+        self.hotpixel_markers2.setSymbol('o')
+        self.hotpixel_markers2.setZValue(5)
+        self.zoom_window.addItem(self.hotpixel_markers2)
+
+        # Grouped so the show/hide/clear sites can treat the four rings as one unit, in step
+        # with the calstar markers
+        self.hotpixel_marker_items = [self.hotpixel_markers, self.hotpixel_markers2,
+            self.hotpixel_markers_outer, self.hotpixel_markers_outer2]
 
         # pick markers (manual reduction)
         self.pick_marker = pg.ScatterPlotItem()
@@ -3490,6 +3537,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.settings.sigLabelMagLimitChanged.connect(self.onLabelMagLimitChanged)
         self.tab.settings.sigConstellationToggled.connect(self.toggleShowConstellations)
         self.tab.settings.sigCalStarsToggled.connect(self.toggleShowCalStars)
+        self.tab.settings.sigHotPixelsToggled.connect(self.toggleShowHotPixels)
         self.tab.settings.sigSelStarsToggled.connect(self.toggleShowSelectedStars)
         self.tab.settings.sigPicksToggled.connect(self.toggleShowPicks)
         self.tab.settings.sigGreatCircleToggled.connect(self.toggleShowGreatCircle)
@@ -4922,11 +4970,19 @@ class PlateTool(QtWidgets.QMainWindow):
             y = star_data[:, 0]
             x = star_data[:, 1]
 
+            # Split off detections at blacklisted hot pixel positions - they get amber rings
+            # instead of green. The blacklist file is re-read here so external updates (the
+            # nightly pipeline, python -m RMS.HotPixels) show up on the next image change
+            hot = self._hotPixelMask(x, y)
+
             # Set both the inner and outer rings
-            self.calstar_markers.setData(x=x + 0.5, y=y + 0.5)
-            self.calstar_markers2.setData(x=x + 0.5, y=y + 0.5)
-            self.calstar_markers_outer.setData(x=x + 0.5, y=y + 0.5)
-            self.calstar_markers_outer2.setData(x=x + 0.5, y=y + 0.5)
+            self.calstar_markers.setData(x=x[~hot] + 0.5, y=y[~hot] + 0.5)
+            self.calstar_markers2.setData(x=x[~hot] + 0.5, y=y[~hot] + 0.5)
+            self.calstar_markers_outer.setData(x=x[~hot] + 0.5, y=y[~hot] + 0.5)
+            self.calstar_markers_outer2.setData(x=x[~hot] + 0.5, y=y[~hot] + 0.5)
+
+            for markers in self.hotpixel_marker_items:
+                markers.setData(x=x[hot] + 0.5, y=y[hot] + 0.5)
 
         else:
             # Clear all markers if no stars
@@ -4934,6 +4990,9 @@ class PlateTool(QtWidgets.QMainWindow):
             self.calstar_markers2.setData(pos=[])
             self.calstar_markers_outer.setData(pos=[])
             self.calstar_markers_outer2.setData(pos=[])
+
+            for markers in self.hotpixel_marker_items:
+                markers.setData(pos=[])
 
 
     def initStarDetectionOverrides(self):
@@ -5263,6 +5322,28 @@ class PlateTool(QtWidgets.QMainWindow):
             elif override_data and not merged:
                 merged = dict(override_data)
 
+        # Curate: drop detections at blacklisted hot pixel positions. Legacy CALSTARS files and
+        # re-detected frames still contain them (the display marks them amber), but the
+        # night-wide fitting steps must never treat them as stars. The blacklist is loaded once
+        # here, not per frame
+        if getattr(self.config, 'hot_pixels_filter', True):
+
+            hp_xy = HotPixels.loadHotPixelCoords(self.dir_path, self.config)
+
+            if len(hp_xy):
+                radius = getattr(self.config, 'hot_pixels_radius', 2.0)
+                curated = {}
+                for ff, stars in merged.items():
+                    rows = list(stars)
+                    if not rows:
+                        continue
+                    hot = HotPixels.matchHotPixels([r[1] for r in rows], [r[0] for r in rows],
+                        hp_xy, radius)
+                    kept = [row for row, h in zip(rows, hot) if not h]
+                    if kept:
+                        curated[ff] = kept
+                merged = curated
+
         return {ff: stars for ff, stars in merged.items() if len(stars) > 0}
 
 
@@ -5563,6 +5644,13 @@ class PlateTool(QtWidgets.QMainWindow):
             print(f"\n=== Star Detection Tuning ===")
             print(f"  Using deep catalog (LM={deep_catalog_lm}) for matching: {n_catalog_visible} stars in FOV")
 
+            # Report the hot pixel blacklist - blacklisted detections are excluded from every
+            # phase, otherwise they poison the precision estimates
+            n_hp = len(HotPixels.loadHotPixelCoords(self.dir_path, self.config)) \
+                if getattr(self.config, 'hot_pixels_filter', True) else 0
+            if n_hp:
+                print(f"  Hot pixel blacklist: {n_hp} pixels (excluded from all tuning phases)")
+
             if n_catalog_visible < 5:
                 qmessagebox(message=f"Only {n_catalog_visible} catalog stars visible in FOV.\n"
                             "Need at least 5 for tuning. Try increasing catalog magnitude limit.",
@@ -5824,6 +5912,27 @@ class PlateTool(QtWidgets.QMainWindow):
             self.config.max_stars = original_max_stars
 
 
+    def _hotPixelMask(self, x_arr, y_arr):
+        """ Boolean mask flagging detections at blacklisted hot pixel positions (True = hot).
+
+        On cameras with in-camera hot pixel filtering disabled, hot pixels can outnumber real
+        stars; anything judging detections against the catalog must exclude them first.
+        """
+
+        x_arr = np.asarray(x_arr, dtype=float)
+
+        if not getattr(self.config, 'hot_pixels_filter', True) or len(x_arr) == 0:
+            return np.zeros(len(x_arr), dtype=bool)
+
+        hp_xy = HotPixels.loadHotPixelCoords(self.dir_path, self.config)
+
+        if not len(hp_xy):
+            return np.zeros(len(x_arr), dtype=bool)
+
+        return HotPixels.matchHotPixels(x_arr, y_arr, hp_xy,
+            getattr(self.config, 'hot_pixels_radius', 2.0))
+
+
     def _countTrueFalsePositives(self, ff_name, gate_factor, segment_radius,
                                   catalog_x, catalog_y, match_radius=3.0, return_positions=False,
                                   extra_info=None, scale_radius_with_fwhm=True):
@@ -5870,6 +5979,12 @@ class PlateTool(QtWidgets.QMainWindow):
             x_arr = np.asarray(x_arr, dtype=float)
             y_arr = np.asarray(y_arr, dtype=float)
             fwhm_arr = np.asarray(fwhm_arr, dtype=float)
+
+            # Exclude blacklisted hot pixels - they are detections but not stars, and would
+            # poison the precision estimate the sweep is built on
+            hot = self._hotPixelMask(x_arr, y_arr)
+            x_arr, y_arr, fwhm_arr = x_arr[~hot], y_arr[~hot], fwhm_arr[~hot]
+
             n_detected = len(x_arr)
 
             if n_detected == 0 or len(catalog_x) == 0:
@@ -5941,6 +6056,11 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Construct CALSTARS format: Y(0) X(1) IntensSum(2) Ampltd(3) FWHM(4) BgLvl(5) SNR(6) NSatPx(7)
             star_data = list(zip(y_arr, x_arr, intensity, amplitude, fwhm, background, snr, saturated_count))
+
+            # Drop blacklisted hot pixels - the FWHM probe must not measure them as stars
+            hot = self._hotPixelMask([r[1] for r in star_data], [r[0] for r in star_data])
+            star_data = [row for row, h in zip(star_data, hot) if not h]
+
             return star_data
 
         else:
@@ -6004,6 +6124,11 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Construct CALSTARS format
             star_data = list(zip(y_arr, x_arr, intensity, amplitude, fwhm, background, snr, saturated_count))
+
+            # Drop blacklisted hot pixels - the FWHM probe must not measure them as stars
+            hot = self._hotPixelMask([r[1] for r in star_data], [r[0] for r in star_data])
+            star_data = [row for row, h in zip(star_data, hot) if not h]
+
             return star_data
 
 
@@ -7130,6 +7255,8 @@ class PlateTool(QtWidgets.QMainWindow):
             self.calstar_markers2.hide()
             self.calstar_markers_outer.hide()
             self.calstar_markers_outer2.hide()
+            for markers in self.hotpixel_marker_items:
+                markers.hide()
         else:
             # Switch back to current image
             self.img.loadImage(self.mode, self.img_type_flag)
@@ -7144,6 +7271,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.calstar_markers2.show()
                 self.calstar_markers_outer.show()
                 self.calstar_markers_outer2.show()
+                self.syncHotPixelMarkerVisibility()
 
     def onTabChanged(self, old_index, new_index):
         """Handle tab changes - restore image when leaving mask tab."""
@@ -7193,6 +7321,8 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.calstar_markers2.hide()
                 self.calstar_markers_outer.hide()
                 self.calstar_markers_outer2.hide()
+                for markers in self.hotpixel_marker_items:
+                    markers.hide()
 
         elif old_index == mask_tab_index:
             # Leaving mask tab - disable brush/draw modes and restore settings
@@ -7222,6 +7352,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.calstar_markers2.show()
                 self.calstar_markers_outer.show()
                 self.calstar_markers_outer2.show()
+                self.syncHotPixelMarkerVisibility()
             if self.astrometry_stars_visible:
                 self.astrometry_quad_markers.show()
                 self.astrometry_quad_markers2.show()
@@ -9209,6 +9340,8 @@ class PlateTool(QtWidgets.QMainWindow):
             # remove markers
             self.calstar_markers.setData(pos=[])
             self.calstar_markers2.setData(pos=[])
+            for markers in self.hotpixel_marker_items:
+                markers.setData(pos=[])
             self.cat_star_markers.setData(pos=[])
             self.cat_star_markers2.setData(pos=[])
             self.pick_marker.setData(pos=[])
@@ -12412,8 +12545,27 @@ class PlateTool(QtWidgets.QMainWindow):
 
         self.photometry()
 
+    def syncHotPixelMarkerVisibility(self):
+        """ Show the amber hot pixel rings only while both the detected stars and the hot pixel
+            toggles are on. """
+
+        visible = self.draw_calstars and getattr(self, 'draw_hotpixels', True)
+
+        for markers in self.hotpixel_marker_items:
+            if visible:
+                markers.show()
+            else:
+                markers.hide()
+
+
+    def toggleShowHotPixels(self):
+        """ Toggle the amber hot pixel rings independently of the detected stars. """
+        self.draw_hotpixels = not getattr(self, 'draw_hotpixels', True)
+        self.syncHotPixelMarkerVisibility()
+
+
     def toggleShowCalStars(self):
-        """ Toggle whether to show the calstars (green circles) """
+        """ Toggle whether to show the calstars (green circles; blacklisted hot pixels amber) """
         self.draw_calstars = not self.draw_calstars
         if self.draw_calstars:
             self.calstar_markers.show()
@@ -12425,6 +12577,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self.calstar_markers2.hide()
             self.calstar_markers_outer.hide()
             self.calstar_markers_outer2.hide()
+        self.syncHotPixelMarkerVisibility()
 
     def toggleShowAstrometryNetStars(self):
         """ Toggle whether to show astrometry.net matched stars """
@@ -14045,6 +14198,11 @@ class PlateTool(QtWidgets.QMainWindow):
         elif ff_name_c in self.calstars:
             star_data = np.array(self.calstars[ff_name_c])
             has_star_data = True
+
+        # Exclude blacklisted hot pixels - the plate solver must only be fed real stars
+        if star_data is not None and len(star_data):
+            hot = self._hotPixelMask(star_data[:, 1], star_data[:, 0])
+            star_data = star_data[~hot]
 
         if has_star_data and (not upload_image):
 
