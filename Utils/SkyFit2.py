@@ -3070,6 +3070,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.zoom_window.addItem(self.centroid_star_markers2)
 
         self.draw_calstars = True
+        self.draw_hotpixels = True
 
 
         # Distortion center marker (red cross) - main window
@@ -3536,6 +3537,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.settings.sigLabelMagLimitChanged.connect(self.onLabelMagLimitChanged)
         self.tab.settings.sigConstellationToggled.connect(self.toggleShowConstellations)
         self.tab.settings.sigCalStarsToggled.connect(self.toggleShowCalStars)
+        self.tab.settings.sigHotPixelsToggled.connect(self.toggleShowHotPixels)
         self.tab.settings.sigSelStarsToggled.connect(self.toggleShowSelectedStars)
         self.tab.settings.sigPicksToggled.connect(self.toggleShowPicks)
         self.tab.settings.sigGreatCircleToggled.connect(self.toggleShowGreatCircle)
@@ -7269,8 +7271,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.calstar_markers2.show()
                 self.calstar_markers_outer.show()
                 self.calstar_markers_outer2.show()
-                for markers in self.hotpixel_marker_items:
-                    markers.show()
+                self.syncHotPixelMarkerVisibility()
 
     def onTabChanged(self, old_index, new_index):
         """Handle tab changes - restore image when leaving mask tab."""
@@ -7351,8 +7352,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.calstar_markers2.show()
                 self.calstar_markers_outer.show()
                 self.calstar_markers_outer2.show()
-                for markers in self.hotpixel_marker_items:
-                    markers.show()
+                self.syncHotPixelMarkerVisibility()
             if self.astrometry_stars_visible:
                 self.astrometry_quad_markers.show()
                 self.astrometry_quad_markers2.show()
@@ -12545,6 +12545,25 @@ class PlateTool(QtWidgets.QMainWindow):
 
         self.photometry()
 
+    def syncHotPixelMarkerVisibility(self):
+        """ Show the amber hot pixel rings only while both the detected stars and the hot pixel
+            toggles are on. """
+
+        visible = self.draw_calstars and getattr(self, 'draw_hotpixels', True)
+
+        for markers in self.hotpixel_marker_items:
+            if visible:
+                markers.show()
+            else:
+                markers.hide()
+
+
+    def toggleShowHotPixels(self):
+        """ Toggle the amber hot pixel rings independently of the detected stars. """
+        self.draw_hotpixels = not getattr(self, 'draw_hotpixels', True)
+        self.syncHotPixelMarkerVisibility()
+
+
     def toggleShowCalStars(self):
         """ Toggle whether to show the calstars (green circles; blacklisted hot pixels amber) """
         self.draw_calstars = not self.draw_calstars
@@ -12553,15 +12572,12 @@ class PlateTool(QtWidgets.QMainWindow):
             self.calstar_markers2.show()
             self.calstar_markers_outer.show()
             self.calstar_markers_outer2.show()
-            for markers in self.hotpixel_marker_items:
-                markers.show()
         else:
             self.calstar_markers.hide()
             self.calstar_markers2.hide()
             self.calstar_markers_outer.hide()
             self.calstar_markers_outer2.hide()
-            for markers in self.hotpixel_marker_items:
-                markers.hide()
+        self.syncHotPixelMarkerVisibility()
 
     def toggleShowAstrometryNetStars(self):
         """ Toggle whether to show astrometry.net matched stars """
