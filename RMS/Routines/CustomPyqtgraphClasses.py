@@ -4638,6 +4638,9 @@ class SettingsWidget(QtWidgets.QWidget, ScaledSizeHelper):
         vbox.addWidget(self.show_constellations)
 
         self.detected_stars = QtWidgets.QCheckBox('Show Detected Stars')
+        self.detected_stars.setToolTip(
+            "Green rings: detected stars. Amber rings: detections at blacklisted hot pixel\n"
+            "positions (hotpixels.json), which the pipeline excludes from CALSTARS.")
         self.detected_stars.released.connect(self.sigCalStarsToggled.emit)
         self.updateShowCalStars()
         vbox.addWidget(self.detected_stars)
