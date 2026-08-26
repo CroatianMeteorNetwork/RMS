@@ -260,9 +260,11 @@ class FrameDisplay:
             self._mpl_ready = False
 
 
-# On-screen key legend, toggled with the 'h' key while viewing
+# On-screen key legend, toggled with the 'h' key while viewing. Off by default so it never covers
+# the image unless it was asked for - KEY_BANNER is printed to the console when a file is opened.
 KEY_LEGEND = "Keys: SPACE pause | 1 prev file | 2 next line | q quit | h hide keys"
-show_key_legend = True
+KEY_BANNER = "Keys: SPACE pause | 1 prev file | 2 next line | q quit | h show/hide the on-screen legend"
+show_key_legend = False
 
 
 def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format=None, hide=False,
@@ -299,6 +301,9 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format=N
 
     print('------------------------')
     print('Showing file:', fr_path)
+
+    if not hide:
+        print(KEY_BANNER)
 
 
     if ff_path is None:
