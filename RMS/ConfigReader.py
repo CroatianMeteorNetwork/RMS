@@ -281,7 +281,7 @@ class Config:
         self.frame_dir = "FramesFiles"
         self.video_dir = "VideoFiles"
         self.times_dir = "TimeFiles"
-        self.sprite_dir = "SpriteFiles"
+        self.sprite_dir = "SpriteData"
 
         # days of logfiles to keep
         self.logdays_to_keep = 30
@@ -323,7 +323,12 @@ class Config:
         # Sprite dirs to keep
         # Keep this many sprite detection folders (days)
         # Zero means keep them all
-        self.sprite_days_to_keep = 8
+        self.sprite_days_to_keep = 30
+
+        # Sprite detection HTTPS REST API upload settings
+        self.sprite_upload_url = ""
+        self.sprite_upload_timeout = 10
+        self.sprite_upload_ff = False
 
         # Space quotas in GB
 
@@ -992,6 +997,15 @@ def parseCapture(config, parser):
         config.sprite_days_to_keep = int(parser.get(section, "sprite_days_to_keep"))
     elif parser.has_option(section, "tle_days_to_keep"):
         config.sprite_days_to_keep = int(parser.get(section, "tle_days_to_keep"))
+
+    if parser.has_option(section, "sprite_upload_url"):
+        config.sprite_upload_url = parser.get(section, "sprite_upload_url")
+
+    if parser.has_option(section, "sprite_upload_timeout"):
+        config.sprite_upload_timeout = parser.getint(section, "sprite_upload_timeout")
+
+    if parser.has_option(section, "sprite_upload_ff"):
+        config.sprite_upload_ff = parser.getboolean(section, "sprite_upload_ff")
 
     if parser.has_option(section, "quota_management_enabled"):
         config.quota_management_enabled = parser.getboolean(section, "quota_management_enabled")
