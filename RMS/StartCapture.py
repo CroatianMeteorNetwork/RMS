@@ -173,6 +173,7 @@ from RMS.CaptureModeSwitcher import captureModeSwitcher
 from RMS.Compression import Compressor
 from RMS.DeleteOldObservations import deleteOldObservations
 from RMS.DetectStarsAndMeteors import detectStarsAndMeteors
+from RMS.SpriteDetector import detectSprites, processResults as processSpriteResults, TFLITE_AVAILABLE as SPRITE_TFLITE_AVAILABLE
 from RMS.Formats.FFfile import validFFName
 from RMS.Misc import mkdirP, RmsDateTime, UTCFromTimestamp, setMultiprocessingStartMethod, frameBufferShape
 from RMS.QueuedPool import QueuedPool
@@ -618,6 +619,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
     # Initialize the detector
     detector = None
+    sprite_detector = None
 
     # Path to the archive directory of the processed night (stays None if the night was never processed)
     night_archive_dir = None
@@ -719,6 +721,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
             # Check if the detection should be performed or not
             if nodetect:
                 detector = None
+                sprite_detector = None
 
             else:
 
@@ -745,6 +748,15 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
                 detector = QueuedPool(detectStarsAndMeteors, cores=1, log=log, delay_start=delay_detection, \
                     backup_dir=night_data_dir, input_queue_maxsize=None)
                 detector.startPool()
+
+                # Initialize the sprite detector if enabled
+                sprite_detector = None
+                if config.detect_sprites and SPRITE_TFLITE_AVAILABLE:
+                    log.info("Sprite detection enabled.")
+                    sprite_detector = QueuedPool(detectSprites, cores=1, log=log, low_priority=True)
+                    sprite_detector.startPool()
+                elif config.detect_sprites:
+                    log.warning("Sprite detection enabled but TFLite not available. Skipping.")
 
 
                 # If the capture is being resumed into the directory, load all previously saved FF files
@@ -794,7 +806,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
             # Initialize compression
             compressor = Compressor(night_data_dir, sharedArray, startTime, sharedArray2, start_time2, config,
-                detector=detector)
+                detector=detector, sprite_detector=sprite_detector)
 
             # Open the observation summary report
             if video_file is None:
@@ -874,7 +886,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
             # Stop the compressor
             log.debug('Stopping compression...')
-            detector = compressor.stop()
+            detector, sprite_detector = compressor.stop()
             log.debug('Compression stopped')
 
             if live_view is not None:
@@ -1016,6 +1028,17 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
                 # Shut down the Manager server process now that results are collected
                 detector.shutdownManager()
+
+                # Process sprite detection results
+                if sprite_detector is not None:
+                    try:
+                        log.info('Collecting sprite detection results...')
+                        sprite_detector.closePool()
+                        sprite_results = sprite_detector.getResults()
+                        processSpriteResults(sprite_results, night_data_dir, config)
+                        sprite_detector.shutdownManager()
+                    except Exception as e:
+                        log.error("Error processing sprite results: {:s}".format(repr(e)))
 
             else:
 
