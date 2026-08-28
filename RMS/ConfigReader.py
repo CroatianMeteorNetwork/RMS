@@ -197,6 +197,9 @@ class Config:
         ##### Capture
         self.deviceID = 0
 
+        # Enable/disable detection of transient luminous events (TLEs), run on every captured frame block
+        self.detect_tle = False
+
         # Transport Layer Protocol: tcp or udp
         self.protocol = "tcp"
 
@@ -920,6 +923,9 @@ def parseCapture(config, parser):
     
     if not parser.has_section(section):
         return
+
+    if parser.has_option(section, "detect_tle"):
+        config.detect_tle = parser.getboolean(section, "detect_tle")
 
     if parser.has_option(section, "data_dir"):
         

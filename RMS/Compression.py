@@ -34,6 +34,7 @@ from RMS.Formats import FieldIntensities
 from RMS.Logger import getLogger, getLoggingQueue, initChildProcess
 from RMS.Misc import UTCFromTimestamp, frameBufferShape, AtomicFlag, stableDoubleRead
 from RMS.Routines.Image import saveImage
+from RMS.TLEDetector import TLEDetector
 
 # Import Cython functions
 import pyximport
@@ -100,6 +101,19 @@ class Compressor(multiprocessing.Process):
         # under the 'forkserver'/'spawn' start methods (handlers are not inherited there)
         self.logging_queue = getLoggingQueue()
 
+        if self.config.detect_tle:
+            log.debug("TLE detection enabled.")
+            TLE_DETECTOR_MODEL_PATH = os.path.join(self.config.rms_root_dir, "share","tle_detector.tflite")
+            try:
+                self.tle_detector = TLEDetector(
+                    self.data_dir, TLE_DETECTOR_MODEL_PATH, self.config, log, min_stars=1
+                )
+            except Exception as e:
+                log.error(f"Failed to initialize TLEDetector: {e}")
+                self.tle_detector = None
+        else:
+            log.debug("TLE detection disabled.")
+            self.tle_detector = None
 
     def compress(self, frames):
         """ Compress frames to the FTP-compatible array and extract sums of intensities per every field.
@@ -225,6 +239,9 @@ class Compressor(multiprocessing.Process):
                 break
 
         log.debug('Compression joined!')
+
+        if self.tle_detector is not None:
+            self.tle_detector.close()
 
         # If process didn't exit cleanly, send graceful interrupt
         if self.is_alive():
@@ -447,6 +464,8 @@ class Compressor(multiprocessing.Process):
                 self.detector.addJob([self.data_dir, filename, self.config])
                 log.debug('Added file for detection: {:s}'.format(filename))
 
+            if self.tle_detector is not None:
+                self.tle_detector.pool.addJob([filename])
 
 
         log.debug('Compression run exit')
