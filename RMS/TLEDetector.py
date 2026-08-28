@@ -1,11 +1,12 @@
 import json
 import logging
 import os
+import shutil
 from datetime import datetime, timezone
 
 import numpy as np
 import requests
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw
 
 from RMS.Formats.CALSTARS import readCALSTARS
 from RMS.Formats.FFfits import read as readFFfile
@@ -439,12 +440,26 @@ class TLEDetector:
         except Exception as e:
             self.log.error(f"Failed to send TLE data to server: {e}")
 
+        self.copy_ff_file(payload.filename)
+
         with open(
             os.path.join(self.JSON_DIR, f"{payload.filename}.json"),
             "w",
             encoding="utf-8",
         ) as f:
             json.dump(payload.data, f, indent=4)
+
+    def copy_ff_file(self, filename):
+        try:
+            src_path = os.path.join(self.folder_path, filename)
+            ffs_dir = os.path.join(self.save_dir, "FFs")
+            os.makedirs(ffs_dir, exist_ok=True)
+            dst_path = os.path.join(ffs_dir, filename)
+            
+            shutil.copy2(src_path, dst_path)
+            self.log.info(f"Copied {filename} to {ffs_dir}")
+        except Exception as e:
+            self.log.error(f"Failed to copy FF file {filename}: {e}")
 
     def close(self):
         self.pool.closePool()
