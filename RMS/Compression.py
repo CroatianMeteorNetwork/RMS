@@ -34,7 +34,6 @@ from RMS.Formats import FieldIntensities
 from RMS.Logger import getLogger, getLoggingQueue, initChildProcess
 from RMS.Misc import UTCFromTimestamp, frameBufferShape, AtomicFlag, stableDoubleRead
 from RMS.Routines.Image import saveImage
-from RMS.SpriteDetector import TFLITE_AVAILABLE as SPRITE_TFLITE_AVAILABLE
 
 # Import Cython functions
 import pyximport
