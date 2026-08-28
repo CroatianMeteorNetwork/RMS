@@ -281,6 +281,7 @@ class Config:
         self.frame_dir = "FramesFiles"
         self.video_dir = "VideoFiles"
         self.times_dir = "TimeFiles"
+        self.tle_dir = "TLEFiles"
 
         # days of logfiles to keep
         self.logdays_to_keep = 30
@@ -318,6 +319,11 @@ class Config:
         # Keep this many ft file (timestamp) folders (days)
         # Zero means keep them all
         self.times_days_to_keep = 8
+
+        # TLE dirs to keep
+        # Keep this many TLE folders (days)
+        # Zero means keep them all
+        self.tle_days_to_keep = 8
 
         # Space quotas in GB
 
@@ -980,6 +986,9 @@ def parseCapture(config, parser):
     if parser.has_option(section, "times_days_to_keep"):
         config.times_days_to_keep = int(parser.get(section, "times_days_to_keep"))
 
+    if parser.has_option(section, "tle_days_to_keep"):
+        config.tle_days_to_keep = int(parser.get(section, "tle_days_to_keep"))
+
     if parser.has_option(section, "quota_management_enabled"):
         config.quota_management_enabled = parser.getboolean(section, "quota_management_enabled")
 
@@ -1016,6 +1025,9 @@ def parseCapture(config, parser):
 
     if parser.has_option(section, "times_dir"):
         config.times_dir = parser.get(section, "times_dir")
+
+    if parser.has_option(section, "tle_dir"):
+        config.tle_dir = parser.get(section, "tle_dir")
 
     if parser.has_option(section, "width"):
         config.width = parser.getint(section, "width")
