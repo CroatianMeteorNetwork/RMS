@@ -328,7 +328,8 @@ def detectSprites(data_dir, ff_name, model_path, config):
 
     Return:
         [tuple] (ff_name, detections_list, timestamp) where each detection is a dict with keys:
-            image_name, detection_type, model, confidence, centroid_x, centroid_y.
+            image_name, detection_type, model, confidence, centroid_x, centroid_y,
+            box_x1, box_y1, box_x2, box_y2.
             Returns (ff_name, [], timestamp) if no detections or on error.
     """
 
@@ -390,6 +391,10 @@ def detectSprites(data_dir, ff_name, model_path, config):
             "confidence": float(i[4]),
             "centroid_x": centroid_x,
             "centroid_y": centroid_y,
+            "box_x1": x1,
+            "box_y1": y1,
+            "box_x2": x2,
+            "box_y2": y2,
         })
 
     log.info("Detection on {:s}! {:d} object(s) found.".format(ff_name, len(detections)))
@@ -530,19 +535,12 @@ def _markSprites(detections, data_dir, ff_name, save_dir, config):
     edit_image = image.copy()
     draw = ImageDraw.Draw(edit_image)
 
-    width, height = edit_image.size
     for det in detections:
         class_name = det["detection_type"]
         confidence = det["confidence"]
 
-        # Reverse the centroid to get box coordinates
-        cx = det["centroid_x"]
-        cy = det["centroid_y"]
-
-        # Use a fixed box size for marking since we only store centroids
-        box_half = 30
-        top_left = (cx - box_half, cy - box_half)
-        bottom_right = (cx + box_half, cy + box_half)
+        top_left = (det["box_x1"], det["box_y1"])
+        bottom_right = (det["box_x2"], det["box_y2"])
 
         color = "blue" if "sprite" in class_name else "red"
         draw.rectangle([top_left, bottom_right], outline=color, width=1)
