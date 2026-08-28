@@ -54,12 +54,12 @@ def quotaReport(capt_dir_quota, config, after=False):
     frames_files = os.path.join(config.data_dir, config.frame_dir)
     time_files = os.path.join(config.data_dir, config.times_dir)
     video_files = os.path.join(config.data_dir, config.video_dir)
-    tle_files = os.path.join(config.data_dir, config.tle_dir)
+    sprite_files = os.path.join(config.data_dir, config.sprite_dir)
 
     frames_files_used_space = usedSpace(frames_files)
     time_files_used_space = usedSpace(time_files)
     video_files_used_space = usedSpace(video_files)
-    tle_files_used_space = usedSpace(tle_files)
+    sprite_files_used_space = usedSpace(sprite_files)
     archived_dir_used_space = usedSpace(archived_dir)
     captured_dir_used_space = usedSpace(captured_dir)
     log_dir_used_space = usedSpace(log_dir)
@@ -67,7 +67,7 @@ def quotaReport(capt_dir_quota, config, after=False):
     size_archived_dirs = sizeArchivedDirs(config)
     size_bz2_files = sizeBz2Files(config)
 
-    continuous_capture_used_space = frames_files_used_space + time_files_used_space + video_files_used_space + tle_files_used_space
+    continuous_capture_used_space = frames_files_used_space + time_files_used_space + video_files_used_space + sprite_files_used_space
 
     if config.log_files_quota != 0:
         log_files_pc = 100 * log_dir_used_space / config.log_files_quota
@@ -121,7 +121,7 @@ def quotaReport(capt_dir_quota, config, after=False):
     rep += ("                       frames files : {:7.02f}GB\n".format(frames_files_used_space))
     rep += ("                         time files : {:7.02f}GB\n".format(time_files_used_space))
     rep += ("                        video files : {:7.02f}GB\n".format(video_files_used_space))
-    rep += ("                         tle files   : {:7.02f}GB\n".format(tle_files_used_space))
+    rep += ("                      sprite files : {:7.02f}GB\n".format(sprite_files_used_space))
     rep += ("                                        ----------------------\n")
     rep += ("       total for continuous capture : {:7.02f}GB {:7.02f}GB {:3.0f}%\n".format(continuous_capture_used_space, config.continuous_capture_quota, continuous_capture_pc))
     rep += ("\n")
@@ -941,11 +941,11 @@ def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration
             free_space_status = True
             break
 
-        # Delete one day of TLE directory data
-        tle_dir_path = os.path.join(data_dir, config.tle_dir)
-        tle_dirs_remaining = deleteRawItems(tle_dir_path)
+        # Delete one day of sprite directory data
+        sprite_dir_path = os.path.join(data_dir, config.sprite_dir)
+        sprite_dirs_remaining = deleteNightFolders(sprite_dir_path, config)
 
-        log.info("Deleted dir(s) in TLE files directory: {:s}".format(tle_dir_path))
+        log.info("Deleted dir(s) in sprite files directory: {:s}".format(sprite_dir_path))
         log.info("Free space: {:.2f} GB".format(availableSpace(data_dir)/1024/1024/1024))
 
         # Break if there's enough space
@@ -960,10 +960,10 @@ def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration
         time.sleep(10)
 
         # If no folders left to delete, try to delete archived files
-        if (len(captured_dirs_remaining) + len(archived_dirs_remaining) + 
-            len(frame_dirs_remaining) + len(video_dirs_remaining) + len(times_dirs_remaining) + len(tle_dirs_remaining) == 0):
+        if (len(captured_dirs_remaining) + len(archived_dirs_remaining) +
+            len(frame_dirs_remaining) + len(video_dirs_remaining) + len(times_dirs_remaining) + len(sprite_dirs_remaining) == 0):
 
-            log.info("Deleted all Capture, Archived, Frame, Video, Time and TLE directories, deleting archived bz2 files...")
+            log.info("Deleted all Capture, Archived, Frame, Video, Time and Sprite directories, deleting archived bz2 files...")
 
             archived_files_remaining = deleteFiles(archived_dir, config)
 
@@ -1048,7 +1048,7 @@ def deleteByQuota(archived_dir, capt_dir_quota, captured_dir, config):
 
     # Manage the size of the continuous capture directories
     delete_list = objectsToDeleteByTime(config.data_dir,
-                                        [config.frame_dir, config.times_dir, config.video_dir, config.tle_dir],
+                                        [config.frame_dir, config.times_dir, config.video_dir, config.sprite_dir],
                                         config.continuous_capture_quota)
     rmList(delete_list, dummy_run=not config.quota_management_enabled)
 
@@ -1144,21 +1144,21 @@ def deleteOldDirs(data_dir, config):
     log.info('Purged {} days of old folders from TimeFiles'.format(orig_count - final_count))
 
 
-    # Deleting old TLE files
+    # Deleting old sprite detection files
     orig_count = 0
     final_count = 0
-    tle_dir = os.path.join(data_dir, config.tle_dir)
-    if config.tle_days_to_keep > 0:
-        tledir_list = getRawItems(tle_dir)
-        orig_count = len(tledir_list)
-        while len(tledir_list) > config.tle_days_to_keep:
-            prev_length = len(tledir_list)
-            tledir_list = deleteRawItems(tle_dir)
-            if len(tledir_list) == prev_length:
-                log.error("Failed to delete folder from TLEFiles. Exiting loop.")
+    sprite_dir = os.path.join(data_dir, config.sprite_dir)
+    if config.sprite_days_to_keep > 0:
+        spritedir_list = getNightDirs(sprite_dir, config.stationID)
+        orig_count = len(spritedir_list)
+        while len(spritedir_list) > config.sprite_days_to_keep:
+            prev_length = len(spritedir_list)
+            spritedir_list = deleteNightFolders(sprite_dir, config)
+            if len(spritedir_list) == prev_length:
+                log.error("Failed to delete folder from SpriteFiles. Exiting loop.")
                 break
-        final_count = len(tledir_list)
-    log.info('Purged {} days of old folders from TLEFiles'.format(orig_count - final_count))
+        final_count = len(spritedir_list)
+    log.info('Purged {:d} days of old folders from SpriteFiles'.format(orig_count - final_count))
 
 
     # Deleting old bz2 files

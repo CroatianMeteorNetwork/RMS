@@ -34,7 +34,7 @@ from RMS.Formats import FieldIntensities
 from RMS.Logger import getLogger, getLoggingQueue, initChildProcess
 from RMS.Misc import UTCFromTimestamp, frameBufferShape, AtomicFlag, stableDoubleRead
 from RMS.Routines.Image import saveImage
-from RMS.TLEDetector import TLEDetector
+from RMS.SpriteDetector import TFLITE_AVAILABLE as SPRITE_TFLITE_AVAILABLE
 
 # Import Cython functions
 import pyximport
@@ -56,7 +56,8 @@ class Compressor(multiprocessing.Process):
 
     running = False
     
-    def __init__(self, data_dir, array1, start_time1, array2, start_time2, config, detector=None):
+    def __init__(self, data_dir, array1, start_time1, array2, start_time2, config, detector=None,
+                 sprite_detector=None):
         """
 
         Arguments:
@@ -70,11 +71,12 @@ class Compressor(multiprocessing.Process):
         Keyword arguments:
             detector: [Detector object] Handle to Detector object used for running star extraction and
                 meteor detection.
+            sprite_detector: [QueuedPool or None] Handle to sprite detection QueuedPool.
 
         """
-        
+
         super(Compressor, self).__init__()
-        
+
         self.data_dir = data_dir
         # array1/array2 are multiprocessing.Array BASE objects (picklable across forkserver/spawn).
         # The numpy views over them are rebuilt in run() so they stay backed by the same shared
@@ -88,6 +90,12 @@ class Compressor(multiprocessing.Process):
         self.config = config
 
         self.detector = detector
+        self.sprite_detector = sprite_detector
+
+        # Store model path for sprite detection jobs
+        self.sprite_model_path = os.path.join(
+            self.config.rms_root_dir, "share", "sprite_detector.tflite"
+        ) if self.sprite_detector is not None else None
 
         # Lock-free flags: these are set/polled across processes and must never be able to
         # deadlock, even if a process sharing them is killed (see AtomicFlag)
@@ -100,20 +108,6 @@ class Compressor(multiprocessing.Process):
         # Grab the logging queue on the parent side so the child can re-attach logging
         # under the 'forkserver'/'spawn' start methods (handlers are not inherited there)
         self.logging_queue = getLoggingQueue()
-
-        if self.config.detect_tle:
-            log.debug("TLE detection enabled.")
-            TLE_DETECTOR_MODEL_PATH = os.path.join(self.config.rms_root_dir, "share","tle_detector.tflite")
-            try:
-                self.tle_detector = TLEDetector(
-                    self.data_dir, TLE_DETECTOR_MODEL_PATH, self.config, log, min_stars=1
-                )
-            except Exception as e:
-                log.error(f"Failed to initialize TLEDetector: {e}")
-                self.tle_detector = None
-        else:
-            log.debug("TLE detection disabled.")
-            self.tle_detector = None
 
     def compress(self, frames):
         """ Compress frames to the FTP-compatible array and extract sums of intensities per every field.
@@ -240,9 +234,6 @@ class Compressor(multiprocessing.Process):
 
         log.debug('Compression joined!')
 
-        if self.tle_detector is not None:
-            self.tle_detector.close()
-
         # If process didn't exit cleanly, send graceful interrupt
         if self.is_alive():
             log.info("Compression process still alive, sending interrupt signal...")
@@ -285,8 +276,8 @@ class Compressor(multiprocessing.Process):
             log.debug("Compression process not alive, joining to reap resources")
             self.join(timeout=5)
 
-        # Return the detector and live viewer objects because they were updated in this namespace
-        return self.detector
+        # Return the detector and sprite detector handles
+        return self.detector, self.sprite_detector
     
 
 
@@ -464,8 +455,9 @@ class Compressor(multiprocessing.Process):
                 self.detector.addJob([self.data_dir, filename, self.config])
                 log.debug('Added file for detection: {:s}'.format(filename))
 
-            if self.tle_detector is not None:
-                self.tle_detector.pool.addJob([filename])
+            if self.sprite_detector is not None:
+                self.sprite_detector.addJob([self.data_dir, filename, self.sprite_model_path,
+                                             self.config])
 
 
         log.debug('Compression run exit')
