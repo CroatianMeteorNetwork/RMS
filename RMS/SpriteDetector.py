@@ -64,8 +64,10 @@ except ImportError:
 log = getLogger("rmslogger")
 
 
-# Module-level interpreter cache (one per worker process, survives across calls)
+# Module-level caches (one per worker process, survive across calls)
 _interpreter_cache = {}
+_mask_cache = {}
+_resized_mask_cache = {}
 
 
 # Detection class names and colors
@@ -357,9 +359,16 @@ def detectSprites(data_dir, ff_name, model_path, config):
     # Use maxpixel as input (consider max-ave after model retraining)
     image = Image.fromarray(ff.maxpixel).convert("RGB")
 
-    # Load and apply mask
-    mask = loadMask(config)
-    prediction, image = getPrediction(image, interpreter, input_details, mask=mask)
+    # Load mask once per worker process
+    mask_key = config.config_file_path
+    if mask_key not in _mask_cache:
+        _mask_cache[mask_key] = loadMask(config)
+        _resized_mask_cache[mask_key] = [None]
+    mask = _mask_cache[mask_key]
+    resized_mask = _resized_mask_cache[mask_key]
+
+    prediction, image = getPrediction(image, interpreter, input_details, mask=mask,
+                                      resized_mask_cache=resized_mask)
 
     # Process predictions
     output = processPredictions(prediction)
@@ -506,12 +515,16 @@ def _writeCSV(csv_path, all_detections):
         if not file_exists or os.stat(csv_path).st_size == 0:
             writer.writerow([
                 "image name", "detection type", "model", "confidence",
-                "centroid x", "centroid y",
+                "centroid x", "centroid y", "box x1", "box y1", "box x2", "box y2",
             ])
 
         for ff_name, detections, timestamp in all_detections:
             for det in detections:
-                writer.writerow(list(det.values()))
+                writer.writerow([
+                    det["image_name"], det["detection_type"], det["model"],
+                    det["confidence"], det["centroid_x"], det["centroid_y"],
+                    det["box_x1"], det["box_y1"], det["box_x2"], det["box_y2"],
+                ])
 
 
 def _markSprites(detections, data_dir, ff_name, save_dir, config):
