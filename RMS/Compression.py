@@ -56,7 +56,7 @@ class Compressor(multiprocessing.Process):
     running = False
     
     def __init__(self, data_dir, array1, start_time1, array2, start_time2, config, detector=None,
-                 sprite_detector=None):
+                 sprite_queue=None):
         """
 
         Arguments:
@@ -70,7 +70,7 @@ class Compressor(multiprocessing.Process):
         Keyword arguments:
             detector: [Detector object] Handle to Detector object used for running star extraction and
                 meteor detection.
-            sprite_detector: [QueuedPool or None] Handle to sprite detection QueuedPool.
+            sprite_queue: [multiprocessing.Queue or None] Input queue for sprite detection process.
 
         """
 
@@ -89,12 +89,7 @@ class Compressor(multiprocessing.Process):
         self.config = config
 
         self.detector = detector
-        self.sprite_detector = sprite_detector
-
-        # Store model path for sprite detection jobs
-        self.sprite_model_path = os.path.join(
-            self.config.rms_root_dir, "share", "sprite_detector.tflite"
-        ) if self.sprite_detector is not None else None
+        self.sprite_queue = sprite_queue
 
         # Lock-free flags: these are set/polled across processes and must never be able to
         # deadlock, even if a process sharing them is killed (see AtomicFlag)
@@ -275,8 +270,7 @@ class Compressor(multiprocessing.Process):
             log.debug("Compression process not alive, joining to reap resources")
             self.join(timeout=5)
 
-        # Return the detector and sprite detector handles
-        return self.detector, self.sprite_detector
+        return self.detector
     
 
 
@@ -454,9 +448,8 @@ class Compressor(multiprocessing.Process):
                 self.detector.addJob([self.data_dir, filename, self.config])
                 log.debug('Added file for detection: {:s}'.format(filename))
 
-            if self.sprite_detector is not None:
-                self.sprite_detector.addJob([self.data_dir, filename, self.sprite_model_path,
-                                             self.config])
+            if self.sprite_queue is not None:
+                self.sprite_queue.put((self.data_dir, filename))
 
 
         log.debug('Compression run exit')
