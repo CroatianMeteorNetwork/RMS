@@ -197,6 +197,9 @@ class Config:
         ##### Capture
         self.deviceID = 0
 
+        # Enable/disable detection of sprites/elves, run on every captured frame block
+        self.detect_sprites = False
+
         # Transport Layer Protocol: tcp or udp
         self.protocol = "tcp"
 
@@ -278,6 +281,7 @@ class Config:
         self.frame_dir = "FramesFiles"
         self.video_dir = "VideoFiles"
         self.times_dir = "TimeFiles"
+        self.sprite_dir = "SpriteData"
 
         # days of logfiles to keep
         self.logdays_to_keep = 30
@@ -315,6 +319,16 @@ class Config:
         # Keep this many ft file (timestamp) folders (days)
         # Zero means keep them all
         self.times_days_to_keep = 8
+
+        # Sprite dirs to keep
+        # Keep this many sprite detection folders (days)
+        # Zero means keep them all
+        self.sprite_days_to_keep = 30
+
+        # Sprite detection HTTPS REST API upload settings
+        self.sprite_upload_url = ""
+        self.sprite_upload_timeout = 10
+        self.sprite_upload_ff = False
 
         # Space quotas in GB
 
@@ -921,6 +935,11 @@ def parseCapture(config, parser):
     if not parser.has_section(section):
         return
 
+    if parser.has_option(section, "detect_sprites"):
+        config.detect_sprites = parser.getboolean(section, "detect_sprites")
+    elif parser.has_option(section, "detect_tle"):
+        config.detect_sprites = parser.getboolean(section, "detect_tle")
+
     if parser.has_option(section, "data_dir"):
         
         config.data_dir = parser.get(section, "data_dir")
@@ -974,6 +993,20 @@ def parseCapture(config, parser):
     if parser.has_option(section, "times_days_to_keep"):
         config.times_days_to_keep = int(parser.get(section, "times_days_to_keep"))
 
+    if parser.has_option(section, "sprite_days_to_keep"):
+        config.sprite_days_to_keep = int(parser.get(section, "sprite_days_to_keep"))
+    elif parser.has_option(section, "tle_days_to_keep"):
+        config.sprite_days_to_keep = int(parser.get(section, "tle_days_to_keep"))
+
+    if parser.has_option(section, "sprite_upload_url"):
+        config.sprite_upload_url = parser.get(section, "sprite_upload_url")
+
+    if parser.has_option(section, "sprite_upload_timeout"):
+        config.sprite_upload_timeout = parser.getint(section, "sprite_upload_timeout")
+
+    if parser.has_option(section, "sprite_upload_ff"):
+        config.sprite_upload_ff = parser.getboolean(section, "sprite_upload_ff")
+
     if parser.has_option(section, "quota_management_enabled"):
         config.quota_management_enabled = parser.getboolean(section, "quota_management_enabled")
 
@@ -1010,6 +1043,11 @@ def parseCapture(config, parser):
 
     if parser.has_option(section, "times_dir"):
         config.times_dir = parser.get(section, "times_dir")
+
+    if parser.has_option(section, "sprite_dir"):
+        config.sprite_dir = parser.get(section, "sprite_dir")
+    elif parser.has_option(section, "tle_dir"):
+        config.sprite_dir = parser.get(section, "tle_dir")
 
     if parser.has_option(section, "width"):
         config.width = parser.getint(section, "width")
