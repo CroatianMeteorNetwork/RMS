@@ -142,7 +142,7 @@ class TLEDetector:
         self.API_URL = ""  # todo
 
         self.save_dir = os.path.join(
-            config.data_dir, "TLEFiles", os.path.basename(folder_path)
+            config.data_dir, config.tle_dir, os.path.basename(folder_path)
         )
 
         self.interpreter, self.input_details, self.output_details = (
@@ -327,6 +327,8 @@ class TLEDetector:
         elapsed_time = end_time - start_time
         self.log.debug(f"Elapsed time in seconds: {elapsed_time.total_seconds()}")
 
+        # for now we will store even detections that dont pass the filter 
+        # so that we have at least some information about them, like how those false positives look like
         results = self.store_detections(
             image,
             output,
@@ -448,7 +450,9 @@ class TLEDetector:
         self.pool.closePool()
         results = self.pool.getResults()
         results = [r for r in results if r is not None]
-        self.log.info(f"{sum(results)} TLEs have been detected this night.")
+        self.log.info(
+            f"{sum(results)} TLEs have been detected this night over {self.detection_counter} FF files."
+        )
         self.pool.deleteBackupFiles()
 
 
