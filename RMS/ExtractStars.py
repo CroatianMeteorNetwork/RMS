@@ -336,28 +336,40 @@ def extractStarsFF(
         return error_return
 
 
+    # Use the full-precision average if the FF file carries one (16-bit fixed point, 1/256 ADU
+    # units), otherwise the 8-bit avepixel. The extra precision reduces the photometric scatter
+    # of faint stars, whose per-pixel signal is comparable to the 1 ADU quantization step
+    if getattr(ff, 'avepixel16', None) is not None:
+        avepixel = ff.avepixel16.astype(np.float32)/256.0
+    else:
+        avepixel = ff.avepixel
+
     # Apply the dark frame
     if dark is not None:
-        ff.avepixel = Image.applyDark(ff.avepixel, dark)
+        avepixel = Image.applyDark(avepixel, dark)
+
+        # cv2.subtract only clips at zero for integer types; do the same on the float path
+        if avepixel.dtype != np.uint8:
+            avepixel = np.clip(avepixel, 0, None)
 
     # Apply the flat
     if flat_struct is not None:
-        ff.avepixel = Image.applyFlat(ff.avepixel, flat_struct)
+        avepixel = Image.applyFlat(avepixel, flat_struct)
 
-    # Mask the FF file
+    # Mask the image
     if mask is not None:
-        ff = MaskImage.applyMask(ff, mask, ff_flag=True)
+        avepixel = MaskImage.applyMask(avepixel, mask)
 
 
     # Calculate image mean and stddev
-    img_median = np.median(ff.avepixel)
+    img_median = np.median(avepixel)
 
     # Check if the image is too bright and skip the image (scale the cutoff to the image bit depth)
     if img_median > max_global_intensity*(2**(config.bit_depth - 8)):
         return error_return
 
     # Get the image data from the average pixel image
-    img = ff.avepixel.astype(np.float32)
+    img = avepixel.astype(np.float32)
 
 
     # Find the stars in the image

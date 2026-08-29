@@ -443,7 +443,8 @@ class InputTypeFRFF(InputType):
                 ref_ff = readFF(self.dir_path, ffs_to_read[0])
                 target_dtype = self.getTargetDtype(ref_ff.maxpixel)
                 
-                ff = FFMimickInterface(self.nrows, self.ncols, target_dtype)
+                ff = FFMimickInterface(self.nrows, self.ncols, target_dtype,
+                    gamma=self.config.gamma, bit_depth=self.config.bit_depth)
 
                 # Store maxpixel selections, avepixels, stdpixels
                 maxpixel_list = []
@@ -571,7 +572,7 @@ class InputTypeFRFF(InputType):
             # calculate avepixel
             img_count[img_count <= 0] = 1
             img = np.sum(frame_list, axis=0)
-            ff.avepixel = np.swapaxes(img/img_count, 0, 1).astype(np.uint8)
+            ff.avepixel = np.rint(np.swapaxes(img/img_count, 0, 1)).astype(np.uint8)
 
             ff.stdpixel = np.zeros_like(ff.avepixel)
 
@@ -995,7 +996,8 @@ class InputTypeVideo(InputType):
         target_dtype = self.getTargetDtype()
 
         # Init making the FF structure
-        ff_struct_fake = FFMimickInterface(self.nrows, self.ncols, target_dtype)
+        ff_struct_fake = FFMimickInterface(self.nrows, self.ncols, target_dtype,
+            gamma=self.config.gamma, bit_depth=self.config.bit_depth)
 
         # If there are no frames to read, return an empty array
         if frames_to_read == 0 or frames_to_read == -1:
@@ -1316,7 +1318,8 @@ class InputTypeUWOVid(InputType):
         target_dtype = self.getTargetDtype()
 
         # Init making the FF structure
-        ff_struct_fake = FFMimickInterface(self.nrows, self.ncols, target_dtype)
+        ff_struct_fake = FFMimickInterface(self.nrows, self.ncols, target_dtype,
+            gamma=self.config.gamma, bit_depth=self.config.bit_depth)
 
         self.frame_chunk_unix_times = []
 
@@ -1910,7 +1913,8 @@ class InputTypeImages(InputType):
         # Init making the FF structure
         # Update the FF struct's target dtype based on the first frame's bit depth
         target_dtype = self.getTargetDtype()
-        ff_struct_fake = FFMimickInterface(self.nrows, self.ncols, target_dtype)
+        ff_struct_fake = FFMimickInterface(self.nrows, self.ncols, target_dtype,
+            gamma=self.config.gamma, bit_depth=self.config.bit_depth)
 
         self.frame_dt_list = []
 
@@ -2417,7 +2421,8 @@ class InputTypeDFN(InputType):
             img = np.rot90(img)
 
         target_dtype = self.getTargetDtype(img)
-        self.ff = FFMimickInterface(self.nrows, self.ncols, target_dtype)
+        self.ff = FFMimickInterface(self.nrows, self.ncols, target_dtype,
+            gamma=self.config.gamma, bit_depth=self.config.bit_depth)
         self.ff.addFrame(img.astype(np.uint16))
         self.ff.finish()
 

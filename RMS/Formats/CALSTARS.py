@@ -86,7 +86,8 @@ def writeCALSTARS(star_list, ff_directory, file_name, cam_code, nrows, ncols, ch
 
                 star_file.write("{:7.2f} {:7.2f} {:9d} {:6d} {:5.2f} {:6d} {:5.2f} {:6d}".format(
                     round(y, 2), round(x, 2),
-                    int(intensity), int(amplitude), fwhm, int(background), snr, int(saturated_count)) + "\n")
+                    int(round(intensity)), int(round(amplitude)), fwhm, int(round(background)),
+                    snr, int(saturated_count)) + "\n")
 
         # Write the end separator
         star_file.write("##########################################################################\n")
