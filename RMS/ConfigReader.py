@@ -1107,16 +1107,21 @@ def parseCapture(config, parser):
         pass
 
     if parser.has_option(section, "protocol"):
-        config.protocol = parser.get(section, "protocol")
+        config.protocol = parser.get(section, "protocol").strip().lower()
 
     if parser.has_option(section, "udp_buffer_size"):
         config.udp_buffer_size = parser.getint(section, "udp_buffer_size")
 
     if parser.has_option(section, "media_backend"):
-        config.media_backend = parser.get(section, "media_backend")
+        config.media_backend = parser.get(section, "media_backend").strip().lower()
 
     if parser.has_option(section, "gst_colorspace"):
-        config.gst_colorspace = parser.get(section, "gst_colorspace")
+        gst_colorspace = parser.get(section, "gst_colorspace").strip()
+
+        # Normalize the formats explicitly supported by RMS, while preserving the case of other
+        # GStreamer formats (e.g. RGBx and v210) whose canonical names are case-sensitive.
+        supported_gst_colorspaces = {'bgr': 'BGR', 'gray8': 'GRAY8'}
+        config.gst_colorspace = supported_gst_colorspaces.get(gst_colorspace.lower(), gst_colorspace)
 
     if parser.has_option(section, "gst_decoder"):
         config.gst_decoder = parser.get(section, "gst_decoder")
@@ -1225,7 +1230,7 @@ def parseCapture(config, parser):
         config.save_frames = save_requested
 
     if parser.has_option(section, "frame_file_type"):
-        config.frame_file_type = parser.get(section, "frame_file_type")
+        config.frame_file_type = parser.get(section, "frame_file_type").strip().lower()
 
     # Load the JPEG quality
     if parser.has_option(section, "jpgs_quality"):
@@ -1252,7 +1257,7 @@ def parseCapture(config, parser):
 
     # Set whether to delete, archive, or leave saved frames after making timelapse ('delete', 'tar', 'none')
     if parser.has_option(section, "frame_cleanup"):
-        config.frame_cleanup = parser.get(section, "frame_cleanup")
+        config.frame_cleanup = parser.get(section, "frame_cleanup").strip().lower()
 
     # Enable/disable showing a slideshow of last night's meteor detections on the screen during the day
     if parser.has_option(section, "slideshow_enable"):
