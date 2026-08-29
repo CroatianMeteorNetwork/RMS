@@ -23,6 +23,7 @@ shopt -s inherit_errexit 2>/dev/null || true
 RMS_BRANCH="${RMS_BRANCH:-""}"  # Use environment variable if set, otherwise empty
 SWITCH_MODE=""  # Set by parse_args: "", "direct", or "interactive"
 FORCE_UPDATE=false  # Set by parse_args when --force is used
+SKIP_BUFFERS=false  # Set by parse_args when --skip-buffers is used
 readonly RMSSOURCEDIR=$HOME/source/RMS
 readonly RMSBACKUPDIR=$HOME/.rms_backup
 readonly CURRENT_CONFIG="$RMSSOURCEDIR/.config"
@@ -44,6 +45,19 @@ readonly GIT_RETRY_DELAY=15  # Seconds between git operation retries
 BRANCH_REMOTE=""
 UPSTREAM_BRANCH=""
 
+# PID of the background sudo keep-alive process started by ensure_sudo()
+SUDO_KEEP_ALIVE_PID=""
+
+# Stop the background sudo keep-alive process, if one is running.
+# Safe to call repeatedly and when no keep-alive was ever started.
+stop_sudo_keep_alive() {
+    if [ -n "${SUDO_KEEP_ALIVE_PID:-}" ]; then
+        kill "$SUDO_KEEP_ALIVE_PID" 2>/dev/null || true
+        wait "$SUDO_KEEP_ALIVE_PID" 2>/dev/null || true
+        SUDO_KEEP_ALIVE_PID=""
+    fi
+}
+
 # Trap handler for emergency cleanup
 emergency_cleanup() {
     local exit_code=$?
@@ -58,6 +72,9 @@ emergency_cleanup() {
     
     # Release lock safely before any potentially failing operations
     exec 200>&- 2>/dev/null || true
+
+    # Stop the background sudo refresher so it cannot outlive the script
+    stop_sudo_keep_alive
     
     print_status "error" "Script failed at line $line_number with exit code $exit_code"
     print_status "warning" "Attempting emergency recovery..."
@@ -94,6 +111,9 @@ emergency_cleanup() {
 # Set up trap for errors and signals
 trap 'emergency_cleanup $LINENO' ERR INT TERM
 
+# Always reap the sudo keep-alive, including on a clean exit
+trap stop_sudo_keep_alive EXIT
+
 # Safety check to prevent catastrophic deletions if RMSSOURCEDIR is misconfigured
 validate_rms_directory() {
     local dir="$1"
@@ -117,9 +137,10 @@ validate_rms_directory() {
 }
 
 usage() {
-    print_status "info" "Usage: $0 [--switch <branch>] [--force] [--help]"
+    print_status "info" "Usage: $0 [--switch <branch>] [--force] [--skip-buffers] [--help]"
     print_status "info" "  --switch <branch>  Interactively switch or switch to a specific branch"
     print_status "info" "  --force            Force update even if repository is up-to-date"
+    print_status "info" "  --skip-buffers     Do not check or raise system UDP buffer sizes"
     print_status "info" "  --help             Show usage info"
     print_status "info" ""
     print_status "info" "Environment:"
@@ -144,6 +165,10 @@ parse_args() {
                 ;;
             --force)
                 FORCE_UPDATE=true
+                shift 1
+                ;;
+            --skip-buffers)
+                SKIP_BUFFERS=true
                 shift 1
                 ;;
             --help|-h)
@@ -986,6 +1011,85 @@ switch_to_branch() {
 }
 
 
+# Establish sudo credentials for the operation described by $1.
+# Returns 0 if sudo can be used afterwards, 1 if not. Never exits the script.
+#
+# The password prompt is deliberately bounded by a read timeout rather than
+# left to sudo. Sudo's own passwd_timeout defaults to 0 (no timeout), so an
+# unattended run can block forever - which matters because GRMSUpdater.sh
+# stops all stations before calling this script.
+ensure_sudo() {
+    local reason="$1"
+    local timeout_duration=30
+    local attempts=3
+    local refresh_interval=$((timeout_duration / 2))
+    local password=""
+    local i
+
+    # Already root, or sudo needs no password - nothing to establish
+    if [ "$(id -u)" -eq 0 ] || sudo -n true 2>/dev/null; then
+        return 0
+    fi
+
+    # A password is required, which only works with someone at the terminal
+    if [ "$INTERACTIVE" != true ]; then
+        print_status "warning" "Sudo password required for $reason, but no terminal is attached."
+        return 1
+    fi
+
+    if [ "$USE_COLOR" = true ]; then
+        tput bold; tput setaf 3  # Bold yellow
+    fi
+    echo "
+==============================================
+  Sudo access needed for $reason
+==============================================
+"
+    if [ "$USE_COLOR" = true ]; then
+        tput sgr0  # Reset formatting
+    fi
+    interactive_sleep 1
+
+    echo "You have $attempts attempts, with a ${timeout_duration}-second timeout."
+
+    for ((i = 1; i <= attempts; i++)); do
+        # read returns non-zero on timeout or EOF, leaving $password empty
+        if ! read -r -s -t "$timeout_duration" \
+            -p "[sudo] password for ${USER:-$(id -un)} (timeout in ${timeout_duration}s): " password; then
+            echo
+            print_status "warning" "Password entry timed out. Skipping $reason."
+            return 1
+        fi
+        echo  # Move to a new line after the hidden input
+
+        # printf, not echo: echo can mangle backslashes in a password
+        if [ -n "$password" ] && printf '%s\n' "$password" | sudo -S -v 2>/dev/null; then
+            password=""
+
+            # Refresh the timestamp in the background so it survives a long
+            # apt-get. -n keeps it from ever competing for the terminal, and
+            # the kill -0 check stops it once this script is gone.
+            (
+                while kill -0 "$$" 2>/dev/null; do
+                    sudo -n -v 2>/dev/null || exit 0
+                    sleep "$refresh_interval"
+                done
+            ) &
+            SUDO_KEEP_ALIVE_PID=$!
+            return 0
+        fi
+
+        if [ "$i" -lt "$attempts" ]; then
+            echo "Sorry, try again. You have $((attempts - i)) attempts remaining."
+        fi
+    done
+
+    password=""
+    print_status "warning" "$attempts incorrect password attempts. Skipping $reason."
+    return 1
+}
+
+
 # Install missing dependencies
 install_missing_dependencies() {
 
@@ -1025,40 +1129,63 @@ install_missing_dependencies() {
     print_status "info" "The following packages will be installed: ${missing_packages[*]}"
     interactive_sleep 1
 
-    if sudo -n true 2>/dev/null; then
-        print_status "info" "Passwordless sudo available. Installing missing packages..."
-        sudo apt-get update
-        for package in "${missing_packages[@]}"; do
-            if ! sudo apt-get install -y "$package"; then
-                print_status "error" "Failed to install $package. Please install it manually."
-            fi
-        done
-    else
-        # Show prominent message for sudo
-        if [ "$USE_COLOR" = true ]; then
-            tput bold; tput setaf 3  # Bold yellow
-            echo "
-==============================================
-  Sudo access needed for package installation
-==============================================
-"
-            tput sgr0  # Reset formatting
-        else
-            echo "
-==============================================
-  Sudo access needed for package installation
-==============================================
-"
-        fi
-        interactive_sleep 2
-        
-        sudo apt-get update
-        for package in "${missing_packages[@]}"; do
-            if ! sudo apt-get install -y "$package"; then
-                print_status "error" "Failed to install $package. Please install it manually."
-            fi
-        done
+    if ! ensure_sudo "package installation"; then
+        print_status "warning" "Skipping package installation. Install manually with:"
+        print_status "info" "  sudo apt-get install ${missing_packages[*]}"
+        return
     fi
+
+    sudo apt-get update
+    for package in "${missing_packages[@]}"; do
+        if ! sudo apt-get install -y "$package"; then
+            print_status "error" "Failed to install $package. Please install it manually."
+        fi
+    done
+}
+
+# Raise the system UDP buffer limits if they are below what GStreamer needs.
+#
+# BufferedCapture.py asks rtspsrc for a 16MB udp-buffer-size, but the kernel
+# silently clamps that request to net.core.rmem_max. If the limit is lower the
+# request is a no-op and frames are dropped under load.
+#
+# This never fails the update - buffer sizing affects capture at runtime, it is
+# not a prerequisite for building RMS.
+update_udp_buffers() {
+    local buffers_script="$RMSSOURCEDIR/Scripts/UpdateBuffers.sh"
+
+    if [ "$SKIP_BUFFERS" = true ]; then
+        print_status "info" "Skipping UDP buffer check (--skip-buffers)."
+        return 0
+    fi
+
+    if [ ! -f "$buffers_script" ]; then
+        print_status "warning" "UpdateBuffers.sh not found, skipping UDP buffer check."
+        return 0
+    fi
+
+    # The check itself is unprivileged, so only reach for sudo if there is work
+    if bash "$buffers_script" --check >/dev/null 2>&1; then
+        print_status "success" "UDP buffers are already sized correctly."
+        return 0
+    fi
+
+    print_status "info" "UDP buffers are below the 16MB GStreamer requests, so the kernel is clamping it."
+
+    if ! ensure_sudo "UDP buffer configuration"; then
+        print_status "warning" "UDP buffers left unchanged. To apply them later, run:"
+        print_status "info" "  sudo $buffers_script --yes"
+        return 0
+    fi
+
+    if sudo bash "$buffers_script" --yes; then
+        print_status "success" "UDP buffers raised to the recommended size."
+    else
+        print_status "warning" "Could not raise UDP buffers. To retry, run:"
+        print_status "info" "  sudo $buffers_script --yes"
+    fi
+
+    return 0
 }
 
 get_commit_info() {
@@ -1504,6 +1631,9 @@ PY
     # Install missing dependencies
     print_header "Installing Missing Dependencies"
     install_missing_dependencies
+
+    print_header "Checking UDP Buffer Sizes"
+    update_udp_buffers
 
     print_header "Installing Python Requirements"
     print_status "info" "This may take a few minutes..."
