@@ -479,7 +479,7 @@ if __name__ == "__main__":
     arg_parser.add_argument('-i', '--show_ip', dest='show_ip', default=False, action="store_true",
                             help="Show ip address of the camera.")
 
-    arg_parser.add_argument('-c', '--show_coordinates', dest='show_coordinates', default=False, action="store_true",
+    arg_parser.add_argument('--show_coordinates', dest='show_coordinates', default=False, action="store_true",
                             help="Show coordinates of the camera.")
 
     arg_parser.add_argument('-s', '--show_sun', dest='show_sun', default=False, action="store_true",
