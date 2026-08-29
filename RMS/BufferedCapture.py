@@ -60,6 +60,11 @@ log = getLogger("rmslogger")
 # stuck teardown be abandoned so capture keeps its heartbeat and is never force-killed.
 GST_TEARDOWN_TIMEOUT = 10
 
+# Upper bound on a plausible PTS. A camera restarting its RTP timebase (a settings or
+# protocol change) can emit a wild PTS for the first seconds after the stream comes up,
+# and anything derived from it would be nonsense.
+MAX_EXPECTED_PTS_NS = 24*60*60*1e9  # 24 hours in nanoseconds
+
 if sys.version_info[0] < 3:
     # py2
     from urlparse import urlparse
@@ -588,8 +593,7 @@ class BufferedCapture(Process):
                 gst_timestamp_ns = buffer.pts  # GStreamer timestamp in nanoseconds
 
                 # Sanity check for pts value
-                max_expected_ns = 24*60*60*1e9  # 24 hours in nanoseconds
-                if not (0 < gst_timestamp_ns <= max_expected_ns):
+                if not (0 < gst_timestamp_ns <= MAX_EXPECTED_PTS_NS):
                     log.info("Unexpected PTS value: {}.".format(gst_timestamp_ns))
                     return False, None, None
 
@@ -886,10 +890,84 @@ class BufferedCapture(Process):
             return None
 
 
+    def segmentTimestamp(self, first_sample):
+        """
+        Derive the wall-clock start time of a new video segment from its first sample.
+
+        Arguments:
+          first_sample [GstSample]: First sample in the fragment, or None.
+
+        Returns:
+          timestamp [float or None]: UNIX timestamp of the segment start, or None if no
+              trustworthy timestamp could be derived. None is never an error - the caller
+              names the segment so that it makes no claim about its time.
+        """
+
+        def toTimestamp(running_time_ns):
+            """ Convert a running time to a wall-clock timestamp, or None if it is not
+                trustworthy.
+            """
+
+            if running_time_ns is None:
+                return None
+
+            # Same bound getFrame() applies before trusting a PTS
+            if not (0 < running_time_ns <= MAX_EXPECTED_PTS_NS):
+                return None
+
+            timestamp = self.start_timestamp + (running_time_ns + self.last_pts_correction_ns)/1e9
+
+            # Segments are cut live, so the derived time must land near now. This also
+            # catches a start_timestamp that was never established (it initializes to 0).
+            if abs(timestamp - time.time()) > 86400:
+                return None
+
+            return timestamp
+
+
+        candidates = []
+
+        if first_sample is not None:
+            buffer = first_sample.get_buffer()
+            segment = first_sample.get_segment()
+
+            if buffer is not None and buffer.pts != Gst.CLOCK_TIME_NONE:
+
+                if segment is not None:
+                    converted = segment.to_running_time(Gst.Format.TIME, buffer.pts)
+                    if converted != Gst.CLOCK_TIME_NONE:
+                        candidates.append(converted)
+
+                candidates.append(buffer.pts)
+
+        # The running time of the last frame pulled from the appsink, which getFrame() has
+        # already validated. Both branches are fed from the same tee, so this is the same
+        # running-time domain. Under UDP a lost packet can leave the fragment's first sample
+        # with a corrupt PTS while this one is still good, so it is tried whenever the
+        # sample cannot be trusted - not only when the sample carries no PTS at all.
+        candidates.append(self.last_running_time_ns)
+
+        for running_time_ns in candidates:
+            segment_timestamp = toTimestamp(running_time_ns)
+
+            if segment_timestamp is not None:
+                return segment_timestamp
+
+        log.warning("No usable running time for the new video segment (rejected: {})"
+                    .format(candidates))
+        return None
+
+
     def moveSegment(self, splitmuxsink, fragment_id, first_sample=None):
         """
         Custom callback for splitmuxsink's format-location signal to name and move each segment as its
         created. Generates a timestamp-based folder structure: Year/Day-Of-Year/Hour/ per video segment.
+
+        This must return a writable path for every fragment. Returning None leaves
+        splitmuxsink's internal filesink with no location, which fails its state change and
+        errors the whole pipeline - reported upstream as a camera disconnect. So a segment
+        whose time cannot be established is still saved, under a name that states no time
+        rather than a wrong one.
 
         Arguments:
           splitmuxsink [GstElement]: The splitmuxsink object itself, included in arguments as GStreamer expects it.
@@ -901,49 +979,41 @@ class BufferedCapture(Process):
           full_path [str]: Full path to save this new video segment to
         """
 
-        segment_timestamp = None
-        corrected_running_time_ns = None
+        try:
+            segment_timestamp = self.segmentTimestamp(first_sample)
 
-        if first_sample is not None:
-            try:
-                buffer = first_sample.get_buffer()
-                segment = first_sample.get_segment()
-                running_time_ns = None
-
-                if buffer is not None:
-                    buffer_pts = buffer.pts
-                    if buffer_pts != Gst.CLOCK_TIME_NONE:
-                        running_time_ns = buffer_pts
-
-                        if segment is not None:
-                            converted = segment.to_running_time(Gst.Format.TIME, buffer_pts)
-                            if converted != Gst.CLOCK_TIME_NONE:
-                                running_time_ns = converted
-
-                if running_time_ns is not None:
-                    corrected_running_time_ns = running_time_ns + self.last_pts_correction_ns
-                    segment_timestamp = self.start_timestamp + (corrected_running_time_ns / 1e9)
-
-            except Exception as sample_exc:
-                log.debug("Failed to derive running time from splitmux sample: %s", sample_exc)
-
-        if segment_timestamp is None and corrected_running_time_ns is None and self.last_running_time_ns is not None:
-            corrected_running_time_ns = self.last_running_time_ns + self.last_pts_correction_ns
-            segment_timestamp = self.start_timestamp + (corrected_running_time_ns / 1e9)
+        except Exception:
+            log.exception("Failed to derive the timestamp of video segment #{}".format(fragment_id))
+            segment_timestamp = None
 
         if segment_timestamp is not None:
             segment_time = UTCFromTimestamp.utcfromtimestamp(segment_timestamp)
-            self.last_segment_savetime = segment_timestamp
+            segment_filename = segment_time.strftime("{}_%Y%m%d_%H%M%S_%f_video.mkv"
+                                                     .format(self.config.stationID))
+
         else:
-            # Fallback to previous behaviour using wall-clock time
-            segment_time = UTCFromTimestamp.utcfromtimestamp(self.last_segment_savetime)
-            self.last_segment_savetime = time.time()
+            # Keep the video, but name it so it never claims a time it does not have.
+            # The directory still comes from the wall clock so the clip is filed with its
+            # neighbours and ages out with them - that is a location, not a time claim.
+            segment_time = UTCFromTimestamp.utcfromtimestamp(time.time())
+            segment_filename = "{}_UNKNOWNTIME_{:06d}_video.mkv".format(self.config.stationID,
+                                                                        fragment_id)
+            log.warning("Could not establish the start time of video segment #{}, saving it as {}"
+                        .format(fragment_id, segment_filename))
 
-        segment_filename = segment_time.strftime("{}_%Y%m%d_%H%M%S_%f_video.mkv".format(self.config.stationID))
-        segment_subpath = os.path.join(self.config.data_dir, self.config.video_dir, segment_time.strftime("%Y/%Y%m%d-%j/%Y%m%d-%j_%H"))
+        segment_subpath = os.path.join(self.config.data_dir, self.config.video_dir,
+                                       segment_time.strftime("%Y/%Y%m%d-%j/%Y%m%d-%j_%H"))
 
-        # Create full path for the segment
-        mkdirP(segment_subpath)
+        try:
+            # Create full path for the segment
+            mkdirP(segment_subpath)
+
+        except Exception:
+            # Nothing survives an unwritable video directory, so let the pipeline error out
+            # rather than dropping the clip somewhere that is never cleaned up.
+            log.exception("Cannot create the video segment directory {}".format(segment_subpath))
+            return None
+
         segment_full_path = os.path.join(segment_subpath, segment_filename)
         log.info("Created new video segment #{} at: {}".format(fragment_id, segment_full_path))
 
@@ -1908,10 +1978,6 @@ class BufferedCapture(Process):
                 self.timestamp_buffer = []
                 # For testing ft files
                 # self.ft_test_time = time.time()
-
-            # Initialize segment saving time for raw video saving
-            if self.config.raw_video_save:
-                self.last_segment_savetime = time.time()
 
             log.debug("Process-specific initialization complete")
 
