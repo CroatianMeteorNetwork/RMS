@@ -2,14 +2,14 @@
 
 from __future__ import print_function, division, absolute_import
 
+from RMS.CLITools import addConfigArgument, loadConfig
 from RMS.VideoExtraction import Extractor
-import RMS.ConfigReader as cr
 import RMS.Formats.FFfile as FFfile
 from RMS.Routines.Grouping3D import find3DLines, getAllPoints
 
 
 import os
-import sys
+import argparse
 import time
 
 
@@ -27,11 +27,20 @@ pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 
 if __name__ == "__main__":
 
-    # Extract the directory name from the given argument
-    bin_dir = sys.argv[1]
+    arg_parser = argparse.ArgumentParser(description="""Run the fireball extractor on FF files in the \
+given directory and show the detected points and lines as 3D plots.""")
+
+    arg_parser.add_argument('dir_path', metavar='DIR_PATH', type=str,
+        help='Path to the directory with FF files.')
+
+    addConfigArgument(arg_parser)
+
+    cml_args = arg_parser.parse_args()
+
+    bin_dir = cml_args.dir_path
 
     # Load config file
-    config = cr.parse(".config")
+    config = loadConfig(cml_args.config, bin_dir)
 
     print('Directory:', bin_dir)
 
