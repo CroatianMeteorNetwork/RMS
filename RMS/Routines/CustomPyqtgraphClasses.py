@@ -3650,6 +3650,7 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
     sigRedetectStars = QtCore.pyqtSignal()
     sigRedetectAllImages = QtCore.pyqtSignal()
     sigTuneParameters = QtCore.pyqtSignal()
+    sigPhotonTransferPressed = QtCore.pyqtSignal()
     sigSaveCalstarsPressed = QtCore.pyqtSignal()
     sigSaveToConfig = QtCore.pyqtSignal()
     sigCatalogLMChanged = QtCore.pyqtSignal(float)
@@ -3843,6 +3844,14 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
         self.tune_button.setToolTip('Auto-find optimal threshold and segment radius')
         self.tune_button.clicked.connect(self.sigTuneParameters.emit)
         btn_layout.addWidget(self.tune_button)
+
+        self.photon_transfer_button = QtWidgets.QPushButton('Photon Transfer')
+        self.photon_transfer_button.setToolTip(
+            'Plot per-pixel temporal variance (stdpixel^2) against mean (avepixel) for the\n'
+            'current FF file. Shot-noise-limited data is linear (slope = 1/gain); codec\n'
+            'noise suppression shows as a collapsed/quantized variance floor.')
+        self.photon_transfer_button.clicked.connect(self.sigPhotonTransferPressed.emit)
+        btn_layout.addWidget(self.photon_transfer_button)
 
         self.defaults_button = QtWidgets.QPushButton('Reset to Defaults')
         self.defaults_button.setToolTip('Reset all star detection parameters to the recommended defaults')
