@@ -3505,6 +3505,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.star_detection.sigMaxFeatureRatioChanged.connect(self.updateMaxFeatureRatio)
         self.tab.star_detection.sigRoundnessThresholdChanged.connect(self.updateRoundnessThreshold)
         self.tab.star_detection.sigTuneParameters.connect(self.tuneStarDetection)
+        self.tab.star_detection.sigPhotonTransferPressed.connect(self.photonTransferCheck)
         self.tab.star_detection.sigSaveCalstarsPressed.connect(self.saveOverrideCalstars)
         self.tab.star_detection.sigSaveToConfig.connect(lambda: self.showCalibrationFilesDialog(save_ftype="Config"))
         self.tab.star_detection.sigCatalogLMChanged.connect(self.updateCatalogLMFromStarDetection)
@@ -5544,6 +5545,300 @@ class PlateTool(QtWidgets.QMainWindow):
     # slow ones (every admitted candidate gets a PSF fit) and nothing past a collapse of this
     # size can win.
     GATE_SWEEP_ABANDON_DROP = 0.15
+
+    def _ptcComputeFF(self, ff, dir_path):
+        """ Compute photon transfer statistics for one FF file.
+
+        Per-pixel temporal variance (stdpixel^2, dequantization-dithered) against the temporal
+        mean (avepixel16 when available), gamma-linearized when the FF records a camera gamma.
+        Masked pixels and blacklisted hot pixels (blacklist resolved for the FF's own
+        directory) are excluded. Shot-noise-limited data gives var = mean/g + read_noise^2.
+
+        The stdpixel trim (top/bottom 4 frames removed) retains ~82% of Gaussian variance;
+        the reported corrected slope divides by that factor.
+
+        Return:
+            [dict] Curve and fit statistics, or None if the FF has no usable planes.
+        """
+
+        if ff is None or ff.stdpixel is None or ff.avepixel is None:
+            return None
+
+        # Use the full-precision average if the FF carries one (1/256 ADU units)
+        if getattr(ff, 'avepixel16', None) is not None:
+            mean_img = ff.avepixel16.astype(np.float64)/256.0
+        else:
+            mean_img = ff.avepixel.astype(np.float64)
+
+        # Dequantization dither: stdpixel is stored as a rounded integer, so raw variance
+        # only takes the values 1, 4, 9, ... Reconstructing the rounding error with +-0.5 ADU
+        # uniform dither restores a continuous distribution; the 1/12 ADU^2 the dither itself
+        # adds is subtracted
+        rng = np.random.RandomState(0)
+        std_img = ff.stdpixel.astype(np.float64) + rng.uniform(-0.5, 0.5, size=ff.stdpixel.shape)
+
+        h, w = mean_img.shape
+
+        # Exclude masked pixels (static structures have real but non-photon statistics),
+        # reusing the session mask when it matches this FF's geometry
+        valid = np.ones((h, w), dtype=bool)
+        if self.mask is not None and getattr(self.mask, 'img', None) is not None \
+                and self.mask.img.shape == (h, w):
+            valid &= self.mask.img != 0
+
+        # Exclude blacklisted hot pixels - defective pixels measure defect statistics, not
+        # photon noise
+        n_hot_excluded = 0
+        if getattr(self.config, 'hot_pixels_filter', True):
+
+            hp_xy = HotPixels.loadHotPixelCoords(dir_path, self.config)
+
+            if len(hp_xy):
+                radius = int(np.ceil(getattr(self.config, 'hot_pixels_radius', 2.0)))
+                for hx, hy in hp_xy:
+                    xi, yi = int(round(hx)), int(round(hy))
+                    y0, y1 = max(0, yi - radius), yi + radius + 1
+                    x0, x1 = max(0, xi - radius), xi + radius + 1
+                    n_hot_excluded += int(np.count_nonzero(valid[y0:y1, x0:x1]))
+                    valid[y0:y1, x0:x1] = False
+
+        vflat = valid.ravel()
+        mean_flat = mean_img.ravel()[vflat]
+        var_flat = np.maximum((std_img**2).ravel()[vflat] - 1.0/12, 0)
+        std_int_flat = ff.stdpixel.ravel()[vflat]
+
+        if len(mean_flat) == 0:
+            return None
+
+        bit_depth = ff.nbits if getattr(ff, 'nbits', 0) > 0 else 8*ff.avepixel.dtype.itemsize
+        max_level = 2**bit_depth - 1
+
+        # Fraction of pixels at or below the stdpixel storage floor of 1 ADU
+        frac_floor = np.mean(std_int_flat <= 1)
+
+        # The FF planes are gamma-encoded; in the encoded domain shot noise is not linear in
+        # the mean, so when the camera gamma is known, decode to the linear domain and scale
+        # the variance by the local slope (dL/dE)^2
+        gamma = getattr(ff, 'avegamma', 1.0)
+        linearized = False
+
+        if gamma != 1.0 and gamma > 0:
+            enc = np.clip(mean_flat, 1e-3, max_level)
+            mean_flat = max_level*(enc/max_level)**(1.0/gamma)
+            dl_de = (1.0/gamma)*(enc/max_level)**((1.0 - gamma)/gamma)
+            var_flat = var_flat*dl_de**2
+            linearized = True
+
+        # Cap the fit below the container ceiling, set in the ENCODED domain: above ~80% of
+        # full scale, clipping of the temporal max and the camera's tone-curve knee suppress
+        # the recorded noise regardless of the sensor
+        if linearized:
+            fit_max = max_level*0.8**(1.0/gamma)
+        else:
+            fit_max = 0.8*max_level
+
+        # Weighted linear fit through binned median variances - the median is robust against
+        # star-crossed and residual defective pixels
+        bins = np.linspace(np.floor(mean_flat.min()), fit_max, 120)
+        bin_idx = np.digitize(mean_flat, bins) - 1
+
+        bin_centers, bin_medians, bin_counts = [], [], []
+        for b in range(len(bins) - 1):
+            sel = bin_idx == b
+            count = int(np.count_nonzero(sel))
+            if count < 500:
+                continue
+            bin_centers.append(0.5*(bins[b] + bins[b + 1]))
+            bin_medians.append(np.median(var_flat[sel]))
+            bin_counts.append(count)
+
+        slope, intercept = None, None
+        if len(bin_centers) >= 3:
+            slope, intercept = np.polyfit(bin_centers, bin_medians, 1, w=np.sqrt(bin_counts))
+
+        # Log-binned noise-vs-signal curve, normalized to full scale = 1 so captures of any
+        # bit depth land in the same static window. The low count threshold lets the sparse
+        # bright region show the rollover and the clipping cliff
+        log_bins = np.geomspace(max(np.min(mean_flat), 0.0) + 2.0, max_level, 70)
+        lb_idx = np.digitize(mean_flat, log_bins) - 1
+
+        lb_c, lb_sig = [], []
+        for b in range(len(log_bins) - 1):
+            sel = lb_idx == b
+            if np.count_nonzero(sel) < 100:
+                continue
+            lb_c.append(np.sqrt(log_bins[b]*log_bins[b + 1]))
+            lb_sig.append(np.sqrt(np.median(var_flat[sel])))
+
+        return {
+            'curve_x': np.array(lb_c)/max_level,
+            'curve_y': np.array(lb_sig)/max_level,
+            'slope': slope, 'intercept': intercept,
+            'gamma': gamma, 'linearized': linearized,
+            'bit_depth': bit_depth, 'max_level': max_level, 'fit_max': fit_max,
+            'frac_floor': frac_floor, 'std_int': std_int_flat,
+            'n_px': len(mean_flat), 'n_hot_excluded': n_hot_excluded,
+        }
+
+
+    def photonTransferCheck(self):
+        """ Photon transfer check on the current FF file: median temporal noise against signal
+            level (both as fractions of full scale, log-log, static window), plus the raw
+            noise histogram.
+
+        Shot-noise-limited data follows a slope-1/2 line; a compressing codec or in-camera
+        noise filtering shows as a flattened curve, a dark-end dip below the shot-noise line,
+        and mass piled at the 1-ADU storage floor in the histogram. The static normalized
+        window makes captures directly comparable - the Compare FF... button overlays any
+        other FF file picked from disk (any night, any station).
+        """
+
+        # For Gaussian noise, the symmetric 4+4 trim in the FF compressor retains ~82.4% of
+        # the sample variance
+        TRIM_VAR_CORRECTION = 1/0.824
+
+        ff = getattr(self.img_handle, 'ff', None)
+        res = self._ptcComputeFF(ff, self.dir_path)
+
+        if res is None:
+            qmessagebox(message="The current image has no avepixel/stdpixel planes.\n"
+                "The photon transfer check needs an FF file.",
+                title="Photon Transfer", message_type="warning")
+            return
+
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12.5, 6),
+            gridspec_kw={'width_ratios': [1.6, 1]})
+        fig.canvas.manager.set_window_title("Photon transfer - " + str(self.img_handle.name()))
+
+        plotted_names = []
+
+        def describeCurve(name, r):
+            label = "{:s}  (gamma {:.2f})".format(name, r['gamma'])
+            if r['slope'] is not None and r['slope'] > 0:
+                label += "\ngain slope {:.2f}, floor {:.1f}%".format(
+                    r['slope']*TRIM_VAR_CORRECTION, 100*r['frac_floor'])
+            return label
+
+        def plotCurve(r, name, color):
+            ax1.loglog(r['curve_x'], r['curve_y'], 'o-', ms=3, lw=1.1, color=color,
+                label=describeCurve(name, r))
+
+            if r['slope'] is not None and r['slope'] > 0:
+                xf = np.geomspace(1.0, r['fit_max'], 20)
+                ax1.loglog(xf/r['max_level'],
+                    np.sqrt(r['slope']*xf + max(r['intercept'], 0))/r['max_level'],
+                    ls='--', lw=1.0, color=color, alpha=0.6)
+
+            std_max_show = int(min(np.percentile(r['std_int'], 99.9)*2 + 2, r['max_level']))
+            ax2.hist(r['std_int'], bins=np.arange(0, std_max_show + 2) - 0.5, log=True,
+                histtype='step', lw=1.4, color=color)
+
+            ax1.legend(fontsize=7, loc='lower right')
+            plotted_names.append(name)
+
+            # Console summary for logs
+            print("\n=== Photon transfer: {} ===".format(name))
+            if r['slope'] is not None:
+                print("  gain slope={:.4f} (trim-corrected {:.4f}), intercept={:.2f}, "
+                      "floor fraction={:.1f}%, {:d} hot px excluded".format(
+                          r['slope'], r['slope']*TRIM_VAR_CORRECTION, r['intercept'],
+                          100*r['frac_floor'], r['n_hot_excluded']))
+            else:
+                print("  Not enough populated bins for a fit.")
+
+        # Solid: measured curve. Dashed: its shot-noise fit. Static normalized window - the
+        # same for every capture and bit depth, so curves are directly comparable
+        plotCurve(res, str(self.img_handle.name()), 'k')
+
+        ax1.set_xlim(1e-3, 1)
+        ax1.set_ylim(1e-4, 0.3)
+        ax1.grid(True, which='both', alpha=0.3)
+        ax1.set_xlabel('signal (fraction of full scale)')
+        ax1.set_ylabel('temporal noise $\\sigma$ (fraction of full scale)')
+        ax1.set_title('Noise vs signal (log-log, {:s} domain)'.format(
+            'linear' if res['linearized'] else 'encoded'))
+
+        ax2.set_xlabel('stdpixel (ADU, integer-stored)')
+        ax2.set_ylabel('Pixels (log)')
+        ax2.set_title('Temporal noise histogram')
+
+        fig.tight_layout(rect=[0, 0, 1, 0.94])
+
+        # Compare button: overlay the same curve for any FF file picked from disk
+        from matplotlib.widgets import Button
+        from RMS.Formats import FFfile as FFfileFormat
+
+        btn_ax = fig.add_axes([0.01, 0.945, 0.12, 0.05])
+        compare_btn = Button(btn_ax, 'Compare FF...')
+        state = {'count': 0}
+
+        def onCompare(event):
+
+            # Parent the dialogs to the plot window itself, so closing them returns focus to
+            # the plot instead of the main SkyFit2 window
+            plot_win = getattr(fig.canvas.manager, 'window', None)
+            dialog_parent = plot_win if isinstance(plot_win, QtWidgets.QWidget) else self
+
+            path, _ = QtWidgets.QFileDialog.getOpenFileName(dialog_parent,
+                "Select FF file to compare",
+                self.dir_path, "FF files (FF*.fits FF*.bin);;All files (*)")
+
+            if not path:
+                return
+
+            cmp_dir, cmp_name = os.path.split(path)
+
+            try:
+                cmp_ff = FFfileFormat.read(cmp_dir, cmp_name)
+            except Exception as e:
+                print("Could not read {:s}: {:s}".format(path, repr(e)))
+                return
+
+            if cmp_ff is None:
+                print("Could not read {:s}".format(path))
+                return
+
+            # The encoding gamma of the selected file may differ from the current one, and
+            # older FF files don't record it at all (they read back as 1.0 even when the
+            # camera encoded with e.g. 0.45) - let the user confirm or override it
+            gamma_rec = getattr(cmp_ff, 'avegamma', 1.0)
+            gamma_val, ok = QtWidgets.QInputDialog.getDouble(dialog_parent,
+                "Encoding gamma", "Encoding gamma of {:s}\n\n"
+                "Recorded in the file: {:.2f}. Older FF files do not record the in-camera\n"
+                "gamma and read back as 1.0 - override here if this file was encoded\n"
+                "differently.".format(cmp_name, gamma_rec),
+                gamma_rec, 0.1, 2.0, 2)
+
+            if not ok:
+                return
+
+            cmp_ff.avegamma = gamma_val
+
+            cmp_res = self._ptcComputeFF(cmp_ff, cmp_dir)
+
+            if cmp_res is None:
+                print("No usable avepixel/stdpixel planes in {:s}".format(cmp_name))
+                return
+
+            state['count'] += 1
+            plotCurve(cmp_res, cmp_name, 'C{:d}'.format((state['count'] - 1) % 10))
+            fig.canvas.draw_idle()
+
+            # Bring the plot window back to front - some window managers leave focus with the
+            # dialog's parent even when the dialog was parented to the plot
+            if plot_win is not None:
+                try:
+                    plot_win.raise_()
+                    plot_win.activateWindow()
+                except AttributeError:
+                    pass
+
+        compare_btn.on_clicked(onCompare)
+
+        # Keep the widget referenced for the figure's lifetime, else the button goes dead
+        fig._ptc_compare_btn = compare_btn
+
+        fig.show()
 
     def tuneStarDetection(self):
         """
