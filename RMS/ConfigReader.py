@@ -559,6 +559,25 @@ class Config:
                                     # measured by SkyFit2's star detection tuner
         self.max_feature_ratio = 0.8 # maximum ratio between 2 sigma of the star and the image segment area
 
+        # Hot pixel blacklist - for cameras with in-camera hot pixel filtering disabled. Detections
+        # which recur at the same pixel across the night are blacklisted in hot_pixels_file
+        # (config dir), removed from CALSTARS, and excluded from the ff_min_stars meteor gate
+        # during capture. The file is re-read on every FF, so external updates (SkyFit priming,
+        # python -m RMS.HotPixels) take effect immediately, even mid-capture.
+        self.hot_pixels_filter = True
+        self.hot_pixels_file = 'hotpixels.json'
+        self.hot_pixels_radius = 2.0 # match/cluster radius in pixels
+        self.hot_pixels_min_count = 15 # a pixel must recur on at least this many FFs...
+        self.hot_pixels_min_frac = 0.01 # ...and on this fraction of the night's star-bearing FFs.
+                                        # Kept low on purpose: the PSF roundness filter hides hot
+                                        # pixels on most FFs and their surfacing rate swings
+                                        # night-to-night (1-10% measured on US005A), so the real
+                                        # discriminators are the coverage/drift/span gates - chance
+                                        # coincidences at one pixel reaching even the min_count
+                                        # floor are Poisson-negligible
+        self.hot_pixels_min_span_minutes = 45.0 # recurrence must span this much of the night
+        self.hot_pixels_max_age_days = 14 # entries unseen for this many days are dropped
+
 
         ##### Calibration
         self.use_flat = False
@@ -1689,6 +1708,27 @@ def parseStarExtraction(config, parser):
 
     if parser.has_option(section, "max_feature_ratio"):
         config.max_feature_ratio = parser.getfloat(section, "max_feature_ratio")
+
+    if parser.has_option(section, "hot_pixels_filter"):
+        config.hot_pixels_filter = parser.getboolean(section, "hot_pixels_filter")
+
+    if parser.has_option(section, "hot_pixels_file"):
+        config.hot_pixels_file = os.path.basename(parser.get(section, "hot_pixels_file"))
+
+    if parser.has_option(section, "hot_pixels_radius"):
+        config.hot_pixels_radius = parser.getfloat(section, "hot_pixels_radius")
+
+    if parser.has_option(section, "hot_pixels_min_count"):
+        config.hot_pixels_min_count = parser.getint(section, "hot_pixels_min_count")
+
+    if parser.has_option(section, "hot_pixels_min_frac"):
+        config.hot_pixels_min_frac = parser.getfloat(section, "hot_pixels_min_frac")
+
+    if parser.has_option(section, "hot_pixels_min_span_minutes"):
+        config.hot_pixels_min_span_minutes = parser.getfloat(section, "hot_pixels_min_span_minutes")
+
+    if parser.has_option(section, "hot_pixels_max_age_days"):
+        config.hot_pixels_max_age_days = parser.getint(section, "hot_pixels_max_age_days")
 
 
 

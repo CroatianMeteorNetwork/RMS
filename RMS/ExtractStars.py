@@ -1080,6 +1080,12 @@ def extractStarsAndSave(config, ff_dir):
     # Generate the name for the CALSTARS file
     calstars_name = 'CALSTARS_' + prefix + '.txt'
 
+    # Update the hot pixel blacklist from this night's stationary detections and remove all
+    # blacklisted pixels before writing CALSTARS - same curation the nightly pipeline applies
+    # in saveDetections, so re-extraction paths (AutoPlatepar, Flux, SkyFit2) stay clean
+    if getattr(config, 'hot_pixels_filter', True):
+        from RMS import HotPixels
+        star_list = HotPixels.applyHotPixels(star_list, ff_dir, config)
 
     # Write detected stars to the CALSTARS file
     CALSTARS.writeCALSTARS(star_list, ff_dir, calstars_name, config.stationID, config.height, config.width)
