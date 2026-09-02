@@ -799,10 +799,11 @@ def upgradeFirmware(cam, firmware_path, skip_confirm=False):
         # same as one that was. So None is treated as "unconfirmed" and settled
         # by waiting for the camera to come back.
         #
-        # Note the progress lines printed during the transfer are not a reliable
-        # status either -- dvrip's completion loop prints a stale variable, so
-        # the Ret values scrolling past can repeat or show a value the camera
-        # never sent.
+        # Note the Ret values printed during the transfer are just progress,
+        # not a completion status. (They also used to repeat or show a value
+        # the camera never sent, because dvrip's completion loop logged a stale
+        # variable -- fixed upstream in OpenIPC/python-dvr, which requirements.txt
+        # now pins to.)
         confirmed = False
 
         if isinstance(result, dict):
