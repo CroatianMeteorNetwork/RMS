@@ -1078,8 +1078,12 @@ if __name__ == '__main__':
         help="Camera password (overrides the password in the config device URL)."
     )
 
+    # NOTE: no '-i' short form on purpose. Firmware-side ISP control forwards
+    # daemon args verbatim (isp_ctl `manual`/`auto` use -a/-d/-i/-e, where
+    # -i = ISP-digital gain). A '-i' short form here would let argparse swallow
+    # the daemon's `-i <val>` as the camera IP, silently dropping it.
     parser.add_argument(
-        '-i', '--ip',
+        '--ip',
         type=str,
         default=None,
         help="Control a camera directly by its IP address, with no RMS config "
