@@ -16,6 +16,8 @@ import datetime
 import tarfile
 import threading
 import signal
+import socket
+import tempfile
 import time
 import multiprocessing
 
@@ -403,6 +405,433 @@ def runWithTimeout(func, args=(), kwargs=None, timeout=60, on_late_completion=No
         # Timed out — flag thread so on_late_completion fires if it finishes later
         timed_out[0] = True
         return (False, None, None)
+
+
+### Safe git invocation ###
+
+# Hosts from which RMS is allowed to fetch, i.e. hosts which are known to serve the RMS
+# repositories anonymously. Remotes on any other host are skipped, as they may well be private
+# forks which would ask for credentials.
+GIT_ALLOWED_HOSTS = ("github.com", )
+
+# Default timeout for git operations which touch the network [s]. A blobless clone of the RMS
+# history over a slow station uplink can take well over two minutes, and too tight a ceiling
+# reports a healthy station as "Not determined" every night.
+GIT_NETWORK_TIMEOUT = 300
+
+# Default timeout for purely local git operations [s]
+GIT_LOCAL_TIMEOUT = 30
+
+# Timeout of the TCP reachability pre-check performed before any network git operation [s]
+GIT_REACHABILITY_TIMEOUT = 5
+
+# Environment variables which disable every interactive prompt git or ssh might produce. Without
+# these, a git operation against an unhealthy server (e.g. GitHub answering an anonymous HTTPS
+# request with a 401) asks for a user name on the terminal and blocks the whole processing chain
+# indefinitely.
+GIT_NO_PROMPT_ENV = {
+
+    # git >= 2.3 - fail with an error instead of asking for a user name and a password
+    "GIT_TERMINAL_PROMPT": "0",
+
+    # OpenSSH >= 8.4 - never fall back to SSH_ASKPASS
+    "SSH_ASKPASS_REQUIRE": "never",
+
+    # Do not ask for a passphrase or for a host key confirmation on ssh remotes
+    "GIT_SSH_COMMAND": "ssh -oBatchMode=yes -oConnectTimeout=10",
+
+    # Git Credential Manager, in case it is ever installed
+    "GCM_INTERACTIVE": "Never",
+    }
+
+# Never pop up a helper to ask for a password, /bin/echo returns an empty string immediately. Only
+# set this where /bin/echo exists, as pointing git at a missing helper only produces a warning and
+# GIT_TERMINAL_PROMPT already covers that case anyway.
+if os.path.exists("/bin/echo"):
+    GIT_NO_PROMPT_ENV["GIT_ASKPASS"] = "/bin/echo"
+    GIT_NO_PROMPT_ENV["SSH_ASKPASS"] = "/bin/echo"
+
+
+class GitCommandTimeout(Exception):
+    """ Raised when a git command had to be killed because it exceeded its timeout. """
+    pass
+
+
+def gitSafeEnv(env=None):
+    """ Return a copy of the environment with all interactive git and ssh prompts disabled.
+
+    Keyword arguments:
+        env: [dict] Environment to start from. None by default, in which case os.environ is used.
+
+    Return:
+        [dict] Copy of the environment with the no-prompt variables set.
+    """
+
+    # Start from the current environment, unless another one was given
+    if env is None:
+        env = os.environ
+
+    # Work on a copy, so that the environment of this process is not touched
+    safe_env = dict(env)
+
+    # Override the prompt related variables
+    safe_env.update(GIT_NO_PROMPT_ENV)
+
+    return safe_env
+
+
+def disableGitPrompts():
+    """ Disable interactive git and ssh prompts for this process and all its children.
+
+        This is a process-wide safety net which also covers git invocations that do not go through
+        runGitCommand, e.g. GitPython. Variables which are already set are left alone, so that a
+        deliberate override from the outside still works.
+    """
+
+    # setdefault leaves any variable which is already set alone
+    for name, value in GIT_NO_PROMPT_ENV.items():
+        os.environ.setdefault(name, value)
+
+
+def sanitiseGitUrl(url):
+    """ Remove any embedded credentials from a git URL, so that it is safe to write to the log.
+
+    Arguments:
+        url: [str] URL, or any other command line argument.
+
+    Return:
+        [str] The URL with the userinfo part removed.
+    """
+
+    try:
+
+        # Drop the userinfo part which sits between the scheme and the host
+        return re.sub(r'([A-Za-z][A-Za-z0-9+.\-]*://)[^/@]+@', r'\1', url)
+
+    except Exception:
+
+        # Never risk writing a URL which might still hold a password
+        return "[URL_REDACTED]"
+
+
+def gitUrlHost(url):
+    """ Extract the host name from a git remote URL.
+
+        Handles URLs with a scheme (https://host/path, ssh://user@host:port/path) and the scp-like
+        syntax (user@host:path).
+
+    Arguments:
+        url: [str] Git remote URL.
+
+    Return:
+        [str] Host name, or None for local paths and file:// URLs.
+    """
+
+    if url is None:
+        return None
+
+    url = url.strip()
+
+    # A local repository has no host to connect to
+    if not url or url.startswith("file://"):
+        return None
+
+    # Match a URL with an explicit scheme
+    scheme_match = re.match(r'^[A-Za-z][A-Za-z0-9+.\-]*://([^/]+)', url)
+
+    if scheme_match is not None:
+        netloc = scheme_match.group(1)
+
+    elif ("@" in url) and (":" in url.split("@", 1)[1]):
+
+        # scp-like syntax, e.g. git@github.com:user/repo.git
+        netloc = url.split("@", 1)[1].split(":", 1)[0]
+
+    else:
+        # A plain local path
+        return None
+
+    # Strip the userinfo part
+    if "@" in netloc:
+        netloc = netloc.rsplit("@", 1)[1]
+
+    # Strip the port
+    if netloc.startswith("["):
+
+        # IPv6 literal
+        netloc = netloc.split("]", 1)[0].lstrip("[")
+
+    elif ":" in netloc:
+        netloc = netloc.split(":", 1)[0]
+
+    return netloc if netloc else None
+
+
+def anonymousHttpsGitUrl(url):
+    """ Convert a git remote URL into the equivalent anonymous https URL.
+
+        Public repositories are served over plain https without any credentials, while an ssh
+        remote needs a key or an agent and can block on a passphrase prompt. Rewriting the URL
+        keeps the remote usable for read-only operations on checkouts which were cloned over ssh.
+
+    Arguments:
+        url: [str] Git remote URL.
+
+    Return:
+        [str] The equivalent anonymous https URL, or None if the URL cannot be used anonymously
+            (a local path, or a URL which carries credentials).
+    """
+
+    if url is None:
+        return None
+
+    url = url.strip()
+
+    # A URL without a host is a local path, which cannot be rewritten
+    host = gitUrlHost(url)
+
+    if host is None:
+        return None
+
+    if url.lower().startswith(("http://", "https://")):
+
+        # Reject an http(s) URL which carries credentials, as it points to a private repository.
+        # Note that a user name in an ssh URL is only the login name, not a credential, so this
+        # check is deliberately limited to http(s).
+        if re.match(r'^[A-Za-z][A-Za-z0-9+.\-]*://[^/@]+@', url) is not None:
+            return None
+
+        # A plain http(s) URL can be used as it is
+        return url
+
+    # ssh://[user@]host[:port]/path
+    ssh_match = re.match(r'^ssh://(?:[^@/]+@)?[^/]+/(.+)$', url, re.IGNORECASE)
+
+    # Keep the path and swap the transport for https
+    if ssh_match is not None:
+        return "https://{:s}/{:s}".format(host, ssh_match.group(1).lstrip("/"))
+
+    # scp-like syntax, e.g. git@github.com:user/repo.git
+    scp_match = re.match(r'^(?:[^@/]+@)?[^:/]+:(.+)$', url)
+
+    if scp_match is not None:
+        return "https://{:s}/{:s}".format(host, scp_match.group(1).lstrip("/"))
+
+    # An unrecognized form, better to skip it than to guess
+    return None
+
+
+def gitUrlHostAndPort(url):
+    """ Extract the host name and the port to connect to from a git remote URL.
+
+    Arguments:
+        url: [str] Git remote URL.
+
+    Return:
+        (host, port): [str, int] Host name and port, or (None, None) for a local path.
+    """
+
+    # A local path has neither a host nor a port
+    host = gitUrlHost(url)
+
+    if host is None:
+        return None, None
+
+    # An explicit port in the URL takes precedence
+    port_match = re.search(r'^[A-Za-z][A-Za-z0-9+.\-]*://(?:[^/@]+@)?(?:\[[^\]]+\]|[^/:]+):(\d+)', url)
+
+    if port_match is not None:
+        return host, int(port_match.group(1))
+
+    # Otherwise fall back to the default port of the scheme
+    if url.lower().startswith("http://"):
+        return host, 80
+
+    if url.lower().startswith("https://"):
+        return host, 443
+
+    # Both ssh:// and the scp-like syntax go over ssh
+    if url.lower().startswith("ssh://") or ("@" in url):
+        return host, 22
+
+    # Assume https for anything else
+    return host, 443
+
+
+def hostReachable(host, port=443, timeout=GIT_REACHABILITY_TIMEOUT):
+    """ Check that a TCP connection to the given host and port can be established.
+
+        This is a cheap pre-check which fails fast on a DNS failure, a dead link or a blackholed
+        route, so that a slow network operation is not even attempted.
+
+    Arguments:
+        host: [str] Host name or IP address.
+
+    Keyword arguments:
+        port: [int] TCP port. 443 by default.
+        timeout: [float] Connection timeout in seconds.
+
+    Return:
+        [bool] True if the connection succeeded.
+    """
+
+    # Without a host there is nothing to connect to
+    if host is None:
+        return False
+
+    sock = None
+
+    try:
+
+        # Open a connection and drop it straight away, only reachability matters here
+        sock = socket.create_connection((host, port), timeout=timeout)
+        return True
+
+    except Exception as e:
+
+        # A refused connection, a DNS failure and a timeout are all treated the same way
+        log.debug("Host {:s}:{:d} is not reachable: {:s}".format(str(host), int(port), repr(e)))
+        return False
+
+    finally:
+
+        # Always release the socket, even when the connection failed halfway through
+        if sock is not None:
+            try:
+                sock.close()
+            except Exception:
+                pass
+
+
+def killProcessGroup(proc):
+    """ Kill a process and, on POSIX systems, its whole process group.
+
+        Killing only the process itself is not enough for git, which delegates the transfer to a
+        helper process (e.g. git-remote-https) that would keep the connection open.
+
+    Arguments:
+        proc: [Popen object] The process to kill.
+    """
+
+    try:
+
+        # Kill the whole group, so that the transport helper goes down with git itself
+        if (os.name == 'posix') and hasattr(os, 'killpg'):
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+
+        # Windows has no process groups, so only the process itself can be killed
+        else:
+            proc.kill()
+
+    except Exception:
+
+        # The group might have already gone away, so fall back to the process itself
+        try:
+            proc.kill()
+        except Exception:
+            pass
+
+
+def runGitCommand(args, cwd=None, timeout=GIT_NETWORK_TIMEOUT, network=False):
+    """ Run a git command with all interactive prompts disabled and with a hard timeout.
+
+    Arguments:
+        args: [list of str] Git arguments, without the leading "git".
+
+    Keyword arguments:
+        cwd: [str] Directory in which to run the command. None by default.
+        timeout: [float] Hard timeout in seconds, after which the process group is killed.
+        network: [bool] True if the command touches the network, in which case git is also told to
+            abort a transfer which has stalled. False by default.
+
+    Return:
+        (returncode, stdout, stderr): [int, str, str] Exit code and the decoded output.
+
+    Raises:
+        GitCommandTimeout: If the command did not finish within the timeout.
+    """
+
+    # Clear the credential helper list, so that a configured helper (store, cache, manager) cannot
+    # block or supply stale credentials either
+    cmd = ["git", "-c", "credential.helper="]
+
+    if network:
+
+        # Abort a transfer which delivers less than 1 kB/s for 30 s
+        cmd += ["-c", "http.lowSpeedLimit=1000", "-c", "http.lowSpeedTime=30"]
+
+    # Append the arguments of the actual git subcommand
+    cmd += list(args)
+
+    # Log the command with any credentials stripped out of the URLs
+    log.debug("Running git command: {:s}".format(" ".join([sanitiseGitUrl(arg) for arg in cmd])))
+
+    # Redirect the output into temporary files instead of pipes. Pipes would have to be drained
+    # concurrently, otherwise a command which produces more output than the pipe buffer deadlocks.
+    stdout_file = tempfile.TemporaryFile()
+    stderr_file = tempfile.TemporaryFile()
+
+    # Read stdin from /dev/null, so that a credential prompt which somehow slips past the
+    # environment variables gets an immediate EOF instead of blocking forever
+    devnull_file = open(os.devnull, 'r')
+
+    # Put the child into its own process group, so that the whole group can be killed on a timeout
+    popen_kwargs = {}
+
+    # Python 3 calls setsid in the child on its own
+    if sys.version_info[0] >= 3:
+        popen_kwargs['start_new_session'] = True
+
+    # On Python 2 it has to be done by hand
+    elif os.name == 'posix':
+        popen_kwargs['preexec_fn'] = os.setsid
+
+    try:
+
+        # Run git with the prompts disabled and with nothing to read on stdin
+        proc = subprocess.Popen(cmd, cwd=cwd, env=gitSafeEnv(), stdin=devnull_file,
+                                stdout=stdout_file, stderr=stderr_file, **popen_kwargs)
+
+        # Poll until the command finishes or the timeout expires
+        deadline = time.time() + timeout
+        timed_out = False
+
+        while proc.poll() is None:
+
+            # The command has run for too long, take it and its transport helper down
+            if time.time() > deadline:
+                killProcessGroup(proc)
+                proc.wait()
+                timed_out = True
+                break
+
+            # Poll gently, so that waiting does not burn a core
+            time.sleep(0.1)
+
+        # Read back whatever the command managed to write
+        stdout_file.seek(0)
+        stderr_file.seek(0)
+        stdout = stdout_file.read().decode('utf-8', 'replace')
+        stderr = stderr_file.read().decode('utf-8', 'replace')
+
+        # Report the timeout together with anything git said before it was killed
+        if timed_out:
+            raise GitCommandTimeout("git {:s} timed out after {:.0f} s and was killed. stderr: {:s}"
+                                    .format(sanitiseGitUrl(" ".join(args)), timeout, stderr.strip()[:500]))
+
+        return proc.returncode, stdout, stderr
+
+    finally:
+
+        # Release the temporary output files and the /dev/null handle
+        for file_handle in (stdout_file, stderr_file, devnull_file):
+            try:
+                file_handle.close()
+            except Exception:
+                pass
+
+
+### ###
 
 
 def mkdirP(path):
