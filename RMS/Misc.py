@@ -205,10 +205,14 @@ def gitSafeEnv(env=None):
         [dict] Copy of the environment with the no-prompt variables set.
     """
 
+    # Start from the current environment, unless another one was given
     if env is None:
         env = os.environ
 
+    # Work on a copy, so that the environment of this process is not touched
     safe_env = dict(env)
+
+    # Override the prompt related variables
     safe_env.update(GIT_NO_PROMPT_ENV)
 
     return safe_env
@@ -222,6 +226,7 @@ def disableGitPrompts():
         deliberate override from the outside still works.
     """
 
+    # setdefault leaves any variable which is already set alone
     for name, value in GIT_NO_PROMPT_ENV.items():
         os.environ.setdefault(name, value)
 
@@ -237,9 +242,13 @@ def sanitiseGitUrl(url):
     """
 
     try:
+
+        # Drop the userinfo part which sits between the scheme and the host
         return re.sub(r'([A-Za-z][A-Za-z0-9+.\-]*://)[^/@]+@', r'\1', url)
 
     except Exception:
+
+        # Never risk writing a URL which might still hold a password
         return "[URL_REDACTED]"
 
 
@@ -261,6 +270,7 @@ def gitUrlHost(url):
 
     url = url.strip()
 
+    # A local repository has no host to connect to
     if not url or url.startswith("file://"):
         return None
 
@@ -315,6 +325,7 @@ def anonymousHttpsGitUrl(url):
 
     url = url.strip()
 
+    # A URL without a host is a local path, which cannot be rewritten
     host = gitUrlHost(url)
 
     if host is None:
@@ -334,6 +345,7 @@ def anonymousHttpsGitUrl(url):
     # ssh://[user@]host[:port]/path
     ssh_match = re.match(r'^ssh://(?:[^@/]+@)?[^/]+/(.+)$', url, re.IGNORECASE)
 
+    # Keep the path and swap the transport for https
     if ssh_match is not None:
         return "https://{:s}/{:s}".format(host, ssh_match.group(1).lstrip("/"))
 
@@ -343,6 +355,7 @@ def anonymousHttpsGitUrl(url):
     if scp_match is not None:
         return "https://{:s}/{:s}".format(host, scp_match.group(1).lstrip("/"))
 
+    # An unrecognized form, better to skip it than to guess
     return None
 
 
@@ -356,6 +369,7 @@ def gitUrlHostAndPort(url):
         (host, port): [str, int] Host name and port, or (None, None) for a local path.
     """
 
+    # A local path has neither a host nor a port
     host = gitUrlHost(url)
 
     if host is None:
@@ -374,9 +388,11 @@ def gitUrlHostAndPort(url):
     if url.lower().startswith("https://"):
         return host, 443
 
+    # Both ssh:// and the scp-like syntax go over ssh
     if url.lower().startswith("ssh://") or ("@" in url):
         return host, 22
 
+    # Assume https for anything else
     return host, 443
 
 
@@ -397,20 +413,27 @@ def hostReachable(host, port=443, timeout=GIT_REACHABILITY_TIMEOUT):
         [bool] True if the connection succeeded.
     """
 
+    # Without a host there is nothing to connect to
     if host is None:
         return False
 
     sock = None
 
     try:
+
+        # Open a connection and drop it straight away, only reachability matters here
         sock = socket.create_connection((host, port), timeout=timeout)
         return True
 
     except Exception as e:
+
+        # A refused connection, a DNS failure and a timeout are all treated the same way
         log.debug("Host {:s}:{:d} is not reachable: {:s}".format(str(host), int(port), repr(e)))
         return False
 
     finally:
+
+        # Always release the socket, even when the connection failed halfway through
         if sock is not None:
             try:
                 sock.close()
@@ -429,15 +452,18 @@ def killProcessGroup(proc):
     """
 
     try:
+
+        # Kill the whole group, so that the transport helper goes down with git itself
         if (os.name == 'posix') and hasattr(os, 'killpg'):
             os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
 
+        # Windows has no process groups, so only the process itself can be killed
         else:
             proc.kill()
 
     except Exception:
 
-        # Fall back to killing just the process itself
+        # The group might have already gone away, so fall back to the process itself
         try:
             proc.kill()
         except Exception:
@@ -472,8 +498,10 @@ def runGitCommand(args, cwd=None, timeout=GIT_NETWORK_TIMEOUT, network=False):
         # Abort a transfer which delivers less than 1 kB/s for 30 s
         cmd += ["-c", "http.lowSpeedLimit=1000", "-c", "http.lowSpeedTime=30"]
 
+    # Append the arguments of the actual git subcommand
     cmd += list(args)
 
+    # Log the command with any credentials stripped out of the URLs
     log.debug("Running git command: {:s}".format(" ".join([sanitiseGitUrl(arg) for arg in cmd])))
 
     # Redirect the output into temporary files instead of pipes. Pipes would have to be drained
@@ -488,14 +516,17 @@ def runGitCommand(args, cwd=None, timeout=GIT_NETWORK_TIMEOUT, network=False):
     # Put the child into its own process group, so that the whole group can be killed on a timeout
     popen_kwargs = {}
 
+    # Python 3 calls setsid in the child on its own
     if sys.version_info[0] >= 3:
         popen_kwargs['start_new_session'] = True
 
+    # On Python 2 it has to be done by hand
     elif os.name == 'posix':
         popen_kwargs['preexec_fn'] = os.setsid
 
     try:
 
+        # Run git with the prompts disabled and with nothing to read on stdin
         proc = subprocess.Popen(cmd, cwd=cwd, env=gitSafeEnv(), stdin=devnull_file,
                                 stdout=stdout_file, stderr=stderr_file, **popen_kwargs)
 
@@ -505,12 +536,14 @@ def runGitCommand(args, cwd=None, timeout=GIT_NETWORK_TIMEOUT, network=False):
 
         while proc.poll() is None:
 
+            # The command has run for too long, take it and its transport helper down
             if time.time() > deadline:
                 killProcessGroup(proc)
                 proc.wait()
                 timed_out = True
                 break
 
+            # Poll gently, so that waiting does not burn a core
             time.sleep(0.1)
 
         # Read back whatever the command managed to write
@@ -519,6 +552,7 @@ def runGitCommand(args, cwd=None, timeout=GIT_NETWORK_TIMEOUT, network=False):
         stdout = stdout_file.read().decode('utf-8', 'replace')
         stderr = stderr_file.read().decode('utf-8', 'replace')
 
+        # Report the timeout together with anything git said before it was killed
         if timed_out:
             raise GitCommandTimeout("git {:s} timed out after {:.0f} s and was killed. stderr: {:s}"
                                     .format(sanitiseGitUrl(" ".join(args)), timeout, stderr.strip()[:500]))
@@ -527,6 +561,7 @@ def runGitCommand(args, cwd=None, timeout=GIT_NETWORK_TIMEOUT, network=False):
 
     finally:
 
+        # Release the temporary output files and the /dev/null handle
         for file_handle in (stdout_file, stderr_file, devnull_file):
             try:
                 file_handle.close()
