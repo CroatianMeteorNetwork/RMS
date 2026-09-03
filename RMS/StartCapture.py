@@ -46,7 +46,7 @@ from RMS.Compression import Compressor
 from RMS.DeleteOldObservations import deleteOldObservations
 from RMS.DetectStarsAndMeteors import detectStarsAndMeteors
 from RMS.Formats.FFfile import validFFName
-from RMS.Misc import mkdirP, RmsDateTime, UTCFromTimestamp
+from RMS.Misc import mkdirP, RmsDateTime, UTCFromTimestamp, disableGitPrompts
 from RMS.QueuedPool import QueuedPool
 from RMS.Reprocess import getPlatepar, processNight, processFramesFiles
 from RMS.RunExternalScript import runExternalScript
@@ -1026,6 +1026,10 @@ def processIncompleteCaptures(config, upload_manager):
 
 
 if __name__ == "__main__":
+
+    # Make sure that no git invocation from this process, or from any of its children, can ever
+    # stop and ask for credentials on the terminal and block the whole processing chain
+    disableGitPrompts()
 
     ### COMMAND LINE ARGUMENTS
 

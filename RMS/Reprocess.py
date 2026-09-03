@@ -42,7 +42,7 @@ from Utils.PlotTimeIntervals import plotFFTimeIntervals
 from RMS.Formats.ObservationSummary import addObsParam, getObsDBConn
 from RMS.Formats.ObservationSummary import serialize, finalizeObservationSummary
 from Utils.AuditConfig import compareConfigs
-from RMS.Misc import RmsDateTime, tarWithProgress
+from RMS.Misc import RmsDateTime, tarWithProgress, disableGitPrompts
 from RMS.RunExternalScript import runExternalScript
 
 # Get the logger from the main module
@@ -782,6 +782,10 @@ def processFramesFiles(config):
 
 
 if __name__ == "__main__":
+
+    # Make sure that no git invocation from this process, or from any of its children, can ever
+    # stop and ask for credentials on the terminal and block the whole processing chain
+    disableGitPrompts()
 
     ### COMMAND LINE ARGUMENTS
 

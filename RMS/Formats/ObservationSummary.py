@@ -47,11 +47,20 @@ import tempfile
 import ephem
 
 from RMS.ConfigReader import parse
-from RMS.Misc import niceFormat, isRaspberryPi, sanitise, getRMSStyleFileName, getRmsRootDir, UTCFromTimestamp
+from RMS.Misc import niceFormat, isRaspberryPi, sanitise, getRMSStyleFileName, getRmsRootDir, \
+    UTCFromTimestamp
+from RMS.Misc import runGitCommand, GitCommandTimeout, hostReachable, gitUrlHost, \
+    gitUrlHostAndPort, sanitiseGitUrl, anonymousHttpsGitUrl, GIT_ALLOWED_HOSTS, \
+    GIT_NETWORK_TIMEOUT, GIT_LOCAL_TIMEOUT
+from RMS.Logger import getLogger
 from RMS.Formats.FFfits import filenameToDatetimeStr
 from RMS.Formats.Platepar import Platepar
 from RMS.CaptureDuration import captureDuration
 from RMS.CaptureModeSwitcher import SWITCH_HORIZON_DEG
+
+
+# Get the logger from the main module
+log = getLogger("rmslogger")
 
 
 if sys.version_info.major > 2:
@@ -749,47 +758,154 @@ def nightSummaryData(config, night_data_dir):
             time_first_fits_file, time_last_fits_file, total_expected_fits, total_expected_fits_ephemeris
 
 
-def updateCommitHistoryDirectory(remote_urls, target_directory):
+def filterCloneableRemotes(remote_list, allowed_hosts=GIT_ALLOWED_HOSTS):
+
+    """ Keep only the remotes which can be cloned anonymously, i.e. without any chance of a
+        credential prompt.
+
+        Only remotes on known hosts and without embedded credentials are kept, as a remote on an
+        unknown host may well be a private fork which would ask for credentials. An ssh remote on
+        an allowed host is rewritten to its anonymous https equivalent, so that checkouts which
+        were cloned over ssh are still covered, without ever needing a key or a passphrase.
+
+    Arguments:
+        remote_list: [list] list of [remote_name, url] pairs, as returned by getRemoteUrls.
+
+    Keyword arguments:
+        allowed_hosts: [tuple of str] host names from which cloning is allowed.
+
+    Return:
+        [list] list of [remote_name, url] pairs with anonymous https URLs.
+    """
+
+    allowed_hosts_lower = [host.lower() for host in allowed_hosts]
+
+    cloneable_remotes = []
+
+    for remote_name, url in remote_list:
+
+        host = gitUrlHost(url)
+
+        if (host is None) or (host.lower() not in allowed_hosts_lower):
+            log.debug("Skipping git remote {:s}, the host {:s} is not in the list of allowed hosts"
+                      .format(remote_name, str(host)))
+            continue
+
+        # Rewrite the URL so that it can be cloned without any credentials
+        https_url = anonymousHttpsGitUrl(url)
+
+        if https_url is None:
+            log.debug("Skipping git remote {:s}, its URL cannot be used anonymously".format(remote_name))
+            continue
+
+        if [remote_name, https_url] not in cloneable_remotes:
+            cloneable_remotes.append([remote_name, https_url])
+
+    return cloneable_remotes
+
+
+def updateCommitHistoryDirectory(remote_urls, target_directory, timeout=GIT_NETWORK_TIMEOUT):
 
     """ Clone only the commit history of a remote repository.
 
+        Every git operation runs with the interactive prompts disabled and with a hard timeout, so
+        that an unhealthy remote can never block the processing chain.
+
     Arguments:
-        remote_urls: [url] the remote url to be cloned/
+        remote_urls: [list] list of [remote_name, url] pairs to be cloned/fetched.
         target_directory: [path] the directory into which to clone.
+
+    Keyword arguments:
+        timeout: [float] hard timeout of every git operation which touches the network, in seconds.
 
     Return:
         commit_repo_directory: [path] directory of the repository
     """
 
+    # Keep only the remotes which can be cloned without any chance of a credential prompt
+    remote_urls = filterCloneableRemotes(remote_urls)
 
-    if os.path.exists(target_directory):
-        shutil.rmtree(target_directory)
+    if len(remote_urls) == 0:
+        raise RuntimeError("No anonymously cloneable git remote was found")
 
-    os.makedirs(target_directory)
-    first_remote = True
-    for remote_url in remote_urls:
-        local_name, url = remote_url[0], remote_url[1]
+    if not os.path.exists(target_directory):
+        os.makedirs(target_directory)
 
-        if first_remote:
-            first_remote = False
-            p = subprocess.Popen(["git", "clone", url, "--filter=blob:none", "--no-checkout"], cwd=target_directory,
-                             stdout=subprocess.PIPE)
-            p.wait()
-            # this first remote might have been pulled in with the wrong local_name so rename it
-            commit_repo_directory = os.path.join(target_directory, os.listdir(target_directory)[0])
-            downloaded_remote_name = subprocess.check_output(["git", "remote"], cwd = commit_repo_directory).strip().decode('utf-8')
+    # Clone into a directory named here, so that the location of the clone does not have to be
+    # guessed from a directory listing afterwards
+    clone_directory = os.path.join(target_directory, "commit_history")
 
-            if downloaded_remote_name != local_name:
-                p = subprocess.Popen(["git", "remote", "rename", downloaded_remote_name, local_name], cwd = commit_repo_directory)
-                p.wait()
+    if os.path.exists(clone_directory):
+        shutil.rmtree(clone_directory)
 
-        else:
-            # this is not the first remote so add another remote
+    commit_repo_directory = None
 
-            p = subprocess.Popen(["git", "remote", "add", local_name, url], cwd = commit_repo_directory)
-            p.wait()
-            p = subprocess.Popen(["git", "fetch", "--filter=blob:none", local_name], cwd = commit_repo_directory)
-            p.wait()
+    for local_name, url in remote_urls:
+
+        host, port = gitUrlHostAndPort(url)
+
+        # Fail fast if the host cannot even be reached, instead of waiting out the git timeout
+        if not hostReachable(host, port):
+            log.warning("Skipping git remote {:s}, the host {:s} is not reachable".format(
+                local_name, str(host)))
+            continue
+
+        try:
+
+            if commit_repo_directory is None:
+
+                # Clone the commit history of the first reachable remote
+                returncode, _, stderr = runGitCommand(
+                    ["clone", url, "--filter=blob:none", "--no-checkout", clone_directory],
+                    timeout=timeout, network=True)
+
+                if returncode != 0:
+                    log.warning("Cloning the commit history from {:s} failed with code {:d}: {:s}"
+                                .format(sanitiseGitUrl(url), returncode, stderr.strip()[:500]))
+                    continue
+
+                commit_repo_directory = clone_directory
+
+                # This first remote might have been pulled in with the wrong local name, so rename it
+                returncode, stdout, _ = runGitCommand(["remote"], cwd=commit_repo_directory,
+                                                      timeout=GIT_LOCAL_TIMEOUT)
+                downloaded_remote_name = stdout.strip()
+
+                if (returncode == 0) and (len(downloaded_remote_name) > 0) \
+                        and (downloaded_remote_name != local_name):
+
+                    runGitCommand(["remote", "rename", downloaded_remote_name, local_name],
+                                  cwd=commit_repo_directory, timeout=GIT_LOCAL_TIMEOUT)
+
+            else:
+
+                # The history is already there, so only add the additional remote and fetch it. A
+                # failure here is not fatal, as the lag can still be measured against the remote
+                # which was cloned first.
+                returncode, _, stderr = runGitCommand(["remote", "add", local_name, url],
+                                                      cwd=commit_repo_directory,
+                                                      timeout=GIT_LOCAL_TIMEOUT)
+
+                if returncode != 0:
+                    log.warning("Adding the git remote {:s} failed: {:s}".format(
+                        local_name, stderr.strip()[:500]))
+                    continue
+
+                returncode, _, stderr = runGitCommand(["fetch", "--filter=blob:none", local_name],
+                                                      cwd=commit_repo_directory, timeout=timeout,
+                                                      network=True)
+
+                if returncode != 0:
+                    log.warning("Fetching the git remote {:s} failed: {:s}".format(
+                        local_name, stderr.strip()[:500]))
+
+        except GitCommandTimeout as e:
+            log.warning("Git operation on the remote {:s} timed out: {:s}".format(local_name, repr(e)))
+            continue
+
+    if commit_repo_directory is None:
+        raise RuntimeError("Could not clone the commit history from any git remote")
+
     return commit_repo_directory
 
 def getCommit(repo):
@@ -802,10 +918,13 @@ def getCommit(repo):
         commit: [string] latest commit hash
     """
 
-    commit = subprocess.check_output(["git", "log", "-n 1", "--pretty=format:%H"], cwd=repo).decode(
-        "utf-8")
+    returncode, stdout, stderr = runGitCommand(["log", "-n 1", "--pretty=format:%H"], cwd=repo,
+                                               timeout=GIT_LOCAL_TIMEOUT)
 
-    return commit
+    if returncode != 0:
+        raise RuntimeError("Could not read the latest local commit: " + stderr.strip()[:500])
+
+    return stdout
 
 def getDateOfCommit(repo, commit):
     """Get the date of a commit
@@ -820,7 +939,16 @@ def getDateOfCommit(repo, commit):
 
     if commit is None:
         return datetime.datetime.strptime("2000-01-01 00:00:00 +00:00", "%Y-%m-%d %H:%M:%S %z")
-    commit_date  = subprocess.check_output(["git", "show", "-s", "--format=%ci", commit], cwd=repo).decode('utf8').replace("\n","")
+
+    returncode, stdout, stderr = runGitCommand(["show", "-s", "--format=%ci", commit], cwd=repo,
+                                               timeout=GIT_LOCAL_TIMEOUT)
+
+    if returncode != 0:
+        raise RuntimeError("Could not read the date of the commit {:s}: {:s}".format(
+            str(commit), stderr.strip()[:500]))
+
+    commit_date = stdout.replace("\n", "")
+
     return datetime.datetime.strptime(commit_date, "%Y-%m-%d %H:%M:%S %z")
 
 def getRemoteUrls(repo):
@@ -832,7 +960,12 @@ def getRemoteUrls(repo):
         list of [remote, url] where remote is the local name of a remote and URL is the URL of the remote
     """
 
-    urls_and_remotes = subprocess.check_output(["git", "remote", "-v"], cwd=repo).decode("utf-8").split("\n")
+    returncode, stdout, stderr = runGitCommand(["remote", "-v"], cwd=repo, timeout=GIT_LOCAL_TIMEOUT)
+
+    if returncode != 0:
+        raise RuntimeError("Could not read the git remotes: " + stderr.strip()[:500])
+
+    urls_and_remotes = stdout.split("\n")
     url_remote_list_to_return = []
     for url_and_remote in urls_and_remotes:
         url_and_remote = url_and_remote.split("\t")
@@ -854,8 +987,10 @@ def getBranchOfCommit(repo, commit):
         local_branch: [str] A local branch where a commit exists.
     """
 
-    local_branch = subprocess.check_output(["git", "branch", "-a", "--contains", commit], cwd=repo).decode(
-         "utf-8").split("\n")[0].replace("*", "").strip()
+    _, stdout, _ = runGitCommand(["branch", "-a", "--contains", commit], cwd=repo,
+                                 timeout=GIT_LOCAL_TIMEOUT)
+
+    local_branch = stdout.split("\n")[0].replace("*", "").strip()
     return local_branch
 
 def getLatestCommit(repo, commit_branch):
@@ -872,7 +1007,9 @@ def getLatestCommit(repo, commit_branch):
     if commit_branch.startswith("remotes/"):
         commit_branch = commit_branch[len("remotes/"):]
 
-    commit_list = subprocess.check_output(["git", "branch", "-r", "-v"], cwd=repo).decode("utf-8").split("\n")
+    _, stdout, _ = runGitCommand(["branch", "-r", "-v"], cwd=repo, timeout=GIT_LOCAL_TIMEOUT)
+
+    commit_list = stdout.split("\n")
     commit = None
     for branch in commit_list:
 
@@ -899,10 +1036,12 @@ def getRemoteBranchNameForCommit(repo, commit):
 
     local_branch_list = []
     try:
-        local_branch_list = subprocess.check_output(["git", "branch", "-a", "--contains", commit], cwd=repo).decode(
-            "utf-8").split("\n")
-    except:
-        pass
+        _, stdout, _ = runGitCommand(["branch", "-a", "--contains", commit], cwd=repo,
+                                     timeout=GIT_LOCAL_TIMEOUT)
+        local_branch_list = stdout.split("\n")
+
+    except Exception as e:
+        log.debug("Could not list the branches containing the commit: " + repr(e))
 
     remote_branch_name = None
     for branch in local_branch_list:
@@ -912,32 +1051,53 @@ def getRemoteBranchNameForCommit(repo, commit):
 
     return remote_branch_name
 
-def daysBehind():
+def daysBehind(timeout=GIT_NETWORK_TIMEOUT):
     """Measure how far behind the latest commit on the active branch is behind a branch with that commit on the remote
     repository.
 
-    Arguments:
-        syscon: [config] RMS config object.
+    Keyword arguments:
+        timeout: [float] hard timeout of every git operation which touches the network, in seconds.
 
     Return:
-        number of days behind the latest remote commit that the latest local commit is on the active branch.
+        (days_behind, remote_branch): number of days behind the latest remote commit that the latest
+            local commit is on the active branch, and the remote branch it was measured against.
+            (None, None) if the lag could not be determined.
     """
 
-    latest_local_commit = getCommit(os.getcwd())
-    latest_local_date = getDateOfCommit(os.getcwd(), latest_local_commit)
+    repo_directory = getRmsRootDir()
+
+    latest_local_commit = getCommit(repo_directory)
+    latest_local_date = getDateOfCommit(repo_directory, latest_local_commit)
+
+    remote_urls = getRemoteUrls(repo_directory)
+
     target_directory_obj = tempfile.TemporaryDirectory()
-    target_directory = target_directory_obj.name
-    remote_urls = getRemoteUrls(os.getcwd())
-    commit_repo_directory = updateCommitHistoryDirectory(remote_urls, target_directory)
-    remote_branch_of_commit = getRemoteBranchNameForCommit(commit_repo_directory, latest_local_commit)
-    if not remote_branch_of_commit is None:
+
+    try:
+
+        commit_repo_directory = updateCommitHistoryDirectory(remote_urls, target_directory_obj.name,
+                                                             timeout=timeout)
+
+        remote_branch_of_commit = getRemoteBranchNameForCommit(commit_repo_directory, latest_local_commit)
+
+        if remote_branch_of_commit is None:
+            log.warning("The latest local commit was not found on any remote branch, "
+                        "the repository lag could not be measured")
+            return None, None
+
         latest_remote_date = getDateOfCommit(commit_repo_directory, remote_branch_of_commit)
         days_behind = (latest_remote_date - latest_local_date).total_seconds()/(60 * 60 * 24)
-        target_directory_obj.cleanup()
+
         return days_behind, remote_branch_of_commit
-    else:
-        target_directory_obj.cleanup()
-        return "Unable to determine"
+
+    finally:
+
+        try:
+            target_directory_obj.cleanup()
+
+        except Exception as e:
+            log.debug("Could not clean up the temporary commit history directory: " + repr(e))
+
 
 def retrieveObservationData(conn, config, night_directory=None, ordering=None):
     """ Query the database to get the data more recent than the time passed in.
@@ -1263,9 +1423,18 @@ def finalizeObservationSummary(config, night_data_dir, platepar=None):
 
     try:
         days_behind, remote_branch = daysBehind()
-        addObsParam(obs_db_conn, "repository_lag_remote_days", days_behind)
-        addObsParam(obs_db_conn, "remote_branch", os.path.basename(remote_branch))
-    except:
+
+        if days_behind is None:
+            addObsParam(obs_db_conn, "repository_lag_remote_days", "Not determined")
+
+        else:
+            addObsParam(obs_db_conn, "repository_lag_remote_days", days_behind)
+
+            if remote_branch is not None:
+                addObsParam(obs_db_conn, "remote_branch", os.path.basename(remote_branch))
+
+    except Exception as e:
+        log.warning("Could not determine the repository lag: " + repr(e))
         addObsParam(obs_db_conn, "repository_lag_remote_days", "Not determined")
     obs_db_conn.close()
 
