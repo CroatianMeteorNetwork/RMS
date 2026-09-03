@@ -616,6 +616,41 @@ def setAutoReboot(cam, opts):
     cam.set_info("General.AutoMaintain", info)
 
 
+def ispControl(camera_ip, cmd_line, port=9600, timeout=5):
+    """Send a command to the isp_ctl TCP daemon running on the camera.
+
+    The isp_ctl daemon listens for one text command per TCP connection,
+    sends the response, then closes. This provides true ISP manual
+    exposure/gain control that DVRIP cannot achieve.
+
+    Args:
+        camera_ip (str): Camera IP address
+        cmd_line (str): Command to send (e.g. "query", "manual -a 2048", "auto")
+        port (int): TCP port (default 9600)
+        timeout (int): Socket timeout in seconds
+
+    Returns:
+        str: Response text from isp_ctl, or None on error
+    """
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(timeout)
+        s.connect((camera_ip, port))
+        s.sendall((cmd_line + "\n").encode())
+        s.shutdown(socket.SHUT_WR)
+        chunks = []
+        while True:
+            data = s.recv(4096)
+            if not data:
+                break
+            chunks.append(data)
+        s.close()
+        return b"".join(chunks).decode(errors="replace")
+    except Exception as e:
+        log.error("isp_ctl connection to %s:%d failed: %s", camera_ip, port, e)
+        return None
+
+
 def manageCloudConnection(cam, opts):
     if len(opts) < 1 or opts[0] not in ['on', 'off', 'get']:
         log.info('usage: CloudConnection on|off|get')
@@ -1058,6 +1093,35 @@ def dvripCall(cam, cmd, opts, camera_settings_path='./camera_settings.json'):
         upgradeFirmware(cam, firmware_path, skip_confirm)
         return
 
+    elif cmd == 'IspQuery':
+        resp = ispControl(cam.ip, "query")
+        if resp:
+            log.info(resp.rstrip())
+        return
+
+    elif cmd == 'IspManual':
+        # opts: ["-a", "2048", "-e", "500", ...]
+        resp = ispControl(cam.ip, "manual " + " ".join(opts))
+        if resp:
+            log.info(resp.rstrip())
+        return
+
+    elif cmd == 'IspAuto':
+        # opts: ["--max-again", "4096", ...] or empty for full auto
+        resp = ispControl(cam.ip, "auto " + " ".join(opts))
+        if resp:
+            log.info(resp.rstrip())
+        return
+
+    elif cmd == 'Isp':
+        # Generic pass-through to the isp_ctl/hisp_ctl daemon on :9600.
+        # Forward all opts verbatim, e.g. Isp wb unity | Isp wb 512 256 256 |
+        # Isp gain 4096 | Isp ae | Isp status | Isp drc off. Empty -> status.
+        resp = ispControl(cam.ip, " ".join(opts) if opts else "status")
+        if resp:
+            log.info(resp.rstrip())
+        return
+
     # -- If we get here, command is not recognized:
     else:
         log.error("Unrecognized command '%s' in dvripCall. Options were: %s", cmd, opts)
@@ -1131,7 +1195,8 @@ if __name__ == '__main__':
         'reboot', 'GetHostname', 'GetSettings','GetDeviceInformation','GetNetConfig',
         'GetCameraParams','GetEncodeParams','SetParam','SaveSettings','LoadSettings',
         'SetColor','SetOSD','SetAutoReboot','GetIP','GetAutoReboot','CloudConnection',
-        'CameraTime','SwitchMode','UpgradeFirmware'
+        'CameraTime','SwitchMode','UpgradeFirmware',
+        'IspQuery','IspManual','IspAuto','Isp'
     ]
     opthelp = (
         'optional parameters for SetParam for example Camera ElecLevel 70 \n'
