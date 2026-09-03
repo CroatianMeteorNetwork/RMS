@@ -50,7 +50,6 @@ from RMS.Misc import niceFormat, isRaspberryPi, sanitise, getRMSStyleFileName, g
 from RMS.Misc import runGitCommand, GitCommandTimeout, hostReachable, gitUrlHost, \
     gitUrlHostAndPort, sanitiseGitUrl, anonymousHttpsGitUrl, GIT_ALLOWED_HOSTS, \
     GIT_NETWORK_TIMEOUT, GIT_LOCAL_TIMEOUT
-from RMS.Logger import getLogger
 from RMS.Formats.FFfits import filenameToDatetimeStr
 from RMS.Formats.Platepar import Platepar
 from RMS.CaptureDuration import captureDuration
