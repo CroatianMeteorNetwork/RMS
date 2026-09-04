@@ -1826,7 +1826,7 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
         layout = QtWidgets.QVBoxLayout(dlg)
 
         # Show what the save will write into the config, so nothing changes behind the user's back
-        lm_checkbox = self._addConfigPreview(layout) if ftype == "Config" else None
+        lm_checkbox, lm_spinbox = self._addConfigPreview(layout) if ftype == "Config" else (None, None)
 
         checkboxes = []
         for i, (label, path) in enumerate(self._locations):
@@ -1890,15 +1890,19 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
         if dlg.exec() == QtWidgets.QDialog.DialogCode.Accepted:
             paths = [cb.property("path") for cb in checkboxes if cb.isChecked()]
             if paths:
-                save_lm = (lm_checkbox is not None) and lm_checkbox.isChecked()
-                self._saveFile(ftype, paths, save_lm=save_lm)
+                # The LM is written only if its row is ticked, and then it is the value in the box
+                catalog_lm = None
+                if (lm_checkbox is not None) and lm_checkbox.isChecked():
+                    catalog_lm = lm_spinbox.value()
+
+                self._saveFile(ftype, paths, catalog_lm=catalog_lm)
 
 
     def _addConfigPreview(self, layout):
         """ Tabulate the values a config save will write, as current -> new.
 
-        The tuned catalog limiting magnitude gets a checkbox of its own, as it is only written on
-        request. Returns that checkbox, or None if the LM was not tuned in this session.
+        The catalog limiting magnitude gets a checkbox and an editable value of its own, as it is
+        only written on request. Returns (checkbox, spinbox).
         """
         pt = self.plate_tool
 
@@ -1958,23 +1962,58 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
                    note=note)
             row += 1
 
-        # The catalog LM is only offered when the tuner found one. Everything else that moves the LM
-        #   (the spinboxes, the R/F keys, plate fitting) is a working value that must not be saved,
-        #   or the LM that recalibration uses would drift with every save.
-        lm_checkbox = None
-        if getattr(pt, 'catalog_lm_tuned', False) and hasattr(pt, 'tuned_cat_lim_mag'):
+        # The catalog LM is never taken from the working value: the spinboxes, the R/F keys and
+        #   plate fitting move it for viewing, and saving that would make the LM recalibration
+        #   uses drift with every save. What is offered is the tuner's result, which the user may
+        #   correct in the box before it is written. That edit is the deliberate override, made
+        #   here and nowhere else. Without a tune the row starts unticked at the config's value.
+        tuned = getattr(pt, 'catalog_lm_tuned', False) and hasattr(pt, 'tuned_cat_lim_mag')
+        config_lm = getattr(pt.config, 'catalog_mag_limit', None)
+        working_lm = getattr(pt, 'cat_lim_mag', None)
 
-            lm_checkbox = QtWidgets.QCheckBox("catalog_mag_limit")
-            lm_checkbox.setChecked(True)
-            lm_checkbox.setToolTip("Recalibration matches stars down to this magnitude. "
-                                   "Uncheck to keep the value already in the config.")
+        lm_checkbox = QtWidgets.QCheckBox("catalog_mag_limit")
+        lm_checkbox.setChecked(bool(tuned))
+        lm_checkbox.setToolTip("Recalibration matches stars down to this magnitude. "
+                               "Untick to keep the value already in the config.")
 
-            addRow(row, lm_checkbox, str(getattr(pt.config, 'catalog_mag_limit', "?")),
-                   "{:.1f}".format(pt.tuned_cat_lim_mag), note="tuned")
+        lm_spinbox = QtWidgets.QDoubleSpinBox()
+        lm_spinbox.setDecimals(1)
+        lm_spinbox.setSingleStep(0.1)
+        lm_spinbox.setRange(3.0, 15.0)
+        if tuned:
+            lm_spinbox.setValue(round(float(pt.tuned_cat_lim_mag), 1))
+        elif config_lm is not None:
+            lm_spinbox.setValue(float(config_lm))
+        elif working_lm is not None:
+            lm_spinbox.setValue(float(working_lm))
+        lm_spinbox.setToolTip("The value the save writes. Edit it to override the tuned value.")
+
+        # Editing the value is the override, so it ticks the row as well
+        lm_spinbox.valueChanged.connect(lambda _value: lm_checkbox.setChecked(True))
+
+        # Say where the value came from, and where the view currently is if that differs, so the
+        #   user can copy it in deliberately rather than have it saved behind their back
+        notes = ["tuned"] if tuned else []
+        if (working_lm is not None) and (abs(float(working_lm) - lm_spinbox.value()) > 0.05):
+            notes.append("view is at {:.1f}".format(float(working_lm)))
+
+        grid.addWidget(lm_checkbox, row, 0)
+
+        old_label = QtWidgets.QLabel("?" if config_lm is None else "{:.1f}".format(float(config_lm)))
+        old_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignRight
+                               | QtCore.Qt.AlignmentFlag.AlignVCenter)
+        grid.addWidget(old_label, row, 1)
+        grid.addWidget(QtWidgets.QLabel("->"), row, 2)
+        grid.addWidget(lm_spinbox, row, 3)
+
+        if notes:
+            note_label = QtWidgets.QLabel(", ".join(notes))
+            note_label.setFont(self._italicFont(note_label))
+            grid.addWidget(note_label, row, 4)
 
         layout.addWidget(group)
 
-        return lm_checkbox
+        return lm_checkbox, lm_spinbox
 
 
     @staticmethod
@@ -1993,8 +2032,13 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
         return font
 
 
-    def _saveFile(self, ftype, target_dirs, save_lm=False):
-        """Save a single file type to one or more target directories."""
+    def _saveFile(self, ftype, target_dirs, catalog_lm=None):
+        """Save a single file type to one or more target directories.
+
+        Keyword arguments:
+            catalog_lm: [float] Catalog limiting magnitude to write into the config, as chosen in
+                the save dialog. None leaves the config's value alone.
+        """
         pt = self.plate_tool
         results = []
 
@@ -2012,24 +2056,13 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
                 try:
                     src = pt.config.config_file_name
                     dest = os.path.join(target_dir, os.path.basename(src))
-                    # Write the tuned catalog LM as-is. This used to subtract 1.0 to
-                    #   compensate for the "+ 1" in ApplyRecalibrate, but that margin only
-                    #   controls how deep readStarCatalog() pulls the catalog file into
-                    #   memory (ApplyRecalibrate.py:813-827); the limit stars are actually
-                    #   matched against is config.catalog_mag_limit itself, taken raw by
-                    #   subsetCatalog (ApplyRecalibrate.py:229), and likewise by CheckFit,
-                    #   AutoPlatepar and SkyFit2 on the next start. So there was nothing to
-                    #   compensate for, and subtracting a magnitude left every one of those
-                    #   consumers a magnitude shallower than what was tuned. Recalibration
-                    #   still reads one magnitude deeper than it matches, as intended.
-                    config_catalog_lm = max(3.0, pt.cat_lim_mag)
                     if os.path.realpath(src) != os.path.realpath(dest):
                         # Copy the config to the target, then write overrides into the copy
                         shutil.copy2(src, dest)
-                        pt._writeStarDetectionConfig(dest, catalog_mag_limit=config_catalog_lm)
-                    else:
-                        # Same file — write overrides in-place (backup handled by _writeStarDetectionConfig)
-                        pt._writeStarDetectionConfig(dest, catalog_mag_limit=config_catalog_lm)
+
+                    # The LM comes from the save dialog alone (None leaves the file's value
+                    #   alone). The working LM is never written; see _addConfigPreview.
+                    pt._writeStarDetectionConfig(dest, catalog_mag_limit=catalog_lm)
                     # Sync in-memory config attrs so modified state is cleared
                     pt.config.star_gate_factor = pt.override_star_gate_factor
                     pt.config.neighborhood_size = pt.override_neighborhood_size
@@ -2040,11 +2073,13 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
                     pt.config.segment_radius = pt.override_segment_radius
                     pt.config.max_feature_ratio = pt.override_max_feature_ratio
                     pt.config.roundness_threshold = pt.override_roundness_threshold
-                    # Sync the LM to the value actually written, not to pt.cat_lim_mag: the
-                    #   file holds it to one decimal, and isConfigModified() compares against
-                    #   this attribute, so storing the unrounded value would report the config
-                    #   as modified again the moment it was saved
-                    pt.config.catalog_mag_limit = config_catalog_lm
+                    if catalog_lm is not None:
+                        # Sync to the one decimal the file holds, so the modified check clears.
+                        #   A hand-corrected value replaces the tuner's from here on, also for
+                        #   the catalog reloads that restore the tuned LM after fitting.
+                        pt.config.catalog_mag_limit = round(catalog_lm, 1)
+                        if getattr(pt, 'catalog_lm_tuned', False):
+                            pt.tuned_cat_lim_mag = round(catalog_lm, 1)
                     pt._updateConfigSaveButtonState()
                     results.append("Config saved to: " + dest)
                 except Exception as e:
@@ -5163,13 +5198,9 @@ class PlateTool(QtWidgets.QMainWindow):
             or abs(self.override_gamma - (self._original_config_gamma
                 if self._original_config_gamma is not None
                 else getattr(cfg, 'gamma', self.override_gamma))) > 0.00005
-            # The catalog LM is written to the config too, so a tuned or hand-set LM has to
-            #   count as an unsaved change - otherwise Save Config stays disabled and there is
-            #   no way to persist it. Compared at the precision it is written with (one
-            #   decimal), so the rounding in _writeStarDetectionConfig cannot leave the config
-            #   looking permanently modified after a save.
-            or abs(getattr(self, 'cat_lim_mag', 0.0)
-                   - getattr(cfg, 'catalog_mag_limit', getattr(self, 'cat_lim_mag', 0.0))) > 0.05
+            # Only the tuner's LM counts as an unsaved change. The working LM is never saved
+            #   (see the save dialog), so it must not light up Save Config either.
+            or self.isTunedCatalogLMUnsaved()
         )
 
     def configMaxStars(self):
@@ -6606,10 +6637,11 @@ class PlateTool(QtWidgets.QMainWindow):
                 # (1/2.2 = 0.4545) are not representable at two
                 "gamma": f"{self.override_gamma:.4f}",
             },
-            "Calibration": {
-                "catalog_mag_limit": f"{catalog_mag_limit:.1f}",
-            },
         }
+
+        # The LM is only written on request (see the save dialog). None leaves the file's value alone
+        if catalog_mag_limit is not None:
+            updates["Calibration"] = {"catalog_mag_limit": f"{catalog_mag_limit:.1f}"}
 
         # Any failure propagates to the File Manager's save path, which reports it (its
         # status refresh and error dialog) - swallowing it here would falsely report a
@@ -6689,7 +6721,8 @@ class PlateTool(QtWidgets.QMainWindow):
         print(f"  star_gate_factor: {self.override_star_gate_factor:.1f}")
         print(f"  segment_radius: {self.override_segment_radius}")
         print(f"  max_stars: {self.override_config_max_stars}")
-        print(f"  catalog_mag_limit: {catalog_mag_limit:.1f}")
+        if catalog_mag_limit is not None:
+            print(f"  catalog_mag_limit: {catalog_mag_limit:.1f}")
 
 
     ###################################################################################################
