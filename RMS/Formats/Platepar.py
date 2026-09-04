@@ -2267,11 +2267,17 @@ class Platepar(object):
         cache it. A value present in the platepar file, or one assigned explicitly, takes precedence.
         """
 
-        # Honour a value read from the platepar file or assigned by a caller
+        # An explicit assignment (or an earlier derivation) wins. Callers such as the contrail
+        # pipeline correct the station elevation and then reassign this, so it has to override any
+        # value that came in with the platepar file.
+        if getattr(self, '_height_wgs84', None) is not None:
+            return self._height_wgs84
+
+        # Otherwise honour a value stored in the platepar file
         if self.__dict__.get('height_wgs84') is not None:
             return self.__dict__['height_wgs84']
 
-        if getattr(self, '_height_wgs84', None) is None:
+        if True:
             try:
                 self._height_wgs84 = mslToWGS84Height(np.radians(self.lat), np.radians(self.lon),
                                                       self.elev)
@@ -2286,7 +2292,12 @@ class Platepar(object):
 
     @height_wgs84.setter
     def height_wgs84(self, value):
+
         self._height_wgs84 = value
+
+        # Keep a file-supplied value in step, so a corrected height is what gets written back out
+        if 'height_wgs84' in self.__dict__:
+            self.__dict__['height_wgs84'] = value
 
 
     def jsonStr(self):
