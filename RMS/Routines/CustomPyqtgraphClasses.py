@@ -4565,6 +4565,7 @@ class SettingsWidget(QtWidgets.QWidget, ScaledSizeHelper):
     sigGeoMarkerScaleChanged = QtCore.pyqtSignal(float)
     sigConstellationToggled = QtCore.pyqtSignal()
     sigCalStarsToggled = QtCore.pyqtSignal()
+    sigHotPixelsToggled = QtCore.pyqtSignal()
     sigDistortionToggled = QtCore.pyqtSignal()
     sigMeasGroundPointsToggled = QtCore.pyqtSignal()
     sigInvertToggled = QtCore.pyqtSignal()
@@ -4662,9 +4663,20 @@ class SettingsWidget(QtWidgets.QWidget, ScaledSizeHelper):
         vbox.addWidget(self.show_constellations)
 
         self.detected_stars = QtWidgets.QCheckBox('Show Detected Stars')
+        self.detected_stars.setToolTip(
+            "Green rings: detected stars. Amber rings: detections at blacklisted hot pixel\n"
+            "positions (hotpixels.json), which the pipeline excludes from CALSTARS.")
         self.detected_stars.released.connect(self.sigCalStarsToggled.emit)
         self.updateShowCalStars()
         vbox.addWidget(self.detected_stars)
+
+        self.hot_pixels = QtWidgets.QCheckBox('Show Hot Pixels')
+        self.hot_pixels.setToolTip(
+            "Amber rings on detections at blacklisted hot pixel positions (hotpixels.json).\n"
+            "Only drawn while detected stars are shown.")
+        self.hot_pixels.released.connect(self.sigHotPixelsToggled.emit)
+        self.updateShowHotPixels()
+        vbox.addWidget(self.hot_pixels)
 
         self.selected_stars = QtWidgets.QCheckBox('Show Selected Stars')
         self.selected_stars.released.connect(self.sigSelStarsToggled.emit)
@@ -4870,6 +4882,9 @@ class SettingsWidget(QtWidgets.QWidget, ScaledSizeHelper):
     def updateShowCalStars(self):
         self.detected_stars.setChecked(self.gui.draw_calstars)
 
+    def updateShowHotPixels(self):
+        self.hot_pixels.setChecked(getattr(self.gui, 'draw_hotpixels', True))
+
     def updateShowSelStars(self):
         self.selected_stars.setChecked(self.gui.selected_stars_visible)
 
@@ -5019,6 +5034,7 @@ class SettingsWidget(QtWidgets.QWidget, ScaledSizeHelper):
         self.std.show()
         self.std_label.show()
         self.detected_stars.show()
+        self.hot_pixels.show()
         self.distortion.show()
         self.error_overlay_chk.show()
         self.error_overlay_slider.show()
@@ -5045,6 +5061,10 @@ class SettingsWidget(QtWidgets.QWidget, ScaledSizeHelper):
         self.sigCalStarsToggled.emit()  # toggle makes it true
         self.updateShowCalStars()
 
+        self.gui.draw_hotpixels = False
+        self.sigHotPixelsToggled.emit()  # toggle makes it true
+        self.updateShowHotPixels()
+
     def onManualReduction(self):
         self.lim_mag.hide()
         self.lim_mag_label.hide()
@@ -5052,6 +5072,7 @@ class SettingsWidget(QtWidgets.QWidget, ScaledSizeHelper):
         self.std.hide()
         self.std_label.hide()
         self.detected_stars.hide()
+        self.hot_pixels.hide()
         self.distortion.hide()
         self.error_overlay_chk.hide()
         self.error_overlay_slider.hide()

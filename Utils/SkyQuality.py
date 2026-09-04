@@ -17,7 +17,12 @@ resolved through safe tiers:
       bright), never as an absolute value.
 
 Measurements are taken on the highest-altitude unmasked patch of the FOV, only on frames
-inside clear intervals with no significant moon. The sky level is devignetted and scaled
+inside clear intervals with no significant moon. Frames with a bright risen moon are
+additionally sampled into a labeled diagnostic series (moonlit_sky: patch ADU with the
+moon's altitude, illumination, and angular separation per frame) - the moonlit sky is far
+above the bias noise, so this series survives even nights where the SQM itself must skip,
+and one lunation of it measures the moon's global sky-brightening profile per site.
+The moonless sky level is devignetted and scaled
 by the tracked PSF capture fraction (see the APERTURE_* constants: the star extractor's
 windowed sums miss the PSF wings, and mag_lev absorbs that deficit, so extended sources
 need the same haircut to sit on the calibrated flux scale). Results are written to
@@ -52,6 +57,8 @@ log = getLogger("logger")
 RADIOMETRIC_FILE_SUFFIX = "radiometric.json"
 SKY_PATCH_HALF = 30              # px - half-size of the measurement patch
 MAX_FRAMES = 10                  # frames sampled per night
+MOONLIT_MAX_FRAMES = 30          # moonlit frames sampled per night for the labeled
+                                 # moonlit-sky series (diagnostic, not part of the SQM)
 MIN_SKY_ADU = 1.5                # below this the sky signal is in the noise - skip frame
 MIN_LEVER = 3.0                  # min (p95/p05) model-brightness contrast for regression
 MOON_PHASE_MAX = 25.0            # percent - frames with a brighter risen moon are skipped
@@ -524,8 +531,9 @@ def _sunTooHigh(jd, lat, lon):
         return False
 
 
-def _moonIsUp(jd, lat, lon):
-    """ True if a moon brighter than MOON_PHASE_MAX percent is above the horizon. """
+def _moonState(jd, lat, lon):
+    """ Moon (altitude deg, azimuth deg, illuminated percent) at the given time, or None
+        if the ephemeris is unavailable. """
 
     try:
         import ephem
@@ -539,10 +547,30 @@ def _moonIsUp(jd, lat, lon):
         moon = ephem.Moon()
         moon.compute(obs)
 
-        return (np.degrees(float(moon.alt)) > 0) and (float(moon.phase) > MOON_PHASE_MAX)
+        return (np.degrees(float(moon.alt)), np.degrees(float(moon.az)),
+                float(moon.phase))
 
     except Exception:
+        return None
+
+
+def _moonIsUp(jd, lat, lon):
+    """ True if a moon brighter than MOON_PHASE_MAX percent is above the horizon. """
+
+    state = _moonState(jd, lat, lon)
+    if state is None:
         return False
+    alt, _, phase = state
+    return (alt > 0) and (phase > MOON_PHASE_MAX)
+
+
+def _angSepDeg(alt1, az1, alt2, az2):
+    """ Angular separation (deg) between two horizontal-coordinate directions. """
+
+    a1, a2 = np.radians(alt1), np.radians(alt2)
+    dz = np.radians(az1 - az2)
+    c = np.sin(a1)*np.sin(a2) + np.cos(a1)*np.cos(a2)*np.cos(dz)
+    return float(np.degrees(np.arccos(np.clip(c, -1.0, 1.0))))
 
 
 def _recordNight(config, dir_path, record, dome_model):
@@ -571,13 +599,15 @@ def _recordNight(config, dir_path, record, dome_model):
         log.debug("Sky quality history/plot update failed: {}".format(e))
 
 
-def _writeSkipRecord(config, dir_path, reason, dome_model=None):
+def _writeSkipRecord(config, dir_path, reason, dome_model=None, extra=None):
     """ A skipped night still writes its record: an absent file must never be ambiguous
         between 'skipped by design' and 'broken'. """
 
     night = os.path.basename(os.path.normpath(dir_path))
     record = dict(stationID=str(config.stationID), night=night, status="skipped",
         reason=reason)
+    if extra:
+        record.update(extra)
 
     _recordNight(config, dir_path, record, dome_model)
 
@@ -649,21 +679,53 @@ def measureSkyQuality(config, dir_path, dome_model, recalibrated_platepars, time
         return _writeSkipRecord(config, dir_path, "no unmasked measurement patch", dome_model)
     x0, y0, patch_az, patch_alt = patch
 
-    # --- frames: inside clear intervals, no bright risen moon ---
+    # --- frames: inside clear intervals, split by moon state. Moonless frames feed the
+    # SQM as before; frames with a bright risen moon feed a labeled diagnostic series
+    # (moonlit sky is well above the bias noise, so it is measurable even on nights the
+    # SQM itself must skip) ---
     usable = []
+    moonlit = []
     for ff_name in ffs:
         t = FFfile.filenameToDatetime(ff_name)
         if not any(beg <= t <= end for beg, end in time_intervals):
             continue
         date = FFfile.getMiddleTimeFF(ff_name, config.fps, ret_milliseconds=True)
-        if _moonIsUp(date2JD(*date), pp0.lat, pp0.lon):
+        jd = date2JD(*date)
+        if _sunTooHigh(jd, pp0.lat, pp0.lon):
             continue
-        if _sunTooHigh(date2JD(*date), pp0.lat, pp0.lon):
+        if _moonIsUp(jd, pp0.lat, pp0.lon):
+            moonlit.append((ff_name, jd))
             continue
         usable.append(ff_name)
 
+    # Measure the moonlit series first: it must survive even the "no moonless clear
+    # frames" skip below (a full-moon night carries data now, not nothing)
+    moonlit_sky = []
+    if moonlit:
+        pick = np.unique(np.linspace(0, len(moonlit) - 1,
+            min(MOONLIT_MAX_FRAMES, len(moonlit))).astype(int))
+        for i in pick:
+            ff_name, jd = moonlit[i]
+            state = _moonState(jd, pp0.lat, pp0.lon)
+            if state is None:
+                continue
+            ff = FFfile.read(dir_path, ff_name)
+            if ff is None:
+                continue
+            ave = preciseAvepixel(ff)
+            adu = float(np.median(ave[y0 - SKY_PATCH_HALF:y0 + SKY_PATCH_HALF,
+                                      x0 - SKY_PATCH_HALF:x0 + SKY_PATCH_HALF]))
+            malt, maz, millum = state
+            moonlit_sky.append(dict(
+                ff=ff_name,
+                adu=round(adu, 2),
+                moon_alt=round(malt, 1),
+                moon_illum=round(millum, 1),
+                moon_sep=round(_angSepDeg(patch_alt, patch_az, malt, maz), 1)))
+
     if not usable:
-        return _writeSkipRecord(config, dir_path, "no moonless clear frames", dome_model)
+        return _writeSkipRecord(config, dir_path, "no moonless clear frames", dome_model,
+            extra=(dict(moonlit_sky=moonlit_sky) if moonlit_sky else None))
 
     usable = [usable[i] for i in np.unique(np.linspace(0, len(usable) - 1,
         min(MAX_FRAMES, len(usable))).astype(int))]
@@ -744,7 +806,8 @@ def measureSkyQuality(config, dir_path, dome_model, recalibrated_platepars, time
         sqm_values.append(pp.mag_lev - 2.5*np.log10(sky) + 2.5*np.log10(area))
 
     if not sqm_values:
-        return _writeSkipRecord(config, dir_path, "sky signal below noise at the measurement patch", dome_model)
+        return _writeSkipRecord(config, dir_path, "sky signal below noise at the measurement patch", dome_model,
+            extra=(dict(moonlit_sky=moonlit_sky) if moonlit_sky else None))
 
     sqm = float(np.median(sqm_values))
 
@@ -767,6 +830,9 @@ def measureSkyQuality(config, dir_path, dome_model, recalibrated_platepars, time
         note=("above-atmosphere magnitude convention (~+0.2 mag vs as-seen)" if absolute
               else "LIMIT only: bias unknown, sky is AT LEAST this bright"),
     )
+
+    if moonlit_sky:
+        result["moonlit_sky"] = moonlit_sky
 
     result["status"] = "ok"
     _recordNight(config, dir_path, result, dome_model)
