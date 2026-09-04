@@ -204,9 +204,6 @@ class Platepar(object):
         # Station coordinates
         self.lat = self.lon = self.elev = 0
 
-        # Lazily derived WGS84 (ellipsoidal) station height - see the height_wgs84 property
-        self._height_wgs84 = None
-
         # Reference time and date
         self.time = 0
         self.JD = 2451545.0
@@ -2060,6 +2057,20 @@ class Platepar(object):
         if not 'version' in self.__dict__:
             self.version = 1
 
+        # If the WGS84 height is not present, compute it from MSL elevation
+        if not 'height_wgs84' in self.__dict__:
+            try:
+                egm96_file_path = None  # This will use the default path
+                self.height_wgs84 = mslToWGS84Height(
+                    np.radians(self.lat),
+                    np.radians(self.lon),
+                    self.elev,
+                    egm96_file_path=egm96_file_path
+                )
+            except Exception as e:
+                self.height_wgs84 = self.elev
+                print("Warning: Calculating platepar WGS84 height failed {}. Using Geoid height instead.".format(str(e)))
+
         # If the refraction was not used for the fit, assume it is disabled
         if not 'refraction' in self.__dict__:
             self.refraction = False
@@ -2209,6 +2220,18 @@ class Platepar(object):
                 # Parse latitude, longitude, elevation
                 self.lon, self.lat, self.elev = self.parseLine(f)
 
+                try:
+                    egm96_file_path = None  # This will use the default path
+                    self.height_wgs84 = mslToWGS84Height(
+                        np.radians(self.lat),
+                        np.radians(self.lon),
+                        self.elev,
+                        egm96_file_path=egm96_file_path
+                    )
+                except Exception as e:
+                    self.height_wgs84 = self.elev
+                    print("Warning: Calculating platepar WGS84 height failed {}. Using Geoid height instead.".format(str(e)))
+
                 # Parse date and time as int
                 D, M, Y, h, m, s = map(int, f.readline().split())
 
@@ -2258,46 +2281,6 @@ class Platepar(object):
 
         return fmt
 
-    @property
-    def height_wgs84(self):
-        """ Station height above the WGS84 ellipsoid (meters).
-
-        Platepars store the station height above mean sea level (elev, EGM96 geoid). The ENU and
-        geodetic transforms need the ellipsoidal height, so derive it from elev on first access and
-        cache it. A value present in the platepar file, or one assigned explicitly, takes precedence.
-        """
-
-        # An explicit assignment (or an earlier derivation) wins. Callers such as the contrail
-        # pipeline correct the station elevation and then reassign this, so it has to override any
-        # value that came in with the platepar file.
-        if getattr(self, '_height_wgs84', None) is not None:
-            return self._height_wgs84
-
-        # Otherwise honour a value stored in the platepar file
-        if self.__dict__.get('height_wgs84') is not None:
-            return self.__dict__['height_wgs84']
-
-        if True:
-            try:
-                self._height_wgs84 = mslToWGS84Height(np.radians(self.lat), np.radians(self.lon),
-                                                      self.elev)
-            except Exception as e:
-                # Fall back to the MSL height, which is what the geoid offset is applied to
-                self._height_wgs84 = self.elev
-                print("Warning: computing the platepar WGS84 height failed ({}). "
-                      "Using the MSL height instead.".format(e))
-
-        return self._height_wgs84
-
-
-    @height_wgs84.setter
-    def height_wgs84(self, value):
-
-        self._height_wgs84 = value
-
-        # Keep a file-supplied value in step, so a corrected height is what gets written back out
-        if 'height_wgs84' in self.__dict__:
-            self.__dict__['height_wgs84'] = value
 
 
     def jsonStr(self):
@@ -2312,11 +2295,6 @@ class Platepar(object):
         self2.y_poly_fwd = self.y_poly_fwd.tolist()
         self2.y_poly_rev = self.y_poly_rev.tolist()
         del self2.time
-
-        # Derived/scratch attributes that are not part of the platepar format
-        for _attr in ('_height_wgs84', '_pole_safe_rot', '_rot_probe_active'):
-            if _attr in self2.__dict__:
-                del self2.__dict__[_attr]
 
         # For compatibility with old procedures, write the forward distortion parameters as x, y
         self2.x_poly = self.x_poly_fwd.tolist()
