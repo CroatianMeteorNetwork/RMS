@@ -40,6 +40,7 @@ import scipy.optimize
 from scipy.spatial import cKDTree
 from RMS.Astrometry.Conversions import date2JD, jd2Date, JD2HourAngle, trueRaDec2ApparentAltAz
 from RMS.Math import angularSeparation, sphericalPointFromHeadingAndDistance
+from RMS.GeoidHeightEGM96 import mslToWGS84Height
 
 pyximport.install(setup_args={'include_dirs': [np.get_include()]})
 from RMS.Astrometry.CyFunctions import (
@@ -202,6 +203,9 @@ class Platepar(object):
 
         # Station coordinates
         self.lat = self.lon = self.elev = 0
+
+        # Lazily derived WGS84 (ellipsoidal) station height - see the height_wgs84 property
+        self._height_wgs84 = None
 
         # Reference time and date
         self.time = 0
@@ -2254,6 +2258,37 @@ class Platepar(object):
 
         return fmt
 
+    @property
+    def height_wgs84(self):
+        """ Station height above the WGS84 ellipsoid (meters).
+
+        Platepars store the station height above mean sea level (elev, EGM96 geoid). The ENU and
+        geodetic transforms need the ellipsoidal height, so derive it from elev on first access and
+        cache it. A value present in the platepar file, or one assigned explicitly, takes precedence.
+        """
+
+        # Honour a value read from the platepar file or assigned by a caller
+        if self.__dict__.get('height_wgs84') is not None:
+            return self.__dict__['height_wgs84']
+
+        if getattr(self, '_height_wgs84', None) is None:
+            try:
+                self._height_wgs84 = mslToWGS84Height(np.radians(self.lat), np.radians(self.lon),
+                                                      self.elev)
+            except Exception as e:
+                # Fall back to the MSL height, which is what the geoid offset is applied to
+                self._height_wgs84 = self.elev
+                print("Warning: computing the platepar WGS84 height failed ({}). "
+                      "Using the MSL height instead.".format(e))
+
+        return self._height_wgs84
+
+
+    @height_wgs84.setter
+    def height_wgs84(self, value):
+        self._height_wgs84 = value
+
+
     def jsonStr(self):
         """Returns the JSON representation of the platepar as a string."""
 
@@ -2266,6 +2301,11 @@ class Platepar(object):
         self2.y_poly_fwd = self.y_poly_fwd.tolist()
         self2.y_poly_rev = self.y_poly_rev.tolist()
         del self2.time
+
+        # Derived/scratch attributes that are not part of the platepar format
+        for _attr in ('_height_wgs84', '_pole_safe_rot', '_rot_probe_active'):
+            if _attr in self2.__dict__:
+                del self2.__dict__[_attr]
 
         # For compatibility with old procedures, write the forward distortion parameters as x, y
         self2.x_poly = self.x_poly_fwd.tolist()
