@@ -28,12 +28,12 @@ def read(directory, filename):
         ft = FTStruct()
         
         # Read number of frames
-        n_frames = int(np.fromfile(ft_file, dtype=np.uint32, count=1))
+        n_frames = int(np.fromfile(ft_file, dtype=np.uint32, count=1)[0])
 
         # Read timestamps
         for _ in range(n_frames):
-            frame_number = int(np.fromfile(ft_file, dtype=np.uint32, count=1))
-            timestamp = float(np.fromfile(ft_file, dtype=np.float64, count=1))
+            frame_number = int(np.fromfile(ft_file, dtype=np.uint32, count=1)[0])
+            timestamp = float(np.fromfile(ft_file, dtype=np.float64, count=1)[0])
             ft.timestamps.append((frame_number, timestamp))
 
     return ft

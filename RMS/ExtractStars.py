@@ -116,7 +116,7 @@ def adaptiveContrastThreshold(contrast, bit_depth=8, factor=None):
 def extractStars(img, img_median=None, mask=None, gamma=1.0, max_star_candidates=1000, border=10,
                  neighborhood_size=10, intensity_threshold=18,
                  segment_radius=4, roundness_threshold=0.5, max_feature_ratio=0.8, bit_depth=8,
-                 extra_info=None, gate_factor=None):
+                 extra_info=None, gate_factor=None, show_candidates=False):
     """ Extracts stars on a given image by searching for local maxima and applying PSF fit for star 
         confirmation.
 
@@ -144,6 +144,8 @@ def extractStars(img, img_median=None, mask=None, gamma=1.0, max_star_candidates
             (hot pixels are narrow, while stars are round).
         max_feature_ratio: [float] Maximum ratio between 2 sigma of the star and the image segment area.
         bit_depth: [int] Bit depth of the image. 8 bits by default.
+        show_candidates: [bool] Show the raw star candidates before PSF fitting and the successfully fitted
+            stars afterwards. False by default.
     
     Return:
         x2, y2, background, intensity, fwhm: [list of ndarrays]
@@ -266,8 +268,17 @@ def extractStars(img, img_median=None, mask=None, gamma=1.0, max_star_candidates
     x_init = x_init.flatten() + 0.5
     y_init = y_init.flatten() + 0.5
 
-    # # Plot stars before the PSF fit
-    # plotStars(ff, x, y)
+    # Plot all raw candidates before the PSF fit
+    if show_candidates:
+        plotStars(
+            img, x_init, y_init, bit_depth=bit_depth,
+            title='Star candidates before PSF fitting ({:d})'.format(num_objects)
+        )
+
+    # Skip PSF fitting if the diagnostic plot showed more candidates than the configured limit
+    if num_objects > max_star_candidates:
+        log.warning('Too many candidate stars to process! {:d}/{:d}'.format(num_objects, max_star_candidates))
+        return False
 
     # Fit a PSF to each star on the raw image
     (
@@ -278,6 +289,14 @@ def extractStars(img, img_median=None, mask=None, gamma=1.0, max_star_candidates
         gamma=gamma,
         segment_radius=segment_radius, roundness_threshold=roundness_threshold, 
         max_feature_ratio=max_feature_ratio, bit_depth=bit_depth
+        )
+
+    # Compare all raw candidates with the stars which passed PSF fitting
+    if show_candidates:
+        plotStars(
+            img, x_init, y_init, bit_depth=bit_depth,
+            title='PSF fitting result ({:d}/{:d} fitted)'.format(len(x_arr), num_objects),
+            x_fitted=x_arr, y_fitted=y_arr
         )
     
     # x_arr, y_arr, amplitude, intensity = list(x), list(y), [], [] # Skip PSF fit
@@ -357,7 +376,7 @@ def extractStarsFF(
         max_global_intensity=230,
         neighborhood_size=10, intensity_threshold=18,
         segment_radius=4, roundness_threshold=0.5, max_feature_ratio=0.8,
-        extra_info=None
+        extra_info=None, show_candidates=False
         ):
     """ Extracts stars on a given FF bin by searching for local maxima and applying PSF fit for star 
         confirmation.
@@ -377,6 +396,8 @@ def extractStarsFF(
         flat_struct: [Flat struct] Structure containing the flat field. None by default.
         dark: [ndarray] Dark frame. None by default.
         mask: [ndarray] Mask image. None by default.
+        show_candidates: [bool] Show the raw star candidates before PSF fitting and the successfully fitted
+            stars afterwards. False by default.
 
     Return:
         x2, y2, background, intensity, fwhm: [list of ndarrays]
@@ -459,7 +480,7 @@ def extractStarsFF(
         neighborhood_size=neighborhood_size, intensity_threshold=intensity_threshold,
         segment_radius=segment_radius, roundness_threshold=roundness_threshold,
         max_feature_ratio=max_feature_ratio, bit_depth=config.bit_depth,
-        extra_info=extra_info, gate_factor=gate_factor
+        extra_info=extra_info, gate_factor=gate_factor, show_candidates=show_candidates
     )
 
     # If the star extraction failed, return an empty list
@@ -941,33 +962,84 @@ def fitPSF(img, img_median, x_init, y_init, gamma=1.0, segment_radius=4, roundne
 
 
 
-def plotStars(ff, x2, y2):
+def plotStars(img, x2, y2, bit_depth=None, title=None, x_fitted=None, y_fitted=None):
     """ Plots detected stars on the input image.
+
+    Arguments:
+        img: [ndarray or FF structure] Input image or FF structure containing an average pixel image.
+        x2: [array-like] Star X coordinates.
+        y2: [array-like] Star Y coordinates.
+
+    Keyword arguments:
+        bit_depth: [int] Image bit depth. Inferred for integer images if not given. Floating-point images
+            default to 8 bits because their source bit depth cannot be inferred from the data type.
+        title: [str] Optional plot title.
+        x_fitted: [array-like] Successfully fitted star X coordinates. None by default.
+        y_fitted: [array-like] Successfully fitted star Y coordinates. None by default.
     """
 
-    # Plot image with adjusted levels to better see stars
-    plt.imshow(Image.adjustLevels(ff.avepixel, 0, 1.3, 255), cmap='gray')
+    # Preserve compatibility with callers passing an FF structure
+    if hasattr(img, 'avepixel'):
+        img = img.avepixel
+
+    if bit_depth is None:
+        if np.issubdtype(img.dtype, np.integer):
+            bit_depth = np.iinfo(img.dtype).bits
+        else:
+            bit_depth = 8
+
+    # Automatically stretch the average-pixel background while retaining bright stars
+    max_level = 2**bit_depth - 1
+    min_level = np.percentile(img, 1.0)
+    max_display_level = np.percentile(img, 99.99)
+
+    # Fall back to the full range for flat images where percentile levels are identical
+    if max_display_level <= min_level:
+        min_level = 0
+        max_display_level = max_level
+
+    adjusted_img = Image.adjustLevels(
+        img, min_level, 1.3, max_display_level, nbits=bit_depth
+    )
+    fig, ax = plt.subplots()
+    ax.imshow(adjusted_img, cmap='gray')
 
     # Plot stars
-    for star in zip(list(y2), list(x2)):
+    for i, star in enumerate(zip(list(y2), list(x2))):
         y, x = star
-        c = plt.Circle((x, y), 5, fill=False, color='r')
-        plt.gca().add_patch(c)
+        label = 'Raw candidates' if i == 0 else None
+        c = plt.Circle((x, y), 5, fill=False, color='r', label=label)
+        ax.add_patch(c)
 
-    plt.show()
+    # Mark the successfully fitted stars separately so rejected candidates remain visible in red
+    if (x_fitted is not None) and (y_fitted is not None):
+        ax.plot(
+            list(x_fitted), list(y_fitted), linestyle='None', marker='+', markersize=8,
+            markeredgewidth=1.5, color='lime', label='PSF-fitted stars'
+        )
 
-    plt.clf()
-    plt.close()
+    if len(x2) or ((x_fitted is not None) and len(x_fitted)):
+        ax.legend(loc='upper right')
+
+    if title is not None:
+        ax.set_title(title)
+
+    plt.show(block=True)
+    plt.close(fig)
 
 
 
 
-def extractStarsAndSave(config, ff_dir):
+def extractStarsAndSave(config, ff_dir, show_candidates=False):
     """ Extract stars in the given folder and save the CALSTARS file. 
     
     Arguments:
         config: [config object] configuration object (loaded from the .config file)
         ff_dir: [str] Path to directory where FF files are.
+
+    Keyword arguments:
+        show_candidates: [bool] Show raw star candidates before PSF fitting, show successfully fitted stars
+            afterwards, and process FF files sequentially. False by default.
 
     Return:
         star_list: [list] A list of [ff_name, star_data] entries, where star_data contains a list of 
@@ -996,20 +1068,21 @@ def extractStarsAndSave(config, ff_dir):
         extraction_list.append(ff_name)
 
 
-    # If just one file is given, run the extraction on it instead of using the QueuedPool
+    # Interactive plots must run in the main process, so candidate display uses sequential extraction
     workpool = None
-    if len(extraction_list) == 1:
-        ff_name = extraction_list[0]
+    if (len(extraction_list) == 1) or show_candidates:
+        results = []
 
-        log.info('Extracting stars from ' + ff_name)
+        for ff_name in extraction_list:
+            log.info('Extracting stars from ' + ff_name)
 
-        # Run the extraction
-        result = extractStarsFF(
-            ff_dir, ff_name, flat_struct=flat_struct, dark=dark, mask=mask,
-            config=config
-        )
+            # Run the extraction
+            result = extractStarsFF(
+                ff_dir, ff_name, flat_struct=flat_struct, dark=dark, mask=mask,
+                config=config, show_candidates=show_candidates
+            )
 
-        results = [result]
+            results.append(result)
 
 
     else:
@@ -1115,6 +1188,10 @@ if __name__ == "__main__":
 
     arg_parser.add_argument('-s', '--showstd', action="store_true", help="""Show a histogram of stddevs of PSFs of all detected stars. """)
 
+    arg_parser.add_argument('--show-candidates', action="store_true", help="""Show raw star candidates
+        before PSF fitting and successfully fitted stars afterwards. Files are processed sequentially and
+        each window must be closed to continue. """)
+
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
@@ -1135,7 +1212,7 @@ if __name__ == "__main__":
 
 
     # Run extraction and save the resulting CALSTARS file
-    star_list = extractStarsAndSave(config, ff_dir)
+    star_list = extractStarsAndSave(config, ff_dir, show_candidates=cml_args.show_candidates)
 
 
     fwhm_list = []

@@ -96,7 +96,7 @@ def readFieldIntensitiesBin(dir_path, file_name, deinterlace=False):
 	with open(os.path.join(dir_path, file_name), 'rb') as fid:
 
 		# Read the number of entries
-		n_entries = int(np.fromfile(fid, dtype=np.uint16, count = 1))
+		n_entries = int(np.fromfile(fid, dtype=np.uint16, count = 1)[0])
 
 		intensity_array = np.zeros(n_entries, dtype=np.uint32)
 		half_frames = np.zeros(n_entries)
@@ -113,7 +113,7 @@ def readFieldIntensitiesBin(dir_path, file_name, deinterlace=False):
 			half_frames[i] = float(i)/deinterlace_flag
 
 			# Read the summed field intensity
-			intensity_array[i] = int(np.fromfile(fid, dtype=np.uint32, count = 1))
+			intensity_array[i] = int(np.fromfile(fid, dtype=np.uint32, count = 1)[0])
 
 
 		return half_frames, intensity_array

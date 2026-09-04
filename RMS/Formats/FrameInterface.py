@@ -47,21 +47,26 @@ def messagebox(title, message):
     
     # First, try Qt. This is the most specific and desired case.
     try:
-        # We must import QApplication to check for an instance
-        from PyQt5.QtWidgets import QApplication, QMessageBox
-        
-        # Check if a QApplication instance already exists
-        if QApplication.instance():
-            # If it exists, we can safely create and show a message box
-            msg_box = QMessageBox()
-            msg_box.setWindowTitle(title)
-            msg_box.setText(message)
-            msg_box.exec_()
-            return # Success, so we exit the function
-    except ImportError:
-        # This means PyQt5 (or your chosen binding) is not installed.
-        # We'll just pass and try the next option.
-        pass
+        # Go through the pyqtgraph proxy so the binding matches the one the GUI already loaded.
+        # Importing raw PyQt5 here would either miss the running QApplication or pull a second
+        # Qt binding into the process.
+        from pyqtgraph.Qt import QtWidgets
+
+    except Exception:
+        # This means no Qt binding (or pyqtgraph) is installed. pyqtgraph raises a plain
+        # Exception rather than an ImportError when it cannot find a binding, so catch broadly
+        # here. We'll just fall through and try the next option.
+        QtWidgets = None
+
+    # Check if a QApplication instance already exists
+    if (QtWidgets is not None) and QtWidgets.QApplication.instance():
+
+        # If it exists, we can safely create and show a message box
+        msg_box = QtWidgets.QMessageBox()
+        msg_box.setWindowTitle(title)
+        msg_box.setText(message)
+        msg_box.exec()
+        return # Success, so we exit the function
 
     # Second, check for a display and try Tkinter as a fallback
     if os.environ.get('DISPLAY'):

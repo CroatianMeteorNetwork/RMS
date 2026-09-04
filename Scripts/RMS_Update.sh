@@ -41,6 +41,33 @@ readonly GIT_RETRY_LIMIT=5
 
 readonly GIT_RETRY_DELAY=15  # Seconds between git operation retries
 
+# Hard timeout for any git operation which touches the network [s]
+readonly GIT_NET_TIMEOUT=${GIT_NET_TIMEOUT:-300}
+
+# Disable every interactive prompt git or ssh might produce. Without these, a git operation against
+# an unhealthy server (e.g. GitHub answering an anonymous HTTPS request with a 401) asks for a user
+# name on the terminal and blocks this script forever. That is especially damaging here, because
+# RMS_FirstRun.sh runs this script unattended at boot, before capture is started.
+export GIT_TERMINAL_PROMPT=0   # git >= 2.3: fail with an error instead of asking for credentials
+export GIT_ASKPASS=/bin/echo   # never pop up a helper, /bin/echo returns an empty string at once
+export SSH_ASKPASS=/bin/echo
+export SSH_ASKPASS_REQUIRE=never                         # OpenSSH >= 8.4
+export GIT_SSH_COMMAND="ssh -oBatchMode=yes -oConnectTimeout=10"
+export GCM_INTERACTIVE=Never                             # Git Credential Manager, if installed
+
+# Run a git command which touches the network, with a hard timeout and with stdin closed, so that
+# it can never hang. The credential helper list is cleared, so that a configured helper cannot
+# block either, and a transfer which stalls below 1 kB/s for 30 s is aborted by git itself.
+git_net() {
+    if command -v timeout >/dev/null 2>&1; then
+        timeout -k 10 "$GIT_NET_TIMEOUT" git -c credential.helper= \
+            -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=30 "$@" < /dev/null
+    else
+        git -c credential.helper= \
+            -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=30 "$@" < /dev/null
+    fi
+}
+
 # Remote/branch tracking inferred at runtime (initialized to avoid -u unbound errors)
 BRANCH_REMOTE=""
 UPSTREAM_BRANCH=""
@@ -308,7 +335,7 @@ check_git_setup() {
     
     # Verify we can reach the RMS repository
     print_status "info" "Verifying connection to RMS remote..."
-    if ! git ls-remote --exit-code "$RMS_REMOTE" >/dev/null 2>&1; then
+    if ! git_net ls-remote --exit-code "$RMS_REMOTE" >/dev/null 2>&1; then
         print_status "error" "Cannot reach RMS repository. Please check your internet connection"
         exit 1
     else
@@ -333,7 +360,7 @@ resolve_branch_remote() {
 
     # Else, try to find a remote that has this branch
     for r in $(git remote); do
-        if git ls-remote --exit-code --heads "$r" "refs/heads/$branch" >/dev/null 2>&1; then
+        if git_net ls-remote --exit-code --heads "$r" "refs/heads/$branch" >/dev/null 2>&1; then
             BRANCH_REMOTE="$r"
             UPSTREAM_BRANCH="$branch"
             return
@@ -839,7 +866,7 @@ git_with_retry() {
                         return 1
                     fi
 
-                    if git clone --config http.version=HTTP/1.1 --config http.sslverify=false https://github.com/CroatianMeteorNetwork/RMS.git "$RMSSOURCEDIR"; then
+                    if git_net clone --config http.version=HTTP/1.1 --config http.sslverify=false https://github.com/CroatianMeteorNetwork/RMS.git "$RMSSOURCEDIR"; then
                         print_status "success" "Repository successfully recloned using HTTP/1.1"
                         cd "$RMSSOURCEDIR" || exit 1
 
@@ -873,7 +900,7 @@ git_with_retry() {
         # Ensure Git Fails Properly Before Retrying
         case $cmd in
             "fetch")
-                if ! git "${git_config_args[@]}" fetch --all --prune --force --quiet $depth_arg; then
+                if ! git_net "${git_config_args[@]}" fetch --all --prune --force --quiet $depth_arg; then
                     print_status "warning" "Git fetch failed, retrying..."
                 else
                     return 0
@@ -962,7 +989,7 @@ switch_to_branch() {
     # If no explicit remote, try to find any remote carrying this branch
     if [ -z "$remote_candidate" ]; then
         for r in $(git remote); do
-            if git ls-remote --exit-code --heads "$r" "refs/heads/$target_branch" >/dev/null 2>&1; then
+            if git_net ls-remote --exit-code --heads "$r" "refs/heads/$target_branch" >/dev/null 2>&1; then
                 remote_candidate="$r"
                 break
             fi
@@ -1289,7 +1316,7 @@ main() {
             [[ -z "$RMS_BRANCH" ]] && RMS_BRANCH=$(git rev-parse --abbrev-ref HEAD)
             resolve_branch_remote "$RMS_BRANCH"
 
-            REMOTE_SHA=$(git ls-remote --quiet --heads "$BRANCH_REMOTE" "refs/heads/$UPSTREAM_BRANCH" | cut -f1)
+            REMOTE_SHA=$(git_net ls-remote --quiet --heads "$BRANCH_REMOTE" "refs/heads/$UPSTREAM_BRANCH" | cut -f1)
             LOCAL_SHA=$(git rev-parse HEAD)
 
             if [[ -z "$REMOTE_SHA" ]]; then
