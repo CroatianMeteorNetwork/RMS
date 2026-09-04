@@ -40,6 +40,7 @@ import scipy.optimize
 from scipy.spatial import cKDTree
 from RMS.Astrometry.Conversions import date2JD, jd2Date, JD2HourAngle, trueRaDec2ApparentAltAz
 from RMS.Math import angularSeparation, sphericalPointFromHeadingAndDistance
+from RMS.GeoidHeightEGM96 import mslToWGS84Height
 
 pyximport.install(setup_args={'include_dirs': [np.get_include()]})
 from RMS.Astrometry.CyFunctions import (
@@ -2056,6 +2057,20 @@ class Platepar(object):
         if not 'version' in self.__dict__:
             self.version = 1
 
+        # If the WGS84 height is not present, compute it from MSL elevation
+        if not 'height_wgs84' in self.__dict__:
+            try:
+                egm96_file_path = None  # This will use the default path
+                self.height_wgs84 = mslToWGS84Height(
+                    np.radians(self.lat),
+                    np.radians(self.lon),
+                    self.elev,
+                    egm96_file_path=egm96_file_path
+                )
+            except Exception as e:
+                self.height_wgs84 = self.elev
+                print("Warning: Calculating platepar WGS84 height failed {}. Using Geoid height instead.".format(str(e)))
+
         # If the refraction was not used for the fit, assume it is disabled
         if not 'refraction' in self.__dict__:
             self.refraction = False
@@ -2205,6 +2220,18 @@ class Platepar(object):
                 # Parse latitude, longitude, elevation
                 self.lon, self.lat, self.elev = self.parseLine(f)
 
+                try:
+                    egm96_file_path = None  # This will use the default path
+                    self.height_wgs84 = mslToWGS84Height(
+                        np.radians(self.lat),
+                        np.radians(self.lon),
+                        self.elev,
+                        egm96_file_path=egm96_file_path
+                    )
+                except Exception as e:
+                    self.height_wgs84 = self.elev
+                    print("Warning: Calculating platepar WGS84 height failed {}. Using Geoid height instead.".format(str(e)))
+
                 # Parse date and time as int
                 D, M, Y, h, m, s = map(int, f.readline().split())
 
@@ -2253,6 +2280,8 @@ class Platepar(object):
         self.addVignettingCoeff(use_flat)
 
         return fmt
+
+
 
     def jsonStr(self):
         """Returns the JSON representation of the platepar as a string."""
