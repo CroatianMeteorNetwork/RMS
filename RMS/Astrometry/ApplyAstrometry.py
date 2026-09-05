@@ -61,6 +61,7 @@ from RMS.Astrometry.CyFunctions import (cyraDecToXY, cyTrueRaDec2ApparentAltAz,
                                         cyraDec2AltAz,
                                         cyXYToRADec,
                                         eqRefractionApparentToTrue,
+                                        pyRefractionApparentToTrue,
                                         refractionTrueToApparent,
                                         equatorialCoordPrecession,
                                         cyXYToAltAz,
@@ -68,6 +69,7 @@ from RMS.Astrometry.CyFunctions import (cyraDecToXY, cyTrueRaDec2ApparentAltAz,
                                         cyXYHttoENU_wgs84,
                                         cyGeoToENU,
                                         cyENUToXY_iter,
+                                        cyENHtToXY_iter,
                                         cyGeoToXY_wgs84_iter,
                                         cyXYToGeo_wgs84,
                                         cyRaDecToXY_iter,
@@ -477,143 +479,122 @@ def getFOVSelectionRadius(platepar):
 def imageCenter(platepar, center_of_distortion=False):
     """
     Returns image x, y of the FOV center, or the center of distortion
-
     Arguments:
         platepar: [Platepar structure] Astrometry parameters.
-    
     Keyword arguments:
         center_of_distortion: [bool] If True, return the image x,y of the center of distortion
-
     Return: (x, y)
     """
 
+    x = platepar.X_res/2.0
+    y = platepar.Y_res/2.0
+
     if center_of_distortion:
+
         if platepar.distortion_type.startswith("radial"):
-            x0_norm = platepar.x_poly_fwd[0]
-            y0_norm = platepar.x_poly_fwd[1]
+
+            # Radial models store the distortion centre as offsets normalized to half the image size
+            # (see cyXYToRADec), unless the centre is forced to the image centre
+            if not platepar.force_distortion_centre:
+                x0 = platepar.x_poly_fwd[0]*platepar.X_res/2.0
+                y0 = platepar.x_poly_fwd[1]*platepar.Y_res/2.0
+
+                # Wrap the offsets to always be within the image, as the kernels do
+                x += -platepar.X_res/2.0 + (x0 + platepar.X_res/2.0)%platepar.X_res
+                y += -platepar.Y_res/2.0 + (y0 + platepar.Y_res/2.0)%platepar.Y_res
+
         else:
-            x0_norm = platepar.x_poly_fwd[0]
-            y0_norm = platepar.y_poly_fwd[0]
-    
-    else:
-        x0_norm = 0
-        y0_norm = 0
-    
-    x = (1 + x0_norm) * platepar.X_res / 2
-    y = (1 + y0_norm) * platepar.Y_res / 2
+
+            # Polynomial (poly3+radial*) models store the centre of the radial term as PIXEL offsets in the
+            # constant terms of the polynomials
+            x += platepar.x_poly_fwd[0]
+            y += platepar.y_poly_fwd[0]
 
     return (x, y)
 
 
 
-def _centreAltAz(platepar, jd):
-    """apparent az/alt of the platepar centre at jd (radians)."""
-    az_c, alt_c = cyTrueRaDec2ApparentAltAz(
-        np.radians(platepar.RA_d), np.radians(platepar.dec_d), jd,
-        np.radians(platepar.lat), np.radians(platepar.lon), platepar.refraction)
-    return az_c, alt_c
+def rotationWrtHorizon(platepar, jd_obs=None, probe_frac=0.15):
+    """ Rotation of the image +x axis with respect to the horizon at the FOV centre (degrees, in (-180, 180]).
 
+    This is the rotation consumed by the direct image <-> Alt/Az, ENU and geodetic transforms (cyXYToAltAz
+    and friends), where it enters as a rigid rotation of the gnomonic tangent plane about the FOV centre.
+    It is solved for directly rather than estimated by finite differences: four probe pixels around the
+    distortion centre are projected through the star-calibrated path (xyToRaDecPP -> apparent Alt/Az) and
+    through the Alt/Az kernel with zero rotation, and the rotation is the mean difference of the probes'
+    position angles about the apparent FOV centre, refined once. Both paths share the distortion model and
+    the refraction treatment, so the result sits at the kernel floor for every distortion type (radial and
+    polynomial, where the polynomial's own linear terms bias a finite difference) and for zenith-pointing
+    platepars, where a finite difference of (cos(alt) dAz, dAlt) degenerates.
 
-def rotationWrtHorizon(platepar, jd_obs=None, dx=5):
-    """
-    Angle of the image +x axis w.r.t. the horizon (east) at the FOV center, in degrees.
-    - Uses precession-corrected XY->RA/Dec path and the observation JD.
-    - Corrects the azimuth step by cos(Alt) so the angle is measured in the local tangent plane.
-    - Returns value wrapped to (-180, 180].
+    Arguments:
+        platepar: [Platepar object] Input platepar.
 
-    Args:
-        platepar: plate parameters object (as in RMS)
-        jd_obs:   observation Julian date to evaluate at; if None, uses platepar.JD
-        dx:       half-baseline in pixels for the finite-difference (default 5)
+    Keyword arguments:
+        jd_obs: [float] Julian date to evaluate at. platepar.JD by default.
+        probe_frac: [float] Probe radius as a fraction of the image width. 0.15 by default.
 
-    Returns:
-        rot_deg: float — rotation of sensor +x *from* the horizon (east-positive), degrees
+    Return:
+        rot_angle: [float] Rotation w.r.t. horizon (degrees).
     """
 
     jd = platepar.JD if jd_obs is None else jd_obs
-    x0, y0 = imageCenter(platepar, center_of_distortion=True)
+    lat, lon = np.radians(platepar.lat), np.radians(platepar.lon)
 
-    # --- Pole-safe branch (zenith-pointing platepars, e.g. the pod all-sky
-    # canvas): the finite-difference below measures (cos(alt)*dAz, dAlt) at
-    # the CENTRE — degenerate as alt -> 90. Instead, SOLVE the rotation that
-    # makes the geo path agree with the rotation-correct celestial path:
-    # project one probe direction through raDecToXYPP (reference) and through
-    # geoToXYPP with rot=0 (recursion-guarded); rot enters cyGeoToXY as a
-    # rigid rotation (verified affine, slope -1), so one image-angle
-    # difference determines it. Self-verified with a second projection,
-    # parity-proof, cached on the platepar. Real cameras (alt < 89) are
-    # untouched.
-    _, _alt_centre_chk = _centreAltAz(platepar, jd)
-    if np.degrees(_alt_centre_chk) > 89.0:
-        _cached = getattr(platepar, '_pole_safe_rot', None)
-        if _cached is not None:
-            return _cached
-        if getattr(platepar, '_rot_probe_active', False):
-            return 0.0
-        from RMS.Astrometry.CyFunctions import cyApparentAltAz2TrueRADec
-        try:
-            platepar._rot_probe_active = True
-            x0c, y0c = imageCenter(platepar, center_of_distortion=True)
-            # probe: due-north sky direction 45 deg below zenith
-            _elev_p = np.degrees(_alt_centre_chk) - 45.0
-            ra_p, dec_p = cyApparentAltAz2TrueRADec(
-                np.radians(0.0), np.radians(_elev_p), jd,
-                np.radians(platepar.lat), np.radians(platepar.lon),
-                platepar.refraction)
-            xr, yr = raDecToXYPP(np.array([np.degrees(ra_p)]),
-                                 np.array([np.degrees(dec_p)]), jd, platepar)
-            # geo point in the same direction (spherical-earth approx is fine:
-            # only the ANGLE difference matters and both paths share it)
-            _h = 11000.0
-            _rng = (_h - getattr(platepar, 'elev', 0.0)) / np.tan(np.radians(_elev_p))
-            _lat_t = platepar.lat + np.degrees(_rng / 6371000.0)
-            xg, yg = geoToXYPP(np.array([_lat_t]), np.array([platepar.lon]),
-                               np.array([_h]), platepar)
-            _phi_ref = np.arctan2(float(yr[0]) - y0c, float(xr[0]) - x0c)
-            _phi_got = np.arctan2(float(yg[0]) - y0c, float(xg[0]) - x0c)
-            for _cand in (np.degrees(_phi_got - _phi_ref),
-                          np.degrees(_phi_ref - _phi_got)):
-                platepar._pole_safe_rot = ((_cand + 180) % 360) - 180
-                platepar._rot_probe_active = False
-                xv, yv = geoToXYPP(np.array([_lat_t]), np.array([platepar.lon]),
-                                   np.array([_h]), platepar)
-                if np.hypot(float(xv[0]) - float(xr[0]),
-                            float(yv[0]) - float(yr[0])) < 5.0:
-                    return platepar._pole_safe_rot
-                platepar._rot_probe_active = True
-            # neither candidate verified — fall through to FD (degenerate but
-            # defined) rather than return garbage silently
-            platepar._pole_safe_rot = None
-        finally:
-            platepar._rot_probe_active = False
+    # FOV centre as the kernels see it (true Alt/Az from RA_d/dec_d, no precession) and its apparent altitude
+    az_c, alt_c = cyraDec2AltAz(np.radians(platepar.RA_d), np.radians(platepar.dec_d), jd, lat, lon)
+    alt_c_app = refractionTrueToApparent(alt_c) if platepar.refraction else alt_c
 
-    def _altaz_at(x, y):
-        # precession-aware XY->RA/Dec->Alt/Az at jd
-        _, RA, DEC, _ = xyToRaDecPP(np.array([jd, jd]), np.array([x, x]), np.array([y, y]),
-                                    np.ones(2), platepar, extinction_correction=False, jd_time=True)
-        az, alt = cyTrueRaDec2ApparentAltAz(np.radians(RA[0]), np.radians(DEC[0]),
-                                            jd, np.radians(platepar.lat), np.radians(platepar.lon),
-                                            platepar.refraction)
-        return az, alt
+    # Probe pixels around the distortion centre
+    xc, yc = imageCenter(platepar, center_of_distortion=True)
+    rp = probe_frac*platepar.X_res
+    xs = np.array([xc + rp, xc, xc - rp, xc], dtype=np.float64)
+    ys = np.array([yc, yc + rp, yc, yc - rp], dtype=np.float64)
 
-    # central differences at h and h/2
-    def _east_up(h):
-        A1,H1 = _altaz_at(x0-h, y0)
-        A2,H2 = _altaz_at(x0+h, y0)
-        dA = (A2 - A1 + np.pi) % (2*np.pi) - np.pi
-        dH = H2 - H1
-        h0 = 0.5*(H1 + H2)
-        return (np.cos(h0)*dA)/(2*h), dH/(2*h)   # east', up' per pixel
+    # Reference directions of the probes: star-calibrated path, apparent Alt/Az
+    _, ra_arr, dec_arr, _ = xyToRaDecPP(np.full(len(xs), jd), xs, ys, np.ones(len(xs)), platepar,
+        extinction_correction=False, jd_time=True)
+    az_r = np.empty(len(xs))
+    alt_r = np.empty(len(xs))
+    for i in range(len(xs)):
+        az_r[i], alt_r[i] = cyTrueRaDec2ApparentAltAz(np.radians(ra_arr[i]), np.radians(dec_arr[i]), jd,
+            lat, lon, platepar.refraction)
 
-    ex1, up1 = _east_up(dx)
-    ex2, up2 = _east_up(dx/2.0)
+    def _kernelAltAz(rot):
+        """ Probe directions through the Alt/Az kernel for a given rotation, as apparent Alt/Az. """
 
-    # Richardson (error ~ k*h^2): D* ≈ D(h/2) + (D(h/2)-D(h))/3
-    east = ex2 + (ex2 - ex1)/3.0
-    up   = up2 + (up2 - up1)/3.0
+        alt_k, az_k = cyXYToAltAz(xs, ys, float(platepar.X_res), float(platepar.Y_res),
+            float(np.degrees(alt_c)), float(np.degrees(az_c)), float(rot), float(platepar.F_scale),
+            platepar.x_poly_fwd, platepar.y_poly_fwd, unicode(platepar.distortion_type),
+            refraction=platepar.refraction, equal_aspect=platepar.equal_aspect,
+            force_distortion_centre=platepar.force_distortion_centre, asymmetry_corr=platepar.asymmetry_corr)
 
-    rot_deg = np.degrees(np.arctan2(up, east))
-    return ((rot_deg + 180) % 360) - 180
+        alt_k = np.radians(alt_k)
+        az_k = np.radians(az_k)
+
+        # The kernel returns true altitudes when refraction is on, compare in the apparent frame
+        if platepar.refraction:
+            alt_k = np.array([refractionTrueToApparent(a) for a in alt_k])
+
+        return az_k, alt_k
+
+    def _positionAngle(az, alt):
+        """ Position angle of a direction about the apparent FOV centre, in the sense of the kernel's theta. """
+
+        dlon = az - az_c
+        return np.arctan2(np.sin(dlon)*np.cos(alt),
+            np.cos(alt_c_app)*np.sin(alt) - np.sin(alt_c_app)*np.cos(alt)*np.cos(dlon))
+
+    pa_ref = _positionAngle(az_r, alt_r)
+
+    # The kernel applies theta = pi/2 - rot + atan2(y, x), so rot = (kernel position angle) - (reference)
+    rot = 0.0
+    for _ in range(2):
+        az_k, alt_k = _kernelAltAz(rot)
+        d = _positionAngle(az_k, alt_k) - pa_ref
+        rot += np.degrees(np.arctan2(np.mean(np.sin(d)), np.mean(np.cos(d))))
+
+    return ((rot + 180)%360) - 180
 
 
 def rotationWrtHorizon_iter(platepar):
@@ -759,8 +740,12 @@ def rotationWrtStandard(platepar):
     dec_up = dec[1]
 
     # Compute the equatorial orientation
-    rot_angle = np.degrees(np.arctan2(np.radians(dec_mid) - np.radians(dec_up), \
-        np.radians(ra_mid) - np.radians(ra_up)))
+    # Compute the RA difference, wrapping across the 0/360 deg boundary so a FOV centre near RA ~ 0 deg
+    # does not produce a spurious ~360 deg difference (same failure mode as the azimuth wrap in
+    # rotationWrtHorizon).
+    d_ra = (np.radians(ra_mid) - np.radians(ra_up) + np.pi)%(2*np.pi) - np.pi
+
+    rot_angle = np.degrees(np.arctan2(np.radians(dec_mid) - np.radians(dec_up), d_ra))
 
     # Wrap output to 0-360 range
     rot_angle = rot_angle%360
@@ -1006,8 +991,6 @@ def xyToAltAzPP(X_data, Y_data, platepar, measurement=False):
         platepar: [Platepar structure] Astrometry parameters.
 
     Keyword arguments:
-        extinction_correction: [bool] Apply extinction correction. True by default. False is set to prevent 
-            infinite recursion in extinctionCorrectionApparentToTrue when set to True.
         measurement: [bool] Indicates if the given images values are image measurements. Used for correcting
             celestial coordinates for refraction if the refraction was not taken into account during
             plate fitting.
@@ -1047,7 +1030,7 @@ def xyToAltAzPP(X_data, Y_data, platepar, measurement=False):
     if (not platepar.refraction) and measurement and platepar.measurement_apparent_to_true_refraction:
         for i, entry in enumerate(zip(Az_data, Alt_data)):
             az, alt = entry
-            alt = refractionApparentToTrue(np.radians(alt))
+            alt = pyRefractionApparentToTrue(np.radians(alt))
 
             Az_data[i] = az
             Alt_data[i] = np.degrees(alt)
@@ -1089,15 +1072,21 @@ def xyHtToENUPP(X_data, Y_data, ht_wgs84_m, platepar, min_el_deg=0.0):
     
     rot = rotationWrtHorizon(platepar)
         
+    X_array = np.atleast_1d(np.array(X_data, dtype=np.float64)).ravel()
+    Y_array = np.atleast_1d(np.array(Y_data, dtype=np.float64)).ravel()
+    Ht_array = np.atleast_1d(np.array(ht_wgs84_m, dtype=np.float64)).ravel()
+    if Ht_array.size == 1 and X_array.size > 1:
+        Ht_array = np.full(X_array.size, Ht_array[0])
+
     E, N, U = cyXYHttoENU_wgs84(
-        np.array(X_data, dtype=np.float64), np.array(Y_data, dtype=np.float64), 
+        X_array, Y_array, 
         float(platepar.X_res), float(platepar.Y_res), 
         float(alt_centre), float(az_centre),
         float(rot), float(platepar.F_scale), 
         platepar.x_poly_fwd, platepar.y_poly_fwd, 
         unicode(platepar.distortion_type), 
         float(platepar.lat), float(platepar.lon), float(platepar.height_wgs84), 
-        np.array(ht_wgs84_m, dtype=np.float64).ravel() if not np.isscalar(ht_wgs84_m) else np.full(len(X_data), float(ht_wgs84_m), dtype=np.float64),
+        Ht_array,
         refraction=platepar.refraction, 
         equal_aspect=platepar.equal_aspect, 
         force_distortion_centre=platepar.force_distortion_centre, 
@@ -1184,9 +1173,9 @@ def enuToXYPP(E_data, N_data, U_data, platepar, min_el_deg=0.0):
     rot = rotationWrtHorizon(platepar)
     
     x, y = cyENUToXY_iter(
-        np.array(E_data, dtype=np.float64),
-        np.array(N_data, dtype=np.float64),
-        np.array(U_data, dtype=np.float64),
+        np.atleast_1d(np.array(E_data, dtype=np.float64)).ravel(),
+        np.atleast_1d(np.array(N_data, dtype=np.float64)).ravel(),
+        np.atleast_1d(np.array(U_data, dtype=np.float64)).ravel(),
         float(platepar.X_res), float(platepar.Y_res),
         float(alt_centre), float(az_centre),
         float(rot), float(platepar.F_scale),
@@ -1220,9 +1209,6 @@ def enHtToXYPP(E_data, N_data, Ht_data, platepar, min_el_deg=0.0):
         (x, y): [tuple of ndarrays] Image X and Y coordinates.
     """
     
-    # Import the Cython function
-    from RMS.Astrometry.CyFunctions import cyENHtToXY_iter
-    
     # Reference Alt/Az of the FOV centre (true, i.e. unrefracted, epoch of date). Refraction is applied
     # inside the Cython function when platepar.refraction is set, so it must NOT be pre-applied here;
     # doing so corrected the centre twice and biased every point by the refraction at the centre.
@@ -1241,6 +1227,8 @@ def enHtToXYPP(E_data, N_data, Ht_data, platepar, min_el_deg=0.0):
     E_array = np.array(E_data, dtype=np.float64).ravel()
     N_array = np.array(N_data, dtype=np.float64).ravel()
     Ht_array = np.array(Ht_data, dtype=np.float64).ravel()
+    if Ht_array.size == 1 and E_array.size > 1:
+        Ht_array = np.full(E_array.size, Ht_array[0])
     
     # Check that arrays have the same length
     if len(E_array) != len(N_array) or len(E_array) != len(Ht_array):
@@ -1287,6 +1275,12 @@ def ENHt0ToENHt1(E0_data, N0_data, Ht0_data, Ht1_data, platepar):
     Ht0_array = np.array(Ht0_data, dtype=np.float64).ravel()
     Ht1_array = np.array(Ht1_data, dtype=np.float64).ravel()
 
+    # Broadcast scalar heights to the number of points
+    if Ht0_array.size == 1 and E0_array.size > 1:
+        Ht0_array = np.full(E0_array.size, Ht0_array[0])
+    if Ht1_array.size == 1 and E0_array.size > 1:
+        Ht1_array = np.full(E0_array.size, Ht1_array[0])
+
     # Check that arrays have the same length
     if len(E0_array) != len(N0_array) or len(E0_array) != len(Ht0_array) or len(E0_array) != len(Ht1_array):
         raise ValueError(f"E0, N0, Ht0, and Ht1 arrays must have the same length. Got E0:{len(E0_array)}, N0:{len(N0_array)}, Ht0:{len(Ht0_array)}, Ht1:{len(Ht1_array)}")
@@ -1331,8 +1325,8 @@ def geoToXYPP(lat_data, lon_data, h_data, platepar, min_el_deg=0.0):
     rot = rotationWrtHorizon(platepar)
         
     X_data, Y_data = cyGeoToXY_wgs84_iter(
-        np.array(lat_data, dtype=np.float64), np.array(lon_data, dtype=np.float64),
-        np.array(h_data, dtype=np.float64),
+        np.atleast_1d(np.array(lat_data, dtype=np.float64)).ravel(), np.atleast_1d(np.array(lon_data, dtype=np.float64)).ravel(),
+        np.atleast_1d(np.array(h_data, dtype=np.float64)).ravel(),
         float(platepar.X_res), float(platepar.Y_res),
         float(alt_centre), float(az_centre),
         float(rot), float(platepar.F_scale),
