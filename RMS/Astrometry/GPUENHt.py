@@ -13,10 +13,21 @@ import math
 try:
     from numba import cuda
     CUDA_AVAILABLE = True
+
 except ImportError:
     CUDA_AVAILABLE = False
-    print("Warning: Numba CUDA not available. GPU acceleration disabled.")
-    print("Install with: pip install numba")
+
+    class _CudaUnavailable(object):
+        """ Stand-in so this module imports cleanly without numba: the kernel decorator below becomes a
+            no-op and every GPU entry point raises ImportError through its CUDA_AVAILABLE check.
+        """
+        @staticmethod
+        def jit(func=None, **kwargs):
+            if func is None:
+                return lambda f: f
+            return func
+
+    cuda = _CudaUnavailable()
 
 
 @cuda.jit
