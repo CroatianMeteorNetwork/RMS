@@ -61,7 +61,7 @@ def test_normalization():
     
     # Load platepar
     pp = Platepar()
-    pp.read('/home/luc/data/advect_staging/US0001/US0001_20250707_031251_to_20250707_111038/platepar_cmn2010.cal')
+    pp.read(os.environ.get('RMS_TEST_PLATEPAR', os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'share', 'platepar_templates', 'template_generic_720p_4mm.cal')))
     
     print("COORDINATE NORMALIZATION TEST")
     print("="*70)

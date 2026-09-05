@@ -11,7 +11,7 @@ import numpy as np
 sys.path.insert(0, '/home/luc/source/RMS')
 
 from RMS.Formats.Platepar import Platepar
-from RMS.Astrometry.ApplyAstrometry import xyHtToENUPP, geoToXYPP_iter, xyToGeoPP_iter
+from RMS.Astrometry.ApplyAstrometry import xyHtToENUPP, geoToXYPP, xyToGeoPP
 from RMS.Astrometry.Conversions import geo2Cartesian, cartesian2Geo
 
 def test_enu_functions():
@@ -19,7 +19,7 @@ def test_enu_functions():
     
     # Load platepar
     pp = Platepar()
-    pp.read('/home/luc/data/advect_staging/US0001/US0001_20250707_031251_to_20250707_111038/platepar_cmn2010.cal')
+    pp.read(os.environ.get('RMS_TEST_PLATEPAR', os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'share', 'platepar_templates', 'template_generic_720p_4mm.cal')))
     
     print("ENU COORDINATE CONVERSION TEST")
     print("="*70)
@@ -71,7 +71,7 @@ def test_enu_functions():
             print(f"\n  {name}: ({x:.1f}, {y:.1f})")
             
             # XY to Geo
-            lat_arr, lon_arr, h_arr = xyToGeoPP_iter(
+            lat_arr, lon_arr = xyToGeoPP(
                 np.array([x]), np.array([y]), np.array([height]), pp.JD, pp
             )
             lat = lat_arr[0]
@@ -81,7 +81,7 @@ def test_enu_functions():
             print(f"    → Geo: Lat={lat:.6f}°, Lon={lon:.6f}°, H={h:.1f}m")
             
             # Geo back to XY
-            x_arr, y_arr = geoToXYPP_iter(
+            x_arr, y_arr = geoToXYPP(
                 np.array([lat]), np.array([lon]), np.array([h]), pp.JD, pp
             )
             x_back = x_arr[0]
@@ -110,7 +110,7 @@ def test_enu_functions():
         print(f"\n  {name}: Lat={lat:.6f}°, Lon={lon:.6f}°, H={h/1000:.0f}km")
         
         # Geo to XY
-        x_arr, y_arr = geoToXYPP_iter(
+        x_arr, y_arr = geoToXYPP(
             np.array([lat]), np.array([lon]), np.array([h]), pp.JD, pp
         )
         
@@ -121,7 +121,7 @@ def test_enu_functions():
             print(f"    → XY: ({x:.3f}, {y:.3f})")
             
             # XY back to Geo
-            lat_arr, lon_arr, h_arr = xyToGeoPP_iter(
+            lat_arr, lon_arr = xyToGeoPP(
                 np.array([x]), np.array([y]), np.array([h]), pp.JD, pp
             )
             lat_back = lat_arr[0]
