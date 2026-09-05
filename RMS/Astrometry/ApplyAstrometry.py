@@ -971,7 +971,9 @@ def AltAzToXYPP(alt_data, az_data, platepar):
     Return:
         (x, y): [tuple of ndarrays] Image X and Y coordinates.
     """
-    # Compute reference Alt/Az to apparent coordinates, epoch of date
+    # Reference Alt/Az of the FOV centre (true, i.e. unrefracted, epoch of date). Refraction is applied
+    # inside the Cython function when platepar.refraction is set, so it must NOT be pre-applied here;
+    # doing so corrected the centre twice and biased every point by the refraction at the centre.
     az_centre, alt_centre = cyraDec2AltAz(
         np.radians(platepar.RA_d),
         np.radians(platepar.dec_d),
@@ -979,7 +981,6 @@ def AltAzToXYPP(alt_data, az_data, platepar):
         np.radians(platepar.lat),
         np.radians(platepar.lon)
     )
-    alt_centre = refractionTrueToApparent(alt_centre)
     az_centre, alt_centre = np.degrees(az_centre), np.degrees(alt_centre)
 
 
@@ -1017,7 +1018,9 @@ def xyToAltAzPP(X_data, Y_data, platepar, measurement=False):
             Az_data: [ndarray] Azimuth of each point (deg).
     """
 
-    # Compute reference Alt/Az to apparent coordinates, epoch of date
+    # Reference Alt/Az of the FOV centre (true, i.e. unrefracted, epoch of date). Refraction is applied
+    # inside the Cython function when platepar.refraction is set, so it must NOT be pre-applied here;
+    # doing so corrected the centre twice and biased every point by the refraction at the centre.
     az_centre, alt_centre = cyraDec2AltAz(
         np.radians(platepar.RA_d),
         np.radians(platepar.dec_d),
@@ -1025,7 +1028,6 @@ def xyToAltAzPP(X_data, Y_data, platepar, measurement=False):
         np.radians(platepar.lat),
         np.radians(platepar.lon)
     )
-    alt_centre = refractionTrueToApparent(alt_centre)
     az_centre, alt_centre = np.degrees(az_centre), np.degrees(alt_centre)
 
 
@@ -1073,7 +1075,9 @@ def xyHtToENUPP(X_data, Y_data, ht_wgs84_m, platepar, min_el_deg=0.0):
             az, el: [ndarrays] Azimuth and elevation of the ray (radians).
     """
     
-    # Compute reference Alt/Az to apparent coordinates, epoch of date
+    # Reference Alt/Az of the FOV centre (true, i.e. unrefracted, epoch of date). Refraction is applied
+    # inside the Cython function when platepar.refraction is set, so it must NOT be pre-applied here;
+    # doing so corrected the centre twice and biased every point by the refraction at the centre.
     az_centre, alt_centre = cyraDec2AltAz(
         np.radians(platepar.RA_d),
         np.radians(platepar.dec_d),
@@ -1081,7 +1085,6 @@ def xyHtToENUPP(X_data, Y_data, ht_wgs84_m, platepar, min_el_deg=0.0):
         np.radians(platepar.lat),
         np.radians(platepar.lon)
     )
-    alt_centre = refractionTrueToApparent(alt_centre)
     az_centre, alt_centre = np.degrees(az_centre), np.degrees(alt_centre)
     
     rot = rotationWrtHorizon(platepar)
@@ -1166,7 +1169,9 @@ def enuToXYPP(E_data, N_data, U_data, platepar, min_el_deg=0.0):
         (x, y): [tuple of ndarrays] Image X and Y coordinates.
     """
     
-    # Compute reference Alt/Az to apparent coordinates, epoch of date
+    # Reference Alt/Az of the FOV centre (true, i.e. unrefracted, epoch of date). Refraction is applied
+    # inside the Cython function when platepar.refraction is set, so it must NOT be pre-applied here;
+    # doing so corrected the centre twice and biased every point by the refraction at the centre.
     az_centre, alt_centre = cyraDec2AltAz(
         np.radians(platepar.RA_d),
         np.radians(platepar.dec_d),
@@ -1174,7 +1179,6 @@ def enuToXYPP(E_data, N_data, U_data, platepar, min_el_deg=0.0):
         np.radians(platepar.lat),
         np.radians(platepar.lon)
     )
-    alt_centre = refractionTrueToApparent(alt_centre)
     az_centre, alt_centre = np.degrees(az_centre), np.degrees(alt_centre)
     
     rot = rotationWrtHorizon(platepar)
@@ -1219,7 +1223,9 @@ def enHtToXYPP(E_data, N_data, Ht_data, platepar, min_el_deg=0.0):
     # Import the Cython function
     from RMS.Astrometry.CyFunctions import cyENHtToXY_iter
     
-    # Compute reference Alt/Az to apparent coordinates, epoch of date
+    # Reference Alt/Az of the FOV centre (true, i.e. unrefracted, epoch of date). Refraction is applied
+    # inside the Cython function when platepar.refraction is set, so it must NOT be pre-applied here;
+    # doing so corrected the centre twice and biased every point by the refraction at the centre.
     az_centre, alt_centre = cyraDec2AltAz(
         np.radians(platepar.RA_d),
         np.radians(platepar.dec_d),
@@ -1227,7 +1233,6 @@ def enHtToXYPP(E_data, N_data, Ht_data, platepar, min_el_deg=0.0):
         np.radians(platepar.lat),
         np.radians(platepar.lon)
     )
-    alt_centre = refractionTrueToApparent(alt_centre)
     az_centre, alt_centre = np.degrees(az_centre), np.degrees(alt_centre)
     
     rot = rotationWrtHorizon(platepar)
@@ -1311,7 +1316,9 @@ def geoToXYPP(lat_data, lon_data, h_data, platepar, min_el_deg=0.0):
         (x, y): [tuple of ndarrays] Image X and Y coordinates.
     """
     
-    # Compute reference Alt/Az to apparent coordinates, epoch of date
+    # Reference Alt/Az of the FOV centre (true, i.e. unrefracted, epoch of date). Refraction is applied
+    # inside the Cython function when platepar.refraction is set, so it must NOT be pre-applied here;
+    # doing so corrected the centre twice and biased every point by the refraction at the centre.
     az_centre, alt_centre = cyraDec2AltAz(
         np.radians(platepar.RA_d),
         np.radians(platepar.dec_d),
@@ -1319,7 +1326,6 @@ def geoToXYPP(lat_data, lon_data, h_data, platepar, min_el_deg=0.0):
         np.radians(platepar.lat),
         np.radians(platepar.lon)
     )
-    alt_centre = refractionTrueToApparent(alt_centre)
     az_centre, alt_centre = np.degrees(az_centre), np.degrees(alt_centre)
     
     rot = rotationWrtHorizon(platepar)
@@ -1361,7 +1367,9 @@ def xyToGeoPP(X_data, Y_data, h_data, platepar, min_el_deg=0.0):
             lon: [ndarray] Geodetic longitudes (degrees).
     """
     
-    # Compute reference Alt/Az to apparent coordinates, epoch of date
+    # Reference Alt/Az of the FOV centre (true, i.e. unrefracted, epoch of date). Refraction is applied
+    # inside the Cython function when platepar.refraction is set, so it must NOT be pre-applied here;
+    # doing so corrected the centre twice and biased every point by the refraction at the centre.
     az_centre, alt_centre = cyraDec2AltAz(
         np.radians(platepar.RA_d),
         np.radians(platepar.dec_d),
@@ -1369,7 +1377,6 @@ def xyToGeoPP(X_data, Y_data, h_data, platepar, min_el_deg=0.0):
         np.radians(platepar.lat),
         np.radians(platepar.lon)
     )
-    alt_centre = refractionTrueToApparent(alt_centre)
     az_centre, alt_centre = np.degrees(az_centre), np.degrees(alt_centre)
     
     rot = rotationWrtHorizon(platepar)
