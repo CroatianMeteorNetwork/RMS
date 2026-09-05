@@ -33,9 +33,8 @@ import os
 import matplotlib.pyplot as plt
 import numpy as np
 
-from RMS.GeoidHeightEGM96 import mslToWGS84Height
-
 # Import Cython functions
+import functools
 import pyximport
 import RMS.Astrometry.ApplyAstrometry
 import scipy.optimize
@@ -147,6 +146,19 @@ def getPairedStarsSkyPositions(img_x, img_y, jd, platepar):
     return ra_array, dec_array
 
 
+@functools.lru_cache(maxsize=256)
+def _heightWGS84(lat, lon, elev):
+    """ Station height above the WGS84 ellipsoid (m) from the MSL elevation via the EGM96 geoid. Cached
+        per (lat, lon, elev) so it is cheap to derive on every access.
+    """
+    try:
+        return float(mslToWGS84Height(np.radians(lat), np.radians(lon), elev))
+
+    except Exception as e:
+        print("Warning: Calculating platepar WGS84 height failed ({}). Using the MSL elevation instead.".format(e))
+        return float(elev)
+
+
 class Platepar(object):
     def __init__(self, distortion_type="radial5-odd"):
         """Astrometric and photometric calibration plate parameters. Several distortion types are supported.
@@ -248,6 +260,24 @@ class Platepar(object):
         # Now set the actual distortion type
         self.setDistortionType(self._init_distortion_type, reset_params=True)
         del self._init_distortion_type
+
+    @property
+    def height_wgs84(self):
+        """ Station height above the WGS84 ellipsoid (m), always derived from the current lat, lon and MSL
+            elevation via EGM96, so it can never go stale when the coordinates change and it is never
+            written to platepar files. Assigning a value overrides the derived one for this object only
+            (e.g. a directly measured GNSS ellipsoidal height); assign None to go back to the derived value.
+        """
+        override = self.__dict__.get('_height_wgs84_override')
+        if override is not None:
+            return override
+
+        return _heightWGS84(float(self.lat), float(self.lon), float(self.elev))
+
+    @height_wgs84.setter
+    def height_wgs84(self, value):
+        self.__dict__['_height_wgs84_override'] = None if value is None else float(value)
+
 
     def resetDistortionParameters(self, preserve_centre=False):
         """Set the distortion parameters to zero.
@@ -2029,32 +2059,10 @@ class Platepar(object):
         if not 'version' in self.__dict__:
             self.version = 1
 
-        # If the WGS84 height is not present, compute it from MSL elevation
-        if not 'height_wgs84' in self.__dict__:
-            try:
-                egm96_file_path = None  # This will use the default path
-                self.height_wgs84 = mslToWGS84Height(
-                    np.radians(self.lat),
-                    np.radians(self.lon),
-                    self.elev,
-                    egm96_file_path=egm96_file_path
-                )
-            except Exception as e:
-                self.height_wgs84 = self.elev
-                print("Warning: Calculating platepar WGS84 height failed {}. Using Geoid height instead.".format(str(e)))
-
-        # If the refraction was not used for the fit, assume it is disabled
-        if not 'height_wgs84' in self.__dict__:
-            try:
-                self.height_wgs84 = mslToWGS84Height(
-                    np.radians(self.lat),
-                    np.radians(self.lon),
-                    self.elev,
-                    egm96_file_path=egm96_file_path
-                )
-            except Exception as e:
-                self.height_wgs84 = self.elev
-                print("Warning: Calculating platepar WGS84 height failed {}. Using Geoid height instead.".format(str(e)))
+        # The WGS84 height is derived from lat/lon/elev on access (see the height_wgs84 property); discard
+        # any value stored in the file so a stale one can never be used
+        self.__dict__.pop('height_wgs84', None)
+        self.__dict__.pop('_height_wgs84_override', None)
 
         # If the refraction was not used for the fit, assume it is disabled
         if not 'refraction' in self.__dict__:
@@ -2212,16 +2220,6 @@ class Platepar(object):
                 # Parse latitude, longitude, elevation
                 self.lon, self.lat, self.elev = self.parseLine(f)
 
-                try:
-                    self.height_wgs84 = mslToWGS84Height(
-                        np.radians(self.lat),
-                        np.radians(self.lon),
-                        self.elev,
-                        egm96_file_path=egm96_file_path
-                    )
-                except Exception as e:
-                    self.height_wgs84 = self.elev
-                    print("Warning: Calculating platepar WGS84 height failed {}. Using Geoid height instead.".format(str(e)))
 
                 # Parse date and time as int
                 D, M, Y, h, m, s = map(int, f.readline().split())
@@ -2231,19 +2229,6 @@ class Platepar(object):
 
                 # Convert time to JD
                 self.JD = date2JD(Y, M, D, h, m, s)
-
-                # Calculate WGS84 height from MSL elevation
-                try:
-                    egm96_file_path = None  # This will use the default path
-                    self.height_wgs84 = mslToWGS84Height(
-                        np.radians(self.lat),
-                        np.radians(self.lon),
-                        self.elev,
-                        egm96_file_path=egm96_file_path
-                    )
-                except Exception as e:
-                    self.height_wgs84 = self.elev
-                    print("Warning: Calculating platepar WGS84 height failed {}. Using Geoid height instead.".format(str(e)))
 
                 # Calculate the reference hour angle
                 T = (self.JD - 2451545.0) / 36525.0
@@ -2303,6 +2288,10 @@ class Platepar(object):
         self2.y_poly_fwd = self.y_poly_fwd.tolist()
         self2.y_poly_rev = self.y_poly_rev.tolist()
         del self2.time
+
+        # The WGS84 height is derived from lat/lon/elev on load; never persist it or an in-memory override
+        self2.__dict__.pop('height_wgs84', None)
+        self2.__dict__.pop('_height_wgs84_override', None)
 
         # For compatibility with old procedures, write the forward distortion parameters as x, y
         self2.x_poly = self.x_poly_fwd.tolist()
