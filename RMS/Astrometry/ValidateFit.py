@@ -22,6 +22,7 @@ from scipy.spatial import cKDTree
 
 from RMS.Astrometry.ApplyAstrometry import raDecToXYPP, xyToRaDecPP
 from RMS.Astrometry.Conversions import date2JD
+from RMS.Astrometry.StarFilters import DEFAULT_BLEND_FWHM_MULT
 from RMS.Formats.FFfile import filenameToDatetime
 from RMS.Math import angularSeparation
 
@@ -356,13 +357,14 @@ def validateFit(platepar, calstars, catalog_stars, frames=None, match_radius=10.
         det_fwhm = star_data[:, 4] if star_data.shape[1] > 4 else None
 
         # Blend rejection: drop pairs whose catalog star has ANOTHER catalog star within
-        # 2x the median detected FWHM - the detection is likely a blend of both and its
-        # centroid sits between them
+        # DEFAULT_BLEND_FWHM_MULT x the median detected FWHM (the same radius the auto-fit
+        # blend filter uses) - the detection is likely a blend of both and its centroid sits
+        # between them. The fallback is an absolute pixel radius, so it is not rescaled.
         n_blend = 0
         rejected_det = set()
         if len(matches) >= 5:
             good_fwhm = det_fwhm[det_fwhm > 0] if det_fwhm is not None else np.array([])
-            blend_radius = 2.0*float(np.median(good_fwhm)) if len(good_fwhm) else 6.0
+            blend_radius = DEFAULT_BLEND_FWHM_MULT*float(np.median(good_fwhm)) if len(good_fwhm) else 6.0
             idx_inside = np.where(inside)[0]
             cat_tree = cKDTree(np.column_stack([cat_x[idx_inside], cat_y[idx_inside]]))
             kept = []

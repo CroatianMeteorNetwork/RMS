@@ -14,7 +14,8 @@ np = pytest.importorskip("numpy")
 
 from RMS.Astrometry.ApplyAstrometry import getFOVSelectionRadius, raDecToXYPP, xyToRaDecPP
 from RMS.Astrometry.StarClasses import CatalogStar, PairedStars
-from RMS.Astrometry.StarFilters import catalogStarsInFOV, filterBlendedStars
+from RMS.Astrometry.StarFilters import catalogStarsInFOV, filterBlendedStars, \
+    DEFAULT_BLEND_FWHM_MULT
 from RMS.Formats.Platepar import Platepar
 
 
@@ -188,7 +189,7 @@ class TestFilterBlendedStars(object):
     BASE = [(300, 200), (500, 250), (700, 300), (900, 350), (400, 500)]
 
     def test_close_neighbour_is_flagged(self):
-        """ A catalog star at 1.5x FWHM is inside the 2x FWHM blend radius. """
+        """ A catalog star at 1.5x FWHM is inside the default blend radius. """
 
         pp = makePlatepar()
         paired = buildPairedStars(pp, self.BASE, fwhm=3.0)
@@ -268,7 +269,7 @@ class TestFilterBlendedStars(object):
         matched_x = np.array([p[0] for p in matched_positions])
         matched_y = np.array([p[1] for p in matched_positions])
 
-        blend_radius = 2.0*fwhm
+        blend_radius = DEFAULT_BLEND_FWHM_MULT*fwhm
         expected = 0
         for mx, my in zip(matched_x, matched_y):
             dist = np.hypot(cat_x - mx, cat_y - my)
@@ -287,7 +288,10 @@ class TestFilterBlendedStars(object):
         """
 
         pp = makePlatepar()
-        paired = buildPairedStars(pp, self.BASE, fwhm=3.0)
+
+        # FWHM chosen so the blend radius is exactly 6 px: the layout below was validated at
+        #   that radius, and a wider one lets a random sky star land next to a base star
+        paired = buildPairedStars(pp, self.BASE, fwhm=6.0/DEFAULT_BLEND_FWHM_MULT)
 
         near_catalog = buildCatalog(pp, self.BASE + [(304.5, 200)])
 

@@ -36,8 +36,10 @@ except ImportError:
 
 
 # Default beam radius as a multiple of the PSF sigma (flux gathering within the core;
-# the empirical P-boost vs separation curve on USC0G4 supports ~2 px at FWHM ~3 px)
-BEAM_SIGMA_FACTOR = 1.6
+# the empirical P-boost vs separation curve on USC0G4 supports ~2 px at a CALSTARS FWHM
+# of ~3 px in the legacy sqrt(2)-inflated convention, i.e. ~2.1 px in the standard
+# 2.355*sigma convention CALSTARS now uses). Rescaled 1.6 -> 2.3 so the beam stays ~2 px.
+BEAM_SIGMA_FACTOR = 2.3
 
 
 def beamRadiusArcsec(fwhm_px, plate_scale_arcsec_px):

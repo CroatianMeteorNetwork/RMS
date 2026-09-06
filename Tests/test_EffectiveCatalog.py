@@ -5,7 +5,7 @@ from __future__ import absolute_import, division, print_function
 import numpy as np
 import pytest
 
-from RMS.EffectiveCatalog import buildEffectiveSources, beamRadiusArcsec
+from RMS.EffectiveCatalog import buildEffectiveSources, beamRadiusArcsec, BEAM_SIGMA_FACTOR
 
 
 BEAM = 600.0   # arcsec, ~2.6 px at an RMS plate scale
@@ -58,9 +58,9 @@ def test_empty_input():
 
 
 def test_beam_radius_from_fwhm():
-    # FWHM 3 px at 229 arcsec/px -> sigma 1.27 px -> radius ~467 arcsec
+    # FWHM 3 px at 229 arcsec/px -> sigma 1.27 px, times the beam factor
     r = beamRadiusArcsec(3.0, 229.0)
-    assert r == pytest.approx(1.6*(3.0/2.355)*229.0, rel=1e-6)
+    assert r == pytest.approx(BEAM_SIGMA_FACTOR*(3.0/2.355)*229.0, rel=1e-6)
 
 
 def test_dense_field_reduces_source_count():
