@@ -1668,7 +1668,7 @@ def cyRaDecToXY_iter(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
     double y_res, double h0, double jd_ref, double ra_ref, double dec_ref, double pos_angle_ref, 
     double pix_scale, np.ndarray[FLOAT_TYPE_t, ndim=1] x_poly_fwd, 
     np.ndarray[FLOAT_TYPE_t, ndim=1] y_poly_fwd, str dist_type, bool refraction=True, bool equal_aspect=False, 
-    bool force_distortion_centre=False, bool asymmetry_corr=True):
+    bool force_distortion_centre=False, bool asymmetry_corr=True, double refraction_scale=1.0):
     """ Convert RA, Dec to distortion corrected image coordinates using iterative solver for radial distortions.
 
     Arguments:
@@ -1691,6 +1691,8 @@ def cyRaDecToXY_iter(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
         
     Keyword arguments:
         refraction: [bool] Apply refraction correction. True by default.
+        refraction_scale: [float] Scale of the refraction for the observer's height above sea level, from
+            refractionScale(). 1.0 by default (sea level).
         equal_aspect: [bool] Force the X/Y aspect ratio to be equal. Used only for radial distortion. \
             False by default.
         force_distortion_centre: [bool] Force the distortion centre to the image centre. False by default.
@@ -1719,7 +1721,7 @@ def cyRaDecToXY_iter(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
     ra_centre, dec_centre, pos_angle_ref = pointingCorrection(
             jd, radians(lat), radians(lon), 
             radians(h0), jd_ref, radians(ra_ref), radians(dec_ref), radians(pos_angle_ref), 
-            refraction=refraction
+            refraction=refraction, refraction_scale=refraction_scale
             )
 
     # If the radial distortion is used, unpack radial parameters
@@ -1821,7 +1823,7 @@ def cyRaDecToXY_iter(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
 
         # Apply refraction
         if refraction:
-            ra, dec = eqRefractionTrueToApparent(ra, dec, jd, radians(lat), radians(lon))
+            ra, dec = eqRefractionTrueToApparent(ra, dec, jd, radians(lat), radians(lon), refraction_scale)
 
         # Compute the distance from the FOV centre to the sky coordinate
         radius = radians(angularSeparation(degrees(ra), degrees(dec), degrees(ra_centre), degrees(dec_centre)))
@@ -2365,7 +2367,7 @@ def cyAltAzToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] alt_data, np.ndarray[FLOAT_TYPE
     double x_res, double y_res, double alt_ref, double az_ref, double rotation_from_horiz, double pix_scale, \
     np.ndarray[FLOAT_TYPE_t, ndim=1] x_poly_fwd, np.ndarray[FLOAT_TYPE_t, ndim=1] y_poly_fwd, \
     str dist_type, bool refraction=True, bool equal_aspect=False, bool force_distortion_centre=False, \
-    bool asymmetry_corr=True):
+    bool asymmetry_corr=True, double refraction_scale=1.0):
     """
     Convert Azimuth, Altitude to distortion corrected image coordinates.
 
@@ -2384,6 +2386,8 @@ def cyAltAzToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] alt_data, np.ndarray[FLOAT_TYPE
         
     Keyword arguments:
         refraction: [bool] Apply refraction correction. True by default.
+        refraction_scale: [float] Scale of the refraction for the observer's height above sea level, from
+            refractionScale(). 1.0 by default (sea level).
         equal_aspect: [bool] Force the X/Y aspect ratio to be equal. Used only for radial distortion. \
             False by default.
         force_distortion_centre: [bool] Force the distortion centre to the image centre. False by default.
@@ -2411,7 +2415,7 @@ def cyAltAzToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] alt_data, np.ndarray[FLOAT_TYPE
 
     # Correct the reference FOV centre for refraction
     if refraction:
-        alt_ref = refractionTrueToApparent(alt_ref)
+        alt_ref = refractionTrueToApparent(alt_ref, refraction_scale)
 
     # If the radial distortion is used, unpack radial parameters
     if dist_type.startswith("radial"):
@@ -2514,7 +2518,7 @@ def cyAltAzToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] alt_data, np.ndarray[FLOAT_TYPE
 
         # Apply refraction correction
         if refraction:
-            alt = refractionTrueToApparent(alt)
+            alt = refractionTrueToApparent(alt, refraction_scale)
 
         ### Gnomonization of coordinates to image coordinates ###
 
@@ -2668,7 +2672,7 @@ def cyXYToAltAz(np.ndarray[FLOAT_TYPE_t, ndim=1] x_data, \
     double alt_centre, double az_centre, double rotation_from_horiz, double pix_scale, \
     np.ndarray[FLOAT_TYPE_t, ndim=1] x_poly_fwd, np.ndarray[FLOAT_TYPE_t, ndim=1] y_poly_fwd, \
     str dist_type, bool refraction=True, bool equal_aspect=False, bool force_distortion_centre=False,\
-    bool asymmetry_corr=True):
+    bool asymmetry_corr=True, double refraction_scale=1.0):
     """
     Arguments:
         x_data: [ndarray] 1D numpy array containing the image column.
@@ -2686,6 +2690,8 @@ def cyXYToAltAz(np.ndarray[FLOAT_TYPE_t, ndim=1] x_data, \
         
     Keyword arguments:
         refraction: [bool] Apply refraction correction. True by default.
+        refraction_scale: [float] Scale of the refraction for the observer's height above sea level, from
+            refractionScale(). 1.0 by default (sea level).
         equal_aspect: [bool] Force the X/Y aspect ratio to be equal. Used only for radial distortion. \
             False by default.
         force_distortion_centre: [bool] Force the distortion centre to the image centre. False by default.
@@ -2928,7 +2934,7 @@ def cyXYToAltAz(np.ndarray[FLOAT_TYPE_t, ndim=1] x_data, \
 
         # Correct the FOV centre for refraction
         if refraction:
-            alt_centre_corr = refractionTrueToApparent(alt_centre)
+            alt_centre_corr = refractionTrueToApparent(alt_centre, refraction_scale)
 
         else:
             alt_centre_corr = alt_centre
@@ -2944,7 +2950,7 @@ def cyXYToAltAz(np.ndarray[FLOAT_TYPE_t, ndim=1] x_data, \
 
         # Apply refraction correction
         if refraction:
-            alt = refractionApparentToTrue(alt)
+            alt = refractionApparentToTrue(alt, refraction_scale)
 
         # Convert coordinates to degrees
         az = degrees(az)
@@ -3012,7 +3018,7 @@ def cyXYHttoENU_wgs84(
     bint refraction=True, bint equal_aspect=False,
     bint force_distortion_centre=False, bint asymmetry_corr=True,
     double min_el_deg=0.0
-):
+, double refraction_scale=1.0):
     """
     Pixels (x,y) + WGS-84 height -> ENU (meters).
     Steps (identical normalization to cyXYToAltAz):
@@ -3083,7 +3089,7 @@ def cyXYHttoENU_wgs84(
     A0 = radians(az_ref)
     h0 = radians(alt_ref)
     if refraction:
-        h0 = refractionTrueToApparent(h0)   # apparent centre for spherical part
+        h0 = refractionTrueToApparent(h0, refraction_scale)   # apparent centre for spherical part
     rotH = radians(rotation_from_horiz)
     el_gate = radians(min_el_deg)
 
@@ -3199,7 +3205,7 @@ def cyXYHttoENU_wgs84(
 
         # 4) finish refraction handling same as your code: true altitude for ray
         if refraction:
-            h = refractionApparentToTrue(h)
+            h = refractionApparentToTrue(h, refraction_scale)
         if h < el_gate:
             E[i]=N[i]=U[i]=np.nan
             continue
@@ -3394,7 +3400,7 @@ def cyGeoToXY_wgs84_iter(
     bint refraction=True, bint equal_aspect=False,
     bint force_distortion_centre=False, bint asymmetry_corr=True,
     double min_el_deg=0.0
-):
+, double refraction_scale=1.0):
     """
     GEO (lat,lon,h) -> image (x,y), using the SAME gnomonic + distortion flow as cyAltAzToXY:
       GEO -> ECEF -> ENU -> Alt/Az (apparent if refraction=True) ->
@@ -3458,7 +3464,7 @@ def cyGeoToXY_wgs84_iter(
     A0 = radians(az_ref)
     h0 = radians(alt_ref)
     if refraction:
-        h0 = refractionTrueToApparent(h0)   # apparent centre for spherical step
+        h0 = refractionTrueToApparent(h0, refraction_scale)   # apparent centre for spherical step
     rotH = radians(rotation_from_horiz)
 
     # Distortion params (same unpack as cyAltAzToXY)
@@ -3522,7 +3528,7 @@ def cyGeoToXY_wgs84_iter(
         if az < 0.0: az += 2*pi
         alt = atan2(U, sqrt(E*E + Nn*Nn))
         if refraction:
-            alt = refractionTrueToApparent(alt)
+            alt = refractionTrueToApparent(alt, refraction_scale)
         if alt < el_gate:
             x_array[i] = np.nan; y_array[i] = np.nan
             continue
@@ -3643,7 +3649,7 @@ def cyENUToXY_iter(
     bint refraction=True, bint equal_aspect=False,
     bint force_distortion_centre=False, bint asymmetry_corr=True,
     double min_el_deg=0.0
-):
+, double refraction_scale=1.0):
     """
     ENU (meters) -> image (x,y), using the SAME spherical/gnomonic + distortion flow as cyAltAzToXY.
     """
@@ -3671,7 +3677,7 @@ def cyENUToXY_iter(
     A0 = radians(az_ref)
     h0 = radians(alt_ref)
     if refraction:
-        h0 = refractionTrueToApparent(h0)   # apparent centre for spherical math
+        h0 = refractionTrueToApparent(h0, refraction_scale)   # apparent centre for spherical math
     rotH = radians(rotation_from_horiz)
     el_gate = radians(min_el_deg)
 
@@ -3719,7 +3725,7 @@ def cyENUToXY_iter(
         if A < 0.0: A += 2*pi
         h = atan2(U_m[i], sqrt(E_m[i]*E_m[i] + N_m[i]*N_m[i]))
         if refraction:
-            h = refractionTrueToApparent(h)
+            h = refractionTrueToApparent(h, refraction_scale)
         if h < el_gate:
             x_array[i] = np.nan; y_array[i] = np.nan
             continue
@@ -3833,7 +3839,7 @@ def cyENHtToXY_iter(
     bint refraction=True, bint equal_aspect=False,
     bint force_distortion_centre=False, bint asymmetry_corr=True,
     double min_el_deg=0.0
-):
+, double refraction_scale=1.0):
     """
     (E, N, h_ellip[i]) -> XY.
     Solves U per point so that geodetic height equals Ht_m[i], then Alt/Az -> gnomonic -> forward distortion.
@@ -3899,7 +3905,7 @@ def cyENHtToXY_iter(
     A0 = radians(az_ref)
     h0 = radians(alt_ref)
     if refraction:
-        h0 = refractionTrueToApparent(h0)
+        h0 = refractionTrueToApparent(h0, refraction_scale)
     rotH = radians(rotation_from_horiz)
     el_gate = radians(min_el_deg)
 
@@ -4022,7 +4028,7 @@ def cyENHtToXY_iter(
         if A < 0.0: A += 2*pi
         h = atan2(U, sqrt(E*E + Nn*Nn))
         if refraction:
-            h = refractionTrueToApparent(h)
+            h = refractionTrueToApparent(h, refraction_scale)
         if h < el_gate:
             x_array[i] = np.nan; y_array[i] = np.nan
             continue
@@ -4401,7 +4407,7 @@ def cyXYToGeo_wgs84(
     bint refraction=True, bint equal_aspect=False,
     bint force_distortion_centre=False, bint asymmetry_corr=True,
     double min_el_deg=0.0
-):
+, double refraction_scale=1.0):
     """
     Pixels (x,y) -> WGS-84 (lat, lon) at specified height.
     Undistort/gnomonic step is IDENTICAL to cyXYToAltAz (same normalization & formulas).
@@ -4467,7 +4473,7 @@ def cyXYToGeo_wgs84(
     A0 = radians(az_centre)
     h0 = radians(alt_centre)
     if refraction:
-        h0 = refractionTrueToApparent(h0)  # apparent centre for spherical math, as in your code
+        h0 = refractionTrueToApparent(h0, refraction_scale)  # apparent centre for spherical math, as in your code
     rotH = radians(rotation_from_horiz)
 
     # --- Distortion params (IDENTICAL unpack to cyXYToAltAz) ---
@@ -4585,7 +4591,7 @@ def cyXYToGeo_wgs84(
 
         # Use TRUE elevation for the ray if you mirrored cyXYToAltAz finishing step
         if refraction:
-            h = refractionApparentToTrue(h)
+            h = refractionApparentToTrue(h, refraction_scale)
         if h < el_gate:
             lat_out[i] = np.nan; lon_out[i] = np.nan
             continue

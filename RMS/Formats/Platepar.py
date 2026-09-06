@@ -2420,7 +2420,7 @@ class Platepar(object):
             np.radians(self.lon),
         )
         if self.refraction:
-            alt_centre = refractionTrueToApparent(alt_centre)
+            alt_centre = refractionTrueToApparent(alt_centre, refractionScale(self.elev))
 
         return np.degrees(az_centre), np.degrees(alt_centre)
 
@@ -2448,7 +2448,7 @@ class Platepar(object):
         # epoch of date (no precession, see the docstring)
         alt_centre = np.radians(self.alt_centre)
         if self.refraction:
-            alt_centre = pyRefractionApparentToTrue(alt_centre)
+            alt_centre = pyRefractionApparentToTrue(alt_centre, refractionScale(self.elev))
 
         ra, dec = cyaltAz2RADec(
             np.radians(self.az_centre),

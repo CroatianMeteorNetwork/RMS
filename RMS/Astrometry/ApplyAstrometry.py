@@ -543,7 +543,7 @@ def rotationWrtHorizon(platepar, jd_obs=None, probe_frac=0.15):
 
     # FOV centre as the kernels see it (true Alt/Az from RA_d/dec_d, no precession) and its apparent altitude
     az_c, alt_c = cyraDec2AltAz(np.radians(platepar.RA_d), np.radians(platepar.dec_d), jd, lat, lon)
-    alt_c_app = refractionTrueToApparent(alt_c) if platepar.refraction else alt_c
+    alt_c_app = refractionTrueToApparent(alt_c, refractionScale(platepar.elev)) if platepar.refraction else alt_c
 
     # Probe pixels around the distortion centre
     xc, yc = imageCenter(platepar, center_of_distortion=True)
@@ -558,7 +558,7 @@ def rotationWrtHorizon(platepar, jd_obs=None, probe_frac=0.15):
     alt_r = np.empty(len(xs))
     for i in range(len(xs)):
         az_r[i], alt_r[i] = cyTrueRaDec2ApparentAltAz(np.radians(ra_arr[i]), np.radians(dec_arr[i]), jd,
-            lat, lon, platepar.refraction)
+            lat, lon, platepar.refraction, refractionScale(platepar.elev))
 
     def _kernelAltAz(rot):
         """ Probe directions through the Alt/Az kernel for a given rotation, as apparent Alt/Az. """
@@ -566,7 +566,7 @@ def rotationWrtHorizon(platepar, jd_obs=None, probe_frac=0.15):
         alt_k, az_k = cyXYToAltAz(xs, ys, float(platepar.X_res), float(platepar.Y_res),
             float(np.degrees(alt_c)), float(np.degrees(az_c)), float(rot), float(platepar.F_scale),
             platepar.x_poly_fwd, platepar.y_poly_fwd, unicode(platepar.distortion_type),
-            refraction=platepar.refraction, equal_aspect=platepar.equal_aspect,
+            refraction=platepar.refraction, refraction_scale=refractionScale(platepar.elev), equal_aspect=platepar.equal_aspect,
             force_distortion_centre=platepar.force_distortion_centre, asymmetry_corr=platepar.asymmetry_corr)
 
         alt_k = np.radians(alt_k)
@@ -574,7 +574,7 @@ def rotationWrtHorizon(platepar, jd_obs=None, probe_frac=0.15):
 
         # The kernel returns true altitudes when refraction is on, compare in the apparent frame
         if platepar.refraction:
-            alt_k = np.array([refractionTrueToApparent(a) for a in alt_k])
+            alt_k = np.array([refractionTrueToApparent(a, refractionScale(platepar.elev)) for a in alt_k])
 
         return az_k, alt_k
 
@@ -625,7 +625,8 @@ def rotationWrtHorizon_iter(platepar):
         total_error = 0
         for ra, dec in zip(ra_arr, dec_arr):
             az, alt = cyTrueRaDec2ApparentAltAz(np.radians(ra), np.radians(dec), platepar_temp.JD, \
-                                               np.radians(platepar_temp.lat), np.radians(platepar_temp.lon), platepar_temp.refraction)
+                                               np.radians(platepar_temp.lat), np.radians(platepar_temp.lon), platepar_temp.refraction,
+                                               refractionScale(platepar_temp.elev))
             x_out, y_out = AltAzToXYPP(np.array([np.degrees(alt)]), np.array([np.degrees(az)]), platepar_temp)
             error = np.sqrt((x_out - xx)**2 + (y_out - yy)**2)
             total_error += np.sum(error)
@@ -954,7 +955,7 @@ def raDecToXYPP_iter(RA_data, dec_data, jd, platepar):
         float(platepar.X_res), float(platepar.Y_res), float(platepar.Ho), float(platepar.JD),
         float(platepar.RA_d), float(platepar.dec_d), float(platepar.pos_angle_ref), platepar.F_scale,
         platepar.x_poly_fwd, platepar.y_poly_fwd, unicode(platepar.distortion_type),
-        refraction=platepar.refraction, equal_aspect=platepar.equal_aspect,
+        refraction=platepar.refraction, refraction_scale=refractionScale(platepar.elev), equal_aspect=platepar.equal_aspect,
         force_distortion_centre=platepar.force_distortion_centre, asymmetry_corr=platepar.asymmetry_corr)
 
     return X_data, Y_data
@@ -988,7 +989,7 @@ def AltAzToXYPP(alt_data, az_data, platepar):
     X_data, Y_data = cyAltAzToXY(alt_data, az_data,
         float(platepar.X_res), float(platepar.Y_res), float(alt_centre), \
         float(az_centre), float(rot), platepar.F_scale, platepar.x_poly_fwd, \
-        platepar.y_poly_fwd, unicode(platepar.distortion_type), refraction=platepar.refraction, \
+        platepar.y_poly_fwd, unicode(platepar.distortion_type), refraction=platepar.refraction, refraction_scale=refractionScale(platepar.elev), \
         equal_aspect=platepar.equal_aspect, force_distortion_centre=platepar.force_distortion_centre, \
         asymmetry_corr=platepar.asymmetry_corr)
 
@@ -1034,7 +1035,7 @@ def xyToAltAzPP(X_data, Y_data, platepar, measurement=False):
         np.array(Y_data, dtype=np.float64), float(platepar.X_res), \
         float(platepar.Y_res), float(alt_centre), float(az_centre), \
         float(rot), float(platepar.F_scale), platepar.x_poly_fwd, platepar.y_poly_fwd, \
-        unicode(platepar.distortion_type), refraction=platepar.refraction, \
+        unicode(platepar.distortion_type), refraction=platepar.refraction, refraction_scale=refractionScale(platepar.elev), \
         equal_aspect=platepar.equal_aspect, force_distortion_centre=platepar.force_distortion_centre, \
         asymmetry_corr=platepar.asymmetry_corr)
 
@@ -1043,7 +1044,7 @@ def xyToAltAzPP(X_data, Y_data, platepar, measurement=False):
     if (not platepar.refraction) and measurement and platepar.measurement_apparent_to_true_refraction:
         for i, entry in enumerate(zip(Az_data, Alt_data)):
             az, alt = entry
-            alt = pyRefractionApparentToTrue(np.radians(alt))
+            alt = pyRefractionApparentToTrue(np.radians(alt), refractionScale(platepar.elev))
 
             Az_data[i] = az
             Alt_data[i] = np.degrees(alt)
@@ -1100,7 +1101,7 @@ def xyHtToENUPP(X_data, Y_data, ht_wgs84_m, platepar, min_el_deg=0.0):
         unicode(platepar.distortion_type), 
         float(platepar.lat), float(platepar.lon), float(platepar.height_wgs84), 
         Ht_array,
-        refraction=platepar.refraction, 
+        refraction=platepar.refraction, refraction_scale=refractionScale(platepar.elev), 
         equal_aspect=platepar.equal_aspect, 
         force_distortion_centre=platepar.force_distortion_centre, 
         asymmetry_corr=platepar.asymmetry_corr, 
@@ -1256,7 +1257,7 @@ def enHtToXYPP(E_data, N_data, Ht_data, platepar, min_el_deg=0.0):
         platepar.x_poly_fwd, platepar.y_poly_fwd,
         platepar.distortion_type,
         float(platepar.lat), float(platepar.lon), float(platepar.height_wgs84),
-        refraction=platepar.refraction,
+        refraction=platepar.refraction, refraction_scale=refractionScale(platepar.elev),
         equal_aspect=platepar.equal_aspect,
         force_distortion_centre=platepar.force_distortion_centre,
         asymmetry_corr=platepar.asymmetry_corr,
@@ -1346,7 +1347,7 @@ def geoToXYPP(lat_data, lon_data, h_data, platepar, min_el_deg=0.0):
         platepar.x_poly_fwd, platepar.y_poly_fwd,
         unicode(platepar.distortion_type),
         float(platepar.lat), float(platepar.lon), float(platepar.height_wgs84),
-        refraction=platepar.refraction,
+        refraction=platepar.refraction, refraction_scale=refractionScale(platepar.elev),
         equal_aspect=platepar.equal_aspect,
         force_distortion_centre=platepar.force_distortion_centre,
         asymmetry_corr=platepar.asymmetry_corr,
@@ -1411,7 +1412,7 @@ def xyToGeoPP(X_data, Y_data, h_data, platepar, min_el_deg=0.0):
         unicode(platepar.distortion_type),
         float(platepar.lat), float(platepar.lon), float(platepar.height_wgs84),
         ht_array,
-        refraction=platepar.refraction,
+        refraction=platepar.refraction, refraction_scale=refractionScale(platepar.elev),
         equal_aspect=platepar.equal_aspect,
         force_distortion_centre=platepar.force_distortion_centre,
         asymmetry_corr=platepar.asymmetry_corr,
