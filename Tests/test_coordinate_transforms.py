@@ -20,6 +20,8 @@ from RMS.Astrometry.ApplyAstrometry import (xyToRaDecPP, raDecToXYPP, xyToAltAzP
     geoToXYPP, geoToENUPP, xyToGeoPP, ENHt0ToENHt1, rotationWrtHorizon, rotationWrtHorizonToPosAngle)
 from RMS.Astrometry.Conversions import jd2Date
 from RMS.Astrometry.CyFunctions import cyTrueRaDec2ApparentAltAz, equatorialCoordPrecession, j2000FromTrueOfDate
+from RMS.Astrometry.CyFunctions import (refractionScale, refractionTargetFraction, pyRefractionApparentToTrue,
+    pyRefractionTrueToApparent)
 from RMS.GeoidHeightEGM96 import mslToWGS84Height, wgs84toMSLHeight, geoidUndulation
 from RMS.Misc import getRmsRootDir
 
@@ -188,6 +190,13 @@ class TestDirectTransforms(unittest.TestCase):
         for label, pp in self._platepars():
             X, Y = pixelGrid(pp, nx=5, ny=3, margin=100)
             az_r, alt_r = referenceAltAz(pp, X, Y, False)
+            # The star-calibrated path gives a star's true direction; a target at HT is refracted less
+            #   (refractionTargetFraction), so convert the reference to the direction of such a target
+            if pp.refraction:
+                scale = refractionScale(pp.elev)
+                fraction = refractionTargetFraction(pp.height_wgs84, HT)
+                alt_r = np.array([pyRefractionApparentToTrue(pyRefractionTrueToApparent(a, scale), scale*fraction)
+                    for a in alt_r])
             E, N, U = xyHtToENUPP(X, Y, HT, pp)[:3]
 
             lat, lon = np.radians(pp.lat), np.radians(pp.lon)

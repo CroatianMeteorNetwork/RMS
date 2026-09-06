@@ -1,7 +1,8 @@
 """
 GPU-accelerated ENHt0ToENHt1 using Numba CUDA.
 
-This implements the same double-bisection algorithm as cyENHt0ToENHt1,
+This implements the same double-bisection algorithm as cyENHt0ToENHt1, including the
+height-dependent refraction (the true direction to a target depends on its height),
 but runs on GPU with thousands of parallel threads.
 
 Expected speedup: 20-50x for large arrays (1M+ points)
@@ -9,6 +10,8 @@ Expected speedup: 20-50x for large arrays (1M+ points)
 
 import numpy as np
 import math
+
+from RMS.Astrometry.CyFunctions import refractionScale
 
 try:
     from numba import cuda
@@ -30,11 +33,62 @@ except ImportError:
     cuda = _CudaUnavailable()
 
 
+
+@cuda.jit(device=True)
+def _refraction_apparent_to_true(elev, scale):
+    """ Bennett's refraction (radians), scaled: same as RMS.Astrometry.CyFunctions.refractionApparentToTrue. """
+    elev_calc = elev if elev > -0.5*math.pi/180.0 else -0.5*math.pi/180.0
+    e_deg = elev_calc*180.0/math.pi
+    return elev - scale*(1.0/(60.0*math.tan((e_deg + 7.31/(e_deg + 4.4))*math.pi/180.0)))*math.pi/180.0
+
+
+@cuda.jit(device=True)
+def _refraction_true_to_apparent(elev, scale):
+    """ Exact inverse of _refraction_apparent_to_true by fixed-point iteration (as in CyFunctions). """
+    elev_app = elev
+    for _ in range(5):
+        elev_app = elev + (elev_app - _refraction_apparent_to_true(elev_app, scale))
+    return elev_app
+
+
+@cuda.jit(device=True)
+def _isa_refractivity(h):
+    if h < -500.0:
+        h = -500.0
+    if h <= 11000.0:
+        return (1.0 - 2.25577e-5*h)**4.25588
+    return (1.0 - 2.25577e-5*11000.0)**4.25588*math.exp(-(h - 11000.0)/6341.6)
+
+
+@cuda.jit(device=True)
+def _isa_refractivity_integral(h):
+    if h < -500.0:
+        h = -500.0
+    if h <= 11000.0:
+        return (1.0 - (1.0 - 2.25577e-5*h)**5.25588)/(2.25577e-5*5.25588)
+    j_tp = (1.0 - (1.0 - 2.25577e-5*11000.0)**5.25588)/(2.25577e-5*5.25588)
+    return j_tp + _isa_refractivity(11000.0)*6341.6*(1.0 - math.exp(-(h - 11000.0)/6341.6))
+
+
+@cuda.jit(device=True)
+def _refraction_target_fraction(elev_obs, target_height):
+    """ Same as RMS.Astrometry.CyFunctions.refractionTargetFraction. """
+    if target_height > 1.0e6:
+        return 1.0
+    height_diff = target_height - elev_obs
+    if height_diff <= 1.0:
+        return 0.0
+    if elev_obs > 11000.0:
+        elev_obs = 11000.0
+    return 1.0 - (_isa_refractivity_integral(target_height) - _isa_refractivity_integral(elev_obs)) \
+        /(height_diff*_isa_refractivity(elev_obs))
+
+
 @cuda.jit
 def ENHt_kernel(E0_m, N0_m, Ht0_m, Ht1_m,
                 E1_out, N1_out, U1_out,
                 lat_sta_rad, lon_sta_rad, h_sta_m,
-                n_points):
+                n_points, refraction_on, refraction_scale):
     """
     CUDA kernel for ENHt0ToENHt1 conversion.
 
@@ -142,7 +196,7 @@ def ENHt_kernel(E0_m, N0_m, Ht0_m, Ht1_m,
         f_hi = hP - Ht0
 
     # Bisection iterations to find U0
-    for _ in range(20):
+    for _ in range(40):
         U_mid = 0.5 * (U_lo + U_hi)
         Xi = Xc + dxe_base + RU0 * U_mid
         Yi = Yc + dye_base + RU1 * U_mid
@@ -164,6 +218,8 @@ def ENHt_kernel(E0_m, N0_m, Ht0_m, Ht1_m,
             f_lo = f_mid
 
         if math.fabs(f_mid) < 1e-3:  # 1mm tolerance
+            # Return the tested midpoint, not the midpoint of the updated bracket (a quarter width away)
+            U_lo = U_mid; U_hi = U_mid
             break
 
     U0 = 0.5 * (U_lo + U_hi)
@@ -181,11 +237,25 @@ def ENHt_kernel(E0_m, N0_m, Ht0_m, Ht1_m,
         dir_n = N0 / ray_length
         dir_u = U0 / ray_length
 
+        # Refraction: apparent direction of the point at Ht0, then the true direction for a target at Ht1
+        #   (mirrors cyENHt0ToENHt1)
+        if refraction_on:
+            alt_true0 = math.asin(dir_u)
+            alt_app = _refraction_true_to_apparent(alt_true0,
+                refraction_scale*_refraction_target_fraction(h_sta_m, Ht0_m[idx]))
+            alt_true1 = _refraction_apparent_to_true(alt_app,
+                refraction_scale*_refraction_target_fraction(h_sta_m, Ht1_m[idx]))
+            horiz = math.sqrt(dir_e*dir_e + dir_n*dir_n)
+            if horiz > 0.0:
+                dir_e = dir_e/horiz*math.cos(alt_true1)
+                dir_n = dir_n/horiz*math.cos(alt_true1)
+                dir_u = math.sin(alt_true1)
+
         # Binary search along ray for point at height Ht1
         t_lo = 10.0
         t_hi = 1000000.0
 
-        for _ in range(30):
+        for _ in range(50):
             t_mid = 0.5 * (t_lo + t_hi)
 
             # ENU coordinates at distance t_mid along ray
@@ -212,6 +282,8 @@ def ENHt_kernel(E0_m, N0_m, Ht0_m, Ht1_m,
                 t_hi = t_mid
 
             if math.fabs(hP - Ht1) < 1e-3:  # 1mm tolerance
+                # Return the tested midpoint, not the midpoint of the updated bracket (a quarter width away)
+                t_lo = t_mid; t_hi = t_mid
                 break
 
         # Final position at height Ht1
@@ -290,7 +362,7 @@ def ENHt0ToENHt1_gpu(E0_data, N0_data, Ht0_data, Ht1_data, platepar,
         E0_gpu, N0_gpu, Ht0_gpu, Ht1_gpu,
         E1_gpu, N1_gpu, U1_gpu,
         lat_sta_rad, lon_sta_rad, h_sta_m,
-        n_points
+        n_points, int(bool(platepar.refraction)), refractionScale(platepar.elev)
     )
 
     # Copy results back from GPU
@@ -326,6 +398,8 @@ class GPUENHtConverter:
         self.lat_sta_rad = math.radians(platepar.lat)
         self.lon_sta_rad = math.radians(platepar.lon)
         self.h_sta_m = platepar.height_wgs84
+        self.refraction_on = int(bool(platepar.refraction))
+        self.refraction_scale = refractionScale(platepar.elev)
 
         # Cache for GPU arrays
         self._cached_size = None
@@ -381,7 +455,7 @@ class GPUENHtConverter:
             self._E0_gpu, self._N0_gpu, self._Ht0_gpu, self._Ht1_gpu,
             self._E1_gpu, self._N1_gpu, self._U1_gpu,
             self.lat_sta_rad, self.lon_sta_rad, self.h_sta_m,
-            n_points
+            n_points, self.refraction_on, self.refraction_scale
         )
 
         # Copy results back

@@ -60,7 +60,7 @@ pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 from RMS.Astrometry.CyFunctions import (cyraDecToXY, cyTrueRaDec2ApparentAltAz,
                                         cyraDec2AltAz,
                                         cyXYToRADec,
-                                        eqRefractionApparentToTrue, refractionScale,
+                                        eqRefractionApparentToTrue, refractionScale, refractionTargetFraction,
                                         pyRefractionApparentToTrue,
                                         refractionTrueToApparent,
                                         equatorialCoordPrecession,
@@ -961,12 +961,17 @@ def raDecToXYPP_iter(RA_data, dec_data, jd, platepar):
     return X_data, Y_data
 
 
-def AltAzToXYPP(alt_data, az_data, platepar):
+def AltAzToXYPP(alt_data, az_data, platepar, target_height=None):
     """ Converts Azim, Alt to image coordinates, but the platepar is given instead of individual parameters.
     Arguments:
         az: [ndarray] Array of azimuth (degrees).
         alt: [ndarray] Array of altitude (degrees).
         platepar: [Platepar structure] Astrometry parameters.
+
+    Keyword arguments:
+        target_height: [float] Height above sea level (m) of the target (a meteor, a contrail), whose
+            refraction is the fraction of a star's that reaches it (refractionTargetFraction). None (default)
+            for stars.
     Return:
         (x, y): [tuple of ndarrays] Image X and Y coordinates.
     """
@@ -986,17 +991,20 @@ def AltAzToXYPP(alt_data, az_data, platepar):
     rot = rotationWrtHorizon(platepar)
 
     # Use the cythonized funtion insted of the Python function
+    target_fraction = 1.0 if target_height is None else refractionTargetFraction(platepar.elev, target_height)
+
     X_data, Y_data = cyAltAzToXY(alt_data, az_data,
         float(platepar.X_res), float(platepar.Y_res), float(alt_centre), \
         float(az_centre), float(rot), platepar.F_scale, platepar.x_poly_fwd, \
         platepar.y_poly_fwd, unicode(platepar.distortion_type), refraction=platepar.refraction, refraction_scale=refractionScale(platepar.elev), \
         equal_aspect=platepar.equal_aspect, force_distortion_centre=platepar.force_distortion_centre, \
-        asymmetry_corr=platepar.asymmetry_corr)
+        asymmetry_corr=platepar.asymmetry_corr,
+        target_fraction=target_fraction)
 
     return X_data, Y_data
 
 
-def xyToAltAzPP(X_data, Y_data, platepar, measurement=False):
+def xyToAltAzPP(X_data, Y_data, platepar, measurement=False, target_height=None):
     """ Converts image XY to Alt, Az, but it takes a platepar instead of individual parameters. 
 
     Arguments:
@@ -1008,6 +1016,9 @@ def xyToAltAzPP(X_data, Y_data, platepar, measurement=False):
         measurement: [bool] Indicates if the given images values are image measurements. Used for correcting
             celestial coordinates for refraction if the refraction was not taken into account during
             plate fitting.
+        target_height: [float] Height above sea level (m) of the target the pixels point at (a meteor, a
+            contrail): the refraction applied is the fraction of a star's that reaches such a target
+            (refractionTargetFraction). None (default) for stars.
 
     Return:
         (Alt_data, Az_data): [tuple of ndarrays]
@@ -1031,20 +1042,23 @@ def xyToAltAzPP(X_data, Y_data, platepar, measurement=False):
     rot = rotationWrtHorizon(platepar)
 
     # Convert x,y to Alt/Az using a fast cython function
+    target_fraction = 1.0 if target_height is None else refractionTargetFraction(platepar.elev, target_height)
+
     Alt_data, Az_data = cyXYToAltAz(np.array(X_data, dtype=np.float64), \
         np.array(Y_data, dtype=np.float64), float(platepar.X_res), \
         float(platepar.Y_res), float(alt_centre), float(az_centre), \
         float(rot), float(platepar.F_scale), platepar.x_poly_fwd, platepar.y_poly_fwd, \
         unicode(platepar.distortion_type), refraction=platepar.refraction, refraction_scale=refractionScale(platepar.elev), \
         equal_aspect=platepar.equal_aspect, force_distortion_centre=platepar.force_distortion_centre, \
-        asymmetry_corr=platepar.asymmetry_corr)
+        asymmetry_corr=platepar.asymmetry_corr,
+        target_fraction=target_fraction)
 
     # Correct the coordinates for refraction if it wasn't taken into account during the astrometry calibration
     #   procedure
     if (not platepar.refraction) and measurement and platepar.measurement_apparent_to_true_refraction:
         for i, entry in enumerate(zip(Az_data, Alt_data)):
             az, alt = entry
-            alt = pyRefractionApparentToTrue(np.radians(alt), refractionScale(platepar.elev))
+            alt = pyRefractionApparentToTrue(np.radians(alt), refractionScale(platepar.elev)*target_fraction)
 
             Az_data[i] = az
             Alt_data[i] = np.degrees(alt)
@@ -1197,8 +1211,9 @@ def enuToXYPP(E_data, N_data, U_data, platepar, min_el_deg=0.0):
         platepar.distortion_type,
         platepar.refraction, platepar.equal_aspect,
         platepar.force_distortion_centre, platepar.asymmetry_corr,
-        min_el_deg
-    )
+        min_el_deg,
+        h_sta_m=float(platepar.height_wgs84),
+        refraction_scale=refractionScale(platepar.elev))
     
     return x, y
 
@@ -1302,8 +1317,8 @@ def ENHt0ToENHt1(E0_data, N0_data, Ht0_data, Ht1_data, platepar):
     # Call the Cython function
     E1, N1, U1 = cyENHt0ToENHt1(
         E0_array, N0_array, Ht0_array, Ht1_array,
-        float(platepar.lat), float(platepar.lon), float(platepar.height_wgs84)
-    )
+        float(platepar.lat), float(platepar.lon), float(platepar.height_wgs84),
+        refraction=platepar.refraction, refraction_scale=refractionScale(platepar.elev))
 
     return E1, N1, U1
 
@@ -1621,8 +1636,9 @@ def applyPlateparToRaDecCentroids(ff_name, fps, meteor_meas, platepar, add_calst
 
 def xyHt2Geo(platepar, x, y, h):
     """ Given pixel coordinates on the image and a height of the target above sea level,
-        compute geo coordinates of the point. The assumption is that the target is close enough for the
-        refraction not to be needed to be applied.
+        compute geo coordinates of the point. The refraction applied is the one for a target at that height
+        (refractionTargetFraction): a target at 10 km still gets ~40% of a star's refraction, so leaving it out
+        put low-elevation targets 1-2 arcmin too high; this is now xyToGeoPP with a scalar-friendly interface.
 
     Arguments:
         platepar: [Platepar object]
@@ -1635,9 +1651,6 @@ def xyHt2Geo(platepar, x, y, h):
 
     """
 
-    # Disable the refraction correction
-    platepar = copy.deepcopy(platepar)
-    platepar.refraction = False
 
     # If any of the input parameters are arrays, get their length
     arr_len = None
@@ -1667,58 +1680,10 @@ def xyHt2Geo(platepar, x, y, h):
         h = np.array([h])
 
     # Convert the pixel coordinates to RA/Dec
-    jd_arr, ra_arr, dec_arr, _ = xyToRaDecPP(
-        [platepar.JD]*len(x), x, y, [1]*len(x),
-        platepar, 
-        extinction_correction=False, precompute_pointing_corr=True, jd_time=True,
-        measurement=False # Disables refraction correction
-        )
-        
-    # Vectorised path (2026-07-30): the previous per-point Python loop cost
-    # ~30 us/point (cy scalar call boxing + per-point AEGeoidH2LatLonAlt numpy
-    # scalars); on contrail-pipeline workloads (millions of contour points)
-    # this dominated whole processing phases. Identical math:
-    #  - alt/az via the cython-internal loop over the SAME scalar function
-    #  - AEGeoidH2LatLonAlt's lat/lon algebra broadcast over N (its altitude
-    #    output was never used here)
-    from RMS.Astrometry.CyFunctions import cyTrueRaDec2ApparentAltAz_vect
-    from RMS.Astrometry.Conversions import latLonAlt2ECEF, EARTH
+    lat, lon = xyToGeoPP(np.asarray(x, dtype=np.float64), np.asarray(y, dtype=np.float64),
+        np.asarray(h, dtype=np.float64), platepar)
 
-    jd_np = np.asarray(jd_arr, dtype=np.float64)
-    az_arr, elev_arr = cyTrueRaDec2ApparentAltAz_vect(
-        np.radians(np.asarray(ra_arr, dtype=np.float64)),
-        np.radians(np.asarray(dec_arr, dtype=np.float64)),
-        jd_np, np.radians(platepar.lat), np.radians(platepar.lon),
-        False # Disable refraction correction
-        )
-
-    lat0 = np.radians(platepar.lat)
-    lon0 = np.radians(platepar.lon)
-    obs_x, obs_y, obs_z = latLonAlt2ECEF(lat0, lon0, platepar.height_wgs84)
-
-    # Line-of-sight unit vectors in ENU, rotated to ECEF (explicit rows of the
-    # same R_enu2ecef used by AEGeoidH2LatLonAlt)
-    ce = np.cos(elev_arr); se = np.sin(elev_arr)
-    E_ = ce*np.sin(az_arr); N_ = ce*np.cos(az_arr); U_ = se
-    los_x = -np.sin(lon0)*E_ + (-np.sin(lat0)*np.cos(lon0))*N_ + (np.cos(lat0)*np.cos(lon0))*U_
-    los_y =  np.cos(lon0)*E_ + (-np.sin(lat0)*np.sin(lon0))*N_ + (np.cos(lat0)*np.sin(lon0))*U_
-    los_z =                    (np.cos(lat0))*N_ + (np.sin(lat0))*U_
-
-    h_np = np.asarray(h, dtype=np.float64)
-    r = (h_np - platepar.height_wgs84)/se
-    tx = obs_x + r*los_x
-    ty = obs_y + r*los_y
-    tz = obs_z + r*los_z
-
-    # ecef2LatLonAlt lat/lon algebra, broadcast (altitude part omitted - unused)
-    ep = np.sqrt((EARTH.EQUATORIAL_RADIUS**2 - EARTH.POLAR_RADIUS**2)/(EARTH.POLAR_RADIUS**2))
-    lon_t = np.arctan2(ty, tx)
-    p_ = np.sqrt(tx**2 + ty**2)
-    theta = np.arctan2(tz*EARTH.EQUATORIAL_RADIUS, p_*EARTH.POLAR_RADIUS)
-    lat_t = np.arctan2(tz + (ep**2)*EARTH.POLAR_RADIUS*np.sin(theta)**3, \
-        p_ - (EARTH.E**2)*EARTH.EQUATORIAL_RADIUS*np.cos(theta)**3)
-
-    return np.degrees(lat_t), np.degrees(lon_t)
+    return lat, lon
 
 
 

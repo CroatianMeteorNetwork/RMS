@@ -1850,7 +1850,7 @@ def cyRaDecToXY_iter(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
             y_img = y_corr
             delta_r = 1.0
             j = 0
-            while (delta_r > 0.01) and (j < 100):   # ~0.01 px tolerance
+            while (delta_r > 0.001) and (j < 200):   # 0.001 px step (the map converges slowly near strong distortion)
                 j += 1
 
                 r  = sqrt((x_img - x0)**2 + (y_img - y0)**2)
@@ -1892,7 +1892,7 @@ def cyRaDecToXY_iter(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
             y_img = y_corr
 
             # Iterate to find the distorted position
-            while delta_r > 0.01 and j < 100:  # 0.01 pixel tolerance
+            while delta_r > 0.001 and j < 200:  # 0.001 px step tolerance
                 j += 1
 
                 # Compute the radius (with aspect ratio and asymmetry, in pixels then normalized)
@@ -2367,7 +2367,7 @@ def cyAltAzToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] alt_data, np.ndarray[FLOAT_TYPE
     double x_res, double y_res, double alt_ref, double az_ref, double rotation_from_horiz, double pix_scale, \
     np.ndarray[FLOAT_TYPE_t, ndim=1] x_poly_fwd, np.ndarray[FLOAT_TYPE_t, ndim=1] y_poly_fwd, \
     str dist_type, bool refraction=True, bool equal_aspect=False, bool force_distortion_centre=False, \
-    bool asymmetry_corr=True, double refraction_scale=1.0):
+    bool asymmetry_corr=True, double refraction_scale=1.0, double target_fraction=1.0):
     """
     Convert Azimuth, Altitude to distortion corrected image coordinates.
 
@@ -2388,6 +2388,8 @@ def cyAltAzToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] alt_data, np.ndarray[FLOAT_TYPE
         refraction: [bool] Apply refraction correction. True by default.
         refraction_scale: [float] Scale of the refraction for the observer's height above sea level, from
             refractionScale(). 1.0 by default (sea level).
+        target_fraction: [float] Fraction of the star refraction that applies to the target (see
+            refractionTargetFraction): 1.0 by default (stars), less for a meteor or a contrail.
         equal_aspect: [bool] Force the X/Y aspect ratio to be equal. Used only for radial distortion. \
             False by default.
         force_distortion_centre: [bool] Force the distortion centre to the image centre. False by default.
@@ -2518,7 +2520,7 @@ def cyAltAzToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] alt_data, np.ndarray[FLOAT_TYPE
 
         # Apply refraction correction
         if refraction:
-            alt = refractionTrueToApparent(alt, refraction_scale)
+            alt = refractionTrueToApparent(alt, refraction_scale*target_fraction)
 
         ### Gnomonization of coordinates to image coordinates ###
 
@@ -2552,7 +2554,7 @@ def cyAltAzToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] alt_data, np.ndarray[FLOAT_TYPE
             y_img = y_corr
             delta_r = 1.0
             j = 0
-            while (delta_r > 0.01) and (j < 100):   # ~0.01 px tolerance
+            while (delta_r > 0.001) and (j < 200):   # 0.001 px step (the map converges slowly near strong distortion)
                 j += 1
 
                 r  = sqrt((x_img - x0)**2 + (y_img - y0)**2)
@@ -2595,7 +2597,7 @@ def cyAltAzToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] alt_data, np.ndarray[FLOAT_TYPE
             y_img = y_corr
 
             # Iterate to find the distorted position
-            while delta_r > 0.01 and j < 100:  # 0.01 pixel tolerance
+            while delta_r > 0.001 and j < 200:  # 0.001 px step tolerance
                 j += 1
 
                 # Compute the radius (with aspect ratio and asymmetry, in pixels then normalized)
@@ -2672,7 +2674,7 @@ def cyXYToAltAz(np.ndarray[FLOAT_TYPE_t, ndim=1] x_data, \
     double alt_centre, double az_centre, double rotation_from_horiz, double pix_scale, \
     np.ndarray[FLOAT_TYPE_t, ndim=1] x_poly_fwd, np.ndarray[FLOAT_TYPE_t, ndim=1] y_poly_fwd, \
     str dist_type, bool refraction=True, bool equal_aspect=False, bool force_distortion_centre=False,\
-    bool asymmetry_corr=True, double refraction_scale=1.0):
+    bool asymmetry_corr=True, double refraction_scale=1.0, double target_fraction=1.0):
     """
     Arguments:
         x_data: [ndarray] 1D numpy array containing the image column.
@@ -2692,6 +2694,8 @@ def cyXYToAltAz(np.ndarray[FLOAT_TYPE_t, ndim=1] x_data, \
         refraction: [bool] Apply refraction correction. True by default.
         refraction_scale: [float] Scale of the refraction for the observer's height above sea level, from
             refractionScale(). 1.0 by default (sea level).
+        target_fraction: [float] Fraction of the star refraction that applies to the target the pixels point
+            at (refractionTargetFraction): 1.0 by default (stars), less for a meteor or a contrail.
         equal_aspect: [bool] Force the X/Y aspect ratio to be equal. Used only for radial distortion. \
             False by default.
         force_distortion_centre: [bool] Force the distortion centre to the image centre. False by default.
@@ -2950,7 +2954,7 @@ def cyXYToAltAz(np.ndarray[FLOAT_TYPE_t, ndim=1] x_data, \
 
         # Apply refraction correction
         if refraction:
-            alt = refractionApparentToTrue(alt, refraction_scale)
+            alt = refractionApparentToTrue(alt, refraction_scale*target_fraction)
 
         # Convert coordinates to degrees
         az = degrees(az)
@@ -3205,7 +3209,8 @@ def cyXYHttoENU_wgs84(
 
         # 4) finish refraction handling same as your code: true altitude for ray
         if refraction:
-            h = refractionApparentToTrue(h, refraction_scale)
+            # Heights are WGS-84 ellipsoidal here; the geoid offset (<= 100 m) moves the fraction by < 0.3 arcsec
+            h = refractionApparentToTrue(h, refraction_scale*refractionTargetFraction(h_sta_m, ht_wgs84_m[i]))
         if h < el_gate:
             E[i]=N[i]=U[i]=np.nan
             continue
@@ -3270,6 +3275,8 @@ def cyXYHttoENU_wgs84(
             else:
                 s_lo = s_mid; f_lo = f_mid
             if fabs(f_mid) < 1e-3:
+                # Return the tested midpoint, not the midpoint of the updated bracket (a quarter width away)
+                s_lo = s_mid; s_hi = s_mid
                 break
 
         # return ENU meters relative to station
@@ -3528,7 +3535,8 @@ def cyGeoToXY_wgs84_iter(
         if az < 0.0: az += 2*pi
         alt = atan2(U, sqrt(E*E + Nn*Nn))
         if refraction:
-            alt = refractionTrueToApparent(alt, refraction_scale)
+            # Heights are WGS-84 ellipsoidal here; the geoid offset (<= 100 m) moves the fraction by < 0.3 arcsec
+            alt = refractionTrueToApparent(alt, refraction_scale*refractionTargetFraction(h_sta_m, h_geo_m[i]))
         if alt < el_gate:
             x_array[i] = np.nan; y_array[i] = np.nan
             continue
@@ -3559,7 +3567,7 @@ def cyGeoToXY_wgs84_iter(
             y_img = y_corr
             delta_r = 1.0
             j = 0
-            while (delta_r > 0.01) and (j < 100):   # ~0.01 px tolerance
+            while (delta_r > 0.001) and (j < 200):   # 0.001 px step (the map converges slowly near strong distortion)
                 j += 1
 
                 r  = sqrt((x_img - x0)**2 + (y_img - y0)**2)
@@ -3595,7 +3603,7 @@ def cyGeoToXY_wgs84_iter(
             j = 0
             x_img = x_corr
             y_img = y_corr
-            while (delta_r > 0.01) and (j < 100):   # ~0.01 px tolerance
+            while (delta_r > 0.001) and (j < 200):   # 0.001 px step (the map converges slowly near strong distortion)
                 j += 1
 
                 r = sqrt((x_img - x0)**2 + ((1.0 + xy)*(y_img - y0))**2)
@@ -3649,7 +3657,7 @@ def cyENUToXY_iter(
     bint refraction=True, bint equal_aspect=False,
     bint force_distortion_centre=False, bint asymmetry_corr=True,
     double min_el_deg=0.0
-, double refraction_scale=1.0):
+, double refraction_scale=1.0, double h_sta_m=-1.0e9):
     """
     ENU (meters) -> image (x,y), using the SAME spherical/gnomonic + distortion flow as cyAltAzToXY.
     """
@@ -3725,7 +3733,9 @@ def cyENUToXY_iter(
         if A < 0.0: A += 2*pi
         h = atan2(U_m[i], sqrt(E_m[i]*E_m[i] + N_m[i]*N_m[i]))
         if refraction:
-            h = refractionTrueToApparent(h, refraction_scale)
+            # Heights are WGS-84 ellipsoidal here; the geoid offset (<= 100 m) moves the fraction by < 0.3 arcsec
+            h = refractionTrueToApparent(h, refraction_scale*(refractionTargetFraction(h_sta_m, h_sta_m + U_m[i]
+                + (E_m[i]*E_m[i] + N_m[i]*N_m[i])/(2.0*6371000.0)) if h_sta_m > -1.0e8 else 1.0))
         if h < el_gate:
             x_array[i] = np.nan; y_array[i] = np.nan
             continue
@@ -3752,7 +3762,7 @@ def cyENUToXY_iter(
             y_img = y_corr
             delta_r = 1.0
             j = 0
-            while (delta_r > 0.01) and (j < 100):   # ~0.01 px tolerance
+            while (delta_r > 0.001) and (j < 200):   # 0.001 px step (the map converges slowly near strong distortion)
                 j += 1
 
                 r  = sqrt((x_img - x0)**2 + (y_img - y0)**2)
@@ -3787,7 +3797,7 @@ def cyENUToXY_iter(
             j = 0
             x_img = x_corr
             y_img = y_corr
-            while (delta_r > 0.01) and (j < 100):   # ~0.01 px tolerance
+            while (delta_r > 0.001) and (j < 200):   # 0.001 px step (the map converges slowly near strong distortion)
                 j += 1
 
                 r = sqrt((x_img - x0)**2 + ((1.0 + xy)*(y_img - y0))**2)
@@ -4005,7 +4015,7 @@ def cyENHtToXY_iter(
             x_array[i] = np.nan; y_array[i] = np.nan
             continue
 
-        for it in range(20):
+        for it in range(40):
             U_mid = 0.5*(U_lo + U_hi)
             Xi = Xc + dxe_base + RU0*U_mid; Yi = Yc + dye_base + RU1*U_mid; Zi = Zc + dze_base + RU2*U_mid
             pval = sqrt(Xi*Xi + Yi*Yi)
@@ -4019,6 +4029,8 @@ def cyENHtToXY_iter(
             else:
                 U_lo = U_mid; f_lo = f_mid
             if fabs(f_mid) < 1e-3:   # ~1 mm height
+                # Return the tested midpoint, not the midpoint of the updated bracket (a quarter width away)
+                U_lo = U_mid; U_hi = U_mid
                 break
 
         U = 0.5*(U_lo + U_hi)
@@ -4028,7 +4040,8 @@ def cyENHtToXY_iter(
         if A < 0.0: A += 2*pi
         h = atan2(U, sqrt(E*E + Nn*Nn))
         if refraction:
-            h = refractionTrueToApparent(h, refraction_scale)
+            # Heights are WGS-84 ellipsoidal here; the geoid offset (<= 100 m) moves the fraction by < 0.3 arcsec
+            h = refractionTrueToApparent(h, refraction_scale*refractionTargetFraction(h_sta_m, Ht_m[i]))
         if h < el_gate:
             x_array[i] = np.nan; y_array[i] = np.nan
             continue
@@ -4056,7 +4069,7 @@ def cyENHtToXY_iter(
             y_img = y_corr
             delta_r = 1.0
             j = 0
-            while (delta_r > 0.01) and (j < 100):   # ~0.01 px tolerance
+            while (delta_r > 0.001) and (j < 200):   # 0.001 px step (the map converges slowly near strong distortion)
                 j += 1
 
                 r  = sqrt((x_img - x0)**2 + (y_img - y0)**2)
@@ -4090,7 +4103,7 @@ def cyENHtToXY_iter(
             delta_r = 1.0
             j = 0
             x_img = x_corr; y_img = y_corr
-            while (delta_r > 0.01) and (j < 100):
+            while (delta_r > 0.001) and (j < 200):
                 j += 1
                 r = sqrt((x_img - x0)**2 + ((1.0 + xy)*(y_img - y0))**2)
                 r = r + a1*(1.0 + xy)*(y_img - y0)*cos(a2) - a1*(x_img - x0)*sin(a2)
@@ -4133,11 +4146,15 @@ def cyENHt0ToENHt1(
     np.ndarray[FLOAT_TYPE_t, ndim=1] N0_m,    # Input ENU north at height Ht0 (m)
     np.ndarray[FLOAT_TYPE_t, ndim=1] Ht0_m,   # Input target WGS-84 ellipsoidal height (m)
     np.ndarray[FLOAT_TYPE_t, ndim=1] Ht1_m,   # Output target WGS-84 ellipsoidal height (m)
-    double lat_sta_deg, double lon_sta_deg, double h_sta_m
+    double lat_sta_deg, double lon_sta_deg, double h_sta_m,
+    bint refraction=True, double refraction_scale=1.0
 ):
     """
     Convert ENHt coordinates at one height to ENHt at a different height,
-    maintaining the same line of sight from the station.
+    maintaining the same line of sight from the station. With refraction, the line of sight is the
+    refracted one: the true direction to a target depends on its height (refractionTargetFraction), so the
+    apparent direction of the point at Ht0 is recovered first and the true direction for Ht1 taken from it.
+    refraction_scale is the station-height scale (refractionScale).
 
     Given (E0, N0, Ht0), find (E1, N1, U1) such that (E1, N1, Ht1) lies on the
     same ray from the station as (E0, N0, Ht0), where U1 is the Up component.
@@ -4150,6 +4167,7 @@ def cyENHt0ToENHt1(
 
     # WGS-84 constants
     cdef double a, f, e2, b, ep2
+    cdef double alt_true0, alt_app, alt_true1, horiz
 
     # Station ECEF and rotation matrix columns
     cdef double latS, lonS, sS, cS, Nsta, Xc, Yc, Zc
@@ -4268,7 +4286,7 @@ def cyENHt0ToENHt1(
             continue
 
         # Bisection iterations
-        for it in range(20):
+        for it in range(40):
             U_mid = 0.5*(U_lo + U_hi)
             Xi = Xc + dxe_base + RU0*U_mid
             Yi = Yc + dye_base + RU1*U_mid
@@ -4290,6 +4308,8 @@ def cyENHt0ToENHt1(
                 f_lo = f_mid
 
             if fabs(f_mid) < 1e-3:  # ~1 mm height tolerance
+                # Return the tested midpoint, not the midpoint of the updated bracket (a quarter width away)
+                U_lo = U_mid; U_hi = U_mid
                 break
 
         U0 = 0.5*(U_lo + U_hi)
@@ -4319,6 +4339,19 @@ def cyENHt0ToENHt1(
             dir_e = E0 / sqrt(E0*E0 + N0*N0 + U0*U0)
             dir_n = N0 / sqrt(E0*E0 + N0*N0 + U0*U0)
             dir_u = U0 / sqrt(E0*E0 + N0*N0 + U0*U0)
+
+            # Refraction: apparent direction of the point at Ht0, then the true direction for a target at Ht1
+            if refraction:
+                alt_true0 = asin(dir_u)
+                # Heights are WGS-84 ellipsoidal here; the geoid offset (<= 100 m) moves the fraction by < 0.3 arcsec
+                alt_app = refractionTrueToApparent(alt_true0, refraction_scale*refractionTargetFraction(h_sta_m, Ht0_m[i]))
+                # Heights are WGS-84 ellipsoidal here; the geoid offset (<= 100 m) moves the fraction by < 0.3 arcsec
+                alt_true1 = refractionApparentToTrue(alt_app, refraction_scale*refractionTargetFraction(h_sta_m, Ht1_m[i]))
+                horiz = sqrt(dir_e*dir_e + dir_n*dir_n)
+                if horiz > 0.0:
+                    dir_e = dir_e/horiz*cos(alt_true1)
+                    dir_n = dir_n/horiz*cos(alt_true1)
+                    dir_u = sin(alt_true1)
 
             # Search along the ray for the point at height Ht1
             # Parameter t: distance along ray from station
@@ -4355,7 +4388,7 @@ def cyENHt0ToENHt1(
             increasing = h_hi > h_lo
 
             # Binary search for the right distance along the ray
-            for it in range(30):
+            for it in range(50):
                 t_mid = 0.5*(t_lo + t_hi)
                 E1 = t_mid*dir_e; N1 = t_mid*dir_n; U1 = t_mid*dir_u
                 Xi = Xc + RE0*E1 + RN0*N1 + RU0*U1
@@ -4371,6 +4404,8 @@ def cyENHt0ToENHt1(
                 else:
                     t_hi = t_mid
                 if fabs(hP - Ht1_m[i]) < 1e-3:  # 1mm tolerance
+                    # Return the tested midpoint, not the midpoint of the updated bracket (a quarter width away)
+                    t_lo = t_mid; t_hi = t_mid
                     break
 
             # Final position at height Ht1
@@ -4591,7 +4626,8 @@ def cyXYToGeo_wgs84(
 
         # Use TRUE elevation for the ray if you mirrored cyXYToAltAz finishing step
         if refraction:
-            h = refractionApparentToTrue(h, refraction_scale)
+            # Heights are WGS-84 ellipsoidal here; the geoid offset (<= 100 m) moves the fraction by < 0.3 arcsec
+            h = refractionApparentToTrue(h, refraction_scale*refractionTargetFraction(h_sta_m, ht_wgs84_m[i]))
         if h < el_gate:
             lat_out[i] = np.nan; lon_out[i] = np.nan
             continue
@@ -4654,6 +4690,8 @@ def cyXYToGeo_wgs84(
             else:
                 s_lo = s_mid; f_lo = f_mid
             if fabs(f_mid) < 1e-3:  # ~1 mm
+                # Return the tested midpoint, not the midpoint of the updated bracket (a quarter width away)
+                s_lo = s_mid; s_hi = s_mid
                 break
 
         lonP = atan2(Yi, Xi)
