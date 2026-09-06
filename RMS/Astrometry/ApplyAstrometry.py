@@ -60,7 +60,7 @@ pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 from RMS.Astrometry.CyFunctions import (cyraDecToXY, cyTrueRaDec2ApparentAltAz,
                                         cyXYToRADec,
                                         cyRaDecToXY_iter,
-                                        eqRefractionApparentToTrue,
+                                        eqRefractionApparentToTrue, refractionScale,
                                         equatorialCoordPrecession)
 
 # Handle Python 2/3 compatibility
@@ -577,9 +577,11 @@ def rotationWrtHorizon(platepar):
     jd_arr, ra_arr, dec_arr, _ = xyToRaDecPP(2*[jd2Date(platepar.JD)], [img_mid_w, img_up_w], \
         [img_mid_h, img_up_h], [1, 1], platepar, extinction_correction=False, precompute_pointing_corr=True)
     azim_mid, alt_mid = cyTrueRaDec2ApparentAltAz(np.radians(ra_arr[0]), np.radians(dec_arr[0]), jd_arr[0], \
-        np.radians(platepar.lat), np.radians(platepar.lon), platepar.refraction)
+        np.radians(platepar.lat), np.radians(platepar.lon), platepar.refraction,
+        refractionScale(platepar.elev))
     azim_up, alt_up = cyTrueRaDec2ApparentAltAz(np.radians(ra_arr[1]), np.radians(dec_arr[1]), jd_arr[1], \
-        np.radians(platepar.lat), np.radians(platepar.lon), platepar.refraction)
+        np.radians(platepar.lat), np.radians(platepar.lon), platepar.refraction,
+        refractionScale(platepar.elev))
 
     # Compute the azimuth difference, wrapping across the 0/360 deg boundary. Without this, a FOV centre
     # pointing near due north (azimuth ~ 0/360 deg) puts the two sample points on opposite sides of the
@@ -642,7 +644,8 @@ def screenNudgeToAzAltDelta(platepar, screen_dx, screen_dy, key_increment, scree
         jd_arr, ra_arr, dec_arr, _ = xyToRaDecPP([jd2Date(platepar.JD)], [x], [y], [1], platepar, \
             extinction_correction=False, precompute_pointing_corr=True)
         az, alt = cyTrueRaDec2ApparentAltAz(np.radians(ra_arr[0]), np.radians(dec_arr[0]), jd_arr[0], \
-            np.radians(platepar.lat), np.radians(platepar.lon), platepar.refraction)
+            np.radians(platepar.lat), np.radians(platepar.lon), platepar.refraction,
+        refractionScale(platepar.elev))
         ca = np.cos(alt)
         return np.array([ca*np.cos(az), ca*np.sin(az), np.sin(alt)])
 
@@ -749,7 +752,8 @@ def fovCentreZenithDirection(platepar, h_px=10, centre=None):
         jd_arr, ra_arr, dec_arr, _ = xyToRaDecPP([jd2Date(platepar.JD)], [x], [y], [1], platepar, \
             extinction_correction=False, precompute_pointing_corr=True)
         az, alt = cyTrueRaDec2ApparentAltAz(np.radians(ra_arr[0]), np.radians(dec_arr[0]), jd_arr[0], \
-            np.radians(platepar.lat), np.radians(platepar.lon), platepar.refraction)
+            np.radians(platepar.lat), np.radians(platepar.lon), platepar.refraction,
+        refractionScale(platepar.elev))
         return az, alt
 
     if centre is None:
@@ -985,7 +989,7 @@ def xyToRaDecPP(time_data, X_data, Y_data, level_data, platepar, extinction_corr
         platepar.y_poly_fwd, unicode(platepar.distortion_type), refraction=platepar.refraction, \
         equal_aspect=platepar.equal_aspect, force_distortion_centre=platepar.force_distortion_centre, \
         asymmetry_corr=platepar.asymmetry_corr, precompute_pointing_corr=precompute_pointing_corr, \
-        aberration=not measurement)
+        aberration=not measurement, refraction_scale=refractionScale(platepar.elev))
 
     # Correct the coordinates for refraction if it wasn't taken into account during the astrometry calibration
     #   procedure
@@ -993,7 +997,7 @@ def xyToRaDecPP(time_data, X_data, Y_data, level_data, platepar, extinction_corr
         for i, entry in enumerate(zip(JD_data, RA_data, dec_data)):
             jd, ra, dec = entry
             ra, dec = eqRefractionApparentToTrue(np.radians(ra), np.radians(dec), jd, \
-                np.radians(platepar.lat), np.radians(platepar.lon))
+                np.radians(platepar.lat), np.radians(platepar.lon), refractionScale(platepar.elev))
 
             RA_data[i] = np.degrees(ra)
             dec_data[i] = np.degrees(dec)
@@ -1041,12 +1045,12 @@ def raDecToXYPP(RA_data, dec_data, jd, platepar, measurement=False):
         platepar.x_poly_rev, platepar.y_poly_rev, unicode(platepar.distortion_type),
         refraction=platepar.refraction, equal_aspect=platepar.equal_aspect,
         force_distortion_centre=platepar.force_distortion_centre, asymmetry_corr=platepar.asymmetry_corr,
-        aberration=not measurement)
+        aberration=not measurement, refraction_scale=refractionScale(platepar.elev))
 
     return X_data, Y_data
 
 
-def raDecToXYPP_iter(RA_data, dec_data, jd, platepar):
+def raDecToXYPP_iter(RA_data, dec_data, jd, platepar, measurement=False):
     """ Converts RA, Dec to image coordinates by iteratively inverting the forward (image -> sky)
         mapping, so only the forward distortion polynomial is needed. This gives an exact round trip
         with xyToRaDecPP even when the reverse polynomial has not been fitted (e.g. mid auto-fit).
@@ -1056,6 +1060,10 @@ def raDecToXYPP_iter(RA_data, dec_data, jd, platepar):
         dec_data: [ndarray] Array of declinations (degrees).
         jd: [float] Julian date.
         platepar: [Platepar structure] Astrometry parameters.
+
+    Keyword arguments:
+        measurement: [bool] False (default) for catalog directions of stars, which are displaced by the
+            annual aberration; True for measured directions, which already include it (see raDecToXYPP).
 
     Return:
         (x, y): [tuple of ndarrays] Image X and Y coordinates.
@@ -1068,7 +1076,8 @@ def raDecToXYPP_iter(RA_data, dec_data, jd, platepar):
         platepar.x_poly_fwd, platepar.y_poly_fwd, unicode(platepar.distortion_type),
         refraction=platepar.refraction, equal_aspect=platepar.equal_aspect,
         force_distortion_centre=platepar.force_distortion_centre,
-        asymmetry_corr=platepar.asymmetry_corr)
+        asymmetry_corr=platepar.asymmetry_corr,
+        aberration=not measurement, refraction_scale=refractionScale(platepar.elev))
 
     return X_data, Y_data
 

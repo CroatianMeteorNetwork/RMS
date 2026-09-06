@@ -15,7 +15,8 @@ import numpy as np
 from RMS.Formats.Platepar import Platepar
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP
 from RMS.Astrometry.Conversions import jd2Date
-from RMS.Astrometry.CyFunctions import cyTrueRaDec2ApparentAltAz, equatorialCoordPrecession
+from RMS.Astrometry.CyFunctions import cyTrueRaDec2ApparentAltAz, equatorialCoordPrecession, \
+    refractionScale
 from RMS.Misc import getRmsRootDir
 
 
@@ -47,8 +48,9 @@ class TestReferencePointingEpoch(unittest.TestCase):
             xc, yc = raDecToXYPP(np.array([np.degrees(ra_j)]), np.array([np.degrees(dec_j)]), pp.JD, pp)
             jd_arr, ra, dec, _ = xyToRaDecPP([jd2Date(pp.JD)], [xc[0]], [yc[0]], [1], pp,
                 extinction_correction=False)
+            # The calibrated path scales the refraction with the station height, so check at that scale too
             az, alt = cyTrueRaDec2ApparentAltAz(np.radians(ra[0]), np.radians(dec[0]), jd_arr[0],
-                np.radians(pp.lat), np.radians(pp.lon), refraction)
+                np.radians(pp.lat), np.radians(pp.lon), refraction, refractionScale(pp.elev))
 
             self.assertLess(separationArcmin(az, alt, np.radians(200.0), np.radians(45.0)), 0.1,
                 "refraction={}".format(refraction))
