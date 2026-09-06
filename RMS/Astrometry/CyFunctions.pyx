@@ -226,7 +226,8 @@ cdef double cyjd2LST(double jd, double lon):
         lon: [float] Longitude of the observer in degrees.
     
     Return:
-        lst [float] Apparent Local Sidereal Time (deg).
+        lst [float] Mean Local Sidereal Time (deg). (Mean, not apparent: the equation of the equinoxes, ~1
+            arcsec, is not applied.)
     """
 
     cdef double gst
@@ -379,13 +380,134 @@ cdef (double, double) nutationComponents(double T):
     return delta_psi, delta_eps
 
 
+
+cdef double meanObliquity(double T):
+    """ Mean obliquity of the ecliptic (Meeus, Astronomical Algorithms, eq. 22.2).
+
+    Arguments:
+        T: [float] Julian centuries since J2000.0.
+
+    Return:
+        eps: [float] Mean obliquity (radians).
+    """
+
+    return radians(23.0 + 26.0/60.0 + 21.448/3600.0 - (46.8150*T + 0.00059*T*T - 0.001813*T*T*T)/3600.0)
+
+
+cdef (double, double, double) nutationRotate(double jd, double x, double y, double z, bint inverse):
+    """ Rotate a unit vector between the mean and the true equator and equinox of date.
+
+        Nutation is a rotation about the ecliptic pole by the nutation in longitude, combined with the change of
+        obliquity: N = R1(-(eps + deps)) * R3(-dpsi) * R1(eps) takes a vector from the mean equator and equinox of
+        date to the true equator and equinox of date (the frame the Earth actually rotates in, and the one the
+        sidereal time refers to). inverse=True applies N^T (true -> mean).
+
+    Arguments:
+        jd: [float] Julian date of the epoch.
+        x, y, z: [float] Unit vector components (equatorial axes).
+        inverse: [bool] False: mean -> true, True: true -> mean.
+
+    Return:
+        (x, y, z): [tuple of floats] Rotated vector.
+    """
+
+    cdef double T, dpsi, deps, eps, eps1, x1, y1, z1, x2, y2, z2
+
+    T = (jd - J2000_DAYS)/36525.0
+    dpsi, deps = nutationComponents(T)
+    eps = meanObliquity(T)
+    eps1 = eps + deps
+
+    if not inverse:
+
+        # R1(eps): rotate into the ecliptic frame
+        x1 = x
+        y1 = y*cos(eps) + z*sin(eps)
+        z1 = -y*sin(eps) + z*cos(eps)
+
+        # R3(-dpsi): nutation in longitude, about the ecliptic pole
+        x2 = x1*cos(dpsi) - y1*sin(dpsi)
+        y2 = x1*sin(dpsi) + y1*cos(dpsi)
+        z2 = z1
+
+        # R1(-(eps + deps)): back to the equator, with the nutated obliquity
+        return x2, y2*cos(eps1) - z2*sin(eps1), y2*sin(eps1) + z2*cos(eps1)
+
+    else:
+
+        # N^T = R1(-eps) * R3(dpsi) * R1(eps + deps)
+        x1 = x
+        y1 = y*cos(eps1) + z*sin(eps1)
+        z1 = -y*sin(eps1) + z*cos(eps1)
+
+        x2 = x1*cos(dpsi) + y1*sin(dpsi)
+        y2 = -x1*sin(dpsi) + y1*cos(dpsi)
+        z2 = z1
+
+        return x2, y2*cos(eps) - z2*sin(eps), y2*sin(eps) + z2*cos(eps)
+
+
+cpdef (double, double) trueOfDateFromJ2000(double jd, double ra, double dec):
+    """ Catalog (mean J2000) right ascension and declination -> true equator and equinox of date, i.e. precession
+        followed by nutation. This is the frame that goes with the sidereal time when computing hour angles and
+        alt/az, and the frame in which the platepar reference pointing RA_d/dec_d is expressed.
+
+    Arguments:
+        jd: [float] Julian date of the epoch of date.
+        ra: [float] Right ascension (radians, J2000).
+        dec: [float] Declination (radians, J2000).
+
+    Return:
+        (ra, dec): [tuple of floats] True equatorial coordinates of date (radians).
+    """
+
+    cdef double x, y, z
+
+    ra, dec = equatorialCoordPrecession(J2000_DAYS, jd, ra, dec)
+
+    x = cos(dec)*cos(ra)
+    y = cos(dec)*sin(ra)
+    z = sin(dec)
+    x, y, z = nutationRotate(jd, x, y, z, False)
+
+    return (atan2(y, x) + 2*pi)%(2*pi), atan2(z, sqrt(x*x + y*y))
+
+
+cpdef (double, double) j2000FromTrueOfDate(double jd, double ra, double dec):
+    """ Inverse of trueOfDateFromJ2000: true equator and equinox of date -> catalog (mean J2000) coordinates.
+
+    Arguments:
+        jd: [float] Julian date of the epoch of date.
+        ra: [float] Right ascension (radians, true of date).
+        dec: [float] Declination (radians, true of date).
+
+    Return:
+        (ra, dec): [tuple of floats] J2000 equatorial coordinates (radians).
+    """
+
+    cdef double x, y, z
+
+    x = cos(dec)*cos(ra)
+    y = cos(dec)*sin(ra)
+    z = sin(dec)
+    x, y, z = nutationRotate(jd, x, y, z, True)
+    ra = (atan2(y, x) + 2*pi)%(2*pi)
+    dec = atan2(z, sqrt(x*x + y*y))
+
+    return equatorialCoordPrecession(jd, J2000_DAYS, ra, dec)
+
+
 @cython.boundscheck(False)
 @cython.wraparound(False)
 @cython.cdivision(True)
 cpdef (double, double, double) equatorialCoordAndRotPrecession(double start_epoch, double final_epoch,
                                                                double ra, double dec, double rot_angle):
-    """ Corrects Right Ascension, Declination, and Rotation wrt Standard angle from one epoch to another,
-    taking only precession into account.
+    """ Transforms right ascension, declination and the rotation wrt standard angle (pos_angle_ref) from the true
+        equator and equinox of one epoch to that of another: nutation of the start epoch is removed, the mean
+        precession applied, and the nutation of the final epoch added. J2000 (J2000_DAYS) is treated as the mean,
+        catalog frame and gets no nutation. The rotation angle changes by the angle between the two frames' north
+        directions at the transformed point, so a gnomonic projection defined in one frame is exactly the same
+        projection in the other.
     
     Arguments:
         start_epoch: [float] Julian date of the starting epoch.
@@ -398,22 +520,17 @@ cpdef (double, double, double) equatorialCoordAndRotPrecession(double start_epoc
         (ra, dec, rot_angle): [tuple of floats] Precessed equatorial coordinates and rotation angle (radians).
     """
     
-    # Don't precess if the start and final epoch are the same
+    # Don't transform if the start and final epoch are the same
     if start_epoch == final_epoch:
         return ra, dec, rot_angle
 
     cdef:
-        np.ndarray[double, ndim=1] initial_vector, transformed_vector, parallel_vec, parallel_vec_precessed
-        np.ndarray[double, ndim=1] normal_vector, transformed_normal
-        np.ndarray[double, ndim=1] proj_parallel, proj_parallel_precessed
+        np.ndarray[double, ndim=1] vec, north
         np.ndarray[double, ndim=2] P
-        np.ndarray[double, ndim=2] epsilon_matrix, psi_matrix
+        double ra_precessed, dec_precessed, T, t, zeta, z, theta
+        double x, y, zz, new_rot_angle, rotation_change
 
-        double ra_precessed, dec_precessed, T, t, zeta, z, theta, Delta_psi, Delta_epsilon
-        double new_rot_angle, angle1, angle2, rotation_change
-        int i
-
-    # Calculate precession parameters
+    # Calculate precession parameters (mean equinox of the start epoch to that of the final epoch)
     T = (start_epoch - 2451545.0)/36525.0  # J2000.0 epoch
     t = (final_epoch - start_epoch)/36525.0
 
@@ -430,79 +547,37 @@ cpdef (double, double, double) equatorialCoordAndRotPrecession(double start_epoc
     # Calculate precession matrix
     P = precessionMatrix(zeta, theta, z)
 
-    # Convert RA, Dec to cartesian coordinates
-    initial_vector = raDecToCartesian(ra, dec)
+    # Pointing direction, and the local north direction at it (a physical direction fixed to the sensor)
+    vec = raDecToCartesian(ra, dec)
+    north = np.array([-sin(dec)*cos(ra), -sin(dec)*sin(ra), cos(dec)])
 
-    # Apply precession
-    transformed_vector = np.dot(P, initial_vector)
+    # Full rotation: true of date (start) -> mean (start) -> mean (final) -> true of date (final)
+    if start_epoch != J2000_DAYS:
+        x, y, zz = nutationRotate(start_epoch, vec[0], vec[1], vec[2], True)
+        vec = np.array([x, y, zz])
+        x, y, zz = nutationRotate(start_epoch, north[0], north[1], north[2], True)
+        north = np.array([x, y, zz])
 
+    vec = np.dot(P, vec)
+    north = np.dot(P, north)
 
+    if final_epoch != J2000_DAYS:
+        x, y, zz = nutationRotate(final_epoch, vec[0], vec[1], vec[2], False)
+        vec = np.array([x, y, zz])
+        x, y, zz = nutationRotate(final_epoch, north[0], north[1], north[2], False)
+        north = np.array([x, y, zz])
 
-    # Calculate nutation corrections
-    Delta_psi, Delta_epsilon = nutationComponents(T)
+    # Convert the transformed pointing back to RA, Dec
+    vec /= np.linalg.norm(vec)
+    ra_precessed, dec_precessed = cartesianToRaDec(vec)
 
-    # Construct the nutation matrices
-    epsilon_matrix = np.array([[1,                  0,                   0],
-                               [0, cos(Delta_epsilon),  sin(Delta_epsilon)],
-                               [0, -sin(Delta_epsilon),  cos(Delta_epsilon)]])
-
-    psi_matrix = np.array([[cos(Delta_psi), -sin(Delta_psi), 0],
-                           [sin(Delta_psi),  cos(Delta_psi), 0],
-                           [0,                            0, 1]])
-
-    # Apply nutation
-    transformed_vector = np.dot(epsilon_matrix, transformed_vector)
-    transformed_vector = np.dot(psi_matrix, transformed_vector)
-
-
-    # Calculate normal vector to the plane of precession
-    normal_vector = np.cross(initial_vector, transformed_vector)
-    transformed_normal = np.dot(P, normal_vector)
-
-    # Normalize vectors
-    initial_vector /= np.linalg.norm(initial_vector)
-    transformed_vector /= np.linalg.norm(transformed_vector)
-    normal_vector /= np.linalg.norm(normal_vector)
-    transformed_normal /= np.linalg.norm(transformed_normal)
-
-    # Convert precessed vector back to RA, Dec
-    ra_precessed, dec_precessed = cartesianToRaDec(transformed_vector)
-
-    # Calculate vector tangent to the parallel of declination
-    parallel_vec = np.array([-sin(ra), cos(ra), 0])
-    parallel_vec_precessed = np.array([-sin(ra_precessed), cos(ra_precessed), 0])
-
-    # Project parallel vectors onto the plane perpendicular to the line of sight
-    proj_parallel = parallel_vec - np.dot(parallel_vec, initial_vector)*initial_vector
-    proj_parallel_precessed = parallel_vec_precessed - np.dot(parallel_vec_precessed, transformed_vector)*transformed_vector
-
-    # Normalize projected vectors
-    proj_parallel /= np.linalg.norm(proj_parallel)
-    proj_parallel_precessed /= np.linalg.norm(proj_parallel_precessed)
-
-    # Calculate the angles between the normal vector and projected parallels
-    # in the plane perpendicular to the line of sight (sensor plane).
-    #
-    # The normal vectors are fixed relative to the camera sensor.
-    # The projected parallels represent how the celestial parallels appear on the sensor plane.
-    #
-    # Since the rotationWrtStandard function computes pos_angle_ref as the angle between
-    # a row of pixels and the parallel passing through the center of the FOV,
-    # we want to determine how precession affects this angle.
-    #
-    # By comparing these angles before and after precession, we can quantify
-    # the change in field orientation due to precession.
-
-    # Angle for the initial position
-    angle1 = atan2(np.dot(np.cross(normal_vector, proj_parallel), initial_vector), 
-                   np.dot(normal_vector, proj_parallel))
-
-    # Angle for the precessed position
-    angle2 = atan2(np.dot(np.cross(transformed_normal, proj_parallel_precessed), transformed_vector), 
-                   np.dot(transformed_normal, proj_parallel_precessed))
-
-    # Calculate the change in angle
-    rotation_change = angle2 - angle1
+    # The transported north direction, measured against the final frame's east and north at the new point,
+    # gives the rotation of the field: this is how much a row of pixels turns relative to the local parallel
+    rotation_change = atan2(
+        np.dot(north, np.array([-sin(ra_precessed), cos(ra_precessed), 0.0])),
+        np.dot(north, np.array([-sin(dec_precessed)*cos(ra_precessed), -sin(dec_precessed)*sin(ra_precessed),
+            cos(dec_precessed)]))
+        )
 
     # Apply the rotation change to the initial rotation angle
     new_rot_angle = rot_angle + rotation_change
@@ -510,11 +585,7 @@ cpdef (double, double, double) equatorialCoordAndRotPrecession(double start_epoc
     # Normalize the new rotation angle to be between -pi and pi
     new_rot_angle = fmod(new_rot_angle + M_PI, 2*M_PI) - M_PI
 
-    # print("Rotation change due to precession: {} arcmin".format(degrees(rotation_change) * 60))
-
     return ra_precessed, dec_precessed, new_rot_angle
-
-
 
 @cython.cdivision(True)
 cdef double refractionApparentToTrue(double elev):
@@ -758,8 +829,8 @@ cpdef (double, double) cyTrueRaDec2ApparentAltAz(double ra, double dec, double j
     cdef double azim, elev
 
 
-    # Precess RA/Dec to the epoch of date
-    ra, dec = equatorialCoordPrecession(J2000_DAYS, jd, ra, dec)
+    # Precession and nutation: catalog J2000 -> true equator and equinox of date
+    ra, dec = trueOfDateFromJ2000(jd, ra, dec)
 
     # Convert to alt/az
     azim, elev = cyraDec2AltAz(ra, dec, jd, lat, lon)
@@ -886,8 +957,8 @@ cpdef (double, double) cyApparentAltAz2TrueRADec(double azim, double elev, doubl
     # Convert to RA/Dec (true, epoch of date)
     ra, dec = cyaltAz2RADec(azim, elev, jd, lat, lon)
 
-    # Precess RA/Dec to J2000
-    ra, dec = equatorialCoordPrecession(jd, J2000_DAYS, ra, dec)
+    # Nutation and precession: true equator and equinox of date -> catalog J2000
+    ra, dec = j2000FromTrueOfDate(jd, ra, dec)
 
 
     return (ra, dec)
@@ -1318,7 +1389,7 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
 
 
 
-cdef (double, double, double) pointingCorrection(
+cpdef (double, double, double) pointingCorrection(
     double jd, double lat, double lon, 
     double h0, double jd_ref, double ra_ref, double dec_ref, double pos_angle_ref, 
     bool refraction=True
