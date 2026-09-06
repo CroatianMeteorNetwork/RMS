@@ -1010,7 +1010,7 @@ def altAz2RADec(azim, elev, jd, lat, lon):
     return np.degrees(ra), np.degrees(dec)
 
 
-def apparentAltAz2TrueRADec(azim, elev, jd, lat, lon, refraction=True):
+def apparentAltAz2TrueRADec(azim, elev, jd, lat, lon, refraction=True, refraction_scale=1.0):
     """ Convert the apparent azimuth and altitude in the epoch of date to true (refraction corrected) right 
         ascension and declination in J2000.
     Arguments:
@@ -1021,6 +1021,8 @@ def apparentAltAz2TrueRADec(azim, elev, jd, lat, lon, refraction=True):
         lon: [float] Longitude of the observer in degrees.
     Keyword arguments:
         refraction: [bool] Apply refraction correction. True by default.
+        refraction_scale: [float] Scale of the refraction for the observer's height above sea level, from
+            RMS.Astrometry.CyFunctions.refractionScale(elev). 1.0 by default (sea level).
     Return:
         (ra, dec): [tuple]
             ra: [float] Right ascension (degrees, J2000).
@@ -1033,10 +1035,10 @@ def apparentAltAz2TrueRADec(azim, elev, jd, lat, lon, refraction=True):
     lon = np.radians(lon)
 
     if isinstance(azim, float) or isinstance(azim, int) or isinstance(azim, np.float64):
-        ra, dec = cyApparentAltAz2TrueRADec(azim, elev, jd, lat, lon, refraction)
+        ra, dec = cyApparentAltAz2TrueRADec(azim, elev, jd, lat, lon, refraction, refraction_scale)
     
     elif isinstance(azim, np.ndarray):
-        ra, dec = cyApparentAltAz2TrueRADec_vect(azim, elev, jd, lat, lon, refraction)
+        ra, dec = cyApparentAltAz2TrueRADec_vect(azim, elev, jd, lat, lon, refraction, refraction_scale)
 
     else:
         raise TypeError("azim must be a number or np.ndarray, given: {}".format(type(azim)))
@@ -1074,7 +1076,7 @@ def raDec2AltAz(ra, dec, jd, lat, lon):
     return np.degrees(azim), np.degrees(elev)
 
 
-def trueRaDec2ApparentAltAz(ra, dec, jd, lat, lon, refraction=True):
+def trueRaDec2ApparentAltAz(ra, dec, jd, lat, lon, refraction=True, refraction_scale=1.0):
     """ Convert the true right ascension and declination in J2000 to azimuth (+East of due North) and 
         altitude in the epoch of date. The correction for refraction is performed.
     Arguments:
@@ -1085,6 +1087,8 @@ def trueRaDec2ApparentAltAz(ra, dec, jd, lat, lon, refraction=True):
         lon: [float] Longitude in degrees.
     Keyword arguments:
         refraction: [bool] Apply refraction correction. True by default.
+        refraction_scale: [float] Scale of the refraction for the observer's height above sea level, from
+            RMS.Astrometry.CyFunctions.refractionScale(elev). 1.0 by default (sea level).
     Return:
         (azim, elev): [tuple]
             azim: [float] Azimuth (+east of due north) in degrees (epoch of date).
@@ -1097,7 +1101,7 @@ def trueRaDec2ApparentAltAz(ra, dec, jd, lat, lon, refraction=True):
     lon = np.radians(lon)
 
     if isinstance(ra, float) or isinstance(ra, int) or isinstance(ra, np.float64):
-        azim, elev = cyTrueRaDec2ApparentAltAz(ra, dec, jd, lat, lon, refraction)
+        azim, elev = cyTrueRaDec2ApparentAltAz(ra, dec, jd, lat, lon, refraction, refraction_scale)
 
     elif isinstance(ra, np.ndarray):
 
@@ -1106,7 +1110,7 @@ def trueRaDec2ApparentAltAz(ra, dec, jd, lat, lon, refraction=True):
             jd = np.zeros_like(ra) + jd
 
         # Compute it for numpy arrays
-        azim, elev = cyTrueRaDec2ApparentAltAz_vect(ra, dec, jd, lat, lon, refraction)
+        azim, elev = cyTrueRaDec2ApparentAltAz_vect(ra, dec, jd, lat, lon, refraction, refraction_scale)
 
     else:
         raise TypeError("ra must be a number or np.ndarray, given: {}".format(type(ra)))
@@ -1130,7 +1134,7 @@ def _perPoint(func, *args):
     return out[:, 0].reshape(a.shape), out[:, 1].reshape(a.shape)
 
 
-def trueOfDateRaDec2ApparentAltAz(ra, dec, jd, lat, lon, refraction=True):
+def trueOfDateRaDec2ApparentAltAz(ra, dec, jd, lat, lon, refraction=True, refraction_scale=1.0):
     """ Convert a true-of-date right ascension and declination, such as the platepar reference pointing
         RA_d/dec_d, to apparent azimuth and altitude. No precession or nutation is applied, only the hour
         angle against the apparent sidereal time and, optionally, the refraction.
@@ -1149,6 +1153,8 @@ def trueOfDateRaDec2ApparentAltAz(ra, dec, jd, lat, lon, refraction=True):
 
     Keyword arguments:
         refraction: [bool] Apply refraction correction. True by default.
+        refraction_scale: [float] Scale of the refraction for the observer's height, from
+            refractionScale(). 1.0 by default (sea level).
 
     Return:
         (azim, elev): [tuple of floats or ndarrays] Azimuth (+east of due north) and apparent altitude in
@@ -1161,14 +1167,14 @@ def trueOfDateRaDec2ApparentAltAz(ra, dec, jd, lat, lon, refraction=True):
         azim, elev = cyraDec2AltAz(np.radians(ra_i), np.radians(dec_i), jd, np.radians(lat), np.radians(lon))
 
         if refraction:
-            elev = pyRefractionTrueToApparent(elev)
+            elev = pyRefractionTrueToApparent(elev, refraction_scale)
 
         return np.degrees(azim), np.degrees(elev)
 
     return _perPoint(one, ra, dec)
 
 
-def apparentAltAz2TrueOfDateRaDec(azim, elev, jd, lat, lon, refraction=True):
+def apparentAltAz2TrueOfDateRaDec(azim, elev, jd, lat, lon, refraction=True, refraction_scale=1.0):
     """ Inverse of trueOfDateRaDec2ApparentAltAz: apparent azimuth and altitude to a true-of-date right
         ascension and declination, the frame of the platepar reference pointing RA_d/dec_d.
 
@@ -1181,6 +1187,8 @@ def apparentAltAz2TrueOfDateRaDec(azim, elev, jd, lat, lon, refraction=True):
 
     Keyword arguments:
         refraction: [bool] Remove the refraction first. True by default.
+        refraction_scale: [float] Scale of the refraction for the observer's height, from
+            refractionScale(). 1.0 by default (sea level).
 
     Return:
         (ra, dec): [tuple of floats or ndarrays] Right ascension and declination in degrees (true of date).
@@ -1192,7 +1200,7 @@ def apparentAltAz2TrueOfDateRaDec(azim, elev, jd, lat, lon, refraction=True):
         elev_i = np.radians(elev_i)
 
         if refraction:
-            elev_i = pyRefractionApparentToTrue(elev_i)
+            elev_i = pyRefractionApparentToTrue(elev_i, refraction_scale)
 
         ra, dec = cyaltAz2RADec(np.radians(azim_i), elev_i, jd, np.radians(lat), np.radians(lon))
 
