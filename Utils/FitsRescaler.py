@@ -31,8 +31,10 @@ def rescale_fits(input_path, output_path, target_width=1280, target_height=720):
             return False
 
         # Update dimension metadata in the header
+        rescaling_factor = round(target_height / header['NROWS'], 6)  # Store the rescaling factor
         header['NROWS'] = target_height
         header['NCOLS'] = target_width
+        header['RESCALE'] = rescaling_factor
 
         # Initialize a new HDU list with the updated primary header
         new_hdulist = fits.HDUList([fits.PrimaryHDU(header=header)])
@@ -107,7 +109,7 @@ def rescale_bin(input_path, output_path, scale_factor=1.5):
                     size = int(np.fromfile(fid_in, dtype=np.uint32, count=1)[0])
 
                     # Read the raw pixel data for the crop
-                    raw_pixels = np.fromfile(fid_in, dtype=np.uint8, count=size**2)
+                    raw_pixels = np.fromfile(fid_in, dtype=np.uint8, count=size ** 2)
                     frame = np.reshape(raw_pixels, (size, size))
 
                     # --- RESCALE LOGIC ---
@@ -132,70 +134,6 @@ def rescale_bin(input_path, output_path, scale_factor=1.5):
     print("Successfully saved BIN to: {0}".format(output_path))
     return True
 
-def rescale_config(input_path, output_path, target_width=1280, target_height=720):
-    print("Processing CONFIG: {0}...".format(os.path.basename(input_path)))
-    try:
-        with open(input_path, 'r') as f:
-            lines = f.readlines()
-
-        new_lines = []
-        for line in lines:
-            cleaned = line.strip().lower()
-
-            # Check for width parameters
-            if cleaned.startswith('width') or cleaned.startswith('resolution_width'):
-                # Determine separator (":" or "=")
-                sep = ":" if ":" in line else "="
-                new_lines.append("width{0} {1}\n".format(sep, target_width))
-
-            # Check for height parameters
-            elif cleaned.startswith('height') or cleaned.startswith('resolution_height'):
-                sep = ":" if ":" in line else "="
-                new_lines.append("height{0} {1}\n".format(sep, target_height))
-
-            else:
-                new_lines.append(line)
-
-        with open(output_path, 'w') as f:
-            f.writelines(new_lines)
-
-        print("Successfully updated CONFIG to 720p.")
-        return True
-    except Exception as e:
-        print("Failed to process CONFIG: {0}".format(e))
-        return False
-
-def rescale_calibration(input_path, output_path, scale_factor=1.5, target_width=1280, target_height=720):
-    """
-    Parses platepar_cmn2010.cal JSON file, modifies focal scale and dimensions,
-    and clears 1080p star_list to align with 720p frames.
-    """
-    print("Processing CALIBRATION: {0}...".format(os.path.basename(input_path)))
-    try:
-        with open(input_path, 'r') as f:
-            data = json.load(f)
-
-        # 1. Update resolution references
-        data['X_res'] = target_width
-        data['Y_res'] = target_height
-
-        # 2. Rescale focal parameters to preserve true FOV
-        if 'F_scale' in data:
-            data['F_scale'] = data['F_scale'] / scale_factor
-
-        # # 3. Clear or reset star list because it contains old 1080p absolute pixel positions
-        # if 'star_list' in data:
-        #     data['star_list'] = []
-
-        with open(output_path, 'w') as f:
-            json.dump(data, f, indent=4)
-
-        print("Successfully updated CALIBRATION (.cal) to 720p.")
-        return True
-    except Exception as e:
-        print("Failed to process CALIBRATION: {0}".format(e))
-        return False
-
 def process_path(input_path, output_dir=None):
     """
     Handles the logic for processing either a single file or an entire directory.
@@ -218,27 +156,24 @@ def process_path(input_path, output_dir=None):
         fits_files = [f for f in all_files if f.lower().startswith('ff_') and f.lower().endswith('.fits')]
         # Independent scan for FR_ bin files
         bin_files = [f for f in all_files if f.lower().startswith('fr_') and f.lower().endswith('.bin')]
-        config_files = [f for f in all_files if f.lower() == '.config']
-        cal_files = [f for f in all_files if f.lower().endswith('.cal')]
 
-        print("Found {0} FITS, {1} BIN, {2} CONFIG, and {3} CAL files.".format(
-            len(fits_files), len(bin_files), len(config_files), len(cal_files)))
+        print("Found {0} FITS, {1} BIN files.".format(len(fits_files), len(bin_files)))
 
         for file in fits_files: rescale_fits(os.path.join(input_path, file), os.path.join(output_dir, file))
         for file in bin_files:  rescale_bin(os.path.join(input_path, file), os.path.join(output_dir, file))
-        for file in config_files: rescale_config(os.path.join(input_path, file), os.path.join(output_dir, file))
-        for file in cal_files: rescale_calibration(os.path.join(input_path, file), os.path.join(output_dir, file))
 
     elif os.path.isfile(input_path):
         filename = os.path.basename(input_path)
         full_output_path = os.path.join(output_dir, filename)
         ext = os.path.splitext(filename).lower()
 
-        if filename.lower().startswith('ff_') and ext in ['.fits', '.fit']: rescale_fits(input_path, full_output_path)
-        elif filename.lower().startswith('fr_') and ext == '.bin': rescale_bin(input_path, full_output_path)
-        elif filename.lower() == '.config': rescale_config(input_path, full_output_path)
-        elif ext == '.cal': rescale_calibration(input_path, full_output_path)
-        else: print("Unknown file type. Processing stopped.")
+        if filename.lower().startswith('ff_') and ext in ['.fits', '.fit']:
+            rescale_fits(input_path, full_output_path)
+        elif filename.lower().startswith('fr_') and ext == '.bin':
+            rescale_bin(input_path, full_output_path)
+        else:
+            print("Unknown file type. Processing stopped.")
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="RMS FITS & BIN Rescaler 1080p -> 720p")
