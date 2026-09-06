@@ -39,14 +39,16 @@ import pyximport
 import RMS.Astrometry.ApplyAstrometry
 import scipy.optimize
 from scipy.spatial import cKDTree
-from RMS.Astrometry.Conversions import date2JD, jd2Date, trueRaDec2ApparentAltAz
+from RMS.Astrometry.Conversions import date2JD, jd2Date
 from RMS.Math import angularSeparation, sphericalPointFromHeadingAndDistance
 from RMS.GeoidHeightEGM96 import mslToWGS84Height
 
 pyximport.install(setup_args={'include_dirs': [np.get_include()]})
 from RMS.Astrometry.CyFunctions import (
-    cyApparentAltAz2TrueRADec,
-    cyTrueRaDec2ApparentAltAz,
+    cyaltAz2RADec,
+    cyraDec2AltAz,
+    pyRefractionApparentToTrue,
+    refractionTrueToApparent,
     pyRefractionTrueToApparent,
 )
 
@@ -2395,39 +2397,64 @@ class Platepar(object):
 
         return fmt
 
-    def updateRefAltAz(self):
-        """Update the reference apparent azimuth and altitude from the reference RA and Dec."""
+    def computeRefAltAz(self):
+        """Apparent azimuth and altitude (deg) of the reference pointing, from RA_d/dec_d. No side effects.
 
-        # Compute reference Alt/Az to apparent coordinates, epoch of date
-        az_centre, alt_centre = cyTrueRaDec2ApparentAltAz(
+        RA_d/dec_d are the TRUE (unrefracted) equatorial coordinates of the FOV centre in the EPOCH OF DATE of
+        the platepar JD - that is how the projection kernels read them (see pointingCorrection, which shifts
+        them by sidereal time and precesses to J2000 itself). They must therefore be converted without any
+        precession; the J2000 converters would put the centre ~20 arcmin (the precession since 2000) away
+        from where the camera points.
+
+        Return:
+            (az_centre, alt_centre): [tuple of floats] Apparent azimuth (+E of N) and altitude (deg).
+        """
+
+        # Epoch-of-date RA/Dec -> true Alt/Az, then apparent altitude if the platepar models refraction
+        az_centre, alt_centre = cyraDec2AltAz(
             np.radians(self.RA_d),
             np.radians(self.dec_d),
             self.JD,
             np.radians(self.lat),
             np.radians(self.lon),
-            self.refraction,
         )
-        self.az_centre, self.alt_centre = np.degrees(az_centre), np.degrees(alt_centre)
+        if self.refraction:
+            alt_centre = refractionTrueToApparent(alt_centre)
+
+        return np.degrees(az_centre), np.degrees(alt_centre)
+
+    def updateRefAltAz(self):
+        """Update the reference apparent azimuth and altitude from the reference RA and Dec (see
+        computeRefAltAz for the epoch convention), and the rotation wrt horizon."""
+
+        self.az_centre, self.alt_centre = self.computeRefAltAz()
 
         # Update the rotation wrt horizon
         self.rotation_from_horiz = RMS.Astrometry.ApplyAstrometry.rotationWrtHorizon(self)
 
     def updateRefRADec(self, skip_rot_update=False, preserve_rotation=False):
-        """Update the reference RA and Dec (true in J2000) from Alt/Az (apparent in epoch of date)."""
+        """Update the reference RA and Dec (true, epoch of date) from Alt/Az (apparent, epoch of date).
+
+        See computeRefAltAz for the epoch convention of RA_d/dec_d.
+        """
 
         if (not skip_rot_update) and (not preserve_rotation):
 
             # Save the current rotation w.r.t horizon value
             self.rotation_from_horiz = RMS.Astrometry.ApplyAstrometry.rotationWrtHorizon(self)
 
-        # Convert the reference apparent Alt/Az in the epoch of date to true RA/Dec in J2000
-        ra, dec = cyApparentAltAz2TrueRADec(
+        # Apparent altitude -> true altitude if the platepar models refraction, then Alt/Az -> RA/Dec in the
+        # epoch of date (no precession, see the docstring)
+        alt_centre = np.radians(self.alt_centre)
+        if self.refraction:
+            alt_centre = pyRefractionApparentToTrue(alt_centre)
+
+        ra, dec = cyaltAz2RADec(
             np.radians(self.az_centre),
-            np.radians(self.alt_centre),
+            alt_centre,
             self.JD,
             np.radians(self.lat),
             np.radians(self.lon),
-            self.refraction,
         )
 
         # Assign the computed RA/Dec to platepar
@@ -2463,10 +2490,8 @@ class Platepar(object):
 
     def __repr__(self):
 
-        # Compute alt/az pointing
-        azim, elev = trueRaDec2ApparentAltAz(
-            self.RA_d, self.dec_d, self.JD, self.lat, self.lon, refraction=self.refraction
-        )
+        # Compute the apparent alt/az pointing (RA_d/dec_d are epoch of date, see computeRefAltAz)
+        azim, elev = self.computeRefAltAz()
 
         out_str = "Platepar\n"
         out_str += "--------\n"
@@ -2478,7 +2503,7 @@ class Platepar(object):
             *RMS.Astrometry.ApplyAstrometry.computeFOVSize(self)
         )
         out_str += "    Img res   = {:6d} x {:6d} px\n".format(self.X_res, self.Y_res)
-        out_str += "Reference pointing - equatorial (J2000):\n"
+        out_str += "Reference pointing - equatorial (true, epoch of date):\n"
         out_str += "    JD      = {:.10f} \n".format(self.JD)
         out_str += "    RA      = {:11.6f} deg\n".format(self.RA_d)
         out_str += "    Dec     = {:+11.6f} deg\n".format(self.dec_d)

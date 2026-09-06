@@ -16,10 +16,10 @@ import unittest
 import numpy as np
 
 from RMS.Formats.Platepar import Platepar
-from RMS.Astrometry.ApplyAstrometry import (xyToRaDecPP, xyToAltAzPP, xyHtToENUPP, enHtToXYPP, enuToXYPP,
+from RMS.Astrometry.ApplyAstrometry import (xyToRaDecPP, raDecToXYPP, xyToAltAzPP, xyHtToENUPP, enHtToXYPP, enuToXYPP,
     geoToXYPP, geoToENUPP, xyToGeoPP, ENHt0ToENHt1, rotationWrtHorizon, rotationWrtHorizonToPosAngle)
 from RMS.Astrometry.Conversions import jd2Date
-from RMS.Astrometry.CyFunctions import cyTrueRaDec2ApparentAltAz
+from RMS.Astrometry.CyFunctions import cyTrueRaDec2ApparentAltAz, equatorialCoordPrecession
 from RMS.GeoidHeightEGM96 import mslToWGS84Height, wgs84toMSLHeight, geoidUndulation
 from RMS.Misc import getRmsRootDir
 
@@ -237,6 +237,31 @@ class TestDirectTransforms(unittest.TestCase):
         self.assertAlmostEqual(float(x[0]), 640.0, delta=0.1)
         self.assertAlmostEqual(float(y[0]), 360.0, delta=0.1)
 
+
+
+class TestReferencePointingEpoch(unittest.TestCase):
+
+    def testPointingSetFromAltAzLandsWhereRequested(self):
+        """ RA_d/dec_d are epoch-of-date for the kernels; updateRefRADec/updateRefAltAz must use the same
+            convention, otherwise a pointing set from alt/az lands ~20 arcmin (the precession since 2000)
+            from where it was requested.
+        """
+
+        for refraction in (True, False):
+            pp = makePlatepar(45, 200, 20, refraction=refraction)   # goes through updateRefRADec
+
+            # Pixel of the reference direction (raDecToXYPP takes J2000), then back through the calibrated path
+            ra_j, dec_j = equatorialCoordPrecession(pp.JD, 2451545.0, np.radians(pp.RA_d), np.radians(pp.dec_d))
+            xc, yc = raDecToXYPP(np.array([np.degrees(ra_j)]), np.array([np.degrees(dec_j)]), pp.JD, pp)
+            az, alt = referenceAltAz(pp, np.array([xc[0]]), np.array([yc[0]]), refraction)
+
+            self.assertLess(separationArcmin(az[0], alt[0], np.radians(200), np.radians(45)), 0.1,
+                "refraction={}".format(refraction))
+
+            # And the inverse helper recovers the alt/az it was set from
+            pp.updateRefAltAz()
+            self.assertAlmostEqual(pp.az_centre, 200.0, places=3)
+            self.assertAlmostEqual(pp.alt_centre, 45.0, places=3)
 
 
 class TestStationHeight(unittest.TestCase):
