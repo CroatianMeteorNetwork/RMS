@@ -36,10 +36,12 @@ def _write_shared_buffer(base, shape):
 
 def _logcheck_worker(x):
     """ Worker that reports the root logger handlers present in its process. Used to confirm
-        the worker re-attached logging (a QueueHandler) under spawn.
+        the worker re-attached logging (a QueueHandler) under spawn. Every class in each
+        handler's MRO is reported, so a QueueHandler subclass (the dropping handler the
+        capture processes attach) counts as one.
     """
     import logging
-    return [type(h).__name__ for h in logging.getLogger().handlers]
+    return [cls.__name__ for h in logging.getLogger().handlers for cls in type(h).__mro__]
 
 
 def _exercise_pool_in_child(pool, result_queue):
@@ -142,7 +144,7 @@ def test_queuedpool_worker_reattaches_logging():
         results = pool.getResults()
 
         assert results, "worker produced no result"
-        assert 'QueueHandler' in results[0]   # logging was re-attached in the worker
+        assert 'QueueHandler' in results[0]   # a QueueHandler (or subclass) was re-attached in the worker
     finally:
         pool.shutdownManager()
 
