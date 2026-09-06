@@ -50,6 +50,7 @@ from RMS.Astrometry.CyFunctions import (
     pyRefractionApparentToTrue,
     refractionTrueToApparent,
     pyRefractionTrueToApparent,
+    refractionScale,
 )
 
 

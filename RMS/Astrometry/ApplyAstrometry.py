@@ -60,7 +60,7 @@ pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 from RMS.Astrometry.CyFunctions import (cyraDecToXY, cyTrueRaDec2ApparentAltAz,
                                         cyraDec2AltAz,
                                         cyXYToRADec,
-                                        eqRefractionApparentToTrue,
+                                        eqRefractionApparentToTrue, refractionScale,
                                         pyRefractionApparentToTrue,
                                         refractionTrueToApparent,
                                         equatorialCoordPrecession,
@@ -664,9 +664,11 @@ def rotationWrtHorizon_old(platepar):
     jd_arr, ra_arr, dec_arr, _ = xyToRaDecPP(2*[jd2Date(platepar.JD)], [img_mid_w, img_up_w], \
         [img_mid_h, img_up_h], [1, 1], platepar, extinction_correction=False, precompute_pointing_corr=True)
     azim_mid, alt_mid = cyTrueRaDec2ApparentAltAz(np.radians(ra_arr[0]), np.radians(dec_arr[0]), jd_arr[0], \
-        np.radians(platepar.lat), np.radians(platepar.lon), platepar.refraction)
+        np.radians(platepar.lat), np.radians(platepar.lon), platepar.refraction,
+        refractionScale(platepar.elev))
     azim_up, alt_up = cyTrueRaDec2ApparentAltAz(np.radians(ra_arr[1]), np.radians(dec_arr[1]), jd_arr[1], \
-        np.radians(platepar.lat), np.radians(platepar.lon), platepar.refraction)
+        np.radians(platepar.lat), np.radians(platepar.lon), platepar.refraction,
+        refractionScale(platepar.elev))
 
     # Compute the rotation wrt horizon (deg)
     rot_angle = np.degrees(np.arctan2(alt_up - alt_mid, azim_up - azim_mid))
@@ -875,7 +877,7 @@ def xyToRaDecPP(time_data, X_data, Y_data, level_data, platepar, extinction_corr
         platepar.y_poly_fwd, unicode(platepar.distortion_type), refraction=platepar.refraction, \
         equal_aspect=platepar.equal_aspect, force_distortion_centre=platepar.force_distortion_centre, \
         asymmetry_corr=platepar.asymmetry_corr, precompute_pointing_corr=precompute_pointing_corr, \
-        aberration=not measurement)
+        aberration=not measurement, refraction_scale=refractionScale(platepar.elev))
 
     # Correct the coordinates for refraction if it wasn't taken into account during the astrometry calibration
     #   procedure
@@ -883,7 +885,7 @@ def xyToRaDecPP(time_data, X_data, Y_data, level_data, platepar, extinction_corr
         for i, entry in enumerate(zip(JD_data, RA_data, dec_data)):
             jd, ra, dec = entry
             ra, dec = eqRefractionApparentToTrue(np.radians(ra), np.radians(dec), jd, \
-                np.radians(platepar.lat), np.radians(platepar.lon))
+                np.radians(platepar.lat), np.radians(platepar.lon), refractionScale(platepar.elev))
 
             RA_data[i] = np.degrees(ra)
             dec_data[i] = np.degrees(dec)
@@ -928,7 +930,7 @@ def raDecToXYPP(RA_data, dec_data, jd, platepar, measurement=False):
         platepar.x_poly_rev, platepar.y_poly_rev, unicode(platepar.distortion_type), 
         refraction=platepar.refraction, equal_aspect=platepar.equal_aspect, 
         force_distortion_centre=platepar.force_distortion_centre, asymmetry_corr=platepar.asymmetry_corr, 
-        aberration=not measurement)
+        aberration=not measurement, refraction_scale=refractionScale(platepar.elev))
 
     return X_data, Y_data
 
