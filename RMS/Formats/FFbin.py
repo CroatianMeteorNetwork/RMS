@@ -54,17 +54,17 @@ def read(directory, filename, array=False, full_filename=False):
     with open(file_path, "rb") as fid:
 
         # Check if it is the new of the old CAMS data format
-        version_flag = int(np.fromfile(fid, dtype=np.int32, count = 1))
+        version_flag = int(np.fromfile(fid, dtype=np.int32, count = 1)[0])
 
         # Old format
         if version_flag > 0:
 
             ff.nrows = version_flag
-            ff.ncols = int(np.fromfile(fid, dtype=np.uint32, count = 1))
-            ff.nbits = int(np.fromfile(fid, dtype=np.uint32, count = 1))
+            ff.ncols = int(np.fromfile(fid, dtype=np.uint32, count = 1)[0])
+            ff.nbits = int(np.fromfile(fid, dtype=np.uint32, count = 1)[0])
             ff.nframes = 2**ff.nbits
-            ff.first = int(np.fromfile(fid, dtype=np.uint32, count = 1))
-            ff.camno = int(np.fromfile(fid, dtype=np.uint32, count = 1))
+            ff.first = int(np.fromfile(fid, dtype=np.uint32, count = 1)[0])
+            ff.camno = int(np.fromfile(fid, dtype=np.uint32, count = 1)[0])
 
             ff.decimation_fact = 1
 
@@ -73,18 +73,18 @@ def read(directory, filename, array=False, full_filename=False):
         # New format
         elif version_flag == -1:
 
-            ff.nrows = int(np.fromfile(fid, dtype=np.uint32, count = 1))
-            ff.ncols = int(np.fromfile(fid, dtype=np.uint32, count = 1))
+            ff.nrows = int(np.fromfile(fid, dtype=np.uint32, count = 1)[0])
+            ff.ncols = int(np.fromfile(fid, dtype=np.uint32, count = 1)[0])
 
-            ff.nframes = int(np.fromfile(fid, dtype=np.uint32, count = 1))
-            ff.first = int(np.fromfile(fid, dtype=np.uint32, count = 1))
-            ff.camno = int(np.fromfile(fid, dtype=np.uint32, count = 1))
+            ff.nframes = int(np.fromfile(fid, dtype=np.uint32, count = 1)[0])
+            ff.first = int(np.fromfile(fid, dtype=np.uint32, count = 1)[0])
+            ff.camno = int(np.fromfile(fid, dtype=np.uint32, count = 1)[0])
 
-            ff.decimation_fact = int(np.fromfile(fid, dtype=np.uint32, count = 1))
+            ff.decimation_fact = int(np.fromfile(fid, dtype=np.uint32, count = 1)[0])
 
-            ff.interleave_flag = int(np.fromfile(fid, dtype=np.uint32, count = 1))
+            ff.interleave_flag = int(np.fromfile(fid, dtype=np.uint32, count = 1)[0])
 
-            ff.fps = float(np.fromfile(fid, dtype=np.uint32, count = 1))/1000
+            ff.fps = float(np.fromfile(fid, dtype=np.uint32, count = 1)[0])/1000
 
 
         if array:
