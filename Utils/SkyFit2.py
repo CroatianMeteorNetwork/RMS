@@ -2464,6 +2464,7 @@ class PlateTool(QtWidgets.QMainWindow):
         
         # Init a blank platepar
         self.platepar = Platepar()
+        self.original_f_scale = None
 
         # Platepar format (json or txt)
         self.platepar_fmt = None
@@ -3964,19 +3965,21 @@ class PlateTool(QtWidgets.QMainWindow):
 
     def onFrameResize(self):
         """ What happens when the window is resized. """
+        current_width = self.img_handle.ncols if self.img_handle is not None else self.config.width
+        current_height = self.img_handle.nrows if self.img_handle is not None else self.config.height
 
         self.star_pick_info.setPos(0, self.img_frame.height() - 50)
 
-        if self.config.height/self.config.width < self.img_frame.height()/self.img_frame.width():
-            self.img_frame.setLimits(xMin=0,
-                                     xMax=self.config.width,
-                                     yMin=None,
-                                     yMax=None)
+        if current_height / current_width < self.img_frame.height() / self.img_frame.width():
+                self.img_frame.setLimits(xMin=0,
+                                         xMax=current_width,
+                                         yMin=None,
+                                         yMax=None)
         else:
-            self.img_frame.setLimits(xMin=None,
-                                     xMax=None,
-                                     yMin=0,
-                                     yMax=self.config.height)
+               self.img_frame.setLimits(xMin=None,
+                                         xMax=None,
+                                         yMin=0,
+                                         yMax=current_height)
 
         # The geo point markers are sized relative to the displayed image, so they have to be rescaled
         self.updateGeoMarkerSize()
@@ -9044,6 +9047,11 @@ class PlateTool(QtWidgets.QMainWindow):
             elif n < 0:
                 for _ in range(abs(n)):
                     self.img.prevChunk()
+            self.img.img_handle.loadChunk()
+            if self.img.img_handle.ncols != self.platepar.X_res:
+                self.platepar.X_res = self.img.img_handle.ncols
+                self.platepar.Y_res = self.img.img_handle.nrows
+                self.platepar.F_scale = self.original_f_scale * self.img.img_handle.rescaling_factor
 
             self.img_zoom.loadImage(self.mode, self.img_type_flag)
             self.img.loadImage(self.mode, self.img_type_flag)
@@ -9089,6 +9097,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self.drawPhotometryColoring()
 
             self.updateStars()
+            self.onFrameResize()
 
         # Manual reduction mode
         else:
@@ -14409,6 +14418,7 @@ class PlateTool(QtWidgets.QMainWindow):
             # Parse the platepar file
             try:
                 self.platepar_fmt = platepar.read(platepar_file, use_flat=self.config.use_flat)
+                self.original_f_scale = platepar.F_scale
 
             except Exception as e:
                 print('Loading platepar failed with error:' + repr(e))
@@ -14431,8 +14441,13 @@ class PlateTool(QtWidgets.QMainWindow):
             platepar.lon = self.config.longitude
             platepar.elev = self.config.elevation
 
-            platepar.X_res = self.config.width
-            platepar.Y_res = self.config.height
+            if self.img_handle.ncols != platepar.X_res:
+                platepar.X_res = self.img_handle.ncols
+                platepar.Y_res = self.img_handle.nrows
+                platepar.F_scale = self.original_f_scale * self.img_handle.rescaling_factor
+            else:
+                platepar.X_res = self.config.width
+                platepar.Y_res = self.config.height
 
             # Set the camera gamma from the config file
             platepar.gamma = self.config.gamma
