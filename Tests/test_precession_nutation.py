@@ -3,6 +3,7 @@
 
 from __future__ import print_function, division, absolute_import
 
+import os
 import unittest
 
 import numpy as np
@@ -10,6 +11,9 @@ import numpy as np
 from RMS.Astrometry.CyFunctions import (equatorialCoordAndRotPrecession, equatorialCoordPrecession,
     trueOfDateFromJ2000, j2000FromTrueOfDate, cyTrueRaDec2ApparentAltAz, pointingCorrection)
 from RMS.Astrometry.Conversions import date2JD, JD2HourAngle
+from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP
+from RMS.Formats.Platepar import Platepar
+from RMS.Misc import getRmsRootDir
 
 try:
     import erfa
@@ -139,6 +143,147 @@ class TestPrecessionNutation(unittest.TestCase):
             errs.append(separationArcsec(r1, d1, *icrs(jd)))
         self.assertLess(max(errs), 2.0)
         self.assertLess(max(errs) - min(errs), 0.5)
+
+# ---- A distortion-free synthetic camera, fixed in alt/az, checked at off-centre pixels ----------------------------
+
+TEMPLATE = os.path.join(getRmsRootDir(), 'share', 'platepar_templates', 'template_generic_720p_4mm.cal')
+SITE = (32.2, -110.9, 700.0)       # lat, lon (deg), elevation (m)
+X_RES, Y_RES, FOV_DEG = 1280, 720, 82.0
+
+
+def syntheticCamera(az, alt, rot):
+    """ A distortion-free camera fixed in alt/az, with the kernels' projection (equidistant azimuthal about the image
+        centre) built in the horizontal frame. Returns the pixel coordinates of a 9 x 7 grid over the frame and the
+        ECEF unit vectors of their lines of sight. """
+
+    lat, lon = np.radians(SITE[0]), np.radians(SITE[1])
+    sl, cl, so, co = np.sin(lat), np.cos(lat), np.sin(lon), np.cos(lon)
+    enu_to_ecef = np.array([[-so, -sl*co, cl*co], [co, -sl*so, cl*so], [0, cl, sl]])
+
+    a, h = np.radians(az), np.radians(alt)
+    pointing = np.array([np.cos(h)*np.sin(a), np.cos(h)*np.cos(a), np.sin(h)])
+    up = np.array([0, 0, 1.0]) - pointing[2]*pointing
+    up /= np.linalg.norm(up)
+    side = np.cross(pointing, up)
+
+    f_scale = X_RES/FOV_DEG
+    xs, ys = np.meshgrid(np.linspace(20, X_RES - 20, 9), np.linspace(20, Y_RES - 20, 7))
+    X, Y = xs.ravel(), ys.ravel()
+    dx, dy = X - X_RES/2, Y - Y_RES/2
+    rho = np.radians(np.hypot(dx, dy)/f_scale)
+    theta = np.pi/2 - np.radians(rot) + np.arctan2(dy, dx)
+    d = np.cos(rho)[:, None]*pointing + np.sin(rho)[:, None]*(np.cos(theta)[:, None]*up
+        + np.sin(theta)[:, None]*side)
+
+    return X, Y, d.dot(enu_to_ecef.T), f_scale
+
+
+def earthFrameJ2000(jd, d_ecef):
+    """ J2000 (GCRS) directions of Earth-fixed lines of sight at jd: Earth rotation (GAST), then the IAU 2006/2000A
+        precession-nutation, both from erfa. """
+
+    tta = jd + TT_MINUS_UT
+    gast = erfa.gst06a(jd, 0.0, tta, 0.0)
+    pnm = erfa.pnm06a(tta, 0.0)
+    r3 = np.array([[np.cos(gast), -np.sin(gast), 0], [np.sin(gast), np.cos(gast), 0], [0, 0, 1]])
+
+    return d_ecef.dot(r3.T).dot(pnm)
+
+
+def positionAngle(ra1, dec1, ra2, dec2):
+    """ Position angle of (ra2, dec2) seen from (ra1, dec1), from north through east (radians). """
+
+    return np.arctan2(np.sin(ra2 - ra1)*np.cos(dec2),
+        np.cos(dec1)*np.sin(dec2) - np.sin(dec1)*np.cos(dec2)*np.cos(ra2 - ra1))
+
+
+def syntheticPlatepar(jd0, X, Y, f_scale, j2000_dirs):
+    """ Platepar of the synthetic camera referenced at jd0: the true pointing and rotation, expressed in the kernels'
+        frame (true equator and equinox of date), no distortion, no refraction.
+
+    Arguments:
+        jd0: [float] Reference Julian date.
+        X, Y: [ndarray] Grid pixel coordinates (the image centre and the point to its right must be in the grid).
+        f_scale: [float] Pixel scale (px/deg).
+        j2000_dirs: [ndarray] J2000 unit vectors of the grid's lines of sight at jd0 (the true pointing).
+    """
+
+    pp = Platepar()
+    pp.read(TEMPLATE)
+    pp.X_res, pp.Y_res, pp.F_scale = X_RES, Y_RES, f_scale
+    pp.lat, pp.lon, pp.elev = SITE
+    pp.resetDistortionParameters()
+
+    # The template keeps a distortion-centre offset; put the projection centre on the image centre
+    pp.x_poly_fwd[0] = pp.x_poly_fwd[1] = 0.0
+    pp.refraction = False
+    pp.measurement_apparent_to_true_refraction = False
+    pp.JD = jd0
+    pp.Ho = JD2HourAngle(jd0)
+
+    ic = np.argmin(np.hypot(X - X_RES/2, Y - Y_RES/2))
+    ix = np.argmin(np.hypot(X - X_RES/2 - 155, Y - Y_RES/2))
+    ra_c, dec_c = trueOfDateFromJ2000(jd0, *raDec(j2000_dirs[ic]))
+    ra_x, dec_x = trueOfDateFromJ2000(jd0, *raDec(j2000_dirs[ix]))
+    pp.RA_d, pp.dec_d = np.degrees(ra_c), np.degrees(dec_c)
+
+    # The kernels measure the image position angle as theta = pi/2 - pos_angle_ref + atan2(y, x), from north
+    #   towards west (RA decreasing), so the point to the right of the centre (atan2 = 0) has position angle
+    #   pos_angle_ref - pi/2 from north through east
+    pp.pos_angle_ref = (90.0 + np.degrees(positionAngle(ra_c, dec_c, ra_x, dec_x)))%360
+
+    return pp
+
+
+def errorField(kernel_dirs, true_dirs, ic):
+    """ Compare the kernel's directions with the true ones over the grid.
+
+    Return:
+        (centre, worst, roll, nonrigid): [tuple of floats] Error at the centre, worst error over the grid, the
+            rigid rotation of the error field about the centre's line of sight (a pos_angle_ref error), and the
+            largest residual after removing the best-fit rigid rotation (a scale or projection error). All arcsec.
+    """
+
+    sep = np.degrees(np.arctan2(np.linalg.norm(np.cross(kernel_dirs, true_dirs), axis=1),
+        np.sum(kernel_dirs*true_dirs, axis=1)))*3600
+    e = kernel_dirs - true_dirs
+    A = np.concatenate([np.array([[0, t[2], -t[1]], [-t[2], 0, t[0]], [t[1], -t[0], 0]]) for t in true_dirs])
+    w = np.linalg.lstsq(A, e.ravel(), rcond=None)[0]
+    resid = e - np.cross(w, true_dirs)
+
+    return sep[ic], sep.max(), np.degrees(w.dot(true_dirs[ic]))*3600, np.degrees(np.linalg.norm(resid, axis=1).max())*3600
+
+
+class TestSyntheticCamera(unittest.TestCase):
+
+    @unittest.skipIf(erfa is None, "pyerfa not installed")
+    def testGridOverNight(self):
+        """ A distortion-free camera fixed in alt/az, referenced at the start of the night: the kernel's XY -> J2000
+            over a 9 x 7 grid on the 82 x 46 deg frame stays on the true (erfa) directions through the night. The
+            off-centre points see rotation and scale errors that the centre alone cannot. """
+
+        for az, alt in ((14.0, 44.0), (200.0, 30.0)):
+
+            X, Y, d_ecef, f_scale = syntheticCamera(az, alt, 10.0)
+            ic = np.argmin(np.hypot(X - X_RES/2, Y - Y_RES/2))
+
+            for jd0 in DATES:
+
+                pp = syntheticPlatepar(jd0, X, Y, f_scale, earthFrameJ2000(jd0, d_ecef))
+
+                for hours in (0.0, 4.0, 8.0):
+
+                    jd = jd0 + hours/24.0
+                    truth = earthFrameJ2000(jd, d_ecef)
+                    _, ra, dec, _ = xyToRaDecPP(len(X)*[jd], X, Y, np.ones(len(X)), pp, extinction_correction=False,
+                        measurement=True, jd_time=True)
+                    centre, worst, roll, nonrigid = errorField(unitVector(np.radians(ra), np.radians(dec)).T, truth, ic)
+
+                    where = (az, alt, jd0, hours)
+                    self.assertLess(centre, 0.5, where)
+                    self.assertLess(worst, 0.5, where)
+                    self.assertLess(abs(roll), 0.3, where)
+                    self.assertLess(nonrigid, 0.1, where)
 
 
 if __name__ == "__main__":
