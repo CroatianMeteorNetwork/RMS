@@ -80,6 +80,7 @@ from matplotlib.dates import DateFormatter
 # Import Cython functions
 import pyximport
 pyximport.install(setup_args={'include_dirs':[np.get_include()]})
+from RMS.Astrometry.CyFunctions import refractionScale
 
 log = getLogger("rmslogger")
 EM_RAISE = False
