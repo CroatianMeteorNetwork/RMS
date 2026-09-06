@@ -840,9 +840,12 @@ def xyToRaDecPP(time_data, X_data, Y_data, level_data, platepar, extinction_corr
     Keyword arguments:
         extinction_correction: [bool] Apply extinction correction. True by default. False is set to prevent 
             infinite recursion in extinctionCorrectionApparentToTrue when set to True.
-        measurement: [bool] Indicates if the given images values are image measurements. Used for correcting
-            celestial coordinates for refraction if the refraction was not taken into account during
-            plate fitting.
+        measurement: [bool] Indicates if the given image values are image measurements (meteor centroids,
+            picks) rather than stars. False by default. Used for correcting celestial coordinates for
+            refraction if the refraction was not taken into account during plate fitting, and to decide
+            about the annual aberration: stars (False) have it removed so the output is a catalog direction,
+            while an object in the atmosphere (True) is not aberrated and the output is its geometric direction
+            in the Earth's frame, which is what a trajectory solver uses.
         jd_time: [bool] If True, time_data is expected as a list of Julian dates. False by default.
         precompute_pointing_corr: [bool] Precompute the pointing correction. False by default. This is used
             to speed up the calculation when the input JD is the same for all data points, e.g. during
@@ -871,7 +874,8 @@ def xyToRaDecPP(time_data, X_data, Y_data, level_data, platepar, extinction_corr
         float(platepar.dec_d), float(platepar.pos_angle_ref), float(platepar.F_scale), platepar.x_poly_fwd, 
         platepar.y_poly_fwd, unicode(platepar.distortion_type), refraction=platepar.refraction, \
         equal_aspect=platepar.equal_aspect, force_distortion_centre=platepar.force_distortion_centre, \
-        asymmetry_corr=platepar.asymmetry_corr, precompute_pointing_corr=precompute_pointing_corr)
+        asymmetry_corr=platepar.asymmetry_corr, precompute_pointing_corr=precompute_pointing_corr, \
+        aberration=not measurement)
 
     # Correct the coordinates for refraction if it wasn't taken into account during the astrometry calibration
     #   procedure
@@ -900,13 +904,19 @@ def xyToRaDecPP(time_data, X_data, Y_data, level_data, platepar, extinction_corr
     return JD_data, RA_data, dec_data, magnitude_data
 
 
-def raDecToXYPP(RA_data, dec_data, jd, platepar):
+def raDecToXYPP(RA_data, dec_data, jd, platepar, measurement=False):
     """ Converts RA, Dec to image coordinates, but the platepar is given instead of individual parameters.
     Arguments:
         RA: [ndarray] Array of right ascensions (degrees).
         dec: [ndarray] Array of declinations (degrees).
         jd: [float] Julian date.
         platepar: [Platepar structure] Astrometry parameters.
+
+    Keyword arguments:
+        measurement: [bool] False (default) for catalog directions of stars, which are displaced by the annual
+            aberration before projection. True for directions in the Earth's frame (e.g. a meteor position
+            from a trajectory), which are not aberrated.
+
     Return:
         (x, y): [tuple of ndarrays] Image X and Y coordinates.
     """
@@ -917,7 +927,8 @@ def raDecToXYPP(RA_data, dec_data, jd, platepar):
         float(platepar.RA_d), float(platepar.dec_d), float(platepar.pos_angle_ref), platepar.F_scale, 
         platepar.x_poly_rev, platepar.y_poly_rev, unicode(platepar.distortion_type), 
         refraction=platepar.refraction, equal_aspect=platepar.equal_aspect, 
-        force_distortion_centre=platepar.force_distortion_centre, asymmetry_corr=platepar.asymmetry_corr)
+        force_distortion_centre=platepar.force_distortion_centre, asymmetry_corr=platepar.asymmetry_corr, 
+        aberration=not measurement)
 
     return X_data, Y_data
 

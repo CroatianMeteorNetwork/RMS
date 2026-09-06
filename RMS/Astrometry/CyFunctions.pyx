@@ -1118,6 +1118,108 @@ cpdef (double, double) cartesianToRaDec(np.ndarray[np.float64_t, ndim=1] vec):
 
 
 
+
+### Annual aberration ###
+
+# Constant of aberration kappa = n*a / (c*sqrt(1 - e^2)), the mean orbital speed of the Earth in units of c
+cdef double ABERRATION_CONSTANT = radians(20.49552/3600.0)
+
+# Mean obliquity of the ecliptic at J2000
+cdef double MEAN_OBLIQUITY_J2000 = radians(23.4392911)
+
+
+cdef (double, double, double) earthVelocityJ2000(double jd):
+    """ Heliocentric velocity of the Earth at the given Julian date, in units of c, in equatorial axes
+        (mean equinox and obliquity of J2000).
+
+        Keplerian two-body velocity from the low-precision solar solution (Meeus, Astronomical Algorithms,
+        ch. 25) with the longitudes referred to the J2000 equinox, within 0.05 arcsec of the IAU 2006
+        barycentric velocity. The Moon's ~13 m/s and the planetary perturbations are neglected.
+
+    Arguments:
+        jd: [float] Julian date.
+
+    Return:
+        (vx, vy, vz): [tuple of floats] Velocity components in units of c (equatorial J2000 axes).
+    """
+
+    cdef double T, L0, M, e, C, sun_lon, earth_lon, perihelion_lon, prec, vx_ecl, vy_ecl
+
+    T = (jd - J2000_DAYS)/36525.0
+
+    # Geometric mean longitude and mean anomaly of the Sun, eccentricity of the Earth's orbit
+    L0 = radians((280.46646 + 36000.76983*T + 0.0003032*T*T)%360.0)
+    M = radians((357.52911 + 35999.05029*T - 0.0001537*T*T)%360.0)
+    e = 0.016708634 - 0.000042037*T - 0.0000001267*T*T
+
+    # Equation of the centre, true geocentric longitude of the Sun
+    C = radians((1.914602 - 0.004817*T - 0.000014*T*T)*sin(M) + (0.019993 - 0.000101*T)*sin(2*M) \
+        + 0.000289*sin(3*M))
+    sun_lon = L0 + C
+
+    # True heliocentric longitude of the Earth, and the longitude of the Earth's perihelion: the Sun's perigee
+    #   longitude (mean longitude - mean anomaly) plus 180 deg. Both are referred to the mean equinox of date;
+    #   subtract the general precession in longitude to refer them to the J2000 equinox, so the velocity comes
+    #   out in J2000 axes
+    prec = radians(1.3969713*T)
+    earth_lon = sun_lon + pi - prec
+    perihelion_lon = L0 - M + pi - prec
+
+    # Keplerian velocity in the ecliptic plane: kappa*(-(sin L + e sin w), cos L + e cos w)
+    vx_ecl = -ABERRATION_CONSTANT*(sin(earth_lon) + e*sin(perihelion_lon))
+    vy_ecl = ABERRATION_CONSTANT*(cos(earth_lon) + e*cos(perihelion_lon))
+
+    # Ecliptic -> equatorial axes
+    return vx_ecl, vy_ecl*cos(MEAN_OBLIQUITY_J2000), vy_ecl*sin(MEAN_OBLIQUITY_J2000)
+
+
+cdef (double, double) shiftDirection(double ra, double dec, double vx, double vy, double vz):
+    """ Direction (ra, dec) shifted by a small velocity vector: the first-order aberration formula
+        p' = (p + v/c)/|p + v/c|.
+    """
+
+    cdef double x, y, z, n
+
+    x = cos(dec)*cos(ra) + vx
+    y = cos(dec)*sin(ra) + vy
+    z = sin(dec) + vz
+    n = sqrt(x*x + y*y + z*z)
+
+    return (atan2(y, x) + 2*pi)%(2*pi), asin(z/n)
+
+
+cpdef (double, double) applyAberration(double ra, double dec, double jd):
+    """ Annual aberration: catalog (barycentric) direction -> apparent direction seen from the moving Earth.
+        Stars are displaced by up to 20.5 arcsec towards the apex of the Earth's motion.
+
+    Arguments:
+        ra: [float] Right ascension (radians, J2000).
+        dec: [float] Declination (radians, J2000).
+        jd: [float] Julian date.
+
+    Return:
+        (ra, dec): [tuple of floats] Apparent direction (radians, J2000 axes).
+    """
+
+    cdef double vx, vy, vz
+
+    vx, vy, vz = earthVelocityJ2000(jd)
+
+    return shiftDirection(ra, dec, vx, vy, vz)
+
+
+cpdef (double, double) removeAberration(double ra, double dec, double jd):
+    """ Inverse of applyAberration: apparent direction -> catalog direction. First-order inverse, exact to
+        ~0.002 arcsec.
+    """
+
+    cdef double vx, vy, vz
+
+    vx, vy, vz = earthVelocityJ2000(jd)
+
+    return shiftDirection(ra, dec, -vx, -vy, -vz)
+
+
 @cython.boundscheck(False)
 @cython.wraparound(False)
 @cython.cdivision(True)
@@ -1126,7 +1228,7 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
     double y_res, double h0, double jd_ref, double ra_ref, double dec_ref, double pos_angle_ref, 
     double pix_scale, np.ndarray[FLOAT_TYPE_t, ndim=1] x_poly_rev, 
     np.ndarray[FLOAT_TYPE_t, ndim=1] y_poly_rev, str dist_type, bool refraction=True, bool equal_aspect=False, 
-    bool force_distortion_centre=False, bool asymmetry_corr=True):
+    bool force_distortion_centre=False, bool asymmetry_corr=True, bool aberration=True):
     """ Convert RA, Dec to distortion corrected image coordinates. 
 
     Arguments:
@@ -1152,6 +1254,10 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
         equal_aspect: [bool] Force the X/Y aspect ratio to be equal. Used only for radial distortion. \
             False by default.
         force_distortion_centre: [bool] Force the distortion centre to the image centre. False by default.
+        aberration: [bool] Displace the input directions by the annual aberration of light (up to 20.5 arcsec
+            towards the apex of the Earth's motion), i.e. treat them as catalog directions of distant sources.
+            True by default. Set False for directions already in the Earth's frame (e.g. an object in the
+            atmosphere), which are not aberrated.
         asymmetry_corr: [bool] Correct the distortion for asymmetry. Only for radial distortion. True by
             default.
     
@@ -1161,6 +1267,7 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
 
     cdef int i
     cdef double ra_centre, dec_centre, ra, dec
+    cdef double vx, vy, vz
     cdef double radius, sin_ang, cos_ang, theta, x, y, r, dx, dy, x_img, y_img, r_corr, r_scale
     cdef double x0, y0, xy, a1, a2, k1, k2, k3, k4, k5
     cdef int index_offset
@@ -1269,10 +1376,19 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
 
 
     # Convert all equatorial coordinates to image coordinates
+    # Earth velocity for the annual aberration of the catalog directions
+    vx = vy = vz = 0.0
+    if aberration:
+        vx, vy, vz = earthVelocityJ2000(jd)
+
     for i in range(ra_data.shape[0]):
 
         ra = radians(ra_data[i])
         dec = radians(dec_data[i])
+
+        # Annual aberration: catalog direction -> apparent direction seen from the moving Earth
+        if aberration:
+            ra, dec = shiftDirection(ra, dec, vx, vy, vz)
 
         ### Gnomonization of star coordinates to image coordinates ###
 
@@ -1797,7 +1913,7 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
     double h0, double jd_ref, double ra_ref, double dec_ref, double pos_angle_ref, double pix_scale, \
     np.ndarray[FLOAT_TYPE_t, ndim=1] x_poly_fwd, np.ndarray[FLOAT_TYPE_t, ndim=1] y_poly_fwd, \
     str dist_type, bool refraction=True, bool equal_aspect=False, bool force_distortion_centre=False,\
-    bool asymmetry_corr=True, bool precompute_pointing_corr=False):
+    bool asymmetry_corr=True, bool precompute_pointing_corr=False, bool aberration=True):
     """
     Arguments:
         jd_data: [ndarray] Julian date of each data point.
@@ -1824,6 +1940,10 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
         force_distortion_centre: [bool] Force the distortion centre to the image centre. False by default.
         asymmetry_corr: [bool] Correct the distortion for asymmetry. Only for radial distortion. True by
             default.
+        aberration: [bool] Remove the annual aberration of light (up to 20.5 arcsec) so the output is the
+            catalog direction of a distant source (a star). True by default. Set False for an object in the
+            atmosphere (a meteor), whose light is not aberrated: the output is then the geometric direction
+            in the Earth's frame, which is what a trajectory solver uses.
         precompute_pointing_corr: [bool] Precompute the pointing correction. False by default. This is used
             to speed up the calculation when the input JD is the same for all data points, e.g. during
             plate solving.
@@ -2103,6 +2223,10 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
         # Apply refraction correction
         if refraction:
             ra, dec = eqRefractionApparentToTrue(ra, dec, jd, radians(lat), radians(lon))
+
+        # Annual aberration: apparent direction seen from the moving Earth -> catalog direction
+        if aberration:
+            ra, dec = removeAberration(ra, dec, jd)
 
 
 
