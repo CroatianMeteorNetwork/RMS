@@ -80,7 +80,6 @@ from matplotlib.dates import DateFormatter
 # Import Cython functions
 import pyximport
 pyximport.install(setup_args={'include_dirs':[np.get_include()]})
-from RMS.Astrometry.CyFunctions import cyTrueRaDec2ApparentAltAz
 
 log = getLogger("rmslogger")
 EM_RAISE = False
@@ -4297,13 +4296,8 @@ def platepar2AltAz(rp):
 
     """
 
-    RA_d = np.radians(rp.RA_d)
-    dec_d = np.radians(rp.dec_d)
-    JD = rp.JD
-    lat = np.radians(rp.lat)
-    lon = np.radians(rp.lon)
-
-    return np.degrees(cyTrueRaDec2ApparentAltAz(RA_d, dec_d, JD, lat, lon))
+    # RA_d/dec_d are epoch-of-date, so the platepar's own conversion (no precession) must be used
+    return np.array(rp.computeRefAltAz())
 
 def angDif(a1, a2):
 
