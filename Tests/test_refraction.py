@@ -16,6 +16,13 @@ from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP
 from RMS.Astrometry.Conversions import date2JD, JD2HourAngle
 from RMS.Astrometry.CyFunctions import (refractionScale, refractionTargetFraction, pyRefractionApparentToTrue,
     pyRefractionTrueToApparent, equatorialCoordPrecession)
+
+try:
+    # Kernels that model the annual aberration: a star's catalog direction is its Earth-frame direction with the
+    #   aberration removed
+    from RMS.Astrometry.CyFunctions import removeAberration
+except ImportError:
+    removeAberration = None
 from RMS.Misc import getRmsRootDir
 
 
@@ -167,6 +174,8 @@ class TestRefraction(unittest.TestCase):
             ra = np.arctan2(eq[:, 1], eq[:, 0])%(2*np.pi)
             dec = np.arcsin(eq[:, 2])
             out = np.array([equatorialCoordPrecession(jd, 2451545.0, r_, d_) for r_, d_ in zip(ra, dec)])
+            if removeAberration is not None:
+                out = np.array([removeAberration(r_, d_, jd) for r_, d_ in out])
             return np.degrees(out[:, 0]), np.degrees(out[:, 1])
 
         def unit(ra, dec):
@@ -222,8 +231,9 @@ class TestRefraction(unittest.TestCase):
             star_rms_arcsec = np.sqrt(np.mean((xs - sx)**2 + (ys - sy)**2))/f_scale*3600
             self.assertLess(star_rms_arcsec, 5.0, elev_model)
 
+            # Evaluate through the star path (catalog frame, the same frame as the truth)
             _, ra, dec, _ = xyToRaDecPP(len(gx)*[jd], gx, gy, np.ones(len(gx)), pp_fit, extinction_correction=False,
-                measurement=True, jd_time=True)
+                jd_time=True)
             worst[elev_model] = separation(ra, dec, ra_t, dec_t).max()
 
         self.assertLess(worst[elev_station], 1.0)
