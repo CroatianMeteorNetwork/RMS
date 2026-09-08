@@ -365,6 +365,9 @@ def detectSpritesInFF(data_dir, ff_name, model_path, config, platepar=None):
     Return:
         [tuple] (ff_name, detections_list, timestamp, jd) where each detection is a dict with
             image/sky coordinates. Returns (ff_name, [], timestamp, None) on error.
+
+    Mask behavior:
+        The station mask is only loaded and applied when config.sprite_use_mask is enabled.
     """
 
     # Extract timestamp from FF filename
@@ -396,13 +399,16 @@ def detectSpritesInFF(data_dir, ff_name, model_path, config, platepar=None):
     # Use maxpixel as input (consider max-ave after model retraining)
     image = Image.fromarray(ff.maxpixel).convert("RGB")
 
-    # Load mask once per process
-    mask_key = config.config_file_path
-    if mask_key not in _mask_cache:
-        _mask_cache[mask_key] = loadMask(config)
-        _resized_mask_cache[mask_key] = [None]
-    mask = _mask_cache[mask_key]
-    resized_mask = _resized_mask_cache[mask_key]
+    # Load mask once per process (only if mask application is enabled)
+    mask = None
+    resized_mask = None
+    if config.sprite_use_mask:
+        mask_key = config.config_file_path
+        if mask_key not in _mask_cache:
+            _mask_cache[mask_key] = loadMask(config)
+            _resized_mask_cache[mask_key] = [None]
+        mask = _mask_cache[mask_key]
+        resized_mask = _resized_mask_cache[mask_key]
 
     prediction, image = getPrediction(image, interpreter, input_details, mask=mask,
                                       resized_mask_cache=resized_mask)

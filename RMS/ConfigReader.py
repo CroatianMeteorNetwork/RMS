@@ -330,6 +330,10 @@ class Config:
         self.sprite_upload_timeout = 10
         self.sprite_upload_ff = False
 
+        # Apply the station mask onto frames before sprite detection inference.
+        # Disabled by default.
+        self.sprite_use_mask = False
+
         # Space quotas in GB
 
 
@@ -1006,6 +1010,9 @@ def parseCapture(config, parser):
 
     if parser.has_option(section, "sprite_upload_ff"):
         config.sprite_upload_ff = parser.getboolean(section, "sprite_upload_ff")
+
+    if parser.has_option(section, "sprite_use_mask"):
+        config.sprite_use_mask = parser.getboolean(section, "sprite_use_mask")
 
     if parser.has_option(section, "quota_management_enabled"):
         config.quota_management_enabled = parser.getboolean(section, "quota_management_enabled")
