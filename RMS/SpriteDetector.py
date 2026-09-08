@@ -1092,6 +1092,9 @@ class SpriteDetector(multiprocessing.Process):
                 "timestamp": timestamp_iso,
                 "ff_name": ff_name,
                 "night_dir": night_dir_name,
+                "latitude": self.config.latitude,
+                "longitude": self.config.longitude,
+                "elevation": self.config.elevation,
                 "detections": detections,
             }
 
