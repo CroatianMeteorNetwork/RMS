@@ -449,12 +449,21 @@ def setCameraParam(cam, opts):
         cam - the camera 
         opts - array of fields, subfields and the value to set
     """
-    # these fields are stored as integers. Others are Hex strings
+    # Param.[0] fields stored as integers (not hex strings)
     intfields = [
         'AeSensitivity','Day_nfLevel','DncThr','ElecLevel','IRCUTMode',
-        'IrcutSwap','Night_nfLevel','Level','AutoGain','Gain'
+        'IrcutSwap','InfraredSwap','Night_nfLevel','Level','AutoGain','Gain'
     ]
     styleFlds = ('typedefault','type1','type2')
+
+    # ParamEx.[0] integer fields
+    paramex_intfields = [
+        'AeMeansure','AutomaticAdjustment','CorridorMode','Dis',
+        'Ldc','LowLuxMode','PreventOverExpo','SoftPhotosensitivecontrol',
+        'LightRestrainLevel'
+    ]
+    # ParamEx.[0] hex string fields
+    paramex_hexfields = ['ExposureTime']
 
     fld = opts[1]
     if fld == 'ClearFog':
@@ -492,13 +501,32 @@ def setCameraParam(cam, opts):
         else:
             log.info("BroadTrends option must be 'AutoGain' or 'Gain'")
 
+    elif fld == 'DayNightSwitch':
+        subfld = opts[2]
+        val = int(opts[3])
+        fldToSet = 'Camera.ParamEx.[0].' + fld
+        log.info('Set {}.{} to {}'.format(fldToSet, subfld, val))
+        cam.set_info(fldToSet, {subfld: val})
+
+    # Other ParamEx.[0] fields (int and hex)
+    elif fld in paramex_intfields:
+        val = int(opts[2])
+        log.info('Set Camera.ParamEx.[0].{} to {}'.format(fld, val))
+        cam.set_info("Camera.ParamEx.[0]", {fld: val})
+
+    elif fld in paramex_hexfields:
+        val = int(opts[2])
+        val = "0x%8.8X" % val
+        log.info('Set Camera.ParamEx.[0].{} to {}'.format(fld, val))
+        cam.set_info("Camera.ParamEx.[0]", {fld: val})
+
     # Exposuretime and gainparam have subfields
     elif fld in ('ExposureParam', 'GainParam'):
 
         subfld = opts[2]
         val = int(opts[3])
         if subfld not in intfields:
-            # the two non-int fields in ExposureParam are the exposure times. 
+            # the two non-int fields in ExposureParam are the exposure times.
             # These are stored in microseconds converted to hex strings.
             if val < 10 or val > 80000:
                 log.info('Exposure must be between 10 and 80000 microsecs')
@@ -509,7 +537,7 @@ def setCameraParam(cam, opts):
         cam.set_info(fldToSet, {subfld: val})
 
     else:
-        # other fields do not have subfields
+        # other Param.[0] fields do not have subfields
         val = int(opts[2])
         if fld not in intfields:
             val = "0x%8.8X" % val
@@ -614,6 +642,41 @@ def setAutoReboot(cam, opts):
     info["AutoRebootHour"] = hour
     log.info('Set autoreboot: %s at %s', day, hour*100)
     cam.set_info("General.AutoMaintain", info)
+
+
+def ispControl(camera_ip, cmd_line, port=9600, timeout=5):
+    """Send a command to the isp_ctl TCP daemon running on the camera.
+
+    The isp_ctl daemon listens for one text command per TCP connection,
+    sends the response, then closes. This provides true ISP manual
+    exposure/gain control that DVRIP cannot achieve.
+
+    Args:
+        camera_ip (str): Camera IP address
+        cmd_line (str): Command to send (e.g. "query", "manual -a 2048", "auto")
+        port (int): TCP port (default 9600)
+        timeout (int): Socket timeout in seconds
+
+    Returns:
+        str: Response text from isp_ctl, or None on error
+    """
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(timeout)
+        s.connect((camera_ip, port))
+        s.sendall((cmd_line + "\n").encode())
+        s.shutdown(socket.SHUT_WR)
+        chunks = []
+        while True:
+            data = s.recv(4096)
+            if not data:
+                break
+            chunks.append(data)
+        s.close()
+        return b"".join(chunks).decode(errors="replace")
+    except Exception as e:
+        log.error("isp_ctl connection to %s:%d failed: %s", camera_ip, port, e)
+        return None
 
 
 def manageCloudConnection(cam, opts):
@@ -784,6 +847,9 @@ def upgradeFirmware(cam, firmware_path, skip_confirm=False):
             log.warning("Could not stop the keep-alive timer: %s", e)
 
     try:
+        # Increase socket timeout — camera needs time to prepare flash for writing
+        old_timeout = cam.socket.gettimeout()
+        cam.socket.settimeout(30)
         result = cam.upgrade(firmware_path, packetsize=0x8000, vprint=progress_callback)
 
         # cam.upgrade() ends in one of two ways and they do NOT mean the same
@@ -843,8 +909,9 @@ def upgradeFirmware(cam, firmware_path, skip_confirm=False):
                 log.info("Firmware upgrade successful - camera confirmed it and is back online.")
             else:
                 log.info("Camera is back online after the upgrade.")
-                log.info("The upgrade was not confirmed over the wire, so check the "
-                         "build with GetDeviceInformation before relying on it.")
+                log.info("The upgrade was not confirmed over the wire. Verify with "
+                         "GetDeviceInformation - its Build Time is stamped from the "
+                         "image, so it should now match the build you flashed.")
             log.info("Remember: push 'SwitchMode init' now. Config stored on the "
                      "camera is not replaced by the new image's defaults.")
             return True
@@ -901,6 +968,7 @@ def switchMode(cam, mode_name, path='./camera_settings.json'):
                          .format(mode_name, path, list(modes.keys())))
 
     # Loop over each command array in the specified mode
+    failed = []
     for param in modes[mode_name]:
         cmd = param[0]
         opts = param[1:]
@@ -910,8 +978,68 @@ def switchMode(cam, mode_name, path='./camera_settings.json'):
             log.warning("Ignoring SwitchMode command inside JSON to prevent recursion.")
             continue
 
-        # Pass everything else directly to dvripCall
-        dvripCall(cam, cmd, opts)
+        # Pass everything else directly to dvripCall.
+        # Guard each entry: without this, a single unsupported command aborts the
+        # whole loop and every later setting is silently skipped. That happened
+        # with a 5-element DayNightSwitch entry against a build of this file that
+        # had no handler for it, which dropped the last 7 settings of "init"
+        # (IRCUTMode, IrcutSwap, Night_nfLevel, RejectFlicker, WhiteBalance,
+        # PictureFlip, PictureMirror) behind one generic error line.
+        try:
+            dvripCall(cam, cmd, opts)
+        except Exception as e:
+            failed.append((param, e))
+            log.error('Skipping %s %s: %s', cmd, opts, e)
+
+    if failed:
+        log.error('%d of %d "%s" commands failed:', len(failed), len(modes[mode_name]), mode_name)
+        for param, e in failed:
+            log.error('    %s -> %s', param, e)
+    else:
+        log.info('All %d "%s" commands applied', len(modes[mode_name]), mode_name)
+
+
+# Config groups RestoreDefault resets by default: everything the App exposes
+# EXCEPT NetWork (resetting it changes the IP and drops the camera) and Ability
+# (read-only device capabilities). 'RestoreDefault all' adds NetWork.
+DEFAULT_RESTORE_GROUPS = [
+    'General', 'Encode', 'Camera', 'Detect', 'Alarm', 'Storage', 'Comm',
+    'System', 'AVEnc', 'fVideo', 'Uart', 'Record', 'ChannelTitle',
+    'VideoWidget', 'Simplify', 'Guide', 'Snap', 'Consumer', 'OtherFunction',
+]
+
+
+def restoreDefault(cam, groups):
+    """Reset camera configuration groups to factory defaults over DVRIP.
+
+    Sends the XM SysManager command OPDefaultConfig (message code 1450 -- the
+    same code family as OPMachine/reboot, disambiguated by the JSON Name). The
+    payload is a list of top-level config groups and the reset is scoped to
+    exactly those groups; other config (and the firmware) is left alone. The
+    camera App restarts (~30-60 s) to apply the defaults.
+
+    NOTE: a firmware flash does NOT reset config -- persistent settings live in
+    jffs2 and survive flashing. This DVRIP reset is the way to restore factory
+    config independent of which firmware image is installed.
+
+    NOTE: including 'NetWork' resets the IP to the factory default, which drops
+    the camera off its current address.
+
+    Args:
+        cam: a logged-in DVRIPCam
+        groups (list[str]): config groups to reset
+    """
+    if not groups:
+        log.info("RestoreDefault: no config groups specified, nothing to do")
+        return
+    if 'NetWork' in groups:
+        log.warning("RestoreDefault includes 'NetWork': the IP will reset to the "
+                    "factory default and the camera will drop off %s", cam.ip)
+    resp = cam.set_command("OPDefaultConfig", groups, 1450)
+    log.info("RestoreDefault sent for %d group(s): %s", len(groups), ", ".join(groups))
+    log.info("The camera App will now restart to apply defaults (~30-60 s).")
+    if resp:
+        log.info("Response: %s", resp)
 
 
 def dvripCall(cam, cmd, opts, camera_settings_path='./camera_settings.json'):
@@ -1055,7 +1183,54 @@ def dvripCall(cam, cmd, opts, camera_settings_path='./camera_settings.json'):
 
         firmware_path = opts[0]
         skip_confirm = '--yes' in opts or '-y' in opts
+        # One-command fleet convert: if the operator hands the OpenIPC venc .tgz
+        # to an XM camera, auto-wrap it into a per-unit DVRIP-flashable coupler
+        # bin -- reading THIS camera's MAC over DVRIP first and baking it into the
+        # env so the converted camera keeps its identity. No external tools.
+        try:
+            from Utils.CameraFlash import detect_bin_kind, build_coupler_bin
+            if detect_bin_kind(firmware_path)[0] == 'openipc_tgz':
+                import tempfile, os as _os
+                mac = cam.get_info("NetWork.NetCommon").get("MAC")
+                if not mac:
+                    log.error("Could not read camera MAC over DVRIP; aborting auto-wrap.")
+                    return
+                log.info("XM camera + OpenIPC venc image -> auto-wrapping coupler "
+                         "bin (MAC %s preserved)", mac)
+                firmware_path = build_coupler_bin(
+                    firmware_path, mac,
+                    _os.path.join(tempfile.gettempdir(),
+                                  "venc_coupler_%s.bin" % mac.replace(':', '')))
+                log.info("Built %s", firmware_path)
+        except Exception as e:
+            log.error("Auto-wrap failed: %s", e)
+            return
         upgradeFirmware(cam, firmware_path, skip_confirm)
+        return
+
+    elif cmd in ISP_COMMANDS:
+        # ISP-daemon (:9600) commands. Normally reached via the login-free fast
+        # path in cameraControl(); handled here too so a logged-in DVRIP session
+        # can still dispatch them. Delegates to the shared ispCall().
+        #   IspQuery                 -> query
+        #   IspManual -a 2048 -e 500 -> manual ...
+        #   IspAuto  --max-again N   -> auto ...
+        #   Isp wb unity | Isp gamma 0.5 | Isp status  (verbatim; empty->status)
+        ispCall(cam.ip, cmd, opts)
+        return
+
+    elif cmd == 'RestoreDefault':
+        # Reset config groups to factory defaults via OPDefaultConfig (App restarts).
+        #   RestoreDefault            -> DEFAULT_RESTORE_GROUPS (keeps NetWork/IP)
+        #   RestoreDefault all        -> default groups + NetWork (resets the IP!)
+        #   RestoreDefault G1 G2 ...  -> exactly those groups
+        if opts and str(opts[0]).lower() == 'all':
+            groups = DEFAULT_RESTORE_GROUPS + ['NetWork']
+        elif opts:
+            groups = list(opts)
+        else:
+            groups = DEFAULT_RESTORE_GROUPS
+        restoreDefault(cam, groups)
         return
 
     # -- If we get here, command is not recognized:
@@ -1065,6 +1240,175 @@ def dvripCall(cam, cmd, opts, camera_settings_path='./camera_settings.json'):
         ugi = cam.get_upgrade_info()
         log.info(ugi['Hardware'])
         return
+
+
+# Commands served by the isp_ctl/hisp_ctl daemon on :9600. These need only the
+# camera IP -- they never use the DVRIP session -- so they must NOT be gated
+# behind a DVRIP login. OpenIPC cameras have no DVRIP service at all, and even
+# on XM firmware this skips a needless DVRIP connect for a pure-ISP command.
+ISP_COMMANDS = {'Isp', 'IspQuery', 'IspManual', 'IspAuto'}
+
+
+def ispCall(camera_ip, cmd, opts):
+    """Dispatch an ISP-daemon (:9600) command without any DVRIP session.
+
+    Single source of truth for the Isp* command family, shared by the DVRIP
+    dispatcher (dvripCall) and the login-free fast path in cameraControl().
+    """
+    if not opts:
+        opts = []
+    if cmd == 'IspQuery':
+        line = "query"
+    elif cmd == 'IspManual':
+        line = "manual " + " ".join(opts)
+    elif cmd == 'IspAuto':
+        line = "auto " + " ".join(opts)
+    else:  # 'Isp' -- generic verbatim pass-through; empty -> query (both daemons)
+        line = " ".join(opts) if opts else "query"
+    resp = ispControl(camera_ip, line)
+    if resp:
+        log.info(resp.rstrip())
+
+
+# ---------------------------------------------------------------------------
+# OpenIPC control path
+#
+# Our science cameras run OpenIPC with our own venc (majestic disabled), so they
+# have NEITHER DVRIP (that is XM firmware) NOR a live ONVIF service. The only
+# programmable control channel is our isp_ctl daemon on :9600. This layer maps
+# the DVRIP-style setup verbs RMS already uses onto that daemon so the existing
+# camera_settings.json provisioning + day/night switch work unchanged on OpenIPC.
+# ---------------------------------------------------------------------------
+
+def ispReachable(camera_ip, timeout=2):
+    """True if the isp_ctl/hisp_ctl daemon answers on :9600 (OpenIPC science cam)."""
+    r = ispControl(camera_ip, "query", timeout=timeout)
+    return bool(r) and ("Exposure" in r or "AGain" in r or "AE Route" in r)
+
+
+def _openipc_setparam(o):
+    """Map a DVRIP 'SetParam <group> <field...> <value>' onto an isp_ctl line,
+    or ('ACK', reason) for params with no OpenIPC equivalent (baked at flash /
+    handled structurally). o = [group, field..., value]."""
+    if len(o) < 2:
+        return ('ACK', 'SetParam: too few args')
+    grp = o[0]
+    val = str(o[-1])
+    field = ' '.join(str(x) for x in o[1:-1])
+    key = (grp + ' ' + field).strip()
+    kl = key.lower()
+    on = val in ('1', 'on', 'true', 'True', 'yes')
+    mapping = {
+        'encode video resolution':      'encode set resolution %s' % val,
+        'encode video fps':             'encode set fps %s' % val,
+        'encode video bitrate':         'encode set bitrate %s' % val,
+        'encode video bitratecontrol':  'encode set rc %s' % val,
+        'encode video compression':     'encode set compression %s' % val,
+        'camera pictureflip':           'flip %s' % ('on' if on else 'off'),
+        'camera picturemirror':         'mirror %s' % ('on' if on else 'off'),
+    }
+    if kl in mapping:
+        return mapping[kl]
+    if kl == 'camera daynightcolor':
+        # OpenIPC camera_settings.json: DayNightColor 1 = day/colour, 2 = night
+        return 'ircut %s' % ('day' if val in ('0', '1') else 'night')
+    if kl == 'camera whitebalance':
+        return 'wb %s' % ('auto' if val == '2' else 'unity')
+    return ('ACK', 'SetParam %s=%s (n/a on OpenIPC / baked at flash)' % (key, val))
+
+
+def _openipc_line_for(cmd, opts):
+    """Translate a DVRIP-style (cmd, opts) into an isp_ctl :9600 command line.
+    Returns a line string, or ('ACK', reason) for a safe no-op, or None if the
+    verb is handled elsewhere (Isp*/SwitchMode) or unknown."""
+    o = [str(x) for x in (opts if opts else [])]
+    if cmd == 'CameraTime':
+        if o and o[0] == 'get':
+            return 'time get'
+        # RTC-less board: set the live clock from the host; NTP persists it.
+        return 'time set %d' % int(time.time())
+    if cmd == 'SetAutoReboot':
+        spec = o[0] if o else ''
+        parts = spec.split(',')
+        day = (parts[0].lower() if parts and parts[0] else '')
+        hour = parts[1] if len(parts) > 1 else '0'
+        if day in ('never', 'off', ''):
+            return 'autoreboot off'
+        return 'autoreboot everyday %s' % hour
+    if cmd == 'SetOSD':
+        return 'osd %s' % (o[0] if o else 'off')
+    if cmd == 'CloudConnection':
+        return 'cloud %s' % (o[0] if o else 'off')
+    if cmd == 'reboot':
+        return 'reboot'
+    if cmd == 'SetColor':
+        # b,c,s,h,g,a -> map saturation (0..100) onto isp satu (0..255).
+        try:
+            s = int(o[0].split(',')[2])
+            return 'satu %d' % max(0, min(255, int(round(s * 255 / 100.0))))
+        except Exception:
+            return ('ACK', 'SetColor: unparseable, ignored')
+    if cmd == 'SetParam':
+        return _openipc_setparam(o)
+    return None
+
+
+def openipcCall(camera_ip, cmd, opts, camera_settings_path='./camera_settings.json'):
+    """Execute one camera-control command on an OpenIPC science camera (:9600)."""
+    if cmd in ISP_COMMANDS:
+        ispCall(camera_ip, cmd, opts)
+        return
+    if cmd == 'SwitchMode':
+        mode = opts if isinstance(opts, str) else (opts[0] if opts else None)
+        if not mode:
+            log.error("No mode specified for SwitchMode.")
+            return
+        openipcSwitchMode(camera_ip, mode, camera_settings_path)
+        return
+
+    mapped = _openipc_line_for(cmd, opts)
+    if mapped is None:
+        log.warning("OpenIPC: command '%s' not supported on this camera; ignored", cmd)
+        return
+    if isinstance(mapped, tuple) and mapped[0] == 'ACK':
+        log.info("OpenIPC: %s (ack)", mapped[1])
+        return
+    resp = ispControl(camera_ip, mapped)
+    if resp:
+        log.info(resp.rstrip())
+
+
+def openipcSwitchMode(camera_ip, mode_name, path='./camera_settings.json'):
+    """Login-free day/night/init mode switch for OpenIPC cameras.
+
+    Mirrors switchMode() but dispatches each command through openipcCall (:9600)
+    instead of DVRIP. Each command is guarded so one unsupported line does not
+    abort the whole mode.
+    """
+    if not os.path.isfile(path):
+        raise FileNotFoundError("Camera settings file '{}' not found.".format(path))
+    with open(path, 'r') as f:
+        modes = json.load(f)
+    if mode_name not in modes:
+        avail = [k for k in modes if not str(k).startswith('_')]
+        raise ValueError("Mode '{}' not found in '{}'. Available modes: {}"
+                         .format(mode_name, path, avail))
+    failed = []
+    for param in modes[mode_name]:
+        cmd = param[0]
+        opts = param[1:]
+        if cmd == "SwitchMode":
+            log.warning("Ignoring SwitchMode command inside JSON to prevent recursion.")
+            continue
+        try:
+            openipcCall(camera_ip, cmd, opts, path)
+        except Exception as e:
+            failed.append((param, e))
+            log.error('Skipping %s %s: %s', cmd, opts, e)
+    if failed:
+        log.error('%d of %d "%s" commands failed:', len(failed), len(modes[mode_name]), mode_name)
+        for param, e in failed:
+            log.error('  %s: %s', param, e)
 
 
 def cameraControl(camera_ip, camera_user, camera_pwd, cmd, opts='', camera_settings_path='./camera_settings.json'):
@@ -1077,17 +1421,72 @@ def cameraControl(camera_ip, camera_user, camera_pwd, cmd, opts='', camera_setti
         cmd (string): Command to be executed
         opts (array of strings): Optional array of field, subfield and value for the SetParam command
     """
-    # Process the IP camera control command
+    # ISP-daemon commands go straight to :9600 with no DVRIP login. This is what
+    # makes runtime ISP control work on OpenIPC cameras (no DVRIP service), and
+    # avoids a needless DVRIP connect for a pure-ISP command on XM cameras.
+    if cmd in ISP_COMMANDS:
+        ispCall(camera_ip, cmd, opts)
+        return
+
+    # Firmware transport commands go through Utils.CameraFlash (SSH-based
+    # for OpenIPC, no DVRIP). RevertToXM defaults to a DRY-RUN; pass
+    # 'commit' to actually flash. It restores THIS camera's own saved
+    # full-chip backup and never writes the u-boot binary (see CameraFlash).
+    if cmd == 'DetectFirmware':
+        from Utils.CameraFlash import detect_transport
+        log.info('Firmware transport on %s: %s', camera_ip, detect_transport(camera_ip))
+        return
+    # UpgradeFirmware is transport-aware. On XM the DVRIP path below handles it.
+    # On OpenIPC (no DVRIP) route to the SSH flasher, which auto-detects the bin
+    # (XM update ZIP / OpenIPC-Coupler ZIP / raw 16MB), never writes the u-boot
+    # binary, verifies each partition, and flips the boot env (MAC preserved).
+    # Dry-run unless the operator passes 'commit'.
+    if cmd == 'UpgradeFirmware':
+        from Utils.CameraFlash import detect_transport, upgrade_from_openipc
+        if detect_transport(camera_ip) == 'openipc':
+            if not opts:
+                log.error("Usage: UpgradeFirmware /path/to/fw.bin [commit] [--no-backup]")
+                return
+            image_path = opts[0]
+            do_commit = ('commit' in opts) or ('--commit' in opts)
+            do_backup = '--no-backup' not in opts
+            upgrade_from_openipc(camera_ip, image_path, dry_run=not do_commit,
+                                 do_backup=do_backup)
+            return
+        # else: fall through to the DVRIP (XM) upgrade path below
+
+    # Process the IP camera control command. cam.login() returns False on some
+    # failures but RAISES (dvrip.SomethingIsWrongWithCamera) when the DVRIP port
+    # is refused -- which is exactly the OpenIPC case -- so treat both the same.
     cam = dvr.DVRIPCam(camera_ip, user=camera_user, password=camera_pwd)
-    if cam.login():
+    logged_in = False
+    try:
+        logged_in = cam.login()
+    except Exception:
+        logged_in = False
+    if logged_in:
         try:
             dvripCall(cam, cmd, opts, camera_settings_path)
         except Exception as e:
             log.error("Error executing command: %s", e)
             log.error("This command may not be supported.")
+        cam.close()
+        return
+    try:
+        cam.close()
+    except Exception:
+        pass
+
+    # DVRIP unavailable -> OpenIPC science camera (our venc, majestic off)?
+    # Route the command to the :9600 control surface instead.
+    if ispReachable(camera_ip):
+        log.info("DVRIP unavailable on %s; using OpenIPC (:9600) control", camera_ip)
+        try:
+            openipcCall(camera_ip, cmd, opts, camera_settings_path)
+        except Exception as e:
+            log.error("OpenIPC command error: %s", e)
     else:
-        log.info("Failure. Could not connect.")
-    cam.close()
+        log.info("Failure. Could not connect (no DVRIP, no isp_ctl on :9600).")
 
 
 def cameraControlV2(config, cmd, opts='', camera_user=None, camera_pwd=None):
@@ -1131,7 +1530,10 @@ if __name__ == '__main__':
         'reboot', 'GetHostname', 'GetSettings','GetDeviceInformation','GetNetConfig',
         'GetCameraParams','GetEncodeParams','SetParam','SaveSettings','LoadSettings',
         'SetColor','SetOSD','SetAutoReboot','GetIP','GetAutoReboot','CloudConnection',
-        'CameraTime','SwitchMode','UpgradeFirmware'
+        'CameraTime','SwitchMode','UpgradeFirmware',
+        'DetectFirmware',
+        'IspQuery','IspManual','IspAuto','Isp',
+        'RestoreDefault'
     ]
     opthelp = (
         'optional parameters for SetParam for example Camera ElecLevel 70 \n'
@@ -1181,8 +1583,14 @@ if __name__ == '__main__':
         help="Camera password (overrides the password in the config device URL)."
     )
 
+    # NOTE: no '-i' short form on purpose. The Isp pass-through forwards unknown
+    # args (parse_known_args -> extra) verbatim to the isp_ctl daemon, and the
+    # daemon's `manual`/`auto` use -a/-d/-i/-e (-i = ISP-digital gain). A '-i'
+    # short form here would let argparse swallow the daemon's `-i <val>` as the
+    # camera IP, silently dropping it (e.g. `Isp manual -a 1024 -i 1024 -e 30`).
     parser.add_argument(
-        '-i', '--ip',
+        '--ip',
+        metavar='IP',
         type=str,
         default=None,
         help="Control a camera directly by its IP address, with no RMS config "
@@ -1190,12 +1598,12 @@ if __name__ == '__main__':
              "--user/--password override the default admin / empty credentials."
     )
 
-    cml_args = parser.parse_args()
+    cml_args, extra = parser.parse_known_args()
     cmd = cml_args.command[0]
     if cml_args.options is not None:
-        opts = cml_args.options
+        opts = cml_args.options + extra
     else:
-        opts = ''
+        opts = extra if extra else ''
 
     if cmd not in cmd_list:
         log.info('Error: command "%s" not supported', cmd)
