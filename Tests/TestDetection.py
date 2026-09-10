@@ -122,7 +122,7 @@ def test_save_detections_accepts_results_without_diagnostics(tmp_path, monkeypat
     """ Results restored from backups written before the diagnostics were added still save. """
 
     monkeypatch.setattr(DSM.log, 'warning', lambda message: None)
-    config = SimpleNamespace(stationID='XX0001', height=10, width=10, fps=25)
+    config = SimpleNamespace(stationID='XX0001', height=10, width=10, fps=25, hot_pixels_filter=False)
 
     results = [('FF_XX0001_a.fits', [[], [], [], []], []), makeResult('FF_XX0001_b.fits')]
 
