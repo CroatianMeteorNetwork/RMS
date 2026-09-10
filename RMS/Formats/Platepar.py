@@ -2060,12 +2060,10 @@ class Platepar(object):
         # If the WGS84 height is not present, compute it from MSL elevation
         if not 'height_wgs84' in self.__dict__:
             try:
-                egm96_file_path = None  # This will use the default path
                 self.height_wgs84 = mslToWGS84Height(
                     np.radians(self.lat),
                     np.radians(self.lon),
-                    self.elev,
-                    egm96_file_path=egm96_file_path
+                    self.elev
                 )
             except Exception as e:
                 self.height_wgs84 = self.elev
@@ -2221,12 +2219,10 @@ class Platepar(object):
                 self.lon, self.lat, self.elev = self.parseLine(f)
 
                 try:
-                    egm96_file_path = None  # This will use the default path
                     self.height_wgs84 = mslToWGS84Height(
                         np.radians(self.lat),
                         np.radians(self.lon),
-                        self.elev,
-                        egm96_file_path=egm96_file_path
+                        self.elev
                     )
                 except Exception as e:
                     self.height_wgs84 = self.elev
