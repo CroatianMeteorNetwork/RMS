@@ -2158,6 +2158,17 @@ def cyXYHttoENU_wgs84(
                 + y_poly_fwd[3]*x_img**2 + y_poly_fwd[4]*x_img*y_img + y_poly_fwd[5]*y_img**2
                 + y_poly_fwd[6]*x_img**3 + y_poly_fwd[7]*x_img**2*y_img + y_poly_fwd[8]*x_img*y_img**2 + y_poly_fwd[9]*y_img**3
                 + y_poly_fwd[10]*y_img*r + y_poly_fwd[11]*x_img*r)
+
+            # If the 3rd order radial term is used, apply it
+            if dist_type.endswith("+radial3") or dist_type.endswith("+radial5"):
+                dx += x_poly_fwd[12]*x_img*r**3
+                dy += y_poly_fwd[12]*y_img*r**3
+
+            # If the 5th order radial term is used, apply it
+            if dist_type.endswith("+radial5"):
+                dx += x_poly_fwd[13]*x_img*r**5
+                dy += y_poly_fwd[13]*y_img*r**5
+
             x_corr = (x_img + dx)/pix_scale
             y_corr = (y_img + dy)/pix_scale
 
@@ -2184,8 +2195,7 @@ def cyXYHttoENU_wgs84(
             x_corr = (x_img + dx)/pix_scale
             y_corr = (y_img + dy)/pix_scale
         else:
-            x_corr = x_img/pix_scale
-            y_corr = y_img/pix_scale
+            raise ValueError("Unknown distortion type: {}".format(dist_type))
 
         # 3) gnomonic → Alt/Az (IDENTICAL to cyXYToAltAz)
         R = radians(sqrt(x_corr*x_corr + y_corr*y_corr))
@@ -2821,7 +2831,8 @@ def cyENHtToXY_iter(
     # per-point temps
     cdef double E, Nn, U
     cdef double dxe_base, dye_base, dze_base
-    cdef double U_lo, U_hi, U_mid, f_lo, f_hi, f_mid
+    cdef double U_lo, U_hi, U_mid, U_eval, f_lo, f_hi, f_mid
+    cdef bint moved_lo
     cdef double Xi, Yi, Zi, pval, theta_b, st, ct, latP, Ncur, hP
 
     cdef double A, h, radius, theta, sin_ang, cos_ang
@@ -2923,20 +2934,35 @@ def cyENHtToXY_iter(
         hP   = pval/cos(latP) - Ncur
         f_hi = hP - Ht_m[i]
 
+        # Expand the bracket, re-evaluating whichever endpoint actually moved. Evaluating only at
+        # U_hi left f_lo stale whenever the U_lo side was the one widened, so the loop could exit
+        # believing it had a bracket when it did not.
         it = 0
         while f_lo*f_hi > 0.0 and it < 8:
-            if fabs(f_lo) < fabs(f_hi):
+            moved_lo = fabs(f_lo) < fabs(f_hi)
+            if moved_lo:
                 U_lo -= 0.5*(U_hi - U_lo)
+                U_eval = U_lo
             else:
                 U_hi += 0.5*(U_hi - U_lo)
-            Xi = Xc + dxe_base + RU0*U_hi; Yi = Yc + dye_base + RU1*U_hi; Zi = Zc + dze_base + RU2*U_hi
+                U_eval = U_hi
+            Xi = Xc + dxe_base + RU0*U_eval; Yi = Yc + dye_base + RU1*U_eval; Zi = Zc + dze_base + RU2*U_eval
             pval = sqrt(Xi*Xi + Yi*Yi)
             theta_b = atan2(Zi*a, pval*b); st = sin(theta_b); ct = cos(theta_b)
             latP = atan2(Zi + ep2*b*st*st*st, pval - e2*a*ct*ct*ct)
             Ncur = a / sqrt(1.0 - e2*sin(latP)*sin(latP))
             hP   = pval/cos(latP) - Ncur
-            f_hi = hP - Ht_m[i]
+            if moved_lo:
+                f_lo = hP - Ht_m[i]
+            else:
+                f_hi = hP - Ht_m[i]
             it += 1
+
+        # Still no sign change: bisecting would converge on an endpoint and return it as a real
+        # answer. Report NaN, as cyXYHttoENU_wgs84 does.
+        if f_lo*f_hi > 0.0:
+            x_array[i] = np.nan; y_array[i] = np.nan
+            continue
 
         for it in range(20):
             U_mid = 0.5*(U_lo + U_hi)
@@ -3077,11 +3103,12 @@ def cyENHt0ToENHt1(
     # Per-point variables
     cdef double E0, N0, U0, E1, N1, U1
     cdef double dxe_base, dye_base, dze_base
-    cdef double U_lo, U_hi, U_mid, f_lo, f_hi, f_mid
+    cdef double U_lo, U_hi, U_mid, U_eval, f_lo, f_hi, f_mid
     cdef double Xi, Yi, Zi, pval, theta_b, st, ct, latP, Ncur, hP
     cdef double A, h, distance0, scale_factor
     cdef double dir_e, dir_n, dir_u
-    cdef double t_lo, t_hi, t_mid
+    cdef double t_lo, t_hi, t_mid, h_lo, h_hi
+    cdef bint moved_lo
     cdef int it
 
     n = E0_m.shape[0]
@@ -3157,17 +3184,21 @@ def cyENHt0ToENHt1(
         hP = pval/cos(latP) - Ncur
         f_hi = hP - Ht0_m[i]
 
-        # Ensure bracketing
+        # Ensure bracketing, re-evaluating whichever endpoint actually moved. Evaluating only at
+        # U_hi left f_lo stale whenever the U_lo side was the one widened.
         it = 0
         while f_lo*f_hi > 0.0 and it < 8:
-            if fabs(f_lo) < fabs(f_hi):
+            moved_lo = fabs(f_lo) < fabs(f_hi)
+            if moved_lo:
                 U_lo -= 0.5*(U_hi - U_lo)
+                U_eval = U_lo
             else:
                 U_hi += 0.5*(U_hi - U_lo)
+                U_eval = U_hi
 
-            Xi = Xc + dxe_base + RU0*U_hi
-            Yi = Yc + dye_base + RU1*U_hi
-            Zi = Zc + dze_base + RU2*U_hi
+            Xi = Xc + dxe_base + RU0*U_eval
+            Yi = Yc + dye_base + RU1*U_eval
+            Zi = Zc + dze_base + RU2*U_eval
             pval = sqrt(Xi*Xi + Yi*Yi)
             theta_b = atan2(Zi*a, pval*b)
             st = sin(theta_b)
@@ -3175,8 +3206,16 @@ def cyENHt0ToENHt1(
             latP = atan2(Zi + ep2*b*st*st*st, pval - e2*a*ct*ct*ct)
             Ncur = a / sqrt(1.0 - e2*sin(latP)*sin(latP))
             hP = pval/cos(latP) - Ncur
-            f_hi = hP - Ht0_m[i]
+            if moved_lo:
+                f_lo = hP - Ht0_m[i]
+            else:
+                f_hi = hP - Ht0_m[i]
             it += 1
+
+        # No sign change: the ray never reaches Ht0, so there is nothing to bisect.
+        if f_lo*f_hi > 0.0:
+            E1_array[i] = np.nan; N1_array[i] = np.nan; U1_array[i] = np.nan
+            continue
 
         # Bisection iterations
         for it in range(20):
@@ -3236,7 +3275,42 @@ def cyENHt0ToENHt1(
             t_lo = 10.0      # Start search at 10m from station
             t_hi = 1000000.0 # Up to 1000km
 
-            # Binary search for the right distance along the ray
+            # Height at both ends of the bracket. The previous version assumed height always
+            # increases with t and always moved t_lo when hP < Ht1, which bisects in the wrong
+            # direction on a downward-looking ray. It also never checked that Ht1 lies between the
+            # ends, so a ray that never reaches Ht1 converged on t_hi = 1e6 m and returned that as
+            # a valid position instead of NaN.
+            Xi = Xc + (RE0*dir_e + RN0*dir_n + RU0*dir_u)*t_lo
+            Yi = Yc + (RE1*dir_e + RN1*dir_n + RU1*dir_u)*t_lo
+            Zi = Zc + (RE2*dir_e + RN2*dir_n + RU2*dir_u)*t_lo
+            pval = sqrt(Xi*Xi + Yi*Yi)
+            theta_b = atan2(Zi*a, pval*b)
+            st = sin(theta_b)
+            ct = cos(theta_b)
+            latP = atan2(Zi + ep2*b*st*st*st, pval - e2*a*ct*ct*ct)
+            Ncur = a / sqrt(1.0 - e2*sin(latP)*sin(latP))
+            h_lo = pval/cos(latP) - Ncur - Ht1_m[i]
+
+            Xi = Xc + (RE0*dir_e + RN0*dir_n + RU0*dir_u)*t_hi
+            Yi = Yc + (RE1*dir_e + RN1*dir_n + RU1*dir_u)*t_hi
+            Zi = Zc + (RE2*dir_e + RN2*dir_n + RU2*dir_u)*t_hi
+            pval = sqrt(Xi*Xi + Yi*Yi)
+            theta_b = atan2(Zi*a, pval*b)
+            st = sin(theta_b)
+            ct = cos(theta_b)
+            latP = atan2(Zi + ep2*b*st*st*st, pval - e2*a*ct*ct*ct)
+            Ncur = a / sqrt(1.0 - e2*sin(latP)*sin(latP))
+            h_hi = pval/cos(latP) - Ncur - Ht1_m[i]
+
+            if h_lo*h_hi > 0.0:
+                # Ht1 is not reached anywhere along the ray
+                E1_array[i] = np.nan
+                N1_array[i] = np.nan
+                U1_array[i] = np.nan
+                continue
+
+            # Binary search for the right distance along the ray, driven by the sign at t_lo so it
+            # works for both ascending and descending rays
             for it in range(30):
                 t_mid = 0.5*(t_lo + t_hi)
 
@@ -3258,10 +3332,11 @@ def cyENHt0ToENHt1(
                 Ncur = a / sqrt(1.0 - e2*sin(latP)*sin(latP))
                 hP = pval/cos(latP) - Ncur
 
-                if hP < Ht1_m[i]:
-                    t_lo = t_mid
-                else:
+                if h_lo*(hP - Ht1_m[i]) <= 0.0:
                     t_hi = t_mid
+                else:
+                    t_lo = t_mid
+                    h_lo = hP - Ht1_m[i]
 
                 if fabs(hP - Ht1_m[i]) < 1e-3:  # 1mm tolerance
                     break
