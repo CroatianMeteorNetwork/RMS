@@ -13,7 +13,7 @@ import numpy as np
 import scipy.interpolate
 
 from RMS.Misc import getRmsRootDir
-from RMS.Decorators import memoizeSingle
+from RMS.Decorators import memoizeAll
 
 
 # Name of the EGM96 geoid data file shipped with RMS
@@ -137,7 +137,24 @@ def interpolateEGM96Data(geoid_heights):
     return geoid_model
 
 
-@memoizeSingle
+@memoizeAll
+def geoidModel(file_path):
+    """ Interpolated EGM96 geoid model for a data file, built once per path.
+
+    Loading the array and constructing the 721x1440 RectSphereBivariateSpline costs ~0.09 s on a
+    desktop and appreciably more on a Pi, so it must not happen per conversion. Keyed on the
+    resolved file path, which is the only thing the model depends on.
+
+    Arguments:
+        file_path: [str] Full path to the EGM96 data file.
+
+    Return:
+        [RectSphereBivariateSpline] Interpolated geoid model.
+    """
+
+    return interpolateEGM96Data(loadEGM96Data(file_path=file_path))
+
+
 def mslToWGS84Height(lat, lon, msl_height, egm96_source=None):
     """ Given the height above sea level (using the EGM96 model), compute the height above the WGS84
         ellipsoid.
@@ -157,11 +174,8 @@ def mslToWGS84Height(lat, lon, msl_height, egm96_source=None):
 
     """
 
-    # Load the geoid heights array
-    GEOID_HEIGHTS = loadEGM96Data(file_path=egm96FilePath(egm96_source))
-
-    # Init the interpolated geoid model
-    GEOID_MODEL = interpolateEGM96Data(GEOID_HEIGHTS)
+    # Interpolated geoid model, built once per data file
+    GEOID_MODEL = geoidModel(egm96FilePath(egm96_source))
 
     # Get the difference between WGS84 and MSL height
     lat_mod = np.pi/2 - lat
@@ -175,7 +189,6 @@ def mslToWGS84Height(lat, lon, msl_height, egm96_source=None):
     return wgs84_height
 
 
-@memoizeSingle
 def wgs84toMSLHeight(lat, lon, wgs84_height, egm96_source=None):
     """ Given the height above the WGS84 ellipsoid compute the height above sea level (using the EGM96 model).
 
@@ -194,11 +207,8 @@ def wgs84toMSLHeight(lat, lon, wgs84_height, egm96_source=None):
 
     """
 
-    # Load the geoid heights array
-    GEOID_HEIGHTS = loadEGM96Data(file_path=egm96FilePath(egm96_source))
-
-    # Init the interpolated geoid model
-    GEOID_MODEL = interpolateEGM96Data(GEOID_HEIGHTS)
+    # Interpolated geoid model, built once per data file
+    GEOID_MODEL = geoidModel(egm96FilePath(egm96_source))
 
     # Get the difference between WGS84 and MSL height
     lat_mod = np.pi/2 - lat
