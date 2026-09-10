@@ -1684,6 +1684,9 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
 # test-coordinate-transforms branch for the GMN contrail pipeline (Janus).
 # ============================================================================
 
+@cython.boundscheck(False)
+@cython.wraparound(False)
+@cython.cdivision(True)
 def cyXYToAltAz(np.ndarray[FLOAT_TYPE_t, ndim=1] x_data, \
     np.ndarray[FLOAT_TYPE_t, ndim=1] y_data, double x_res, double y_res, \
     double alt_centre, double az_centre, double rotation_from_horiz, double pix_scale, \
@@ -1696,7 +1699,7 @@ def cyXYToAltAz(np.ndarray[FLOAT_TYPE_t, ndim=1] x_data, \
         y_data: [ndarray] 1D numpy array containing the image row.
         x_res: [int] Image size, X dimension (px).
         y_res: [int] Image size, Y dimenstion (px).
-        az_centre: [float] Reference right ascension of the image centre (degrees).
+        az_centre: [float] Reference azimuth of the image centre (degrees).
         alt_centre: [float] Reference declination of the image centre (degrees).
         rotation_from_horiz: [float] Field rotation parameter (degrees).
         pix_scale: [float] Plate scale (px/deg).
@@ -1722,6 +1725,7 @@ def cyXYToAltAz(np.ndarray[FLOAT_TYPE_t, ndim=1] x_data, \
     cdef int i, index_offset
     cdef double x0, y0, xy, a1, a2, k1, k2, k3, k4
     cdef double r, r1, r2, dx, dy, lens_dist, x_corr, y_corr, x_corr1, y_corr1
+    cdef double r_corr, r_scale
     cdef double x_img, y_img, x_img1, y_img1, x_img2, y_img2
     cdef double radius, theta, sin_t, cos_t
     cdef double alt_centre_corr, az, alt
@@ -1977,42 +1981,6 @@ def cyXYToAltAz(np.ndarray[FLOAT_TYPE_t, ndim=1] x_data, \
     return alt_data, az_data
 
 # === XY -> ENU at WGS-84 height (low-elevation safe) ===
-@cython.cdivision(True)
-cdef inline void geodetic_to_ecef(double lat, double lon, double h,
-                                  double* X, double* Y, double* Z):
-    cdef double a = 6378137.0
-    cdef double f = 1.0/298.257223563
-    cdef double e2 = f*(2.0 - f)
-    cdef double s = sin(lat), c = cos(lat)
-    cdef double cl = cos(lon), sl = sin(lon)
-    cdef double N = a / sqrt(1.0 - e2*s*s)
-    X[0] = (N + h)*c*cl
-    Y[0] = (N + h)*c*sl
-    Z[0] = (N*(1.0 - e2) + h)*s
-
-@cython.cdivision(True)
-cdef inline void ecef_to_geodetic_bowring(double X, double Y, double Z,
-                                          double* lat, double* lon, double* h):
-    cdef double a = 6378137.0
-    cdef double f = 1.0/298.257223563
-    cdef double b = a*(1.0 - f)
-    cdef double e2 = f*(2.0 - f)
-    cdef double ep2 = (a*a - b*b)/(b*b)
-    cdef double p = sqrt(X*X + Y*Y)
-    lon[0] = atan2(Y, X)
-    cdef double theta = atan2(Z*a, p*b)
-    cdef double st = sin(theta), ct = cos(theta)
-    lat[0] = atan2(Z + ep2*b*st*st*st, p - e2*a*ct*ct*ct)
-    cdef double s = sin(lat[0])
-    cdef double N = a / sqrt(1.0 - e2*s*s)
-    h[0] = p/cos(lat[0]) - N
-
-@cython.cdivision(True)
-cdef inline void R_ecef_from_enu(double lat, double lon, double[:, :] R):
-    cdef double sL = sin(lon), cL = cos(lon), sF = sin(lat), cF = cos(lat)
-    R[0,0] = -sL;         R[1,0] =  cL;        R[2,0] = 0.0
-    R[0,1] = -sF*cL;      R[1,1] = -sF*sL;     R[2,1] =  cF
-    R[0,2] =  cF*cL;      R[1,2] =  cF*sL;     R[2,2] =  sF
 
 
 @cython.boundscheck(False)
@@ -2058,6 +2026,7 @@ def cyXYHttoENU_wgs84(
     cdef double x0, y0, xy, a1, a2, k1, k2, k3, k4
     # Per-sample vars
     cdef double x_img, y_img, r, dx, dy, x_corr, y_corr
+    cdef double r_corr, r_scale, dX
     cdef double R, theta, A, h, el_gate
     cdef double sin_t, cos_t, sin_ang, cos_ang
     cdef double east, north, up

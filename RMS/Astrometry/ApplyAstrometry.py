@@ -69,6 +69,7 @@ from RMS.Astrometry.CyFunctions import (cyraDecToXY, cyTrueRaDec2ApparentAltAz,
                                         cyGeoToENU,
                                         cyENUToXY_iter,
                                         cyGeoToXY_wgs84_iter,
+                                        cyENHtToXY_iter,
                                         cyENHt0ToENHt1)
 
 # Handle Python 2/3 compatibility
@@ -1732,10 +1733,17 @@ def imageCenter(platepar, center_of_distortion=False):
 
 
 def _centreAltAz(platepar, jd):
-    """apparent az/alt of the platepar centre at jd (radians)."""
-    az_c, alt_c = cyTrueRaDec2ApparentAltAz(
+    """ Alt/az of the platepar centre at jd (radians).
+
+    Uses cyraDec2AltAz rather than cyTrueRaDec2ApparentAltAz: the latter precesses J2000 -> date,
+    but RA_d/dec_d are already epoch-of-date in RMS (see pointingCorrection), so precessing them
+    again shifts the centre. This is the same call the ENU wrappers make.
+    """
+
+    az_c, alt_c = cyraDec2AltAz(
         np.radians(platepar.RA_d), np.radians(platepar.dec_d), jd,
-        np.radians(platepar.lat), np.radians(platepar.lon), platepar.refraction)
+        np.radians(platepar.lat), np.radians(platepar.lon))
+
     return az_c, alt_c
 
 
@@ -1748,8 +1756,6 @@ def xyToAltAzPP(X_data, Y_data, platepar, measurement=False):
         platepar: [Platepar structure] Astrometry parameters.
 
     Keyword arguments:
-        extinction_correction: [bool] Apply extinction correction. True by default. False is set to prevent 
-            infinite recursion in extinctionCorrectionApparentToTrue when set to True.
         measurement: [bool] Indicates if the given images values are image measurements. Used for correcting
             celestial coordinates for refraction if the refraction was not taken into account during
             plate fitting.
@@ -1774,8 +1780,8 @@ def xyToAltAzPP(X_data, Y_data, platepar, measurement=False):
     rot = rotationWrtHorizon(platepar)
 
     # Convert x,y to Alt/Az using a fast cython function
-    Alt_data, Az_data = cyXYToAltAz(np.array(X_data, dtype=np.float64), \
-        np.array(Y_data, dtype=np.float64), float(platepar.X_res), \
+    Alt_data, Az_data = cyXYToAltAz(np.atleast_1d(np.array(X_data, dtype=np.float64)).ravel(), \
+        np.atleast_1d(np.array(Y_data, dtype=np.float64)).ravel(), float(platepar.X_res), \
         float(platepar.Y_res), float(alt_centre), float(az_centre), \
         float(rot), float(platepar.F_scale), platepar.x_poly_fwd, platepar.y_poly_fwd, \
         unicode(platepar.distortion_type), refraction=platepar.refraction, \
@@ -1827,14 +1833,16 @@ def xyHtToENUPP(X_data, Y_data, ht_wgs84_m, platepar, min_el_deg=0.0):
     rot = rotationWrtHorizon(platepar)
         
     E, N, U = cyXYHttoENU_wgs84(
-        np.array(X_data, dtype=np.float64), np.array(Y_data, dtype=np.float64), 
+        np.atleast_1d(np.array(X_data, dtype=np.float64)).ravel(),
+        np.atleast_1d(np.array(Y_data, dtype=np.float64)).ravel(), 
         float(platepar.X_res), float(platepar.Y_res), 
         float(alt_centre), float(az_centre),
         float(rot), float(platepar.F_scale), 
         platepar.x_poly_fwd, platepar.y_poly_fwd, 
         unicode(platepar.distortion_type), 
         float(platepar.lat), float(platepar.lon), float(platepar.height_wgs84), 
-        np.array(ht_wgs84_m, dtype=np.float64).ravel() if not np.isscalar(ht_wgs84_m) else np.full(len(X_data), float(ht_wgs84_m), dtype=np.float64),
+        np.array(ht_wgs84_m, dtype=np.float64).ravel() if not np.isscalar(ht_wgs84_m) \
+            else np.full(np.size(X_data), float(ht_wgs84_m), dtype=np.float64),
         refraction=platepar.refraction, 
         equal_aspect=platepar.equal_aspect, 
         force_distortion_centre=platepar.force_distortion_centre, 
@@ -1966,9 +1974,9 @@ def enuToXYPP(E_data, N_data, U_data, platepar, min_el_deg=0.0):
     rot = rotationWrtHorizon(platepar)
     
     x, y = cyENUToXY_iter(
-        np.array(E_data, dtype=np.float64),
-        np.array(N_data, dtype=np.float64),
-        np.array(U_data, dtype=np.float64),
+        np.atleast_1d(np.array(E_data, dtype=np.float64)).ravel(),
+        np.atleast_1d(np.array(N_data, dtype=np.float64)).ravel(),
+        np.atleast_1d(np.array(U_data, dtype=np.float64)).ravel(),
         float(platepar.X_res), float(platepar.Y_res),
         float(alt_centre), float(az_centre),
         float(rot), float(platepar.F_scale),
@@ -2003,7 +2011,6 @@ def enHtToXYPP(E_data, N_data, Ht_data, platepar, min_el_deg=0.0):
     """
     
     # Import the Cython function
-    from RMS.Astrometry.CyFunctions import cyENHtToXY_iter
     
     # Compute reference Alt/Az to apparent coordinates, epoch of date
     az_centre, alt_centre = cyraDec2AltAz(
@@ -2067,9 +2074,19 @@ def ENHt0ToENHt1(E0_data, N0_data, Ht0_data, Ht1_data, platepar):
     Ht0_array = np.array(Ht0_data, dtype=np.float64).ravel()
     Ht1_array = np.array(Ht1_data, dtype=np.float64).ravel()
 
+    # Broadcast length-1 heights over the points, as the docstring promises. A scalar height with
+    # array E0/N0 is the normal way to ask for a whole frame at one height.
+    if len(Ht0_array) == 1 and len(E0_array) != 1:
+        Ht0_array = np.full(len(E0_array), Ht0_array[0], dtype=np.float64)
+
+    if len(Ht1_array) == 1 and len(E0_array) != 1:
+        Ht1_array = np.full(len(E0_array), Ht1_array[0], dtype=np.float64)
+
     # Check that arrays have the same length
     if len(E0_array) != len(N0_array) or len(E0_array) != len(Ht0_array) or len(E0_array) != len(Ht1_array):
-        raise ValueError(f"E0, N0, Ht0, and Ht1 arrays must have the same length. Got E0:{len(E0_array)}, N0:{len(N0_array)}, Ht0:{len(Ht0_array)}, Ht1:{len(Ht1_array)}")
+        raise ValueError("E0, N0, Ht0, and Ht1 must have the same length (heights may also be scalar). "
+                         "Got E0:{}, N0:{}, Ht0:{}, Ht1:{}".format(len(E0_array), len(N0_array),
+                                                                   len(Ht0_array), len(Ht1_array)))
 
     # Call the Cython function
     E1, N1, U1 = cyENHt0ToENHt1(
