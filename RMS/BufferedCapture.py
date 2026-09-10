@@ -24,6 +24,7 @@ import traceback
 
 import re
 import time
+import struct
 import datetime
 import copy
 import os.path
@@ -64,6 +65,49 @@ GST_TEARDOWN_TIMEOUT = 10
 # protocol change) can emit a wild PTS for the first seconds after the stream comes up,
 # and anything derived from it would be nonsense.
 MAX_EXPECTED_PTS_NS = 24*60*60*1e9  # 24 hours in nanoseconds
+
+
+# Fixed sensor-readout offset (raw_pts stamp point -> true row-0 readout), established
+# +88 us on the IMX307 (VMAX/HMAX/SHS1 timing + PPS-LED cal); see reference_rmsp_provenance.
+_K_READOUT_S = 88e-6
+
+
+def _rmspCapUtc(data):
+    """Parse the first checksum-valid RMSP v4 provenance SEI in a raw H.264 access
+    unit and return the camera capture UTC in seconds, or None. Layout matches
+    venc/main.c build_rmsp_payload (fields XOR-0xFF after the 'RMSP' magic).
+    capture_utc = (sec+usec) - (mono_pts_us - raw_pts_us), i.e. host-clock at emit
+    minus the camera-side capture->emit delay, both from the same back-to-back cal."""
+    def deesc(b):
+        o = bytearray(); z = 0
+        for x in b:
+            if z >= 2 and x == 3:
+                z = 0; continue
+            o.append(x); z = z + 1 if x == 0 else 0
+        return bytes(o)
+    raw = deesc(data); i = 0
+    while True:
+        j = raw.find(b"RMSP", i)
+        if j < 0 or j + 6 > len(raw):
+            return None
+        v = raw[j + 4] ^ 0xFF
+        L = {4: 61, 3: 59, 2: 53, 1: 49}.get(v, 49)
+        if j + L > len(raw):
+            i = j + 4; continue
+        rec = raw[j:j + L]; u = rec[:4] + bytes(x ^ 0xFF for x in rec[4:L]); i = j + L
+        ck = 0
+        for x in u[4:L - 1]:
+            ck ^= x
+        if ck != u[L - 1]:
+            continue
+        if v != 4:
+            return None
+        sec = struct.unpack('<I', u[6:10])[0]; usec = struct.unpack('<I', u[10:14])[0]
+        raw_pts = struct.unpack('<I', u[44:48])[0]; mono = struct.unpack('<I', u[48:52])[0]
+        exp_us = struct.unpack('<I', u[18:22])[0]
+        delay = (mono - raw_pts) & 0xffffffff
+        capture_utc = (sec + usec/1e6) - delay/1e6
+        return (capture_utc, exp_us/1e6)
 
 if sys.version_info[0] < 3:
     # py2
@@ -554,6 +598,33 @@ class BufferedCapture(Process):
         return smoothed_pts
 
 
+    def _seiProbe(self, pad, info):
+        """RMS_SEI_PROBE pad-probe on the tee sink: store SEI capture-UTC by buffer PTS."""
+        try:
+            buf = info.get_buffer()
+            ok, mi = buf.map(Gst.MapFlags.READ)
+            if ok:
+                cu = _rmspCapUtc(bytes(mi.data)); buf.unmap(mi)
+                if cu is not None and buf.pts != Gst.CLOCK_TIME_NONE:
+                    self._sei_by_pts[buf.pts] = cu
+                    if len(self._sei_by_pts) > 600:
+                        for k in list(self._sei_by_pts)[:200]:
+                            self._sei_by_pts.pop(k, None)
+        except Exception:
+            pass
+        return Gst.PadProbeReturn.OK
+
+    def _seiRecordDelta(self, ms):
+        """RMS_SEI_PROBE: accumulate stock-minus-SEI deltas and log stats each 100 frames."""
+        self._sei_deltas.append(ms)
+        n = len(self._sei_deltas)
+        if n % 100 == 0:
+            a = self._sei_deltas[-500:]
+            mean = sum(a)/len(a)
+            sd = (sum((x - mean)**2 for x in a)/len(a))**0.5
+            log.info("RMS_SEI_PROBE: stock-minus-row0start ms  n=%d  mean=%.1f  sd=%.1f  min=%.1f  max=%.1f",
+                     n, mean, sd, min(a), max(a))
+
     def read(self):
         """ Retrieve frames and timestamp.
 
@@ -641,6 +712,18 @@ class BufferedCapture(Process):
                 ret, frame = self.device.read()
                 if ret:
                     timestamp = time.time()
+
+        # RMS_SEI_PROBE: correlate stock timestamp with SEI capture-UTC by PTS (measurement only)
+        _sbp = getattr(self, '_sei_by_pts', None)
+        if _sbp is not None and ret and (timestamp is not None):
+            try:
+                _cu = _sbp.pop(gst_timestamp_ns, None)
+            except NameError:
+                _cu = None
+            if _cu is not None:
+                _cap_utc, _exp_s = _cu
+                _row0_start = _cap_utc - _exp_s - _K_READOUT_S   # start of integration, row 0
+                self._seiRecordDelta((timestamp - _row0_start)*1000.0)
 
         return ret, frame, timestamp
 
@@ -1275,6 +1358,20 @@ class BufferedCapture(Process):
                 self.pipeline = Gst.parse_launch(pipeline_str)
                 if not self.pipeline:
                     raise ValueError("Could not create pipeline")
+
+                # RMS_SEI_PROBE (env-gated): tap the RMSP provenance SEI off the tee
+                # (compressed H.264, pre-decode) to compare the stock frame timestamp
+                # against the camera's SEI capture-UTC. Off unless RMS_SEI_PROBE is set.
+                if os.environ.get('RMS_SEI_PROBE'):
+                    self._sei_by_pts = {}
+                    self._sei_deltas = []
+                    try:
+                        _tee = self.pipeline.get_by_name('t')
+                        if _tee is not None:
+                            _tee.get_static_pad('sink').add_probe(Gst.PadProbeType.BUFFER, self._seiProbe)
+                            log.info("RMS_SEI_PROBE: SEI probe attached on tee sink")
+                    except Exception as _e:
+                        log.warning("RMS_SEI_PROBE attach failed: %s", _e)
                 
                 # Start a daemon thread that drains the GstBus so it never fills
                 self._bus_thread = threading.Thread(target=self._busPoller, daemon=True)
