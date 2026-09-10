@@ -1,0 +1,60 @@
+{
+  "_platform": "OpenIPC / Goke GK7205V200 / IMX307 -- our venc + isp_ctl on :9600 (no DVRIP, no ONVIF)",
+  "_notes": "Science config for OpenIPC-converted cameras. Control goes to the isp_ctl daemon on :9600 via Utils/CameraControl's OpenIPC path (openipcCall). DVRIP setup verbs are mapped: CameraTime->time set, SetAutoReboot->autoreboot(cron), SetParam Encode*->encode(venc.conf+bounce), Camera PictureFlip/Mirror->flip/mirror, Camera DayNightColor->ircut, Camera WhiteBalance->wb, SetOSD/CloudConnection->ack. Isp commands are channel-less (venc is VENC chn 1, auto-detected). Encode params match the values baked into S96venc, so replaying them causes no venc bounce. Deploy as camera_settings.json on OpenIPC stations, or set config camera_settings_path to this file.",
+
+  "init": [
+    ["CameraTime", "set"],
+    ["SetAutoReboot", "Everyday,15"],
+    ["SetOSD", "off"],
+    ["CloudConnection", "off"],
+
+    ["SetParam", "Encode", "Video", "Compression", "H.264"],
+    ["SetParam", "Encode", "Video", "Resolution", "1080P"],
+    ["SetParam", "Encode", "Video", "FPS", "25"],
+    ["SetParam", "Encode", "Video", "BitRateControl", "CBR"],
+
+    ["SetParam", "Camera", "PictureFlip", "0"],
+    ["SetParam", "Camera", "PictureMirror", "0"],
+    ["SetParam", "Camera", "WhiteBalance", "2"],
+
+    ["Isp", "gamma", "0.5"],
+    ["Isp", "drc", "off"],
+    ["Isp", "nr", "off"],
+    ["Isp", "sharpen", "off"],
+    ["Isp", "dpc", "off"],
+    ["Isp", "dehaze", "off"],
+    ["Isp", "ldci", "off"],
+    ["Isp", "bypass", "antifc", "on"],
+    ["Isp", "bypass", "crosstalk", "on"],
+    ["Isp", "bypass", "ca", "on"],
+    ["Isp", "bypass", "lcac", "on"],
+    ["Isp", "bypass", "meshshading", "on"],
+    ["Isp", "bypass", "radialshading", "on"],
+    ["Isp", "ccm", "off"],
+    ["Isp", "satu", "128"],
+    ["Isp", "colortone", "unity"],
+    ["Isp", "venc_qp", "cap", "45", "25"],
+    ["Isp", "venc_cqp", "-12"],
+    ["Isp", "auto", "--min-exptime", "30"]
+  ],
+
+  "day": [
+    ["SetParam", "Camera", "DayNightColor", "1"],
+    ["Isp", "auto", "--min-exptime", "30", "--max-exptime", "39970"],
+    ["Isp", "drc", "off"],
+    ["Isp", "wb", "auto"],
+    ["Isp", "bypass", "dehaze", "on"],
+    ["Isp", "dehaze", "off"],
+    ["Isp", "bypass", "ca", "on"]
+  ],
+
+  "night": [
+    ["SetParam", "Camera", "DayNightColor", "2"],
+    ["Isp", "manual", "-a", "22924", "-i", "2048", "-e", "39941"],
+    ["Isp", "drc", "off"],
+    ["Isp", "wb", "unity"],
+    ["Isp", "bypass", "dehaze", "on"],
+    ["Isp", "dehaze", "off"],
+    ["Isp", "bypass", "ca", "on"]
+  ]
+}
