@@ -188,6 +188,23 @@ def SetIP(ip):
     return "0x%08X" % struct.unpack("I", inet_aton(ip))
 
 
+def ipField(value, current_hex, what, default=None):
+    """ Encode an IP entered in the GUI/CLI. A blank field keeps the device's current
+        setting (or the default) instead of crashing inet_aton on an empty string; a
+        malformed address raises a readable error instead of an OSError traceback. """
+    value = (value or "").strip()
+    if not value:
+        if current_hex:
+            return current_hex
+        if default:
+            return SetIP(default)
+        raise ValueError("A {:s} is required".format(what))
+    try:
+        return SetIP(value)
+    except OSError:
+        raise ValueError("Invalid {:s}: {!r}".format(what, value))
+
+
 def GetInterfaces(checkip=False):
     # if the GUI is initialised, just read the list of interfaces from the dropdown
     if app is not None:
@@ -285,9 +302,12 @@ def ConfigXM(data, debug=False, intf=None):
     print('Remote host:', devices[data[1]][u"HostName"])
     config[u"DvrMac"] = devices[data[1]][u"MAC"]
     config[u"EncryptType"] = 1
-    config[u"GateWay"] = SetIP(data[4])
-    config[u"HostIP"] = SetIP(data[2])
-    config[u"Submask"] = SetIP(data[3])
+    dev = devices[data[1]]
+    # Blank gateway/mask keep what the device reported in its search reply (netherd/XM
+    # cameras advertise both); the IP itself is required
+    config[u"GateWay"] = ipField(data[4], dev.get(u"GateWay"), "gateway")
+    config[u"HostIP"] = ipField(data[2], None, "IP address")
+    config[u"Submask"] = ipField(data[3], dev.get(u"Submask"), "subnet mask", default="255.255.255.0")
     config[u"Username"] = "admin"
     if len(data) > 5:
         passwd = sofia_hash(data[5])
@@ -1038,16 +1058,20 @@ class GUITk:
         devices[dev][u"TCPPort"] = int(self.tcp.get())
         devices[dev][u"HttpPort"] = int(self.http.get())
         devices[dev][u"HostName"] = self.name.get()
-        result = ProcessCMD(
-            [
-                "config",
-                dev,
-                self.addr.get(),
-                self.mask.get(),
-                self.gate.get(),
-                self.passw.get(),
-            ]
-        )
+        try:
+            result = ProcessCMD(
+                [
+                    "config",
+                    dev,
+                    self.addr.get(),
+                    self.mask.get(),
+                    self.gate.get(),
+                    self.passw.get(),
+                ]
+            )
+        except ValueError as e:
+            showerror("Error", str(e))
+            return
         if result["Ret"] == 100:
             self.table.item(
                 self.table.selection()[0],
