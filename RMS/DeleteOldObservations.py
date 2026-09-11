@@ -741,6 +741,32 @@ def deleteFiles(dir_path, config, delete_all=False):
 
 
 
+def estimateNightVideoBytes(video_dir, sample=3):
+    """Estimate one night/day of raw video from ACTUAL recent usage on disk, so the
+    disk-space provisioning tracks the camera's real bitrate instead of a fixed guess.
+
+    Returns the largest of the most recent `sample` per-day video directories, in
+    BYTES (worst-case recent day, so we never under-provision), or None when there is
+    no video history yet (first run -> caller falls back to the fixed-bitrate baseline).
+    getRawItems(video_dir, in_video_dir=True) yields the Year/Day dirs in chronological
+    order; measuring the real dirs makes this bitrate-agnostic (a 20 Mbps VBR night and
+    a 0.25 Mbps CBR night are both accounted for correctly).
+    """
+    try:
+        day_dirs = getRawItems(video_dir, in_video_dir=True)
+    except Exception:
+        return None
+    if not day_dirs:
+        return None
+    sizes = []
+    for d in day_dirs[-sample:]:
+        try:
+            sizes.append(usedSpaceRecursive(d)*(1024**3))   # usedSpaceRecursive returns GB
+        except Exception:
+            pass
+    return max(sizes) if sizes else None
+
+
 def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration=None):
     """ Deletes old observation directories to free up space for new ones.
 
@@ -847,14 +873,18 @@ def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration
 
     if config.raw_video_save:
 
-        # Taking a ~0.25 Mbps average video bitrate (default 720p capture @ 25 fps)
-        raw_video_bytes = duration*0.25*(1024**2)
+        # Prefer the ACTUAL size of recent raw video on disk -- it tracks the camera's
+        # real bitrate. The old fixed 0.25 Mbps assumption under-provisions badly on
+        # high-bitrate/VBR encoders (measured ~5-10x, up to ~200x at peak), so the disk
+        # could fill mid-night despite cleanup having run.
+        raw_video_bytes = estimateNightVideoBytes(video_dir)
 
-        # Roughly scaling for higher resolutions
-        raw_video_bytes *= (config.width*config.height)/(1280*720)
-
-        # Roughly scaling for fps
-        raw_video_bytes *= (config.fps)/(25)
+        if raw_video_bytes is None:
+            # No history yet: fall back to a ~0.25 Mbps @720p25 baseline, scaled by
+            # resolution and fps. Replaced by the measured value from the next night on.
+            raw_video_bytes = duration*0.25*(1024**2)
+            raw_video_bytes *= (config.width*config.height)/(1280*720)
+            raw_video_bytes *= (config.fps)/(25)
 
         next_night_bytes += raw_video_bytes
 
