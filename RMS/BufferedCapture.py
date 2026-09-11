@@ -71,6 +71,23 @@ MAX_EXPECTED_PTS_NS = 24*60*60*1e9  # 24 hours in nanoseconds
 # +88 us on the IMX307 (VMAX/HMAX/SHS1 timing + PPS-LED cal); see reference_rmsp_provenance.
 _K_READOUT_S = 88e-6
 
+# Wallclock RATE discipline for GStreamer frame timestamps.
+# The RTP/PTS timebase rides the camera's crystal (measured -13.2 ppm on a GK7205/IMX307
+# unit = ~475 ms over a night; chrony/NTP steer CLOCK_REALTIME, never the camera's
+# monotonic clock). The stock timestamp anchors wallclock ONCE (start_time) and then
+# follows PTS, so it inherits the full drift. Fix: track the least-delayed
+# (arrival wallclock - smoothed PTS) offset over a rolling window -- arrival jitter is
+# one-sided (delay only), so the window MIN is the clean estimator -- and apply only its
+# CHANGE since the first converged window. Rate-only by design: at t0 the correction is
+# exactly 0, so the run origin and every station's existing camera_latency calibration
+# are preserved; before convergence, or if anything looks wrong, the fallback IS the
+# stock timestamp. Validated against per-frame camera SEI ground truth (RMS_SEI_PROBE):
+# -13.2 ppm -> <2 ppm residual, 0.6 ms p2p; the 120 s window converges within ~2 min.
+DISC_WINDOW_S = 120.0            # min-tracking window (120 s beat 30 s: catches true-min frames)
+DISC_SLEW_S_PER_FRAME = 20e-6    # max correction change per frame (500 ppm @ 25 fps): tracks any
+                                 # real crystal, absorbs a host clock step gradually, never jumps
+DISC_RESET_S = 2.0               # |target - corr| beyond this = PTS/clock discontinuity: re-reference
+
 
 def _rmspCapUtc(data):
     """Parse the first checksum-valid RMSP v4 provenance SEI in a raw H.264 access
@@ -598,32 +615,83 @@ class BufferedCapture(Process):
         return smoothed_pts
 
 
-    def _seiProbe(self, pad, info):
-        """RMS_SEI_PROBE pad-probe on the tee sink: store SEI capture-UTC by buffer PTS."""
+    def _arrivalProbe(self, pad, info):
+        """Pad probe on the tee sink (compressed H.264, pre-decode, streaming thread): record
+        CLOCK_REALTIME arrival per buffer PTS for the wallclock rate discipline. Measured here
+        and not at read(): on a loaded host a consumer backlog delays the appsink pull, not
+        the arrival, so the window MIN stays honest. With RMS_SEI_PROBE set, also parse the
+        RMSP provenance SEI (camera ground-truth capture UTC) for validation logging."""
         try:
             buf = info.get_buffer()
-            ok, mi = buf.map(Gst.MapFlags.READ)
-            if ok:
-                cu = _rmspCapUtc(bytes(mi.data)); buf.unmap(mi)
-                if cu is not None and buf.pts != Gst.CLOCK_TIME_NONE:
-                    self._sei_by_pts[buf.pts] = cu
-                    if len(self._sei_by_pts) > 600:
-                        for k in list(self._sei_by_pts)[:200]:
-                            self._sei_by_pts.pop(k, None)
+            pts = buf.pts
+            if pts == Gst.CLOCK_TIME_NONE:
+                return Gst.PadProbeReturn.OK
+            self._arr_by_pts[pts] = time.time()
+            if len(self._arr_by_pts) > 600:
+                for k in list(self._arr_by_pts)[:200]:
+                    self._arr_by_pts.pop(k, None)
+            if self._sei_by_pts is not None:
+                ok, mi = buf.map(Gst.MapFlags.READ)
+                if ok:
+                    cu = _rmspCapUtc(bytes(mi.data)); buf.unmap(mi)
+                    if cu is not None:
+                        self._sei_by_pts[pts] = cu
+                        if len(self._sei_by_pts) > 600:
+                            for k in list(self._sei_by_pts)[:200]:
+                                self._sei_by_pts.pop(k, None)
         except Exception:
             pass
         return Gst.PadProbeReturn.OK
 
-    def _seiRecordDelta(self, ms):
-        """RMS_SEI_PROBE: accumulate stock-minus-SEI deltas and log stats each 100 frames."""
-        self._sei_deltas.append(ms)
+    def _seiRecordDelta(self, live_ms, stock_ms, lpipe_ms, corr_ms, exp_ms):
+        """RMS_SEI_PROBE: log stats every 100 frames (over the last 500). live = the
+        disciplined timestamp RMS emits, stock = the same before discipline, both vs the
+        TARGET (row-0 start of integration = SEI readout - exp). Lpipe = least-delayed
+        arrival - readout (exposure-independent pipeline latency; nan until the window
+        is full). corr = the applied rate correction."""
+        self._sei_deltas.append((live_ms, stock_ms, lpipe_ms))
         n = len(self._sei_deltas)
         if n % 100 == 0:
             a = self._sei_deltas[-500:]
-            mean = sum(a)/len(a)
-            sd = (sum((x - mean)**2 for x in a)/len(a))**0.5
-            log.info("RMS_SEI_PROBE: stock-minus-row0start ms  n=%d  mean=%.1f  sd=%.1f  min=%.1f  max=%.1f",
-                     n, mean, sd, min(a), max(a))
+            def st(i):
+                v = [x[i] for x in a if x[i] == x[i]]      # drop nan
+                if not v:
+                    return float('nan'), float('nan'), float('nan'), float('nan')
+                mu = sum(v)/len(v)
+                return mu, (sum((x - mu)**2 for x in v)/len(v))**0.5, min(v), max(v)
+            lv, so, lp = st(0), st(1), st(2)
+            log.info("RMS_SEI_PROBE n=%d ms | live-intstart: mean=%.2f sd=%.2f min=%.2f max=%.2f"
+                     " | stock-intstart: mean=%.2f sd=%.2f | Lpipe: mean=%.2f sd=%.2f"
+                     " | corr=%.2f ms exp=%.1f ms",
+                     n, lv[0], lv[1], lv[2], lv[3], so[0], so[1], lp[0], lp[1], corr_ms, exp_ms)
+
+    def _disciplineTimestamp(self, stock_ts, arr):
+        """Rate-only wallclock discipline (see DISC_* at module top). Returns stock_ts plus
+        a slew-limited correction equal to the change of the least-delayed
+        (arrival - smoothed PTS) offset since the first full window. Returns stock_ts
+        unchanged until the window is full, so startup behaviour is exactly stock."""
+        pts_s = stock_ts - self.start_timestamp          # smoothed PTS timebase, either branch
+        win = self._disc_win
+        win.append(arr - pts_s)
+        if len(win) < win.maxlen:
+            return stock_ts
+        m = min(win)
+        if self._disc_ref is None:
+            self._disc_ref = m                           # correction starts at exactly 0
+            return stock_ts
+        d = (m - self._disc_ref) - self._disc_corr
+        if abs(d) > DISC_RESET_S:
+            # PTS timebase reset or host clock step: re-reference so the correction
+            # continues from its current value instead of jumping the timestamps.
+            log.warning("Timestamp discipline: %.3f s discontinuity, re-referencing", d)
+            self._disc_ref = m - self._disc_corr
+            return stock_ts + self._disc_corr
+        if d > DISC_SLEW_S_PER_FRAME:
+            d = DISC_SLEW_S_PER_FRAME
+        elif d < -DISC_SLEW_S_PER_FRAME:
+            d = -DISC_SLEW_S_PER_FRAME
+        self._disc_corr += d
+        return stock_ts + self._disc_corr
 
     def read(self):
         """ Retrieve frames and timestamp.
@@ -713,7 +781,27 @@ class BufferedCapture(Process):
                 if ret:
                     timestamp = time.time()
 
-        # RMS_SEI_PROBE: correlate stock timestamp with SEI capture-UTC by PTS (measurement only)
+        # Wallclock rate discipline (GStreamer path; see DISC_* at module top). Pops this
+        # frame's arrival time recorded by _arrivalProbe. No arrival (OpenCV path, probe not
+        # attached) -> stock timestamp; a lone frame without arrival keeps the current
+        # correction so the series never steps.
+        _stock_ts = timestamp
+        _arr = None
+        if ret and (timestamp is not None) and getattr(self, '_arr_by_pts', None):
+            try:
+                _arr = self._arr_by_pts.pop(gst_timestamp_ns, None)
+            except NameError:
+                _arr = None
+        if _arr is not None:
+            timestamp = self._disciplineTimestamp(_stock_ts, _arr)
+        elif (timestamp is not None) and getattr(self, '_disc_corr', 0.0):
+            timestamp = _stock_ts + self._disc_corr
+
+        # RMS_SEI_PROBE (measurement only): live and stock timestamps vs the SEI ground
+        # truth, keyed by buffer PTS. TARGET = row-0 START OF INTEGRATION. Row-0 READOUT
+        # (capture_utc - k) is the exposure-independent intermediary: least-delayed arrival
+        # - readout = the fixed pipeline latency L_pipe. int_start = readout - exp; the SEI
+        # gives exp per frame, the non-SEI path uses camera_buffer/fps (~ night exposure).
         _sbp = getattr(self, '_sei_by_pts', None)
         if _sbp is not None and ret and (timestamp is not None):
             try:
@@ -722,8 +810,14 @@ class BufferedCapture(Process):
                 _cu = None
             if _cu is not None:
                 _cap_utc, _exp_s = _cu
-                _row0_start = _cap_utc - _exp_s - _K_READOUT_S   # start of integration, row 0
-                self._seiRecordDelta((timestamp - _row0_start)*1000.0)
+                _readout = _cap_utc - _K_READOUT_S           # row-0 readout (exposure-independent)
+                _int_start = _readout - _exp_s               # TARGET: row-0 start of integration
+                _win = self._disc_win
+                _lpipe = float('nan')
+                if len(_win) == _win.maxlen:
+                    _lpipe = (_stock_ts - self.start_timestamp) + min(_win) - _readout
+                self._seiRecordDelta((timestamp - _int_start)*1000.0, (_stock_ts - _int_start)*1000.0,
+                                     _lpipe*1000.0, self._disc_corr*1000.0, _exp_s*1000.0)
 
         return ret, frame, timestamp
 
@@ -1359,19 +1453,30 @@ class BufferedCapture(Process):
                 if not self.pipeline:
                     raise ValueError("Could not create pipeline")
 
-                # RMS_SEI_PROBE (env-gated): tap the RMSP provenance SEI off the tee
-                # (compressed H.264, pre-decode) to compare the stock frame timestamp
-                # against the camera's SEI capture-UTC. Off unless RMS_SEI_PROBE is set.
-                if os.environ.get('RMS_SEI_PROBE'):
-                    self._sei_by_pts = {}
-                    self._sei_deltas = []
-                    try:
-                        _tee = self.pipeline.get_by_name('t')
-                        if _tee is not None:
-                            _tee.get_static_pad('sink').add_probe(Gst.PadProbeType.BUFFER, self._seiProbe)
-                            log.info("RMS_SEI_PROBE: SEI probe attached on tee sink")
-                    except Exception as _e:
-                        log.warning("RMS_SEI_PROBE attach failed: %s", _e)
+                # Wallclock rate discipline state + arrival probe on the tee sink (see DISC_*
+                # at module top). Reset on every pipeline build: a new run origin. With
+                # RMS_SEI_PROBE set, the same probe also taps the RMSP provenance SEI
+                # (camera ground-truth capture UTC) for validation logging.
+                self._arr_by_pts = {}
+                try:
+                    _n = int(DISC_WINDOW_S*float(self.config.fps))
+                except Exception:
+                    _n = 3000
+                self._disc_win = deque(maxlen=max(2, _n))
+                self._disc_ref = None
+                self._disc_corr = 0.0
+                self._sei_by_pts = {} if os.environ.get('RMS_SEI_PROBE') else None
+                self._sei_deltas = []
+                try:
+                    _tee = self.pipeline.get_by_name('t')
+                    if _tee is not None:
+                        _tee.get_static_pad('sink').add_probe(Gst.PadProbeType.BUFFER, self._arrivalProbe)
+                        log.info("Timestamp discipline: arrival probe attached on tee sink (window %d frames)%s",
+                                 self._disc_win.maxlen, ", SEI probe on" if self._sei_by_pts is not None else "")
+                    else:
+                        log.warning("Timestamp discipline: tee not found; arrival probe not attached (stock timestamps)")
+                except Exception as _e:
+                    log.warning("Timestamp discipline: arrival probe attach failed (%s); stock timestamps", _e)
                 
                 # Start a daemon thread that drains the GstBus so it never fills
                 self._bus_thread = threading.Thread(target=self._busPoller, daemon=True)
