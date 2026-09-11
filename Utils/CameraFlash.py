@@ -138,29 +138,50 @@ class _Cam(object):
         return out.strip().split()[0] if out.strip() else None
 
     def put_and_flash(self, data, index, name):
-        """Stream `data` (one whole partition) to /tmp, flashcp, verify md5, clean
-        up. DESTRUCTIVE. Returns True on verified success."""
+        """STREAM `data` (one whole partition) straight into the flash and verify by
+        read-back md5. DESTRUCTIVE. Returns True on verified success.
+
+        The bytes are base64'd over the SSH channel and piped through `dd` straight
+        to the mtd CHAR device /dev/mtdN (erased first with flash_eraseall) -- exactly
+        what flashcp does internally, but WITHOUT staging the whole image first. Peak
+        camera RAM is the dd buffer (~64 KB), independent of image size. The char
+        device is used (not /dev/mtdblockN) because the rootfs partition is the mounted
+        overlay lowerdir -> the block device is EBUSY, while the char device is not
+        (this is why flashcp always used /dev/mtdN). The previous version base64-decoded
+        the ENTIRE image into /tmp (tmpfs = RAM) and then ran flashcp; on a 32 MB camera
+        a ~4 MB rootfs in tmpfs OOM/watchdog-crashed the box MID-WRITE and bricked it
+        (a partial squashfs the kernel can't mount). No tmpfs staging here.
+        """
         want = hashlib.md5(data).hexdigest()
-        tmp = "/tmp/.flash_%s.img" % name
         b64 = base64.b64encode(data)
+        # flash_eraseall clears the whole partition, then dd streams the decoded bytes to
+        # the char device (bs = 64 KB erase block). Pre-fault the binaries this write needs
+        # into page cache FIRST: flash_eraseall erases the mounted rootfs lowerdir up front,
+        # so an uncached page fault to it mid-write (busybox applet, etc.) could crash the
+        # box during the minutes-long write on worn NOR -- caching them closes that window.
+        # rc != 0 if the erase, dd, or sync fails; the read-back md5 below is the real proof.
         i, o, e = self.c.exec_command(
-            "base64 -d > '%s' && flashcp '%s' /dev/mtd%d && sync" % (tmp, tmp, index),
-            timeout=900)
-        for k in range(0, len(b64), 32768):
-            i.write(b64[k:k + 32768])
-        i.flush(); i.channel.shutdown_write()
+            'cat "$(command -v busybox)" "$(command -v flash_eraseall)" >/dev/null 2>&1; '
+            "flash_eraseall /dev/mtd%d >/dev/null 2>&1 && "
+            "base64 -d | dd of=/dev/mtd%d bs=65536 && sync" % (index, index),
+            timeout=1800)
+        try:
+            for k in range(0, len(b64), 32768):
+                i.write(b64[k:k + 32768])
+            i.flush(); i.channel.shutdown_write()
+        except Exception as ex:
+            log.error("  stream to mtd%d (%s) failed: %s", index, name, ex)
+            return False
         _ = o.read(); err = e.read().decode("utf-8", "replace")
         rc = o.channel.recv_exit_status()
         if rc != 0:
-            self.run("rm -f '%s'" % tmp)
-            log.error("  flashcp mtd%d (%s) FAILED rc=%d: %s", index, name, rc, err.strip())
+            log.error("  stream-write mtd%d (%s) FAILED rc=%d: %s", index, name, rc, err.strip())
             return False
         got = self.mtd_md5(index, len(data))
-        self.run("rm -f '%s'" % tmp)
         if got != want:
             log.error("  VERIFY FAILED mtd%d (%s): on-chip %s != want %s", index, name, got, want)
             return False
-        log.info("  mtd%d (%s): wrote+verified %d B (md5 %s)", index, name, len(data), want)
+        log.info("  mtd%d (%s): streamed+verified %d B (md5 %s)", index, name, len(data), want)
         return True
 
     def close(self):
@@ -266,15 +287,21 @@ def preflight(cam):
     facts["mac_pretty"] = mac.strip()
     log.info("[preflight] live MAC %s (will be preserved in the env)", mac.strip())
 
-    rc, dfout, _ = cam.run("df -k /tmp | tail -1")
-    try: facts["tmp_free_kb"] = int(dfout.split()[3])
-    except Exception: facts["tmp_free_kb"] = -1
-    biggest = max(sz for (i, n, o, sz) in OPENIPC_MTD if i in WRITE_ORDER)
-    if facts["tmp_free_kb"] >= 0 and facts["tmp_free_kb"] * 1024 < biggest:
-        log.warning("[preflight] /tmp free %d KB < biggest slice %d KB -- commit stops "
-                    "venc/isp_ctl first to free RAM", facts["tmp_free_kb"], biggest // 1024)
-    else:
-        log.info("[preflight] staging headroom OK (/tmp %d KB free)", facts["tmp_free_kb"])
+    # Free RAM sanity. The image is STREAMED to flash (put_and_flash), so we no longer
+    # need image-sized headroom -- peak use is ~one erase block. But a critically low
+    # MemAvailable means something else is eating RAM (e.g. capture still streaming from
+    # this cam); flashing into that risks the OOM/watchdog crash that bricked .205, so
+    # HARD-FAIL rather than proceed. Stop RMS capture on the target before flashing.
+    MIN_FREE_KB = 3072  # 3 MB: comfortable for the dd/erase path + running services
+    rc, mout, _ = cam.run("awk '/^MemAvailable:/{print $2; f=1} END{if(!f) print -1}' /proc/meminfo")
+    try: facts["mem_avail_kb"] = int(mout.split()[0])
+    except Exception: facts["mem_avail_kb"] = -1
+    if 0 <= facts["mem_avail_kb"] < MIN_FREE_KB:
+        raise RuntimeError(
+            "only %d KB RAM available (< %d KB) -- refusing to flash. Something is using "
+            "memory on the camera (is RMS still capturing from it?). Stop capture and retry; "
+            "flashing into low RAM is what OOM/watchdog-bricked .205." % (facts["mem_avail_kb"], MIN_FREE_KB))
+    log.info("[preflight] RAM available %d KB (streamed flash, no full-image staging)", facts["mem_avail_kb"])
     return facts
 
 
@@ -450,7 +477,7 @@ def flash_openipc_image(cam, ip, tgz_path, dry_run):
     shadows = [p for p in present.split() if p]
     log.info("  overlay shadows to clear: %s", shadows if shadows else "(none -- clean-image camera)")
     log.info("  preserved: interfaces.d/eth0 (IP), hostname, dropbear key, /mnt/mtd/*")
-    log.info("  plan: feed watchdog -> flashcp kernel(verify) -> flashcp rootfs(verify)"
+    log.info("  plan: feed watchdog -> stream kernel(verify) -> stream rootfs(verify)"
              " -> clear shadows -> reboot")
     if dry_run:
         log.info("=== DRY-RUN complete. Nothing was flashed. Add 'commit' to flash. ===")
@@ -465,8 +492,8 @@ def flash_openipc_image(cam, ip, tgz_path, dry_run):
             "</dev/null >/dev/null 2>&1 & echo fed")
     cam.run("rm -f /tmp/*.log 2>/dev/null")
 
-    # Flash kernel then rootfs, each read-back verified. put_and_flash streams to
-    # /tmp one partition at a time (tmpfs has room now that logs are cleared).
+    # Flash kernel then rootfs, each STREAMED straight to the mtd block device and
+    # read-back verified (put_and_flash; ~64 KB peak RAM, no tmpfs staging).
     log.warning("[commit] flashing kernel -> mtd%d", kmtd)
     if not cam.put_and_flash(kdata, kmtd, "kernel"):
         log.error("[commit] kernel flash FAILED -- overlay untouched, still boots current image.")
