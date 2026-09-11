@@ -277,7 +277,15 @@ def SearchXM(intf=None):
                 devices[answer["NetWork.NetCommon"]["MAC"]] = answer[
                     "NetWork.NetCommon"
                 ]
-                devices[answer["NetWork.NetCommon"]["MAC"]][u"Brand"] = u"xm"
+                _nc = answer["NetWork.NetCommon"]
+                # netherd fronts our OpenIPC/venc cams over XM broadcast but they serve
+                # RTSP on :554 (real XM DVRIP is :34567) and are named openipc-* -> route
+                # them to the SSH set-IP path, not XM broadcast (which netherd acks but
+                # cannot apply).
+                _oipc = (str(_nc.get("TCPPort")) == "554"
+                         or str(_nc.get("HostName", "")).lower().startswith("openipc")
+                         or str(_nc.get("SN", "")).upper() == "OPENIPC")
+                devices[_nc["MAC"]][u"Brand"] = u"openipc" if _oipc else u"xm"
     server.close()
     return devices
 
@@ -706,6 +714,84 @@ def ConfigONVIF(data, debug=False, intf=None):
 
 
 
+def _openipc_ssh(ip, password="12345", timeout=12):
+    """Best-effort SSH to an OpenIPC camera (dropbear root). paramiko is optional."""
+    import paramiko
+    c = paramiko.SSHClient()
+    c.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    c.connect(ip, username="root", password=password, timeout=timeout,
+              banner_timeout=timeout, auth_timeout=timeout)
+    return c
+
+
+def ConfigOpenIPC(data, debug=False, intf=None):
+    """Set an OpenIPC camera's static IPv4 over SSH, then reboot.
+
+    Our OpenIPC cameras run the venc streamer with majestic OFF -> no ONVIF, and
+    netherd acks an XM broadcast set-IP but cannot apply it. Every OpenIPC build
+    has dropbear, so SSH is the reliable control plane: write a static
+    interfaces.d/eth0 (+ hostname) into the overlay and reboot. Unicast -- the
+    camera must be reachable at its current IP. data = [config, MAC, IP, MASK,
+    GATE, PASSWORD?]. Returns the XM-style {"Ret": ...} the UI expects.
+    """
+    mac = data[1]
+    dev = devices.get(mac, {})
+    cur_ip = GetIP(dev["HostIP"]) if dev.get("HostIP") else None
+    if not cur_ip:
+        print("OpenIPC set-IP: unknown current IP for %s" % mac)
+        return {"Ret": 101}
+    new_ip = data[2]
+    mask = data[3] if len(data) > 3 and data[3] else "255.255.255.0"
+    gate = data[4] if len(data) > 4 and data[4] else ""
+    pw = data[5] if len(data) > 5 and data[5] else "12345"
+    host = "openipc-" + new_ip.split(".")[-1]
+    stanza = ("iface eth0 inet static\n"
+              "    hwaddress ether $(fw_printenv -n ethaddr || echo 00:00:23:34:45:66)\n"
+              "    address %s\n    netmask %s\n" % (new_ip, mask))
+    if gate:
+        stanza += "    gateway %s\n" % gate
+    try:
+        c = _openipc_ssh(cur_ip, pw)
+    except ImportError:
+        print("OpenIPC set-IP needs paramiko (pip install paramiko)")
+        return {"Ret": 102}
+    except Exception as err:
+        m = str(err).lower()
+        if "auth" in m or "password" in m or "authentication" in m:
+            print("OpenIPC SSH auth failed for %s" % cur_ip)
+            return {"Ret": 106}
+        print("OpenIPC SSH connect failed (%s): %s" % (cur_ip, err))
+        return {"Ret": 101}
+    try:
+        def run(cmd):
+            _, o, e = c.exec_command(cmd)
+            return (o.read().decode("utf-8", "replace") + e.read().decode("utf-8", "replace"))
+        run("cat > /etc/network/interfaces.d/eth0 <<'EOF'\n" + stanza + "EOF")
+        run("echo %s > /etc/hostname" % host)
+        got = run("cat /etc/network/interfaces.d/eth0")
+        if got.strip() != stanza.strip():
+            print("OpenIPC set-IP: stanza write mismatch on %s" % cur_ip)
+            try: c.close()
+            except Exception: pass
+            return {"Ret": 101}
+        # reboot in the background so the channel closes cleanly; camera comes up static
+        c.exec_command("sync; (sleep 1; reboot) >/dev/null 2>&1 &")
+        try: c.close()
+        except Exception: pass
+        dev["HostIP"] = SetIP(new_ip)
+        dev["Submask"] = SetIP(mask)
+        if gate:
+            dev["GateWay"] = SetIP(gate)
+        dev["HostName"] = host
+        print("OpenIPC %s -> %s (rebooting; will come up static as %s)" % (cur_ip, new_ip, host))
+        return {"Ret": 100}
+    except Exception as err:
+        print("OpenIPC set-IP failed: %s" % err)
+        try: c.close()
+        except Exception: pass
+        return {"Ret": 101}
+
+
 def ProcessCMD(cmd):
     global log, logLevel, devices, searchers, configure, intf
     if logLevel == 20:
@@ -1117,7 +1203,7 @@ if __name__ == "__main__":
 
     logLevel = 30	
     searchers = {"xm": SearchXM, "onvif": SearchONVIF}
-    configure = {"xm": ConfigXM, "onvif": ConfigONVIF, "openipc": ConfigONVIF}
+    configure = {"xm": ConfigXM, "onvif": ConfigONVIF, "openipc": ConfigOpenIPC}
 
     # check if there's a DISPLAY, and use commandline mode if not
     if os.getenv('DISPLAY', default=None) is None and sys.platform !='win32':
