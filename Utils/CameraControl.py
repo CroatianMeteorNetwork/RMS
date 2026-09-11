@@ -734,7 +734,7 @@ def waitForCameraOnline(camera_ip, timeout=240, settle=8):
     return False
 
 
-def upgradeFirmware(cam, firmware_path, skip_confirm=False):
+def upgradeFirmware(cam, firmware_path, skip_confirm=False, converts_to_openipc=False):
     """Upgrade the camera firmware via the DVRIP protocol.
 
     Args:
@@ -899,6 +899,18 @@ def upgradeFirmware(cam, firmware_path, skip_confirm=False):
         else:
             log.warning("Transfer ended without a confirmation from the camera.")
             log.warning("That is normal if it rebooted early, but it has to be verified.")
+
+        # An XM->OpenIPC conversion reboots onto DHCP (the fresh OpenIPC image
+        # defaults to DHCP), NOT the camera's old XM IP -- so polling cam.ip here
+        # would hang until timeout and wrongly report failure. Exit cleanly with
+        # the reassignment steps instead.
+        if converts_to_openipc:
+            log.info("Converted to OpenIPC%s.", " (camera confirmed Ret 515)" if confirmed else " (transfer ended -- verify)")
+            log.info("The camera is rebooting onto DHCP, NOT its old IP %s.", cam.ip)
+            log.info("Reassign a static IP:  python -m Utils.CamManager  ->  'search'  then")
+            log.info("  'config <MAC> <IP> <MASK> <GATE>'  (OpenIPC set-IP is SSH-based).")
+            log.info("Then push 'SwitchMode init' to provision the science config.")
+            return True
 
         # Either way, the camera is the authority on whether this worked.
         log.info("Waiting for the camera to come back online...")
@@ -1205,7 +1217,7 @@ def dvripCall(cam, cmd, opts, camera_settings_path='./camera_settings.json'):
         except Exception as e:
             log.error("Auto-wrap failed: %s", e)
             return
-        upgradeFirmware(cam, firmware_path, skip_confirm)
+        upgradeFirmware(cam, firmware_path, skip_confirm, converts_to_openipc=True)
         return
 
     elif cmd in ISP_COMMANDS:
