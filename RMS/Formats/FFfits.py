@@ -12,6 +12,13 @@ import datetime
 
 
 
+# Optional per-block photometric provenance cards (RMSP SEI): FF attribute -> FITS keyword
+_SEI_CARDS = (('exptime', 'EXPTIME'), ('expmin', 'EXPMIN'), ('expmax', 'EXPMAX'),
+              ('again', 'AGAIN'), ('dgain', 'DGAIN'), ('ispdgain', 'ISPDGAIN'),
+              ('seistabl', 'SEISTABL'), ('qpmean', 'QPMEAN'), ('qpmax', 'QPMAX'),
+              ('wbr', 'WBR'), ('wbb', 'WBB'), ('seinfrm', 'SEINFRM'))
+
+
 def filenameToDatetimeStr(file_name, iso8601=False):
     """ Converts FS and FF bin file name to a datetime object.
 
@@ -124,6 +131,10 @@ def read(directory, filename, array=False, full_filename=False, memmap=True):
         # Optional camera SoC die temperature [degC] (SEI provenance); absent on cameras without it
         ff.soctemp = head.get('SOCTEMP', None)
 
+        # Optional per-block photometric provenance (SEI); absent on cameras without it
+        for attr, key in _SEI_CARDS:
+            setattr(ff, attr, head.get(key, None))
+
         # Check for the DATE-OBS field and read datetime from filename it if it doesn't exist
         if 'DATE-OBS' in head:
             ff.starttime = head['DATE-OBS']
@@ -197,6 +208,30 @@ def write(ff, directory, filename):
     # without the SEI are unaffected
     if getattr(ff, 'soctemp', None) is not None:
         head['SOCTEMP'] = (float(ff.soctemp), 'camera SoC die temperature [degC] (SEI)')
+
+    # Optional per-block photometric provenance from the RMSP SEI. Photometry assumes the block
+    # is stationary, so besides means we record the exposure extremes and a stability flag; QP
+    # is the encoder's actual quantiser (near the floor = clean, toward the cap = bitrate-
+    # ceiling limited, faint flux quantised). AGAIN/DGAIN/ISPDGAIN are sensor/ISP multipliers,
+    # deliberately NOT the FITS 'GAIN' (e-/ADU) keyword. Written only when known
+    if getattr(ff, 'exptime', None) is not None:
+        head['EXPTIME'] = (round(float(ff.exptime), 6), 'block mean frame exposure [s] (SEI)')
+        head['EXPMIN'] = (round(float(ff.expmin), 6), 'min frame exposure in block [s]')
+        head['EXPMAX'] = (round(float(ff.expmax), 6), 'max frame exposure in block [s]')
+    if getattr(ff, 'again', None) is not None:
+        head['AGAIN'] = (round(float(ff.again), 4), 'sensor analog gain, x (block mean)')
+        head['DGAIN'] = (round(float(ff.dgain), 4), 'sensor digital gain, x (block mean)')
+        head['ISPDGAIN'] = (round(float(ff.ispdgain), 4), 'ISP digital gain, x (block mean)')
+    if getattr(ff, 'seistabl', None) is not None:
+        head['SEISTABL'] = (bool(ff.seistabl), 'exposure and gains constant within block')
+    if getattr(ff, 'qpmean', None) is not None:
+        head['QPMEAN'] = (round(float(ff.qpmean), 2), 'H.264 mean QP over block (codec loss)')
+        head['QPMAX'] = (int(ff.qpmax), 'H.264 max frame QP in block')
+    if getattr(ff, 'wbr', None) is not None:
+        head['WBR'] = (round(float(ff.wbr), 4), 'white balance R gain, x (colour term)')
+        head['WBB'] = (round(float(ff.wbb), 4), 'white balance B gain, x (colour term)')
+    if getattr(ff, 'seinfrm', None) is not None:
+        head['SEINFRM'] = (int(ff.seinfrm), 'frames with SEI provenance in block')
 
     # Deconstruct the 3D array into individual images
     if ff.array is not None:

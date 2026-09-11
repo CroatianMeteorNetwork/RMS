@@ -29,6 +29,7 @@ import datetime
 import copy
 import os.path
 from multiprocessing import Process, Value, Array
+from RMS.SEIBlockMeta import SEIBlockAccumulator, publishSeiMeta
 import threading
 from collections import deque
 import os
@@ -120,7 +121,7 @@ class _SlidingMin(object):
 
 def _rmspCapUtc(data):
     """Parse the first checksum-valid RMSP v4 provenance SEI in a raw (escaped) H.264 access
-    unit. Returns (capture_utc_s, exp_s, soc_temp_c or None) or None. Layout matches
+    unit. Returns (capture_utc_s, exp_s, soc_temp_c or None, meta dict) or None. Layout matches
     venc/main.c build_rmsp_payload (fields XOR-0xFF after the 'RMSP' magic).
     capture_utc = (sec+usec) - (mono_pts_us - raw_pts_us): host-clock at emit minus the
     camera-side capture->emit delay, both from the same back-to-back cal.
@@ -157,9 +158,23 @@ def _rmspCapUtc(data):
         sec = struct.unpack('<I', u[6:10])[0]; usec = struct.unpack('<I', u[10:14])[0]
         raw_pts = struct.unpack('<I', u[44:48])[0]; mono = struct.unpack('<I', u[48:52])[0]
         exp_us = struct.unpack('<I', u[18:22])[0]
-        temp = struct.unpack('<h', u[42:44])[0]/10.0 if (u[5] & 0x01) else None   # flags b0 = temp valid
+        fl = u[5]
+        temp = struct.unpack('<h', u[42:44])[0]/10.0 if (fl & 0x01) else None   # flags b0 = temp valid
         delay = (mono - raw_pts) & 0xffffffff
-        return ((sec + usec/1e6) - delay/1e6, exp_us/1e6, temp)
+        # Per-block photometric provenance (RMS.SEIBlockMeta): gains are HI_MPI_ISP_QueryExposureInfo
+        # units, x1024 = 1x; WB gains x256 = 1x; mean_qp = this frame's actual coded QP.
+        # Flags: b1 wb valid, b3 exposure/gains valid, b6 qp valid
+        exp_ok = bool(fl & 0x08)
+        meta = {
+            'exp_s': exp_us/1e6 if exp_ok else None,
+            'again': struct.unpack('<I', u[22:26])[0]/1024.0 if exp_ok else None,
+            'dgain': struct.unpack('<I', u[26:30])[0]/1024.0 if exp_ok else None,
+            'ispdgain': struct.unpack('<I', u[30:34])[0]/1024.0 if exp_ok else None,
+            'wb_r': struct.unpack('<H', u[34:36])[0]/256.0 if (fl & 0x02) else None,
+            'wb_b': struct.unpack('<H', u[36:38])[0]/256.0 if (fl & 0x02) else None,
+            'qp': u[58] if (fl & 0x40) else None,
+        }
+        return ((sec + usec/1e6) - delay/1e6, exp_us/1e6, temp, meta)
 
 if sys.version_info[0] < 3:
     # py2
@@ -233,7 +248,7 @@ class BufferedCapture(Process):
     
     def __init__(self, array1, start_time1, array2, start_time2, config, video_file=None, night_data_dir=None,
                  saved_frames_dir=None, daytime_mode=None, camera_mode_switch_trigger=None,
-                 soc_temp1=None, soc_temp2=None):
+                 soc_temp1=None, soc_temp2=None, sei_meta1=None, sei_meta2=None):
         """ Populate arrays with (startTime, frames) after startCapture is called.
         
         Arguments:
@@ -291,6 +306,12 @@ class BufferedCapture(Process):
         self.soc_temp1 = soc_temp1
         self.soc_temp2 = soc_temp2
         self._soc_temp = -999.0
+        # Per-block SEI photometric provenance (exposure/gains/QP/WB), see RMS.SEIBlockMeta
+        self.sei_meta1 = sei_meta1
+        self.sei_meta2 = sei_meta2
+        self._sei_blk = SEIBlockAccumulator()
+        self._sei_blk_seq = 0
+        self._sei_seen = False
 
         # Initialize shared values for raw frame saving (these are designed for multiprocessing)
 
@@ -662,8 +683,10 @@ class BufferedCapture(Process):
         """Pad probe on the tee sink (compressed H.264, pre-decode, streaming thread): record
         CLOCK_REALTIME arrival per buffer PTS for the wallclock rate discipline. Measured here
         and not at read(): on a loaded host a consumer backlog delays the appsink pull, not
-        the arrival, so the window MIN stays honest. With RMS_SEI_PROBE set, also parse the
-        RMSP provenance SEI (camera ground-truth capture UTC) for validation logging."""
+        the arrival, so the window MIN stays honest. Also parses the RMSP provenance SEI for the
+        block SoC temperature and the per-block photometric provenance (exposure/gains/QP/WB,
+        RMS.SEIBlockMeta); with RMS_SEI_PROBE set it also keeps per-frame records for the
+        validation logging."""
         try:
             buf = info.get_buffer()
             pts = buf.pts
@@ -673,17 +696,21 @@ class BufferedCapture(Process):
             if len(self._arr_by_pts) > 600:
                 for k in list(self._arr_by_pts)[:200]:
                     self._arr_by_pts.pop(k, None)
-            # RMSP SEI: every frame while validating (RMS_SEI_PROBE), else every 64th (~2.5 s)
-            # for the block SoC temperature -- a thermal quantity needs no more, and it keeps
-            # the per-frame cost on a Pi negligible
+            # RMSP SEI: every frame on a camera that emits it (the per-block QP mean/max need
+            # every frame; ~14 us per access unit). A camera that showed no SEI in its first
+            # 512 frames is probed every 64th frame only, so the per-frame cost on a Pi driving
+            # an XM camera stays negligible
             self._probe_n += 1
-            if self._sei_by_pts is not None or (self._probe_n % 64 == 0):
+            if (self._sei_seen or self._sei_by_pts is not None or self._probe_n <= 512
+                    or (self._probe_n % 64 == 0)):
                 ok, mi = buf.map(Gst.MapFlags.READ)
                 if ok:
                     cu = _rmspCapUtc(bytes(mi.data)); buf.unmap(mi)
                     if cu is not None:
+                        self._sei_seen = True
                         if cu[2] is not None:
                             self._soc_temp = cu[2]
+                        self._sei_blk.add(cu[3])
                         if self._sei_by_pts is not None:
                             self._sei_by_pts[pts] = cu
                             if len(self._sei_by_pts) > 600:
@@ -2751,21 +2778,31 @@ class BufferedCapture(Process):
                 break
 
 
+            # Per-block SEI photometric provenance: snapshot and reset at EVERY block boundary
+            # (daytime included), so the first night block never inherits the day's exposure and
+            # gain extremes. The probe taps the stream pre-decode, so attribution to a block is
+            # offset by the decode queue depth (a few frames) -- fine for 256-frame statistics
+            self._sei_blk_seq += 1
+            sei_meta_vals = self._sei_blk.snapshotAndReset(self._sei_blk_seq)
+
             if (not wait_for_reconnect
                 and not self.daytime_mode.value
                 and first_frame_timestamp is not None):
 
                 # Set the starting value of the frame block, which indicates to the compression that the
                 # block is ready for processing
-                # Publish the block's camera SoC temperature first, then the block-ready signal
+                # Publish the block's camera SoC temperature and SEI provenance first, then the
+                # block-ready signal
                 if buffer_one:
                     if self.soc_temp1 is not None:
                         self.soc_temp1.value = self._soc_temp
+                    publishSeiMeta(self.sei_meta1, sei_meta_vals)
                     self.start_time1.value = first_frame_timestamp
 
                 else:
                     if self.soc_temp2 is not None:
                         self.soc_temp2.value = self._soc_temp
+                    publishSeiMeta(self.sei_meta2, sei_meta_vals)
                     self.start_time2.value = first_frame_timestamp
 
                 log.debug('New block of raw frames available for compression with starting time: {:s}'

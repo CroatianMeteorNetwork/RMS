@@ -45,6 +45,24 @@ class FFStruct:
         # housing/ambient temperature, NOT lens temperature). None when unknown (e.g. XM cameras)
         self.soctemp = None
 
+        # Optional per-block photometric provenance from the RMSP SEI (None when unknown):
+        # frame exposure [s] (block mean / min / max); sensor analog, sensor digital and ISP
+        # digital gain (x, block mean); whether exposure and all gains were constant within the
+        # block; encoder mean/max QP (codec-quality indicator); white balance R/B gains (colour
+        # term); number of frames in the block that carried the SEI
+        self.exptime = None
+        self.expmin = None
+        self.expmax = None
+        self.again = None
+        self.dgain = None
+        self.ispdgain = None
+        self.seistabl = None
+        self.qpmean = None
+        self.qpmax = None
+        self.wbr = None
+        self.wbb = None
+        self.seinfrm = None
+
         self.array = None
 
 
