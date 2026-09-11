@@ -598,11 +598,17 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     sharedArray2 = sharedArrayBase2
     start_time2 = multiprocessing.Value('d', 0.0, lock=False)
 
+    # Camera SoC temperature [degC] for the block in each buffer (RMSP SEI provenance), -999 = unknown.
+    # Read by the compressor and written to the FF header as the optional SOCTEMP card
+    soc_temp1 = multiprocessing.Value('d', -999.0, lock=False)
+    soc_temp2 = multiprocessing.Value('d', -999.0, lock=False)
+
     log.info('Initializing frame buffers done!')
 
 
     # Initialize buffered capture
     bc = BufferedCapture(sharedArray, startTime, sharedArray2, start_time2, config, video_file=video_file,
+                         soc_temp1=soc_temp1, soc_temp2=soc_temp2,
                          night_data_dir=night_data_dir, saved_frames_dir=saved_frames_dir, 
                          daytime_mode=daytime_mode, camera_mode_switch_trigger=camera_mode_switch_trigger)
     bc.startCapture()
@@ -700,6 +706,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
                     # Create and start new BufferedCapture with same parameters
                     bc = BufferedCapture(sharedArray, startTime, sharedArray2, start_time2, config,
+                                         soc_temp1=soc_temp1, soc_temp2=soc_temp2,
                                          video_file=video_file, night_data_dir=night_data_dir,
                                          saved_frames_dir=saved_frames_dir, daytime_mode=daytime_mode,
                                          camera_mode_switch_trigger=camera_mode_switch_trigger)
@@ -794,7 +801,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
             # Initialize compression
             compressor = Compressor(night_data_dir, sharedArray, startTime, sharedArray2, start_time2, config,
-                detector=detector)
+                detector=detector, soc_temp1=soc_temp1, soc_temp2=soc_temp2)
 
             # Open the observation summary report
             if video_file is None:
@@ -848,6 +855,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
                     # Create and start new BufferedCapture with same parameters
                     bc = BufferedCapture(sharedArray, startTime, sharedArray2, start_time2, config,
+                                         soc_temp1=soc_temp1, soc_temp2=soc_temp2,
                                          video_file=video_file, night_data_dir=night_data_dir,
                                          saved_frames_dir=saved_frames_dir, daytime_mode=daytime_mode,
                                          camera_mode_switch_trigger=camera_mode_switch_trigger)

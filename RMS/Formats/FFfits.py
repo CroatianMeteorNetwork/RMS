@@ -121,6 +121,9 @@ def read(directory, filename, array=False, full_filename=False, memmap=True):
         ff.camno = head['CAMNO']
         ff.fps = head['FPS']
 
+        # Optional camera SoC die temperature [degC] (SEI provenance); absent on cameras without it
+        ff.soctemp = head.get('SOCTEMP', None)
+
         # Check for the DATE-OBS field and read datetime from filename it if it doesn't exist
         if 'DATE-OBS' in head:
             ff.starttime = head['DATE-OBS']
@@ -187,6 +190,13 @@ def write(ff, directory, filename):
     head['CAMNO'] = ff.camno
     head['FPS'] = ff.fps
     head['DATE-OBS'] = ff.starttime
+
+    # Optional: camera SoC die temperature [degC] from the RMSP provenance SEI. A proxy for
+    # housing/ambient (NOT lens) temperature; lets recalibration correlate distortion, plate scale
+    # and dark current with temperature. Written only when known, so older readers and cameras
+    # without the SEI are unaffected
+    if getattr(ff, 'soctemp', None) is not None:
+        head['SOCTEMP'] = (float(ff.soctemp), 'camera SoC die temperature [degC] (SEI)')
 
     # Deconstruct the 3D array into individual images
     if ff.array is not None:

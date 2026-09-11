@@ -41,6 +41,10 @@ class FFStruct:
         # re-encoded, i.e. stays in the gamma-encoded domain). 1.0 means encoded-domain averaging
         self.avegamma = 1.0
 
+        # Optional camera SoC die temperature [degC] from the RMSP provenance SEI (a proxy for
+        # housing/ambient temperature, NOT lens temperature). None when unknown (e.g. XM cameras)
+        self.soctemp = None
+
         self.array = None
 
 

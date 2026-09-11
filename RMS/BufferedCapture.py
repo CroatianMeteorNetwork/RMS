@@ -90,11 +90,15 @@ DISC_RESET_S = 2.0               # |target - corr| beyond this = PTS/clock disco
 
 
 def _rmspCapUtc(data):
-    """Parse the first checksum-valid RMSP v4 provenance SEI in a raw H.264 access
-    unit and return the camera capture UTC in seconds, or None. Layout matches
+    """Parse the first checksum-valid RMSP v4 provenance SEI in a raw (escaped) H.264 access
+    unit. Returns (capture_utc_s, exp_s, soc_temp_c or None) or None. Layout matches
     venc/main.c build_rmsp_payload (fields XOR-0xFF after the 'RMSP' magic).
-    capture_utc = (sec+usec) - (mono_pts_us - raw_pts_us), i.e. host-clock at emit
-    minus the camera-side capture->emit delay, both from the same back-to-back cal."""
+    capture_utc = (sec+usec) - (mono_pts_us - raw_pts_us): host-clock at emit minus the
+    camera-side capture->emit delay, both from the same back-to-back cal.
+    Cheap enough to run per frame: locate the magic in the escaped bytes (memchr speed) and
+    de-escape only a short slice from there. The magic has no zero bytes, so the emulation-
+    prevention state is known (clean) at that point; the SEI precedes slice data, so the first
+    checksum-valid magic is the record."""
     def deesc(b):
         o = bytearray(); z = 0
         for x in b:
@@ -102,29 +106,31 @@ def _rmspCapUtc(data):
                 z = 0; continue
             o.append(x); z = z + 1 if x == 0 else 0
         return bytes(o)
-    raw = deesc(data); i = 0
+    i = 0
     while True:
-        j = raw.find(b"RMSP", i)
-        if j < 0 or j + 6 > len(raw):
+        j = data.find(b"RMSP", i)
+        if j < 0:
             return None
-        v = raw[j + 4] ^ 0xFF
+        i = j + 4
+        u = deesc(data[j:j + 96])          # 61-byte record plus room for emulation-prevention bytes
+        if len(u) < 6:
+            continue
+        v = u[4] ^ 0xFF
         L = {4: 61, 3: 59, 2: 53, 1: 49}.get(v, 49)
-        if j + L > len(raw):
-            i = j + 4; continue
-        rec = raw[j:j + L]; u = rec[:4] + bytes(x ^ 0xFF for x in rec[4:L]); i = j + L
+        if len(u) < L:
+            continue
+        u = u[:4] + bytes(x ^ 0xFF for x in u[4:L])
         ck = 0
         for x in u[4:L - 1]:
             ck ^= x
-        if ck != u[L - 1]:
+        if ck != u[L - 1] or v != 4:
             continue
-        if v != 4:
-            return None
         sec = struct.unpack('<I', u[6:10])[0]; usec = struct.unpack('<I', u[10:14])[0]
         raw_pts = struct.unpack('<I', u[44:48])[0]; mono = struct.unpack('<I', u[48:52])[0]
         exp_us = struct.unpack('<I', u[18:22])[0]
+        temp = struct.unpack('<h', u[42:44])[0]/10.0 if (u[5] & 0x01) else None   # flags b0 = temp valid
         delay = (mono - raw_pts) & 0xffffffff
-        capture_utc = (sec + usec/1e6) - delay/1e6
-        return (capture_utc, exp_us/1e6)
+        return ((sec + usec/1e6) - delay/1e6, exp_us/1e6, temp)
 
 if sys.version_info[0] < 3:
     # py2
@@ -197,7 +203,8 @@ class BufferedCapture(Process):
     running = False
     
     def __init__(self, array1, start_time1, array2, start_time2, config, video_file=None, night_data_dir=None,
-                 saved_frames_dir=None, daytime_mode=None, camera_mode_switch_trigger=None):
+                 saved_frames_dir=None, daytime_mode=None, camera_mode_switch_trigger=None,
+                 soc_temp1=None, soc_temp2=None):
         """ Populate arrays with (startTime, frames) after startCapture is called.
         
         Arguments:
@@ -248,6 +255,13 @@ class BufferedCapture(Process):
         self.start_time2 = start_time2
         self.start_time1.value = 0
         self.start_time2.value = 0
+
+        # Optional shared doubles for the camera SoC temperature [degC] of each block (RMSP SEI
+        # provenance; -999 = unknown). Written before the block-ready signal so the compressor
+        # never pairs a block with a stale reading; it lands in the FF header as SOCTEMP
+        self.soc_temp1 = soc_temp1
+        self.soc_temp2 = soc_temp2
+        self._soc_temp = -999.0
 
         # Initialize shared values for raw frame saving (these are designed for multiprocessing)
 
@@ -630,15 +644,22 @@ class BufferedCapture(Process):
             if len(self._arr_by_pts) > 600:
                 for k in list(self._arr_by_pts)[:200]:
                     self._arr_by_pts.pop(k, None)
-            if self._sei_by_pts is not None:
+            # RMSP SEI: every frame while validating (RMS_SEI_PROBE), else every 64th (~2.5 s)
+            # for the block SoC temperature -- a thermal quantity needs no more, and it keeps
+            # the per-frame cost on a Pi negligible
+            self._probe_n += 1
+            if self._sei_by_pts is not None or (self._probe_n % 64 == 0):
                 ok, mi = buf.map(Gst.MapFlags.READ)
                 if ok:
                     cu = _rmspCapUtc(bytes(mi.data)); buf.unmap(mi)
                     if cu is not None:
-                        self._sei_by_pts[pts] = cu
-                        if len(self._sei_by_pts) > 600:
-                            for k in list(self._sei_by_pts)[:200]:
-                                self._sei_by_pts.pop(k, None)
+                        if cu[2] is not None:
+                            self._soc_temp = cu[2]
+                        if self._sei_by_pts is not None:
+                            self._sei_by_pts[pts] = cu
+                            if len(self._sei_by_pts) > 600:
+                                for k in list(self._sei_by_pts)[:200]:
+                                    self._sei_by_pts.pop(k, None)
         except Exception:
             pass
         return Gst.PadProbeReturn.OK
@@ -809,7 +830,7 @@ class BufferedCapture(Process):
             except NameError:
                 _cu = None
             if _cu is not None:
-                _cap_utc, _exp_s = _cu
+                _cap_utc, _exp_s, _tmp = _cu
                 _readout = _cap_utc - _K_READOUT_S           # row-0 readout (exposure-independent)
                 _int_start = _readout - _exp_s               # TARGET: row-0 start of integration
                 _win = self._disc_win
@@ -1467,6 +1488,7 @@ class BufferedCapture(Process):
                 self._disc_corr = 0.0
                 self._sei_by_pts = {} if os.environ.get('RMS_SEI_PROBE') else None
                 self._sei_deltas = []
+                self._probe_n = 0
                 try:
                     _tee = self.pipeline.get_by_name('t')
                     if _tee is not None:
@@ -2684,10 +2706,15 @@ class BufferedCapture(Process):
 
                 # Set the starting value of the frame block, which indicates to the compression that the
                 # block is ready for processing
+                # Publish the block's camera SoC temperature first, then the block-ready signal
                 if buffer_one:
+                    if self.soc_temp1 is not None:
+                        self.soc_temp1.value = self._soc_temp
                     self.start_time1.value = first_frame_timestamp
 
                 else:
+                    if self.soc_temp2 is not None:
+                        self.soc_temp2.value = self._soc_temp
                     self.start_time2.value = first_frame_timestamp
 
                 log.debug('New block of raw frames available for compression with starting time: {:s}'
