@@ -1435,7 +1435,8 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
 
                         # Compute the corrected frame time
                         frame_no = RollingShutterCorrection.correctRollingShutterTemporal(frame_no, \
-                            y_centroid, img_handle.ff.maxpixel.shape[0])
+                            y_centroid, img_handle.ff.maxpixel.shape[0], fps=config.fps, \
+                            scan_rate=config.scan_rate)
 
 
                     # Get current frame if video or images are used as input
