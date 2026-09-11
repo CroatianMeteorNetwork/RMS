@@ -82,11 +82,40 @@ _K_READOUT_S = 88e-6
 # exactly 0, so the run origin and every station's existing camera_latency calibration
 # are preserved; before convergence, or if anything looks wrong, the fallback IS the
 # stock timestamp. Validated against per-frame camera SEI ground truth (RMS_SEI_PROBE):
-# -13.2 ppm -> <2 ppm residual, 0.6 ms p2p; the 120 s window converges within ~2 min.
-DISC_WINDOW_S = 120.0            # min-tracking window (120 s beat 30 s: catches true-min frames)
+# 25-min live run: -0.11 ppm, 1.8 ms p2p vs stock -13.1 ppm / 20 ms. Window A/B through a
+# dusk transition (exposure 3->40 ms, frame sizes changing): 600 s held 2.1 ms p2p vs 4.3 ms
+# for 120 s -- the deeper floor is the steadier one, and a window MIN rejects any upward
+# latency bump shorter than the window outright. So: the 120 s window provides startup and
+# the reference (correction starts after 2 min), and the 600 s window takes over tracking
+# once full, with a re-based reference so the handover is continuous (its larger min-lag
+# under drift, ~600 s x 13 ppm = 8 ms, is absorbed into the reference, not the timestamps).
+DISC_WINDOW_S = 120.0            # startup/reference window (120 s beat 30 s: catches true-min frames)
+DISC_WINDOW_LONG_S = 600.0       # tracking window after handover
 DISC_SLEW_S_PER_FRAME = 20e-6    # max correction change per frame (500 ppm @ 25 fps): tracks any
                                  # real crystal, absorbs a host clock step gradually, never jumps
 DISC_RESET_S = 2.0               # |target - corr| beyond this = PTS/clock discontinuity: re-reference
+
+
+class _SlidingMin(object):
+    """ O(1)-amortised minimum over the last maxlen appended values (monotonic deque), so the
+        600 s tracking window costs nothing per frame on a Pi. """
+    def __init__(self, maxlen):
+        self.maxlen = maxlen; self.n = 0; self._q = deque()   # (index, value), values increasing
+    def append(self, x):
+        q = self._q
+        while q and q[-1][1] >= x:
+            q.pop()
+        q.append((self.n, x)); self.n += 1
+        lo = self.n - self.maxlen
+        while q[0][0] < lo:
+            q.popleft()
+    def __len__(self):
+        return self.n if self.n < self.maxlen else self.maxlen
+    @property
+    def full(self):
+        return self.n >= self.maxlen
+    def min(self):
+        return self._q[0][1]
 
 
 def _rmspCapUtc(data):
@@ -664,13 +693,13 @@ class BufferedCapture(Process):
             pass
         return Gst.PadProbeReturn.OK
 
-    def _seiRecordDelta(self, live_ms, stock_ms, lpipe_ms, corr_ms, exp_ms):
+    def _seiRecordDelta(self, live_ms, stock_ms, lpipe_ms, corr_ms, exp_ms, alt_ms=float('nan'), lat_ms=float('nan')):
         """RMS_SEI_PROBE: log stats every 100 frames (over the last 500). live = the
         disciplined timestamp RMS emits, stock = the same before discipline, both vs the
         TARGET (row-0 start of integration = SEI readout - exp). Lpipe = least-delayed
         arrival - readout (exposure-independent pipeline latency; nan until the window
         is full). corr = the applied rate correction."""
-        self._sei_deltas.append((live_ms, stock_ms, lpipe_ms))
+        self._sei_deltas.append((live_ms, stock_ms, lpipe_ms, alt_ms, lat_ms))
         n = len(self._sei_deltas)
         if n % 100 == 0:
             a = self._sei_deltas[-500:]
@@ -680,32 +709,46 @@ class BufferedCapture(Process):
                     return float('nan'), float('nan'), float('nan'), float('nan')
                 mu = sum(v)/len(v)
                 return mu, (sum((x - mu)**2 for x in v)/len(v))**0.5, min(v), max(v)
-            lv, so, lp = st(0), st(1), st(2)
+            lv, so, lp, l6, la = st(0), st(1), st(2), st(3), st(4)
             log.info("RMS_SEI_PROBE n=%d ms | live-intstart: mean=%.2f sd=%.2f min=%.2f max=%.2f"
                      " | stock-intstart: mean=%.2f sd=%.2f | Lpipe: mean=%.2f sd=%.2f"
-                     " | corr=%.2f ms exp=%.1f ms",
-                     n, lv[0], lv[1], lv[2], lv[3], so[0], so[1], lp[0], lp[1], corr_ms, exp_ms)
+                     " | corr=%.2f ms exp=%.1f ms | alt120-intstart: mean=%.2f sd=%.2f"
+                     " | lat(arr-readout): min=%.2f mean=%.2f",
+                     n, lv[0], lv[1], lv[2], lv[3], so[0], so[1], lp[0], lp[1], corr_ms, exp_ms,
+                     l6[0], l6[1], la[2], la[0])
 
     def _disciplineTimestamp(self, stock_ts, arr):
-        """Rate-only wallclock discipline (see DISC_* at module top). Returns stock_ts plus
-        a slew-limited correction equal to the change of the least-delayed
-        (arrival - smoothed PTS) offset since the first full window. Returns stock_ts
-        unchanged until the window is full, so startup behaviour is exactly stock."""
+        """Rate-only wallclock discipline (see DISC_* at module top). Returns stock_ts plus a
+        slew-limited correction equal to the change of the least-delayed (arrival - smoothed
+        PTS) offset since the reference. Stock until the short window is full (startup); the
+        short window tracks until the long one is full, which then takes over with a re-based
+        reference so the handover is continuous."""
         pts_s = stock_ts - self.start_timestamp          # smoothed PTS timebase, either branch
-        win = self._disc_win
-        win.append(arr - pts_s)
-        if len(win) < win.maxlen:
+        off = arr - pts_s
+        self._disc_win.append(off); self._disc_win_long.append(off)
+        if not self._disc_win.full:
             return stock_ts
-        m = min(win)
         if self._disc_ref is None:
-            self._disc_ref = m                           # correction starts at exactly 0
+            self._disc_ref = self._disc_win.min()        # correction starts at exactly 0
             return stock_ts
-        d = (m - self._disc_ref) - self._disc_corr
+        if self._disc_win_long.full:
+            m = self._disc_win_long.min()
+            if self._disc_ref_long is None:
+                # Hand over without a step: the long window's larger min-lag under drift goes
+                # into the reference, not into the timestamps.
+                self._disc_ref_long = m - self._disc_corr
+            target = m - self._disc_ref_long
+        else:
+            target = self._disc_win.min() - self._disc_ref
+        d = target - self._disc_corr
         if abs(d) > DISC_RESET_S:
             # PTS timebase reset or host clock step: re-reference so the correction
             # continues from its current value instead of jumping the timestamps.
             log.warning("Timestamp discipline: %.3f s discontinuity, re-referencing", d)
-            self._disc_ref = m - self._disc_corr
+            if self._disc_win_long.full:
+                self._disc_ref_long = self._disc_win_long.min() - self._disc_corr
+            else:
+                self._disc_ref = self._disc_win.min() - self._disc_corr
             return stock_ts + self._disc_corr
         if d > DISC_SLEW_S_PER_FRAME:
             d = DISC_SLEW_S_PER_FRAME
@@ -834,11 +877,17 @@ class BufferedCapture(Process):
                 _readout = _cap_utc - _K_READOUT_S           # row-0 readout (exposure-independent)
                 _int_start = _readout - _exp_s               # TARGET: row-0 start of integration
                 _win = self._disc_win
-                _lpipe = float('nan')
-                if len(_win) == _win.maxlen:
-                    _lpipe = (_stock_ts - self.start_timestamp) + min(_win) - _readout
+                _pts_s = _stock_ts - self.start_timestamp
+                _lpipe = float('nan'); _alt = float('nan'); _lat = float('nan')
+                if _win.full:
+                    _lpipe = _pts_s + _win.min() - _readout
+                    if self._disc_ref is not None:               # A/B: the pure 120 s track
+                        _alt = _stock_ts + (_win.min() - self._disc_ref) - _int_start
+                if _arr is not None:
+                    _lat = _arr - _readout                       # raw per-frame latency vs SEI truth
                 self._seiRecordDelta((timestamp - _int_start)*1000.0, (_stock_ts - _int_start)*1000.0,
-                                     _lpipe*1000.0, self._disc_corr*1000.0, _exp_s*1000.0)
+                                     _lpipe*1000.0, self._disc_corr*1000.0, _exp_s*1000.0,
+                                     _alt*1000.0, _lat*1000.0)
 
         return ret, frame, timestamp
 
@@ -1480,11 +1529,13 @@ class BufferedCapture(Process):
                 # (camera ground-truth capture UTC) for validation logging.
                 self._arr_by_pts = {}
                 try:
-                    _n = int(DISC_WINDOW_S*float(self.config.fps))
+                    _fps = float(self.config.fps)
                 except Exception:
-                    _n = 3000
-                self._disc_win = deque(maxlen=max(2, _n))
+                    _fps = 25.0
+                self._disc_win = _SlidingMin(max(2, int(DISC_WINDOW_S*_fps)))            # startup/reference
+                self._disc_win_long = _SlidingMin(max(2, int(DISC_WINDOW_LONG_S*_fps)))  # tracking
                 self._disc_ref = None
+                self._disc_ref_long = None
                 self._disc_corr = 0.0
                 self._sei_by_pts = {} if os.environ.get('RMS_SEI_PROBE') else None
                 self._sei_deltas = []
@@ -1493,8 +1544,8 @@ class BufferedCapture(Process):
                     _tee = self.pipeline.get_by_name('t')
                     if _tee is not None:
                         _tee.get_static_pad('sink').add_probe(Gst.PadProbeType.BUFFER, self._arrivalProbe)
-                        log.info("Timestamp discipline: arrival probe attached on tee sink (window %d frames)%s",
-                                 self._disc_win.maxlen, ", SEI probe on" if self._sei_by_pts is not None else "")
+                        log.info("Timestamp discipline: arrival probe attached on tee sink (windows %d/%d frames)%s",
+                                 self._disc_win.maxlen, self._disc_win_long.maxlen, ", SEI probe on" if self._sei_by_pts is not None else "")
                     else:
                         log.warning("Timestamp discipline: tee not found; arrival probe not attached (stock timestamps)")
                 except Exception as _e:
