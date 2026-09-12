@@ -932,27 +932,32 @@ class BufferedCapture(Process):
                                      _lpipe*1000.0, self._disc_corr*1000.0, _exp_s*1000.0,
                                      _alt*1000.0, _lat*1000.0)
 
-        # SEI-PRIMARY timing: when the timebase is active for this block, replace the legacy
-        # timestamp with the camera's own integration-start (capture_utc - exp - k), used RAW.
-        # Legacy stays computed above as the sanity reference; the SEI-minus-legacy offset is
-        # sampled per frame for the block's provenance card. A frame whose record is missing is
-        # interpolated from the fit (flagged); if even that is unavailable, legacy is kept.
-        if ret and (timestamp is not None) and self._sei_ts_active:
+        # SEI-PRIMARY timing. The SEI-minus-legacy offset is monitored on EVERY frame that has an
+        # SEI stamp (active or not), because legacy wallclock is the only reference that can catch a
+        # camera whose own clock is wrong (unsynced chrony -> SEI internally perfect but hours off);
+        # that offset gates activation in SEITimebase.ready(). When active, the timestamp becomes the
+        # camera's integration-start (capture_utc - exp - k), used RAW; legacy stays the reference and
+        # the fallback. A frame with no record is interpolated from the fit (flagged); if even that
+        # is unavailable, legacy is kept.
+        if ret and (timestamp is not None) and (getattr(self, '_sei_tb', None) is not None):
             _legacy_ts = timestamp
             try:
                 _sei_ts = self._sei_int_by_pts.pop(gst_timestamp_ns, None)
             except NameError:
                 _sei_ts = None
-            if _sei_ts is None:
-                try:
-                    _sei_ts = self._sei_tb.estimate(gst_timestamp_ns)
-                except NameError:
-                    _sei_ts = None
-                if _sei_ts is not None:
-                    self._sei_interp_n += 1
             if _sei_ts is not None:
-                self._sei_off_samples.append(_sei_ts - _legacy_ts)
-                timestamp = _sei_ts
+                self._sei_tb.note_offset(_sei_ts - _legacy_ts)
+            if self._sei_ts_active:
+                if _sei_ts is None:
+                    try:
+                        _sei_ts = self._sei_tb.estimate(gst_timestamp_ns)
+                    except NameError:
+                        _sei_ts = None
+                    if _sei_ts is not None:
+                        self._sei_interp_n += 1
+                if _sei_ts is not None:
+                    self._sei_off_samples.append(_sei_ts - _legacy_ts)
+                    timestamp = _sei_ts
 
         return ret, frame, timestamp
 
@@ -1216,6 +1221,7 @@ class BufferedCapture(Process):
         """
 
         running_time_ns = None
+        raw_pts_ns = None
 
         if first_sample is not None:
             buffer = first_sample.get_buffer()
@@ -1223,6 +1229,7 @@ class BufferedCapture(Process):
 
             if buffer is not None and buffer.pts != Gst.CLOCK_TIME_NONE:
                 running_time_ns = buffer.pts
+                raw_pts_ns = buffer.pts        # pre-conversion PTS, keyed like the SEI/arrival probes
 
                 if segment is not None:
                     converted = segment.to_running_time(Gst.Format.TIME, buffer.pts)
@@ -1242,7 +1249,20 @@ class BufferedCapture(Process):
             log.warning("Unusable PTS for the new video segment: {}".format(running_time_ns))
             return None
 
-        segment_timestamp = self.start_timestamp + (running_time_ns + self.last_pts_correction_ns)/1e9
+        # The mkv segment start must match the timestamp the FF/detection path gives the same frame.
+        # That path applies the wallclock rate discipline (and the SEI integration-start when active);
+        # this naming previously did neither, so the video drifted at the camera crystal rate vs the
+        # detections (measured up to ~9 frames over a night, per-unit -13..-20 ppm). Apply the same
+        # rate discipline, and prefer the SEI integration-start when the timebase is active.
+        segment_timestamp = self.start_timestamp + (running_time_ns + self.last_pts_correction_ns)/1e9 \
+            + getattr(self, '_disc_corr', 0.0)
+        if getattr(self, '_sei_ts_active', False) and raw_pts_ns is not None:
+            try:
+                _sei_seg = self._sei_tb.estimate(raw_pts_ns)
+            except Exception:
+                _sei_seg = None
+            if _sei_seg is not None:
+                segment_timestamp = _sei_seg
 
         # Segments are cut live, so the derived time must land near now. This also catches
         # a start_timestamp that was never established (it is initialized to 0).

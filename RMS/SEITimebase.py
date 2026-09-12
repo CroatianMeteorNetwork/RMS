@@ -29,6 +29,10 @@ _STALE_S = 2.0                # no fresh SEI for this long -> timebase not usabl
 _MIN_SPAN_S = 1.0             # need at least this much time base before the fit is trusted
 _DISCONT_GAP_S = 2.0          # PTS gap larger than this -> reset the fit (reconnect / sensor reinit)
 _MAX_ANOM_RATE = 0.10         # recent fraction of anomalous residuals above which we stand down
+_MAX_OFFSET_S = 2.0           # |median(SEI - legacy)| beyond this -> camera clock is wrong
+                             # (e.g. chrony not synced); the internal fit stays perfect, so
+                             # legacy wallclock is the ONLY thing that can catch it -> gate on it
+_MIN_OFFSET_SAMPLES = 10     # need this many SEI-vs-legacy samples before trusting the gate
 
 
 class SEITimebase(object):
@@ -50,6 +54,7 @@ class SEITimebase(object):
         self._n_fed = 0
         self._anom = deque(maxlen=200)            # recent residual-anomaly flags (1/0)
         self._last_resid_s = 0.0
+        self._off = deque(maxlen=200)             # recent SEI-minus-legacy offsets [s] (from the caller)
 
     # -- fit helpers (call with the lock held) --
     def _fit(self):
@@ -103,6 +108,19 @@ class SEITimebase(object):
             return self._int_start(cap_utc, exp_s)
 
     # -- capture thread --
+    def note_offset(self, sei_minus_legacy_s):
+        """ Record SEI-minus-legacy for this frame. Legacy wallclock is anchored to the host
+            clock, so a large sustained offset means the camera's own clock is wrong (unsynced
+            chrony) even when the SEI is internally perfect -- the gate for that lives here. """
+        with self._lock:
+            self._off.append(sei_minus_legacy_s)
+
+    def _median_off(self):
+        if not self._off:
+            return None
+        o = sorted(self._off); m = len(o)//2
+        return o[m] if len(o) % 2 else 0.5*(o[m - 1] + o[m])
+
     def estimate(self, pts_ns):
         """ Fit-based integration-start for a frame whose SEI record is missing/corrupt, or
             None if the fit is not usable. Flagged as interpolated by the caller. """
@@ -123,6 +141,14 @@ class SEITimebase(object):
                 return False
             if self._anom and (sum(self._anom)/len(self._anom)) > _MAX_ANOM_RATE:
                 return False
+            # Absolute-time gate: SEI must agree with the host-anchored legacy clock. This is
+            # what stops an unsynced camera (SEI hours off but internally consistent) from
+            # being trusted as the primary timebase.
+            if len(self._off) < _MIN_OFFSET_SAMPLES:
+                return False
+            med = self._median_off()
+            if med is None or abs(med) > _MAX_OFFSET_S:
+                return False
             return True
 
     def health(self):
@@ -130,6 +156,9 @@ class SEITimebase(object):
             span = (self._pts[-1] - self._pts[0]) if len(self._pts) >= 2 else 0.0
             rate = (sum(self._anom)/len(self._anom)) if self._anom else 0.0
             stale = None if self._last_feed_wall is None else (time.time() - self._last_feed_wall)
+            med = self._median_off()
             return {'n_fed': self._n_fed, 'span_s': round(span, 2),
                     'anom_rate': round(rate, 3), 'last_resid_us': round(self._last_resid_s*1e6, 1),
+                    'off_med_ms': None if med is None else round(med*1e3, 1),
+                    'n_off': len(self._off),
                     'stale_s': None if stale is None else round(stale, 2)}
