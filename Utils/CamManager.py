@@ -743,6 +743,12 @@ def ConfigOpenIPC(data, debug=False, intf=None):
     new_ip = data[2]
     mask = data[3] if len(data) > 3 and data[3] else "255.255.255.0"
     gate = data[4] if len(data) > 4 and data[4] else ""
+    # Default to NO gateway: a science camera talks only to the host on its own subnet, so it
+    # needs no default route. Omitting it (rather than 0.0.0.0) means the device cannot route
+    # off-subnet -- no internet pivot, no phone-home -- at zero functional cost. NTP stays
+    # same-subnet via 'time ntp host'. Pass an explicit gateway only if a deployment needs one.
+    if gate in ("0.0.0.0", "0", "0.0.0.0/0"):
+        gate = ""
     pw = data[5] if len(data) > 5 and data[5] else "12345"
     host = "openipc-" + new_ip.split(".")[-1]
     stanza = ("iface eth0 inet static\n"

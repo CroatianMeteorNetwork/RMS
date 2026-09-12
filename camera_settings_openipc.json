@@ -3,6 +3,7 @@
   "_notes": "Science config for OpenIPC-converted cameras. Point RMS 'camera_settings_path' at this file. Every line is a NATIVE isp_ctl command (via CameraControl's openipcCall Isp fast-path). STRUCTURE: 'init' provisions the camera (encode profile incl. the BitRate ceiling, OSD off, auto-reboot, orientation, colour neutrality) and leaves it in the NIGHT baseline (the camera's steady detection state); 'day' is the daytime deviation; 'night' returns to that baseline (its mode-dependent tail == init's). Only what the firmware cannot own is here -- the mode-INDEPENDENT science invariants (gamma 0.5, NR/sharpen/DPC/DRC/LDCI/dehaze/CA/shading bypasses, venc_qp/venc_cqp, 1-line exposure floor) are enforced at boot by S96venc enforce_science and gated by tools/science_audit.py, so they are NOT replayed here. Format follows the stock template: one command per line, keywords as separate tokens.",
 
   "init": [
+    ["Isp", "time", "ntp", "host"],
     ["Isp", "osd", "off"],
     ["Isp", "autoreboot", "everyday", "15"],
     ["Isp", "encode", "set", "compression", "H.264"],

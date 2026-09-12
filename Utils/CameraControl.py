@@ -664,6 +664,13 @@ def ispControl(camera_ip, cmd_line, port=9600, timeout=5):
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.settimeout(timeout)
         s.connect((camera_ip, port))
+        # 'time ntp host' -> the RMS host, resolved to the local IP the kernel actually uses to
+        # reach THIS camera (getsockname on the connected socket). Subnet-agnostic: we never need
+        # to know the host address in advance, and it works whatever the camera's image version.
+        _p = cmd_line.split()
+        if len(_p) >= 3 and _p[0] == 'time' and _p[1] == 'ntp' and _p[2] == 'host':
+            _p[2] = s.getsockname()[0]
+            cmd_line = ' '.join(_p)
         s.sendall((cmd_line + "\n").encode())
         s.shutdown(socket.SHUT_WR)
         chunks = []
@@ -908,7 +915,8 @@ def upgradeFirmware(cam, firmware_path, skip_confirm=False, converts_to_openipc=
             log.info("Converted to OpenIPC%s.", " (camera confirmed Ret 515)" if confirmed else " (transfer ended -- verify)")
             log.info("The camera is rebooting onto DHCP, NOT its old IP %s.", cam.ip)
             log.info("Reassign a static IP:  python -m Utils.CamManager  ->  'search'  then")
-            log.info("  'config <MAC> <IP> <MASK> <GATE>'  (OpenIPC set-IP is SSH-based).")
+            log.info("  'config <MAC> <IP> <MASK>'  (OpenIPC set-IP is SSH-based; gateway omitted")
+            log.info("  by default -- no default route, less attack surface).")
             log.info("Then push 'SwitchMode init' to provision the science config.")
             return True
 
