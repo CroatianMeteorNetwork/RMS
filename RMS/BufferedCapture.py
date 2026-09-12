@@ -29,7 +29,8 @@ import datetime
 import copy
 import os.path
 from multiprocessing import Process, Value, Array
-from RMS.SEIBlockMeta import SEIBlockAccumulator, publishSeiMeta
+from RMS.SEIBlockMeta import SEIBlockAccumulator, publishSeiMeta, SEI_META_FIELDS
+from RMS.SEITimebase import SEITimebase
 import threading
 from collections import deque
 import os
@@ -121,7 +122,7 @@ class _SlidingMin(object):
 
 def _rmspCapUtc(data):
     """Parse the first checksum-valid RMSP v4 provenance SEI in a raw (escaped) H.264 access
-    unit. Returns (capture_utc_s, exp_s, soc_temp_c or None, meta dict) or None. Layout matches
+    unit. Returns (capture_utc_s, exp_s, soc_temp_c or None, meta dict, frame_seq) or None. Layout matches
     venc/main.c build_rmsp_payload (fields XOR-0xFF after the 'RMSP' magic).
     capture_utc = (sec+usec) - (mono_pts_us - raw_pts_us): host-clock at emit minus the
     camera-side capture->emit delay, both from the same back-to-back cal.
@@ -156,6 +157,7 @@ def _rmspCapUtc(data):
         if ck != u[L - 1] or v != 4:
             continue
         sec = struct.unpack('<I', u[6:10])[0]; usec = struct.unpack('<I', u[10:14])[0]
+        frame_seq = struct.unpack('<I', u[14:18])[0]
         raw_pts = struct.unpack('<I', u[44:48])[0]; mono = struct.unpack('<I', u[48:52])[0]
         exp_us = struct.unpack('<I', u[18:22])[0]
         fl = u[5]
@@ -174,7 +176,7 @@ def _rmspCapUtc(data):
             'wb_b': struct.unpack('<H', u[36:38])[0]/256.0 if (fl & 0x02) else None,
             'qp': u[58] if (fl & 0x40) else None,
         }
-        return ((sec + usec/1e6) - delay/1e6, exp_us/1e6, temp, meta)
+        return ((sec + usec/1e6) - delay/1e6, exp_us/1e6, temp, meta, frame_seq)
 
 if sys.version_info[0] < 3:
     # py2
@@ -312,6 +314,15 @@ class BufferedCapture(Process):
         self._sei_blk = SEIBlockAccumulator()
         self._sei_blk_seq = 0
         self._sei_seen = False
+        # SEI-derived integration-start timebase: PRIMARY frame-time source when the camera
+        # emits a valid RMSP SEI. Legacy GStreamer timing stays computed as the sanity
+        # reference and the per-frame fallback. Raw per-frame stamps are stored lock-free in
+        # _sei_int_by_pts (like _arr_by_pts); the source is latched once per block.
+        self._sei_tb = SEITimebase(self.config.fps)
+        self._sei_int_by_pts = {}
+        self._sei_ts_active = False
+        self._sei_off_samples = []
+        self._sei_interp_n = 0
 
         # Initialize shared values for raw frame saving (these are designed for multiprocessing)
 
@@ -711,6 +722,11 @@ class BufferedCapture(Process):
                         if cu[2] is not None:
                             self._soc_temp = cu[2]
                         self._sei_blk.add(cu[3])
+                        if self._sei_tb is not None:
+                            self._sei_int_by_pts[pts] = self._sei_tb.feed(pts, cu[0], cu[1], cu[4])
+                            if len(self._sei_int_by_pts) > 600:
+                                for _k in list(self._sei_int_by_pts)[:200]:
+                                    self._sei_int_by_pts.pop(_k, None)
                         if self._sei_by_pts is not None:
                             self._sei_by_pts[pts] = cu
                             if len(self._sei_by_pts) > 600:
@@ -900,7 +916,7 @@ class BufferedCapture(Process):
             except NameError:
                 _cu = None
             if _cu is not None:
-                _cap_utc, _exp_s, _tmp = _cu
+                _cap_utc, _exp_s, _tmp = _cu[0], _cu[1], _cu[2]
                 _readout = _cap_utc - _K_READOUT_S           # row-0 readout (exposure-independent)
                 _int_start = _readout - _exp_s               # TARGET: row-0 start of integration
                 _win = self._disc_win
@@ -915,6 +931,28 @@ class BufferedCapture(Process):
                 self._seiRecordDelta((timestamp - _int_start)*1000.0, (_stock_ts - _int_start)*1000.0,
                                      _lpipe*1000.0, self._disc_corr*1000.0, _exp_s*1000.0,
                                      _alt*1000.0, _lat*1000.0)
+
+        # SEI-PRIMARY timing: when the timebase is active for this block, replace the legacy
+        # timestamp with the camera's own integration-start (capture_utc - exp - k), used RAW.
+        # Legacy stays computed above as the sanity reference; the SEI-minus-legacy offset is
+        # sampled per frame for the block's provenance card. A frame whose record is missing is
+        # interpolated from the fit (flagged); if even that is unavailable, legacy is kept.
+        if ret and (timestamp is not None) and self._sei_ts_active:
+            _legacy_ts = timestamp
+            try:
+                _sei_ts = self._sei_int_by_pts.pop(gst_timestamp_ns, None)
+            except NameError:
+                _sei_ts = None
+            if _sei_ts is None:
+                try:
+                    _sei_ts = self._sei_tb.estimate(gst_timestamp_ns)
+                except NameError:
+                    _sei_ts = None
+                if _sei_ts is not None:
+                    self._sei_interp_n += 1
+            if _sei_ts is not None:
+                self._sei_off_samples.append(_sei_ts - _legacy_ts)
+                timestamp = _sei_ts
 
         return ret, frame, timestamp
 
@@ -2414,6 +2452,20 @@ class BufferedCapture(Process):
             max_frame_age_seconds = 0.0
             first_frame_timestamp = None
 
+            # Latch the timing source for this whole block (never mid-block, which would step
+            # timestamps inside one FF/FT): SEI integration-start when the timebase is healthy,
+            # else legacy GStreamer timing. Legacy always keeps running as the sanity reference.
+            _sei_now = (self._sei_tb is not None) and self._sei_tb.ready()
+            if _sei_now != self._sei_ts_active:
+                if _sei_now:
+                    log.info('Timing source -> SEI integration-start (%s)', self._sei_tb.health())
+                else:
+                    log.warning('Timing source -> legacy GStreamer; SEI timebase stood down (%s)',
+                                self._sei_tb.health())
+            self._sei_ts_active = _sei_now
+            self._sei_off_samples = []
+            self._sei_interp_n = 0
+
             # running totals for mean calculations
             sum_frame_interval_norm = 0.0
             sum_frame_age_seconds   = 0.0
@@ -2784,6 +2836,17 @@ class BufferedCapture(Process):
             # offset by the decode queue depth (a few frames) -- fine for 256-frame statistics
             self._sei_blk_seq += 1
             sei_meta_vals = self._sei_blk.snapshotAndReset(self._sei_blk_seq)
+            # Fold this block's timing provenance (source, SEI-minus-legacy median, interpolated
+            # count) into the SEI meta so each FF records whether its timing is the us-class SEI
+            # integration-start or the ~30 ms-class legacy origin.
+            if self._sei_off_samples:
+                _off = sorted(self._sei_off_samples); _mid = len(_off)//2
+                _off_ms = (_off[_mid] if len(_off) % 2 else 0.5*(_off[_mid - 1] + _off[_mid]))*1000.0
+            else:
+                _off_ms = 0.0
+            sei_meta_vals[SEI_META_FIELDS.index('time_src')] = 1.0 if self._sei_ts_active else 0.0
+            sei_meta_vals[SEI_META_FIELDS.index('time_off_ms')] = _off_ms
+            sei_meta_vals[SEI_META_FIELDS.index('interp_n')] = float(self._sei_interp_n)
 
             if (not wait_for_reconnect
                 and not self.daytime_mode.value

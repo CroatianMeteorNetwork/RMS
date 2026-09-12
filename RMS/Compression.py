@@ -226,6 +226,10 @@ class Compressor(multiprocessing.Process):
             if sei_meta['wb_r'] > 0:
                 ff.wbr = float(sei_meta['wb_r'])
                 ff.wbb = float(sei_meta['wb_b'])
+            # Timing provenance: which clock this block's frame times came from
+            ff.timesrc = 'sei' if sei_meta['time_src'] >= 0.5 else 'legacy'
+            ff.timeoffs = float(sei_meta['time_off_ms'])
+            ff.timeinterp = int(sei_meta['interp_n'])
 
         if sys.version_info[0] == 2:
             # Python 2 code

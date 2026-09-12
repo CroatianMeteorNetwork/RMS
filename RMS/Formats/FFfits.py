@@ -134,6 +134,9 @@ def read(directory, filename, array=False, full_filename=False, memmap=True):
         # Optional per-block photometric provenance (SEI); absent on cameras without it
         for attr, key in _SEI_CARDS:
             setattr(ff, attr, head.get(key, None))
+        ff.timesrc = head.get('TIMESRC', None)
+        ff.timeoffs = head.get('TIMEOFFS', None)
+        ff.timeinterp = head.get('TIMEITRP', None)
 
         # Check for the DATE-OBS field and read datetime from filename it if it doesn't exist
         if 'DATE-OBS' in head:
@@ -232,6 +235,14 @@ def write(ff, directory, filename):
         head['WBB'] = (round(float(ff.wbb), 4), 'white balance B gain, x (colour term)')
     if getattr(ff, 'seinfrm', None) is not None:
         head['SEINFRM'] = (int(ff.seinfrm), 'frames with SEI provenance in block')
+
+    # Timing provenance: whether this block's frame times are the camera's SEI integration-
+    # start (us-class) or the legacy GStreamer origin (~30 ms-class), the SEI-minus-legacy
+    # block-median offset, and how many frames used an interpolated SEI time
+    if getattr(ff, 'timesrc', None) is not None:
+        head['TIMESRC'] = (str(ff.timesrc), 'frame-time source: sei int-start or legacy')
+        head['TIMEOFFS'] = (round(float(ff.timeoffs), 3), 'SEI minus legacy time, block median [ms]')
+        head['TIMEITRP'] = (int(ff.timeinterp), 'frames with interpolated SEI time in block')
 
     # Deconstruct the 3D array into individual images
     if ff.array is not None:

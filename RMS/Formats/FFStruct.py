@@ -63,6 +63,12 @@ class FFStruct:
         self.wbb = None
         self.seinfrm = None
 
+        # Timing provenance: 'sei' (camera integration-start, us-class) or 'legacy' (GStreamer
+        # origin, ~30 ms-class); SEI-minus-legacy block-median offset [ms]; interpolated frames
+        self.timesrc = None
+        self.timeoffs = None
+        self.timeinterp = None
+
         self.array = None
 
 

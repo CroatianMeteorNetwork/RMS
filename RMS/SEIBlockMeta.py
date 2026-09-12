@@ -18,7 +18,11 @@ import threading
 # Field order of the shared array. 'seq' (last) is a block sequence number written after the
 # fields so a reader can detect a torn read; 'nfrm' == 0 means "no data".
 SEI_META_FIELDS = ('nfrm', 'exp_mean', 'exp_min', 'exp_max', 'again', 'dgain', 'ispdgain',
-                   'stable', 'qp_mean', 'qp_max', 'wb_r', 'wb_b', 'seq')
+                   'stable', 'qp_mean', 'qp_max', 'wb_r', 'wb_b',
+                   # timing provenance (set by the capture loop, not the accumulator):
+                   # time_src 1=SEI integration-start / 0=legacy; time_off_ms = SEI-minus-legacy
+                   # block median [ms]; interp_n = frames with interpolated SEI time
+                   'time_src', 'time_off_ms', 'interp_n', 'seq')
 SEI_META_N = len(SEI_META_FIELDS)
 _SEQ = SEI_META_N - 1
 
@@ -84,7 +88,8 @@ class SEIBlockAccumulator(object):
                         1.0 if stable else 0.0,
                         (self.qp_sum/self.qp_n) if self.qp_n else 0.0, float(self.qp_max),
                         self.wb_r if self.wb_r is not None else 0.0,
-                        self.wb_b if self.wb_b is not None else 0.0, 0.0]
+                        self.wb_b if self.wb_b is not None else 0.0,
+                        0.0, 0.0, 0.0, 0.0]   # time_src, time_off_ms, interp_n, seq (set later)
             vals[_SEQ] = float(seq)
             self._reset()
         return vals
