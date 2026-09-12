@@ -97,6 +97,13 @@ DISC_SLEW_S_PER_FRAME = 20e-6    # max correction change per frame (500 ppm @ 25
                                  # real crystal, absorbs a host clock step gradually, never jumps
 DISC_RESET_S = 2.0               # |target - corr| beyond this = PTS/clock discontinuity: re-reference
 
+# Stream stall tolerance before declaring the device disconnected. A single 500 ms no-sample
+# gap is almost always a transient (network/host hiccup); rtspsrc + jitterbuffer usually recover
+# if we keep pulling. Reconnecting instead re-mints the origin (a ~tens-of-ms legacy step, now
+# softened by the reconnect re-anchor) and loses the frames in the gap, so only a stall longer
+# than this is treated as a dead session. Well under the 180 s watchdog.
+RECONNECT_STALL_S = 4.0
+
 
 class _SlidingMin(object):
     """ O(1)-amortised minimum over the last maxlen appended values (monotonic deque), so the
@@ -834,8 +841,24 @@ class BufferedCapture(Process):
                 # Pull a frame from the GStreamer pipeline with a .5 sec timeout
                 sample = self.device.emit("try-pull-sample", 500 * Gst.MSECOND)
                 if not sample:
-                    log.info("GStreamer pipeline did not emit a sample.")
-                    return False, None, None
+                    # Tolerate a brief stall: keep pulling for up to RECONNECT_STALL_S before
+                    # treating the stream as dead. This turns a recoverable hiccup into a short
+                    # gap (frames resume with correct PTS -- the anchor stays valid) instead of a
+                    # full reconnect + origin re-mint + frame loss. exit is checked so a stop is
+                    # not delayed by the wait.
+                    _stall_t0 = time.time()
+                    _stall_deadline = _stall_t0 + RECONNECT_STALL_S
+                    while (not sample) and (time.time() < _stall_deadline) and (not self.exit.is_set()):
+                        try:
+                            if self.device.get_property("eos"):
+                                break     # genuine end-of-stream: dead session, reconnect now
+                        except Exception:
+                            pass
+                        sample = self.device.emit("try-pull-sample", 500 * Gst.MSECOND)
+                    if not sample:
+                        log.info("No sample for ~%.0f s -- treating as disconnect.", RECONNECT_STALL_S)
+                        return False, None, None
+                    log.info("Recovered after a %.1f s stream stall (no reconnect).", time.time() - _stall_t0)
                 
                 # Extract the frame buffer and timestamp
                 buffer = sample.get_buffer()
