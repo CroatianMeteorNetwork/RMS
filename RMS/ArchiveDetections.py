@@ -59,8 +59,13 @@ def selectFiles(config, dir_path, ff_detected):
 
     selected_list = []
 
+    dir_file_list = os.listdir(dir_path)
+
+    # FF file names, listed once for the FR parent lookup below
+    ff_file_names = [file_name for file_name in dir_file_list if validFFName(file_name)]
+
     # Go through all files in the night directory
-    for file_name in os.listdir(dir_path):
+    for file_name in dir_file_list:
 
         # Take all .txt and .csv files
         if (file_name.lower().endswith('.txt')) or (file_name.lower().endswith('.csv')):
@@ -88,10 +93,10 @@ def selectFiles(config, dir_path, ff_detected):
             ff_match = None
 
             # Locate the parent FF bin file
-            for ff_file_name in os.listdir(dir_path):
+            for ff_file_name in ff_file_names:
 
-                if validFFName(ff_file_name) and (fr_id in ff_file_name):
-                    
+                if fr_id in ff_file_name:
+
                     ff_match = ff_file_name
                     break
 
@@ -137,8 +142,8 @@ def archiveFieldsums(dir_path):
     fieldsum_archive_name = os.path.join(os.path.abspath(os.path.join(fieldsum_archive_dir, os.pardir)), \
         'FS_' + os.path.basename(dir_path) + '_fieldsums')
 
-    # Archive all FS files
-    archiveDir(dir_path, fieldsum_files, fieldsum_archive_dir, fieldsum_archive_name, delete_dest_dir=False)
+    # Archive all FS files straight from the night directory; nothing is staged on disk
+    archiveDir(dir_path, fieldsum_files, fieldsum_archive_dir, fieldsum_archive_name, delete_dest_dir=True)
 
     # Delete FS files in the main directory
     for fs_file in fieldsum_files:
