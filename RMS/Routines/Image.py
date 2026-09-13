@@ -1027,23 +1027,44 @@ def thickLine(img_h, img_w, x_cent, y_cent, length, rotation, radius):
     return photom_mask
 
 
-def signalToNoise(source_intens, source_px_count, bg_median, bg_std):
-    """ Compute the signal to noise ratio using the "CCD equation" (Howell et al., 1989).
+def signalToNoise(source_intens, source_px_count, bg_median, bg_std, gain=None):
+    """ Compute the signal to noise ratio of an aperture sum from the measured background scatter.
+
+    The image values RMS works with are not electron counts: they are 8-bit (or 16-bit) codes,
+    usually gamma-linearised and averaged over many frames. The "CCD equation" (Howell et al., 1989)
+    assumes Poisson statistics in electrons, so applying it to these values produces S/N figures
+    that are wrong by a large, gamma- and gain-dependent factor (e.g. S/N ~ 1 for clearly detected
+    5th magnitude stars on gamma 0.5 data). The only noise estimate available in image units is the
+    measured background scatter, so the noise on a sum of N pixels is taken as bg_std*sqrt(N). This
+    is the sky-limited S/N; it is exact for faint sources and overestimates S/N for bright sources
+    whose own shot noise is not negligible. If the gain (electrons per image unit) is known, pass it
+    and the source shot noise is included.
 
     Arguments:
-        source_intens: [float] Source intensity (integrated, background subtracted).
-        source_px_count: [int] Number of source pixels.
-        bg_median: [float] Background median.
-        bg_std: [float] Background standard deviation.
+        source_intens: [float] Source intensity (integrated, background subtracted), image units.
+        source_px_count: [int] Number of pixels summed into source_intens.
+        bg_median: [float] Background median. Kept for signature compatibility; not used, because a
+            Poisson term in image units is meaningless without a gain.
+        bg_std: [float] Background standard deviation per pixel, in the same units as source_intens.
+
+    Keyword arguments:
+        gain: [float] Electrons per image unit. None by default (sky-limited S/N).
 
     Return:
         [float] Signal to noise ratio.
     """
-    
-    # Compute the SNR using the "CCD equation" (Howell et al., 1989)
-    snr = source_intens/(math.sqrt(source_intens + source_px_count*(bg_median + bg_std**2)))
 
-    return snr
+    # Noise of the sum of N background-limited pixels
+    noise_sq = source_px_count*bg_std**2
+
+    # Add the source shot noise if the gain is known
+    if (gain is not None) and (gain > 0) and (source_intens > 0):
+        noise_sq += source_intens/gain
+
+    if noise_sq <= 0:
+        return 0.0
+
+    return source_intens/math.sqrt(noise_sq)
 
 
 
