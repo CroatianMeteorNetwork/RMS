@@ -8,11 +8,13 @@ import traceback
 
 
 from RMS.Formats.FFfile import validFFName
+from RMS.Formats.FFfile import read as readFF
 from RMS.Logger import getLogger
 from RMS.Misc import archiveDir, tarWithProgress
 from RMS.Routines import MaskImage
-from Utils.GenerateThumbnails import generateThumbnails
-from Utils.StackFFs import stackFFs
+from Utils.GenerateThumbnails import generateThumbnails, ThumbnailMosaic
+from Utils.GenerateTimelapse import TimelapseWriter
+from Utils.StackFFs import stackFFs, FFStacker
 from Utils.LogArchiver import makeLogArchives
 
 
@@ -153,6 +155,91 @@ def archiveFieldsums(dir_path):
 
 
 
+def generateCapturedProducts(captured_path, config, mask=None, make_timelapse=True):
+    """ Make the products that need every FF file of the night, in one pass over the files: the captured
+        thumbnail mosaic, the captured stack, and the timelapse. Each FF is read once, maxpixel and
+        avepixel only, and fed to all three.
+
+    Arguments:
+        captured_path: [str] Path where the captured files are located.
+        config: [conf object] Configuration.
+
+    Keyword arguments:
+        mask: [MaskStructure] Mask to apply to the stack. None by default.
+        make_timelapse: [bool] Whether to make the timelapse. True by default.
+
+    Return:
+        mosaic_file, stack_path, timelapse_path:
+            - mosaic_file: [str] Name of the captured thumbnail mosaic, None if it failed.
+            - stack_path: [str] Path of the captured stack, None if it failed.
+            - timelapse_path: [str] Path of the timelapse, None if it was not made.
+    """
+
+    ff_list = [ff_name for ff_name in sorted(os.listdir(captured_path)) if validFFName(ff_name)]
+
+    log.info('Generating the captured thumbnails, stack{:s} in one pass over {:d} FF files...'.format(
+        ' and timelapse' if make_timelapse else '', len(ff_list)))
+
+    mosaic = ThumbnailMosaic(config, 'CAPTURED', len(ff_list))
+
+    # The per-file 'Stacking:' lines are not logged here, one line per FF for the whole night was noise
+    stacker = FFStacker(deinterlace=(config.deinterlace_order > 0), subavg=True, print_progress=False)
+
+    writer = None
+    if make_timelapse:
+        dir_name = os.path.basename(os.path.abspath(captured_path))
+        mp4_path = os.path.join(captured_path, dir_name.replace("_detected", "") + "_timelapse.mp4")
+        writer = TimelapseWriter(captured_path, mp4_path)
+
+    mosaic_file, stack_path, timelapse_path = None, None, None
+
+    try:
+        for ff_name in ff_list:
+
+            ff = readFF(captured_path, ff_name, planes=('maxpixel', 'avepixel'))
+
+            if ff is None:
+                # A corrupted FF still takes its slot in the mosaic
+                mosaic.add(ff_name, None)
+                continue
+
+            stacker.add(ff_name, ff.maxpixel, ff.avepixel)
+            mosaic.add(ff_name, ff.maxpixel)
+
+            # Last, as the timestamp is stamped onto the maxpixel in place
+            if writer is not None:
+                writer.add(ff_name, ff.maxpixel)
+
+    except Exception as e:
+        log.error('Reading the captured FF files failed with error:' + repr(e))
+        log.error("".join(traceback.format_exception(*sys.exc_info())))
+
+    finally:
+        # Always finish ffmpeg, so a failure above never leaves it waiting on its input
+        if writer is not None:
+            try:
+                timelapse_path = writer.close()
+            except Exception as e:
+                log.error('Finishing the timelapse failed with error:' + repr(e))
+                log.error("".join(traceback.format_exception(*sys.exc_info())))
+
+
+    try:
+        mosaic_file = mosaic.save(captured_path)
+    except Exception as e:
+        log.error('Generating thumbnails failed with error:' + repr(e))
+        log.error("".join(traceback.format_exception(*sys.exc_info())))
+
+    try:
+        stack_path, _ = stacker.save(captured_path, 'jpg', mask=mask, captured_stack=True)
+    except Exception as e:
+        log.error('Generating stack failed with error:' + repr(e))
+        log.error("".join(traceback.format_exception(*sys.exc_info())))
+
+    return mosaic_file, stack_path, timelapse_path
+
+
+
 def archiveDetections(captured_path, archived_path, ff_detected, config, extra_files=None):
     """ Create thumbnails and compress all files with detections and the accompanying files
         in one archive, suffix _detected
@@ -182,58 +269,55 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
     # Get the list of files to archive
     file_list = selectFiles(config, captured_path, ff_detected)
 
-    log.info('Generating thumbnails...')
+    # Copy the extra files list, the timelapse is added to it below
+    extra_files = list(extra_files) if extra_files else []
 
+    # Load the mask for the stack
+    mask = None
     try:
-
-        # Generate captured thumbnails
-        captured_mosaic_file = generateThumbnails(captured_path, config, 'CAPTURED')
-
-        # Generate detected thumbnails
-        detected_mosaic_file = generateThumbnails(captured_path, config, 'DETECTED', \
-            file_list=sorted(file_list), no_stack=True)
-
-        # Add the detected mosaic file to the selected list
-        file_list.append(captured_mosaic_file)
-        file_list.append(detected_mosaic_file)
-
-    except Exception as e:
-        log.error('Generating thumbnails failed with error:' + repr(e))
-        log.error("".join(traceback.format_exception(*sys.exc_info())))
-
-
-
-    log.info('Generating a stack of all captured images...')
-
-    try:
-
-        # Load the mask for stack
-        mask = None
         mask_path_default = os.path.join(config.config_file_path, config.mask_file)
         if os.path.exists(mask_path_default) and config.stack_mask:
             mask_path = os.path.abspath(mask_path_default)
             mask = MaskImage.loadMask(mask_path)
 
+    except Exception as e:
+        log.error('Loading the mask for the stack failed with error:' + repr(e))
+        log.error("".join(traceback.format_exception(*sys.exc_info())))
 
-        # Make a co-added image of all captured images
-        captured_stack_path, _ = stackFFs(captured_path, 'jpg', deinterlace=(config.deinterlace_order > 0), 
-            subavg=True, mask=mask, captured_stack=True)
 
-        if captured_stack_path is not None:
+    # Captured thumbnails, captured stack and the timelapse, from one pass over the FF files
+    captured_mosaic_file, captured_stack_path, timelapse_path = generateCapturedProducts(captured_path,
+        config, mask=mask, make_timelapse=config.timelapse_generate_captured)
 
-            log.info("Captured stack saved to: {:s}".format(captured_stack_path))
+    if captured_mosaic_file is not None:
+        file_list.append(captured_mosaic_file)
+    else:
+        log.info("Captured thumbnails could not be saved!")
 
-            # Extract the name of the stack image
-            stack_file = os.path.basename(captured_stack_path)
-            
-            # Add the stack path to the list of files to put in the archive
-            file_list.append(stack_file)
+    if captured_stack_path is not None:
+        log.info("Captured stack saved to: {:s}".format(captured_stack_path))
+        file_list.append(os.path.basename(captured_stack_path))
+    else:
+        log.info("Captured stack could not be saved!")
 
-        else:
-            log.info("Captured stack could not be saved!")
+    if timelapse_path is not None:
+        # Goes with the extra files, as it did when processNight made it
+        extra_files.append(timelapse_path)
+    elif config.timelapse_generate_captured:
+        log.info("Timelapse could not be saved!")
+
+
+    log.info('Generating detected thumbnails...')
+
+    try:
+        # Generate detected thumbnails
+        detected_mosaic_file = generateThumbnails(captured_path, config, 'DETECTED', \
+            file_list=sorted(file_list), no_stack=True)
+
+        file_list.append(detected_mosaic_file)
 
     except Exception as e:
-        log.error('Generating captured stack failed with error:' + repr(e))
+        log.error('Generating thumbnails failed with error:' + repr(e))
         log.error("".join(traceback.format_exception(*sys.exc_info())))
 
 

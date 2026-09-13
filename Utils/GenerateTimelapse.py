@@ -29,6 +29,194 @@ log = getLogger("rmslogger")
 # --------------------------------------------------------------------
 #  Timelapse generation from FF files (meteors)
 # --------------------------------------------------------------------
+class TimelapseWriter(object):
+    def __init__(self, dir_path, mp4_path, fps=30, hires=False, keep_images=False):
+        """ Streams stamped FF maxpixels into ffmpeg as raw grayscale video, one frame at a time, so the
+            images can come from any reader loop. ffmpeg is started on the first frame, which fixes the
+            frame geometry; frames of any other size are skipped.
+
+        Arguments:
+            dir_path: [str] Directory the movie belongs to; ffmpeg runs there and keep_images writes there.
+            mp4_path: [str] Path of the movie to write.
+
+        Keyword arguments:
+            fps: [int] Frames per second; 30 by default.
+            hires: [bool] Produce a higher-resolution movie (lower CRF). False by default.
+            keep_images: [bool] Also write the stamped frames as JPGs into a temp_img_dir subdirectory.
+                False by default.
+        """
+
+        self.dir_path = dir_path
+        self.mp4_path = mp4_path
+        self.fps = fps
+        self.crf = 25 if hires else 29
+        self.keep_images = keep_images
+
+        self.t_start = RmsDateTime.utcnow()
+
+        self.ffmpeg_path = isFfmpegWorking()
+        self.available = bool(self.ffmpeg_path)
+        if not self.available:
+            log.warning('No video convertor available - tried ffmpeg')
+
+        # Encode into a temporary file and rename on success, so a half-written movie never gets
+        # picked up as a finished product
+        mp4_dir, mp4_name = os.path.split(mp4_path)
+        self.tmp_mp4_path = os.path.join(mp4_dir, "temp_" + mp4_name)
+
+        self.dir_tmp_path = os.path.join(dir_path, "temp_img_dir")
+        if self.available and keep_images:
+            if os.path.exists(self.dir_tmp_path):
+                shutil.rmtree(self.dir_tmp_path, ignore_errors=True)
+            mkdirP(self.dir_tmp_path)
+            log.info("Stamped frames will be kept in: {}".format(self.dir_tmp_path))
+
+        self.process = None
+        self.frame_shape = None
+        self.failed = False
+        self.n_written = 0
+        self.n_skipped = 0
+
+
+    def _start(self, nrows, ncols):
+        """ Start ffmpeg for the given frame geometry. """
+
+        com = [self.ffmpeg_path, '-nostdin', '-y', '-hide_banner',
+                '-loglevel', 'error',
+                '-f', 'rawvideo',
+                '-vcodec', 'rawvideo',
+                '-s', '{:d}x{:d}'.format(ncols, nrows),
+                '-pix_fmt', 'gray',
+                '-r', str(self.fps),
+                '-i', '-',
+                '-vcodec', 'libx264',
+                '-pix_fmt', 'yuv420p',
+                '-an',
+                '-crf', str(self.crf),
+                '-g', '15',
+                '-movflags', 'faststart',
+                '-vf', 'hqdn3d=4:3:6:4.5,lutyuv=y=gammaval(0.77)',
+                self.tmp_mp4_path]
+
+        log.info('Creating timelapse using...')
+        log.info(' '.join(com))
+
+        self.process = subprocess.Popen(com, stdin=subprocess.PIPE, cwd=self.dir_path)
+        self.frame_shape = (nrows, ncols)
+
+
+    def add(self, ff_name, img):
+        """ Stamp the timestamp on the frame and send it to ffmpeg. The array is modified in place.
+
+        Arguments:
+            ff_name: [str] Name of the FF file, used for the timestamp and camera ID.
+            img: [ndarray] Maxpixel image, uint8.
+        """
+
+        if (not self.available) or self.failed:
+            return
+
+        if img is None:
+            self.n_skipped += 1
+            return
+
+        if self.process is None:
+            self._start(*img.shape)
+
+        elif img.shape != self.frame_shape:
+            log.warning("Skipping {} - frame size {} differs from {}".format(ff_name, img.shape,
+                self.frame_shape))
+            self.n_skipped += 1
+            return
+
+        nrows = self.frame_shape[0]
+
+        # Stamp the timestamp on the frame
+        timestamp = filenameToDatetime(ff_name).strftime("%Y-%m-%d %H:%M:%S")
+
+        file_split = ff_name.split('_')
+        i = 1 if len(file_split[0]) == 2 else 0
+        camid = file_split[i]
+
+        text = camid + " " + timestamp + " UTC"
+        position = (10, nrows - 6)
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        font_scale = 0.4
+        thickness = 1
+
+        cv2.putText(img, text, position, font, font_scale, (0, 0, 0), thickness + 2, cv2.LINE_AA)
+        cv2.putText(img, text, position, font, font_scale, (255, 255, 255), thickness, cv2.LINE_AA)
+
+        if self.keep_images:
+            cv2.imwrite(os.path.join(self.dir_tmp_path, 'temp_{:04d}.jpg'.format(self.n_written)), img,
+                [cv2.IMWRITE_JPEG_QUALITY, 100])
+
+        try:
+            self.process.stdin.write(np.ascontiguousarray(img).tobytes())
+
+        except BrokenPipeError:
+            log.error("ffmpeg closed its input early while writing frame {:d}".format(self.n_written + 1))
+            self.failed = True
+            return
+
+        self.n_written += 1
+
+
+    def close(self):
+        """ Finish the movie.
+
+        Return:
+            mp4_path: [str] Path of the movie, or None if it could not be made.
+        """
+
+        return_code = -1
+
+        if self.process is not None:
+
+            try:
+                self.process.stdin.close()
+            except OSError:
+                pass
+
+            try:
+                return_code = self.process.wait(timeout=600)
+
+            except subprocess.TimeoutExpired:
+                log.warning("ffmpeg did not finish within the timeout, terminating...")
+                self.process.terminate()
+                try:
+                    self.process.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    self.process.kill()
+                return_code = -1
+
+            self.process = None
+
+        if not self.available:
+            return None
+
+        log.info("Timelapse frames written: {:d}, skipped: {:d}".format(self.n_written, self.n_skipped))
+
+        if (return_code == 0) and (not self.failed) and os.path.exists(self.tmp_mp4_path) \
+                and (os.path.getsize(self.tmp_mp4_path) > 0):
+
+            os.replace(self.tmp_mp4_path, self.mp4_path)
+            log.info("Timelapse saved to: {} ({:.2f} MB)".format(self.mp4_path,
+                os.path.getsize(self.mp4_path)/(1024*1024)))
+            result = self.mp4_path
+
+        else:
+            log.error("Timelapse encoding failed (ffmpeg return code {})".format(return_code))
+            if os.path.exists(self.tmp_mp4_path):
+                os.remove(self.tmp_mp4_path)
+            result = None
+
+        log.info("Timelapse total time: %s", RmsDateTime.utcnow() - self.t_start)
+
+        return result
+
+
+
 def generateTimelapse(dir_path, keep_images=False, fps=None, output_file=None, hires=False):
     """Generate a high-quality MP4 movie from FF files.
 
@@ -64,18 +252,6 @@ def generateTimelapse(dir_path, keep_images=False, fps=None, output_file=None, h
     else:
         mp4_path = os.path.join(dir_path, os.path.basename(output_file))
 
-    if hires:
-        crf = 25
-    else:
-        crf = 29
-
-    t1 = RmsDateTime.utcnow()
-
-    ffmpeg_path = isFfmpegWorking()
-    if not ffmpeg_path:
-        log.warning('No video convertor available - tried ffmpeg')
-        return None
-
 
     ff_list = [ff_name for ff_name in sorted(os.listdir(dir_path)) if validFFName(ff_name)]
 
@@ -83,28 +259,10 @@ def generateTimelapse(dir_path, keep_images=False, fps=None, output_file=None, h
         log.warning('No FF files found in {}, cannot create timelapse.'.format(dir_path))
         return None
 
+    writer = TimelapseWriter(dir_path, mp4_path, fps=fps, hires=hires, keep_images=keep_images)
 
-    # Frames are written as JPGs only when explicitly requested
-    dir_tmp_path = os.path.join(dir_path, "temp_img_dir")
-    if keep_images:
-        if os.path.exists(dir_tmp_path):
-            shutil.rmtree(dir_tmp_path, ignore_errors=True)
-        mkdirP(dir_tmp_path)
-        log.info("Stamped frames will be kept in: {}".format(dir_tmp_path))
-
-
-    # The raw stream has one fixed geometry, so it is taken from the first readable FF and frames
-    # of any other size are skipped
-    frame_shape = None
-    ffmpeg_process = None
-
-    # Encode into a temporary file and rename on success, so a half-written movie never gets
-    # picked up as a finished product
-    mp4_dir, mp4_name = os.path.split(mp4_path)
-    tmp_mp4_path = os.path.join(mp4_dir, "temp_" + mp4_name)
-
-    n_written = 0
-    n_skipped = 0
+    if not writer.available:
+        return None
 
     log.info("Streaming {:d} FF files into ffmpeg...".format(len(ff_list)))
 
@@ -114,113 +272,17 @@ def generateTimelapse(dir_path, keep_images=False, fps=None, output_file=None, h
             # Only the maxpixel is needed, skip the other three planes on disk
             ff = readFF(dir_path, file_name, planes=('maxpixel',))
 
-            if (ff is None) or (ff.maxpixel is None):
-                n_skipped += 1
-                continue
+            writer.add(file_name, None if ff is None else ff.maxpixel)
 
-            img = ff.maxpixel
-
-            if frame_shape is None:
-
-                frame_shape = img.shape
-                nrows, ncols = frame_shape
-
-                com = [ffmpeg_path, '-nostdin', '-y', '-hide_banner',
-                        '-loglevel', 'error',
-                        '-f', 'rawvideo',
-                        '-vcodec', 'rawvideo',
-                        '-s', '{:d}x{:d}'.format(ncols, nrows),
-                        '-pix_fmt', 'gray',
-                        '-r', str(fps),
-                        '-i', '-',
-                        '-vcodec', 'libx264',
-                        '-pix_fmt', 'yuv420p',
-                        '-an',
-                        '-crf', str(crf),
-                        '-g', '15',
-                        '-movflags', 'faststart',
-                        '-vf', 'hqdn3d=4:3:6:4.5,lutyuv=y=gammaval(0.77)',
-                        tmp_mp4_path]
-
-                log.info('Creating timelapse using...')
-                log.info(' '.join(com))
-
-                ffmpeg_process = subprocess.Popen(com, stdin=subprocess.PIPE, cwd=dir_path)
-
-            elif img.shape != frame_shape:
-                log.warning("Skipping {} - frame size {} differs from {}".format(file_name, img.shape,
-                    frame_shape))
-                n_skipped += 1
-                continue
-
-            # Stamp the timestamp on the frame
-            timestamp = filenameToDatetime(file_name).strftime("%Y-%m-%d %H:%M:%S")
-
-            file_split = file_name.split('_')
-            i = 1 if len(file_split[0]) == 2 else 0
-            camid = file_split[i]
-
-            text = camid + " " + timestamp + " UTC"
-            position = (10, nrows - 6)
-            font = cv2.FONT_HERSHEY_SIMPLEX
-            font_scale = 0.4
-            thickness = 1
-
-            cv2.putText(img, text, position, font, font_scale, (0, 0, 0), thickness + 2, cv2.LINE_AA)
-            cv2.putText(img, text, position, font, font_scale, (255, 255, 255), thickness, cv2.LINE_AA)
-
-            if keep_images:
-                cv2.imwrite(os.path.join(dir_tmp_path, 'temp_{:04d}.jpg'.format(n_written)), img,
-                    [cv2.IMWRITE_JPEG_QUALITY, 100])
-
-            ffmpeg_process.stdin.write(np.ascontiguousarray(img).tobytes())
-            n_written += 1
-
-            if n_written % 30 == 0:
-                print("{:>5d}/{:>5d}, Elapsed: {:s}".format(n_written, len(ff_list),
-                    str(RmsDateTime.utcnow() - t1)), end="\r")
+            if writer.n_written % 30 == 0:
+                print("{:>5d}/{:>5d}, Elapsed: {:s}".format(writer.n_written, len(ff_list),
+                    str(RmsDateTime.utcnow() - writer.t_start)), end="\r")
                 sys.stdout.flush()
 
-    except BrokenPipeError:
-        log.error("ffmpeg closed its input early while writing frame {:d}".format(n_written + 1))
-
     finally:
-        if ffmpeg_process is not None:
-            try:
-                ffmpeg_process.stdin.close()
-            except OSError:
-                pass
+        mp4_path = writer.close()
 
-            try:
-                return_code = ffmpeg_process.wait(timeout=600)
-            except subprocess.TimeoutExpired:
-                log.warning("ffmpeg did not finish within the timeout, terminating...")
-                ffmpeg_process.terminate()
-                try:
-                    ffmpeg_process.wait(timeout=10)
-                except subprocess.TimeoutExpired:
-                    ffmpeg_process.kill()
-                return_code = -1
-        else:
-            return_code = -1
-
-    log.info("Frames written: {:d}, skipped: {:d}".format(n_written, n_skipped))
-
-    if (return_code == 0) and os.path.exists(tmp_mp4_path) and (os.path.getsize(tmp_mp4_path) > 0):
-        os.replace(tmp_mp4_path, mp4_path)
-        log.info("Timelapse saved to: {} ({:.2f} MB)".format(mp4_path,
-            os.path.getsize(mp4_path)/(1024*1024)))
-        result = mp4_path
-
-    else:
-        log.error("Timelapse encoding failed (ffmpeg return code {})".format(return_code))
-        if os.path.exists(tmp_mp4_path):
-            os.remove(tmp_mp4_path)
-        result = None
-
-    log.info("Total time: %s", RmsDateTime.utcnow() - t1)
-
-    return result
+    return mp4_path
 
 
 

@@ -48,6 +48,148 @@ def stackIfLighter(arr1, arr2):
 
 
 
+class ThumbnailMosaic(object):
+    def __init__(self, config, mosaic_type, n_files, no_stack=False):
+        """ Builds the mosaic of thumbnails one FF file at a time, so the images can come from any reader
+            loop. Every thumb_stack consecutive files are stacked 'if lighter' into one thumbnail.
+
+        Arguments:
+            config: [Conf object] Configuration.
+            mosaic_type: [str] Type of the mosaic (e.g. "CAPTURED" or "DETECTED")
+            n_files: [int] Number of FF files that will be added.
+
+        Keyword arguments:
+            no_stack: [bool] Don't stack the images using the config.thumb_stack option. A max of 1000
+                images are supported with this option. If there are more, stacks will be done according
+                to the config.thumb_stack option.
+        """
+
+        self.config = config
+        self.mosaic_type = mosaic_type
+
+        # Calculate the dimensions of the binned image
+        self.bin_w = int(config.width/config.thumb_bin)
+        self.bin_h = int(config.height/config.thumb_bin)
+
+        self.thumb_stack = config.thumb_stack
+
+        # Check if no stacks should be done (max 1000 images for no stack)
+        if no_stack and (n_files < 1000):
+            self.thumb_stack = 1
+
+        self.timestamps = []
+        self.stacked_imgs = []
+        self.n_added = 0
+
+
+    def add(self, ff_name, maxpixel):
+        """ Add one FF file to the mosaic. The input array is not modified.
+
+        Arguments:
+            ff_name: [str] Name of the FF file, used for the timestamp of the first file in each stack.
+            maxpixel: [ndarray] Maxpixel image, or None if the file is corrupted (it still takes its slot
+                in the stack, as before).
+        """
+
+        # Start a new stack every thumb_stack files, stamped with the time of its first file
+        if self.n_added % self.thumb_stack == 0:
+            self.stacked_imgs.append(np.zeros((self.bin_h, self.bin_w), dtype=np.uint8))
+            self.timestamps.append(FFfile.filenameToDatetime(ff_name))
+
+        self.n_added += 1
+
+        if maxpixel is None:
+            return
+
+        # Resize the image
+        img = cv2.resize(maxpixel, (self.bin_w, self.bin_h))
+
+        # Stack the image
+        self.stacked_imgs[-1] = stackIfLighter(self.stacked_imgs[-1], img)
+
+
+    def save(self, dir_path):
+        """ Assemble the mosaic and save it to the night directory as a JPG.
+
+        Arguments:
+            dir_path: [str] Path of the night directory.
+
+        Return:
+            file_name: [str] Name of the thumbnail file.
+        """
+
+        config = self.config
+        bin_w, bin_h = self.bin_w, self.bin_h
+
+        header_height = 20
+        timestamp_height = 10
+
+        # Calculate the number of rows for the thumbnail image
+        n_rows = int(np.ceil(float(self.n_added)/self.thumb_stack/config.thumb_n_width))
+
+        # Calculate the size of the mosaic
+        mosaic_w = int(config.thumb_n_width*bin_w)
+        mosaic_h = int((bin_h + timestamp_height)*n_rows + header_height)
+
+        mosaic_img = np.zeros((mosaic_h, mosaic_w), dtype=np.uint8)
+
+        # Write header text
+        header_text = 'Station: ' + str(config.stationID) + ' Night: ' + os.path.basename(dir_path) \
+            + ' Type: ' + self.mosaic_type
+
+        cv2.putText(mosaic_img, header_text, (0, header_height//2), \
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255,255,255), 1)
+
+        for row in range(n_rows):
+
+            for col in range(config.thumb_n_width):
+
+                # Calculate image index
+                indx = row*config.thumb_n_width + col
+
+                if indx < len(self.stacked_imgs):
+
+                    # Calculate position of the text
+                    text_x = col*bin_w
+                    text_y = row*bin_h + (row + 1)*timestamp_height - 1 + header_height
+
+                    # Add timestamp text
+                    cv2.putText(mosaic_img, self.timestamps[indx].strftime('%H:%M:%S'), (text_x, text_y), \
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
+
+                    # Add the image to the mosaic
+                    img_pos_x = col*bin_w
+                    img_pos_y = row*bin_h + (row + 1)*timestamp_height + header_height
+
+                    mosaic_img[img_pos_y : img_pos_y + bin_h, img_pos_x : img_pos_x + bin_w] = \
+                        self.stacked_imgs[indx]
+
+
+                else:
+                    break
+
+
+        # Only add the station ID if the dir name already doesn't start with it
+        dir_name = os.path.basename(os.path.abspath(dir_path))
+        if dir_name.startswith(config.stationID):
+            prefix = dir_name
+        else:
+            prefix = "{:s}_{:s}".format(config.stationID, dir_name)
+
+        thumb_name = "{:s}_{:s}_thumbs.jpg".format(prefix, self.mosaic_type)
+
+        # Save the mosaic
+        if USING_IMAGEIO:
+            # Use imageio to write the image
+            imwrite(os.path.join(dir_path, thumb_name), mosaic_img, quality=80)
+        else:
+            # Use OpenCV to save the image
+            imwrite(os.path.join(dir_path, thumb_name), mosaic_img, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+
+        return thumb_name
+
+
+
 def generateThumbnails(dir_path, config, mosaic_type, file_list=None, no_stack=False):
     """ Generates a mosaic of thumbnails from all FF files in the given folder and saves it as a JPG image.
     
@@ -59,12 +201,12 @@ def generateThumbnails(dir_path, config, mosaic_type, file_list=None, no_stack=F
     Keyword arguments:
         file_list: [list] A list of file names (without full path) which will be searched for FF files. This
             is used when generating separate thumbnails for captured and detected files.
-
-    Return:
-        file_name: [str] Name of the thumbnail file.
         no_stack: [bool] Don't stack the images using the config.thumb_stack option. A max of 1000 images
             are supported with this option. If there are more, stacks will be done according to the 
             config.thumb_stack option.
+
+    Return:
+        file_name: [str] Name of the thumbnail file.
 
     """
 
@@ -73,149 +215,19 @@ def generateThumbnails(dir_path, config, mosaic_type, file_list=None, no_stack=F
 
 
     # Make a list of all FF files in the night directory
-    ff_list = []
+    ff_list = [file_name for file_name in file_list if FFfile.validFFName(file_name)]
 
-    for file_name in file_list:
-        if FFfile.validFFName(file_name):
-            ff_list.append(file_name)
+    mosaic = ThumbnailMosaic(config, mosaic_type, len(ff_list), no_stack=no_stack)
 
+    for ff_name in ff_list:
 
-    # Calculate the dimensions of the binned image
-    bin_w = int(config.width/config.thumb_bin)
-    bin_h = int(config.height/config.thumb_bin)
+        # Read the FF file, only the maxpixel is used
+        ff = FFfile.read(dir_path, ff_name, planes=('maxpixel',))
 
+        # A corrupted FF still takes its slot in the stack
+        mosaic.add(ff_name, None if ff is None else ff.maxpixel)
 
-    ### RESIZE AND STACK THUMBNAILS ###
-    ##########################################################################################################
-
-    timestamps = []
-    stacked_imgs = []
-
-
-    thumb_stack = config.thumb_stack
-    
-    # Check if no stacks should be done (max 1000 images for no stack)
-    if no_stack and (len(ff_list) < 1000):
-        thumb_stack = 1
-
-
-    for i in range(0, len(ff_list), thumb_stack):
-
-        img_stack = np.zeros((bin_h, bin_w), dtype=np.uint8)
-
-        # Stack thumb_stack images using the 'if lighter' method
-        for j in range(thumb_stack):
-
-            if (i + j) < len(ff_list):
-
-                tmp_file_name = ff_list[i + j]
-
-                    
-                # Read the FF file, only the maxpixel is used
-                ff = FFfile.read(dir_path, tmp_file_name, planes=('maxpixel',))
-
-                # Skip the FF if it is corrupted
-                if ff is None:
-                    continue
-
-                img = ff.maxpixel
-
-                # Resize the image
-                img = cv2.resize(img, (bin_w, bin_h))
-
-                # Stack the image
-                img_stack = stackIfLighter(img_stack, img)
-
-            else:
-                break
-
-
-        # Save the timestamp of the first image in the stack
-        timestamps.append(FFfile.filenameToDatetime(ff_list[i]))
-
-        # Save the stacked image
-        stacked_imgs.append(img_stack)
-
-        # cv2.imshow('test', img_stack)
-        # cv2.waitKey(0)
-        # cv2.destroyAllWindows()
-
-
-    ##########################################################################################################
-
-    ### ADD THUMBS TO ONE MOSAIC IMAGE ###
-    ##########################################################################################################
-
-    header_height = 20
-    timestamp_height = 10
-
-    # Calculate the number of rows for the thumbnail image
-    n_rows = int(np.ceil(float(len(ff_list))/thumb_stack/config.thumb_n_width))
-
-    # Calculate the size of the mosaic
-    mosaic_w = int(config.thumb_n_width*bin_w)
-    mosaic_h = int((bin_h + timestamp_height)*n_rows + header_height)
-
-    mosaic_img = np.zeros((mosaic_h, mosaic_w), dtype=np.uint8)
-
-    # Write header text
-    header_text = 'Station: ' + str(config.stationID) + ' Night: ' + os.path.basename(dir_path) \
-        + ' Type: ' + mosaic_type
-    cv2.putText(mosaic_img, header_text, (0, header_height//2), \
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255,255,255), 1)
-
-    for row in range(n_rows):
-
-        for col in range(config.thumb_n_width):
-
-            # Calculate image index
-            indx = row*config.thumb_n_width + col
-
-            if indx < len(stacked_imgs):
-
-                # Calculate position of the text
-                text_x = col*bin_w
-                text_y = row*bin_h + (row + 1)*timestamp_height - 1 + header_height
-
-                # Add timestamp text
-                cv2.putText(mosaic_img, timestamps[indx].strftime('%H:%M:%S'), (text_x, text_y), \
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
-
-                # Add the image to the mosaic
-                img_pos_x = col*bin_w
-                img_pos_y = row*bin_h + (row + 1)*timestamp_height + header_height
-
-                mosaic_img[img_pos_y : img_pos_y + bin_h, img_pos_x : img_pos_x + bin_w] = stacked_imgs[indx]
-
-
-            else:
-                break
-
-    ##########################################################################################################
-
-    # Only add the station ID if the dir name already doesn't start with it
-    dir_name = os.path.basename(os.path.abspath(dir_path))
-    if dir_name.startswith(config.stationID):
-        prefix = dir_name
-    else:
-        prefix = "{:s}_{:s}".format(config.stationID, dir_name)
-
-    thumb_name = "{:s}_{:s}_thumbs.jpg".format(prefix, mosaic_type)
-
-    # Save the mosaic
-    if USING_IMAGEIO:
-        # Use imageio to write the image
-        imwrite(os.path.join(dir_path, thumb_name), mosaic_img, quality=80)
-    else:
-        # Use OpenCV to save the image
-        imwrite(os.path.join(dir_path, thumb_name), mosaic_img, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
-
-    return thumb_name
-    
-
-
-    
-
+    return mosaic.save(dir_path)
 
 
 
