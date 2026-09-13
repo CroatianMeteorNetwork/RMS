@@ -46,8 +46,9 @@ def makeFlat(dir_path, config, nostars=False, use_images=False, make_dark=False)
 
         # Find the CALSTARS file in the given folder
         calstars_file = None
-        for calstars_file in os.listdir(dir_path):
-            if ('CALSTARS' in calstars_file) and ('.txt' in calstars_file):
+        for file_name in os.listdir(dir_path):
+            if ('CALSTARS' in file_name) and ('.txt' in file_name):
+                calstars_file = file_name
                 break
 
         if calstars_file is None:
@@ -69,6 +70,9 @@ def makeFlat(dir_path, config, nostars=False, use_images=False, make_dark=False)
     else:
         calstars = {}
         calstars_ff_files = []
+
+        # Without CALSTARS the frame count per FF is not known, use the standard block
+        ff_frames = 256
 
 
 
@@ -180,61 +184,60 @@ def makeFlat(dir_path, config, nostars=False, use_images=False, make_dark=False)
 
 
 
-    c = 0
+    # Combine the images in chunks, then combine the chunk results. The chunk results are kept in
+    # float32, exact for the half-integer medians of 8 and 16-bit input, in one preallocated block, so
+    # the peak is that block plus one chunk of images rather than a float64 copy of everything
+    chunk_size = 10
+    n_files = len(ff_list_good)
+    n_chunks = int(np.ceil(n_files/float(chunk_size)))
+
+    chunk_results = None
+    n_stored = 0
     img_list = []
-    median_list = []
 
-    # Median combine all good FF files
-    for i in range(len(ff_list_good)):
+    for i, ff_name in enumerate(ff_list_good):
 
-        # Load 10 files at the time and median combine them, which conserves memory
-        if c < 10:
-
-            # Use images
-            if use_images:
-                img = loadImage(os.path.join(dir_path, ff_list_good[i]), -1)
-
-
-            # Use FF files
-            else:
-                ff = readFF(dir_path, ff_list_good[i])
-
-                # Skip the file if it is corrupted
-                if ff is None:
-                    continue
-
-                img = ff.avepixel
-
-            
-            img_list.append(img)
-
-            c += 1
-
+        if use_images:
+            img = loadImage(os.path.join(dir_path, ff_name), -1)
 
         else:
+            # Only the average pixel is used for the flat
+            ff = readFF(dir_path, ff_name, planes=('avepixel',))
 
-            img_list = np.array(img_list)
+            if ff is None:
+                continue
 
-            # Median combine the loaded 10 (or less) images
-            ff_median = combine_function(img_list, axis=0)
-            median_list.append(ff_median)
+            img = ff.avepixel
 
+        img_list.append(img)
+
+        # Combine a full chunk, or whatever is left at the end
+        if (len(img_list) == chunk_size) or (i == n_files - 1):
+
+            chunk = combine_function(np.array(img_list), axis=0)
             img_list = []
-            c = 0
+
+            if chunk_results is None:
+                chunk_results = np.empty((n_chunks,) + chunk.shape, dtype=np.float32)
+
+            chunk_results[n_stored] = chunk
+            n_stored += 1
 
 
-    # If there are more than 1 calculated median image, combine them
-    if len(median_list) > 1:
+    if n_stored == 0:
+        print('No readable images to make a flat from!')
+        return None
 
-        # Median combine all median images
-        median_list = np.array(median_list)
-        ff_median = combine_function(median_list, axis=0)
+    if n_stored == 1:
+        ff_median = chunk_results[0].astype(np.float64)
 
     else:
-        if len(median_list) > 0:
-            ff_median = median_list[0]
-        else:
-            ff_median = combine_function(np.array(img_list), axis=0)
+        # Combine the chunk results in row strips, so the working copy numpy makes for the reduction
+        # never holds more than a strip
+        ff_median = np.empty(chunk_results.shape[1:], dtype=np.float64)
+        strip = 64
+        for r0 in range(0, ff_median.shape[0], strip):
+            ff_median[r0:r0 + strip] = combine_function(chunk_results[:n_stored, r0:r0 + strip], axis=0)
 
 
     if not make_dark:
