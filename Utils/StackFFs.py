@@ -20,6 +20,189 @@ from RMS.Logger import getLogger
 log = getLogger("rmslogger")
 
 
+class FFStacker(object):
+    def __init__(self, deinterlace=False, subavg=False, filter_bright=False, flat=None, print_progress=True):
+        """ Accumulates FF files into one 'lighten' stack, one file at a time, so the images can come from
+            any reader loop.
+
+        Keyword arguments:
+            deinterlace: [bool] True if the image should be deinterlaced prior to stacking. False by
+                default.
+            subavg: [bool] Whether the average pixel image should be subtracted form the max pixel image.
+                False by default.
+            filter_bright: [bool] Whether images with bright backgrounds (after average subtraction)
+                should be skipped. False by default.
+            flat: [FlatStruct] Flat to apply. None by default. Only used if subavg is False.
+            print_progress: [bool] Log every file that is stacked. True by default.
+        """
+
+        self.deinterlace = deinterlace
+        self.subavg = subavg
+        self.filter_bright = filter_bright
+        self.flat = flat
+        self.print_progress = print_progress
+
+        self.merge_img = None
+        self.n_stacked = 0
+        self.total_ff_files = 0
+
+
+    def add(self, ff_name, maxpixel, avepixel):
+        """ Stack one FF file. The input arrays are not modified.
+
+        Arguments:
+            ff_name: [str] Name of the FF file, for logging.
+            maxpixel: [ndarray] Maxpixel image.
+            avepixel: [ndarray] Avepixel image.
+
+        Return:
+            [bool] True if the file was stacked, False if the bright filter rejected it.
+        """
+
+        self.total_ff_files += 1
+
+        # Deinterlace the images
+        if self.deinterlace:
+            maxpixel = deinterlaceBlend(maxpixel)
+            avepixel = deinterlaceBlend(avepixel)
+
+        # If the flat was given, apply it to the image, only if no subtraction is done
+        if (self.flat is not None) and not self.subavg:
+            maxpixel = applyFlat(maxpixel, self.flat)
+            avepixel = applyFlat(avepixel, self.flat)
+
+
+        # Reject the image if the median subtracted image is too bright. This usually means that there
+        #   are clouds on the image which can ruin the stack
+        if self.filter_bright:
+
+            img = maxpixel - avepixel
+
+            # Compute surface brightness
+            median = np.median(img)
+
+            # Compute top detection pixels
+            top_brightness = np.percentile(img, 99.9)
+
+            # Reject all images where the median brightness is high
+            # Preserve images with very bright detections
+            if (median > 10) and (top_brightness < (2**(8*img.itemsize) - 10)):
+                if self.print_progress:
+                    log.info('Skipping: {} median: {} top brightness {}'.format(ff_name, median, top_brightness))
+                return False
+
+
+        # Subtract the average from maxpixel
+        if self.subavg:
+            img = maxpixel - avepixel
+
+        else:
+            img = maxpixel
+
+        if self.merge_img is None:
+            self.merge_img = np.copy(img)
+            self.n_stacked = 1
+            return True
+
+        if self.print_progress:
+            log.info('Stacking: {}'.format(ff_name))
+
+        # Blend images 'if lighter'
+        self.merge_img = blendLighten(self.merge_img, img)
+
+        self.n_stacked += 1
+
+        return True
+
+
+    def save(self, dir_path, file_format, mask=None, captured_stack=False):
+        """ Stretch the levels of the stack, apply the mask and save it to the night directory.
+
+        Arguments:
+            dir_path: [str] Path to the directory the stack is saved to. Its name is used in the file name.
+            file_format: [str] Image format for the stack. E.g. jpg, png, bmp
+
+        Keyword arguments:
+            mask: [MaskStructure] Mask to apply to the stack. None by default.
+            captured_stack: [bool] True if all files are used and "_captured_stack" will be used in the
+                file name. False by default.
+
+        Return:
+            stack_path, merge_img:
+                - stack_path: [str] Path of the save stack, None if nothing was stacked.
+                - merge_img: [ndarray] Numpy array of the stacked image, None if nothing was stacked.
+        """
+
+        # If no images were stacked, do nothing
+        if self.n_stacked == 0:
+            return None, None
+
+
+        # Extract the name of the night directory which contains the FF files
+        night_dir = os.path.basename(dir_path)
+
+        # If the stack was captured, add "_captured_stack" to the file name
+        if captured_stack:
+            filename_suffix = "_captured_stack."
+        else:
+            filename_suffix = "_stack_{:d}_meteors.".format(self.n_stacked)
+
+
+        stack_path = os.path.join(dir_path, night_dir + filename_suffix + file_format)
+
+        if self.print_progress:
+            log.info('Saving stack to: {}'.format(stack_path))
+
+        # Stretch the levels
+        merge_img = adjustLevels(self.merge_img, np.percentile(self.merge_img, 0.5), 1.3,
+            np.percentile(self.merge_img, 99.9))
+
+
+        # Apply the mask, if given
+        if mask is not None:
+            merge_img = MaskImage.applyMask(merge_img, mask)
+
+
+        # Save the blended image
+        saveImage(stack_path, merge_img)
+
+
+        return stack_path, merge_img
+
+
+
+def loadStackFlat(dir_path, flat_path):
+    """ Load the flat for stacking. See stackFFs for the meaning of flat_path.
+
+    Return:
+        [FlatStruct or None]
+    """
+
+    if flat_path == '':
+        return None
+
+    # Try finding the default flat
+    if flat_path is None:
+        flat_path = dir_path
+        flat_file = 'flat.bmp'
+
+    else:
+        flat_path, flat_file = os.path.split(flat_path)
+
+    flat_full_path = os.path.join(flat_path, flat_file)
+    if os.path.isfile(flat_full_path):
+
+        # Load the flat
+        flat = loadFlat(flat_path, flat_file)
+
+        log.debug('Loaded flat: {}'.format(flat_full_path))
+
+        return flat
+
+    return None
+
+
+
 def stackFFs(dir_path, file_format, deinterlace=False, subavg=False, filter_bright=False, flat_path=None,
     file_list=None, mask=None, captured_stack=False, print_progress=True):
     """ Stack FF files in the given folder. 
@@ -50,31 +233,10 @@ def stackFFs(dir_path, file_format, deinterlace=False, subavg=False, filter_brig
     """
 
     # Load the flat if it was given
-    flat = None
-    if flat_path != '':
+    flat = loadStackFlat(dir_path, flat_path)
 
-        # Try finding the default flat
-        if flat_path is None:
-            flat_path = dir_path
-            flat_file = 'flat.bmp'
-
-        else:
-            flat_path, flat_file = os.path.split(flat_path)
-
-        flat_full_path = os.path.join(flat_path, flat_file)
-        if os.path.isfile(flat_full_path):
-
-            # Load the flat
-            flat = loadFlat(flat_path, flat_file)
-
-            log.debug('Loaded flat: {}'.format(flat_full_path))
-
-
-    first_img = True
-
-    n_stacked = 0
-    total_ff_files = 0
-    merge_img = None
+    stacker = FFStacker(deinterlace=deinterlace, subavg=subavg, filter_bright=filter_bright, flat=flat,
+        print_progress=print_progress)
 
     # If the list of files was not given, take all files in the given folder
     if file_list is None:
@@ -85,111 +247,24 @@ def stackFFs(dir_path, file_format, deinterlace=False, subavg=False, filter_brig
     for ff_name in file_list:
         if validFFName(ff_name):
 
-            # Load only the two planes the stack uses; maxframe and stdpixel are half the file
+            # Load the two planes the stack uses
             ff = readFF(dir_path, ff_name, planes=('maxpixel', 'avepixel'))
 
             # Skip the file if it is corrupted
             if ff is None:
                 continue
 
-            total_ff_files += 1
-
-            maxpixel = ff.maxpixel
-            avepixel = ff.avepixel
-
-            # Deinterlace the images
-            if deinterlace:
-                maxpixel = deinterlaceBlend(maxpixel)
-                avepixel = deinterlaceBlend(avepixel)
-
-            # If the flat was given, apply it to the image, only if no subtraction is done
-            if (flat is not None) and not subavg:
-                maxpixel = applyFlat(maxpixel, flat)
-                avepixel = applyFlat(avepixel, flat)
-
-
-            # Reject the image if the median subtracted image is too bright. This usually means that there
-            #   are clouds on the image which can ruin the stack
-            if filter_bright:
-
-                img = maxpixel - avepixel
-
-                # Compute surface brightness
-                median = np.median(img)
-
-                # Compute top detection pixels
-                top_brightness = np.percentile(img, 99.9)
-
-                # Reject all images where the median brightness is high
-                # Preserve images with very bright detections
-                if (median > 10) and (top_brightness < (2**(8*img.itemsize) - 10)):
-                    if print_progress:
-                        log.info('Skipping: {} median: {} top brightness {}'.format(ff_name, median, top_brightness))
-                    continue
-
-
-            # Subtract the average from maxpixel
-            if subavg:
-                img = maxpixel - avepixel
-
-            else:
-                img = maxpixel
-
-            if first_img:
-                merge_img = np.copy(img)
-                first_img = False
-                n_stacked += 1
-                continue
-
-            if print_progress:
-                log.info('Stacking: {}'.format(ff_name))
-
-            # Blend images 'if lighter'
-            merge_img = blendLighten(merge_img, img)
-
-            n_stacked += 1
+            stacker.add(ff_name, ff.maxpixel, ff.avepixel)
 
 
     # If the number of stacked image is less than 20% of the given images, stack without filtering
-    if filter_bright and (n_stacked < 0.2*total_ff_files):
+    if filter_bright and (stacker.n_stacked < 0.2*stacker.total_ff_files):
         return stackFFs(dir_path, file_format, deinterlace=deinterlace, subavg=subavg, 
             filter_bright=False, flat_path=flat_path, file_list=file_list, mask=mask,
             captured_stack=captured_stack, print_progress=print_progress)
 
-    # If no images were stacked, do nothing
-    if n_stacked == 0:
-        return None, None
 
-
-    # Extract the name of the night directory which contains the FF files
-    night_dir = os.path.basename(dir_path)
-
-    # If the stack was captured, add "_captured_stack" to the file name
-    if captured_stack:
-        filename_suffix = "_captured_stack."
-    else:
-        filename_suffix = "_stack_{:d}_meteors.".format(n_stacked)
-
-
-    stack_path = os.path.join(dir_path, night_dir + filename_suffix + file_format)
-
-    if print_progress:
-        log.info('Saving stack to: {}'.format(stack_path))
-
-    # Stretch the levels
-    merge_img = adjustLevels(merge_img, np.percentile(merge_img, 0.5), 1.3, np.percentile(merge_img, 99.9))
-
-
-    # Apply the mask, if given
-    if mask is not None:
-        merge_img = MaskImage.applyMask(merge_img, mask)
-
-    
-    # Save the blended image
-    saveImage(stack_path, merge_img)
-
-
-    return stack_path, merge_img
+    return stacker.save(dir_path, file_format, mask=mask, captured_stack=captured_stack)
 
 
 
