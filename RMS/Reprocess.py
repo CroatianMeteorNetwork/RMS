@@ -39,6 +39,7 @@ from Utils.GenerateTimelapse import generateTimelapse, generateTimelapseFromFram
 from RMS.CaptureModeSwitcher import lastNightToDaySwitch
 from Utils.MakeFlat import makeFlat
 from Utils.PlotFieldsums import plotFieldsums
+import matplotlib.pyplot as plt
 from Utils.RMS2UFO import FTPdetectinfo2UFOOrbitInput
 from Utils.ShowerAssociation import showerAssociation
 from Utils.PlotTimeIntervals import plotFFTimeIntervals
@@ -293,6 +294,9 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
 
             except Exception as e:
                 log.warning('Generating calibration report failed with the message:\n' + repr(e))
+
+                # The report's figure is only closed on its success path
+                plt.close('all')
                 log.warning(repr(traceback.format_exception(*sys.exc_info())))
 
 
@@ -306,6 +310,9 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
 
             except Exception as e:
                 log.warning('Shower association failed with the message:\n' + repr(e))
+
+                # The shower plot's figure is only closed on its success path
+                plt.close('all')
                 log.warning(repr(traceback.format_exception(*sys.exc_info())))
 
 
@@ -516,6 +523,7 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
         obs_dict = getObservationSummaryDict(night_data_dir)
         addObsParam(obs_dict,"jitter_quality",jitter_quality)
         addObsParam(obs_dict,"dropped_frame_rate",dropped_frame_rate)
+        saveObservationSummaryDict(obs_dict, night_data_dir)
 
 
     except Exception as e:
