@@ -599,24 +599,52 @@ def adjustLevels(img_array, minv, gamma, maxv, nbits=None, scaleto8bits=False):
         maxv = 1.0
     
 
-    img_array = img_array.astype(np.float64)
+    def stretch(values):
+        """ Apply the level stretch to a float64 array in place and return it. """
 
-    # Reduce array to 0-1 values
-    img_array = np.divide(img_array, max_lvl)
+        # Reduce to 0-1 values
+        values /= max_lvl
 
-    # Calculate new levels
-    img_array = np.divide((img_array - minv), interval)
+        # Calculate new levels
+        values -= minv
+        values /= interval
 
-    # Cut values lower than 0
-    img_array[img_array < 0] = 0
+        # Cut values lower than 0
+        np.maximum(values, 0, out=values)
 
-    img_array = np.power(img_array, invgamma)
+        np.power(values, invgamma, out=values)
 
-    img_array = np.multiply(img_array, max_lvl)
+        values *= max_lvl
 
-    # Convert back to 0-maxval values
-    img_array = np.clip(img_array, 0, max_lvl)
+        # Convert back to 0-maxval values
+        np.clip(values, 0, max_lvl, out=values)
 
+        return values
+
+
+    # An integer image has at most 2**nbits distinct values, so compute the curve once over those and
+    # look it up, instead of pushing the whole image through a chain of float64 temporaries
+    if np.issubdtype(img_array.dtype, np.integer) and (nbits <= 16) and (img_array.size > 0):
+
+        img_max = int(np.max(img_array))
+        img_min = int(np.min(img_array))
+
+        if (img_min >= 0) and (img_max < 2**nbits):
+
+            lut = stretch(np.arange(2**nbits, dtype=np.float64))
+
+            if scaleto8bits:
+                # The curve is monotonic, so the image maximum maps to the largest output
+                lut *= 255.0/lut[img_max]
+                lut = lut.astype(np.uint8)
+
+            else:
+                lut = lut.astype(input_type)
+
+            return lut[img_array]
+
+
+    img_array = stretch(img_array.astype(np.float64))
 
     # Scale the image to 8 bits so the maximum value is set to 255
     if scaleto8bits:
