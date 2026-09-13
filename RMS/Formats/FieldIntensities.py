@@ -87,36 +87,42 @@ def saveFieldIntensitiesBin(intensity_array, dir_path, file_name):
 
 def readFieldIntensitiesBin(dir_path, file_name, deinterlace=False):
 	""" Read the field intensities form a binary file.
-	
+
 	Arguments:
 		dir_path: [str] Path to the directory where the file is located.
 		file_name: [str] Name of the file.
+
+	Keyword arguments:
+		deinterlace: [bool] Number half frames as every other frame. False by default.
+
+	Return:
+		half_frames: [ndarray] Half frame index of every entry.
+		intensity_array: [ndarray] Summed field intensities, uint32.
+
+	Raises ValueError if the file holds fewer entries than its header declares.
 	"""
 
 	with open(os.path.join(dir_path, file_name), 'rb') as fid:
 
 		# Read the number of entries
-		n_entries = int(np.fromfile(fid, dtype=np.uint16, count = 1)[0])
-
-		intensity_array = np.zeros(n_entries, dtype=np.uint32)
-		half_frames = np.zeros(n_entries)
+		n_entries = int(np.fromfile(fid, dtype=np.uint16, count=1)[0])
 
 		if deinterlace:
 			deinterlace_flag = 2.0
 		else:
 			deinterlace_flag = 1.0
 
-		# Read individual entries
-		for i in range(n_entries):
+		# Calculate the half frames
+		half_frames = np.arange(n_entries)/deinterlace_flag
 
-			# Calculate the half frame
-			half_frames[i] = float(i)/deinterlace_flag
+		# Read all summed field intensities in one go
+		intensity_array = np.fromfile(fid, dtype=np.uint32, count=n_entries)
 
-			# Read the summed field intensity
-			intensity_array[i] = int(np.fromfile(fid, dtype=np.uint32, count = 1)[0])
+	if len(intensity_array) != n_entries:
+		raise ValueError("{:s} declares {:d} entries but holds {:d}".format(file_name, n_entries,
+			len(intensity_array)))
 
-
-		return half_frames, intensity_array
+	return half_frames, intensity_array
 
 
 

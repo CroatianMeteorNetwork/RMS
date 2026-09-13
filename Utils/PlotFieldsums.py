@@ -60,7 +60,7 @@ def plotFieldsums(dir_path, config):
                 # Read the field sums
                 _, intensity_array = readFieldIntensitiesBin(dir_path, file_name)
 
-            except TypeError:
+            except (TypeError, ValueError, IndexError):
                 print('File {:s} is corrupted!'.format(file_name))
                 continue
 
