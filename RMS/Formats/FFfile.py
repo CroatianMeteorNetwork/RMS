@@ -76,7 +76,8 @@ def readFFpng(directory, filename, full_filename=False):
 
 
 #@memoizeSingle
-def read(directory, filename, fmt=None, array=False, full_filename=False, verbose=True, memmap=True):
+def read(directory, filename, fmt=None, array=False, full_filename=False, verbose=True, memmap=True,
+        planes=None):
     """ Read FF file from the specified directory and choose the proper format for reading.
     
     Arguments:
@@ -90,6 +91,10 @@ def read(directory, filename, fmt=None, array=False, full_filename=False, verbos
         full_filename: [bool] True if full file name is given explicitly, a name which may differ from the
             usual FF*.fits format. False by default.
         verbose: [bool] Print error verbose. True by default.
+        memmap: [bool] Open FITS files with memory mapping. True by default.
+        planes: [iterable of str] Names of the image planes to load, out of 'maxpixel', 'maxframe',
+            'avepixel', 'stdpixel'. None by default, which loads all four. Planes not listed are left
+            as None on the structure. Honoured by the bin and FITS readers; PNG always loads everything.
     
     Return:
         [ff structure]
@@ -113,14 +118,14 @@ def read(directory, filename, fmt=None, array=False, full_filename=False, verbos
 
             # Try reading the file as FITS
             try:
-                ff = readFFfits(directory, filename, array=array)
+                ff = readFFfits(directory, filename, array=array, planes=planes)
                 fmt = 'fits'
 
             except IOError:
 
                 # Try reading the file as a .bin file
                 try:
-                    ff = readFFbin(directory, filename, array=array)
+                    ff = readFFbin(directory, filename, array=array, planes=planes)
                     fmt = 'bin'
 
                 except:
@@ -131,14 +136,15 @@ def read(directory, filename, fmt=None, array=False, full_filename=False, verbos
     if fmt == 'bin':
 
         # Read the file as bin
-        ff = readFFbin(directory, filename, array=array, full_filename=full_filename)
+        ff = readFFbin(directory, filename, array=array, full_filename=full_filename, planes=planes)
 
 
     elif fmt == 'fits':
 
         try:
             # Read the file as FITS
-            ff = readFFfits(directory, filename, array=array, full_filename=full_filename, memmap=memmap)
+            ff = readFFfits(directory, filename, array=array, full_filename=full_filename, memmap=memmap,
+                planes=planes)
 
         except IOError:
             if verbose:

@@ -875,21 +875,15 @@ def deinterlaceEven(img):
 
 
 def blendLighten(arr1, arr2):
-    """ Blends two image array with lighen method (only takes the lighter pixel on each spot).
+    """ Blends two image arrays with the lighten method (only takes the lighter pixel on each spot).
+
+    The result has the dtype of arr1. If arr2 is a wider type, the maximum is computed in the
+    promoted type and cast back, which matches numpy's plain astype behaviour.
     """
 
-    # Store input type
-    input_type = arr1.dtype
-
-    arr1 = arr1.astype(np.int64)
-
-    temp = arr1 - arr2
-    temp[temp > 0] = 0
-
-    new_arr = arr1 - temp
-    new_arr = new_arr.astype(input_type)
-
-    return  new_arr
+    # A single elementwise maximum, no int64 upcast or temporaries. At 1080p the old
+    # subtract/mask/subtract sequence moved ~50 MB of int64 scratch per call for the same result.
+    return np.maximum(arr1, arr2).astype(arr1.dtype, copy=False)
 
 
 

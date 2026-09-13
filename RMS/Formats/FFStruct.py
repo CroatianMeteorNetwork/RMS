@@ -2,6 +2,35 @@
 
 from __future__ import print_function, division, absolute_import
 
+# Image planes stored in an FF file, in file order
+FF_PLANES = ('maxpixel', 'maxframe', 'avepixel', 'stdpixel')
+
+
+def selectPlanes(planes, array):
+    """ Validate a plane selection for the FF readers.
+
+    Arguments:
+        planes: [iterable of str or None] Requested plane names, or None for all planes.
+        array: [bool] True if the caller wants ff.array populated, which needs every plane.
+
+    Return:
+        (load_all, planes): [bool, frozenset] Whether every plane is loaded, and the set of planes to
+            load when not.
+    """
+
+    if (planes is None) or array:
+        return True, frozenset(FF_PLANES)
+
+    planes = frozenset(planes)
+
+    unknown = planes - frozenset(FF_PLANES)
+    if unknown:
+        raise ValueError("Unknown FF planes: {}. Valid planes: {}".format(
+            sorted(unknown), list(FF_PLANES)))
+
+    return False, planes
+
+
 class FFStruct:
     """ Default structure for an FF file.
     """

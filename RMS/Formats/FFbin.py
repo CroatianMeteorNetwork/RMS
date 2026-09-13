@@ -20,13 +20,13 @@ import struct
 
 import numpy as np
 
-from RMS.Formats.FFStruct import FFStruct
+from RMS.Formats.FFStruct import FFStruct, FF_PLANES, selectPlanes
 
 
 # FFbin handling stolen from FF_bin_suite.py from CMN_binViewer written by Denis Vida
 
 
-def read(directory, filename, array=False, full_filename=False):
+def read(directory, filename, array=False, full_filename=False, planes=None):
     """ Read FF*.bin file from the specified directory.
     
     Arguments:
@@ -37,6 +37,9 @@ def read(directory, filename, array=False, full_filename=False):
         array: [ndarray] True in order to populate structure's array element (default is False)
         full_filename: [bool] True if full file name is given explicitly, a name which may differ from the
             usual FF*.fits format. False by default.
+        planes: [iterable of str] Names of the image planes to load, out of 'maxpixel', 'maxframe',
+            'avepixel', 'stdpixel'. None by default, which loads all four. Planes not listed are left
+            as None on the structure and are skipped over in the file. Ignored when array is True.
     
     Return:
         [ff structure]
@@ -49,6 +52,9 @@ def read(directory, filename, array=False, full_filename=False):
         file_path = os.path.join(directory, "FF" + filename + ".bin")
 
     ff = FFStruct()
+
+    # Resolve which planes to load
+    load_all, planes = selectPlanes(planes, array)
 
     # Read inside a context manager so the file handle is always closed, even on error
     with open(file_path, "rb") as fid:
@@ -95,10 +101,13 @@ def read(directory, filename, array=False, full_filename=False):
         else:
             N = ff.nrows*ff.ncols
 
-            ff.maxpixel = np.reshape(np.fromfile(fid, dtype=np.uint8, count=N), (ff.nrows, ff.ncols))
-            ff.maxframe = np.reshape(np.fromfile(fid, dtype=np.uint8, count=N), (ff.nrows, ff.ncols))
-            ff.avepixel = np.reshape(np.fromfile(fid, dtype=np.uint8, count=N), (ff.nrows, ff.ncols))
-            ff.stdpixel = np.reshape(np.fromfile(fid, dtype=np.uint8, count=N), (ff.nrows, ff.ncols))
+            # Planes are stored back to back, so an unwanted plane is skipped with a seek
+            for plane in FF_PLANES:
+                if load_all or (plane in planes):
+                    setattr(ff, plane, np.reshape(np.fromfile(fid, dtype=np.uint8, count=N),
+                        (ff.nrows, ff.ncols)))
+                else:
+                    fid.seek(N, os.SEEK_CUR)
 
     return ff
 
