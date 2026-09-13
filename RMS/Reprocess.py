@@ -1160,7 +1160,9 @@ def processFramesFiles(config):
         timelapse_results = generateTimelapseFromFrameBlocks(
             image_blocks,
             frame_dir,
-            cleanup_mode=config.frame_cleanup
+            base_crf=config.timelapse_frames_crf,
+            cleanup_mode=config.frame_cleanup,
+            threads=config.timelapse_frames_threads
         )
 
     except Exception as exc:

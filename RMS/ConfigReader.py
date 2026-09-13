@@ -679,6 +679,12 @@ class Config:
         # no-op there. 0 disables the gate.
         self.flux_stage_slots = 2
 
+        # H.264 CRF of the frames timelapse (colour; grayscale uses CRF + 2)
+        self.timelapse_frames_crf = 25
+
+        # x264 threads for the frames timelapse
+        self.timelapse_frames_threads = 2
+
 
         #### Shower association
 
@@ -1920,6 +1926,12 @@ def parseTimelapse(config, parser):
 
     if parser.has_option(section, "transparency_demo_video"):
         config.transparency_demo_video = parser.getboolean(section, "transparency_demo_video")
+
+    if parser.has_option(section, "timelapse_frames_crf"):
+        config.timelapse_frames_crf = parser.getint(section, "timelapse_frames_crf")
+
+    if parser.has_option(section, "timelapse_frames_threads"):
+        config.timelapse_frames_threads = max(1, parser.getint(section, "timelapse_frames_threads"))
 
 
 def parseColors(config, parser):
