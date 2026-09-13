@@ -637,6 +637,12 @@ class Config:
         self.timelapse_generate_captured = True
         self.timelapse_generate_from_frames = True
 
+        # H.264 CRF of the frames timelapse (colour; grayscale uses CRF + 2)
+        self.timelapse_frames_crf = 25
+
+        # x264 threads for the frames timelapse
+        self.timelapse_frames_threads = 2
+
 
         #### Shower association
 
@@ -1840,6 +1846,12 @@ def parseTimelapse(config, parser):
 
     if parser.has_option(section, "timelapse_generate_from_frames"):
         config.timelapse_generate_from_frames = parser.getboolean(section, "timelapse_generate_from_frames")
+
+    if parser.has_option(section, "timelapse_frames_crf"):
+        config.timelapse_frames_crf = parser.getint(section, "timelapse_frames_crf")
+
+    if parser.has_option(section, "timelapse_frames_threads"):
+        config.timelapse_frames_threads = max(1, parser.getint(section, "timelapse_frames_threads"))
 
 
 def parseColors(config, parser):

@@ -585,7 +585,8 @@ def generateTimelapseFromFrameBlocks(frame_blocks,
                                      base_crf=25,
                                      cleanup_mode='none',
                                      compression='bz2',
-                                     use_color=True):
+                                     use_color=True,
+                                     threads=2):
     """Create one timelapse per block and return their paths.
 
     Arguments:
@@ -600,6 +601,7 @@ def generateTimelapseFromFrameBlocks(frame_blocks,
         compression: [str] Tar compression when *cleanup_mode* == 'tar';
             'bz2' or 'gz'. 'bz2' by default.
         use_color: [bool] Encode colour if possible. True by default.
+        threads: [int] x264 encoder threads. 2 by default.
 
     Return:
         results: [list[tuple[str, str] | None]] One *(mp4_path, json_path)*
@@ -630,7 +632,8 @@ def generateTimelapseFromFrameBlocks(frame_blocks,
             base_crf=base_crf,
             cleanup_mode=cleanup_mode,
             compression=compression,
-            use_color=use_color
+            use_color=use_color,
+            threads=threads
         )
 
         results.append((mp4_path, json_path) if mp4_path else None)
@@ -646,6 +649,7 @@ def generateTimelapseFromDir(dir_path,
                              cleanup_mode="none",
                              compression="bz2",
                              use_color=True,
+                             threads=2,
                              ):
     """Build a single timelapse from every image under *dir_path*.
 
@@ -660,6 +664,7 @@ def generateTimelapseFromDir(dir_path,
         cleanup_mode: [str] Post-encode action: 'none', 'delete', or 'tar'.
         compression: [str] Tar compression when *cleanup_mode* == 'tar'.
         use_color: [bool] Encode colour if possible. True by default.
+        threads: [int] x264 encoder threads. 2 by default.
 
     Return:
         (video_path, json_path): [tuple[str, str] | (None, None)]
@@ -696,6 +701,7 @@ def generateTimelapseFromDir(dir_path,
         cleanup_mode=cleanup_mode,
         compression=compression,
         use_color=use_color,
+        threads=threads,
     )
 
 
@@ -719,7 +725,8 @@ def generateTimelapseFromFrames(image_files,
                                 base_crf=25,
                                 cleanup_mode='none',
                                 compression='bz2',
-                                use_color=True):
+                                use_color=True,
+                                threads=2):
     """Stream images into ffmpeg and write a timelapse without temp JPGs.
 
     Arguments:
@@ -735,6 +742,7 @@ def generateTimelapseFromFrames(image_files,
         compression: [str] Tar compression when cleanup_mode == 'tar';
             'bz2' or 'gz'. 'bz2' by default.
         use_color: [bool] Encode colour if possible. True by default.
+        threads: [int] x264 encoder threads. 2 by default.
 
     Return:
         (video_path, json_path): [tuple[str, str] | (None, None)]
@@ -812,12 +820,19 @@ def generateTimelapseFromFrames(image_files,
         # Don't use color if grayscale
         use_color = False
 
-    # Set maxrate and bufsize based on height to prevent very large video files with noisy source images.
-    # With normal images, maxrate and bufsize are not limiting - crf is the main factor.
-    if height <= 720:
-        maxrate, bufsize = "2M", "4M"
-    else:
-        maxrate, bufsize = "4M", "8M"
+    # Encoder settings, from a benchmark on NR-off (grainy) science-camera stills, 2026-09:
+    # - No maxrate/bufsize cap. The old 2M/4M cap was pinned on 74% of a real night's frames and
+    #   flattened every busy frame to the same SSIM regardless of CRF; the movie is a science
+    #   product (contrail detection), so CRF alone sets the quality. The worst case without a cap is
+    #   bounded by the all-intra cost, which is what the GOP below already pays every 10 frames.
+    # - psy-rd 0 and aq-strength 0.5: x264 stops spending bits reproducing grain texture, which a
+    #   detector does not need. -41% size at equal SSIM on the grainy source.
+    # - GOP 10, no B-frames: frames are 5 s apart so inter prediction gains little; this costs +7%
+    #   size over GOP 120, is ~30% cheaper in CPU, and any frame is at most 9 decodes from a keyframe
+    #   when the server fetches one by timestamp.
+    # x264-params: ':' separates options, and the two psy-rd values need a ',' (a ':' there makes
+    # ffmpeg 6.1 silently drop everything after it).
+    x264_params = "psy-rd=0.0,0.0:aq-strength=0.5"
 
     ffmpeg_cmd = [ffmpeg_path, "-y", "-nostdin", '-hide_banner', 
                   '-loglevel', 'error',
@@ -829,14 +844,14 @@ def generateTimelapseFromFrames(image_files,
                   "-i", "-",
                   "-c:v", "libx264",
                   "-crf", str(crf),
-                  "-maxrate", maxrate,       # cap bursts
-                  "-bufsize", bufsize,       # smoothing window
+                  "-x264-params", x264_params,
                   "-profile:v", "high",      # baseline, main, high
                   "-preset", "medium",       # fast, medium, slow to change size/processing speed
                   "-pix_fmt", "yuv420p",
                   "-movflags", "faststart",  # Optimize for streaming
-                  "-threads", "1",
-                  "-g", "120",
+                  "-threads", str(int(threads)),
+                  "-g", "10",
+                  "-bf", "0",
                   temp_video_path]           # Use temporary path
     
     log.info("Starting ffmpeg process for {}...".format(video_path))
