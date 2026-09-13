@@ -911,52 +911,61 @@ def getEphemTimesFromCaptureDirectory(config, capture_directory):
     return start_time, duration, end_time
 
 def countKeyStringsInLogs(session_start, config, key_string="Traceback (most recent call last)"):
-    """Count the number of occurences of key_string in log files from the current session.
+    """Count the occurrences of one or more key strings in log files from the current session.
 
-    Scans all log files in the log directory that were modified after the session's
-    start_time (from the observation database) for lines containing 'Traceback
-    (most recent call last)'.
+    Scans every log file in the log directory modified after the session start once, however many
+    strings are asked for.
 
     Arguments:
         session_start: [datetime] Time object for session start
         config: [config] RMS configuration instance.
 
     Keyword arguments:
-        key_string: [str] Optional default "Traceback (most recent call last)" - string to be sought
+        key_string: [str or list of str] String(s) to be sought. "Traceback (most recent call last)"
+            by default.
 
     Return:
-        count: [int] Number of tracebacks found, or 0 if logs cannot be read.
+        count: [int] Number of lines containing the string, if one string was given; 0 if logs cannot
+            be read.
+        counts: [dict] {key_string: count} if a list was given.
     """
+
+    single = isinstance(key_string, str)
+    keys = [key_string] if single else list(key_string)
+    counts = {key: 0 for key in keys}
 
     log_dir = os.path.join(config.data_dir, config.log_dir)
 
-    if not os.path.isdir(log_dir):
-        return 0
+    if os.path.isdir(log_dir):
 
-    # Find log files modified after the session start
-    key_string_count = 0
-    log_pattern = "log_{}_".format(config.stationID)
+        log_pattern = "log_{}_".format(config.stationID)
 
-    for filename in sorted(os.listdir(log_dir)):
-        if not filename.endswith(".log") or log_pattern not in filename:
-            continue
+        for filename in sorted(os.listdir(log_dir)):
 
-        filepath = os.path.join(log_dir, filename)
+            if not filename.endswith(".log") or log_pattern not in filename:
+                continue
 
-        # Only consider log files modified after the session started
-        file_mtime = datetime.datetime.fromtimestamp(os.path.getmtime(filepath),tz=datetime.timezone.utc)
-        if file_mtime < session_start:
-            continue
+            filepath = os.path.join(log_dir, filename)
 
-        try:
-            with open(filepath, 'r', errors='replace') as f:
-                for line in f:
-                    if key_string in line:
-                        key_string_count += 1
-        except Exception:
-            continue
+            # Only consider log files modified after the session started
+            file_mtime = datetime.datetime.fromtimestamp(os.path.getmtime(filepath), tz=datetime.timezone.utc)
+            if file_mtime < session_start:
+                continue
 
-    return key_string_count
+            try:
+                with open(filepath, 'r', errors='replace') as f:
+                    for line in f:
+                        for key in keys:
+                            if key in line:
+                                counts[key] += 1
+            except Exception:
+                continue
+
+    if single:
+        return counts[key_string]
+
+    return counts
+
 
 
 def gatherCameraInformation(config, attempts=6, delay=10, sock_timeout=3):
@@ -1304,35 +1313,96 @@ def getRemoteBranchNameForCommit(repo, commit):
     # Fall back return
     return remote_branch_name
 
-def daysBehind():
-    """Measure how far behind the latest commit on the active branch is behind a branch with that commit on the remote
-    repository.
+# The remote clone that daysBehind() needs is refreshed at most this often. Between refreshes the
+# lag is computed from the cached remote date, so it can read up to this many days low
+REPO_LAG_REFRESH_DAYS = 7
+REPO_LAG_CACHE_NAME = "repository_lag_cache.json"
 
-    Arguments:
-        syscon: [config] RMS config object.
+
+def daysBehind(config=None):
+    """Measure how far the latest commit on the active branch is behind the branch holding that commit on
+    the remote repository.
+
+    Answering this needs the remote's commit dates, which means a clone over the network. That clone
+    is only made when the local commit has changed or the cached answer is older than
+    REPO_LAG_REFRESH_DAYS; otherwise the cached remote date is reused.
+
+    Keyword arguments:
+        config: [config] RMS config object, used to place the cache file in the data directory. None
+            by default, in which case nothing is cached.
 
     Return:
-        number of days behind the latest remote commit that the latest local commit is on the active branch.
+        (days_behind, remote_branch): number of days the latest local commit is behind the latest remote
+            commit on that branch, and the remote branch name.
+        "Unable to determine": if the local commit is not on any remote branch.
     """
 
-    latest_local_commit = getCommit(os.getcwd())
-    latest_local_date = getDateOfCommit(os.getcwd(), latest_local_commit)
-    remote_urls = getRemoteUrls(os.getcwd())
+    repo_dir = os.getcwd()
 
-    # The clone is only needed to read dates out of, so hold it in a temporary directory. Cleaning up in a
-    # with block means a git timeout below does not leave a partial clone of the history behind.
-    with tempfile.TemporaryDirectory() as target_directory:
+    latest_local_commit = getCommit(repo_dir)
+    latest_local_date = getDateOfCommit(repo_dir, latest_local_commit)
 
-        commit_repo_directory = updateCommitHistoryDirectory(remote_urls, target_directory)
-        remote_branch_of_commit = getRemoteBranchNameForCommit(commit_repo_directory, latest_local_commit)
+    cache_path = None
+    if config is not None:
+        cache_path = os.path.join(config.data_dir, REPO_LAG_CACHE_NAME)
 
-        if not remote_branch_of_commit is None:
-            latest_remote_date = getDateOfCommit(commit_repo_directory, remote_branch_of_commit)
-            days_behind = (latest_remote_date - latest_local_date).total_seconds()/(60 * 60 * 24)
-            return days_behind, remote_branch_of_commit
+    now = datetime.datetime.now(datetime.timezone.utc)
 
-        else:
-            return "Unable to determine"
+    # Reuse the cached remote state if it was fetched recently for this same local commit
+    cached = None
+    if (cache_path is not None) and os.path.isfile(cache_path):
+        try:
+            with open(cache_path) as f:
+                cached = json.load(f)
+
+            fetched = datetime.datetime.strptime(cached["fetched_utc"], "%Y-%m-%d %H:%M:%S %z")
+
+            if (cached.get("local_commit") != latest_local_commit) \
+                    or ((now - fetched).total_seconds() > REPO_LAG_REFRESH_DAYS*24*3600):
+                cached = None
+
+        except Exception:
+            cached = None
+
+    if cached is not None:
+        remote_branch = cached.get("remote_branch")
+        latest_remote_date_str = cached.get("latest_remote_date")
+
+    else:
+        remote_urls = getRemoteUrls(repo_dir)
+
+        # The clone is only needed to read dates out of, so hold it in a temporary directory. Cleaning
+        # up in a with block means a git timeout below does not leave a partial clone of the history
+        # behind.
+        with tempfile.TemporaryDirectory() as target_directory:
+
+            commit_repo_directory = updateCommitHistoryDirectory(remote_urls, target_directory)
+            remote_branch = getRemoteBranchNameForCommit(commit_repo_directory, latest_local_commit)
+
+            latest_remote_date_str = None
+            if remote_branch is not None:
+                latest_remote_date_str = getDateOfCommit(commit_repo_directory, remote_branch).strftime(
+                    "%Y-%m-%d %H:%M:%S %z")
+
+        if cache_path is not None:
+            try:
+                with open(cache_path, 'w') as f:
+                    json.dump({"local_commit": latest_local_commit,
+                               "remote_branch": remote_branch,
+                               "latest_remote_date": latest_remote_date_str,
+                               "fetched_utc": now.strftime("%Y-%m-%d %H:%M:%S %z")}, f, indent=2)
+            except Exception as e:
+                log.warning("Could not write {}: {}".format(cache_path, repr(e)))
+
+    if (remote_branch is None) or (latest_remote_date_str is None):
+        return "Unable to determine"
+
+    latest_remote_date = datetime.datetime.strptime(latest_remote_date_str, "%Y-%m-%d %H:%M:%S %z")
+    days_behind = (latest_remote_date - latest_local_date).total_seconds()/(60*60*24)
+
+    return days_behind, remote_branch
+
+
 
 def serialize(config, format_nicely=True, as_json=False, night_directory=None, drop_keys_list=None, ordering=None, final=False):
     """ Returns the data from the most recent observation session as either colon
@@ -1868,8 +1938,12 @@ def finalizeObservationSummary(config, night_data_dir, platepar=None):
     # Convert AU0004_20260612_100206_674582 into a python time object
     _, time_section = os.path.basename(d['night_data_dir']).split("_",maxsplit=1)
     session_start_time = datetime.datetime.strptime(time_section, "%Y%m%d_%H%M%S_%f").replace(tzinfo=datetime.timezone.utc)
-    addObsParam(d, "traceback_count", countKeyStringsInLogs(session_start_time, config, key_string="Traceback (most recent call last)"))
-    addObsParam(d, "kht_wrapper_count", countKeyStringsInLogs(session_start_time, config, key_string="undefined symbol: kht_wrapper"))
+    # One pass over the session's logs for both counts
+    traceback_key = "Traceback (most recent call last)"
+    kht_key = "undefined symbol: kht_wrapper"
+    key_counts = countKeyStringsInLogs(session_start_time, config, key_string=[traceback_key, kht_key])
+    addObsParam(d, "traceback_count", key_counts[traceback_key])
+    addObsParam(d, "kht_wrapper_count", key_counts[kht_key])
 
     try:
         timeSyncStatus(config, d)
@@ -1913,7 +1987,7 @@ def finalizeObservationSummary(config, night_data_dir, platepar=None):
         log.error("".join(traceback.format_exception(*sys.exc_info())))
 
     try:
-        days_behind, remote_branch = daysBehind()
+        days_behind, remote_branch = daysBehind(config)
         addObsParam(d, "repository_lag_remote_days", days_behind)
         addObsParam(d, "remote_branch", os.path.basename(remote_branch))
     except:
