@@ -40,19 +40,11 @@ import RMS.Formats.FFfile as FFfile
 
 
 def stackIfLighter(arr1, arr2):
-    """ Blends two image array with lighten method (only takes the lighter pixel on each spot).
+    """ Blends two image arrays with the lighten method (only takes the lighter pixel on each spot).
+        The result is uint8, as the thumbnails are.
     """
 
-    arr1 = arr1.astype(np.int16)
-
-    temp = arr1 - arr2
-    temp[temp > 0] = 0
-    new_arr = arr1 - temp
-    
-    new_arr = new_arr.astype(np.uint8)
-    
-    return new_arr
-
+    return np.maximum(arr1, arr2).astype(np.uint8, copy=False)
 
 
 
@@ -109,7 +101,7 @@ def generateThumbnails(dir_path, config, mosaic_type, file_list=None, no_stack=F
 
     for i in range(0, len(ff_list), thumb_stack):
 
-        img_stack = np.zeros((bin_h, bin_w))
+        img_stack = np.zeros((bin_h, bin_w), dtype=np.uint8)
 
         # Stack thumb_stack images using the 'if lighter' method
         for j in range(thumb_stack):
@@ -119,8 +111,8 @@ def generateThumbnails(dir_path, config, mosaic_type, file_list=None, no_stack=F
                 tmp_file_name = ff_list[i + j]
 
                     
-                # Read the FF file
-                ff = FFfile.read(dir_path, tmp_file_name)
+                # Read the FF file, only the maxpixel is used
+                ff = FFfile.read(dir_path, tmp_file_name, planes=('maxpixel',))
 
                 # Skip the FF if it is corrupted
                 if ff is None:
