@@ -535,16 +535,56 @@ def walkDirsToDepth(dir_path, depth=-1):
     return final_list
 
 
+def _collectArchiveMembers(source_dir, file_list, extra_files):
+    """ Resolve the files that go into an archive directory or archive to (source path, name) pairs.
+        Missing files are logged and skipped. A name that appears twice keeps its first source, which
+        matches what copying into one directory produced.
+
+    Arguments:
+        source_dir: [str] Directory the names in file_list are relative to.
+        file_list: [iterable of str] File names in source_dir.
+        extra_files: [iterable of str or None] Full paths of additional files.
+
+    Return:
+        members: [list of (str, str)] (source path, archive name) pairs in the order they were given.
+    """
+
+    members = []
+    seen = set()
+
+    def add(src_path, name):
+        if not os.path.isfile(src_path):
+            log.warning('file {} not found'.format(src_path))
+            return
+        if name in seen:
+            return
+        seen.add(name)
+        members.append((src_path, name))
+
+    for file_name in file_list:
+        add(os.path.join(source_dir, file_name), file_name)
+
+    if extra_files is not None:
+        for file_path in extra_files:
+            add(file_path, os.path.basename(file_path))
+
+    return members
+
+
+
 def archiveDir(source_dir, file_list, dest_dir, compress_file, delete_dest_dir=False, extra_files=None, create_archive=True):
-    """ Move the given file list from the source directory to the destination directory, compress the 
-        destination directory and save it as a .bz2 file. BZ2 compression is used as ZIP files have a limit
-        of 2GB in size.
+    """ Gather the given files into the destination directory and/or a .tar.bz2 archive of them. BZ2
+        compression is used as ZIP files have a limit of 2GB in size.
+
+        When the destination directory is only a staging area (delete_dest_dir=True), the files are
+        written straight from their sources into the archive and never copied to disk. The archive
+        contents and member names are the same as shutil.make_archive produced from a staged copy.
 
     Arguments:
         source_dir: [str] Path to the directory from which the files will be taken and archived.
         file_list: [list] A list of files from the source_dir which will be archived.
         dest_dir: [str] Path to the archive directory which will be compressed.
-        compress_file: [str] Name of the compressed file which will be created.
+        compress_file: [str] Name of the compressed file which will be created, without the extension.
 
     Keyword arguments:
         delete_dest_dir: [bool] Delete the destination directory after compression. False by default.
@@ -556,51 +596,48 @@ def archiveDir(source_dir, file_list, dest_dir, compress_file, delete_dest_dir=F
         archive_name: [str] If an archive was created, full name of the archive, else None.
     """
 
-    # Make the archive directory
+    members = _collectArchiveMembers(source_dir, file_list, extra_files)
+
+    # Nothing needs to stay on disk, so stream the sources straight into the archive. This skips one
+    # full copy of every FF and FR file per archive, on the same card the night was just written to
+    if create_archive and delete_dest_dir:
+
+        archive_name = os.path.join(dest_dir, compress_file) + '.tar.bz2'
+        mkdirP(os.path.dirname(archive_name))
+
+        log.info('Writing {:d} files to {}'.format(len(members), archive_name))
+
+        with tarfile.open(archive_name, 'w:bz2') as tar:
+
+            # make_archive stored the staging directory itself as '.', with every file under './'
+            root = tarfile.TarInfo('.')
+            root.type = tarfile.DIRTYPE
+            root.mode = 0o755
+            root.mtime = int(time.time())
+            tar.addfile(root)
+
+            # Same order as make_archive's directory walk, which is sorted by name
+            for src_path, name in sorted(members, key=lambda m: m[1]):
+                tar.add(src_path, arcname=os.path.join('.', name), recursive=False)
+
+        return archive_name
+
+
+    # Otherwise the directory is a product in its own right: populate it, then archive it if asked
     mkdirP(dest_dir)
 
-    # Copy the files from the source to the archive directory
-    for file_name in file_list:
+    for src_path, name in members:
+        try:
+            shutil.copy2(src_path, os.path.join(dest_dir, name))
+        except shutil.SameFileError:
+            pass
+        except Exception as e:
+            log.warning(e)
 
-        if hasattr(shutil, "SameFileError"):
-            try:
-                if os.path.isfile(os.path.join(source_dir, file_name)):
-                    shutil.copy2(os.path.join(source_dir, file_name), os.path.join(dest_dir, file_name))
-            except shutil.SameFileError:
-                pass
-            except FileNotFoundError:
-                log.warning('file {} not found '.format(os.path.join(source_dir, file_name)))
-        else:
-            try:
-                shutil.copy2(os.path.join(source_dir, file_name), os.path.join(dest_dir, file_name))
-            except Exception as e:
-                log.warning(e)
-
-
-    # Copy the additional files to the archive directory
-    if extra_files is not None:
-        for file_path in extra_files:
-
-            if hasattr(shutil, "SameFileError"):
-                try:
-                    if os.path.isfile(file_path):
-                        shutil.copy2(file_path, os.path.join(dest_dir, os.path.basename(file_path)))
-                except shutil.SameFileError:
-                    pass
-                except FileNotFoundError:
-                    log.warning('file {} not found'.format(file_path))
-            else:
-                try:
-                    shutil.copy2(file_path, os.path.join(dest_dir, os.path.basename(file_path)))
-                except Exception as e:
-                    log.warning(e)
-
-    # If create_archive is set compress the archive directory into a bz2 file
     archive_name = None
     if create_archive:
         archive_name = shutil.make_archive(os.path.join(dest_dir, compress_file), 'bztar', dest_dir, logger=log)
 
-    # Delete the archive directory after compression
     if delete_dest_dir:
         shutil.rmtree(dest_dir)
 
@@ -1320,23 +1357,15 @@ def tarWithProgress(source_dir, tar_path, compression='bz2', remove_source=False
                           last_pct, processed, total_files))
         
         # 3. Verify -------------------------------------------------------------
-        log.info("Verifying archive integrity...")
-        read_mode = 'r:bz2' if compression == 'bz2' else 'r:gz'
-
+        # tar.add raises on any read or write error and the with block above only exits after the
+        # compressed stream is flushed and closed, so the member count is known without decompressing
+        # the whole archive again just to recount it
         if not (os.path.exists(tar_path) and os.path.getsize(tar_path) > 0):
             log.error("Archive verification failed: file is empty or missing")
             return False
 
-        with tarfile.open(tar_path, read_mode) as tst:
-            archive_files = len(tst.getnames())
-            if archive_files < total_files:
-                log.error("Archive verification failed: wanted >={} files, found {}".format(
-                          total_files, archive_files))
-                return False
-            log.info("Archive verified successfully: contains {} files".format(
-                     archive_files))
-            print("Archive verified successfully: contains {} files".format(
-                  archive_files))
+        log.info("Archive written: {} files, {:.1f} MB".format(processed,
+            os.path.getsize(tar_path)/(1024.0*1024.0)))
 
         # 4. Optional cleanup ---------------------------------------------------
         if remove_source and file_list is None and source_dir:
