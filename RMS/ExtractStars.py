@@ -702,8 +702,8 @@ def fitPSF(img, img_median, x_init, y_init, gamma=1.0, segment_radius=4, roundne
 
         ### Compute the star's SNR
 
-        # Compute the number of pixels inside the 3 sigma ellipse around the star
-        star_px_area = np.pi*(3*sigma_x)*(3*sigma_y)
+        # Number of pixels that were summed into the intensity (the crop, not the 3 sigma ellipse)
+        star_px_count = star_seg_crop.size
 
         # Estimate the standard deviation of the background from the segment area outside the star.
         # The crop indices are in the full-segment frame, so gamma correct the full segment and
@@ -719,7 +719,7 @@ def fitPSF(img, img_median, x_init, y_init, gamma=1.0, segment_radius=4, roundne
             bg_std = 1
 
         # Compute the SNR
-        snr = Image.signalToNoise(intensity, star_px_area, bg_corrected, bg_std)
+        snr = Image.signalToNoise(intensity, star_px_count, bg_corrected, bg_std)
 
         ###
 
