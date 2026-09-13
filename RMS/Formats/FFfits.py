@@ -7,7 +7,7 @@ import os
 import numpy as np
 from astropy.io import fits
 
-from RMS.Formats.FFStruct import FFStruct
+from RMS.Formats.FFStruct import FFStruct, FF_PLANES, selectPlanes
 import datetime
 
 
@@ -65,7 +65,7 @@ def filenameToDatetimeStr(file_name, iso8601=False):
 
 
 
-def read(directory, filename, array=False, full_filename=False, memmap=True):
+def read(directory, filename, array=False, full_filename=False, memmap=True, planes=None):
     """ Read a FF structure from a FITS file. 
     
     Arguments:
@@ -76,6 +76,10 @@ def read(directory, filename, array=False, full_filename=False, memmap=True):
         array: [ndarray] True in order to populate structure's array element (default is False)
         full_filename: [bool] True if full file name is given explicitly, a name which may differ from the
             usual FF*.fits format. False by default.
+        memmap: [bool] Open the FITS with memory mapping. True by default.
+        planes: [iterable of str] Names of the image planes to load, out of 'maxpixel', 'maxframe',
+            'avepixel', 'stdpixel'. None by default, which loads all four. Planes not listed are left
+            as None on the structure. Ignored when array is True, as the array needs all planes.
     
     Return:
         [ff structure]
@@ -90,6 +94,9 @@ def read(directory, filename, array=False, full_filename=False, memmap=True):
 
     # Init an empty FF structure
     ff = FFStruct()
+
+    # Resolve which planes to load
+    load_all, planes = selectPlanes(planes, array)
 
     # Unsigned 16-bit planes (the full-precision average, or all planes of native 16-bit
     # camera files) carry BZERO scaling, which astropy refuses to read lazily from an
@@ -128,17 +135,17 @@ def read(directory, filename, array=False, full_filename=False, memmap=True):
             ff.starttime = filenameToDatetimeStr(filename, iso8601=True)
 
         # Read in the image data, copying it so it remains valid (and detached from the
-        # memmap) after the file is closed
-        ff.maxpixel = hdulist[1].data.copy()
-        ff.maxframe = hdulist[2].data.copy()
-        ff.avepixel = hdulist[3].data.copy()
-        ff.stdpixel = hdulist[4].data.copy()
+        # memmap) after the file is closed. Only the requested planes are read; skipping a plane
+        # skips its I/O entirely, which is what makes bulk readers (e.g. stacking) cheap.
+        for hdu_index, plane in enumerate(FF_PLANES, start=1):
+            if load_all or (plane in planes):
+                setattr(ff, plane, hdulist[hdu_index].data.copy())
 
         # If the file declares fractional bits, the average plane is uint16 fixed point at full
         # precision. Keep it in avepixel16 and derive the legacy 8-bit view by rounding off the
         # fractional bits - the same derivation the compressor uses for its 8-bit plane
         avefrac = head.get('AVEFRAC', 0)
-        if avefrac:
+        if avefrac and (ff.avepixel is not None):
             ff.avepixel16 = ff.avepixel
             ff.avegamma = head.get('AVEGAMMA', 1.0)
             ff.avepixel = np.clip(

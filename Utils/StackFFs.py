@@ -85,8 +85,8 @@ def stackFFs(dir_path, file_format, deinterlace=False, subavg=False, filter_brig
     for ff_name in file_list:
         if validFFName(ff_name):
 
-            # Load FF file
-            ff = readFF(dir_path, ff_name)
+            # Load only the two planes the stack uses; maxframe and stdpixel are half the file
+            ff = readFF(dir_path, ff_name, planes=('maxpixel', 'avepixel'))
 
             # Skip the file if it is corrupted
             if ff is None:
