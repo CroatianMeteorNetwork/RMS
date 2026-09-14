@@ -368,13 +368,6 @@ class BufferedCapture(Process):
         self._sei_ts_active = False
         self._sei_off_samples = []
         self._sei_interp_n = 0
-        # Reconnect continuity re-anchor (non-SEI): carry the legacy timeline across a
-        # reconnect instead of re-deriving the origin from a fresh connect gap. Tracks the last
-        # good (legacy UTC, pre-decode arrival) so a re-connect can place its first frame at
-        # last_utc + the real wallclock gap. See _disciplineTimestamp / DISC_*.
-        self._last_good_utc = None
-        self._last_good_arr = None
-        self._reanchor_pending = False
 
         # Initialize shared values for raw frame saving (these are designed for multiprocessing)
 
@@ -967,27 +960,16 @@ class BufferedCapture(Process):
                 _arr = self._arr_by_pts.pop(gst_timestamp_ns, None)
             except NameError:
                 _arr = None
-        # Reconnect continuity re-anchor (non-SEI): after a reconnect the origin is otherwise
-        # re-derived from a fresh connect gap (~tens of ms of run-to-run scatter -- a silent
-        # timeline step). Instead, place this first post-reconnect frame at last_good_utc + the
-        # REAL wallclock gap, measured pre-decode via arrival on both ends so pipeline latency
-        # cancels, and shift start_timestamp so the legacy timebase stays continuous. This is
-        # what the SEI path gets for free; it makes the non-SEI reconnect step ~arrival-floor
-        # jitter (few ms) instead of the connect-gap scatter. Fires once per reconnect, only
-        # with a prior timeline and a plausible shift.
-        if (self._reanchor_pending and _arr is not None and self._last_good_arr is not None
-                and _stock_ts is not None):
-            _desired = self._last_good_utc + (_arr - self._last_good_arr)
-            _shift = _desired - _stock_ts
-            if abs(_shift) < 5.0:
-                self.start_timestamp += _shift
-                _stock_ts += _shift
-                log.info('Reconnect re-anchor: origin shifted %.1f ms for timeline continuity '
-                         '(gap %.2f s)', _shift*1000.0, _arr - self._last_good_arr)
-            else:
-                log.warning('Reconnect re-anchor skipped: implausible shift %.3f s (gap %.2f s); '
-                            'using fresh connect origin', _shift, _arr - self._last_good_arr)
-            self._reanchor_pending = False
+        # NOTE: the arrival-gap "reconnect re-anchor" that used to live here was REMOVED. It tried
+        # to carry the legacy timeline across a reconnect by shifting start_timestamp by the
+        # arrival gap (last_good_utc + (arr - last_good_arr)), but arrival is measured downstream
+        # of the kernel TCP buffer and rtspsrc's rtpjitterbuffer, which empties/refills across a
+        # reconnect -- so the gap was contaminated by a variable buffer transient and, because it
+        # chained last_good_utc forward, that error was baked in and CARRIED across every
+        # subsequent reconnect (this is what corrupted US05E1's origin to ~1.3 s). A bounded,
+        # self-resetting fresh connect origin (re-derived each reconnect) plus the rate discipline
+        # below is strictly safer for the non-SEI path; SEI stations are absolute per-frame and
+        # self-anchor across a reconnect for free.
         if _arr is not None:
             timestamp = self._disciplineTimestamp(_stock_ts, _arr)
         elif (timestamp is not None) and getattr(self, '_disc_corr', 0.0):
@@ -1021,12 +1003,6 @@ class BufferedCapture(Process):
                                      _lpipe*1000.0, self._disc_corr*1000.0, _exp_s*1000.0,
                                      _alt*1000.0, _lat*1000.0)
 
-        # Track the last good LEGACY-disciplined timestamp + its pre-decode arrival, so a future
-        # reconnect can re-anchor continuously. Captured BEFORE any SEI override -- the re-anchor
-        # is a legacy-path mechanism (SEI stations are already absolute per-frame).
-        if ret and (timestamp is not None) and (_arr is not None):
-            self._last_good_utc = timestamp
-            self._last_good_arr = _arr
 
         # SEI-PRIMARY timing. The SEI-minus-legacy offset is monitored on EVERY frame that has an
         # SEI stamp (active or not), because legacy wallclock is the only reference that can catch a
@@ -1758,25 +1734,35 @@ class BufferedCapture(Process):
                 # Transition through states
                 log.info("Starting pipeline state transitions...")
 
-                # First transition to PAUSED to capture start_time
+                # First transition to PAUSED. The start_time captured here is taken before the
+                # PAUSED transition completes, so it still includes the (variable) connect+preroll
+                # gap -- used only as a PROVISIONAL origin so splitmuxsink has a timing reference
+                # for any segment created before we refine it just below.
                 success, start_time = self.handleStateChange(self.pipeline, Gst.State.PAUSED)
                 if not success:
                     raise ValueError("Failed to transition pipeline to PAUSED state")
 
-                # Calculate start timestamp BEFORE going to PLAYING
-                # This ensures splitmuxsink has correct timing reference when it creates first segment
+                # Provisional origin (refined immediately after PLAYING, below).
                 if start_time is not None:
                     self.start_timestamp = start_time - (self.config.camera_buffer/self.config.fps + self.config.camera_latency)
-                    # A reconnect (we already have a timeline) should re-anchor to it, not to
-                    # this fresh connect gap. First-ever connect (_last_good_utc None) keeps the
-                    # provisional origin above.
-                    if self._last_good_utc is not None:
-                        self._reanchor_pending = True
 
                 # Now transition to PLAYING
                 success, _ = self.handleStateChange(self.pipeline, Gst.State.PLAYING)
                 if not success:
                     raise ValueError("Failed to transition pipeline to PLAYING state")
+
+                # Anchor the origin AFTER PLAYING. The PAUSED-time capture above includes the
+                # variable connect+preroll gap, which bakes a connect-dependent error into the
+                # origin (the old cure for that was the arrival-gap re-anchor -- worse; see read()).
+                # Now that the pipeline is running the running-time base is set, so wallclock here
+                # corresponds to running_time ~= 0; camera_buffer/latency accounts for the
+                # jitterbuffer depth. This removes the variable gap and leaves only a constant
+                # residual, which is calibratable via camera_latency and directly measurable
+                # against SEI ground truth (the RMS_SEI_PROBE 'stock-intstart' delta). Overwrites
+                # the provisional origin before any frame flows, so all frame/segment stamps use
+                # the accurate value.
+                self.start_timestamp = time.time() \
+                    - (self.config.camera_buffer/self.config.fps + self.config.camera_latency)
 
                 # Log start time
                 start_time_str = (UTCFromTimestamp.utcfromtimestamp(self.start_timestamp)
