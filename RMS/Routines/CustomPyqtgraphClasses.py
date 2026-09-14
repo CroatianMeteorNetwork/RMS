@@ -473,6 +473,21 @@ class ViewBox(pg.ViewBox):
         else:
             event.accept()  
 
+    def mouseDragEvent(self, ev, axis=None):
+        """ Block pyqtgraph's pan/zoom drags while panning is disabled.
+
+        Gating the press alone is not enough. If panning gets disabled in the middle of a drag
+        (e.g. SHIFT is pressed to start coloring photometry after the button is already down),
+        pyqtgraph has already picked this ViewBox as the drag item and keeps sending drag events
+        here, which would pan the image while the pixels are being painted.
+        """
+
+        if not self.panning_enabled:
+            ev.ignore()
+            return
+
+        super().mouseDragEvent(ev, axis=axis)
+
 
     def wheelEventModified(self, ev, axis=None):
 
