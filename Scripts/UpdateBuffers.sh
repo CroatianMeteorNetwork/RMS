@@ -27,6 +27,31 @@ RECOMMENDED_SIZE=16777216  # 16MB in bytes - must be >= rtspsrc udp-buffer-size 
 
 CHECK_ONLY=false
 
+# ---------------------------------------------------------------------------
+# Dirty-page writeback (PC-class hosts only)
+# ---------------------------------------------------------------------------
+# With raw video saving at tens of Mbit/s per camera the kernel defaults (dirty pages
+# allowed to reach 10%/20% of RAM before flushing/throttling) let gigabytes pile up and
+# then flush in one burst; if the disk falls behind, every writer on the box blocks --
+# including the capture pipeline, which back-pressures the camera. Byte thresholds make
+# writeback continuous instead. Applied only on hosts with >= 8 GB RAM: a Pi on an SD
+# card is left at kernel defaults.
+WRITEBACK_MIN_RAM_KB=$((8*1024*1024))
+writeback_targets() {
+    # Prints "background_bytes dirty_bytes" for this host, or nothing if not applicable
+    local ram_kb
+    ram_kb=$(awk '/^MemTotal:/{print $2}' /proc/meminfo 2>/dev/null)
+    [ -n "$ram_kb" ] && [ "$ram_kb" -ge "$WRITEBACK_MIN_RAM_KB" ] || return 1
+    local ram_bytes=$((ram_kb*1024))
+    local bg=$((ram_bytes/50))           # 2% of RAM
+    local dirty=$((ram_bytes*8/100))     # 8% of RAM
+    [ "$bg" -lt $((32*1024*1024)) ] && bg=$((32*1024*1024))
+    [ "$bg" -gt $((256*1024*1024)) ] && bg=$((256*1024*1024))
+    [ "$dirty" -lt $((128*1024*1024)) ] && dirty=$((128*1024*1024))
+    [ "$dirty" -gt $((1024*1024*1024)) ] && dirty=$((1024*1024*1024))
+    echo "$bg $dirty"
+}
+
 # Parsed before the root check so --check works unprivileged
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -60,6 +85,16 @@ if [ "$CHECK_ONLY" = true ]; then
     w=$(sysctl -n net.core.wmem_max 2>/dev/null || true)
     r=${r:-0}
     w=${w:-0}
+    if targets=$(writeback_targets); then
+        set -- $targets
+        cur_bg=$(sysctl -n vm.dirty_background_bytes 2>/dev/null || echo 0)
+        cur_dirty=$(sysctl -n vm.dirty_bytes 2>/dev/null || echo 0)
+        if [ "$cur_bg" = "$1" ] && [ "$cur_dirty" = "$2" ]; then
+            echo "Writeback thresholds already set (dirty_background_bytes=$1, dirty_bytes=$2)"
+        else
+            echo "Writeback thresholds not set for this host (want dirty_background_bytes=$1, dirty_bytes=$2; have $cur_bg/$cur_dirty)"
+        fi
+    fi
     if [ "$r" -ge "$RECOMMENDED_SIZE" ] && [ "$w" -ge "$RECOMMENDED_SIZE" ]; then
         echo "UDP buffers are already at least $RECOMMENDED_SIZE bytes (rmem_max=$r, wmem_max=$w)"
         exit 0
@@ -129,6 +164,20 @@ fi
 
 # 3. Re-apply all sysctl config the same way systemd does at boot, so the values
 # shown below reflect what will actually survive a reboot.
+WRITEBACK_DROP_IN="/etc/sysctl.d/99-rms-writeback.conf"
+if targets=$(writeback_targets); then
+    set -- $targets
+    cat > "$WRITEBACK_DROP_IN" << EOF
+# RMS: continuous dirty-page writeback for high-bitrate raw video capture (see UpdateBuffers.sh)
+vm.dirty_background_bytes=$1
+vm.dirty_bytes=$2
+EOF
+    echo "Wrote $WRITEBACK_DROP_IN (dirty_background_bytes=$1, dirty_bytes=$2)"
+else
+    echo "Host has < 8 GB RAM: leaving kernel writeback thresholds at their defaults"
+    rm -f "$WRITEBACK_DROP_IN"
+fi
+
 echo "Applying..."
 sysctl --system >/dev/null 2>&1
 
