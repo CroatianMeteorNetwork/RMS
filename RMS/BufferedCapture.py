@@ -1734,15 +1734,25 @@ class BufferedCapture(Process):
                 # Transition through states
                 log.info("Starting pipeline state transitions...")
 
-                # First transition to PAUSED. The start_time captured here is taken before the
-                # PAUSED transition completes, so it still includes the (variable) connect+preroll
-                # gap -- used only as a PROVISIONAL origin so splitmuxsink has a timing reference
-                # for any segment created before we refine it just below.
+                # First transition to PAUSED to capture start_time.
+                #
+                # NOTE: an "anchor AFTER PLAYING" variant was tried here and REVERTED. Anchoring
+                # after PLAYING seemed cleaner (it would drop the connect+preroll gap from the
+                # origin), but handleStateChange(PLAYING) blocks in get_state through the whole RTSP
+                # preroll (~2 s), so time.time() captured afterwards overshoots the running-time
+                # base by that preroll and put the legacy origin ~2 s LATE on every camera
+                # (measured live: A1/E1 stock-intstart jumped from ~0 / 1.3 s to ~2.1 s). The
+                # before-PAUSED capture + camera_latency calibration IS the prerelease behaviour and
+                # is aligned to SEI on healthy cams (A1 stock-intstart ~0); the reconnect-scatter it
+                # leaves is ~30 ms, bounded and self-resetting, and the SEI path fixes the origin
+                # exactly on our cams anyway. The real bug was the arrival-gap re-anchor (removed in
+                # read()), not this anchor point.
                 success, start_time = self.handleStateChange(self.pipeline, Gst.State.PAUSED)
                 if not success:
                     raise ValueError("Failed to transition pipeline to PAUSED state")
 
-                # Provisional origin (refined immediately after PLAYING, below).
+                # Calculate start timestamp BEFORE going to PLAYING
+                # This ensures splitmuxsink has correct timing reference when it creates first segment
                 if start_time is not None:
                     self.start_timestamp = start_time - (self.config.camera_buffer/self.config.fps + self.config.camera_latency)
 
@@ -1750,19 +1760,6 @@ class BufferedCapture(Process):
                 success, _ = self.handleStateChange(self.pipeline, Gst.State.PLAYING)
                 if not success:
                     raise ValueError("Failed to transition pipeline to PLAYING state")
-
-                # Anchor the origin AFTER PLAYING. The PAUSED-time capture above includes the
-                # variable connect+preroll gap, which bakes a connect-dependent error into the
-                # origin (the old cure for that was the arrival-gap re-anchor -- worse; see read()).
-                # Now that the pipeline is running the running-time base is set, so wallclock here
-                # corresponds to running_time ~= 0; camera_buffer/latency accounts for the
-                # jitterbuffer depth. This removes the variable gap and leaves only a constant
-                # residual, which is calibratable via camera_latency and directly measurable
-                # against SEI ground truth (the RMS_SEI_PROBE 'stock-intstart' delta). Overwrites
-                # the provisional origin before any frame flows, so all frame/segment stamps use
-                # the accurate value.
-                self.start_timestamp = time.time() \
-                    - (self.config.camera_buffer/self.config.fps + self.config.camera_latency)
 
                 # Log start time
                 start_time_str = (UTCFromTimestamp.utcfromtimestamp(self.start_timestamp)
