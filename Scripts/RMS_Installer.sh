@@ -59,6 +59,14 @@ sudo systemctl enable chrony
 sudo systemctl start ssh
 sudo systemctl enable ssh
 
+# On GNOME desktops, prevent sleep and screen lock so captures are not interrupted
+if command -v gsettings >/dev/null 2>&1; then
+    gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-ac-type 'nothing' 2>/dev/null
+    gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-ac-timeout 0 2>/dev/null
+    gsettings set org.gnome.desktop.session idle-delay 600 2>/dev/null
+    gsettings set org.gnome.desktop.screensaver lock-enabled false 2>/dev/null
+fi
+
 # Clone repositories
 git clone https://github.com/CroatianMeteorNetwork/RMS.git
 git clone https://github.com/CroatianMeteorNetwork/cmn_binviewer.git
