@@ -33,6 +33,7 @@ from RMS.Formats import FFfile, FFStruct
 from RMS.Formats import FieldIntensities
 from RMS.Logger import getLogger, getLoggingQueue, initChildProcess, flushLoggingQueue
 from RMS.Misc import UTCFromTimestamp, frameBufferShape, AtomicFlag, stableDoubleRead
+from RMS.SEIBlockMeta import readSeiMeta
 from RMS.Routines.Image import saveImage
 
 # Import Cython functions
@@ -64,7 +65,8 @@ class Compressor(multiprocessing.Process):
 
     running = False
     
-    def __init__(self, data_dir, array1, start_time1, array2, start_time2, config, detector=None):
+    def __init__(self, data_dir, array1, start_time1, array2, start_time2, config, detector=None,
+                 soc_temp1=None, soc_temp2=None, sei_meta1=None, sei_meta2=None):
         """
 
         Arguments:
@@ -93,6 +95,12 @@ class Compressor(multiprocessing.Process):
         self.array2 = None
         self.start_time1 = start_time1
         self.start_time2 = start_time2
+        # Optional shared doubles: camera SoC temperature [degC] for the block in array1/array2
+        # (-999 = unknown), published by BufferedCapture before the block-ready signal
+        self.soc_temp1 = soc_temp1
+        self.soc_temp2 = soc_temp2
+        self.sei_meta1 = sei_meta1
+        self.sei_meta2 = sei_meta2
         self.config = config
 
         self.detector = detector
@@ -134,7 +142,19 @@ class Compressor(multiprocessing.Process):
     
 
 
-    def saveFF(self, arr, startTime, N, ave16=None):
+    def _readSocTemp(self, shared):
+        """ Read an optional lock-free shared double holding the block's camera SoC temperature.
+            Returns None when absent/unknown (-999 sentinel) or if the read never stabilises. """
+        if shared is None:
+            return None
+        for _ in range(3):
+            a = shared.value; b = shared.value
+            if a == b:
+                return float(a) if a > -273.15 else None
+        return None
+
+
+    def saveFF(self, arr, startTime, N, ave16=None, soc_temp=None, sei_meta=None):
         """ Write metadata and data array to FF file and return filenames for FF and FS files
 
         Arguments:
@@ -145,6 +165,10 @@ class Compressor(multiprocessing.Process):
         Keyword arguments:
             ave16: [2D ndarray] average pixel image in 8.8 fixed point (uint16). Written to the FF
                 file as a full-precision average plane if ff_avepixel16 is enabled in the config.
+            soc_temp: [float] camera SoC die temperature [degC] for this block, or None. Written as
+                the optional SOCTEMP header card when known.
+            sei_meta: [dict] per-block photometric provenance from the camera SEI (see
+                RMS.SEIBlockMeta), or None. Written as the optional EXPTIME/gain/QP/WB cards.
         """
         
         # Generate the name for the file
@@ -179,6 +203,33 @@ class Compressor(multiprocessing.Process):
         ff.first = N + 256
         ff.camno = self.config.stationID
         ff.fps = self.config.fps
+
+        # Optional camera SoC temperature (SEI provenance); the writer skips the card when None
+        if soc_temp is not None:
+            ff.soctemp = round(float(soc_temp), 1)
+
+        # Optional per-block photometric provenance (SEI); the writer skips absent cards
+        if sei_meta is not None:
+            ff.seinfrm = int(sei_meta['nfrm'])
+            if sei_meta['exp_mean'] > 0:
+                ff.exptime = float(sei_meta['exp_mean'])
+                ff.expmin = float(sei_meta['exp_min'])
+                ff.expmax = float(sei_meta['exp_max'])
+            if sei_meta['again'] > 0:
+                ff.again = float(sei_meta['again'])
+                ff.dgain = float(sei_meta['dgain'])
+                ff.ispdgain = float(sei_meta['ispdgain'])
+            ff.seistabl = bool(sei_meta['stable'])
+            if sei_meta['qp_max'] > 0:
+                ff.qpmean = float(sei_meta['qp_mean'])
+                ff.qpmax = int(sei_meta['qp_max'])
+            if sei_meta['wb_r'] > 0:
+                ff.wbr = float(sei_meta['wb_r'])
+                ff.wbb = float(sei_meta['wb_b'])
+            # Timing provenance: which clock this block's frame times came from
+            ff.timesrc = 'sei' if sei_meta['time_src'] >= 0.5 else 'legacy'
+            ff.timeoffs = float(sei_meta['time_off_ms'])
+            ff.timeinterp = int(sei_meta['interp_n'])
 
         if sys.version_info[0] == 2:
             # Python 2 code
@@ -401,10 +452,15 @@ class Compressor(multiprocessing.Process):
             start_time1_val = stableDoubleRead(self.start_time1)
             start_time2_val = stableDoubleRead(self.start_time2)
 
+            socTemp = None
+            seiMeta = None
+
             if start_time1_val > 0:
 
                 # Retrieve time of first frame
                 startTime = float(start_time1_val)
+                socTemp = self._readSocTemp(self.soc_temp1)
+                seiMeta = readSeiMeta(self.sei_meta1)
 
                 # Copy frames
                 frames = self.array1
@@ -417,6 +473,8 @@ class Compressor(multiprocessing.Process):
 
                 # Retrieve time of first frame
                 startTime = float(start_time2_val)
+                socTemp = self._readSocTemp(self.soc_temp2)
+                seiMeta = readSeiMeta(self.sei_meta2)
 
                 # Copy frames
                 frames = self.array2
@@ -507,7 +565,8 @@ class Compressor(multiprocessing.Process):
             t = time.time()
 
             # Save the compressed image
-            filename_millis, filename_micros = self.saveFF(compressed, startTime, n*256, ave16=ave16)
+            filename_millis, filename_micros = self.saveFF(compressed, startTime, n*256, ave16=ave16,
+                                                           soc_temp=socTemp, sei_meta=seiMeta)
             n += 1
             
             log.info("Saving time: {:.3f} s".format(time.time() - t))

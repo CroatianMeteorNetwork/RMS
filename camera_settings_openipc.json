@@ -1,0 +1,54 @@
+{
+  "_platform": "OpenIPC / Goke GK7205V200 / IMX307 -- our venc + isp_ctl on :9600 (no DVRIP, no ONVIF)",
+  "_notes": "Science config for OpenIPC-converted cameras. Point RMS 'camera_settings_path' at this file. Every line is a NATIVE isp_ctl command (via CameraControl's openipcCall Isp fast-path). STRUCTURE: 'init' provisions the camera (encode profile incl. the BitRate ceiling, OSD off, auto-reboot, orientation, colour neutrality) and leaves it in the NIGHT baseline (the camera's steady detection state); 'day' is the daytime deviation; 'night' returns to that baseline (its mode-dependent tail == init's). Only what the firmware cannot own is here -- the mode-INDEPENDENT science invariants (gamma 0.5, NR/sharpen/DPC/DRC/LDCI/dehaze/CA/shading bypasses, venc_qp/venc_cqp, 1-line exposure floor) are enforced at boot by S96venc enforce_science and gated by tools/science_audit.py, so they are NOT replayed here. Format follows the stock template: one command per line, keywords as separate tokens.",
+
+  "init": [
+    ["Isp", "time", "ntp", "host"],
+    ["Isp", "osd", "off"],
+    ["Isp", "autoreboot", "everyday", "15"],
+    ["Isp", "encode", "set", "compression", "H.264"],
+    ["Isp", "encode", "set", "resolution", "1080P"],
+    ["Isp", "encode", "set", "fps", "25"],
+    ["Isp", "encode", "set", "rc", "VBR"],
+    ["Isp", "encode", "set", "bitrate", "61440"],
+    ["Isp", "flip", "off"],
+    ["Isp", "mirror", "off"],
+    ["Isp", "bypass", "antifc", "on"],
+    ["Isp", "bypass", "ca", "on"],
+    ["Isp", "bypass", "crosstalk", "on"],
+    ["Isp", "bypass", "dehaze", "on"],
+    ["Isp", "bypass", "lcac", "on"],
+    ["Isp", "bypass", "meshshading", "on"],
+    ["Isp", "bypass", "radialshading", "on"],
+    ["Isp", "dehaze", "off"],
+    ["Isp", "drc", "off"],
+    ["Isp", "ldci", "off"],
+    ["Isp", "nr", "off"],
+    ["Isp", "sharpen", "off"],
+    ["Isp", "venc_qp", "cap", "51", "15"],
+    ["Isp", "venc_cqp", "-12"],
+    ["Isp", "colortone", "unity"],
+
+    ["Isp", "ircut", "night"],
+    ["Isp", "manual", "-a", "22924", "-i", "2048", "-e", "39941"],
+    ["Isp", "wb", "unity"],
+    ["Isp", "ccm", "on"],
+    ["Isp", "satu", "0"]
+  ],
+
+  "day": [
+    ["Isp", "ircut", "day"],
+    ["Isp", "auto", "--min-exptime", "30", "--max-exptime", "39970", "--max-dgain", "1024"],
+    ["Isp", "wb", "460", "256", "490"],
+    ["Isp", "ccm", "off"],
+    ["Isp", "satu", "128"]
+  ],
+
+  "night": [
+    ["Isp", "ircut", "night"],
+    ["Isp", "manual", "-a", "22924", "-i", "2048", "-e", "39941"],
+    ["Isp", "wb", "unity"],
+    ["Isp", "ccm", "on"],
+    ["Isp", "satu", "0"]
+  ]
+}

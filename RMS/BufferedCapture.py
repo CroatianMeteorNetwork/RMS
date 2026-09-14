@@ -24,10 +24,13 @@ import traceback
 
 import re
 import time
+import struct
 import datetime
 import copy
 import os.path
 from multiprocessing import Process, Value, Array
+from RMS.SEIBlockMeta import SEIBlockAccumulator, publishSeiMeta, SEI_META_FIELDS
+from RMS.SEITimebase import SEITimebase
 import threading
 from collections import deque
 import os
@@ -64,6 +67,123 @@ GST_TEARDOWN_TIMEOUT = 10
 # protocol change) can emit a wild PTS for the first seconds after the stream comes up,
 # and anything derived from it would be nonsense.
 MAX_EXPECTED_PTS_NS = 24*60*60*1e9  # 24 hours in nanoseconds
+
+
+# Fixed sensor-readout offset (raw_pts stamp point -> true row-0 readout), established
+# +88 us on the IMX307 (VMAX/HMAX/SHS1 timing + PPS-LED cal); see reference_rmsp_provenance.
+_K_READOUT_S = 88e-6
+
+# Wallclock RATE discipline for GStreamer frame timestamps.
+# The RTP/PTS timebase rides the camera's crystal (measured -13.2 ppm on a GK7205/IMX307
+# unit = ~475 ms over a night; chrony/NTP steer CLOCK_REALTIME, never the camera's
+# monotonic clock). The stock timestamp anchors wallclock ONCE (start_time) and then
+# follows PTS, so it inherits the full drift. Fix: track the least-delayed
+# (arrival wallclock - smoothed PTS) offset over a rolling window -- arrival jitter is
+# one-sided (delay only), so the window MIN is the clean estimator -- and apply only its
+# CHANGE since the first converged window. Rate-only by design: at t0 the correction is
+# exactly 0, so the run origin and every station's existing camera_latency calibration
+# are preserved; before convergence, or if anything looks wrong, the fallback IS the
+# stock timestamp. Validated against per-frame camera SEI ground truth (RMS_SEI_PROBE):
+# 25-min live run: -0.11 ppm, 1.8 ms p2p vs stock -13.1 ppm / 20 ms. Window A/B through a
+# dusk transition (exposure 3->40 ms, frame sizes changing): 600 s held 2.1 ms p2p vs 4.3 ms
+# for 120 s -- the deeper floor is the steadier one, and a window MIN rejects any upward
+# latency bump shorter than the window outright. So: the 120 s window provides startup and
+# the reference (correction starts after 2 min), and the 600 s window takes over tracking
+# once full, with a re-based reference so the handover is continuous (its larger min-lag
+# under drift, ~600 s x 13 ppm = 8 ms, is absorbed into the reference, not the timestamps).
+DISC_WINDOW_S = 120.0            # startup/reference window (120 s beat 30 s: catches true-min frames)
+DISC_WINDOW_LONG_S = 600.0       # tracking window after handover
+DISC_SLEW_S_PER_FRAME = 20e-6    # max correction change per frame (500 ppm @ 25 fps): tracks any
+                                 # real crystal, absorbs a host clock step gradually, never jumps
+DISC_RESET_S = 2.0               # |target - corr| beyond this = PTS/clock discontinuity: re-reference
+
+# Stream stall tolerance before declaring the device disconnected. A single 500 ms no-sample
+# gap is almost always a transient (network/host hiccup); rtspsrc + jitterbuffer usually recover
+# if we keep pulling. Reconnecting instead re-mints the origin (a ~tens-of-ms legacy step, now
+# softened by the reconnect re-anchor) and loses the frames in the gap, so only a stall longer
+# than this is treated as a dead session. Well under the 180 s watchdog.
+RECONNECT_STALL_S = 4.0
+
+
+class _SlidingMin(object):
+    """ O(1)-amortised minimum over the last maxlen appended values (monotonic deque), so the
+        600 s tracking window costs nothing per frame on a Pi. """
+    def __init__(self, maxlen):
+        self.maxlen = maxlen; self.n = 0; self._q = deque()   # (index, value), values increasing
+    def append(self, x):
+        q = self._q
+        while q and q[-1][1] >= x:
+            q.pop()
+        q.append((self.n, x)); self.n += 1
+        lo = self.n - self.maxlen
+        while q[0][0] < lo:
+            q.popleft()
+    def __len__(self):
+        return self.n if self.n < self.maxlen else self.maxlen
+    @property
+    def full(self):
+        return self.n >= self.maxlen
+    def min(self):
+        return self._q[0][1]
+
+
+def _rmspCapUtc(data):
+    """Parse the first checksum-valid RMSP v4 provenance SEI in a raw (escaped) H.264 access
+    unit. Returns (capture_utc_s, exp_s, soc_temp_c or None, meta dict, frame_seq) or None. Layout matches
+    venc/main.c build_rmsp_payload (fields XOR-0xFF after the 'RMSP' magic).
+    capture_utc = (sec+usec) - (mono_pts_us - raw_pts_us): host-clock at emit minus the
+    camera-side capture->emit delay, both from the same back-to-back cal.
+    Cheap enough to run per frame: locate the magic in the escaped bytes (memchr speed) and
+    de-escape only a short slice from there. The magic has no zero bytes, so the emulation-
+    prevention state is known (clean) at that point; the SEI precedes slice data, so the first
+    checksum-valid magic is the record."""
+    def deesc(b):
+        o = bytearray(); z = 0
+        for x in b:
+            if z >= 2 and x == 3:
+                z = 0; continue
+            o.append(x); z = z + 1 if x == 0 else 0
+        return bytes(o)
+    i = 0
+    while True:
+        j = data.find(b"RMSP", i)
+        if j < 0:
+            return None
+        i = j + 4
+        u = deesc(data[j:j + 96])          # 61-byte record plus room for emulation-prevention bytes
+        if len(u) < 6:
+            continue
+        v = u[4] ^ 0xFF
+        L = {4: 61, 3: 59, 2: 53, 1: 49}.get(v, 49)
+        if len(u) < L:
+            continue
+        u = u[:4] + bytes(x ^ 0xFF for x in u[4:L])
+        ck = 0
+        for x in u[4:L - 1]:
+            ck ^= x
+        if ck != u[L - 1] or v != 4:
+            continue
+        sec = struct.unpack('<I', u[6:10])[0]; usec = struct.unpack('<I', u[10:14])[0]
+        frame_seq = struct.unpack('<I', u[14:18])[0]
+        raw_pts = struct.unpack('<I', u[44:48])[0]; mono = struct.unpack('<I', u[48:52])[0]
+        exp_us = struct.unpack('<I', u[18:22])[0]
+        fl = u[5]
+        temp = struct.unpack('<h', u[42:44])[0]/10.0 if (fl & 0x01) else None   # flags b0 = temp valid
+        delay = (mono - raw_pts) & 0xffffffff
+        # Per-block photometric provenance (RMS.SEIBlockMeta): gains are HI_MPI_ISP_QueryExposureInfo
+        # units, x1024 = 1x; WB gains x256 = 1x; mean_qp = this frame's actual coded QP.
+        # Flags: b1 wb valid, b3 exposure/gains valid, b6 qp valid
+        exp_ok = bool(fl & 0x08)
+        meta = {
+            'exp_s': exp_us/1e6 if exp_ok else None,
+            'again': struct.unpack('<I', u[22:26])[0]/1024.0 if exp_ok else None,
+            'dgain': struct.unpack('<I', u[26:30])[0]/1024.0 if exp_ok else None,
+            'ispdgain': struct.unpack('<I', u[30:34])[0]/1024.0 if exp_ok else None,
+            'wb_r': struct.unpack('<H', u[34:36])[0]/256.0 if (fl & 0x02) else None,
+            'wb_b': struct.unpack('<H', u[36:38])[0]/256.0 if (fl & 0x02) else None,
+            'qp': u[58] if (fl & 0x40) else None,
+        }
+        return ((sec + usec/1e6) - delay/1e6, exp_us/1e6, temp, meta, frame_seq)
 
 if sys.version_info[0] < 3:
     # py2
@@ -174,7 +294,8 @@ class BufferedCapture(Process):
     running = False
     
     def __init__(self, array1, start_time1, array2, start_time2, config, video_file=None, night_data_dir=None,
-                 saved_frames_dir=None, daytime_mode=None, camera_mode_switch_trigger=None):
+                 saved_frames_dir=None, daytime_mode=None, camera_mode_switch_trigger=None,
+                 soc_temp1=None, soc_temp2=None, sei_meta1=None, sei_meta2=None):
         """ Populate arrays with (startTime, frames) after startCapture is called.
         
         Arguments:
@@ -225,6 +346,35 @@ class BufferedCapture(Process):
         self.start_time2 = start_time2
         self.start_time1.value = 0
         self.start_time2.value = 0
+
+        # Optional shared doubles for the camera SoC temperature [degC] of each block (RMSP SEI
+        # provenance; -999 = unknown). Written before the block-ready signal so the compressor
+        # never pairs a block with a stale reading; it lands in the FF header as SOCTEMP
+        self.soc_temp1 = soc_temp1
+        self.soc_temp2 = soc_temp2
+        self._soc_temp = -999.0
+        # Per-block SEI photometric provenance (exposure/gains/QP/WB), see RMS.SEIBlockMeta
+        self.sei_meta1 = sei_meta1
+        self.sei_meta2 = sei_meta2
+        self._sei_blk = SEIBlockAccumulator()
+        self._sei_blk_seq = 0
+        self._sei_seen = False
+        # SEI-derived integration-start timebase: PRIMARY frame-time source when the camera
+        # emits a valid RMSP SEI. Legacy GStreamer timing stays computed as the sanity
+        # reference and the per-frame fallback. Raw per-frame stamps are stored lock-free in
+        # _sei_int_by_pts (like _arr_by_pts); the source is latched once per block.
+        self._sei_tb = SEITimebase(self.config.fps)
+        self._sei_int_by_pts = {}
+        self._sei_ts_active = False
+        self._sei_off_samples = []
+        self._sei_interp_n = 0
+        # Reconnect continuity re-anchor (non-SEI): carry the legacy timeline across a
+        # reconnect instead of re-deriving the origin from a fresh connect gap. Tracks the last
+        # good (legacy UTC, pre-decode arrival) so a re-connect can place its first frame at
+        # last_utc + the real wallclock gap. See _disciplineTimestamp / DISC_*.
+        self._last_good_utc = None
+        self._last_good_arr = None
+        self._reanchor_pending = False
 
         # Initialize shared values for raw frame saving (these are designed for multiprocessing)
 
@@ -592,6 +742,116 @@ class BufferedCapture(Process):
         return smoothed_pts
 
 
+    def _arrivalProbe(self, pad, info):
+        """Pad probe on the tee sink (compressed H.264, pre-decode, streaming thread): record
+        CLOCK_REALTIME arrival per buffer PTS for the wallclock rate discipline. Measured here
+        and not at read(): on a loaded host a consumer backlog delays the appsink pull, not
+        the arrival, so the window MIN stays honest. Also parses the RMSP provenance SEI for the
+        block SoC temperature and the per-block photometric provenance (exposure/gains/QP/WB,
+        RMS.SEIBlockMeta); with RMS_SEI_PROBE set it also keeps per-frame records for the
+        validation logging."""
+        try:
+            buf = info.get_buffer()
+            pts = buf.pts
+            if pts == Gst.CLOCK_TIME_NONE:
+                return Gst.PadProbeReturn.OK
+            self._arr_by_pts[pts] = time.time()
+            if len(self._arr_by_pts) > 600:
+                for k in list(self._arr_by_pts)[:200]:
+                    self._arr_by_pts.pop(k, None)
+            # RMSP SEI: every frame on a camera that emits it (the per-block QP mean/max need
+            # every frame; ~14 us per access unit). A camera that showed no SEI in its first
+            # 512 frames is probed every 64th frame only, so the per-frame cost on a Pi driving
+            # an XM camera stays negligible
+            self._probe_n += 1
+            if (self._sei_seen or self._sei_by_pts is not None or self._probe_n <= 512
+                    or (self._probe_n % 64 == 0)):
+                ok, mi = buf.map(Gst.MapFlags.READ)
+                if ok:
+                    cu = _rmspCapUtc(bytes(mi.data)); buf.unmap(mi)
+                    if cu is not None:
+                        self._sei_seen = True
+                        if cu[2] is not None:
+                            self._soc_temp = cu[2]
+                        self._sei_blk.add(cu[3])
+                        if self._sei_tb is not None:
+                            self._sei_int_by_pts[pts] = self._sei_tb.feed(pts, cu[0], cu[1], cu[4])
+                            if len(self._sei_int_by_pts) > 600:
+                                for _k in list(self._sei_int_by_pts)[:200]:
+                                    self._sei_int_by_pts.pop(_k, None)
+                        if self._sei_by_pts is not None:
+                            self._sei_by_pts[pts] = cu
+                            if len(self._sei_by_pts) > 600:
+                                for k in list(self._sei_by_pts)[:200]:
+                                    self._sei_by_pts.pop(k, None)
+        except Exception:
+            pass
+        return Gst.PadProbeReturn.OK
+
+    def _seiRecordDelta(self, live_ms, stock_ms, lpipe_ms, corr_ms, exp_ms, alt_ms=float('nan'), lat_ms=float('nan')):
+        """RMS_SEI_PROBE: log stats every 100 frames (over the last 500). live = the
+        disciplined timestamp RMS emits, stock = the same before discipline, both vs the
+        TARGET (row-0 start of integration = SEI readout - exp). Lpipe = least-delayed
+        arrival - readout (exposure-independent pipeline latency; nan until the window
+        is full). corr = the applied rate correction."""
+        self._sei_deltas.append((live_ms, stock_ms, lpipe_ms, alt_ms, lat_ms))
+        n = len(self._sei_deltas)
+        if n % 100 == 0:
+            a = self._sei_deltas[-500:]
+            def st(i):
+                v = [x[i] for x in a if x[i] == x[i]]      # drop nan
+                if not v:
+                    return float('nan'), float('nan'), float('nan'), float('nan')
+                mu = sum(v)/len(v)
+                return mu, (sum((x - mu)**2 for x in v)/len(v))**0.5, min(v), max(v)
+            lv, so, lp, l6, la = st(0), st(1), st(2), st(3), st(4)
+            log.info("RMS_SEI_PROBE n=%d ms | live-intstart: mean=%.2f sd=%.2f min=%.2f max=%.2f"
+                     " | stock-intstart: mean=%.2f sd=%.2f | Lpipe: mean=%.2f sd=%.2f"
+                     " | corr=%.2f ms exp=%.1f ms | alt120-intstart: mean=%.2f sd=%.2f"
+                     " | lat(arr-readout): min=%.2f mean=%.2f",
+                     n, lv[0], lv[1], lv[2], lv[3], so[0], so[1], lp[0], lp[1], corr_ms, exp_ms,
+                     l6[0], l6[1], la[2], la[0])
+
+    def _disciplineTimestamp(self, stock_ts, arr):
+        """Rate-only wallclock discipline (see DISC_* at module top). Returns stock_ts plus a
+        slew-limited correction equal to the change of the least-delayed (arrival - smoothed
+        PTS) offset since the reference. Stock until the short window is full (startup); the
+        short window tracks until the long one is full, which then takes over with a re-based
+        reference so the handover is continuous."""
+        pts_s = stock_ts - self.start_timestamp          # smoothed PTS timebase, either branch
+        off = arr - pts_s
+        self._disc_win.append(off); self._disc_win_long.append(off)
+        if not self._disc_win.full:
+            return stock_ts
+        if self._disc_ref is None:
+            self._disc_ref = self._disc_win.min()        # correction starts at exactly 0
+            return stock_ts
+        if self._disc_win_long.full:
+            m = self._disc_win_long.min()
+            if self._disc_ref_long is None:
+                # Hand over without a step: the long window's larger min-lag under drift goes
+                # into the reference, not into the timestamps.
+                self._disc_ref_long = m - self._disc_corr
+            target = m - self._disc_ref_long
+        else:
+            target = self._disc_win.min() - self._disc_ref
+        d = target - self._disc_corr
+        if abs(d) > DISC_RESET_S:
+            # PTS timebase reset or host clock step: re-reference so the correction
+            # continues from its current value instead of jumping the timestamps.
+            log.warning("Timestamp discipline: %.3f s discontinuity, re-referencing", d)
+            if self._disc_win_long.full:
+                self._disc_ref_long = self._disc_win_long.min() - self._disc_corr
+            else:
+                self._disc_ref = self._disc_win.min() - self._disc_corr
+            return stock_ts + self._disc_corr
+        if d > DISC_SLEW_S_PER_FRAME:
+            d = DISC_SLEW_S_PER_FRAME
+        elif d < -DISC_SLEW_S_PER_FRAME:
+            d = -DISC_SLEW_S_PER_FRAME
+        self._disc_corr += d
+        return stock_ts + self._disc_corr
+
     def read(self):
         """ Retrieve frames and timestamp.
 
@@ -619,8 +879,24 @@ class BufferedCapture(Process):
                 # Pull a frame from the GStreamer pipeline with a .5 sec timeout
                 sample = self.device.emit("try-pull-sample", 500 * Gst.MSECOND)
                 if not sample:
-                    log.info("GStreamer pipeline did not emit a sample.")
-                    return False, None, None
+                    # Tolerate a brief stall: keep pulling for up to RECONNECT_STALL_S before
+                    # treating the stream as dead. This turns a recoverable hiccup into a short
+                    # gap (frames resume with correct PTS -- the anchor stays valid) instead of a
+                    # full reconnect + origin re-mint + frame loss. exit is checked so a stop is
+                    # not delayed by the wait.
+                    _stall_t0 = time.time()
+                    _stall_deadline = _stall_t0 + RECONNECT_STALL_S
+                    while (not sample) and (time.time() < _stall_deadline) and (not self.exit.is_set()):
+                        try:
+                            if self.device.get_property("eos"):
+                                break     # genuine end-of-stream: dead session, reconnect now
+                        except Exception:
+                            pass
+                        sample = self.device.emit("try-pull-sample", 500 * Gst.MSECOND)
+                    if not sample:
+                        log.info("No sample for ~%.0f s -- treating as disconnect.", RECONNECT_STALL_S)
+                        return False, None, None
+                    log.info("Recovered after a %.1f s stream stall (no reconnect).", time.time() - _stall_t0)
                 
                 # Extract the frame buffer and timestamp
                 buffer = sample.get_buffer()
@@ -679,6 +955,105 @@ class BufferedCapture(Process):
                 ret, frame = self.device.read()
                 if ret:
                     timestamp = time.time()
+
+        # Wallclock rate discipline (GStreamer path; see DISC_* at module top). Pops this
+        # frame's arrival time recorded by _arrivalProbe. No arrival (OpenCV path, probe not
+        # attached) -> stock timestamp; a lone frame without arrival keeps the current
+        # correction so the series never steps.
+        _stock_ts = timestamp
+        _arr = None
+        if ret and (timestamp is not None) and getattr(self, '_arr_by_pts', None):
+            try:
+                _arr = self._arr_by_pts.pop(gst_timestamp_ns, None)
+            except NameError:
+                _arr = None
+        # Reconnect continuity re-anchor (non-SEI): after a reconnect the origin is otherwise
+        # re-derived from a fresh connect gap (~tens of ms of run-to-run scatter -- a silent
+        # timeline step). Instead, place this first post-reconnect frame at last_good_utc + the
+        # REAL wallclock gap, measured pre-decode via arrival on both ends so pipeline latency
+        # cancels, and shift start_timestamp so the legacy timebase stays continuous. This is
+        # what the SEI path gets for free; it makes the non-SEI reconnect step ~arrival-floor
+        # jitter (few ms) instead of the connect-gap scatter. Fires once per reconnect, only
+        # with a prior timeline and a plausible shift.
+        if (self._reanchor_pending and _arr is not None and self._last_good_arr is not None
+                and _stock_ts is not None):
+            _desired = self._last_good_utc + (_arr - self._last_good_arr)
+            _shift = _desired - _stock_ts
+            if abs(_shift) < 5.0:
+                self.start_timestamp += _shift
+                _stock_ts += _shift
+                log.info('Reconnect re-anchor: origin shifted %.1f ms for timeline continuity '
+                         '(gap %.2f s)', _shift*1000.0, _arr - self._last_good_arr)
+            else:
+                log.warning('Reconnect re-anchor skipped: implausible shift %.3f s (gap %.2f s); '
+                            'using fresh connect origin', _shift, _arr - self._last_good_arr)
+            self._reanchor_pending = False
+        if _arr is not None:
+            timestamp = self._disciplineTimestamp(_stock_ts, _arr)
+        elif (timestamp is not None) and getattr(self, '_disc_corr', 0.0):
+            timestamp = _stock_ts + self._disc_corr
+
+        # RMS_SEI_PROBE (measurement only): live and stock timestamps vs the SEI ground
+        # truth, keyed by buffer PTS. TARGET = row-0 START OF INTEGRATION. Row-0 READOUT
+        # (capture_utc - k) is the exposure-independent intermediary: least-delayed arrival
+        # - readout = the fixed pipeline latency L_pipe. int_start = readout - exp; the SEI
+        # gives exp per frame, the non-SEI path uses camera_buffer/fps (~ night exposure).
+        _sbp = getattr(self, '_sei_by_pts', None)
+        if _sbp is not None and ret and (timestamp is not None):
+            try:
+                _cu = _sbp.pop(gst_timestamp_ns, None)
+            except NameError:
+                _cu = None
+            if _cu is not None:
+                _cap_utc, _exp_s, _tmp = _cu[0], _cu[1], _cu[2]
+                _readout = _cap_utc - _K_READOUT_S           # row-0 readout (exposure-independent)
+                _int_start = _readout - _exp_s               # TARGET: row-0 start of integration
+                _win = self._disc_win
+                _pts_s = _stock_ts - self.start_timestamp
+                _lpipe = float('nan'); _alt = float('nan'); _lat = float('nan')
+                if _win.full:
+                    _lpipe = _pts_s + _win.min() - _readout
+                    if self._disc_ref is not None:               # A/B: the pure 120 s track
+                        _alt = _stock_ts + (_win.min() - self._disc_ref) - _int_start
+                if _arr is not None:
+                    _lat = _arr - _readout                       # raw per-frame latency vs SEI truth
+                self._seiRecordDelta((timestamp - _int_start)*1000.0, (_stock_ts - _int_start)*1000.0,
+                                     _lpipe*1000.0, self._disc_corr*1000.0, _exp_s*1000.0,
+                                     _alt*1000.0, _lat*1000.0)
+
+        # Track the last good LEGACY-disciplined timestamp + its pre-decode arrival, so a future
+        # reconnect can re-anchor continuously. Captured BEFORE any SEI override -- the re-anchor
+        # is a legacy-path mechanism (SEI stations are already absolute per-frame).
+        if ret and (timestamp is not None) and (_arr is not None):
+            self._last_good_utc = timestamp
+            self._last_good_arr = _arr
+
+        # SEI-PRIMARY timing. The SEI-minus-legacy offset is monitored on EVERY frame that has an
+        # SEI stamp (active or not), because legacy wallclock is the only reference that can catch a
+        # camera whose own clock is wrong (unsynced chrony -> SEI internally perfect but hours off);
+        # that offset gates activation in SEITimebase.ready(). When active, the timestamp becomes the
+        # camera's integration-start (capture_utc - exp - k), used RAW; legacy stays the reference and
+        # the fallback. A frame with no record is interpolated from the fit (flagged); if even that
+        # is unavailable, legacy is kept.
+        if ret and (timestamp is not None) and (getattr(self, '_sei_tb', None) is not None):
+            _legacy_ts = timestamp
+            try:
+                _sei_ts = self._sei_int_by_pts.pop(gst_timestamp_ns, None)
+            except NameError:
+                _sei_ts = None
+            if _sei_ts is not None:
+                self._sei_tb.note_offset(_sei_ts - _legacy_ts)
+            if self._sei_ts_active:
+                if _sei_ts is None:
+                    try:
+                        _sei_ts = self._sei_tb.estimate(gst_timestamp_ns)
+                    except NameError:
+                        _sei_ts = None
+                    if _sei_ts is not None:
+                        self._sei_interp_n += 1
+                if _sei_ts is not None:
+                    self._sei_off_samples.append(_sei_ts - _legacy_ts)
+                    timestamp = _sei_ts
 
         return ret, frame, timestamp
 
@@ -942,6 +1317,7 @@ class BufferedCapture(Process):
         """
 
         running_time_ns = None
+        raw_pts_ns = None
 
         if first_sample is not None:
             buffer = first_sample.get_buffer()
@@ -949,6 +1325,7 @@ class BufferedCapture(Process):
 
             if buffer is not None and buffer.pts != Gst.CLOCK_TIME_NONE:
                 running_time_ns = buffer.pts
+                raw_pts_ns = buffer.pts        # pre-conversion PTS, keyed like the SEI/arrival probes
 
                 if segment is not None:
                     converted = segment.to_running_time(Gst.Format.TIME, buffer.pts)
@@ -968,7 +1345,20 @@ class BufferedCapture(Process):
             log.warning("Unusable PTS for the new video segment: {}".format(running_time_ns))
             return None
 
-        segment_timestamp = self.start_timestamp + (running_time_ns + self.last_pts_correction_ns)/1e9
+        # The mkv segment start must match the timestamp the FF/detection path gives the same frame.
+        # That path applies the wallclock rate discipline (and the SEI integration-start when active);
+        # this naming previously did neither, so the video drifted at the camera crystal rate vs the
+        # detections (measured up to ~9 frames over a night, per-unit -13..-20 ppm). Apply the same
+        # rate discipline, and prefer the SEI integration-start when the timebase is active.
+        segment_timestamp = self.start_timestamp + (running_time_ns + self.last_pts_correction_ns)/1e9 \
+            + getattr(self, '_disc_corr', 0.0)
+        if getattr(self, '_sei_ts_active', False) and raw_pts_ns is not None:
+            try:
+                _sei_seg = self._sei_tb.estimate(raw_pts_ns)
+            except Exception:
+                _sei_seg = None
+            if _sei_seg is not None:
+                segment_timestamp = _sei_seg
 
         # Segments are cut live, so the derived time must land near now. This also catches
         # a start_timestamp that was never established (it is initialized to 0).
@@ -1325,6 +1715,34 @@ class BufferedCapture(Process):
                 self.pipeline = Gst.parse_launch(pipeline_str)
                 if not self.pipeline:
                     raise ValueError("Could not create pipeline")
+
+                # Wallclock rate discipline state + arrival probe on the tee sink (see DISC_*
+                # at module top). Reset on every pipeline build: a new run origin. With
+                # RMS_SEI_PROBE set, the same probe also taps the RMSP provenance SEI
+                # (camera ground-truth capture UTC) for validation logging.
+                self._arr_by_pts = {}
+                try:
+                    _fps = float(self.config.fps)
+                except Exception:
+                    _fps = 25.0
+                self._disc_win = _SlidingMin(max(2, int(DISC_WINDOW_S*_fps)))            # startup/reference
+                self._disc_win_long = _SlidingMin(max(2, int(DISC_WINDOW_LONG_S*_fps)))  # tracking
+                self._disc_ref = None
+                self._disc_ref_long = None
+                self._disc_corr = 0.0
+                self._sei_by_pts = {} if os.environ.get('RMS_SEI_PROBE') else None
+                self._sei_deltas = []
+                self._probe_n = 0
+                try:
+                    _tee = self.pipeline.get_by_name('t')
+                    if _tee is not None:
+                        _tee.get_static_pad('sink').add_probe(Gst.PadProbeType.BUFFER, self._arrivalProbe)
+                        log.info("Timestamp discipline: arrival probe attached on tee sink (windows %d/%d frames)%s",
+                                 self._disc_win.maxlen, self._disc_win_long.maxlen, ", SEI probe on" if self._sei_by_pts is not None else "")
+                    else:
+                        log.warning("Timestamp discipline: tee not found; arrival probe not attached (stock timestamps)")
+                except Exception as _e:
+                    log.warning("Timestamp discipline: arrival probe attach failed (%s); stock timestamps", _e)
                 
                 # Start a daemon thread that drains the GstBus so it never fills
                 self._bus_thread = threading.Thread(target=self._busPoller, daemon=True)
@@ -1349,6 +1767,11 @@ class BufferedCapture(Process):
                 # This ensures splitmuxsink has correct timing reference when it creates first segment
                 if start_time is not None:
                     self.start_timestamp = start_time - (self.config.camera_buffer/self.config.fps + self.config.camera_latency)
+                    # A reconnect (we already have a timeline) should re-anchor to it, not to
+                    # this fresh connect gap. First-ever connect (_last_good_utc None) keeps the
+                    # provisional origin above.
+                    if self._last_good_utc is not None:
+                        self._reanchor_pending = True
 
                 # Now transition to PLAYING
                 success, _ = self.handleStateChange(self.pipeline, Gst.State.PLAYING)
@@ -2162,6 +2585,20 @@ class BufferedCapture(Process):
             max_frame_age_seconds = 0.0
             first_frame_timestamp = None
 
+            # Latch the timing source for this whole block (never mid-block, which would step
+            # timestamps inside one FF/FT): SEI integration-start when the timebase is healthy,
+            # else legacy GStreamer timing. Legacy always keeps running as the sanity reference.
+            _sei_now = (self._sei_tb is not None) and self._sei_tb.ready()
+            if _sei_now != self._sei_ts_active:
+                if _sei_now:
+                    log.info('Timing source -> SEI integration-start (%s)', self._sei_tb.health())
+                else:
+                    log.warning('Timing source -> legacy GStreamer; SEI timebase stood down (%s)',
+                                self._sei_tb.health())
+            self._sei_ts_active = _sei_now
+            self._sei_off_samples = []
+            self._sei_interp_n = 0
+
             # running totals for mean calculations
             sum_frame_interval_norm = 0.0
             sum_frame_age_seconds   = 0.0
@@ -2526,16 +2963,42 @@ class BufferedCapture(Process):
                 break
 
 
+            # Per-block SEI photometric provenance: snapshot and reset at EVERY block boundary
+            # (daytime included), so the first night block never inherits the day's exposure and
+            # gain extremes. The probe taps the stream pre-decode, so attribution to a block is
+            # offset by the decode queue depth (a few frames) -- fine for 256-frame statistics
+            self._sei_blk_seq += 1
+            sei_meta_vals = self._sei_blk.snapshotAndReset(self._sei_blk_seq)
+            # Fold this block's timing provenance (source, SEI-minus-legacy median, interpolated
+            # count) into the SEI meta so each FF records whether its timing is the us-class SEI
+            # integration-start or the ~30 ms-class legacy origin.
+            if self._sei_off_samples:
+                _off = sorted(self._sei_off_samples); _mid = len(_off)//2
+                _off_ms = (_off[_mid] if len(_off) % 2 else 0.5*(_off[_mid - 1] + _off[_mid]))*1000.0
+            else:
+                _off_ms = 0.0
+            sei_meta_vals[SEI_META_FIELDS.index('time_src')] = 1.0 if self._sei_ts_active else 0.0
+            sei_meta_vals[SEI_META_FIELDS.index('time_off_ms')] = _off_ms
+            sei_meta_vals[SEI_META_FIELDS.index('interp_n')] = float(self._sei_interp_n)
+
             if (not wait_for_reconnect
                 and not self.daytime_mode.value
                 and first_frame_timestamp is not None):
 
                 # Set the starting value of the frame block, which indicates to the compression that the
                 # block is ready for processing
+                # Publish the block's camera SoC temperature and SEI provenance first, then the
+                # block-ready signal
                 if buffer_one:
+                    if self.soc_temp1 is not None:
+                        self.soc_temp1.value = self._soc_temp
+                    publishSeiMeta(self.sei_meta1, sei_meta_vals)
                     self.start_time1.value = first_frame_timestamp
 
                 else:
+                    if self.soc_temp2 is not None:
+                        self.soc_temp2.value = self._soc_temp
+                    publishSeiMeta(self.sei_meta2, sei_meta_vals)
                     self.start_time2.value = first_frame_timestamp
 
                 log.debug('New block of raw frames available for compression with starting time: {:s}'

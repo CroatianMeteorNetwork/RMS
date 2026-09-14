@@ -70,6 +70,34 @@ class FFStruct:
         # re-encoded, i.e. stays in the gamma-encoded domain). 1.0 means encoded-domain averaging
         self.avegamma = 1.0
 
+        # Optional camera SoC die temperature [degC] from the RMSP provenance SEI (a proxy for
+        # housing/ambient temperature, NOT lens temperature). None when unknown (e.g. XM cameras)
+        self.soctemp = None
+
+        # Optional per-block photometric provenance from the RMSP SEI (None when unknown):
+        # frame exposure [s] (block mean / min / max); sensor analog, sensor digital and ISP
+        # digital gain (x, block mean); whether exposure and all gains were constant within the
+        # block; encoder mean/max QP (codec-quality indicator); white balance R/B gains (colour
+        # term); number of frames in the block that carried the SEI
+        self.exptime = None
+        self.expmin = None
+        self.expmax = None
+        self.again = None
+        self.dgain = None
+        self.ispdgain = None
+        self.seistabl = None
+        self.qpmean = None
+        self.qpmax = None
+        self.wbr = None
+        self.wbb = None
+        self.seinfrm = None
+
+        # Timing provenance: 'sei' (camera integration-start, us-class) or 'legacy' (GStreamer
+        # origin, ~30 ms-class); SEI-minus-legacy block-median offset [ms]; interpolated frames
+        self.timesrc = None
+        self.timeoffs = None
+        self.timeinterp = None
+
         self.array = None
 
 

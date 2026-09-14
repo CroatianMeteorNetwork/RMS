@@ -188,6 +188,23 @@ def SetIP(ip):
     return "0x%08X" % struct.unpack("I", inet_aton(ip))
 
 
+def ipField(value, current_hex, what, default=None):
+    """ Encode an IP entered in the GUI/CLI. A blank field keeps the device's current
+        setting (or the default) instead of crashing inet_aton on an empty string; a
+        malformed address raises a readable error instead of an OSError traceback. """
+    value = (value or "").strip()
+    if not value:
+        if current_hex:
+            return current_hex
+        if default:
+            return SetIP(default)
+        raise ValueError("A {:s} is required".format(what))
+    try:
+        return SetIP(value)
+    except OSError:
+        raise ValueError("Invalid {:s}: {!r}".format(what, value))
+
+
 def GetInterfaces(checkip=False):
     # if the GUI is initialised, just read the list of interfaces from the dropdown
     if app is not None:
@@ -260,7 +277,15 @@ def SearchXM(intf=None):
                 devices[answer["NetWork.NetCommon"]["MAC"]] = answer[
                     "NetWork.NetCommon"
                 ]
-                devices[answer["NetWork.NetCommon"]["MAC"]][u"Brand"] = u"xm"
+                _nc = answer["NetWork.NetCommon"]
+                # netherd fronts our OpenIPC/venc cams over XM broadcast but they serve
+                # RTSP on :554 (real XM DVRIP is :34567) and are named openipc-* -> route
+                # them to the SSH set-IP path, not XM broadcast (which netherd acks but
+                # cannot apply).
+                _oipc = (str(_nc.get("TCPPort")) == "554"
+                         or str(_nc.get("HostName", "")).lower().startswith("openipc")
+                         or str(_nc.get("SN", "")).upper() == "OPENIPC")
+                devices[_nc["MAC"]][u"Brand"] = u"openipc" if _oipc else u"xm"
     server.close()
     return devices
 
@@ -285,9 +310,12 @@ def ConfigXM(data, debug=False, intf=None):
     print('Remote host:', devices[data[1]][u"HostName"])
     config[u"DvrMac"] = devices[data[1]][u"MAC"]
     config[u"EncryptType"] = 1
-    config[u"GateWay"] = SetIP(data[4])
-    config[u"HostIP"] = SetIP(data[2])
-    config[u"Submask"] = SetIP(data[3])
+    dev = devices[data[1]]
+    # Blank gateway/mask keep what the device reported in its search reply (netherd/XM
+    # cameras advertise both); the IP itself is required
+    config[u"GateWay"] = ipField(data[4], dev.get(u"GateWay"), "gateway")
+    config[u"HostIP"] = ipField(data[2], None, "IP address")
+    config[u"Submask"] = ipField(data[3], dev.get(u"Submask"), "subnet mask", default="255.255.255.0")
     config[u"Username"] = "admin"
     if len(data) > 5:
         passwd = sofia_hash(data[5])
@@ -369,6 +397,405 @@ def FlashXM(cmd):
         cam.upgrade(cmd[3], 0x4000, cmd[4])
     else:
         cmd[4]("Auth failed")
+
+
+# ---------------------------------------------------------------------------
+# ONVIF / OpenIPC support
+# ---------------------------------------------------------------------------
+# XM cameras are found and re-addressed over the DVRIP L2 broadcast (port 34569),
+# which needs neither root nor a matching subnet.  ONVIF cameras -- OpenIPC, and
+# XM's own SimpOnvif -- do not answer that protocol, so they are found here via
+# ONVIF WS-Discovery (multicast 239.255.255.250:3702).  Discovery is likewise
+# root-free and crosses subnets.  Reconfiguration (set-IP) differs: ONVIF's
+# SetNetworkInterfaces is *unicast*, so unlike XM's broadcast set-IP the camera
+# must be routable from this host (same subnet, or a route added).  Management
+# reuses Utils.CameraControlONVIF, an optional dependency; if the onvif library
+# is absent, discovery still lists cameras from WS-Discovery alone.
+
+WSD_MCAST = ("239.255.255.250", 3702)
+ONVIF_USER = "admin"
+ONVIF_PASS = ""
+
+
+def _prefix_to_mask(prefix):
+    """CIDR prefix length -> dotted netmask string."""
+    prefix = int(prefix)
+    bits = (0xFFFFFFFF << (32 - prefix)) & 0xFFFFFFFF if prefix else 0
+    return inet_ntoa(struct.pack(">I", bits))
+
+
+def _mask_to_prefix(mask):
+    """Dotted netmask string -> CIDR prefix length."""
+    try:
+        return bin(struct.unpack(">I", inet_aton(mask))[0]).count("1")
+    except Exception:
+        return 24
+
+
+def _import_onvif_cc():
+    """Best-effort import of the ONVIF control helper (optional dependency)."""
+    try:
+        from Utils import CameraControlONVIF as cc
+        return cc
+    except Exception:
+        pass
+    try:
+        import CameraControlONVIF as cc  # when run from within Utils/
+        return cc
+    except Exception:
+        pass
+    try:
+        here = os.path.dirname(os.path.abspath(__file__))
+        if here not in sys.path:
+            sys.path.insert(0, here)
+        import CameraControlONVIF as cc
+        return cc
+    except Exception as err:
+        print("ONVIF control helper unavailable ({}); discovery only.".format(err))
+        return None
+
+
+def _wsd_probe(intf=None, timeout=4):
+    """Send an ONVIF WS-Discovery Probe and collect responders.
+
+    Returns {ip: {'xaddr','port','scopes','mac','name'}}. Multicast, so it is
+    unprivileged and reaches cameras on other subnets on the same L2 segment.
+    """
+    import time as _time
+    import uuid as _uuid
+    import re as _re
+    from socket import timeout as _sock_timeout
+
+    probe = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<e:Envelope xmlns:e="http://www.w3.org/2003/05/soap-envelope" '
+        'xmlns:w="http://schemas.xmlsoap.org/ws/2004/08/addressing" '
+        'xmlns:d="http://schemas.xmlsoap.org/ws/2005/04/discovery" '
+        'xmlns:dn="http://www.onvif.org/ver10/network/wsdl">'
+        '<e:Header><w:MessageID>uuid:{}</w:MessageID>'
+        '<w:To e:mustUnderstand="true">'
+        'urn:schemas-xmlsoap-org:ws:2005:04:discovery</w:To>'
+        '<w:Action e:mustUnderstand="true">'
+        'http://schemas.xmlsoap.org/ws/2005/04/discovery/Probe</w:Action>'
+        '</e:Header><e:Body><d:Probe>'
+        '<d:Types>dn:NetworkVideoTransmitter</d:Types></d:Probe></e:Body>'
+        '</e:Envelope>'
+    ).format(_uuid.uuid4())
+
+    s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)
+    s.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
+    s.setsockopt(IPPROTO_IP, IP_MULTICAST_TTL, 2)
+    bind_ip = ""
+    if intf:
+        try:
+            bind_ip = get_ip_address(intf)
+        except Exception:
+            bind_ip = ""
+    try:
+        s.bind((bind_ip, 0))
+    except OSError:
+        s.bind(("", 0))
+    s.settimeout(timeout)
+    try:
+        s.sendto(probe.encode("utf-8"), WSD_MCAST)
+    except OSError as err:
+        print("WS-Discovery send failed ({}); is the interface up?".format(err))
+        s.close()
+        return {}
+
+    found = {}
+    deadline = _time.time() + timeout + 1
+    while _time.time() < deadline:
+        try:
+            data, addr = s.recvfrom(65535)
+        except (_sock_timeout, OSError):
+            break
+        xml = data.decode("utf-8", "replace")
+        xaddr_m = _re.search(r"XAddrs>\s*([^<\s]+)", xml)
+        scopes_m = _re.search(r"Scopes[^>]*>([^<]*)<", xml)
+        xaddr = xaddr_m.group(1) if xaddr_m else ""
+        scopes = scopes_m.group(1) if scopes_m else ""
+        ip = addr[0]
+        port = 80
+        if xaddr:
+            pm = _re.search(r"https?://[^/:]+:(\d+)", xaddr)
+            if pm:
+                port = int(pm.group(1))
+            hm = _re.search(r"https?://([^/:]+)", xaddr)
+            if hm:
+                ip = hm.group(1)
+        mac_m = _re.search(r"/[Mm][Aa][Cc]/([0-9A-Fa-f:]{17})", scopes)
+        name_m = _re.search(r"/name/([^ ]+)", scopes)
+        found[ip] = {
+            "xaddr": xaddr,
+            "port": port,
+            "scopes": scopes,
+            "mac": mac_m.group(1).upper() if mac_m else "",
+            "name": name_m.group(1) if name_m else "ONVIF",
+        }
+    s.close()
+    return found
+
+
+def SearchONVIF(intf=None):
+    """Discover ONVIF cameras (OpenIPC, XM SimpOnvif, generic) via WS-Discovery
+    and merge them into the global device list.
+
+    Serial number, netmask and hostname are enriched over ONVIF when the camera
+    answers with the default credentials; cameras that do not answer are still
+    listed from their WS-Discovery advertisement alone.
+    """
+    if not intf:
+        try:
+            intf = GetInterfaces(checkip=True)[0]
+        except Exception:
+            intf = None
+    print("Interface:", intf)
+    responders = _wsd_probe(intf=intf)
+    print("WS-Discovery found %d ONVIF responder(s)" % len(responders))
+
+    cc = _import_onvif_cc()
+    for ip, info in responders.items():
+        scopes_l = info["scopes"].lower()
+        brand = "openipc" if "openipc" in scopes_l else "onvif"
+        mac = info["mac"]
+        submask = "0x00000000"
+        gateway = "0x00000000"
+        sn = ""
+        name = info["name"]
+
+        if cc is not None:
+            try:
+                cam = cc.connectCamera(ip, info["port"], ONVIF_USER, ONVIF_PASS)
+                if cam is not None:
+                    di = cc.getDeviceInfo(cam, showit=False) or {}
+                    if str(di.get("Manufacturer", "")).lower().startswith("openipc"):
+                        brand = "openipc"
+                    sn = di.get("SerialNumber", "") or sn
+                    # MAC + netmask direct from GetNetworkInterfaces (WS-Discovery
+                    # scopes often omit the MAC, and MAC is the device-list key).
+                    try:
+                        dm = cc._get_devicemgmt_service(cam)
+                        for ni in (cc._resolve_onvif_call(dm.GetNetworkInterfaces()) or []):
+                            hw = getattr(getattr(ni, "Info", None), "HwAddress", None)
+                            if hw and not mac:
+                                mac = hw.upper()
+                            ipv4 = getattr(ni, "IPv4", None)
+                            cfg = getattr(ipv4, "Config", None) if ipv4 else None
+                            manual = getattr(cfg, "Manual", None) if cfg else None
+                            if manual:
+                                m0 = manual[0] if isinstance(manual, list) else manual
+                                pl = getattr(m0, "PrefixLength", None)
+                                if pl:
+                                    submask = SetIP(_prefix_to_mask(pl))
+                            break
+                    except Exception:
+                        pass
+                    try:
+                        hn = cc.getNetworkParams(cam, showit=False) or {}
+                        if hn.get("Hostname"):
+                            name = hn["Hostname"]
+                    except Exception:
+                        pass
+                    try:
+                        cc._close_camera(cam)
+                    except Exception:
+                        pass
+            except Exception as err:
+                if logLevel >= 20:
+                    print("  ONVIF enrich %s failed: %s" % (ip, err))
+
+        # XM stores MACs lowercase; match that so the same physical camera keys
+        # identically across searchers and does not double-list.
+        mac = mac.lower()
+        key = mac if mac else ip
+        existing = devices.get(key)
+        if existing and existing.get("Brand") == "xm":
+            # Dual-protocol camera (XM SimpOnvif): keep the XM entry, whose
+            # broadcast set-IP works cross-subnet and root-free, and just record
+            # that ONVIF is also available on this device.
+            existing["OnvifPort"] = info["port"]
+            existing["OnvifXAddr"] = info["xaddr"]
+            if not existing.get("SN"):
+                existing["SN"] = sn
+            continue
+        devices[key] = {
+            "Brand": brand,
+            "MAC": mac if mac else "(unknown)",
+            "HostName": name,
+            "HostIP": SetIP(ip),
+            "Submask": submask,
+            "GateWay": gateway,
+            "TCPPort": info["port"],
+            "HttpPort": info["port"],
+            "SN": sn,
+            "OnvifXAddr": info["xaddr"],
+        }
+    return devices
+
+
+def ConfigONVIF(data, debug=False, intf=None):
+    """Set a discovered ONVIF camera's IPv4 address via SetNetworkInterfaces.
+
+    data = ["config", MAC, IP, MASK, GATE, PASSWORD].
+
+    NOTE: ONVIF reconfiguration is unicast, so -- unlike the XM broadcast set-IP
+    -- the target must be routable from this host. A camera stranded on a foreign
+    subnet must first be made reachable (same subnet, or a temporary route).
+
+    Verified on hardware (2026-09-05): a full round trip on a GK7205V200 (XM
+    SimpOnvif), moving the camera to a spare same-subnet address and back, applied
+    and reverted cleanly. A full OpenIPC target implements ONVIF completely and is
+    the primary use case.
+    """
+    dev = devices.get(data[1])
+    if not dev:
+        return {"Ret": 103}  # illegal request / unknown device
+    cc = _import_onvif_cc()
+    if cc is None:
+        return {"Ret": 102}  # not supported (onvif lib missing)
+
+    ip_now = GetIP(dev["HostIP"])
+    port = dev.get("TCPPort", 80)
+    new_ip = data[2]
+    mask = data[3] if len(data) > 3 and data[3] else "255.255.255.0"
+    gate = data[4] if len(data) > 4 else ""
+    pw = data[5] if len(data) > 5 and data[5] else ONVIF_PASS
+    prefix = _mask_to_prefix(mask)
+
+    try:
+        cam = cc.connectCamera(ip_now, port, ONVIF_USER, pw)
+        if cam is None:
+            return {"Ret": 108}  # timeout / unreachable
+        devicemgmt = cc._get_devicemgmt_service(cam)
+        ifaces = cc._resolve_onvif_call(devicemgmt.GetNetworkInterfaces())
+        if not ifaces:
+            return {"Ret": 101}
+        token = cc._get_onvif_token(ifaces[0]) or getattr(ifaces[0], "token", None)
+
+        req = devicemgmt.create_type("SetNetworkInterfaces")
+        req.InterfaceToken = token
+        req.NetworkInterface = {
+            "Enabled": True,
+            "IPv4": {
+                "Enabled": True,
+                "Manual": [{"Address": new_ip, "PrefixLength": prefix}],
+                "DHCP": False,
+            },
+        }
+        cc._resolve_onvif_call(devicemgmt.SetNetworkInterfaces(req))
+
+        # Best-effort default gateway
+        if gate:
+            try:
+                greq = devicemgmt.create_type("SetNetworkDefaultGateway")
+                greq.IPv4Address = [gate]
+                cc._resolve_onvif_call(devicemgmt.SetNetworkDefaultGateway(greq))
+            except Exception as gerr:
+                if logLevel >= 20:
+                    print("  gateway set skipped: %s" % gerr)
+
+        try:
+            cc._close_camera(cam)
+        except Exception:
+            pass
+
+        dev["HostIP"] = SetIP(new_ip)
+        dev["Submask"] = SetIP(mask)
+        if gate:
+            dev["GateWay"] = SetIP(gate)
+        return {"Ret": 100}
+    except Exception as err:
+        msg = str(err).lower()
+        if "auth" in msg or "not authorized" in msg or "401" in msg:
+            return {"Ret": 106}  # bad credentials
+        print("ONVIF set-IP failed: %s" % err)
+        return {"Ret": 101}
+
+
+
+def _openipc_ssh(ip, password="12345", timeout=12):
+    """Best-effort SSH to an OpenIPC camera (dropbear root). paramiko is optional."""
+    import paramiko
+    c = paramiko.SSHClient()
+    c.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    c.connect(ip, username="root", password=password, timeout=timeout,
+              banner_timeout=timeout, auth_timeout=timeout)
+    return c
+
+
+def ConfigOpenIPC(data, debug=False, intf=None):
+    """Set an OpenIPC camera's static IPv4 over SSH, then reboot.
+
+    Our OpenIPC cameras run the venc streamer with majestic OFF -> no ONVIF, and
+    netherd acks an XM broadcast set-IP but cannot apply it. Every OpenIPC build
+    has dropbear, so SSH is the reliable control plane: write a static
+    interfaces.d/eth0 (+ hostname) into the overlay and reboot. Unicast -- the
+    camera must be reachable at its current IP. data = [config, MAC, IP, MASK,
+    GATE, PASSWORD?]. Returns the XM-style {"Ret": ...} the UI expects.
+    """
+    mac = data[1]
+    dev = devices.get(mac, {})
+    cur_ip = GetIP(dev["HostIP"]) if dev.get("HostIP") else None
+    if not cur_ip:
+        print("OpenIPC set-IP: unknown current IP for %s" % mac)
+        return {"Ret": 101}
+    new_ip = data[2]
+    mask = data[3] if len(data) > 3 and data[3] else "255.255.255.0"
+    gate = data[4] if len(data) > 4 and data[4] else ""
+    # Default to NO gateway: a science camera talks only to the host on its own subnet, so it
+    # needs no default route. Omitting it (rather than 0.0.0.0) means the device cannot route
+    # off-subnet -- no internet pivot, no phone-home -- at zero functional cost. NTP stays
+    # same-subnet via 'time ntp host'. Pass an explicit gateway only if a deployment needs one.
+    if gate in ("0.0.0.0", "0", "0.0.0.0/0"):
+        gate = ""
+    pw = data[5] if len(data) > 5 and data[5] else "12345"
+    host = "openipc-" + new_ip.split(".")[-1]
+    stanza = ("iface eth0 inet static\n"
+              "    hwaddress ether $(fw_printenv -n ethaddr || echo 00:00:23:34:45:66)\n"
+              "    address %s\n    netmask %s\n" % (new_ip, mask))
+    if gate:
+        stanza += "    gateway %s\n" % gate
+    try:
+        c = _openipc_ssh(cur_ip, pw)
+    except ImportError:
+        print("OpenIPC set-IP needs paramiko (pip install paramiko)")
+        return {"Ret": 102}
+    except Exception as err:
+        m = str(err).lower()
+        if "auth" in m or "password" in m or "authentication" in m:
+            print("OpenIPC SSH auth failed for %s" % cur_ip)
+            return {"Ret": 106}
+        print("OpenIPC SSH connect failed (%s): %s" % (cur_ip, err))
+        return {"Ret": 101}
+    try:
+        def run(cmd):
+            _, o, e = c.exec_command(cmd)
+            return (o.read().decode("utf-8", "replace") + e.read().decode("utf-8", "replace"))
+        run("cat > /etc/network/interfaces.d/eth0 <<'EOF'\n" + stanza + "EOF")
+        run("echo %s > /etc/hostname" % host)
+        got = run("cat /etc/network/interfaces.d/eth0")
+        if got.strip() != stanza.strip():
+            print("OpenIPC set-IP: stanza write mismatch on %s" % cur_ip)
+            try: c.close()
+            except Exception: pass
+            return {"Ret": 101}
+        # reboot in the background so the channel closes cleanly; camera comes up static
+        c.exec_command("sync; (sleep 1; reboot) >/dev/null 2>&1 &")
+        try: c.close()
+        except Exception: pass
+        dev["HostIP"] = SetIP(new_ip)
+        dev["Submask"] = SetIP(mask)
+        if gate:
+            dev["GateWay"] = SetIP(gate)
+        dev["HostName"] = host
+        print("OpenIPC %s -> %s (rebooting; will come up static as %s)" % (cur_ip, new_ip, host))
+        return {"Ret": 100}
+    except Exception as err:
+        print("OpenIPC set-IP failed: %s" % err)
+        try: c.close()
+        except Exception: pass
+        return {"Ret": 101}
 
 
 def ProcessCMD(cmd):
@@ -640,7 +1067,7 @@ class GUITk:
         self.aply = Button(self.fr_config, text="Apply", command=self.setconfig)
         self.aply.grid(row=8, column=1, pady=3, padx=5, sticky="ew")
         self.ven = Combobox(self.fr_tools, width=10)
-        self.ven["values"] = ["XM",]
+        self.ven["values"] = ["XM", "ONVIF"]
         self.ven.current(0)
         self.l8 = Label(self.fr_tools, text="Interface", width=10)
         self.intf = Combobox(self.fr_tools, width=10)
@@ -723,16 +1150,20 @@ class GUITk:
         devices[dev][u"TCPPort"] = int(self.tcp.get())
         devices[dev][u"HttpPort"] = int(self.http.get())
         devices[dev][u"HostName"] = self.name.get()
-        result = ProcessCMD(
-            [
-                "config",
-                dev,
-                self.addr.get(),
-                self.mask.get(),
-                self.gate.get(),
-                self.passw.get(),
-            ]
-        )
+        try:
+            result = ProcessCMD(
+                [
+                    "config",
+                    dev,
+                    self.addr.get(),
+                    self.mask.get(),
+                    self.gate.get(),
+                    self.passw.get(),
+                ]
+            )
+        except ValueError as e:
+            showerror("Error", str(e))
+            return
         if result["Ret"] == 100:
             self.table.item(
                 self.table.selection()[0],
@@ -777,8 +1208,8 @@ if __name__ == "__main__":
 
 
     logLevel = 30	
-    searchers = {"xm": SearchXM}
-    configure = {"xm": ConfigXM}
+    searchers = {"xm": SearchXM, "onvif": SearchONVIF}
+    configure = {"xm": ConfigXM, "onvif": ConfigONVIF, "openipc": ConfigOpenIPC}
 
     # check if there's a DISPLAY, and use commandline mode if not
     if os.getenv('DISPLAY', default=None) is None and sys.platform !='win32':
@@ -797,6 +1228,8 @@ if __name__ == "__main__":
         log [filename]		Set log file
         logLevel [0..100]	Set log verbosity
         search [brand]		Searching devices of [brand] or all
+                                brands: xm (DVRIP broadcast), onvif (WS-Discovery;
+                                finds OpenIPC + XM SimpOnvif, cross-subnet, no root)
         table			Table of devices
         json			JSON String of devices
         device [MAC]		JSON String of [MAC]
