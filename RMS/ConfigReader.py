@@ -224,6 +224,11 @@ class Config:
         # Duration of the raw video segment (seconds)
         self.raw_video_duration = 30
 
+        # How many seconds of raw video the capture may hold in memory when the disk pauses
+        # (writeback bursts, dawn processing) before the camera feels it. The byte cap scales
+        # with free memory, so this is safe at any bitrate and on any host.
+        self.raw_video_buffer_sec = 60.0
+
         self.uyvy_pixelformat = False
 
         self.width = 1280
@@ -1178,6 +1183,9 @@ def parseCapture(config, parser):
         # If the duration is negative, set it to 256 frames at the current FPS
         if config.raw_video_duration < 0:
             config.raw_video_duration = 256.0/float(config.fps)
+
+    if parser.has_option(section, "raw_video_buffer_sec"):
+        config.raw_video_buffer_sec = parser.getfloat(section, "raw_video_buffer_sec")
 
 
     if parser.has_option(section, "force_v4l2"):

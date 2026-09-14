@@ -249,6 +249,44 @@ def validVideoCrop(crop_str):
     return True
 
 
+# Depth (seconds) of the compressed-frame queue ahead of the decoder and of the raw-video
+# (storage) queue. The tee that feeds both branches runs on the RTSP receive thread: when either
+# branch refuses a buffer the tee blocks, the socket stops being read and the camera is
+# back-pressured all the way into its encoder. Both queues are therefore sized in TIME, so they
+# absorb the same pause at 8 Mbit/s on a Pi and at 60 Mbit/s on a multi-camera host. The decoder
+# queue only has to outlast a decoder hiccup (a longer one is treated as a dead stream anyway);
+# the storage queue has to outlast a disk or writeback pause, so it is deep and its byte cap
+# scales with the memory free when the pipeline is built (a tenth of MemAvailable, 8 MB..2 GB).
+# Neither queue sits upstream of the arrival-time probe on the tee, and frame timestamps are
+# PTS-based, so queue depth cannot move a timestamp.
+DECODE_QUEUE_S = 12.0
+RAW_VIDEO_QUEUE_S_DEFAULT = 60.0
+RAW_VIDEO_QUEUE_MEM_FRACTION = 0.10
+RAW_VIDEO_QUEUE_MIN_BYTES = 8*1024*1024
+RAW_VIDEO_QUEUE_MAX_BYTES = 2*1024*1024*1024
+
+
+def rawVideoQueueBytes(fraction=RAW_VIDEO_QUEUE_MEM_FRACTION, floor_bytes=RAW_VIDEO_QUEUE_MIN_BYTES,
+                       cap_bytes=RAW_VIDEO_QUEUE_MAX_BYTES, fallback_bytes=256*1024*1024):
+    """ Byte cap for the raw-video queue: a fraction of the memory available right now, clamped
+        to [floor_bytes, cap_bytes]. Reads /proc/meminfo (Linux); anything else gets the fallback.
+
+    Return:
+        [int] Byte cap.
+    """
+
+    try:
+        with open('/proc/meminfo') as f:
+            for line in f:
+                if line.startswith('MemAvailable:'):
+                    avail = int(line.split()[1])*1024
+                    return int(min(cap_bytes, max(floor_bytes, avail*fraction)))
+    except Exception:
+        pass
+
+    return fallback_bytes
+
+
 class BufferedCapture(Process):
     """ Capture from device to buffer in memory.
     """
@@ -1618,12 +1656,13 @@ class BufferedCapture(Process):
         # Branch for processing
         queue_size = self.config.gst_queue_size
         processing_branch = (
-            "t. ! queue ! {:s} ! "
+            "t. ! queue max-size-buffers=0 max-size-bytes=0 max-size-time={:d} ! {:s} ! "
             "queue leaky=downstream max-size-buffers={:d} max-size-bytes=0 max-size-time=0 ! {:s}{:s}"
             "videoconvert ! video/x-raw,format={:s} ! "
             "queue max-size-buffers={:d} max-size-bytes=0 max-size-time=0 ! "
             "appsink max-buffers={:d} drop=true sync=0 name=appsink"
-            ).format(gst_decoder, queue_size, video_scale, video_crop, video_format, queue_size, queue_size)
+            ).format(int(DECODE_QUEUE_S*1e9), gst_decoder, queue_size, video_scale, video_crop,
+                     video_format, queue_size, queue_size)
         
          # Branch for storage - if video_file_dir is not None, save the raw stream to a file
         if video_file_dir is not None:
@@ -1632,12 +1671,23 @@ class BufferedCapture(Process):
             # The splitmuxsink will save the segments to video_file_dir
             # The splitmuxsink will use the matroskamux muxer
             # The splitmuxsink will use the format-location-full signal to name and move each segment
-            # queue2 smooths out the writes, but doesn't wait until the buffers fill up for writing
+            # The queue in front of the muxer is what stands between a disk/writeback pause and the
+            # camera: when it fills, the tee blocks and the camera is back-pressured. Size it in
+            # time (raw_video_buffer_sec) with a byte cap scaled to the memory free right now, so
+            # a pause of up to that many seconds is absorbed in RAM at any bitrate.
+            raw_video_queue_s = getattr(self.config, 'raw_video_buffer_sec', RAW_VIDEO_QUEUE_S_DEFAULT)
+            try:
+                raw_video_queue_s = max(1.0, float(raw_video_queue_s))
+            except (TypeError, ValueError):
+                raw_video_queue_s = RAW_VIDEO_QUEUE_S_DEFAULT
+            raw_video_queue_bytes = rawVideoQueueBytes()
+            log.info("Raw video queue: up to {:.0f} s, byte cap {:d} MB".format(raw_video_queue_s,
+                                                                                 raw_video_queue_bytes//(1024*1024)))
             storage_branch = (
-                "t. ! queue2 max-size-buffers=150 max-size-bytes=2097152 max-size-time=5000000000 ! "
+                "t. ! queue2 max-size-buffers=0 max-size-bytes={:d} max-size-time={:d} ! "
                 "h264parse ! "
                 "splitmuxsink name=splitmuxsink0 async-finalize=true max-size-time={:d} muxer-factory=matroskamux"
-                ).format(int(segment_duration_sec*1e9))
+                ).format(raw_video_queue_bytes, int(raw_video_queue_s*1e9), int(segment_duration_sec*1e9))
 
         # Otherwise, skip saving the raw stream to disk
         else:
