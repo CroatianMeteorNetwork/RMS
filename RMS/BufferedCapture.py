@@ -1761,6 +1761,37 @@ class BufferedCapture(Process):
                 if not success:
                     raise ValueError("Failed to transition pipeline to PLAYING state")
 
+                # Optional exact origin (config origin_anchor=playing_basetime): reconstruct the
+                # wallclock at running_time=0 from the pipeline base_time. handleStateChange(PLAYING)
+                # blocks through the RTSP preroll, so we do NOT assume running_time~=0 here (that is
+                # exactly what put the origin ~2 s late in an earlier attempt) -- we read the
+                # running-time already elapsed (clock.get_time() - base_time) and subtract it, so the
+                # result is base_time-in-wallclock no matter how long preroll took. Same math read()
+                # uses per frame (timestamp = start_timestamp + running_time); removes the ~30 ms
+                # connect-gap scatter the before-PAUSED capture carries. Falls back to the
+                # before-PAUSED provisional if the clock/base_time are unavailable.
+                if getattr(self.config, 'origin_anchor', 'paused') == 'playing_basetime':
+                    try:
+                        _clk = self.pipeline.get_clock()
+                        _base = self.pipeline.get_base_time()
+                        if _clk is not None and _base != Gst.CLOCK_TIME_NONE:
+                            _wall = time.time()
+                            _rt = _clk.get_time() - _base
+                            if _rt >= 0:
+                                self.start_timestamp = _wall - _rt/1e9 \
+                                    - (self.config.camera_buffer/self.config.fps + self.config.camera_latency)
+                                log.info("Origin anchored to base_time (playing_basetime): "
+                                         "running-time elapsed %.3f s at capture", _rt/1e9)
+                            else:
+                                log.warning("origin_anchor playing_basetime: negative running-time "
+                                            "(%.3f s); keeping before-PAUSED origin", _rt/1e9)
+                        else:
+                            log.warning("origin_anchor playing_basetime: clock/base_time unavailable; "
+                                        "keeping before-PAUSED origin")
+                    except Exception as _e:
+                        log.warning("origin_anchor playing_basetime failed (%s); keeping before-PAUSED "
+                                    "origin", _e)
+
                 # Log start time
                 start_time_str = (UTCFromTimestamp.utcfromtimestamp(self.start_timestamp)
                                     .strftime('%Y-%m-%d %H:%M:%S.%f'))

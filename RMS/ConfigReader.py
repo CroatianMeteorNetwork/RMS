@@ -209,6 +209,13 @@ class Config:
         # Decoder for the gstreamer media backend (e.g. decodebin, avdec_h264, nvh264dec)
         self.gst_decoder = "avdec_h264"
 
+        # How the legacy GStreamer timestamp origin is anchored (gst backend):
+        #   "paused"          - wallclock captured before the PAUSED transition (prerelease default)
+        #   "playing_basetime"- wallclock reconstructed from the pipeline base_time right after
+        #                       PLAYING (removes the connect-gap scatter; robust to preroll blocking)
+        # See BufferedCapture.createGstreamDevice. Default keeps existing behaviour fleet-wide.
+        self.origin_anchor = "paused"
+
         # Max buffers per GStreamer queue element (lower values reduce memory usage on multi-cam systems)
         self.gst_queue_size = 100
 
@@ -1155,6 +1162,9 @@ def parseCapture(config, parser):
 
     if parser.has_option(section, "gst_decoder"):
         config.gst_decoder = parser.get(section, "gst_decoder")
+
+    if parser.has_option(section, "origin_anchor"):
+        config.origin_anchor = parser.get(section, "origin_anchor").strip().lower()
 
     if parser.has_option(section, "gst_queue_size"):
         # Clamp to >= 1: in GStreamer max-size-buffers=0 means *unlimited*, which would
