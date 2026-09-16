@@ -260,7 +260,7 @@ class Config:
 
         self.ff_format = 'fits'
 
-        # Also store the average frame at full precision as a 16-bit FITS plane
+        # Also store the sub-ADU bits of the average frame, in an extra FITS plane
         self.ff_avepixel16 = True
         
         self.fov_w = 64.0
