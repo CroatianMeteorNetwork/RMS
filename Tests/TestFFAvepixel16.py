@@ -4,7 +4,10 @@ Covers:
     - the compressor's outputs match an exact numpy reference: rounded fixed-point
       mean, the 8-bit mean derived from it ((ave16 + 128) >> 8), and the correct
       rounded sample standard deviation
-    - FITS round trip of the 16-bit plane, incl. the derived legacy 8-bit view
+    - FITS round trip of the 16-bit plane: the legacy 8-bit average stays in its HDU and the
+      sub-ADU residual travels in a fifth HDU, so a reader that only knows the four legacy
+      planes reads the file unchanged
+    - files from the first draft of the format (uint16 average HDU) still read
     - files without the plane and native 16-bit camera files are unaffected
     - extractStarsFF uses the full-precision plane when present
     - SkyFit's image item displays the full-precision plane, without posterizing a narrow
@@ -20,6 +23,7 @@ import shutil
 import tempfile
 
 import numpy as np
+from astropy.io import fits
 
 from RMS.CompressionCy import compressFrames
 from RMS.Formats import FFfile, FFfits
@@ -145,6 +149,30 @@ def testCompressorGammaPath():
                 assert np.array_equal(ave16, ref16)
 
 
+def legacyReadPlanes(file_path):
+    """ Read the four image planes the way FF readers that predate the residual plane do: by HDU
+        position, stacking them into one array. Mirrors FFfits.read on master. """
+
+    with fits.open(file_path) as hdulist:
+        planes = [hdulist[i].data.copy() for i in (1, 2, 3, 4)]
+
+    return planes, np.dstack(planes)
+
+
+def testSplitJoinExact():
+    """ The two stored planes reassemble every representable mean exactly. """
+
+    # Every 8.8 value a mean of 8-bit samples can take (0 ... 255.0 ADU)
+    ave16 = np.arange(0, 255*256 + 1, dtype=np.uint16).reshape(1, -1)
+
+    avepixel, averesid = FFfits.splitAvepixel16(ave16)
+
+    assert avepixel.dtype == np.uint8
+    assert averesid.dtype == np.uint8
+    assert np.array_equal(avepixel, (ave16.astype(np.uint32) + 128) >> 8)
+    assert np.array_equal(FFfits.joinAvepixel16(avepixel, averesid), ave16)
+
+
 def testFitsRoundTrip():
     """ The 16-bit plane survives a write/read cycle and yields the 8-bit view. """
 
@@ -169,11 +197,67 @@ def testFitsRoundTrip():
         ref_view = np.clip((ave16.astype(np.uint32) + 128) >> 8, 0, 255).astype(np.uint8)
         assert np.array_equal(ff_read.avepixel, ref_view)
 
+        # Backward compatibility: the four legacy planes keep their position and 8-bit dtype, so a
+        # reader that knows nothing of the residual plane sees the rounded average and never the
+        # fixed-point values. The residual rides in a fifth HDU
+        file_path = os.path.join(tmp_dir, 'FF_XX0001_roundtrip.fits')
+        planes, stacked = legacyReadPlanes(file_path)
+        assert stacked.dtype == np.uint8
+        assert np.array_equal(planes[0], ff.maxpixel)
+        assert np.array_equal(planes[1], ff.maxframe)
+        assert np.array_equal(planes[2], ref_view)
+        assert np.array_equal(planes[3], ff.stdpixel)
+
+        with fits.open(file_path) as hdulist:
+            assert len(hdulist) == 6
+            assert hdulist[5].name == 'AVEFRAC'
+            assert hdulist[5].data.dtype == np.uint8
+            assert hdulist[0].header['AVEFRAC'] == 8
+
+        # The stored 8-bit plane is derived from the fixed-point plane, whatever the structure
+        # carried in avepixel, so the two planes can never disagree
+        assert not np.array_equal(ff.avepixel, ref_view)
+
 
         # The array interface stays uint8
         ff_read_arr = FFfile.read(tmp_dir, 'FF_XX0001_roundtrip.fits', array=True,
             full_filename=True)
         assert ff_read_arr.array.dtype == np.uint8
+
+    finally:
+        shutil.rmtree(tmp_dir)
+
+
+def testDraftLayoutStillReads():
+    """ Files written by the first draft of the format, with the 8.8 mean as a uint16 AVEPIXEL
+        plane and no residual HDU, still read to the same avepixel16 and 8-bit view. """
+
+    tmp_dir = tempfile.mkdtemp()
+
+    try:
+
+        ave16 = (np.random.default_rng(3).integers(0, 255, (32, 48)).astype(np.uint16)*256
+            + np.random.default_rng(4).integers(0, 256, (32, 48)).astype(np.uint16))
+        ff = makeFF(ave16=None)
+
+        head = fits.Header()
+        for key in ('NROWS', 'NCOLS', 'NBITS', 'NFRAMES', 'FIRST', 'CAMNO', 'FPS'):
+            head[key] = getattr(ff, key.lower())
+        head['DATE-OBS'] = ff.starttime
+        head['AVEFRAC'] = 8
+        head['AVEGAMMA'] = 1.0
+
+        file_path = os.path.join(tmp_dir, 'FF_XX0001_draft.fits')
+        fits.HDUList([fits.PrimaryHDU(header=head),
+            fits.ImageHDU(ff.maxpixel, name='MAXPIXEL'), fits.ImageHDU(ff.maxframe, name='MAXFRAME'),
+            fits.ImageHDU(ave16, name='AVEPIXEL'), fits.ImageHDU(ff.stdpixel, name='STDPIXEL')
+            ]).writeto(file_path, overwrite=True)
+
+        ff_read = FFfits.read(tmp_dir, 'FF_XX0001_draft.fits', full_filename=True)
+
+        assert np.array_equal(ff_read.avepixel16, ave16)
+        assert ff_read.avepixel.dtype == np.uint8
+        assert np.array_equal(ff_read.avepixel, (ave16.astype(np.uint32) + 128) >> 8)
 
     finally:
         shutil.rmtree(tmp_dir)
@@ -194,6 +278,10 @@ def testLegacyFileUnchanged():
         assert ff_read.avepixel16 is None
         assert ff_read.avepixel.dtype == np.uint8
         assert np.array_equal(ff_read.avepixel, ff.avepixel)
+
+        with fits.open(os.path.join(tmp_dir, 'FF_XX0001_legacy.fits')) as hdulist:
+            assert len(hdulist) == 5
+            assert 'AVEFRAC' not in hdulist[0].header
 
     finally:
         shutil.rmtree(tmp_dir)

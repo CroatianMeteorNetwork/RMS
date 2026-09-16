@@ -38,8 +38,8 @@ def compressFrames(np.ndarray[INT8_TYPE_t, ndim=3] frames, int deinterlace_order
 
     # Full-precision average in 8.8 fixed point (units of 1/256 ADU). The 8-bit average in ftp_array
     # rounds away the sub-ADU precision of the 256-frame mean; this plane keeps it. The 8-bit plane
-    # is derived from it by rounding off the fractional bits ((ave16 + 128) >> 8), the same way
-    # readers derive the 8-bit view
+    # is derived from it by rounding off the fractional bits ((ave16 + 128) >> 8), the same
+    # derivation the FF writer uses, so the stored planes always agree
     cdef np.ndarray[INT16_TYPE_t, ndim=2] ave16_array = np.empty([frames.shape[1], frames.shape[2]],
         dtype=INT16_TYPE)
 
@@ -230,8 +230,8 @@ def compressFrames(np.ndarray[INT8_TYPE_t, ndim=3] frames, int deinterlace_order
 
             ave16_array[y, x] = <unsigned short>ave16
 
-            # 8-bit mean, rounded off the fixed-point mean - the same derivation readers use for
-            # the 8-bit view, so the two planes always agree
+            # 8-bit mean, rounded off the fixed-point mean - the same derivation the FF writer
+            # uses, so the two planes always agree
             mean = (ave16 + 128) >> 8
 
 

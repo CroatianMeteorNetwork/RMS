@@ -163,8 +163,8 @@ class Compressor(multiprocessing.Process):
             N: [int] frame counter (ie. 0000512)
 
         Keyword arguments:
-            ave16: [2D ndarray] average pixel image in 8.8 fixed point (uint16). Written to the FF
-                file as a full-precision average plane if ff_avepixel16 is enabled in the config.
+            ave16: [2D ndarray] average pixel image in 8.8 fixed point (uint16). Its sub-ADU bits
+                are written to the FF file as an extra plane if ff_avepixel16 is enabled in the config.
             soc_temp: [float] camera SoC die temperature [degC] for this block, or None. Written as
                 the optional SOCTEMP header card when known.
             sei_meta: [dict] per-block photometric provenance from the camera SEI (see
@@ -188,8 +188,8 @@ class Compressor(multiprocessing.Process):
         ff = FFStruct.FFStruct()
         ff.array = arr
 
-        # Attach the full-precision average so it gets written as a 16-bit plane. Only the FITS
-        # format can carry it; the legacy bin writer ignores it
+        # Attach the full-precision average so its sub-ADU bits get written as an extra plane.
+        # Only the FITS format can carry it; the legacy bin writer ignores it
         if (ave16 is not None) and self.config.ff_avepixel16:
             ff.avepixel16 = ave16
 

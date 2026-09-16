@@ -72,6 +72,50 @@ def filenameToDatetimeStr(file_name, iso8601=False):
 
 
 
+# Index of the optional HDU carrying the sub-ADU residual of the average (after the four legacy planes)
+AVEFRAC_HDU = 5
+
+
+def splitAvepixel16(avepixel16):
+    """ Split the 8.8 fixed-point average into the two planes stored in the FF file.
+
+    Arguments:
+        avepixel16: [2D ndarray uint16] Average in units of 1/256 ADU.
+
+    Return:
+        (avepixel, averesid):
+            - avepixel: [2D ndarray uint8] The average rounded to whole ADU, i.e. the legacy plane.
+            - averesid: [2D ndarray uint8] Signed residual avepixel16 - 256*avepixel, in 1/256 ADU
+                and stored as its two's complement byte (equivalently, the low byte of avepixel16).
+    """
+
+    avepixel16 = np.asarray(avepixel16)
+
+    avepixel = np.clip((avepixel16.astype(np.uint32) + 128) >> 8, 0, 255).astype(np.uint8)
+    averesid = (avepixel16 & 0xFF).astype(np.uint8)
+
+    return avepixel, averesid
+
+
+def joinAvepixel16(avepixel, averesid):
+    """ Reassemble the 8.8 fixed-point average from the planes stored in the FF file, the exact
+        inverse of splitAvepixel16.
+
+    Arguments:
+        avepixel: [2D ndarray uint8] Average rounded to whole ADU.
+        averesid: [2D ndarray uint8] Two's complement byte of the sub-ADU residual.
+
+    Return:
+        [2D ndarray uint16] Average in units of 1/256 ADU.
+    """
+
+    avepixel16 = (np.asarray(avepixel).astype(np.int32) << 8) \
+        + np.asarray(averesid).astype(np.uint8).view(np.int8).astype(np.int32)
+
+    return np.clip(avepixel16, 0, 65535).astype(np.uint16)
+
+
+
 def read(directory, filename, array=False, full_filename=False, memmap=True, planes=None):
     """ Read a FF structure from a FITS file. 
     
@@ -105,14 +149,14 @@ def read(directory, filename, array=False, full_filename=False, memmap=True, pla
     # Resolve which planes to load
     load_all, planes = selectPlanes(planes, array)
 
-    # Unsigned 16-bit planes (the full-precision average, or all planes of native 16-bit
-    # camera files) carry BZERO scaling, which astropy refuses to read lazily from an
-    # explicitly requested memory map. Fall back to a plain read for such files - all planes
-    # are copied out below anyway, so nothing is lost. 8-bit files keep the memmap path
+    # Unsigned 16-bit planes (native 16-bit camera files) carry BZERO scaling, which astropy
+    # refuses to read lazily from an explicitly requested memory map. Fall back to a plain read
+    # for such files - all planes are copied out below anyway, so nothing is lost. 8-bit files
+    # keep the memmap path
     if memmap:
         with fits.open(file_path, memmap=True) as hdulist:
             if any(('BZERO' in hdu.header) or ('BSCALE' in hdu.header) or ('BLANK' in hdu.header)
-                    for hdu in hdulist[1:5]):
+                    for hdu in hdulist[1:]):
                 memmap = False
 
     # Read in the FITS. Pass the path (not a pre-opened handle) so astropy owns and closes
@@ -158,16 +202,24 @@ def read(directory, filename, array=False, full_filename=False, memmap=True, pla
             if load_all or (plane in planes):
                 setattr(ff, plane, hdulist[hdu_index].data.copy())
 
-        # If the file declares fractional bits, the average plane is uint16 fixed point at full
-        # precision. Keep it in avepixel16 and derive the legacy 8-bit view by rounding off the
-        # fractional bits - the same derivation the compressor uses for its 8-bit plane
+        # Full-precision average. The AVEPIXEL plane is the legacy 8-bit average (rounded), and
+        # the optional fifth HDU carries the sub-ADU residual of the 8.8 fixed-point mean, so
+        # avepixel16 = 256*avepixel + residual. Readers that only know the four legacy planes
+        # never see the extra HDU
         avefrac = head.get('AVEFRAC', 0)
-        if avefrac and (ff.avepixel is not None):
+        if avefrac and (ff.avepixel is not None) and (len(hdulist) > AVEFRAC_HDU) \
+                and (hdulist[AVEFRAC_HDU].name == 'AVEFRAC'):
+            ff.avepixel16 = joinAvepixel16(ff.avepixel, hdulist[AVEFRAC_HDU].data)
+            ff.avegamma = head.get('AVEGAMMA', 1.0)
+
+        # Transitional: files from the first draft of this format stored the 8.8 fixed-point mean
+        # as a uint16 AVEPIXEL plane. Derive the legacy 8-bit view from it. This path only exists
+        # for the test-station files written by that draft
+        elif avefrac and (ff.avepixel is not None) and (ff.avepixel.dtype.itemsize == 2) \
+                and (ff.nbits <= 8):
             ff.avepixel16 = ff.avepixel
             ff.avegamma = head.get('AVEGAMMA', 1.0)
-            ff.avepixel = np.clip(
-                (ff.avepixel16.astype(np.uint32) + (1 << (avefrac - 1))) >> avefrac,
-                0, 255).astype(np.uint8)
+            ff.avepixel = splitAvepixel16(ff.avepixel16)[0]
 
     if array:
         ff.array = np.dstack([ff.maxpixel, ff.maxframe, ff.avepixel, ff.stdpixel])
@@ -259,27 +311,31 @@ def write(ff, directory, filename):
         ff.avepixel = ff.avepixel[0]
         ff.stdpixel = ff.stdpixel[0]
 
-    # Add the maxpixel to the list
-    maxpixel_hdu = fits.ImageHDU(ff.maxpixel, name='MAXPIXEL')
-    maxframe_hdu = fits.ImageHDU(ff.maxframe, name='MAXFRAME')
-    stdpixel_hdu = fits.ImageHDU(ff.stdpixel, name='STDPIXEL')
-
-    # Write the average at full precision (uint16, 8.8 fixed point) if available, and declare the
-    # number of fractional bits in the header so readers know to scale it. Otherwise write the
-    # legacy 8-bit average
+    # Full-precision average: the AVEPIXEL plane stays the legacy 8-bit average, and the sub-ADU
+    # residual of the 8.8 fixed-point mean goes into a fifth HDU. The four legacy planes keep
+    # their position and dtype, so readers that predate the residual plane read the file as before
+    # and simply never look past the fourth HDU. Both planes are derived from avepixel16 so they
+    # always agree
+    avepixel = ff.avepixel
+    averesid = None
     if getattr(ff, 'avepixel16', None) is not None:
-        head['AVEFRAC'] = (8, 'AVEPIXEL fractional bits (uint16, ADU*256)')
+        avepixel, averesid = splitAvepixel16(ff.avepixel16)
+        head['AVEFRAC'] = (8, 'sub-ADU bits of the mean in the AVEFRAC HDU')
         head['AVEGAMMA'] = (float(getattr(ff, 'avegamma', 1.0) or 1.0),
             'gamma used for linear-domain averaging')
-        avepixel_hdu = fits.ImageHDU(ff.avepixel16, name='AVEPIXEL')
-    else:
-        avepixel_hdu = fits.ImageHDU(ff.avepixel, name='AVEPIXEL')
 
     # Create the primary part
     prim = fits.PrimaryHDU(header=head)
-    
+
     # Combine everything into into FITS
-    hdulist = fits.HDUList([prim, maxpixel_hdu, maxframe_hdu, avepixel_hdu, stdpixel_hdu])
+    hdulist = fits.HDUList([prim,
+        fits.ImageHDU(ff.maxpixel, name='MAXPIXEL'),
+        fits.ImageHDU(ff.maxframe, name='MAXFRAME'),
+        fits.ImageHDU(avepixel, name='AVEPIXEL'),
+        fits.ImageHDU(ff.stdpixel, name='STDPIXEL')])
+
+    if averesid is not None:
+        hdulist.append(fits.ImageHDU(averesid, name='AVEFRAC'))
 
     # Save the FITS
     hdulist.writeto(file_path, overwrite=True)
