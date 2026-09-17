@@ -238,12 +238,20 @@ def makeFlat(dir_path, config, nostars=False, use_images=False, make_dark=False)
 
 
     if not make_dark:
-        
-        # Stretch flat to 0-255 
+
+        # Stretch flat to 0-255
         ff_median = ff_median/np.max(ff_median)*255
 
-    # Convert the flat to 8 bits
-    ff_median = ff_median.astype(np.uint8)
+        # Convert the flat to 8 bits, rounding instead of truncating
+        ff_median = np.rint(ff_median).astype(np.uint8)
+
+    else:
+
+        # Keep darks in a type wide enough for the source data (a 16-bit dark does not fit in
+        # 8 bits - the old unconditional uint8 cast wrapped such values modulo 256), rounding
+        # instead of truncating
+        out_type = np.uint8 if np.max(ff_median) <= 255 else np.uint16
+        ff_median = np.clip(np.rint(ff_median), 0, np.iinfo(out_type).max).astype(out_type)
 
     return ff_median
 
