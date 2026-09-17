@@ -1350,12 +1350,17 @@ class RightOptionsTab(QtWidgets.QTabWidget, ScaledSizeHelper):
         self.index = 0
         self.maximized = True
 
+        # The Fit Parameters and Settings tabs can be taller than the panel on small windows, so they scroll
+        #   instead of squeezing their widgets
+        self.param_manager_scroll = self.scrollable(self.param_manager)
+        self.settings_scroll = self.scrollable(self.settings)
+
         self.addTab(self.hist, 'Levels')
-        self.addTab(self.param_manager, 'Fit Parameters')
+        self.addTab(self.param_manager_scroll, 'Fit Parameters')
         self.addTab(self.geolocation, 'Station')
         self.addTab(self.star_detection, 'Star Detection')
         self.addTab(self.mask, 'Mask')
-        self.addTab(self.settings, 'Settings')
+        self.addTab(self.settings_scroll, 'Settings')
         self.addTab(self.help, 'ⓘ Help')
 
         self.setCurrentIndex(self.index)  # redundant
@@ -1366,6 +1371,26 @@ class RightOptionsTab(QtWidgets.QTabWidget, ScaledSizeHelper):
         self.applyTabWidth()
 
         self.tabBarClicked.connect(self.onTabBarClicked)
+
+    @staticmethod
+    def scrollable(widget):
+        """ Wrap a tab page in a scroll area, which only shows the vertical scroll bar when the page doesn't
+            fit in the panel.
+
+        Arguments:
+            widget: [QWidget] Tab page.
+
+        Return:
+            [QScrollArea] Scroll area holding the page.
+        """
+
+        scroll = QtWidgets.QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setWidget(widget)
+
+        return scroll
 
     def keyPressEvent(self, event):
         """ Pressing escape when you're focused on any widget on the right focuses
@@ -1441,7 +1466,7 @@ class RightOptionsTab(QtWidgets.QTabWidget, ScaledSizeHelper):
         self.removeTabText('Debruijn')
 
         # Add Skyfit-specific tabs
-        self.insertTab(1, self.param_manager, "Fit Parameters")
+        self.insertTab(1, self.param_manager_scroll, "Fit Parameters")
         self.insertTab(2, self.geolocation, "Station")
         self.settings.onSkyFit()
 
@@ -4005,6 +4030,11 @@ class SettingsWidget(QtWidgets.QWidget, ScaledSizeHelper):
     sigLoadTLEPressed = QtCore.pyqtSignal()
     sigClearTLEPressed = QtCore.pyqtSignal()
     sigRedrawSatTracksPressed = QtCore.pyqtSignal()
+    sigWMPLSolutionsToggled = QtCore.pyqtSignal()
+    sigWMPLLegendToggled = QtCore.pyqtSignal()
+    sigWMPLSolutionToggled = QtCore.pyqtSignal(int)  # Emits the index of the solution
+    sigLoadWMPLPressed = QtCore.pyqtSignal()
+    sigRemoveWMPLPressed = QtCore.pyqtSignal(int)  # Emits the index of the selected solution
     sigCatalogChanged = QtCore.pyqtSignal(str)  # Emits the selected catalog filename
 
     def __init__(self, gui):
@@ -4174,6 +4204,33 @@ class SettingsWidget(QtWidgets.QWidget, ScaledSizeHelper):
 
         vbox.addWidget(QHSeparationLine())
 
+        self.wmpl_solutions_chk = QtWidgets.QCheckBox('Show WMPL Solutions')
+        self.wmpl_solutions_chk.released.connect(self.sigWMPLSolutionsToggled.emit)
+        vbox.addWidget(self.wmpl_solutions_chk)
+
+        self.wmpl_legend_chk = QtWidgets.QCheckBox('Show Legend')
+        self.wmpl_legend_chk.released.connect(self.sigWMPLLegendToggled.emit)
+        self.updateShowWMPLSolutions()  # Initialize after both checkboxes are created
+        vbox.addWidget(self.wmpl_legend_chk)
+
+        # Loaded solutions, the checked ones are shown
+        self.wmpl_list = QtWidgets.QListWidget()
+        self.wmpl_list.itemChanged.connect(
+            lambda item: self.sigWMPLSolutionToggled.emit(self.wmpl_list.row(item)))
+        vbox.addWidget(self.wmpl_list)
+        self.updateWMPLSolutionList()  # Sync only after the list is in the layout, as it sets its visibility
+
+        self.load_wmpl_btn = QtWidgets.QPushButton("Load WMPL Report")
+        self.load_wmpl_btn.released.connect(self.sigLoadWMPLPressed.emit)
+        vbox.addWidget(self.load_wmpl_btn)
+
+        self.remove_wmpl_btn = QtWidgets.QPushButton("Remove Selected Solution")
+        self.remove_wmpl_btn.released.connect(
+            lambda: self.sigRemoveWMPLPressed.emit(self.wmpl_list.currentRow()))
+        vbox.addWidget(self.remove_wmpl_btn)
+
+        vbox.addWidget(QHSeparationLine())
+
 
         vbox.addWidget(QtWidgets.QLabel('Grid:'))
         hbox = QtWidgets.QHBoxLayout()
@@ -4312,6 +4369,32 @@ class SettingsWidget(QtWidgets.QWidget, ScaledSizeHelper):
 
     def updateTLELabel(self, text):
         self.tle_label.setText("TLE: " + text)
+
+    def updateShowWMPLSolutions(self):
+        self.wmpl_solutions_chk.setChecked(self.gui.show_wmpl_solutions)
+        self.wmpl_legend_chk.setChecked(self.gui.show_wmpl_legend)
+        # The legend can only be shown together with the solutions
+        self.wmpl_legend_chk.setEnabled(self.gui.show_wmpl_solutions)
+
+    def updateWMPLSolutionList(self):
+        # Rebuild the list without emitting the signals of the checkboxes
+        self.wmpl_list.blockSignals(True)
+        self.wmpl_list.clear()
+
+        for solution in self.gui.wmpl_solutions:
+            item = QtWidgets.QListWidgetItem(solution['symbol'][1] + ' ' + solution['name'])
+            item.setToolTip(solution['path'])
+            item.setFlags(item.flags() | QtCore.Qt.ItemFlag.ItemIsUserCheckable)
+            item.setCheckState(QtCore.Qt.CheckState.Checked if solution['visible'] \
+                else QtCore.Qt.CheckState.Unchecked)
+            self.wmpl_list.addItem(item)
+
+        self.wmpl_list.blockSignals(False)
+
+        # The list is only as tall as its items, so it takes no space when no solutions are loaded
+        self.wmpl_list.setFixedHeight(self.wmpl_list.sizeHintForRow(0)*self.wmpl_list.count() \
+            + 2*self.wmpl_list.frameWidth())
+        self.wmpl_list.setVisible(self.wmpl_list.count() > 0)
 
     def updateImageGamma(self):
         self.img_gamma.setValue(self.gui.img.gamma)
