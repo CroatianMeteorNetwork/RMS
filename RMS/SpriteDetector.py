@@ -18,6 +18,9 @@ from __future__ import print_function, division, absolute_import
 
 import base64
 import collections
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import padding, rsa, ed25519, ec
+from cryptography.hazmat.primitives.serialization import load_ssh_private_key
 import csv
 import json
 import multiprocessing
@@ -33,6 +36,7 @@ from datetime import datetime, timezone
 import numpy as np
 from PIL import Image, ImageDraw
 
+from RMS.Formats.FFfile import reconstructFrame
 from RMS.Formats.FFfits import read as readFFfile
 from RMS.Logger import getLogger, getLoggingQueue, initChildProcess
 from RMS.Misc import AtomicFlag
@@ -85,6 +89,23 @@ except ImportError:
 
 # Get the logger from the main module
 log = getLogger("rmslogger")
+
+
+def _formatTimestamp(ts_float):
+    """ Format a Unix timestamp as an ISO 8601 UTC string with microseconds.
+
+    Arguments:
+        ts_float: [float] Unix timestamp.
+
+    Return:
+        [str] ISO 8601 string, e.g. "2025-01-01T12:00:00.123456Z".
+    """
+
+    ts_utc = time.gmtime(ts_float)
+    micros = int((ts_float % 1) * 1000000)
+    timestamp_iso = time.strftime("%Y-%m-%dT%H:%M:%S", ts_utc)
+    timestamp_iso += ".{:06d}Z".format(micros)
+    return timestamp_iso
 
 
 # Module-level caches (one per process, survive across calls)
@@ -433,11 +454,19 @@ def detectSpritesInFF(data_dir, ff_name, model_path, config, platepar=None):
         x2 = int(i[2] * config.width)
         y2 = int(i[3] * config.height)
 
+        is_sprite, frame_index = tle_artifact_filter(ff, x1, y1, x2, y2)
+        time_offset = frame_index / config.fps
+        timestamp2 = timestamp + time_offset
+        if not is_sprite:
+            log.debug("Detection rejected.")
+            continue
+
         centroid_x = (x1 + x2) / 2.0
         centroid_y = (y1 + y2) / 2.0
 
         detections.append({
             "image_name": ff_name,
+            "timestamp": _formatTimestamp(timestamp2),
             "detection_type": detection_type,
             "model": model_name,
             "confidence": float(i[4]),
@@ -457,6 +486,57 @@ def detectSpritesInFF(data_dir, ff_name, model_path, config, platepar=None):
 
     return (ff_name, detections, timestamp, jd)
 
+def tle_artifact_filter(ff, x0, y0, x1, y1, k=1, thres=0.1):
+    """
+    Determine whether a bounding-box region is a sprite or an artifact.
+
+    The filter computes the cumulative field sum over the region for each
+    frame of the loaded FF file, takes the incremental (per-frame) increases
+    of that cumulative sum, and checks how large a share of the total
+    increase is contributed by the ``k`` largest increments.
+
+    A high "max incremental share" indicates that most of the flash took place
+    abruptly within a very small number of frames (typical of a real sprite),
+    while a share close to the mean indicates a gradual, spreading flash that
+    is more consistent with an artifact.
+
+    Args:
+        ff (:class:`FStruct`): Loaded FF file containing the frames to process.
+        x0 (int): X value of the upper-left corner of the bounding box.
+        y0 (int): Y value of the upper-left corner of the bounding box.
+        x1 (int): X value of the lower-right corner of the bounding box.
+        y1 (int): Y value of the lower-right corner of the bounding box.
+        k (int, optional): Number of largest incremental field sums used to
+            calculate the max incremental share. Defaults to 1.
+        thres (float, optional): Share threshold below which detection is
+            considered an artifact. Defaults to 0.1.
+
+    Returns:
+        (bool, int): A tuple containing the filter decision and index of the frame with the largest
+        incremental field sum:
+
+        - ``bool`` -- True if the region is considered a sprite (share > 0.1),
+          False if it is considered an artifact.
+        - ``float`` -- The index of the frame with the largest incremental field sum across
+          all frames.
+    """
+    nframes = int(ff.nframes)
+    fieldsums = np.empty(nframes, dtype=np.float64)
+
+    fieldsum = 0
+    for i in range(nframes):
+        frame = reconstructFrame(ff, i)
+        roi = frame[y0:y1, x0:x1]
+        fieldsum += roi.sum()
+        fieldsums[i] = fieldsum
+
+    d = np.diff(fieldsums, prepend=0)
+    # share = d.max() / d.sum()  #original one
+    share = np.sort(d)[-k:].sum() / d.sum()
+
+    is_sprite = share > thres
+    frame_idx = np.argmax(d)
+    return is_sprite, frame_idx
 
 def _calibrateDetections(detections, jd, platepar):
     """ Add RA/Dec J2000 and alt/az to each detection using the platepar.
@@ -537,7 +617,7 @@ def _appendCSV(csv_path, ff_name, detections, timestamp):
 
         if not file_exists:
             writer.writerow([
-                "image name", "detection type", "model", "confidence",
+                "image name", "timestamp", "detection type", "model", "confidence",
                 "centroid x", "centroid y", "box x1", "box y1", "box x2", "box y2",
                 "ra_j2000", "dec_j2000", "azimuth", "altitude",
                 "box_ra_j2000_1", "box_dec_j2000_1", "box_azimuth_1", "box_altitude_1",
@@ -549,6 +629,7 @@ def _appendCSV(csv_path, ff_name, detections, timestamp):
         for det in detections:
             writer.writerow([
                 det.get("image_name", ff_name),
+                det.get("timestamp", ""),
                 det.get("detection_type", ""),
                 det.get("model", ""),
                 det.get("confidence", ""),
@@ -625,9 +706,10 @@ def _markSprites(detections, data_dir, ff_name, save_dir, config):
 
     unmarked_dir = os.path.join(save_dir, "unmarked")
     os.makedirs(unmarked_dir, exist_ok=True)
-    image.save(os.path.join(unmarked_dir, "{:s}_unmarked.png".format(ff_name)))
+    unmarked_path = os.path.join(unmarked_dir, "{:s}_unmarked.png".format(ff_name))
+    image.save(unmarked_path)
 
-    return marked_path
+    return marked_path, unmarked_path
 
 
 def _copyFFFile(data_dir, ff_name, save_dir):
@@ -650,6 +732,20 @@ def _copyFFFile(data_dir, ff_name, save_dir):
     except Exception as e:
         log.error("Failed to copy FF file {:s}: {:s}".format(ff_name, repr(e)))
 
+# ###########################################################################
+#                       Cryptography utility functions
+# ###########################################################################
+
+def sign_bytes(private_key, message: bytes) -> bytes:
+    if isinstance(private_key, rsa.RSAPrivateKey):
+        return private_key.sign(message, padding.PKCS1v15(), hashes.SHA256())
+    elif isinstance(private_key, ed25519.Ed25519PrivateKey):
+        # Ed25519 hashes internally; no separate digest algorithm to choose.
+        return private_key.sign(message)
+    elif isinstance(private_key, ec.EllipticCurvePrivateKey):
+        return private_key.sign(message, ec.ECDSA(hashes.SHA256()))
+    else:
+        raise TypeError(f"Unsupported private key type: {type(private_key)}")
 
 # ###########################################################################
 #                       HTTPS upload client
@@ -674,6 +770,7 @@ class SpriteUploader(object):
         self.timeout = config.sprite_upload_timeout
         self.upload_ff = config.sprite_upload_ff
         self.station_id = config.stationID
+        self.private_key_path = config.rsa_private_key
         self.pending_file = pending_file_path
 
         # (payload_dict, attempt_count, next_retry_time) as mutable lists
@@ -759,13 +856,42 @@ class SpriteUploader(object):
         """
 
         url = self.base_url + "/api/v1/detections"
+        payload["sent_at"] = _formatTimestamp(time.time())
         data = json.dumps(payload).encode("utf-8")
-        req = urllib.request.Request(url, data=data,
-            headers={"Content-Type": "application/json"}, method="POST")
+
+        if os.path.exists(self.private_key_path):
+            with open(self.private_key_path, "rb") as f:
+                private_key = load_ssh_private_key(f.read(), password=None)
+            try:
+                signature = sign_bytes(private_key, data)
+            except TypeError:
+                log.debug("Unsupported private key format for signing payload.")
+                return False
+        else:
+            log.debug("No private key available.")
+            return False
+
+        req = urllib.request.Request(
+            url,
+            data=data,
+            headers={
+                "Content-Type": "application/json",
+                "X-Station-Id": self.station_id,
+                "X-Signature": signature.hex(),
+            },
+            method="POST",
+        )
 
         try:
-            resp = urllib.request.urlopen(req, timeout=self.timeout)
-            return 200 <= resp.status < 300
+            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                return 200 <= resp.status < 300
+        except urllib.error.HTTPError as e:
+            log.debug(
+                "Sprite API upload failed: {!r} | Status: {} | Response: {}".format(
+                    e, getattr(e, "code", None), json.loads(e.read().decode("utf-8"))
+                )
+            )
+            return False
         except Exception as e:
             log.debug("Sprite API upload failed: {:s}".format(repr(e)))
             return False
@@ -807,15 +933,40 @@ class SpriteUploader(object):
         parts.append("\r\n--{}--\r\n".format(boundary).encode())
 
         body = b"".join(parts)
+        if os.path.exists(self.private_key_path):
+            with open(self.private_key_path, "rb") as f:
+                private_key = load_ssh_private_key(f.read(), password=None)
+            try:
+                signature = sign_bytes(private_key, body)
+            except TypeError:
+                log.debug("Unsupported private key format for signing payload.")
+                return False
+        else:
+            log.debug("No private key available.")
+            return False
 
-        req = urllib.request.Request(url, data=body,
-            headers={"Content-Type": "multipart/form-data; boundary={}".format(boundary)},
-            method="POST")
+        req = urllib.request.Request(
+            url,
+            data=body,
+            headers={
+                "Content-Type": "multipart/form-data; boundary={}".format(boundary),
+                "X-Station-Id": self.station_id,
+                "X-Signature": signature.hex(),
+            },
+            method="POST",
+        )
 
         try:
             file_timeout = min(self.timeout * 10, 120)
-            resp = urllib.request.urlopen(req, timeout=file_timeout)
-            return 200 <= resp.status < 300
+            with urllib.request.urlopen(req, timeout=file_timeout) as resp:
+                return 200 <= resp.status < 300
+        except urllib.error.HTTPError as e:
+            log.debug(
+                "Sprite FF upload failed: {!r} | Status: {} | Response: {}".format(
+                    e, getattr(e, "code", None), json.loads(e.read().decode("utf-8"))
+                )
+            )
+            return False
         except Exception as e:
             log.debug("Sprite FF upload failed: {:s}".format(repr(e)))
             return False
@@ -1071,7 +1222,7 @@ class SpriteDetector(multiprocessing.Process):
         _appendCSV(csv_path, ff_name, detections, det.timestamp)
 
         # Save marked/unmarked images
-        marked_image_path = _markSprites(detections, data_dir, ff_name, save_dir, self.config)
+        marked_image_path, unmarked_image_path = _markSprites(detections, data_dir, ff_name, save_dir, self.config)
 
         # Copy FF file to sprite output directory
         _copyFFFile(data_dir, ff_name, save_dir)
@@ -1088,10 +1239,7 @@ class SpriteDetector(multiprocessing.Process):
         if uploader.base_url:
 
             # Format timestamp as ISO 8601
-            ts_utc = time.gmtime(det.timestamp)
-            micros = int((det.timestamp % 1) * 1000000)
-            timestamp_iso = time.strftime("%Y-%m-%dT%H:%M:%S", ts_utc)
-            timestamp_iso += ".{:06d}Z".format(micros)
+            timestamp_iso = _formatTimestamp(det.timestamp)
 
             payload = {
                 "station_id": self.config.stationID,
@@ -1109,6 +1257,13 @@ class SpriteDetector(multiprocessing.Process):
                 try:
                     with open(marked_image_path, "rb") as f:
                         payload["marked_image"] = base64.b64encode(f.read()).decode("ascii")
+                except Exception:
+                    pass     
+            # Encode unmarked image as base64 PNG
+            if unmarked_image_path and os.path.isfile(unmarked_image_path):
+                try:
+                    with open(unmarked_image_path, "rb") as f:
+                        payload["unmarked_image"] = base64.b64encode(f.read()).decode("ascii")
                 except Exception:
                     pass
 
