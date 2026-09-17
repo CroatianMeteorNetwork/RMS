@@ -48,7 +48,11 @@ def angularSeparation(ra1, dec1, ra2, dec2):
     """
 
     # Classical method
-    return np.arccos(np.sin(dec1)*np.sin(dec2) + np.cos(dec1)*np.cos(dec2)*np.cos(ra2 - ra1))
+    # Rounding can push the cosine slightly above 1 for (nearly) coincident directions, which
+    # would make arccos return NaN, so clamp it to the closed interval [-1, 1].
+    cos_sep = np.sin(dec1)*np.sin(dec2) + np.cos(dec1)*np.cos(dec2)*np.cos(ra2 - ra1)
+
+    return np.arccos(np.clip(cos_sep, -1.0, 1.0))
 
     # # Compute the angular separation using the haversine formula
     # #   Source: https://idlastro.gsfc.nasa.gov/ftp/pro/astro/gcirc.pro
