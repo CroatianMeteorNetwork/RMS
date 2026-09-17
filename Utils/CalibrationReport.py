@@ -112,8 +112,11 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
     night_name = os.path.split(night_dir_path.strip(os.sep))[1]
 
 
-    # Go one mag deeper than in the config
-    lim_mag = config.catalog_mag_limit + 1
+    # Match at the config limiting magnitude, the same depth the nightly recalibration matches at, so the
+    #   report reflects what the pipeline saw. The catalog is loaded one magnitude deeper only so the plot
+    #   can show a margin of fainter catalog stars below the faintest match.
+    match_lim_mag = config.catalog_mag_limit
+    lim_mag = match_lim_mag + 1
 
     ts = FFfile.getMiddleTimeFF(calstars_list[0][0], fps=config.fps, ret_milliseconds=True, dt_obj=True)
 
@@ -211,7 +214,7 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
 
             # Match stars on the image with the stars in the catalog
             n_matched, avg_dist, cost, matched_stars = matchStarsResiduals(config, platepar, catalog_stars, \
-                filtered_star_dict, match_radius, ret_nmatch=True, lim_mag=lim_mag)
+                filtered_star_dict, match_radius, ret_nmatch=True, lim_mag=match_lim_mag)
 
             max_matched_stars = n_matched
 
@@ -236,7 +239,7 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
 
         # Match stars on the image with the stars in the catalog
         n_matched, avg_dist, cost, matched_stars = matchStarsResiduals(config, platepar, catalog_stars, \
-            star_dict, match_radius, ret_nmatch=True, lim_mag=lim_mag)
+            star_dict, match_radius, ret_nmatch=True, lim_mag=match_lim_mag)
 
 
 
@@ -356,15 +359,24 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
             va='center')
 
 
-    ### Plot positions of catalog stars to the limiting magnitude of the faintest matched star + 1 mag ###
+    ### Plot positions of catalog stars down to the faintest matched star, plus a margin of the next few
+    #   fainter catalog stars so missed stars just below the detection depth are visible. The margin is a
+    #   star count, not a magnitude, because a magnitude margin multiplies the plotted count by ~3 and
+    #   swamps wide fields and deep cameras. It is capped at one magnitude below the faintest match. ###
+
+    # Number of catalog stars fainter than the faintest match to plot
+    plot_margin_stars = 50
 
     # Find the faintest magnitude among matched stars
     if max_matched_stars > 2:
-        faintest_mag = np.max(matched_catalog_stars[:, 2]) + 1
+        faintest_mag = np.max(matched_catalog_stars[:, 2])
 
     else:
         # If there are no matched stars, use the limiting magnitude from config
-        faintest_mag = config.catalog_mag_limit + 1
+        faintest_mag = match_lim_mag
+
+    # Deepest magnitude the plot may reach
+    plot_ceiling_mag = faintest_mag + 1
 
 
     # Estimate RA,dec of the centre of the FOV
@@ -376,9 +388,9 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
 
     fov_radius = getFOVSelectionRadius(platepar)
 
-    # Get stars from the catalog around the defined center in a given radius
+    # Get stars from the catalog around the defined center in a given radius, down to the plot ceiling
     _, extracted_catalog = subsetCatalog(catalog_stars, RA_c, dec_c, max_jd, platepar.lat, platepar.lon, \
-        fov_radius, faintest_mag)
+        fov_radius, plot_ceiling_mag)
     ra_catalog, dec_catalog, mag_catalog = extracted_catalog.T
 
     # Compute image positions of all catalog stars that should be on the image
@@ -390,11 +402,19 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
     temp_arr = temp_arr[temp_arr[:, 0] <= ff.avepixel.shape[1]]
     temp_arr = temp_arr[temp_arr[:, 1] >= 0]
     temp_arr = temp_arr[temp_arr[:, 1] <= ff.avepixel.shape[0]]
+
+    # Keep every star down to the faintest match, then only the next plot_margin_stars fainter ones
+    temp_arr = temp_arr[np.argsort(temp_arr[:, 2])]
+    n_to_faintest = int(np.sum(temp_arr[:, 2] <= faintest_mag))
+    temp_arr = temp_arr[:n_to_faintest + plot_margin_stars]
     x_catalog, y_catalog, mag_catalog = temp_arr.T
+
+    # Magnitude the plot actually reaches
+    plotted_lim_mag = np.max(mag_catalog) if len(mag_catalog) else faintest_mag
 
     # Plot catalog stars on the image
     cat_stars_handle = plt.scatter(x_catalog, y_catalog, c='none', marker='D', lw=1.0, alpha=0.4, \
-        s=((4.0 + (faintest_mag - mag_catalog))/3.0)**(2*2.512), edgecolor='r', label='Catalog stars')
+        s=((4.0 + (plotted_lim_mag - mag_catalog))/3.0)**(2*2.512), edgecolor='r', label='Catalog stars')
 
     legend_handles.append(cat_stars_handle)
 
@@ -406,7 +426,7 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
         + "Matched stars within {:.1f} px radius: {:d}/{:d} \n".format(match_radius, max_matched_stars, \
             len(star_dict[max_jd])) \
         + "Median distance = {:.2f} px\n".format(np.median(distances)) \
-        + "Catalog lim mag = {:.1f}".format(lim_mag)
+        + "Matched to mag {:.1f}, catalog plotted to mag {:.1f}".format(match_lim_mag, plotted_lim_mag)
 
     plt.text(10, 10, info_text, bbox=dict(facecolor='black', alpha=0.5), va='top', ha='left', fontsize=4, \
         color='w', family='monospace')
