@@ -1350,17 +1350,12 @@ class RightOptionsTab(QtWidgets.QTabWidget, ScaledSizeHelper):
         self.index = 0
         self.maximized = True
 
-        # The Fit Parameters and Settings tabs can be taller than the panel on small windows, so they scroll
-        #   instead of squeezing their widgets
-        self.param_manager_scroll = self.scrollable(self.param_manager)
-        self.settings_scroll = self.scrollable(self.settings)
-
         self.addTab(self.hist, 'Levels')
-        self.addTab(self.param_manager_scroll, 'Fit Parameters')
+        self.addTab(self.param_manager, 'Fit Parameters')
         self.addTab(self.geolocation, 'Station')
         self.addTab(self.star_detection, 'Star Detection')
         self.addTab(self.mask, 'Mask')
-        self.addTab(self.settings_scroll, 'Settings')
+        self.addTab(self.settings, 'Settings')
         self.addTab(self.help, 'ⓘ Help')
 
         self.setCurrentIndex(self.index)  # redundant
@@ -1371,26 +1366,6 @@ class RightOptionsTab(QtWidgets.QTabWidget, ScaledSizeHelper):
         self.applyTabWidth()
 
         self.tabBarClicked.connect(self.onTabBarClicked)
-
-    @staticmethod
-    def scrollable(widget):
-        """ Wrap a tab page in a scroll area, which only shows the vertical scroll bar when the page doesn't
-            fit in the panel.
-
-        Arguments:
-            widget: [QWidget] Tab page.
-
-        Return:
-            [QScrollArea] Scroll area holding the page.
-        """
-
-        scroll = QtWidgets.QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll.setWidget(widget)
-
-        return scroll
 
     def keyPressEvent(self, event):
         """ Pressing escape when you're focused on any widget on the right focuses
@@ -1466,7 +1441,7 @@ class RightOptionsTab(QtWidgets.QTabWidget, ScaledSizeHelper):
         self.removeTabText('Debruijn')
 
         # Add Skyfit-specific tabs
-        self.insertTab(1, self.param_manager_scroll, "Fit Parameters")
+        self.insertTab(1, self.param_manager, "Fit Parameters")
         self.insertTab(2, self.geolocation, "Station")
         self.settings.onSkyFit()
 
