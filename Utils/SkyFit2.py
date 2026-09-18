@@ -236,6 +236,14 @@ except Exception as e:
 #   far fewer stars than the nightly processing needs.
 MIN_CONFIG_MAX_STARS = 800
 
+# Markers of the WMPL solutions as (pyqtgraph symbol, legend character). Every loaded solution takes its own
+#   marker, so this also sets how many solutions can be loaded at the same time
+WMPL_SOLUTION_SYMBOLS = [('o', '○'), ('s', '□'), ('t', '▽'), ('d', '◇'), ('star', '☆')]
+
+# Colors of the stations in the WMPL solutions (R, G, B)
+WMPL_STATION_COLORS = [(255, 0, 0), (0, 255, 0), (60, 100, 255), (255, 255, 0), (255, 0, 255), (0, 255, 255),
+                       (255, 128, 0), (128, 0, 255)]
+
 
 ##############################################################################################################
 # ASTRA GUI Code
@@ -2307,6 +2315,45 @@ class GeoPoints(object):
         self.dec_data = np.array(self.dec_data)
 
 
+class WMPLSolution(GeoPoints):
+    """ Trajectory points of a WMPL solution, read from its report file. Every point is the position on the
+        trajectory of one observation and is named after the station which made it, so the points can be
+        projected on the image in the same way as the geo points.
+    """
+
+    def load(self):
+        """ Load the points from the Points table of the WMPL report. """
+
+        with open(self.geo_points_input) as f:
+            lines = f.read().splitlines()
+
+        # The column names are two lines below the table title. The columns are found by their names, so
+        #   the reading doesn't break if new columns are added to the report
+        header_index = lines.index('Points') + 2
+        header = [name.strip() for name in lines[header_index].split(',')]
+
+        station_col = header.index('Station ID')
+        lat_col = header.index('Latitude (deg)')
+        lon_col = header.index('Longitude (deg)')
+        ele_col = header.index('Height (m)')
+
+        for line in lines[header_index + 1:]:
+
+            # The table ends with an empty line
+            if not line.strip():
+                break
+
+            entries = [entry.strip() for entry in line.split(',')]
+
+            self.names.append(entries[station_col])
+            self.lat_data.append(float(entries[lat_col]))
+            self.lon_data.append(float(entries[lon_col]))
+            self.ele_data.append(float(entries[ele_col]))
+
+        if not self.names:
+            raise ValueError("The Points table is empty")
+
+
 # CatalogStar, GeoPoint, and PairedStars are now imported from RMS.Astrometry.StarClasses
 
 
@@ -2972,6 +3019,19 @@ class PlateTool(QtWidgets.QMainWindow):
         self.geo_markers2.setZValue(4)
         self.zoom_window.addItem(self.geo_markers2)
 
+        # WMPL trajectory solutions, only for visualization (they are not saved in the state)
+        self.wmpl_solutions = []
+        self.wmpl_station_colors = {}
+        self.show_wmpl_solutions = True
+        self.show_wmpl_legend = True
+
+        # Legend of the WMPL solutions (top right corner)
+        self.wmpl_legend = TextItem(color=(255, 255, 255), fill=(0, 0, 0, 150), anchor=(1, 0), \
+            interaction=False)
+        self.wmpl_legend.setFont(label_font)
+        self.wmpl_legend.setParentItem(self.img_frame)
+        self.wmpl_legend.hide()
+
         # Solar system body markers (main window) - yellow/orange color
         self.planet_markers = pg.ScatterPlotItem()
         self.planet_markers.setPen(pg.mkPen(color=(255, 200, 0), width=2))  # yellow-orange
@@ -3555,6 +3615,11 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.settings.sigLoadTLEPressed.connect(self.loadTLEFileDialog)
         self.tab.settings.sigClearTLEPressed.connect(self.clearTLESelection)
         self.tab.settings.sigRedrawSatTracksPressed.connect(self.redrawSatelliteTracks)
+        self.tab.settings.sigWMPLSolutionsToggled.connect(self.toggleShowWMPLSolutions)
+        self.tab.settings.sigWMPLLegendToggled.connect(self.toggleShowWMPLLegend)
+        self.tab.settings.sigWMPLSolutionToggled.connect(self.toggleWMPLSolution)
+        self.tab.settings.sigLoadWMPLPressed.connect(self.loadWMPLSolutionDialog)
+        self.tab.settings.sigRemoveWMPLPressed.connect(self.removeWMPLSolution)
 
         layout.addWidget(self.tab, 0, 2)
 
@@ -3966,6 +4031,7 @@ class PlateTool(QtWidgets.QMainWindow):
         """ What happens when the window is resized. """
 
         self.star_pick_info.setPos(0, self.img_frame.height() - 50)
+        self.wmpl_legend.setPos(self.img_frame.width(), 0)
 
         if self.config.height/self.config.width < self.img_frame.height()/self.img_frame.width():
             self.img_frame.setLimits(xMin=0,
@@ -4249,6 +4315,9 @@ class PlateTool(QtWidgets.QMainWindow):
                     size=self.geoMarkerSize())
                 self.geo_markers2.setData(x=self.geo_x_filtered + 0.5, y=self.geo_y_filtered + 0.5, \
                     size=self.geoMarkerSizeZoom())
+
+        # Update the WMPL solutions
+        self.drawWMPLSolutions()
 
 
         ### Draw catalog stars on the image using the current platepar ###
@@ -7560,6 +7629,10 @@ class PlateTool(QtWidgets.QMainWindow):
         self.geo_markers.setSize(self.geoMarkerSize())
         self.geo_markers2.setSize(self.geoMarkerSizeZoom())
 
+        # The trajectory points of the WMPL solutions are geo points too
+        for solution in self.wmpl_solutions:
+            solution['markers'].setSize(self.geoMarkerSize())
+
 
     def photometry(self, show_plot=False, force_update=False):
         """
@@ -9303,7 +9376,9 @@ class PlateTool(QtWidgets.QMainWindow):
             # TextItemList objects
             'planet_labels', 'residual_text', 'spectral_type_text_list',
             # Matplotlib objects
-            'fig_astrometry', 'plot_highlight_artists'
+            'fig_astrometry', 'plot_highlight_artists',
+            # WMPL solutions (only for visualization, not saved)
+            'wmpl_solutions', 'wmpl_station_colors', 'show_wmpl_solutions', 'show_wmpl_legend', 'wmpl_legend'
         ]
         for key in pyqtgraph_keys:
             if key in dic:
@@ -17306,6 +17381,166 @@ class PlateTool(QtWidgets.QMainWindow):
                     if hasattr(label, 'orig_pos'):
                         label.setPos(*label.orig_pos)
 
+
+    def loadWMPLSolutionDialog(self):
+        """ Opens a file dialog to choose a WMPL report file and loads its trajectory solution. """
+
+        # Every solution takes its own marker
+        used_symbols = [solution['symbol'] for solution in self.wmpl_solutions]
+        free_symbols = [symbol for symbol in WMPL_SOLUTION_SYMBOLS if symbol not in used_symbols]
+
+        if not free_symbols:
+            qmessagebox(title="Load WMPL Solution", message="Up to {:d} WMPL solutions can be loaded at the "
+                "same time, remove one first.".format(len(WMPL_SOLUTION_SYMBOLS)), message_type="warning")
+            return
+
+        file_path, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self,
+            "Select WMPL Report File",
+            self.dir_path,
+            "WMPL Report Files (*_report.txt);;All Files (*)"
+        )
+
+        if not file_path:
+            return
+
+        try:
+            points = WMPLSolution(file_path)
+
+        except (OSError, ValueError, IndexError) as e:
+            qmessagebox(title="Load WMPL Solution", message="The trajectory points could not be read from "
+                "the WMPL report:\n{:s}".format(str(e)), message_type="error")
+            return
+
+        # Every station keeps the same color in all solutions
+        for station_id in points.names:
+            if station_id not in self.wmpl_station_colors:
+                self.wmpl_station_colors[station_id] = \
+                    WMPL_STATION_COLORS[len(self.wmpl_station_colors)%len(WMPL_STATION_COLORS)]
+
+        pens = np.array([pg.mkPen(self.wmpl_station_colors[station_id], width=2) \
+            for station_id in points.names], dtype=object)
+
+        # The solutions are only for visualization, so they are drawn just above the image (below all other
+        #   overlays) and ignore the mouse
+        markers = pg.ScatterPlotItem(symbol=free_symbols[0][0], brush=(0, 0, 0, 0))
+        markers.setZValue(0.5)
+        markers.setAcceptedMouseButtons(QtCore.Qt.MouseButton.NoButton)
+        self.img_frame.addItem(markers)
+
+        self.wmpl_solutions.append({'name': os.path.splitext(os.path.basename(file_path))[0],
+            'path': file_path, 'symbol': free_symbols[0], 'points': points, 'pens': pens, 'markers': markers,
+            'visible': True})
+
+        # Show the solutions if they were turned off
+        self.show_wmpl_solutions = True
+
+        self.tab.settings.updateShowWMPLSolutions()
+        self.tab.settings.updateWMPLSolutionList()
+        self.drawWMPLSolutions()
+
+
+    def removeWMPLSolution(self, index):
+        """ Removes a loaded WMPL solution.
+
+        Arguments:
+            index: [int] Index of the solution in the list of loaded solutions.
+        """
+
+        if not (0 <= index < len(self.wmpl_solutions)):
+            return
+
+        self.img_frame.removeItem(self.wmpl_solutions.pop(index)['markers'])
+
+        # Start assigning the station colors from the beginning once all solutions are removed
+        if not self.wmpl_solutions:
+            self.wmpl_station_colors = {}
+
+        self.tab.settings.updateWMPLSolutionList()
+        self.drawWMPLSolutions()
+
+
+    def toggleShowWMPLSolutions(self):
+        """ Toggle whether to show the loaded WMPL solutions. """
+
+        self.show_wmpl_solutions = not self.show_wmpl_solutions
+        self.tab.settings.updateShowWMPLSolutions()
+        self.drawWMPLSolutions()
+
+
+    def toggleShowWMPLLegend(self):
+        """ Toggle whether to show the legend of the WMPL solutions. """
+
+        self.show_wmpl_legend = not self.show_wmpl_legend
+        self.tab.settings.updateShowWMPLSolutions()
+        self.drawWMPLSolutions()
+
+
+    def toggleWMPLSolution(self, index):
+        """ Toggle whether to show one of the loaded WMPL solutions.
+
+        Arguments:
+            index: [int] Index of the solution in the list of loaded solutions.
+        """
+
+        self.wmpl_solutions[index]['visible'] = not self.wmpl_solutions[index]['visible']
+        self.drawWMPLSolutions()
+
+
+    def drawWMPLSolutions(self):
+        """ Projects the trajectory points of the loaded WMPL solutions on the image and updates their legend.
+        """
+
+        if not self.hasData():
+            return
+
+        # If in skyfit mode, take the time of the chunk
+        # If in manual reduction mode, take the time of the current frame
+        if self.mode == 'skyfit':
+            jd = date2JD(*self.img_handle.currentTime())
+        else:
+            jd = date2JD(*self.img_handle.currentFrameTime())
+
+        legend_lines = []
+
+        for solution in self.wmpl_solutions:
+
+            markers = solution['markers']
+            points = solution['points']
+
+            if not (self.show_wmpl_solutions and solution['visible']):
+                markers.hide()
+                continue
+
+            # Compute RA/Dec of the trajectory points as seen from this station (with a fake magnitude)
+            points.update(self.platepar, jd)
+            points_radec = np.c_[points.ra_data, points.dec_data, np.ones_like(points.ra_data)]
+
+            # Compute image coordinates. Unlike the geo points, the trajectory points are true positions of
+            #   the meteor, so the refraction is applied in the same way as for the stars
+            x, y, _ = getCatalogStarsImagePositions(points_radec, jd, self.platepar)
+
+            # Only draw the points inside the FOV and the image
+            filtered_indices, _ = self.filterCatalogStarsInsideFOV(points_radec, remove_under_horizon=False, \
+                sort_declination=True)
+            inside = np.zeros(len(x), dtype=bool)
+            inside[filtered_indices] = True
+            inside &= (x > 0) & (x < self.platepar.X_res) & (y > 0) & (y < self.platepar.Y_res)
+
+            markers.setData(x=x[inside] + 0.5, y=y[inside] + 0.5, pen=solution['pens'][inside], \
+                size=self.geoMarkerSize())
+            markers.show()
+
+            # Legend entry with the marker and the name of the solution, followed by its stations in their
+            #   colors
+            stations = ' '.join('<span style="color: rgb({:d}, {:d}, {:d});">{:s}</span>'.format( \
+                *self.wmpl_station_colors[station_id], station_id) \
+                for station_id in dict.fromkeys(points.names))
+            legend_lines.append('{:s} {:s}<br>&nbsp;&nbsp;{:s}'.format(solution['symbol'][1], \
+                solution['name'], stations))
+
+        self.wmpl_legend.setHtml('<br>'.join(legend_lines))
+        self.wmpl_legend.setVisible(self.show_wmpl_legend and bool(legend_lines))
 
 
     def saveECSV(self):
