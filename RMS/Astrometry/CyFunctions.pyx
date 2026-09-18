@@ -89,6 +89,7 @@ cpdef double angularSeparation(double ra1, double dec1, double ra2, double dec2)
     cdef double deldec2
     cdef double delra2
     cdef double sindis
+    cdef double cos_sep
 
     # Convert input coordinates to radians
     ra1 = radians(ra1)
@@ -98,7 +99,16 @@ cpdef double angularSeparation(double ra1, double dec1, double ra2, double dec2)
 
 
     # Classical method
-    return degrees(acos(sin(dec1)*sin(dec2) + cos(dec1)*cos(dec2)*cos(ra2 - ra1)))
+    # Rounding can push the cosine slightly above 1 for (nearly) coincident directions, which
+    # would make acos return NaN, so clamp it to the closed interval [-1, 1].
+    cos_sep = sin(dec1)*sin(dec2) + cos(dec1)*cos(dec2)*cos(ra2 - ra1)
+
+    if cos_sep > 1.0:
+        cos_sep = 1.0
+    elif cos_sep < -1.0:
+        cos_sep = -1.0
+
+    return degrees(acos(cos_sep))
 
 
     # # Compute the angular separation using the haversine formula
