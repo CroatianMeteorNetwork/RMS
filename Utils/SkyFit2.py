@@ -210,7 +210,8 @@ from Utils.KalmanFilter import KalmanFilter
 
 import pyximport
 pyximport.install(setup_args={'include_dirs': [np.get_include()]})
-from RMS.Astrometry.CyFunctions import subsetCatalog, equatorialCoordPrecession
+from RMS.Astrometry.CyFunctions import subsetCatalog, equatorialCoordPrecession, \
+    refractionScale
 from RMS.Astrometry.MatchStars import matchStars
 from RMS.Routines.SatellitePositions import SatellitePredictor, loadTLEs, loadRobustTLEs, findClosestTLEFile, SKYFIELD_AVAILABLE
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP
@@ -4018,7 +4019,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Compute alt, az
             azim, alt = trueRaDec2ApparentAltAz(ra[0], dec[0], jd[0], pp_tmp.lat, pp_tmp.lon, \
-                                                pp_tmp.refraction)
+                                                pp_tmp.refraction, refraction_scale=refractionScale(pp_tmp.elev))
 
 
             # If ground points are measured, change the text for alt/az
@@ -7635,7 +7636,7 @@ class PlateTool(QtWidgets.QMainWindow):
             # Compute the azimuth and elevation of the star
             _, alt = trueRaDec2ApparentAltAz(star_ra, star_dec, date2JD(*self.img_handle.currentTime()),
                                                 self.platepar.lat, self.platepar.lon, 
-                                                self.platepar.refraction)
+                                                self.platepar.refraction, refraction_scale=refractionScale(self.platepar.elev))
             
             elevation_list.append(alt)
 
@@ -10968,7 +10969,7 @@ class PlateTool(QtWidgets.QMainWindow):
                     # Compute reference Alt/Az to apparent coordinates, epoch of date
                     self.platepar.az_centre, self.platepar.alt_centre = trueRaDec2ApparentAltAz( \
                         self.platepar.RA_d, self.platepar.dec_d, self.platepar.JD, \
-                        self.platepar.lat, self.platepar.lon, self.platepar.refraction)
+                        self.platepar.lat, self.platepar.lon, self.platepar.refraction, refraction_scale=refractionScale(self.platepar.elev))
 
                     # Compute the position angle
                     self.platepar.pos_angle_ref = rotationWrtHorizonToPosAngle(self.platepar, \
@@ -13469,7 +13470,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.platepar.Ho = JD2HourAngle(jd)
 
         azim, alt = trueRaDec2ApparentAltAz(ra_astnet, dec_astnet, jd,
-                                            self.platepar.lat, self.platepar.lon)
+                                            self.platepar.lat, self.platepar.lon, refraction=self.platepar.refraction, refraction_scale=refractionScale(self.platepar.elev))
         self.platepar.az_centre = azim
         self.platepar.alt_centre = alt
         self.platepar.updateRefRADec(skip_rot_update=True)
@@ -13492,7 +13493,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
             azim_corr, alt_corr = trueRaDec2ApparentAltAz(
                 self.platepar.RA_d, self.platepar.dec_d, jd,
-                self.platepar.lat, self.platepar.lon)
+                self.platepar.lat, self.platepar.lon, refraction=self.platepar.refraction, refraction_scale=refractionScale(self.platepar.elev))
             self.platepar.az_centre = azim_corr
             self.platepar.alt_centre = alt_corr
 
@@ -13682,7 +13683,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.platepar.Ho = JD2HourAngle(jd)
 
         # Compute reference azimuth and altitude
-        azim, alt = trueRaDec2ApparentAltAz(ra, dec, jd, self.platepar.lat, self.platepar.lon)
+        azim, alt = trueRaDec2ApparentAltAz(ra, dec, jd, self.platepar.lat, self.platepar.lon, refraction=self.platepar.refraction, refraction_scale=refractionScale(self.platepar.elev))
 
         # Set parameters to platepar
         self.platepar.F_scale = scale
@@ -14002,7 +14003,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Convert FOV centre to RA, Dec
         ra, dec = apparentAltAz2TrueRADec(self.azim_centre, self.alt_centre, date2JD(*img_time),
-                                          self.platepar.lat, self.platepar.lon)
+                                          self.platepar.lat, self.platepar.lon, refraction=self.platepar.refraction, refraction_scale=refractionScale(self.platepar.elev))
 
         return ra, dec, rot_horizontal, lenses_template_file
 
@@ -14607,7 +14608,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Recalculate reference alt/az
             self.platepar.az_centre, self.platepar.alt_centre = trueRaDec2ApparentAltAz(self.platepar.RA_d, \
-                self.platepar.dec_d, self.platepar.JD, self.platepar.lat, self.platepar.lon)
+                self.platepar.dec_d, self.platepar.JD, self.platepar.lat, self.platepar.lon, refraction=self.platepar.refraction, refraction_scale=refractionScale(self.platepar.elev))
 
 
         # Check that the calibration parameters are within the nominal range
@@ -15800,14 +15801,14 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Compute azim/elev from the catalog
             azim_cat, elev_cat = trueRaDec2ApparentAltAz(cat_ra, cat_dec, jd, self.platepar.lat, \
-                self.platepar.lon)
+                self.platepar.lon, refraction=self.platepar.refraction, refraction_scale=refractionScale(self.platepar.elev))
 
             azim_list.append(azim_cat)
             elev_list.append(elev_cat)
 
             # Compute azim/elev from image coordinates
             azim_img, elev_img = trueRaDec2ApparentAltAz(img_ra, img_dec, jd, self.platepar.lat, \
-                self.platepar.lon)
+                self.platepar.lon, refraction=self.platepar.refraction, refraction_scale=refractionScale(self.platepar.elev))
 
             # Compute azim/elev residuals
             azim_residuals.append(((azim_cat - azim_img + 180)%360 - 180)*np.cos(np.radians(elev_cat)))

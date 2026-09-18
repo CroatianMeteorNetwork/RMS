@@ -46,6 +46,7 @@ from RMS.Astrometry.CyFunctions import (
     cyApparentAltAz2TrueRADec,
     cyTrueRaDec2ApparentAltAz,
     pyRefractionTrueToApparent,
+    refractionScale,
 )
 
 
@@ -2388,6 +2389,7 @@ class Platepar(object):
             np.radians(self.lat),
             np.radians(self.lon),
             self.refraction,
+            refractionScale(self.elev),
         )
         self.az_centre, self.alt_centre = np.degrees(az_centre), np.degrees(alt_centre)
 
@@ -2410,6 +2412,7 @@ class Platepar(object):
             np.radians(self.lat),
             np.radians(self.lon),
             self.refraction,
+            refractionScale(self.elev),
         )
 
         # Assign the computed RA/Dec to platepar
@@ -2447,7 +2450,8 @@ class Platepar(object):
 
         # Compute alt/az pointing
         azim, elev = trueRaDec2ApparentAltAz(
-            self.RA_d, self.dec_d, self.JD, self.lat, self.lon, refraction=self.refraction
+            self.RA_d, self.dec_d, self.JD, self.lat, self.lon, refraction=self.refraction,
+            refraction_scale=refractionScale(self.elev)
         )
 
         out_str = "Platepar\n"
