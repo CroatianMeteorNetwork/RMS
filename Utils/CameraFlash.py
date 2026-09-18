@@ -477,19 +477,41 @@ def flash_openipc_image(cam, ip, tgz_path, dry_run):
     shadows = [p for p in present.split() if p]
     log.info("  overlay shadows to clear: %s", shadows if shadows else "(none -- clean-image camera)")
     log.info("  preserved: interfaces.d/eth0 (IP), hostname, dropbear key, /mnt/mtd/*")
-    log.info("  plan: feed watchdog -> stream kernel(verify) -> stream rootfs(verify)"
-             " -> clear shadows -> reboot")
+    log.info("  plan: leave watchdog to the kernel -> stream kernel(verify)"
+             " -> stream rootfs(verify) -> clear shadows -> reboot")
     if dry_run:
         log.info("=== DRY-RUN complete. Nothing was flashed. Add 'commit' to flash. ===")
         return True
 
-    # Keep /dev/watchdog fed across the flash. majestic (if running) holds it, so
-    # take it over: kill majestic, then immediately start a keep-alive writer
-    # (well within the 60s margin). On the new image nothing arms the watchdog.
-    log.warning("[commit] taking over the watchdog (kill majestic + keep-alive feeder)")
-    cam.run("killall -9 majestic 2>/dev/null; sleep 1; "
-            "setsid sh -c 'while :; do echo w > /dev/watchdog 2>/dev/null; sleep 15; done' "
-            "</dev/null >/dev/null 2>&1 & echo fed")
+    # DO NOT TOUCH /dev/watchdog. This block used to "take over" the watchdog with
+    # `killall majestic` + `echo w > /dev/watchdog` every 15 s. On the goke open_wdt
+    # driver that is not a keep-alive, it is a self-inflicted reset:
+    #   * open_wdt exposes ONLY open/ioctl -- there is NO write() method, so the
+    #     `echo w` never fed anything (it blocks forever on the open).
+    #   * under the default nodeamon=0 a KERNEL thread feeds the watchdog. Merely
+    #     OPENING the device takes it away from that feeder, and nothing refreshes
+    #     it afterwards -> the SoC hard-resets ~60-180 s later.
+    # A reset landing inside the multi-minute rootfs write leaves a partial squashfs
+    # the kernel cannot mount = BRICK. That bricked .204 on 2026-09-18 (reproduced on
+    # .206: a single `echo w` -> hard reset ~100 s later, nothing else done to it) and
+    # most likely .205 on 2026-09-11, which was mis-attributed to a tmpfs OOM.
+    # The kernel feeder already covers a hang during the flash; leave it alone.
+    rc, wdt_holder, _ = cam.run(
+        "ls -l /proc/*/fd 2>/dev/null | grep -c watchdog")
+    try:
+        holders = int((wdt_holder or "0").strip().split()[0])
+    except Exception:
+        holders = 0
+    if holders:
+        # Something in userspace owns the watchdog (a stock-image majestic, or a venc
+        # stuck in a watchdog reboot loop). Killing it removes the only feeder and
+        # lights exactly the fuse described above, so refuse rather than gamble.
+        raise RuntimeError(
+            "/dev/watchdog is held by a userspace process (%d fd(s)). Flashing now risks a "
+            "watchdog reset mid-write (this is how .204/.205 were bricked). Release it first "
+            "-- e.g. `/etc/init.d/S96venc stop; killall -9 venc` -- so the kernel [dog] feeder "
+            "resumes, then re-run." % holders)
+    log.info("[commit] watchdog: left to the kernel feeder (never opened from here)")
     cam.run("rm -f /tmp/*.log 2>/dev/null")
 
     # Flash kernel then rootfs, each STREAMED straight to the mtd block device and
