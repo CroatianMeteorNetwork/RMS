@@ -21,6 +21,7 @@ import math
 import os
 import sys
 from RMS.CompileArgs import getCompileArgs
+from RMS.Logger import installEarlyLogBuffer
 from RMS.Misc import getRmsRootDir
 from Utils.GenerateTimelapse import isFfmpegWorking
 import matplotlib.colors as mcolors
@@ -736,6 +737,12 @@ def parse(path, strict=True):
         config: [Config]
 
     """
+
+    # Buffer any warnings raised while parsing (clamped FPS, bad binning, upload disabled on the
+    # default station code, ...) so initLogging can replay them into the night log. Config parsing
+    # runs before logging is initialized in every entry point, and every config load funnels
+    # through here. Idempotent and a no-op once logging is up (see installEarlyLogBuffer).
+    installEarlyLogBuffer()
 
     delimiter = ";"
 
