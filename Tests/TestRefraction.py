@@ -12,7 +12,7 @@ np = pytest.importorskip("numpy")
 
 from RMS.Misc import getRmsRootDir
 from RMS.Formats.Platepar import Platepar
-from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP
+from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP, targetRaDecToPlateRaDec
 from RMS.Astrometry.Conversions import date2JD, JD2HourAngle
 from RMS.Astrometry.CyFunctions import (refractionScale, refractionTargetFraction,
     pyRefractionApparentToTrue, pyRefractionTrueToApparent, equatorialCoordPrecession)
@@ -280,3 +280,250 @@ def test_star_fit_at_altitude_leaves_no_bias():
     # With the station height the fit is unbiased, with the sea-level model it is not
     assert worst[elev_station] < 1.0
     assert worst[0.0] > 4.0
+
+
+def _syntheticCamera(lat, lon, elev_station, az0, alt0, x_res, y_res, f_scale, jd):
+    """ Helper: a camera fixed in alt/az with no distortion, as a function that returns the true J2000
+        direction of whatever is seen at a given pixel, refracted with a given scale. Passing a scale of 0
+        gives the direction of a target whose light is not refracted, i.e. a ground reference.
+    """
+
+    la, lo = np.radians(lat), np.radians(lon)
+    sl, cl, so, co = np.sin(la), np.cos(la), np.sin(lo), np.cos(lo)
+    enu_to_ecef = np.array([[-so, -sl*co, cl*co], [co, -sl*so, cl*so], [0, cl, sl]])
+    a, h = np.radians(az0), np.radians(alt0)
+    pointing = np.array([np.cos(h)*np.sin(a), np.cos(h)*np.cos(a), np.sin(h)])
+    up = np.array([0, 0, 1.0]) - pointing[2]*pointing
+    up /= np.linalg.norm(up)
+    side = np.cross(pointing, up)
+    gmst = np.radians(JD2HourAngle(jd))
+
+    def trueJ2000(x, y, refr_scale):
+
+        dx, dy = x - x_res/2, y - y_res/2
+        rho = np.radians(np.hypot(dx, dy)/f_scale)
+        theta = np.pi/2 + np.arctan2(dy, dx)
+        d = np.cos(rho)[:, None]*pointing + np.sin(rho)[:, None]*(np.cos(theta)[:, None]*up \
+            + np.sin(theta)[:, None]*side)
+
+        az = np.degrees(np.arctan2(d[:, 0], d[:, 1]))%360
+        alt_app = np.degrees(np.arcsin(d[:, 2]))
+        alt_true = alt_app - refr_scale/(60*np.tan(np.radians(alt_app + 7.31/(alt_app + 4.4))))
+
+        a_, h_ = np.radians(az), np.radians(alt_true)
+        enu = np.stack([np.cos(h_)*np.sin(a_), np.cos(h_)*np.cos(a_), np.sin(h_)], -1)
+        ecef = enu.dot(enu_to_ecef.T)
+        eq = np.stack([ecef[:, 0]*np.cos(gmst) - ecef[:, 1]*np.sin(gmst), \
+            ecef[:, 0]*np.sin(gmst) + ecef[:, 1]*np.cos(gmst), ecef[:, 2]], -1)
+        ra = np.arctan2(eq[:, 1], eq[:, 0])%(2*np.pi)
+        dec = np.arcsin(eq[:, 2])
+        out = np.array([equatorialCoordPrecession(jd, 2451545.0, r_, d_) for r_, d_ in zip(ra, dec)])
+
+        return np.degrees(out[:, 0]), np.degrees(out[:, 1])
+
+    return trueJ2000
+
+
+def _separation(ra1, dec1, ra2, dec2):
+    """ Helper: angular separation between two directions, in arc seconds. """
+
+    r1, d1, r2, d2 = np.radians(ra1), np.radians(dec1), np.radians(ra2), np.radians(dec2)
+    cos_ang = np.sin(d1)*np.sin(d2) + np.cos(d1)*np.cos(d2)*np.cos(r1 - r2)
+
+    return np.degrees(np.arccos(np.clip(cos_ang, -1.0, 1.0)))*3600
+
+
+@pytest.mark.parametrize("references", ["geo_only", "mixed"])
+def test_ground_references_are_fitted_without_refraction(references):
+    """ A plate fitted against ground references has to reproduce both kinds of measurement: the ground
+        points themselves, whose light is not refracted, and objects on the sky, whose light is. Handing
+        the fit the true direction of a ground point instead of its plate coordinates biases the whole
+        plate by up to a full refraction.
+
+        The camera here points at 20 deg altitude from 2610 m, where a star is refracted by about 160
+        arcsec, so the bias is easy to separate from the numerical noise of the fit.
+    """
+
+    lat, lon, elev_station = 31.69, -110.9, 2610.0
+    x_res, y_res, f_scale = 1280, 720, 1280/39.8
+    jd = date2JD(2026, 9, 5, 6, 0, 0)
+    scale = refractionScale(elev_station)
+    trueJ2000 = _syntheticCamera(lat, lon, elev_station, 334.8, 20.0, x_res, y_res, f_scale, jd)
+
+    # Stars and ground references seen by the camera. A ground reference is seen in its true direction, so
+    #   its true J2000 direction is the one the camera's line of sight points at, with no refraction.
+    rng = np.random.default_rng(3)
+    sx, sy = rng.uniform(10, x_res - 10, 300), rng.uniform(10, y_res - 10, 300)
+    ra_s, dec_s = trueJ2000(sx, sy, scale)
+    rng = np.random.default_rng(11)
+    gx, gy = rng.uniform(20, x_res - 20, 40), rng.uniform(20, y_res - 20, 40)
+    ra_g, dec_g = trueJ2000(gx, gy, 0.0)
+
+    # Check points spread over the frame, and the truth for both kinds of measurement
+    cx, cy = np.meshgrid(np.linspace(30, x_res - 30, 7), np.linspace(30, y_res - 30, 5))
+    cx, cy = cx.ravel(), cy.ravel()
+    ra_ground_true, dec_ground_true = trueJ2000(cx, cy, 0.0)
+    ra_sky_true, dec_sky_true = trueJ2000(cx, cy, scale)
+
+    # Start from an ordinary refraction-on plate fitted on the stars, so that the distortion is already
+    #   the one of this camera and the comparison below only sees the effect of the ground references
+    pp = Platepar()
+    pp.read(TEMPLATE)
+    pp.X_res, pp.Y_res, pp.F_scale = x_res, y_res, f_scale
+    pp.lat, pp.lon, pp.elev = lat, lon, elev_station
+    pp.resetDistortionParameters()
+
+    # The synthetic camera is a plain gnomonic projection, so pin the distortion to the identity and fit
+    #   only the pointing. That keeps the comparison below free of any distortion-fit residual of its own.
+    pp.x_poly_fwd[0] = pp.x_poly_fwd[1] = pp.x_poly_rev[0] = pp.x_poly_rev[1] = 0.0
+    pp.refraction = True
+    pp.JD, pp.Ho = jd, JD2HourAngle(jd)
+    ra_c, dec_c = trueJ2000(np.array([x_res/2.0]), np.array([y_res/2.0]), scale)
+    pp.RA_d, pp.dec_d, pp.pos_angle_ref = ra_c[0], dec_c[0], 0.0
+    pp.fitAstrometry(jd, np.column_stack([sx, sy, np.ones(len(sx))]), \
+        np.column_stack([ra_s, dec_s, 5*np.ones(len(sx))]), fit_only_pointing=True)
+    pp.updateRefAltAz()
+    xs, ys = raDecToXYPP(ra_s, dec_s, jd, pp)
+    assert np.sqrt(np.mean((xs - sx)**2 + (ys - sy)**2)) < 0.01
+
+    # The plate coordinates of the ground references: the refraction the plate applies, taken back out
+    ra_plate, dec_plate = targetRaDecToPlateRaDec(ra_g, dec_g, jd, pp, refraction_fraction=0.0)
+    assert _separation(ra_plate, dec_plate, ra_g, dec_g).max() > 100.0
+
+    def fitAndMeasure(ra_ref, dec_ref, x_ref, y_ref):
+        """ Fit a plate against the given references, then measure the check points both ways. """
+
+        pp_fit = copy.deepcopy(pp)
+        pp_fit.fitAstrometry(jd, np.column_stack([x_ref, y_ref, np.ones(len(x_ref))]), \
+            np.column_stack([ra_ref, dec_ref, 5*np.ones(len(x_ref))]), fit_only_pointing=True)
+        pp_fit.updateRefAltAz()
+
+        # Ground picks go through the refraction-free representation of the same plate
+        pp_ground = copy.deepcopy(pp_fit)
+        pp_ground.switchToGroundPicks()
+        _, ra_m, dec_m, _ = xyToRaDecPP(len(cx)*[jd], cx, cy, np.ones(len(cx)), pp_ground, \
+            extinction_correction=False, measurement=True, jd_time=True)
+
+        # Sky measurements go through the plate itself and come out as true J2000
+        _, ra_k, dec_k, _ = xyToRaDecPP(len(cx)*[jd], cx, cy, np.ones(len(cx)), pp_fit, \
+            extinction_correction=False, measurement=True, jd_time=True)
+
+        return (_separation(ra_m, dec_m, ra_ground_true, dec_ground_true).max(),
+                _separation(ra_k, dec_k, ra_sky_true, dec_sky_true).max())
+
+    if references == "geo_only":
+        x_ref, y_ref = gx, gy
+        ra_true_ref, dec_true_ref = ra_g, dec_g
+        ra_fit_ref, dec_fit_ref = ra_plate, dec_plate
+        expected_bias = 100.0
+
+    else:
+        x_ref, y_ref = np.concatenate([sx, gx]), np.concatenate([sy, gy])
+        ra_true_ref = np.concatenate([ra_s, ra_g])
+        dec_true_ref = np.concatenate([dec_s, dec_g])
+        ra_fit_ref = np.concatenate([ra_s, ra_plate])
+        dec_fit_ref = np.concatenate([dec_s, dec_plate])
+        expected_bias = 10.0
+
+    # Handing the fit the true direction of the ground points biases the plate
+    ground_err, sky_err = fitAndMeasure(ra_true_ref, dec_true_ref, x_ref, y_ref)
+    assert ground_err > expected_bias
+    assert sky_err > expected_bias
+
+    # With the plate coordinates, both kinds of measurement come out right from the same plate
+    ground_err, sky_err = fitAndMeasure(ra_fit_ref, dec_fit_ref, x_ref, y_ref)
+    assert ground_err < 1.0, ground_err
+    assert sky_err < 1.0, sky_err
+
+
+def test_plate_coordinates_are_a_no_op_without_refraction():
+    """ A plate fitted with the refraction off maps the arrival direction of a target directly, so a ground
+        reference needs no correction at all. """
+
+    pp = Platepar()
+    pp.read(TEMPLATE)
+    pp.lat, pp.lon, pp.elev = 31.69, -110.9, 2610.0
+    pp.refraction = False
+
+    ra = np.array([120.0, 121.0, 122.0])
+    dec = np.array([20.0, 21.0, 22.0])
+    ra_plate, dec_plate = targetRaDecToPlateRaDec(ra, dec, 2460000.5, pp)
+
+    assert np.array_equal(ra_plate, ra)
+    assert np.array_equal(dec_plate, dec)
+
+
+def test_a_full_refraction_fraction_is_a_no_op():
+    """ A target outside the atmosphere is refracted exactly like a star, so its plate coordinates are its
+        true coordinates. This is the check that the two steps of targetRaDecToPlateRaDec are inverses. """
+
+    pp = Platepar()
+    pp.read(TEMPLATE)
+    pp.lat, pp.lon, pp.elev = 31.69, -110.9, 2610.0
+    pp.refraction = True
+
+    ra = np.array([120.0, 150.0, 200.0])
+    dec = np.array([5.0, 20.0, 60.0])
+    ra_plate, dec_plate = targetRaDecToPlateRaDec(ra, dec, 2460000.5, pp, refraction_fraction=1.0)
+
+    assert _separation(ra_plate, dec_plate, ra, dec).max() < 1e-6
+
+
+def test_ground_projection_uses_the_apparent_pointing():
+    """ xyHt2Geo() and geoHt2XY() project onto the ground without refraction, which is right for a target
+        on the ground. Clearing the refraction flag alone is not enough though: that leaves the reference
+        pointing at the true direction of the camera axis while the camera looks along the apparent one,
+        which offsets the whole field by the refraction at the FOV centre, about 3 arc minutes at 20 deg
+        elevation.
+
+        The direction that the ground path recovers from a pixel is checked here against the line of sight
+        of a synthetic camera, which is free of any Earth-model assumption.
+    """
+
+    lat, lon, elev_station = 31.69, -110.9, 2610.0
+    x_res, y_res, f_scale = 1280, 720, 1280/39.8
+    jd = date2JD(2026, 9, 5, 6, 0, 0)
+    scale = refractionScale(elev_station)
+    trueJ2000 = _syntheticCamera(lat, lon, elev_station, 334.8, 20.0, x_res, y_res, f_scale, jd)
+
+    # An ordinary refraction-on plate fitted on the stars of this camera
+    rng = np.random.default_rng(3)
+    sx, sy = rng.uniform(10, x_res - 10, 200), rng.uniform(10, y_res - 10, 200)
+    ra_s, dec_s = trueJ2000(sx, sy, scale)
+
+    pp = Platepar()
+    pp.read(TEMPLATE)
+    pp.X_res, pp.Y_res, pp.F_scale = x_res, y_res, f_scale
+    pp.lat, pp.lon, pp.elev = lat, lon, elev_station
+    pp.resetDistortionParameters()
+    pp.x_poly_fwd[0] = pp.x_poly_fwd[1] = pp.x_poly_rev[0] = pp.x_poly_rev[1] = 0.0
+    pp.refraction = True
+    pp.JD, pp.Ho = jd, JD2HourAngle(jd)
+    ra_c, dec_c = trueJ2000(np.array([x_res/2.0]), np.array([y_res/2.0]), scale)
+    pp.RA_d, pp.dec_d, pp.pos_angle_ref = ra_c[0], dec_c[0], 0.0
+    pp.fitAstrometry(jd, np.column_stack([sx, sy, np.ones(len(sx))]), \
+        np.column_stack([ra_s, dec_s, 5*np.ones(len(sx))]), fit_only_pointing=True)
+    pp.updateRefAltAz()
+
+    cx, cy = np.meshgrid(np.linspace(30, x_res - 30, 5), np.linspace(30, y_res - 30, 4))
+    cx, cy = cx.ravel(), cy.ravel()
+
+    # The light of a target on the ground is not refracted, so its true direction is the line of sight
+    ra_ground, dec_ground = trueJ2000(cx, cy, 0.0)
+
+    # The direction the ground path of xyHt2Geo() recovers from those pixels
+    pp_ground = copy.deepcopy(pp)
+    pp_ground.updateRefAltAz()
+    pp_ground.switchToGroundPicks()
+    _, ra_m, dec_m, _ = xyToRaDecPP(len(cx)*[jd], cx, cy, np.ones(len(cx)), pp_ground, \
+        extinction_correction=False, measurement=False, jd_time=True)
+
+    assert _separation(ra_m, dec_m, ra_ground, dec_ground).max() < 1.0
+
+    # Leaving the reference pointing alone, as the ground helpers used to, offsets the whole field
+    pp_flag_only = copy.deepcopy(pp)
+    pp_flag_only.refraction = False
+    _, ra_b, dec_b, _ = xyToRaDecPP(len(cx)*[jd], cx, cy, np.ones(len(cx)), pp_flag_only, \
+        extinction_correction=False, measurement=False, jd_time=True)
+
+    assert _separation(ra_b, dec_b, ra_ground, dec_ground).max() > 100.0

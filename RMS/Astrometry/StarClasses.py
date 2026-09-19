@@ -54,14 +54,19 @@ class GeoPoint(object):
 
 
     def coords(self):
-        """ Return sky coordinates.
+        """ Return the sky coordinates to use as a plate fit reference.
+
+        These are the plate coordinates, not the true direction of the point: the light of a ground point
+        is not refracted, so the refraction that the plate applies has been taken out of them. Handing the
+        true direction to the fit instead would place the point where a star in the same direction would be
+        seen, which is a full refraction away. See ApplyAstrometry.targetRaDecToPlateRaDec.
 
         Returns:
             tuple: (ra, dec, mag) where mag is always 1.0 for geo points.
         """
 
-        ra = self.geo_points_obj.ra_data[self.geo_point_index]
-        dec = self.geo_points_obj.dec_data[self.geo_point_index]
+        ra = self.geo_points_obj.ra_plate_data[self.geo_point_index]
+        dec = self.geo_points_obj.dec_plate_data[self.geo_point_index]
         mag = 1.0
 
         return ra, dec, mag

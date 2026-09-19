@@ -59,7 +59,8 @@ import pyximport
 pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 from RMS.Astrometry.CyFunctions import (cyraDecToXY, cyTrueRaDec2ApparentAltAz,
                                         cyXYToRADec,
-                                        eqRefractionApparentToTrue, refractionScale,
+                                        eqRefractionApparentToTrue, eqRefractionTrueToApparent,
+                                        refractionScale,
                                         equatorialCoordPrecession)
 
 # Handle Python 2/3 compatibility
@@ -1256,9 +1257,15 @@ def xyHt2Geo(platepar, x, y, h):
 
     """
 
-    # Disable the refraction correction
+    # Switch the plate to the refraction-free representation. Clearing the refraction flag on its own is
+    #   not enough: that leaves the reference pointing at the true direction of the camera axis while the
+    #   camera actually looks along the apparent one, which offsets the whole field by the refraction at
+    #   the FOV centre. switchToGroundPicks() re-derives the reference pointing from the apparent alt/az,
+    #   so the plate maps a pixel straight onto the arrival direction of the light, which for a target on
+    #   the ground is its true direction.
     platepar = copy.deepcopy(platepar)
-    platepar.refraction = False
+    platepar.updateRefAltAz()
+    platepar.switchToGroundPicks()
 
     # If any of the input parameters are arrays, get their length
     arr_len = None
@@ -1357,6 +1364,80 @@ def geoHt2RaDec(platepar, jd, lat, lon, h):
     return ra, dec
 
 
+def targetRaDecToPlateRaDec(ra_data, dec_data, jd, platepar, refraction_fraction=0.0):
+    """ Convert the true J2000 direction of a target whose light is refracted by only a fraction of a
+        star's refraction into the coordinates that have to be given to the plate as a fit reference.
+
+        The plate maps a catalog direction to an image position by first refracting it as if it were a
+        star, which is correct for a star and for anything else outside the atmosphere. A target inside or
+        below the atmosphere is bent by less than that: a ground reference is not bent at all, and a target
+        at a finite height only by the fraction returned by refractionTargetFraction(). Handing the plate
+        the true direction of such a target therefore places it where a star in that direction would be
+        seen, not where the target is seen, and a fit made against it absorbs the difference into the
+        pointing and the distortion.
+
+        Let T be the plate's true-to-apparent refraction at the station height. The target is seen at
+        T(true_dir, fraction*scale), while the plate maps an input to T(input, scale), so the input that
+        makes the plate reproduce the arrival direction of the target is
+
+            input = T^-1(T(true_dir, fraction*scale), scale)
+
+        With fraction = 0 that is just the plate's own refraction removed. A plate fitted against such
+        references is an ordinary refraction-on plate: measurements of meteors and stars made with it come
+        out as true J2000 coordinates through xyToRaDecPP(), and ground picks through
+        Platepar.switchToGroundPicks().
+
+    Arguments:
+        ra_data: [ndarray] True J2000 right ascensions of the targets (deg).
+        dec_data: [ndarray] True J2000 declinations of the targets (deg).
+        jd: [float] Julian date.
+        platepar: [Platepar object] Astrometry parameters.
+
+    Keyword arguments:
+        refraction_fraction: [float] Fraction of a star's refraction that the target's light undergoes,
+            from RMS.Astrometry.CyFunctions.refractionTargetFraction(). 0.0 by default, which is the value
+            for a ground reference, close enough that no measurable refraction accumulates along the way.
+
+    Return:
+        (ra_plate, dec_plate): [tuple of ndarrays] Coordinates to hand to the plate (deg, J2000).
+
+    """
+
+    ra_data = np.atleast_1d(np.array(ra_data, dtype=np.float64))
+    dec_data = np.atleast_1d(np.array(dec_data, dtype=np.float64))
+
+    # A plate fitted without refraction maps the arrival direction directly, so nothing has to be undone
+    if not platepar.refraction:
+        return ra_data, dec_data
+
+    lat = np.radians(platepar.lat)
+    lon = np.radians(platepar.lon)
+    refr_scale = refractionScale(platepar.elev)
+
+    ra_plate = np.zeros_like(ra_data)
+    dec_plate = np.zeros_like(dec_data)
+
+    for i, (ra, dec) in enumerate(zip(ra_data, dec_data)):
+
+        ra, dec = np.radians(ra), np.radians(dec)
+
+        # Refract the true direction by the part of the refraction the target's light actually undergoes,
+        #   which gives the direction the target is seen in. A ground reference is seen in its true
+        #   direction, so this step does nothing for it.
+        if refraction_fraction != 0.0:
+            ra, dec = eqRefractionTrueToApparent(ra, dec, jd, lat, lon, \
+                refraction_fraction*refr_scale)
+
+        # Remove the refraction the plate will apply, so that the plate maps this back onto the arrival
+        #   direction of the target
+        ra, dec = eqRefractionApparentToTrue(ra, dec, jd, lat, lon, refr_scale)
+
+        ra_plate[i] = np.degrees(ra)%360
+        dec_plate[i] = np.degrees(dec)
+
+    return ra_plate, dec_plate
+
+
 def geoHt2XY(platepar, lat, lon, h):
     """ Given geo coordinates of the target and a height of the target above sea level,
         compute pixel coordinates on the image.
@@ -1372,9 +1453,15 @@ def geoHt2XY(platepar, lat, lon, h):
 
     """
 
-    # Disable the refraction correction
+    # Switch the plate to the refraction-free representation. Clearing the refraction flag on its own is
+    #   not enough: that leaves the reference pointing at the true direction of the camera axis while the
+    #   camera actually looks along the apparent one, which offsets the whole field by the refraction at
+    #   the FOV centre. switchToGroundPicks() re-derives the reference pointing from the apparent alt/az,
+    #   so the plate maps a pixel straight onto the arrival direction of the light, which for a target on
+    #   the ground is its true direction.
     platepar = copy.deepcopy(platepar)
-    platepar.refraction = False
+    platepar.updateRefAltAz()
+    platepar.switchToGroundPicks()
 
     # geoHt2RaDec returns J2000, so any time works; the plate's own reference time is the natural one
     ra, dec = geoHt2RaDec(platepar, platepar.JD, lat, lon, h)
@@ -1470,9 +1557,15 @@ def geoHt2XYInsideFOV(platepar, lat_arr, lon_arr, h_att, side_sample=10):
 
     """
 
-    # Disable the refraction correction
+    # Switch the plate to the refraction-free representation. Clearing the refraction flag on its own is
+    #   not enough: that leaves the reference pointing at the true direction of the camera axis while the
+    #   camera actually looks along the apparent one, which offsets the whole field by the refraction at
+    #   the FOV centre. switchToGroundPicks() re-derives the reference pointing from the apparent alt/az,
+    #   so the plate maps a pixel straight onto the arrival direction of the light, which for a target on
+    #   the ground is its true direction.
     platepar = copy.deepcopy(platepar)
-    platepar.refraction = False
+    platepar.updateRefAltAz()
+    platepar.switchToGroundPicks()
 
     # If any of the input parameters is an iterable but the rest are not, convert them them all to arrays
     arr_len = None

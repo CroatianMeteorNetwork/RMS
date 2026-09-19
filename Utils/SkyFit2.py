@@ -176,7 +176,7 @@ from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP, \
     rotationWrtHorizon, rotationWrtHorizonToPosAngle, computeFOVSize, photomLine, photometryFit, \
     rotationWrtStandard, rotationWrtStandardToPosAngle, correctVignetting, \
     extinctionCorrectionTrueToApparent, applyAstrometryFTPdetectinfo, getFOVSelectionRadius, \
-    limitingMagnitude, screenNudgeToAzAltDelta, fovCentreZenithDirection
+    limitingMagnitude, screenNudgeToAzAltDelta, fovCentreZenithDirection, targetRaDecToPlateRaDec
 from RMS.Astrometry.AtmosphericExtinction import atmosphericExtinctionCorrection
 from RMS.Astrometry.StarClasses import CatalogStar, GeoPoint, PlanetPoint, PairedStars
 from RMS.Astrometry.StarFilters import filterPhotometricOutliers, filterBlendedStars
@@ -2238,9 +2238,16 @@ class GeoPoints(object):
         self.lon_data = []
         self.ele_data = []
 
-        # Equatorial coordinates (degrees)
+        # True equatorial coordinates of the points as seen from the station (degrees, J2000)
         self.ra_data = []
         self.dec_data = []
+
+        # The same points expressed as plate fit references. A ground point is close enough that its light
+        #   is not measurably refracted, so the refraction that the plate applies has to be taken out of
+        #   its coordinates first (see targetRaDecToPlateRaDec). Without this the fit would place the
+        #   points where a star in the same direction would be seen, which is up to a full refraction away.
+        self.ra_plate_data = []
+        self.dec_plate_data = []
 
         # Load the points from a file
         self.load()
@@ -2271,7 +2278,13 @@ class GeoPoints(object):
 
 
     def update(self, platepar, jd):
-        """ Project points to the observer's point of view. """
+        """ Project points to the observer's point of view.
+
+        Arguments:
+            platepar: [Platepar object] Astrometry parameters. Only the station location and the refraction
+                settings are used.
+            jd: [float] Julian date.
+        """
 
         # Reset RA/Dec array
         self.ra_data = []
@@ -2309,6 +2322,10 @@ class GeoPoints(object):
 
         self.ra_data = np.array(self.ra_data)
         self.dec_data = np.array(self.dec_data)
+
+        # Take out the refraction that the plate applies, as the light of a ground point is not refracted
+        self.ra_plate_data, self.dec_plate_data = targetRaDecToPlateRaDec(self.ra_data, self.dec_data, jd, \
+            platepar, refraction_fraction=0.0)
 
 
 # CatalogStar, GeoPoint, and PairedStars are now imported from RMS.Astrometry.StarClasses
@@ -4213,15 +4230,15 @@ class PlateTool(QtWidgets.QMainWindow):
             # Compute RA/Dec of geo points
             self.geo_points_obj.update(self.platepar, ff_jd)
 
-            # RA, dec, and fake magnitude of geo points
-            self.geo_points = np.c_[self.geo_points_obj.ra_data, self.geo_points_obj.dec_data, \
-                np.ones_like(self.geo_points_obj.ra_data)]
+            # RA, dec, and fake magnitude of geo points. The plate coordinates are used because every
+            #   consumer below compares them through the plate's own projection, which must not refract
+            #   the ground points.
+            self.geo_points = np.c_[self.geo_points_obj.ra_plate_data, \
+                self.geo_points_obj.dec_plate_data, np.ones_like(self.geo_points_obj.ra_plate_data)]
 
-            # Compute image coordinates of geo points (always without refraction)
-            pp_noref = copy.deepcopy(self.platepar)
-            pp_noref.refraction = False
-            pp_noref.updateRefRADec(preserve_rotation=True)
-            self.geo_x, self.geo_y, _ = getCatalogStarsImagePositions(self.geo_points, ff_jd, pp_noref)
+            # Compute image coordinates of geo points (the refraction the plate applies was already taken
+            #   out of the plate coordinates, so the points land where the camera sees them)
+            self.geo_x, self.geo_y, _ = getCatalogStarsImagePositions(self.geo_points, ff_jd, self.platepar)
 
             geo_xy = np.c_[self.geo_x, self.geo_y]
 
@@ -9699,6 +9716,13 @@ class PlateTool(QtWidgets.QMainWindow):
         # Update the possibly missing params
         if not hasattr(self, "geo_points_obj"):
             self.geo_points_obj = None
+
+        # Geo points saved before the plate coordinates were introduced only carry the true direction. Seed
+        #   the plate coordinates with it; the next update() recomputes them properly.
+        if self.geo_points_obj is not None:
+            if not hasattr(self.geo_points_obj, "ra_plate_data"):
+                self.geo_points_obj.ra_plate_data = self.geo_points_obj.ra_data
+                self.geo_points_obj.dec_plate_data = self.geo_points_obj.dec_data
 
         # Update the possibly missing params
         if not hasattr(self, "geo_marker_scale"):
