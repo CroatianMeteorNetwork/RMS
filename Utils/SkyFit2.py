@@ -9270,7 +9270,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.image_navigation_slider.setValue(self.img.getFrame())
                 self.image_navigation_slider.blockSignals(False)
 
-                self.image_navigation_label.setText(f'Frame: {self.img.getFrame()} / {last_frame}')
+                self.setNavigationLabel('Frame', self.img.getFrame(), last_frame)
 
             return
 
@@ -9294,7 +9294,18 @@ class PlateTool(QtWidgets.QMainWindow):
         self.image_navigation_slider.blockSignals(False)
 
         # Update label text
-        self.image_navigation_label.setText(f'Image: {current_index + 1} / {total_images}')
+        self.setNavigationLabel('Image', current_index + 1, total_images)
+
+
+    def setNavigationLabel(self, name, current, last):
+        """ Set the navigation label, keeping the width of its longest text so the slider does not move. """
+
+        label = self.image_navigation_label
+
+        label.setText(f'{name}: {last} / {last}')
+        label.setMinimumWidth(label.sizeHint().width())
+
+        label.setText(f'{name}: {current} / {last}')
 
 
     def saveState(self):
