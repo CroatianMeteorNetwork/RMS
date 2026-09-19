@@ -573,7 +573,8 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
     platepar.F_scale = scale
 
     # Compute azimuth and altitude from RA/Dec
-    azim, alt = trueRaDec2ApparentAltAz(ra, dec, jd, platepar.lat, platepar.lon, refraction=platepar.refraction, refraction_scale=refractionScale(platepar.elev))
+    azim, alt = trueRaDec2ApparentAltAz(ra, dec, jd, platepar.lat, platepar.lon, \
+        refraction=platepar.refraction, refraction_scale=refractionScale(platepar.elev))
     platepar.az_centre = azim
     platepar.alt_centre = alt
 

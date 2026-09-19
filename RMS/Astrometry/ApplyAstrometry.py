@@ -575,12 +575,11 @@ def rotationWrtHorizon(platepar):
     # Compute apparent alt/az in the epoch of date from X,Y
     jd_arr, ra_arr, dec_arr, _ = xyToRaDecPP(2*[jd2Date(platepar.JD)], [img_mid_w, img_up_w], \
         [img_mid_h, img_up_h], [1, 1], platepar, extinction_correction=False, precompute_pointing_corr=True)
+    refr_scale = refractionScale(platepar.elev)
     azim_mid, alt_mid = cyTrueRaDec2ApparentAltAz(np.radians(ra_arr[0]), np.radians(dec_arr[0]), jd_arr[0], \
-        np.radians(platepar.lat), np.radians(platepar.lon), platepar.refraction,
-        refractionScale(platepar.elev))
+        np.radians(platepar.lat), np.radians(platepar.lon), platepar.refraction, refr_scale)
     azim_up, alt_up = cyTrueRaDec2ApparentAltAz(np.radians(ra_arr[1]), np.radians(dec_arr[1]), jd_arr[1], \
-        np.radians(platepar.lat), np.radians(platepar.lon), platepar.refraction,
-        refractionScale(platepar.elev))
+        np.radians(platepar.lat), np.radians(platepar.lon), platepar.refraction, refr_scale)
 
     # Compute the azimuth difference, wrapping across the 0/360 deg boundary. Without this, a FOV centre
     # pointing near due north (azimuth ~ 0/360 deg) puts the two sample points on opposite sides of the
@@ -643,8 +642,8 @@ def screenNudgeToAzAltDelta(platepar, screen_dx, screen_dy, key_increment, scree
         jd_arr, ra_arr, dec_arr, _ = xyToRaDecPP([jd2Date(platepar.JD)], [x], [y], [1], platepar, \
             extinction_correction=False, precompute_pointing_corr=True)
         az, alt = cyTrueRaDec2ApparentAltAz(np.radians(ra_arr[0]), np.radians(dec_arr[0]), jd_arr[0], \
-            np.radians(platepar.lat), np.radians(platepar.lon), platepar.refraction,
-        refractionScale(platepar.elev))
+            np.radians(platepar.lat), np.radians(platepar.lon), platepar.refraction, \
+            refractionScale(platepar.elev))
         ca = np.cos(alt)
         return np.array([ca*np.cos(az), ca*np.sin(az), np.sin(alt)])
 
@@ -751,8 +750,8 @@ def fovCentreZenithDirection(platepar, h_px=10, centre=None):
         jd_arr, ra_arr, dec_arr, _ = xyToRaDecPP([jd2Date(platepar.JD)], [x], [y], [1], platepar, \
             extinction_correction=False, precompute_pointing_corr=True)
         az, alt = cyTrueRaDec2ApparentAltAz(np.radians(ra_arr[0]), np.radians(dec_arr[0]), jd_arr[0], \
-            np.radians(platepar.lat), np.radians(platepar.lon), platepar.refraction,
-        refractionScale(platepar.elev))
+            np.radians(platepar.lat), np.radians(platepar.lon), platepar.refraction, \
+            refractionScale(platepar.elev))
         return az, alt
 
     if centre is None:
@@ -990,10 +989,13 @@ def xyToRaDecPP(time_data, X_data, Y_data, level_data, platepar, extinction_corr
     # Correct the coordinates for refraction if it wasn't taken into account during the astrometry calibration
     #   procedure
     if (not platepar.refraction) and measurement and platepar.measurement_apparent_to_true_refraction:
+
+        refr_scale = refractionScale(platepar.elev)
+
         for i, entry in enumerate(zip(JD_data, RA_data, dec_data)):
             jd, ra, dec = entry
             ra, dec = eqRefractionApparentToTrue(np.radians(ra), np.radians(dec), jd, \
-                np.radians(platepar.lat), np.radians(platepar.lon), refractionScale(platepar.elev))
+                np.radians(platepar.lat), np.radians(platepar.lon), refr_scale)
 
             RA_data[i] = np.degrees(ra)
             dec_data[i] = np.degrees(dec)

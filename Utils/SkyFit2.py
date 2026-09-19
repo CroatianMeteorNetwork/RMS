@@ -4022,7 +4022,8 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Compute alt, az
             azim, alt = trueRaDec2ApparentAltAz(ra[0], dec[0], jd[0], pp_tmp.lat, pp_tmp.lon, \
-                                                pp_tmp.refraction, refraction_scale=refractionScale(pp_tmp.elev))
+                                                pp_tmp.refraction, \
+                                                refraction_scale=refractionScale(pp_tmp.elev))
 
 
             # If ground points are measured, change the text for alt/az
@@ -7639,7 +7640,8 @@ class PlateTool(QtWidgets.QMainWindow):
             # Compute the azimuth and elevation of the star
             _, alt = trueRaDec2ApparentAltAz(star_ra, star_dec, date2JD(*self.img_handle.currentTime()),
                                                 self.platepar.lat, self.platepar.lon, 
-                                                self.platepar.refraction, refraction_scale=refractionScale(self.platepar.elev))
+                                                self.platepar.refraction,
+                                                refraction_scale=refractionScale(self.platepar.elev))
             
             elevation_list.append(alt)
 
@@ -13473,7 +13475,9 @@ class PlateTool(QtWidgets.QMainWindow):
         self.platepar.Ho = JD2HourAngle(jd)
 
         azim, alt = trueRaDec2ApparentAltAz(ra_astnet, dec_astnet, jd,
-                                            self.platepar.lat, self.platepar.lon, refraction=self.platepar.refraction, refraction_scale=refractionScale(self.platepar.elev))
+                                            self.platepar.lat, self.platepar.lon,
+                                            refraction=self.platepar.refraction,
+                                            refraction_scale=refractionScale(self.platepar.elev))
         self.platepar.az_centre = azim
         self.platepar.alt_centre = alt
         self.platepar.updateRefRADec(skip_rot_update=True)
@@ -13685,7 +13689,8 @@ class PlateTool(QtWidgets.QMainWindow):
         self.platepar.Ho = JD2HourAngle(jd)
 
         # Compute reference azimuth and altitude
-        azim, alt = trueRaDec2ApparentAltAz(ra, dec, jd, self.platepar.lat, self.platepar.lon, refraction=self.platepar.refraction, refraction_scale=refractionScale(self.platepar.elev))
+        azim, alt = trueRaDec2ApparentAltAz(ra, dec, jd, self.platepar.lat, self.platepar.lon, \
+            refraction=self.platepar.refraction, refraction_scale=refractionScale(self.platepar.elev))
 
         # Set parameters to platepar
         self.platepar.F_scale = scale
@@ -15770,6 +15775,9 @@ class PlateTool(QtWidgets.QMainWindow):
         # Get RA/Dec of the FOV centre
         ra_centre, dec_centre = self.computeCentreRADec()
 
+        # Scale of the refraction at the station height
+        refr_scale = refractionScale(self.platepar.elev)
+
         # Calculate the distance and the angle between each pair of image positions and catalog predictions
         for star_no, (cat_x, cat_y, cat_coords, img_c, snr, saturated) in enumerate(zip(
                 catalog_x, catalog_y, catalog_stars, img_stars, snr_data, saturated_data)):
@@ -15806,14 +15814,14 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Compute azim/elev from the catalog
             azim_cat, elev_cat = trueRaDec2ApparentAltAz(cat_ra, cat_dec, jd, self.platepar.lat, \
-                self.platepar.lon, refraction=self.platepar.refraction, refraction_scale=refractionScale(self.platepar.elev))
+                self.platepar.lon, refraction=self.platepar.refraction, refraction_scale=refr_scale)
 
             azim_list.append(azim_cat)
             elev_list.append(elev_cat)
 
             # Compute azim/elev from image coordinates
             azim_img, elev_img = trueRaDec2ApparentAltAz(img_ra, img_dec, jd, self.platepar.lat, \
-                self.platepar.lon, refraction=self.platepar.refraction, refraction_scale=refractionScale(self.platepar.elev))
+                self.platepar.lon, refraction=self.platepar.refraction, refraction_scale=refr_scale)
 
             # Compute azim/elev residuals
             azim_residuals.append(((azim_cat - azim_img + 180)%360 - 180)*np.cos(np.radians(elev_cat)))
