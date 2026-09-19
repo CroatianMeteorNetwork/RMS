@@ -129,6 +129,18 @@ class _Cam(object):
         err = e.read().decode("utf-8", "replace")
         return o.channel.recv_exit_status(), out, err
 
+    def put_file(self, data, remote, timeout=900):
+        """Copy bytes to `remote` on the camera and return the md5 the CAMERA computed.
+        Nothing destructive happens here; the caller compares against the host md5."""
+        i, o, e = self.c.exec_command("base64 -d > %s && md5sum %s" % (remote, remote), timeout=timeout)
+        b64 = base64.b64encode(data)
+        for k in range(0, len(b64), 65536):
+            i.write(b64[k:k + 65536])
+        i.flush(); i.channel.shutdown_write()
+        out = o.read().decode("utf-8", "replace").strip(); _ = e.read()
+        rc = o.channel.recv_exit_status()
+        return out.split()[0] if (rc == 0 and out) else None
+
     def mtd_md5(self, index, length, bs=0x10000):
         # Read ceil(length/bs) blocks then trim to EXACTLY length bytes, so the
         # md5 covers the real image size even when it is not block-aligned
@@ -418,6 +430,36 @@ def _wait_port(ip, port, timeout=180):
 # so the camera keeps its IP and settings across the upgrade. On a camera already
 # running our baked image none of these exist in the overlay -> a no-op.
 # ---------------------------------------------------------------------------
+# Self-contained on-camera writer (silicon_research/venc_override/mtdburn.c, static musl ARM).
+# It is uploaded to tmpfs and does the erase/write/verify/reboot with NO dependency on the
+# host, the network, dropbear, busybox or libc -- all of which used to be single points of
+# brick. Its md5 is pinned so a stale/corrupt copy is refused before it is ever run.
+MTDBURN_BIN = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mtdburn.gk7205v200")
+MTDBURN_MD5 = "d015700c6e2435929f984d852a8c8037"
+STAGE_DIR = "/tmp/.flash"          # tmpfs on the camera; wiped by the reboot
+UIMAGE_MAGIC = b"\x27\x05\x19\x56"
+SQUASHFS_MAGIC = b"hsqs"
+
+def _check_payload(tf, kname, kdata, rname, rdata, kmtd_size, rmtd_size):
+    """Refuse to flash anything that is not exactly what the archive says it is."""
+    for name, data in ((kname, kdata), (rname, rdata)):
+        m = name + ".md5sum"
+        if m in tf.getnames():
+            want = tf.extractfile(m).read().decode().split()[0]
+            got = hashlib.md5(data).hexdigest()
+            if want != got:
+                raise RuntimeError("payload %s md5 %s != archive's %s -- corrupt archive, refusing" % (name, got, want))
+            log.info("[payload] %s md5 %s matches the archive", name, got)
+        else:
+            log.warning("[payload] %s has no .md5sum in the archive (unverified)", name)
+    if not kdata.startswith(UIMAGE_MAGIC):
+        raise RuntimeError("kernel %s is not a uImage (bad magic) -- refusing" % kname)
+    if not rdata.startswith(SQUASHFS_MAGIC):
+        raise RuntimeError("rootfs %s is not a squashfs (bad magic) -- refusing" % rname)
+    if len(kdata) > kmtd_size or len(rdata) > rmtd_size:
+        raise RuntimeError("payload does not fit its partition (kernel %d/%d, rootfs %d/%d)"
+                           % (len(kdata), kmtd_size, len(rdata), rmtd_size))
+
 OVERLAY_UPPER = "/overlay/root"
 SHADOW_OVERLAY_PATHS = [
     "usr/bin/venc", "usr/bin/venc.bak3line", "usr/bin/isp_ctl", "usr/bin/ircut",
@@ -497,16 +539,23 @@ def _cron_reboot_guard(cam, refuse_before_s=600, jitter_max_s=120):
     return soonest
 
 
-def flash_openipc_image(cam, ip, tgz_path, dry_run):
-    """OpenIPC->OpenIPC. Extracts the .tgz host-side, flashes kernel+rootfs
-    DIRECTLY (flashcp, read-back verified) -- no sysupgrade, no /tmp extraction.
-    Keeps the hardware watchdog fed across the flash, clears only shadowing
-    overlay app-paths (network/identity/config preserved), then reboots.
+def flash_openipc_image(cam, ip, tgz_path, dry_run, allow_streaming=False):
+    """OpenIPC->OpenIPC, hardened for cameras nobody can reach.
 
-    Why direct-flash, not sysupgrade: sysupgrade extracts the archive into /tmp
-    (tmpfs, often <5MB free) which fails on a ~6MB image, and its free_resources
-    KILLS majestic -- the process feeding /dev/watchdog -- so a stalled flash lets
-    the 60s watchdog reboot the box mid-attempt.
+    Sequence (everything before the marked line is NON-destructive and abort-safe):
+      1. payload: extract kernel+rootfs, check md5 vs the archive, magic bytes, fit.
+      2. guards: cron reboot window, /dev/watchdog holder, RTSP client streaming,
+         tmpfs + RAM headroom for staging.
+      3. stage in tmpfs: the static writer (md5-pinned) + kernel + rootfs, each
+         md5-verified BY THE CAMERA against the host copy.
+      4. clear overlay shadows (jffs2, not touched by the write).
+      ---- point of no return ----
+      5. launch the writer DETACHED (setsid, signals ignored, OOM-immune, mlocked).
+         It erases/writes/verifies per block with retries, does a full bytewise
+         read-back, and reboots the camera ITSELF. It needs nothing from the host,
+         the network, dropbear, busybox or libc from that moment on.
+      6. monitor its log; if SSH dies, wait for the reboot instead.
+      7. after the reboot: prove persistence by md5 of the flashed partitions.
     """
     import tarfile
     tf = tarfile.open(tgz_path)
@@ -517,83 +566,143 @@ def flash_openipc_image(cam, ip, tgz_path, dry_run):
         raise RuntimeError("archive missing uImage/rootfs.squashfs: %s" % tf.getnames())
     kdata = tf.extractfile(kname).read()
     rdata = tf.extractfile(rname).read()
-    kmtd = next(i for (i, n, o, s) in OPENIPC_MTD if n == "kernel")
-    rmtd = next(i for (i, n, o, s) in OPENIPC_MTD if n == "rootfs")
-    log.info("---- OpenIPC image upgrade (direct flash) ----")
-    log.info("  kernel %s (%d B) -> mtd%d ; rootfs %s (%d B) -> mtd%d",
-             kname, len(kdata), kmtd, rname, len(rdata), rmtd)
+    kmtd, kmtd_size = next((i, sz) for (i, n, o, sz) in OPENIPC_MTD if n == "kernel")
+    rmtd, rmtd_size = next((i, sz) for (i, n, o, sz) in OPENIPC_MTD if n == "rootfs")
+    _check_payload(tf, kname, kdata, rname, rdata, kmtd_size, rmtd_size)
+    kmd5, rmd5 = hashlib.md5(kdata).hexdigest(), hashlib.md5(rdata).hexdigest()
+    burner = open(MTDBURN_BIN, "rb").read()
+    if hashlib.md5(burner).hexdigest() != MTDBURN_MD5:
+        raise RuntimeError("%s md5 does not match the pinned MTDBURN_MD5 -- refusing to run an unverified writer" % MTDBURN_BIN)
+    staged_bytes = len(kdata) + len(rdata) + len(burner)
+
+    log.info("---- OpenIPC image upgrade (staged, detached, self-verifying) ----")
+    log.info("  kernel %s (%d B, %s) -> mtd%d ; rootfs %s (%d B, %s) -> mtd%d",
+             kname, len(kdata), kmd5, kmtd, rname, len(rdata), rmd5, rmtd)
     rc, present, _ = cam.run("cd %s 2>/dev/null && ls -1d %s 2>/dev/null"
                              % (OVERLAY_UPPER, " ".join(SHADOW_OVERLAY_PATHS)))
     shadows = [p for p in present.split() if p]
     log.info("  overlay shadows to clear: %s", shadows if shadows else "(none -- clean-image camera)")
     log.info("  preserved: interfaces.d/eth0 (IP), hostname, dropbear key, /mnt/mtd/*")
-    log.info("  plan: leave watchdog to the kernel -> stream kernel(verify)"
-             " -> stream rootfs(verify) -> clear shadows -> reboot")
+    log.info("  plan: guards -> stage %d B in tmpfs (camera-verified) -> clear shadows -> "
+             "detached writer (rootfs then kernel, per-block verify, full read-back) -> "
+             "self-reboot -> post-boot md5 proof", staged_bytes)
     if dry_run:
         log.info("=== DRY-RUN complete. Nothing was flashed. Add 'commit' to flash. ===")
         return True
 
+    # ---- 2. guards (all abort-safe) ----
     _cron_reboot_guard(cam)
-
-    # DO NOT TOUCH /dev/watchdog. This block used to "take over" the watchdog with
-    # `killall majestic` + `echo w > /dev/watchdog` every 15 s. On the goke open_wdt
-    # driver that is not a keep-alive, it is a self-inflicted reset:
-    #   * open_wdt exposes ONLY open/ioctl -- there is NO write() method, so the
-    #     `echo w` never fed anything (it blocks forever on the open).
-    #   * under the default nodeamon=0 a KERNEL thread feeds the watchdog. Merely
-    #     OPENING the device takes it away from that feeder, and nothing refreshes
-    #     it afterwards -> the SoC hard-resets ~60-180 s later.
-    # A reset landing inside the multi-minute rootfs write leaves a partial squashfs
-    # the kernel cannot mount = BRICK. That bricked .204 on 2026-09-18 (reproduced on
-    # .206: a single `echo w` -> hard reset ~100 s later, nothing else done to it) and
-    # most likely .205 on 2026-09-11, which was mis-attributed to a tmpfs OOM.
-    # The kernel feeder already covers a hang during the flash; leave it alone.
-    rc, wdt_holder, _ = cam.run(
-        "ls -l /proc/*/fd 2>/dev/null | grep -c watchdog")
-    try:
-        holders = int((wdt_holder or "0").strip().split()[0])
-    except Exception:
-        holders = 0
+    # DO NOT TOUCH /dev/watchdog. The goke open_wdt driver has no write() method and
+    # merely OPENING it steals it from the kernel [dog] feeder -> hard reset ~60-180 s
+    # later. That bricked .204 (2026-09-18) and most likely .205 (2026-09-11). The
+    # kernel feeder already covers a hang during the flash; leave it alone.
+    rc, wdt_holder, _ = cam.run("ls -l /proc/*/fd 2>/dev/null | grep -c watchdog")
+    try: holders = int((wdt_holder or "0").strip().split()[0])
+    except Exception: holders = 0
     if holders:
-        # Something in userspace owns the watchdog (a stock-image majestic, or a venc
-        # stuck in a watchdog reboot loop). Killing it removes the only feeder and
-        # lights exactly the fuse described above, so refuse rather than gamble.
         raise RuntimeError(
             "/dev/watchdog is held by a userspace process (%d fd(s)). Flashing now risks a "
             "watchdog reset mid-write (this is how .204/.205 were bricked). Release it first "
             "-- e.g. `/etc/init.d/S96venc stop; killall -9 venc` -- so the kernel [dog] feeder "
             "resumes, then re-run." % holders)
-    log.info("[commit] watchdog: left to the kernel feeder (never opened from here)")
-    cam.run("rm -f /tmp/*.log 2>/dev/null")
+    log.info("[guard] watchdog: left to the kernel feeder (never opened from here)")
+    rc, est, _ = cam.run("netstat -tn 2>/dev/null | grep ':554 ' | grep -c ESTAB")
+    try: clients = int((est or "0").strip().split()[0])
+    except Exception: clients = 0
+    if clients and not allow_streaming:
+        raise RuntimeError(
+            "%d RTSP client(s) are streaming from this camera. Stop capture on it first "
+            "(RAM/CPU headroom during the write), or pass --allow-streaming to override." % clients)
+    log.info("[guard] RTSP clients: %d%s", clients, " (override)" if clients else "")
+    rc, hdr, _ = cam.run("df -k /tmp | tail -1 | awk '{print $4}'; awk '/^MemAvailable:/{print $2}' /proc/meminfo")
+    try: tmp_free_kb, mem_avail_kb = [int(x) for x in hdr.split()[:2]]
+    except Exception: tmp_free_kb = mem_avail_kb = -1
+    need_kb = staged_bytes // 1024
+    if tmp_free_kb >= 0 and tmp_free_kb < need_kb + 512:
+        raise RuntimeError("tmpfs has %d KB free, staging needs %d KB -- clear /tmp on the camera first" % (tmp_free_kb, need_kb))
+    if mem_avail_kb >= 0 and mem_avail_kb < need_kb + 4096:
+        raise RuntimeError("only %d KB RAM available; staging %d KB in tmpfs leaves < 4 MB -- refusing" % (mem_avail_kb, need_kb))
+    log.info("[guard] tmpfs free %d KB, RAM available %d KB, staging %d KB", tmp_free_kb, mem_avail_kb, need_kb)
 
-    # Flash kernel then rootfs, each STREAMED straight to the mtd block device and
-    # read-back verified (put_and_flash; ~64 KB peak RAM, no tmpfs staging).
-    log.warning("[commit] flashing kernel -> mtd%d", kmtd)
-    if not cam.put_and_flash(kdata, kmtd, "kernel"):
-        log.error("[commit] kernel flash FAILED -- overlay untouched, still boots current image.")
-        return False
-    log.warning("[commit] flashing rootfs -> mtd%d", rmtd)
-    if not cam.put_and_flash(rdata, rmtd, "rootfs"):
-        log.error("[commit] rootfs flash FAILED -- kernel already updated; RE-RUN before reboot.")
-        return False
+    # ---- 3. stage + camera-side verification (still nothing destructive) ----
+    cam.run("rm -rf %s; mkdir -p %s" % (STAGE_DIR, STAGE_DIR))
+    for label, data, want, rem in (("writer", burner, MTDBURN_MD5, "mtdburn"),
+                                   ("rootfs", rdata, rmd5, "rootfs"),
+                                   ("kernel", kdata, kmd5, "uImage")):
+        got = cam.put_file(data, "%s/%s" % (STAGE_DIR, rem))
+        if got != want:
+            cam.run("rm -rf %s" % STAGE_DIR)
+            raise RuntimeError("staging %s: camera md5 %s != %s -- aborted before any write" % (label, got, want))
+        log.info("[stage] %s -> %s/%s  md5 %s verified by the camera", label, STAGE_DIR, rem, got)
+    cam.run("chmod 755 %s/mtdburn" % STAGE_DIR)
+    rc, vo, _ = cam.run("%s/mtdburn --verify-only %s/uImage:/dev/mtd%d %s/rootfs:/dev/mtd%d | tail -1"
+                        % (STAGE_DIR, STAGE_DIR, kmtd, STAGE_DIR, rmtd))
+    log.info("[stage] writer runs on the target; current flash vs payload: %s", (vo or "").strip())
+    if "RESULT EQUAL" in (vo or ""):
+        log.warning("[stage] camera ALREADY holds exactly this image -- flashing anyway (re-flash requested)")
 
     if shadows:
         cam.run("cd %s && rm -f %s" % (OVERLAY_UPPER, " ".join(shadows)))
         log.info("[commit] cleared %d shadowing overlay path(s)", len(shadows))
-    log.warning("[commit] flash verified; rebooting into the new image")
-    cam.run("sync; (sleep 2; reboot) >/dev/null 2>&1 &")
-    log.info("[post] waiting for reboot into the new image ...")
-    if _wait_reboot(ip, 22):
-        log.info("=== %s rebooted; new image should be live. ===", ip)
-        return True
-    log.warning("=== reboot not confirmed in time; check the camera (u-boot intact -> recoverable). ===")
-    return False
+
+    # ---- 5. point of no return: detached writer ----
+    log.warning("[commit] POINT OF NO RETURN: launching the detached writer (rootfs -> mtd%d, then kernel -> mtd%d)", rmtd, kmtd)
+    cam.run("cd %s && setsid ./mtdburn --log %s/log --reboot --retries 3 rootfs:/dev/mtd%d uImage:/dev/mtd%d "
+            "</dev/null >/dev/null 2>&1 & echo launched" % (STAGE_DIR, STAGE_DIR, rmtd, kmtd))
+
+    # ---- 6. monitor: tail the log over fresh connections; if SSH dies, wait for the reboot ----
+    seen = 0; result = None; t0 = time.time(); lost_ssh = False
+    while time.time() - t0 < 600:
+        try:
+            rc, out, _ = cam.run("cat %s/log 2>/dev/null" % STAGE_DIR, timeout=20)
+            lines = out.splitlines()
+            for l in lines[seen:]:
+                log.info("  [cam] %s", l)
+            seen = len(lines)
+            if any("RESULT FAIL" in l for l in lines):
+                result = False; break
+            if any("rebooting" in l for l in lines):
+                result = True; break
+        except Exception as ex:
+            lost_ssh = True
+            log.warning("[monitor] SSH lost (%s) -- the writer does not need it; waiting for the reboot", ex)
+            break
+        time.sleep(3)
+    if result is False:
+        log.error("[commit] writer reported FAILURE; camera is still up, staged files kept in %s -- "
+                  "inspect %s/log and re-run", STAGE_DIR, STAGE_DIR)
+        return False
+    if result is None and not lost_ssh:
+        log.error("[commit] no result after 600 s; camera still up? check %s/log manually", STAGE_DIR)
+        return False
+
+    # ---- 7. post-boot proof ----
+    log.info("[post] waiting for the camera to reboot into the new image ...")
+    if not _wait_reboot(ip, 22, up_timeout=300):
+        log.error("=== %s did not come back within 300 s. u-boot was never written -> recoverable "
+                  "over serial; payload md5s kernel %s rootfs %s ===", ip, kmd5, rmd5)
+        return False
+    time.sleep(5)
+    try:
+        cam2 = _Cam(ip)
+        got_k = cam2.mtd_md5(kmtd, len(kdata)); got_r = cam2.mtd_md5(rmtd, len(rdata))
+        rc, up, _ = cam2.run("cut -d. -f1 /proc/uptime"); cam2.close()
+    except Exception as ex:
+        log.error("[post] camera answered on :22 but SSH failed: %s -- verify manually", ex); return False
+    ok = (got_k == kmd5 and got_r == rmd5)
+    log.info("[post] uptime %ss | mtd%d %s %s | mtd%d %s %s", (up or "?").strip(), kmtd, got_k,
+             "OK" if got_k == kmd5 else "MISMATCH", rmtd, got_r, "OK" if got_r == rmd5 else "MISMATCH")
+    if ok:
+        log.info("=== %s flashed, rebooted, and the new image is proven on-chip. ===", ip)
+    else:
+        log.error("=== %s came back but on-chip md5 does not match the payload -- do NOT power-cycle; re-run ===", ip)
+    return ok
 
 # ---------------------------------------------------------------------------
 # Main entry: upgrade an OpenIPC camera to whatever `bin_path` is.
 # ---------------------------------------------------------------------------
 def upgrade_from_openipc(ip, bin_path, dry_run=True, password="12345",
-                         backup_dir=None, do_backup=True):
+                         backup_dir=None, do_backup=True, allow_streaming=False):
     kind, info = detect_bin_kind(bin_path)
     log.info("=== UpgradeFirmware (OpenIPC/SSH) : %s ===", ip)
     log.info("    bin  : %s", bin_path)
@@ -616,7 +725,7 @@ def upgrade_from_openipc(ip, bin_path, dry_run=True, password="12345",
         # keeps it reachable (network/identity preserved). Different mechanism
         # from the raw partition-write engine below.
         if kind == "openipc_tgz":
-            return flash_openipc_image(cam, ip, bin_path, dry_run)
+            return flash_openipc_image(cam, ip, bin_path, dry_run, allow_streaming=allow_streaming)
 
         if kind == "xm_zip":
             target, placed = build_target_from_xm_zip(bin_path)

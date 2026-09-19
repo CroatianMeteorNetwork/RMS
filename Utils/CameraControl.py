@@ -1500,7 +1500,8 @@ def cameraControl(camera_ip, camera_user, camera_pwd, cmd, opts='', camera_setti
             do_commit = ('commit' in opts) or ('--commit' in opts)
             do_backup = '--no-backup' not in opts
             upgrade_from_openipc(camera_ip, image_path, dry_run=not do_commit,
-                                 do_backup=do_backup)
+                                 do_backup=do_backup,
+                                 allow_streaming=('--allow-streaming' in opts))
             return
         # else: fall through to the DVRIP (XM) upgrade path below
 
