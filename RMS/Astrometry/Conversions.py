@@ -460,9 +460,10 @@ def ECEF2AltAz(s_vect, p_vect):
     dz = pz - sz
 
     # Compute the elevation
-    alt = np.degrees(
-        np.pi/2 - np.arccos((sx*dx + sy*dy + sz*dz)/np.sqrt((sx**2 + sy**2 + sz**2)*(dx**2 + dy**2 + dz**2)))
-        )
+    # The normalized dot product can round just outside [-1, 1] when P is directly overhead or
+    #   directly below S, which would make arccos return NaN, so clamp it
+    cos_zenith = (sx*dx + sy*dy + sz*dz)/np.sqrt((sx**2 + sy**2 + sz**2)*(dx**2 + dy**2 + dz**2))
+    alt = np.degrees(np.pi/2 - np.arccos(np.clip(cos_zenith, -1.0, 1.0)))
 
     # Compute the azimuth
     

@@ -246,7 +246,7 @@ cpdef (double, double) equatorialCoordPrecession(double start_epoch, double fina
         (ra, dec): [tuple of floats] Precessed equatorial coordinates (radians).
     """
 
-    cdef double T, t, zeta, z, theta, A, B, C, ra_corr, dec_corr
+    cdef double T, t, zeta, z, theta, A, B, C, ra_corr, dec_corr, cos_pole_dist
 
 
     T = (start_epoch - J2000_DAYS )/36525.0
@@ -272,7 +272,15 @@ cpdef (double, double) equatorialCoordPrecession(double start_epoch, double fina
 
     # Calculate declination (apply a different equation if close to the pole, closer then 0.5 degrees)
     if (pi/2 - fabs(dec)) < radians(0.5):
-        dec_corr = sign(dec)*acos(sqrt(A**2 + B**2))
+
+        # A, B and C are components of a unit vector, so sqrt(A**2 + B**2) is in [0, 1], but
+        #   rounding can push it just above 1 and make acos return NaN
+        cos_pole_dist = sqrt(A**2 + B**2)
+
+        if cos_pole_dist > 1.0:
+            cos_pole_dist = 1.0
+
+        dec_corr = sign(dec)*acos(cos_pole_dist)
     else:
         dec_corr = asin(C)
 
