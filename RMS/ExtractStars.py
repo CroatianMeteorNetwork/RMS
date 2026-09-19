@@ -361,6 +361,10 @@ def extractStarsAuto(img, mask=None,
     # statistically supports
     background = snr = saturated_count = None
 
+    # Keep the per-frame noise model (and the gate) for the log even when the caller did not ask
+    if extra_info is None:
+        extra_info = {}
+
     status = extractStars(img, img_median=img_median, mask=mask,
                             max_star_candidates=max_star_candidates,
                             segment_radius=segment_radius, bit_depth=bit_depth)
@@ -499,7 +503,9 @@ def extractStarsFF(
     x_arr, y_arr, amplitude, intensity, fwhm, background, snr, saturated_count = status
 
 
-    log.debug('extracted ' + str(len(x_arr)) + ' stars from ' + ff_name)
+    log.debug('extracted {:d} stars from {:s} (noise sigma {:.2f}, beta {:.2f}, gate {:.1f} ADU)'.format(
+        len(x_arr), ff_name, extra_info.get('noise_sigma', float('nan')),
+        extra_info.get('noise_beta', float('nan')), extra_info.get('gate_adu', float('nan'))))
     return ff_name, x_arr, y_arr, amplitude, intensity, fwhm, background, snr, saturated_count
 
 
