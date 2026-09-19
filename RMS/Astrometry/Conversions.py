@@ -37,7 +37,6 @@ import math
 from datetime import datetime, timedelta, MINYEAR
 
 import numpy as np
-import scipy.optimize
 
 from RMS.Math import vectMag, vectNorm
 from RMS.Misc import UTCFromTimestamp
@@ -666,29 +665,15 @@ def AEH2Range(azim, elev, h, lat, lon, alt, accurate=False):
         alt: [float] Altitude of observer in meters.
 
     Keyword arguments:
-        accurate: [bool] Minimize the range for very accurate solution. False by default, in which case
-            the accuracy is +/- 10 m using an analytical approach.
+        accurate: [bool] Solve for the range on the WGS84 ellipsoid instead of using the analytical
+            approximation, which is accurate to about +/- 10 m for a target above the observer. False by
+            default. The approximation also picks the wrong intersection for a target below the observer,
+            so this has to be set for a target that the camera looks down at.
 
     Return:
-        r: [float] Range to point in meters.
+        r: [float] Range to point in meters. NaN if the line of sight never reaches the given height.
 
     """
-
-
-    def _heightCostFunction(params, azim, elev, h, lat, lon, alt):
-
-        # Get the guessed range
-        r = params
-
-        # Compute the ECEF coordinates with the given range
-        x, y, z = AER2ECEF(azim, elev, r, lat, lon, alt)
-
-        # Compute the height
-        _, _, h_computed = ecef2LatLonAlt(x, y, z)
-
-        # Return residual between the heights
-        return (h_computed - h)**2
-
 
 
     ### Law of sines solution ###
@@ -711,28 +696,59 @@ def AEH2Range(azim, elev, h, lat, lon, alt, accurate=False):
     ### ###
 
 
-    # Compute an accurate numerical solution if needed
+    # Solve on the ellipsoid if the approximation is not good enough, or if the target is below the
+    #   observer, where the law of sines above returns the far intersection instead of the near one
     if accurate:
 
-        # First guess of range if the elevation is higher than 10 degrees
-        if elev < np.radians(10):
+        # Observer position and the unit line of sight, both in ECEF
+        obs = np.array(latLonAlt2ECEF(np.radians(lat), np.radians(lon), alt))
+        los = np.array(AER2ECEF(azim, elev, 1.0, lat, lon, alt)) - obs
 
-            # Flat-Earth assumption
-            r0 = r
+        # Geocentric distances of the observer and of the target, the latter through the Earth radius
+        #   under the observer. Only the starting guess needs this, the iteration below works on the
+        #   ellipsoid itself.
+        rs = np.sqrt(np.dot(obs, obs))
+        rm = (rs - alt) + h
+
+        # The ray meets the sphere of radius rm where r**2 + 2*r*(obs . los) + rs**2 - rm**2 = 0. For a
+        #   target above the observer only one root is in front of the camera; for one below there are two
+        #   and the near one is wanted.
+        b = np.dot(obs, los)
+        disc = b*b + rm*rm - rs*rs
+
+        # The line of sight never reaches that height
+        if disc < 0:
+            return np.nan
+
+        if rm >= rs:
+            r = -b + np.sqrt(disc)
 
         else:
-            # Otherwise, use a distance of 1000 km
-            r0 = 1e6
+            r = -b - np.sqrt(disc)
 
-        # Numerically find the range which corresponds to the given height above the ground
-        res = scipy.optimize.minimize(_heightCostFunction, r0, \
-            args=(azim, elev, h, lat, lon, alt))
+        if r <= 0:
+            return np.nan
 
-        # Minimized range
-        r = res.x[0]
+        # Refine on the WGS84 ellipsoid. The height along the line of sight grows with the range at the
+        #   rate of the component of the line of sight along the local vertical, which is the derivative
+        #   Newton's method needs.
+        for _ in range(20):
+
+            lat_p, lon_p, h_p = ecef2LatLonAlt(*(obs + r*los))
+            up = np.array([np.cos(lat_p)*np.cos(lon_p), np.cos(lat_p)*np.sin(lon_p), np.sin(lat_p)])
+            slope = np.dot(los, up)
+
+            # The ray is grazing, so the height barely changes with the range and Newton cannot step
+            if abs(slope) < 1e-9:
+                break
+
+            dr = (h - h_p)/slope
+            r += dr
+
+            if abs(dr) < 1e-6:
+                break
 
 
-    # Return the minimized solution
     return r
 
 
@@ -809,44 +825,19 @@ def AEGeoidH2LatLonAlt(azim, elev, h, lat, lon, alt):
 
     """
 
-    # Convert azimuth and elevation to radians
-    azim = np.radians(azim)
-    elev = np.radians(elev)
-    lat = np.radians(lat)
-    lon = np.radians(lon)
+    # Range at which the line of sight is at the given height above the ellipsoid. Solved on the
+    #   ellipsoid rather than taken as (h - alt)/sin(elev): that flat-Earth range ignores the Earth
+    #   curving away under the ray, which puts a target at 100 km and 5 deg elevation at 200 km instead,
+    #   and it cannot be inverted by geoHt2XY(), which places the target at exactly h.
+    r = AEH2Range(azim, elev, h, lat, lon, alt, accurate=True)
 
-    # Convert observer's geodetic coordinates to ECEF
-    obs_x, obs_y, obs_z = latLonAlt2ECEF(lat, lon, alt)
+    if not np.isfinite(r):
+        return np.nan, np.nan
 
-    # Calculate line-of-sight unit vector in ENU coordinates
-    los_vector_enu = np.array([
-        np.cos(elev)*np.sin(azim),  # East component
-        np.cos(elev)*np.cos(azim),  # North component
-        np.sin(elev)                # Up component
-    ])
+    # Convert the target's ECEF coordinates to geodetic coordinates
+    target_lat, target_lon, _ = ecef2LatLonAlt(*AER2ECEF(azim, elev, r, lat, lon, alt))
 
-    # Transform ENU to ECEF coordinates
-    R_enu2ecef = np.array([
-        [-np.sin(lon),  -np.sin(lat)*np.cos(lon),  np.cos(lat)*np.cos(lon)],
-        [np.cos(lon), -np.sin(lat)*np.sin(lon),  np.cos(lat)*np.sin(lon)],
-        [0, np.cos(lat), np.sin(lat)]
-    ])
-
-    los_vector = np.dot(R_enu2ecef, los_vector_enu)
-
-    # Compute the range to the point
-    r = (h - alt)/np.sin(elev)
-    
-    # Find the target ECEF coordinates using the optimized range
-    target_x = obs_x + r*los_vector[0]
-    target_y = obs_y + r*los_vector[1]
-    target_z = obs_z + r*los_vector[2]
-      
-    # Convert target ECEF coordinates to geodetic coordinates
-    target_lat, target_lon, h2 = ecef2LatLonAlt(target_x, target_y, target_z)
-    target_lat, target_lon = np.degrees(target_lat), np.degrees(target_lon)
-
-    return target_lat, target_lon
+    return np.degrees(target_lat), np.degrees(target_lon)
 
 
 def cartesian2Geo(julian_date, x, y, z):
