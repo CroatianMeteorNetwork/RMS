@@ -50,6 +50,7 @@ import sys
 import time
 import hashlib
 import base64
+import re
 import zipfile
 
 try:
@@ -447,6 +448,55 @@ def _wait_reboot(ip, port=22, up_timeout=200):
     return went_down  # came down at least; may still be booting
 
 
+def _cron_reboot_guard(cam, refuse_before_s=600, jitter_max_s=120):
+    """Refuse to flash if the camera's OWN scheduled reboot is about to fire.
+
+    isp_ctl `autoreboot` installs `M H * * * sleep <jitter>; /sbin/reboot` in the
+    camera crontab (daily, per-MAC jitter 0..119 s). A reset landing inside the
+    ~36 s rootfs write leaves a partial squashfs = brick -- the same outcome as the
+    watchdog fuse, from a different clock. Uses the CAMERA's clock so host timezone
+    is irrelevant. Only the simple `M H * * *` form is parsed; anything else is
+    reported and skipped rather than guessed at.
+    Returns seconds until the next scheduled reboot, or None if there is none.
+    """
+    rc, tab, _ = cam.run("cat /etc/crontabs/root 2>/dev/null; echo __NOW__ $(date +%s) $(date +%H:%M)")
+    m_now = re.search(r"__NOW__\s+(\d+)\s+(\d+):(\d+)", tab or "")
+    if not m_now:
+        log.warning("[cron-guard] could not read the camera clock -- skipping the check")
+        return None
+    now_epoch, now_h, now_m = int(m_now.group(1)), int(m_now.group(2)), int(m_now.group(3))
+    soonest = None
+    for line in (tab or "").splitlines():
+        if "reboot" not in line or line.lstrip().startswith("#"):
+            continue
+        f = re.match(r"\s*(\d+)\s+(\d+)\s+\*\s+\*\s+\*\s+(.*)$", line)
+        if not f:
+            log.warning("[cron-guard] unparsed reboot entry (not M H * * *): %r -- NOT guarded", line.strip())
+            continue
+        mm, hh, cmd = int(f.group(1)), int(f.group(2)), f.group(3)
+        sl = re.search(r"sleep\s+(\d+)", cmd)
+        jitter = int(sl.group(1)) if sl else 0
+        now_s = now_h * 3600 + now_m * 60
+        fire_s = hh * 3600 + mm * 60
+        delta = fire_s - now_s
+        if delta < -(jitter + jitter_max_s):       # already fired today (past its jitter window)
+            delta += 86400
+        delta += jitter
+        if soonest is None or delta < soonest:
+            soonest = delta
+    if soonest is None:
+        log.info("[cron-guard] no scheduled reboot in the camera crontab")
+        return None
+    if -jitter_max_s <= soonest <= refuse_before_s:
+        raise RuntimeError(
+            "the camera's own cron reboot (rms-autoreboot) fires in %d s -- a reset inside the "
+            "rootfs write bricks the camera exactly like the watchdog did to .204. Retry after "
+            "it has rebooted, or remove the entry (`isp_ctl autoreboot off`) and re-run."
+            % soonest)
+    log.info("[cron-guard] next scheduled camera reboot in %d s -- clear of the flash window", soonest)
+    return soonest
+
+
 def flash_openipc_image(cam, ip, tgz_path, dry_run):
     """OpenIPC->OpenIPC. Extracts the .tgz host-side, flashes kernel+rootfs
     DIRECTLY (flashcp, read-back verified) -- no sysupgrade, no /tmp extraction.
@@ -482,6 +532,8 @@ def flash_openipc_image(cam, ip, tgz_path, dry_run):
     if dry_run:
         log.info("=== DRY-RUN complete. Nothing was flashed. Add 'commit' to flash. ===")
         return True
+
+    _cron_reboot_guard(cam)
 
     # DO NOT TOUCH /dev/watchdog. This block used to "take over" the watchdog with
     # `killall majestic` + `echo w > /dev/watchdog` every 15 s. On the goke open_wdt
