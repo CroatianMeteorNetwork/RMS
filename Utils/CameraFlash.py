@@ -435,8 +435,9 @@ def _wait_port(ip, port, timeout=180):
 # host, the network, dropbear, busybox or libc -- all of which used to be single points of
 # brick. Its md5 is pinned so a stale/corrupt copy is refused before it is ever run.
 MTDBURN_BIN = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mtdburn.gk7205v200")
-MTDBURN_MD5 = "d015700c6e2435929f984d852a8c8037"
+MTDBURN_MD5 = "3dd385558067cb1d11508da510109bdc"
 STAGE_DIR = "/tmp/.flash"          # tmpfs on the camera; wiped by the reboot
+RESULT_FILE = "/mnt/mtd/flash.result"   # jffs2: the writer's verdict survives the reboot
 UIMAGE_MAGIC = b"\x27\x05\x19\x56"
 SQUASHFS_MAGIC = b"hsqs"
 
@@ -647,8 +648,11 @@ def flash_openipc_image(cam, ip, tgz_path, dry_run, allow_streaming=False):
 
     # ---- 5. point of no return: detached writer ----
     log.warning("[commit] POINT OF NO RETURN: launching the detached writer (rootfs -> mtd%d, then kernel -> mtd%d)", rmtd, kmtd)
-    cam.run("cd %s && setsid ./mtdburn --log %s/log --reboot --retries 3 rootfs:/dev/mtd%d uImage:/dev/mtd%d "
-            "</dev/null >/dev/null 2>&1 & echo launched" % (STAGE_DIR, STAGE_DIR, rmtd, kmtd))
+    rc, cam_t0, _ = cam.run("rm -f %s; date +%%s" % RESULT_FILE)
+    try: cam_t0 = int(cam_t0.strip().split()[0])
+    except Exception: cam_t0 = None
+    cam.run("cd %s && setsid ./mtdburn --log %s/log --result %s --reboot --retries 3 rootfs:/dev/mtd%d uImage:/dev/mtd%d "
+            "</dev/null >/dev/null 2>&1 & echo launched" % (STAGE_DIR, STAGE_DIR, RESULT_FILE, rmtd, kmtd))
 
     # ---- 6. monitor: tail the log over fresh connections; if SSH dies, wait for the reboot ----
     seen = 0; result = None; t0 = time.time(); lost_ssh = False
@@ -677,26 +681,40 @@ def flash_openipc_image(cam, ip, tgz_path, dry_run, allow_streaming=False):
         return False
 
     # ---- 7. post-boot proof ----
+    # Do NOT rely on witnessing the down phase: the camera can be back before the first
+    # probe, which produced a false "did not come back" on 2026-09-19 after a flash that had
+    # in fact succeeded. A reboot AFTER the launch is proven by the camera's own clock
+    # (boot epoch = now - uptime must be later than the launch epoch), then the writer's
+    # persistent verdict and the on-chip md5 of both partitions must agree with the payload.
     log.info("[post] waiting for the camera to reboot into the new image ...")
-    if not _wait_reboot(ip, 22, up_timeout=300):
-        log.error("=== %s did not come back within 300 s. u-boot was never written -> recoverable "
-                  "over serial; payload md5s kernel %s rootfs %s ===", ip, kmd5, rmd5)
-        return False
-    time.sleep(5)
-    try:
-        cam2 = _Cam(ip)
-        got_k = cam2.mtd_md5(kmtd, len(kdata)); got_r = cam2.mtd_md5(rmtd, len(rdata))
-        rc, up, _ = cam2.run("cut -d. -f1 /proc/uptime"); cam2.close()
-    except Exception as ex:
-        log.error("[post] camera answered on :22 but SSH failed: %s -- verify manually", ex); return False
-    ok = (got_k == kmd5 and got_r == rmd5)
-    log.info("[post] uptime %ss | mtd%d %s %s | mtd%d %s %s", (up or "?").strip(), kmtd, got_k,
-             "OK" if got_k == kmd5 else "MISMATCH", rmtd, got_r, "OK" if got_r == rmd5 else "MISMATCH")
-    if ok:
-        log.info("=== %s flashed, rebooted, and the new image is proven on-chip. ===", ip)
+    t_wait = time.time(); ok = False; verdict = "?"
+    while time.time() - t_wait < 600:
+        time.sleep(5)
+        try:
+            cam2 = _Cam(ip, timeout=8)
+            rc, o, _ = cam2.run("date +%%s; cut -d. -f1 /proc/uptime; cat %s 2>/dev/null" % RESULT_FILE, timeout=20)
+            parts = o.split(); cam_now, up = int(parts[0]), int(parts[1])
+            verdict = " ".join(parts[2:]) or "(no result file)"
+            booted = cam_now - up
+            if cam_t0 is not None and booted < cam_t0 - 2:
+                rc, tl, _ = cam2.run("tail -1 %s/log 2>/dev/null" % STAGE_DIR); cam2.close()
+                log.info("[post] up, not yet rebooted since launch; writer: %s", (tl or "").strip()); continue
+            got_k = cam2.mtd_md5(kmtd, len(kdata)); got_r = cam2.mtd_md5(rmtd, len(rdata)); cam2.close()
+            ok = (got_k == kmd5 and got_r == rmd5)
+            log.info("[post] rebooted %ds after launch (uptime %ds) | writer verdict: %s | mtd%d %s %s | mtd%d %s %s",
+                     booted - (cam_t0 or booted), up, verdict, kmtd, got_k, "OK" if got_k == kmd5 else "MISMATCH",
+                     rmtd, got_r, "OK" if got_r == rmd5 else "MISMATCH")
+            break
+        except Exception as ex:
+            log.info("[post] not reachable yet (%s)", str(ex)[:60])
+    if ok and verdict.startswith("OK"):
+        log.info("=== %s flashed, rebooted, writer verdict '%s', new image proven on-chip. ===", ip, verdict)
+    elif ok:
+        log.warning("=== %s on-chip md5s match but the writer verdict is '%s' -- inspect before trusting ===", ip, verdict)
     else:
-        log.error("=== %s came back but on-chip md5 does not match the payload -- do NOT power-cycle; re-run ===", ip)
-    return ok
+        log.error("=== %s: could not prove the new image on-chip within 600 s (verdict '%s'). u-boot was never "
+                  "written -> recoverable over serial; payload md5s kernel %s rootfs %s ===", ip, verdict, kmd5, rmd5)
+    return ok and verdict.startswith("OK")
 
 # ---------------------------------------------------------------------------
 # Main entry: upgrade an OpenIPC camera to whatever `bin_path` is.
