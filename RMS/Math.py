@@ -169,7 +169,9 @@ def cartesianToPolar(x, y, z):
 
     """
 
-    theta = np.arccos(z)
+    # Rounding can push the z component of a unit vector just outside [-1, 1] for points near the
+    #   poles, which would make arccos return NaN
+    theta = np.arccos(np.clip(z, -1.0, 1.0))
     phi = np.arctan2(y, x)
 
     return theta, phi
