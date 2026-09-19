@@ -2843,7 +2843,9 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # bottom information
         self.status_bar = QtWidgets.QStatusBar()
-        self.status_bar.setFont(QtGui.QFont('monospace'))
+        status_font = QtGui.QFont('monospace')
+        status_font.setPointSizeF(status_font.pointSizeF() - 0.5)
+        self.status_bar.setFont(status_font)
         self.setStatusBar(self.status_bar)
 
         self.file_manager_button = QtWidgets.QPushButton('File Manager')
@@ -2868,7 +2870,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.image_navigation_slider.setMaximum(1)
         self.image_navigation_slider.setValue(1)
         self.image_navigation_slider.setMinimumWidth(200)
-        self.image_navigation_slider.setMaximumWidth(400)
+        self.image_navigation_slider.setMaximumWidth(300)
         self.image_navigation_slider.setToolTip("Drag or click to navigate through images (frames in manual "
                                                 "reduction)")
         self.image_navigation_slider.valueChanged.connect(self.jumpToImage)
