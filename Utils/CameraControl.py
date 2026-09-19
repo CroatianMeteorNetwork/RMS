@@ -1203,27 +1203,13 @@ def dvripCall(cam, cmd, opts, camera_settings_path='./camera_settings.json'):
 
         firmware_path = opts[0]
         skip_confirm = '--yes' in opts or '-y' in opts
-        # One-command fleet convert: if the operator hands the OpenIPC venc .tgz
-        # to an XM camera, auto-wrap it into a per-unit DVRIP-flashable coupler
-        # bin -- reading THIS camera's MAC over DVRIP first and baking it into the
-        # env so the converted camera keeps its identity. No external tools.
-        try:
-            from Utils.CameraFlash import detect_bin_kind, build_coupler_bin
-            if detect_bin_kind(firmware_path)[0] == 'openipc_tgz':
-                import tempfile, os as _os
-                mac = cam.get_info("NetWork.NetCommon").get("MAC")
-                if not mac:
-                    log.error("Could not read camera MAC over DVRIP; aborting auto-wrap.")
-                    return
-                log.info("XM camera + OpenIPC venc image -> auto-wrapping coupler "
-                         "bin (MAC %s preserved)", mac)
-                firmware_path = build_coupler_bin(
-                    firmware_path, mac,
-                    _os.path.join(tempfile.gettempdir(),
-                                  "venc_coupler_%s.bin" % mac.replace(':', '')))
-                log.info("Built %s", firmware_path)
-        except Exception as e:
-            log.error("Auto-wrap failed: %s", e)
+        # The DVRIP updater takes a DVRIP-flashable .bin. Wrapping an OpenIPC .tgz into a
+        # per-unit coupler bin (MAC baked into the env) now lives with the firmware:
+        #   silicon_research/tools/openipc_flash.py wrap <tgz> <mac> <out.bin>
+        if firmware_path.lower().endswith((".tgz", ".tar.gz")):
+            log.error("%s is an OpenIPC image archive, not a DVRIP-flashable bin. Wrap it first: "
+                      "silicon_research/tools/openipc_flash.py wrap <tgz> <this camera's MAC> <out.bin>",
+                      firmware_path)
             return
         upgradeFirmware(cam, firmware_path, skip_confirm, converts_to_openipc=True)
         return
@@ -1477,33 +1463,29 @@ def cameraControl(camera_ip, camera_user, camera_pwd, cmd, opts='', camera_setti
         ispCall(camera_ip, cmd, opts)
         return
 
-    # Firmware transport commands go through Utils.CameraFlash (SSH-based
-    # for OpenIPC, no DVRIP). RevertToXM defaults to a DRY-RUN; pass
-    # 'commit' to actually flash. It restores THIS camera's own saved
-    # full-chip backup and never writes the u-boot binary (see CameraFlash).
+    # Firmware transport. The SSH flasher for OpenIPC cameras is NOT in RMS any more:
+    # it lives with the firmware it flashes (silicon_research/tools/flash_cam.sh ->
+    # tools/openipc_flash.py), because brick-capable code in a shared, branch-switched
+    # RMS checkout is how a pre-fix flasher ran against a production camera on
+    # 2026-09-19. RMS keeps the DVRIP (XM) updater below and the OpenIPC control path.
+    def _firmware_transport(ip):
+        import socket
+        for port, name in ((34567, "xm"), (22, "openipc")):
+            sk = socket.socket(); sk.settimeout(3)
+            try:
+                sk.connect((ip, port)); sk.close(); return name
+            except Exception:
+                sk.close()
+        return None
     if cmd == 'DetectFirmware':
-        from Utils.CameraFlash import detect_transport
-        log.info('Firmware transport on %s: %s', camera_ip, detect_transport(camera_ip))
+        log.info('Firmware transport on %s: %s', camera_ip, _firmware_transport(camera_ip))
         return
-    # UpgradeFirmware is transport-aware. On XM the DVRIP path below handles it.
-    # On OpenIPC (no DVRIP) route to the SSH flasher, which auto-detects the bin
-    # (XM update ZIP / OpenIPC-Coupler ZIP / raw 16MB), never writes the u-boot
-    # binary, verifies each partition, and flips the boot env (MAC preserved).
-    # Dry-run unless the operator passes 'commit'.
-    if cmd == 'UpgradeFirmware':
-        from Utils.CameraFlash import detect_transport, upgrade_from_openipc
-        if detect_transport(camera_ip) == 'openipc':
-            if not opts:
-                log.error("Usage: UpgradeFirmware /path/to/fw.bin [commit] [--no-backup]")
-                return
-            image_path = opts[0]
-            do_commit = ('commit' in opts) or ('--commit' in opts)
-            do_backup = '--no-backup' not in opts
-            upgrade_from_openipc(camera_ip, image_path, dry_run=not do_commit,
-                                 do_backup=do_backup,
-                                 allow_streaming=('--allow-streaming' in opts))
-            return
-        # else: fall through to the DVRIP (XM) upgrade path below
+    if cmd == 'UpgradeFirmware' and _firmware_transport(camera_ip) == 'openipc':
+        log.error("%s is an OpenIPC camera (SSH, no DVRIP). RMS does not flash those. Use "
+                  "silicon_research/tools/flash_cam.sh %s <image.tgz> commit -- the only "
+                  "supported path (staged, detached, self-verifying writer).", camera_ip, camera_ip)
+        return
+    # XM cameras: fall through to the DVRIP upgrade path below
 
     # Process the IP camera control command. cam.login() returns False on some
     # failures but RAISES (dvrip.SomethingIsWrongWithCamera) when the DVRIP port
