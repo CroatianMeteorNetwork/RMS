@@ -275,6 +275,15 @@ def extractStars(img, img_median=None, mask=None, gamma=1.0, max_star_candidates
             title='Star candidates before PSF fitting ({:d})'.format(num_objects)
         )
 
+    # Background-noise model for the S/N, built once per frame: the per-frame correlation factor
+    # beta from blank apertures, and the detrended frame the per-star annulus is measured on.
+    # Every gate-passing maximum (not only the subsampled candidates) is masked out of both.
+    noise_model = buildNoiseModel(img, gamma=gamma, bit_depth=bit_depth, mask=mask,
+                                  star_mask=maxima, core_radius=segment_radius)
+    if extra_info is not None:
+        extra_info['noise_sigma'] = float(noise_model[1])
+        extra_info['noise_beta'] = float(noise_model[2])
+
     # Fit a PSF to each star on the raw image
     (
         x_arr, y_arr, amplitude, intensity, 
@@ -283,7 +292,8 @@ def extractStars(img, img_median=None, mask=None, gamma=1.0, max_star_candidates
         img, img_median, x_init, y_init, 
         gamma=gamma,
         segment_radius=segment_radius, roundness_threshold=roundness_threshold, 
-        max_feature_ratio=max_feature_ratio, bit_depth=bit_depth
+        max_feature_ratio=max_feature_ratio, bit_depth=bit_depth,
+        noise_model=noise_model
         )
 
     # Compare all raw candidates with the stars which passed PSF fitting
@@ -659,8 +669,51 @@ def extractStarsImgHandle(img_handle,
 
 
 
-def fitPSF(img, img_median, x_init, y_init, gamma=1.0, segment_radius=4, roundness_threshold=0.5, 
-           max_feature_ratio=0.8, bit_depth=8):
+def buildNoiseModel(img, gamma=1.0, bit_depth=8, mask=None, star_mask=None, x_init=None, y_init=None,
+                    core_radius=4):
+    """ Build the background-noise model used for the star S/N (see Image.backgroundNoiseModel).
+
+    Arguments:
+        img: [ndarray] The image the stars are extracted from (raw, not gamma corrected).
+
+    Keyword arguments:
+        gamma: [float] Gamma of the image; the model is built on the linearised image.
+        bit_depth: [int] Bit depth of the image (white point of the gamma correction).
+        mask: [MaskStructure or ndarray] Mask; masked pixels are excluded. None by default.
+        star_mask: [ndarray] Boolean or 0/255 image of star candidates. None by default.
+        x_init, y_init: [ndarray] Candidate positions, used to build the star mask when star_mask
+            is not given. None by default.
+        core_radius: [int] Dilation of each candidate into a core to exclude, px. 4 by default.
+
+    Return:
+        (img_hp, sigma, beta, live_mask, star_mask): see Image.backgroundNoiseModel; the two masks
+            are boolean images (or None).
+    """
+
+    gamma_wp = 2**bit_depth - 1
+    img_lin = Image.gammaCorrectionImage(np.asarray(img, dtype=np.float32), gamma, wp=gamma_wp,
+                                         out_type=np.float32)
+
+    if (star_mask is None) and (x_init is not None) and (len(x_init) > 0):
+        star_mask = np.zeros(img_lin.shape, dtype=bool)
+        xi = np.clip(np.round(np.asarray(x_init)).astype(int), 0, img_lin.shape[1] - 1)
+        yi = np.clip(np.round(np.asarray(y_init)).astype(int), 0, img_lin.shape[0] - 1)
+        star_mask[yi, xi] = True
+
+    if star_mask is not None:
+        star_mask = ndimage.binary_dilation(np.asarray(star_mask) > 0, iterations=core_radius)
+
+    live_mask = None
+    if mask is not None:
+        live_mask = np.asarray(mask.img if hasattr(mask, 'img') else mask) > 0
+
+    img_hp, sigma, beta = Image.backgroundNoiseModel(img_lin, live_mask=live_mask, star_mask=star_mask)
+
+    return img_hp, sigma, beta, live_mask, star_mask
+
+
+def fitPSF(img, img_median, x_init, y_init, gamma=1.0, segment_radius=4, roundness_threshold=0.5,
+           max_feature_ratio=0.8, bit_depth=8, noise_model=None):
     """ Fit a 2D Gaussian to the star candidate cutout to check if it's a star.
     
     Arguments:
@@ -847,21 +900,20 @@ def fitPSF(img, img_median, x_init, y_init, gamma=1.0, segment_radius=4, roundne
         # Number of pixels that were summed into the intensity (the crop, not the 3 sigma ellipse)
         star_px_count = star_seg_crop.size
 
-        # Estimate the standard deviation of the background from the segment area outside the star.
-        # The crop indices are in the full-segment frame, so gamma correct the full segment and
-        # NaN out the 3 sigma star region, leaving only the surrounding sky.
-        star_seg_corr = Image.gammaCorrectionImage(star_seg.astype(np.float32), gamma,
-                                                   wp=gamma_wp, out_type=np.float32)
-        star_seg_bg = np.copy(star_seg_corr)
-        star_seg_bg[crop_y_min:crop_y_max, crop_x_min:crop_x_max] = np.nan
-        bg_std = np.nanstd(star_seg_bg)
+        # Background scatter from an annulus outside the star on the detrended, linearised frame,
+        # falling back to the frame-level scatter when the annulus has too few usable pixels
+        # (frame edge, mask). The 8x8 segment cannot hold such an annulus: its ring sits at
+        # ~2.3 sigma, inside the star's own halo, and reads the star as noise.
+        img_hp, noise_sigma, noise_beta, live_mask, star_mask = noise_model
+        bg_std = Image.localBackgroundNoise(img_hp, x_min + xo, y_min + yo,
+                                            np.sqrt(sigma_x*sigma_y),
+                                            live_mask=live_mask, star_mask=star_mask)
+        if bg_std is None:
+            bg_std = noise_sigma
 
-        # Make sure the background standard deviation is not zero
-        if (bg_std <= 0) or np.isnan(bg_std):
-            bg_std = 1
-
-        # Compute the SNR
-        snr = Image.signalToNoise(intensity, star_px_count, bg_corrected, bg_std)
+        # Compute the SNR (0 on a flat frame where no noise could be measured - never a stand-in
+        # value, which would make the S/N whatever the flux happens to be)
+        snr = Image.signalToNoise(intensity, star_px_count, bg_corrected, bg_std, beta=noise_beta)
 
         ###
 

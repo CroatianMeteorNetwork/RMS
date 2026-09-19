@@ -9,6 +9,7 @@ import time
 
 import numpy as np
 import scipy.misc
+import scipy.ndimage as ndimage
 import cv2
 
 from PIL import Image, ImageFont, ImageDraw 
@@ -1049,18 +1050,234 @@ def thickLine(img_h, img_w, x_cent, y_cent, length, rotation, radius):
     return photom_mask
 
 
-def signalToNoise(source_intens, source_px_count, bg_median, bg_std, gain=None):
+def sigmaClippedStd(values, sigma=3.0, max_iter=5):
+    """ Robust standard deviation via iterative sigma clipping.
+
+        Built on np.std on purpose: a median-absolute-deviation estimator collapses to exactly zero
+        on quantised data whenever more than half the residuals are identical, which happens in the
+        brighter parts of ordinary 8-bit frames (measured: 56% zero residuals over the lower third
+        of a real frame whose true scatter was 1.03 codes).
+
+    Arguments:
+        values: [ndarray] Sample values (any shape; flattened internally).
+
+    Keyword arguments:
+        sigma: [float] Clipping threshold in standard deviations. 3.0 by default.
+        max_iter: [int] Maximum clipping iterations. 5 by default.
+
+    Return:
+        [float] Clipped standard deviation. 0.0 if there are no finite values.
+    """
+
+    v = np.asarray(values, dtype=np.float64).ravel()
+    v = v[np.isfinite(v)]
+
+    if v.size == 0:
+        return 0.0
+
+    for _ in range(max_iter):
+        med = np.median(v)
+        std = np.std(v)
+
+        if std == 0:
+            break
+
+        keep = np.abs(v - med) <= sigma*std
+
+        if keep.all() or (np.count_nonzero(keep) < 2):
+            break
+
+        v = v[keep]
+
+    return float(np.std(v))
+
+
+def smoothBackground(img, size=9, bin_factor=2):
+    """ Smooth background of an image for detrending: a median filter of the given size (in
+        full-resolution pixels), computed on a bin_factor x bin_factor binned copy and expanded
+        back by pixel replication.
+
+        The plain 2-D median at size 9 dominates the extraction cost (0.44 s per 1280x720 frame);
+        the binned version costs 0.06 s and reproduces the per-star background scatter of the
+        full-resolution filter to 1% (ratio 0.99, 16-84% 0.95-1.04, two real frames). The window
+        must stay ~9 px: smaller windows remove part of the correlated noise itself (beta 2.13 at
+        9 px, 1.84 at 7, 1.47 at 5).
+
+    Arguments:
+        img: [ndarray] Image (float).
+
+    Keyword arguments:
+        size: [int] Filter window in full-resolution pixels. 9 by default.
+        bin_factor: [int] Binning factor. 2 by default; 1 gives the plain median filter.
+
+    Return:
+        [ndarray] Smooth background, same shape as img (float32).
+    """
+
+    img = np.asarray(img, dtype=np.float32)
+
+    if bin_factor <= 1:
+        return ndimage.median_filter(img, size=size)
+
+    h, w = img.shape
+    hb, wb = h//bin_factor, w//bin_factor
+    binned = img[:hb*bin_factor, :wb*bin_factor].reshape(hb, bin_factor, wb, bin_factor).mean(axis=(1, 3))
+
+    size_b = max(3, int(round(size/float(bin_factor))))
+    if size_b%2 == 0:
+        size_b += 1
+
+    bg = ndimage.median_filter(binned, size=size_b)
+    bg = np.repeat(np.repeat(bg, bin_factor, axis=0), bin_factor, axis=1)
+
+    # Pad the trailing rows/columns lost to the binning by edge replication
+    if bg.shape != img.shape:
+        bg = np.pad(bg, ((0, h - bg.shape[0]), (0, w - bg.shape[1])), mode='edge')
+
+    return bg
+
+
+def backgroundNoiseModel(img, live_mask=None, star_mask=None, hp_size=9, aperture=(5, 6),
+                         n_samples=4000, seed=0):
+    """ Measure the background noise of an image for aperture photometry: the detrended image, the
+        per-pixel scatter, and the correlation factor beta by which the noise on an aperture sum
+        exceeds sigma*sqrt(N).
+
+        The noise on RMS frames is not white - camera noise reduction and stream compression
+        correlate neighbouring pixels (measured lag-1 autocorrelation ~0.6), so the noise on a sum
+        of N pixels is beta*sigma*sqrt(N) with beta ~2, not sigma*sqrt(N). Beta is a property of
+        the imaging chain, not of the sky (measured 2.13-2.17 on three cameras, stable across the
+        frame and the night), so it is measured once per frame from blank apertures on star-free,
+        unmasked sky. The image is detrended with a median filter first so that sky gradients,
+        vignetting and the halos of bright stars are not counted as noise.
+
+    Arguments:
+        img: [ndarray] Image, in the same (linearised) units the photometry is done in.
+
+    Keyword arguments:
+        live_mask: [ndarray] Boolean, True where the pixel is usable (not masked). None = all.
+        star_mask: [ndarray] Boolean, True on the cores of detected candidates. None = none.
+        hp_size: [int] Detrend window in full-resolution px (see smoothBackground). 9 by default.
+        aperture: [tuple] (rows, cols) of the reference blank aperture. (5, 6) by default.
+        n_samples: [int] Number of blank apertures to try. 4000 by default.
+        seed: [int] Random seed for the aperture placement (reproducible per frame).
+
+    Return:
+        (img_hp, sigma, beta):
+            - img_hp: [ndarray] The detrended image (float32).
+            - sigma: [float] Clipped per-pixel scatter of the detrended background. 0.0 if none.
+            - beta: [float] Aperture-noise correlation factor, >= 1. 1.0 if it could not be measured.
+    """
+
+    img = np.asarray(img, dtype=np.float32)
+    img_hp = img - smoothBackground(img, hp_size)
+
+    ok = np.isfinite(img_hp)
+    if live_mask is not None:
+        ok &= live_mask
+    if star_mask is not None:
+        ok &= ~star_mask
+
+    sigma = sigmaClippedStd(img_hp[ok])
+    if sigma <= 0:
+        return img_hp, 0.0, 1.0
+
+    bh, bw = aperture
+    h, w = img_hp.shape
+    if (h < bh + 2) or (w < bw + 2):
+        return img_hp, sigma, 1.0
+
+    # Blank apertures: skip any window that touches a masked pixel, a candidate core or an outlier
+    rng = np.random.default_rng(seed)
+    ys = rng.integers(0, h - bh, n_samples)
+    xs = rng.integers(0, w - bw, n_samples)
+    bad = ~ok
+    sums = []
+    for y, x in zip(ys, xs):
+        if bad[y:y + bh, x:x + bw].any():
+            continue
+        win = img_hp[y:y + bh, x:x + bw]
+        if np.max(np.abs(win)) > 4*sigma:
+            continue
+        sums.append(float(win.sum()))
+
+    if len(sums) < 100:
+        return img_hp, sigma, 1.0
+
+    beta = float(np.std(sums)/(sigma*math.sqrt(bh*bw)))
+
+    return img_hp, sigma, max(beta, 1.0)
+
+
+def localBackgroundNoise(img_hp, x, y, sigma_psf, live_mask=None, star_mask=None,
+                         r_inner_sigma=4.0, r_box_min=14, min_px=200):
+    """ Clipped background scatter in an annulus around a star, on the detrended image.
+
+        The annulus starts outside the star (r > r_inner_sigma*sigma_psf): measured on real
+        frames, a star's light is gone by ~4 sigma, and beyond that the scatter around a bright
+        star equals the scatter around a faint one once the smooth halo has been detrended. The
+        old 8x8 segment ring sat at ~2.3 sigma, inside the halo, and read the star as noise.
+
+    Arguments:
+        img_hp: [ndarray] Detrended image from backgroundNoiseModel.
+        x, y: [float] Star centre, image coordinates.
+        sigma_psf: [float] Fitted PSF sigma, px.
+
+    Keyword arguments:
+        live_mask: [ndarray] Boolean, True where usable. None = all.
+        star_mask: [ndarray] Boolean, True on candidate cores (other stars are excluded). None = none.
+        r_inner_sigma: [float] Inner radius of the annulus in units of sigma_psf. 4.0 by default.
+        r_box_min: [int] Minimum half-size of the box the annulus is cut from, px. 14 by default;
+            grows with sigma_psf so the annulus keeps a few hundred pixels.
+        min_px: [int] Minimum usable pixels for an estimate. 200 by default.
+
+    Return:
+        [float] Clipped scatter, or None if the annulus has too few usable pixels (the caller
+            falls back to the frame-level scatter).
+    """
+
+    h, w = img_hp.shape
+    r_box = int(max(r_box_min, math.ceil(6*sigma_psf)))
+    xc, yc = int(round(x)), int(round(y))
+    y0, y1 = max(yc - r_box, 0), min(yc + r_box + 1, h)
+    x0, x1 = max(xc - r_box, 0), min(xc + r_box + 1, w)
+
+    if ((y1 - y0) < 8) or ((x1 - x0) < 8):
+        return None
+
+    box = img_hp[y0:y1, x0:x1]
+    yy, xx = np.indices(box.shape)
+    rr = np.hypot(yy - (y - y0), xx - (x - x0))
+
+    sel = (rr > r_inner_sigma*sigma_psf) & np.isfinite(box)
+    if live_mask is not None:
+        sel &= live_mask[y0:y1, x0:x1]
+    if star_mask is not None:
+        sel &= ~star_mask[y0:y1, x0:x1]
+
+    if np.count_nonzero(sel) < min_px:
+        return None
+
+    s = sigmaClippedStd(box[sel])
+
+    return s if s > 0 else None
+
+
+def signalToNoise(source_intens, source_px_count, bg_median, bg_std, gain=None, beta=1.0, n_eff=1.0):
     """ Compute the signal to noise ratio of an aperture sum from the measured background scatter.
 
     The image values RMS works with are not electron counts: they are 8-bit (or 16-bit) codes,
     usually gamma-linearised and averaged over many frames. The "CCD equation" (Howell et al., 1989)
     assumes Poisson statistics in electrons, so applying it to these values produces S/N figures
-    that are wrong by a large, gamma- and gain-dependent factor (e.g. S/N ~ 1 for clearly detected
-    5th magnitude stars on gamma 0.5 data). The only noise estimate available in image units is the
-    measured background scatter, so the noise on a sum of N pixels is taken as bg_std*sqrt(N). This
-    is the sky-limited S/N; it is exact for faint sources and overestimates S/N for bright sources
-    whose own shot noise is not negligible. If the gain (electrons per image unit) is known, pass it
-    and the source shot noise is included.
+    that are wrong by a large, gamma- and gain-dependent factor. The only noise estimate available
+    in image units is the measured background scatter, so the noise on a sum of N pixels is taken as
+    beta*bg_std*sqrt(N), where beta accounts for the spatial correlation of the noise (see
+    backgroundNoiseModel; ~2 on RMS frames). This is the sky-limited S/N: exact for faint sources,
+    optimistic for bright ones whose own shot noise is not negligible. If the gain (electrons per
+    image unit) is known, pass it and the source shot noise is included.
+
+    Note that on a stacked image (an avepixel) both the intensity and bg_std refer to the stack, so
+    this is the S/N of the stack, not of a single frame.
 
     Arguments:
         source_intens: [float] Source intensity (integrated, background subtracted), image units.
@@ -1071,17 +1288,21 @@ def signalToNoise(source_intens, source_px_count, bg_median, bg_std, gain=None):
 
     Keyword arguments:
         gain: [float] Electrons per image unit. None by default (sky-limited S/N).
+        beta: [float] Aperture-noise correlation factor from backgroundNoiseModel. 1.0 by default
+            (white noise).
+        n_eff: [float] Effective number of frames in the stack the intensity was measured on; the
+            source shot noise averages down by this factor. 1.0 by default (a single frame).
 
     Return:
         [float] Signal to noise ratio.
     """
 
-    # Noise of the sum of N background-limited pixels
-    noise_sq = source_px_count*bg_std**2
+    # Noise of the sum of N background-limited, spatially correlated pixels
+    noise_sq = source_px_count*(beta*bg_std)**2
 
     # Add the source shot noise if the gain is known
-    if (gain is not None) and (gain > 0) and (source_intens > 0):
-        noise_sq += source_intens/gain
+    if (gain is not None) and (gain > 0) and (source_intens > 0) and (n_eff > 0):
+        noise_sq += source_intens/(gain*n_eff)
 
     if noise_sq <= 0:
         return 0.0

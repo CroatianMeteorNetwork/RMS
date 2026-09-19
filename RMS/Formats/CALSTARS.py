@@ -91,11 +91,12 @@ def writeCALSTARS(star_list, ff_directory, file_name, cam_code, nrows, ncols, ch
                 if saturated_count > 999999:
                     saturated_count = 999999
 
-                # Limit the SNR to 99.99
-                if snr > 99.99:
-                    snr = 99.99
+                # Limit the SNR to 99999.99 (the field used to cap at 99.99, which the corrected
+                # S/N exceeds for 6-8% of stars; the reader splits on whitespace)
+                if snr > 99999.99:
+                    snr = 99999.99
 
-                star_file.write("{:7.2f} {:7.2f} {:9d} {:6d} {:5.2f} {:6d} {:5.2f} {:6d}".format(
+                star_file.write("{:7.2f} {:7.2f} {:9d} {:6d} {:5.2f} {:6d} {:8.2f} {:6d}".format(
                     round(y, 2), round(x, 2),
                     int(round(intensity)), int(round(amplitude)), fwhm, int(round(background)),
                     snr, int(saturated_count)) + "\n")

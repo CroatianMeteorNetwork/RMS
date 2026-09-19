@@ -162,3 +162,75 @@ def test_extra_info_reports_measured_gate():
     deep = {}
     extractStars(img, gate_factor=2.0, extra_info=deep)
     assert deep['gate_adu'] < extra['gate_adu']
+
+
+### Star S/N: background-noise model ###
+
+def correlatedNoiseImage(size=300, bg=40.0, sigma=1.0, seed=3):
+    """ Sky with spatially correlated noise (a 3x3 binomial kernel gives lag-1 autocorrelation
+        ~0.6, as measured on real frames). """
+    import scipy.ndimage as ndimage
+    rng = np.random.default_rng(seed)
+    white = rng.normal(0, 1, (size + 4, size + 4))
+    k = np.array([[1, 2, 1], [2, 4, 2], [1, 2, 1]], dtype=float)
+    corr = ndimage.convolve(white, k/k.sum())[2:-2, 2:-2]
+    corr *= sigma/corr.std()
+    return bg + corr
+
+
+def test_backgroundNoiseModel_measures_correlation():
+    from RMS.Routines.Image import backgroundNoiseModel
+    _, sigma, beta = backgroundNoiseModel(correlatedNoiseImage())
+    assert 0.7 < sigma < 1.3
+    assert 1.5 < beta < 3.0
+    # white noise: sigma*sqrt(N) is right, beta ~1
+    white = 40 + np.random.default_rng(4).normal(0, 1, (300, 300))
+    _, _, beta_white = backgroundNoiseModel(white)
+    assert beta_white < 1.2
+
+
+def test_localBackgroundNoise_clears_the_halo():
+    # A bright star with a broad halo: the annulus outside 4 sigma reads the sky, the old
+    # 8x8 ring at ~2.3 sigma read the halo
+    from RMS.Routines.Image import backgroundNoiseModel, localBackgroundNoise
+    img = correlatedNoiseImage(sigma=1.0)
+    yy, xx = np.mgrid[0:300, 0:300]
+    r2 = (xx - 150)**2 + (yy - 150)**2
+    img += 200*np.exp(-r2/(2*1.3**2)) + 8*np.exp(-r2/(2*6.0**2))
+    img_hp, sigma, _ = backgroundNoiseModel(img)
+    s_loc = localBackgroundNoise(img_hp, 150, 150, 1.3)
+    assert s_loc is not None
+    assert abs(s_loc - sigma)/sigma < 0.3
+    ring = img[146:155, 146:155].astype(float)
+    ring[3:6, 3:6] = np.nan
+    assert np.nanstd(ring) > 1.5*sigma
+
+
+def test_sigmaClippedStd_survives_quantisation():
+    # >50% of the residuals are exactly zero: a MAD would collapse to 0, np.std must not
+    from RMS.Routines.Image import sigmaClippedStd
+    v = np.round(np.random.default_rng(5).normal(0, 0.45, 20000))
+    assert np.median(np.abs(v - np.median(v))) == 0
+    assert 0.35 < sigmaClippedStd(v) < 0.6
+
+
+def test_star_snr_scales_with_flux():
+    # Injected stars on correlated noise: log10(S/N) vs instrumental magnitude must have the
+    # sky-limited slope of -0.4 (the old ring estimator gave -0.13), and beta must be measured
+    from RMS.ExtractStars import extractStars
+    img = correlatedNoiseImage(size=400, bg=40.0, sigma=1.0, seed=7)
+    yy, xx = np.mgrid[0:400, 0:400]
+    amps = [60, 40, 25, 15, 10, 60, 40, 25, 15, 10, 60, 40]
+    for i, amp in enumerate(amps):
+        x0, y0 = 50 + 100*(i % 4), 60 + 90*(i//4)
+        img += amp*np.exp(-((xx - x0)**2 + (yy - y0)**2)/(2*1.5**2))
+    img = np.clip(img, 0, 255).astype(np.float32)
+    info = {}
+    res = extractStars(img, gamma=1.0, bit_depth=8, extra_info=info)
+    intensity, snr = np.array(res[3], dtype=float), np.array(res[6], dtype=float)
+    assert len(intensity) >= 8
+    assert np.all(snr > 0)
+    m = -2.5*np.log10(intensity)
+    slope, _ = np.polyfit(m, np.log10(snr), 1)
+    assert -0.5 < slope < -0.3
+    assert 1.3 < info['noise_beta'] < 3.0
