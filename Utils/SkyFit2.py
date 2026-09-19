@@ -17722,27 +17722,13 @@ class PlateTool(QtWidgets.QMainWindow):
         ax_snr.set_xscale('log')
         if len(snr_list) > 0 and min(snr_list) > 0:
             snr_min, snr_max = min(snr_list), max(snr_list)
-            snr_range = snr_max - snr_min
-            # Find nice tick spacing closest to 6 ticks using 1-2-5 sequence
-            nice_spacings = [0.1 * (10 ** p) * m for p in range(-1, 5) for m in [1, 2, 5]]
-            target_ticks = 6
-            best_spacing = nice_spacings[0]
-            best_diff = float('inf')
-            for spacing in nice_spacings:
-                num_ticks = snr_range / spacing
-                if abs(num_ticks - target_ticks) < best_diff:
-                    best_diff = abs(num_ticks - target_ticks)
-                    best_spacing = spacing
-            # Generate tick positions
-            tick_start = np.floor(snr_min / best_spacing) * best_spacing
-            tick_end = np.ceil(snr_max / best_spacing) * best_spacing
-            ticks = np.arange(tick_start, tick_end + best_spacing/2, best_spacing)
-            # Filter out zero/negative ticks for log scale
-            ticks = ticks[ticks > 0]
-            ax_snr.set_xticks(ticks)
-            ax_snr.xaxis.set_major_formatter(ticker.FuncFormatter(lambda x, _: f'{x:g}'))
+            ax_snr.set_xlim([snr_min*0.8, snr_max*1.2])
+            # Ticks at 1, 2, 5 per decade: the axis is logarithmic and the S/N now spans two
+            # decades (~10 to >1000), so a linear 1-2-5 spacing piled every label onto the
+            # right end and left the lower decade unlabelled
+            ax_snr.xaxis.set_major_locator(ticker.LogLocator(base=10, subs=(1.0, 2.0, 5.0), numticks=12))
+            ax_snr.xaxis.set_major_formatter(ticker.FuncFormatter(lambda x, _: '{:g}'.format(x)))
             ax_snr.xaxis.set_minor_locator(ticker.NullLocator())
-            ax_snr.set_xlim([snr_min * 0.8, snr_max * 1.2])
 
         # Plot error vs magnitude (saturated stars in red)
         mag_arr = np.array(mag_list)
