@@ -2869,7 +2869,8 @@ class PlateTool(QtWidgets.QMainWindow):
         self.image_navigation_slider.setValue(1)
         self.image_navigation_slider.setMinimumWidth(200)
         self.image_navigation_slider.setMaximumWidth(400)
-        self.image_navigation_slider.setToolTip("Drag or click to navigate through images")
+        self.image_navigation_slider.setToolTip("Drag or click to navigate through images (frames in manual "
+                                                "reduction)")
         self.image_navigation_slider.valueChanged.connect(self.jumpToImage)
         self.status_bar.addPermanentWidget(self.image_navigation_slider)
 
@@ -3732,6 +3733,9 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Update the great circle
             self.updateGreatCircle()
+
+        # Switch the navigation slider between images and frames
+        self.updateImageNavigationDisplay()
 
 
     def changeStation(self, dir_path=None, config_override=None):
@@ -9210,11 +9214,17 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
     def jumpToImage(self, image_num):
-        """ Jump directly to a specific image number (1-indexed).
+        """ Jump directly to a specific image number (1-indexed), or to a frame in manual reduction.
 
         Arguments:
-            image_num: [int] Target image number (1-indexed, 1 to total_images)
+            image_num: [int] Target image number (1-indexed, 1 to total_images), or the frame number in
+                manual reduction.
         """
+        # In manual reduction the slider moves through the frames
+        if self.mode == 'manualreduction':
+            self.nextImg(n=image_num - self.img.getFrame())
+            return
+
         # Only works in skyfit mode with multiple images
         if self.mode != 'skyfit':
             return
@@ -9242,6 +9252,28 @@ class PlateTool(QtWidgets.QMainWindow):
         if not self.hasData():
             return
 
+        # In manual reduction the slider moves through the frames. DFN and single images only allow moving
+        #   next to the picks, so they get no slider
+        if self.mode == 'manualreduction':
+
+            show = not ((self.img_handle.input_type == 'dfn')
+                or ((self.img_handle.input_type == 'images') and self.img_handle.single_image_mode))
+
+            self.image_navigation_slider.setVisible(show)
+            self.image_navigation_label.setVisible(show)
+
+            if show:
+                last_frame = self.img_handle.total_frames - 1
+
+                self.image_navigation_slider.blockSignals(True)
+                self.image_navigation_slider.setRange(0, last_frame)
+                self.image_navigation_slider.setValue(self.img.getFrame())
+                self.image_navigation_slider.blockSignals(False)
+
+                self.image_navigation_label.setText(f'Frame: {self.img.getFrame()} / {last_frame}')
+
+            return
+
         # Only update if we have a multi-image handle with ff_list
         if not hasattr(self.img_handle, 'ff_list'):
             self.image_navigation_slider.hide()
@@ -9257,7 +9289,7 @@ class PlateTool(QtWidgets.QMainWindow):
         current_index = self.img_handle.current_ff_index
 
         self.image_navigation_slider.blockSignals(True)
-        self.image_navigation_slider.setMaximum(total_images)
+        self.image_navigation_slider.setRange(1, total_images)
         self.image_navigation_slider.setValue(current_index + 1)  # 1-indexed display
         self.image_navigation_slider.blockSignals(False)
 
