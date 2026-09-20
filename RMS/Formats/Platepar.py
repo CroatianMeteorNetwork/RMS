@@ -2382,16 +2382,28 @@ class Platepar(object):
 
         return fmt
 
-    def updateRefAltAz(self):
-        """Update the reference apparent azimuth and altitude from the reference RA and Dec.
+    def computeRefAltAz(self):
+        """Apparent azimuth and altitude (deg) of the reference pointing, from RA_d/dec_d. No side effects.
 
-        RA_d/dec_d are true-of-date coordinates (the kernel precesses them to J2000 before comparing with the
-        catalog, so that is the frame the fit defines them in), so they go to alt/az without any precession.
+        RA_d/dec_d are the true (unrefracted) equatorial coordinates of the reference point in the epoch of
+        date of the platepar JD: pointingCorrection shifts them by sidereal time and precesses them to J2000
+        itself, so that is the frame the star fit defines them in. They are therefore converted without any
+        precession; the J2000 converters would put the centre ~20 arcmin (the precession since 2000) away
+        from where the camera points.
+
+        Return:
+            (az_centre, alt_centre): [tuple of floats] Apparent azimuth (+E of N) and altitude (deg).
         """
 
-        self.az_centre, self.alt_centre = trueOfDateRaDec2ApparentAltAz(
+        return trueOfDateRaDec2ApparentAltAz(
             self.RA_d, self.dec_d, self.JD, self.lat, self.lon, refraction=self.refraction
         )
+
+    def updateRefAltAz(self):
+        """Update the reference apparent azimuth and altitude from the reference RA and Dec (see
+        computeRefAltAz for the epoch convention), and the rotation wrt horizon."""
+
+        self.az_centre, self.alt_centre = self.computeRefAltAz()
 
         # Update the rotation wrt horizon
         self.rotation_from_horiz = RMS.Astrometry.ApplyAstrometry.rotationWrtHorizon(self)
@@ -2439,9 +2451,7 @@ class Platepar(object):
     def __repr__(self):
 
         # Compute alt/az pointing
-        azim, elev = trueOfDateRaDec2ApparentAltAz(
-            self.RA_d, self.dec_d, self.JD, self.lat, self.lon, refraction=self.refraction
-        )
+        azim, elev = self.computeRefAltAz()
 
         out_str = "Platepar\n"
         out_str += "--------\n"

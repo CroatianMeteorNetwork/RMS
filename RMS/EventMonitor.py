@@ -61,8 +61,7 @@ import RMS.ConfigReader as cr
 import json
 
 from RMS.Formats.CALSTARS import readCALSTARS
-from RMS.Astrometry.Conversions import datetime2JD, geo2Cartesian, altAz2RADec, vectNorm, raDec2Vector, raDec2AltAz, \
-    trueOfDateRaDec2ApparentAltAz
+from RMS.Astrometry.Conversions import datetime2JD, geo2Cartesian, altAz2RADec, vectNorm, raDec2Vector, raDec2AltAz
 from RMS.Astrometry.Conversions import latLonAlt2ECEF, AER2LatLonAlt, AEH2Range, ECEF2AltAz, ecef2LatLonAlt, jd2Date
 from RMS.Astrometry.ApplyAstrometry import raDecToXYPP
 from RMS.Logger import getLogger, getLoggingQueue, initChildProcess
@@ -4297,8 +4296,8 @@ def platepar2AltAz(rp):
 
     """
 
-    # RA_d/dec_d are true-of-date coordinates, so no precession is applied
-    return trueOfDateRaDec2ApparentAltAz(rp.RA_d, rp.dec_d, rp.JD, rp.lat, rp.lon, refraction=rp.refraction)
+    # RA_d/dec_d are epoch-of-date coordinates, see Platepar.computeRefAltAz
+    return np.array(rp.computeRefAltAz())
 
 def angDif(a1, a2):
 
