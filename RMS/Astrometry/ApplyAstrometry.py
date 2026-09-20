@@ -58,6 +58,7 @@ from RMS.Routines.SphericalPolygonCheck import sphericalPolygonCheck
 import pyximport
 pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 from RMS.Astrometry.CyFunctions import (cyraDecToXY, cyTrueRaDec2ApparentAltAz,
+                                        cyTrueRaDec2ApparentAltAz_vect,
                                         cyXYToRADec,
                                         eqRefractionApparentToTrue, eqRefractionTrueToApparent,
                                         refractionScale,
@@ -1302,28 +1303,14 @@ def xyHt2Geo(platepar, x, y, h):
         measurement=False # Disables refraction correction
         )
         
-    # Iterate through the altitudes and azimuths and compute the geo coordinates
-    lat_arr = np.zeros_like(ra_arr)
-    lon_arr = np.zeros_like(ra_arr)
+    # Apparent alt/az of every pixel, without refraction (the plate is in the ground representation)
+    azim_arr, elev_arr = cyTrueRaDec2ApparentAltAz_vect(np.radians(ra_arr), np.radians(dec_arr), \
+        np.asarray(jd_arr, dtype=np.float64), np.radians(platepar.lat), np.radians(platepar.lon), False)
 
-    for i in range(len(ra_arr)):
+    # Project every line of sight onto the given height, solved on the WGS84 ellipsoid
+    lat_arr, lon_arr = AEGeoidH2LatLonAlt(np.degrees(azim_arr), np.degrees(elev_arr), h, \
+        platepar.lat, platepar.lon, platepar.elev)
 
-        # Compute the apparent alt/az
-        az, elev = cyTrueRaDec2ApparentAltAz(
-            np.radians(ra_arr[i]), np.radians(dec_arr[i]), jd_arr[i], \
-            np.radians(platepar.lat), np.radians(platepar.lon), 
-            False # Disable refraction correction
-            )
-
-        # Convert the apparent alt/az to geo coordinates
-        lat, lon = AEGeoidH2LatLonAlt(
-            np.degrees(az), np.degrees(elev), h[i], 
-            platepar.lat, platepar.lon, platepar.elev
-            )
-        
-        lat_arr[i] = lat
-        lon_arr[i] = lon
-    
     return lat_arr, lon_arr
 
 

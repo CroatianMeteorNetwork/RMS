@@ -347,22 +347,22 @@ def latLonAlt2ECEF(lat, lon, h):
     """ Convert geographical coordinates to Earth centered - Earth fixed coordinates.
 
     Arguments:
-        lat: [float] latitude in radians (+north)
-        lon: [float] longitude in radians (+east)
-        h: [float] elevation in meters (WGS84)
+        lat: [float or ndarray] latitude in radians (+north)
+        lon: [float or ndarray] longitude in radians (+east)
+        h: [float or ndarray] elevation in meters (WGS84)
 
     Return:
-        (x, y, z): [tuple of floats] ECEF coordinates
+        (x, y, z): [tuple of floats or ndarrays] ECEF coordinates
 
     """
 
     # Get distance from Earth centre to the position given by geographical coordinates, in WGS84
-    N = EARTH.EQUATORIAL_RADIUS/math.sqrt(1.0 - (EARTH.E**2)*math.sin(lat)**2)
+    N = EARTH.EQUATORIAL_RADIUS/np.sqrt(1.0 - (EARTH.E**2)*np.sin(lat)**2)
 
     # Calculate ECEF coordinates
-    ecef_x = (N + h)*math.cos(lat)*math.cos(lon)
-    ecef_y = (N + h)*math.cos(lat)*math.sin(lon)
-    ecef_z = ((1 - EARTH.E**2)*N + h)*math.sin(lat)
+    ecef_x = (N + h)*np.cos(lat)*np.cos(lon)
+    ecef_y = (N + h)*np.cos(lat)*np.sin(lon)
+    ecef_z = ((1 - EARTH.E**2)*N + h)*np.sin(lat)
 
     return ecef_x, ecef_y, ecef_z
 
@@ -413,14 +413,19 @@ def ecef2LatLonAlt(x, y, z):
         elevation).
 
     Arguments:
-        x: [float] ECEF x coordinate
-        y: [float] ECEF y coordinate
-        z: [float] ECEF z coordinate
+        x: [float or ndarray] ECEF x coordinate
+        y: [float or ndarray] ECEF y coordinate
+        z: [float or ndarray] ECEF z coordinate
 
     Return:
-        (lat, lon, alt): [tuple of floats] latitude and longitude in radians, WGS84 elevation in meters
+        (lat, lon, alt): [tuple of floats or ndarrays] latitude and longitude in radians, WGS84 elevation
+            in meters
 
     """
+
+    scalar_input = (np.ndim(x) == 0) and (np.ndim(y) == 0) and (np.ndim(z) == 0)
+    x, y, z = np.asarray(x, dtype=np.float64), np.asarray(y, dtype=np.float64), \
+        np.asarray(z, dtype=np.float64)
 
     # Calculate the polar eccentricity
     ep = np.sqrt((EARTH.EQUATORIAL_RADIUS**2 - EARTH.POLAR_RADIUS**2)/(EARTH.POLAR_RADIUS**2))
@@ -437,19 +442,18 @@ def ecef2LatLonAlt(x, y, z):
         p - (EARTH.E**2)*EARTH.EQUATORIAL_RADIUS*np.cos(theta)**3)
 
     # Get distance from Earth centre to the position given by geographical coordinates, in WGS84
-    N = EARTH.EQUATORIAL_RADIUS/math.sqrt(1.0 - (EARTH.E**2)*math.sin(lat)**2)
+    N = EARTH.EQUATORIAL_RADIUS/np.sqrt(1.0 - (EARTH.E**2)*np.sin(lat)**2)
 
-    
-    # Calculate the height in meters
 
-    # Correct for numerical instability in altitude near exact poles (and make sure cos(lat) is not 0!)
-    if((np.abs(x) < 1000) and (np.abs(y) < 1000)):
-        alt = np.abs(z) - EARTH.POLAR_RADIUS
+    # Calculate the height in meters. Near the exact poles cos(lat) vanishes, so the height is taken
+    #   from the polar axis there instead.
+    near_pole = (np.abs(x) < 1000) & (np.abs(y) < 1000)
 
-    else:
-        # Calculate altitude anywhere else
-        alt = p/np.cos(lat) - N
+    with np.errstate(divide='ignore', invalid='ignore'):
+        alt = np.where(near_pole, np.abs(z) - EARTH.POLAR_RADIUS, p/np.cos(lat) - N)
 
+    if scalar_input:
+        return float(lat), float(lon), float(alt)
 
     return lat, lon, alt
 
@@ -657,21 +661,22 @@ def AEH2Range(azim, elev, h, lat, lon, alt, accurate=False):
         that has the specified height above the ground.
 
     Arguments:
-        azim: [float] Azimuth (+E of due N) in degrees.
-        elev: [float] Elevation in degrees.
-        h: [float] Height of the point on the line of sight (meters).
+        azim: [float or ndarray] Azimuth (+E of due N) in degrees.
+        elev: [float or ndarray] Elevation in degrees.
+        h: [float or ndarray] Height of the point on the line of sight (meters).
         lat: [float] Latitude of observer in degrees.
         lon: [float] Longitude of observer in degrees.
         alt: [float] Altitude of observer in meters.
 
     Keyword arguments:
-        accurate: [bool] Solve for the range on the WGS84 ellipsoid instead of using the analytical
-            approximation, which is accurate to about +/- 10 m for a target above the observer. False by
-            default. The approximation also picks the wrong intersection for a target below the observer,
-            so this has to be set for a target that the camera looks down at.
+        accurate: [bool] Solve for the range on the WGS84 ellipsoid (see rangeToHeightWGS84) instead of
+            using the analytical approximation, which is accurate to about +/- 10 m for a target above
+            the observer. False by default. The approximation also picks the wrong intersection for a
+            target below the observer, so this has to be set for a target that the camera looks down at.
 
     Return:
-        r: [float] Range to point in meters. NaN if the line of sight never reaches the given height.
+        r: [float or ndarray] Range to point in meters. With accurate=True, NaN if the line of sight
+            never reaches the given height.
 
     """
 
@@ -700,54 +705,111 @@ def AEH2Range(azim, elev, h, lat, lon, alt, accurate=False):
     #   observer, where the law of sines above returns the far intersection instead of the near one
     if accurate:
 
-        # Observer position and the unit line of sight, both in ECEF
-        obs = np.array(latLonAlt2ECEF(np.radians(lat), np.radians(lon), alt))
-        los = np.array(AER2ECEF(azim, elev, 1.0, lat, lon, alt)) - obs
+        r = rangeToHeightWGS84(azim, elev, h, lat, lon, alt)
 
-        # Geocentric distances of the observer and of the target, the latter through the Earth radius
-        #   under the observer. Only the starting guess needs this, the iteration below works on the
-        #   ellipsoid itself.
-        rs = np.sqrt(np.dot(obs, obs))
-        rm = (rs - alt) + h
+        # Scalar in, scalar out
+        if (np.ndim(azim) == 0) and (np.ndim(elev) == 0) and (np.ndim(h) == 0):
+            return float(r[0])
 
-        # The ray meets the sphere of radius rm where r**2 + 2*r*(obs . los) + rs**2 - rm**2 = 0. For a
-        #   target above the observer only one root is in front of the camera; for one below there are two
-        #   and the near one is wanted.
-        b = np.dot(obs, los)
-        disc = b*b + rm*rm - rs*rs
 
-        # The line of sight never reaches that height
-        if disc < 0:
-            return np.nan
+    return r
 
-        if rm >= rs:
-            r = -b + np.sqrt(disc)
 
-        else:
-            r = -b - np.sqrt(disc)
 
-        if r <= 0:
-            return np.nan
+def rangeToHeightWGS84(azim, elev, h, lat, lon, alt, max_iter=20, height_tol=1.0e-3):
+    """ Range along a line of sight at which it reaches a given WGS84 height, solved on the ellipsoid.
+        Vectorized over the line of sight and the height; the observer is fixed.
 
-        # Refine on the WGS84 ellipsoid. The height along the line of sight grows with the range at the
-        #   rate of the component of the line of sight along the local vertical, which is the derivative
-        #   Newton's method needs.
-        for _ in range(20):
+        The start is the intersection with the sphere osculating the ellipsoid at the observer's
+        location, in the azimuth of the line of sight, which is exact to first order and correctly
+        classifies grazing rays: a geocentric sphere would not, since the geocentric vertical is up to
+        0.19 deg off the geodetic one that the elevation is measured from. For a target below the
+        observer the near crossing is taken, for one above the far one. Newton's method on the
+        ellipsoid then refines it, using the component of the line of sight along the local vertical
+        as the derivative.
 
-            lat_p, lon_p, h_p = ecef2LatLonAlt(*(obs + r*los))
-            up = np.array([np.cos(lat_p)*np.cos(lon_p), np.cos(lat_p)*np.sin(lon_p), np.sin(lat_p)])
-            slope = np.dot(los, up)
+    Arguments:
+        azim: [float or ndarray] Azimuth (+E of due N) in degrees.
+        elev: [float or ndarray] Elevation in degrees.
+        h: [float or ndarray] Height of the point on the line of sight (meters, WGS84).
+        lat: [float] Latitude of observer in degrees.
+        lon: [float] Longitude of observer in degrees.
+        alt: [float] Altitude of observer in meters (WGS84).
 
-            # The ray is grazing, so the height barely changes with the range and Newton cannot step
-            if abs(slope) < 1e-9:
-                break
+    Keyword arguments:
+        max_iter: [int] Maximum number of Newton steps. 20 by default, two or three are typical.
+        height_tol: [float] Largest accepted miss of the requested height (meters). 1 mm by default.
 
-            dr = (h - h_p)/slope
-            r += dr
+    Return:
+        r: [ndarray] Range to the point in meters, NaN where the line of sight never reaches the
+            height, or where the solution did not converge to within height_tol.
 
-            if abs(dr) < 1e-6:
-                break
+    """
 
+    azim, elev, h = np.broadcast_arrays(np.atleast_1d(azim).astype(np.float64), \
+        np.atleast_1d(elev).astype(np.float64), np.atleast_1d(h).astype(np.float64))
+
+    lat_rad, lon_rad = np.radians(lat), np.radians(lon)
+
+    # Observer position and the unit line of sight, both in ECEF
+    obs = np.array(latLonAlt2ECEF(lat_rad, lon_rad, alt), dtype=np.float64)
+    los = np.stack(AER2ECEF(azim, elev, 1.0, lat, lon, alt), axis=-1) - obs
+
+    # Radius of curvature of the ellipsoid at the observer in the azimuth of the line of sight (Euler's
+    #   formula from the meridional and prime vertical radii)
+    sin2_lat = np.sin(lat_rad)**2
+    radius_n = EARTH.EQUATORIAL_RADIUS/np.sqrt(1.0 - (EARTH.E**2)*sin2_lat)
+    radius_m = EARTH.EQUATORIAL_RADIUS*(1.0 - EARTH.E**2)/(1.0 - (EARTH.E**2)*sin2_lat)**1.5
+    azim_rad = np.radians(azim)
+    radius = 1.0/(np.cos(azim_rad)**2/radius_m + np.sin(azim_rad)**2/radius_n)
+
+    # Distances of the observer and of the target from the centre of the osculating sphere
+    rs = radius + alt
+    rm = radius + h
+
+    # The ray meets the sphere of radius rm where r**2 + 2*b*r + rs**2 - rm**2 = 0, with b the component
+    #   of the observer's position along the line of sight, rs*sin(elev). For a target above the
+    #   observer only one root is in front of the camera; for one below there are two and the near one
+    #   is wanted. A negative discriminant means the ray never gets down to that height.
+    b = rs*np.sin(np.radians(elev))
+    disc = b*b + rm*rm - rs*rs
+
+    reachable = disc >= 0
+    sqrt_disc = np.sqrt(np.where(reachable, disc, 0.0))
+    r = np.where(rm >= rs, -b + sqrt_disc, -b - sqrt_disc)
+    r = np.where(reachable & (r > 0), r, np.nan)
+
+    # Refine on the WGS84 ellipsoid. The height along the line of sight grows with the range at the
+    #   rate of the component of the line of sight along the local vertical, which is the derivative
+    #   Newton's method needs. A grazing ray has a vanishing derivative, so it is left where it is and
+    #   caught by the height check below.
+    active = np.isfinite(r)
+
+    for _ in range(max_iter):
+
+        if not np.any(active):
+            break
+
+        idx = np.flatnonzero(active)
+        point = obs + r[idx, None]*los[idx]
+        lat_p, lon_p, h_p = ecef2LatLonAlt(point[:, 0], point[:, 1], point[:, 2])
+        up = np.stack([np.cos(lat_p)*np.cos(lon_p), np.cos(lat_p)*np.sin(lon_p), np.sin(lat_p)], \
+            axis=-1)
+        slope = np.sum(los[idx]*up, axis=1)
+
+        steep = np.abs(slope) > 1.0e-9
+        dr = np.where(steep, (h[idx] - h_p)/np.where(steep, slope, 1.0), 0.0)
+        r[idx] += dr
+
+        active[idx[np.abs(dr) < 1.0e-6]] = False
+
+    # Only accept a range in front of the camera that actually lands on the requested height
+    with np.errstate(invalid='ignore'):
+        point = obs + r[:, None]*los
+        _, _, h_p = ecef2LatLonAlt(point[:, 0], point[:, 1], point[:, 2])
+        good = np.isfinite(r) & (r > 0) & (np.abs(h_p - h) < height_tol)
+
+    r[~good] = np.nan
 
     return r
 
@@ -811,33 +873,42 @@ def AEH2LatLonAlt(azim, elev, h, lat, lon, alt):
 
 def AEGeoidH2LatLonAlt(azim, elev, h, lat, lon, alt):
     """ Given an azimuth and altitude, and Height above Geoid compute lat, lon, and lat to a point.
+        Vectorized over the line of sight and the height; the observer is fixed.
 
     Arguments:
-        azim: [float] Azimuth (+E of due N) in degrees.
-        elev: [float] Elevation in degrees.
-        h: [float] Height of the point above the geoid (meters).
+        azim: [float or ndarray] Azimuth (+E of due N) in degrees.
+        elev: [float or ndarray] Elevation in degrees.
+        h: [float or ndarray] Height of the point above the geoid (meters).
         lat: [float] Latitude of observer in degrees.
         lon: [float] Longitude of observer in degrees.
         alt: [float] Altitude of observer in meters.
 
     Return:
-        (lat, lon): [tuple of floats] latitude and longitude in degrees
+        (lat, lon): [tuple of floats or ndarrays] latitude and longitude in degrees. NaN where the line
+            of sight never reaches the given height.
 
     """
+
+    scalar_input = (np.ndim(azim) == 0) and (np.ndim(elev) == 0) and (np.ndim(h) == 0)
+    azim, elev, h = np.broadcast_arrays(np.atleast_1d(azim).astype(np.float64), \
+        np.atleast_1d(elev).astype(np.float64), np.atleast_1d(h).astype(np.float64))
 
     # Range at which the line of sight is at the given height above the ellipsoid. Solved on the
     #   ellipsoid rather than taken as (h - alt)/sin(elev): that flat-Earth range ignores the Earth
     #   curving away under the ray, which puts a target at 100 km and 5 deg elevation at 200 km instead,
     #   and it cannot be inverted by geoHt2XY(), which places the target at exactly h.
-    r = AEH2Range(azim, elev, h, lat, lon, alt, accurate=True)
+    r = rangeToHeightWGS84(azim, elev, h, lat, lon, alt)
 
-    if not np.isfinite(r):
-        return np.nan, np.nan
+    # Convert the target's ECEF coordinates to geodetic coordinates (NaN ranges stay NaN)
+    with np.errstate(invalid='ignore'):
+        target_lat, target_lon, _ = ecef2LatLonAlt(*AER2ECEF(azim, elev, r, lat, lon, alt))
 
-    # Convert the target's ECEF coordinates to geodetic coordinates
-    target_lat, target_lon, _ = ecef2LatLonAlt(*AER2ECEF(azim, elev, r, lat, lon, alt))
+    target_lat, target_lon = np.degrees(target_lat), np.degrees(target_lon)
 
-    return np.degrees(target_lat), np.degrees(target_lon)
+    if scalar_input:
+        return float(target_lat[0]), float(target_lon[0])
+
+    return target_lat, target_lon
 
 
 def cartesian2Geo(julian_date, x, y, z):

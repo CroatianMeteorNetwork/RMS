@@ -11,7 +11,8 @@ np = pytest.importorskip("numpy")
 from RMS.Formats.Platepar import Platepar
 from RMS.Misc import getRmsRootDir
 from RMS.Astrometry.ApplyAstrometry import xyHt2Geo, geoHt2XY
-from RMS.Astrometry.Conversions import AEH2Range, AEGeoidH2LatLonAlt, AER2ECEF, ecef2LatLonAlt
+from RMS.Astrometry.Conversions import AEH2Range, AEGeoidH2LatLonAlt, AER2ECEF, ecef2LatLonAlt, \
+    latLonAlt2ECEF
 
 import os
 
@@ -120,3 +121,87 @@ def test_ground_projection_round_trips(target_height):
     for i in range(len(x)):
         x_back, y_back = geoHt2XY(pp, lat_t[i], lon_t[i], target_height)
         assert np.hypot(x_back[0] - x[i], y_back[0] - y[i]) < 0.5, (x[i], y[i], x_back, y_back)
+
+
+@pytest.mark.parametrize("elev, h", [
+    (-0.05, ALT - 1.0), (-0.3, ALT + 1.0), (-0.3, ALT - 50.0), (-0.1, ALT - 5.0), (0.1, ALT + 2.0),
+])
+def test_grazing_rays_land_on_the_requested_height(elev, h):
+    """ Rays within a fraction of a degree of the horizon, aimed at heights within metres of the station.
+        A start taken from a geocentric sphere misclassifies these, since the geocentric vertical is up to
+        0.19 deg off the geodetic one the elevation is measured from, and returned ranges that were
+        negative or did not reach the height. """
+
+    r = AEH2Range(180.0, elev, h, LAT, LON, ALT, accurate=True)
+
+    assert np.isfinite(r)
+    assert r > 0
+    assert abs(_heightAtRange(180.0, elev, r) - h) < 1.0e-3
+
+
+@pytest.mark.parametrize("elev, h", [
+    (0.0, ALT - 1.0), (0.05, ALT - 1.0), (-0.1, ALT - 10.0), (-0.3, ALT - 100.0),
+])
+def test_grazing_rays_that_never_reach_the_height_return_nan(elev, h):
+    """ A horizontal ray only climbs away from the ellipsoid, and a ray below the horizon bottoms out at
+        about R*sin(elev)**2/2 below the station, 9.7 m at -0.1 deg and 87 m at -0.3 deg, so none of
+        these heights is ever reached. """
+
+    assert np.isnan(AEH2Range(180.0, elev, h, LAT, LON, ALT, accurate=True))
+
+
+def test_range_is_never_negative_or_off_the_height():
+    """ Whatever comes back finite has to be in front of the camera and on the requested height, over a
+        grid straddling the horizon and the station height. """
+
+    elev, dh = np.meshgrid(np.arange(-0.5, 0.51, 0.1), np.arange(-200.0, 201.0, 50.0))
+    elev, dh = elev.ravel(), dh.ravel()
+
+    r = AEH2Range(np.full(len(elev), 180.0), elev, ALT + dh, LAT, LON, ALT, accurate=True)
+    finite = np.isfinite(r)
+
+    assert finite.any()
+    assert np.all(r[finite] > 0)
+
+    for i in np.flatnonzero(finite):
+        assert abs(_heightAtRange(180.0, elev[i], r[i]) - (ALT + dh[i])) < 1.0e-3
+
+
+def test_vectorized_range_and_geoid_conversion_match_the_scalar_calls():
+    """ The array form is what xyHt2Geo() uses; it has to agree with one call per point. """
+
+    azim = np.array([0.0, 90.0, 180.0, 270.0, 45.0, 200.0])
+    elev = np.array([60.0, 20.0, 5.0, -5.0, 2.0, 30.0])
+    h = np.array([100.0e3, ALT + 3000.0, 100.0e3, 1400.0, ALT + 3000.0, 30.0e3])
+
+    r = AEH2Range(azim, elev, h, LAT, LON, ALT, accurate=True)
+    lat_t, lon_t = AEGeoidH2LatLonAlt(azim, elev, h, LAT, LON, ALT)
+
+    assert r.shape == (6,) and lat_t.shape == (6,)
+
+    for i in range(6):
+        r_scalar = AEH2Range(azim[i], elev[i], h[i], LAT, LON, ALT, accurate=True)
+        assert r[i] == pytest.approx(r_scalar, abs=1.0e-6)
+        lat_s, lon_s = AEGeoidH2LatLonAlt(azim[i], elev[i], h[i], LAT, LON, ALT)
+        assert isinstance(lat_s, float)
+        assert lat_t[i] == pytest.approx(lat_s, abs=1.0e-12)
+        assert lon_t[i] == pytest.approx(lon_s, abs=1.0e-12)
+
+
+def test_ecef_conversions_accept_arrays():
+    """ ecef2LatLonAlt() and latLonAlt2ECEF() are used on whole pixel arrays by the ground projection. """
+
+    lat = np.radians(np.array([LAT, 0.0, -60.0, 89.9999]))
+    lon = np.radians(np.array([LON, 10.0, 170.0, 0.0]))
+    h = np.array([ALT, 0.0, 12000.0, 100.0])
+
+    x, y, z = latLonAlt2ECEF(lat, lon, h)
+    lat_b, lon_b, h_b = ecef2LatLonAlt(x, y, z)
+
+    assert np.allclose(lat_b, lat, atol=1.0e-12)
+    assert np.allclose(lon_b, lon, atol=1.0e-12)
+    assert np.allclose(h_b, h, atol=1.0e-5)
+
+    # Scalars still come back as scalars
+    x0, y0, z0 = latLonAlt2ECEF(float(lat[0]), float(lon[0]), float(h[0]))
+    assert all(isinstance(v, float) for v in ecef2LatLonAlt(float(x0), float(y0), float(z0)))
