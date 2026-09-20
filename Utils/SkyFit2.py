@@ -2919,6 +2919,23 @@ class PlateTool(QtWidgets.QMainWindow):
         self.status_bar.setFont(status_font)
         self.setStatusBar(self.status_bar)
 
+        # Image navigation slider (like a video timeline). Added before the buttons so they stay anchored
+        #   to the right edge and don't shift when the slider/label show, hide or resize.
+        self.image_navigation_label = QtWidgets.QLabel('Image: 1 / 1')
+        self.image_navigation_label.setMinimumWidth(80)
+        self.status_bar.addPermanentWidget(self.image_navigation_label)
+
+        self.image_navigation_slider = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
+        self.image_navigation_slider.setMinimum(1)
+        self.image_navigation_slider.setMaximum(1)
+        self.image_navigation_slider.setValue(1)
+        self.image_navigation_slider.setMinimumWidth(200)
+        self.image_navigation_slider.setMaximumWidth(300)
+        self.image_navigation_slider.setToolTip("Drag or click to navigate through images (frames in manual "
+                                                "reduction)")
+        self.image_navigation_slider.valueChanged.connect(self.jumpToImage)
+        self.status_bar.addPermanentWidget(self.image_navigation_slider)
+
         # Stop button for long-running operations (validation, night refit, redetect-all,
         # astrometry.net solving, NN fits).
         # Hidden unless a cancellable operation is running; the operations pump the Qt event
@@ -2942,22 +2959,6 @@ class PlateTool(QtWidgets.QMainWindow):
         self.manualreduction_button.pressed.connect(lambda: self.changeMode('manualreduction'))
         self.status_bar.addPermanentWidget(self.skyfit_button)
         self.status_bar.addPermanentWidget(self.manualreduction_button)
-
-        # Image navigation slider (like a video timeline)
-        self.image_navigation_label = QtWidgets.QLabel('Image: 1 / 1')
-        self.image_navigation_label.setMinimumWidth(80)
-        self.status_bar.addPermanentWidget(self.image_navigation_label)
-
-        self.image_navigation_slider = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
-        self.image_navigation_slider.setMinimum(1)
-        self.image_navigation_slider.setMaximum(1)
-        self.image_navigation_slider.setValue(1)
-        self.image_navigation_slider.setMinimumWidth(200)
-        self.image_navigation_slider.setMaximumWidth(300)
-        self.image_navigation_slider.setToolTip("Drag or click to navigate through images (frames in manual "
-                                                "reduction)")
-        self.image_navigation_slider.valueChanged.connect(self.jumpToImage)
-        self.status_bar.addPermanentWidget(self.image_navigation_slider)
 
         ###################################################################################################
         # CENTRAL WIDGET (DISPLAY)
