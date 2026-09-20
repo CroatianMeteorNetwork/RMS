@@ -2849,17 +2849,14 @@ class PlateTool(QtWidgets.QMainWindow):
         self.setStatusBar(self.status_bar)
 
         # Image navigation slider (like a video timeline). Added before the buttons so they stay anchored
-        #   to the right edge and don't shift when the slider/label show, hide or resize.
-        self.image_navigation_label = QtWidgets.QLabel('Image: 1 / 1')
-        self.image_navigation_label.setMinimumWidth(80)
-        self.status_bar.addPermanentWidget(self.image_navigation_label)
-
+        #   to the right edge and don't shift when the slider/label show, hide or resize. The label comes
+        #   after the slider so it's not next to the mouse-over coordinates text.
         self.image_navigation_slider = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
         self.image_navigation_slider.setMinimum(1)
         self.image_navigation_slider.setMaximum(1)
         self.image_navigation_slider.setValue(1)
-        self.image_navigation_slider.setMinimumWidth(200)
-        self.image_navigation_slider.setMaximumWidth(300)
+        self.image_navigation_slider.setMinimumWidth(220)
+        self.image_navigation_slider.setMaximumWidth(330)
         self.image_navigation_slider.setToolTip("Drag or click to navigate through images (frames in manual "
                                                 "reduction)")
         # Shrink the handle so it fits within the status bar height without being clipped. A background is
@@ -2869,6 +2866,10 @@ class PlateTool(QtWidgets.QMainWindow):
             "background: palette(button); border: 1px solid palette(dark); }")
         self.image_navigation_slider.valueChanged.connect(self.jumpToImage)
         self.status_bar.addPermanentWidget(self.image_navigation_slider)
+
+        self.image_navigation_label = QtWidgets.QLabel('Image: 1 / 1')
+        self.image_navigation_label.setMinimumWidth(80)
+        self.status_bar.addPermanentWidget(self.image_navigation_label)
 
         self.file_manager_button = QtWidgets.QPushButton('File Manager')
         self.file_manager_button.pressed.connect(self.showCalibrationFilesDialog)
@@ -4149,7 +4150,7 @@ class PlateTool(QtWidgets.QMainWindow):
             text_str += self.img_type_flag + '\n'
             text_str += "Time  = {:s}\n".format(
                 self.img_handle.currentFrameTime(dt_obj=True).strftime("%Y/%m/%d %H:%M:%S.%f")[:-3])
-            text_str += 'Frame = {:d}\n'.format(self.img.getFrame())
+            text_str += 'Frame = {:d} / {:d}\n'.format(self.img.getFrame(), self.img_handle.total_frames - 1)
             if self.img_handle.input_type == "ff":
                 if self.use_fr_files:
                     text_str += 'Line = {:d}\n'.format(self.img_handle.current_line)
@@ -9261,14 +9262,15 @@ class PlateTool(QtWidgets.QMainWindow):
             return
 
         # In manual reduction the slider moves through the frames. DFN and single images only allow moving
-        #   next to the picks, so they get no slider
+        #   next to the picks, so they get no slider. The frame number is already on the floating info
+        #   panel (updateLeftLabels), so the label next to the slider is not needed here.
         if self.mode == 'manualreduction':
 
             show = not ((self.img_handle.input_type == 'dfn')
                 or ((self.img_handle.input_type == 'images') and self.img_handle.single_image_mode))
 
             self.image_navigation_slider.setVisible(show)
-            self.image_navigation_label.setVisible(show)
+            self.image_navigation_label.hide()
 
             if show:
                 last_frame = self.img_handle.total_frames - 1
@@ -9277,8 +9279,6 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.image_navigation_slider.setRange(0, last_frame)
                 self.image_navigation_slider.setValue(self.img.getFrame())
                 self.image_navigation_slider.blockSignals(False)
-
-                self.setNavigationLabel('Frame', self.img.getFrame(), last_frame)
 
             return
 
