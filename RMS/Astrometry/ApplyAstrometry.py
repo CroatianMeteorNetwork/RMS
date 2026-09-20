@@ -39,7 +39,7 @@ import numpy as np
 import RMS.Formats.Platepar
 import scipy.optimize
 from RMS.Astrometry.AtmosphericExtinction import atmosphericExtinctionCorrection
-from RMS.Astrometry.Conversions import (J2000_JD, 
+from RMS.Astrometry.Conversions import (J2000_JD, trueOfDateRaDec2J2000,
                                         date2JD, 
                                         jd2Date, 
                                         raDec2AltAz, 
@@ -1317,6 +1317,10 @@ def geoHt2RaDec(platepar, jd, lat, lon, h):
     """ Given geo coordinates of the target and a height of the target above sea level,
         compute equatorial coordinates of the target.
 
+        The direction is built in Earth-fixed geometry rotated by the apparent sidereal time, which is the
+        true equator and equinox of date; nutation and precession are then taken out so that the result is
+        an ordinary J2000 direction the plate can be given at the same jd.
+
     Arguments:
         platepar: [Platepar object]
         jd: [float] Julian date.
@@ -1325,19 +1329,22 @@ def geoHt2RaDec(platepar, jd, lat, lon, h):
         h: [float] elevation of the target in meters (WGS84).
 
     Return:
-        (ra, dec): [tuple of floats] Right ascension and declination in degrees
+        (ra, dec): [tuple of floats] Right ascension and declination in degrees (J2000)
 
     """
 
-    # Convert the target and camera coordinats into the ECI frame
+    # Compute the ECI coordinates of the target and the station
     vector_target = np.array(geo2Cartesian(lat, lon, h, jd))
     vector_station = np.array(geo2Cartesian(platepar.lat, platepar.lon, platepar.elev, jd))
 
     # Compute the pointing vector from the station to the target
     pointing_vector = vector_target - vector_station
 
-    # Convert the pointing vector to RA/Dec
+    # Compute the RA and Dec of the pointing vector (true of date)
     ra, dec = vector2RaDec(pointing_vector)
+
+    # To J2000
+    ra, dec = trueOfDateRaDec2J2000(ra, dec, jd)
 
     return ra, dec
 
@@ -1361,7 +1368,8 @@ def geoHt2XY(platepar, lat, lon, h):
     platepar = copy.deepcopy(platepar)
     platepar.refraction = False
 
-    ra, dec = geoHt2RaDec(platepar, J2000_JD.days, lat, lon, h)
+    # geoHt2RaDec returns J2000, so any time works; the plate's own reference time is the natural one
+    ra, dec = geoHt2RaDec(platepar, platepar.JD, lat, lon, h)
 
     # If Ra and Dec are not arrays, convert them to arrays
     if not isinstance(ra, np.ndarray):
@@ -1369,7 +1377,7 @@ def geoHt2XY(platepar, lat, lon, h):
         dec = np.array([dec])
 
     # Project the RA/Dec to the image
-    x, y = raDecToXYPP(ra, dec, J2000_JD.days, platepar)
+    x, y = raDecToXYPP(ra, dec, platepar.JD, platepar)
     
     return x, y
 
@@ -1482,14 +1490,14 @@ def geoHt2XYInsideFOV(platepar, lat_arr, lon_arr, h_att, side_sample=10):
 
 
     # Compute the polygon describing the edges of the FOV, with side_sample points on each side
-    _, _, ra_vert, dec_vert = fovEdgePolygon(platepar, J2000_JD.days, side_sample=side_sample)
+    _, _, ra_vert, dec_vert = fovEdgePolygon(platepar, platepar.JD, side_sample=side_sample)
 
     # Compute the ra, dec of the target
     ra_arr = []
     dec_arr = []
 
     for i in range(len(lat_arr)):
-        ra, dec = geoHt2RaDec(platepar, J2000_JD.days, lat_arr[i], lon_arr[i], h_att[i])
+        ra, dec = geoHt2RaDec(platepar, platepar.JD, lat_arr[i], lon_arr[i], h_att[i])
         ra_arr.append(ra)
         dec_arr.append(dec)
 
@@ -1514,7 +1522,7 @@ def geoHt2XYInsideFOV(platepar, lat_arr, lon_arr, h_att, side_sample=10):
         return np.array([]), np.array([]), inside_indices
     
     # Convert the points to image coordinates
-    x, y = raDecToXYPP(ra_inside, dec_inside, J2000_JD.days, platepar)
+    x, y = raDecToXYPP(ra_inside, dec_inside, platepar.JD, platepar)
 
     return x, y, inside_indices
 

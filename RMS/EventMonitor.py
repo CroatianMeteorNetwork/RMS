@@ -61,7 +61,8 @@ import RMS.ConfigReader as cr
 import json
 
 from RMS.Formats.CALSTARS import readCALSTARS
-from RMS.Astrometry.Conversions import datetime2JD, geo2Cartesian, altAz2RADec, vectNorm, raDec2Vector, raDec2AltAz
+from RMS.Astrometry.Conversions import datetime2JD, geo2Cartesian, altAz2RADec, vectNorm, raDec2Vector, raDec2AltAz, \
+    trueOfDateRaDec2ApparentAltAz
 from RMS.Astrometry.Conversions import latLonAlt2ECEF, AER2LatLonAlt, AEH2Range, ECEF2AltAz, ecef2LatLonAlt, jd2Date
 from RMS.Astrometry.ApplyAstrometry import raDecToXYPP
 from RMS.Logger import getLogger, getLoggingQueue, initChildProcess
@@ -80,7 +81,6 @@ from matplotlib.dates import DateFormatter
 # Import Cython functions
 import pyximport
 pyximport.install(setup_args={'include_dirs':[np.get_include()]})
-from RMS.Astrometry.CyFunctions import cyTrueRaDec2ApparentAltAz
 
 log = getLogger("rmslogger")
 EM_RAISE = False
@@ -4297,13 +4297,8 @@ def platepar2AltAz(rp):
 
     """
 
-    RA_d = np.radians(rp.RA_d)
-    dec_d = np.radians(rp.dec_d)
-    JD = rp.JD
-    lat = np.radians(rp.lat)
-    lon = np.radians(rp.lon)
-
-    return np.degrees(cyTrueRaDec2ApparentAltAz(RA_d, dec_d, JD, lat, lon))
+    # RA_d/dec_d are true-of-date coordinates, so no precession is applied
+    return trueOfDateRaDec2ApparentAltAz(rp.RA_d, rp.dec_d, rp.JD, rp.lat, rp.lon, refraction=rp.refraction)
 
 def angDif(a1, a2):
 
