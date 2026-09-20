@@ -181,6 +181,7 @@ from RMS.Astrometry.AtmosphericExtinction import atmosphericExtinctionCorrection
 from RMS.Astrometry.StarClasses import CatalogStar, GeoPoint, PlanetPoint, PairedStars
 from RMS.Astrometry.StarFilters import filterPhotometricOutliers, filterBlendedStars
 from RMS.Astrometry.Conversions import date2JD, JD2HourAngle, trueRaDec2ApparentAltAz, \
+    trueOfDateRaDec2ApparentAltAz, \
     apparentAltAz2TrueRADec, J2000_JD, jd2Date, datetime2JD, JD2LST, geo2Cartesian, vector2RaDec, raDec2Vector
 from RMS.Astrometry.AstrometryNet import astrometryNetSolve
 from RMS.Astrometry.ApplyRecalibrate import recalibrateFF
@@ -14608,7 +14609,7 @@ class PlateTool(QtWidgets.QMainWindow):
             ) = self.getFOVcentre()
 
             # Recalculate reference alt/az
-            self.platepar.az_centre, self.platepar.alt_centre = trueRaDec2ApparentAltAz(self.platepar.RA_d, \
+            self.platepar.az_centre, self.platepar.alt_centre = trueOfDateRaDec2ApparentAltAz(self.platepar.RA_d, \
                 self.platepar.dec_d, self.platepar.JD, self.platepar.lat, self.platepar.lon)
 
 
@@ -17328,7 +17329,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
         # Compute alt/az pointing
-        azim, elev = trueRaDec2ApparentAltAz(self.platepar.RA_d, self.platepar.dec_d, self.platepar.JD, \
+        azim, elev = trueOfDateRaDec2ApparentAltAz(self.platepar.RA_d, self.platepar.dec_d, self.platepar.JD, \
             self.platepar.lat, self.platepar.lon, refraction=False)
 
         # Compute FOV size
