@@ -16,7 +16,8 @@ from RMS.Misc import getRmsRootDir
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, geoHt2RaDec, geoHt2XY
 from RMS.Astrometry.Conversions import (date2JD, JD2HourAngle, latLonAlt2ECEF, trueOfDateRaDec2ApparentAltAz,
     apparentAltAz2TrueOfDateRaDec, trueOfDateRaDec2J2000, j2000RaDec2TrueOfDate)
-from RMS.Astrometry.CyFunctions import pointingCorrection, trueOfDateFromJ2000, cyraDec2AltAz
+from RMS.Astrometry.CyFunctions import pointingCorrection, trueOfDateFromJ2000, cyraDec2AltAz, \
+    refractionScale
 from RMS.EventMonitor import platepar2AltAz
 
 TEMPLATE = os.path.join(getRmsRootDir(), 'share', 'platepar_templates', 'template_generic_720p_4mm.cal')
@@ -62,8 +63,9 @@ def test_reference_alt_az_is_the_kernels_pointing(refraction):
     pp = _templatePlatepar(refraction)
     lat, lon = np.radians(pp.lat), np.radians(pp.lon)
 
+    # The kernel scales the refraction with the station height, as updateRefAltAz() does
     ra_k, dec_k, _ = pointingCorrection(pp.JD, lat, lon, np.radians(pp.Ho), pp.JD,
-        np.radians(pp.RA_d), np.radians(pp.dec_d), 0.0, refraction)
+        np.radians(pp.RA_d), np.radians(pp.dec_d), 0.0, refraction, refractionScale(pp.elev))
     ra_t, dec_t = trueOfDateFromJ2000(pp.JD, ra_k, dec_k)
     az_k, alt_k = np.degrees(cyraDec2AltAz(ra_t, dec_t, pp.JD, lat, lon))
 
