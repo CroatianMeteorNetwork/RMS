@@ -47,7 +47,8 @@ from RMS.GeoidHeightEGM96 import mslToWGS84Height, wgs84toMSLHeight
 import pyximport
 pyximport.install(setup_args={'include_dirs': [np.get_include()]})
 from RMS.Astrometry.CyFunctions import cyaltAz2RADec, cyraDec2AltAz, cyApparentAltAz2TrueRADec, \
-    cyApparentAltAz2TrueRADec_vect, cyTrueRaDec2ApparentAltAz, cyTrueRaDec2ApparentAltAz_vect, cyjd2GST
+    cyApparentAltAz2TrueRADec_vect, cyTrueRaDec2ApparentAltAz, cyTrueRaDec2ApparentAltAz_vect, cyjd2GST, \
+    trueOfDateFromJ2000, j2000FromTrueOfDate, pyRefractionTrueToApparent, pyRefractionApparentToTrue
 
 # Vectorize some functions
 cyaltAz2RADec_vect = np.vectorize(cyaltAz2RADec, excluded=["jd", "lat", "lon"])
@@ -1111,6 +1112,133 @@ def trueRaDec2ApparentAltAz(ra, dec, jd, lat, lon, refraction=True):
         raise TypeError("ra must be a number or np.ndarray, given: {}".format(type(ra)))
 
     return np.degrees(azim), np.degrees(elev)
+
+
+def _perPoint(func, *args):
+    """ Helper: apply a scalar (ra, dec)-style function to scalars or to arrays of the first two arguments,
+        returning floats for scalars and arrays otherwise. """
+
+    a, b = args[0], args[1]
+    rest = args[2:]
+
+    if np.ndim(a) == 0 and np.ndim(b) == 0:
+        return func(float(a), float(b), *rest)
+
+    a, b = np.broadcast_arrays(np.atleast_1d(a).astype(np.float64), np.atleast_1d(b).astype(np.float64))
+    out = np.array([func(float(x), float(y), *rest) for x, y in zip(a.ravel(), b.ravel())])
+
+    return out[:, 0].reshape(a.shape), out[:, 1].reshape(a.shape)
+
+
+def trueOfDateRaDec2ApparentAltAz(ra, dec, jd, lat, lon, refraction=True):
+    """ Convert a true-of-date right ascension and declination, such as the platepar reference pointing
+        RA_d/dec_d, to apparent azimuth and altitude. No precession or nutation is applied, only the hour
+        angle against the apparent sidereal time and, optionally, the refraction.
+
+        This is the conversion that matches the astrometric kernel: pointingCorrection takes RA_d/dec_d to
+        be true-of-date and precesses them to J2000 before comparing with the catalog, so the fit defines
+        them in that frame. Feeding them to trueRaDec2ApparentAltAz, which expects J2000, precesses them a
+        second time and lands 8-19 arcmin from the real pointing in 2026.
+
+    Arguments:
+        ra: [float or ndarray] Right ascension in degrees (true of date).
+        dec: [float or ndarray] Declination in degrees (true of date).
+        jd: [float] Julian date.
+        lat: [float] Latitude in degrees.
+        lon: [float] Longitude in degrees.
+
+    Keyword arguments:
+        refraction: [bool] Apply refraction correction. True by default.
+
+    Return:
+        (azim, elev): [tuple of floats or ndarrays] Azimuth (+east of due north) and apparent altitude in
+            degrees.
+
+    """
+
+    def one(ra_i, dec_i):
+
+        azim, elev = cyraDec2AltAz(np.radians(ra_i), np.radians(dec_i), jd, np.radians(lat), np.radians(lon))
+
+        if refraction:
+            elev = pyRefractionTrueToApparent(elev)
+
+        return np.degrees(azim), np.degrees(elev)
+
+    return _perPoint(one, ra, dec)
+
+
+def apparentAltAz2TrueOfDateRaDec(azim, elev, jd, lat, lon, refraction=True):
+    """ Inverse of trueOfDateRaDec2ApparentAltAz: apparent azimuth and altitude to a true-of-date right
+        ascension and declination, the frame of the platepar reference pointing RA_d/dec_d.
+
+    Arguments:
+        azim: [float or ndarray] Azimuth (+east of due north) in degrees.
+        elev: [float or ndarray] Apparent altitude in degrees.
+        jd: [float] Julian date.
+        lat: [float] Latitude in degrees.
+        lon: [float] Longitude in degrees.
+
+    Keyword arguments:
+        refraction: [bool] Remove the refraction first. True by default.
+
+    Return:
+        (ra, dec): [tuple of floats or ndarrays] Right ascension and declination in degrees (true of date).
+
+    """
+
+    def one(azim_i, elev_i):
+
+        elev_i = np.radians(elev_i)
+
+        if refraction:
+            elev_i = pyRefractionApparentToTrue(elev_i)
+
+        ra, dec = cyaltAz2RADec(np.radians(azim_i), elev_i, jd, np.radians(lat), np.radians(lon))
+
+        return np.degrees(ra), np.degrees(dec)
+
+    return _perPoint(one, azim, elev)
+
+
+def trueOfDateRaDec2J2000(ra, dec, jd):
+    """ True equator and equinox of date -> J2000, in degrees (see j2000FromTrueOfDate).
+
+    Arguments:
+        ra: [float or ndarray] Right ascension in degrees (true of date).
+        dec: [float or ndarray] Declination in degrees (true of date).
+        jd: [float] Julian date of the epoch of date.
+
+    Return:
+        (ra, dec): [tuple of floats or ndarrays] Right ascension and declination in degrees (J2000).
+
+    """
+
+    def one(ra_i, dec_i):
+        ra_j, dec_j = j2000FromTrueOfDate(jd, np.radians(ra_i), np.radians(dec_i))
+        return np.degrees(ra_j), np.degrees(dec_j)
+
+    return _perPoint(one, ra, dec)
+
+
+def j2000RaDec2TrueOfDate(ra, dec, jd):
+    """ J2000 -> true equator and equinox of date, in degrees (see trueOfDateFromJ2000).
+
+    Arguments:
+        ra: [float or ndarray] Right ascension in degrees (J2000).
+        dec: [float or ndarray] Declination in degrees (J2000).
+        jd: [float] Julian date of the epoch of date.
+
+    Return:
+        (ra, dec): [tuple of floats or ndarrays] Right ascension and declination in degrees (true of date).
+
+    """
+
+    def one(ra_i, dec_i):
+        ra_t, dec_t = trueOfDateFromJ2000(jd, np.radians(ra_i), np.radians(dec_i))
+        return np.degrees(ra_t), np.degrees(dec_t)
+
+    return _perPoint(one, ra, dec)
 
 
 def geocentricToApparentRadiantAndVelocity(ra_g, dec_g, vg, lat, lon, elev, jd, include_rotation=True):
