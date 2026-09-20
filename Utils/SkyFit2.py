@@ -2862,6 +2862,11 @@ class PlateTool(QtWidgets.QMainWindow):
         self.image_navigation_slider.setMaximumWidth(300)
         self.image_navigation_slider.setToolTip("Drag or click to navigate through images (frames in manual "
                                                 "reduction)")
+        # Shrink the handle so it fits within the status bar height without being clipped. A background is
+        #   needed or the handle renders invisible once a stylesheet is set.
+        self.image_navigation_slider.setStyleSheet(
+            "QSlider::handle:horizontal { width: 10px; height: 10px; margin: -3px 0; border-radius: 5px; "
+            "background: palette(button); border: 1px solid palette(dark); }")
         self.image_navigation_slider.valueChanged.connect(self.jumpToImage)
         self.status_bar.addPermanentWidget(self.image_navigation_slider)
 
