@@ -17,7 +17,7 @@ from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, geoHt2RaDec, geoHt2XY
 from RMS.Astrometry.Conversions import (date2JD, JD2HourAngle, latLonAlt2ECEF, trueOfDateRaDec2ApparentAltAz,
     apparentAltAz2TrueOfDateRaDec, trueOfDateRaDec2J2000, j2000RaDec2TrueOfDate)
 from RMS.Astrometry.CyFunctions import pointingCorrection, trueOfDateFromJ2000, cyraDec2AltAz, \
-    refractionScale
+    refractionScale, removeAberration
 from RMS.EventMonitor import platepar2AltAz
 
 TEMPLATE = os.path.join(getRmsRootDir(), 'share', 'platepar_templates', 'template_generic_720p_4mm.cal')
@@ -134,7 +134,13 @@ def test_fitted_pointing_matches_the_camera():
         tod = np.stack([ecef[:, 0]*np.cos(gast) - ecef[:, 1]*np.sin(gast),
             ecef[:, 0]*np.sin(gast) + ecef[:, 1]*np.cos(gast), ecef[:, 2]], -1)
         gcrs = tod.dot(pnm)
-        return np.degrees(np.arctan2(gcrs[:, 1], gcrs[:, 0]))%360, np.degrees(np.arcsin(gcrs[:, 2]))
+        ra = np.arctan2(gcrs[:, 1], gcrs[:, 0])%(2*np.pi)
+        dec = np.arcsin(gcrs[:, 2])
+
+        # The camera sees the aberrated direction; the catalog direction the fit is given has it taken out
+        out = np.array([removeAberration(r, d, JD) for r, d in zip(ra, dec)])
+
+        return np.degrees(out[:, 0]), np.degrees(out[:, 1])
 
     rng = np.random.default_rng(5)
     sx, sy = rng.uniform(10, x_res - 10, 200), rng.uniform(10, y_res - 10, 200)
@@ -196,7 +202,7 @@ def test_ground_projection_is_consistent_at_any_time():
     ra, dec = geoHt2RaDec(pp, jd, tlat, tlon, th)
     from RMS.Astrometry.ApplyAstrometry import raDecToXYPP
     pp_g = copy.deepcopy(pp)
-    x2, y2 = raDecToXYPP(np.array([ra]), np.array([dec]), jd, pp_g)
+    x2, y2 = raDecToXYPP(np.array([ra]), np.array([dec]), jd, pp_g, aberration=False)
     assert np.hypot(x2[0] - x1[0], y2[0] - y1[0]) < 0.01
 
     # One sidereal day later the Earth-fixed baseline points the same way in space, to the precession of
