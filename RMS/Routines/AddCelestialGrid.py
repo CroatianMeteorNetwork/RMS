@@ -6,6 +6,7 @@ import numpy as np
 
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP, computeFOVSize, getFOVSelectionRadius
 from RMS.Astrometry.Conversions import jd2Date, apparentAltAz2TrueRADec, trueRaDec2ApparentAltAz
+from RMS.Astrometry.CyFunctions import refractionScale
 from RMS.Math import angularSeparation
 
 
@@ -27,8 +28,12 @@ def addEquatorialGrid(plt_handle, platepar, jd):
     RA_c = RA_c[0]
     dec_c = dec_c[0]
 
+    # Scale of the refraction at the station height
+    refr_scale = refractionScale(platepar.elev)
+
     # Compute FOV centre alt/az
-    azim_centre, alt_centre = trueRaDec2ApparentAltAz(RA_c, dec_c, jd, platepar.lat, platepar.lon)
+    azim_centre, alt_centre = trueRaDec2ApparentAltAz(RA_c, dec_c, jd, platepar.lat, platepar.lon, \
+        refraction=platepar.refraction, refraction_scale=refr_scale)
 
     # Compute FOV size
     fov_radius = getFOVSelectionRadius(platepar)
@@ -69,7 +74,7 @@ def addEquatorialGrid(plt_handle, platepar, jd):
 
         # Compute alt/az
         az_grid_plot, alt_grid_plot = trueRaDec2ApparentAltAz(ra_grid_plot, dec_grid_plot, jd, platepar.lat, \
-            platepar.lon)
+            platepar.lon, refraction=platepar.refraction, refraction_scale=refr_scale)
 
         # Filter out points below the horizon  and outside the FOV
         filter_arr = (alt_grid_plot > 0) & (np.degrees(angularSeparation(np.radians(azim_centre), \
@@ -131,7 +136,7 @@ def addEquatorialGrid(plt_handle, platepar, jd):
 
         # Compute alt/az
         az_grid_plot, alt_grid_plot = trueRaDec2ApparentAltAz(ra_grid_plot, dec_grid_plot, jd, platepar.lat, \
-            platepar.lon)
+            platepar.lon, refraction=platepar.refraction, refraction_scale=refr_scale)
 
         # Filter out points below the horizon
         filter_arr = (alt_grid_plot > 0) & (np.degrees(angularSeparation(np.radians(azim_centre), \
@@ -174,9 +179,12 @@ def updateRaDecGrid(grid, platepar):
     _, RA_c, dec_c, _ = xyToRaDecPP([jd2Date(platepar.JD)], [platepar.X_res/2], [platepar.Y_res/2], [1], \
                                     platepar, extinction_correction=False)
 
+    # Scale of the refraction at the station height
+    refr_scale = refractionScale(platepar.elev)
+
     # Compute alt/az of FOV centre
     azim_centre, alt_centre = trueRaDec2ApparentAltAz(RA_c[0], dec_c[0], platepar.JD, platepar.lat, \
-        platepar.lon)
+        platepar.lon, refraction=platepar.refraction, refraction_scale=refr_scale)
 
     ### ###
 
@@ -214,7 +222,7 @@ def updateRaDecGrid(grid, platepar):
 
         # Compute alt/az
         az_grid_plot, alt_grid_plot = trueRaDec2ApparentAltAz(ra_grid_plot, dec_grid_plot, platepar.JD, \
-            platepar.lat, platepar.lon, platepar.refraction)
+            platepar.lat, platepar.lon, platepar.refraction, refraction_scale=refr_scale)
 
         # Filter out points below the horizon and outside the FOV
         filter_arr = (alt_grid_plot >= 0) & (np.degrees(angularSeparation(np.radians(azim_centre), \
@@ -247,7 +255,7 @@ def updateRaDecGrid(grid, platepar):
 
         # Compute alt/az
         az_grid_plot, alt_grid_plot = trueRaDec2ApparentAltAz(ra_grid_plot, dec_grid_plot, platepar.JD, \
-            platepar.lat, platepar.lon, platepar.refraction)
+            platepar.lat, platepar.lon, platepar.refraction, refraction_scale=refr_scale)
 
         # Filter out points below the horizon
         filter_arr = (alt_grid_plot >= 0) & (np.degrees(angularSeparation(np.radians(azim_centre), \
@@ -272,7 +280,7 @@ def updateRaDecGrid(grid, platepar):
     az_horiz_arr = np.arange(0, 360, plot_dens)
     alt_horiz_arr = np.zeros_like(az_horiz_arr)
     ra_horiz_plot, dec_horiz_plot = apparentAltAz2TrueRADec(az_horiz_arr, alt_horiz_arr, platepar.JD, \
-        platepar.lat, platepar.lon, platepar.refraction)
+        platepar.lat, platepar.lon, platepar.refraction, refraction_scale=refr_scale)
 
     # Filter out all horizon points outside the FOV
     filter_arr = np.degrees(angularSeparation(np.radians(alt_centre), np.radians(azim_centre), \
@@ -327,9 +335,12 @@ def updateAzAltGrid(grid, platepar):
     _, RA_c, dec_c, _ = xyToRaDecPP([jd2Date(platepar.JD)], [platepar.X_res/2], [platepar.Y_res/2], [1], \
                                     platepar, extinction_correction=False)
 
+    # Scale of the refraction at the station height
+    refr_scale = refractionScale(platepar.elev)
+
     # Compute alt/az of FOV centre
     azim_centre, alt_centre = trueRaDec2ApparentAltAz(RA_c[0], dec_c[0], platepar.JD, platepar.lat, \
-        platepar.lon)
+        platepar.lon, refraction=platepar.refraction, refraction_scale=refr_scale)
 
     ### ###
 
@@ -374,7 +385,7 @@ def updateAzAltGrid(grid, platepar):
 
         # Compute image coordinates
         ra_grid_plot, dec_grid_plot = apparentAltAz2TrueRADec(az_grid_plot, alt_grid_plot, platepar.JD, \
-            platepar.lat, platepar.lon, platepar.refraction)
+            platepar.lat, platepar.lon, platepar.refraction, refraction_scale=refr_scale)
         x_grid, y_grid = raDecToXYPP(ra_grid_plot, dec_grid_plot, platepar.JD, platepar)
 
         # Filter out all points outside the image
@@ -405,7 +416,7 @@ def updateAzAltGrid(grid, platepar):
         
         # Compute image coordinates
         ra_grid_plot, dec_grid_plot = apparentAltAz2TrueRADec(az_grid_plot, alt_grid_plot, platepar.JD, \
-            platepar.lat, platepar.lon, platepar.refraction)
+            platepar.lat, platepar.lon, platepar.refraction, refraction_scale=refr_scale)
         x_grid, y_grid = raDecToXYPP(ra_grid_plot, dec_grid_plot, platepar.JD, platepar)
 
         

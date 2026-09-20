@@ -33,6 +33,7 @@ cdef extern from "math.h":
     double hypot(double, double)
     double fmod(double, double)
     double M_PI "M_PI"
+    double exp(double)
 
 
 # Define Pi
@@ -651,53 +652,232 @@ cpdef (double, double, double) equatorialCoordAndRotPrecession(double start_epoc
 
     return ra_precessed, dec_precessed, new_rot_angle
 
+
+# International Standard Atmosphere in the troposphere: T/T0 = 1 - ISA_LAPSE*h and
+#   P/P0 = (T/T0)**ISA_PRESSURE_EXP, so the refractivity of the air (n - 1), proportional to P/T, falls as
+#   (T/T0)**(ISA_PRESSURE_EXP - 1). Above the tropopause the temperature is constant and the pressure
+#   falls exponentially.
+cdef double ISA_LAPSE = 2.25577e-5
+cdef double ISA_PRESSURE_EXP = 5.25588
+cdef double ISA_TROPOPAUSE = 11000.0
+cdef double ISA_STRATOSPHERE_SCALE = 6341.6
+
+
+cdef double isaRefractivity(double h):
+    """ Refractivity of the International Standard Atmosphere at the given height, relative to sea level.
+
+    Arguments:
+        h: [float] Height above sea level (m).
+
+    Return:
+        [float] Refractivity (n - 1) relative to its sea-level value.
+
+    """
+
+    cdef double refractivity_tropopause
+
+    # Keep the profile defined below sea level
+    if h < -500.0:
+        h = -500.0
+
+    # In the troposphere the refractivity falls as a power of the temperature ratio
+    if h <= ISA_TROPOPAUSE:
+        return (1.0 - ISA_LAPSE*h)**(ISA_PRESSURE_EXP - 1.0)
+
+    # Above the tropopause the temperature is constant, so the refractivity follows the pressure
+    refractivity_tropopause = (1.0 - ISA_LAPSE*ISA_TROPOPAUSE)**(ISA_PRESSURE_EXP - 1.0)
+
+    return refractivity_tropopause*exp(-(h - ISA_TROPOPAUSE)/ISA_STRATOSPHERE_SCALE)
+
+
+cdef double isaRefractivityIntegral(double h):
+    """ Integral of the relative ISA refractivity from sea level up to the given height.
+
+    Arguments:
+        h: [float] Height above sea level (m).
+
+    Return:
+        [float] Integral (m). Tends to 8434 m for large heights.
+
+    """
+
+    cdef double j_tropopause, tail_scale
+
+    # Keep the profile defined below sea level
+    if h < -500.0:
+        h = -500.0
+
+    # Closed form of the troposphere power law
+    if h <= ISA_TROPOPAUSE:
+        return (1.0 - (1.0 - ISA_LAPSE*h)**ISA_PRESSURE_EXP)/(ISA_LAPSE*ISA_PRESSURE_EXP)
+
+    # Above the tropopause, add the exponential tail to the integral up to the tropopause
+    j_tropopause = (1.0 - (1.0 - ISA_LAPSE*ISA_TROPOPAUSE)**ISA_PRESSURE_EXP)/(ISA_LAPSE*ISA_PRESSURE_EXP)
+    tail_scale = isaRefractivity(ISA_TROPOPAUSE)*ISA_STRATOSPHERE_SCALE
+
+    return j_tropopause + tail_scale*(1.0 - exp(-(h - ISA_TROPOPAUSE)/ISA_STRATOSPHERE_SCALE))
+
+
+cpdef double refractionScale(double elev_obs):
+    """ Scale of the atmospheric refraction at the observer's height, relative to sea level. The refraction
+        is proportional to the refractivity of the air at the observer, i.e. to its pressure over
+        temperature, taken here from the International Standard Atmosphere: 1.0 at sea level, 0.93 at 700 m,
+        0.82 at 2000 m and 0.76 at 2800 m. The weather is not modelled, and +-10 K or +-10 hPa change the
+        refraction by about 3.5% or 1%.
+
+    Arguments:
+        elev_obs: [float] Height of the observer above sea level (m).
+
+    Return:
+        [float] Factor to multiply the sea-level refraction with.
+
+    """
+
+    # Clamp to the tropopause, above which the ground-observer model no longer applies
+    if elev_obs > ISA_TROPOPAUSE:
+        elev_obs = ISA_TROPOPAUSE
+
+    return isaRefractivity(elev_obs)
+
+
+cpdef double refractionTargetFraction(double elev_obs, double target_height):
+    """ Fraction of the refraction of a star that applies to a target at a finite height, e.g. a meteor or
+        a contrail. The light from a target inside or just above the atmosphere is bent only by the air
+        between the target and the observer, and the straight line to the target differs from the arrival
+        direction of the light by the path average of the bending accumulated along the way. With the ISA
+        refractivity profile this gives, seen from sea level: 1 for a star, 0.92 for a meteor at 100 km,
+        0.72 for a target at 30 km and 0.38 for a contrail at 10 km.
+
+        Flat-atmosphere approximation, independent of the elevation angle: within 2% of the star refraction
+        for targets below 30 km at any elevation, and within 2% (6 arcsec) of it above 10 deg elevation for
+        a target at 100 km, where the curvature of the Earth starts to matter.
+
+        Only valid for a target above the observer. The closed form breaks down for a target below the
+        observer, where the mean refractivity along the path exceeds the one at the observer and the
+        fraction comes out negative, so that case returns 0.
+
+    Arguments:
+        elev_obs: [float] Height of the observer above sea level (m).
+        target_height: [float] Height of the target above sea level (m). Infinity, or anything above
+            1000 km, means a star.
+
+    Return:
+        [float] Factor in [0, 1] to multiply the star refraction with (on top of refractionScale).
+
+    """
+
+    cdef double height_diff, path_integral
+
+    # Anything beyond the atmosphere, infinity included, gets the full star refraction
+    if target_height > 1.0e6:
+        return 1.0
+
+    # Clamp to the tropopause, above which the ground-observer model no longer applies
+    if elev_obs > ISA_TROPOPAUSE:
+        elev_obs = ISA_TROPOPAUSE
+
+    height_diff = target_height - elev_obs
+
+    # No air between the observer and the target, or a target below the observer (see the note above)
+    if height_diff <= 1.0:
+        return 0.0
+
+    # Refractivity integrated over the path, relative to the refractivity at the observer
+    path_integral = isaRefractivityIntegral(target_height) - isaRefractivityIntegral(elev_obs)
+
+    return 1.0 - path_integral/(height_diff*isaRefractivity(elev_obs))
+
+
+
 @cython.cdivision(True)
-cdef double refractionApparentToTrue(double elev):
-    """ Correct the apparent elevation of a star for refraction to true elevation. The temperature and air
-        pressure are assumed to be unknown. 
+cdef (double, double) bennettRefraction(double elev, double refraction_scale):
+    """ Atmospheric refraction at the given apparent elevation, and its derivative with respect to that
+        elevation. Standard conditions at sea level; the observer's height enters through the scale. The
+        derivative is returned alongside because inverting the formula (refractionTrueToApparent) needs it
+        and it costs only a few operations once the tangent has been computed.
 
         Source: Explanatory Supplement to the Astronomical Almanac (1992), p. 144.
 
     Arguments:
         elev: [float] Apparent elevation (radians).
+        refraction_scale: [float] Scale of the refraction for the observer's height, from
+            refractionScale().
+
+    Return:
+        (refraction, derivative): [tuple]
+            refraction: [float] Refraction to subtract from the apparent elevation (radians).
+            derivative: [float] Derivative of the refraction with respect to the apparent elevation.
+
+    """
+
+    cdef double elev_deg, arg_slope, cotangent, refraction
+
+    # Don't apply refraction for elevations below -0.5 deg. The refraction is held at its value there, so
+    #   it no longer varies with the elevation and its derivative is zero.
+    if elev <= radians(-0.5):
+        elev_deg = -0.5
+        arg_slope = 0.0
+
+    else:
+        elev_deg = degrees(elev)
+        arg_slope = 1.0 - 7.31/(elev_deg + 4.4)**2
+
+    # Bennett's formula gives the refraction in arc minutes
+    cotangent = 1.0/tan(radians(elev_deg + 7.31/(elev_deg + 4.4)))
+    refraction = refraction_scale*radians(cotangent/60)
+
+    # d(cot x)/dx = -(1 + cot**2 x), and the degree-to-radian conversions of the two elevations cancel
+    return (refraction, -refraction_scale*radians((1.0 + cotangent*cotangent)*arg_slope/60))
+
+
+
+cdef double refractionApparentToTrue(double elev, double refraction_scale=1.0):
+    """ Correct the apparent elevation of a star for refraction to true elevation. Standard conditions at
+        sea level (Bennett's formula); the observer's height is taken into account through the scale.
+
+    Arguments:
+        elev: [float] Apparent elevation (radians).
+
+    Keyword arguments:
+        refraction_scale: [float] Scale of the refraction for the observer's height, from
+            refractionScale(). 1.0 by default (sea level). Multiply by refractionTargetFraction() for a
+            target at a finite height.
 
     Return:
         [float] True elevation (radians).
 
     """
 
-    cdef double refraction, elev_calc
+    cdef double refraction, derivative
 
-    # Don't apply refraction for elevations below -0.5 deg
-    if elev <= radians(-0.5):
-        elev_calc = radians(-0.5)
-    else:
-        elev_calc = elev
-
-    # Refraction in radians
-    refraction = radians(1.0/(60*tan(radians(degrees(elev_calc) + 7.31/(degrees(elev_calc) + 4.4)))))
+    refraction, derivative = bennettRefraction(elev, refraction_scale)
 
     # Correct the elevation
     return elev - refraction
 
 
 
-cpdef double pyRefractionApparentToTrue(double elev):
+cpdef double pyRefractionApparentToTrue(double elev, double refraction_scale=1.0):
     """ Python version of the refraction correction (apparent to true).
 
     Arguments:
         elev: [float] Apparent elevation (radians).
+
+    Keyword arguments:
+        refraction_scale: [float] Scale of the refraction for the observer's height, from
+            refractionScale(). 1.0 by default (sea level).
 
     Return:
         [float] True elevation (radians).
 
     """
 
-    return refractionApparentToTrue(elev)
+    return refractionApparentToTrue(elev, refraction_scale)
 
 
 
-cpdef (double, double) eqRefractionApparentToTrue(double ra, double dec, double jd, double lat, double lon):
+cpdef (double, double) eqRefractionApparentToTrue(double ra, double dec, double jd, double lat, double lon, \
+    double refraction_scale=1.0):
     """ Correct the equatorial coordinates for refraction. The correction is done from apparent to true
         coordinates.
     
@@ -707,6 +887,10 @@ cpdef (double, double) eqRefractionApparentToTrue(double ra, double dec, double 
         jd: [float] Julian date.
         lat: [float] latitude in radians.
         lon: [float] longitude in radians.
+
+    Keyword arguments:
+        refraction_scale: [float] Scale of the refraction for the observer's height, from
+            refractionScale(). 1.0 by default (sea level).
 
     Return:
         (ra, dec):
@@ -724,7 +908,7 @@ cpdef (double, double) eqRefractionApparentToTrue(double ra, double dec, double 
     azim, alt = cyraDec2AltAz(ra, dec, jd, lat, lon)
 
     # Correct the elevation
-    alt = refractionApparentToTrue(alt)
+    alt = refractionApparentToTrue(alt, refraction_scale)
 
     # Convert back to equatorial
     ra, dec = cyaltAz2RADec(azim, alt, jd, lat, lon)
@@ -738,52 +922,68 @@ cpdef (double, double) eqRefractionApparentToTrue(double ra, double dec, double 
 
 
 @cython.cdivision(True)
-cdef double refractionTrueToApparent(double elev):
-    """ Correct the true elevation of a star for refraction to apparent elevation. The temperature and air
-        pressure are assumed to be unknown. 
+cdef double refractionTrueToApparent(double elev, double refraction_scale=1.0):
+    """ Correct the true elevation of a star for refraction to apparent elevation, as the exact inverse of
+        refractionApparentToTrue, so that the two directions close on each other.
 
-        Source: https://en.wikipedia.org/wiki/Atmospheric_refraction
+        Solves elev_app - refraction(elev_app) = elev for elev_app by Newton's method on Bennett's formula.
+        The refraction is smooth and its derivative never exceeds 0.22 in magnitude, so two or three steps
+        reach double precision at any elevation, the horizon included.
 
     Arguments:
-        elev: [float] Apparent elevation (radians).
+        elev: [float] True elevation (radians).
+
+    Keyword arguments:
+        refraction_scale: [float] Scale of the refraction for the observer's height, from
+            refractionScale(). 1.0 by default (sea level). Multiply by refractionTargetFraction() for a
+            target at a finite height.
 
     Return:
-        [float] True elevation (radians).
+        [float] Apparent elevation (radians).
 
     """
 
-    cdef double refraction, elev_calc
+    cdef double elev_app, refraction, derivative, step
+    cdef int i
 
-    # Don't apply refraction for elevation below -0.5 deg
-    if elev <= radians(-0.5):
-        elev_calc = radians(-0.5)
-    else:
-        elev_calc = elev
+    elev_app = elev
 
-    # Refraction in radians
-    refraction = radians(1.02/(60*tan(radians(degrees(elev_calc) + 10.3/(degrees(elev_calc) + 5.11)))))
+    for i in range(10):
 
-    # Apply the refraction
-    return elev + refraction
+        refraction, derivative = bennettRefraction(elev_app, refraction_scale)
+
+        # Newton step on elev_app - refraction(elev_app) - elev
+        step = (elev + refraction - elev_app)/(1.0 - derivative)
+        elev_app += step
+
+        if fabs(step) < 1e-11:
+            break
+
+    return elev_app
 
 
 
-cpdef double pyRefractionTrueToApparent(double elev):
+cpdef double pyRefractionTrueToApparent(double elev, double refraction_scale=1.0):
     """ Python version of the refraction correction (true to apparent).
 
     Arguments:
-        elev: [float] Apparent elevation (radians).
+        elev: [float] True elevation (radians).
+
+    Keyword arguments:
+        refraction_scale: [float] Scale of the refraction for the observer's height, from
+            refractionScale(). 1.0 by default (sea level).
 
     Return:
-        [float] True elevation (radians).
+        [float] Apparent elevation (radians).
 
     """
 
-    return refractionTrueToApparent(elev)
+    return refractionTrueToApparent(elev, refraction_scale)
 
 
 
-cpdef (double, double) eqRefractionTrueToApparent(double ra, double dec, double jd, double lat, double lon):
+cpdef (double, double) eqRefractionTrueToApparent(double ra, double dec, double jd, double lat, double lon, \
+    double refraction_scale=1.0):
     """ Correct the equatorial coordinates for refraction. The correction is done from true to apparent
         coordinates.
     
@@ -793,6 +993,10 @@ cpdef (double, double) eqRefractionTrueToApparent(double ra, double dec, double 
         jd: [float] Julian date.
         lat: [float] Latitude in radians.
         lon: [float] Longitude in radians.
+
+    Keyword arguments:
+        refraction_scale: [float] Scale of the refraction for the observer's height, from
+            refractionScale(). 1.0 by default (sea level).
 
     Return:
         (ra, dec):
@@ -810,7 +1014,7 @@ cpdef (double, double) eqRefractionTrueToApparent(double ra, double dec, double 
     azim, alt = cyraDec2AltAz(ra, dec, jd, lat, lon)
 
     # Correct the elevation
-    alt = refractionTrueToApparent(alt)
+    alt = refractionTrueToApparent(alt, refraction_scale)
 
     # Convert back to equatorial
     ra, dec = cyaltAz2RADec(azim, alt, jd, lat, lon)
@@ -869,7 +1073,7 @@ cpdef (double, double) cyraDec2AltAz(double ra, double dec, double jd, double la
 
 
 cpdef (double, double) cyTrueRaDec2ApparentAltAz(double ra, double dec, double jd, double lat, double lon, \
-    bool refraction=True):
+    bool refraction=True, double refraction_scale=1.0):
     """ Convert the true right ascension and declination in J2000 to azimuth (+East of due North) and 
         altitude in the epoch of date. The correction for refraction is performed.
 
@@ -882,6 +1086,8 @@ cpdef (double, double) cyTrueRaDec2ApparentAltAz(double ra, double dec, double j
 
     Keyword arguments:
         refraction: [bool] Apply refraction correction. True by default.
+        refraction_scale: [float] Scale of the refraction for the observer's height above sea level, from
+            refractionScale(). 1.0 by default (sea level).
 
     Return:
         (azim, elev): [tuple]
@@ -901,7 +1107,7 @@ cpdef (double, double) cyTrueRaDec2ApparentAltAz(double ra, double dec, double j
 
     # Correct elevation for refraction
     if refraction:
-        elev = refractionTrueToApparent(elev)
+        elev = refractionTrueToApparent(elev, refraction_scale)
 
 
     return (azim, elev)
@@ -912,7 +1118,7 @@ cpdef (double, double) cyTrueRaDec2ApparentAltAz(double ra, double dec, double j
 @cython.wraparound(False)
 def cyTrueRaDec2ApparentAltAz_vect(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_arr, \
     np.ndarray[FLOAT_TYPE_t, ndim=1] dec_arr, np.ndarray[FLOAT_TYPE_t, ndim=1] jd_arr, \
-    double lat, double lon, bool refraction=True):
+    double lat, double lon, bool refraction=True, double refraction_scale=1.0):
     """ Convert the true right ascension and declination in J2000 to azimuth (+East of due North) and 
         altitude in the epoch of date. The correction for refraction is performed.
     Arguments:
@@ -923,6 +1129,8 @@ def cyTrueRaDec2ApparentAltAz_vect(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_arr, \
         lon: [float] Longitude in radians.
     Keyword arguments:
         refraction: [bool] Apply refraction correction. True by default.
+        refraction_scale: [float] Scale of the refraction for the observer's height above sea level, from
+            refractionScale(). 1.0 by default (sea level).
     Return:
         (azim, elev): [tuple]
             azim: [ndarray] Azimuth (+east of due north) in radians (epoch of date).
@@ -940,7 +1148,7 @@ def cyTrueRaDec2ApparentAltAz_vect(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_arr, \
 
         # Compute alt/az
         azim, elev = cyTrueRaDec2ApparentAltAz(ra_arr[i], dec_arr[i], jd_arr[i], lat, lon, \
-            refraction=refraction)
+            refraction=refraction, refraction_scale=refraction_scale)
 
         # Assign alt/az to array
         azim_arr[i] = azim
@@ -990,7 +1198,7 @@ cpdef (double, double) cyaltAz2RADec(double azim, double elev, double jd, double
 
 
 cpdef (double, double) cyApparentAltAz2TrueRADec(double azim, double elev, double jd, double lat, double lon, \
-    bool refraction=True):
+    bool refraction=True, double refraction_scale=1.0):
     """ Convert the apparent azimuth and altitude in the epoch of date to true (refraction corrected) right 
         ascension and declination in J2000.
 
@@ -1003,6 +1211,8 @@ cpdef (double, double) cyApparentAltAz2TrueRADec(double azim, double elev, doubl
 
     Keyword arguments:
         refraction: [bool] Apply refraction correction. True by default.
+        refraction_scale: [float] Scale of the refraction for the observer's height above sea level, from
+            refractionScale(). 1.0 by default (sea level).
 
     Return:
         (ra, dec): [tuple]
@@ -1016,7 +1226,7 @@ cpdef (double, double) cyApparentAltAz2TrueRADec(double azim, double elev, doubl
 
     # Correct elevation for refraction
     if refraction:
-        elev = refractionApparentToTrue(elev)
+        elev = refractionApparentToTrue(elev, refraction_scale)
 
     # Convert to RA/Dec (true, epoch of date)
     ra, dec = cyaltAz2RADec(azim, elev, jd, lat, lon)
@@ -1031,7 +1241,7 @@ cpdef (double, double) cyApparentAltAz2TrueRADec(double azim, double elev, doubl
 @cython.boundscheck(False)
 @cython.wraparound(False)
 def cyApparentAltAz2TrueRADec_vect(np.ndarray[FLOAT_TYPE_t, ndim=1] azim_arr, np.ndarray[FLOAT_TYPE_t, ndim=1] elev_arr,
-    double jd, double lat, double lon, bool refraction=True):
+    double jd, double lat, double lon, bool refraction=True, double refraction_scale=1.0):
     """ Convert the apparent azimuth and altitude in the epoch of date to true (refraction corrected) right 
         ascension and declination in J2000.
     Arguments:
@@ -1042,6 +1252,8 @@ def cyApparentAltAz2TrueRADec_vect(np.ndarray[FLOAT_TYPE_t, ndim=1] azim_arr, np
         lon: [float] Longitude of the observer in radians.
     Keyword arguments:
         refraction: [bool] Apply refraction correction. True by default.
+        refraction_scale: [float] Scale of the refraction for the observer's height above sea level, from
+            refractionScale(). 1.0 by default (sea level).
     Return:
         (ra_arr, dec_arr): [tuple]
             ra: [float] Right ascension (radians, J2000).
@@ -1058,7 +1270,7 @@ def cyApparentAltAz2TrueRADec_vect(np.ndarray[FLOAT_TYPE_t, ndim=1] azim_arr, np
 
         # Compute RA/Dec
         ra, dec = cyApparentAltAz2TrueRADec(azim_arr[i], elev_arr[i], jd, lat, lon, \
-            refraction=refraction)
+            refraction=refraction, refraction_scale=refraction_scale)
 
         ra_arr[i] = ra
         dec_arr[i] = dec
@@ -1144,7 +1356,7 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
     double y_res, double h0, double jd_ref, double ra_ref, double dec_ref, double pos_angle_ref, 
     double pix_scale, np.ndarray[FLOAT_TYPE_t, ndim=1] x_poly_rev, 
     np.ndarray[FLOAT_TYPE_t, ndim=1] y_poly_rev, str dist_type, bool refraction=True, bool equal_aspect=False, 
-    bool force_distortion_centre=False, bool asymmetry_corr=True):
+    bool force_distortion_centre=False, bool asymmetry_corr=True, double refraction_scale=1.0):
     """ Convert RA, Dec to distortion corrected image coordinates. 
 
     Arguments:
@@ -1167,6 +1379,8 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
         
     Keyword arguments:
         refraction: [bool] Apply refraction correction. True by default.
+        refraction_scale: [float] Scale of the refraction for the observer's height above sea level, from
+            refractionScale(). 1.0 by default (sea level).
         equal_aspect: [bool] Force the X/Y aspect ratio to be equal. Used only for radial distortion. \
             False by default.
         force_distortion_centre: [bool] Force the distortion centre to the image centre. False by default.
@@ -1192,7 +1406,7 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
     ra_centre, dec_centre, pos_angle_ref = pointingCorrection(
             jd, radians(lat), radians(lon), 
             radians(h0), jd_ref, radians(ra_ref), radians(dec_ref), radians(pos_angle_ref), 
-            refraction=refraction
+            refraction=refraction, refraction_scale=refraction_scale
             )
 
     # # Compute the current RA of the FOV centre by adding the difference in between the current and the 
@@ -1296,7 +1510,7 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
 
         # Apply refraction
         if refraction:
-            ra, dec = eqRefractionTrueToApparent(ra, dec, jd, radians(lat), radians(lon))
+            ra, dec = eqRefractionTrueToApparent(ra, dec, jd, radians(lat), radians(lon), refraction_scale)
 
 
         # Compute the distance from the FOV centre to the sky coordinate
@@ -1456,7 +1670,7 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
 cpdef (double, double, double) pointingCorrection(
     double jd, double lat, double lon, 
     double h0, double jd_ref, double ra_ref, double dec_ref, double pos_angle_ref, 
-    bool refraction=True
+    bool refraction=True, double refraction_scale=1.0
     ):
     """ Compute the pointing correction for the given Julian date. The correction is done by computing the
         difference in RA between the current and the reference epoch. The correction is done in the J2000
@@ -1474,6 +1688,8 @@ cpdef (double, double, double) pointingCorrection(
     
     Keyword arguments:
         refraction: [bool] Apply refraction correction. True by default.
+        refraction_scale: [float] Scale of the refraction for the observer's height above sea level, from
+            refractionScale(). 1.0 by default (sea level).
 
     Return:
         (ra_ref_now_corr, dec_ref_corr, pos_angle_ref_now_corr): [tuple]
@@ -1494,7 +1710,7 @@ cpdef (double, double, double) pointingCorrection(
     #   time, evaluating the refraction about 22 arcmin (in 2026) away from the real altitude.
     if refraction:
         azim, alt = cyraDec2AltAz(ra_ref_now, dec_ref, jd, lat, lon)
-        alt = refractionTrueToApparent(alt)
+        alt = refractionTrueToApparent(alt, refraction_scale)
         ra_ref_now_corr, dec_ref_corr = cyaltAz2RADec(azim, alt, jd, lat, lon)
 
     else:
@@ -1520,7 +1736,7 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
     double h0, double jd_ref, double ra_ref, double dec_ref, double pos_angle_ref, double pix_scale, \
     np.ndarray[FLOAT_TYPE_t, ndim=1] x_poly_fwd, np.ndarray[FLOAT_TYPE_t, ndim=1] y_poly_fwd, \
     str dist_type, bool refraction=True, bool equal_aspect=False, bool force_distortion_centre=False,\
-    bool asymmetry_corr=True, bool precompute_pointing_corr=False):
+    bool asymmetry_corr=True, bool precompute_pointing_corr=False, double refraction_scale=1.0):
     """
     Arguments:
         jd_data: [ndarray] Julian date of each data point.
@@ -1542,6 +1758,8 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
         
     Keyword arguments:
         refraction: [bool] Apply refraction correction. True by default.
+        refraction_scale: [float] Scale of the refraction for the observer's height above sea level, from
+            refractionScale(). 1.0 by default (sea level).
         equal_aspect: [bool] Force the X/Y aspect ratio to be equal. Used only for radial distortion. \
             False by default.
         force_distortion_centre: [bool] Force the distortion centre to the image centre. False by default.
@@ -1575,7 +1793,7 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
         ra_ref_now_corr, dec_ref_corr, pos_angle_ref_now_corr = pointingCorrection(
             np.mean(jd_data), radians(lat), radians(lon), 
             radians(h0), jd_ref, radians(ra_ref), radians(dec_ref), radians(pos_angle_ref), 
-            refraction=refraction
+            refraction=refraction, refraction_scale=refraction_scale
             )
 
 
@@ -1801,7 +2019,7 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
             ra_ref_now_corr, dec_ref_corr, pos_angle_ref_now_corr = pointingCorrection(
                 jd, radians(lat), radians(lon), 
                 radians(h0), jd_ref, radians(ra_ref), radians(dec_ref), radians(pos_angle_ref), 
-                refraction=refraction
+                refraction=refraction, refraction_scale=refraction_scale
                 )
 
 
@@ -1825,7 +2043,7 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
 
         # Apply refraction correction
         if refraction:
-            ra, dec = eqRefractionApparentToTrue(ra, dec, jd, radians(lat), radians(lon))
+            ra, dec = eqRefractionApparentToTrue(ra, dec, jd, radians(lat), radians(lon), refraction_scale)
 
 
 

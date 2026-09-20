@@ -176,7 +176,7 @@ from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP, \
     rotationWrtHorizon, rotationWrtHorizonToPosAngle, computeFOVSize, photomLine, photometryFit, \
     rotationWrtStandard, rotationWrtStandardToPosAngle, correctVignetting, \
     extinctionCorrectionTrueToApparent, applyAstrometryFTPdetectinfo, getFOVSelectionRadius, \
-    limitingMagnitude, screenNudgeToAzAltDelta, fovCentreZenithDirection
+    limitingMagnitude, screenNudgeToAzAltDelta, fovCentreZenithDirection, targetRaDecToPlateRaDec
 from RMS.Astrometry.AtmosphericExtinction import atmosphericExtinctionCorrection
 from RMS.Astrometry.StarClasses import CatalogStar, GeoPoint, PlanetPoint, PairedStars
 from RMS.Astrometry.StarFilters import filterPhotometricOutliers, filterBlendedStars
@@ -211,7 +211,8 @@ from Utils.KalmanFilter import KalmanFilter
 
 import pyximport
 pyximport.install(setup_args={'include_dirs': [np.get_include()]})
-from RMS.Astrometry.CyFunctions import subsetCatalog, equatorialCoordPrecession, j2000FromTrueOfDate
+from RMS.Astrometry.CyFunctions import subsetCatalog, equatorialCoordPrecession, j2000FromTrueOfDate, \
+    refractionScale
 from RMS.Astrometry.MatchStars import matchStars
 from RMS.Routines.SatellitePositions import SatellitePredictor, loadTLEs, loadRobustTLEs, findClosestTLEFile, SKYFIELD_AVAILABLE
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP
@@ -2237,9 +2238,16 @@ class GeoPoints(object):
         self.lon_data = []
         self.ele_data = []
 
-        # Equatorial coordinates (degrees)
+        # True equatorial coordinates of the points as seen from the station (degrees, J2000)
         self.ra_data = []
         self.dec_data = []
+
+        # The same points expressed as plate fit references. A ground point is close enough that its light
+        #   is not measurably refracted, so the refraction that the plate applies has to be taken out of
+        #   its coordinates first (see targetRaDecToPlateRaDec). Without this the fit would place the
+        #   points where a star in the same direction would be seen, which is up to a full refraction away.
+        self.ra_plate_data = []
+        self.dec_plate_data = []
 
         # Load the points from a file
         self.load()
@@ -2270,7 +2278,13 @@ class GeoPoints(object):
 
 
     def update(self, platepar, jd):
-        """ Project points to the observer's point of view. """
+        """ Project points to the observer's point of view.
+
+        Arguments:
+            platepar: [Platepar object] Astrometry parameters. Only the station location and the refraction
+                settings are used.
+            jd: [float] Julian date.
+        """
 
         # Reset RA/Dec array
         self.ra_data = []
@@ -2308,6 +2322,10 @@ class GeoPoints(object):
 
         self.ra_data = np.array(self.ra_data)
         self.dec_data = np.array(self.dec_data)
+
+        # Take out the refraction that the plate applies, as the light of a ground point is not refracted
+        self.ra_plate_data, self.dec_plate_data = targetRaDecToPlateRaDec(self.ra_data, self.dec_data, jd, \
+            platepar, refraction_fraction=0.0)
 
 
 # CatalogStar, GeoPoint, and PairedStars are now imported from RMS.Astrometry.StarClasses
@@ -4021,7 +4039,8 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Compute alt, az
             azim, alt = trueRaDec2ApparentAltAz(ra[0], dec[0], jd[0], pp_tmp.lat, pp_tmp.lon, \
-                                                pp_tmp.refraction)
+                                                pp_tmp.refraction, \
+                                                refraction_scale=refractionScale(pp_tmp.elev))
 
 
             # If ground points are measured, change the text for alt/az
@@ -4211,15 +4230,15 @@ class PlateTool(QtWidgets.QMainWindow):
             # Compute RA/Dec of geo points
             self.geo_points_obj.update(self.platepar, ff_jd)
 
-            # RA, dec, and fake magnitude of geo points
-            self.geo_points = np.c_[self.geo_points_obj.ra_data, self.geo_points_obj.dec_data, \
-                np.ones_like(self.geo_points_obj.ra_data)]
+            # RA, dec, and fake magnitude of geo points. The plate coordinates are used because every
+            #   consumer below compares them through the plate's own projection, which must not refract
+            #   the ground points.
+            self.geo_points = np.c_[self.geo_points_obj.ra_plate_data, \
+                self.geo_points_obj.dec_plate_data, np.ones_like(self.geo_points_obj.ra_plate_data)]
 
-            # Compute image coordinates of geo points (always without refraction)
-            pp_noref = copy.deepcopy(self.platepar)
-            pp_noref.refraction = False
-            pp_noref.updateRefRADec(preserve_rotation=True)
-            self.geo_x, self.geo_y, _ = getCatalogStarsImagePositions(self.geo_points, ff_jd, pp_noref)
+            # Compute image coordinates of geo points (the refraction the plate applies was already taken
+            #   out of the plate coordinates, so the points land where the camera sees them)
+            self.geo_x, self.geo_y, _ = getCatalogStarsImagePositions(self.geo_points, ff_jd, self.platepar)
 
             geo_xy = np.c_[self.geo_x, self.geo_y]
 
@@ -7638,7 +7657,8 @@ class PlateTool(QtWidgets.QMainWindow):
             # Compute the azimuth and elevation of the star
             _, alt = trueRaDec2ApparentAltAz(star_ra, star_dec, date2JD(*self.img_handle.currentTime()),
                                                 self.platepar.lat, self.platepar.lon, 
-                                                self.platepar.refraction)
+                                                self.platepar.refraction,
+                                                refraction_scale=refractionScale(self.platepar.elev))
             
             elevation_list.append(alt)
 
@@ -9696,6 +9716,13 @@ class PlateTool(QtWidgets.QMainWindow):
         # Update the possibly missing params
         if not hasattr(self, "geo_points_obj"):
             self.geo_points_obj = None
+
+        # Geo points saved before the plate coordinates were introduced only carry the true direction. Seed
+        #   the plate coordinates with it; the next update() recomputes them properly.
+        if self.geo_points_obj is not None:
+            if not hasattr(self.geo_points_obj, "ra_plate_data"):
+                self.geo_points_obj.ra_plate_data = self.geo_points_obj.ra_data
+                self.geo_points_obj.dec_plate_data = self.geo_points_obj.dec_data
 
         # Update the possibly missing params
         if not hasattr(self, "geo_marker_scale"):
@@ -13472,7 +13499,9 @@ class PlateTool(QtWidgets.QMainWindow):
         self.platepar.Ho = JD2HourAngle(jd)
 
         azim, alt = trueRaDec2ApparentAltAz(ra_astnet, dec_astnet, jd,
-                                            self.platepar.lat, self.platepar.lon)
+                                            self.platepar.lat, self.platepar.lon,
+                                            refraction=self.platepar.refraction,
+                                            refraction_scale=refractionScale(self.platepar.elev))
         self.platepar.az_centre = azim
         self.platepar.alt_centre = alt
         self.platepar.updateRefRADec(skip_rot_update=True)
@@ -13684,7 +13713,8 @@ class PlateTool(QtWidgets.QMainWindow):
         self.platepar.Ho = JD2HourAngle(jd)
 
         # Compute reference azimuth and altitude
-        azim, alt = trueRaDec2ApparentAltAz(ra, dec, jd, self.platepar.lat, self.platepar.lon)
+        azim, alt = trueRaDec2ApparentAltAz(ra, dec, jd, self.platepar.lat, self.platepar.lon, \
+            refraction=self.platepar.refraction, refraction_scale=refractionScale(self.platepar.elev))
 
         # Set parameters to platepar
         self.platepar.F_scale = scale
@@ -14005,7 +14035,8 @@ class PlateTool(QtWidgets.QMainWindow):
         # Convert the FOV centre (apparent alt/az) to true RA/Dec in the epoch of date, which is the frame of
         #   the platepar reference pointing (see Platepar.computeRefAltAz)
         ra, dec = apparentAltAz2TrueOfDateRaDec(self.azim_centre, self.alt_centre, date2JD(*img_time),
-            self.platepar.lat, self.platepar.lon, refraction=self.platepar.refraction)
+            self.platepar.lat, self.platepar.lon, refraction=self.platepar.refraction,
+            refraction_scale=refractionScale(self.platepar.elev))
 
         return ra, dec, rot_horizontal, lenses_template_file
 
@@ -14610,7 +14641,8 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Recalculate reference alt/az
             self.platepar.az_centre, self.platepar.alt_centre = trueOfDateRaDec2ApparentAltAz(self.platepar.RA_d, \
-                self.platepar.dec_d, self.platepar.JD, self.platepar.lat, self.platepar.lon)
+                self.platepar.dec_d, self.platepar.JD, self.platepar.lat, self.platepar.lon, \
+                refraction=self.platepar.refraction, refraction_scale=refractionScale(self.platepar.elev))
 
 
         # Check that the calibration parameters are within the nominal range
@@ -15767,6 +15799,9 @@ class PlateTool(QtWidgets.QMainWindow):
         # Get RA/Dec of the FOV centre
         ra_centre, dec_centre = self.computeCentreRADec()
 
+        # Scale of the refraction at the station height
+        refr_scale = refractionScale(self.platepar.elev)
+
         # Calculate the distance and the angle between each pair of image positions and catalog predictions
         for star_no, (cat_x, cat_y, cat_coords, img_c, snr, saturated) in enumerate(zip(
                 catalog_x, catalog_y, catalog_stars, img_stars, snr_data, saturated_data)):
@@ -15803,14 +15838,14 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Compute azim/elev from the catalog
             azim_cat, elev_cat = trueRaDec2ApparentAltAz(cat_ra, cat_dec, jd, self.platepar.lat, \
-                self.platepar.lon)
+                self.platepar.lon, refraction=self.platepar.refraction, refraction_scale=refr_scale)
 
             azim_list.append(azim_cat)
             elev_list.append(elev_cat)
 
             # Compute azim/elev from image coordinates
             azim_img, elev_img = trueRaDec2ApparentAltAz(img_ra, img_dec, jd, self.platepar.lat, \
-                self.platepar.lon)
+                self.platepar.lon, refraction=self.platepar.refraction, refraction_scale=refr_scale)
 
             # Compute azim/elev residuals
             azim_residuals.append(((azim_cat - azim_img + 180)%360 - 180)*np.cos(np.radians(elev_cat)))
