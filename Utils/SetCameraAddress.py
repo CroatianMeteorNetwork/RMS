@@ -232,6 +232,8 @@ class DVRIPCam(object):
 
 
 if __name__ == '__main__':
+    import argparse
+
     if len(sys.argv) < 3:
         print("This script allows you to set your Camera's IP address.")
         print('')
@@ -252,10 +254,27 @@ if __name__ == '__main__':
         print('')
         print('replacing the two addresses as needed')
         print('')
+        print('You can also override the default credentials (user "admin", empty password)')
+        print('using the -u/--user and -p/--password options, eg:')
+        print('')
+        print('   python -m Utils.SetCameraAddress 192.168.1.100 192.168.42.10 -u admin -p mypass')
+        print('')
         exit(0)
 
-    ipaddr = sys.argv[1]
-    newaddr = sys.argv[2]
+    parser = argparse.ArgumentParser(
+        description="This script allows you to set your Camera's IP address."
+    )
+    parser.add_argument('current_ip', type=str, help="Camera's current IP address")
+    parser.add_argument('new_ip', type=str, help="IP address to assign to the camera")
+    parser.add_argument('-u', '--user', type=str, default='admin',
+                         help="Camera username (default: admin)")
+    parser.add_argument('-p', '--password', type=str, default='',
+                         help="Camera password (default: empty)")
+
+    cml_args = parser.parse_args()
+
+    ipaddr = cml_args.current_ip
+    newaddr = cml_args.new_ip
 
     if not checkValidIPAddr(ipaddr) or not checkValidIPAddr(newaddr):
         print('')
@@ -265,7 +284,7 @@ if __name__ == '__main__':
         print('')
         exit(0)
 
-    cam=DVRIPCam(ipaddr)
+    cam=DVRIPCam(ipaddr, user=cml_args.user, password=cml_args.password)
     if cam.login():
 
         print('--------')
@@ -281,12 +300,12 @@ if __name__ == '__main__':
         print('--------')
         cam.set_info("NetWork.NetDHCP.[0].Enable", 0)
         hexval = strIPtoHex(newaddr)
-        try: 
+        try:
             # this wil actually succeed, but a timeout will occur once
             # the camera address is changed.
             cam.set_info("NetWork.NetCommon.HostIP", hexval)
         except mysocket.timeout:
-            cam2=DVRIPCam(newaddr)
+            cam2=DVRIPCam(newaddr, user=cml_args.user, password=cml_args.password)
             cam2.login()
             nc=cam2.get_info("NetWork.NetCommon.HostIP")
             dh=cam2.get_info("NetWork.NetDHCP.[0].Enable")
