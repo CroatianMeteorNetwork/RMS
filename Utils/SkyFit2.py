@@ -2848,19 +2848,8 @@ class PlateTool(QtWidgets.QMainWindow):
         self.status_bar.setFont(status_font)
         self.setStatusBar(self.status_bar)
 
-        self.file_manager_button = QtWidgets.QPushButton('File Manager')
-        self.file_manager_button.pressed.connect(self.showCalibrationFilesDialog)
-        self.file_manager_button.setToolTip("Open File Manager")
-        self.status_bar.addPermanentWidget(self.file_manager_button)
-
-        self.skyfit_button = QtWidgets.QPushButton('SkyFit')
-        self.skyfit_button.pressed.connect(lambda: self.changeMode('skyfit'))
-        self.manualreduction_button = QtWidgets.QPushButton('ManualReduction')
-        self.manualreduction_button.pressed.connect(lambda: self.changeMode('manualreduction'))
-        self.status_bar.addPermanentWidget(self.skyfit_button)
-        self.status_bar.addPermanentWidget(self.manualreduction_button)
-
-        # Image navigation slider (like a video timeline)
+        # Image navigation slider (like a video timeline). Added before the buttons so they stay anchored
+        #   to the right edge and don't shift when the slider/label show, hide or resize.
         self.image_navigation_label = QtWidgets.QLabel('Image: 1 / 1')
         self.image_navigation_label.setMinimumWidth(80)
         self.status_bar.addPermanentWidget(self.image_navigation_label)
@@ -2875,6 +2864,18 @@ class PlateTool(QtWidgets.QMainWindow):
                                                 "reduction)")
         self.image_navigation_slider.valueChanged.connect(self.jumpToImage)
         self.status_bar.addPermanentWidget(self.image_navigation_slider)
+
+        self.file_manager_button = QtWidgets.QPushButton('File Manager')
+        self.file_manager_button.pressed.connect(self.showCalibrationFilesDialog)
+        self.file_manager_button.setToolTip("Open File Manager")
+        self.status_bar.addPermanentWidget(self.file_manager_button)
+
+        self.skyfit_button = QtWidgets.QPushButton('SkyFit')
+        self.skyfit_button.pressed.connect(lambda: self.changeMode('skyfit'))
+        self.manualreduction_button = QtWidgets.QPushButton('ManualReduction')
+        self.manualreduction_button.pressed.connect(lambda: self.changeMode('manualreduction'))
+        self.status_bar.addPermanentWidget(self.skyfit_button)
+        self.status_bar.addPermanentWidget(self.manualreduction_button)
 
         self.nextstar_button = QtWidgets.QPushButton('SkyFit')
         self.nextstar_button.pressed.connect(self.jumpNextStar)
