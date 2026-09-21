@@ -18,6 +18,13 @@ def matchStars(stars_list, cat_x_array, cat_y_array, cat_good_indices, max_radiu
 
     Return:
         matched_indices: [ndarray] (K, 3) array of (image_star_index, catalog_star_index, distance).
+
+    Matching semantics (same as the brute-force Cython matchStars this replaces): every image star is
+    independently assigned its nearest catalog star, so the matching is NOT one-to-one - two image stars
+    may claim the same catalog star. Callers (matchStarsResiduals) only use the pairs to compute residuals
+    and a match count, so duplicates are tolerated. The only difference to the Cython version is that a
+    match exactly at max_radius is accepted (cKDTree's distance_upper_bound is inclusive) where the old
+    code used a strict "<"; this is a measure-zero boundary case.
     """
 
     if len(cat_good_indices) == 0 or len(stars_list) == 0:

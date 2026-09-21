@@ -415,8 +415,9 @@ def _calcImageResidualsAstro(params, config, platepar, catalog_stars, star_dict,
     """
 
 
-    # Set the fitting parameters directly on the platepar (no deep copy needed —
-    # matchStarsResiduals only reads from the platepar, never modifies it)
+    # Set the fitting parameters directly on the platepar (no deep copy needed - matchStarsResiduals only
+    #   reads from the platepar, never modifies it). NOTE: this leaves the platepar holding whichever
+    #   parameter set was evaluated last; the caller must restore/apply the wanted parameters afterwards.
     platepar.RA_d, platepar.dec_d, platepar.pos_angle_ref, platepar.F_scale = params
 
     # Match stars and calculate image residuals
@@ -679,6 +680,11 @@ def autoCheckFit(config, platepar, calstars_data, _nn_refinement=False):
         res = scipy.optimize.minimize(_calcImageResidualsAstro, p0, args=(config, platepar, catalog_stars, \
             star_dict, match_radius), method='Nelder-Mead', \
             options={'fatol': fatol, 'xatol': xatol_ang, 'initial_simplex': simplex})
+
+        # The residual function writes every evaluated parameter set straight onto the platepar, so on exit
+        #   it holds the last evaluated simplex vertex, not the optimum. Restore the starting parameters;
+        #   the optimum is applied below only if the fit succeeded.
+        platepar.RA_d, platepar.dec_d, platepar.pos_angle_ref, platepar.F_scale = p0
 
         log.info(res)
 

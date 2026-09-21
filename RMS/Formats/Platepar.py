@@ -40,6 +40,7 @@ import scipy.optimize
 from scipy.spatial import cKDTree
 from RMS.Astrometry.Conversions import date2JD, jd2Date, JD2HourAngle, trueRaDec2ApparentAltAz
 from RMS.Math import angularSeparation, sphericalPointFromHeadingAndDistance
+from RMS.Logger import getLogger
 
 pyximport.install(setup_args={'include_dirs': [np.get_include()]})
 from RMS.Astrometry.CyFunctions import (
@@ -47,6 +48,9 @@ from RMS.Astrometry.CyFunctions import (
     cyTrueRaDec2ApparentAltAz,
     pyRefractionTrueToApparent,
 )
+
+
+log = getLogger("rmslogger")
 
 
 class stationData(object):
@@ -130,6 +134,41 @@ def getPairedStarsSkyPositions(img_x, img_y, jd, platepar):
     )
 
     return ra_array, dec_array
+
+
+def normalizeRaDec(ra_d, dec_d):
+    """ Wrap a right ascension and declination back onto the celestial sphere.
+
+    The pointing optimizers (Nelder-Mead, Levenberg-Marquardt) treat RA and dec as unbounded
+    parameters, so a simplex vertex or an LM step can push the declination past a pole. The point
+    (ra, 90 + x) is physically the point (ra + 180, 90 - x), so the declination is reflected across
+    the pole and the RA advanced by 180 deg. A plain modulo wrap of the declination would instead jump
+    to the opposite pole, putting a discontinuity in the cost function right at the pole.
+
+    Arguments:
+        ra_d: [float] Right ascension (deg), any value.
+        dec_d: [float] Declination (deg), any value.
+
+    Return:
+        (ra_d, dec_d): [tuple of floats] RA wrapped to [0, 360), dec reflected into [-90, 90].
+    """
+
+    # Bring the declination into [-180, 180)
+    dec_d = (dec_d + 180.0) % 360.0 - 180.0
+
+    # Reflect across the pole if the declination went past it
+    if dec_d > 90.0:
+        dec_d = 180.0 - dec_d
+        ra_d = ra_d + 180.0
+
+    elif dec_d < -90.0:
+        dec_d = -180.0 - dec_d
+        ra_d = ra_d + 180.0
+
+    # Wrap the right ascension
+    ra_d = ra_d % 360.0
+
+    return ra_d, dec_d
 
 
 def _lstsqFit(residual_func, x0, args):
@@ -920,8 +959,7 @@ class Platepar(object):
             pp_copy = copy.copy(platepar)
 
             # Unnormalize the pointing parameters
-            pp_copy.RA_d = (360 * ra_ref) % (360)
-            pp_copy.dec_d = -90 + (90 * dec_ref + 90) % (180.000001)
+            pp_copy.RA_d, pp_copy.dec_d = normalizeRaDec(360*ra_ref, 90*dec_ref)
             pp_copy.pos_angle_ref = (360 * pos_angle_ref) % (360)
             pp_copy.F_scale = f_scale_fixed if fixed_scale else abs(F_scale)
 
@@ -944,8 +982,7 @@ class Platepar(object):
 
             pp_copy = copy.copy(platepar)
             ra_ref, dec_ref, pos_angle_ref, F_scale = params[:4]
-            pp_copy.RA_d = (360 * ra_ref) % (360)
-            pp_copy.dec_d = -90 + (90 * dec_ref + 90) % (180.000001)
+            pp_copy.RA_d, pp_copy.dec_d = normalizeRaDec(360*ra_ref, 90*dec_ref)
             pp_copy.pos_angle_ref = (360 * pos_angle_ref) % (360)
             pp_copy.F_scale = f_scale_fixed if fixed_scale else abs(F_scale)
             pp_copy.x_poly_rev = np.array(params[4:])
@@ -970,8 +1007,7 @@ class Platepar(object):
             pp_copy = copy.copy(platepar)
 
             # Unnormalize the pointing parameters
-            pp_copy.RA_d = (360 * ra_ref) % (360)
-            pp_copy.dec_d = -90 + (90 * dec_ref + 90) % (180.000001)
+            pp_copy.RA_d, pp_copy.dec_d = normalizeRaDec(360*ra_ref, 90*dec_ref)
             pp_copy.pos_angle_ref = (360 * pos_angle_ref) % (360)
             pp_copy.F_scale = f_scale_fixed if fixed_scale else abs(F_scale)
 
@@ -1006,8 +1042,7 @@ class Platepar(object):
             pp_copy = copy.copy(platepar)
 
             ra_ref, dec_ref, pos_angle_ref, F_scale = params[:4]
-            pp_copy.RA_d = (360 * ra_ref) % (360)
-            pp_copy.dec_d = -90 + (90 * dec_ref + 90) % (180.000001)
+            pp_copy.RA_d, pp_copy.dec_d = normalizeRaDec(360*ra_ref, 90*dec_ref)
             pp_copy.pos_angle_ref = (360 * pos_angle_ref) % (360)
             pp_copy.F_scale = f_scale_fixed if fixed_scale else abs(F_scale)
             pp_copy.x_poly_fwd = np.array(params[4:])
@@ -1045,8 +1080,7 @@ class Platepar(object):
             ra_ref, dec_ref, pos_angle_ref, F_scale = params[:4]
 
             # Unnormalize the pointing parameters
-            pp_copy.RA_d = (360 * ra_ref) % (360)
-            pp_copy.dec_d = -90 + (90 * dec_ref + 90) % (180.000001)
+            pp_copy.RA_d, pp_copy.dec_d = normalizeRaDec(360*ra_ref, 90*dec_ref)
             pp_copy.pos_angle_ref = (360 * pos_angle_ref) % (360)
             pp_copy.F_scale = f_scale_fixed if fixed_scale else abs(F_scale)
 
@@ -1226,7 +1260,9 @@ class Platepar(object):
                     # Get detected star positions (used for radial distance computation)
                     img_x_all, img_y_all, _ = img_stars.T
 
-                    # Initial radial_scale using image center (updated in loop with distortion center)
+                    # Radial weighting of the outlier threshold, computed once from the image centre. The
+                    #   fitted distortion centre is deliberately not used here: it moves between iterations
+                    #   and the "outliers stable" early exit relies on the threshold staying fixed.
                     cx_init, cy_init = self.X_res / 2.0, self.Y_res / 2.0
                     r_init = np.sqrt((img_x_all - cx_init)**2 + (img_y_all - cy_init)**2)
                     r_max = np.sqrt(cx_init**2 + cy_init**2)  # Corner distance
@@ -1317,8 +1353,7 @@ class Platepar(object):
                             # Save current best params from radial3-odd
                             if best_res is not None:
                                 ra_ref, dec_ref, pos_angle_ref, F_scale = best_res.x[:4]
-                                self.RA_d = (360 * ra_ref) % (360)
-                                self.dec_d = -90 + (90 * dec_ref + 90) % (180.000001)
+                                self.RA_d, self.dec_d = normalizeRaDec(360*ra_ref, 90*dec_ref)
                                 self.pos_angle_ref = (360 * pos_angle_ref) % (360)
                                 self.F_scale = f_scale_fixed if fixed_scale else abs(F_scale)
                                 # Update x_poly_fwd with best radial3-odd coefficients
@@ -1349,8 +1384,7 @@ class Platepar(object):
                             # Save current best params from radial5-odd
                             if best_res is not None:
                                 ra_ref, dec_ref, pos_angle_ref, F_scale = best_res.x[:4]
-                                self.RA_d = (360 * ra_ref) % (360)
-                                self.dec_d = -90 + (90 * dec_ref + 90) % (180.000001)
+                                self.RA_d, self.dec_d = normalizeRaDec(360*ra_ref, 90*dec_ref)
                                 self.pos_angle_ref = (360 * pos_angle_ref) % (360)
                                 self.F_scale = f_scale_fixed if fixed_scale else abs(F_scale)
                                 # Update x_poly_fwd with best radial5-odd coefficients
@@ -1415,9 +1449,9 @@ class Platepar(object):
                             weights = np.sqrt(intensity_clipped)
                             weights = weights / weights.sum()  # normalize to probabilities
 
-                            np.random.seed(42 + iteration)
-                            subset_indices = np.random.choice(available_indices, n_subset, replace=False,
-                                                             p=weights)
+                            # Use a local seeded generator so the global NumPy RNG state is not touched
+                            rng = np.random.RandomState(42 + iteration)
+                            subset_indices = rng.choice(available_indices, n_subset, replace=False, p=weights)
 
                         img_stars_subset = img_stars[subset_indices]
 
@@ -1428,8 +1462,8 @@ class Platepar(object):
                         # Pre-filter catalog to FOV using current pointing (from start_params)
                         # This avoids re-filtering inside every optimizer function evaluation
                         pp_filter = copy.deepcopy(self)
-                        pp_filter.RA_d = (360 * start_params[0]) % 360
-                        pp_filter.dec_d = -90 + (90 * start_params[1] + 90) % (180.000001)
+                        pp_filter.RA_d, pp_filter.dec_d = normalizeRaDec(360*start_params[0],
+                                                                         90*start_params[1])
                         pp_filter.pos_angle_ref = (360 * start_params[2]) % 360
                         pp_filter.F_scale = f_scale_fixed if fixed_scale else abs(start_params[3])
                         ra_cat_all, dec_cat_all, _ = catalog_stars.T
@@ -1475,8 +1509,7 @@ class Platepar(object):
                         # Score on ALL stars
                         pp_temp = copy.deepcopy(self)
                         ra_ref, dec_ref, pos_angle_ref, F_scale = res.x[:4]
-                        pp_temp.RA_d = (360 * ra_ref) % (360)
-                        pp_temp.dec_d = -90 + (90 * dec_ref + 90) % (180.000001)
+                        pp_temp.RA_d, pp_temp.dec_d = normalizeRaDec(360*ra_ref, 90*dec_ref)
                         pp_temp.pos_angle_ref = (360 * pos_angle_ref) % (360)
                         pp_temp.F_scale = f_scale_fixed if fixed_scale else abs(F_scale)
                         pp_temp.x_poly_fwd = np.array(res.x[4:])
@@ -1532,8 +1565,7 @@ class Platepar(object):
                         else:
                             dist_label = "radial7-odd"
                         # Debug: show RA/Dec at each iteration
-                        iter_ra = (360 * res.x[0]) % 360
-                        iter_dec = -90 + (90 * res.x[1] + 90) % 180.000001
+                        iter_ra, iter_dec = normalizeRaDec(360*res.x[0], 90*res.x[1])
                         print("      Iter {}: {} (w={}) fit on {}, {} outliers, RMSD={:.2f}', RA={:.2f} Dec={:.2f}".format(
                             iteration + 1, dist_label, weight, len(subset_indices),
                             np.sum(iteration_outliers), rmsd_arcmin, iter_ra, iter_dec))
@@ -1591,6 +1623,11 @@ class Platepar(object):
                     print("    RANSAC result: {}/{} inliers (removed {} outliers with score > 0), RMSD={:.2f}'".format(
                         n_inliers, n_stars, n_outliers, best_cost))
 
+                    # Safety check: no iteration produced a scored fit (e.g. every iteration bailed out early)
+                    if best_res is None:
+                        print("    -> No RANSAC iteration produced a fit, skipping final fit")
+                        return None
+
                     # Safety check: if RMSD is too large, bail out
                     max_rmsd_arcmin = 10.0
                     if best_cost > max_rmsd_arcmin:
@@ -1600,8 +1637,7 @@ class Platepar(object):
 
                     # Apply best RANSAC params to platepar
                     ra_ref, dec_ref, pos_angle_ref, F_scale = best_res.x[:4]
-                    self.RA_d = (360 * ra_ref) % (360)
-                    self.dec_d = -90 + (90 * dec_ref + 90) % (180.000001)
+                    self.RA_d, self.dec_d = normalizeRaDec(360*ra_ref, 90*dec_ref)
                     self.pos_angle_ref = (360 * pos_angle_ref) % (360)
                     self.F_scale = f_scale_fixed if fixed_scale else abs(F_scale)
                     self.x_poly_fwd = np.array(best_res.x[4:])  # Ensure numpy array
@@ -1689,8 +1725,7 @@ class Platepar(object):
 
                         # Update fitted astrometric parameters (Unnormalize the pointing parameters)
                         ra_ref, dec_ref, pos_angle_ref, F_scale = res.x[:4]
-                        self.RA_d = (360 * ra_ref) % (360)
-                        self.dec_d = -90 + (90 * dec_ref + 90) % (180.000001)
+                        self.RA_d, self.dec_d = normalizeRaDec(360*ra_ref, 90*dec_ref)
                         self.pos_angle_ref = (360 * pos_angle_ref) % (360)
                         # Hold the scale when fixed_scale is set. The patched residual makes the fit
                         # objective independent of the F_scale parameter, so LM leaves res.x[3] at its
@@ -1748,8 +1783,7 @@ class Platepar(object):
                         (self, jd, catalog_stars, img_stars),
                     )
                     xf = res_final.x
-                    self.RA_d = (360*xf[0]) % 360
-                    self.dec_d = -90 + (90*xf[1] + 90) % (180.000001)
+                    self.RA_d, self.dec_d = normalizeRaDec(360*xf[0], 90*xf[1])
                     self.pos_angle_ref = (360*xf[2]) % 360
                     # Hold the scale when fixed_scale is set (see fwd-rev loop note above).
                     self.F_scale = f_scale_fixed if fixed_scale else abs(xf[3])
@@ -2298,8 +2332,10 @@ class Platepar(object):
                 # Local import to avoid circular dependency (ApplyAstrometry imports Platepar)
                 from RMS.Astrometry.ApplyAstrometry import computeFOVSize
                 self.fov_h, self.fov_v = computeFOVSize(self)
-            except Exception:
-                pass  # Keep existing values if computation fails (e.g. uncalibrated platepar)
+
+            # Keep the existing values if the FOV cannot be computed (e.g. an uncalibrated platepar)
+            except (ValueError, TypeError, AttributeError, ArithmeticError) as e:
+                log.debug("Platepar.write: could not recompute the FOV, keeping stored values: {}".format(e))
 
         # Set JSON to be the default format
         if fmt is None:

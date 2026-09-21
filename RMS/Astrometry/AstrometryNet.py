@@ -103,7 +103,9 @@ def astrometryNetSolveLocal(ff_file_path=None, img=None, mask=None, x_data=None,
         (fov_w_range[0] + fov_w_range[1]) / 2.0 if fov_w_range is not None else None
     )
 
-    print("DEBUG: fov_w_hint={}, fov_w_range={}, estimated_fov={}".format(fov_w_hint, fov_w_range, estimated_fov))
+    if verbose:
+        print("FOV hint: fov_w_hint={}, fov_w_range={}, estimated_fov={}".format(
+            fov_w_hint, fov_w_range, estimated_fov))
 
     if estimated_fov is not None and estimated_fov > 90:
 
@@ -178,7 +180,9 @@ def astrometryNetSolveLocal(ff_file_path=None, img=None, mask=None, x_data=None,
             # Fall back to random selection if no intensities available
             if verbose:
                 print("Randomly selecting {:d} stars...".format(max_stars))
-            rand_indices = np.random.choice(len(x_data), max_stars, replace=False)
+            # Use a local seeded generator so repeated solves of the same input pick the same stars
+            rng = np.random.RandomState(0)
+            rand_indices = rng.choice(len(x_data), max_stars, replace=False)
             x_data = x_data[rand_indices]
             y_data = y_data[rand_indices]
 

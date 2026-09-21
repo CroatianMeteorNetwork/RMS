@@ -231,9 +231,10 @@ def extractStarsAuto(img, mask=None,
     intensity = []
     fwhm = []
 
-    # Try different intensity thresholds until the greatest number of stars is found
-    # (the reference list is for 8-bit, scale it to the image bit depth)
-    intens_thresh_list = [t*(2**(bit_depth - 8)) for t in [70, 50, 40, 30, 20, 10, 5]]
+    # Try different intensity thresholds until the greatest number of stars is found. The values are 8-bit
+    #   reference thresholds - extractStars scales them to the image bit depth itself, so they must NOT be
+    #   pre-scaled here (that would apply the bit depth factor twice)
+    intens_thresh_list = [70, 50, 40, 30, 20, 10, 5]
 
     # Repeat the process until the number of returned stars falls within the range
     min_stars_detect = 50
@@ -241,7 +242,7 @@ def extractStarsAuto(img, mask=None,
     for intens_thresh in intens_thresh_list:
 
         if verbose:
-            print("Detecting stars with intensity threshold: ", intens_thresh)
+            print("Detecting stars with intensity threshold (8-bit reference): ", intens_thresh)
 
         status = extractStars(img, img_median=img_median, mask=mask, 
                                 max_star_candidates=max_star_candidates, segment_radius=segment_radius, 
@@ -604,15 +605,15 @@ def fitPSF(img, img_median, x_init, y_init, gamma=1.0, segment_radius=4, roundne
         # Extract an image segment around each star
         star_seg = img[y_min:y_max, x_min:x_max]
 
+        # Skip empty segments (can happen at the very edge of the image)
+        if star_seg.size == 0:
+            continue
+
         # Create x and y indices
         y_ind, x_ind = np.indices(star_seg.shape, dtype=np.int32)
 
         # Estimate saturation level from image type
         saturation = (2**bit_depth - 1)*np.ones_like(y_ind)
-
-        # Skip empty segments (can happen at the very edge of the image)
-        if star_seg.size == 0:
-            continue
 
         # Seed the amplitude from this segment's peak so the fit converges regardless of bit
         # depth. A fixed amplitude guess (e.g. 30, an 8-bit value) starts ~1000x too low on
