@@ -735,8 +735,9 @@ class Platepar(object):
 
         # Pre-extract detected star positions (constant across iterations)
         img_x, img_y, _ = img_stars.T
+        img_coords = np.column_stack([img_x, img_y])
 
-        def _calcPointingNNCostPixel(params, pp_work, jd, ra_catalog, dec_catalog, img_x, img_y, fixed_scale):
+        def _calcPointingNNCostPixel(params, pp_work, jd, ra_catalog, dec_catalog, img_coords, fixed_scale):
             """NN cost function in pixel space for pointing fit.
 
             Projects catalog stars to image coordinates and computes pixel-space NN distances.
@@ -762,10 +763,13 @@ class Platepar(object):
             if len(cat_x_valid) < 3:
                 return 1e10  # Return large cost if too few valid catalog stars
 
-            # Use KD-tree for fast nearest-neighbor search (O(N log M) vs O(N*M))
+            # Use KD-tree for fast nearest-neighbor search (O(N log M) vs O(N*M)). The residual is the
+            #   distance from every detection to its nearest projected catalog star, so the tree has to be
+            #   built on the projected catalog (which moves every evaluation) - building it on the static
+            #   detections would answer the reverse question. The sliding-midpoint, non-compacted build is
+            #   ~2x cheaper than the default and the exact nearest distances it returns are identical.
             cat_coords = np.column_stack([cat_x_valid, cat_y_valid])
-            tree = cKDTree(cat_coords)
-            img_coords = np.column_stack([img_x, img_y])
+            tree = cKDTree(cat_coords, balanced_tree=False, compact_nodes=False)
             nn_distances, _ = tree.query(img_coords, k=1)
 
             # Use RMSD (root mean square deviation) as cost
@@ -787,7 +791,7 @@ class Platepar(object):
         res = scipy.optimize.minimize(
             _calcPointingNNCostPixel,
             p0,
-            args=(pp_work, jd, ra_catalog, dec_catalog, img_x, img_y, fixed_scale),
+            args=(pp_work, jd, ra_catalog, dec_catalog, img_coords, fixed_scale),
             method='Nelder-Mead',
             options={'maxiter': 5000, 'adaptive': True, 'initial_simplex': simplex},
         )
@@ -809,8 +813,7 @@ class Platepar(object):
             return False, res.fun, 0.0, 0.0
 
         cat_coords = np.column_stack([cat_x_valid, cat_y_valid])
-        tree = cKDTree(cat_coords)
-        img_coords = np.column_stack([img_x, img_y])
+        tree = cKDTree(cat_coords, balanced_tree=False, compact_nodes=False)
         nn_distances, _ = tree.query(img_coords, k=1)
 
         # Count inliers (matches within threshold)

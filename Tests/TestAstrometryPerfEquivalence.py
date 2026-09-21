@@ -119,3 +119,46 @@ def testOneToOneMatchingRuleIsUnchanged(seed):
 
     assert np.array_equal(keep_ref, keep_new)
     assert len(np.unique(nearest_indices[keep_new])) == np.sum(keep_new)
+
+
+@pytest.mark.parametrize("seed", [0, 1, 2])
+def testSlidingMidpointTreeGivesExactNearestDistances(seed):
+    """ The cheaper cKDTree build used in fitPointingNN (balanced_tree=False, compact_nodes=False) returns
+        the same nearest-neighbour distances as the default build and as brute force. """
+
+    rng = np.random.RandomState(seed)
+    cat_coords = rng.uniform(0, 1920, (3000, 2))
+    img_coords = rng.uniform(0, 1920, (2000, 2))
+
+    dist_default, _ = cKDTree(cat_coords).query(img_coords, k=1)
+    dist_fast, _ = cKDTree(cat_coords, balanced_tree=False, compact_nodes=False).query(img_coords, k=1)
+    dist_brute = np.sqrt(np.min(
+        (img_coords[:, 0:1] - cat_coords[:, 0][np.newaxis, :])**2
+        + (img_coords[:, 1:2] - cat_coords[:, 1][np.newaxis, :])**2, axis=1))
+
+    assert np.array_equal(dist_default, dist_fast)
+    np.testing.assert_allclose(dist_fast, dist_brute, rtol=1e-12, atol=0)
+
+
+def testFitPointingNNRecoversSyntheticPointing():
+    """ End-to-end: fitPointingNN on the synthetic benchmark field recovers a 0.5 deg pointing offset. """
+
+    import copy
+    from Tests.BenchmarkAstrometryFit import (JD_OBS, buildSyntheticCatalog, buildSyntheticDetections,
+                                              buildSyntheticPlatepar)
+
+    rng = np.random.RandomState(12345)
+    pp = buildSyntheticPlatepar()
+    catalog_stars = buildSyntheticCatalog(pp, rng, n_target=1500)
+    img_stars, _ = buildSyntheticDetections(pp, catalog_stars, rng)
+
+    pp_pert = copy.deepcopy(pp)
+    pp_pert.RA_d = (pp_pert.RA_d + 0.4/np.cos(np.radians(pp.dec_d))) % 360
+    pp_pert.dec_d = pp_pert.dec_d + 0.3
+
+    success, rmsd, inlier_fraction, inlier_rmsd = pp_pert.fitPointingNN(JD_OBS, img_stars, catalog_stars)
+
+    assert success
+    assert inlier_fraction > 0.8
+    assert abs((pp_pert.RA_d - pp.RA_d + 180) % 360 - 180)*np.cos(np.radians(pp.dec_d)) < 0.02
+    assert abs(pp_pert.dec_d - pp.dec_d) < 0.02
