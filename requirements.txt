@@ -19,7 +19,6 @@ cython>=3.0.6 ; python_version>='3.13'
 scipy>=1.0.0
 Pillow>=4.3.0
 astropy>=2.0.3
-imreg_dft @ git+https://github.com/matejak/imreg_dft@master
 configparser==4.0.2
 imageio>=2.31
 python-dvr>=0.0.1 ; python_version >='3.6'
