@@ -15,12 +15,69 @@ import numpy as np
 
 from RMS.Astrometry.StarClasses import PairedStars
 from RMS.Astrometry.ApplyAstrometry import extinctionCorrectionTrueToApparent, raDecToXYPP
+from RMS.Math import angularSeparationDeg
 
 
 # Default filtering parameters
 DEFAULT_PHOTOMETRIC_SIGMA = 2.5
 DEFAULT_BLEND_FWHM_MULT = 2.0  # Multiplier of FWHM for blending detection radius
 DEFAULT_BLEND_MAG_MARGIN = 0.3  # Margin above limiting magnitude for blend check
+
+# Multiplicative margin on the FOV radius used when pre-selecting catalog stars
+DEFAULT_FOV_RADIUS_MARGIN = 1.5
+
+
+
+def fovRadiusDeg(platepar, margin=DEFAULT_FOV_RADIUS_MARGIN):
+    """ Estimate the angular radius of the field of view from the platepar.
+
+        Half the image diagonal is converted from pixels to degrees with the plate scale. The result is
+        capped at 90 deg, as nothing further from the pointing than that can be in front of the camera.
+
+    Arguments:
+        platepar: [Platepar object] Platepar with X_res, Y_res (px) and F_scale (px/deg).
+
+    Keyword arguments:
+        margin: [float] Multiplicative margin on the radius. 1.5 by default, i.e. a 50% margin.
+
+    Return:
+        fov_radius: [float] FOV radius (deg), at most 90 deg.
+    """
+
+    # Half the image diagonal in pixels
+    half_diagonal_px = np.sqrt(platepar.X_res**2 + platepar.Y_res**2)/2
+
+    # Convert to degrees with the plate scale (px/deg) and apply the margin
+    fov_radius = margin*half_diagonal_px/platepar.F_scale
+
+    return min(fov_radius, 90.0)
+
+
+
+def catalogInFOVMask(catalog_ra, catalog_dec, platepar, margin=DEFAULT_FOV_RADIUS_MARGIN):
+    """ Select the catalog stars within the FOV radius of the platepar pointing.
+
+        This is used before projecting catalog stars to image coordinates, as stars behind the camera
+        can otherwise project to valid-looking pixel positions.
+
+    Arguments:
+        catalog_ra: [ndarray] Catalog right ascensions (deg).
+        catalog_dec: [ndarray] Catalog declinations (deg).
+        platepar: [Platepar object] Platepar with the reference pointing RA_d, dec_d (deg).
+
+    Keyword arguments:
+        margin: [float] Multiplicative margin on the FOV radius. 1.5 by default.
+
+    Return:
+        in_fov: [ndarray of bool] True for catalog stars within the FOV radius.
+    """
+
+    # Angular distance from the pointing to every catalog star
+    ang_dist_deg = angularSeparationDeg(platepar.RA_d, platepar.dec_d, np.asarray(catalog_ra),
+        np.asarray(catalog_dec))
+
+    return ang_dist_deg < fovRadiusDeg(platepar, margin=margin)
+
 
 
 def filterPhotometricOutliers(paired_stars, platepar, jd, sigma_threshold=DEFAULT_PHOTOMETRIC_SIGMA,
@@ -147,26 +204,9 @@ def filterBlendedStars(paired_stars, catalog_stars, platepar, jd, lim_mag,
     catalog_ra = catalog_stars[bright_mask, 0]
     catalog_dec = catalog_stars[bright_mask, 1]
 
-    # Filter to stars actually in front of the camera (within FOV + margin)
-    # This prevents false positives from stars behind the camera that could
-    # project to valid-looking pixel coordinates
-    ra_rad = np.radians(catalog_ra)
-    dec_rad = np.radians(catalog_dec)
-    ra_center = np.radians(platepar.RA_d)
-    dec_center = np.radians(platepar.dec_d)
-
-    # Spherical angular distance from camera pointing to each catalog star
-    cos_ang_dist = (np.sin(dec_center) * np.sin(dec_rad) +
-                    np.cos(dec_center) * np.cos(dec_rad) * np.cos(ra_rad - ra_center))
-    cos_ang_dist = np.clip(cos_ang_dist, -1, 1)
-    ang_dist_deg = np.degrees(np.arccos(cos_ang_dist))
-
-    # Estimate FOV radius from platepar (diagonal / 2 * scale, with margin)
-    fov_diagonal = np.sqrt(platepar.X_res**2 + platepar.Y_res**2)
-    fov_radius = (fov_diagonal / 2) * platepar.F_scale * 1.5  # 50% margin
-    fov_radius = min(fov_radius, 90)  # Cap at 90 degrees
-
-    in_fov = ang_dist_deg < fov_radius
+    # Keep only the stars in front of the camera (within the FOV radius plus a margin). This prevents
+    # false positives from stars behind the camera that could project to valid-looking pixel coordinates.
+    in_fov = catalogInFOVMask(catalog_ra, catalog_dec, platepar)
     catalog_ra = catalog_ra[in_fov]
     catalog_dec = catalog_dec[in_fov]
 
