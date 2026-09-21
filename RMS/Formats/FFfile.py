@@ -20,20 +20,21 @@ from RMS.Decorators import memoizeSingle
 def readFFpng(directory, filename, full_filename=False):
     """ Read a PNG image and return it as a pseudo-FF structure.
 
-    For single images like PNG, the avepixel is set to the image data,
-    and maxpixel/stdpixel are approximated.
+        For single images like PNG, the avepixel is set to the image data, and maxpixel/stdpixel are
+        approximated.
 
     Arguments:
         directory: [str] Path to the directory containing the PNG file.
         filename: [str] Name of the PNG file.
 
     Keyword arguments:
-        full_filename: [bool] True if the full path is given in filename.
+        full_filename: [bool] True if the full path is given in filename. False by default.
 
     Return:
-        ff: [FFStruct] FF structure with PNG image data.
+        ff: [FFStruct] FF structure with PNG image data, or None if the image could not be read.
     """
 
+    # Construct the full path to the image
     if full_filename:
         file_path = filename
     else:
@@ -42,6 +43,7 @@ def readFFpng(directory, filename, full_filename=False):
     # Read the image using OpenCV
     img = cv2.imread(file_path, cv2.IMREAD_UNCHANGED)
 
+    # Fail gracefully if the file could not be read
     if img is None:
         return None
 
@@ -105,6 +107,7 @@ def read(directory, filename, fmt=None, array=False, full_filename=False, verbos
         if (extens.lower() == '.bin') or (extens.lower() == '.fits'):
             fmt = extens.replace('.', '')
 
+        # Single PNG images are read as pseudo-FF files
         elif extens.lower() == '.png':
             fmt = 'png'
 
