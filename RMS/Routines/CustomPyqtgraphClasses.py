@@ -350,7 +350,7 @@ class TextItemList(pg.GraphicsObject):
         # Get scene once for efficiency
         try:
             scene = self.parentItem().scene()
-        except:
+        except Exception:
             scene = None
 
         # Remove all items (iterate in reverse to avoid O(n²) from pop(0))
@@ -359,7 +359,7 @@ class TextItemList(pg.GraphicsObject):
             if scene is not None:
                 try:
                     scene.removeItem(item)
-                except:
+                except Exception:
                     pass
             item.setParentItem(None)
 
@@ -373,7 +373,7 @@ class TextItemList(pg.GraphicsObject):
         item = self.text_list.pop(i)
         try:
             self.parentItem().scene().removeItem(item)
-        except:
+        except Exception:
             pass
         item.setParentItem(None)
 
@@ -992,7 +992,6 @@ class CursorItem(pg.GraphicsObject):
             painter.setBrush(QtCore.Qt.BrushStyle.NoBrush)
             painter.drawEllipse(QtCore.QPoint(0, 0), r, r)
 
-            # pen.setStyle(Qt.DotLine)
             painter.setPen(pen)
             painter.drawEllipse(QtCore.QPoint(0, 0), 2*r, 2*r)
             painter.setPen(QtGui.QPen(QtCore.Qt.GlobalColor.blue, 2*self.thickness))
@@ -1064,6 +1063,10 @@ class PointingIndicator(pg.GraphicsObject):
         self.precision = 0         # decimals for the Az/Alt readout (FOV-dependent)
         self.valid_zenith = True   # False when the centre is at/near the zenith
 
+        # Device pixels per image pixel, cached per refresh()/setData() because boundingRect() and paint()
+        #   are called on every scene update and the mapToDevice round-trip is not free
+        self.device_scale_x = 1.0
+
         # Colours (muted, so the glyph stays unobtrusive over the image)
         self.arrow_color = QtGui.QColor(170, 175, 180)
         self.notch_color = QtGui.QColor(210, 215, 220)
@@ -1083,6 +1086,7 @@ class PointingIndicator(pg.GraphicsObject):
         self.step_px = float(step_px)
         self.precision = int(precision)
         self.valid_zenith = bool(valid_zenith)
+        self.device_scale_x = self._deviceScaleX()
         self.prepareGeometryChange()
         self.update()
 
@@ -1090,6 +1094,7 @@ class PointingIndicator(pg.GraphicsObject):
     def refresh(self):
         """ Recompute geometry and repaint. Connect this to the view's range-change signal so the
             step bar (which scales with zoom) is redrawn with up-to-date bounds. """
+        self.device_scale_x = self._deviceScaleX()
         self.prepareGeometryChange()
         self.update()
 
@@ -1112,7 +1117,7 @@ class PointingIndicator(pg.GraphicsObject):
 
     def boundingRect(self):
         # Cover the arrow (plus arrowhead and text margin) and the horizontal step bar (zoom-scaled)
-        bar_half = 0.5*self.step_px*self._deviceScaleX()
+        bar_half = 0.5*self.step_px*self.device_scale_x
         reach = max(self.arrow_length + 34.0, bar_half + 24.0, 122.0)
         return QtCore.QRectF(-reach, -reach, 2*reach, 2*reach)
 
@@ -1128,8 +1133,13 @@ class PointingIndicator(pg.GraphicsObject):
         # length is one WASD step on screen, so it scales with the image zoom -- and (c) an azimuth compass:
         # the middle is North, little notches mark West and East (+/- 90 deg), and a longer notch slides to
         # the current azimuth. The compass spans +/-180 deg over the bar (the ends are South).
+        # The bar's +east_angle end is the screen direction in which the azimuth increases at the optical
+        # axis (fovCentreZenithDirection), and the WASD pan (screenNudgeToAzAltDelta) moves the pointing
+        # toward the sky shown in the pressed screen direction, so panning toward the +east end of the bar
+        # increases the azimuth and slides the notch the same way. The notch jumps between the two ends
+        # when the azimuth crosses due South, which is inherent to the +/-180 deg layout.
         if self.step_px > 0.5:
-            half = 0.5*self.step_px*self._deviceScaleX()
+            half = 0.5*self.step_px*self.device_scale_x
             ea = np.radians(self.east_angle)
             ux, uy = np.cos(ea), -np.sin(ea)         # unit toward East along the horizon (device coords)
             px_, py_ = -uy, ux                       # unit perpendicular (for the notch ticks)
@@ -1281,7 +1291,7 @@ class HistogramLUTItem(pg.HistogramLUTItem):
         if not self.auto_levels:
             self.saved_manual_levels = self.getLevels()
             self.setLevels(*self.imageItem().getAutolevels())
-        else:
+        elif self.saved_manual_levels is not None:
             self.setLevels(*self.saved_manual_levels)
         self.auto_levels = not self.auto_levels
 
@@ -1311,7 +1321,7 @@ class HistogramLUTItem(pg.HistogramLUTItem):
         super().imageChanged(autoLevel, autoRange)
         if self.auto_levels:
             self.setLevels(*self.imageItem().getAutolevels())
-        else:
+        elif self.saved_manual_levels is not None:
             self.setLevels(*self.saved_manual_levels)
 
 
