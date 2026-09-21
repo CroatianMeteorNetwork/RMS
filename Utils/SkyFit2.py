@@ -12700,6 +12700,92 @@ class PlateTool(QtWidgets.QMainWindow):
         return filtered_indices, filtered_catalog_stars
 
 
+    def _makeLMCallback(self):
+        """ Build the callback alignPlatepar calls when the catalog limiting magnitude changes during
+            balancing. It reloads the catalog at the new LM and redraws the catalog stars.
+
+        Return:
+            lm_callback: [function] lm_callback(lim_mag, n_catalog, n_detected, ratio).
+        """
+
+        def lm_callback(lim_mag, n_catalog, n_detected, ratio):
+
+            # Update catalog LM and reload catalog
+            self.cat_lim_mag = lim_mag
+            self.catalog_stars = self.loadCatalogStars(lim_mag)
+
+            # Update status bar
+            self.status_bar.showMessage("Balancing LM={:.1f}: {} catalog, {} detected, ratio={:.2f}".format(
+                lim_mag, n_catalog, n_detected, ratio))
+
+            # Redraw catalog stars
+            self.updateStars(only_update_catalog=True)
+            QtWidgets.QApplication.processEvents()
+
+        return lm_callback
+
+
+    def _makeIterationCallback(self):
+        """ Build the callback fitAstrometry calls at every RANSAC iteration of the NN fit. It temporarily
+            swaps in the iteration platepar to redraw the catalog stars and the distortion centre.
+
+        Return:
+            iteration_callback: [function] iteration_callback(iteration, pp_iter, outlier_mask, rmsd_arcmin).
+        """
+
+        def iteration_callback(iteration, pp_iter, outlier_mask, rmsd_arcmin):
+
+            # pp_iter is a complete deepcopy with correct distortion_type, poly coeffs, and pointing. Swap
+            #   the entire platepar pointer instead of copying attributes piecemeal (which missed
+            #   distortion_type, y_poly, poly_length - causing the display to use wrong-length
+            #   coefficients with the wrong distortion model).
+            saved_pp = self.platepar
+            self.platepar = pp_iter
+
+            # Update status bar with LM and iteration info
+            n_outliers = np.sum(outlier_mask) if outlier_mask is not None else 0
+            self.status_bar.showMessage("LM={:.1f} | RANSAC iter {}: RMSD={:.1f}', {} outliers".format(
+                self.cat_lim_mag, iteration, rmsd_arcmin, n_outliers))
+
+            # Redraw catalog stars and distortion center with updated platepar
+            self.updateStars(only_update_catalog=True)
+            self.updateDistortionCenterMarker()
+            QtWidgets.QApplication.processEvents()
+
+            # Restore original platepar so optimizer isn't corrupted
+            self.platepar = saved_pp
+
+        return iteration_callback
+
+
+    def _filterPairsBeforeFinalFit(self):
+        """ Remove photometric outliers and blended stars from the paired stars before the final fit.
+            Both filters need at least 15 pairs to be applied. """
+
+        # Filter photometric outliers before final fit
+        if len(self.paired_stars) >= 15:
+            removed = self.filterPhotometricOutliers(sigma_threshold=2.5)
+            if removed > 0:
+                print("Pairs after photometric filtering: {}".format(len(self.paired_stars)))
+
+        # Filter blended stars before final fit
+        if len(self.paired_stars) >= 15:
+            removed = self.filterBlendedStars(fwhm_mult=2.0, mag_margin=0.3)
+            if removed > 0:
+                print("Pairs after blend filtering: {}".format(len(self.paired_stars)))
+
+
+    def _sigmaClipPairsAndRefit(self):
+        """ Sigma-clip gross positional mispairs that survived the NN/RANSAC fit (a detection matched to a
+            wrong/duplicate catalog star inflates the RMSD) and refit once on the clean set if any were
+            removed. Call after fitPickedStars(). """
+
+        removed = self.filterPositionalOutliers(sigma_threshold=3.0, abs_floor_px=3.0)
+        if removed > 0:
+            print("Pairs after positional filtering: {}".format(len(self.paired_stars)))
+            self.fitPickedStars()
+
+
     def tryQuickAlignment(self, pointing_only=False):
         """ Try to align platepar using existing pointing as starting point.
 
@@ -12755,18 +12841,7 @@ class PlateTool(QtWidgets.QMainWindow):
         # Pass full CALSTARS data so alignPlatepar can infer catalog LM from intensities
 
         # Callback to update display when catalog LM changes during balancing
-        def lm_callback(lim_mag, n_catalog, n_detected, ratio):
-            # Update catalog LM and reload catalog
-            self.cat_lim_mag = lim_mag
-            self.catalog_stars = self.loadCatalogStars(lim_mag)
-
-            # Update status bar
-            self.status_bar.showMessage("Balancing LM={:.1f}: {} catalog, {} detected, ratio={:.2f}".format(
-                lim_mag, n_catalog, n_detected, ratio))
-
-            # Redraw catalog stars
-            self.updateStars(only_update_catalog=True)
-            QtWidgets.QApplication.processEvents()
+        lm_callback = self._makeLMCallback()
 
         try:
             pp_aligned, inferred_lm = alignPlatepar(self.config, self.platepar, calstars_time,
@@ -12918,26 +12993,7 @@ class PlateTool(QtWidgets.QMainWindow):
                     tuned_catalog = self.loadCatalogStars(self.tuned_cat_lim_mag)
 
                 # Callback to update display at each RANSAC iteration (visual debugging)
-                def iteration_callback(iteration, pp_iter, outlier_mask, rmsd_arcmin):
-                    # pp_iter is a complete deepcopy with correct distortion_type, poly coeffs,
-                    # and pointing. Swap the entire platepar pointer instead of copying attributes
-                    # piecemeal (which missed distortion_type, y_poly, poly_length — causing the
-                    # display to use wrong-length coefficients with the wrong distortion model).
-                    saved_pp = self.platepar
-                    self.platepar = pp_iter
-
-                    # Update status bar with LM and iteration info
-                    n_outliers = np.sum(outlier_mask) if outlier_mask is not None else 0
-                    self.status_bar.showMessage("LM={:.1f} | RANSAC iter {}: RMSD={:.1f}', {} outliers".format(
-                        self.cat_lim_mag, iteration, rmsd_arcmin, n_outliers))
-
-                    # Redraw catalog stars and distortion center with updated platepar
-                    self.updateStars(only_update_catalog=True)
-                    self.updateDistortionCenterMarker()
-                    QtWidgets.QApplication.processEvents()
-
-                    # Restore original platepar so optimizer isn't corrupted
-                    self.platepar = saved_pp
+                iteration_callback = self._makeIterationCallback()
 
                 ransac_result = self.platepar.fitAstrometry(
                     jd, img_stars_arr, catalog_stars_filtered,
@@ -12994,17 +13050,8 @@ class PlateTool(QtWidgets.QMainWindow):
         # Use reset_params=False to preserve the fitted coefficients, just add zeros for new terms
         self.platepar.setDistortionType(user_distortion_type, reset_params=False)
 
-        # Filter photometric outliers before final fit
-        if len(self.paired_stars) >= 15:
-            removed = self.filterPhotometricOutliers(sigma_threshold=2.5)
-            if removed > 0:
-                print("Pairs after photometric filtering: {}".format(len(self.paired_stars)))
-
-        # Filter blended stars before final fit
-        if len(self.paired_stars) >= 15:
-            removed = self.filterBlendedStars(fwhm_mult=2.0, mag_margin=0.3)
-            if removed > 0:
-                print("Pairs after blend filtering: {}".format(len(self.paired_stars)))
+        # Filter photometric outliers and blended stars before the final fit
+        self._filterPairsBeforeFinalFit()
 
         # Do a final fit with user's distortion settings
         if len(self.paired_stars) >= 10:
@@ -13015,12 +13062,8 @@ class PlateTool(QtWidgets.QMainWindow):
                 print("Final refinement with user settings (distortion={})...".format(user_distortion_type))
             self.fitPickedStars()
 
-            # Sigma-clip gross positional mispairs that survived NN/RANSAC (a detection matched to a
-            #   wrong/duplicate catalog star inflates the RMSD), then refit once on the clean set.
-            removed = self.filterPositionalOutliers(sigma_threshold=3.0, abs_floor_px=3.0)
-            if removed > 0:
-                print("Pairs after positional filtering: {}".format(len(self.paired_stars)))
-                self.fitPickedStars()
+            # Sigma-clip gross positional mispairs that survived NN/RANSAC, then refit once
+            self._sigmaClipPairsAndRefit()
 
         # Restore fit_only_pointing after pointing-only fit
         self.fit_only_pointing = user_fit_only_pointing
@@ -13088,18 +13131,7 @@ class PlateTool(QtWidgets.QMainWindow):
         sys.stdout.flush()
 
         # Callback to update display when catalog LM changes during balancing
-        def lm_callback(lim_mag, n_catalog, n_detected, ratio):
-            # Update catalog LM and reload catalog
-            self.cat_lim_mag = lim_mag
-            self.catalog_stars = self.loadCatalogStars(lim_mag)
-
-            # Update status bar
-            self.status_bar.showMessage("Balancing LM={:.1f}: {} catalog, {} detected, ratio={:.2f}".format(
-                lim_mag, n_catalog, n_detected, ratio))
-
-            # Redraw catalog stars
-            self.updateStars(only_update_catalog=True)
-            QtWidgets.QApplication.processEvents()
+        lm_callback = self._makeLMCallback()
 
         try:
             pp_aligned, inferred_lm = alignPlatepar(self.config, self.platepar, calstars_time,
@@ -13891,25 +13923,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 tuned_catalog = self.loadCatalogStars(self.tuned_cat_lim_mag)
 
             # Callback to update display at each RANSAC iteration (visual debugging)
-            def iteration_callback(iteration, pp_iter, outlier_mask, rmsd_arcmin):
-                # pp_iter is a complete deepcopy with correct distortion_type, poly coeffs,
-                # and pointing. Swap the entire platepar pointer instead of copying attributes
-                # piecemeal (which missed distortion_type, y_poly, poly_length).
-                saved_pp = self.platepar
-                self.platepar = pp_iter
-
-                # Update status bar with LM and iteration info
-                n_outliers = np.sum(outlier_mask) if outlier_mask is not None else 0
-                self.status_bar.showMessage("LM={:.1f} | RANSAC iter {}: RMSD={:.1f}', {} outliers".format(
-                    self.cat_lim_mag, iteration, rmsd_arcmin, n_outliers))
-
-                # Redraw catalog stars and distortion center with updated platepar
-                self.updateStars(only_update_catalog=True)
-                self.updateDistortionCenterMarker()
-                QtWidgets.QApplication.processEvents()
-
-                # Restore original platepar so optimizer isn't corrupted
-                self.platepar = saved_pp
+            iteration_callback = self._makeIterationCallback()
 
             try:
                 self.platepar.fitAstrometry(
@@ -13959,17 +13973,8 @@ class PlateTool(QtWidgets.QMainWindow):
             self.platepar.refraction = user_refraction
             self.fit_only_pointing = user_fit_only_pointing
 
-            # Filter photometric outliers before final fit
-            if len(self.paired_stars) >= 15:
-                removed = self.filterPhotometricOutliers(sigma_threshold=2.5)
-                if removed > 0:
-                    print("Pairs after photometric filtering: {}".format(len(self.paired_stars)))
-
-            # Filter blended stars before final fit
-            if len(self.paired_stars) >= 15:
-                removed = self.filterBlendedStars(fwhm_mult=2.0, mag_margin=0.3)
-                if removed > 0:
-                    print("Pairs after blend filtering: {}".format(len(self.paired_stars)))
+            # Filter photometric outliers and blended stars before the final fit
+            self._filterPairsBeforeFinalFit()
 
             # Do the final fit with user's settings
             print()
@@ -13980,10 +13985,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self.fitPickedStars()
 
             # Sigma-clip gross positional mispairs that survived NN/RANSAC, then refit once
-            removed = self.filterPositionalOutliers(sigma_threshold=3.0, abs_floor_px=3.0)
-            if removed > 0:
-                print("Pairs after positional filtering: {}".format(len(self.paired_stars)))
-                self.fitPickedStars()
+            self._sigmaClipPairsAndRefit()
 
             # Note: catalog LM restoration is handled by the caller (autoFitAstrometryNet)
 
