@@ -765,6 +765,8 @@ class EventMonitor(multiprocessing.Process):
         self.db_conn = self.getConnectionToEventMonitorDB()
         self.upgradeDB(self.db_conn)
         self.check_interval = self.syscon.event_monitor_check_interval
+
+        # Exit flag (a plain shared value, safe to inherit under any multiprocessing start method)
         self.exit = AtomicFlag()
 
         # Grab the logging queue on the parent side so the child can re-attach logging
@@ -785,10 +787,17 @@ class EventMonitor(multiprocessing.Process):
         anyway), so the connections are dropped here; run() opens fresh connections on the
         child side. Under 'fork' no pickling occurs, so this is never called and the child
         inherits the connections as before.
+
+        Return:
+            state: [dict] Copy of the instance dictionary with the sqlite connections set to None.
         """
+
         state = self.__dict__.copy()
+
+        # Drop the sqlite connections, they are reopened in run()
         state['conn'] = None
         state['db_conn'] = None
+
         return state
 
     def createDB(self):
@@ -2561,6 +2570,7 @@ class EventMonitor(multiprocessing.Process):
                                                    self.syscon.elevation,
                                                    continuous_capture=self.syscon.continuous_capture)
 
+            # A datetime start time means capture is not running yet: report when it starts
             if not isinstance(start_time, bool):
 
                 time_left_before_start = (start_time - RmsDateTime.utcnow())
@@ -2575,11 +2585,13 @@ class EventMonitor(multiprocessing.Process):
                                                                                              time_left_before_start_minutes))
                 else:
                     log.info('Next night capture start  : {} UTC'.format(str(start_time.strftime('%H:%M:%S'))))
+            # Otherwise capture is already running: report when the night ends, if it is soon
             else:
                 next_check_start_time = (RmsDateTime.utcnow() + datetime.timedelta(minutes=self.check_interval))
                 next_check_start_time_str = next_check_start_time.replace(microsecond=0).strftime('%H:%M:%S')
                 log.info('Next EventMonitor run         : {} UTC {:05.1f} minutes from now'.format(next_check_start_time_str,
                                                                                            self.check_interval))
+
                 end_time = RmsDateTime.utcnow() + datetime.timedelta(seconds=duration)
                 time_left_before_end_minutes = duration / 60
                 if time_left_before_end_minutes < 120:

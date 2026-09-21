@@ -596,9 +596,16 @@ class UploadManager(multiprocessing.Process):
         keeps it alive, and the Queue/Lock proxies it created (self.file_queue,
         self.file_queue_lock) are picklable and reconnect on the child side. Under 'fork' no
         pickling occurs, so this is never called and behavior is unchanged.
+
+        Return:
+            state: [dict] Copy of the instance dictionary with the SyncManager set to None.
         """
+
         state = self.__dict__.copy()
+
+        # Drop the SyncManager, the parent keeps it alive
         state['_mgr'] = None
+
         return state
 
 
@@ -621,6 +628,8 @@ class UploadManager(multiprocessing.Process):
         self.join(timeout)
         if not self.is_alive():
             log.info("UploadManager stopped successfully.")
+
+            # Release the Manager server process now that the child is gone
             self._shutdownManager()
             return
 
@@ -649,8 +658,11 @@ class UploadManager(multiprocessing.Process):
             the 'forkserver'/'spawn' start methods). A no-op in child processes, where _mgr is
             None (see __getstate__). Safe to call more than once.
         """
+
         mgr = getattr(self, '_mgr', None)
         if mgr is not None:
+
+            # The manager may already be gone if the interpreter is shutting down
             try:
                 mgr.shutdown()
             except Exception:
