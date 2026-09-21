@@ -126,10 +126,15 @@ def getPairedStarsSkyPositions(img_x, img_y, jd, platepar):
         (ra_array, dec_array): [tuple of ndarrays] Arrays of RA and Dec of stars on the image.
     """
 
-    # Compute RA, Dec of image stars
+    # All stars share the same time, so convert the JD to a date tuple and back once and broadcast it. This
+    #   gives exactly the same JD per star as converting the tuple once per star, without the O(N) Python
+    #   loop in xyToRaDecPP
     img_time = jd2Date(jd)
+    jd_data = np.full(len(img_x), date2JD(*img_time), dtype=np.float64)
+
+    # Compute RA, Dec of image stars (no levels are given, which skips the unused magnitude computation)
     _, ra_array, dec_array, _ = RMS.Astrometry.ApplyAstrometry.xyToRaDecPP(
-        len(img_x) * [img_time], img_x, img_y, len(img_x) * [1], platepar, extinction_correction=False,
+        jd_data, img_x, img_y, None, platepar, extinction_correction=False, jd_time=True,
         precompute_pointing_corr=True
     )
 

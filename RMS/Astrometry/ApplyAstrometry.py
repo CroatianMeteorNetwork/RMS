@@ -943,11 +943,12 @@ def xyToRaDecPP(time_data, X_data, Y_data, level_data, platepar, extinction_corr
             if jd_time is True - Julian dates.
         X_data: [ndarray] 1D numpy array containing the image X component.
         Y_data: [ndarray] 1D numpy array containing the image Y component.
-        level_data: [ndarray] Levels of the meteor centroid.
+        level_data: [ndarray] Levels of the meteor centroid. If None, the magnitude computation is skipped
+            and magnitude_data is returned as None.
         platepar: [Platepar structure] Astrometry parameters.
 
     Keyword arguments:
-        extinction_correction: [bool] Apply extinction correction. True by default. False is set to prevent 
+        extinction_correction: [bool] Apply extinction correction. True by default. False is set to prevent
             infinite recursion in extinctionCorrectionApparentToTrue when set to True.
         measurement: [bool] Indicates if the given images values are image measurements. Used for correcting
             celestial coordinates for refraction if the refraction was not taken into account during
@@ -994,16 +995,24 @@ def xyToRaDecPP(time_data, X_data, Y_data, level_data, platepar, extinction_corr
             dec_data[i] = np.degrees(dec)
             
 
-    # Compute radii from image centre
-    radius_arr = np.hypot(np.array(X_data) - platepar.X_res/2, np.array(Y_data) - platepar.Y_res/2)
+    # Skip the photometry when no levels are given (e.g. when only the sky positions are needed during
+    #   plate fitting), as the per-point magnitude loop is then pure overhead
+    if level_data is None:
+        magnitude_data = None
 
-    # Calculate magnitudes
-    magnitude_data = calculateMagnitudes(level_data, radius_arr, platepar.mag_lev, platepar.vignetting_coeff)
+    else:
 
-    # Extinction correction
-    if extinction_correction:
-        magnitude_data = extinctionCorrectionApparentToTrue(magnitude_data, X_data, Y_data, JD_data[0], \
-            platepar)
+        # Compute radii from image centre
+        radius_arr = np.hypot(np.array(X_data) - platepar.X_res/2, np.array(Y_data) - platepar.Y_res/2)
+
+        # Calculate magnitudes
+        magnitude_data = calculateMagnitudes(level_data, radius_arr, platepar.mag_lev,
+            platepar.vignetting_coeff)
+
+        # Extinction correction
+        if extinction_correction:
+            magnitude_data = extinctionCorrectionApparentToTrue(magnitude_data, X_data, Y_data, JD_data[0], \
+                platepar)
 
 
     return JD_data, RA_data, dec_data, magnitude_data
