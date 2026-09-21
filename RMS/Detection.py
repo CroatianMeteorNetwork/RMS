@@ -1152,6 +1152,11 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
 
         filtered_lines = []
 
+        # Fixed-seed local generator for subsampling overly dense stripes below, created once per image so
+        #   reprocessing the same data is reproducible (the global RNG is unseeded; this matches the
+        #   seeded-RNG convention used elsewhere in RMS, e.g. ApplyRecalibrate)
+        rng = np.random.default_rng(0)
+
         # Analyze stripes of each line
         # This step makes sure that there is a linear propagation of the detections in time
         for line in line_list:
@@ -1209,11 +1214,7 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                 maxpix_elements = img_handle.ff.maxpixel[ys,xs].astype(np.float64)
                 weights = maxpix_elements/np.sum(maxpix_elements)
 
-                # Random sample the point, sampling is weighted by pixel intensity.
-                # Use a fixed-seed local generator so reprocessing the same data is
-                # reproducible (the global RNG is unseeded; this matches the seeded-RNG
-                # convention used elsewhere in RMS, e.g. ApplyRecalibrate).
-                rng = np.random.default_rng(0)
+                # Random sample the points, weighted by pixel intensity
                 indices = rng.choice(len(zs), config.max_points_det, replace=False, p=weights)
                 ys = ys[indices]
                 xs = xs[indices]
