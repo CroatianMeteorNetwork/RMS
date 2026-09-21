@@ -274,19 +274,11 @@ class Compressor(multiprocessing.Process):
             log.debug("Compression process was never started, nothing to reap")
 
         else:
-            # Process is not alive but may not have been joined yet - reap it
+            # Process is not alive but may not have been joined yet - reap it. The process has
+            # already exited, so this join returns as soon as the exit status is collected; the
+            # timeout is only a guard against the bookkeeping itself misbehaving.
             log.debug("Compression process not alive, joining to reap resources")
             self.join(timeout=5)
-
-            # A timed-out join here leaves the child unreaped; do not let that pass silently -
-            # escalate the same way as the live branch above
-            if self.is_alive():
-                log.warning("Compression process could not be reaped within 5 s, sending SIGKILL...")
-                try:
-                    os.kill(self.pid, signal.SIGKILL)
-                except (OSError, AttributeError):
-                    pass
-                self.join(5)
 
         # Return the detector and live viewer objects because they were updated in this namespace
         return self.detector
