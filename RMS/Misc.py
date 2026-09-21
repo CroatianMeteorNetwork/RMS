@@ -37,7 +37,7 @@ from matplotlib import scale as mscale
 from matplotlib import transforms as mtransforms
 from matplotlib.ticker import FixedLocator
 
-from RMS.Logger import getLogger
+from RMS.Logger import getLogger, flushChildLogging
 
 # Map FileNotFoundError to IOError in Python 2 as it does not exist
 if sys.version_info[0] < 3:
@@ -160,6 +160,9 @@ class BoundedLock(object):
     touches it. Acquisition times out (5 s first time, 0.5 s once broken), warns once, and
     proceeds without the lock - stale/racy data beats a permanent wedge for the counters and
     timestamps this protects. Usable as a context manager, releasing only if acquired.
+
+    Thread-safe within a process: whether the lock was acquired is tracked per thread, so two
+    threads sharing one instance cannot release each other's acquisition. Not reentrant.
     """
 
     def __init__(self, name='lock', timeout=5.0):
@@ -167,24 +170,27 @@ class BoundedLock(object):
         self._name = name
         self._timeout = timeout
         self._broken = False        # per-process memo of an orphaned lock
-        self._acquired_here = False
+
+        # Thread ident -> True while that thread holds the lock. A plain dict (not
+        # threading.local) so the instance stays picklable for the 'spawn'/'forkserver'
+        # start methods, where the owning Process object is sent to the child by pickle
+        self._holders = {}
 
     def __enter__(self):
         timeout = 0.5 if self._broken else self._timeout
-        self._acquired_here = self._lock.acquire(timeout=timeout)
-        if not self._acquired_here and not self._broken:
+        acquired = self._lock.acquire(timeout=timeout)
+        if not acquired and not self._broken:
             self._broken = True
-            print('BoundedLock({:s}): not acquired after {:.1f} s - a process likely died '
-                  'holding it. Proceeding without the lock.'.format(self._name, timeout),
-                  file=sys.__stderr__)
-        if self._acquired_here:
+            log.warning('BoundedLock({:s}): not acquired after {:.1f} s - a process likely died '
+                        'holding it. Proceeding without the lock.'.format(self._name, timeout))
+        if acquired:
             self._broken = False
+            self._holders[threading.get_ident()] = True
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        if self._acquired_here:
+        if self._holders.pop(threading.get_ident(), False):
             self._lock.release()
-            self._acquired_here = False
         return False
 
 
@@ -286,8 +292,14 @@ def setParentDeathSignal(sig=9):
             return
 
         # If the parent already exited before we armed the signal we were reparented to
-        # init (ppid == 1): exit now rather than linger as an orphan.
+        # init (ppid == 1): PDEATHSIG will never fire for a parent that is already gone, so
+        # this is the only chance to die - exit now rather than linger as an orphan holding
+        # the inherited frame buffers. os._exit() (not sys.exit) because a Process.run()
+        # must not unwind into the multiprocessing bootstrap; flush the log record first
+        # so the orphan exit is at least visible.
         if os.getppid() == 1:
+            log.warning("setParentDeathSignal: parent already gone (reparented to init), exiting")
+            flushChildLogging(timeout=1.0)
             os._exit(0)
 
     except Exception as e:
