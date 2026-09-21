@@ -212,6 +212,63 @@ def _raDecToUnitVectors(ra_deg, dec_deg):
     return np.column_stack([cos_dec*np.cos(ra), cos_dec*np.sin(ra), np.sin(dec)])
 
 
+def _nearestCatalogStars(ra_det, dec_det, ra_cat, dec_cat, cat_tree=None):
+    """Find the nearest catalog star of every detected star.
+
+    Equivalent to taking the row-wise argmin/min of the dense N x M angularSeparation matrix, but in
+    O(N log M) instead of O(N*M). The nearest neighbour is found with a KD-tree of unit vectors (the
+    chord distance 2*sin(sep/2) is monotonic in the angular separation, so the nearest neighbour is the
+    same), and the separation of every matched pair is then recomputed with angularSeparation so the
+    returned values are the same numbers the dense matrix produced.
+
+    Arguments:
+        ra_det: [ndarray] Right ascensions of the detected stars (deg).
+        dec_det: [ndarray] Declinations of the detected stars (deg).
+        ra_cat: [ndarray] Right ascensions of the catalog stars (deg).
+        dec_cat: [ndarray] Declinations of the catalog stars (deg).
+
+    Keyword arguments:
+        cat_tree: [cKDTree] Prebuilt tree of the catalog unit vectors (see _raDecToUnitVectors). If None,
+            it is built here.
+
+    Return:
+        (nearest_indices, nearest_sep): [tuple of ndarrays]
+            nearest_indices: [ndarray of int] Index of the nearest catalog star for every detection.
+            nearest_sep: [ndarray] Angular separation to that catalog star (radians).
+    """
+
+    ra_det = np.asarray(ra_det, dtype=np.float64)
+    dec_det = np.asarray(dec_det, dtype=np.float64)
+    ra_cat = np.asarray(ra_cat, dtype=np.float64)
+    dec_cat = np.asarray(dec_cat, dtype=np.float64)
+
+    # Build the catalog tree if one was not given
+    if cat_tree is None:
+        cat_tree = cKDTree(_raDecToUnitVectors(ra_cat, dec_cat))
+
+    # The tree query rejects non-finite points, while the dense matrix gave such detections a NaN row
+    #   (argmin 0, min NaN). Reproduce that so degenerate projections are handled the same way
+    det_vectors = _raDecToUnitVectors(ra_det, dec_det)
+    finite = np.all(np.isfinite(det_vectors), axis=1)
+
+    nearest_indices = np.zeros(len(ra_det), dtype=np.intp)
+    nearest_sep = np.full(len(ra_det), np.nan, dtype=np.float64)
+
+    if np.any(finite):
+
+        _, nearest_indices[finite] = cat_tree.query(det_vectors[finite], k=1)
+
+        # Recompute the separation of the matched pairs with the same formula the dense matrix used
+        nearest_sep[finite] = angularSeparation(
+            np.radians(ra_det[finite]),
+            np.radians(dec_det[finite]),
+            np.radians(ra_cat[nearest_indices[finite]]),
+            np.radians(dec_cat[nearest_indices[finite]]),
+        )
+
+    return nearest_indices, nearest_sep
+
+
 class Platepar(object):
     def __init__(self, distortion_type="radial7-odd"):
         """Astrometric and photometric calibration plate parameters. Several distortion types are supported.
@@ -1533,13 +1590,9 @@ class Platepar(object):
                         catalog_stars_iter = catalog_stars[in_fov_iter]
                         ra_catalog, dec_catalog, _ = catalog_stars_iter.T
 
-                        # Vectorized NN: compute NxM separation matrix
-                        ra_det_rad = np.radians(ra_det)[:, np.newaxis]  # (N, 1)
-                        dec_det_rad = np.radians(dec_det)[:, np.newaxis]  # (N, 1)
-                        ra_cat_rad = np.radians(ra_catalog)[np.newaxis, :]  # (1, M)
-                        dec_cat_rad = np.radians(dec_catalog)[np.newaxis, :]  # (1, M)
-                        sep_matrix = angularSeparation(ra_det_rad, dec_det_rad, ra_cat_rad, dec_cat_rad)
-                        nn_seps = np.min(sep_matrix, axis=1)  # (N,)
+                        # Nearest catalog star of every detection (KD-tree, O(N log M)); the separations
+                        #   are the same values the dense NxM matrix row minima gave
+                        _, nn_seps = _nearestCatalogStars(ra_det, dec_det, ra_catalog, dec_catalog)
 
                         median_sep = np.median(nn_seps)
                         base_threshold = 3.0 * median_sep
@@ -1664,27 +1717,22 @@ class Platepar(object):
                     catalog_stars_fov = catalog_stars[in_fov_final]
                     ra_catalog, dec_catalog, _ = catalog_stars_fov.T
 
-                    # Vectorized NN matching: compute NxM separation matrix
-                    ra_det_rad = np.radians(ra_det)[:, np.newaxis]  # (N, 1)
-                    dec_det_rad = np.radians(dec_det)[:, np.newaxis]  # (N, 1)
-                    ra_cat_rad = np.radians(ra_catalog)[np.newaxis, :]  # (1, M)
-                    dec_cat_rad = np.radians(dec_catalog)[np.newaxis, :]  # (1, M)
-                    sep_matrix = angularSeparation(ra_det_rad, dec_det_rad, ra_cat_rad, dec_cat_rad)
-                    nearest_indices = np.argmin(sep_matrix, axis=1)  # (N,)
-                    nearest_sep = np.min(sep_matrix, axis=1)         # (N,)
+                    # NN matching: nearest catalog star of every detection (KD-tree, O(N log M) instead
+                    #   of the dense NxM separation matrix)
+                    nearest_indices, nearest_sep = _nearestCatalogStars(ra_det, dec_det, ra_catalog,
+                                                                         dec_catalog)
 
-                    # Enforce one-to-one matching. argmin is per-detection and non-injective, so two
-                    #   detected stars can claim the same catalog star (a duplicate) - which then
-                    #   shows up as a gross residual and inflates the RMSD. Resolve conflicts by
-                    #   keeping, for each catalog star, only the closest detection; drop the rest.
+                    # Enforce one-to-one matching. The nearest neighbour is per-detection and
+                    #   non-injective, so two detected stars can claim the same catalog star (a
+                    #   duplicate) - which then shows up as a gross residual and inflates the RMSD.
+                    #   Resolve conflicts by keeping, for each catalog star, only the closest detection;
+                    #   drop the rest. Walking the detections in order of increasing separation and
+                    #   keeping the first claim of every catalog star is the same as taking the first
+                    #   occurrence of every catalog index in that order.
+                    sep_order = np.argsort(nearest_sep)
+                    _, first_claim = np.unique(nearest_indices[sep_order], return_index=True)
                     keep_mask = np.zeros(len(nearest_indices), dtype=bool)
-                    seen_catalog = set()
-                    for det_i in np.argsort(nearest_sep):
-                        cat_i = int(nearest_indices[det_i])
-                        if cat_i in seen_catalog:
-                            continue
-                        seen_catalog.add(cat_i)
-                        keep_mask[det_i] = True
+                    keep_mask[sep_order[first_claim]] = True
 
                     n_dupes = int(np.sum(~keep_mask))
                     if n_dupes > 0:
