@@ -19,12 +19,11 @@ in SkyFit2 on the selected image.
 
 from __future__ import print_function, division, absolute_import
 
-import datetime
 import os
 
 import numpy as np
 
-from RMS.Astrometry.Conversions import date2JD, jd2Date, JD2HourAngle, JD2LST
+from RMS.Astrometry.Conversions import date2JD, JD2HourAngle, JD2LST, jd2YearsFromJ2000
 from RMS.Astrometry.Conversions import trueRaDec2ApparentAltAz
 from RMS.Astrometry.ApplyAstrometry import rotationWrtStandardToPosAngle
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP
@@ -47,6 +46,10 @@ DEFAULT_EQUAL_ASPECT = True
 DEFAULT_ASYMMETRY_CORR = True
 DEFAULT_FORCE_DISTORTION_CENTRE = False
 DEFAULT_REFRACTION = True
+
+# Maximum pixel distance between an NN-fitted star position and a detected star for the detection's
+#   FWHM/SNR/saturation to be attached to the pair (the fitted star_list only carries x, y, intensity)
+NN_PAIR_ASSOC_RADIUS_PX = 3.0
 
 
 def scoreFrameDistribution(star_data, img_width, img_height, n_grid=4):
@@ -139,8 +142,9 @@ def scoreFrameQuality(star_data, min_stars=10, max_stars=200):
     snr = star_data[:, 6] if star_data.shape[1] > 6 else np.ones(n_stars)
     n_saturated_px = star_data[:, 7] if star_data.shape[1] > 7 else np.zeros(n_stars)
 
+    # Fraction of stars with no saturated pixels (higher is better for the score)
     non_saturated_count = np.sum(n_saturated_px == 0)
-    saturation_fraction = non_saturated_count / n_stars
+    non_saturated_fraction = non_saturated_count / n_stars
 
     non_sat_mask = n_saturated_px == 0
     if np.sum(non_sat_mask) > 0:
@@ -156,13 +160,13 @@ def scoreFrameQuality(star_data, min_stars=10, max_stars=200):
     else:
         count_score = max(0, 1.0 - (n_stars - max_stars) / max_stars)
 
-    score = 0.4 * count_score + 0.4 * saturation_fraction + 0.2 * snr_score
+    score = 0.4 * count_score + 0.4 * non_saturated_fraction + 0.2 * snr_score
 
     details = {
         'n_stars': n_stars,
         'valid': True,
         'non_saturated_count': non_saturated_count,
-        'saturation_fraction': saturation_fraction,
+        'non_saturated_fraction': non_saturated_fraction,
         'mean_snr': mean_snr,
         'snr_score': snr_score,
         'count_score': count_score
@@ -403,7 +407,7 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
             return None, None, None
 
     else:
-        calstars_list, chunk_frames = CALSTARS.readCALSTARS(dir_path, calstars_file)
+        calstars_list, _ = CALSTARS.readCALSTARS(dir_path, calstars_file)
     calstars = {ff_file: star_data for ff_file, star_data in calstars_list}
 
     if verbose:
@@ -455,7 +459,7 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
             print("  Stars: {:d}, Coverage: {:.1f}%, Non-saturated: {:.1f}%".format(
                 details['quality_details']['n_stars'],
                 details['distribution_details']['coverage_fraction'] * 100,
-                details['quality_details']['saturation_fraction'] * 100
+                details['quality_details']['non_saturated_fraction'] * 100
             ))
 
     # Get star data for best frame
@@ -550,6 +554,7 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
                 photometric_sigma=photometric_sigma,
                 fwhm_mult=fwhm_mult,
                 wide_fov_search=True,
+                final_catalog_stars=final_catalog_stars,
                 verbose=verbose
             )
 
@@ -628,7 +633,7 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
             if len(x_data) > 0:
                 distances = np.sqrt((x_data - img_x)**2 + (y_data - img_y)**2)
                 closest_idx = np.argmin(distances)
-                if distances[closest_idx] < 3.0:
+                if distances[closest_idx] < NN_PAIR_ASSOC_RADIUS_PX:
                     fwhm = input_fwhm[closest_idx]
                     snr = input_snr[closest_idx]
                     saturated = input_saturated[closest_idx] > 0
@@ -650,11 +655,11 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
         print("Filtering stars...")
 
     if len(paired_stars) >= 15:
-        paired_stars, removed = filterPhotometricOutliers(
+        paired_stars, _ = filterPhotometricOutliers(
             paired_stars, platepar, jd, sigma_threshold=photometric_sigma, verbose=verbose)
 
     if len(paired_stars) >= 15:
-        paired_stars, removed = filterBlendedStars(
+        paired_stars, _ = filterBlendedStars(
             paired_stars, catalog_stars, platepar, jd, config.catalog_mag_limit,
             fwhm_mult=fwhm_mult, verbose=verbose)
 
@@ -729,8 +734,8 @@ def loadCatalogStars(config, lim_mag, jd=None):
         star_catalog_path = os.path.join(config.rms_root_dir, 'Catalogs')
 
     if jd is not None:
-        dt = jd2Date(jd, dt_obj=True)
-        years_from_J2000 = (dt - datetime.datetime(2000, 1, 1, 12, 0, 0)).days / 365.25
+        # Computed from the JD directly so the day fraction is kept (a .days difference truncates)
+        years_from_J2000 = jd2YearsFromJ2000(jd)
     else:
         years_from_J2000 = 0.0
 
