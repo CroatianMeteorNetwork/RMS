@@ -257,9 +257,11 @@ class Extractor(Process):
             filename: [str] name of the FF file which is being processed
 
         """
-        
+
+        # Exit flag (a plain shared value, safe to inherit under any multiprocessing start method)
         self.exit = AtomicFlag()
-        
+
+        # Keep only the shared buffer base and shape; the numpy view is rebuilt in run()
         self.frames_base = frames_base
         self.frames_shape = frames_shape
         self.frames = None      # numpy view rebuilt in run() (per-process)
