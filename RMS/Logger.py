@@ -89,17 +89,29 @@ class LoggerWriter:
     """ Used to redirect stdout/stderr to the log.
     """
     def __init__(self, logger, level, stdout_captured=True):
+        """ Arguments:
+                logger: [Logger] Logger the stream is redirected to.
+                level: [int] Logging level used for the redirected messages.
+
+            Keyword arguments:
+                stdout_captured: [bool] True if stdout is also redirected to the log (config.log_stdout).
+                    True by default.
+        """
+
         self.logger = logger
         self.level = level
         self.stdout_captured = stdout_captured
 
     def write(self, message):
+        """ Log the message, ignoring blank writes. Never raises. """
+
         try:
             if message.strip():
                 self.logger.log(self.level, message.strip())
+
+        # Never print() here: when stdout is redirected to this very object the print would
+        # re-enter write() and recurse. Write to the original stderr instead, best-effort.
         except Exception:
-            # Never print() here: when stdout is redirected to this very object the print would
-            # re-enter write() and recurse. Write to the original stderr instead, best-effort.
             try:
                 sys.__stderr__.write('error during logging to stdout/stderr: attempted to log - '
                     '{}\n'.format(message))
@@ -386,12 +398,21 @@ _active_manager = None
 class _DroppingQueueHandler(logging.handlers.QueueHandler):
     """ QueueHandler that silently drops records when the queue is full or broken.
 
-    The logging queue is bounded, so a stalled listener cannot grow producer memory without
-    bound. Blocking or raising here would stall capture, so dropping is the only safe option.
+        The logging queue is bounded, so a stalled listener cannot grow producer memory without
+        bound. Blocking or raising here would stall capture, so dropping is the only safe option.
     """
+
     dropped = 0   # per-process: each forked producer counts its own drops
 
     def enqueue(self, record):
+        """ Put the record on the queue without blocking, counting it as dropped if the queue is full
+            or broken.
+
+        Arguments:
+            record: [LogRecord] Record to enqueue.
+        """
+
+        # Drop the record if the queue is full or broken
         try:
             self.queue.put_nowait(record)
         except Exception:
@@ -413,14 +434,21 @@ class _DroppingQueueHandler(logging.handlers.QueueHandler):
                 self.dropped += n
 
     def takeDroppedCount(self):
-        """ Return and reset this process's dropped-record count. """
+        """ Return and reset this process's dropped-record count.
+
+        Return:
+            n: [int] Number of records dropped since the last call.
+        """
+
         n, self.dropped = self.dropped, 0
         return n
 
 
 class LoggingManager:
-    """Manages the lifecycle of the multiprocessing logger."""
+    """ Manages the lifecycle of the multiprocessing logger. """
+
     def __init__(self):
+
         self.logging_queue = None
         self.listener_process = None
         self.is_initialized = False
@@ -447,7 +475,8 @@ class LoggingManager:
         # Records the current listener has taken off the queue (lock-free, single writer)
         self._records_processed = None
 
-        # Restart pacing (see checkLoggingHealth)
+        # Restart pacing (see checkLoggingHealth): the number of restarts so far and the earliest
+        # monotonic time the next one is allowed
         self._restart_count = 0
         self._next_restart_allowed = 0.0
 
@@ -569,14 +598,14 @@ class LoggingManager:
     def checkLoggingHealth(self):
         """ Detect a dead or starved logging pipeline and restart it.
 
-        Two failure modes are covered:
-        - The listener process died (crash, OOM kill): trivially detectable.
-        - The listener is alive but records stopped reaching it. This happens when any
-          producer process dies (or is killed) while holding one of the queue's shared
-          internal locks - every producer then buffers records forever and the station
-          goes silently log-dark while continuing to run.
+            Two failure modes are covered:
+            - The listener process died (crash, OOM kill): trivially detectable.
+            - The listener is alive but records stopped reaching it. This happens when any
+              producer process dies (or is killed) while holding one of the queue's shared
+              internal locks - every producer then buffers records forever and the station
+              goes silently log-dark while continuing to run.
 
-        Call periodically from the main process (e.g. the capture watchdog).
+            Call periodically from the main process (e.g. the capture watchdog).
 
         Return:
             [bool] True if the pipeline is healthy, False if a restart was triggered.
@@ -584,6 +613,7 @@ class LoggingManager:
 
         with self.init_lock:
 
+            # Nothing to check before logging is set up
             if not self.is_initialized:
                 return True
 
@@ -603,7 +633,7 @@ class LoggingManager:
             # abandoned queue every minute
             now = time.monotonic()
 
-            # Listener process died
+            # Listener process died - restart it, unless the backoff window is still open
             if (self.listener_process is None) or (not self.listener_process.is_alive()):
                 if now < self._next_restart_allowed:
                     print('LOGGING WATCHDOG: listener dead; next restart '
@@ -651,6 +681,7 @@ class LoggingManager:
             self._last_processed = processed
             self._last_sample_time = now
 
+            # Enough consecutive stalled samples - restart, unless the backoff window is still open
             if self._stall_strikes >= LOG_STALL_STRIKES:
                 if now < self._next_restart_allowed:
                     print('LOGGING WATCHDOG: backlog stalled; next restart '
@@ -665,10 +696,13 @@ class LoggingManager:
             return True
 
     def _healthLoop(self):
-        """ Always-on periodic health check (daemon thread in the process that
-            initialized logging). """
+        """ Always-on periodic health check (daemon thread in the process that initialized logging).
+            Runs until the stop event is set.
+        """
 
         while not self._health_stop.wait(LOG_HEALTH_INTERVAL):
+
+            # The check must never kill the health thread
             try:
                 self.checkLoggingHealth()
             except Exception as e:
@@ -677,7 +711,11 @@ class LoggingManager:
 
 
     def _restartLogging(self, reason):
-        """ Replace the queue and listener process. Must be called with init_lock held. """
+        """ Replace the queue and listener process. Must be called with init_lock held.
+
+        Arguments:
+            reason: [str] Human-readable reason for the restart, printed to the real stderr and logged.
+        """
 
         # This must bypass the stream redirect entirely: with log_stdout, plain
         # print() goes to a LoggerWriter still pointing at the wedged queue and
@@ -685,6 +723,7 @@ class LoggingManager:
         print('LOGGING WATCHDOG: {:s} - restarting the logging pipeline...'.format(reason),
               file=sys.__stderr__)
 
+        # Stop the old listener, if it is still around
         try:
             if (self.listener_process is not None) and self.listener_process.is_alive():
                 self.listener_process.terminate()
@@ -707,11 +746,13 @@ class LoggingManager:
         except Exception:
             pass
 
+        # Arm the exponential backoff for the next restart
         self._restart_count += 1
         self._next_restart_allowed = time.monotonic() + min(
             LOG_RESTART_BACKOFF_BASE*(2**(self._restart_count - 1)),
             LOG_RESTART_BACKOFF_MAX)
 
+        # Start a fresh queue and listener, and reset the stall detection
         self._spawnListener()
         self._stall_strikes = 0
         self._last_processed = None
@@ -729,6 +770,8 @@ class LoggingManager:
         """
         Handles cleanup of logging resources. Stops the listener process.
         """
+
+        # Stop the health thread first so it cannot restart the pipeline mid-shutdown
         if self._health_stop is not None:
             self._health_stop.set()
 
@@ -856,11 +899,21 @@ def _listener_configurer(config, log_file_prefix, safedir, console_level=logging
 def _listener_process(queue, records_processed, config, log_file_prefix, safedir,
                       console_level=logging.INFO, file_level=logging.DEBUG):
     """ Target function for the logging listener process.
-    Ignores SIGINT and processes messages in strict FIFO order.
+        Ignores SIGINT and processes messages in strict FIFO order.
 
-    records_processed is a lock-free shared counter of the records taken off the queue. It is
-    the health check's only reliable "the listener is consuming" signal - the queue backlog
-    alone cannot distinguish a wedged pipeline from producers outrunning a healthy listener.
+    Arguments:
+        queue: [multiprocessing.Queue] Queue the producers put their log records on.
+        records_processed: [multiprocessing.Value] Lock-free shared counter of the records taken off
+            the queue. It is the health check's only reliable "the listener is consuming" signal - the
+            queue backlog alone cannot distinguish a wedged pipeline from producers outrunning a
+            healthy listener.
+        config: [Config] RMS configuration object.
+        log_file_prefix: [str] Prefix of the log file name.
+        safedir: [str] Fallback directory for the log file if the configured one is not writable.
+
+    Keyword arguments:
+        console_level: [int] Logging level of the console handler. INFO by default.
+        file_level: [int] Logging level of the file handler. DEBUG by default.
     """
     import signal
     signal.signal(signal.SIGINT, signal.SIG_IGN)
@@ -1029,6 +1082,7 @@ def getLoggingQueue():
         [multiprocessing.Queue or None] The shared logging queue, or None if logging was
             never initialized in this process.
     """
+
     # Prefer the global manager's queue, if it was used
     if _global_logging_manager.logging_queue is not None:
         return _global_logging_manager.logging_queue
@@ -1056,6 +1110,8 @@ def initChildLogging(logging_queue, config):
         logging_queue: [multiprocessing.Queue] The shared logging queue, or None.
         config: [Config] Config used for the InRmsFilter. If None, no filter is applied.
     """
+
+    # Nothing to attach to if logging was never initialized
     if logging_queue is None:
         return
 
@@ -1065,6 +1121,7 @@ def initChildLogging(logging_queue, config):
     for handler in root.handlers[:]:
         root.removeHandler(handler)
 
+    # Forward everything to the listener, filtering to RMS records if a config is given
     qh = logging.handlers.QueueHandler(logging_queue)
     qh.setFormatter(logging.Formatter('%(message)s'))
     if config is not None:
@@ -1107,6 +1164,8 @@ def flushChildLogging(timeout=2.0):
                 queues.append(q)
 
     def _drain():
+        """ Close every queue and wait for its feeder thread to flush. """
+
         for q in queues:
             try:
                 q.close()
@@ -1124,23 +1183,27 @@ def flushChildLogging(timeout=2.0):
 def initChildProcess(logging_queue=None, config=None, ignore_sigint=True):
     """ Re-establish logging and signal handling at the start of a child process's run().
 
-    Needed under the 'forkserver'/'spawn' start methods (the default on Linux from Python
-    3.14), where a child does NOT inherit the parent's logging handlers or signal
-    dispositions. Under 'fork' this simply re-creates the configuration the child would
-    have inherited, so it is safe on every supported Python version.
+        Needed under the 'forkserver'/'spawn' start methods (the default on Linux from Python
+        3.14), where a child does NOT inherit the parent's logging handlers or signal
+        dispositions. Under 'fork' this simply re-creates the configuration the child would
+        have inherited, so it is safe on every supported Python version.
 
-    Arguments:
-        logging_queue: [multiprocessing.Queue] Shared logging queue, or None.
-        config: [Config] Config for the logging filter, or None.
-        ignore_sigint: [bool] If True, ignore SIGINT in the child and let the parent
-            coordinate shutdown via the child's exit Event (mirrors the log listener).
+    Keyword arguments:
+        logging_queue: [multiprocessing.Queue] Shared logging queue. None by default.
+        config: [Config] Config for the logging filter. None by default, in which case no filter is
+            applied.
+        ignore_sigint: [bool] If True, ignore SIGINT in the child and let the parent coordinate
+            shutdown via the child's exit Event (mirrors the log listener). True by default.
     """
+
+    # Ignore Ctrl+C in the child, the parent coordinates the shutdown
     if ignore_sigint:
         import signal
+
+        # signal() only works in the main thread of the main interpreter
         try:
             signal.signal(signal.SIGINT, signal.SIG_IGN)
         except (ValueError, OSError):
-            # signal() only works in the main thread of the main interpreter
             pass
 
     initChildLogging(logging_queue, config)
