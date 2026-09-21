@@ -261,7 +261,7 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
                 log.info('Astrometric calibration FAILED!, Using old platepar for calibration...')
                 addObsParam(obs_dict, "photometry_good", "False")
 
-            saveObservationSummaryDict(obs_dict)
+            saveObservationSummaryDict(obs_dict, night_data_dir)
             # If a flat is used, disable vignetting correction
             if config.use_flat:
                 platepar.vignetting_coeff = 0.0
@@ -970,8 +970,9 @@ def processFramesFiles(config):
                 continue
             try:
                 os.rmdir(root)  # succeeds only if empty
-            except OSError:
-                pass
+            except OSError as e:
+                # Non-empty is expected; anything else (permissions, busy) should be visible
+                log.debug("Could not remove frame directory %s: %s", root, e)
 
     return archive_paths
 

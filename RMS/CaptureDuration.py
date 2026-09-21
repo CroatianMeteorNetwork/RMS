@@ -6,11 +6,17 @@ import ephem
 import RMS.ConfigReader as cr
 import os
 
+from RMS.Logger import getLogger
 from RMS.Misc import RmsDateTime
 
 
+log = getLogger("rmslogger")
+
+
+# Sun altitude thresholds (deg, or deg:min, as ephem horizon strings). Defined here, at the bottom
+# of the import graph, and imported by CaptureModeSwitcher and ObservationSummary.
 SWITCH_HORIZON_DEG = "-9"  # Used for continuous capture mode switching
-CAPTURE_HORIZON_DEG = "-5:26"  # Used for standard capture start/stop (matches CaptureDuration.py)
+CAPTURE_HORIZON_DEG = "-5:26"  # Used for standard capture start/stop
 
 def captureDuration(lat, lon, elevation, current_time=None, continuous_capture=None, sun_angle=None,  max_hours=23):
 
@@ -36,8 +42,10 @@ def captureDuration(lat, lon, elevation, current_time=None, continuous_capture=N
     
     Return:
         (start_time, duration):
-            - start_time: [datetime object] time when the capturing should start, True if capturing should
-                start right away
+            - start_time: [datetime object or bool] time when the capturing should start, or the bool
+                True if capturing should start right away (already night, polar night, or no sunset
+                found). Callers must test `isinstance(start_time, bool)` before doing datetime
+                arithmetic on it.
             - duration: [float] seconds of capturing time
     """
 
@@ -45,18 +53,11 @@ def captureDuration(lat, lon, elevation, current_time=None, continuous_capture=N
     # If a sun_angle is given, it always takes priority.
     # If a continuous_capture is given, the appropriate constant is chosen.
     # If nothing is given, then default to night time only capture settings
-
-    if continuous_capture is None and sun_angle is None:
-        sun_angle = CAPTURE_HORIZON_DEG
-
-    elif continuous_capture is not None and sun_angle is None:
-        sun_angle = SWITCH_HORIZON_DEG if continuous_capture is True else CAPTURE_HORIZON_DEG
-
-    elif continuous_capture is None and sun_angle is not None:
-        sun_angle = sun_angle
-
-    elif continuous_capture is not None and sun_angle is not None:
-        sun_angle = sun_angle
+    if sun_angle is None:
+        if continuous_capture is None:
+            sun_angle = CAPTURE_HORIZON_DEG
+        else:
+            sun_angle = SWITCH_HORIZON_DEG if continuous_capture is True else CAPTURE_HORIZON_DEG
 
     # Initialize the observer
     o = ephem.Observer()  
@@ -95,7 +96,7 @@ def captureDuration(lat, lon, elevation, current_time=None, continuous_capture=N
         # Search in 1 hour increments until the next sunset is found. The window covers ~13 months
         # so that a full polar day at the exact poles (where day/night each last ~6 months) is
         # always spanned.
-        print("Searching for the next sunset...")
+        log.info("Polar day: searching for the next sunset...")
         next_set = None
         for i in range(0, 13*30*24):
 

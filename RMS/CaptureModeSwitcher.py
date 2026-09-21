@@ -8,14 +8,13 @@ import ephem
 import Utils.CameraControl as cc
 from RMS.Logger import getLogger
 from RMS.Misc import RmsDateTime
+from RMS.CaptureDuration import SWITCH_HORIZON_DEG, CAPTURE_HORIZON_DEG
 
 # Get the logger from the main module
 log = getLogger("rmslogger")
 
-# Sun altitude (in degrees) that defines the switch point.
-# Negative numbers mean the Sun is below the horizon.
-SWITCH_HORIZON_DEG = "-9"  # Used for continuous capture mode switching
-CAPTURE_HORIZON_DEG = "-5:26"  # Used for standard capture start/stop (matches CaptureDuration.py)
+# The Sun altitudes that define the switch point (SWITCH_HORIZON_DEG) and the capture start/stop
+# (CAPTURE_HORIZON_DEG) are defined once in RMS.CaptureDuration and imported above.
 
 # Buffer time (seconds) to account for capture pipeline shutdown inertia.
 # Capture continues briefly after the calculated end time while the pipeline shuts down.
