@@ -19,7 +19,11 @@ import numpy as np
 
 from RMS.Decorators import memoizeSingle
 from RMS.Misc import RmsDateTime
+from RMS.Logger import getLogger
 from datetime import datetime
+
+
+log = getLogger("rmslogger")
 
 
 # Data structure for the GMN catalog (v1 - 18 columns, legacy format)
@@ -70,10 +74,26 @@ GMN_CATALOG_DTYPE_V2 = np.dtype([
 
 
 def gmnCatalogDtype(num_columns):
-    """ Select the GMN catalog dtype based on the number of columns declared in the header. """
-    if num_columns >= 20:
+    """ Select the GMN catalog dtype based on the number of columns declared in the header.
+
+    Arguments:
+        num_columns: [int] Number of columns declared in the binary catalog header.
+
+    Return:
+        dtype: [np.dtype] Structured dtype of one catalog row.
+    """
+
+    # v1 - legacy 18-column format
+    if num_columns == 18:
+        return GMN_CATALOG_DTYPE_V1
+
+    # v2 - 20-column format with common_name and bayer_name
+    if num_columns == 20:
         return GMN_CATALOG_DTYPE_V2
-    return GMN_CATALOG_DTYPE_V1
+
+    # Any other column count is a format this reader does not know how to decode
+    raise ValueError("Unsupported GMN star catalog format: {:d} columns declared in the header "
+                     "(expected 18 for v1 or 20 for v2)".format(num_columns))
 
 
 def removeFileSilently(path):
@@ -508,6 +528,12 @@ def loadGMNStarCatalog(file_path,
         # Filter to only fields that exist in this catalog version (backward compatibility)
         valid = set(catalog_data.dtype.names)
         available = [n for n in requested if n in valid]
+
+        # Warn about requested fields this catalog does not have, so a typo does not silently drop a column
+        unknown = [n for n in requested if n not in valid]
+        if unknown:
+            log.warning("Requested star catalog fields not present in {:s}: {:s}".format(
+                catalog_file, ", ".join(unknown)))
 
         # Populate dict with available fields only
         for name in available:
