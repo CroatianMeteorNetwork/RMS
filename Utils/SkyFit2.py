@@ -179,7 +179,7 @@ from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP, \
     limitingMagnitude, screenNudgeToAzAltDelta, fovCentreZenithDirection
 from RMS.Astrometry.AtmosphericExtinction import atmosphericExtinctionCorrection
 from RMS.Astrometry.StarClasses import CatalogStar, GeoPoint, PlanetPoint, PairedStars
-from RMS.Astrometry.StarFilters import filterPhotometricOutliers, filterBlendedStars
+from RMS.Astrometry.StarFilters import filterPhotometricOutliers, filterBlendedStars, catalogInFOVMask
 from RMS.Astrometry.Conversions import date2JD, JD2HourAngle, trueRaDec2ApparentAltAz, \
     apparentAltAz2TrueRADec, J2000_JD, jd2Date, datetime2JD, JD2LST, geo2Cartesian, vector2RaDec, raDec2Vector
 from RMS.Astrometry.AstrometryNet import astrometryNetSolve
@@ -6066,25 +6066,7 @@ class PlateTool(QtWidgets.QMainWindow):
             # Filter catalog to stars actually in front of camera (prevent back-projection)
             # Use angular distance in celestial coordinates, not self.filterCatalogStarsInsideFOV
             # which incorrectly uses self.cat_lim_mag instead of the test catalog's LM
-            catalog_ra = test_catalog[:, 0]
-            catalog_dec = test_catalog[:, 1]
-            ra_rad = np.radians(catalog_ra)
-            dec_rad = np.radians(catalog_dec)
-            ra_center = np.radians(self.platepar.RA_d)
-            dec_center = np.radians(self.platepar.dec_d)
-
-            # Spherical angular distance from camera pointing to each catalog star
-            cos_ang_dist = (np.sin(dec_center) * np.sin(dec_rad) +
-                            np.cos(dec_center) * np.cos(dec_rad) * np.cos(ra_rad - ra_center))
-            cos_ang_dist = np.clip(cos_ang_dist, -1, 1)
-            ang_dist_deg = np.degrees(np.arccos(cos_ang_dist))
-
-            # FOV radius with margin (stars behind camera have ang_dist > 90)
-            fov_diagonal = np.sqrt(self.platepar.X_res**2 + self.platepar.Y_res**2)
-            fov_radius = (fov_diagonal / 2) * self.platepar.F_scale * 1.5
-            fov_radius = min(fov_radius, 90)
-
-            in_fov = ang_dist_deg < fov_radius
+            in_fov = catalogInFOVMask(test_catalog[:, 0], test_catalog[:, 1], self.platepar)
             test_catalog = test_catalog[in_fov]
 
             if len(test_catalog) == 0:
@@ -7473,7 +7455,10 @@ class PlateTool(QtWidgets.QMainWindow):
                 precision, valid)
             self.pointing_indicator.show()
 
-        except Exception:
+        except Exception as e:
+
+            # Hide the glyph rather than crash the redraw, but don't swallow the error silently
+            print("Pointing indicator update failed: {}".format(e))
             self.pointing_indicator.hide()
 
 
@@ -7526,10 +7511,19 @@ class PlateTool(QtWidgets.QMainWindow):
             base_size = 10.0
 
         else:
+            # Aspect ratio of the displayed image. img.data is stored (width, height), see the mask
+            #   drawing code. The loaded image may differ from the config frame size (e.g. a platepar
+            #   or an image from another camera), so the config is only a fallback before any image is
+            #   loaded.
+            if (self.img.data is not None) and (self.img.data.shape[0] > 0):
+                aspect = self.img.data.shape[1]/self.img.data.shape[0]
+            else:
+                aspect = self.config.height/self.config.width
+
             # Height of the displayed image in screen pixels. The view is aspect locked, so the image
             #   is constrained by whichever frame dimension runs out first - only using the frame
             #   height would rescale the markers when the window is resized in the other direction.
-            image_height = min(frame_height, frame_width*self.config.height/self.config.width)
+            image_height = min(frame_height, frame_width*aspect)
 
             # The reference look is 10 px on a 650 px tall image, clamped so the markers stay visible
             #   on tiny windows and don't become unwieldy on very large ones
@@ -8881,7 +8875,9 @@ class PlateTool(QtWidgets.QMainWindow):
         else:
             return 0
 
-        jd = date2JD(*self.img_handle.currentFrameTime())
+        # Use the chunk time, consistent with the rest of the fit code (fitPickedStars, the
+        #   positional/photometric outlier filters and the catalog projection)
+        jd = date2JD(*self.img_handle.currentTime())
 
         self.paired_stars, removed_count = filterBlendedStars(
             self.paired_stars,

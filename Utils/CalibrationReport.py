@@ -492,6 +492,11 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
         # Compute radius of every star from image centre
         radius_arr = np.hypot(image_stars[:, 0] - img_h/2, image_stars[:, 1] - img_w/2)
 
+        # Keep the full unfiltered intensities and radii for the limiting magnitude fit below, as the
+        #   robust photometry fit returns only the inlier subset under the same names
+        lm_intens = star_intensities
+        lm_radius = radius_arr
+
         # Compute apparent extinction corrected magnitudes
         catalog_mags = extinctionCorrectionTrueToApparent(catalog_mags, catalog_ra, catalog_dec, max_jd, \
             platepar)
@@ -505,12 +510,13 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
         photom_offset, _ = photom_params
 
         # Fit the limiting magnitude model: log10(S/N) vs the calibrated (vignetting + extinction
-        # corrected) apparent magnitude. Use the full unfiltered matched set, since image_stars
-        # still holds the S/N at column 6 (CALSTARS format) aligned with all matched stars.
-        lm_intens = image_stars[:, 2]
-        lm_radius = np.hypot(image_stars[:, 0] - img_h/2, image_stars[:, 1] - img_w/2)
-        lm_pred_mags = photomLine((lm_intens, lm_radius), photom_offset, platepar.vignetting_coeff)
-        lm_info = limitingMagnitude(lm_pred_mags, image_stars[:, 6], snr_targets=(5, 10))
+        # corrected) apparent magnitude. Use the full unfiltered matched set, aligned with the S/N column
+        # of the CALSTARS rows (column 6). Older CALSTARS files have no S/N column, in which case the
+        # limiting magnitude cannot be fit.
+        lm_info = None
+        if image_stars.shape[1] > 6:
+            lm_pred_mags = photomLine((lm_intens, lm_radius), photom_offset, platepar.vignetting_coeff)
+            lm_info = limitingMagnitude(lm_pred_mags, image_stars[:, 6], snr_targets=(5, 10))
 
         ### ###
 
