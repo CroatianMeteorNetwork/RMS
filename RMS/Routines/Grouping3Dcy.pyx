@@ -135,7 +135,8 @@ def getAllPoints(np.ndarray[UINT16_TYPE_t, ndim=2] point_list, x1, y1, z1, x2, y
     @param x1, y1, z1, x2, y2, z2: [int] points defining a line in 3D space
     @param distance_threshold: [int] maximum distance between the line and the point to be takes as a part of the same line
     @param gap_threshold: [float] maximum allowed gap between points
-    @param max_array_size: [float] predefined size of max_line_points array (optional)
+    @param max_array_size: [int] minimum preallocated size of the max_line_points array (optional). It is
+        only a lower bound on the allocation, never a cap: it is raised to the point list size if smaller.
     
     @return: [ndarray] array of points belonging to a certain line
     """
@@ -188,6 +189,9 @@ def getAllPoints(np.ndarray[UINT16_TYPE_t, ndim=2] point_list, x1, y1, z1, x2, y
         return max_line_points, i
 
 
+    # The caller-supplied size is only a minimum allocation, never a cap. propagateLine stops filling once
+    #   the array is full, so an array smaller than the point list could silently truncate the line; a line
+    #   can never hold more points than the point list, so enlarge the array to that size.
     if max_array_size <= 0 or max_array_size < point_list_size:
         max_array_size = point_list_size
 
@@ -464,7 +468,7 @@ def thresholdAndSubsample(np.ndarray[UINT8_TYPE_t, ndim=3] frames, \
 
     cdef unsigned int x, y, x2, y2, n, max_val, nframes, x_size, y_size
     cdef unsigned int num = 0
-    cdef unsigned int avg_std
+    cdef int avg_std
 
     # Calculate the shapes of the subsamples image
     cdef shape_z = frames.shape[0]
@@ -487,14 +491,17 @@ def thresholdAndSubsample(np.ndarray[UINT8_TYPE_t, ndim=3] frames, \
 
             max_val = compressed[0, y, x]
 
-            # Keep the original truncation order while making both narrowing conversions explicit.
-            avg_std = <unsigned int> (
+            # Compute the threshold as a signed value (a negative j1 can make it negative, which would wrap
+            #   to a huge number if narrowed to an unsigned type), keeping the original truncation order
+            avg_std = <int> (
                 <int> (<double> compressed[2, y, x] + k1*<double> compressed[3, y, x])
                 + <double> j1
             )
 
-            # Make sure the threshold limit is not above the maximum possible value
-            if avg_std > 255:
+            # Clamp the threshold to the valid pixel value range
+            if avg_std < 0:
+                avg_std = 0
+            elif avg_std > 255:
                 avg_std = 255
             
             if ((max_val > min_level) and (max_val >= avg_std)):
