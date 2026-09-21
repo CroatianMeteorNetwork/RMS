@@ -112,8 +112,13 @@ def validVideoCrop(crop_str):
         crop_str: [str] The video_crop value from the config.
 
     Return:
-        [bool] True if the string is a well-formed videocrop spec, False otherwise.
+        [bool] True if the string is a well-formed videocrop spec, False otherwise. An empty or
+            whitespace-only string is rejected: it would produce a bare 'videocrop !' element in
+            the pipeline (ConfigReader maps ""/none to None, so this only guards direct callers).
     """
+
+    if (crop_str is None) or (not crop_str.split()):
+        return False
 
     valid_keys = {"top", "bottom", "left", "right"}
     for token in crop_str.split():
@@ -1766,8 +1771,10 @@ class BufferedCapture(Process):
             finally:
                 self.raw_frame_saver = None
 
-        # Clean up array resources
+        # Clean up array resources (raw_array_shape too, so a stale shape from a previous
+        # mode can never be handed to a new RawFrameSaver after a failed re-init)
         self.current_raw_frame_shape = None
+        self.raw_array_shape = None
         self.shared_raw_array = None
         
         # Safely delete shared memory arrays

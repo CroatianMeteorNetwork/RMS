@@ -226,18 +226,14 @@ class RawFrameSaver(multiprocessing.Process):
         # Flush any frames whose TS array still has data.
         #
         # Defensive read: BufferedCapture.releaseRawArrays() calls stop() both on shutdown AND
-        # on every day/night mode switch. Guard against a released/None buffer so a teardown
-        # path can never zip None ("TypeError: 'NoneType' object is not iterable"), which RMS
-        # would otherwise log as a traceback on a perfectly healthy station (twice a day, per
-        # camera). There is nothing to flush in that case.
+        # on every day/night mode switch. ensureViews() above rebuilds all four views, so they
+        # are never None here; the per-buffer None checks below only guard against a future
+        # change to that invariant so a teardown path can never zip None ("TypeError:
+        # 'NoneType' object is not iterable") on a healthy station.
         array1 = getattr(self, 'array1', None)
         array2 = getattr(self, 'array2', None)
         timestamps1 = getattr(self, 'timeStamps1', None)
         timestamps2 = getattr(self, 'timeStamps2', None)
-
-        if array1 is None and array2 is None:
-            log.debug('Raw frame saver buffers already released - '
-                      'nothing to flush')
 
         leftovers = []
         if (array1 is not None) and (timestamps1 is not None):
