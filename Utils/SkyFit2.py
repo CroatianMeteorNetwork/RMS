@@ -2289,13 +2289,6 @@ class GeoPoints(object):
             # Compute ra/dec in radians
             ra, dec = vector2RaDec(eci_point)
 
-            # # Compute alt/az
-            # azim, alt = raDec2AltAz(np.radians(ra), np.radians(dec), jd, np.radians(platepar.lat), \
-            #     np.radians(platepar.lon))
-
-            # print("{:>25s}, {:8.3f}, {:7.3f}".format(name, np.degrees(azim), np.degrees(alt)))
-
-
             # Precess RA/Dec to J2000
             ra, dec = equatorialCoordPrecession(jd, J2000_JD.days, np.radians(ra), np.radians(dec))
 
@@ -7822,7 +7815,7 @@ class PlateTool(QtWidgets.QMainWindow):
                         self.astrometry_plot_highlight_marker2_outer.hide()
                         if not force_update:
                             return
-                except:
+                except Exception:
                     pass
                 self.fig_photometry = None
                 self.astrometry_plot_highlight_marker.hide()
@@ -7859,7 +7852,7 @@ class PlateTool(QtWidgets.QMainWindow):
             except AttributeError:
                 fig_p.canvas.manager.window.setWindowTitle('Photometry')
             
-            except:
+            except Exception:
                 print("Warning: Could not set window title for photometry plot.")
 
             # Plot catalog magnitude vs. raw logsum of pixel intensities
@@ -9305,7 +9298,6 @@ class PlateTool(QtWidgets.QMainWindow):
         to_remove = []
 
         dic = copy.copy(self.__dict__)
-        # print('input path', dic['input_path'])
         for k, v in dic.items():
 
             if (v.__class__.__bases__[0] is not object) and (not isinstance(v, bool)) and \
@@ -9313,7 +9305,6 @@ class PlateTool(QtWidgets.QMainWindow):
 
                 # Remove class that inherits from something
                 to_remove.append(k)
-                # print(k,v)
 
         for remove in to_remove:
             del dic[remove]
@@ -13325,7 +13316,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 f"Best with image:  {best_available_ff}  ({n_stars_available} stars)"
             )
 
-            auto_fit_label = "Auto Fit (placeholder)" if not best_ff_available else "Auto Fit"
+            auto_fit_label = "Auto Fit" if best_ff_available else "Auto Fit on placeholder image"
             auto_fit_btn = msg_box.addButton(auto_fit_label, QtWidgets.QMessageBox.ButtonRole.ActionRole)
             navigate_btn = msg_box.addButton("Go to Best Image", QtWidgets.QMessageBox.ButtonRole.ActionRole)
             msg_box.addButton(QtWidgets.QMessageBox.StandardButton.Cancel)
@@ -15122,8 +15113,6 @@ class PlateTool(QtWidgets.QMainWindow):
         # Apply the mask to only include the pixels within the star aperture radius
         saturated_count = np.sum(img_crop_orig[aperture_mask == 1] > self.saturation_threshold)
 
-        # print("Saturation threshold: {:.2f}, count: {:d}".format(self.saturation_threshold, saturated_count))
-
         # If 2 or more pixels are saturated, mark the pick as saturated
         min_saturated_px_count = 2
         if saturated_count >= min_saturated_px_count:
@@ -15637,47 +15626,6 @@ class PlateTool(QtWidgets.QMainWindow):
         # Get image coordinates of catalog stars
         catalog_x, catalog_y, catalog_mag = getCatalogStarsImagePositions(catalog_stars, jd, self.platepar)
 
-        # ## Compute standard coordinates ##
-
-        # # Platepar with no distortion
-        # pp_nodist = copy.deepcopy(self.platepar)
-        # pp_nodist.x_poly_rev *= 0
-        # pp_nodist.y_poly_rev *= 0
-
-        # standard_x, standard_y, _ = getCatalogStarsImagePositions(catalog_stars, jd, pp_nodist)
-
-        # ## ##
-
-
-
-        # ### TEST ###
-
-        # print("time:", self.img_handle.currentTime())
-        # print("jd:", jd)
-        # print("LST:", JD2LST(jd, self.platepar.lon)[0])
-        # print()
-
-        # print("RA_J2000, Dec_J2000, RA_date, Dec_date, RA_ref, Dec_ref, Azim_ref, Elev_ref")
-        # for cat_coords in catalog_stars:
-        #     ra, dec, _ = cat_coords
-
-        #     # Precess to epoch of date
-        #     ra_date, dec_date = equatorialCoordPrecession(2451545.0, jd, np.radians(ra), np.radians(dec))
-        #     ra_date, dec_date = np.degrees(ra_date), np.degrees(dec_date)
-
-        #     # Compute apparent RA/Dec with the applied refraction
-        #     azim, elev = cyTrueRaDec2ApparentAltAz(np.radians(ra), np.radians(dec), jd, np.radians(self.platepar.lat), np.radians(self.platepar.lon), refraction=True)
-        #     ra_ref, dec_ref = cyaltAz2RADec(azim, elev, jd, np.radians(self.platepar.lat), np.radians(self.platepar.lon))
-        #     azim, elev = np.degrees(azim), np.degrees(elev)
-        #     ra_ref, dec_ref = np.degrees(ra_ref), np.degrees(dec_ref)
-
-
-        #     print("{:>12.6f}, {:>+13.6f}, {:>12.6f}, {:>+13.6f}, {:>12.6f}, {:>+13.6f}, {:>12.6f}, {:>+13.6f}".format(ra, dec, ra_date, dec_date, ra_ref, dec_ref, azim, elev))
-
-        # ### ###
-
-
-
         print()
         print("Image time =", self.img_handle.currentTime(dt_obj=True), "UTC")
         print("Image JD = {:.8f}".format(jd))
@@ -15801,9 +15749,6 @@ class PlateTool(QtWidgets.QMainWindow):
             self.tab.geolocation.residuals_label.setText("Residuals:\n{:.2f} px, {:.2f} {:s}".format(rmsd_img,\
                 rmsd_angular, angular_error_label))
 
-        # Print the field of view size
-        #print("FOV: {:.2f} x {:.2f} deg".format(*computeFOVSize(self.platepar))) 
-
         ####################
 
         # Save the residuals
@@ -15857,7 +15802,7 @@ class PlateTool(QtWidgets.QMainWindow):
                     self.astrometry_plot_highlight_marker2_outer.hide()
                     if not force_update:
                         return
-            except:
+            except Exception:
                 pass
             self.fig_astrometry = None
             self.astrometry_plot_highlight_marker.hide()
@@ -15980,7 +15925,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
             fig_a.canvas.manager.window.setWindowTitle("Astrometry fit")
 
-        except:
+        except Exception:
 
             # Handle FigureCanvasQTAgg error on some versions of Qt
             print("Failed to set the window title!")
@@ -17044,9 +16989,7 @@ class PlateTool(QtWidgets.QMainWindow):
         fov_poly = []
         if self.fov_poly_cache is not None and self.fov_poly_jd == jd:
             fov_poly = self.fov_poly_cache
-            # print("Using cached FOV polygon.")
         else:
-            # print("Computing FOV polygon...")
             # Define edges: (x1, y1) -> (x2, y2)
             edges = [
                 ((0, 0), (w, 0)),   # Top
