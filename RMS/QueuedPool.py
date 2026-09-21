@@ -15,6 +15,10 @@ from RMS.Logger import getLogger, getLoggingQueue, initChildProcess
 from RMS.Misc import randomCharacters, isListKeyInDict, listToTupleRecursive, AtomicFlag
 
 
+# Module logger (worker processes inherit or re-attach the queue handler, see initChildProcess)
+log = getLogger("rmslogger")
+
+
 from errno import EPIPE
 
 # Python 3
@@ -67,10 +71,10 @@ class SafeValue(object):
 
         if not acquired and not self._lock_broken:
             self._lock_broken = True
-            print('SafeValue: lock not acquired after {:.0f} s - a process likely died while '
-                  'holding it. Proceeding without the lock (later operations retry with a '
-                  'short timeout, without repeating this warning).'.format(
-                      SAFE_VALUE_LOCK_TIMEOUT))
+            log.warning('SafeValue: lock not acquired after {:.0f} s - a process likely died while '
+                        'holding it. Proceeding without the lock (later operations retry with a '
+                        'short timeout, without repeating this warning).'.format(
+                            SAFE_VALUE_LOCK_TIMEOUT))
 
         if acquired and self._lock_broken:
             self._lock_broken = False
@@ -230,6 +234,10 @@ class QueuedPool(object):
         self.config = config
         self.pool = None
 
+        # Results moved out of the Manager-hosted output queue by closePool(), so the Manager
+        # server process can be shut down there and getResults() still works afterwards
+        self._results = []
+
         self.total_jobs = SafeValue(minval=0)
         self.results_counter = SafeValue(minval=0)
         self.active_workers = SafeValue(minval=0, maxval=multiprocessing.cpu_count())
@@ -274,6 +282,7 @@ class QueuedPool(object):
         state = self.__dict__.copy()
         state['manager'] = None
         state['pool'] = None
+        state['_results'] = []
         state['log'] = self.log.name if self.log is not None else None
         return state
 
@@ -425,7 +434,7 @@ class QueuedPool(object):
                     break
                 continue
 
-            except:
+            except Exception:
                 tb = traceback.format_exc()
                 self.printAndLog('Failed retrieving inputs...')
                 self.printAndLog(tb)
@@ -472,7 +481,7 @@ class QueuedPool(object):
                     all_args = tuple(args) + tuple(self.func_extra_args)
                     result = func(*all_args, **self.func_kwargs)
 
-                except:
+                except Exception:
                     tb = traceback.format_exc()
 
                     self.printAndLog(tb)
@@ -522,6 +531,29 @@ class QueuedPool(object):
 
 
 
+    def _poolWorkers(self):
+        """ Return the list of worker Process objects of the underlying Pool.
+
+        Pool keeps them in the private attribute `_pool`, which has been stable across every
+        supported Python version. Should it ever disappear, fall back to an empty list: the
+        callers then treat the workers as already gone and hand the pool to terminate()/join()
+        (the standard library shutdown path) instead of the manual SIGTERM/SIGKILL escalation.
+
+        Return:
+            [list] Worker Process objects, or an empty list if unavailable.
+        """
+
+        if self.pool is None:
+            return []
+
+        workers = getattr(self.pool, '_pool', None)
+
+        if workers is None:
+            return []
+
+        return list(workers)
+
+
     def _shutdownPool(self, graceful_timeout=30):
         """ Close the pool, giving the workers time to exit on their own after receiving poison
             pills. terminate() is only used as a last resort: killing a worker that is mid-write
@@ -541,10 +573,9 @@ class QueuedPool(object):
 
         self.pool.close()
 
-        # Wait for the workers to exit on their own (uses the private worker list, which is
-        # stable across all supported Python versions)
+        # Wait for the workers to exit on their own
         t_beg = time.time()
-        while any([w.is_alive() for w in self.pool._pool]):
+        while any([w.is_alive() for w in self._poolWorkers()]):
 
             if (time.time() - t_beg) > graceful_timeout:
                 self.printAndLog('Workers still alive after {:.0f} s, terminating...'.format(
@@ -559,9 +590,9 @@ class QueuedPool(object):
         # (review finding). Escalate manually first - SIGTERM, bounded wait,
         # SIGKILL - and only hand the pool to terminate()/join() once every
         # worker is confirmed dead.
-        if any([w.is_alive() for w in self.pool._pool]):
+        if any([w.is_alive() for w in self._poolWorkers()]):
 
-            for w in self.pool._pool:
+            for w in self._poolWorkers():
                 if w.is_alive():
                     try:
                         w.terminate()
@@ -569,11 +600,11 @@ class QueuedPool(object):
                         pass
 
             t_beg = time.time()
-            while any([w.is_alive() for w in self.pool._pool]) \
+            while any([w.is_alive() for w in self._poolWorkers()]) \
                     and ((time.time() - t_beg) < 10):
                 time.sleep(0.25)
 
-            for w in self.pool._pool:
+            for w in self._poolWorkers():
                 if w.is_alive():
                     self.printAndLog('Worker {} survived terminate(), sending '
                         'SIGKILL...'.format(w.pid))
@@ -587,11 +618,11 @@ class QueuedPool(object):
 
             # Give SIGKILL a moment to be delivered and the workers reaped
             t_beg = time.time()
-            while any([w.is_alive() for w in self.pool._pool]) \
+            while any([w.is_alive() for w in self._poolWorkers()]) \
                     and ((time.time() - t_beg) < 5):
                 time.sleep(0.25)
 
-        if any([w.is_alive() for w in self.pool._pool]):
+        if any([w.is_alive() for w in self._poolWorkers()]):
             # A worker stuck in uninterruptible I/O (hung camera/USB) survives even
             # SIGKILL, and terminate()/join() would hang on it forever - abandon the
             # pool instead of wedging shutdown
@@ -606,7 +637,13 @@ class QueuedPool(object):
 
 
     def closePool(self):
-        """ Wait until all jobs are done and close the pool. """
+        """ Wait until all jobs are done and close the pool.
+
+        Also collects the results out of the Manager-hosted output queue and shuts the Manager
+        server process down, so a caller that forgets shutdownManager() does not leave it
+        running. After this call only getResults() (and deleteBackupFiles) are usable - addJob(),
+        startPool() and allDone() need the Manager queues.
+        """
 
         if self.pool is not None:
 
@@ -685,7 +722,7 @@ class QueuedPool(object):
                         # zero pills would silently degrade the shutdown to the
                         # terminate path (review finding).
                         for i in range(max(self.active_workers.value(),
-                                len(self.pool._pool))):
+                                len(self._poolWorkers()))):
                             self.input_queue.put(None)
 
                         self._shutdownPool()
@@ -704,7 +741,7 @@ class QueuedPool(object):
                     # Insert the 'poison pill' to the queue, to kill all workers
                     # (counted from the real spawned-worker list - see above)
                     for i in range(max(self.active_workers.value(),
-                            len(self.pool._pool))):
+                            len(self._poolWorkers()))):
                         self.printAndLog('Inserting pill', i + 1)
                         self.input_queue.put(None)
 
@@ -743,10 +780,38 @@ class QueuedPool(object):
                 else:
                     time.sleep(0.1)
 
+        # The workers are gone, so nothing can add to the output queue any more - move the
+        # results into this process and release the Manager server process. Every QueuedPool
+        # user goes through closePool(), which is why the shutdown lives here rather than
+        # relying on callers to remember shutdownManager().
+        self._collectResults()
+        self.shutdownManager()
+
+
+
+    def _collectResults(self):
+        """ Move everything currently in the output queue into the local results list.
+
+        Safe to call repeatedly, and a no-op once the Manager has been shut down.
+        """
+
+        if getattr(self, 'manager', None) is None:
+            return
+
+        while True:
+            try:
+                self._results.append(self.output_queue.get_nowait())
+
+            # queue.Empty when drained; a connection error if the Manager died underneath us
+            except Exception:
+                break
+
 
 
     def shutdownManager(self):
-        """ Shut down the Manager server process. Call this after all results have been collected. """
+        """ Shut down the Manager server process. Idempotent; closePool() calls this, so callers
+            only need it when they never called closePool().
+        """
 
         if hasattr(self, 'manager') and self.manager is not None:
             try:
@@ -852,19 +917,18 @@ class QueuedPool(object):
 
 
     def getResults(self):
-        """ Get the results from the output queue and store them in a list. The output list will be returned. 
+        """ Get the results from the output queue and store them in a list. The output list will be returned.
+
+        Each result is returned once: a second call returns only results that arrived in between.
+        Works after closePool() has shut the Manager down (the results were collected there).
         """
 
-        results = []
+        # Pull anything still sitting in the Manager queue, then hand over the local list
+        self._collectResults()
 
-        # Get all elements in the output queue
-        if not self.output_queue.empty():
-            while True:
-                try:
-                    results.append(self.output_queue.get_nowait())
-                except:
-                    break
-            
+        results = self._results
+        self._results = []
+
         return results
 
 
@@ -898,10 +962,8 @@ if __name__ == "__main__":
     # log = getLogger('rmslogger', level="INFO")
      # log = getLogger('rmslogger', level="DEBUG")
 
-    log = None
-
     # Initialize the pool with only one core, timeout of only 10 seconds
-    workpool = QueuedPool(exampleWorker, cores=1, log=log, worker_timeout=10)
+    workpool = QueuedPool(exampleWorker, cores=1, log=None, worker_timeout=10)
 
     # Give the pool something to do
     for i in range(1, 3):
