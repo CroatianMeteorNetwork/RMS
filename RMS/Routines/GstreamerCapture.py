@@ -18,6 +18,7 @@ try:
 except ImportError as e:
     print('Could not import gi: {}. Using OpenCV.'.format(e))
 
+# gi.require_version raises ValueError, but a broken GStreamer install can raise other errors too
 except Exception as e:
     print('Could not import Gst: {}. Using OpenCV.'.format(e))
 
@@ -56,6 +57,7 @@ class GstCaptureTest(multiprocessing.Process):
 
         super(GstCaptureTest, self).__init__()
 
+        # Exit flag (a plain shared value, safe to inherit under any multiprocessing start method)
         self.exit = AtomicFlag()
 
         self.device_url = device_url
