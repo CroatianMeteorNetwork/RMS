@@ -192,6 +192,7 @@ class Config:
         self.reboot_after_processing = False
         self.reboot_lock_file = ".reboot_lock"
 
+        # NTP server used to check the system clock offset
         self.time_server = "time.cloudflare.com"
 
         ##### Capture
@@ -236,9 +237,12 @@ class Config:
         self.height = 720
         self.width_device = self.width
         self.height_device = self.height
+
+        # Optional scaling and cropping of the raw video stream before processing (None = disabled)
         self.video_scale_width = None
         self.video_scale_height = None
         self.video_crop = None
+
         self.fps = 25.0
 
         # Camera buffer in number of frames. This will applied a buffer/fps correction to
@@ -545,7 +549,7 @@ class Config:
         # Filtering by machine learning
         self.ml_filter = 0.5
 
-        # Path to the ML model
+        # Name of the ML model file (in the share directory) and the full path to it
         self.ml_model_file = 'hyper_model.tflite'
         self.ml_model_path = os.path.join(self.rms_root_dir, "share", self.ml_model_file)
 
@@ -896,6 +900,7 @@ def parseSystem(config, parser):
     if parser.has_option(section, "reboot_lock_file"):
         config.reboot_lock_file = parser.get(section, "reboot_lock_file")
 
+    # NTP server for the clock check (an empty value keeps the default)
     if parser.has_option(section, "time_server"):
         time_server = parser.get(section, "time_server").strip()
         if time_server != '':
@@ -1025,7 +1030,7 @@ def parseCapture(config, parser):
         config.height_device = config.height
 
 
-    # for scaling and or cropping source raw video for further processing
+    # Optional scaling and/or cropping of the source raw video for further processing
     if parser.has_option(section, "video_scale_width"):
         config.video_scale_width = parser.getint(section, "video_scale_width")
 
@@ -1034,6 +1039,7 @@ def parseCapture(config, parser):
 
     if parser.has_option(section, "video_crop"):
         config.video_crop = parser.get(section, "video_crop").strip()
+
         # Treat an empty value or the literal "none" as disabled
         if config.video_crop == "" or config.video_crop.lower() == "none":
             config.video_crop = None
@@ -1109,6 +1115,7 @@ def parseCapture(config, parser):
     if parser.has_option(section, "protocol"):
         config.protocol = parser.get(section, "protocol")
 
+    # UDP receive buffer for the GStreamer rtspsrc element
     if parser.has_option(section, "udp_buffer_size"):
         config.udp_buffer_size = parser.getint(section, "udp_buffer_size")
 
@@ -1121,9 +1128,9 @@ def parseCapture(config, parser):
     if parser.has_option(section, "gst_decoder"):
         config.gst_decoder = parser.get(section, "gst_decoder")
 
+    # Max buffers per GStreamer queue element. Clamp to >= 1: in GStreamer max-size-buffers=0 means
+    # *unlimited*, which would defeat the purpose of this setting and risk OOM.
     if parser.has_option(section, "gst_queue_size"):
-        # Clamp to >= 1: in GStreamer max-size-buffers=0 means *unlimited*, which would
-        # defeat the purpose of this setting and risk OOM.
         config.gst_queue_size = max(1, parser.getint(section, "gst_queue_size"))
 
     if parser.has_option(section, "camera_settings_path") and os.path.isfile(parser.get(section, "camera_settings_path")):
@@ -1628,13 +1635,16 @@ def parseMeteorDetection(config, parser):
     if parser.has_option(section, "min_patch_intensity_multiplier"):
         config.min_patch_intensity_multiplier = parser.getfloat(section, "min_patch_intensity_multiplier")
 
+    # Name of the ML model file in the share directory (the path is derived from it)
     if parser.has_option(section, "ml_model_file"):
         config.ml_model_file = parser.get(section, "ml_model_file")
         config.ml_model_path = os.path.join(config.rms_root_dir, "share", config.ml_model_file)
 
     if parser.has_option(section, "ml_filter"):
-        # since most of the old configs have threshold 0.85, and the current model is calibrated to 0.5,
-        # we need to rescale the value here - only for new model
+
+        # Since most of the old configs have threshold 0.85, and the default model is calibrated to 0.5,
+        # we need to rescale the value here - only for the default model, custom models take the value
+        # as given
         if (config.ml_model_file == "hyper_model.tflite"):
             config.ml_filter = parser.getfloat(section, "ml_filter") * 0.5/0.85
         else:
@@ -1782,6 +1792,7 @@ def parseCalibration(config, parser):
     if parser.has_option(section, "recalibration_max_stars"):
         config.recalibration_max_stars = parser.getint(section, "recalibration_max_stars")
 
+    # Minimum fraction of detected stars a per-FF recalibration fit must match to be accepted
     if parser.has_option(section, "recalibration_min_match_fraction"):
         config.recalibration_min_match_fraction = parser.getfloat(
             section, "recalibration_min_match_fraction")
