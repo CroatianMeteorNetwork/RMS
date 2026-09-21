@@ -3644,6 +3644,9 @@ class PlateTool(QtWidgets.QMainWindow):
             self.cursor2.hide()
             self.fr_box.hide()
 
+            # Re-evaluate the mouse panning lock for the new mode
+            self.updatePanningEnabled()
+
             if not first_time and self.img.img_handle.input_type != 'dfn':
                 self.img_zoom.loadImage(self.mode, self.img_type_flag)
                 self.img.loadImage(self.mode, self.img_type_flag)
@@ -3686,6 +3689,13 @@ class PlateTool(QtWidgets.QMainWindow):
             if hasattr(self, 'pointing_indicator'):
                 self.pointing_indicator.hide()
 
+            # Leave the mask editing modes, otherwise brush painting and the mouse panning lock would
+            #   survive into the manual reduction mode
+            if getattr(self, 'mask_brush_mode', False):
+                self._exitBrushMode()
+            if getattr(self, 'mask_draw_mode', False):
+                self.closeMaskPolygon()
+
             self.img_type_flag = 'avepixel'
             self.tab.settings.updateMaxAvePixel()
             self.img_zoom.loadImage(self.mode, self.img_type_flag)
@@ -3718,6 +3728,10 @@ class PlateTool(QtWidgets.QMainWindow):
             self.star_pick_mode = False
             self.cursor.hide()
             self.cursor2.hide()
+
+            # Re-evaluate the mouse panning lock for the new mode
+            self.updatePanningEnabled()
+
             self.tab.onManualReduction()
 
             # Refresh mode-aware Help content
@@ -6520,6 +6534,9 @@ class PlateTool(QtWidgets.QMainWindow):
         else:
             snapshot = None
 
+        # A new stroke must not be joined to the end of the previous one
+        self.mask_brush_last_pos = None
+
         self.mask_brush_stroke_history.append(snapshot)
 
         # Drop oldest entry when the history depth limit is reached
@@ -6550,16 +6567,20 @@ class PlateTool(QtWidgets.QMainWindow):
             self.mask_paint_layer = np.zeros((img_height, img_width), dtype=np.uint8)
 
         value = 2 if self.mask_brush_erasing else 1
-        radius = int(self.mask_brush_radius)
-        center = (int(round(x)), int(round(y)))
+        radius = max(int(self.mask_brush_radius), 1)
 
+        # Clamp the brush centre to the image so a cursor dragged off the image doesn't produce huge
+        #   coordinates (the disc may still partly overhang the edge, OpenCV clips the drawing)
+        center = (int(min(max(round(x), 0), img_width - 1)), int(min(max(round(y), 0), img_height - 1)))
+
+        # Fill the gap from the previous mouse position with a thick line so fast drags leave no holes
         if self.mask_brush_last_pos is not None:
-            # Draw a thick line from the previous position to fill gaps between mouse events
-            cv2.line(self.mask_paint_layer, self.mask_brush_last_pos, center,
-                     value, thickness=radius * 2)
-        else:
-            # First point of a new stroke: draw a single filled circle
-            cv2.circle(self.mask_paint_layer, center, radius, value, -1)
+            cv2.line(self.mask_paint_layer, self.mask_brush_last_pos, center, value, thickness=2*radius)
+
+        # Always stamp a disc at the current position so the footprint is the same disc of the brush
+        #   radius along the whole stroke, including at the first point and at both ends of every
+        #   segment (the thick line caps are not guaranteed to match the disc exactly)
+        cv2.circle(self.mask_paint_layer, center, radius, value, -1)
 
         self.mask_brush_last_pos = center
         self.updateMaskOverlayImage()
@@ -9930,8 +9951,15 @@ class PlateTool(QtWidgets.QMainWindow):
         if event.type() == QtCore.QEvent.Type.MouseButtonRelease:
             # Only handle if obj is the view_widget viewport
             if obj == self.view_widget.viewport():
-                # Convert widget coords to scene coords
-                scene_pos = self.view_widget.mapToScene(event.pos())
+
+                # Convert widget coords to scene coords. Qt6 deprecates QMouseEvent.pos() in favour of
+                #   position(), which older Qt5 bindings don't have.
+                if hasattr(event, 'position'):
+                    widget_pos = event.position().toPoint()
+                else:
+                    widget_pos = event.pos()
+
+                scene_pos = self.view_widget.mapToScene(widget_pos)
                 self.handleMouseRelease(event.button(), scene_pos.x(), scene_pos.y())
             return False  # Don't consume the event
 
@@ -10416,7 +10444,10 @@ class PlateTool(QtWidgets.QMainWindow):
         modifiers &= ~group_switch
         qmodifiers &= ~group_switch
 
-        self.keys_pressed.append(event.key())
+        # Track held keys without duplicates: key auto-repeat delivers many press events for a single
+        #   release, and the release only removes one entry
+        if event.key() not in self.keys_pressed:
+            self.keys_pressed.append(event.key())
 
         # Handle mask drawing - Space or Enter to close polygon
         if self.mask_draw_mode and len(self.mask_current_polygon) >= 3:
