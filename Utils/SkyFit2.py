@@ -195,7 +195,7 @@ from RMS.Formats.FrameInterface import detectInputTypeFolder, detectInputTypeFil
 from RMS.Formats.FTPdetectinfo import writeFTPdetectinfo
 from RMS.Formats import StarCatalog
 from RMS.Pickling import loadPickle, savePickle
-from RMS.Math import angularSeparation, RMSD, vectNorm
+from RMS.Math import angularSeparation, angularSeparationDeg, RMSD, vectNorm
 from RMS.Misc import decimalDegreesToSexHours
 from RMS.Routines.AddCelestialGrid import updateRaDecGrid, updateAzAltGrid
 from RMS.Routines.SkyFitHelp import shortcutsTopicId
@@ -2837,6 +2837,12 @@ class PlateTool(QtWidgets.QMainWindow):
         self.frames = np.zeros(self.n)
         self.profile = cProfile.Profile()
         self.keys_pressed = []  # keeps track of all the keys pressed
+
+        # Parsed matched-pairs file, cached as (path, mtime, data) so image navigation doesn't re-read it
+        self._pairs_cache = None
+
+        # True while runInBackground is executing a long operation
+        self._background_busy = False
 
         ###################################################################################################
         # STATUS BAR ON BOTTOM
@@ -9440,6 +9446,69 @@ class PlateTool(QtWidgets.QMainWindow):
         self.status_bar.showMessage(msg)
 
 
+    def _readPairsFile(self, path):
+        """ Read and parse the folder-level pairs JSON, cached by (path, mtime).
+
+            pairsHint is called on every image navigation, so without the cache the file would be
+            re-read and re-parsed on every key press.
+
+        Arguments:
+            path: [str] Path to the pairs JSON file.
+
+        Return:
+            data: [dict] Parsed file contents. Raises on a missing or unreadable file.
+        """
+
+        mtime = os.path.getmtime(path)
+
+        cache = getattr(self, '_pairs_cache', None)
+        if (cache is not None) and (cache[0] == path) and (cache[1] == mtime):
+            return cache[2]
+
+        with open(path) as f:
+            data = json.load(f)
+
+        self._pairs_cache = (path, mtime, data)
+
+        return data
+
+
+    def _lookupCatalogStar(self, ra, dec, mag, max_sep_deg=0.01):
+        """ Find the loaded catalog star nearest to the given coordinates.
+
+            Pairs saved to the pairs file only carry RA/Dec/mag, so on load the star is looked up again in
+            the currently loaded catalog. This restores the current catalog magnitude (e.g. after a band
+            ratio change) and makes sure the per-star band data lookups (which match by RA/Dec) hit.
+
+        Arguments:
+            ra: [float] Right ascension (deg).
+            dec: [float] Declination (deg).
+            mag: [float] Saved magnitude, used when no catalog star is close enough.
+
+        Keyword arguments:
+            max_sep_deg: [float] Largest accepted separation (deg). 0.01 deg by default, same as the band
+                data lookup in fitBandRatio.
+
+        Return:
+            (star, matched): [CatalogStar, bool] The catalog star object and whether it came from the
+                loaded catalog (False when the saved values were used as they are).
+        """
+
+        catalog = getattr(self, 'catalog_stars', None)
+
+        if (catalog is not None) and (len(catalog) > 0):
+
+            # Nearest loaded catalog star
+            sep = angularSeparationDeg(ra, dec, catalog[:, 0], catalog[:, 1])
+            idx = int(np.argmin(sep))
+
+            if sep[idx] <= max_sep_deg:
+                cat_ra, cat_dec, cat_mag = catalog[idx][:3]
+                return CatalogStar(float(cat_ra), float(cat_dec), float(cat_mag)), True
+
+        return CatalogStar(ra, dec, mag), False
+
+
     def loadPairs(self):
         """ Load matched pairs for the CURRENT image from the folder-level pairs file.
             Pairs are per-image, so only the current image's saved entry is restored. """
@@ -9451,8 +9520,7 @@ class PlateTool(QtWidgets.QMainWindow):
             return
 
         try:
-            with open(path) as f:
-                data = json.load(f)
+            data = self._readPairsFile(path)
         except Exception as e:
             qmessagebox(message="Could not read pairs file:\n{}".format(e),
                         title="Load pairs", message_type="warning")
@@ -9467,9 +9535,38 @@ class PlateTool(QtWidgets.QMainWindow):
                         title="Load pairs", message_type="warning")
             return
 
+        # Warn if the pairs were saved for a different image time than the one currently shown. The image
+        #   key matches, so this happens when the time of the image changed (e.g. different fps or
+        #   timestamp settings), in which case the catalog positions no longer line up with the picks.
+        saved_jd = images[key].get('jd')
+        if saved_jd is not None:
+            try:
+                current_jd = date2JD(*self.img_handle.currentTime())
+            except Exception:
+                current_jd = None
+
+            if current_jd is not None:
+
+                # One frame block (FF file) duration, 256 frames at 25 fps if unknown
+                fps = getattr(self.img_handle, 'fps', 0)
+                total_frames = getattr(self.img_handle, 'total_frames', 256)
+                block_duration = total_frames/fps if fps > 0 else 256/25.0
+
+                jd_diff_s = abs(current_jd - saved_jd)*86400
+
+                if jd_diff_s > block_duration:
+                    qmessagebox(message="The saved pairs were recorded for an image time {:.1f} s away from "
+                                        "the current image time.\n\nThe pairs are loaded anyway, but check "
+                                        "that the catalog stars still line up with the picks.".format(
+                                        jd_diff_s),
+                                title="Load pairs", message_type="warning")
+
+        # Rebuild the pairs, looking every star up in the loaded catalog again
         new_pairs = PairedStars()
+        n_rematched = 0
         for p in images[key].get('pairs', []):
-            star = CatalogStar(p['ra'], p['dec'], p['mag'])
+            star, matched = self._lookupCatalogStar(p['ra'], p['dec'], p['mag'])
+            n_rematched += int(matched)
             new_pairs.addPair(p['x'], p['y'], p['fwhm'], p['intens_acc'], star,
                               snr=p.get('snr', 0), saturated=p.get('saturated', False))
 
@@ -9477,6 +9574,8 @@ class PlateTool(QtWidgets.QMainWindow):
         self.updatePairedStars()
 
         msg = "Loaded {} matched pairs for '{}'".format(len(new_pairs), key)
+        if n_rematched < len(new_pairs):
+            msg += " ({} not found in the loaded catalog)".format(len(new_pairs) - n_rematched)
         print(msg)
         self.status_bar.showMessage(msg)
 
@@ -9488,8 +9587,7 @@ class PlateTool(QtWidgets.QMainWindow):
             path = self._pairsFilePath()
             if not os.path.isfile(path):
                 return
-            with open(path) as f:
-                data = json.load(f)
+            data = self._readPairsFile(path)
             images = data.get('images', {}) if isinstance(data, dict) else {}
             entry = images.get(self._currentImageKey())
             if entry and len(entry.get('pairs', [])) > 0:
@@ -14174,19 +14272,36 @@ class PlateTool(QtWidgets.QMainWindow):
             *args, **kwargs: Arguments passed to the function.
 
         Returns:
-            The return value of func(*args, **kwargs).
+            The return value of func(*args, **kwargs), or None if another background operation is
+            still running (the request is refused, not queued).
 
         Raises:
             Any exception raised by func.
         """
-        with ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(func, *args, **kwargs)
 
-            while not future.done():
-                QtWidgets.QApplication.processEvents()
-                time.sleep(0.05)
+        # The processEvents loop below lets the user trigger another long operation (e.g. a second
+        #   click on the same button) while the first one is running, which would nest a second loop
+        #   inside this one. Refuse the second request instead.
+        if getattr(self, '_background_busy', False):
+            msg = "Another operation is still running, please wait for it to finish"
+            print(msg)
+            self.status_bar.showMessage(msg)
+            return None
 
-            return future.result()
+        self._background_busy = True
+
+        try:
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(func, *args, **kwargs)
+
+                while not future.done():
+                    QtWidgets.QApplication.processEvents()
+                    time.sleep(0.05)
+
+                return future.result()
+
+        finally:
+            self._background_busy = False
 
 
     def loadCatalogStars(self, lim_mag):
