@@ -98,10 +98,12 @@ class LoggerWriter:
             if message.strip():
                 self.logger.log(self.level, message.strip())
         except Exception:
-            if not self.stdout_captured:
-                print(f'error during logging to stdout/stderr: attempted to log - {message}')
-            else:
-                # if stdout is also captured we can't emit any messages 
+            # Never print() here: when stdout is redirected to this very object the print would
+            # re-enter write() and recurse. Write to the original stderr instead, best-effort.
+            try:
+                sys.__stderr__.write('error during logging to stdout/stderr: attempted to log - '
+                    '{}\n'.format(message))
+            except Exception:
                 pass
 
     def flush(self):
@@ -426,8 +428,13 @@ class LoggingManager:
         # The health thread holds this for the duration of every periodic check, so it can
         # be held at fork time - a child inheriting it locked would deadlock on any
         # LoggingManager call. Nothing forked calls one today (every initLogging call lives
-        # in a __main__ block); keep it that way, or fork before initLogging.
+        # in a __main__ block, and forked children exit through os._exit, which skips the
+        # atexit-registered shutdownLogging). As a guard against future callers, the lock is
+        # replaced with a fresh one in every forked child (Python 3.7+; a no-op elsewhere).
         self.init_lock = threading.Lock()
+
+        if hasattr(os, 'register_at_fork'):
+            os.register_at_fork(after_in_child=self._reinitLockInChild)
 
         # Arguments used to spawn the listener, kept so a wedged listener can be respawned
         self._listener_args = None
@@ -447,6 +454,15 @@ class LoggingManager:
         # Always-on health thread (started by initLogging)
         self._health_stop = None
         self._health_thread = None
+
+    def _reinitLockInChild(self):
+        """ Give a freshly forked child an unlocked init_lock (fork copies only the calling
+            thread, so a lock held by the health thread at fork time would never be released
+            in the child).
+        """
+
+        self.init_lock = threading.Lock()
+
 
     def initLogging(self, config, log_file_prefix="", safedir=None, 
                     console_level=logging.INFO, file_level=logging.DEBUG):
@@ -1063,6 +1079,46 @@ def initChildLogging(logging_queue, config):
     # from Compressor) can grab it in their own __init__ under 'forkserver'/'spawn', where
     # the module-level manager state is not inherited.
     _global_logging_manager.logging_queue = logging_queue
+
+
+def flushChildLogging(timeout=2.0):
+    """ Push a child process's buffered log records to the listener before os._exit().
+
+    Records logged through a QueueHandler sit in the multiprocessing.Queue feeder thread's buffer
+    until that thread writes them to the pipe. os._exit() kills the process without giving the
+    feeder a chance to run, so the last records a child logs (typically its own exit messages)
+    are silently lost. Closing the queue asks the feeder to flush and exit, and join_thread()
+    waits for that. The wait is bounded because a listener that stopped reading would otherwise
+    block the exit forever.
+
+    Only call this immediately before os._exit(): the queue is unusable in this process
+    afterwards.
+
+    Keyword arguments:
+        timeout: [float] Maximum number of seconds to wait for the flush. 2.0 by default.
+    """
+
+    # Collect the distinct queues behind the root logger's queue handlers
+    queues = []
+    for handler in logging.getLogger().handlers:
+        if isinstance(handler, logging.handlers.QueueHandler):
+            q = getattr(handler, 'queue', None)
+            if (q is not None) and all(q is not other for other in queues):
+                queues.append(q)
+
+    def _drain():
+        for q in queues:
+            try:
+                q.close()
+                q.join_thread()
+            except Exception:
+                pass
+
+    # Bound the wait with a daemon thread; os._exit() abandons it if the flush is stuck
+    flusher = threading.Thread(target=_drain, name='rms-log-flush')
+    flusher.daemon = True
+    flusher.start()
+    flusher.join(timeout)
 
 
 def initChildProcess(logging_queue=None, config=None, ignore_sigint=True):
