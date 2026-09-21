@@ -1,11 +1,11 @@
 from __future__ import absolute_import, print_function
 
+import os
 import datetime
 
 import ephem
-import RMS.ConfigReader as cr
-import os
 
+import RMS.ConfigReader as cr
 from RMS.Logger import getLogger
 from RMS.Misc import RmsDateTime
 
@@ -18,10 +18,11 @@ log = getLogger("rmslogger")
 SWITCH_HORIZON_DEG = "-9"  # Used for continuous capture mode switching
 CAPTURE_HORIZON_DEG = "-5:26"  # Used for standard capture start/stop
 
-def captureDuration(lat, lon, elevation, current_time=None, continuous_capture=None, sun_angle=None,  max_hours=23):
 
-    """ Calculates the start time and the duration of capturing, for the given geographical coordinates, and optional
-    sun angle
+def captureDuration(lat, lon, elevation, current_time=None, continuous_capture=None, sun_angle=None, \
+    max_hours=23):
+    """ Calculates the start time and the duration of capturing, for the given geographical coordinates
+        and an optional Sun angle.
     
     Arguments:
         lat: [float] latitude +N in degrees
@@ -34,12 +35,13 @@ def captureDuration(lat, lon, elevation, current_time=None, continuous_capture=N
         max_hours: [float] Maximum number of hours of capturing time. If the calculated duration is longer
             than this, the duration is set to this value. 23 by default, to give enough time for the
             rest of the processing.
-        continuous_capture: [bool] If False the sun rise angle is set to -5:26 degrees below the horizon.
-                                   If True the sun rise angle is set to -9 degrees
-                                   If None then the value in sun_angle is used
-        sun_angle: [str] Sun angle in deg:min below the horizon. Default -5:26 degrees below the horizon
+        continuous_capture: [bool] If False the Sun rise angle is set to -5:26 degrees below the horizon
+            (CAPTURE_HORIZON_DEG). If True the Sun rise angle is set to -9 degrees (SWITCH_HORIZON_DEG).
+            None by default, in which case the value in sun_angle is used.
+        sun_angle: [str] Sun angle in deg:min below the horizon (ephem horizon string). None by default,
+            which means -5:26 degrees below the horizon unless continuous_capture is given. If given,
+            it takes priority over continuous_capture.
 
-    
     Return:
         (start_time, duration):
             - start_time: [datetime object or bool] time when the capturing should start, or the bool
@@ -49,10 +51,10 @@ def captureDuration(lat, lon, elevation, current_time=None, continuous_capture=N
             - duration: [float] seconds of capturing time
     """
 
-    # Handle keyword parameters
-    # If a sun_angle is given, it always takes priority.
-    # If a continuous_capture is given, the appropriate constant is chosen.
-    # If nothing is given, then default to night time only capture settings
+    # Choose the Sun altitude threshold:
+    #   - if a sun_angle is given, it always takes priority
+    #   - if continuous_capture is given, the appropriate constant is chosen
+    #   - if nothing is given, default to the night time only capture settings
     if sun_angle is None:
         if continuous_capture is None:
             sun_angle = CAPTURE_HORIZON_DEG
@@ -65,7 +67,7 @@ def captureDuration(lat, lon, elevation, current_time=None, continuous_capture=N
     o.long = str(lon)
     o.elevation = elevation
 
-    # The Sun should be about 5.5 degrees below the horizon when the capture should begin/end
+    # The Sun should be below the chosen altitude threshold when the capture should begin/end
     o.horizon = sun_angle
 
     # If the current time is not given, use the current time
@@ -75,7 +77,7 @@ def captureDuration(lat, lon, elevation, current_time=None, continuous_capture=N
     # Set the current time
     o.date = current_time
 
-    # Calculate the locations of the Sun
+    # Calculate the location of the Sun as seen by the observer
     s = ephem.Sun()
     s.compute(o)
 
@@ -189,7 +191,7 @@ if __name__ == "__main__":
 
     cml_args = arg_parser.parse_args()
 
-    # Load the config file
+    # Load the config file (from the current directory if not given)
     if cml_args.config is None:
         config = cr.loadConfigFromDirectory(".config", os.getcwd())
     else:
@@ -217,23 +219,28 @@ if __name__ == "__main__":
     # start_time, duration = captureDuration(-89.0, 0.0, 0,
     #                                          current_time=datetime.datetime(2022, 12, 21, 0, 0, 0))
 
+    # Compare the capture windows for the station location under the different Sun angle settings
     print(f"For location {config.latitude}, {config.longitude}, {config.elevation}, ")
 
+    # Default (night time only)
     start_time, duration = captureDuration(config.latitude, config.longitude, config.elevation)
     duration = datetime.timedelta(seconds=round(duration))
 
     print(f"No keyword argument     Start time: {start_time} Duration: {duration}")
 
+    # Explicit night time only capture
     start_time, duration = captureDuration(config.latitude, config.longitude, config.elevation,
                                            continuous_capture=False)
     duration = datetime.timedelta(seconds=round(duration))
     print(f"Night time capture mode Start time: {start_time} Duration: {duration}")
 
+    # Continuous capture (switch point at -9 degrees)
     start_time, duration = captureDuration(config.latitude, config.longitude, config.elevation,
                                            continuous_capture=True)
     duration = datetime.timedelta(seconds=round(duration))
     print(f"Continuous capture mode Start time: {start_time} Duration: {duration}")
 
+    # A lower Sun angle should give a later start and a shorter capture
     sun_angle = '-10'
     start_time, duration = captureDuration(config.latitude, config.longitude, config.elevation,
                                            sun_angle=sun_angle)
@@ -241,6 +248,7 @@ if __name__ == "__main__":
     print(f"Specify a sun angle of {sun_angle} - which is lower, so should lead to a later start and shorter capture")
     print(f"                        Start time: {start_time} Duration: {duration}")
 
+    # A higher Sun angle should give an earlier start and a longer capture
     sun_angle = '-1'
     start_time, duration = captureDuration(config.latitude, config.longitude, config.elevation,
                                            sun_angle=sun_angle)
