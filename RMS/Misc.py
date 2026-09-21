@@ -662,12 +662,17 @@ def hostReachable(host, port=443, timeout=GIT_REACHABILITY_TIMEOUT):
         This is a cheap pre-check which fails fast on a DNS failure, a dead link or a blackholed
         route, so that a slow network operation is not even attempted.
 
+        The whole attempt, including the name lookup, runs under a hard deadline. The socket timeout
+        alone is not enough, as create_connection() resolves the host with a blocking getaddrinfo()
+        before that timeout applies, so a stalled DNS resolver during an outage would hang here
+        indefinitely.
+
     Arguments:
         host: [str] Host name or IP address.
 
     Keyword arguments:
         port: [int] TCP port. 443 by default.
-        timeout: [float] Connection timeout in seconds.
+        timeout: [float] Deadline for the name lookup and the connection together, in seconds.
 
     Return:
         [bool] True if the connection succeeded.
@@ -677,28 +682,45 @@ def hostReachable(host, port=443, timeout=GIT_REACHABILITY_TIMEOUT):
     if host is None:
         return False
 
-    sock = None
+    # The socket is kept in a list so that the late cleanup below can reach it
+    sock_holder = [None]
 
-    try:
 
-        # Open a connection and drop it straight away, only reachability matters here
-        sock = socket.create_connection((host, port), timeout=timeout)
-        return True
+    def _closeSocket():
+        """ Release the socket, if one was opened. """
 
-    except Exception as e:
-
-        # A refused connection, a DNS failure and a timeout are all treated the same way
-        log.debug("Host {:s}:{:d} is not reachable: {:s}".format(str(host), int(port), repr(e)))
-        return False
-
-    finally:
-
-        # Always release the socket, even when the connection failed halfway through
-        if sock is not None:
+        if sock_holder[0] is not None:
             try:
-                sock.close()
+                sock_holder[0].close()
             except Exception:
                 pass
+
+
+    def _connect():
+        """ Open a connection and keep the socket, only reachability matters here. """
+
+        sock_holder[0] = socket.create_connection((host, port), timeout=timeout)
+
+
+    # Run the lookup and the connection in a daemon thread with a hard deadline. A connection which
+    # comes through after the deadline is closed by the late cleanup.
+    completed, _, exception = runWithTimeout(_connect, timeout=timeout, on_late_completion=_closeSocket)
+
+    # The DNS lookup or the connection did not finish in time
+    if not completed:
+        log.debug("Host {:s}:{:d} is not reachable: no answer within {:.1f} s".format(str(host), int(port),
+            float(timeout)))
+        return False
+
+    # Always release the socket, even when the connection failed halfway through
+    _closeSocket()
+
+    # A refused connection, a DNS failure and a socket timeout are all treated the same way
+    if exception is not None:
+        log.debug("Host {:s}:{:d} is not reachable: {:s}".format(str(host), int(port), repr(exception)))
+        return False
+
+    return True
 
 
 def killProcessGroup(proc):
