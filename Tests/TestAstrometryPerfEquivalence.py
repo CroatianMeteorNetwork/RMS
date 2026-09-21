@@ -162,3 +162,70 @@ def testFitPointingNNRecoversSyntheticPointing():
     assert inlier_fraction > 0.8
     assert abs((pp_pert.RA_d - pp.RA_d + 180) % 360 - 180)*np.cos(np.radians(pp.dec_d)) < 0.02
     assert abs(pp_pert.dec_d - pp.dec_d) < 0.02
+
+
+def _blendedIndicesDenseReference(paired_stars, catalog_stars, platepar, jd, lim_mag, fwhm_mult, mag_margin):
+    """ The dense (n_matched x n_catalog) distance-matrix blend test that filterBlendedStars replaced.
+        Returns the set of paired_stars indices that would be removed. """
+
+    from RMS.Astrometry.ApplyAstrometry import raDecToXYPP
+    from RMS.Astrometry.StarFilters import catalogInFOVMask
+
+    bright_mask = catalog_stars[:, 2] < (lim_mag + mag_margin)
+    catalog_ra = catalog_stars[bright_mask, 0]
+    catalog_dec = catalog_stars[bright_mask, 1]
+    in_fov = catalogInFOVMask(catalog_ra, catalog_dec, platepar)
+    catalog_x, catalog_y = raDecToXYPP(catalog_ra[in_fov], catalog_dec[in_fov], jd, platepar)
+
+    check_indices, ra_list, dec_list, radii = [], [], [], []
+    for i, (x, y, fwhm, intens_acc, obj, snr, saturated) in enumerate(paired_stars.paired_stars):
+        ra, dec, mag = obj.coords()
+        check_indices.append(i)
+        ra_list.append(ra)
+        dec_list.append(dec)
+        radii.append(fwhm_mult*fwhm)
+
+    mx, my = raDecToXYPP(np.array(ra_list), np.array(dec_list), jd, platepar)
+    radii = np.array(radii)
+    dist_matrix = np.sqrt((mx[:, np.newaxis] - catalog_x[np.newaxis, :])**2
+                          + (my[:, np.newaxis] - catalog_y[np.newaxis, :])**2)
+    has_neighbor = np.any((dist_matrix < radii[:, np.newaxis]) & (dist_matrix > 0.1), axis=1)
+
+    return set(idx for k, idx in enumerate(check_indices) if has_neighbor[k])
+
+
+@pytest.mark.parametrize("seed", [0, 1])
+def testFilterBlendedStarsMatchesDenseReference(seed):
+    """ The KD-tree blend filter removes exactly the stars the dense distance matrix flagged, including
+        with zero, negative and NaN FWHM values (which can never flag a neighbour). """
+
+    from RMS.Astrometry.StarFilters import filterBlendedStars
+    from Tests.BenchmarkAstrometryFit import (JD_OBS, buildPairedStars, buildSyntheticCatalog,
+                                              buildSyntheticDetections, buildSyntheticPlatepar)
+
+    rng = np.random.RandomState(seed)
+    pp = buildSyntheticPlatepar()
+    catalog_stars = buildSyntheticCatalog(pp, rng, n_target=2500)
+    img_stars, truth = buildSyntheticDetections(pp, catalog_stars, rng)
+    paired_stars = buildPairedStars(pp, catalog_stars, img_stars, truth, rng)
+
+    # Inject degenerate FWHM values and a few very large ones
+    paired_stars.paired_stars[0][2] = 0.0
+    paired_stars.paired_stars[1][2] = -1.0
+    paired_stars.paired_stars[2][2] = np.nan
+    paired_stars.paired_stars[3][2] = 40.0
+    paired_stars.paired_stars[4][2] = 40.0
+
+    lim_mag, fwhm_mult, mag_margin = 9.0, 2.0, 0.3
+    removed_ref = _blendedIndicesDenseReference(paired_stars, catalog_stars, pp, JD_OBS, lim_mag, fwhm_mult,
+                                                mag_margin)
+
+    filtered, n_removed = filterBlendedStars(paired_stars, catalog_stars, pp, JD_OBS, lim_mag,
+                                             fwhm_mult=fwhm_mult, mag_margin=mag_margin)
+
+    assert n_removed == len(removed_ref) > 0
+    kept_ref = [p for i, p in enumerate(paired_stars.paired_stars) if i not in removed_ref]
+    assert len(filtered.paired_stars) == len(kept_ref)
+    for p_new, p_ref in zip(filtered.paired_stars, kept_ref):
+        assert p_new[0] == p_ref[0] and p_new[1] == p_ref[1]
+    assert 0 not in removed_ref and 1 not in removed_ref and 2 not in removed_ref

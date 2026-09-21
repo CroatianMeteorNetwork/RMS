@@ -12,6 +12,7 @@ These functions are used by both SkyFit2 and AutoPlatepar.
 from __future__ import print_function, division, absolute_import
 
 import numpy as np
+from scipy.spatial import cKDTree
 
 from RMS.Astrometry.StarClasses import PairedStars
 from RMS.Astrometry.ApplyAstrometry import extinctionCorrectionTrueToApparent, raDecToXYPP
@@ -238,15 +239,27 @@ def filterBlendedStars(paired_stars, catalog_stars, platepar, jd, lim_mag,
             np.array(matched_ra_list), np.array(matched_dec_list), jd, platepar)
         blend_radii = np.array(blend_radii)
 
-        # Compute distance from each matched star to all bright catalog stars using broadcasting
-        # Shape: (n_matched, n_catalog)
-        dx = all_matched_x[:, np.newaxis] - catalog_x[np.newaxis, :]
-        dy = all_matched_y[:, np.newaxis] - catalog_y[np.newaxis, :]
-        dist_matrix = np.sqrt(dx**2 + dy**2)
+        # Find the catalog stars within each star's blend radius with a KD-tree (O(N log M) instead of the
+        #   dense N x M distance matrix). The ball query is inclusive (dist <= r) and returns everything
+        #   for a negative radius, so non-positive or non-finite radii are queried with 0 and the exact
+        #   (0.1 < dist < r) rule is re-applied on the candidates below
+        matched_coords = np.column_stack([all_matched_x, all_matched_y])
+        query_radii = np.where(np.isfinite(blend_radii) & (blend_radii > 0), blend_radii, 0.0)
+        catalog_tree = cKDTree(np.column_stack([catalog_x, catalog_y]))
+        candidates = catalog_tree.query_ball_point(matched_coords, query_radii, return_sorted=False)
+
+        # Flatten the candidate lists into (matched, catalog) index pairs
+        n_candidates = np.array([len(c) for c in candidates], dtype=int)
+        matched_idx = np.repeat(np.arange(len(candidates)), n_candidates)
+        catalog_idx = np.concatenate([np.asarray(c, dtype=int) for c in candidates]) \
+            if np.any(n_candidates) else np.zeros(0, dtype=int)
 
         # Check for neighbors within each star's blend radius (excluding self)
-        has_neighbor = np.any(
-            (dist_matrix < blend_radii[:, np.newaxis]) & (dist_matrix > 0.1), axis=1)
+        dist = np.sqrt((all_matched_x[matched_idx] - catalog_x[catalog_idx])**2
+            + (all_matched_y[matched_idx] - catalog_y[catalog_idx])**2)
+        is_neighbor = (dist < blend_radii[matched_idx]) & (dist > 0.1)
+        has_neighbor = np.zeros(len(candidates), dtype=bool)
+        has_neighbor[matched_idx[is_neighbor]] = True
 
         for k, idx in enumerate(check_indices):
             if has_neighbor[k]:
