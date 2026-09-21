@@ -248,3 +248,196 @@ if __name__ == '__main__':
     mask_file = '../../mask.bmp'
 
     print(loadMask(mask_file))
+
+
+
+# Pixel encoding of the SkyFit2 brush paint layer
+PAINT_UNTOUCHED = 0     # transparent, the polygon layer shows through
+PAINT_MASKED = 1        # painted, the pixel is masked
+PAINT_UNMASKED = 2      # erased, the pixel is unmasked even when inside a polygon
+
+
+
+def compositeMaskLayers(mask_polygons, paint_layer, img_width, img_height, masked_value=0, \
+    unmasked_value=255):
+    """ Render the editable mask layers (polygons plus the brush paint layer) into a single mask image.
+
+        The polygons are filled first, then the paint layer is composited on top so that brush-painted
+        pixels mask and brush-erased pixels unmask, overriding any polygon beneath.
+
+    Arguments:
+        mask_polygons: [list] List of polygons, each a list of (x, y) image coordinates.
+        paint_layer: [ndarray or None] uint8 (img_height, img_width) brush layer with PAINT_UNTOUCHED,
+            PAINT_MASKED and PAINT_UNMASKED values. A layer of a different size is resampled to the image
+            size with nearest-neighbour interpolation.
+        img_width: [int] Image width in pixels.
+        img_height: [int] Image height in pixels.
+
+    Keyword arguments:
+        masked_value: [int] Value written where the pixel is masked. 0 by default (RMS mask.bmp
+            convention).
+        unmasked_value: [int] Value written where the pixel is unmasked. 255 by default.
+
+    Return:
+        mask: [ndarray] uint8 (img_height, img_width) mask image.
+    """
+
+    # Start fully unmasked
+    mask = np.full((img_height, img_width), unmasked_value, dtype=np.uint8)
+
+    # Burn in the polygons
+    for polygon in mask_polygons:
+        pts = np.array(polygon, dtype=np.int32)
+        cv2.fillPoly(mask, [pts], masked_value)
+
+    # Composite the brush paint layer on top
+    if paint_layer is not None:
+
+        # The layer may come from a mask saved for a different image size (nearest-neighbour keeps the
+        #   0/1/2 labels intact)
+        if paint_layer.shape != mask.shape:
+            paint_layer = cv2.resize(paint_layer, (img_width, img_height), interpolation=cv2.INTER_NEAREST)
+
+        mask[paint_layer == PAINT_MASKED] = masked_value
+        mask[paint_layer == PAINT_UNMASKED] = unmasked_value
+
+    return mask
+
+
+
+def maskRasterResiduals(mask_img, mask_polygons):
+    """ Compute the brush paint layer needed to reproduce a mask image exactly from the given polygons.
+
+        Pixels masked in the image but not covered by any polygon become PAINT_MASKED, pixels unmasked in
+        the image but inside a polygon become PAINT_UNMASKED.
+
+    Arguments:
+        mask_img: [ndarray] uint8 mask image, 0 = masked, 255 = unmasked.
+        mask_polygons: [list] List of polygons, each a list of (x, y) image coordinates.
+
+    Return:
+        paint_layer: [ndarray or None] uint8 paint layer, or None if the polygons reproduce the image
+            exactly.
+    """
+
+    img_height, img_width = mask_img.shape[:2]
+
+    # What the polygons alone would reproduce
+    polygon_mask = compositeMaskLayers(mask_polygons, None, img_width, img_height)
+
+    paint_layer = np.zeros((img_height, img_width), dtype=np.uint8)
+    paint_layer[(mask_img == 0) & (polygon_mask == 255)] = PAINT_MASKED
+    paint_layer[(mask_img == 255) & (polygon_mask == 0)] = PAINT_UNMASKED
+
+    if np.any(paint_layer != PAINT_UNTOUCHED):
+        return paint_layer
+
+    return None
+
+
+
+def decomposeMaskImage(mask_img, epsilon_frac=0.002):
+    """ Split a mask image into editable polygons plus a paint layer holding the raster residuals.
+
+        Masked regions are traced as contours and simplified with approxPolyDP. Whatever the simplified
+        polygons don't reproduce (brush strokes, boundary pixels rounded away) is captured in the paint
+        layer so the mask survives a save/load round trip without pixel loss.
+
+    Arguments:
+        mask_img: [ndarray] uint8 mask image, 0 = masked, 255 = unmasked.
+
+    Keyword arguments:
+        epsilon_frac: [float] approxPolyDP tolerance as a fraction of the contour length. 0.002 by
+            default.
+
+    Return:
+        (polygons, paint_layer): [tuple]
+            polygons: [list] List of polygons, each a list of (x, y) float image coordinates.
+            paint_layer: [ndarray or None] Raster residuals, None if the polygons reproduce the image.
+    """
+
+    # Trace the masked (value 0) regions
+    inverted = cv2.bitwise_not(mask_img)
+    contours, _ = cv2.findContours(inverted, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    polygons = []
+    for contour in contours:
+        epsilon = epsilon_frac*cv2.arcLength(contour, True)
+        approx = cv2.approxPolyDP(contour, epsilon, True)
+        points = [(float(pt[0][0]), float(pt[0][1])) for pt in approx]
+        if len(points) >= 3:
+            polygons.append(points)
+
+    return polygons, maskRasterResiduals(mask_img, polygons)
+
+
+
+def resampleMaskLayers(mask_polygons, paint_layer, src_size, dst_size):
+    """ Rescale mask polygons and the paint layer from one image size to another.
+
+        Used when a mask file was saved for a different frame size than the image it is loaded on.
+
+    Arguments:
+        mask_polygons: [list] List of polygons, each a list of (x, y) image coordinates.
+        paint_layer: [ndarray or None] uint8 paint layer of size src_size.
+        src_size: [tuple] (width, height) the layers are currently in.
+        dst_size: [tuple] (width, height) to rescale to.
+
+    Return:
+        (polygons, paint_layer): [tuple] Rescaled polygons and paint layer (None stays None).
+    """
+
+    src_width, src_height = src_size
+    dst_width, dst_height = dst_size
+
+    # Nothing to do for equal sizes
+    if (src_width == dst_width) and (src_height == dst_height):
+        return mask_polygons, paint_layer
+
+    scale_x = dst_width/src_width
+    scale_y = dst_height/src_height
+
+    polygons = [[(x*scale_x, y*scale_y) for x, y in polygon] for polygon in mask_polygons]
+
+    if paint_layer is not None:
+        paint_layer = cv2.resize(paint_layer, (dst_width, dst_height), interpolation=cv2.INTER_NEAREST)
+
+    return polygons, paint_layer
+
+
+
+def paintBrushSegment(paint_layer, prev_pos, pos, radius, value):
+    """ Stamp one brush step onto the paint layer, in place.
+
+        A disc of the brush radius is drawn at the current position, and when there is a previous
+        position the gap is filled with a line of width 2*radius so fast drags leave no holes. The
+        footprint is thus the same disc along the whole stroke, including at its first point.
+
+    Arguments:
+        paint_layer: [ndarray] uint8 (height, width) paint layer, modified in place.
+        prev_pos: [tuple or None] (x, y) integer position of the previous step, None at the start of a
+            stroke.
+        pos: [tuple] (x, y) position of this step, clamped to the layer.
+        radius: [int] Brush radius in pixels (at least 1).
+        value: [int] PAINT_MASKED or PAINT_UNMASKED.
+
+    Return:
+        center: [tuple] The clamped integer (x, y) position, to pass as prev_pos of the next step.
+    """
+
+    img_height, img_width = paint_layer.shape[:2]
+
+    radius = max(int(radius), 1)
+
+    # Clamp the brush centre to the image so a cursor dragged off the image doesn't produce huge
+    #   coordinates (the disc may still partly overhang the edge, OpenCV clips the drawing)
+    center = (int(min(max(round(pos[0]), 0), img_width - 1)), int(min(max(round(pos[1]), 0), img_height - 1)))
+
+    # Fill the gap from the previous position
+    if prev_pos is not None:
+        cv2.line(paint_layer, tuple(prev_pos), center, value, thickness=2*radius)
+
+    # Always stamp the disc at the current position (the thick line caps are not guaranteed to match it)
+    cv2.circle(paint_layer, center, radius, value, -1)
+
+    return center

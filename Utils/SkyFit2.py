@@ -203,7 +203,8 @@ from RMS.Routines.CustomPyqtgraphClasses import ViewBox, TextItem, TextItemList,
 from RMS.Routines.GreatCircle import fitGreatCircle, greatCircle
 from RMS.Routines.SphericalPolygonCheck import sphericalPolygonCheck
 from RMS.Routines.Image import loadFlat, loadDark, applyFlat, applyDark, signalToNoise, gammaCorrectionImage, adjustLevels, saveImage, loadImage
-from RMS.Routines.MaskImage import getMaskFile, MaskStructure
+from RMS.Routines.MaskImage import getMaskFile, MaskStructure, compositeMaskLayers, decomposeMaskImage, \
+    resampleMaskLayers, paintBrushSegment
 from RMS.Routines import RollingShutterCorrection
 from RMS.Misc import maxDistBetweenPoints, getRmsRootDir
 from Utils.KalmanFilter import KalmanFilter
@@ -6566,22 +6567,10 @@ class PlateTool(QtWidgets.QMainWindow):
             self.mask_paint_layer = np.zeros((img_height, img_width), dtype=np.uint8)
 
         value = 2 if self.mask_brush_erasing else 1
-        radius = max(int(self.mask_brush_radius), 1)
 
-        # Clamp the brush centre to the image so a cursor dragged off the image doesn't produce huge
-        #   coordinates (the disc may still partly overhang the edge, OpenCV clips the drawing)
-        center = (int(min(max(round(x), 0), img_width - 1)), int(min(max(round(y), 0), img_height - 1)))
-
-        # Fill the gap from the previous mouse position with a thick line so fast drags leave no holes
-        if self.mask_brush_last_pos is not None:
-            cv2.line(self.mask_paint_layer, self.mask_brush_last_pos, center, value, thickness=2*radius)
-
-        # Always stamp a disc at the current position so the footprint is the same disc of the brush
-        #   radius along the whole stroke, including at the first point and at both ends of every
-        #   segment (the thick line caps are not guaranteed to match the disc exactly)
-        cv2.circle(self.mask_paint_layer, center, radius, value, -1)
-
-        self.mask_brush_last_pos = center
+        # Stamp the brush disc at (x, y) and fill the gap from the previous mouse position
+        self.mask_brush_last_pos = paintBrushSegment(self.mask_paint_layer, self.mask_brush_last_pos, (x, y),
+            self.mask_brush_radius, value)
         self.updateMaskOverlayImage()
 
     def undoBrushStroke(self):
@@ -6881,28 +6870,9 @@ class PlateTool(QtWidgets.QMainWindow):
         img_width = self.img.data.shape[0]
         img_height = self.img.data.shape[1]
 
-        mask_img = np.zeros((img_height, img_width), dtype=np.uint8)
-
-        # Fill polygon interiors
-        for polygon in self.mask_polygons:
-            pts = np.array(polygon, dtype=np.int32)
-            cv2.fillPoly(mask_img, [pts], 1)
-
-        # Composite brush paint layer on top
-        if self.mask_paint_layer is not None:
-            paint_layer = self.mask_paint_layer
-
-            # The paint layer may have been saved at a different resolution than the current image
-            #   (e.g. a mask carried over from a sensor with a different frame height). Resample it
-            #   (nearest-neighbour, to preserve the 0/1/2 labels) so loading doesn't crash.
-            if paint_layer.shape != mask_img.shape:
-                print("Mask paint layer {} != image {}; resampling to fit".format(
-                    paint_layer.shape, mask_img.shape))
-                paint_layer = cv2.resize(paint_layer, (img_width, img_height),
-                                         interpolation=cv2.INTER_NEAREST)
-
-            mask_img[paint_layer == 1] = 1   # painted → masked
-            mask_img[paint_layer == 2] = 0   # erased  → clear
+        # Polygons + brush paint layer, 1 = masked (shown red), 0 = clear
+        mask_img = compositeMaskLayers(self.mask_polygons, self.mask_paint_layer, img_width, img_height,
+            masked_value=1, unmasked_value=0)
 
         # Transpose to (width, height) for pyqtgraph ImageItem
         self.mask_overlay.setImage(mask_img.T)
@@ -7101,30 +7071,8 @@ class PlateTool(QtWidgets.QMainWindow):
         img_width = self.img.data.shape[0]
         img_height = self.img.data.shape[1]
 
-        # Start fully unmasked
-        mask = np.full((img_height, img_width), 255, dtype=np.uint8)
-
-        # Burn in polygons (masked regions = 0)
-        for polygon in self.mask_polygons:
-            pts = np.array(polygon, dtype=np.int32)
-            cv2.fillPoly(mask, [pts], 0)
-
-        # Composite brush paint layer on top:
-        #   paint pixels (1) → masked (0)
-        #   erase pixels  (2) → unmasked (255), overrides polygon fill
-        if self.mask_paint_layer is not None:
-            paint_layer = self.mask_paint_layer
-
-            # Resample if the paint layer was saved at a different resolution than the current image
-            #   (nearest-neighbour preserves the 0/1/2 labels), so a stale mask doesn't crash here.
-            if paint_layer.shape != mask.shape:
-                paint_layer = cv2.resize(paint_layer, (img_width, img_height),
-                                         interpolation=cv2.INTER_NEAREST)
-
-            mask[paint_layer == 1] = 0
-            mask[paint_layer == 2] = 255
-
-        return mask
+        # Polygons + brush paint layer in the mask.bmp convention (0 = masked, 255 = unmasked)
+        return compositeMaskLayers(self.mask_polygons, self.mask_paint_layer, img_width, img_height)
 
     def saveMask(self):
         """Save mask to file and update self.mask for star detection."""
@@ -7177,40 +7125,29 @@ class PlateTool(QtWidgets.QMainWindow):
             print(f"Failed to load mask: {mask_path}")
             return
 
-        self.mask_polygons = []
         self.mask_current_polygon = []
 
-        # Find contours of masked (black, value=0) regions and convert to polygons.
-        # approxPolyDP reduces vertex count while keeping contour fidelity within epsilon.
-        inverted = cv2.bitwise_not(mask_img)
-        contours, _ = cv2.findContours(inverted, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        # Convert the masked regions to editable polygons, with the pixels the simplified polygons don't
+        #   reproduce (prior brush strokes, boundary pixels rounded away) captured in the paint layer
+        self.mask_polygons, paint_layer = decomposeMaskImage(mask_img)
 
-        for contour in contours:
-            epsilon = 0.002 * cv2.arcLength(contour, True)
-            approx = cv2.approxPolyDP(contour, epsilon, True)
-            points = [(float(pt[0][0]), float(pt[0][1])) for pt in approx]
-            if len(points) >= 3:
-                self.mask_polygons.append(points)
+        # A mask saved for a different frame size than the current image has to be rescaled, polygons
+        #   included, otherwise the polygons stay in the file's pixel coordinates while the paint layer
+        #   gets resampled at render time
+        mask_height, mask_width = mask_img.shape[:2]
+        if self.img.data is not None:
 
-        # Detect raster residuals: pixels that differ between the original mask
-        # and what the simplified polygons would reproduce.  These arise from
-        # prior brush strokes or from boundary pixels rounded away by approxPolyDP.
-        # They are stored in the paint layer so they are preserved on next save.
-        polygon_mask = np.full_like(mask_img, 255)
-        for polygon in self.mask_polygons:
-            pts = np.array(polygon, dtype=np.int32)
-            cv2.fillPoly(polygon_mask, [pts], 0)
+            # shape[0]=X (width), shape[1]=Y (height) - codebase convention
+            img_width, img_height = self.img.data.shape[0], self.img.data.shape[1]
 
-        img_height, img_width = mask_img.shape[:2]
-        paint_layer = np.zeros((img_height, img_width), dtype=np.uint8)
+            if (mask_width, mask_height) != (img_width, img_height):
+                print("Mask size {}x{} != image size {}x{}; resampling the mask to fit".format(mask_width,
+                    mask_height, img_width, img_height))
+                self.mask_polygons, paint_layer = resampleMaskLayers(self.mask_polygons, paint_layer,
+                    (mask_width, mask_height), (img_width, img_height))
+                mask_img = cv2.resize(mask_img, (img_width, img_height), interpolation=cv2.INTER_NEAREST)
 
-        # Pixels masked in file but not covered by any polygon → paint (value=1)
-        paint_layer[(mask_img == 0) & (polygon_mask == 255)] = 1
-
-        # Pixels unmasked in file but inside a polygon → erase (value=2)
-        paint_layer[(mask_img == 255) & (polygon_mask == 0)] = 2
-
-        if np.any(paint_layer != 0):
+        if paint_layer is not None:
             self.mask_paint_layer = paint_layer
             self.mask_brush_stroke_history = []
             print(f"Loaded {len(self.mask_polygons)} polygon(s) + raster residuals from mask")
