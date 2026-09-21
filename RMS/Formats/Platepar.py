@@ -1523,7 +1523,11 @@ class Platepar(object):
 
                         # Pre-filter catalog to FOV using current pointing (from start_params)
                         # This avoids re-filtering inside every optimizer function evaluation
-                        pp_filter = copy.deepcopy(self)
+                        # A shallow copy is enough: the projection functions only read the platepar
+                        #   and the parameters below are rebound (not mutated in place), so self and its
+                        #   arrays are untouched. The same copy is reused for the scoring below.
+                        pp_work = copy.copy(self)
+                        pp_filter = pp_work
                         pp_filter.RA_d, pp_filter.dec_d = normalizeRaDec(360*start_params[0],
                                                                          90*start_params[1])
                         pp_filter.pos_angle_ref = (360 * start_params[2]) % 360
@@ -1568,8 +1572,8 @@ class Platepar(object):
                         print("        opt: {} iters, {} fev, {} (fatol={})".format(
                             res.nit, res.nfev, exit_reason, ransac_opts['fatol']))
 
-                        # Score on ALL stars
-                        pp_temp = copy.deepcopy(self)
+                        # Score on ALL stars (reusing the shallow working copy from the FOV filter)
+                        pp_temp = pp_work
                         ra_ref, dec_ref, pos_angle_ref, F_scale = res.x[:4]
                         pp_temp.RA_d, pp_temp.dec_d = normalizeRaDec(360*ra_ref, 90*dec_ref)
                         pp_temp.pos_angle_ref = (360 * pos_angle_ref) % (360)
