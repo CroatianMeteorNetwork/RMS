@@ -807,10 +807,17 @@ def averageNeighbourPhotometry(recalibrated_platepars, ff_names, calstars_ffs,
     """ Average the photometric offsets of recalibrated platepars within a neighbourhood of FF files.
 
         For every given FF, the offsets of the recalibrated FFs around it (in the CALSTARS order) are
-        averaged and the average with the combined standard deviation is written to all of them. FFs
+        averaged, and the average with the combined standard deviation is written to all of them. FFs
         without a usable photometric solution (non-finite values, or a zero standard deviation of a
         degenerate fit) do not contribute to the average, but they receive it, so that they do not keep
         a bad zero point.
+
+        All averages are computed from the photometric solutions as they were before any averaging, and
+        only then written back. Writing them back while iterating would let a value that is itself an
+        average (or a repaired degenerate fit) count again as an independent measurement in the next
+        overlapping neighbourhood, which double counts FFs and makes the result depend on the order of
+        ff_names. Where neighbourhoods overlap, a given FF from ff_names always ends up with the average
+        of its own neighbourhood, as that is the one centred on it.
 
     Arguments:
         recalibrated_platepars: [dict] FF name -> recalibrated Platepar, updated in place.
@@ -825,7 +832,17 @@ def averageNeighbourPhotometry(recalibrated_platepars, ff_names, calstars_ffs,
         None
     """
 
-    # Go through the list of FF files
+    # Take the photometric solutions as they are before any averaging, so that every average below is
+    #   computed from original measurements only
+    original_photometry = {ff_name: (pp.mag_lev, pp.mag_lev_stddev)
+                           for ff_name, pp in recalibrated_platepars.items()}
+
+
+    ### Compute the neighbourhood averages ###
+
+    # List of (centre FF, neighbouring FFs, average offset, average stddev)
+    neighbourhood_averages = []
+
     for ff_name in ff_names:
 
         # Make sure the FF was successfully recalibrated
@@ -856,15 +873,13 @@ def averageNeighbourPhotometry(recalibrated_platepars, ff_names, calstars_ffs,
                 # Every recalibrated neighbour receives the average
                 neighboring_ffs.append(ff_name_tmp)
 
-                # Get the computed photometric offset and stddev
-                mag_lev_tmp = recalibrated_platepars[ff_name_tmp].mag_lev
-                mag_lev_stddev_tmp = recalibrated_platepars[ff_name_tmp].mag_lev_stddev
+                # Get the original photometric offset and stddev (not one already averaged)
+                mag_lev_tmp, mag_lev_stddev_tmp = original_photometry[ff_name_tmp]
 
                 # Only use neighbours with a usable photometric solution for the average. Averaging in a
-                #   non-finite value would make the average non-finite and, as the average is written back
-                #   to all neighbours, the non-finite value would spread to all FF files of the night
-                #   through overlapping neighbourhoods. A zero standard deviation marks a degenerate fit
-                #   (not calibrated, e.g. the initial guess of the fit), which is skipped too
+                #   non-finite value would make the average non-finite and spread it to all FF files of
+                #   the night through overlapping neighbourhoods. A zero standard deviation marks a
+                #   degenerate fit (not calibrated, e.g. the initial guess of the fit), which is skipped too
                 if not (np.isfinite(mag_lev_tmp) and np.isfinite(mag_lev_stddev_tmp)):
                     continue
 
@@ -893,10 +908,23 @@ def averageNeighbourPhotometry(recalibrated_platepars, ff_names, calstars_ffs,
             / len(photom_offset_tmp_list)
         )
 
-        # Assign the new photometric offset and standard deviation to all neighbouring FFs
+        neighbourhood_averages.append((ff_name, neighboring_ffs, photom_offset_new, photom_offset_std_new))
+
+
+    ### Write the averages back ###
+
+    # First give every neighbour the average of its neighbourhood
+    for _, neighboring_ffs, photom_offset_new, photom_offset_std_new in neighbourhood_averages:
         for ff_name_tmp in neighboring_ffs:
             recalibrated_platepars[ff_name_tmp].mag_lev = photom_offset_new
             recalibrated_platepars[ff_name_tmp].mag_lev_stddev = photom_offset_std_new
+
+    # Then make sure every centre FF carries the average of its own neighbourhood, whatever order the
+    #   overlapping neighbourhoods were written in
+    for ff_name, _, photom_offset_new, photom_offset_std_new in neighbourhood_averages:
+        recalibrated_platepars[ff_name].mag_lev = photom_offset_new
+        recalibrated_platepars[ff_name].mag_lev_stddev = photom_offset_std_new
+
 
 
 def recalibrateIndividualFFsAndApplyAstrometry(

@@ -5,6 +5,7 @@ from __future__ import print_function, division, absolute_import
 import copy
 
 import numpy as np
+import pytest
 
 import RMS.ConfigReader as cr
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP
@@ -138,3 +139,65 @@ def testNeighbourPhotometryAveragingReplacesDegenerateZeroPoint():
     for ff_name in calstars_ffs[1:]:
         assert np.isclose(recalibrated[ff_name].mag_lev, 11.1)
         assert recalibrated[ff_name].mag_lev_stddev > 0
+
+
+def _overlappingNeighbourhoodNight():
+    """ A night where the neighbourhoods of two meteor FFs overlap, with one degenerate fit between. """
+
+    from types import SimpleNamespace
+
+    calstars_ffs = ['FF_{:d}'.format(i) for i in range(8)]
+    recalibrated = {
+        'FF_1': SimpleNamespace(mag_lev=11.0, mag_lev_stddev=0.1),
+        'FF_2': SimpleNamespace(mag_lev=11.4, mag_lev_stddev=0.1),
+        'FF_3': SimpleNamespace(mag_lev=10.0, mag_lev_stddev=0.0),
+        'FF_4': SimpleNamespace(mag_lev=11.2, mag_lev_stddev=0.1),
+        'FF_5': SimpleNamespace(mag_lev=10.6, mag_lev_stddev=0.1),
+        'FF_6': SimpleNamespace(mag_lev=11.8, mag_lev_stddev=0.1),
+        'FF_7': SimpleNamespace(mag_lev=11.1, mag_lev_stddev=0.1),
+    }
+
+    return calstars_ffs, recalibrated
+
+
+def testNeighbourPhotometryAveragingDoesNotDependOnOrder():
+    """ Overlapping neighbourhoods must give each meteor FF the same zero point in any order.
+
+        With the meteor FFs two apart, writing the averages back while iterating gave 11.21 in one order
+        and 11.185 in the other.
+    """
+
+    import copy
+
+    from RMS.Astrometry.ApplyRecalibrate import averageNeighbourPhotometry
+
+    calstars_ffs, recalibrated = _overlappingNeighbourhoodNight()
+
+    forward = copy.deepcopy(recalibrated)
+    backward = copy.deepcopy(recalibrated)
+
+    averageNeighbourPhotometry(forward, ['FF_3', 'FF_5'], calstars_ffs, neighbourhood_size=5)
+    averageNeighbourPhotometry(backward, ['FF_5', 'FF_3'], calstars_ffs, neighbourhood_size=5)
+
+    for ff_name in ['FF_3', 'FF_5']:
+        assert forward[ff_name].mag_lev == pytest.approx(backward[ff_name].mag_lev)
+        assert forward[ff_name].mag_lev_stddev == pytest.approx(backward[ff_name].mag_lev_stddev)
+
+
+def testNeighbourPhotometryAveragingUsesOriginalMeasurementsOnly():
+    """ A repaired or already averaged value must never count again as an independent measurement.
+
+        FF_3 is degenerate. Its neighbourhood (FF_1..FF_5) averages FF_1, FF_2, FF_4, FF_5; the
+        neighbourhood of FF_4 (FF_2..FF_6) must average the original FF_2, FF_4, FF_5, FF_6 and still skip
+        FF_3, even though FF_3 received a valid-looking average from the first neighbourhood.
+    """
+
+    from RMS.Astrometry.ApplyRecalibrate import averageNeighbourPhotometry
+
+    calstars_ffs, recalibrated = _overlappingNeighbourhoodNight()
+
+    averageNeighbourPhotometry(recalibrated, ['FF_3', 'FF_4'], calstars_ffs, neighbourhood_size=5)
+
+    # Each meteor FF carries the average of its own neighbourhood, from the original values
+    assert recalibrated['FF_3'].mag_lev == pytest.approx(np.mean([11.0, 11.4, 11.2, 10.6]))
+    assert recalibrated['FF_4'].mag_lev == pytest.approx(np.mean([11.4, 11.2, 10.6, 11.8]))
