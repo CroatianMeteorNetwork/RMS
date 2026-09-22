@@ -3672,6 +3672,12 @@ class DistortionDialog(QtWidgets.QDialog, ScaledSizeHelper):
             for i in range(start_idx, len(poly)):
                 poly[i] = 0.0
 
+        # The reset coefficients must not come back from the Fit Parameters stash on a later flag or
+        #   distortion type change
+        param_manager = getattr(getattr(self.parent_widget, 'tab', None), 'param_manager', None)
+        if param_manager is not None:
+            param_manager.resetCoeffStash()
+
         self.fit_parameters.updateValues()
         self.valueModified.emit()
 

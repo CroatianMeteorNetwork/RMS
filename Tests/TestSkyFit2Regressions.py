@@ -1443,3 +1443,41 @@ def testChangeStationFailureKeepsCurrentStationState(plateTool, secondStationDir
     assert pt.star_detection_override_data == {'FF_A.fits': [[1, 2, 3]]}
     assert pt.unsuitable_stars is unsuitable
     assert pt.tab.star_detection.use_override_checkbox.isChecked()
+
+
+@pytest.mark.parametrize("reset", ["resetToZero", "resetDistortion", "changeDistortionType", "firstFit"])
+def testExplicitResetDropsCoeffStash(plateTool, reset):
+    """ After an explicit distortion reset, a type change does not bring the old coefficients back. """
+
+    pt = plateTool
+    pm = pt.tab.param_manager
+    pp = pt.platepar
+    assert pp.distortion_type == "radial9-odd"
+
+    # radial9 -> radial7 stashes the highest term
+    pm.distortion_type.setCurrentIndex(pp.distortion_type_list.index("radial7-odd"))
+    assert any(pm._coeff_stash['x_fwd'].values())
+
+    if reset == "resetToZero":
+        pm.distortion_dialog.updatePlatepar(pp)
+        pm.distortion_dialog.resetToZero()
+    elif reset == "resetDistortion":
+        pt.resetDistortion()
+    elif reset == "changeDistortionType":
+        pt.dist_type_index = pp.distortion_type_list.index("radial7-odd")
+        pt.changeDistortionType()
+    else:
+        pt.first_platepar_fit = True
+        pt.platepar.fitAstrometry = lambda *a, **k: None
+        pt.paired_stars = SF.PairedStars()
+        for x, y, intens, ra, dec, mag in np.array(pp.star_list)[:10, 1:]:
+            pt.paired_stars.addPair(x, y, 2.0, intens, SF.CatalogStar(ra, dec, mag))
+        pt.fitPickedStars()
+
+    assert not any(any(stash.values()) for stash in pm._coeff_stash.values())
+
+    # Back to radial9: no pre-reset coefficient comes back into the zero slots
+    before = np.array(pp.x_poly_fwd)
+    pm.distortion_type.setCurrentIndex(pp.distortion_type_list.index("radial9-odd"))
+    assert np.allclose(pp.x_poly_fwd[:len(before)], before)
+    assert pp.x_poly_fwd[-1] == 0.0
