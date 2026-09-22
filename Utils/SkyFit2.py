@@ -6658,15 +6658,15 @@ class PlateTool(QtWidgets.QMainWindow):
     ###################################################################################################
 
     def initMaskFromFile(self):
-        """Auto-load mask.bmp if present, else clear any mask carried over from a previous station.
+        """ Auto-load mask.bmp if present, else clear any mask carried over from a previous station.
 
-        Must be called after the new station's image handle is in place, since the mask is rendered
-        against the current image dimensions.
+            Must be called after the new station's image handle is in place, since the mask is rendered
+            against the current image dimensions.
         """
 
-        # Reset ALL mask state - critical when switching stations/directories. Clearing only the
-        #   paint layer (not the polygons or the rendered overlay) left the previous station's mask
-        #   visible whenever the new station had no mask file.
+        # Reset ALL mask state - critical when switching stations/directories. Clearing only the paint
+        #   layer (not the polygons or the rendered overlay) left the previous station's mask visible
+        #   whenever the new station had no mask file
         if self.mask_brush_mode:
             self._exitBrushMode()
         self.mask_polygons = []
@@ -6678,8 +6678,9 @@ class PlateTool(QtWidgets.QMainWindow):
         mask_path = os.path.join(self.dir_path, "mask.bmp")
         if os.path.exists(mask_path):
             self.loadMaskFromFile(mask_path)
+
+        # No mask for this station - clear any leftover overlay/outlines from the previous one
         else:
-            # No mask for this station - clear any leftover overlay/outlines from the previous one
             self.updateMaskDisplay()
 
         # Sync the detection mask to the loaded-or-cleared state so it doesn't leak across stations
@@ -6687,25 +6688,37 @@ class PlateTool(QtWidgets.QMainWindow):
             self.mask = MaskStructure(self.generateMaskImage())
 
     def toggleMaskDrawMode(self):
-        """Toggle mask polygon drawing mode."""
+        """ Mask tab callback: enter or leave the polygon drawing mode, following the Draw button state.
+            Leaving the mode closes the polygon in progress if it has at least 3 vertices. """
+
         self.mask_draw_mode = self.tab.mask.draw_button.isChecked()
+
         if self.mask_draw_mode:
             self.mask_current_polygon = []
+
+            # Drawing and painting are exclusive
             if self.mask_brush_mode:
                 self._exitBrushMode()
+
+            # Disable star-label hyperlinks so clicks go to polygon drawing
             self.spectral_type_text_list.setInteractionEnabled(False)
+
         else:
             if len(self.mask_current_polygon) >= 3:
                 self.mask_polygons.append(self.mask_current_polygon.copy())
                 self.tab.mask.setUnsaved(True)
+
             self.mask_current_polygon = []
             self.tab.mask.setDrawMode(False)
             self.spectral_type_text_list.setInteractionEnabled(True)
+
         self.updateMaskDisplay()
         self._updateMaskStatus()
 
     def toggleMaskBrushMode(self):
-        """Toggle mask brush painting mode."""
+        """ Mask tab callback: enter or leave the brush painting mode, following the Brush button
+            state. """
+
         self.mask_brush_mode = self.tab.mask.brush_button.isChecked()
 
         if self.mask_brush_mode:
@@ -6733,7 +6746,8 @@ class PlateTool(QtWidgets.QMainWindow):
         self._updateMaskStatus()
 
     def _exitBrushMode(self):
-        """Deactivate brush painting and reset all brush interaction state."""
+        """ Deactivate brush painting and reset all brush interaction state. """
+
         self.mask_brush_mode = False
         self.mask_brush_painting = False
         self.mask_brush_erasing = False
@@ -6745,12 +6759,12 @@ class PlateTool(QtWidgets.QMainWindow):
     def updatePanningEnabled(self):
         """ Enable or disable panning the image frame with a mouse drag.
 
-        Panning has to be disabled whenever a mouse drag is used for painting instead of navigating,
-        i.e. when editing the mask or when coloring photometry pixels in the manual reduction mode.
+            Panning has to be disabled whenever a mouse drag is used for painting instead of navigating,
+            i.e. when editing the mask or when coloring photometry pixels in the manual reduction mode.
 
-        Disabling panning is done by setting the panning_enabled flag on the custom ViewBox, which
-        makes it accept the mouse press itself. The press is then never handed to pyqtgraph's drag
-        machinery, so neither the left-drag pan nor the right-drag zoom is generated.
+            Disabling panning is done by setting the panning_enabled flag on the custom ViewBox, which
+            makes it accept the mouse press itself. The press is then never handed to pyqtgraph's drag
+            machinery, so neither the left-drag pan nor the right-drag zoom is generated.
         """
 
         block_panning = False
@@ -6773,7 +6787,13 @@ class PlateTool(QtWidgets.QMainWindow):
         self.img_frame.panning_enabled = not block_panning
 
     def addMaskPoint(self, x, y):
-        """Add a point to the current polygon being drawn."""
+        """ Add a vertex to the polygon being drawn, snapping it to the image edge when close to it.
+
+        Arguments:
+            x: [float] Image X coordinate.
+            y: [float] Image Y coordinate.
+        """
+
         # Get image dimensions - shape[0] is X, shape[1] is Y in this codebase
         max_x = self.img.data.shape[0] - 1
         max_y = self.img.data.shape[1] - 1
@@ -6799,7 +6819,8 @@ class PlateTool(QtWidgets.QMainWindow):
                                            has_brush_strokes=self._hasBrushStrokes())
 
     def closeMaskPolygon(self):
-        """Close the current polygon and add it to the list."""
+        """ Close the polygon being drawn (if it has at least 3 vertices) and leave the drawing mode. """
+
         if len(self.mask_current_polygon) >= 3:
             self.mask_polygons.append(self.mask_current_polygon.copy())
             self.tab.mask.setUnsaved(True)
@@ -6810,7 +6831,8 @@ class PlateTool(QtWidgets.QMainWindow):
         self._updateMaskStatus()
 
     def clearMaskPolygons(self):
-        """Clear all mask polygons and the paint layer (full visual reset)."""
+        """ Clear all mask polygons and the paint layer (full visual reset). """
+
         self.mask_polygons = []
         self.mask_current_polygon = []
         self.mask_draw_mode = False
@@ -6824,17 +6846,17 @@ class PlateTool(QtWidgets.QMainWindow):
         self._updateMaskStatus()
 
     def setBrushSize(self, size):
-        """Set brush radius from slider."""
+        """ Mask tab slider callback: set the brush radius in image pixels. """
         self.mask_brush_radius = size
         self.brush_cursor.setRadius(size)
 
     def brushStrokeBegin(self):
-        """Save a compressed undo snapshot before a new brush stroke begins.
+        """ Save a compressed undo snapshot before a new brush stroke begins.
 
-        Snapshots are stored as (shape, zlib-compressed bytes) tuples.
-        None is stored when the paint layer doesn't exist yet, so undoing
-        the very first stroke restores a clean slate.
+            Snapshots are stored as (shape, zlib-compressed bytes) tuples. None is stored when the paint
+            layer doesn't exist yet, so undoing the very first stroke restores a clean slate.
         """
+
         if self.mask_paint_layer is not None:
             snapshot = (self.mask_paint_layer.shape,
                         zlib.compress(self.mask_paint_layer.tobytes()))
@@ -6853,46 +6875,55 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.mask.setUndoEnabled(True)
 
     def brushPaintAt(self, x, y):
-        """Paint or erase a circle at (x, y), interpolating from the last position.
+        """ Paint or erase a brush disc at (x, y), filling the gap from the last position.
 
-        Paint layer pixel encoding:
-            0 = untouched (transparent to the polygon layer)
-            1 = painted (masked, shown red in overlay)
-            2 = erased  (unmasked, overrides any polygon beneath)
+            Paint layer pixel encoding:
+                0 = untouched (transparent to the polygon layer)
+                1 = painted (masked, shown red in overlay)
+                2 = erased  (unmasked, overrides any polygon beneath)
 
-        Note: img.data is stored (width, height) in this codebase (shape[0]=X, shape[1]=Y),
-        so the paint layer is allocated as (height, width) to match OpenCV convention.
+            Note: img.data is stored (width, height) in this codebase (shape[0]=X, shape[1]=Y), so the
+            paint layer is allocated as (height, width) to match the OpenCV convention.
+
+        Arguments:
+            x: [float] Image X coordinate.
+            y: [float] Image Y coordinate.
         """
+
         if self.img.data is None:
             return
 
-        # shape[0] is X (width), shape[1] is Y (height) — see codebase convention
+        # shape[0] is X (width), shape[1] is Y (height) - see codebase convention
         img_width = self.img.data.shape[0]
         img_height = self.img.data.shape[1]
 
+        # Allocate the paint layer on the first stroke
         if self.mask_paint_layer is None:
             self.mask_paint_layer = np.zeros((img_height, img_width), dtype=np.uint8)
 
         value = 2 if self.mask_brush_erasing else 1
 
         # Stamp the brush disc at (x, y) and fill the gap from the previous mouse position
-        self.mask_brush_last_pos = paintBrushSegment(self.mask_paint_layer, self.mask_brush_last_pos, (x, y),
-            self.mask_brush_radius, value)
+        self.mask_brush_last_pos = paintBrushSegment(self.mask_paint_layer, self.mask_brush_last_pos, \
+            (x, y), self.mask_brush_radius, value)
+
         self.updateMaskOverlayImage()
 
     def undoBrushStroke(self):
-        """Undo the last brush stroke by restoring the previous snapshot."""
+        """ Undo the last brush stroke by restoring the previous snapshot. """
+
         if not self.mask_brush_stroke_history:
             return
 
         snapshot = self.mask_brush_stroke_history.pop()
 
+        # The snapshot before the very first stroke: paint layer was empty
         if snapshot is None:
-            # The snapshot before the very first stroke: paint layer was empty
             self.mask_paint_layer = None
+
+        # frombuffer returns a read-only view, so .copy() is required
         else:
             shape, data = snapshot
-            # frombuffer returns a read-only view, so .copy() is required
             self.mask_paint_layer = np.frombuffer(
                 zlib.decompress(data), dtype=np.uint8).reshape(shape).copy()
 
@@ -6901,7 +6932,8 @@ class PlateTool(QtWidgets.QMainWindow):
         self.updateMaskOverlayImage()
 
     def clearBrushStrokes(self):
-        """Clear all brush paint strokes."""
+        """ Clear all brush paint strokes and the undo history. """
+
         self.mask_paint_layer = None
         self.mask_brush_stroke_history = []
         self.tab.mask.setUndoEnabled(False)
@@ -6910,16 +6942,17 @@ class PlateTool(QtWidgets.QMainWindow):
         self._updateMaskStatus()
 
     def _hasBrushStrokes(self):
-        """Check if there are any brush strokes on the paint layer."""
+        """ Check if there are any brush strokes on the paint layer. """
         return self.mask_paint_layer is not None and np.any(self.mask_paint_layer != 0)
 
     def _updateMaskStatus(self):
-        """Update mask tab status label with polygon + brush info."""
+        """ Update the mask tab status label with the polygon + brush info. """
         self.tab.mask.updateStatus(len(self.mask_polygons),
                                     has_brush_strokes=self._hasBrushStrokes())
 
     def invertMaskPolygons(self):
-        """ Invert the current mask polygons using the mask image. """
+        """ Invert the current mask by tracing the unmasked regions of the rendered mask image into new
+            polygons. The brush layer is dropped, as it is baked into the traced polygons. """
 
         if self.img.data is None:
             return
@@ -6927,24 +6960,23 @@ class PlateTool(QtWidgets.QMainWindow):
         # Generate current binary mask
         current_mask_img = self.generateMaskImage()
 
-        # Find contours of the currently unmasked regions
-        # current_mask_img has 0 for masked, 255 for unmasked. 
-        # findContours finds the contours of regions with value 255.
+        # Find contours of the currently unmasked regions. current_mask_img has 0 for masked, 255 for
+        #   unmasked, and findContours finds the contours of regions with value 255
         contours, _ = cv2.findContours(current_mask_img, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
 
         self.mask_polygons = []
         self.mask_current_polygon = []
 
         for contour in contours:
-            
-            # Approximate the contour to a polygon to reduce the number of vertices.
-            # epsilon is the maximum distance from contour to approximated contour.
+
+            # Approximate the contour to a polygon to reduce the number of vertices. epsilon is the
+            #   maximum distance from contour to approximated contour
             epsilon = 0.002*cv2.arcLength(contour, True)
             approx = cv2.approxPolyDP(contour, epsilon, True)
-            
+
             # Extract the points into a flat list of (x, y) coordinate tuples
             points = [(float(pt[0][0]), float(pt[0][1])) for pt in approx]
-            
+
             # Only add to mask polygons if it has at least 3 points (a valid polygon)
             if len(points) >= 3:
                 self.mask_polygons.append(points)
@@ -6959,9 +6991,20 @@ class PlateTool(QtWidgets.QMainWindow):
         self._updateMaskStatus()
 
     def findNearestMaskVertex(self, x, y, threshold=15):
-        """Find the nearest vertex to (x, y) within threshold.
-        Returns ('current', idx) for current polygon or (poly_idx, vert_idx) for completed polygons.
+        """ Find the nearest polygon vertex to (x, y) within the threshold.
+
+        Arguments:
+            x: [float] Image X coordinate.
+            y: [float] Image Y coordinate.
+
+        Keyword arguments:
+            threshold: [float] Maximum distance in pixels. 15 by default.
+
+        Return:
+            result: [tuple] ('current', idx) for the polygon being drawn or (poly_idx, vert_idx) for
+                completed polygons, None if no vertex is close enough.
         """
+
         min_dist = threshold
         result = None
 
@@ -6983,25 +7026,39 @@ class PlateTool(QtWidgets.QMainWindow):
         return result
 
     def findNearestMaskEdge(self, x, y, threshold=15):
-        """Find the nearest edge to (x, y) within threshold.
-        Returns (poly_idx, insert_idx) where insert_idx is the index to insert a new vertex,
-        or ('current', insert_idx) for the current polygon being drawn.
+        """ Find the nearest polygon edge to (x, y) within the threshold.
+
+        Arguments:
+            x: [float] Image X coordinate.
+            y: [float] Image Y coordinate.
+
+        Keyword arguments:
+            threshold: [float] Maximum distance in pixels. 15 by default.
+
+        Return:
+            result: [tuple] (poly_idx, insert_idx) where insert_idx is the index at which to insert a new
+                vertex, or ('current', insert_idx) for the polygon being drawn. None if no edge is close
+                enough.
         """
+
         min_dist = threshold
         result = None
 
         def pointToSegmentDist(px, py, x1, y1, x2, y2):
-            """Calculate distance from point (px, py) to line segment (x1,y1)-(x2,y2)."""
-            # Vector from segment start to point
+            """ Distance from point (px, py) to the line segment (x1, y1)-(x2, y2). """
+
+            # Vector from segment start to point, and the segment vector
             dx, dy = px - x1, py - y1
-            # Segment vector
             sx, sy = x2 - x1, y2 - y1
-            # Segment length squared
+
+            # Degenerate segment
             seg_len_sq = sx*sx + sy*sy
             if seg_len_sq == 0:
-                return np.hypot(dx, dy)  # Degenerate segment
+                return np.hypot(dx, dy)
+
             # Parameter t for projection onto segment (clamped to [0,1])
             t = max(0, min(1, (dx*sx + dy*sy) / seg_len_sq))
+
             # Closest point on segment
             closest_x = x1 + t * sx
             closest_y = y1 + t * sy
@@ -7031,13 +7088,23 @@ class PlateTool(QtWidgets.QMainWindow):
         return result
 
     def insertMaskVertex(self, edge_ref, x, y):
-        """Insert a new vertex at position (x, y) at the specified edge location."""
+        """ Insert a new vertex at position (x, y) into the edge found by findNearestMaskEdge.
+
+        Arguments:
+            edge_ref: [tuple] ('current', insert_idx) or (poly_idx, insert_idx).
+            x: [float] Image X coordinate.
+            y: [float] Image Y coordinate.
+        """
+
+        # Polygon being drawn
         if edge_ref[0] == 'current':
             insert_idx = edge_ref[1]
             self.mask_current_polygon.insert(insert_idx, (x, y))
             self.updateMaskDisplay()
             self.tab.mask.updateStatus(len(self.mask_polygons), len(self.mask_current_polygon),
                                            has_brush_strokes=self._hasBrushStrokes())
+
+        # Completed polygon
         else:
             poly_idx, insert_idx = edge_ref
             if poly_idx < len(self.mask_polygons):
@@ -7047,7 +7114,15 @@ class PlateTool(QtWidgets.QMainWindow):
                 self._updateMaskStatus()
 
     def deleteMaskVertex(self, vertex_ref):
-        """Delete a vertex from a polygon."""
+        """ Delete a vertex from a polygon. A completed polygon that would drop below 3 vertices is
+            deleted altogether.
+
+        Arguments:
+            vertex_ref: [tuple] ('current', idx) or (poly_idx, vert_idx), as returned by
+                findNearestMaskVertex.
+        """
+
+        # Polygon being drawn
         if vertex_ref[0] == 'current':
             idx = vertex_ref[1]
             if len(self.mask_current_polygon) > 0:
@@ -7055,25 +7130,37 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.updateMaskDisplay()
                 self.tab.mask.updateStatus(len(self.mask_polygons), len(self.mask_current_polygon),
                                            has_brush_strokes=self._hasBrushStrokes())
+
+        # Completed polygon
         else:
             poly_idx, vert_idx = vertex_ref
             if poly_idx < len(self.mask_polygons):
                 polygon = self.mask_polygons[poly_idx]
+
+                # Keep polygon if it still has at least 3 vertices
                 if len(polygon) > 3:
-                    # Keep polygon if it still has at least 3 vertices
                     del polygon[vert_idx]
                     self.tab.mask.setUnsaved(True)
                     self.updateMaskDisplay()
                     self._updateMaskStatus()
+
+                # Delete entire polygon if less than 3 vertices would remain
                 else:
-                    # Delete entire polygon if less than 3 vertices would remain
                     del self.mask_polygons[poly_idx]
                     self.tab.mask.setUnsaved(True)
                     self.updateMaskDisplay()
                     self._updateMaskStatus()
 
     def moveMaskVertex(self, vertex_ref, new_x, new_y):
-        """Move a vertex to new position with edge snapping."""
+        """ Move a vertex to a new position, snapping it to the image edge when close to it.
+
+        Arguments:
+            vertex_ref: [tuple] ('current', idx) or (poly_idx, vert_idx), as returned by
+                findNearestMaskVertex.
+            new_x: [float] New image X coordinate.
+            new_y: [float] New image Y coordinate.
+        """
+
         # Apply edge snapping
         max_x = self.img.data.shape[0] - 1
         max_y = self.img.data.shape[1] - 1
@@ -7091,10 +7178,13 @@ class PlateTool(QtWidgets.QMainWindow):
         new_x = np.clip(new_x, 0, max_x)
         new_y = np.clip(new_y, 0, max_y)
 
+        # Polygon being drawn
         if vertex_ref[0] == 'current':
             idx = vertex_ref[1]
             if idx < len(self.mask_current_polygon):
                 self.mask_current_polygon[idx] = (new_x, new_y)
+
+        # Completed polygon
         else:
             poly_idx, vert_idx = vertex_ref
             if poly_idx < len(self.mask_polygons) and vert_idx < len(self.mask_polygons[poly_idx]):
@@ -7105,10 +7195,13 @@ class PlateTool(QtWidgets.QMainWindow):
         self._updateMaskStatus()
 
     def updateMaskDisplay(self):
-        """Update all mask graphics items."""
+        """ Redraw all mask graphics items: the polygon being drawn, the completed polygon outlines and
+            vertex markers, and the overlay. """
+
         # Update current polygon line
         if len(self.mask_current_polygon) > 0:
             pts = np.array(self.mask_current_polygon)
+
             # Close the polygon visually
             if len(pts) >= 3:
                 pts_closed = np.vstack([pts, pts[0]])
@@ -7137,6 +7230,7 @@ class PlateTool(QtWidgets.QMainWindow):
             line.setZValue(12)
             self.img_frame.addItem(line)
             self.mask_polygon_items.append(line)
+
             # Collect vertices for markers
             all_completed_vertices.extend(polygon)
 
@@ -7151,18 +7245,19 @@ class PlateTool(QtWidgets.QMainWindow):
         self.updateMaskOverlayImage()
 
     def updateMaskOverlayImage(self):
-        """Rebuild the semi-transparent red overlay that shows the current mask.
+        """ Rebuild the semi-transparent red overlay that shows the current mask.
 
-        The overlay array uses 1=masked (shown red) / 0=clear.
-        The paint layer is composited on top of the polygon fill, so
-        brush-erased holes (value=2) punch through solid polygon regions.
-        The array is transposed before passing to pyqtgraph because
-        img.data is stored (width, height) while numpy/OpenCV use (height, width).
+            The overlay array uses 1=masked (shown red) / 0=clear. The paint layer is composited on top
+            of the polygon fill, so brush-erased holes (value=2) punch through solid polygon regions. The
+            array is transposed before passing to pyqtgraph because img.data is stored (width, height)
+            while numpy/OpenCV use (height, width).
         """
+
         if not self.tab.mask.show_overlay.isChecked():
             self.mask_overlay.hide()
             return
 
+        # Nothing to show
         has_polygons = len(self.mask_polygons) > 0
         has_paint = self._hasBrushStrokes()
 
@@ -7173,7 +7268,7 @@ class PlateTool(QtWidgets.QMainWindow):
         if self.img.data is None:
             return
 
-        # shape[0]=X (width), shape[1]=Y (height) — codebase convention
+        # shape[0]=X (width), shape[1]=Y (height) - codebase convention
         img_width = self.img.data.shape[0]
         img_height = self.img.data.shape[1]
 
@@ -7186,24 +7281,36 @@ class PlateTool(QtWidgets.QMainWindow):
         self.mask_overlay.show()
 
     def toggleMaskOverlay(self, visible):
-        """Toggle mask overlay visibility (includes outlines and vertices)."""
+        """ Mask tab callback: show or hide the mask overlay, the polygon outlines and the vertex
+            markers.
+
+        Arguments:
+            visible: [bool] True to show.
+        """
+
         if visible:
             self.updateMaskOverlayImage()
-            # Show polygon outlines
+
+            # Show polygon outlines and completed vertex markers
             for item in self.mask_polygon_items:
                 item.show()
-            # Show completed vertex markers
             self.mask_completed_vertex_markers.show()
+
         else:
             self.mask_overlay.hide()
-            # Hide polygon outlines
+
+            # Hide polygon outlines and completed vertex markers
             for item in self.mask_polygon_items:
                 item.hide()
-            # Hide completed vertex markers
             self.mask_completed_vertex_markers.hide()
 
     def loadFlatImage(self):
-        """Load flat.bmp from data directory if it exists."""
+        """ Load flat.bmp from the data directory into self.flat_image_data, if it exists.
+
+        Return:
+            [bool] True if the flat was loaded.
+        """
+
         flat_path = os.path.join(self.dir_path, "flat.bmp")
 
         if os.path.isfile(flat_path):
@@ -7217,16 +7324,20 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.flat_image_data = flat_img
                 print(f"Loaded flat image: {flat_path}")
                 return True
+
             except Exception as e:
                 print(f"Failed to load flat image: {e}")
                 self.flat_image_data = None
                 return False
+
+        # No flat in the data directory
         else:
             self.flat_image_data = None
             return False
 
     def checkAndSetupFlatForMask(self):
-        """Check for flat.bmp and setup mask tab accordingly."""
+        """ Check for flat.bmp and set up the mask tab "use flat" option accordingly. """
+
         flat_exists = self.loadFlatImage()
 
         # Block signal to prevent showing flat during initialization
@@ -7238,7 +7349,13 @@ class PlateTool(QtWidgets.QMainWindow):
             self.mask_use_flat_background = True
 
     def toggleMaskFlatBackground(self, use_flat):
-        """Toggle between flat.bmp and current image as mask editing background."""
+        """ Mask tab callback: toggle between flat.bmp and the current image as the mask editing
+            background.
+
+        Arguments:
+            use_flat: [bool] True to show the flat.
+        """
+
         self.mask_use_flat_background = use_flat
 
         # Only change the image if we're currently on the mask tab
@@ -7246,10 +7363,11 @@ class PlateTool(QtWidgets.QMainWindow):
         if self.tab.currentIndex() != mask_tab_index:
             return
 
+        # Switch to flat image
         if use_flat and self.flat_image_data is not None:
-            # Switch to flat image
             self.img.setImage(self.flat_image_data.T)
             print("Mask background: using flat.bmp")
+
             # Hide all stars when showing flat
             self.cat_star_markers.hide()
             self.cat_star_markers2.hide()
@@ -7258,10 +7376,12 @@ class PlateTool(QtWidgets.QMainWindow):
             self.calstar_markers2.hide()
             self.calstar_markers_outer.hide()
             self.calstar_markers_outer2.hide()
+
+        # Switch back to current image
         else:
-            # Switch back to current image
             self.img.loadImage(self.mode, self.img_type_flag)
             print("Mask background: using current image")
+
             # Show stars when showing current image (if enabled)
             if self.catalog_stars_visible:
                 self.cat_star_markers.show()
@@ -7274,27 +7394,34 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.calstar_markers_outer2.show()
 
     def onTabChanged(self, old_index, new_index):
-        """Handle tab changes - restore image when leaving mask tab."""
+        """ Right panel tab change callback. Entering the mask tab hides the picks and fit overlays (and
+            shows the flat, if enabled), leaving it restores them and closes the mask editing modes.
+
+        Arguments:
+            old_index: [int] Index of the previously shown tab.
+            new_index: [int] Index of the tab now shown.
+        """
 
         # Refresh the Help tab content when it is opened, so it reflects the current mode and any
-        # features that were toggled since it was last shown.
+        #   features that were toggled since it was last shown
         if new_index == self.tab.indexOf(self.tab.help):
             self.tab.help.updateHelp()
 
         # Mask tab is at index 4 (Levels=0, Fit Parameters=1, Station=2, Star Detection=3, Mask=4)
         mask_tab_index = self.tab.indexOf(self.tab.mask)
 
+        # Leaving mask tab while flat was shown - restore current image
         if old_index == mask_tab_index and self.mask_use_flat_background:
-            # Leaving mask tab while flat was shown - restore current image
             self.img.loadImage(self.mode, self.img_type_flag)
             print("Restored current image (left mask tab)")
 
-        elif new_index == mask_tab_index and self.mask_use_flat_background and self.flat_image_data is not None:
-            # Entering mask tab with flat enabled - show flat
+        # Entering mask tab with flat enabled - show flat
+        elif new_index == mask_tab_index and self.mask_use_flat_background \
+            and self.flat_image_data is not None:
             self.img.setImage(self.flat_image_data.T)
             print("Showing flat.bmp for mask editing")
 
-        # Handle mask tab visibility
+        # Entering the mask tab
         if new_index == mask_tab_index:
             self.img_frame.panning_enabled = False
 
@@ -7309,6 +7436,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self.astrometry_quad_markers2.hide()
             self.astrometry_matched_markers.hide()
             self.astrometry_matched_markers2.hide()
+
             # Clear error text (TextItemList children are parented to frame, not list)
             self.residual_text.clear()
 
@@ -7322,10 +7450,13 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.calstar_markers_outer.hide()
                 self.calstar_markers_outer2.hide()
 
+        # Leaving mask tab - disable brush/draw modes and restore settings
         elif old_index == mask_tab_index:
-            # Leaving mask tab - disable brush/draw modes and restore settings
+
             if self.mask_brush_mode:
                 self._exitBrushMode()
+
+            # Close the polygon in progress
             if self.mask_draw_mode:
                 if len(self.mask_current_polygon) >= 3:
                     self.mask_polygons.append(self.mask_current_polygon.copy())
@@ -7336,6 +7467,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self.spectral_type_text_list.setInteractionEnabled(True)
             self.img_frame.panning_enabled = True
 
+            # Restore the overlays that were hidden on the mask tab
             if self.catalog_stars_visible:
                 self.cat_star_markers.show()
                 self.cat_star_markers2.show()
@@ -7355,26 +7487,34 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.astrometry_quad_markers2.show()
                 self.astrometry_matched_markers.show()
                 self.astrometry_matched_markers2.show()
+
             # Restore error text by re-running photometry
             self.photometry()
+
             # Picks only visible in manual reduction mode
             if self.mode == 'manualreduction':
                 self.pick_marker.show()
                 self.pick_marker2.show()
+
+        # Any other tab change
         else:
             self.img_frame.panning_enabled = True
 
     def generateMaskImage(self):
-        """Generate the mask.bmp array from polygons and the brush paint layer.
+        """ Generate the mask.bmp array from the polygons and the brush paint layer.
 
-        Output convention (matches RMS mask format):
-            255 = unmasked (pixel is used)
-              0 = masked   (pixel is ignored)
+            Output convention (matches RMS mask format):
+                255 = unmasked (pixel is used)
+                  0 = masked   (pixel is ignored)
 
-        The paint layer is composited on top of the polygon fill so that
-        brush-erased pixels (value=2) can punch holes through solid polygons.
+            The paint layer is composited on top of the polygon fill so that brush-erased pixels
+            (value=2) can punch holes through solid polygons.
+
+        Return:
+            [ndarray] uint8 (height, width) mask image.
         """
-        # shape[0]=X (width), shape[1]=Y (height) — codebase convention
+
+        # shape[0]=X (width), shape[1]=Y (height) - codebase convention
         img_width = self.img.data.shape[0]
         img_height = self.img.data.shape[1]
 
@@ -7382,7 +7522,8 @@ class PlateTool(QtWidgets.QMainWindow):
         return compositeMaskLayers(self.mask_polygons, self.mask_paint_layer, img_width, img_height)
 
     def saveMask(self):
-        """Save mask to file and update self.mask for star detection."""
+        """ Ask for a file name, save the mask to it and update self.mask for star detection. """
+
         default_path = os.path.join(self.config.config_file_path, "mask.bmp")
         file_path, _ = QFileDialog.getSaveFileName(
             self, "Save Mask", default_path, "BMP Files (*.bmp);;All Files (*)")
@@ -7402,7 +7543,8 @@ class PlateTool(QtWidgets.QMainWindow):
             self.updateFileManagerButton()
 
     def loadMaskDialog(self):
-        """Open dialog to load a mask file."""
+        """ Ask for a mask file and load it. """
+
         # Use last mask directory if set, otherwise fall back to image directory
         default_path = self.last_mask_dir if self.last_mask_dir else self.dir_path
         file_path, _ = QFileDialog.getOpenFileName(
@@ -7414,13 +7556,17 @@ class PlateTool(QtWidgets.QMainWindow):
             self.loadMaskFromFile(file_path)
 
     def loadMaskFromFile(self, mask_path):
-        """Load mask.bmp and convert masked regions to editable polygons.
+        """ Load a mask image and convert the masked regions to editable polygons.
 
-        Pixels that cannot be represented as clean polygon contours (e.g. prior
-        brush strokes, or boundary pixels lost to approxPolyDP simplification)
-        are captured in the paint layer so the full mask survives a round-trip
-        through save → load without any pixel loss.
+            Pixels that cannot be represented as clean polygon contours (e.g. prior brush strokes, or
+            boundary pixels lost to approxPolyDP simplification) are captured in the paint layer so the
+            full mask survives a round-trip through save -> load without any pixel loss. A mask saved
+            for a different frame size is rescaled to the current image.
+
+        Arguments:
+            mask_path: [str] Path to the mask image (0 = masked, 255 = unmasked).
         """
+
         if not os.path.exists(mask_path):
             print(f"Mask file not found: {mask_path}")
             return
@@ -7454,10 +7600,12 @@ class PlateTool(QtWidgets.QMainWindow):
                     (mask_width, mask_height), (img_width, img_height))
                 mask_img = cv2.resize(mask_img, (img_width, img_height), interpolation=cv2.INTER_NEAREST)
 
+        # The undo history refers to the previous mask, so it is dropped
         if paint_layer is not None:
             self.mask_paint_layer = paint_layer
             self.mask_brush_stroke_history = []
             print(f"Loaded {len(self.mask_polygons)} polygon(s) + raster residuals from mask")
+
         else:
             self.mask_paint_layer = None
             print(f"Loaded {len(self.mask_polygons)} polygon(s) from mask")
