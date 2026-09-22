@@ -1045,6 +1045,8 @@ class SpriteDetector(multiprocessing.Process):
         self.model_path = os.path.join(config.rms_root_dir, "share", "sprite_detector.tflite")
         self.logging_queue = getLoggingQueue()
 
+        self.max_daily_detections = 150
+
     def stop(self):
         """ Signal exit, wait for queue drain and flush, then join the process. """
 
@@ -1131,11 +1133,11 @@ class SpriteDetector(multiprocessing.Process):
             lambda det: self._onConfirmed(det, save_dir, csv_path, uploader, night_dir_name))
 
         log.info("Sprite detector process started.")
-
+        number_of_detections = 0
         while True:
 
             # Exit when flagged and queue is drained
-            if self.exit.is_set() and self.input_queue.empty():
+            if self.exit.is_set() and self.input_queue.empty() and number_of_detections > self.max_daily_detections:
                 break
 
             try:
@@ -1152,6 +1154,7 @@ class SpriteDetector(multiprocessing.Process):
             # Feed FP filter (even with no detections, tick advances the window)
             if detections:
                 fp_filter.addDetection(timestamp, detections, ff_name)
+                number_of_detections += 1
             fp_filter.tick(timestamp)
 
             # Try uploads between detections (~7s of idle time per cycle)
