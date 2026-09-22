@@ -35,6 +35,7 @@ def testCandidatesAreShownBeforePsfFit(monkeypatch):
     events = []
     extra_info = {}
 
+    # Record every plot and fit call, in the order in which extractStars makes them
     def recordCandidates(img, x_data, y_data, **kwargs):
         fitted_count = len(kwargs['x_fitted']) if kwargs.get('x_fitted') is not None else 0
         events.append(('plot', len(x_data), len(y_data), fitted_count))
@@ -46,11 +47,13 @@ def testCandidatesAreShownBeforePsfFit(monkeypatch):
     monkeypatch.setattr(ExtractStars, 'plotStars', recordCandidates)
     monkeypatch.setattr(ExtractStars, 'fitPSF', recordFit)
 
+    # Run the extraction with the candidate display turned on
     status = ExtractStars.extractStars(
         _singleCandidateImage(), border=1, neighborhood_size=3,
         extra_info=extra_info, show_candidates=True
     )
 
+    # Candidates are plotted first without fits, then fitted, then plotted again with the fits
     assert status is not False
     assert events == [
         ('plot', extra_info['num_candidates'], extra_info['num_candidates'], 0),
@@ -66,6 +69,7 @@ def testOverLimitCandidatesAreShownThenRejected(monkeypatch):
     candidate_counts = []
     extra_info = {}
 
+    # Count the plot calls, and fail outright if the PSF fit is reached
     def recordCandidates(img, x_data, y_data, **kwargs):
         candidate_counts.append(len(x_data))
 
@@ -75,11 +79,13 @@ def testOverLimitCandidatesAreShownThenRejected(monkeypatch):
     monkeypatch.setattr(ExtractStars, 'plotStars', recordCandidates)
     monkeypatch.setattr(ExtractStars, 'fitPSF', unexpectedFit)
 
+    # A max_star_candidates of 0 rejects the frame, but the candidates are still shown once
     status = ExtractStars.extractStars(
         _singleCandidateImage(), border=1, neighborhood_size=3,
         max_star_candidates=0, extra_info=extra_info, show_candidates=True
     )
 
+    # The frame is rejected, but the single plot call did happen
     assert status is False
     assert candidate_counts == [extra_info['num_candidates']]
 
@@ -87,6 +93,7 @@ def testOverLimitCandidatesAreShownThenRejected(monkeypatch):
 def testDefaultOverLimitRejectionDoesNotPlot(monkeypatch):
     """ Without show_candidates the over-limit early rejection neither plots nor fits. """
 
+    # Neither the plotting nor the fitting may be reached in the default (non-display) path
     def unexpectedCall(*args, **kwargs):
         raise AssertionError('Plotting and fitting must not run after the default early rejection')
 
@@ -107,15 +114,18 @@ def testCandidateDisplayProcessesFfFilesSequentially(monkeypatch, tmp_path):
 
     config = SimpleNamespace(stationID='XX0001', height=32, width=32)
 
+    # Stub out the calibration, the directory listing and the CALSTARS writing
     monkeypatch.setattr(ExtractStars, 'loadImageCalibration', lambda *args: (None, None, None))
     monkeypatch.setattr(ExtractStars.os, 'listdir', lambda path: ['FF_b.bin', 'FF_a.bin'])
     monkeypatch.setattr(ExtractStars.FFfile, 'validFFName', lambda name: True)
     monkeypatch.setattr(ExtractStars.CALSTARS, 'writeCALSTARS', lambda *args: None)
 
+    # Creating a worker pool would mean the extraction did not stay in the main process
     class UnexpectedPool(object):
         def __init__(self, *args, **kwargs):
             raise AssertionError('Candidate display must not create a worker pool')
 
+    # Record the FF files in the order in which they are handed to the extraction
     def extractFf(ff_dir, ff_name, **kwargs):
         extraction_calls.append((ff_name, kwargs['show_candidates']))
         return ff_name, [1], [2], [3], [4], [5], [6], [7], [8]
@@ -125,6 +135,7 @@ def testCandidateDisplayProcessesFfFilesSequentially(monkeypatch, tmp_path):
 
     star_list = ExtractStars.extractStarsAndSave(config, str(tmp_path), show_candidates=True)
 
+    # The unsorted listing must be processed in sorted order, sequentially
     assert extraction_calls == [('FF_a.bin', True), ('FF_b.bin', True)]
     assert [entry[0] for entry in star_list] == ['FF_a.bin', 'FF_b.bin']
 
@@ -136,6 +147,7 @@ def testPlotStarsSupportsFfStructuresAndBitDepth(monkeypatch):
     img = np.zeros((8, 8), dtype=np.uint16)
     ff = SimpleNamespace(avepixel=img)
 
+    # Capture the levels that plotStars asks for instead of actually stretching the image
     def adjustLevels(input_img, minv, gamma, maxv, nbits=None):
         adjust_call['img'] = input_img
         adjust_call['maxv'] = maxv
@@ -147,6 +159,7 @@ def testPlotStarsSupportsFfStructuresAndBitDepth(monkeypatch):
 
     ExtractStars.plotStars(ff, [3], [4], title='Candidates')
 
+    # The FF structure must be unwrapped to its avepixel, and the 16 bit depth inferred from the dtype
     assert adjust_call['img'] is img
     assert adjust_call['maxv'] == 2**16 - 1
     assert adjust_call['nbits'] == 16
@@ -158,6 +171,7 @@ def testPlotStarsDefaultsFloatingImagesToEightBits(monkeypatch):
     adjust_call = {}
     img = np.zeros((8, 8), dtype=np.float32)
 
+    # Capture the levels that plotStars asks for
     def adjustLevels(input_img, minv, gamma, maxv, nbits=None):
         adjust_call['maxv'] = maxv
         adjust_call['nbits'] = nbits
@@ -168,6 +182,7 @@ def testPlotStarsDefaultsFloatingImagesToEightBits(monkeypatch):
 
     ExtractStars.plotStars(img, [3], [4], title='Candidates')
 
+    # A float image has no integer bit depth, so the 8 bit default is used
     assert adjust_call == {'maxv': 2**8 - 1, 'nbits': 8}
 
 
@@ -177,6 +192,7 @@ def testPlotStarsAutomaticallyAdjustsBackgroundLevels(monkeypatch):
     adjust_call = {}
     img = np.arange(10000, dtype=np.uint16).reshape((100, 100))
 
+    # Capture the levels that plotStars asks for
     def adjustLevels(input_img, minv, gamma, maxv, nbits=None):
         adjust_call['minv'] = minv
         adjust_call['gamma'] = gamma
@@ -188,6 +204,7 @@ def testPlotStarsAutomaticallyAdjustsBackgroundLevels(monkeypatch):
 
     ExtractStars.plotStars(img, [3], [4])
 
+    # The black and white points are the percentiles of the image, with a fixed gamma
     assert adjust_call['minv'] == np.percentile(img, 1.0)
     assert adjust_call['gamma'] == 1.3
     assert adjust_call['maxv'] == np.percentile(img, 99.99)
@@ -199,6 +216,7 @@ def testPlotStarsMarksFittedPositions(monkeypatch):
     plot_data = {}
     original_subplots = ExtractStars.plt.subplots
 
+    # Keep a handle on the axes that plotStars draws into
     def recordSubplots():
         fig, ax = original_subplots()
         plot_data['ax'] = ax
@@ -212,6 +230,7 @@ def testPlotStarsMarksFittedPositions(monkeypatch):
         x_fitted=[3.25], y_fitted=[4.25]
     )
 
+    # Two raw candidates become two circle patches, the one fitted position becomes one line series
     ax = plot_data['ax']
     assert len(ax.patches) == 2
     assert len(ax.lines) == 1

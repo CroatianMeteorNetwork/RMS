@@ -25,7 +25,13 @@ class TestSatellitePositions(unittest.TestCase):
         
         # Test 1: Daily cache mode - should create date-stamped files
         def createDummyTle(url, filepath):
-            """Side effect for mock to actually create a file"""
+            """ Side effect for the mock that actually creates the cache file.
+
+            Arguments:
+                url: [str] Ignored, the URL the real download would fetch.
+                filepath: [str] Path of the cache file to create.
+            """
+
             os.makedirs(os.path.dirname(filepath), exist_ok=True)
             with open(filepath, 'w') as f:
                 f.write("DUMMY TLE DATA\n")
@@ -81,7 +87,8 @@ class TestSatellitePositions(unittest.TestCase):
 
 
     def test_load_tles_with_time(self):
-        """ With a time of interest the cached TLE file closest to that time is used instead of downloading. """
+        """ With a time of interest the cached TLE file closest to that time is used instead of
+            downloading. """
         if not SKYFIELD_AVAILABLE:
             self.skipTest("Skyfield not installed")
             
