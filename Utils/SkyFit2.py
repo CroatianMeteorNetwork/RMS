@@ -14671,8 +14671,10 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.param_manager.setQuickAlignButtonBusy(True)
         QtWidgets.QApplication.processEvents()
 
-        # Capture the current catalog LM before fitting
+        # Capture the current catalog LM before fitting, and the config LM which the balancing sets for
+        #   alignPlatepar
         user_cat_lim_mag = self.cat_lim_mag
+        config_cat_lim_mag = self.config.catalog_mag_limit
 
         # Balance the catalog magnitude before fitting
         self.balanceCatalogMagnitude()
@@ -14704,6 +14706,10 @@ class PlateTool(QtWidgets.QMainWindow):
             print(f"  Restoring user catalog LM: {user_cat_lim_mag:.1f}")
             self.cat_lim_mag = user_cat_lim_mag
             self.catalog_stars = self.loadCatalogStars(self.cat_lim_mag)
+
+        # The balanced LM was only for this fit, the config keeps the LM it was loaded with (which is
+        #   the one a config save compares against and recalibration uses)
+        self.config.catalog_mag_limit = config_cat_lim_mag
 
         # Update the GUI
         self.updateDistortion()
@@ -14742,8 +14748,9 @@ class PlateTool(QtWidgets.QMainWindow):
         QtWidgets.QApplication.processEvents()
 
         # Capture the current catalog LM before fitting (the user may have set it via the tuning or
-        #   manually)
+        #   manually), and the config LM which the balancing sets for alignPlatepar
         user_cat_lim_mag = self.cat_lim_mag
+        config_cat_lim_mag = self.config.catalog_mag_limit
 
         # Balance the catalog magnitude before any fitting (this affects both the quick and the full path)
         self.balanceCatalogMagnitude()
@@ -14773,6 +14780,10 @@ class PlateTool(QtWidgets.QMainWindow):
             print(f"  Restoring user catalog LM: {user_cat_lim_mag:.1f}")
             self.cat_lim_mag = user_cat_lim_mag
             self.catalog_stars = self.loadCatalogStars(self.cat_lim_mag)
+
+        # The balanced LM was only for this fit, the config keeps the LM it was loaded with (which is
+        #   the one a config save compares against and recalibration uses)
+        self.config.catalog_mag_limit = config_cat_lim_mag
 
         # Update the GUI
         self.updateDistortion()

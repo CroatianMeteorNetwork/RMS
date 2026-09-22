@@ -973,3 +973,24 @@ def testOptimalCatalogLMSearchKeepsLoadedCatalog(plateTool):
 
     assert pt.catalog_stars is catalog
     assert pt.catalog_stars_common_names is names
+
+
+@pytest.mark.parametrize("method", ["quickAlign", "autoFitAstrometryNet"])
+def testAutoFitRestoresConfigCatalogLM(plateTool, method):
+    """ The LM the balancing sets in the config for alignPlatepar does not outlive the fit. """
+
+    pt = plateTool
+    config_lm = pt.config.catalog_mag_limit
+
+    def fakeBalance():
+        pt.cat_lim_mag = config_lm + 1.5
+        pt.config.catalog_mag_limit = config_lm + 1.5
+        return True
+
+    pt.balanceCatalogMagnitude = fakeBalance
+    pt.tryQuickAlignment = lambda *a, **k: True
+    pt.paired_stars = SF.PairedStars()
+
+    getattr(pt, method)()
+
+    assert pt.config.catalog_mag_limit == config_lm
