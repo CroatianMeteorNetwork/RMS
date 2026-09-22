@@ -936,21 +936,25 @@ class UploadManager(multiprocessing.Process):
 
         while not self.exit.is_set():
 
+            # The waits below sleep outside the locks: sleeping while holding one kept the lock
+            #   held almost all the time, so the parent's addFiles()/delayNextUpload() timed out
+            #   on it and logged false "process died" warnings
+
+            # Check if the upload should be run (if 15 minutes are up)
             with self.last_runtime_lock:
+                wait = (self.last_runtime.value > 0) and ((time.time() - self.last_runtime.value) < 15*60)
 
-                # Check if the upload should be run (if 15 minutes are up)
-                if self.last_runtime.value > 0:
-                    if (time.time() - self.last_runtime.value) < 15*60:
-                        time.sleep(1)
-                        continue
+            if wait:
+                time.sleep(1)
+                continue
 
+            # Check if the upload delay is up
             with self.next_runtime_lock:
+                wait = (self.next_runtime.value > 0) and (time.time() < self.next_runtime.value)
 
-                # Check if the upload delay is up
-                if self.next_runtime.value > 0:
-                    if time.time() < self.next_runtime.value:
-                        time.sleep(1)
-                        continue
+            if wait:
+                time.sleep(1)
+                continue
 
             with self.last_runtime_lock:
                 self.last_runtime.value = time.time()

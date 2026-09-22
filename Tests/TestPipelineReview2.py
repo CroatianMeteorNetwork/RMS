@@ -575,3 +575,73 @@ def testObservationSummaryReseededFromFinalJson(tmp_path):
 
     # And it was persisted as the working JSON
     assert os.path.isfile(getRMSStyleFileName(night_dir, osm.OBSERVATION_SUMMARY_WORKING_NAME_JSON))
+
+
+# ---------------------------------------------------------------------------
+# Item 9: UploadManager.run must not sleep while holding its runtime locks
+
+class _UploadLoopStub(object):
+    """ Minimal stand-in for the UploadManager state used by run(). """
+
+    def __init__(self):
+
+        from RMS.Misc import AtomicFlag, BoundedLock
+
+        self.exit = AtomicFlag()
+        self.last_runtime_lock = BoundedLock('last')
+        self.next_runtime_lock = BoundedLock('next')
+        self.last_runtime = multiprocessing.Value('d', 0.0, lock=False)
+        self.next_runtime = multiprocessing.Value('d', 0.0, lock=False)
+        self.logging_queue = None
+        self.config = None
+        self.parent_pid = None
+        self.uploads = 0
+
+    def loadQueue(self):
+        pass
+
+    def uploadData(self):
+        self.uploads += 1
+
+
+@pytest.mark.parametrize('which', ['last', 'next'])
+def testUploadManagerLoopReleasesLocksWhileWaiting(monkeypatch, which):
+    """ While run() waits for the next upload, the parent must get the runtime locks at once. """
+
+    import threading
+    import RMS.UploadManager as um
+
+    # Keep the process-wide side effects out of the test process
+    monkeypatch.setattr(um, 'setParentDeathSignal', lambda: None)
+    monkeypatch.setattr(um, 'initChildProcess', lambda *a, **k: None)
+    monkeypatch.setattr(um, 'exitIfParentGone', lambda *a, **k: None)
+
+    stub = _UploadLoopStub()
+
+    # Make the loop wait: on the 15-minute interval after one upload, or on an upload delay
+    if which == 'next':
+        stub.next_runtime.value = time.time() + 3600
+
+    loop = threading.Thread(target=um.UploadManager.run, args=(stub,))
+    loop.daemon = True
+    loop.start()
+
+    try:
+        time.sleep(0.5)
+        lock = stub.last_runtime_lock if which == 'last' else stub.next_runtime_lock
+
+        for _ in range(3):
+            t_beg = time.monotonic()
+            got = lock._lock.acquire(timeout=2.0)
+            elapsed = time.monotonic() - t_beg
+            if got:
+                lock._lock.release()
+
+            assert got and (elapsed < 0.5), 'lock held by the waiting loop ({:.2f} s)'.format(elapsed)
+            time.sleep(0.3)
+
+    finally:
+        stub.exit.set()
+        loop.join(5)
+
+    assert stub.uploads == (1 if which == 'last' else 0)
