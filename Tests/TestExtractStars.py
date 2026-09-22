@@ -236,3 +236,71 @@ def testPlotStarsMarksFittedPositions(monkeypatch):
     assert len(ax.lines) == 1
     assert list(ax.lines[0].get_xdata()) == [3.25]
     assert list(ax.lines[0].get_ydata()) == [4.25]
+
+
+def _syntheticStarField(n_stars=40, height=200, width=300, seed=3):
+    """ Return an 8-bit synthetic star field and the true star positions (y, x). """
+
+    rng = np.random.default_rng(seed)
+    yy, xx = np.mgrid[0:height, 0:width]
+
+    # Place Gaussian stars on a flat background
+    stars = [(rng.uniform(20, height - 20), rng.uniform(20, width - 20), rng.uniform(40, 200))
+             for _ in range(n_stars)]
+    img = np.zeros((height, width)) + 30.0
+    for y, x, amp in stars:
+        img += amp*np.exp(-((yy - y)**2 + (xx - x)**2)/(2*1.3**2))
+
+    # Add noise and quantize to 8 bits
+    img = np.clip(img + rng.normal(0, 2, (height, width)), 0, 255).astype(np.uint8)
+
+    return img, stars
+
+
+def testEffectiveBitDepthCapsIntegerImages():
+    """ The bit depth is capped at the integer data type size and kept for floating-point images. """
+
+    assert ExtractStars.Image.effectiveBitDepth(np.zeros(2, dtype=np.uint8), 12) == 8
+    assert ExtractStars.Image.effectiveBitDepth(np.zeros(2, dtype=np.uint8), 8) == 8
+    assert ExtractStars.Image.effectiveBitDepth(np.zeros(2, dtype=np.uint16), 12) == 12
+    assert ExtractStars.Image.effectiveBitDepth(np.zeros(2, dtype=np.uint16), 16) == 16
+    assert ExtractStars.Image.effectiveBitDepth(np.zeros(2, dtype=np.float32), 12) == 12
+
+
+def testExtractStarsIgnoresConfigBitDepthAboveDataDepth():
+    """ 8-bit data with a larger configured bit depth must give the same stars as bit_depth = 8. """
+
+    img, _ = _syntheticStarField()
+    img_median = np.median(img)
+
+    ref = ExtractStars.extractStars(img, img_median=img_median, bit_depth=8)
+    assert len(ref[0]) > 20
+
+    for bit_depth in (10, 12, 16):
+        res = ExtractStars.extractStars(img, img_median=img_median, bit_depth=bit_depth)
+        assert len(res[0]) == len(ref[0])
+        assert np.allclose(res[0], ref[0])
+        assert np.allclose(res[3], ref[3])
+
+
+def testExtractStarsFFUsesDataBitDepth(monkeypatch):
+    """ extractStarsFF on an 8-bit FF with config.bit_depth = 12 must find the same stars as with 8. """
+
+    img, _ = _syntheticStarField()
+
+    # Fake an 8-bit FF file whose average pixel is the star field
+    monkeypatch.setattr(ExtractStars.FFfile, 'read',
+                        lambda ff_dir, ff_name: SimpleNamespace(avepixel=img.copy()))
+
+    counts = []
+    for bit_depth in (8, 12):
+        config = SimpleNamespace(
+            max_global_intensity=150, border=10, neighborhood_size=10, intensity_threshold=18,
+            segment_radius=4, roundness_threshold=0.5, max_feature_ratio=0.8, bit_depth=bit_depth,
+            gamma=1.0, max_stars=1000
+        )
+        res = ExtractStars.extractStarsFF('.', 'FF_test.fits', config=config)
+        counts.append(len(res[1]))
+
+    assert counts[0] > 20
+    assert counts[0] == counts[1]

@@ -106,6 +106,9 @@ def extractStars(img, img_median=None, mask=None, gamma=1.0, max_star_candidates
     img_max = filters.maximum_filter(img_convolved, neighborhood_size)
     maxima = (img_convolved == img_max)
     img_min = filters.minimum_filter(img_convolved, neighborhood_size)
+    # Cap the bit depth at what the image data type can hold (e.g. 8-bit data with a larger config value)
+    bit_depth = Image.effectiveBitDepth(img, bit_depth)
+
     # Scale the threshold from the 8-bit reference range to the image bit depth
     intensity_threshold_scaled = intensity_threshold*(2**(bit_depth - 8))
     diff = ((img_max - img_min) > intensity_threshold_scaled)
@@ -357,8 +360,11 @@ def extractStarsFF(
     # Calculate image mean and stddev
     img_median = np.median(ff.avepixel)
 
+    # Get the bit depth of the image data (capped at the data type size) before converting it to float
+    bit_depth = Image.effectiveBitDepth(ff.avepixel, config.bit_depth)
+
     # Check if the image is too bright and skip the image (scale the cutoff to the image bit depth)
-    if img_median > max_global_intensity*(2**(config.bit_depth - 8)):
+    if img_median > max_global_intensity*(2**(bit_depth - 8)):
         return error_return
 
     # Get the image data from the average pixel image
@@ -372,7 +378,7 @@ def extractStarsFF(
         max_star_candidates=config.max_stars, border=border,
         neighborhood_size=neighborhood_size, intensity_threshold=intensity_threshold,
         segment_radius=segment_radius, roundness_threshold=roundness_threshold,
-        max_feature_ratio=max_feature_ratio, bit_depth=config.bit_depth,
+        max_feature_ratio=max_feature_ratio, bit_depth=bit_depth,
         extra_info=extra_info, show_candidates=show_candidates
     )
 
@@ -474,8 +480,11 @@ def extractStarsImgHandle(img_handle,
         # Calculate image mean and stddev
         img_median = np.median(avepixel)
 
+        # Get the bit depth of the image data (capped at the data type size) before converting it to float
+        bit_depth = Image.effectiveBitDepth(avepixel, config.bit_depth)
+
         # Check if the image is too bright and skip the image (scale the cutoff to the image bit depth)
-        if img_median > max_global_intensity*(2**(config.bit_depth - 8)):
+        if img_median > max_global_intensity*(2**(bit_depth - 8)):
             return error_return
 
         # Get the image data from the average pixel image
@@ -488,7 +497,7 @@ def extractStarsImgHandle(img_handle,
             max_star_candidates=config.max_stars, border=border,
             neighborhood_size=neighborhood_size, intensity_threshold=intensity_threshold,
             segment_radius=segment_radius, roundness_threshold=roundness_threshold,
-            max_feature_ratio=max_feature_ratio, bit_depth=config.bit_depth
+            max_feature_ratio=max_feature_ratio, bit_depth=bit_depth
         )
 
         # If the star extraction failed, return an empty list
@@ -616,6 +625,9 @@ def fitPSF(img, img_median, x_init, y_init, gamma=1.0, segment_radius=4, roundne
 
     # Get the image dimensions
     nrows, ncols = img.shape
+
+    # Cap the bit depth at what the image data type can hold
+    bit_depth = Image.effectiveBitDepth(img, bit_depth)
 
     # Threshold for the reported numbers of saturated pixels (98% of the dynamic range)
     saturation_threshold_report = int(round(0.98*(2**bit_depth - 1)))
