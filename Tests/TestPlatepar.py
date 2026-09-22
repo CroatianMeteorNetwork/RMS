@@ -400,3 +400,68 @@ def testFitPointingNNRobustToFalseDetections(false_fraction):
     assert success
     assert inlier_fraction > 0.7
     assert _medianProjectionError(pp, pp_fit, catalog) < 0.1
+
+
+def testNearestCatalogStarsEmptyCatalog():
+    """ An empty catalog gives NaN separations instead of an IndexError. """
+
+    from RMS.Formats.Platepar import _nearestCatalogStars
+
+    indices, seps = _nearestCatalogStars(np.array([10.0, 20.0]), np.array([5.0, 6.0]), np.array([]),
+        np.array([]))
+
+    assert len(indices) == 2
+    assert np.all(np.isnan(seps))
+
+
+def _nnRansacScene():
+    """ Synthetic scene and start platepar for the NN RANSAC fit, as the benchmark sets it up. """
+
+    import copy
+
+    from Tests.BenchmarkAstrometryFit import (buildSyntheticPlatepar, buildSyntheticCatalog,
+        buildSyntheticDetections)
+
+    pp = buildSyntheticPlatepar()
+    catalog = buildSyntheticCatalog(pp, np.random.RandomState(1), n_target=800)
+    img_stars, _ = buildSyntheticDetections(pp, catalog, np.random.RandomState(2))
+
+    pp_start = copy.deepcopy(pp)
+    pp_start.RA_d = (pp_start.RA_d + 0.05)%360
+    pp_start.dec_d = pp_start.dec_d + 0.05
+    pp_start.equal_aspect = True
+    pp_start.asymmetry_corr = False
+    pp_start.force_distortion_centre = False
+    pp_start.setDistortionType("radial5-odd", reset_params=True)
+
+    return pp, pp_start, catalog, img_stars
+
+
+def testNNFitHandlesNonFiniteDetection():
+    """ A detection with a non-finite position must not crash the KD-tree cost of the NN fit. """
+
+    pp, pp_start, catalog, img_stars = _nnRansacScene()
+
+    img_stars = np.array(img_stars, dtype=np.float64)
+    img_stars[5, 0] = np.nan
+
+    result = pp_start.fitAstrometry(pp.JD, img_stars, catalog, first_platepar_fit=True, use_nn_cost=True)
+
+    assert result is not None
+    img_matched, cat_matched = result
+    assert np.all(np.isfinite(img_matched[:, :2]))
+    assert len(img_matched) > 0.5*len(img_stars)
+
+
+def testNNFitHandlesZeroIntensities():
+    """ Zero intensities (median <= 0) must fall back to uniform RANSAC sampling instead of raising. """
+
+    pp, pp_start, catalog, img_stars = _nnRansacScene()
+
+    img_stars = np.array(img_stars, dtype=np.float64)
+    img_stars[:, 2] = 0.0
+
+    result = pp_start.fitAstrometry(pp.JD, img_stars, catalog, first_platepar_fit=True, use_nn_cost=True)
+
+    assert result is not None
+    assert len(result[0]) > 0.5*len(img_stars)

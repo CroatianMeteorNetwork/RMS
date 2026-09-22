@@ -267,6 +267,14 @@ def _nearestCatalogStars(ra_det, dec_det, ra_cat, dec_cat, cat_tree=None):
     ra_cat = np.asarray(ra_cat, dtype=np.float64)
     dec_cat = np.asarray(dec_cat, dtype=np.float64)
 
+    nearest_indices = np.zeros(len(ra_det), dtype=np.intp)
+    nearest_sep = np.full(len(ra_det), np.nan, dtype=np.float64)
+
+    # With an empty catalog there is no nearest star, so return NaN separations for every detection
+    #   (the tree query would return an out-of-range index)
+    if len(ra_cat) == 0:
+        return nearest_indices, nearest_sep
+
     # Build the catalog tree if one was not given
     if cat_tree is None:
         cat_tree = cKDTree(_raDecToUnitVectors(ra_cat, dec_cat))
@@ -275,9 +283,6 @@ def _nearestCatalogStars(ra_det, dec_det, ra_cat, dec_cat, cat_tree=None):
     #   (argmin 0, min NaN). Reproduce that so degenerate projections are handled the same way
     det_vectors = _raDecToUnitVectors(ra_det, dec_det)
     finite = np.all(np.isfinite(det_vectors), axis=1)
-
-    nearest_indices = np.zeros(len(ra_det), dtype=np.intp)
-    nearest_sep = np.full(len(ra_det), np.nan, dtype=np.float64)
 
     if np.any(finite):
 
@@ -1303,8 +1308,15 @@ class Platepar(object):
             # Fast path: query a prebuilt KD-tree of catalog unit vectors. Same nearest neighbour as the
             #   matrix below, but O(N log M) instead of O(N*M) per eval
             if cat_tree is not None:
-                chord_dist, _ = cat_tree.query(_raDecToUnitVectors(ra_det, dec_det), k=1)
-                nn_distances = 2.0*np.arcsin(np.clip(chord_dist/2.0, 0.0, 1.0))  # chord -> angle
+
+                # The tree query rejects non-finite points (degenerate projections), so only query the
+                #   finite ones - the others get the maximum separation below
+                det_vectors = _raDecToUnitVectors(ra_det, dec_det)
+                finite = np.all(np.isfinite(det_vectors), axis=1)
+                nn_distances = np.full(len(det_vectors), np.nan)
+                if np.any(finite):
+                    chord_dist, _ = cat_tree.query(det_vectors[finite], k=1)
+                    nn_distances[finite] = 2.0*np.arcsin(np.clip(chord_dist/2.0, 0.0, 1.0))  # chord -> angle
 
             # Dense path: the catalog is pre-filtered to the FOV by the caller, no need to re-filter here
             else:
@@ -1319,6 +1331,10 @@ class Platepar(object):
                 # angularSeparation broadcasts to (N, M) separation matrix
                 sep_matrix = angularSeparation(ra_det_rad, dec_det_rad, ra_cat_rad, dec_cat_rad)
                 nn_distances = np.min(sep_matrix, axis=1)  # (N,)
+
+            # Give detections with a degenerate (non-finite) sky position the maximum possible separation,
+            #   so the cost stays finite and steers the optimizer away from such parameters
+            nn_distances = np.where(np.isfinite(nn_distances), nn_distances, np.pi)
 
             total_cost = np.sum(nn_distances ** 2)
 
@@ -1671,6 +1687,11 @@ class Platepar(object):
                             weights = np.sqrt(intensity_clipped)
                             weights = weights / weights.sum()  # normalize to probabilities
 
+                            # Fall back to a uniform selection if the intensities cannot be used as weights
+                            #   (e.g. a median intensity <= 0, or NaN intensities)
+                            if not ((intensity_median > 0) and np.all(np.isfinite(weights))):
+                                weights = None
+
                             # Use a local seeded generator so the global NumPy RNG state is not touched
                             rng = np.random.RandomState(42 + iteration)
                             subset_indices = rng.choice(available_indices, n_subset, replace=False, p=weights)
@@ -1760,11 +1781,13 @@ class Platepar(object):
                         _, nn_seps = _nearestCatalogStars(ra_det, dec_det, ra_catalog, dec_catalog)
 
                         # Flag the stars further from their nearest catalog star than 3x the median, with
-                        #   the threshold relaxed towards the image corners
-                        median_sep = np.median(nn_seps)
+                        #   the threshold relaxed towards the image corners. Detections without a finite
+                        #   separation (degenerate position, or no catalog stars) are always outliers
+                        finite_seps = np.isfinite(nn_seps)
+                        median_sep = np.median(nn_seps[finite_seps]) if np.any(finite_seps) else np.inf
                         base_threshold = 3.0 * median_sep
                         per_star_threshold = base_threshold * radial_scale
-                        iteration_outliers = nn_seps > per_star_threshold
+                        iteration_outliers = ~(nn_seps <= per_star_threshold)
 
                         # Weighted scoring: outliers get +weight, inliers get -weight (redemption!)
                         outlier_scores[iteration_outliers] += weight
@@ -1895,6 +1918,11 @@ class Platepar(object):
                     catalog_stars_fov = catalog_stars[in_fov_final]
                     ra_catalog, dec_catalog, _ = catalog_stars_fov.T
 
+                    # Nothing can be matched if no catalog stars project inside the image
+                    if len(catalog_stars_fov) == 0:
+                        log.info("    -> No catalog stars in the FOV of the RANSAC fit, skipping final fit")
+                        return _rejectNNFit()
+
                     # NN matching: nearest catalog star of every detection (KD-tree, O(N log M) instead
                     #   of the dense NxM separation matrix)
                     nearest_indices, nearest_sep = _nearestCatalogStars(ra_det, dec_det, ra_catalog,
@@ -1916,6 +1944,9 @@ class Platepar(object):
                     if n_dupes > 0:
                         log.info("    Dropped {} duplicate matches (multiple detections -> one catalog "
                               "star)".format(n_dupes))
+
+                    # Detections without a finite sky position have no real nearest catalog star
+                    keep_mask &= np.isfinite(nearest_sep)
 
                     img_stars_clean = img_stars_clean[keep_mask]
                     matched_catalog = catalog_stars_fov[nearest_indices[keep_mask]]
