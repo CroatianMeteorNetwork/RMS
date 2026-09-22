@@ -769,3 +769,46 @@ def testRebootStopsPendingCaptureBeforeShutdownCommand():
 
     assert i_stop < i_reboot
     assert 'stopPendingCapture()' in main_src[i_reboot:i_resume]
+
+
+# ---------------------------------------------------------------------------
+# Item 13: Compressor.stop goes straight to terminate
+
+class _StuckCompressor(object):
+    """ Compressor stand-in whose run() never exits until it is terminated. """
+
+    def __init__(self):
+
+        from RMS.Misc import AtomicFlag
+
+        self.exit = AtomicFlag()
+        self.run_exited = AtomicFlag()
+        self.run_exited.set()
+        self.pid = 999999999
+        self.detector = 'detector'
+        self.terminated = False
+        self.join_timeouts = []
+
+    def is_alive(self):
+        return not self.terminated
+
+    def terminate(self):
+        self.terminated = True
+
+    def join(self, timeout=None):
+        self.join_timeouts.append(timeout)
+
+
+def testCompressorStopSkipsSigint(monkeypatch):
+    """ The compressor ignores SIGINT, so stop() must not send it and wait 5 s for nothing. """
+
+    import RMS.Compression as comp
+
+    signals = []
+    monkeypatch.setattr(comp.os, 'kill', lambda pid, sig: signals.append(sig))
+
+    fake = _StuckCompressor()
+    assert comp.Compressor.stop(fake) == 'detector'
+
+    assert fake.terminated
+    assert signals == []

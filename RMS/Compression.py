@@ -237,28 +237,17 @@ class Compressor(multiprocessing.Process):
 
         log.debug('Compression joined!')
 
-        # If process didn't exit cleanly, send graceful interrupt
+        # If the process didn't exit cleanly, terminate it. No SIGINT step first: the compressor
+        # ignores SIGINT (initChildProcess), so it only wasted 5 s of the stop
         if self.is_alive():
-            log.info("Compression process still alive, sending interrupt signal...")
+            log.warning("Compression process still alive, forcing termination")
             try:
-                if self.pid:
-                    os.kill(self.pid, signal.SIGINT)
-                
-                # Wait for graceful shutdown
-                self.join(5)
-                
-                if self.is_alive():
-                    log.warning("Compression process still alive after interrupt, forcing termination")
-                    self.terminate()
-                else:
-                    log.info("Compression process exited gracefully after interrupt")
+                self.terminate()
 
             except ProcessLookupError:
                 log.info("Compression process already terminated")
             except Exception as e:
-                log.error("Error during graceful compression shutdown: {}".format(e))
-                log.info("Falling back to terminate()")
-                self.terminate()
+                log.error("Terminating the compression process failed: {}".format(e))
 
             # A bare join() would hang forever on a process that ignores SIGTERM -
             # bound the wait and escalate to SIGKILL (review finding)
