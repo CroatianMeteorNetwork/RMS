@@ -398,3 +398,51 @@ def testCaptureDurationLastNightBeforePolarDay(lat, lon, t_beg, t_end, step, con
             assert start_time is True
 
         t += datetime.timedelta(minutes=step)
+
+
+# ---------------------------------------------------------------------------
+# Item 6: reprocess_if_archive_missing must reprocess a night only once
+
+def testArchiveMissingNightReprocessedOnce(tmp_path, monkeypatch):
+    """ A processed night whose archive keeps disappearing (quota/retention) is reprocessed once,
+        not on every start.
+    """
+
+    import RMS.StartCapture as sc
+    import RMS.ConfigReader as cr
+    from RMS.Reprocess import updateProcessingStatus
+
+    config = cr.Config()
+    config.data_dir = str(tmp_path)
+    config.stationID = 'XX0001'
+    config.reprocess_if_archive_missing = True
+    config.auto_reprocess_max_attempts = 3
+    config.continuous_capture = True
+    config.external_script_run = False
+
+    # A captured night which finished processing, and whose archive was deleted
+    night = 'XX0001_20260101_000000_000000'
+    captured_dir_path = os.path.join(str(tmp_path), config.captured_dir, night)
+    os.makedirs(captured_dir_path)
+    open(os.path.join(captured_dir_path, 'FF_XX0001_20260101_000000_000_0000000.fits'), 'w').close()
+    updateProcessingStatus(config, captured_dir_path, archiving='completed')
+
+    calls = []
+
+    def fakeProcessNight(dir_path, cfg):
+
+        # Recreate the archive and mark the night complete, like processNight
+        calls.append(dir_path)
+        updateProcessingStatus(cfg, dir_path, archiving='completed')
+        return os.path.join(cfg.data_dir, cfg.archived_dir, night), None, None, None, None
+
+    monkeypatch.setattr(sc, 'processNight', fakeProcessNight)
+
+    # The module logger is only created in StartCapture's __main__ block
+    monkeypatch.setattr(sc, 'log', logging.getLogger('rmslogger'), raising=False)
+
+    # Several starts; the quota logic deletes the archive again each time (it is never created here)
+    for _ in range(3):
+        sc.processIncompleteCaptures(config, None)
+
+    assert len(calls) == 1

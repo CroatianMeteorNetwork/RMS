@@ -1162,6 +1162,10 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
 
 
+# Processing status key marking a night reprocessed because reprocess_if_archive_missing found no archive
+REPROCESSED_FOR_MISSING_ARCHIVE = 'reprocessed_for_missing_archive'
+
+
 def getReprocessAttempts(config, captured_dir_path):
     """ Read how many times auto-reprocessing has already been attempted on a captured directory.
 
@@ -1230,6 +1234,7 @@ def processIncompleteCaptures(config, upload_manager):
     for captured_subdir in captured_dir_list:
 
         captured_dir_path = os.path.join(config.data_dir, config.captured_dir, captured_subdir)
+        archive_missing_reprocess = False
         log.debug("Checking folder: {:s}".format(captured_subdir))
 
         # Work out how far processing got on this night. The observation summary is the marker,
@@ -1259,6 +1264,14 @@ def processIncompleteCaptures(config, upload_manager):
                 log.debug("    ... fully processed!")
                 continue
 
+            # Reprocess such a night only once. Retention and quota management delete the new
+            #   archive again on a space-constrained station, and without this the night would be
+            #   reprocessed, re-archived and re-uploaded on every start, forever
+            if readProcessingStatus(config, captured_dir_path).get(REPROCESSED_FOR_MISSING_ARCHIVE):
+                log.debug("    ... processed, and already reprocessed once for its missing archive")
+                continue
+
+            archive_missing_reprocess = True
             log.warning("Folder {:s} looks processed but has no directory in {:s} - reprocessing "
                 "because reprocess_if_archive_missing is enabled"\
                 .format(captured_subdir, config.archived_dir))
@@ -1284,6 +1297,11 @@ def processIncompleteCaptures(config, upload_manager):
             # Reprocess the night
             night_archive_dir, archive_name, imgdata_archive_name, metadata_archive_name, detector = \
                                                         processNight(captured_dir_path, config)
+
+            # Record at once that the missing archive was recreated, so a failure in the steps
+            #   below cannot trigger another full reprocess
+            if archive_missing_reprocess:
+                updateProcessingStatus(config, captured_dir_path, **{REPROCESSED_FOR_MISSING_ARCHIVE: True})
 
             # Upload the archive, if upload is enabled
             if upload_manager is not None:
