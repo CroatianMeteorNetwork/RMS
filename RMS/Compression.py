@@ -21,7 +21,6 @@ import traceback
 import time
 import datetime
 import multiprocessing
-import ctypes
 import signal
 from math import floor
 import numpy as np
