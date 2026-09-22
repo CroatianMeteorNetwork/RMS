@@ -1025,3 +1025,29 @@ def testFRbinWriteReadRoundTrip(tmp_path):
     assert fr_read.xc == [[20, 21]]
     assert fr_read.t == [[5, 6]]
     assert np.array_equal(fr_read.frames[0][1], fr.frames[0][1])
+
+
+# ---------------------------------------------------------------------------
+# Item 19: FOV KML with empty polygon sides
+
+@pytest.mark.parametrize('sides', [
+    [],
+    [[], [], [], []],
+    [[[45.0, 15.0, 100000.0], [45.1, 15.1, 100000.0]], [], [[45.2, 15.0, 100000.0]], []],
+    ])
+@pytest.mark.parametrize('plot_station', [True, False])
+def testFovKMLEmptyPolygon(tmp_path, monkeypatch, sides, plot_station):
+    """ A fully or partly masked FOV (empty sides from fovArea) must still produce a KML file. """
+
+    import types
+    import Utils.FOVKML as fovkml
+
+    monkeypatch.setattr(fovkml, 'fovArea', lambda *a, **k: [list(side) for side in sides])
+
+    platepar = types.SimpleNamespace(station_code='XX0001', lat=45.0, lon=15.0, elev=100.0)
+    kml_path = fovkml.fovKML(str(tmp_path), platepar, plot_station=plot_station)
+
+    with open(kml_path) as f:
+        kml = f.read()
+
+    assert kml.rstrip().endswith('</kml>')
