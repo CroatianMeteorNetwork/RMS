@@ -1424,23 +1424,23 @@ class Platepar(object):
                     in_fov_init = (cat_x_init >= 0) & (cat_x_init < self.X_res) & \
                                   (cat_y_init >= 0) & (cat_y_init < self.Y_res)
                     n_catalog_fov = np.sum(in_fov_init)
-                    print("    NN input: {:d} detected stars, {:d} catalog stars in FOV".format(
+                    log.info("    NN input: {:d} detected stars, {:d} catalog stars in FOV".format(
                         len(img_stars), n_catalog_fov))
 
                     # Safety check: a minimum number of stars is needed to proceed
                     min_stars_required = 10
                     if len(img_stars) < min_stars_required:
-                        print("    -> Not enough detected stars ({} < {}), skipping NN fit".format(
+                        log.info("    -> Not enough detected stars ({} < {}), skipping NN fit".format(
                             len(img_stars), min_stars_required))
                         return None
                     if n_catalog_fov < min_stars_required:
-                        print("    -> Not enough catalog stars in FOV ({} < {}), skipping NN fit".format(
+                        log.info("    -> Not enough catalog stars in FOV ({} < {}), skipping NN fit".format(
                             n_catalog_fov, min_stars_required))
                         return None
 
-                    print("    RANSAC outlier detection: 21 iterations")
-                    print("    Radial-weighted threshold: 1.0x at center, 2.0x at corners")
-                    print("    Iterations 1-7: radial3-odd, 8-14: radial5-odd, 15-21: radial7-odd")
+                    log.info("    RANSAC outlier detection: 21 iterations")
+                    log.info("    Radial-weighted threshold: 1.0x at center, 2.0x at corners")
+                    log.info("    Iterations 1-7: radial3-odd, 8-14: radial5-odd, 15-21: radial7-odd")
 
                     ### RANSAC - identify outliers ###
 
@@ -1521,7 +1521,7 @@ class Platepar(object):
                             ] + self.x_poly_fwd.tolist()
                             best_res = None  # Reset best result for new distortion type
                             best_cost = float('inf')
-                            print("      --- Switching to radial5-odd (warm start with coefficient conversion) ---")
+                            log.info("      --- Switching to radial5-odd (warm start with coefficient conversion) ---")
 
                         # Switch to radial7-odd after iteration 14 with a warm start
                         elif iteration == switch_iter_r7:
@@ -1553,12 +1553,12 @@ class Platepar(object):
                             ] + self.x_poly_fwd.tolist()
                             best_res = None  # Reset best result for new distortion type
                             best_cost = float('inf')
-                            print("      --- Switching to radial7-odd (warm start with coefficient conversion) ---")
+                            log.info("      --- Switching to radial7-odd (warm start with coefficient conversion) ---")
 
                             # Switch to the deeper catalog for the final iterations if provided
                             if final_catalog_stars is not None:
                                 catalog_stars = final_catalog_stars
-                                print(f"      --- Using final catalog ({len(catalog_stars)} stars) for radial7 fitting ---")
+                                log.info(f"      --- Using final catalog ({len(catalog_stars)} stars) for radial7 fitting ---")
 
                         # Exclude the stars that were outliers in the previous iteration, which ensures the
                         #   outliers don't contaminate the subsequent fits
@@ -1568,7 +1568,7 @@ class Platepar(object):
                         # Safety check: a minimum number of stars is needed to fit
                         min_stars_for_fit = 5
                         if len(available_indices) < min_stars_for_fit:
-                            print("      -> Not enough non-outlier stars ({} < {}), exiting RANSAC early".format(
+                            log.info("      -> Not enough non-outlier stars ({} < {}), exiting RANSAC early".format(
                                 len(available_indices), min_stars_for_fit))
                             break
 
@@ -1628,7 +1628,7 @@ class Platepar(object):
 
                         # Safety check: a minimum number of catalog stars is needed for the NN matching
                         if len(catalog_stars_fov) < min_stars_for_fit:
-                            print("      -> Not enough catalog stars in FOV ({} < {}), exiting RANSAC early".format(
+                            log.info("      -> Not enough catalog stars in FOV ({} < {}), exiting RANSAC early".format(
                                 len(catalog_stars_fov), min_stars_for_fit))
                             break
 
@@ -1656,7 +1656,7 @@ class Platepar(object):
 
                         # Debug: show the optimizer exit reason
                         exit_reason = "maxiter" if res.nit >= ransac_opts['maxiter'] else "converged"
-                        print("        opt: {} iters, {} fev, {} (fatol={})".format(
+                        log.debug("        opt: {} iters, {} fev, {} (fatol={})".format(
                             res.nit, res.nfev, exit_reason, ransac_opts['fatol']))
 
                         # Score on ALL stars (reusing the shallow working copy from the FOV filter)
@@ -1721,7 +1721,7 @@ class Platepar(object):
 
                         # Debug: show RA/Dec at each iteration
                         iter_ra, iter_dec = normalizeRaDec(360*res.x[0], 90*res.x[1])
-                        print("      Iter {}: {} (w={}) fit on {}, {} outliers, RMSD={:.2f}', RA={:.2f} Dec={:.2f}".format(
+                        log.debug("      Iter {}: {} (w={}) fit on {}, {} outliers, RMSD={:.2f}', RA={:.2f} Dec={:.2f}".format(
                             iteration + 1, dist_label, weight, len(subset_indices),
                             np.sum(iteration_outliers), rmsd_arcmin, iter_ra, iter_dec))
 
@@ -1749,21 +1749,21 @@ class Platepar(object):
 
                                 # In the radial3-odd phase: skip to the radial5-odd phase
                                 if iteration < switch_iter_r5:
-                                    print("      -> Outliers stable for 2 iterations, skipping to radial5-odd")
+                                    log.debug("      -> Outliers stable for 2 iterations, skipping to radial5-odd")
                                     iteration = switch_iter_r5  # Jump to start of radial5-odd
                                     stable_count = 0  # Reset for next phase
                                     prev_outlier_mask = None  # Reset to avoid false stability detection
                                     continue
                                 # In the radial5-odd phase: skip to the radial7-odd phase
                                 elif iteration < switch_iter_r7:
-                                    print("      -> Outliers stable for 2 iterations, skipping to radial7-odd")
+                                    log.debug("      -> Outliers stable for 2 iterations, skipping to radial7-odd")
                                     iteration = switch_iter_r7  # Jump to start of radial7-odd
                                     stable_count = 0  # Reset for next phase
                                     prev_outlier_mask = None  # Reset to avoid false stability detection
                                     continue
                                 # In the radial7-odd phase: exit entirely
                                 else:
-                                    print("      -> Outliers stable for 2 iterations, exiting RANSAC")
+                                    log.debug("      -> Outliers stable for 2 iterations, exiting RANSAC")
                                     break
 
                         else:
@@ -1782,18 +1782,18 @@ class Platepar(object):
                     n_inliers = np.sum(nn_inlier_mask)
                     n_outliers = np.sum(final_outlier_mask)
 
-                    print("    RANSAC result: {}/{} inliers (removed {} outliers with score > 0), RMSD={:.2f}'".format(
+                    log.info("    RANSAC result: {}/{} inliers (removed {} outliers with score > 0), RMSD={:.2f}'".format(
                         n_inliers, n_stars, n_outliers, best_cost))
 
                     # Safety check: no iteration produced a scored fit (e.g. every iteration bailed out early)
                     if best_res is None:
-                        print("    -> No RANSAC iteration produced a fit, skipping final fit")
+                        log.info("    -> No RANSAC iteration produced a fit, skipping final fit")
                         return None
 
                     # Safety check: if the RMSD is too large, bail out
                     max_rmsd_arcmin = 10.0
                     if best_cost > max_rmsd_arcmin:
-                        print("    -> RMSD too large ({:.2f}' > {:.0f}'), skipping final fit".format(
+                        log.info("    -> RMSD too large ({:.2f}' > {:.0f}'), skipping final fit".format(
                             best_cost, max_rmsd_arcmin))
                         return None
 
@@ -1840,7 +1840,7 @@ class Platepar(object):
 
                     n_dupes = int(np.sum(~keep_mask))
                     if n_dupes > 0:
-                        print("    Dropped {} duplicate matches (multiple detections -> one catalog "
+                        log.info("    Dropped {} duplicate matches (multiple detections -> one catalog "
                               "star)".format(n_dupes))
 
                     img_stars_clean = img_stars_clean[keep_mask]
@@ -1850,7 +1850,7 @@ class Platepar(object):
                     self.setDistortionType(original_dist_type, reset_params=False)
 
                     # Final fit: call fitAstrometry recursively with the matched pairs
-                    print("    Final fit on {} matched stars with {} (recursive call)...".format(
+                    log.info("    Final fit on {} matched stars with {} (recursive call)...".format(
                         len(img_stars_clean), original_dist_type))
                     self.fitAstrometry(jd, img_stars_clean, matched_catalog,
                                        first_platepar_fit=False, use_nn_cost=False, fixed_scale=fixed_scale)
