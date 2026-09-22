@@ -57,16 +57,61 @@ def testFovRadiusIsCappedForAllSky():
     assert fovRadiusDeg(pp) == 90.0
 
 
+def _realPlatepar(f_scale):
+    """ A consistent platepar: the reference pointing belongs to its own JD. """
+
+    from RMS.Formats.Platepar import Platepar
+    from RMS.Astrometry.Conversions import JD2HourAngle
+
+    pp = Platepar()
+    pp.X_res, pp.Y_res = 1920, 1080
+    pp.F_scale = f_scale
+    pp.JD = 2460000.5
+    pp.RA_d, pp.dec_d = 100.0, 30.0
+    pp.lat, pp.lon = 45.0, 15.0
+    pp.Ho = JD2HourAngle(pp.JD)%360
+
+    return pp
+
+
+def _inImageStars(pp, jd):
+    """ Sky positions of a grid of pixels covering the whole image at the given time. """
+
+    from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP
+
+    xs, ys = np.meshgrid(np.linspace(0, pp.X_res - 1, 40), np.linspace(0, pp.Y_res - 1, 24))
+    _, ra, dec, _ = xyToRaDecPP(xs.size*[jd], xs.ravel(), ys.ravel(), np.ones(xs.size), pp,
+        extinction_correction=False, jd_time=True)
+
+    return ra, dec
+
+
 def testCatalogInFOVMaskRejectsStarsBehindCamera():
     """ Stars far from the pointing are masked out, stars near it are kept. """
 
-    pp = _FakePlatepar(1920, 1080, 27.0, ra_d=100.0, dec_d=20.0)
+    pp = _realPlatepar(27.0)
 
     # Two stars near the pointing, one on the opposite side of the sky and one far to the south
     catalog_ra = np.array([100.0, 110.0, 280.0, 100.0])
     catalog_dec = np.array([20.0, 25.0, -20.0, -75.0])
 
-    in_fov = catalogInFOVMask(catalog_ra, catalog_dec, pp)
+    in_fov = catalogInFOVMask(catalog_ra, catalog_dec, pp, pp.JD)
 
     # Only the two stars near the pointing may survive
     assert in_fov.tolist() == [True, True, False, False]
+
+
+@pytest.mark.parametrize("hours_after_reference", [0, 1, 2, 3, 6])
+def testCatalogInFOVMaskFollowsTheSkyAtTheImageTime(hours_after_reference):
+    """ Every star genuinely in the image is kept, however far the image is from the platepar's JD.
+
+        A fixed camera sees the sky drift by about 15 deg of RA per hour, so a cone centred on the
+        reference pointing would lose the whole field of a narrow lens within a few hours.
+    """
+
+    pp = _realPlatepar(80.0)
+    jd = pp.JD + hours_after_reference/24.0
+
+    ra, dec = _inImageStars(pp, jd)
+
+    assert np.all(catalogInFOVMask(ra, dec, pp, jd))
