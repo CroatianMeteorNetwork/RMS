@@ -238,3 +238,88 @@ def testRadialFlagToggleKeepsProjection(dist_type, flag_name, restricted_value, 
     sky, img = _projection(pp)
     assert np.max(np.abs(img - img_ref)) < 1e-6
     assert np.max(np.abs(sky - sky_ref)) < 1e-6/3600
+
+
+def _nnStartPlatepar():
+    """ A platepar set up for the NN fit as AutoPlatepar does, with a stale star list. """
+
+    from RMS.Formats.Platepar import Platepar
+
+    pp = Platepar()
+    pp.X_res, pp.Y_res = 1280, 720
+    pp.F_scale = 1280/60.0
+    pp.JD = 2460000.5
+    pp.RA_d, pp.dec_d = 100.0, 30.0
+    pp.pos_angle_ref = 20.0
+    pp.lat, pp.lon = 45.0, 15.0
+    pp.refraction = False
+    pp.equal_aspect = True
+    pp.asymmetry_corr = False
+    pp.force_distortion_centre = False
+    pp.setDistortionType("radial5-odd", reset_params=True)
+    pp.x_poly_fwd[-1] = 0.01
+    pp.x_poly_rev[-1] = -0.01
+    pp.star_list = [[pp.JD, 1.0, 2.0, 3.0, 100.0, 30.0, 4.0]]
+
+    return pp
+
+
+def _nnCatalog(pp, n_stars, rng):
+    """ Catalog stars (RA, dec, mag) at random positions inside the image of the given platepar. """
+
+    from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP
+
+    xs = rng.uniform(20, pp.X_res - 20, n_stars)
+    ys = rng.uniform(20, pp.Y_res - 20, n_stars)
+    _, ra, dec, _ = xyToRaDecPP(n_stars*[pp.JD], xs, ys, np.ones(n_stars), pp, extinction_correction=False,
+        jd_time=True)
+
+    return np.c_[ra, dec, rng.uniform(1, 5, n_stars)]
+
+
+def _plateparState(pp):
+    """ The fitted parameters of a platepar, for comparing before and after a fit. """
+
+    return (pp.distortion_type, pp.poly_length, pp.RA_d, pp.dec_d, pp.pos_angle_ref, pp.F_scale,
+            list(pp.x_poly_fwd), list(pp.x_poly_rev), list(pp.y_poly_fwd), list(pp.y_poly_rev))
+
+
+def testNNFitTooFewStarsDoesNotPairByIndex():
+    """ Too few stars for the NN fit must return None without building index-paired bogus star pairs. """
+
+    pp = _nnStartPlatepar()
+    rng = np.random.default_rng(0)
+    catalog = _nnCatalog(pp, 50, rng)
+    img_stars = np.c_[rng.uniform(0, pp.X_res, 3), rng.uniform(0, pp.Y_res, 3), np.ones(3)]
+
+    state = _plateparState(pp)
+    result = pp.fitAstrometry(pp.JD, img_stars, catalog, first_platepar_fit=True, use_nn_cost=True)
+
+    assert result is None
+    assert _plateparState(pp) == state
+    assert pp.star_list == []
+
+
+def testNNFitRejectionRestoresPlatepar():
+    """ A rejected NN fit (RMSD too large) must leave the platepar parameters as they were at entry. """
+
+    pp = _nnStartPlatepar()
+    rng = np.random.default_rng(1)
+    catalog = _nnCatalog(pp, 150, rng)
+
+    # Detections unrelated to the catalog, so no pointing fits them
+    n_det = 60
+    img_stars = np.c_[rng.uniform(20, pp.X_res - 20, n_det), rng.uniform(20, pp.Y_res - 20, n_det),
+                      np.ones(n_det)]
+
+    # Point the platepar somewhere the catalog does not cover much, so the RMSD is large
+    pp.RA_d = (pp.RA_d + 25.0)%360
+    state = _plateparState(pp)
+
+    result = pp.fitAstrometry(pp.JD, img_stars, catalog, first_platepar_fit=True, use_nn_cost=True)
+
+    if result is not None:
+        pytest.skip("The synthetic scene unexpectedly produced an accepted NN fit")
+
+    assert _plateparState(pp) == state
+    assert pp.star_list == []

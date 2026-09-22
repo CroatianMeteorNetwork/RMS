@@ -939,9 +939,23 @@ class Platepar(object):
             (img_stars_clean, matched_catalog): [tuple of ndarrays] For use_nn_cost=True, the detected
                 stars that survived the RANSAC and the catalog stars they were matched to, or None if
                 the NN fit was skipped or rejected (too few stars, no scored iteration, or an RMSD above
-                10 arcmin), in which case the platepar is left partially updated.
+                10 arcmin), in which case the platepar parameters are restored to their values at entry
+                and the star_list is emptied (no star pairs came out of the fit).
 
         """
+
+        # Snapshot the platepar state so that a rejected NN fit can restore it. The RANSAC switches the
+        #   distortion type and overwrites the pointing and distortion while it runs
+        nn_state_snapshot = copy.deepcopy(self.__dict__) if use_nn_cost else None
+
+        def _rejectNNFit():
+            """ Restore the platepar state from the entry snapshot and clear the star list. """
+
+            self.__dict__.clear()
+            self.__dict__.update(nn_state_snapshot)
+            self.star_list = []
+
+            return None
 
         def _calcImageResidualsDistortion(params, platepar, jd, catalog_stars, img_stars, dimension):
             """Calculates the differences between the stars on the image and catalog stars in image
@@ -1444,11 +1458,11 @@ class Platepar(object):
                     if len(img_stars) < min_stars_required:
                         log.info("    -> Not enough detected stars ({} < {}), skipping NN fit".format(
                             len(img_stars), min_stars_required))
-                        return None
+                        return _rejectNNFit()
                     if n_catalog_fov < min_stars_required:
                         log.info("    -> Not enough catalog stars in FOV ({} < {}), skipping NN fit".format(
                             n_catalog_fov, min_stars_required))
-                        return None
+                        return _rejectNNFit()
 
                     log.info("    RANSAC outlier detection: 21 iterations")
                     log.info("    Radial-weighted threshold: 1.0x at center, 2.0x at corners")
@@ -1802,14 +1816,14 @@ class Platepar(object):
                     # Safety check: no iteration produced a scored fit (e.g. every iteration bailed out early)
                     if best_res is None:
                         log.info("    -> No RANSAC iteration produced a fit, skipping final fit")
-                        return None
+                        return _rejectNNFit()
 
                     # Safety check: if the RMSD is too large, bail out
                     max_rmsd_arcmin = 10.0
                     if best_cost > max_rmsd_arcmin:
                         log.info("    -> RMSD too large ({:.2f}' > {:.0f}'), skipping final fit".format(
                             best_cost, max_rmsd_arcmin))
-                        return None
+                        return _rejectNNFit()
 
                     # Apply the best RANSAC params to the platepar
                     ra_ref, dec_ref, pos_angle_ref, F_scale = best_res.x[:4]
@@ -1984,6 +1998,14 @@ class Platepar(object):
         else:
             if len(img_stars) < min_fit_stars:
                 print('Too few stars to fit the distortion, only the astrometric parameters where fitted!')
+
+        # In the NN mode the catalog stars are not matched to the image stars, so pairing them by index
+        #   below would produce bogus pairs. Reaching this point in the NN mode means the RANSAC did not
+        #   run (too few stars for the distortion fit, or only the pointing was requested), so reject it
+        if use_nn_cost:
+            log.info("    -> NN fit not run ({:d} stars, {:d} needed, fit_only_pointing={}), skipping it".format(
+                len(img_stars), min_fit_stars, fit_only_pointing))
+            return _rejectNNFit()
 
         # Set the list of stars used for the fit to the platepar. Note that use_nn_cost=True returns early
         #   after the RANSAC, so this only runs for matched-pair fits
