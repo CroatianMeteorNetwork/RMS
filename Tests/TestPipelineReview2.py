@@ -667,3 +667,51 @@ def testQueuedPoolCallsPassConfig(rel_path):
     assert calls
     for call in calls:
         assert 'config' in [kw.arg for kw in call.keywords], 'line {:d}'.format(call.lineno)
+
+
+# ---------------------------------------------------------------------------
+# Item 11: runWithTimeout late-completion race
+
+def testRunWithTimeoutLateCompletionRace(monkeypatch):
+    """ If the function completes right between the caller's completion check and the caller giving
+        up, the late cleanup must still run (the caller reports a timeout).
+    """
+
+    import types
+    import threading
+    import RMS.Misc as misc
+
+    gate = threading.Event()
+    was_set = threading.Event()
+
+    class _RacyEvent(threading.Event):
+        """ Event whose first is_set() lets the function finish and then reports the stale state. """
+
+        checks = 0
+
+        def set(self):
+            super(_RacyEvent, self).set()
+            was_set.set()
+
+        def is_set(self):
+            _RacyEvent.checks += 1
+            if _RacyEvent.checks == 1:
+
+                # Let the function finish now, as if it completed during the check
+                gate.set()
+                was_set.wait(0.5)
+                return False
+
+            return super(_RacyEvent, self).is_set()
+
+    # Swap the Event class only for Misc's own threading references
+    fake_threading = types.SimpleNamespace(Event=_RacyEvent, Thread=threading.Thread, Lock=threading.Lock)
+    monkeypatch.setattr(misc, 'threading', fake_threading)
+
+    cleaned = threading.Event()
+
+    success, _, _ = misc.runWithTimeout(lambda: gate.wait(5), timeout=0.05,
+        on_late_completion=cleaned.set)
+
+    assert success is False
+    assert cleaned.wait(5), 'caller reported a timeout but the late cleanup never ran'

@@ -456,11 +456,15 @@ def runWithTimeout(func, args=(), kwargs=None, timeout=60, on_late_completion=No
     if kwargs is None:
         kwargs = {}
 
-    # Results are shared with the worker thread through mutable containers
+    # Results are shared with the worker thread through mutable containers. The lock makes "the
+    # function completed" and "the caller gave up" mutually exclusive decisions: without it the
+    # worker could finish between the caller's check and the caller setting timed_out, so neither
+    # side ran on_late_completion while the caller reported a timeout (leaking e.g. an SSH client)
     result = [None]
     exception = [None]
     timed_out = [False]
     completed = threading.Event()
+    state_lock = threading.Lock()
 
     def target():
         """ Run the function in the worker thread and record its result or exception. """
@@ -470,10 +474,12 @@ def runWithTimeout(func, args=(), kwargs=None, timeout=60, on_late_completion=No
         except Exception as e:
             exception[0] = e
         finally:
-            completed.set()
+            with state_lock:
+                completed.set()
+                late = timed_out[0]
 
             # The caller has already given up - run the late cleanup here
-            if timed_out[0] and on_late_completion is not None:
+            if late and (on_late_completion is not None):
                 log.debug("runWithTimeout: function completed after caller timed out; running late cleanup")
                 try:
                     on_late_completion()
@@ -487,13 +493,16 @@ def runWithTimeout(func, args=(), kwargs=None, timeout=60, on_late_completion=No
     # Wait for completion or timeout
     completed.wait(timeout)
 
-    if completed.is_set():
+    with state_lock:
+
         # Function completed (possibly with exception)
-        return (True, result[0], exception[0])
-    else:
-        # Timed out — flag thread so on_late_completion fires if it finishes later
+        if completed.is_set():
+            return (True, result[0], exception[0])
+
+        # Timed out - flag the thread so on_late_completion fires if it finishes later
         timed_out[0] = True
-        return (False, None, None)
+
+    return (False, None, None)
 
 
 def mkdirP(path):
