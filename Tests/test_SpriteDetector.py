@@ -9,6 +9,7 @@ import hashlib
 import json
 import os
 import re
+import ssl
 import sys
 import threading
 import time
@@ -386,70 +387,72 @@ def test_known_model_hash_is_the_published_model():
         "a73da954ab97a7b68683edc249eafe457f1085bfd8d619f05c9e0d94cdad831a"
 
 
-class FakeSFTP(object):
-    """ Serves one remote file, or none. """
+class FakeResponse(object):
+    """ An HTTP response serving fixed bytes, optionally with a Content-Length that does not match. """
 
-    def __init__(self, content=None, fail=False):
+    def __init__(self, content, length=None):
         self.content = content
-        self.fail = fail
+        self.position = 0
+        self.headers = {"Content-Length": str(len(content) if length is None else length)}
         self.closed = False
 
-    def lstat(self, path):
-        if self.content is None:
-            raise IOError("no such file")
-
-    def get(self, remote_path, local_path):
-        if self.fail:
-            raise OSError("connection dropped")
-        with open(local_path, "wb") as f:
-            f.write(self.content)
+    def read(self, n):
+        chunk = self.content[self.position:self.position + n]
+        self.position += len(chunk)
+        return chunk
 
     def close(self):
         self.closed = True
 
 
-class FakeSSH(object):
+def fakeWeb(monkeypatch, response=None, error=None):
+    """ Replace urlopen; record the requested URL. """
 
-    def close(self):
-        pass
+    requested = []
 
+    def urlopen(request, timeout=None, context=None):
+        requested.append((request.get_full_url(), context))
+        if error is not None:
+            raise error
+        return response
 
-def fakeConnection(monkeypatch, sftp):
-    """ Replace the SFTP connection with a fake one. """
+    monkeypatch.setattr(DownloadSpriteModel.urllib_request, "urlopen", urlopen)
 
-    monkeypatch.setattr(DownloadSpriteModel, "getSSHAndSFTP", lambda *args, **kwargs: (FakeSSH(), sftp))
-
-
-def withKey(config):
-    with open(config.rsa_private_key, "w") as f:
-        f.write("key")
+    return requested
 
 
 def test_download_puts_a_verified_model_in_place(tmp_path, monkeypatch):
 
     config = makeConfig(tmp_path)
-    withKey(config)
     content = b"the real model"
     monkeypatch.setattr(DownloadSpriteModel, "KNOWN_MODEL_SHA256",
                         {config.sprite_model_file: hashlib.sha256(content).hexdigest()})
 
-    sftp = FakeSFTP(content)
-    fakeConnection(monkeypatch, sftp)
+    response = FakeResponse(content)
+    requested = fakeWeb(monkeypatch, response)
 
     assert DownloadSpriteModel.downloadSpriteModel(config)
 
     with open(config.sprite_model_path, "rb") as f:
         assert f.read() == content
     assert not os.path.exists(config.sprite_model_path + ".download")
-    assert sftp.closed
+    assert response.closed
+
+    # Fetched from the configured web directory, with a certificate-checking context
+    url, context = requested[0]
+    assert url == "https://globalmeteornetwork.org/projects/sprite_detector/sprite_detector.tflite"
+    assert context.verify_mode == ssl.CERT_REQUIRED
+
+    # Already there and intact: not downloaded again
+    assert DownloadSpriteModel.downloadSpriteModel(config)
+    assert len(requested) == 1
 
 
 def test_download_with_the_wrong_checksum_is_discarded(tmp_path, monkeypatch):
 
     config = makeConfig(tmp_path)
-    withKey(config)
     monkeypatch.setattr(DownloadSpriteModel, "KNOWN_MODEL_SHA256", {config.sprite_model_file: "0"*64})
-    fakeConnection(monkeypatch, FakeSFTP(b"tampered"))
+    fakeWeb(monkeypatch, FakeResponse(b"tampered"))
 
     assert not DownloadSpriteModel.downloadSpriteModel(config)
     assert not os.path.exists(config.sprite_model_path)
@@ -459,19 +462,38 @@ def test_download_with_the_wrong_checksum_is_discarded(tmp_path, monkeypatch):
 def test_download_fails_cleanly(tmp_path, monkeypatch):
 
     config = makeConfig(tmp_path)
-
-    # No key at all
-    assert not DownloadSpriteModel.downloadSpriteModel(config)
+    tmp_file = config.sprite_model_path + ".download"
 
     # Not published on the server
-    withKey(config)
-    fakeConnection(monkeypatch, FakeSFTP(None))
+    fakeWeb(monkeypatch, error=DownloadSpriteModel.urllib_error.HTTPError(
+        "https://x", 404, "Not Found", {}, None))
     assert not DownloadSpriteModel.downloadSpriteModel(config)
 
-    # Connection drops mid-transfer
-    fakeConnection(monkeypatch, FakeSFTP(b"x", fail=True))
+    # No network
+    fakeWeb(monkeypatch, error=DownloadSpriteModel.urllib_error.URLError("no route to host"))
     assert not DownloadSpriteModel.downloadSpriteModel(config)
-    assert not os.path.exists(config.sprite_model_path + ".download")
+
+    # Connection cut short: fewer bytes than announced
+    fakeWeb(monkeypatch, FakeResponse(b"half", length=100))
+    assert not DownloadSpriteModel.downloadSpriteModel(config)
+    assert not os.path.exists(tmp_file)
+
+    # Far too big to be a model
+    fakeWeb(monkeypatch, FakeResponse(b"x", length=DownloadSpriteModel.MAX_MODEL_BYTES + 1))
+    assert not DownloadSpriteModel.downloadSpriteModel(config)
+    assert not os.path.exists(tmp_file)
+
+    assert not os.path.exists(config.sprite_model_path)
+
+
+def test_download_refuses_plain_http(tmp_path, monkeypatch):
+
+    config = makeConfig(tmp_path)
+    config.sprite_model_base_url = "http://globalmeteornetwork.org/projects/sprite_detector"
+    requested = fakeWeb(monkeypatch, FakeResponse(b"x"))
+
+    assert not DownloadSpriteModel.downloadSpriteModel(config)
+    assert requested == []
 
 
 ### Detector ###

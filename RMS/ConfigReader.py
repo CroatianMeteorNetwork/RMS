@@ -326,8 +326,8 @@ class Config:
         self.sprite_model_file = "sprite_detector.tflite"
         self.sprite_model_path = os.path.join(self.rms_root_dir, "share", self.sprite_model_file)
 
-        # Directory on the server, under remote_dir, from which the model is downloaded
-        self.sprite_model_remote_dir = "sprite_model"
+        # Web directory the model is downloaded from, over HTTPS
+        self.sprite_model_base_url = "https://globalmeteornetwork.org/projects/sprite_detector"
 
         # Minimum model confidence for a detection
         self.sprite_confidence = 0.386
@@ -971,8 +971,8 @@ def parseSpriteDetection(config, parser, section):
         config.sprite_model_file = parser.get(section, "sprite_model_file")
         config.sprite_model_path = os.path.join(config.rms_root_dir, "share", config.sprite_model_file)
 
-    if parser.has_option(section, "sprite_model_remote_dir"):
-        config.sprite_model_remote_dir = parser.get(section, "sprite_model_remote_dir")
+    if parser.has_option(section, "sprite_model_base_url"):
+        config.sprite_model_base_url = parser.get(section, "sprite_model_base_url").strip()
 
     if parser.has_option(section, "sprite_confidence"):
         config.sprite_confidence = parser.getfloat(section, "sprite_confidence")

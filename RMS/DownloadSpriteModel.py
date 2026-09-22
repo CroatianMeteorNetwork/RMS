@@ -14,25 +14,33 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-""" Download the sprite detection model from the GMN server when it is missing or outdated.
+""" Download the sprite detection model from the GMN web server when it is missing or outdated.
 
     The model is about 35 MB, three hundred times the size of the meteor ML model, and is licensed separately
-    from RMS, so it is not kept in the repository. Stations fetch it over SFTP with the same key and server
-    they use for their nightly upload, the way RMS.DownloadPlatepar fetches a new platepar.
+    from RMS, so it is not kept in the repository. Stations fetch it over HTTPS from
+    config.sprite_model_base_url; no key or account is needed.
 
     The expected SHA-256 of every known model file is listed in KNOWN_MODEL_SHA256, which ties a model to the
-    code that knows how to run it. A downloaded file that does not match is discarded.
+    code that knows how to run it. A downloaded file that does not match is discarded, so the web server only
+    has to deliver the bytes, it does not have to be trusted.
 """
 
 from __future__ import print_function, division, absolute_import
 
 import hashlib
 import os
-
-import paramiko
+import ssl
 
 from RMS.Logger import getLogger
-from RMS.UploadManager import getSSHAndSFTP
+
+# Python 2/3 compatibility for urllib
+try:
+    import urllib2 as urllib_request
+    import urllib2 as urllib_error
+
+except ImportError:
+    import urllib.request as urllib_request
+    import urllib.error as urllib_error
 
 
 # Get the logger from the main module
@@ -45,8 +53,14 @@ KNOWN_MODEL_SHA256 = {
     "sprite_detector.tflite": "a73da954ab97a7b68683edc249eafe457f1085bfd8d619f05c9e0d94cdad831a",
 }
 
-# Size of the pieces the file is hashed in, to keep memory low on a Raspberry Pi
-HASH_CHUNK_BYTES = 1024*1024
+# Size of the pieces the file is read and hashed in, to keep memory low on a Raspberry Pi
+CHUNK_BYTES = 1024*1024
+
+# A download larger than this is not a model; stop instead of filling the SD card
+MAX_MODEL_BYTES = 200*1024*1024
+
+# Seconds without any data before the download is given up
+DOWNLOAD_TIMEOUT = 60
 
 
 def fileSha256(file_path):
@@ -66,7 +80,7 @@ def fileSha256(file_path):
 
             # Hash in pieces rather than reading 35 MB into memory at once
             while True:
-                chunk = f.read(HASH_CHUNK_BYTES)
+                chunk = f.read(CHUNK_BYTES)
                 if not chunk:
                     break
                 digest.update(chunk)
@@ -112,8 +126,77 @@ def spriteModelReady(config):
     return fileSha256(config.sprite_model_path) == expected
 
 
+def spriteModelUrl(config):
+    """ URL the configured model file is downloaded from.
+
+    Arguments:
+        config: [Config]
+
+    Return:
+        [str]
+    """
+
+    return config.sprite_model_base_url.rstrip("/") + "/" + config.sprite_model_file
+
+
+def _fetchToFile(url, file_path):
+    """ Stream a URL into a file, with a verified TLS connection and a size limit.
+
+    Arguments:
+        url: [str] https URL.
+        file_path: [str] Where to write it.
+
+    Return:
+        [str or None] None on success, otherwise why it failed.
+    """
+
+    # Only HTTPS with a checked certificate; never fall back to an unverified connection
+    if not url.lower().startswith("https://"):
+        return "the model URL must start with https://"
+
+    if not hasattr(ssl, "create_default_context"):
+        return "this Python cannot verify HTTPS certificates"
+
+    context = ssl.create_default_context()
+    request = urllib_request.Request(url, headers={"User-Agent": "RMS-sprite-model-download"})
+
+    response = urllib_request.urlopen(request, timeout=DOWNLOAD_TIMEOUT, context=context)
+
+    try:
+
+        # Refuse early when the server already says the file is too big
+        length = response.headers.get("Content-Length")
+        if length is not None and length.isdigit() and int(length) > MAX_MODEL_BYTES:
+            return "the server reports {:s} bytes, more than the {:d} allowed".format(length, MAX_MODEL_BYTES)
+
+        written = 0
+
+        with open(file_path, "wb") as f:
+
+            # Copy in pieces, stopping if the file grows past the limit
+            while True:
+                chunk = response.read(CHUNK_BYTES)
+                if not chunk:
+                    break
+
+                written += len(chunk)
+                if written > MAX_MODEL_BYTES:
+                    return "the download exceeded {:d} bytes".format(MAX_MODEL_BYTES)
+
+                f.write(chunk)
+
+        # A connection cut short can end the stream early without an error
+        if length is not None and length.isdigit() and written != int(length):
+            return "received {:d} of {:s} bytes".format(written, length)
+
+    finally:
+        response.close()
+
+    return None
+
+
 def downloadSpriteModel(config):
-    """ Make sure the sprite detection model is present, downloading it from the GMN server if needed.
+    """ Make sure the sprite detection model is present, downloading it if needed.
 
         Nothing is downloaded when the local file is already correct. A partial or corrupt download never
         replaces a good file: the file is fetched to a temporary name, checked and only then moved into place.
@@ -133,53 +216,30 @@ def downloadSpriteModel(config):
         log.warning("Sprite model {:s} does not match the expected checksum, downloading it again".format(
             config.sprite_model_path))
 
-    # Same credentials as the nightly upload; without a key there is no way in
-    if not os.path.isfile(config.rsa_private_key):
-        log.warning("Cannot download the sprite model: private key {:s} not found".format(
-            config.rsa_private_key))
-        return False
-
-    remote_path = "/".join([config.remote_dir, config.sprite_model_remote_dir, config.sprite_model_file])
+    url = spriteModelUrl(config)
     tmp_path = config.sprite_model_path + ".download"
 
-    log.info("Downloading the sprite model from {:s}:{:s} ...".format(config.hostname, remote_path))
-
-    ssh = None
-    sftp = None
+    log.info("Downloading the sprite model from {:s} ...".format(url))
 
     try:
 
-        # Connect the same way DownloadPlatepar does
-        ssh, sftp = getSSHAndSFTP(
-            config.hostname,
-            port=config.host_port,
-            username=config.stationID.lower(),
-            key_filename=config.rsa_private_key,
-            timeout=60,
-            banner_timeout=60,
-            auth_timeout=60
-        )
+        # The share directory normally exists, but not in every installation
+        model_dir = os.path.dirname(config.sprite_model_path)
+        if model_dir and not os.path.isdir(model_dir):
+            os.makedirs(model_dir)
 
-        # The model may simply not be published yet
-        try:
-            sftp.lstat(remote_path)
+        reason = _fetchToFile(url, tmp_path)
 
-        except IOError:
-            log.warning("The sprite model is not available on the server at {:s}".format(remote_path))
-            return False
+    except urllib_error.HTTPError as e:
+        reason = "HTTP {:d}".format(e.code)
 
-        sftp.get(remote_path, tmp_path)
+    except (urllib_error.URLError, ssl.SSLError, EOFError, IOError, OSError, ValueError) as e:
+        reason = repr(e)
 
-    except (paramiko.SSHException, EOFError, OSError, IOError) as e:
-        log.warning("Connection error while downloading the sprite model: {:s}".format(repr(e)))
+    if reason is not None:
+        log.warning("Could not download the sprite model: {:s}".format(reason))
         _removeQuietly(tmp_path)
         return False
-
-    finally:
-        if sftp:
-            sftp.close()
-        if ssh:
-            ssh.close()
 
     # Check the download before it can replace anything
     expected = expectedModelSha256(config)
