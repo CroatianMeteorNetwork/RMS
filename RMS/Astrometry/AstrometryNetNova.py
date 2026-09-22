@@ -312,13 +312,13 @@ def novaAstrometryNetSolve(ff_file_path=None, img=None, x_data=None, y_data=None
             if not len(stat.get("user_images", "")):
                 stat = first_status
 
+        # Use the correct server URL for the web link
         if len(stat.get("user_images", "")):
-            # Use correct server URL for the web link
             is_nova = api_url is None or 'nova.astrometry.net' in api_url
             if is_nova:
                 base_url = "http://nova.astrometry.net"
+            # Extract the base URL from api_url (remove the /api/ suffix)
             else:
-                # Extract base URL from api_url (remove /api/ suffix)
                 base_url = api_url.rstrip('/').replace('/api', '')
             print("Link to web page: {}/user_images/{:d}".format(base_url, stat.get("user_images", "")[0]))
 
@@ -350,23 +350,25 @@ def novaAstrometryNetSolve(ff_file_path=None, img=None, x_data=None, y_data=None
         pil_img.save(file_handle, format='JPEG')
         img_data = file_handle.getvalue()
 
-    # Create client with custom URL if provided
+    # Create the client with the custom URL if provided. For custom servers (like contrailcast), upload
+    #   directly - don't use imgur
     if api_url is not None:
         c = Client(apiurl=api_url)
-        # For custom servers (like contrailcast), upload directly - don't use imgur
         use_direct_upload = True
+
+    # For nova.astrometry.net, use the imgur URL upload (their preferred method)
     else:
         c = Client()
-        # For nova.astrometry.net, use imgur URL upload (their preferred method)
         use_direct_upload = False
         if img_data is not None:
             try:
                 image_url = imgurUpload('skyfit_image.jpg', image_data=img_data)
+
+            # Imgur failed, fall back to the direct upload
             except Exception as e:
-                # Imgur failed, fall back to direct upload
                 use_direct_upload = True
 
-    # If direct upload needed, save to temp file
+    # If a direct upload is needed, save the image to a temp file
     if use_direct_upload and img_data is not None and image_url is None:
         tmpimg = os.path.join(os.getenv('TMP', default='/tmp'), 'skyfit_image.png')
         pil_img.save(tmpimg)
@@ -393,20 +395,24 @@ def novaAstrometryNetSolve(ff_file_path=None, img=None, x_data=None, y_data=None
 
     # Upload image or the list of stars
     if file_handle is not None:
+
+        # Use the URL upload (for nova.astrometry.net via imgur)
         if image_url is not None:
-            # Use URL upload (for nova.astrometry.net via imgur)
             upres = c.url_upload(image_url, **kwargs)
+
+        # Direct upload with the image data in memory (for contrailcast)
         elif img_data is not None:
-            # Direct upload with image data in memory (for contrailcast)
             upres = c.upload(img_data=img_data, **kwargs)
+
+        # Upload from the temp file
         elif tmpimg is not None:
-            # Upload from temp file
             upres = c.upload(fn=tmpimg, **kwargs)
+
         else:
             upres = None
 
+    # For coordinate-only uploads, include the image dimensions if available
     elif x_data is not None:
-        # For coordinate-only uploads, include image dimensions if available
         if x_center is not None and y_center is not None:
             kwargs['image_width'] = int(x_center * 2)
             kwargs['image_height'] = int(y_center * 2)
@@ -527,19 +533,19 @@ def novaAstrometryNetSolve(ff_file_path=None, img=None, x_data=None, y_data=None
 
     # Download the wcs.fits file
     print("Downloading the WCS file...")
-    # Use the correct server URL for WCS download
-    # Nova uses numeric job IDs, custom servers use UUIDs
+    # Use the correct server URL for the WCS download - nova.astrometry.net uses numeric job IDs and a
+    #   different URL format, custom servers use UUIDs
     is_nova = api_url is None or 'nova.astrometry.net' in api_url
     if is_nova:
-        # Nova.astrometry.net uses numeric IDs and different URL format
         wcs_fits_link = "https://nova.astrometry.net/wcs_file/{:d}".format(solved_id)
+
+    # Custom server - use the jobs/<id>/wcs_file endpoint with the UUID
     else:
-        # Custom server - use jobs/<id>/wcs_file endpoint with UUID
         wcs_fits_link = api_url.rstrip('/') + "/jobs/{}/wcs_file".format(solved_id)
     wcs_fits = urlopen(wcs_fits_link).read()
 
-    # Load the WCS file
-    # Suppress warnings about standalone WCS (no image data) and non-standard SIP keywords
+    # Load the WCS file, suppressing the warnings about a standalone WCS (no image data) and non-standard
+    #   SIP keywords
     astropy_logger = logging.getLogger('astropy')
     original_level = astropy_logger.level
     astropy_logger.setLevel(logging.ERROR)
@@ -581,41 +587,42 @@ def novaAstrometryNetSolve(ff_file_path=None, img=None, x_data=None, y_data=None
     rot_eq_standard = np.degrees(np.arctan2(np.radians(dec_mid) - np.radians(dec_right), \
             np.radians(ra_mid) - np.radians(ra_right)))%360
 
-    # Compute the scale from server response or WCS
+    # Compute the scale from the server response or the WCS
     if result.get('pixscale', 0) > 0:
         scale = 3600/result['pixscale']
+
+    # Compute the scale from the WCS pixel_scale_matrix, which gives the transformation matrix in deg/pixel
     else:
-        # Compute scale from WCS pixel_scale_matrix
-        # This gives the transformation matrix in deg/pixel
         psm = wcs_obj.pixel_scale_matrix
-        # Pixel scale in deg/pixel from matrix determinant
+
+        # Pixel scale in deg/pixel from the matrix determinant
         pixscale_deg = np.sqrt(np.abs(np.linalg.det(psm)))
         if pixscale_deg > 0:
             scale = 1.0 / pixscale_deg  # px/deg
         else:
             scale = 100.0  # fallback
 
-    # Compute the FOV width and height from server response or estimate from WCS
+    # Compute the FOV width and height from the server response or estimate them from the WCS
     if result.get('width_arcsec', 0) > 0 and result.get('height_arcsec', 0) > 0:
         fov_w = result['width_arcsec']/3600
         fov_h = result['height_arcsec']/3600
+
+    # Estimate the FOV from the image size and scale, using NAXIS from the WCS or the center coordinates
     else:
-        # Estimate FOV from image size and scale
-        # Use NAXIS from WCS or estimate from center coordinates
         wcs_header = wcs_obj.to_header()
         naxis1 = wcs_header.get('IMAGEW', wcs_header.get('NAXIS1', 2*x_center))
         naxis2 = wcs_header.get('IMAGEH', wcs_header.get('NAXIS2', 2*y_center))
         fov_w = naxis1 / scale  # degrees
         fov_h = naxis2 / scale  # degrees
 
-    # clean up temp image
+    # Clean up the temp image
     if tmpimg:
         try:
             os.remove(tmpimg)
         except Exception as e:
             sys.stderr.write("Warning: failed to remove temporary image '{}': {}\n".format(tmpimg, e))
 
-    # Try to fetch matched star data from server (for custom servers that support it)
+    # Try to fetch the matched star data from the server (for custom servers that support it)
     matched_stars = []
     solution_info = None
     if api_url is not None and 'nova.astrometry.net' not in api_url:
@@ -624,7 +631,7 @@ def novaAstrometryNetSolve(ff_file_path=None, img=None, x_data=None, y_data=None
             info_resp = urlopen(info_url)
             info_data = json.loads(info_resp.read())
 
-            # Parse star_data if available
+            # Parse the star data if available
             if info_data.get('star_data'):
                 for star in info_data['star_data']:
                     matched_stars.append({
@@ -635,8 +642,8 @@ def novaAstrometryNetSolve(ff_file_path=None, img=None, x_data=None, y_data=None
                     })
                 print("Matched stars from server: {:d}".format(len(matched_stars)))
 
-            # Build solution_info similar to local solver
-            # SkyFit2 looks for 'quad_stars' for magenta boxes
+            # Build the solution info similar to the local solver - SkyFit2 looks for 'quad_stars' to draw
+            #   the magenta boxes
             solution_info = {
                 'quad_stars': matched_stars,  # Used by SkyFit2 for magenta markers
                 'matched_stars': matched_stars,  # Keep for compatibility
@@ -648,7 +655,7 @@ def novaAstrometryNetSolve(ff_file_path=None, img=None, x_data=None, y_data=None
             print("Could not fetch matched stars: {}".format(e))
             solution_info = {'wcs_obj': wcs_obj}
 
-    # Return star_data as [x_coords, y_coords] for compatibility
+    # Return the star data as [x_coords, y_coords] for compatibility with the local solver
     star_data = None
     if matched_stars:
         star_x = [s['x_pix'] for s in matched_stars]

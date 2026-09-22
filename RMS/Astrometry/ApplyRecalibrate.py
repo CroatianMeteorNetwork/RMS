@@ -218,10 +218,10 @@ def recalibrateFF(
 
     ##########
 
-    # Pre-filter catalog to FOV region. This avoids re-subsetting the full catalog (potentially
-    # 50k+ stars) on every optimizer iteration. Safe because matched stars are always well inside
-    # the FOV boundary — stars aren't detected within ~15 px of image edges and the max match
-    # radius is 10 px, so stars entering/leaving the subset boundary can never affect matching.
+    # Pre-filter the catalog to the FOV region. This avoids re-subsetting the full catalog (potentially
+    #   50k+ stars) on every optimizer iteration. Safe because matched stars are always well inside
+    #   the FOV boundary - stars aren't detected within ~15 px of image edges and the max match
+    #   radius is 10 px, so stars entering/leaving the subset boundary can never affect matching
     fov_radius = getFOVSelectionRadius(working_platepar)
     _, RA_c, dec_c, _ = xyToRaDecPP(
         [jd2Date(jd)], [working_platepar.X_res/2], [working_platepar.Y_res/2], [1],
@@ -291,6 +291,7 @@ def recalibrateFF(
         # Compute the minimization tolerance
         fatol, xatol_ang = CheckFit.computeMinimizationTolerances(config, working_platepar, len(star_dict_ff))
 
+        # Build the initial simplex with a step size that stays meaningful close to the celestial pole
         simplex = CheckFit.buildNelderMeadSimplex(p0, working_platepar.dec_d, mode="floor")
 
         res = scipy.optimize.minimize(
@@ -388,13 +389,13 @@ def recalibrateFF(
         image_stars, matched_catalog_stars, _ = matched_stars_good[jd]
 
         # Coverage gate: reject a fit that only matched a small fraction of the detected stars.
-        # The goodness check above only weighs the residuals of the stars that matched, so a
-        # sparse spurious subset (e.g. 29 of 308 detections aligned at a wrong pointing) can pass
-        # it. When such a fit is stamped auto_recalibrated and chained forward as the seed for the
-        # next FF, the pointing walks away over a marginal/cloudy night. Requiring a real coverage
-        # fraction rejects those fits (the frame keeps the previous good platepar) while accepting
-        # genuine fits - including after a real camera move, which re-matches the whole field at
-        # the new pointing.
+        #   The goodness check above only weighs the residuals of the stars that matched, so a
+        #   sparse spurious subset (e.g. 29 of 308 detections aligned at a wrong pointing) can pass
+        #   it. When such a fit is stamped auto_recalibrated and chained forward as the seed for the
+        #   next FF, the pointing walks away over a marginal/cloudy night. Requiring a real coverage
+        #   fraction rejects those fits (the frame keeps the previous good platepar) while accepting
+        #   genuine fits - including after a real camera move, which re-matches the whole field at
+        #   the new pointing
         n_detected = len(star_dict_ff[jd])
         match_fraction = len(image_stars)/n_detected if n_detected > 0 else 0.0
 
@@ -1137,9 +1138,9 @@ def recalibrateIndividualFFsAndApplyAstrometry(
         ff_dt = FFfile.filenameToDatetime(ff_name)
         dt_list.append(ff_dt)
 
-        # Compute the angular separation from the reference platepar by projecting
-        # both FOV centres at the FF file's observation time. This correctly handles
-        # platepars with different JD reference epochs.
+        # Compute the angular separation from the reference platepar by projecting both FOV centres at
+        #   the FF file's observation time. This correctly handles platepars with different JD reference
+        #   epochs
         ff_time = FFfile.getMiddleTimeFF(ff_name, config.fps, ret_milliseconds=True)
         _, ref_ra, ref_dec, _ = xyToRaDecPP(
             [ff_time], [platepar.X_res / 2], [platepar.Y_res / 2], [1], platepar,

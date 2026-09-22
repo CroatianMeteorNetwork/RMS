@@ -7,7 +7,8 @@ from time import time
 import numpy as np
 cimport numpy as np
 
-# Initialize the NumPy C API (explicit for clarity: Cython 3 (required to build against NumPy 2) emits it itself)
+# Initialize the NumPy C API. This is explicit for clarity only, as Cython 3 (required to build against
+#   NumPy 2) emits the call itself
 np.import_array()
 cimport cython
 
@@ -48,7 +49,8 @@ cdef float line3DDistance_simple(int x1, int y1, int z1, int x2, int y2, int z2,
     # Original function:
     # np.linalg.norm(np.cross((point0 - point1), (point0 - point2))) / np.linalg.norm(point2 - point1)
 
-    # Length of vector in the numerator
+    # Length of vector in the numerator. 64-bit integers are used so the squared cross products cannot
+    #   overflow for coordinates at the far corners of large frames
     cdef long long dx1 = x0 - x1
     cdef long long dy1 = y0 - y1
     cdef long long dz1 = z0 - z1
@@ -82,6 +84,7 @@ cdef long long point3DDistance(int x1, int y1, int z1, int x2, int y2, int z2):
     @return: squared distance
     """
 
+    # Widen to 64 bits before squaring so the sum cannot overflow a C int
     cdef long long dx = x2 - x1
     cdef long long dy = y2 - y1
     cdef long long dz = z2 - z1

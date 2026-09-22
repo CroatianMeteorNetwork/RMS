@@ -300,8 +300,8 @@ def JD2HourAngle(jd):
 def jd2YearsFromJ2000(jd):
     """ Compute the number of Julian years elapsed since the J2000.0 epoch.
 
-    Used for proper motion correction of star catalogs. Computed directly from the Julian date so the
-    fraction of a day is preserved (a datetime .days difference truncates to whole days).
+        Used for the proper motion correction of star catalogs. Computed directly from the Julian date so
+        the fraction of a day is preserved (a datetime .days difference truncates to whole days).
 
     Arguments:
         jd: [float] Julian date.

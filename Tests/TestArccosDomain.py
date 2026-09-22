@@ -7,6 +7,8 @@
     that happens.
 """
 
+from __future__ import print_function, division, absolute_import
+
 import pytest
 
 np = pytest.importorskip("numpy")

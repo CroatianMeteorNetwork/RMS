@@ -37,8 +37,8 @@ def logLineFunc(x, m, k):
 def angularSeparation(ra1, dec1, ra2, dec2):
     """ Calculates the angle between two points on a sphere. Inputs in radians.
 
-    Note that RMS.Astrometry.CyFunctions.angularSeparation has the same name but takes and
-    returns degrees.
+        Note that RMS.Astrometry.CyFunctions.angularSeparation has the same name but takes and returns
+        degrees.
     
     Arguments:
         ra1: [float] Right ascension 1 (radians).
@@ -50,13 +50,12 @@ def angularSeparation(ra1, dec1, ra2, dec2):
         [float] Angle between two coordinates (radians).
     """
 
-    # Classical method
-    # Rounding can push the cosine slightly above 1 for (nearly) coincident directions, which
-    # would make arccos return NaN, so clamp it to the closed interval [-1, 1]. The clip only
-    # guards the arccos domain - NaN coordinates still propagate as NaN. Note that the classical
-    # form remains ill-conditioned for small angles (the float64 resolution floor is ~0.004
-    # arcsec); the haversine formula below would remove both the NaN and that floor, but it
-    # changes every computed separation, so the clip is kept as the minimal fix.
+    # Classical method. Rounding can push the cosine slightly above 1 for (nearly) coincident directions,
+    #   which would make arccos return NaN, so clamp it to the closed interval [-1, 1]. The clip only guards
+    #   the arccos domain - NaN coordinates still propagate as NaN. Note that the classical form remains
+    #   ill-conditioned for small angles (the float64 resolution floor is ~0.004 arcsec); the haversine
+    #   formula below would remove both the NaN and that floor, but it changes every computed separation,
+    #   so the clip is kept as the minimal fix
     cos_sep = np.sin(dec1)*np.sin(dec2) + np.cos(dec1)*np.cos(dec2)*np.cos(ra2 - ra1)
 
     return np.arccos(np.clip(cos_sep, -1.0, 1.0))

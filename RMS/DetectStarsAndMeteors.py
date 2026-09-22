@@ -401,9 +401,9 @@ def saveDetections(detection_results, ff_dir, config, output_suffix=''):
         if not x2:
             continue
 
-        # Construct the table of the star parameters
-        # CALSTARS format: Y(0) X(1) IntensSum(2) Ampltd(3) FWHM(4) BgLvl(5) SNR(6) NSatPx(7)
-        # Note: intensity=IntensSum (integrated), amplitude=Ampltd (peak)
+        # Construct the table of the star parameters. CALSTARS format: Y(0) X(1) IntensSum(2) Ampltd(3)
+        #   FWHM(4) BgLvl(5) SNR(6) NSatPx(7), where intensity=IntensSum (integrated) and amplitude=Ampltd
+        #   (peak)
         star_data = zip(y2, x2, intensity, amplitude, fwhm, background, snr, saturated_count)
 
         # Add star info to the star list
@@ -540,8 +540,8 @@ def detectStarsAndMeteorsDirectory(dir_path, config, output_suffix=''):
 
 if __name__ == "__main__":
 
-    # Pin the multiprocessing start method for consistent behavior across Python versions
-    # (3.6-3.14). Must be done before any Process/Pool is created.
+    # Pin the multiprocessing start method for consistent behaviour across Python versions (3.6-3.14).
+    #   Must be done before any Process/Pool is created
     setMultiprocessingStartMethod()
 
     time_start = RmsDateTime.utcnow()

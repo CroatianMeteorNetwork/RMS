@@ -1,21 +1,42 @@
+""" Automatic platepar creation from CALSTARS data.
+
+    This module provides functionality to automatically create a platepar (plate solution) from a
+    directory containing CALSTARS data, without requiring GUI interaction.
+
+    The main entry point is autoFitPlatepar() which:
+        1. Loads the CALSTARS data from the directory
+        2. Selects the best frame based on the star distribution quality
+        3. Runs astrometry.net plate solving on that frame
+        4. Performs an iterative NN-based refinement
+        5. Applies star filtering (photometric outliers, blended stars)
+        6. Does the final fit with user-configurable settings
+        7. Returns a fitted Platepar object
+
+    The output should match exactly what would be obtained by clicking "Auto Fit" in SkyFit2 on the
+    selected image.
 """
-Automatic platepar creation from CALSTARS data.
 
-This module provides functionality to automatically create a platepar (plate solution)
-from a directory containing CALSTARS data, without requiring GUI interaction.
+# The MIT License
 
-The main entry point is autoFitPlatepar() which:
-1. Loads CALSTARS data from the directory
-2. Selects the best frame based on star distribution quality
-3. Runs astrometry.net plate solving on that frame
-4. Performs iterative NN-based refinement
-5. Applies star filtering (photometric outliers, blended stars, high FWHM)
-6. Does final fit with user-configurable settings
-7. Returns a fitted Platepar object
+# Copyright (c) 2016 Denis Vida
 
-The output should match exactly what would be obtained by clicking "Auto Fit"
-in SkyFit2 on the selected image.
-"""
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
 
 from __future__ import print_function, division, absolute_import
 
@@ -52,6 +73,9 @@ DEFAULT_REFRACTION = True
 #   FWHM/SNR/saturation to be attached to the pair (the fitted star_list only carries x, y, intensity)
 NN_PAIR_ASSOC_RADIUS_PX = 3.0
 
+
+
+### Detection association ###
 
 def associateDetections(star_x, star_y, x_data, y_data, radius=NN_PAIR_ASSOC_RADIUS_PX):
     """ Find the closest detection to every fitted star, if it is within the association radius.
@@ -99,24 +123,30 @@ def associateDetections(star_x, star_y, x_data, y_data, radius=NN_PAIR_ASSOC_RAD
     return closest_idx
 
 
-def scoreFrameDistribution(star_data, img_width, img_height, n_grid=4):
-    """
-    Score a frame's star distribution based on spatial coverage.
 
-    Divides the image into a grid and scores based on how well stars are
-    distributed across the grid cells. A good distribution has stars in
-    most cells without excessive clustering.
+### Frame scoring ###
+
+def scoreFrameDistribution(star_data, img_width, img_height, n_grid=4):
+    """ Score a frame's star distribution based on spatial coverage.
+
+        Divides the image into a grid and scores based on how well the stars are distributed across the
+        grid cells. A good distribution has stars in most cells without excessive clustering.
 
     Arguments:
-        star_data: [ndarray] Star data array with columns [y, x, IntensSum, Ampltd, FWHM, BgLvl, SNR, NSatPx]
-        img_width: [int] Image width in pixels
-        img_height: [int] Image height in pixels
-        n_grid: [int] Number of grid divisions per axis (default 4 = 16 cells)
+        star_data: [ndarray] Star data array with columns
+            [y, x, IntensSum, Ampltd, FWHM, BgLvl, SNR, NSatPx].
+        img_width: [int] Image width in pixels.
+        img_height: [int] Image height in pixels.
 
-    Returns:
-        score: [float] Distribution score (0-1, higher is better)
-        details: [dict] Detailed breakdown of the score components
+    Keyword arguments:
+        n_grid: [int] Number of grid divisions per axis. 4 by default, i.e. 16 cells.
+
+    Return:
+        score: [float] Distribution score (0-1, higher is better).
+        details: [dict] Detailed breakdown of the score components.
     """
+
+    # An empty frame scores zero
     if len(star_data) == 0:
         return 0.0, {'n_stars': 0, 'cells_occupied': 0, 'total_cells': n_grid*n_grid}
 
@@ -127,22 +157,22 @@ def scoreFrameDistribution(star_data, img_width, img_height, n_grid=4):
     y_coords = star_data[:, 0]
     x_coords = star_data[:, 1]
 
-    # Define grid
+    # Define the grid
     cell_width = img_width / n_grid
     cell_height = img_height / n_grid
     total_cells = n_grid * n_grid
 
-    # Count stars per cell
+    # Count the stars per cell (stars on the far edge are clipped into the last cell)
     cell_x = np.clip((x_coords / cell_width).astype(int), 0, n_grid - 1)
     cell_y = np.clip((y_coords / cell_height).astype(int), 0, n_grid - 1)
     cell_counts = np.zeros((n_grid, n_grid), dtype=int)
     np.add.at(cell_counts, (cell_y, cell_x), 1)
 
-    # Metrics
+    # Fraction of the image covered by stars
     cells_occupied = np.sum(cell_counts > 0)
     coverage_fraction = cells_occupied / total_cells
 
-    # Penalize very uneven distribution (high variance in cell counts)
+    # Penalize a very uneven distribution (high variance in cell counts)
     occupied_counts = cell_counts[cell_counts > 0]
     if len(occupied_counts) > 1:
         cv = np.std(occupied_counts) / np.mean(occupied_counts)
@@ -150,6 +180,7 @@ def scoreFrameDistribution(star_data, img_width, img_height, n_grid=4):
     else:
         uniformity_score = 0.5
 
+    # Coverage matters more than uniformity for constraining the distortion
     score = 0.7 * coverage_fraction + 0.3 * uniformity_score
 
     details = {
@@ -164,28 +195,35 @@ def scoreFrameDistribution(star_data, img_width, img_height, n_grid=4):
     return score, details
 
 
+
 def scoreFrameQuality(star_data, min_stars=10, max_stars=200):
-    """
-    Score a frame's star quality based on SNR, saturation, and count.
+    """ Score a frame's star quality based on SNR, saturation, and count.
 
     Arguments:
-        star_data: [ndarray] Star data array with columns [y, x, IntensSum, Ampltd, FWHM, BgLvl, SNR, NSatPx]
-        min_stars: [int] Minimum number of stars for a valid frame
-        max_stars: [int] Maximum number of stars (more may indicate noise/clouds)
+        star_data: [ndarray] Star data array with columns
+            [y, x, IntensSum, Ampltd, FWHM, BgLvl, SNR, NSatPx].
 
-    Returns:
-        score: [float] Quality score (0-1, higher is better)
-        details: [dict] Detailed breakdown of the score components
+    Keyword arguments:
+        min_stars: [int] Minimum number of stars for a valid frame. 10 by default.
+        max_stars: [int] Maximum number of stars (more may indicate noise/clouds). 200 by default.
+
+    Return:
+        score: [float] Quality score (0-1, higher is better).
+        details: [dict] Detailed breakdown of the score components.
     """
+
+    # An empty frame is not usable
     if len(star_data) == 0:
         return 0.0, {'n_stars': 0, 'valid': False}
 
     star_data = np.array(star_data)
     n_stars = len(star_data)
 
+    # Too few stars cannot constrain a fit
     if n_stars < min_stars:
         return 0.0, {'n_stars': n_stars, 'valid': False, 'reason': 'too_few_stars'}
 
+    # Older CALSTARS files lack the SNR and saturation columns, so assume neutral values for them
     snr = star_data[:, 6] if star_data.shape[1] > 6 else np.ones(n_stars)
     n_saturated_px = star_data[:, 7] if star_data.shape[1] > 7 else np.zeros(n_stars)
 
@@ -193,14 +231,17 @@ def scoreFrameQuality(star_data, min_stars=10, max_stars=200):
     non_saturated_count = np.sum(n_saturated_px == 0)
     non_saturated_fraction = non_saturated_count / n_stars
 
+    # Mean SNR of the unsaturated stars, falling back to all stars if every one is saturated
     non_sat_mask = n_saturated_px == 0
     if np.sum(non_sat_mask) > 0:
         mean_snr = np.mean(snr[non_sat_mask])
     else:
         mean_snr = np.mean(snr)
 
+    # An SNR of 10 or more is considered good enough
     snr_score = min(mean_snr / 10.0, 1.0)
 
+    # Reward more stars up to max_stars, then penalize frames with suspiciously many detections
     if n_stars <= max_stars:
         count_score = (n_stars - min_stars) / (max_stars - min_stars)
         count_score = max(0, min(1, count_score))
@@ -222,31 +263,36 @@ def scoreFrameQuality(star_data, min_stars=10, max_stars=200):
     return score, details
 
 
+
 def selectBestFrame(calstars, img_width, img_height, min_stars=10, max_stars=200, verbose=False):
-    """
-    Select the best frame from CALSTARS data based on star distribution and quality.
+    """ Select the best frame from the CALSTARS data based on the star distribution and quality.
 
     Arguments:
-        calstars: [dict] Dictionary mapping FF filenames to star data arrays
-        img_width: [int] Image width in pixels
-        img_height: [int] Image height in pixels
-        min_stars: [int] Minimum number of stars for a valid frame
-        max_stars: [int] Maximum stars before penalizing
-        verbose: [bool] Print detailed scoring info
+        calstars: [dict] Dictionary mapping FF file names to star data arrays.
+        img_width: [int] Image width in pixels.
+        img_height: [int] Image height in pixels.
 
-    Returns:
-        best_ff: [str] Filename of the best frame (or None if no valid frames)
-        best_score: [float] Score of the best frame
-        all_scores: [dict] Dictionary mapping FF filenames to score details
+    Keyword arguments:
+        min_stars: [int] Minimum number of stars for a valid frame. 10 by default.
+        max_stars: [int] Maximum number of stars before penalizing. 200 by default.
+        verbose: [bool] Print detailed scoring info. False by default.
+
+    Return:
+        best_ff: [str] File name of the best frame (or None if no valid frames).
+        best_score: [float] Score of the best frame.
+        all_scores: [dict] Dictionary mapping FF file names to score details.
     """
+
     all_scores = {}
 
+    # Score every frame on both criteria
     for ff_name, star_data in calstars.items():
         star_data = np.array(star_data)
 
         dist_score, dist_details = scoreFrameDistribution(star_data, img_width, img_height)
         qual_score, qual_details = scoreFrameQuality(star_data, min_stars, max_stars)
 
+        # Frames that failed the quality checks are excluded regardless of their distribution
         if qual_details.get('valid', False):
             combined_score = 0.5 * dist_score + 0.5 * qual_score
         else:
@@ -264,6 +310,7 @@ def selectBestFrame(calstars, img_width, img_height, min_stars=10, max_stars=200
             print("  {:s}: {:.3f} (dist={:.3f}, qual={:.3f}, n_stars={:d})".format(
                 ff_name, combined_score, dist_score, qual_score, len(star_data)))
 
+    # Pick the frame with the highest combined score (a zero score never wins, so it stays None)
     best_ff = None
     best_score = 0.0
 
@@ -275,36 +322,39 @@ def selectBestFrame(calstars, img_width, img_height, min_stars=10, max_stars=200
     return best_ff, best_score, all_scores
 
 
+
+### Fit reporting ###
+
 def printFitResiduals(paired_stars, platepar, jd, ff_dt):
-    """
-    Print fit residuals matching SkyFit2's output format.
+    """ Print the fit residuals matching SkyFit2's output format.
 
     Arguments:
-        paired_stars: [PairedStars] Paired stars object
-        platepar: [Platepar] Fitted platepar
-        jd: [float] Julian date
-        ff_dt: [datetime] Datetime of the image
+        paired_stars: [PairedStars] Paired stars object.
+        platepar: [Platepar] Fitted platepar.
+        jd: [float] Julian date.
+        ff_dt: [datetime] Datetime of the image.
 
-    Returns:
-        rmsd_img: [float] RMSD in pixels
-        rmsd_angular: [float] RMSD in arcmin/arcsec/deg
-        angular_error_label: [str] Unit label for angular RMSD
+    Return:
+        rmsd_img: [float] RMSD in pixels.
+        rmsd_angular: [float] RMSD in the unit given by angular_error_label.
+        angular_error_label: [str] Unit label for the angular RMSD (deg, arcmin or arcsec).
     """
-    # Print platepar
+
+    # Print the platepar
     print()
     print(repr(platepar))
 
-    # Print time info
+    # Print the time info
     print()
     print("Image time = {:s} UTC".format(ff_dt.strftime("%Y-%m-%d %H:%M:%S.%f")))
     print("Image JD = {:.8f}".format(jd))
     print("Image LST = {:.8f}".format(JD2LST(jd, platepar.lon)[0]))
 
-    # Get catalog positions for matched stars
+    # Get the catalog positions for the matched stars
     sky_coords = np.array(paired_stars.skyCoords())
     catalog_x, catalog_y, catalog_mag = getCatalogStarsImagePositions(sky_coords, jd, platepar)
 
-    # Print header
+    # Print the header
     print()
     print('Residuals')
     print('----------')
@@ -322,18 +372,18 @@ def printFitResiduals(paired_stars, platepar, jd, ff_dt):
         delta_x = cat_x - img_x
         delta_y = cat_y - img_y
 
-        # Compute image residual and angle
+        # Compute the image residual and angle
         angle = np.arctan2(delta_y, delta_x)
         distance = np.sqrt(delta_x**2 + delta_y**2)
 
-        # Compute RA/Dec from image position (using JD time format)
+        # Compute RA/Dec from the image position (using the JD time format)
         _, ra_img, dec_img, _ = xyToRaDecPP(
             [jd], [img_x], [img_y], [1], platepar, extinction_correction=False, jd_time=True
         )
         ra_img = ra_img[0]
         dec_img = dec_img[0]
 
-        # Compute angular distance
+        # Compute the angular distance
         angular_distance = np.degrees(angularSeparation(
             np.radians(ra), np.radians(dec),
             np.radians(ra_img), np.radians(dec_img)
@@ -341,22 +391,23 @@ def printFitResiduals(paired_stars, platepar, jd, ff_dt):
 
         residuals.append([img_x, img_y, angle, distance, angular_distance])
 
+        # Guard against missing photometry and star shape data in older CALSTARS files
         lsp = -2.5*np.log10(sum_intens) if sum_intens and sum_intens > 0 else 0
         fwhm_val = fwhm if fwhm is not None else 0.0
         mag_val = mag if mag is not None else 0.0
 
-        # Print residual line
+        # Print the residual line
         print('{:3d}, {:11.6f}, {:11.6f}, {:>12.6f}, {:>+13.6f}, {:8.2f}, {:8.2f}, {:>12.6f}, {:>+13.6f}, {:8.2f}, {:7.2f}, {:+9.1f}, {:5.2f}, {:+6.2f}, {:8.2f}'.format(
             star_no + 1, img_x, img_y, ra, dec, cat_x, cat_y,
             ra_img, dec_img, 60*angular_distance, distance, np.degrees(angle),
             fwhm_val, mag_val, lsp
         ))
 
-    # Compute RMSD errors
+    # Compute the RMSD errors
     rmsd_angular = 60*RMSD([entry[4] for entry in residuals])
     rmsd_img = RMSD([entry[3] for entry in residuals])
 
-    # Determine appropriate angular unit
+    # Determine the appropriate angular unit
     if rmsd_angular > 60:
         rmsd_angular /= 60
         angular_error_label = 'deg'
@@ -372,6 +423,9 @@ def printFitResiduals(paired_stars, platepar, jd, ff_dt):
     return rmsd_img, rmsd_angular, angular_error_label
 
 
+
+### Automatic platepar fit ###
+
 def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
                     fov_w_hint=None, ff_name=None, distortion_type=DEFAULT_DISTORTION_TYPE,
                     equal_aspect=DEFAULT_EQUAL_ASPECT, asymmetry_corr=DEFAULT_ASYMMETRY_CORR,
@@ -382,61 +436,65 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
                     wide_fov_search=False,
                     final_catalog_stars=None,
                     verbose=True):
-    """
-    Automatically create a platepar from CALSTARS data in a directory.
+    """ Automatically create a platepar from the CALSTARS data in a directory.
 
-    This function replicates the behavior of SkyFit2's "Auto Fit" button:
-    1. Loads CALSTARS data from the directory
-    2. Selects the best frame based on star distribution (or uses specified frame)
-    3. Runs astrometry.net plate solving
-    4. Performs NN-based refinement with intermediate settings
-    5. Applies star filtering (photometric outliers, blended stars, high FWHM)
-    6. Does final fit with user-specified settings
-    7. Returns a fitted Platepar
+        This function replicates the behaviour of SkyFit2's "Auto Fit" button:
+            1. Loads the CALSTARS data from the directory
+            2. Selects the best frame based on the star distribution (or uses the specified frame)
+            3. Runs astrometry.net plate solving
+            4. Performs an NN-based refinement with intermediate settings
+            5. Applies star filtering (photometric outliers, blended stars)
+            6. Does the final fit with the user-specified settings
+            7. Returns a fitted Platepar
 
     Arguments:
-        dir_path: [str] Path to directory containing CALSTARS file and FF files
-        config: [Config] RMS configuration object
-        catalog_stars: [ndarray] Star catalog array (RA, Dec, mag, ...)
-        platepar_template: [Platepar] Optional template platepar with station location.
-                          If None, uses config values.
-        fov_w_hint: [float] Optional FOV width hint in degrees. If None, uses config.fov_w.
-        ff_name: [str] Optional specific FF filename to use. If None, selects best frame
-                 from CALSTARS automatically.
+        dir_path: [str] Path to the directory containing the CALSTARS file and FF files.
+        config: [Config] RMS configuration object.
+        catalog_stars: [ndarray] Star catalog array (RA, Dec, mag, ...).
 
-    Keyword arguments (final fit settings - match SkyFit2 defaults):
-        distortion_type: [str] Distortion model for final fit (default: "radial5-odd")
-        equal_aspect: [bool] Equal aspect ratio constraint (default: True)
-        asymmetry_corr: [bool] Asymmetry correction (default: False)
-        force_distortion_centre: [bool] Force distortion centre to image centre (default: False)
-        refraction: [bool] Apply refraction correction (default: True)
+    Keyword arguments:
+        platepar_template: [Platepar] Optional template platepar with the station location. If None,
+            the config values are used.
+        fov_w_hint: [float] Optional FOV width hint in degrees. If None, config.fov_w is used.
+        ff_name: [str] Optional specific FF file name to use. If None, the best frame from CALSTARS is
+            selected automatically.
+        distortion_type: [str] Distortion model for the final fit. DEFAULT_DISTORTION_TYPE by default.
+        equal_aspect: [bool] Equal aspect ratio constraint. DEFAULT_EQUAL_ASPECT by default.
+        asymmetry_corr: [bool] Asymmetry correction. DEFAULT_ASYMMETRY_CORR by default.
+        force_distortion_centre: [bool] Force the distortion centre to the image centre.
+            DEFAULT_FORCE_DISTORTION_CENTRE by default.
+        refraction: [bool] Apply the refraction correction. DEFAULT_REFRACTION by default.
+        photometric_sigma: [float] Sigma threshold for the photometric outlier removal.
+            DEFAULT_PHOTOMETRIC_SIGMA by default.
+        fwhm_mult: [float] Multiplier of the FWHM for the blend detection radius. DEFAULT_BLEND_FWHM_MULT
+            by default.
+        wide_fov_search: [bool] If True, use a wide FOV search range (2 to 200 deg) instead of the
+            config-based range. Used as a fallback when the tight search fails. False by default.
+        final_catalog_stars: [ndarray] Optional deeper star catalog used for the last stage of the NN
+            fit. None by default, in which case catalog_stars is used throughout.
+        verbose: [bool] Print progress information. True by default.
 
-    Keyword arguments (filtering parameters):
-        photometric_sigma: [float] Sigma threshold for photometric outlier removal (default: 2.5)
-        fwhm_mult: [float] Multiplier of FWHM for blend detection radius (default: 2.0)
-
-        wide_fov_search: [bool] If True, use a wide FOV search range (2° to 200°) instead of
-                         the config-based range. Used as fallback when the tight search fails.
-        verbose: [bool] Print progress information
-
-    Returns:
-        platepar: [Platepar] Fitted platepar object, or None if fitting failed
-        matched_stars: [list] List of matched star pairs
-        best_ff: [str] Filename of the frame used for fitting
+    Return:
+        platepar: [Platepar] Fitted platepar object, or None if fitting failed.
+        matched_stars: [PairedStars] Matched star pairs (an empty list if the fit failed after the
+            frame was chosen, None if it failed before).
+        best_ff: [str] File name of the frame used for fitting.
     """
+
     if verbose:
         print("=" * 70)
         print("Auto Platepar Fitting")
         print("=" * 70)
         print("Directory: {:s}".format(dir_path))
 
-    # Find and load CALSTARS file
+    # Find the CALSTARS file
     calstars_file = None
     for f in os.listdir(dir_path):
         if 'CALSTARS' in f and f.endswith('.txt'):
             calstars_file = f
             break
 
+    # Run the star extraction if there is no CALSTARS file yet
     if calstars_file is None:
         if verbose:
             print("No CALSTARS file found, generating automatically...")
@@ -453,8 +511,10 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
                 print("ERROR: Failed to generate CALSTARS file")
             return None, None, None
 
+    # Otherwise load the existing one
     else:
         calstars_list, _ = CALSTARS.readCALSTARS(dir_path, calstars_file)
+
     calstars = {ff_file: star_data for ff_file, star_data in calstars_list}
 
     if verbose:
@@ -466,9 +526,9 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
     img_width = config.width
     img_height = config.height
 
-    # Use specified frame or find the best one
+    # Use the specified frame
     if ff_name is not None:
-        # Use the specified frame
+
         if ff_name not in calstars:
             if verbose:
                 print("ERROR: Specified frame '{:s}' not found in CALSTARS".format(ff_name))
@@ -482,8 +542,9 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
             print()
             print("Using specified frame: {:s}".format(best_ff))
             print("  Stars: {:d}".format(len(calstars[best_ff])))
+
+    # Otherwise find the best frame automatically
     else:
-        # Find the best frame automatically
         if verbose:
             print()
             print("Scoring frames for star distribution...")
@@ -509,10 +570,10 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
                 details['quality_details']['non_saturated_fraction'] * 100
             ))
 
-    # Get star data for best frame
+    # Get the star data for the best frame
     star_data = np.array(calstars[best_ff])
 
-    # Create or copy platepar
+    # Init the platepar with the station location and resolution from the template
     if platepar_template is not None:
         platepar = Platepar()
         platepar.lat = platepar_template.lat
@@ -521,6 +582,8 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
         platepar.X_res = platepar_template.X_res
         platepar.Y_res = platepar_template.Y_res
         platepar.station_code = platepar_template.station_code
+
+    # Or from the config
     else:
         platepar = Platepar()
         platepar.lat = config.latitude
@@ -530,11 +593,11 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
         platepar.Y_res = config.height
         platepar.station_code = config.stationID
 
-    # Initialize vignetting coefficient with resolution-scaled default
-    # We don't apply flat during platepar creation, so photometry needs vignetting correction
+    # Initialize the vignetting coefficient with the resolution-scaled default. The flat is not applied
+    #   during platepar creation, so the photometry needs the vignetting correction
     platepar.addVignettingCoeff(use_flat=False)
 
-    # Get time from FF filename
+    # Get the time from the FF file name
     ff_dt = filenameToDatetime(best_ff)
     jd = date2JD(ff_dt.year, ff_dt.month, ff_dt.day,
                  ff_dt.hour, ff_dt.minute, ff_dt.second, ff_dt.microsecond/1000.0)
@@ -542,22 +605,26 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
     platepar.JD = jd
     platepar.Ho = JD2HourAngle(jd)
 
-    # FOV hint
+    # Take the FOV hint from the config if not given
     if fov_w_hint is None:
         fov_w_hint = config.fov_w
 
-    # Construct FOV width estimate
+    # Construct the FOV width search range
     if wide_fov_search:
-        # Wide search range covers all common lens types (2° telephoto to 200° fisheye)
+
+        # The wide search range covers all common lens types (2 deg telephoto to 200 deg fisheye)
         fov_w_range = [2, max(200, 1.5 * fov_w_hint)]
+
     else:
-        # Tight search range based on config (0.75x to 1.5x)
+
+        # Tight search range based on the config (0.75x to 1.5x)
         fov_w_range = [0.75 * fov_w_hint, 1.5 * fov_w_hint]
 
-    # Load mask if available
+    # Load the mask if available
     mask = getMaskFile(dir_path, config)
 
-    # Extract star coordinates (CALSTARS format: y, x, ...)
+    # Extract the star coordinates (CALSTARS format: y, x, ...). Older CALSTARS files lack the photometry
+    #   and star shape columns, so neutral values are assumed for them
     y_data = star_data[:, 0]
     x_data = star_data[:, 1]
     input_intensities = star_data[:, 2] if star_data.shape[1] > 2 else None
@@ -588,7 +655,8 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
     )
 
     if solution is None:
-        # If tight FOV search failed, try wide search as fallback
+
+        # If the tight FOV search failed, retry with the wide search on the same frame as a fallback
         if not wide_fov_search:
             if verbose:
                 print("Tight FOV search failed, trying wide FOV search...")
@@ -609,7 +677,7 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
             print("ERROR: Astrometry.net failed to find a solution")
         return None, [], best_ff
 
-    # Extract solution
+    # Extract the solution
     ra, dec, rot_standard, scale, fov_w, fov_h, matched_star_data, solution_info = solution
 
     if verbose:
@@ -620,19 +688,20 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
         print("  Scale = {:.3f} arcmin/px".format(60 / scale))
         print("  FOV = {:.2f} x {:.2f} deg".format(fov_w, fov_h))
 
-    # Apply solution to platepar
+    # Apply the solution to the platepar
     platepar.F_scale = scale
 
-    # Compute azimuth and altitude from RA/Dec
+    # Compute the azimuth and altitude from RA/Dec
     azim, alt = trueRaDec2ApparentAltAz(ra, dec, jd, platepar.lat, platepar.lon)
     platepar.az_centre = azim
     platepar.alt_centre = alt
 
+    # Set the reference pointing and convert the astrometry.net rotation to the platepar convention
     platepar.updateRefRADec(skip_rot_update=True)
     platepar.pos_angle_ref = rotationWrtStandardToPosAngle(platepar, rot_standard)
 
-    # Set INTERMEDIATE fitting parameters (matching SkyFit2)
-    # These are used for NN refinement, NOT the final fit
+    # Set the INTERMEDIATE fitting parameters (matching SkyFit2). These are used for the NN refinement,
+    #   NOT the final fit
     platepar.refraction = True
     platepar.equal_aspect = True
     platepar.asymmetry_corr = False
@@ -643,12 +712,13 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
         print()
         print("Performing NN-based refinement...")
 
-    # Prepare detected stars array
+    # Prepare the detected stars array
     img_stars_arr = np.column_stack([x_data, y_data,
                                      input_intensities if input_intensities is not None else np.ones(len(x_data))])
 
     try:
-        # Fit using NN cost function (intermediate fit)
+
+        # Fit using the NN cost function (intermediate fit)
         result = platepar.fitAstrometry(
             jd, img_stars_arr, catalog_stars,
             first_platepar_fit=True,
@@ -666,7 +736,7 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
             print("ERROR: NN fitting failed: {:s}".format(str(e)))
         return None, [], best_ff
 
-    # Build paired_stars from NN fit results
+    # Build the paired stars from the NN fit results
     paired_stars = PairedStars()
 
     if hasattr(platepar, 'star_list') and platepar.star_list:
@@ -682,6 +752,7 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
             _, img_x, img_y, intensity, cat_ra, cat_dec, cat_mag = entry
             sky_obj = CatalogStar(cat_ra, cat_dec, cat_mag)
 
+            # Fall back to nominal star shape values if no detection is close enough
             fwhm, snr, saturated = 2.5, 1.0, False
             if closest_idx >= 0:
                 fwhm = input_fwhm[closest_idx]
@@ -693,17 +764,18 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
         if verbose:
             print("  Matched pairs: {:d}".format(len(paired_stars)))
 
-    # Check if we have enough stars for final fit
+    # Check if there are enough stars for the final fit
     if len(paired_stars) < 10:
         if verbose:
             print("ERROR: Not enough matched stars for final fit ({:d} < 10)".format(len(paired_stars)))
         return None, [], best_ff
 
-    # Apply star filtering (matching SkyFit2)
+    # Apply the star filtering (matching SkyFit2)
     if verbose:
         print()
         print("Filtering stars...")
 
+    # Only filter when there are enough stars left over for the filters to be meaningful
     if len(paired_stars) >= 15:
         paired_stars, _ = filterPhotometricOutliers(
             paired_stars, platepar, jd, sigma_threshold=photometric_sigma, verbose=verbose)
@@ -722,7 +794,7 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
             print("ERROR: Not enough stars after filtering ({:d} < 10)".format(len(paired_stars)))
         return None, [], best_ff
 
-    # Apply USER's settings for final fit
+    # Apply the USER's settings for the final fit
     if verbose:
         print()
         print("Final fit with user settings...")
@@ -732,14 +804,14 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
         print("  force_distortion_centre: {:s}".format(str(force_distortion_centre)))
         print("  refraction: {:s}".format(str(refraction)))
 
-    # Use remapCoeffsForFlagChange to properly handle coefficient structure changes
+    # Use remapCoeffsForFlagChange to properly handle the coefficient structure changes
     platepar.remapCoeffsForFlagChange('equal_aspect', equal_aspect)
     platepar.remapCoeffsForFlagChange('asymmetry_corr', asymmetry_corr)
     platepar.remapCoeffsForFlagChange('force_distortion_centre', force_distortion_centre)
     platepar.refraction = refraction
     platepar.setDistortionType(distortion_type, reset_params=False)
 
-    # Extract coordinates for final fit
+    # Extract the coordinates for the final fit
     img_coords = np.array(paired_stars.imageCoords())
     sky_coords = np.array(paired_stars.skyCoords())
 
@@ -752,9 +824,12 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
         return None, [], best_ff
 
     if verbose:
-        # Print full residuals report (matching SkyFit2 output)
+
+        # Print the full residuals report (matching the SkyFit2 output)
         try:
             printFitResiduals(paired_stars, platepar, jd, ff_dt)
+
+        # Fall back to a short summary if the report cannot be produced
         except Exception as e:
             print("WARNING: Could not print residuals: {:s}".format(str(e)))
             print()
@@ -767,18 +842,25 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
     return platepar, paired_stars, best_ff
 
 
+
+### Catalog loading ###
+
 def loadCatalogStars(config, lim_mag, jd=None):
-    """
-    Load star catalog for plate solving.
+    """ Load the star catalog for plate solving.
 
     Arguments:
-        config: [Config] RMS configuration object
-        lim_mag: [float] Limiting magnitude
-        jd: [float] Julian date for proper motion correction (optional)
+        config: [Config] RMS configuration object.
+        lim_mag: [float] Limiting magnitude.
 
-    Returns:
-        catalog_stars: [ndarray] Star catalog array
+    Keyword arguments:
+        jd: [float] Julian date for the proper motion correction. None by default, in which case the
+            J2000 positions are used.
+
+    Return:
+        catalog_stars: [ndarray] Star catalog array, or None if the catalog could not be read.
     """
+
+    # Fall back to the catalogs shipped with RMS if the configured directory does not exist
     star_catalog_path = config.star_catalog_path
     if not os.path.isdir(star_catalog_path):
         star_catalog_path = os.path.join(config.rms_root_dir, 'Catalogs')
@@ -802,13 +884,19 @@ def loadCatalogStars(config, lim_mag, jd=None):
     return catalog_stars
 
 
+
 if __name__ == "__main__":
+
     import argparse
     import RMS.ConfigReader as cr
 
+    ### COMMAND LINE ARGUMENTS
+
+    # Init the command line arguments parser
     parser = argparse.ArgumentParser(description="Auto-fit platepar from CALSTARS data")
     parser.add_argument("dir_path", help="Path to directory with CALSTARS file")
-    parser.add_argument("-c", "--config", nargs=1, metavar='CONFIG_PATH', type=str, help="Path to config file", default=None)
+    parser.add_argument("-c", "--config", nargs=1, metavar='CONFIG_PATH', type=str,
+                        help="Path to config file", default=None)
 
     # Fitting parameters (matching SkyFit2 defaults)
     parser.add_argument("--distortion", default=DEFAULT_DISTORTION_TYPE,
@@ -824,18 +912,23 @@ if __name__ == "__main__":
 
     # Filtering parameters
     parser.add_argument("--photom-sigma", type=float, default=DEFAULT_PHOTOMETRIC_SIGMA,
-                        help="Photometric outlier sigma threshold (default: {:.1f})".format(DEFAULT_PHOTOMETRIC_SIGMA))
+                        help="Photometric outlier sigma threshold (default: {:.1f})".format(
+                            DEFAULT_PHOTOMETRIC_SIGMA))
     parser.add_argument("--fwhm-mult", type=float, default=DEFAULT_BLEND_FWHM_MULT,
-                        help="FWHM multiplier for blend detection radius (default: {:.1f})".format(DEFAULT_BLEND_FWHM_MULT))
+                        help="FWHM multiplier for blend detection radius (default: {:.1f})".format(
+                            DEFAULT_BLEND_FWHM_MULT))
 
     parser.add_argument("-o", "--output", help="Output platepar filename", default="platepar_auto.cal")
 
+    # Parse the command line arguments
     args = parser.parse_args()
 
-    # Load config
+    #########################
+
+    # Load the config
     config = cr.loadConfigFromDirectory(args.config if args.config is not None else '.', args.dir_path)
 
-    # Load star catalog
+    # Load the star catalog
     catalog_stars = loadCatalogStars(config, config.catalog_mag_limit)
 
     if catalog_stars is None:
@@ -844,7 +937,7 @@ if __name__ == "__main__":
 
     print("Loaded star catalog: {:d} stars".format(len(catalog_stars)))
 
-    # Run auto-fit
+    # Run the auto-fit
     platepar, matched_stars, best_ff = autoFitPlatepar(
         args.dir_path, config, catalog_stars,
         distortion_type=args.distortion,
@@ -857,6 +950,7 @@ if __name__ == "__main__":
         verbose=True
     )
 
+    # Save the platepar next to the input data
     if platepar is not None:
         print()
         print("=" * 70)

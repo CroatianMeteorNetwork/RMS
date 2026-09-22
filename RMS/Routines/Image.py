@@ -45,59 +45,63 @@ from RMS.Routines.BinImageCy import binImage as binImageCy
 
 class CoordinateFilter:
     def __init__(self, image_shape, mask, border):
-        """
-        Initializes the CoordinateFilter with image properties for filtering coordinates
-        that are too close to the image border or inside the mask.
+        """ Initializes the CoordinateFilter with image properties for filtering coordinates that are too
+            close to the image border or inside the mask.
 
         Arguments:
             image_shape: [tuple] Shape of the image (height, width).
-            mask: [MaskStructure or None] Mask structure with .img attribute where
-                black (0) = masked out, white (255) = clear.
+            mask: [MaskStructure or None] Mask structure with a .img attribute where black (0) = masked
+                out, white (255) = clear. A plain ndarray mask is accepted as well.
             border: [float] Distance threshold in pixels from the image edge.
         """
+
         self.h, self.w = image_shape
         self.border = border
 
-        # Extract the mask image array from the MaskStructure object (if given)
+        # Extract the mask image array from the MaskStructure object (if given), or take a raw array as is
         if mask is not None and hasattr(mask, 'img'):
             self.mask_img = mask.img
+
         elif mask is not None and isinstance(mask, np.ndarray):
             self.mask_img = mask
+
         else:
             self.mask_img = None
 
     def filterCoordinates(self, coords):
-        """
-        Filters out coordinates that are too close to the image border or inside the mask.
+        """ Filters out coordinates that are too close to the image border or inside the mask.
 
         Arguments:
             coords: [array-like] Array of (x, y) coordinates to filter, shape (N, 2).
 
-        Returns:
+        Return:
             (filtered_coords, valid_flags):
                 - np.ndarray: Filtered array of coordinates.
                 - np.ndarray: Boolean flags indicating which coordinates are valid.
         """
 
+        # Nothing to filter
         coords_array = np.array(coords)
         if coords_array.size == 0:
             return coords_array, np.zeros(0, dtype=bool)
+
         coords_int = coords_array.astype(np.int32)
 
         x_vals = coords_int[:, 0]
         y_vals = coords_int[:, 1]
 
-        # Check border distance
+        # Check the border distance
         valid_flags = (
             (x_vals >= self.border) & (x_vals < self.w - self.border) &
             (y_vals >= self.border) & (y_vals < self.h - self.border)
         )
 
-        # Check mask (only for coordinates that passed the border check)
+        # Check the mask (only for coordinates that passed the border check)
         if self.mask_img is not None:
             xs_valid = x_vals[valid_flags]
             ys_valid = y_vals[valid_flags]
 
+            # Coordinates outside the mask image cannot be looked up, so they are treated as clear
             in_bounds = (
                 (ys_valid >= 0) & (ys_valid < self.mask_img.shape[0]) &
                 (xs_valid >= 0) & (xs_valid < self.mask_img.shape[1])
@@ -287,10 +291,10 @@ try:
         """
 
         height, width = img_avg_sub.shape
-        # np.bool_ (NOT the builtin bool): this function is @njit-compiled and
-        # Numba cannot type the Python builtin as a dtype - dtype=bool raises a
-        # TypingError on first call wherever numba is installed. np.bool_ exists
-        # on both NumPy 1 and 2 (only the np.bool alias ever went away).
+
+        # np.bool_ (NOT the builtin bool): this function is @njit-compiled and Numba cannot type the
+        #   Python builtin as a dtype - dtype=bool raises a TypingError on first call wherever numba is
+        #   installed. np.bool_ exists on both NumPy 1 and 2 (only the np.bool alias ever went away)
         img_thresh = np.zeros((height, width), dtype=np.bool_)
 
         for i in range(height):

@@ -1,14 +1,37 @@
-"""
-Shared star container classes for astrometry operations.
+""" Shared star container classes for astrometry operations.
 
-This module provides container classes for catalog stars, geo points, and paired stars
-that are used by both SkyFit2 and AutoPlatepar.
+    This module provides container classes for catalog stars, geo points, solar system bodies and
+    paired stars that are used by both SkyFit2 and AutoPlatepar.
 """
+
+# The MIT License
+
+# Copyright (c) 2016 Denis Vida
+
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
 
 from __future__ import print_function, division, absolute_import
 
 import numpy as np
 
+
+### Sky objects that can be paired with an image position ###
 
 class CatalogStar(object):
     def __init__(self, ra, dec, mag):
@@ -20,6 +43,7 @@ class CatalogStar(object):
             mag: [float] Magnitude.
         """
 
+        # Tag used by PairedStars to tell the different sky object types apart
         self.pick_type = "star"
 
         self.ra = ra
@@ -28,10 +52,10 @@ class CatalogStar(object):
 
 
     def coords(self):
-        """ Return sky coordinates.
+        """ Return the sky coordinates of the star.
 
-        Returns:
-            tuple: (ra, dec, mag)
+        Return:
+            (ra, dec, mag): [tuple of floats]
         """
 
         return self.ra, self.dec, self.mag
@@ -40,7 +64,7 @@ class CatalogStar(object):
 
 class GeoPoint(object):
     def __init__(self, geo_points_obj, geo_point_index):
-        """ Container for a geo point.
+        """ Container for a geo point, i.e. a ground landmark with known geographical coordinates.
 
         Arguments:
             geo_points_obj: [object] GeoPoints object containing coordinate arrays.
@@ -49,15 +73,16 @@ class GeoPoint(object):
 
         self.pick_type = "geopoint"
 
+        # Only the reference is kept, so the coordinates follow any update of the GeoPoints object
         self.geo_points_obj = geo_points_obj
         self.geo_point_index = geo_point_index
 
 
     def coords(self):
-        """ Return sky coordinates.
+        """ Return the sky coordinates of the geo point.
 
-        Returns:
-            tuple: (ra, dec, mag) where mag is always 1.0 for geo points.
+        Return:
+            (ra, dec, mag): [tuple of floats] The magnitude is always 1.0 for geo points.
         """
 
         ra = self.geo_points_obj.ra_data[self.geo_point_index]
@@ -73,7 +98,7 @@ class PlanetPoint(object):
         """ Container for a solar system body (planet, Moon, Sun).
 
         Arguments:
-            name: [str] Name of the body (e.g., 'Jupiter', 'Moon').
+            name: [str] Name of the body (e.g. 'Jupiter', 'Moon').
             ra: [float] Right ascension in degrees.
             dec: [float] Declination in degrees.
             mag: [float] Apparent magnitude.
@@ -88,19 +113,25 @@ class PlanetPoint(object):
 
 
     def coords(self):
-        """ Return sky coordinates.
+        """ Return the sky coordinates of the body.
 
-        Returns:
-            tuple: (ra, dec, mag)
+        Return:
+            (ra, dec, mag): [tuple of floats]
         """
 
         return self.ra, self.dec, self.mag
 
 
 
+### Image-to-sky pairs ###
+
 class PairedStars(object):
     def __init__(self):
-        """ Container for picked stars and geo points. """
+        """ Container for picked stars and geo points, i.e. pairs of image positions and sky objects.
+
+            Every entry is a list [x, y, fwhm, intens_acc, obj, snr, saturated], where obj is one of the
+            sky object containers above.
+        """
 
         self.paired_stars = []
 
@@ -113,7 +144,9 @@ class PairedStars(object):
             y: [float] Image Y coordinate.
             fwhm: [float] Full width at half maximum (px).
             intens_acc: [float] Sum of pixel intensities.
-            obj: [object] Instance of CatalogStar or GeoPoint.
+            obj: [object] Instance of CatalogStar, GeoPoint or PlanetPoint.
+
+        Keyword arguments:
             snr: [float] Signal-to-noise ratio. Default is 0.
             saturated: [bool] Whether the star is saturated. Default is False.
         """
@@ -128,14 +161,14 @@ class PairedStars(object):
 
 
     def findClosestPickedStarIndex(self, pos_x, pos_y):
-        """ Finds the index of the closest picked star on the image to the given image position.
+        """ Find the index of the closest picked star on the image to the given image position.
 
         Arguments:
             pos_x: [float] Image X coordinate.
             pos_y: [float] Image Y coordinate.
 
-        Returns:
-            int: Index of the closest star.
+        Return:
+            [int] Index of the closest star.
         """
 
         picked_x = np.array([star[0] for star in self.paired_stars])
@@ -148,14 +181,14 @@ class PairedStars(object):
 
 
     def removeClosestPair(self, pos_x, pos_y):
-        """ Remove pair closest to the given image coordinates.
+        """ Remove the pair closest to the given image coordinates.
 
         Arguments:
             pos_x: [float] Image X coordinate.
             pos_y: [float] Image Y coordinate.
 
-        Returns:
-            The removed pair, or None if no pairs exist.
+        Return:
+            [list] The removed pair, or None if no pairs exist.
         """
 
         if not len(self.paired_stars):
@@ -172,12 +205,13 @@ class PairedStars(object):
         """ Return a list of image coordinates of the pairs.
 
         Keyword arguments:
-            draw: [bool] Add an offset of 0.5 px for drawing using pyqtgraph.
+            draw: [bool] Add an offset of 0.5 px for drawing using pyqtgraph. Default is False.
 
-        Returns:
-            list: List of (x, y, intens_acc) tuples.
+        Return:
+            img_coords: [list] List of (x, y, intens_acc) tuples.
         """
 
+        # pyqtgraph draws pixel centres at half-integer positions
         offset = 0
         if draw:
             offset = 0.5
@@ -189,21 +223,21 @@ class PairedStars(object):
 
 
     def skyCoords(self):
-        """ Return a list of sky coordinates.
+        """ Return a list of sky coordinates of the pairs.
 
-        Returns:
-            list: List of (ra, dec, mag) tuples.
+        Return:
+            [list] List of (ra, dec, mag) tuples.
         """
 
         return [obj.coords() for _, _, _, _, obj, _, _ in self.paired_stars]
 
 
     def allCoords(self):
-        """ Return all coordinates, image and sky in the [(x, y, fwhm, intens_acc, snr, saturated), (ra, dec, mag)]
-            list form for every entry.
+        """ Return all coordinates, image and sky, in the
+            [(x, y, fwhm, intens_acc, snr, saturated), (ra, dec, mag)] list form for every entry.
 
-        Returns:
-            list: List of [(img_data), (sky_data)] pairs.
+        Return:
+            [list] List of [(img_data), (sky_data)] pairs.
         """
 
         return [
@@ -211,11 +245,12 @@ class PairedStars(object):
             for x, y, fwhm, intens_acc, obj, snr, saturated in self.paired_stars
             ]
 
-    def snr(self):
-        """ Return a list of SNR values.
 
-        Returns:
-            list: List of SNR values.
+    def snr(self):
+        """ Return a list of SNR values of the pairs.
+
+        Return:
+            [list] List of SNR values.
         """
 
         return [snr for _, _, _, _, _, snr, _ in self.paired_stars]

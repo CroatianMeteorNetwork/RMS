@@ -1,9 +1,31 @@
-""" Align platepar using nearest-neighbor optimization.
+""" Align the platepar using nearest-neighbour optimization.
 
-This module provides platepar alignment by fitting pointing parameters (RA, Dec, rotation)
-using a nearest-neighbor cost function. This uses direct optimization to minimize the
-distances between detected stars and their nearest catalog matches.
+    This module provides platepar alignment by fitting the pointing parameters (RA, Dec, rotation)
+    using a nearest-neighbour cost function. Direct optimization is used to minimize the distances
+    between detected stars and their nearest catalog matches.
 """
+
+# The MIT License
+
+# Copyright (c) 2016 Denis Vida
+
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
 
 from __future__ import print_function, division, absolute_import
 
@@ -47,10 +69,10 @@ INFERRED_LM_MARGIN = 1.0
 
 def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update=False, show_plot=False,
                   lm_callback=None):
-    """ Align the platepar using nearest-neighbor optimization.
+    """ Align the platepar using nearest-neighbour optimization.
 
-    This function fits the platepar pointing parameters (RA_d, dec_d, pos_angle_ref) by minimizing
-    the sum of angular separations between detected stars and their nearest catalog neighbors.
+        This function fits the platepar pointing parameters (RA_d, dec_d, pos_angle_ref) by minimizing
+        the sum of angular separations between detected stars and their nearest catalog neighbours.
 
     Arguments:
         config: [Config instance]
@@ -95,8 +117,9 @@ def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update
             calstars_coords.shape))
         return platepar, config.catalog_mag_limit
 
+    # Full CALSTARS format: (y, x, intensity, ...)
     if calstars_coords.shape[1] >= 3:
-        # Full CALSTARS format: (y, x, intensity, ...)
+
         det_x = calstars_coords[:, 1]
         det_y = calstars_coords[:, 0]
         det_intens = calstars_coords[:, 2]
@@ -107,6 +130,8 @@ def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update
         photometry_calibrated = (platepar.mag_lev != 1.0) and (platepar.mag_lev_stddev > 0)
 
         if photometry_calibrated:
+
+            # Estimate the catalog magnitude of every detection from its intensity and the zero point
             valid_intens = det_intens[det_intens > 0]
             if len(valid_intens) > 0:
                 inst_mags = -2.5 * np.log10(valid_intens)
@@ -124,10 +149,11 @@ def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update
             log.info("alignPlatepar: Photometry not calibrated (mag_lev={:.1f}), using config LM={:.1f}".format(
                 platepar.mag_lev, config.catalog_mag_limit))
 
-        # Reformat to (x, y) for rest of function
+        # Reformat to (x, y) for the rest of the function
         calstars_coords = np.column_stack([det_x, det_y])
+
+    # Legacy (x, y) format - use the config LM
     else:
-        # Legacy (x, y) format - use config LM
         log.info("alignPlatepar: Using config LM={:.1f} (no intensity data)".format(
             config.catalog_mag_limit))
 
@@ -175,15 +201,14 @@ def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update
         log.warning("alignPlatepar: Not enough catalog stars in FOV ({})".format(len(catalog_stars_fov)))
         return platepar, config.catalog_mag_limit
 
-    # Convert calstars_coords to img_stars format (x, y, intensity)
-    # Add dummy intensity column
+    # Convert calstars_coords to the img_stars format (x, y, intensity) by adding a dummy intensity column
     img_stars = np.column_stack([calstars_coords, np.ones(len(calstars_coords))])
 
     if len(img_stars) < 5:
         log.warning("alignPlatepar: Not enough detected stars ({})".format(len(img_stars)))
         return platepar, config.catalog_mag_limit
 
-    # Create aligned platepar copy
+    # Fit on a copy so the original platepar is returned untouched if the fit fails
     platepar_aligned = copy.deepcopy(platepar)
 
     # Use the NN-based pointing fit
@@ -195,7 +220,7 @@ def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update
 
     if success:
 
-        # Compute pointing shift and rotation change for logging
+        # Compute the pointing shift and rotation change for logging
         _, ra_centre_new, dec_centre_new, _ = ApplyAstrometry.xyToRaDecPP(
             [calstars_time], [platepar.X_res / 2], [platepar.Y_res / 2], [1],
             platepar_aligned, extinction_correction=False, precompute_pointing_corr=True)
@@ -204,6 +229,7 @@ def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update
 
         pointing_shift = angularSeparationDeg(ra_centre, dec_centre, ra_centre_new, dec_centre_new)
 
+        # Wrap the rotation change to the [0, 180] deg range
         rot_change = abs(platepar_aligned.pos_angle_ref - platepar.pos_angle_ref) % 360
         if rot_change > 180:
             rot_change = 360 - rot_change
@@ -223,6 +249,7 @@ def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update
         log.info("    Inliers: {:.1f}%, Inlier RMSD: {:.2f} px".format(
             100*inlier_fraction, inlier_rmsd))
 
+    # Keep the original platepar if the fit did not converge
     else:
         log.warning("alignPlatepar: Fit did not converge (inliers: {:.1f}%), returning original platepar".format(
             100*inlier_fraction))
@@ -303,11 +330,11 @@ if __name__ == "__main__":
 
     log.info('CALSTARS file: ' + calstars_file + ' loaded!')
 
-    # Extract star list from CALSTARS file from FF file with most stars
+    # Extract the star list from the FF file with the most stars
     max_len_ff = max(calstars_dict, key=lambda k: len(calstars_dict[k]))
 
-    # Pass full CALSTARS data - alignPlatepar will extract coordinates and use intensities
-    # to infer appropriate catalog limiting magnitude
+    # Pass the full CALSTARS data - alignPlatepar will extract the coordinates and use the intensities
+    #   to infer the appropriate catalog limiting magnitude
     calstars_data = np.array(calstars_dict[max_len_ff])
 
     # Get the time of the FF file

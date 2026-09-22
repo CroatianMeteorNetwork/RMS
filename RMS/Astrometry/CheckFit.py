@@ -36,48 +36,54 @@ log = getLogger("rmslogger")
 
 
 def buildNelderMeadSimplex(p0, dec_d, mode="floor", angular_step=2.0, min_step_deg=0.5):
-    """Build initial simplex for Nelder-Mead optimization of astrometric parameters.
+    """ Build the initial simplex for the Nelder-Mead optimization of the astrometric parameters.
 
-    Scipy's default simplex perturbs each parameter by 5% of its value. This gives
-    ~0 step when RA or Dec is near 0, breaking the optimizer.
+        Scipy's default simplex perturbs each parameter by 5% of its value. This gives a ~0 step when RA
+        or Dec is near 0, breaking the optimizer.
 
     Arguments:
-        p0: [list/array] Initial parameter vector. First 3 elements must be angular
-            parameters (RA, Dec, Rot). Additional parameters (e.g. scale) keep the
-            default 10% step.
-        dec_d: [float] Declination in degrees, for cos(dec) correction on the RA step.
-        mode: [str] "floor" or "fixed".
-            "floor": Keep scipy's 5% default but enforce min_step_deg minimum for
-                     angular params. Use for fine-tuning (recalibrateFF, autoCheckFit).
-            "fixed": Use angular_step for all angular params regardless of parameter
-                     values. Use for large corrections (fitPointingNN).
-        angular_step: [float] Fixed step in degrees of sky (used in "fixed" mode).
-        min_step_deg: [float] Minimum angular step in degrees (used in "floor" mode).
+        p0: [list/array] Initial parameter vector. The first 3 elements must be the angular parameters
+            (RA, Dec, Rot). Additional parameters (e.g. scale) keep the default 10% step.
+        dec_d: [float] Declination in degrees, for the cos(dec) correction on the RA step.
+
+    Keyword arguments:
+        mode: [str] "floor" (default) or "fixed".
+            "floor": Keep scipy's 5% default but enforce a min_step_deg minimum for the angular
+                params. Use for fine-tuning (recalibrateFF, autoCheckFit).
+            "fixed": Use angular_step for all angular params regardless of the parameter values. Use
+                for large corrections (fitPointingNN).
+        angular_step: [float] Fixed step in degrees of sky (used in "fixed" mode). 2.0 by default.
+        min_step_deg: [float] Minimum angular step in degrees (used in "floor" mode). 0.5 by default.
 
     Return:
         simplex: [ndarray] (N+1) x N array suitable for the initial_simplex option.
     """
 
+    # Start with every vertex at the initial point
     p0_arr = np.array(p0, dtype=float)
     n = len(p0_arr)
     simplex = np.tile(p0_arr, (n + 1, 1))
 
+    # The RA step is stretched by 1/cos(dec) so it covers the same angle on the sky, with the factor
+    #   capped so it stays finite at the pole
     cos_dec = max(np.cos(np.radians(dec_d)), 0.1)
 
+    # Fixed angular step for all angular params
     if mode == "fixed":
-        # Fixed angular step for all angular params
         steps = [angular_step / cos_dec, angular_step, angular_step]
-        # Extra params (e.g. scale) get 10% step
+
+        # Extra params (e.g. scale) get a 10% step
         for j in range(3, n):
             steps.append(abs(p0_arr[j]) * 0.1)
 
+    # Floor mode: scipy's 5% default with a minimum angular step enforced
     else:
-        # Floor mode: scipy's 5% default with a minimum angular step enforced
         steps = [abs(v) * 0.05 if v != 0 else 0.00025 for v in p0_arr]
         steps[0] = max(steps[0], min_step_deg / cos_dec)   # RA
         steps[1] = max(steps[1], min_step_deg)              # Dec
         steps[2] = max(steps[2], min_step_deg)              # Rot
 
+    # Offset one vertex per parameter
     for j in range(n):
         simplex[j + 1, j] += steps[j]
 
@@ -508,8 +514,8 @@ def autoCheckFit(config, platepar, calstars_data, _nn_refinement=False):
             # Extract star list from CALSTARS file from FF file with most stars
             max_len_ff = max(calstars_dict, key=lambda k: len(calstars_dict[k]))
 
-            # Pass full CALSTARS data (y, x, intensity, ...) - alignPlatepar will extract what it needs
-            # and use intensities to infer appropriate catalog limiting magnitude
+            # Pass the full CALSTARS data (y, x, intensity, ...) - alignPlatepar will extract what it needs
+            #   and use the intensities to infer the appropriate catalog limiting magnitude
             calstars_coords = np.array(calstars_dict[max_len_ff])
 
             # Get the time of the FF file
@@ -674,6 +680,7 @@ def autoCheckFit(config, platepar, calstars_data, _nn_refinement=False):
         # Initial parameters for the astrometric fit
         p0 = [platepar.RA_d, platepar.dec_d, platepar.pos_angle_ref, platepar.F_scale]
 
+        # Build the initial simplex with a step size that stays meaningful close to RA/Dec = 0
         simplex = buildNelderMeadSimplex(p0, platepar.dec_d, mode="floor")
 
         # Fit the astrometric parameters
