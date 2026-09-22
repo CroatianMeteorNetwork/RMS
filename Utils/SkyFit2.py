@@ -10188,10 +10188,68 @@ class PlateTool(QtWidgets.QMainWindow):
 
         """
 
+        # Leave any mask editing mode that is active in this session before its flags are replaced
+        if hasattr(self, 'central'):
+            if getattr(self, 'mask_brush_mode', False):
+                self._exitBrushMode()
+            if getattr(self, 'mask_draw_mode', False):
+                self.mask_draw_mode = False
+                self.tab.mask.setDrawMode(False)
+            self.spectral_type_text_list.setInteractionEnabled(True)
+
         variables = loadPickle(dir_path, state_name)
         for k, v in variables.items():
             setattr(self, k, v)
-        
+
+        # Defaults for the attributes that state files saved by older versions do not have. The star
+        #   detection overrides start at the config values, as they do on a normal start
+        config = self.config
+        new_attr_defaults = {
+            '_original_catalog_file': getattr(config, 'star_catalog_file', None),
+            '_original_band_ratios': getattr(config, 'star_catalog_band_ratios', None),
+            'closest_planet_indx': None,
+            'last_mask_dir': None,
+            'platepar_modified': False,
+            'mask_source_path': None,
+            'flat_source_path': None,
+            'dark_source_path': None,
+            '_file_manager_custom_locations': [],
+            'show_spectral_type': False,
+            'show_star_names': False,
+            'apparent_mag_corr_enabled': False,
+            'label_mag_limit': 5.0,
+            'selected_stars_visible': True,
+            'star_detection_override_enabled': False,
+            'star_detection_override_data': {},
+            'override_intensity_threshold': getattr(config, 'intensity_threshold', 18),
+            'override_neighborhood_size': getattr(config, 'neighborhood_size', 10),
+            'override_max_stars': getattr(config, 'max_stars', 200),
+            'override_gamma': getattr(config, 'gamma', 1.0),
+            'override_segment_radius': getattr(config, 'segment_radius', 4),
+            'override_max_feature_ratio': getattr(config, 'max_feature_ratio', 0.8),
+            'override_roundness_threshold': getattr(config, 'roundness_threshold', 0.5),
+            '_original_config_gamma': None,
+            'flat_image_data': None,
+            'mask_use_flat_background': False,
+            '_show_calibration_dialog_on_start': False,
+            '_show_file_manager_on_start': False,
+        }
+        for k, v in new_attr_defaults.items():
+            if not hasattr(self, k):
+                setattr(self, k, v)
+
+        # The mouse interaction flags describe what was going on when the state was saved (a brush
+        #   stroke, a vertex drag, a polygon being drawn, keys held down). The UI they belong to is not
+        #   restored, so always start idle
+        self.mask_draw_mode = False
+        self.mask_current_polygon = []
+        self.mask_dragging_vertex = None
+        self.mask_brush_mode = False
+        self.mask_brush_painting = False
+        self.mask_brush_erasing = False
+        self.mask_brush_last_pos = None
+        self.keys_pressed = []
+
         # Init matplotlib figure references (stripped from saved state, not picklable)
         if not hasattr(self, 'fig_astrometry'):
             self.fig_astrometry = None
@@ -10576,6 +10634,11 @@ class PlateTool(QtWidgets.QMainWindow):
             self.tab.debruijn.updateTable()
             self.tab.settings.updateGeoMarkerScale()
             self.changeMode(self.mode)
+
+            # The brush and draw modes were reset above, sync the panning lock and the mask overlay
+            self.brush_cursor.hide()
+            self.updatePanningEnabled()
+            self.updateMaskDisplay()
 
             self.updateLeftLabels()
 

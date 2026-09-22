@@ -320,3 +320,80 @@ def testDistortionTypeSwitchKeepsArrayLength(plateTool, new_type):
     if new_type[-3:] != old_type[-3:]:
         assert np.allclose(pp.x_poly_fwd, expected.x_poly_fwd)
         assert np.allclose(pp.y_poly_rev, expected.y_poly_rev)
+
+
+###################################################################################################
+# STATE FILES
+###################################################################################################
+
+# Attributes of PlateTool.__init__ that are not in the state files saved by master
+NEW_STATE_ATTRIBUTES = [
+    "_original_catalog_file", "_original_band_ratios", "closest_planet_indx", "last_mask_dir",
+    "platepar_modified", "mask_source_path", "flat_source_path", "dark_source_path",
+    "_file_manager_custom_locations", "fig_astrometry", "fig_photometry", "auto_compute_sattracks",
+    "show_spectral_type", "show_star_names", "apparent_mag_corr_enabled", "label_mag_limit",
+    "show_constellations", "selected_stars_visible", "geo_marker_scale", "star_detection_override_enabled",
+    "star_detection_override_data", "override_intensity_threshold", "override_neighborhood_size",
+    "override_max_stars", "override_gamma", "override_segment_radius", "override_max_feature_ratio",
+    "override_roundness_threshold", "_original_config_gamma", "mask_draw_mode", "mask_current_polygon",
+    "mask_polygons", "mask_dragging_vertex", "mask_brush_mode", "mask_brush_radius", "mask_brush_painting",
+    "mask_brush_erasing", "mask_brush_last_pos", "mask_paint_layer", "mask_brush_stroke_history",
+    "mask_brush_max_undo", "flat_image_data", "mask_use_flat_background",
+    "_show_calibration_dialog_on_start", "_show_file_manager_on_start",
+]
+
+
+def testLoadOldStateFile(plateTool, stationDir, qapp):
+    """ A state file without the attributes introduced in this release loads and is usable. """
+
+    from RMS.Pickling import loadPickle, savePickle
+
+    plateTool.saveState()
+    state = loadPickle(stationDir, 'skyFitMR_latest.state')
+    for key in NEW_STATE_ATTRIBUTES:
+        state.pop(key, None)
+    savePickle(state, stationDir, 'old.state')
+
+    # Load it at startup, the way SkyFit2 does it for a state file given on the command line
+    pt = SF.PlateTool.__new__(SF.PlateTool)
+    super(SF.PlateTool, pt).__init__()
+    pt.loadState(stationDir, 'old.state')
+    qapp.processEvents()
+
+    pt.updateFileManagerButton()
+    SF.CalibrationFilesDialog(pt)
+    assert pt.isConfigModified() == plateTool.isConfigModified()
+    assert pt.override_intensity_threshold == pt.config.intensity_threshold
+    pt.updateCalstars()
+    pt.nextImg()
+    pt.changeMode('manualreduction')
+    pt.changeMode('skyfit')
+
+    pt.close()
+    pt.deleteLater()
+
+
+def testLoadStateMidSessionResetsMaskModes(plateTool, stationDir, qapp):
+    """ Loading a state saved with the brush active does not leave the brush flags without their UI. """
+
+    pt = plateTool
+    tab = pt.tab
+    mask_idx = tab.indexOf(tab.mask)
+    tab.setCurrentIndex(mask_idx)
+    tab.onTabBarClicked(mask_idx)
+    tab.mask.brush_button.setChecked(True)
+    pt.toggleMaskBrushMode()
+    pt.brushStrokeBegin()
+    pt.brushPaintAt(300, 300)
+    pt.saveState()
+
+    # Leave the mask tab, then load the state
+    tab.setCurrentIndex(0)
+    tab.onTabBarClicked(0)
+    pt.loadState(stationDir, 'skyFitMR_latest.state')
+    qapp.processEvents()
+
+    assert not pt.mask_brush_mode
+    assert not pt.mask_brush_painting
+    assert not tab.mask.brush_button.isChecked()
+    assert pt.img_frame.panning_enabled == (tab.currentIndex() != mask_idx)
