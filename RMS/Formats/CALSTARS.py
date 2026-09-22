@@ -70,10 +70,9 @@ def writeCALSTARS(star_list, ff_directory, file_name, cam_code, nrows, ncols, ch
             star_file.write("Star area dim = -1" + "\n")
             star_file.write("Integ pixels  = -1" + "\n")
 
-            # Write every star to file
-            # CALSTARS format: Y(0) X(1) IntensSum(2) Ampltd(3) FWHM(4) BgLvl(5) SNR(6) NSatPx(7)
-            # Input star_data: (y, x, intensity, amplitude, fwhm, background, snr, saturated_count)
-            # where intensity=IntensSum (integrated), amplitude=Ampltd (peak)
+            # Write every star to file. CALSTARS format: Y(0) X(1) IntensSum(2) Ampltd(3) FWHM(4) BgLvl(5)
+            #   SNR(6) NSatPx(7). Input star_data: (y, x, intensity, amplitude, fwhm, background, snr,
+            #   saturated_count), where intensity=IntensSum (integrated) and amplitude=Ampltd (peak)
             for y, x, intensity, amplitude, fwhm, background, snr, saturated_count in list(star_data):
 
                 # Limit the saturation count to 999999
