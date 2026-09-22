@@ -3786,13 +3786,11 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
     def changeMode(self, new_mode):
-        """
-        Changes the mode to either 'skyfit' or 'manualreduction', updating the gui accordingly. Will not 
-        update image if the mode stays the same.
+        """ Change the mode to either 'skyfit' or 'manualreduction', updating the GUI accordingly. The
+            image is not updated if the mode stays the same.
 
         Arguments:
-            new_mode [str]: either 'skyfit' or 'manualreduction'
-
+            new_mode: [str] Either 'skyfit' or 'manualreduction'.
         """
         # Won't update image if not necessary
         if self.mode == new_mode:
@@ -8060,12 +8058,13 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
     def photometry(self, show_plot=False, force_update=False):
-        """
-        Perform the photometry on selected stars. Updates residual text above and below picked stars
+        """ Perform the photometry on the selected stars, updating the residual text above and below the
+            picked stars.
 
-        Arguments:
-            show_plot: if true, will show a plot of the photometry
-
+        Keyword arguments:
+            show_plot: [bool] If True, show a plot of the photometry. False by default.
+            force_update: [bool] If True, recompute the photometry even if nothing has changed. False by
+                default.
         """
 
         if not self.hasData():
@@ -9586,17 +9585,14 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
     def nextImg(self, n=1):
-        """
-        Increments the image index by value n. n=1 will go to next image and n=-1
-        will go to the previous. In manualreduction, nextImg will not change chunks
-        but will change frames, and n can be any integer and the frame will increment
-        by that much.
+        """ Increment the image index by the value n. n=1 goes to the next image and n=-1 goes to the
+            previous one. In the manual reduction mode nextImg does not change the chunks but changes
+            the frames, and n can be any integer by which the frame is incremented.
 
-        Arguments:
-            n [int]: The number of images to go forward or backward
-
+        Keyword arguments:
+            n: [int] The number of images to go forward or backward. 1 by default.
         """
-        
+
         if self.mode == 'skyfit':
 
             # Don't allow image change while in star picking mode
@@ -9810,11 +9806,11 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
     def saveState(self):
-        """
-        Saves the state of the object to a file so that when loading, it will appear the same as before.
+        """ Save the state of the object to a file so that when loading, it will appear the same as
+            before.
 
-        Can be loaded by calling:
-        python -m RMS.Astrometry.SkyFit2 PATH/skyFit2_latest.state --config .
+            It can be loaded by calling:
+                python -m RMS.Astrometry.SkyFit2 PATH/skyFit2_latest.state --config .
         """
 
         # This is pretty thrown together. It's to get around an error where pyqt widgets can't be saved to a
