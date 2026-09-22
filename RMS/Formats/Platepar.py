@@ -1137,12 +1137,17 @@ class Platepar(object):
 
         ### ASTROMETRIC PARAMETERS FIT ###
 
+        # Minimum number of stars needed to fit the distortion
+        min_fit_stars = self.poly_length + 1
+
         # Fit the pointing parameters (RA, Dec, rotation, scale)
         #   Only do the fit for the polynomial distortion model, or if only pointing is requested
-        #   For radial distortion, pointing is fitted jointly with distortion - no separate step needed
+        #   For radial distortion, pointing is fitted jointly with distortion - no separate step needed,
+        #   unless there are too few stars for the distortion fit, which would then fit nothing at all
         if (
             self.distortion_type.startswith("poly")
             or fit_only_pointing
+            or (len(img_stars) < min_fit_stars)
         ) and not use_nn_cost:
 
             self.fitPointing(jd, img_stars, catalog_stars, fixed_scale=fixed_scale)
@@ -1152,7 +1157,6 @@ class Platepar(object):
         ### DISTORTION FIT ###
 
         # Fit the polynomial distortion parameters if there are enough picked stars
-        min_fit_stars = self.poly_length + 1
 
         if (len(img_stars) >= min_fit_stars) and (not fit_only_pointing):
 

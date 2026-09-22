@@ -16557,6 +16557,15 @@ class PlateTool(QtWidgets.QMainWindow):
         self.first_platepar_fit = False
         self.platepar_modified = True
 
+        # Tell the user when there were too few stars for the distortion and only the pointing was fitted
+        min_distortion_stars = self.platepar.poly_length + 1
+        if (not self.fit_only_pointing) and (len(img_stars) < min_distortion_stars):
+            too_few_msg = ("Only the pointing was fitted: the {:s} distortion needs at least {:d} stars, "
+                           "{:d} are paired".format(self.platepar.distortion_type, min_distortion_stars,
+                                                    len(img_stars)))
+            print(too_few_msg)
+            self.status_bar.showMessage(too_few_msg)
+
         # Show platepar parameters
         print()
         print(self.platepar)

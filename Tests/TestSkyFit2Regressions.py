@@ -491,3 +491,40 @@ def testInitialParamsRejectedNNFitRestoresPlatepar(plateTool, monkeypatch):
     assert nn_calls
     assert len(pt.paired_stars) == 0
     assert _plateparState(pt.platepar) == before
+
+
+def testRadialFitWithTooFewStarsFitsPointing(stationDir):
+    """ A radial model fit with fewer stars than the distortion needs still fits the pointing. """
+
+    import io
+    import contextlib
+    from RMS.Formats.Platepar import Platepar
+
+    pp = Platepar()
+    pp.read(os.path.join(stationDir, "platepar_cmn2010.cal"))
+    assert pp.distortion_type.startswith("radial")
+
+    star_list = np.array(pp.star_list)
+    jd = star_list[0, 0]
+    n_stars = pp.poly_length
+    img_stars = star_list[:n_stars, 1:4]
+    catalog_stars = star_list[:n_stars, 4:7]
+
+    results = []
+    for fit_only_pointing in (True, False):
+
+        # Start from an offset pointing
+        pp_fit = copy.deepcopy(pp)
+        pp_fit.RA_d += 0.5
+        pp_fit.updateRefAltAz()
+        ra_start = pp_fit.RA_d
+
+        with contextlib.redirect_stdout(io.StringIO()):
+            pp_fit.fitAstrometry(jd, img_stars, catalog_stars, first_platepar_fit=True,
+                                 fit_only_pointing=fit_only_pointing)
+
+        results.append(pp_fit.RA_d)
+
+    # The pointing moved, and the same way as a pointing-only fit
+    assert abs(results[1] - ra_start) > 0.1
+    assert results[1] == pytest.approx(results[0], abs=1e-6)
