@@ -174,7 +174,8 @@ from RMS.Compression import Compressor
 from RMS.DeleteOldObservations import deleteOldObservations
 from RMS.DetectStarsAndMeteors import detectStarsAndMeteors
 from RMS.Formats.FFfile import validFFName
-from RMS.Misc import mkdirP, RmsDateTime, UTCFromTimestamp, setMultiprocessingStartMethod, frameBufferShape
+from RMS.Misc import mkdirP, RmsDateTime, UTCFromTimestamp, setMultiprocessingStartMethod, frameBufferShape, \
+    disableGitPrompts
 from RMS.QueuedPool import QueuedPool
 from RMS.Reprocess import getPlatepar, processNight, processFramesFiles, nightProcessingState, \
     readProcessingStatus, updateProcessingStatus, NIGHT_PROCESSED, NIGHT_LEGACY_PROCESSED
@@ -1313,6 +1314,10 @@ if __name__ == "__main__":
     # listener below). Keeps the platform default where it is safe: fork on Linux
     # through 3.13; forkserver/spawn only where fork is unavailable or unsafe.
     setMultiprocessingStartMethod()
+
+    # Make sure that no git invocation from this process, or from any of its children, can ever
+    # stop and ask for credentials on the terminal and block the whole processing chain
+    disableGitPrompts()
 
     ### COMMAND LINE ARGUMENTS
 

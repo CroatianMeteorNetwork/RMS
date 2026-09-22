@@ -48,7 +48,8 @@ from RMS.Formats.ObservationSummary import serialize, finalizeObservationSummary
 from RMS.Formats.ObservationSummary import OBSERVATION_SUMMARY_NAME_JSON, \
     OBSERVATION_SUMMARY_WORKING_NAME_JSON
 from Utils.AuditConfig import compareConfigs
-from RMS.Misc import RmsDateTime, tarWithProgress, getRMSStyleFileName, setMultiprocessingStartMethod
+from RMS.Misc import RmsDateTime, tarWithProgress, getRMSStyleFileName, setMultiprocessingStartMethod, \
+    disableGitPrompts
 from RMS.RunExternalScript import runExternalScript
 
 # Get the logger from the main module
@@ -982,6 +983,10 @@ if __name__ == "__main__":
     # (3.6-3.14). Must be done before any Process/Pool is created. Keeps the platform
     # default where it is safe: fork on Linux through 3.13.
     setMultiprocessingStartMethod()
+
+    # Make sure that no git invocation from this process, or from any of its children, can ever
+    # stop and ask for credentials on the terminal and block the whole processing chain
+    disableGitPrompts()
 
     ### COMMAND LINE ARGUMENTS
 
