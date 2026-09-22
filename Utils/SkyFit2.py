@@ -14233,8 +14233,9 @@ class PlateTool(QtWidgets.QMainWindow):
         orig_rot = self.platepar.pos_angle_ref
         print("  BEFORE: RA={:.4f} Dec={:.4f} Rot={:.4f}".format(orig_ra, orig_dec, orig_rot), flush=True)
 
-        # Get the detected stars from the current image (the same as tryQuickAlignment does)
-        ff_name_c = self.img_handle.current_ff_file if hasattr(self.img_handle, 'current_ff_file') else None
+        # Get the detected stars from the current image, resolving the FF name the same way as
+        #   tryQuickAlignment does (FR files map to their FF file)
+        ff_name_c = convertFRNameToFF(self.img_handle.name())
 
         # Use the override data if it is enabled and available, otherwise use the original CALSTARS
         detected_stars = None
@@ -14248,15 +14249,9 @@ class PlateTool(QtWidgets.QMainWindow):
                 0 if detected_stars is None else len(detected_stars)), flush=True)
             return
 
-        # Get the time of the current image
-        if hasattr(self.img_handle, 'currentFrameTime'):
-            calstars_time = list(self.img_handle.currentFrameTime(dt_obj=False))
-            if len(calstars_time) == 6:
-                calstars_time.append(0)
-        else:
-            calstars_time = list(jd2Date(self.img_handle.currentTime(), dt_obj=False))
-            if len(calstars_time) == 6:
-                calstars_time.append(0)
+        # Get the time of the current image, the same as tryQuickAlignment (the image time, not the time
+        #   of frame 0 of the chunk)
+        calstars_time = list(self.img_handle.currentTime())
 
         print("  Detected stars: {}".format(len(detected_stars)), flush=True)
         print("  Image time: {}-{:02d}-{:02d} {:02d}:{:02d}:{:02d}".format(*calstars_time[:6]), flush=True)

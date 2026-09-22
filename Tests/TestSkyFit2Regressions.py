@@ -1056,3 +1056,20 @@ def testPlanetPhaseGeometry():
     assert r == pytest.approx(np.sqrt(2))
     assert delta == pytest.approx(1.0)
     assert alpha == pytest.approx(45.0)
+
+
+def testConfigMagLimitQuickAlignUsesImageTime(plateTool, monkeypatch):
+    """ The config-LM quick align test uses the same image time and stars as tryQuickAlignment. """
+
+    pt = plateTool
+    calls = []
+
+    def fakeAlign(config, platepar, calstars_time, detected_stars, **kwargs):
+        calls.append((list(calstars_time), len(detected_stars)))
+        return platepar, config.catalog_mag_limit
+
+    monkeypatch.setattr(SF, "alignPlatepar", fakeAlign)
+
+    pt.testQuickAlignWithConfigMagLimit()
+
+    assert calls == [(list(pt.img_handle.currentTime()), len(pt.calstars[pt.img_handle.name()]))]
