@@ -14024,16 +14024,18 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Snapshot everything a failed attempt could change (the fit forces its own distortion model
         #   and flags on the platepar before it knows whether it will succeed)
+        platepar_obj = self.platepar
         saved_platepar = copy.deepcopy(self.platepar)
         saved_fit_only_pointing = self.fit_only_pointing
         saved_cat_lim_mag = self.cat_lim_mag
 
         success = self._runQuickAlignment(pointing_only=pointing_only)
 
-        # Put the user's platepar and settings back after a failure
+        # Put the user's platepar and settings back after a failure. The values go back into the same
+        #   platepar object, which the Fit Parameters stash and the distortion dialog refer to
         if not success:
 
-            self.platepar = saved_platepar
+            self._restorePlateparInPlace(platepar_obj, saved_platepar)
             self.fit_only_pointing = saved_fit_only_pointing
 
             if self.cat_lim_mag != saved_cat_lim_mag:
@@ -14041,6 +14043,21 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.catalog_stars = self.loadCatalogStars(self.cat_lim_mag)
 
         return success
+
+
+    def _restorePlateparInPlace(self, platepar_obj, saved_platepar):
+        """ Put the values of a saved platepar copy back into the given platepar object and make it the
+            current platepar. Keeping the object keeps the references to it (the coefficient stash of the
+            Fit Parameters tab, the distortion dialog) valid.
+
+        Arguments:
+            platepar_obj: [Platepar] The platepar object to restore into.
+            saved_platepar: [Platepar] Deep copy with the values to restore.
+        """
+
+        platepar_obj.__dict__.clear()
+        platepar_obj.__dict__.update(saved_platepar.__dict__)
+        self.platepar = platepar_obj
 
 
     def _runQuickAlignment(self, pointing_only=False):
@@ -15257,7 +15274,7 @@ class PlateTool(QtWidgets.QMainWindow):
             #   platepar from before the recalibration back
             if nn_result is None:
                 print("  NN fit rejected - restoring the platepar from before the auto fit")
-                self.platepar = original_platepar
+                self._restorePlateparInPlace(self.platepar, original_platepar)
                 self.fit_only_pointing = user_fit_only_pointing
                 self.updateStars()
                 self.status_bar.showMessage("Auto-fit failed: the NN refinement was rejected")

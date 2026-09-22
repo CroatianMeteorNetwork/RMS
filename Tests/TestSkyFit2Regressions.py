@@ -1481,3 +1481,27 @@ def testExplicitResetDropsCoeffStash(plateTool, reset):
     pm.distortion_type.setCurrentIndex(pp.distortion_type_list.index("radial9-odd"))
     assert np.allclose(pp.x_poly_fwd[:len(before)], before)
     assert pp.x_poly_fwd[-1] == 0.0
+
+
+def testFailedQuickAlignmentKeepsPlateparObjectAndStash(plateTool, monkeypatch):
+    """ A failed quick alignment restores the platepar into the same object, so the Fit Parameters
+        stash and the distortion dialog stay attached to it. """
+
+    from RMS.Formats.Platepar import Platepar
+
+    pt = plateTool
+    pm = pt.tab.param_manager
+    pp = pt.platepar
+
+    pm.distortion_type.setCurrentIndex(pp.distortion_type_list.index("radial7-odd"))
+    stash = copy.deepcopy(pm._coeff_stash)
+    assert any(stash['x_fwd'].values())
+
+    # Every fit is rejected
+    monkeypatch.setattr(Platepar, "fitAstrometry", lambda self, *a, **k: None)
+
+    assert pt.tryQuickAlignment() is False
+    assert pt.platepar is pp
+    pm._checkCoeffStashOwner()
+    assert pm._coeff_stash == stash
+    assert pm.distortion_dialog.platepar is pp
