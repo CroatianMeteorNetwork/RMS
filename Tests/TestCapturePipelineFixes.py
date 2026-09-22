@@ -25,6 +25,8 @@ RMS_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
 # validVideoCrop
 
 def testValidVideoCropAcceptsWellFormed():
+    """ Well-formed videocrop specs are accepted. """
+
     from RMS.BufferedCapture import validVideoCrop
 
     assert validVideoCrop("top=8 bottom=8 left=0 right=16")
@@ -33,6 +35,8 @@ def testValidVideoCropAcceptsWellFormed():
 
 
 def testValidVideoCropRejectsEmpty():
+    """ Empty or missing specs are rejected. """
+
     from RMS.BufferedCapture import validVideoCrop
 
     # An empty spec would put a bare 'videocrop !' into the GStreamer pipeline
@@ -42,6 +46,8 @@ def testValidVideoCropRejectsEmpty():
 
 
 def testValidVideoCropRejectsMalformed():
+    """ Negative values, unknown keys and shell metacharacters are rejected. """
+
     from RMS.BufferedCapture import validVideoCrop
 
     assert not validVideoCrop("top=-1")
@@ -54,6 +60,8 @@ def testValidVideoCropRejectsMalformed():
 # BoundedLock
 
 def testBoundedLockBasicAcquireRelease():
+    """ The lock is held inside the with block and released on exit. """
+
     from RMS.Misc import BoundedLock
 
     bl = BoundedLock('test', timeout=0.5)
@@ -118,6 +126,8 @@ def testBoundedLockHasNoThreadLocalState():
 # flushChildLogging
 
 def testFlushChildLoggingNoHandlersReturnsQuickly():
+    """ flushChildLogging must be a no-op when the root logger has no handlers. """
+
     from RMS.Logger import flushChildLogging
 
     root = logging.getLogger()
@@ -157,6 +167,8 @@ def testFlushChildLoggingDeliversBufferedRecords():
 # captureDuration return contract and horizon constants
 
 def testCaptureDurationPolarNightReturnsBoolStart():
+    """ In polar night captureDuration must return start_time=True and a positive duration. """
+
     from RMS.CaptureDuration import captureDuration
 
     # Svalbard, mid winter: the Sun never rises, capture starts right away
@@ -168,6 +180,8 @@ def testCaptureDurationPolarNightReturnsBoolStart():
 
 
 def testCaptureDurationMidLatitudeReturnsDatetimeOrTrue():
+    """ At mid latitudes the start time is either a datetime or True, and the duration is sane. """
+
     from RMS.CaptureDuration import captureDuration
 
     start_time, duration = captureDuration(43.0, -81.0, 265,
@@ -178,6 +192,8 @@ def testCaptureDurationMidLatitudeReturnsDatetimeOrTrue():
 
 
 def testHorizonConstantsSingleDefinition():
+    """ The horizon constants must be imported from CaptureDuration everywhere, not redefined. """
+
     import RMS.CaptureDuration as cd
     import RMS.CaptureModeSwitcher as cms
     import RMS.Formats.ObservationSummary as obs
@@ -191,10 +207,14 @@ def testHorizonConstantsSingleDefinition():
 # QueuedPool Manager shutdown
 
 def _square(x):
+    """ Trivial worker function for the QueuedPool tests. """
+
     return x*x
 
 
 def testQueuedPoolClosePoolShutsDownManagerKeepsResults():
+    """ closePool must shut down the Manager on its own while keeping the results readable. """
+
     from RMS.QueuedPool import QueuedPool
 
     qp = QueuedPool(_square, cores=1, log=None, backup_dir=None, print_state=False)
@@ -216,6 +236,8 @@ def testQueuedPoolClosePoolShutsDownManagerKeepsResults():
 
 
 def testQueuedPoolWorkersFallbackWithoutPrivateList():
+    """ _poolWorkers must return an empty list when there is no pool or no private worker list. """
+
     from RMS.QueuedPool import QueuedPool
 
     qp = QueuedPool(_square, cores=1, log=None, backup_dir=None, print_state=False)
@@ -254,6 +276,7 @@ def _runUpdater(args, tmp_path):
 
 @pytest.mark.parametrize('option', ['--profile', '--term'])
 def testUpdaterOptionWithoutArgumentFails(option, tmp_path):
+    """ An option that takes an argument must fail with a usage message when the argument is missing. """
 
     code, out = _runUpdater([option], tmp_path)
 
@@ -266,6 +289,7 @@ def testUpdaterOptionWithoutArgumentFails(option, tmp_path):
 
 
 def testUpdaterHelpExitsZero(tmp_path):
+    """ --help must print the usage and exit with 0. """
 
     code, out = _runUpdater(['--help'], tmp_path)
 

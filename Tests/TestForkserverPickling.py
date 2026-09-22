@@ -13,6 +13,8 @@ can only be pickled through the spawn machinery itself, so faithful tests must s
 process rather than calling pickle.dumps() directly.
 """
 
+from __future__ import print_function, division, absolute_import
+
 import multiprocessing
 import sys
 
@@ -56,6 +58,10 @@ def _exercise_pool_in_child(pool, result_queue):
 
 
 def test_setMultiprocessingStartMethod_returns_valid_method():
+    """ setMultiprocessingStartMethod must return a method supported on this platform and keep the
+        per-platform defaults.
+    """
+
     method = setMultiprocessingStartMethod()
     assert method in multiprocessing.get_all_start_methods()
 
@@ -77,6 +83,7 @@ def test_setMultiprocessingStartMethod_returns_valid_method():
 
 def test_queuedpool_getstate_is_clean():
     """ __getstate__ must drop the non-picklable SyncManager and Pool handles. """
+
     pool = QueuedPool(_dummy_worker, cores=1, backup_dir=None)
     try:
         state = pool.__getstate__()
@@ -128,6 +135,7 @@ def test_queuedpool_worker_reattaches_logging():
     multiprocessing.set_start_method('spawn', force=True)
 
     pool = QueuedPool(_logcheck_worker, cores=1, backup_dir=None, print_state=False)
+
     # Simulate an initialized logging queue (getLoggingQueue() is None without initLogging)
     pool.logging_queue = multiprocessing.Queue()
     try:

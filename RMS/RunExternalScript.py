@@ -40,21 +40,22 @@ def _runExternalInChild(external_script_dir, module_name, function_name, capture
             'forkserver'/'spawn').
     """
 
+    # Make the user script importable in this process
     if external_script_dir not in sys.path:
         sys.path.insert(0, external_script_dir)
 
+    # Remove any (inherited) handlers so the external script does not log to the RMS log
     if inhibit_logging:
-        # Remove any (inherited) handlers so the external script does not log to the RMS log
         import logging
         root = logging.getLogger()
         if root.handlers:
             for handler in root.handlers[:]:
                 root.removeHandler(handler)
                 handler.close()
+    # Re-attach logging so the external script's records reach the listener, which under
+    # 'forkserver'/'spawn' a fresh child does not inherit. Logging only - signal handling
+    # is left untouched for the user script.
     else:
-        # Re-attach logging so the external script's records reach the listener, which under
-        # 'forkserver'/'spawn' a fresh child does not inherit. Logging only - signal handling
-        # is left untouched for the user script.
         from RMS.Logger import initChildLogging
         initChildLogging(logging_queue, config)
 
@@ -99,6 +100,8 @@ def runExternalScript(captured_night_dir, archived_night_dir, config):
 
         # Extract the name of the folder and the script
         external_script_dir, external_script_file = os.path.split(os.path.expanduser(config.external_script_path))
+
+        # Importable module name of the script (file name without the extension)
         module_name = external_script_file.replace('.py', '').replace('.PY', '')
 
         # Insert the path to the script (in the parent, so the validation import below works)

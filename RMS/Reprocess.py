@@ -220,7 +220,9 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
 
 
 
+        # Load the per-night observation summary so the detection counts can be recorded
         obs_dict = getObservationSummaryDict(night_data_dir)
+
         # Filter out detections using machine learning
         if config.ml_filter > 0:
 
@@ -248,6 +250,7 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
             platepar, fit_status = autoCheckFit(config, platepar, calstars_data)
 
             obs_dict = getObservationSummaryDict(night_data_dir)
+
             # If the fit was successful, apply the astrometry to detected meteors
             if fit_status:
 
@@ -262,6 +265,7 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
                 addObsParam(obs_dict, "photometry_good", "False")
 
             saveObservationSummaryDict(obs_dict, night_data_dir)
+
             # If a flat is used, disable vignetting correction
             if config.use_flat:
                 platepar.vignetting_coeff = 0.0
@@ -513,6 +517,8 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
         # Add the timelapse to the extra files
         if intervals_path is not None:
             extra_files.append(intervals_path)
+
+        # Record the timing quality in the observation summary
         obs_dict = getObservationSummaryDict(night_data_dir)
         addObsParam(obs_dict,"jitter_quality",jitter_quality)
         addObsParam(obs_dict,"dropped_frame_rate",dropped_frame_rate)
@@ -660,11 +666,13 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
                     night_data_dir, cams_code_formatted, fps, calibration=cal_file_name, 
                     celestial_coords_given=(platepar is not None))
 
+    # Write the final observation summary (text and JSON) and add both to the archive
     try:
         log.info("Calling finalize observation summary")
         observation_summary_path_file_name, observation_summary_json_path_file_name = (
             finalizeObservationSummary(config, night_data_dir))
         log.info("Returned from finalize observation summary")
+
         extra_files.append(observation_summary_path_file_name)
         extra_files.append(observation_summary_json_path_file_name)
 
@@ -673,6 +681,7 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
         log.warning('Finalizing Observation Summary failed with message:\n' + repr(e))
         log.warning(repr(traceback.format_exception(*sys.exc_info())))
 
+    # Log the summary even if finalizing failed
     obs_summary_to_log = serialize(config, night_directory=night_data_dir, final=True)
     log.info("\n\nObservation Summary\n===================\n\n" + obs_summary_to_log + "\n\n")
 
@@ -966,12 +975,17 @@ def processFramesFiles(config):
     # Walk bottom-up and remove any empty subdirectories under frame_dir.
     if config.frame_cleanup in ('delete', 'tar'):
         for root, dirs, files in os.walk(frame_dir, topdown=False):
+
+            # Never remove the frame directory itself
             if root == frame_dir:
                 continue
+
+            # rmdir succeeds only if the directory is empty
             try:
-                os.rmdir(root)  # succeeds only if empty
+                os.rmdir(root)
+
+            # Non-empty is expected; anything else (permissions, busy) should be visible
             except OSError as e:
-                # Non-empty is expected; anything else (permissions, busy) should be visible
                 log.debug("Could not remove frame directory %s: %s", root, e)
 
     return archive_paths
@@ -1028,6 +1042,7 @@ if __name__ == "__main__":
 
             log.info("Using all available cores for detection.")
 
+    # Start the per-night observation summary (no capture duration is known when reprocessing)
     log.info(f"Starting Observation summary report for {cml_args.dir_path[0]}")
     startObservationSummaryReport(config, cml_args.dir_path[0], None)
 
@@ -1041,8 +1056,8 @@ if __name__ == "__main__":
     #   backup cleanup in the finally block, whether they succeed or not
     try:
 
+        # Run the external script
         if cml_args.run_extl_script:
-            # Run the external script
             runExternalScript(cml_args.dir_path[0], night_archive_dir, config)
 
         # Upload the archive, if upload is enabled

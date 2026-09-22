@@ -41,14 +41,20 @@ class SafeValue(object):
 
     Source: http://eli.thegreenplace.net/2012/01/04/shared-counter-with-pythons-multiprocessing
 
-    Lock acquisition is bounded: these counters are shared with worker processes that can be
-    OOM-killed or terminated mid-update. If the lock cannot be acquired within
-    SAFE_VALUE_LOCK_TIMEOUT, the operation proceeds without it - a possibly stale counter is
-    vastly preferable to permanently wedging the pool management code.
+        Lock acquisition is bounded: these counters are shared with worker processes that can be
+        OOM-killed or terminated mid-update. If the lock cannot be acquired within
+        SAFE_VALUE_LOCK_TIMEOUT, the operation proceeds without it - a possibly stale counter is
+        vastly preferable to permanently wedging the pool management code.
     """
 
     def __init__(self, initval=0, minval=None, maxval=None):
+        """ Keyword arguments:
+                initval: [int] Initial value. 0 by default.
+                minval: [int] Lower bound of the value, or None for no bound. None by default.
+                maxval: [int] Upper bound of the value, or None for no bound. None by default.
+        """
 
+        # The lock is managed separately (with a timeout), so the Value itself is lock-free
         self.val = multiprocessing.Value('i', initval, lock=False)
         self.lock = multiprocessing.Lock()
 
@@ -64,11 +70,18 @@ class SafeValue(object):
 
 
     def _acquireLock(self):
-        """ Acquire the lock with a timeout. Returns True if the lock was actually acquired. """
+        """ Acquire the lock with a timeout.
 
+        Return:
+            acquired: [bool] True if the lock was actually acquired, False if the wait timed out and the
+                caller should proceed without it.
+        """
+
+        # Use a much shorter timeout once the lock is known to be orphaned
         timeout = 0.5 if self._lock_broken else SAFE_VALUE_LOCK_TIMEOUT
         acquired = self.lock.acquire(timeout=timeout)
 
+        # Warn once on the first timeout
         if not acquired and not self._lock_broken:
             self._lock_broken = True
             log.warning('SafeValue: lock not acquired after {:.0f} s - a process likely died while '
@@ -76,6 +89,7 @@ class SafeValue(object):
                         'short timeout, without repeating this warning).'.format(
                             SAFE_VALUE_LOCK_TIMEOUT))
 
+        # The lock came back (e.g. it was just contended, not orphaned) - restore the full timeout
         if acquired and self._lock_broken:
             self._lock_broken = False
 
@@ -83,6 +97,8 @@ class SafeValue(object):
 
 
     def increment(self):
+        """ Increase the value by 1, clamping it to maxval. """
+
         acquired = self._acquireLock()
         try:
             self.val.value += 1
@@ -96,6 +112,8 @@ class SafeValue(object):
 
 
     def decrement(self):
+        """ Decrease the value by 1, clamping it to minval. """
+
         acquired = self._acquireLock()
         try:
             self.val.value -= 1
@@ -109,6 +127,8 @@ class SafeValue(object):
 
 
     def set(self, n):
+        """ Set the value to n. """
+
         acquired = self._acquireLock()
         try:
             self.val.value = n
@@ -118,6 +138,8 @@ class SafeValue(object):
 
 
     def value(self):
+        """ Return the current value. """
+
         acquired = self._acquireLock()
         try:
             return self.val.value
@@ -242,6 +264,7 @@ class QueuedPool(object):
         self.results_counter = SafeValue(minval=0)
         self.active_workers = SafeValue(minval=0, maxval=multiprocessing.cpu_count())
         self.available_workers = SafeValue(self.cores.value(), minval=0, maxval=multiprocessing.cpu_count())
+
         # Lock-free flag: workers are OOM-killable and terminated when stuck, and a killed
         # worker must not be able to orphan an Event lock (see AtomicFlag)
         self.kill_workers = AtomicFlag()
@@ -278,21 +301,37 @@ class QueuedPool(object):
 
         Under 'fork' no pickling occurs, so this method is never called and behavior is
         unchanged.
+
+        Return:
+            state: [dict] Copy of the instance dictionary with the unpicklable handles removed.
         """
+
         state = self.__dict__.copy()
+
+        # Drop the handles that cannot (and need not) cross the process boundary
         state['manager'] = None
         state['pool'] = None
         state['_results'] = []
+
+        # Reduce the logger to its name
         state['log'] = self.log.name if self.log is not None else None
+
         return state
 
 
     def __setstate__(self, state):
         """ Restore state in a worker process, re-fetching the logger by name. manager/pool
             stay None in the child; the worker reconnects to the parent's manager server
-            through the pickled Queue proxies. """
+            through the pickled Queue proxies.
+
+        Arguments:
+            state: [dict] State produced by __getstate__.
+        """
+
         log_name = state.get('log')
         self.__dict__.update(state)
+
+        # Re-fetch the logger by name (handlers are re-attached in _workerFunc)
         self.log = getLogger(log_name) if log_name is not None else None
 
 
@@ -428,6 +467,7 @@ class QueuedPool(object):
             try:
                 args = self.input_queue.get(True, 5)
 
+            # Nothing to do - check the kill flag and go back to waiting
             except queue_module.Empty:
                 if self.kill_workers.is_set():
                     self.printAndLog('Worker exiting on kill request while idle')
@@ -561,7 +601,8 @@ class QueuedPool(object):
             queue's internal lock and permanently wedge every other process using it.
 
         Keyword arguments:
-            graceful_timeout: [float] Seconds to wait for workers to exit before terminating.
+            graceful_timeout: [float] Seconds to wait for workers to exit before terminating. 30 by
+                default.
         """
 
         self.printAndLog('Closing pool...')
@@ -592,6 +633,7 @@ class QueuedPool(object):
         # worker is confirmed dead.
         if any([w.is_alive() for w in self._poolWorkers()]):
 
+            # SIGTERM the survivors
             for w in self._poolWorkers():
                 if w.is_alive():
                     try:
@@ -599,11 +641,13 @@ class QueuedPool(object):
                     except (OSError, AttributeError):
                         pass
 
+            # Bounded wait for them to exit
             t_beg = time.time()
             while any([w.is_alive() for w in self._poolWorkers()]) \
                     and ((time.time() - t_beg) < 10):
                 time.sleep(0.25)
 
+            # SIGKILL anything still alive (fall back to terminate() where SIGKILL does not exist)
             for w in self._poolWorkers():
                 if w.is_alive():
                     self.printAndLog('Worker {} survived terminate(), sending '
@@ -622,12 +666,13 @@ class QueuedPool(object):
                     and ((time.time() - t_beg) < 5):
                 time.sleep(0.25)
 
+        # A worker stuck in uninterruptible I/O (hung camera/USB) survives even SIGKILL, and
+        # terminate()/join() would hang on it forever - abandon the pool instead of wedging shutdown
         if any([w.is_alive() for w in self._poolWorkers()]):
-            # A worker stuck in uninterruptible I/O (hung camera/USB) survives even
-            # SIGKILL, and terminate()/join() would hang on it forever - abandon the
-            # pool instead of wedging shutdown
             self.printAndLog('A worker survived SIGKILL (uninterruptible I/O), '
                 'abandoning the pool without joining...')
+
+        # Every worker is dead, so the standard library shutdown path is safe now
         else:
             self.pool.terminate()
             self.printAndLog('Joining pool...')
@@ -795,9 +840,11 @@ class QueuedPool(object):
         Safe to call repeatedly, and a no-op once the Manager has been shut down.
         """
 
+        # The Manager queues are gone once the Manager is shut down
         if getattr(self, 'manager', None) is None:
             return
 
+        # Drain the output queue
         while True:
             try:
                 self._results.append(self.output_queue.get_nowait())
@@ -814,10 +861,13 @@ class QueuedPool(object):
         """
 
         if hasattr(self, 'manager') and self.manager is not None:
+
+            # The server process may already be gone
             try:
                 self.manager.shutdown()
             except Exception:
                 pass
+
             self.manager = None
 
 

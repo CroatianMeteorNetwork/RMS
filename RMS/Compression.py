@@ -55,15 +55,19 @@ class Compressor(multiprocessing.Process):
     running = False
     
     def __init__(self, data_dir, array1, start_time1, array2, start_time2, config, detector=None):
-        """
+        """ Compresses blocks of 256 frames from the shared ping-pong buffers into FF files in a separate
+            process.
 
         Arguments:
-            array1: multiprocessing.Array base for the first frame buffer (the numpy
-                view is rebuilt per-process via frameBufferShape - see RMS.Misc)
-            start_time1: float in shared memory that holds time of first frame in array1
-            array2: multiprocessing.Array base for the second frame buffer
-            start_time2: float in shared memory that holds time of first frame in array2
-            config: configuration class
+            data_dir: [str] Directory where the FF files are saved.
+            array1: [multiprocessing.Array] Base for the first frame buffer (the numpy view is rebuilt
+                per-process via frameBufferShape - see RMS.Misc).
+            start_time1: [multiprocessing.Value] Float in shared memory that holds the time of the first
+                frame in array1.
+            array2: [multiprocessing.Array] Base for the second frame buffer.
+            start_time2: [multiprocessing.Value] Float in shared memory that holds the time of the first
+                frame in array2.
+            config: [Config] Configuration object.
 
         Keyword arguments:
             detector: [Detector object] Handle to Detector object used for running star extraction and
@@ -74,13 +78,17 @@ class Compressor(multiprocessing.Process):
         super(Compressor, self).__init__()
         
         self.data_dir = data_dir
+
         # array1/array2 are multiprocessing.Array BASE objects (picklable across forkserver/spawn).
         # The numpy views over them are rebuilt in run() so they stay backed by the same shared
         # memory the capture process writes into; a numpy view passed here would pickle by value.
         self.array1_base = array1
         self.array2_base = array2
+
+        # Numpy views over the shared buffers, built in run()
         self.array1 = None
         self.array2 = None
+
         self.start_time1 = start_time1
         self.start_time2 = start_time2
         self.config = config
@@ -252,6 +260,7 @@ class Compressor(multiprocessing.Process):
             # bound the wait and escalate to SIGKILL (review finding)
             self.join(5)
 
+            # SIGKILL a process that ignored SIGTERM (os.kill/SIGKILL are unavailable on Windows)
             if self.is_alive():
                 log.warning("Compression process survived terminate, sending SIGKILL...")
                 try:
@@ -268,14 +277,14 @@ class Compressor(multiprocessing.Process):
                 log.warning("Compression process survived SIGKILL (uninterruptible I/O?), "
                             "abandoning it without joining")
 
+        # Never started - join() would assert, and there is nothing to reap
         elif self.pid is None:
-            # Never started - join() would assert, and there is nothing to reap
             log.debug("Compression process was never started, nothing to reap")
 
+        # Process is not alive but may not have been joined yet - reap it. The process has
+        # already exited, so this join returns as soon as the exit status is collected; the
+        # timeout is only a guard against the bookkeeping itself misbehaving.
         else:
-            # Process is not alive but may not have been joined yet - reap it. The process has
-            # already exited, so this join returns as soon as the exit status is collected; the
-            # timeout is only a guard against the bookkeeping itself misbehaving.
             log.debug("Compression process not alive, joining to reap resources")
             self.join(timeout=5)
 
@@ -443,7 +452,10 @@ class Compressor(multiprocessing.Process):
             # alike, while a view would be pickled by value (~236 MB, stalling compression
             # and spiking RSS).
             if self.config.enable_fireball_detection:
+
+                # Pick the base of the buffer that was just compressed
                 frames_base = self.array1_base if buffer_one else self.array2_base
+
                 extractor = Extractor(self.config, self.data_dir)
                 extractor.start(frames_base, frames.shape, compressed, filename_millis)
 

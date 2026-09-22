@@ -112,6 +112,7 @@ def recomputeCollectionAreas(root_dir_path, ncores=1):
             for _ in tqdm(pool.imap_unordered(worker, dir_list), total=len(dir_list)):
                 pass
 
+        # No tqdm, run without the progress bar
         except ImportError:
             for _ in pool.imap_unordered(worker, dir_list):
                 pass

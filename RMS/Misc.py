@@ -50,14 +50,14 @@ log = getLogger("rmslogger")
 def frameBufferShape(config):
     """ Return the shape of the shared frame buffer used for FF compression: (256, H, W).
 
-    The width/height are padded by one pixel in the rare case the buffer size is an exact
-    multiple of 512 KiB, to avoid a CPU-cache aliasing performance issue.
+        The width/height are padded by one pixel in the rare case the buffer size is an exact
+        multiple of 512 KiB, to avoid a CPU-cache aliasing performance issue.
 
-    This is the single source of truth for the buffer shape, used both by the parent (which
-    allocates the multiprocessing.Array) and by the child processes (which rebuild a numpy
-    view over that shared memory in their own run()). Under the 'forkserver'/'spawn' start
-    methods a numpy view cannot be passed between processes (it pickles by value and becomes
-    a private copy), so each process must build its own view from the shared mp.Array base.
+        This is the single source of truth for the buffer shape, used both by the parent (which
+        allocates the multiprocessing.Array) and by the child processes (which rebuild a numpy
+        view over that shared memory in their own run()). Under the 'forkserver'/'spawn' start
+        methods a numpy view cannot be passed between processes (it pickles by value and becomes
+        a private copy), so each process must build its own view from the shared mp.Array base.
 
     Arguments:
         config: [Config] Configuration object (uses width and height).
@@ -65,6 +65,8 @@ def frameBufferShape(config):
     Return:
         [tuple] (256, height [+1], width [+1])
     """
+
+    # Pad the buffer by one pixel if its size is an exact multiple of 512 KiB
     array_pad = 0
     if (256*config.width*config.height) % (512*1024) == 0:
         array_pad = 1
@@ -75,19 +77,19 @@ def frameBufferShape(config):
 def setMultiprocessingStartMethod(preferred=None):
     """ Pin the multiprocessing start method for consistent behavior across Python versions.
 
-    RMS uses multiprocessing throughout the capture pipeline. Historically it relied on the
-    platform default, which on Linux was 'fork' up to Python 3.13 and becomes 'forkserver'
-    in Python 3.14. By default this function pins each platform's existing default rather
-    than forcing a change: 'fork' children share the parent's memory copy-on-write, while a
-    'forkserver'/'spawn' worker re-imports the whole RMS stack, costing tens of MB of
-    private RSS and seconds of import time per worker on small stations (RPi). Linux
-    stations on Python <= 3.13 therefore stay on 'fork'; 'forkserver' is only selected on
-    Python 3.14+, where it is the upstream default anyway. Pinning explicitly keeps
-    behavior deterministic and silences the Python 3.12/3.13 DeprecationWarning about
-    relying on the implicit 'fork' default.
+        RMS uses multiprocessing throughout the capture pipeline. Historically it relied on the
+        platform default, which on Linux was 'fork' up to Python 3.13 and becomes 'forkserver'
+        in Python 3.14. By default this function pins each platform's existing default rather
+        than forcing a change: 'fork' children share the parent's memory copy-on-write, while a
+        'forkserver'/'spawn' worker re-imports the whole RMS stack, costing tens of MB of
+        private RSS and seconds of import time per worker on small stations (RPi). Linux
+        stations on Python <= 3.13 therefore stay on 'fork'; 'forkserver' is only selected on
+        Python 3.14+, where it is the upstream default anyway. Pinning explicitly keeps
+        behavior deterministic and silences the Python 3.12/3.13 DeprecationWarning about
+        relying on the implicit 'fork' default.
 
-    Call this once, early, from an entry point's __main__ block, before any Process or Pool
-    is created. It is safe to call more than once.
+        Call this once, early, from an entry point's __main__ block, before any Process or Pool
+        is created. It is safe to call more than once.
 
     Keyword arguments:
         preferred: [str] Start method to use, overriding the platform-default selection.
@@ -96,14 +98,15 @@ def setMultiprocessingStartMethod(preferred=None):
     Return:
         [str] The start method now in effect.
     """
+
     import multiprocessing as mp
 
     available = mp.get_all_start_methods()
 
+    # Keep the long-soaked platform defaults: fork on Linux through 3.13, forkserver on
+    # Linux from 3.14 (the new upstream default), spawn on Windows/macOS (fork has never
+    # been safe on macOS since 3.8 due to the Objective-C runtime).
     if preferred is None:
-        # Keep the long-soaked platform defaults: fork on Linux through 3.13, forkserver on
-        # Linux from 3.14 (the new upstream default), spawn on Windows/macOS (fork has never
-        # been safe on macOS since 3.8 due to the Objective-C runtime).
         if sys.platform.startswith("linux") and "fork" in available \
                 and sys.version_info < (3, 14):
             preferred = "fork"
@@ -112,6 +115,7 @@ def setMultiprocessingStartMethod(preferred=None):
         else:
             preferred = "spawn"
 
+    # Fall back to spawn (available everywhere) if the preferred method is not supported
     if preferred in available:
         method = preferred
     elif "spawn" in available:
@@ -119,10 +123,10 @@ def setMultiprocessingStartMethod(preferred=None):
     else:
         method = available[0]
 
+    # Context already fixed by an earlier call - keep the existing one
     try:
         mp.set_start_method(method, force=True)
     except RuntimeError:
-        # Context already fixed by an earlier call; keep the existing one
         pass
 
     return mp.get_start_method()
@@ -131,18 +135,22 @@ def setMultiprocessingStartMethod(preferred=None):
 def stableDoubleRead(shared_val, attempts=3):
     """ Read a lock-free c_double written by another process, tolerating torn reads.
 
-    On 32-bit platforms a double store/load is two word accesses, so a read racing the
-    writer can pair a new high word with an old low word - for an epoch-magnitude
-    timestamp that yields a value wrong by up to ~1024 s that still passes a `> 0` gate.
-    Two consecutive equal reads cannot both be torn by the same in-flight store.
+        On 32-bit platforms a double store/load is two word accesses, so a read racing the
+        writer can pair a new high word with an old low word - for an epoch-magnitude
+        timestamp that yields a value wrong by up to ~1024 s that still passes a `> 0` gate.
+        Two consecutive equal reads cannot both be torn by the same in-flight store.
 
     Arguments:
         shared_val: [multiprocessing.Value] A c_double created with lock=False.
+
+    Keyword arguments:
+        attempts: [int] Maximum number of read pairs to try. 3 by default.
 
     Return:
         [float] The stable value (falls back to the last read if never stable).
     """
 
+    # Read until two consecutive reads agree
     v2 = shared_val.value
     for _ in range(attempts):
         v1 = shared_val.value
@@ -155,17 +163,23 @@ def stableDoubleRead(shared_val, attempts=3):
 class BoundedLock(object):
     """ A multiprocessing.Lock wrapper whose acquisition is BOUNDED.
 
-    For locks shared with processes that can be OOM-killed or terminated: a kill while the
-    lock is held orphans it forever, and a plain `with lock:` then wedges every process that
-    touches it. Acquisition times out (5 s first time, 0.5 s once broken), warns once, and
-    proceeds without the lock - stale/racy data beats a permanent wedge for the counters and
-    timestamps this protects. Usable as a context manager, releasing only if acquired.
+        For locks shared with processes that can be OOM-killed or terminated: a kill while the
+        lock is held orphans it forever, and a plain `with lock:` then wedges every process that
+        touches it. Acquisition times out (5 s first time, 0.5 s once broken), warns once, and
+        proceeds without the lock - stale/racy data beats a permanent wedge for the counters and
+        timestamps this protects. Usable as a context manager, releasing only if acquired.
 
-    Thread-safe within a process: whether the lock was acquired is tracked per thread, so two
-    threads sharing one instance cannot release each other's acquisition. Not reentrant.
+        Thread-safe within a process: whether the lock was acquired is tracked per thread, so two
+        threads sharing one instance cannot release each other's acquisition. Not reentrant.
     """
 
     def __init__(self, name='lock', timeout=5.0):
+        """ Keyword arguments:
+                name: [str] Name of the lock, used in the warning message. 'lock' by default.
+                timeout: [float] Seconds to wait for the lock before proceeding without it. 5.0 by
+                    default.
+        """
+
         self._lock = multiprocessing.Lock()
         self._name = name
         self._timeout = timeout
@@ -177,20 +191,31 @@ class BoundedLock(object):
         self._holders = {}
 
     def __enter__(self):
+        """ Acquire the lock with a timeout, proceeding without it if the wait times out. """
+
+        # Use a much shorter timeout once the lock is known to be orphaned
         timeout = 0.5 if self._broken else self._timeout
         acquired = self._lock.acquire(timeout=timeout)
+
+        # Warn once on the first timeout
         if not acquired and not self._broken:
             self._broken = True
             log.warning('BoundedLock({:s}): not acquired after {:.1f} s - a process likely died '
                         'holding it. Proceeding without the lock.'.format(self._name, timeout))
+
+        # Remember that this thread holds the lock, so only it releases it
         if acquired:
             self._broken = False
             self._holders[threading.get_ident()] = True
+
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        """ Release the lock, but only if this thread actually acquired it. """
+
         if self._holders.pop(threading.get_ident(), False):
             self._lock.release()
+
         return False
 
 
@@ -207,23 +232,36 @@ class AtomicFlag(object):
     """
 
     def __init__(self):
+
+        # A single shared byte, no lock
         self._flag = multiprocessing.Value('b', 0, lock=False)
 
     def set(self):
+        """ Set the flag. """
+
         self._flag.value = 1
 
     def clear(self):
+        """ Clear the flag. """
+
         self._flag.value = 0
 
     def is_set(self):
+        """ Return True if the flag is set. """
+
         return bool(self._flag.value)
 
     def wait(self, timeout=None, poll_interval=1.0):
         """ Block until the flag is set or the timeout (in seconds) expires.
 
-        NOTE: unlike multiprocessing.Event.wait, wake-up after set() is polled, so it can
-        lag by up to poll_interval - fine for the shutdown flags this replaces, but a
-        surprise for latency-sensitive uses.
+            NOTE: unlike multiprocessing.Event.wait, wake-up after set() is polled, so it can
+            lag by up to poll_interval - fine for the shutdown flags this replaces, but a
+            surprise for latency-sensitive uses.
+
+        Keyword arguments:
+            timeout: [float] Maximum number of seconds to wait, or None to wait forever. None by
+                default.
+            poll_interval: [float] Seconds between polls of the flag. 1.0 by default.
 
         Return:
             [bool] True if the flag is set, False if the timeout expired.
@@ -235,9 +273,11 @@ class AtomicFlag(object):
 
         while not self.is_set():
 
+            # Give up when the timeout expires
             if (timeout is not None) and ((time.monotonic() - t_beg) >= timeout):
                 break
 
+            # Sleep for one poll interval, but never past the timeout
             if timeout is not None:
                 time_left = timeout - (time.monotonic() - t_beg)
                 time.sleep(max(0.0, min(poll_interval, time_left)))
@@ -248,36 +288,38 @@ class AtomicFlag(object):
 
 
 def setParentDeathSignal(sig=9):
-    """Ask the kernel to deliver *sig* to this process when its parent dies.
+    """ Ask the kernel to deliver *sig* to this process when its parent dies.
 
-    NOTE: per prctl(2), PR_SET_PDEATHSIG fires when the parent *thread* that created this
-    process terminates - not when the whole parent process exits. Only call this from
-    children spawned by the parent's main thread (RawFrameSaver is spawned from
-    BufferedCapture.run()); a child spawned from a short-lived helper thread would be
-    killed as soon as that thread exits.
+        NOTE: per prctl(2), PR_SET_PDEATHSIG fires when the parent *thread* that created this
+        process terminates - not when the whole parent process exits. Only call this from
+        children spawned by the parent's main thread (RawFrameSaver is spawned from
+        BufferedCapture.run()); a child spawned from a short-lived helper thread would be
+        killed as soon as that thread exits.
 
-    NOTE: under the multiprocessing 'forkserver' start method (Python 3.14's new default
-    on Linux) the OS parent is the fork-server, not the logical parent, so this fires on
-    the wrong death. Callers that must survive forkserver should ALSO use an explicit
-    parent-PID liveness check (see RawFrameSaver). This remains a fast, exact fast-path
-    under 'fork' (3.6-3.13 default) and 'spawn'.
+        NOTE: under the multiprocessing 'forkserver' start method (Python 3.14's new default
+        on Linux) the OS parent is the fork-server, not the logical parent, so this fires on
+        the wrong death. Callers that must survive forkserver should ALSO use an explicit
+        parent-PID liveness check (see RawFrameSaver). This remains a fast, exact fast-path
+        under 'fork' (3.6-3.13 default) and 'spawn'.
 
-    Prevents a worker forked by another worker from being orphaned and living forever when
-    its parent is force-killed. Without this, a BufferedCapture that the watchdog SIGKILLs
-    leaves its RawFrameSaver child reparented to init, still looping on a shared exit Event
-    that will never be set - so it never exits and keeps its inherited ~450 MB frame buffer.
-    Repeated across watchdog restarts, that orphans hundreds of processes and OOMs the box.
+        Prevents a worker forked by another worker from being orphaned and living forever when
+        its parent is force-killed. Without this, a BufferedCapture that the watchdog SIGKILLs
+        leaves its RawFrameSaver child reparented to init, still looping on a shared exit Event
+        that will never be set - so it never exits and keeps its inherited ~450 MB frame buffer.
+        Repeated across watchdog restarts, that orphans hundreds of processes and OOMs the box.
 
-    Linux-only (prctl PR_SET_PDEATHSIG); no-op elsewhere. Call as early as possible in a
-    child's run(). Also handles the race where the parent already died before the call -
-    best-effort only: it checks getppid() == 1, which misses orphans reparented to a
-    subreaper (systemd user sessions, containers) instead of init. Callers needing a hard
-    guarantee there should use a parent-PID liveness check as well.
+        Linux-only (prctl PR_SET_PDEATHSIG); no-op elsewhere. Call as early as possible in a
+        child's run(). Also handles the race where the parent already died before the call -
+        best-effort only: it checks getppid() == 1, which misses orphans reparented to a
+        subreaper (systemd user sessions, containers) instead of init. Callers needing a hard
+        guarantee there should use a parent-PID liveness check as well.
 
-    Arguments:
-        sig: [int] Signal to receive on parent death. Default 9 (SIGKILL; numeric because
+    Keyword arguments:
+        sig: [int] Signal to receive on parent death. 9 by default (SIGKILL; numeric because
             signal.SIGKILL does not exist on Windows).
     """
+
+    # Non-Linux or no usable prctl: protection is simply unavailable
     try:
         import ctypes
         import ctypes.util
@@ -302,9 +344,8 @@ def setParentDeathSignal(sig=9):
             flushChildLogging(timeout=1.0)
             os._exit(0)
 
+    # Log at debug so a station silently losing this guard is at least visible
     except Exception as e:
-        # Non-Linux or no usable prctl: protection is simply unavailable. Log at debug
-        # so a station silently losing this guard is at least visible.
         log.debug("setParentDeathSignal: unavailable (%s)", e)
 
 
@@ -354,46 +395,52 @@ def interruptibleWait(seconds):
 
 
 def runWithTimeout(func, args=(), kwargs=None, timeout=60, on_late_completion=None):
-    """
-    Run a function with a hard timeout using threading.
+    """ Run a function with a hard timeout using threading.
+
+        Note: this function uses a daemon thread that continues running even after the timeout
+        expires. The timeout only allows the calling thread to proceed; it does not stop the
+        underlying operation. Pass on_late_completion to clean up any resources the function may
+        open after the caller has already timed out.
 
     Arguments:
-        func: The function to run.
-        args: Positional arguments to pass to the function.
-        kwargs: Keyword arguments to pass to the function.
-        timeout: Maximum time in seconds to wait for the function to complete.
-        on_late_completion: Optional callable invoked in the daemon thread if the
-            function completes after the caller has already timed out. Use this to
-            clean up resources (e.g., closing a connection) that the function opened
-            after the caller gave up.
+        func: [callable] The function to run.
+
+    Keyword arguments:
+        args: [tuple] Positional arguments to pass to the function. Empty by default.
+        kwargs: [dict] Keyword arguments to pass to the function. None by default (no keyword
+            arguments).
+        timeout: [float] Maximum time in seconds to wait for the function to complete. 60 by default.
+        on_late_completion: [callable] Optional callable invoked in the daemon thread if the function
+            completes after the caller has already timed out. Use this to clean up resources (e.g.,
+            closing a connection) that the function opened after the caller gave up. None by default.
 
     Return:
-        A tuple of (success, result, exception):
-        - success: True if function completed within timeout, False if timed out
-        - result: The return value of the function (None if timed out or exception)
-        - exception: The exception raised by the function (None if no exception)
-
-    Note:
-        This function uses a daemon thread that continues running even after the timeout
-        expires. The timeout only allows the calling thread to proceed; it does not stop
-        the underlying operation. Pass on_late_completion to clean up any resources
-        the function may open after the caller has already timed out.
+        (success, result, exception): [tuple]
+            - success: [bool] True if function completed within timeout, False if timed out.
+            - result: The return value of the function (None if timed out or exception).
+            - exception: [Exception] The exception raised by the function (None if no exception).
     """
+
     if kwargs is None:
         kwargs = {}
 
+    # Results are shared with the worker thread through mutable containers
     result = [None]
     exception = [None]
     timed_out = [False]
     completed = threading.Event()
 
     def target():
+        """ Run the function in the worker thread and record its result or exception. """
+
         try:
             result[0] = func(*args, **kwargs)
         except Exception as e:
             exception[0] = e
         finally:
             completed.set()
+
+            # The caller has already given up - run the late cleanup here
             if timed_out[0] and on_late_completion is not None:
                 log.debug("runWithTimeout: function completed after caller timed out; running late cleanup")
                 try:

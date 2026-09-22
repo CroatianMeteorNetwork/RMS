@@ -58,6 +58,8 @@ def quotaReport(capt_dir_quota, config, after=False):
     frames_files_used_space = usedSpace(frames_files)
     time_files_used_space = usedSpace(time_files)
     video_files_used_space = usedSpace(video_files)
+
+    # Measure the remaining directories and the archive components
     archived_dir_used_space = usedSpace(archived_dir)
     captured_dir_used_space = usedSpace(captured_dir)
     log_dir_used_space = usedSpace(log_dir)
@@ -67,6 +69,8 @@ def quotaReport(capt_dir_quota, config, after=False):
 
     continuous_capture_used_space = frames_files_used_space + time_files_used_space + video_files_used_space
 
+    # Compute the percentage of each quota that is used (0 when the quota is disabled, to avoid
+    # dividing by zero)
     if config.log_files_quota != 0:
         log_files_pc = 100 * log_dir_used_space / config.log_files_quota
     else:
@@ -102,8 +106,10 @@ def quotaReport(capt_dir_quota, config, after=False):
     else:
         captured_dir_pc = 0
 
+    # Usage of the partition holding the data directory
     usage = shutil.disk_usage(config.data_dir)
 
+    # Build the report
     rep = "\n\n"
     rep += ("--------------------------------------------------------------\n")
     if after:
@@ -115,28 +121,38 @@ def quotaReport(capt_dir_quota, config, after=False):
     rep += "\n"
     rep += ("                                           Used     Quota\n")
 
-
     rep += ("                       frames files : {:7.02f}GB\n".format(frames_files_used_space))
     rep += ("                         time files : {:7.02f}GB\n".format(time_files_used_space))
     rep += ("                        video files : {:7.02f}GB\n".format(video_files_used_space))
     rep += ("                                        ----------------------\n")
-    rep += ("       total for continuous capture : {:7.02f}GB {:7.02f}GB {:3.0f}%\n".format(continuous_capture_used_space, config.continuous_capture_quota, continuous_capture_pc))
+    rep += ("       total for continuous capture : {:7.02f}GB {:7.02f}GB {:3.0f}%\n".format(
+        continuous_capture_used_space, config.continuous_capture_quota, continuous_capture_pc))
     rep += ("\n")
-    rep += ("                          bz2 files : {:7.02f}GB {:7.02f}GB {:3.0f}%\n".format(size_bz2_files, config.bz2_files_quota, bz2_files_pc))
-    rep += ("               archived directories : {:7.02f}GB {:7.02f}GB {:3.0f}%\n".format(size_archived_dirs, config.arch_dir_quota, arch_dir_pc))
+    rep += ("                          bz2 files : {:7.02f}GB {:7.02f}GB {:3.0f}%\n".format(
+        size_bz2_files, config.bz2_files_quota, bz2_files_pc))
+    rep += ("               archived directories : {:7.02f}GB {:7.02f}GB {:3.0f}%\n".format(
+        size_archived_dirs, config.arch_dir_quota, arch_dir_pc))
     rep += ("                                        ----------------------\n")
-    rep += (" bz2 files and archived directories : {:7.02f}GB {:7.02f}GB {:3.0f}%\n".format(archived_dir_used_space , config.arch_dir_quota + config.bz2_files_quota, total_arch_pc))
+    rep += (" bz2 files and archived directories : {:7.02f}GB {:7.02f}GB {:3.0f}%\n".format(
+        archived_dir_used_space , config.arch_dir_quota + config.bz2_files_quota, total_arch_pc))
     rep += ("\n")
-    rep += ("               captured directories : {:7.02f}GB {:7.02f}GB {:3.0f}%\n".format(captured_dir_used_space, capt_dir_quota, captured_dir_pc))
-    rep += ("                          log files : {:7.02f}GB {:7.02f}GB {:3.0f}%\n".format(log_dir_used_space,config.log_files_quota, log_files_pc))
+    rep += ("               captured directories : {:7.02f}GB {:7.02f}GB {:3.0f}%\n".format(
+        captured_dir_used_space, capt_dir_quota, captured_dir_pc))
+    rep += ("                          log files : {:7.02f}GB {:7.02f}GB {:3.0f}%\n".format(
+        log_dir_used_space,config.log_files_quota, log_files_pc))
     rep += ("                                        ----------------------\n")
-    rep += ("                 total for RMS_data : {:7.02f}GB {:7.02f}GB {:3.0f}%\n".format(data_dir_used_space, config.rms_data_quota, total_rms_data_pc))
+    rep += ("                 total for RMS_data : {:7.02f}GB {:7.02f}GB {:3.0f}%\n".format(
+        data_dir_used_space, config.rms_data_quota, total_rms_data_pc))
     rep += "\n"
+
+    # Partition usage (the percentage is skipped if the total size is unknown)
     rep += (" logical partition information\n")
     if usage.total > 0:
-        rep += ("      partition containing RMS_data : {:7.02f}GB {:7.02f}GB {:3.0f}%\n".format(usage.used / (1024 ** 3), usage.total / (1024 ** 3) , 100 * usage.used / usage.total))
+        rep += ("      partition containing RMS_data : {:7.02f}GB {:7.02f}GB {:3.0f}%\n".format(
+            usage.used / (1024 ** 3), usage.total / (1024 ** 3) , 100 * usage.used / usage.total))
     else:
-        rep += ("      partition containing RMS_data : {:7.02f}GB {:7.02f}GB\n".format(usage.used / (1024 ** 3), usage.total / (1024 ** 3)))
+        rep += ("      partition containing RMS_data : {:7.02f}GB {:7.02f}GB\n".format(
+            usage.used / (1024 ** 3), usage.total / (1024 ** 3)))
     rep += ("--------------------------------------------------------------\n")
 
     return rep
@@ -811,14 +827,15 @@ def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration
         o.elevation = config.elevation
         sun = ephem.Sun()
 
+        # Find the time of the local noon following the last sunrise
         try:
             sunrise = o.previous_rising(sun, start=ephem.now())
             noon_time = o.next_transit(sun, start=sunrise).datetime()
 
+        # Polar night/day: the Sun never crosses the horizon, so there is no rising/transit.
+        # captureDuration() below handles polar conditions itself, so fall back to the current time
+        # as the reference point.
         except (ephem.NeverUpError, ephem.AlwaysUpError):
-            # Polar night/day: the Sun never crosses the horizon, so there is no
-            # rising/transit. captureDuration() below handles polar conditions
-            # itself, so fall back to the current time as the reference point.
             log.warning("Polar day/night: no Sun rising/transit; using current time for disk estimate")
             noon_time = RmsDateTime.utcnow()
 

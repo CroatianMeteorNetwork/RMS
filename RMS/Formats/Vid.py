@@ -86,6 +86,7 @@ def readFrame(st, fid, metadata_only=False):
     #### Read the header ###
     ##########################################################################################################
 
+    # Every field is read as a 1-element array and indexed with [0], as int() of an array is deprecated
     st.magic = int(np.fromfile(fid, dtype=np.uint32, count=1)[0])
 
     # Size of one frame in bytes

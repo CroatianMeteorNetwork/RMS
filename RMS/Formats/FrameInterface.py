@@ -198,13 +198,20 @@ class InputType(object):
         pass
 
     def getTargetDtype(self, first_frame_data=None):
-        """ Determine the target dtype based on the target bit depth of the input images and the 
-            processing configuration.
-            
-        If binning with 'sum' method is used, the target dtype is forced to uint16 to prevent overflow.
-        Otherwise, it depends on the input data's bit depth.
+        """ Determine the target dtype based on the bit depth of the input images and the processing
+            configuration.
+
+            If binning with the 'sum' method is used, the target dtype is forced to uint16 to prevent
+            overflow. Otherwise, it depends on the input data's bit depth.
+
+        Keyword arguments:
+            first_frame_data: [ndarray] First frame of the input, used to determine the input bit depth.
+                None by default, in which case uint16 is returned (unless the configuration forces it).
+
+        Return:
+            [numpy dtype] np.uint8 or np.uint16.
         """
-        
+
         # Check if bit depth should be at least uint16 to handle potential overflow from sum binning
         if hasattr(self, 'config'):
             if self.config.detection_binning_factor > 1 and \
@@ -438,11 +445,11 @@ class InputTypeFRFF(InputType):
             # If there are more FFs to read, make a fake FF
             else:
 
-                # Init an empty FF structure
                 # For multiple FFs, determine the dtype from the first reconstructed FF
                 ref_ff = readFF(self.dir_path, ffs_to_read[0])
                 target_dtype = self.getTargetDtype(ref_ff.maxpixel)
-                
+
+                # Init an empty FF structure
                 ff = FFMimickInterface(self.nrows, self.ncols, target_dtype)
 
                 # Store maxpixel selections, avepixels, stdpixels
@@ -1005,7 +1012,6 @@ class InputTypeVideo(InputType):
         print('Frames to read: ' + str(frames_to_read), end='')
 
         # Load the chunk of frames
-        # Load the chunk of frames
         for i in range(frames_to_read):
 
             # Read a preloaded frame
@@ -1027,7 +1033,7 @@ class InputTypeVideo(InputType):
             if i == 0:
                 ff_struct_fake.dtype = self.getTargetDtype(frame)
 
-        
+
         # Print the total number of read frames in the same line
         print(' - loaded: {:d}'.format(ff_struct_fake.nframes), flush=True)
 
@@ -1725,7 +1731,7 @@ class InputTypeImages(InputType):
                 # Set magnitude limit
                 self.config.catalog_mag_limit = 3.5
 
-            # Non-FreeTrue fit file
+            # Non-FreeTure FITS file, nothing station-specific to set
             else:
                 pass
 
@@ -1907,9 +1913,10 @@ class InputTypeImages(InputType):
             frame, self.frame_dt_list, self.current_fr_chunk_size = self.cache[cache_id]
             return frame
 
-        # Init making the FF structure
-        # Update the FF struct's target dtype based on the first frame's bit depth
+        # Determine target dtype (assume uint16 if not yet initialized, then update from the first frame)
         target_dtype = self.getTargetDtype()
+
+        # Init making the FF structure
         ff_struct_fake = FFMimickInterface(self.nrows, self.ncols, target_dtype)
 
         self.frame_dt_list = []
@@ -2126,9 +2133,9 @@ class InputTypeImages(InputType):
                 # calibration format is visible without flooding the output on every frame
                 self._printFitsHeaderOnce(fits_file[0].header, "FITS mode")
 
-                # If the fits image type is floating point, convert it to uint16
+                # If the FITS image type is floating point, convert it to uint16
                 if np.issubdtype(frame.dtype, np.floating):
-                    
+
                     # Rebalance the image so that the minimum is at 0
                     frame = frame - np.min(frame)
 
@@ -2137,8 +2144,7 @@ class InputTypeImages(InputType):
 
                     # Cast to uint16
                     frame = frame.astype(np.uint16)
-                    
-                
+
 
                 # # Flip image vertically
                 # frame = np.flipud(frame)
@@ -2333,8 +2339,8 @@ class InputTypeImages(InputType):
     def getUWOMagickType(self, img):
         """ Return the type of the UWO PNG image. """
 
-        # Read in the magick number as a uint32
-        # Use first 4 bytes of raw image data to handle any width pixels
+        # Read in the magick number as a uint32 from the first 4 bytes of the raw image data (this works
+        # for any image width and bit depth)
         magicknum = np.frombuffer(img.tobytes()[:4], dtype=np.uint32)[0]
 
         # Define the magick numbers for different UWO PNGs
@@ -2440,6 +2446,7 @@ class InputTypeDFN(InputType):
             self.ncols = temp
             img = np.rot90(img)
 
+        # Init the FF structure with the dtype matching the image bit depth
         target_dtype = self.getTargetDtype(img)
         self.ff = FFMimickInterface(self.nrows, self.ncols, target_dtype)
         self.ff.addFrame(img.astype(np.uint16))

@@ -39,26 +39,30 @@ class RawFrameSaver(multiprocessing.Process):
 
     running = False
     
-    def __init__(self, saved_frames_dir, array1, start_time1, array2, start_time2, tsArray1, tsArray2, daytime_mode, config, raw_array_shape):
-        """
+    def __init__(self, saved_frames_dir, array1, start_time1, array2, start_time2, tsArray1, tsArray2, \
+        daytime_mode, config, raw_array_shape):
+        """ Saves raw video frames from the shared ping-pong buffers to disk in a separate process.
 
         Arguments:
-            saved_frames_dir: directory to save raw frames to
-            array1: multiprocessing.Array base for the first raw-frame buffer (shared memory)
-            start_time1: float in shared memory that holds time of first raw frame in array1
-            array2: multiprocessing.Array base for the second raw-frame buffer
-            start_time1: float in shared memory that holds time of first raw frame in array2
-            tsArray1: multiprocessing.Array base for the first timestamp buffer
-            tsArray2: multiprocessing.Array base for the second timestamp buffer
-            config: configuration class
-            daytime_mode: [bool] True if the camera is in daytime mode, False if in nightime mode
+            saved_frames_dir: [str] Directory to save raw frames to.
+            array1: [multiprocessing.Array] Base for the first raw-frame buffer (shared memory).
+            start_time1: [multiprocessing.Value] Float in shared memory that holds the time of the first
+                raw frame in array1.
+            array2: [multiprocessing.Array] Base for the second raw-frame buffer.
+            start_time2: [multiprocessing.Value] Float in shared memory that holds the time of the first
+                raw frame in array2.
+            tsArray1: [multiprocessing.Array] Base for the first timestamp buffer.
+            tsArray2: [multiprocessing.Array] Base for the second timestamp buffer.
+            daytime_mode: [multiprocessing.Value] True if the camera is in daytime mode, False if in
+                nighttime mode.
+            config: [Config] Configuration object.
             raw_array_shape: [tuple] Shape of the raw-frame buffer, used to rebuild the numpy view.
-
         """
 
         super(RawFrameSaver, self).__init__()
 
         self.saved_frames_dir = saved_frames_dir
+
         # array1/array2 and the timestamp arrays are multiprocessing.Array BASE objects (picklable
         # across forkserver/spawn). The numpy views over them are rebuilt in run() so they stay
         # backed by the same shared memory the capture process writes into.
@@ -67,10 +71,13 @@ class RawFrameSaver(multiprocessing.Process):
         self.timeStamps1_base = tsArray1
         self.timeStamps2_base = tsArray2
         self.raw_array_shape = raw_array_shape
+
+        # Numpy views over the shared buffers, built per process by ensureViews()
         self.array1 = None
         self.array2 = None
         self.timeStamps1 = None
         self.timeStamps2 = None
+
         self.start_time1 = start_time1
         self.start_time2 = start_time2
         self.daytime_mode = daytime_mode
@@ -127,13 +134,14 @@ class RawFrameSaver(multiprocessing.Process):
             if timestamp == 0:
                 break
 
-            # Handle when frame has only two channels (yuyv/uyvy)
-            # OpenCV only supports 1, 3, or 4 color channels
+            # Handle when frame has only two channels (yuyv/uyvy), as OpenCV only supports 1, 3, or 4
+            # color channels
             if (len(frame.shape) == 3) and (frame.shape[2] == 2):
+
                 # If UYVY image given, luma (Y) channel is channel 1
                 if self.config.uyvy_pixelformat:
                     frame = frame[:, :, 1]
-                
+
                 # Otherwise, take the first available channel
                 else:
                     frame = frame[:, :, 0]
@@ -203,6 +211,8 @@ class RawFrameSaver(multiprocessing.Process):
         numpy view cannot be inherited or pickled, so each process builds its own view from the
         shared base here. Idempotent.
         """
+
+        # The bases are locked multiprocessing.Arrays, so go through .get_obj()
         if self.array1 is None:
             self.array1 = np.ctypeslib.as_array(self.array1_base.get_obj()).reshape(self.raw_array_shape)
             self.array2 = np.ctypeslib.as_array(self.array2_base.get_obj()).reshape(self.raw_array_shape)
@@ -235,6 +245,7 @@ class RawFrameSaver(multiprocessing.Process):
         timestamps1 = getattr(self, 'timeStamps1', None)
         timestamps2 = getattr(self, 'timeStamps2', None)
 
+        # Collect the frames with a non-zero timestamp from both buffers
         leftovers = []
         if (array1 is not None) and (timestamps1 is not None):
             for frame, ts in zip(array1, timestamps1):
@@ -242,11 +253,13 @@ class RawFrameSaver(multiprocessing.Process):
         if (array2 is not None) and (timestamps2 is not None):
             for frame, ts in zip(array2, timestamps2):
                 if ts: leftovers.append((frame.copy(), float(ts)))
+
+        # Save them to disk
         if leftovers:
             log.info("Flushing %d tail-end raw frames before shutdown", len(leftovers))
             self.saveFramesToDisk(leftovers, self.daytime_mode)
 
-            # mark buffers consumed so run() won’t resave them
+            # Mark buffers consumed so run() won't resave them
             if timestamps1 is not None:
                 timestamps1.fill(0)
             if timestamps2 is not None:
@@ -254,7 +267,8 @@ class RawFrameSaver(multiprocessing.Process):
             self.start_time1.value = 0
             self.start_time2.value = 0
 
-        # Free shared memory after the raw frame saver is done
+        # Drop the views after the raw frame saver is done (the shared memory itself is owned by the
+        # capture process)
         try:
             log.debug('Freeing frame buffers in raw frame saver...')
             self.array1 = None

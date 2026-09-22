@@ -68,11 +68,18 @@ def captureModeSwitcher(config, daytime_mode, camera_mode_switch_trigger, stop_e
         config: [Config] config object for determining location and controlling camera settings if specified
         daytime_mode: [multiprocessing.Value] shared boolean variable to communicate the mode switch with other processes
                             True = Day time, False = Night time
-        stop_event: [threading.Event] optional event to signal this thread to exit
+        camera_mode_switch_trigger: [multiprocessing.Value] shared boolean set to True when the camera
+            settings need to be switched by the capture process
+
+    Keyword arguments:
+        stop_event: [threading.Event] optional event to signal this thread to exit. None by default,
+            in which case the loop runs forever.
     """
+
     is_first_switch = True  # Track whether it's the initial switch
 
     try:
+        # Run until asked to stop (or forever if no stop event is given)
         while not (stop_event is not None and stop_event.is_set()):
 
             # Initialize observer

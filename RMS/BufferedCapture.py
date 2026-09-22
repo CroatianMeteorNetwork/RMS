@@ -117,9 +117,11 @@ def validVideoCrop(crop_str):
             the pipeline (ConfigReader maps ""/none to None, so this only guards direct callers).
     """
 
+    # Reject empty specs
     if (crop_str is None) or (not crop_str.split()):
         return False
 
+    # Every token must be side=N with a known side and a non-negative integer
     valid_keys = {"top", "bottom", "left", "right"}
     for token in crop_str.split():
         key, sep, val = token.partition("=")
@@ -140,11 +142,13 @@ class BufferedCapture(Process):
         """ Populate arrays with (startTime, frames) after startCapture is called.
         
         Arguments:
-            array1: multiprocessing.Array base for the frame buffer that is going to be
-                filled with frames (numpy views are rebuilt per-process)
-            start_time1: float in shared memory that holds time of first frame in array1
-            array2: multiprocessing.Array base for the second frame buffer
-            start_time2: float in shared memory that holds time of first frame in array2
+            array1: [multiprocessing.Array] Base for the frame buffer that is going to be filled with
+                frames (numpy views are rebuilt per-process).
+            start_time1: [multiprocessing.Value] Float in shared memory that holds the time of the first
+                frame in array1.
+            array2: [multiprocessing.Array] Base for the second frame buffer.
+            start_time2: [multiprocessing.Value] Float in shared memory that holds the time of the first
+                frame in array2.
 
         Keyword arguments:
             video_file: [str] Path to the video file, if it was given as the video source. None by default.
@@ -181,8 +185,11 @@ class BufferedCapture(Process):
         # numpy view passed here would pickle by value and disconnect this process from the buffer.
         self.array1_base = array1
         self.array2_base = array2
+
+        # Numpy views over the shared buffers, built in run()
         self.array1 = None
         self.array2 = None
+
         self.start_time1 = start_time1
         self.start_time2 = start_time2
         self.start_time1.value = 0
@@ -205,23 +212,21 @@ class BufferedCapture(Process):
             self.shared_timestamps_base = Array(ctypes.c_double, self.num_raw_frames)
             self.shared_timestamps_base2 = Array(ctypes.c_double, self.num_raw_frames)
 
-        # Initialize shared counter for dropped frames
-        # lock=False: the capture child is the only writer (increments), the
-        # main process only reads - and stopCapture() SIGKILLs the child before
-        # reading, so a locked Value could be orphaned mid-increment and wedge
-        # the read forever (same class as the Compressor.stop() deadlock).
-        # A 32-bit int store/load is single-copy atomic on all supported
-        # platforms, including ARMv7.
+        # Initialize shared counter for dropped frames. lock=False: the capture child is the only writer
+        # (increments), the main process only reads - and stopCapture() SIGKILLs the child before
+        # reading, so a locked Value could be orphaned mid-increment and wedge the read forever (same
+        # class as the Compressor.stop() deadlock). A 32-bit int store/load is single-copy atomic on all
+        # supported platforms, including ARMv7.
         self.dropped_frames = Value('i', 0, lock=False)
         self.last_daytime_mode = None  # Track day/night transitions
         self.dropped_frames_timestamps = deque()  # Track when frames were dropped for 10-min window
 
-        # Flag for process control
+        # Flag for process control (lock-free, see AtomicFlag)
         self.exit = AtomicFlag()
 
-        # Heartbeat timestamp for watchdog - updated every frame block to detect hangs
-        # lock=False: single writer, and a locked Value can deadlock the watchdog if this
-        # process is killed while holding the lock
+        # Heartbeat timestamp for watchdog - updated every frame block to detect hangs. lock=False: single
+        # writer, and a locked Value can deadlock the watchdog if this process is killed while holding
+        # the lock
         self.heartbeat = Value('d', 0.0, lock=False)
 
         # Initialize sync tick
@@ -807,21 +812,24 @@ class BufferedCapture(Process):
                 
 
     def isGrayscale(self, frame, stride=64):
-        """
-        Quickly check if a frame is grayscale by sampling pixels along the diagonal.
-        If all three channels match on those diagonal samples, return True.
-        If an IndexError is raised (i.e., frame is single-channel), also return True.
-        This trades completeness for speed, as only the diagonal is checked.
+        """ Quickly check if a frame is grayscale by sampling pixels along the diagonal.
+            If all three channels match on those diagonal samples, return True.
+            If an IndexError is raised (i.e., frame is single-channel), also return True.
+            This trades completeness for speed, as only the diagonal is checked.
 
-        Args:
-            frame (numpy.ndarray): The image frame to check (usually BGR or GRAY).
-            stride (int): Spacing for diagonal sampling, skipping many pixels for efficiency.
+        Arguments:
+            frame: [ndarray] The image frame to check (usually BGR or GRAY).
 
-        Returns:
-            bool or None: True if all sampled channels match (or frame is single-channel),
-                False if channels differ (color), or None if inconclusive (all pixels are
-                the same value, e.g. all white or all black).
+        Keyword arguments:
+            stride: [int] Spacing for diagonal sampling, skipping many pixels for efficiency. 64 by
+                default.
+
+        Return:
+            [bool or None] True if all sampled channels match (or frame is single-channel), False if
+                channels differ (color), or None if inconclusive (all pixels are the same value, e.g.
+                all white or all black).
         """
+
         if frame is None:
             raise ValueError("isGrayscale() called with frame=None")
 
@@ -836,7 +844,7 @@ class BufferedCapture(Process):
                     np.all(sampled[..., 1] == sampled[..., 2])
 
             # If all sampled pixels have the same value (e.g. all white or all black),
-            # the check is inconclusive — channels match trivially
+            # the check is inconclusive - channels match trivially
             if is_gray and np.all(sampled[..., 0] == sampled[0, 0, 0]):
                 return None
 
@@ -1486,12 +1494,12 @@ class BufferedCapture(Process):
                     width = getStructureValue(structure, 'width')
                     height = getStructureValue(structure, 'height')
 
-                    # Based on camera settings and optional video_scale/video_crop parameters, the decoded frame size is what
-                    # gets written into the fixed-size capture arrays (sized to config
-                    # width/height). Warn if they disagree: a smaller frame is silently
-                    # zero-padded into the top-left of the array, while a larger one may cause overflows
-                    # and may abort the capture block. (ROI is applied separately and may
-                    # legitimately shrink the frame further, so only warn, never abort.)
+                    # Based on camera settings and optional video_scale/video_crop parameters, the decoded
+                    # frame size is what gets written into the fixed-size capture arrays (sized to config
+                    # width/height). Warn if they disagree: a smaller frame is silently zero-padded into
+                    # the top-left of the array, while a larger one may cause overflows and may abort the
+                    # capture block. (ROI is applied separately and may legitimately shrink the frame
+                    # further, so only warn, never abort.)
                     if width != self.config.width or height != self.config.height:
                         log.warning("video output is {:d}x{:d} but config "
                                     "width/height is {:d}x{:d}; set width/height to match the "
@@ -1509,16 +1517,18 @@ class BufferedCapture(Process):
                     # Unmap the buffer
                     buffer.unmap(map_info)
                     
-                    # Check if frame is grayscale and set flag
+                    # Check if frame is grayscale and set flag (keep the previous value if inconclusive)
                     gray_result = self.isGrayscale(frame)
                     if gray_result is not None:
                         self.convert_to_gray = gray_result
+
                     log.info("Video format: {}, {}P, color: {}".format(self.config.gst_colorspace, height,
                                                                        not self.convert_to_gray))
 
                     # Set the video device type
                     self.video_device_type = "gst"
 
+                    # Record the media backend in the observation summary, if the night directory exists
                     if self.night_data_dir is not None and os.path.isdir(self.night_data_dir):
                         try:
                             addObsParam(getObservationSummaryDict(self.night_data_dir), "media_backend", "gst")
@@ -1531,8 +1541,6 @@ class BufferedCapture(Process):
                     log.info("Error initializing GStreamer, switching to alternative. Error: {}".format(e))
                     self.media_backend_override = True
                     self.releaseResources()
-
-
 
 
             if self.config.media_backend == 'v4l2':
@@ -1563,6 +1571,7 @@ class BufferedCapture(Process):
                 log.info("Initialize OpenCV Device.")
                 self.device = cv2.VideoCapture(self.config.deviceID)
 
+                # Record the media backend in the observation summary, if the night directory exists
                 if self.night_data_dir is not None and os.path.isdir(self.night_data_dir):
                     try:
                         addObsParam(getObservationSummaryDict(self.night_data_dir), "media_backend", "cv2")
@@ -1635,14 +1644,16 @@ class BufferedCapture(Process):
                                               timeout=GST_TEARDOWN_TIMEOUT,
                                               on_late_completion=lambda: log.info(
                                                   "releaseResources: abandoned set_state(NULL) finally unwound"))
+                # Teardown hung. Abandon it (the call keeps running in a daemon thread, holding the
+                # old pipeline until it eventually unwinds) and drop our reference below. Do NOT
+                # retry/verify - keeping capture alive matters more than a clean teardown of an
+                # already-dead camera.
                 if not ok:
-                    # Teardown hung. Abandon it (the call keeps running in a daemon thread,
-                    # holding the old pipeline until it eventually unwinds) and drop our
-                    # reference below. Do NOT retry/verify - keeping capture alive matters
-                    # more than a clean teardown of an already-dead camera.
                     log.warning("releaseResources: set_state(NULL) did not return within %ds - "
                                 "abandoning teardown to keep capture alive (pipeline left to GC)",
                                 GST_TEARDOWN_TIMEOUT)
+
+                # The teardown returned in time - re-raise any error it hit so the forced path below runs
                 else:
                     if exc is not None:
                         raise exc
@@ -1711,7 +1722,8 @@ class BufferedCapture(Process):
             log.debug("releaseResources: Releasing %s", type(self.device).__name__)
 
             try:
-                if hasattr(self.device, "release"):                      # OpenCV branch
+                # OpenCV branch - release() can hang on a dead device, so bound it
+                if hasattr(self.device, "release"):
                     rok, _, _ = runWithTimeout(self.device.release, timeout=2)
                     if not rok:
                         log.warning("releaseResources: cap.release() hung - fd dropped")
@@ -1839,6 +1851,7 @@ class BufferedCapture(Process):
             self.array1 = np.ctypeslib.as_array(self.array1_base.get_obj()).reshape(frame_buffer_shape)
             self.array2 = np.ctypeslib.as_array(self.array2_base.get_obj()).reshape(frame_buffer_shape)
 
+
             log.debug("Initializing process-specific resources...")
 
             # Initialize heartbeat for watchdog
@@ -1871,6 +1884,8 @@ class BufferedCapture(Process):
             self.pipeline = None
             self.start_timestamp = 0
             self.frame_shape = None
+
+            # Assume grayscale at night and color during the day until the first frame says otherwise
             self.convert_to_gray = not (self.daytime_mode.value if self.daytime_mode is not None else False)
             self.last_pts_correction_ns = 0
             self.last_running_time_ns = None
@@ -2051,6 +2066,8 @@ class BufferedCapture(Process):
                     # If the connection was made and the frame was retrieved, continue with the capture
                     if ret:
                         log.info('Video device reconnected successfully!')
+
+                        # Update the grayscale flag (keep the previous value if inconclusive)
                         gray_result = self.isGrayscale(frame)
                         if gray_result is not None:
                             self.convert_to_gray = gray_result
@@ -2112,7 +2129,7 @@ class BufferedCapture(Process):
                                    self.shouldSaveFrame(frame_timestamp)
                                    )
 
-                # Check if frame contains color information
+                # Check if frame contains color information (keep the previous value if inconclusive)
                 if save_this_frame:
                     gray_result = self.isGrayscale(frame)
                     if gray_result is not None:
@@ -2349,10 +2366,10 @@ class BufferedCapture(Process):
 
                         self.last_daytime_mode = current_daytime
 
-                        # Calculate buffer fill percentage based on max frame age
-                        # The appsink has max-buffers=gst_queue_size, so at fps rate, max
-                        # capacity is ~gst_queue_size/fps seconds
-                        max_buffer_time = float(self.config.gst_queue_size) / self.config.fps  # Theoretical max buffer time in seconds
+                        # Calculate buffer fill percentage based on max frame age. The appsink has
+                        # max-buffers=gst_queue_size, so at fps rate the theoretical max buffer time is
+                        # ~gst_queue_size/fps seconds
+                        max_buffer_time = float(self.config.gst_queue_size) / self.config.fps
                         buffer_fill_percent = min(100, (max_frame_age_seconds / max_buffer_time) * 100)
 
                         # Calculate dropped frames in last 10 minutes

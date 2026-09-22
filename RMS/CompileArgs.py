@@ -5,7 +5,29 @@ This module must only depend on the standard library: setup.py imports it at bui
 time, before any of the RMS dependencies (numpy, matplotlib, ...) are installed.
 """
 
-from __future__ import absolute_import, print_function
+# The MIT License
+
+# Copyright (c) 2016 Denis Vida
+
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
+from __future__ import print_function, division, absolute_import
 
 import os
 import sys
@@ -38,6 +60,7 @@ def getCompileArgs(win_args=None, rpi_args=None, linux_pc_args=None):
         [list] Compile arguments for the current platform.
     """
 
+    # Windows - use the given arguments or the defaults
     if sys.platform.startswith('win'):
         args = win_args if win_args is not None else DEFAULT_WIN_PC_ARGS
 
@@ -52,6 +75,7 @@ def getCompileArgs(win_args=None, rpi_args=None, linux_pc_args=None):
     if ('arm' in os.uname()[4]) and (sys.platform != 'darwin'):
         return rpi_args if rpi_args is not None else DEFAULT_RPI_ARGS
 
+    # Linux/macOS PCs
     return linux_pc_args if linux_pc_args is not None else DEFAULT_LINUX_PC_ARGS
 
 
@@ -68,22 +92,27 @@ def getExtraCompileArgs(config_path=None):
         [list] Compile arguments for the current platform.
     """
 
+    # Default to the .config in the repository root
     if config_path is None:
         config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                                    '.config')
 
+    # None means "use the built-in default" for that platform
     win_args, rpi_args, linux_pc_args = None, None, None
 
     if os.path.isfile(config_path):
 
+        # Allow inline ';' comments and duplicate options, as the RMS ConfigReader does
         try:
             parser = RawConfigParser(inline_comment_prefixes=(';',), strict=False)
         except TypeError:
             parser = RawConfigParser()  # Python 2
 
+        # A broken .config must never stop the build, so fall back to the defaults on any error
         try:
             parser.read(config_path)
 
+            # Read the per-platform arguments from the [Build] section, if present
             section = "Build"
             if parser.has_section(section):
 

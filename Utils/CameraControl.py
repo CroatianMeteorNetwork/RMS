@@ -634,16 +634,19 @@ def manageCloudConnection(cam, opts):
 
 
 def upgradeFirmware(cam, firmware_path, skip_confirm=False):
-    """Upgrade the camera firmware via the DVRIP protocol.
+    """ Upgrade the camera firmware via the DVRIP protocol.
 
-    Args:
-        cam: The camera object (must be logged in)
-        firmware_path: Path to the firmware .bin file
-        skip_confirm: If True, skip the confirmation prompt
+    Arguments:
+        cam: [DVRIPCam] The camera object (must be logged in).
+        firmware_path: [str] Path to the firmware .bin file.
 
-    Returns:
-        True on success, False on failure
+    Keyword arguments:
+        skip_confirm: [bool] If True, skip the confirmation prompt. False by default.
+
+    Return:
+        [bool] True on success, False on failure.
     """
+
     # Validate firmware file exists
     if not os.path.isfile(firmware_path):
         log.error("Firmware file not found: %s", firmware_path)
@@ -658,6 +661,7 @@ def upgradeFirmware(cam, firmware_path, skip_confirm=False):
         upgrade_info = cam.get_upgrade_info()
         hw_info = upgrade_info.get('Hardware', 'Unknown')
         sw_version = upgrade_info.get('SoftWareVersion', 'Unknown')
+
         # Some cameras don't return SoftWareVersion via get_upgrade_info,
         # fall back to get_system_info which reliably provides it
         if sw_version == 'Unknown':
@@ -668,6 +672,7 @@ def upgradeFirmware(cam, firmware_path, skip_confirm=False):
         hw_info = 'Unknown'
         sw_version = 'Unknown'
 
+    # Print the upgrade summary
     log.info("=" * 60)
     log.info("FIRMWARE UPGRADE")
     log.info("=" * 60)
@@ -696,8 +701,12 @@ def upgradeFirmware(cam, firmware_path, skip_confirm=False):
     last_percent = [-1]  # Use list to allow modification in nested function
 
     def progress_callback(*args, **kwargs):
-        """Custom print function to capture and log progress."""
+        """ Custom print function passed to the DVRIP upgrade routine which captures and logs the
+            progress messages.
+        """
+
         msg = ' '.join(str(a) for a in args)
+
         # Extract percentage from messages like "Uploading: 45.2%" or "Upgrading:  67%"
         if '%' in msg:
             # Log progress at 10% intervals to avoid spam
@@ -713,6 +722,7 @@ def upgradeFirmware(cam, firmware_path, skip_confirm=False):
             log.error(msg.strip())
         elif 'successful' in msg.lower() or 'Done' in msg:
             log.info(msg.strip())
+
         # Print to console for real-time feedback (with carriage return support)
         end = kwargs.get('end', '\n')
         print(msg, end=end, flush=True)
@@ -723,11 +733,14 @@ def upgradeFirmware(cam, firmware_path, skip_confirm=False):
     try:
         result = cam.upgrade(firmware_path, packetsize=0x8000, vprint=progress_callback)
 
+        # Some firmware versions reboot without sending a final status
         if result is None:
             log.info("Firmware upload completed.")
             log.info("Camera is now applying the update and will reboot automatically.")
             log.info("Please wait for the camera to come back online (this may take several minutes).")
             return True
+
+        # Otherwise interpret the DVRIP return code
         elif isinstance(result, dict):
             ret_code = result.get('Ret', -1)
             if ret_code == 515:
@@ -935,6 +948,7 @@ def dvripCall(cam, cmd, opts, camera_settings_path='./camera_settings.json'):
         switchMode(cam, mode_name, camera_settings_path)
         return
 
+    # Print the model, hardware and firmware info
     elif cmd == 'GetDeviceInformation':
         sys_info = cam.get_system_info()
         log.info('Device Model    : %s', sys_info.get('DeviceModel', 'Unknown'))
@@ -944,6 +958,7 @@ def dvripCall(cam, cmd, opts, camera_settings_path='./camera_settings.json'):
         log.info('Serial No       : %s', sys_info.get('SerialNo', 'Unknown'))
         return
 
+    # Upload a firmware file to the camera (asks for confirmation unless --yes is given)
     elif cmd == 'UpgradeFirmware':
         if not opts:
             log.error("No firmware file specified.")
@@ -964,16 +979,23 @@ def dvripCall(cam, cmd, opts, camera_settings_path='./camera_settings.json'):
         return
 
 
-def cameraControl(camera_ip, camera_user, camera_pwd, cmd, opts='', camera_settings_path='./camera_settings.json'):
-    """CameraControl - main entry point to the module
+def cameraControl(camera_ip, camera_user, camera_pwd, cmd, opts='', \
+    camera_settings_path='./camera_settings.json'):
+    """ CameraControl - main entry point to the module.
 
-    Args:
-        camera_ip (string): IPAddress of camera in dotted form eg 192.168.1.10
-        camera_user: username to login
-        camera_pwd: password of user
-        cmd (string): Command to be executed
-        opts (array of strings): Optional array of field, subfield and value for the SetParam command
+    Arguments:
+        camera_ip: [str] IP address of the camera in dotted form, e.g. 192.168.1.10.
+        camera_user: [str] Username to login with.
+        camera_pwd: [str] Password of the user.
+        cmd: [str] Command to be executed.
+
+    Keyword arguments:
+        opts: [list of str] Optional list of field, subfield and value for the SetParam command.
+            Empty string by default.
+        camera_settings_path: [str] Path to the camera settings JSON file.
+            './camera_settings.json' by default.
     """
+
     # Process the IP camera control command
     cam = dvr.DVRIPCam(camera_ip, user=camera_user, password=camera_pwd)
     if cam.login():
@@ -988,11 +1010,22 @@ def cameraControl(camera_ip, camera_user, camera_pwd, cmd, opts='', camera_setti
 
 
 def cameraControlV2(config, cmd, opts='', camera_user=None, camera_pwd=None):
-    """High-level entry point that uses config to figure out IP and path.
+    """ High-level entry point that uses the config to figure out the camera IP and the settings path.
 
     The camera credentials are taken from the device URL in the config by default
     (e.g. rtsp://192.168.42.10:554/user=admin&password=&channel=1&stream=0.sdp).
     The camera_user/camera_pwd arguments, if given, override the config values.
+
+    Arguments:
+        config: [Config] RMS configuration object.
+        cmd: [str] Command to be executed.
+
+    Keyword arguments:
+        opts: [list of str] Optional arguments for the command. Empty string by default.
+        camera_user: [str] Camera username. None by default, in which case it is read from the
+            device URL in the config.
+        camera_pwd: [str] Camera password. None by default, in which case it is read from the
+            device URL in the config.
     """
 
     if str(config.deviceID).isdigit():
@@ -1004,6 +1037,8 @@ def cameraControlV2(config, cmd, opts='', camera_user=None, camera_pwd=None):
     # Extract credentials from the device URL, falling back to DVRIPCam's defaults
     # (admin / empty password) when the URL does not contain them
     def extractField(pattern, text, default):
+        """ Return the first regex match group in the text, or the default if there is none. """
+
         matches = re.findall(pattern, text)
         return matches[0] if matches else default
 
@@ -1013,7 +1048,8 @@ def cameraControlV2(config, cmd, opts='', camera_user=None, camera_pwd=None):
         camera_pwd = extractField(r'password=([^&]*)', config.deviceID, '')
 
     # camera_settings_path is sanity checked in ConfigReader so no checks needed here
-    cameraControl(camera_ip, camera_user, camera_pwd, cmd, opts, camera_settings_path=config.camera_settings_path)
+    cameraControl(camera_ip, camera_user, camera_pwd, cmd, opts, \
+        camera_settings_path=config.camera_settings_path)
 
 
 if __name__ == '__main__':

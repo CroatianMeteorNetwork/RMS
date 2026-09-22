@@ -31,7 +31,12 @@ import traceback
 
 
 def _closeStationLockInChild(lock_file):
-    """ Close the inherited lock fd in a freshly forked child (see _takeStationLock). """
+    """ Close the inherited lock fd in a freshly forked child (see _takeStationLock).
+
+    Arguments:
+        lock_file: [file] The open lock file handle inherited from the parent.
+    """
+
     try:
         lock_file.close()
     except (IOError, OSError):
@@ -46,6 +51,9 @@ def _takeStationLock(station_id):
     launched debug instance cannot see each other's locks and will both run. Disable
     PrivateTmp for the unit if manual runs must be excluded too.
 
+    Arguments:
+        station_id: [str] Station ID, used to name the lock file.
+
     Return:
         [file] The open lock file handle (keep a reference for the process lifetime).
             Exits the process if the lock cannot be acquired.
@@ -55,6 +63,7 @@ def _takeStationLock(station_id):
     import tempfile
     from multiprocessing import util as mp_util
 
+    # One lock file per station
     lock_path = os.path.join(tempfile.gettempdir(),
         'rms_startcapture_{:s}.lock'.format(station_id))
 
@@ -65,6 +74,7 @@ def _takeStationLock(station_id):
         lock_file = open(lock_path, 'a+')
         fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
 
+    # Refused - report the holder's PID (if it could be read) and exit
     except (IOError, OSError) as e:
         holder = ''
         try:
@@ -72,6 +82,7 @@ def _takeStationLock(station_id):
                 holder = f.read().strip()
         except (IOError, OSError):
             pass
+
         print('Another StartCapture instance appears to be running for station {:s} '
               '(lock file: {:s}{:s}; error: {!r:s}). Exiting.'.format(
                   station_id, lock_path,
@@ -107,8 +118,13 @@ def _earlyStationLock():
     compile Cython modules - observed in production as ~40 hung duplicates at ~700 MB
     each. Best effort: if the station ID cannot be determined from the command line, the
     full guard after config loading (acquireStationLock) still applies.
+
+    Return:
+        [file or None] The open lock file handle, or None if the lock was not taken here (non-POSIX,
+            not running as __main__, --help, or the station ID could not be determined).
     """
 
+    # Only guard real capture runs on POSIX (flock is not available elsewhere)
     if (os.name != 'posix') or (__name__ != '__main__'):
         return None
 
@@ -138,13 +154,14 @@ def _earlyStationLock():
     if (config_path is None) or (not os.path.isfile(config_path)):
         return None
 
-    # Peek at the station ID
+    # Peek at the station ID with a plain regex, without importing ConfigReader
     try:
         with open(config_path) as f:
             match = re.search(r'^\s*stationID\s*[:=]\s*(\S+)', f.read(), re.MULTILINE | re.IGNORECASE)
     except (IOError, OSError):
         return None
 
+    # No station ID found, fall back to the full guard after the config is loaded
     if not match:
         return None
 
@@ -906,6 +923,8 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
             log.debug('Capture stopped')
 
             log.info('Total number of late or dropped frames: ' + str(dropped_frames))
+
+            # Record the dropped frame count in the observation summary
             log.info(f"Starting an observation summary in {night_data_dir}")
             obs_dict = getObservationSummaryDict(night_data_dir)
             addObsParam(obs_dict, "dropped_frames", dropped_frames)
@@ -1518,6 +1537,8 @@ if __name__ == "__main__":
 
             # Calculate when and how should the capture run
             start_time, duration = captureDuration(config.latitude, config.longitude, config.elevation)
+
+            # A bool start time means the capture should start right away
             if isinstance(start_time, bool):
                 log.info(f'captureDuration returned {start_time}')
             else:
@@ -1818,9 +1839,11 @@ if __name__ == "__main__":
             daytime_mode = multiprocessing.Value(ctypes.c_bool, False, lock=False)
             camera_mode_switch_trigger = multiprocessing.Value(ctypes.c_bool, True, lock=False)
 
-            # Setup the capture mode switcher on another thread
+            # Setup the capture mode switcher on another thread (the stop event lets it be shut down
+            # cleanly before a new one is started)
             switcher_stop_event = threading.Event()
-            capture_switcher = threading.Thread(target=captureModeSwitcher, args=(config, daytime_mode, camera_mode_switch_trigger, switcher_stop_event))
+            capture_switcher = threading.Thread(target=captureModeSwitcher, \
+                args=(config, daytime_mode, camera_mode_switch_trigger, switcher_stop_event))
 
             # To make sure the capture switcher thread exits automatically at the end
             capture_switcher.daemon = True

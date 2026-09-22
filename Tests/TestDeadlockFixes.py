@@ -11,6 +11,8 @@ extracted via AST so the test does not pay (or depend on) the module's heavy
 imports - the same reason the lock itself runs before them.
 """
 
+from __future__ import print_function, division, absolute_import
+
 import ast
 import logging
 import logging.handlers
@@ -29,9 +31,12 @@ posix_only = pytest.mark.skipif(os.name != 'posix', reason='POSIX flock/fork sem
 
 @pytest.fixture(autouse=True)
 def _forceForkStartMethod():
-    """ Stations run Linux where fork is the default; QueuedPool on this branch
-        predates the spawn-pickling support, and the flock semantics under test
-        are fork semantics. Force fork for this module (POSIX only). """
+    """ Stations run Linux where fork is the default through Python 3.13, and the flock semantics
+        under test (a child inheriting the lock file descriptor) are fork semantics. Force fork for
+        this module (POSIX only) so the tests exercise the same path as a station, regardless of
+        the interpreter's default start method.
+    """
+
     if os.name == 'posix':
         try:
             multiprocessing.set_start_method('fork', force=True)
@@ -41,6 +46,8 @@ def _forceForkStartMethod():
 
 
 def _forkCtx():
+    """ Return the 'fork' multiprocessing context. """
+
     return multiprocessing.get_context('fork')
 
 
@@ -48,6 +55,8 @@ def _forkCtx():
 # AtomicFlag
 
 def testAtomicFlagBasics():
+    """ set/clear/is_set round trip. """
+
     from RMS.Misc import AtomicFlag
 
     flag = AtomicFlag()
@@ -59,6 +68,8 @@ def testAtomicFlagBasics():
 
 
 def testAtomicFlagWaitTimeout():
+    """ wait() must time out on a clear flag and return promptly on a set one. """
+
     from RMS.Misc import AtomicFlag
 
     flag = AtomicFlag()
@@ -73,6 +84,8 @@ def testAtomicFlagWaitTimeout():
 
 @posix_only
 def testAtomicFlagCrossProcess():
+    """ A flag set in a forked child must be visible to the waiting parent. """
+
     from RMS.Misc import AtomicFlag
 
     ctx = _forkCtx()
@@ -92,6 +105,10 @@ def testAtomicFlagCrossProcess():
 # Drop-on-full logging handler
 
 def testDroppingHandlerNeverBlocksAndCounts():
+    """ The drop-on-full handler must never block on a full queue and must count the dropped
+        records.
+    """
+
     from RMS.Logger import _DroppingQueueHandler
 
     ctx = _forkCtx() if os.name == 'posix' else multiprocessing
@@ -122,6 +139,10 @@ def testDroppingHandlerNeverBlocksAndCounts():
 # SafeValue / BoundedLock with an orphaned lock
 
 def testSafeValueOrphanedLockBounded(monkeypatch):
+    """ SafeValue must give up on a lock held by a dead process after the timeout, and remember
+        that the lock is orphaned so later operations do not wait the full timeout again.
+    """
+
     import RMS.QueuedPool as QP
 
     monkeypatch.setattr(QP, 'SAFE_VALUE_LOCK_TIMEOUT', 0.5)
@@ -144,6 +165,10 @@ def testSafeValueOrphanedLockBounded(monkeypatch):
 
 
 def testBoundedLockOrphaned():
+    """ BoundedLock must proceed after the timeout when the lock is orphaned, and take the short
+        path afterwards.
+    """
+
     from RMS.Misc import BoundedLock
 
     bl = BoundedLock('test', timeout=0.5)
@@ -165,6 +190,8 @@ def testBoundedLockOrphaned():
 # Torn-read tolerant double
 
 def testStableDoubleRead():
+    """ stableDoubleRead must return the stored value of a lock-free double. """
+
     from RMS.Misc import stableDoubleRead
 
     val = multiprocessing.Value('d', 0.0, lock=False)
@@ -177,6 +204,13 @@ def testStableDoubleRead():
 # Station single-instance lock (real code, AST-extracted)
 
 def _loadLockFunctions():
+    """ Extract the station-lock functions from RMS/StartCapture.py by AST and compile them in an
+        isolated namespace, so the module's heavy imports are never executed.
+
+    Return:
+        _takeStationLock: [function] The real lock-taking function.
+    """
+
     src_path = os.path.join(os.path.dirname(__file__), os.pardir, 'RMS', 'StartCapture.py')
     tree = ast.parse(open(src_path).read())
     wanted = {'_closeStationLockInChild', '_takeStationLock'}
@@ -189,6 +223,8 @@ def _loadLockFunctions():
 
 
 def _lockPath(station):
+    """ Return the path of the lock file for the given station ID. """
+
     import tempfile
     return os.path.join(tempfile.gettempdir(),
         'rms_startcapture_{:s}.lock'.format(station))
@@ -196,6 +232,8 @@ def _lockPath(station):
 
 @posix_only
 def testStationLockRefusesDuplicate():
+    """ A second flock attempt on the station lock must fail while the first holder is alive. """
+
     import fcntl
 
     takeLock = _loadLockFunctions()
@@ -214,6 +252,8 @@ def testStationLockRefusesDuplicate():
 
 @posix_only
 def testStationLockReleasedOnSigkill(tmp_path):
+    """ The kernel must release the flock when the holder is SIGKILLed, so a restart can take it. """
+
     import fcntl
 
     ctx = _forkCtx()
@@ -247,7 +287,8 @@ def testStationLockSurvivesOrphanedChild(tmp_path):
     """ The review-blocking case: a child forked after lock acquisition must not
         keep the lock alive once the main process dies. Runs in a fresh
         interpreter: forking from the pytest process is unreliable on macOS
-        once other tests have started threads. """
+        once other tests have started threads.
+    """
 
     import fcntl
     import subprocess
@@ -304,12 +345,16 @@ def testStationLockSurvivesOrphanedChild(tmp_path):
 # QueuedPool graceful shutdown
 
 def _double(x):
+    """ Slow worker function for the QueuedPool tests. """
+
     time.sleep(0.02)
     return x*2
 
 
 @posix_only
 def testQueuedPoolJobsAndClose():
+    """ closePool must finish all queued jobs in bounded time and keep the results. """
+
     from RMS.QueuedPool import QueuedPool
 
     qp = QueuedPool(_double, cores=2, log=None, print_state=False)
@@ -330,7 +375,8 @@ def testQueuedPoolJobsAndClose():
 def testQueuedPoolZeroJobClose():
     """ With no jobs and a start delay, active_workers can still be 0 at close
         time - the pill count must come from the real worker list so shutdown
-        stays graceful (review finding). """
+        stays graceful (review finding).
+    """
 
     from RMS.QueuedPool import QueuedPool
 
@@ -369,6 +415,8 @@ class _FakeCounter(object):
 
 
 class _AliveListener(object):
+    """ Stand-in for a listener process that is always alive. """
+
     def is_alive(self):
         return True
 
@@ -400,7 +448,8 @@ def _sample(mgr):
 def testLoggingStallIgnoresGrowingBacklogWhileListenerConsumes():
     """ A backlog that keeps GROWING is not a stall if the listener is still taking records
         off the queue - producers can legitimately outrun it during a burst, and restarting
-        then discards everything queued. """
+        then discards everything queued.
+    """
 
     mgr = _stallManager(backlogs=[1000, 5000, 12000, 20000, 25000],
                         processed=[500, 4000, 9000, 15000, 21000])
@@ -426,7 +475,8 @@ def testLoggingStallRestartsOnFrozenListener():
 
 def testLoggingStallSamplesAreSpacedOut():
     """ Both the capture watchdog and the always-on health thread call the check, so
-        back-to-back calls must not each count as a strike. """
+        back-to-back calls must not each count as a strike.
+    """
 
     mgr = _stallManager(backlogs=[5000], processed=[77])
 
@@ -442,6 +492,8 @@ def testLoggingStallSamplesAreSpacedOut():
 
 
 class _DeadListener(object):
+    """ Stand-in for a listener process that has died. """
+
     def is_alive(self):
         return False
 
@@ -450,7 +502,8 @@ def testLoggingRestartBackoffPacesDeadListenerRestarts():
     """ A listener that dies instantly on every respawn (e.g. unwritable log dir) must be
         restarted on the backoff schedule, not on every check - each unpaced cycle leaks
         the abandoned queue's fds. Runs the real _restartLogging with only the spawn
-        stubbed out. """
+        stubbed out.
+    """
 
     from RMS.Logger import LoggingManager
 

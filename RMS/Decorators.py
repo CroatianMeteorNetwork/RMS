@@ -100,17 +100,34 @@ class memoizeSingle(object):
         return dict(list(kwargs.items()) + list(zip(spec, args)))
 
     def _makeHashable(self, obj):
-        """ Convert unhashable types to hashable equivalents for cache keys. """
+        """ Convert unhashable types (lists, dicts, sets) to hashable equivalents so they can be used
+            in the cache key. Nested containers are converted recursively.
+
+        Arguments:
+            obj: [object] Argument value to convert.
+
+        Return:
+            [object] A hashable equivalent of the value (tuple, frozenset), or the value itself if it
+                is already hashable.
+        """
+
+        # Lists become tuples
         if isinstance(obj, list):
             return tuple(self._makeHashable(x) for x in obj)
+
+        # Dicts become sorted tuples of (key, value) pairs so the order does not matter
         if isinstance(obj, dict):
             return tuple(sorted((k, self._makeHashable(v)) for k, v in obj.items()))
+
+        # Sets become frozensets
         if isinstance(obj, set):
             return frozenset(self._makeHashable(x) for x in obj)
+
         return obj
 
     def key(self, args, kwargs):
         a = self.normalize_args(args, kwargs)
+
         # Convert any unhashable values (lists, dicts) to hashable equivalents
         hashable_items = [(k, self._makeHashable(v)) for k, v in a.items()]
         return tuple(sorted(hashable_items))
