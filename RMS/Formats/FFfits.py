@@ -208,6 +208,8 @@ if __name__ == "__main__":
 
     ff.ncols = wid
     ff.nrows = ht
+
+    # Fill in the header fields required by write()
     ff.nbits = 8
     ff.nframes = 256
     ff.first = 0

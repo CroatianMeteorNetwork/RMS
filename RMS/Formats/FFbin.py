@@ -53,7 +53,8 @@ def read(directory, filename, array=False, full_filename=False):
     # Read inside a context manager so the file handle is always closed, even on error
     with open(file_path, "rb") as fid:
 
-        # Check if it is the new of the old CAMS data format
+        # Check if it is the new of the old CAMS data format (index [0] as int() of a 1-element array is
+        # deprecated in numpy)
         version_flag = int(np.fromfile(fid, dtype=np.int32, count = 1)[0])
 
         # Old format
@@ -67,7 +68,6 @@ def read(directory, filename, array=False, full_filename=False):
             ff.camno = int(np.fromfile(fid, dtype=np.uint32, count = 1)[0])
 
             ff.decimation_fact = 1
-
 
 
         # New format
@@ -87,6 +87,7 @@ def read(directory, filename, array=False, full_filename=False):
             ff.fps = float(np.fromfile(fid, dtype=np.uint32, count = 1)[0])/1000
 
 
+        # Read the image data, either as one 4-channel array or as separate images
         if array:
             N = 4*ff.nrows*ff.ncols
 
