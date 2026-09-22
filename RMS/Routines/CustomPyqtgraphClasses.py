@@ -3633,19 +3633,23 @@ class DistortionDialog(QtWidgets.QDialog, ScaledSizeHelper):
         """ Reset the distortion coefficients to zero, preserving the centre/offset terms. """
 
         # Determine how many leading indices to preserve (center coefficients). For radial distortion
-        #   without force_distortion_centre, indices 0 and 1 are center x and y, for polynomial
-        #   distortion index 0 is the offset
-        if self.platepar.distortion_type.startswith("radial") \
-            and not self.platepar.force_distortion_centre:
-            preserve_count = 2  # Preserve x_poly[0] and x_poly[1] for radial center
+        #   without force_distortion_centre, indices 0 and 1 are center x and y. With a forced centre
+        #   there is no centre in the array and index 0 is already a distortion term. For polynomial
+        #   distortion index 0 is the offset (in both X and Y)
+        is_radial = self.platepar.distortion_type.startswith("radial")
+        if is_radial:
+            preserve_count = 0 if self.platepar.force_distortion_centre else 2
         else:
-            preserve_count = 1  # Preserve index 0 only
+            preserve_count = 1
 
         for var in ['x_poly_rev', 'y_poly_rev', 'x_poly_fwd', 'y_poly_fwd']:
             poly = getattr(self.platepar, var)
 
             # For y_poly in radial, all values should be zero (no center there)
-            start_idx = preserve_count if var.startswith('x_') else 1
+            if var.startswith('x_'):
+                start_idx = preserve_count
+            else:
+                start_idx = 0 if is_radial else 1
 
             for i in range(start_idx, len(poly)):
                 poly[i] = 0.0

@@ -4025,6 +4025,9 @@ class PlateTool(QtWidgets.QMainWindow):
             self.image_navigation_slider.hide()
             self.image_navigation_label.hide()
 
+            # Manual reduction needs an image, the button is enabled by changeMode once data is loaded
+            self.manualreduction_button.setDisabled(True)
+
         self.updateFileManagerButton()
 
         # Auto-open File Manager when starting empty
@@ -4042,6 +4045,12 @@ class PlateTool(QtWidgets.QMainWindow):
         Arguments:
             new_mode: [str] Either 'skyfit' or 'manualreduction'.
         """
+        # The manual reduction works on the loaded images, so it cannot be entered without data (the
+        #   mode would be switched with half of the GUI failing on the missing image)
+        if (new_mode == 'manualreduction') and not self.hasData():
+            self.status_bar.showMessage("Load data before switching to the manual reduction")
+            return
+
         # Won't update image if not necessary
         if self.mode == new_mode:
             first_time = True

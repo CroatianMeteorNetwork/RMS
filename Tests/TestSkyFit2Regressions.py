@@ -1276,3 +1276,43 @@ def testCtrlZOnMaskTabNeverFits(plateTool, monkeypatch):
     _pressKey(pt, QtCore.Qt.Key.Key_Z, ctrl)
 
     assert fits == []
+
+
+def testManualReductionWithoutData(qapp, quietMessages, monkeypatch):
+    """ Without data the manual reduction cannot be entered and the mode stays skyfit. """
+
+    monkeypatch.setattr(SF.PlateTool, "showCalibrationFilesDialog", lambda self, *a, **k: None)
+    pt = SF.PlateTool()
+    qapp.processEvents()
+
+    try:
+        assert not pt.hasData()
+        assert not pt.manualreduction_button.isEnabled()
+
+        pt.changeMode('manualreduction')
+        assert pt.mode == 'skyfit'
+    finally:
+        pt.close()
+        pt.deleteLater()
+
+
+@pytest.mark.parametrize("force_centre", [False, True])
+def testDistortionResetToZeroForcedCentre(plateTool, force_centre):
+    """ Reset to zero keeps the radial distortion centre only when it is in the coefficient array. """
+
+    pt = plateTool
+    pp = pt.platepar
+    assert pp.distortion_type.startswith("radial")
+
+    pp.remapCoeffsForFlagChange('force_distortion_centre', force_centre)
+    for name in ('x_poly_fwd', 'x_poly_rev', 'y_poly_fwd', 'y_poly_rev'):
+        getattr(pp, name)[:] = 0.123
+
+    dialog = pt.tab.param_manager.distortion_dialog
+    dialog.updatePlatepar(pp)
+    dialog.resetToZero()
+
+    n_centre = 0 if force_centre else 2
+    assert np.all(pp.x_poly_fwd[:n_centre] == 0.123)
+    assert not np.any(pp.x_poly_fwd[n_centre:])
+    assert not np.any(pp.y_poly_fwd)
