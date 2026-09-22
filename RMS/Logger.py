@@ -1121,8 +1121,11 @@ def initChildLogging(logging_queue, config):
     for handler in root.handlers[:]:
         root.removeHandler(handler)
 
-    # Forward everything to the listener, filtering to RMS records if a config is given
-    qh = logging.handlers.QueueHandler(logging_queue)
+    # Forward everything to the listener, filtering to RMS records if a config is given. The handler
+    # must drop records on a full queue like the parent's: a plain QueueHandler raises queue.Full,
+    # handleError() writes the traceback to sys.stderr, which in a forked child is a LoggerWriter
+    # feeding the same full queue, and every log call turns into an unbounded recursion storm
+    qh = _DroppingQueueHandler(logging_queue)
     qh.setFormatter(logging.Formatter('%(message)s'))
     if config is not None:
         qh.addFilter(InRmsFilter(config))

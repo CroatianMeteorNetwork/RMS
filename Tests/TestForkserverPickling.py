@@ -150,7 +150,8 @@ def test_queuedpool_worker_reattaches_logging():
         results = pool.getResults()
 
         assert results, "worker produced no result"
-        assert 'QueueHandler' in results[0]   # logging was re-attached in the worker
+        # Logging was re-attached in the worker (the drop-on-full QueueHandler subclass)
+        assert '_DroppingQueueHandler' in results[0]
     finally:
         pool.shutdownManager()
 
