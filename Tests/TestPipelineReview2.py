@@ -561,6 +561,9 @@ def testObservationSummaryReseededFromFinalJson(tmp_path):
     osm.addObsParam(d, 'stationID', 'XX0001')
     osm.addObsParam(d, 'media_backend', 'gst')
 
+    # A value only written when a step succeeds, which the reprocess must recompute
+    osm.addObsParam(d, 'photometry_good', 'True')
+
     # Finalize writes the final JSON and removes the working one
     osm.writeToJSON(config, getRMSStyleFileName(night_dir, osm.OBSERVATION_SUMMARY_NAME_JSON), night_dir)
     os.unlink(getRMSStyleFileName(night_dir, osm.OBSERVATION_SUMMARY_WORKING_NAME_JSON))
@@ -572,6 +575,10 @@ def testObservationSummaryReseededFromFinalJson(tmp_path):
     assert d.get('stationID') == 'XX0001'
     assert d.get('media_backend') == 'gst'
     assert d.get('night_data_dir') == night_dir
+
+    # Only capture-time keys are carried over, so a stale result cannot survive the reprocess
+    assert 'photometry_good' not in d
+    assert set(d) <= set(osm.OBSERVATION_SUMMARY_SESSION_KEYS) | {'night_data_dir'}
 
     # And it was persisted as the working JSON
     assert os.path.isfile(getRMSStyleFileName(night_dir, osm.OBSERVATION_SUMMARY_WORKING_NAME_JSON))
