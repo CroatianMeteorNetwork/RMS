@@ -5732,7 +5732,7 @@ class PlateTool(QtWidgets.QMainWindow):
             # Load a DEEP catalog (LM 8.0) for true/false positive matching. This ensures we don't
             #   miscount faint real stars as false positives
             deep_catalog_lm = 8.0
-            deep_catalog = self.loadCatalogStars(deep_catalog_lm)
+            deep_catalog = self.readCatalogStars(deep_catalog_lm)
 
             if deep_catalog is None or len(deep_catalog) == 0:
                 qmessagebox(message="No catalog stars available.",
@@ -6593,7 +6593,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 (n_matched, n_visible): [tuple of ints] Matched detections and visible catalog stars.
             """
 
-            test_catalog = self.loadCatalogStars(test_lm)
+            test_catalog = self.readCatalogStars(test_lm)
             if test_catalog is None or len(test_catalog) == 0:
                 return 0, 0
 
@@ -9647,7 +9647,7 @@ class PlateTool(QtWidgets.QMainWindow):
             # Reload catalog with new limit
             old_cat_lim_mag = self.cat_lim_mag
             self.cat_lim_mag = current_mag_limit
-            temp_catalog = self.loadCatalogStars(current_mag_limit)
+            temp_catalog = self.readCatalogStars(current_mag_limit)
             _, temp_catalog_fov = self.filterCatalogStarsInsideFOV(temp_catalog)
             self.cat_lim_mag = old_cat_lim_mag  # Restore temporarily
 
@@ -14028,7 +14028,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 # Load the tuned catalog, if available, for the final fitting stages
                 tuned_catalog = None
                 if getattr(self, 'catalog_lm_tuned', False) and hasattr(self, 'tuned_cat_lim_mag'):
-                    tuned_catalog = self.loadCatalogStars(self.tuned_cat_lim_mag)
+                    tuned_catalog = self.readCatalogStars(self.tuned_cat_lim_mag)
 
                 # Callback which updates the display at each RANSAC iteration (visual debugging)
                 iteration_callback = self._makeIterationCallback()
@@ -15008,7 +15008,7 @@ class PlateTool(QtWidgets.QMainWindow):
             # Load the tuned catalog, if available, for the final fitting stages
             tuned_catalog = None
             if getattr(self, 'catalog_lm_tuned', False) and hasattr(self, 'tuned_cat_lim_mag'):
-                tuned_catalog = self.loadCatalogStars(self.tuned_cat_lim_mag)
+                tuned_catalog = self.readCatalogStars(self.tuned_cat_lim_mag)
 
             # Callback which updates the display at each RANSAC iteration (visual debugging)
             iteration_callback = self._makeIterationCallback()
@@ -15350,12 +15350,18 @@ class PlateTool(QtWidgets.QMainWindow):
             self._background_busy = False
 
 
-    def loadCatalogStars(self, lim_mag):
-        """ Loads stars from the BSC star catalog.
+    def _readCatalog(self, lim_mag, additional_fields=None):
+        """ Read the star catalog down to the given limiting magnitude, without changing the loaded one.
 
         Arguments:
             lim_mag: [float] Limiting magnitude of catalog stars.
 
+        Keyword arguments:
+            additional_fields: [list] Extra catalog fields to read. None by default.
+
+        Return:
+            (catalog_stars, mag_band_string, band_ratios, extras): [tuple] As returned by
+                StarCatalog.readStarCatalog, with extras an empty dict if no fields were asked for.
         """
 
         # If the star catalog path doesn't exist, use the catalog available in the repository
@@ -15367,22 +15373,55 @@ class PlateTool(QtWidgets.QMainWindow):
         years_from_J2000 = (
             self.img_handle.beginning_datetime - datetime.datetime(2000, 1, 1, 12, 0, 0)
                 ).days/365.25
-    
+
         # Load catalog stars
         catalog_results = StarCatalog.readStarCatalog(
             self.config.star_catalog_path, self.config.star_catalog_file,
             years_from_J2000=years_from_J2000,
             lim_mag=lim_mag,
             mag_band_ratios=self.config.star_catalog_band_ratios,
+            additional_fields=additional_fields)
+
+        if len(catalog_results) == 4:
+            return catalog_results
+
+        catalog_stars, mag_band_string, band_ratios = catalog_results
+
+        return catalog_stars, mag_band_string, band_ratios, {}
+
+
+    def readCatalogStars(self, lim_mag):
+        """ Read the catalog stars down to the given limiting magnitude for a temporary use (e.g. a probe
+            at another LM), leaving the loaded catalog, its star names and band data untouched.
+
+        Arguments:
+            lim_mag: [float] Limiting magnitude of catalog stars.
+
+        Return:
+            catalog_stars: [ndarray] Catalog stars (ra, dec, mag, ...).
+        """
+
+        return self._readCatalog(lim_mag)[0]
+
+
+    def loadCatalogStars(self, lim_mag):
+        """ Loads stars from the BSC star catalog, making them the loaded catalog (with the star names
+            and the band magnitudes). Use readCatalogStars for a temporary catalog.
+
+        Arguments:
+            lim_mag: [float] Limiting magnitude of catalog stars.
+
+        Return:
+            catalog_stars: [ndarray] The loaded catalog stars.
+        """
+
+        # Load catalog stars
+        catalog_results = self._readCatalog(lim_mag,
             additional_fields=['spectraltype_esphs', 'preferred_name', 'common_name', 'bayer_name', 'Simbad_OType',
                               'phot_g_mean_mag', 'phot_bp_mean_mag', 'phot_rp_mean_mag',
                               'B', 'V', 'R', 'Ic'])
 
-        if len(catalog_results) == 4:
-            self.catalog_stars, self.mag_band_string, self.config.star_catalog_band_ratios, extras = catalog_results
-        else:
-            self.catalog_stars, self.mag_band_string, self.config.star_catalog_band_ratios = catalog_results
-            extras = {}
+        self.catalog_stars, self.mag_band_string, self.config.star_catalog_band_ratios, extras = catalog_results
 
         # Extract spectral type
         if 'spectraltype_esphs' in extras:

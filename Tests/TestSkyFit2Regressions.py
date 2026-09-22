@@ -936,3 +936,40 @@ def testBestFramePlaceholderNotLeftInDataFolder(plateTool, monkeypatch):
     pt.nextImg(n=-1)
     assert pt.img_handle.name() == placeholder_name
     assert np.all(pt.img_handle.loadChunk().avepixel <= 40)
+
+
+###################################################################################################
+# CATALOG
+###################################################################################################
+
+def testCatalogProbeKeepsLoadedCatalog(plateTool):
+    """ A temporary catalog read at another LM leaves the loaded catalog and its per-star data alone. """
+
+    pt = plateTool
+    catalog = pt.catalog_stars
+    names = pt.catalog_stars_common_names
+    n_stars = len(catalog)
+
+    deep = pt.readCatalogStars(pt.cat_lim_mag + 2.0)
+
+    assert len(deep) > n_stars
+    assert pt.catalog_stars is catalog
+    assert pt.catalog_stars_common_names is names
+    assert (names is None) or (len(names) == n_stars)
+
+
+def testOptimalCatalogLMSearchKeepsLoadedCatalog(plateTool):
+    """ The catalog LM search of the tuner probes other LMs without replacing the loaded catalog. """
+
+    from RMS.Astrometry.Conversions import date2JD
+
+    pt = plateTool
+    catalog = pt.catalog_stars
+    names = pt.catalog_stars_common_names
+
+    stars = np.array(pt.calstars[pt.img_handle.name()])
+    jd = date2JD(*pt.img_handle.currentTime())
+    pt._findOptimalCatalogLM(jd, stars[:, 1], stars[:, 0], target_matches=len(stars)//2)
+
+    assert pt.catalog_stars is catalog
+    assert pt.catalog_stars_common_names is names
