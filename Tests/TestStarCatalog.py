@@ -12,6 +12,7 @@ from RMS.Formats.StarCatalog import gmnCatalogDtype, GMN_CATALOG_DTYPE_V1, GMN_C
 def testGmnCatalogDtypeV1():
     """ 18 declared columns select the legacy v1 layout. """
 
+    # The returned dtype must be the v1 object itself, not a copy with the same fields
     assert gmnCatalogDtype(18) is GMN_CATALOG_DTYPE_V1
     assert len(GMN_CATALOG_DTYPE_V1.names) == 18
 
@@ -19,6 +20,7 @@ def testGmnCatalogDtypeV1():
 def testGmnCatalogDtypeV2():
     """ 20 declared columns select the v2 layout with the extra name columns. """
 
+    # The returned dtype must be the v2 object itself, not a copy with the same fields
     assert gmnCatalogDtype(20) is GMN_CATALOG_DTYPE_V2
     assert len(GMN_CATALOG_DTYPE_V2.names) == 20
 
@@ -27,5 +29,6 @@ def testGmnCatalogDtypeV2():
 def testGmnCatalogDtypeUnknownRaises(num_columns):
     """ Any other column count is an unknown format and must fail loudly instead of misdecoding. """
 
+    # Silently falling back to one of the known layouts would misread every column
     with pytest.raises(ValueError):
         gmnCatalogDtype(num_columns)

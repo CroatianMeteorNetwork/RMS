@@ -13,6 +13,7 @@ from RMS.Formats.Platepar import normalizeRaDec
 def testNormalizeRaDecInsideRange(ra, dec):
     """ Values already on the sphere are returned unchanged. """
 
+    # Nothing to normalize, the input is already inside the valid range
     ra_out, dec_out = normalizeRaDec(ra, dec)
 
     assert ra_out == pytest.approx(ra)
@@ -23,6 +24,7 @@ def testNormalizeRaDecInsideRange(ra, dec):
 def testNormalizeRaDecExactlyAtPoles(dec):
     """ The poles themselves are fixed points and the RA is not flipped. """
 
+    # A declination of exactly +/- 90 deg is on the boundary and must not be reflected
     ra_out, dec_out = normalizeRaDec(50.0, dec)
 
     assert ra_out == pytest.approx(50.0)
@@ -48,6 +50,7 @@ def testNormalizeRaDecExactlyAtPoles(dec):
 def testNormalizeRaDecReflectsAcrossPole(ra, dec, ra_expected, dec_expected):
     """ Declinations past a pole are reflected, with the RA advanced by 180 degrees. """
 
+    # Every parametrized case crosses a pole, so the RA has to move by 180 deg
     ra_out, dec_out = normalizeRaDec(ra, dec)
 
     assert ra_out == pytest.approx(ra_expected)
@@ -57,13 +60,25 @@ def testNormalizeRaDecReflectsAcrossPole(ra, dec, ra_expected, dec_expected):
 def testNormalizeRaDecReflectionPreservesDirection():
     """ The reflected point must be the same unit vector as the raw (ra, dec) pair. """
 
+    # A declination 7.5 deg past the north pole
     ra, dec = 37.0, 97.5
     ra_out, dec_out = normalizeRaDec(ra, dec)
 
     def toVector(ra_d, dec_d):
+        """ Convert an (RA, Dec) pair in degrees to a unit vector.
+
+        Arguments:
+            ra_d: [float] Right ascension (deg).
+            dec_d: [float] Declination (deg).
+
+        Return:
+            vect: [ndarray] Unit vector pointing at the given direction.
+        """
+
         ra_r, dec_r = np.radians(ra_d), np.radians(dec_d)
         return np.array([np.cos(dec_r)*np.cos(ra_r), np.cos(dec_r)*np.sin(ra_r), np.sin(dec_r)])
 
+    # The normalized pair must point in exactly the same direction and be inside the valid ranges
     assert np.allclose(toVector(ra, dec), toVector(ra_out, dec_out))
     assert 0.0 <= ra_out < 360.0
     assert -90.0 <= dec_out <= 90.0
