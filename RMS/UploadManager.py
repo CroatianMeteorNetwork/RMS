@@ -12,7 +12,7 @@ import paramiko
 
 from RMS.Logger import LoggingManager, getLogger, getLoggingQueue, initChildProcess
 from RMS.Misc import mkdirP, UTCFromTimestamp, runWithTimeout, AtomicFlag, BoundedLock, \
-    setParentDeathSignal, exitIfParentGone
+    setParentDeathSignal, exitIfParentGone, startParentWatch
 
 # Suppress Paramiko internal errors before they appear in logs
 getLogger("paramiko.transport").setLevel(logging.CRITICAL)
@@ -938,6 +938,9 @@ class UploadManager(multiprocessing.Process):
 
         # The parent may have died before the death signal was armed
         exitIfParentGone(self.parent_pid, 'UploadManager')
+
+        # Keep watching it: under forkserver the death signal does not fire (see startParentWatch)
+        startParentWatch(self.parent_pid, 'UploadManager', self.exit)
 
         # Load the file queue from disk
         self.loadQueue()

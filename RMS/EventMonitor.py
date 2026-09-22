@@ -74,7 +74,7 @@ from Utils.FRbinViewer import view
 from Utils.BatchFFtoImage import batchFFtoImage
 from RMS.CaptureDuration import captureDuration
 from RMS.Misc import sanitise, RmsDateTime, getRmsRootDir, mkdirP, AtomicFlag, setParentDeathSignal, \
-    exitIfParentGone
+    exitIfParentGone, startParentWatch
 from RMS.Formats.FFfile import read
 from matplotlib.dates import DateFormatter
 
@@ -2571,6 +2571,9 @@ class EventMonitor(multiprocessing.Process):
 
         # The parent may have died before the death signal was armed
         exitIfParentGone(self.parent_pid, 'EventMonitor')
+
+        # Keep watching it: under forkserver the death signal does not fire (see startParentWatch)
+        startParentWatch(self.parent_pid, 'EventMonitor', self.exit)
 
         # Open a sqlite connection owned by this (child) process. Under 'forkserver'/'spawn'
         # the connection from __init__ is not inherited (it was dropped during pickling);

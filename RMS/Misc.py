@@ -381,6 +381,68 @@ def exitIfParentGone(parent_pid, name):
         pass
 
 
+def startParentWatch(parent_pid, name, exit_flag, grace=15.0, interval=1.0):
+    """ Watch the logical parent from a daemon thread and stop this child when the parent is gone.
+
+        setParentDeathSignal() only covers the 'fork' start method: under 'forkserver' (selected
+        on Python 3.14+) the OS parent is the fork server, which outlives a SIGKILLed StartCapture
+        for as long as its children run, so the death signal never fires and the orphans would
+        keep capturing next to a respawned instance. The thread probes the parent PID recorded in
+        __init__ every interval seconds (a cheap os.kill(pid, 0), off the frame hot path, and it
+        also works while the child's main thread is blocked in I/O or a long wait). When the
+        parent is gone it sets the child's exit flag, so the child shuts down through its normal
+        exit path, and if the child has not exited after the grace period, it flushes the log
+        and exits hard.
+
+        POSIX only (os.kill(pid, 0) is not a liveness probe on Windows); a no-op elsewhere.
+
+    Arguments:
+        parent_pid: [int] PID of the logical parent, or None to skip watching.
+        name: [str] Process name used in the log messages.
+        exit_flag: [AtomicFlag] The child's exit flag, set when the parent is gone.
+
+    Keyword arguments:
+        grace: [float] Seconds to wait for the normal exit before exiting hard. 15 by default.
+        interval: [float] Seconds between two parent probes. 1 by default.
+
+    Return:
+        [Thread] The watcher thread, or None if not started.
+    """
+
+    if (os.name != 'posix') or (parent_pid is None):
+        return None
+
+    def _watch():
+        """ Probe the parent until it is gone, then stop the child. """
+
+        # Wait for the parent to disappear. ESRCH only: an EPERM from a live parent owned by
+        #   another user must not look like a death
+        while True:
+            time.sleep(interval)
+            try:
+                os.kill(parent_pid, 0)
+            except ProcessLookupError:
+                break
+            except OSError:
+                pass
+
+        # Ask the child to stop through its normal exit path
+        log.warning("%s: parent process %d is gone, stopping the orphan", name, parent_pid)
+        exit_flag.set()
+
+        # Exit hard if the normal path does not finish in time (e.g. blocked in device I/O)
+        time.sleep(grace)
+        log.warning("%s: orphan still running %.0f s after the stop request, exiting", name, grace)
+        flushChildLogging(timeout=1.0)
+        os._exit(0)
+
+    watcher = threading.Thread(target=_watch, name='rms-parent-watch')
+    watcher.daemon = True
+    watcher.start()
+
+    return watcher
+
+
 def interruptibleWait(seconds):
     """ Wait for the specified number of seconds, but allow interruption by Ctrl+C.
 

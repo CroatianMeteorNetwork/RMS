@@ -315,6 +315,7 @@ def testCaptureChildrenArmOrphanProtection(rel_path, class_name):
     run_calls = calledNames(methods['run'])
     assert 'setParentDeathSignal' in run_calls
     assert 'exitIfParentGone' in run_calls
+    assert 'startParentWatch' in run_calls
 
 
 # ---------------------------------------------------------------------------
@@ -1452,3 +1453,140 @@ def testChildNormalExitDeliversAllRecords(method, n):
     assert not killed
     assert p.exitcode == 0
     assert got == n
+
+
+# ---------------------------------------------------------------------------
+# Codex review, item 1: orphan protection under forkserver
+
+_FORKSERVER_ORPHAN_SCRIPT = """
+import os, sys, time, multiprocessing
+sys.path.insert(0, {root!r})
+from RMS.Misc import AtomicFlag, setParentDeathSignal, exitIfParentGone, startParentWatch
+
+
+class Child(multiprocessing.Process):
+    # Stand-in for a capture child: the same orphan protection as BufferedCapture.run
+
+    def __init__(self, pid_path, done_path):
+        super(Child, self).__init__()
+        self.exit = AtomicFlag()
+        self.parent_pid = os.getpid()
+        self.pid_path = pid_path
+        self.done_path = done_path
+
+    def run(self):
+        setParentDeathSignal()
+        exitIfParentGone(self.parent_pid, 'Child')
+        startParentWatch(self.parent_pid, 'Child', self.exit, grace=10.0, interval=0.2)
+
+        with open(self.pid_path, 'w') as f:
+            f.write(str(os.getpid()))
+
+        # The main loop, leaving through the normal exit path when the exit flag is set
+        while not self.exit.is_set():
+            time.sleep(0.05)
+
+        with open(self.done_path, 'w') as f:
+            f.write('clean')
+
+
+if __name__ == '__main__':
+    multiprocessing.set_start_method({method!r}, force=True)
+    Child(sys.argv[1], sys.argv[2]).start()
+    time.sleep(60)
+"""
+
+
+def _pidAlive(pid):
+    """ True if the PID exists and is not a zombie. """
+
+    try:
+        with open('/proc/{:d}/stat'.format(pid)) as f:
+            return f.read().split(')')[-1].split()[0] != 'Z'
+    except (IOError, OSError):
+        return False
+
+
+@pytest.mark.skipif(not os.path.isdir('/proc'), reason='needs /proc')
+@pytest.mark.parametrize('method', _startMethods())
+def testOrphanStopsAfterMainSigkill(tmp_path, method):
+    """ A capture child must stop within seconds of StartCapture being SIGKILLed, also under
+        forkserver where the parent death signal never fires, and the fork server must not linger.
+    """
+
+    import signal
+    import subprocess
+
+    script = tmp_path/'orphan.py'
+    script.write_text(_FORKSERVER_ORPHAN_SCRIPT.format(root=RMS_ROOT, method=method))
+    pid_path = str(tmp_path/'child.pid')
+    done_path = str(tmp_path/'child.done')
+
+    main = subprocess.Popen([sys.executable, str(script), pid_path, done_path])
+    child_pid = None
+    try:
+        # Wait for the child to be up
+        deadline = time.monotonic() + 30
+        while (not os.path.isfile(pid_path)) and (time.monotonic() < deadline):
+            time.sleep(0.05)
+        time.sleep(0.2)
+        child_pid = int(open(pid_path).read())
+
+        with open('/proc/{:d}/stat'.format(child_pid)) as f:
+            os_parent = int(f.read().split(')')[-1].split()[1])
+
+        # Kill the main process the hard way
+        main.kill()
+        main.wait(10)
+
+        # The orphan must stop through its normal exit path, and the fork server with it
+        deadline = time.monotonic() + 8
+        while (_pidAlive(child_pid) or ((os_parent != main.pid) and _pidAlive(os_parent))) \
+                and (time.monotonic() < deadline):
+            time.sleep(0.1)
+
+        assert not _pidAlive(child_pid), 'orphaned child survived the main process'
+
+        # Under fork the death signal (SIGKILL) takes the child down at once. Under forkserver the
+        #   watcher stops it through its normal exit path, and the fork server then exits too
+        if os_parent != main.pid:
+            assert os.path.isfile(done_path), 'orphan did not leave through its normal exit path'
+            assert not _pidAlive(os_parent), 'fork server lingered after the orphan exited'
+
+    finally:
+        if main.poll() is None:
+            main.kill()
+        if (child_pid is not None) and _pidAlive(child_pid):
+            os.kill(child_pid, signal.SIGKILL)
+
+
+def _ignoresExitFlag(dead_pid):
+    """ Child side: watch a parent that is already gone, but never honour the exit flag. """
+
+    from RMS.Misc import AtomicFlag, startParentWatch
+
+    startParentWatch(dead_pid, 'test', AtomicFlag(), grace=0.5, interval=0.1)
+    time.sleep(30)
+    os._exit(3)
+
+
+@posix_only
+@pytest.mark.parametrize('method', _startMethods())
+def testParentWatchExitsHardAfterGrace(method):
+    """ An orphan that does not leave through its normal exit path is exited after the grace period. """
+
+    ctx = multiprocessing.get_context(method)
+
+    # A PID that certainly belonged to a process that is gone now
+    dead = ctx.Process(target=_shortLived)
+    dead.start()
+    dead.join(10)
+
+    p = ctx.Process(target=_ignoresExitFlag, args=(dead.pid,))
+    t_beg = time.monotonic()
+    p.start()
+    killed = _joinOrKill(p, 10)
+
+    assert not killed
+    assert p.exitcode == 0
+    assert time.monotonic() - t_beg < 8

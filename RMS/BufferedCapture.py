@@ -45,7 +45,7 @@ from RMS.Routines.GstreamerCapture import GstVideoFile, getStructureValue
 from RMS.Formats.ObservationSummary import addObsParam, getObservationSummaryDict
 from RMS.RawFrameSave import RawFrameSaver
 from RMS.Misc import RmsDateTime, mkdirP, UTCFromTimestamp, frameBufferShape, runWithTimeout, AtomicFlag, \
-    setParentDeathSignal, exitIfParentGone
+    setParentDeathSignal, exitIfParentGone, startParentWatch
 from RMS.Formats import FTfile, FTStruct
 from RMS.Logger import LoggingManager, getLogger, gstDebugLogger, getLoggingQueue, initChildProcess
 from RMS.CaptureModeSwitcher import switchCameraMode
@@ -1859,6 +1859,9 @@ class BufferedCapture(Process):
 
             # The parent may have died before the death signal was armed
             exitIfParentGone(self.parent_pid, 'BufferedCapture')
+
+            # Keep watching it: under forkserver the death signal does not fire (see startParentWatch)
+            startParentWatch(self.parent_pid, 'BufferedCapture', self.exit)
 
             # Rebuild numpy views over the shared frame buffers in this process. Under
             # forkserver/spawn the views cannot be inherited, so build them here from the

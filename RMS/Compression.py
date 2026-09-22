@@ -32,7 +32,7 @@ from RMS.Formats import FFfile, FFStruct
 from RMS.Formats import FieldIntensities
 from RMS.Logger import getLogger, getLoggingQueue, initChildProcess, flushChildLogging
 from RMS.Misc import UTCFromTimestamp, frameBufferShape, AtomicFlag, stableDoubleRead, \
-    setParentDeathSignal, exitIfParentGone
+    setParentDeathSignal, exitIfParentGone, startParentWatch
 from RMS.Routines.Image import saveImage
 
 # Import Cython functions
@@ -312,6 +312,9 @@ class Compressor(multiprocessing.Process):
 
         # The parent may have died before the death signal was armed
         exitIfParentGone(self.parent_pid, 'Compressor')
+
+        # Keep watching it: under forkserver the death signal does not fire (see startParentWatch)
+        startParentWatch(self.parent_pid, 'Compressor', self.exit, grace=45.0)
 
         # Rebuild numpy views over the shared frame buffers in this process. Under forkserver/spawn
         # the views cannot be inherited, so build them here from the shared multiprocessing.Array
