@@ -1537,6 +1537,27 @@ def testConfigWriteKeepsCRLFAndEncoding(tmp_path, quietMessages):
     assert cr.parse(cfg_path).intensity_threshold == 41
 
 
+def testConfigWriteKeepsSymlinkedConfig(tmp_path, quietMessages):
+    """ Writing a symlinked config updates the file it points to and keeps the link a link. """
+
+    real_dir = tmp_path / "station"
+    real_dir.mkdir()
+    real_cfg = str(real_dir / ".config")
+    with open(TEMPLATE_CONFIG, encoding='utf-8') as f_in, open(real_cfg, 'w', encoding='utf-8') as f_out:
+        f_out.write(f_in.read())
+
+    # The config the tool is pointed at is a symlink to the station's real config
+    link_cfg = str(tmp_path / ".config")
+    os.symlink(real_cfg, link_cfg)
+
+    pt = _fakePlateTool(link_cfg)
+    pt._writeStarDetectionConfig(link_cfg, backup=False)
+
+    assert os.path.islink(link_cfg)
+    assert os.path.realpath(link_cfg) == os.path.realpath(real_cfg)
+    assert cr.parse(real_cfg).intensity_threshold == 41
+
+
 @pytest.mark.parametrize("text, check", [
     # An empty value must not swallow the line ending
     ("[StarExtraction]\nmax_stars: \nsegment_radius: 3\n", None),

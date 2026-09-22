@@ -7076,16 +7076,18 @@ class PlateTool(QtWidgets.QMainWindow):
         new_lines = updateConfigLines(lines, updates)
 
         # Write back through a temporary file in the same directory, so a failed write never leaves a
-        #   truncated config behind
-        tmp_path = config_path + ".tmp"
+        #   truncated config behind. The real path is written: replacing a symlinked config by name would
+        #   swap the link itself for a regular file and leave the file it points to unchanged
+        real_config_path = os.path.realpath(config_path)
+        tmp_path = real_config_path + ".tmp"
         try:
             with open(tmp_path, 'w', newline='', encoding='utf-8') as f:
                 f.writelines(new_lines)
 
-            if os.path.exists(config_path):
-                shutil.copymode(config_path, tmp_path)
+            if os.path.exists(real_config_path):
+                shutil.copymode(real_config_path, tmp_path)
 
-            os.replace(tmp_path, config_path)
+            os.replace(tmp_path, real_config_path)
 
         finally:
             if os.path.exists(tmp_path):
