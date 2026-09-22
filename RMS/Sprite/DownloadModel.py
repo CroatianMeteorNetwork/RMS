@@ -16,9 +16,10 @@
 
 """ Download the sprite detection model from the GMN web server when it is missing or outdated.
 
-    The model is about 35 MB, three hundred times the size of the meteor ML model, and is licensed separately
-    from RMS, so it is not kept in the repository. Stations fetch it over HTTPS from
-    config.sprite_model_base_url; no key or account is needed.
+    The model is about 35 MB, three hundred times the size of the meteor ML model, so it is not kept in the
+    repository. Stations fetch it over HTTPS from config.sprite_model_base_url; no key or account is needed.
+    It is a YOLOv5su model trained with Ultralytics and is licensed under AGPL-3.0; the README.md next to it
+    on the server describes it.
 
     The expected SHA-256 of every known model file is listed in KNOWN_MODEL_SHA256, which ties a model to the
     code that knows how to run it. A downloaded file that does not match is discarded, so the web server only
