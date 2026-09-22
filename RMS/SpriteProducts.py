@@ -342,7 +342,7 @@ def writeDetectionImages(ff, detections, marked_path, unmarked_path):
 ### Server payload ###
 
 
-def buildSpritePayload(config, ff_name, ff_start, fps, detections, night_dir_name):
+def buildSpritePayload(config, ff_name, ff_start, fps, detections, night_dir_name, platepar=None):
     """ Build the frame object the sprite server takes, from the confirmed detections of one FF.
 
         Only detections with usable astrometry are included: the server triangulates from azimuth and
@@ -355,6 +355,11 @@ def buildSpritePayload(config, ff_name, ff_start, fps, detections, night_dir_nam
         fps: [float] Frame rate the frame indices refer to.
         detections: [list] Detection dicts after astrometry.
         night_dir_name: [str] Name of the night directory.
+
+    Keyword arguments:
+        platepar: [dict or None] Trimmed platepar the directions were computed with, from
+            RMS.SpriteAstrometry.plateparForServer(). The server stores each distinct one once. None to send
+            none. None by default.
 
     Return:
         [tuple] (payload, reason): the payload dict, or None and a short reason when nothing can be sent.
@@ -397,6 +402,10 @@ def buildSpritePayload(config, ff_name, ff_start, fps, detections, night_dir_nam
         "elevation": float(config.elevation),
         "detections": payload_detections,
     }
+
+    # Lets the server recompute the directions later, for example from the nightly recalibrated platepar
+    if platepar is not None:
+        payload["platepar"] = platepar
 
     return payload, None
 

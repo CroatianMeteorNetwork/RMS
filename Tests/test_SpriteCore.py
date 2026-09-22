@@ -585,9 +585,11 @@ def test_platepar_usable():
     ok, reason = SpriteAstrometry.plateparUsable(makePlatepar(), 1280, 720, config)
     assert not ok and "resolution" in reason
 
+    # Refraction is always taken out, explicitly or inside the fitted distortion, so a platepar fitted with
+    #   refraction off is used like any other
     ok, reason = SpriteAstrometry.plateparUsable(makePlatepar(refraction=False,
-        measurement_apparent_to_true_refraction=False), 64, 64, config)
-    assert not ok
+        measurement_apparent_to_true_refraction=False, auto_check_fit_refined=True), 64, 64, config)
+    assert ok and reason is None
 
     ok, reason = SpriteAstrometry.plateparUsable(makePlatepar(refraction=False,
         measurement_apparent_to_true_refraction=True, auto_check_fit_refined=True), 64, 64, config)

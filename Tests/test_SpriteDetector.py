@@ -590,7 +590,7 @@ def test_recorder_writes_products_and_hands_payload_to_the_uploader(tmp_path, mo
     fakeDetections(monkeypatch, {names[1]})
     uploader = FakeUploader()
 
-    recorder = SpriteDetector.NightRecorder(config, night, uploader, {"JD": None})
+    recorder = SpriteDetector.NightRecorder(config, night, uploader)
     detector = SpriteDetector.NightDetector(config, night, recorder, None, None)
 
     for name in names:
@@ -628,7 +628,7 @@ def test_detection_without_astrometry_is_recorded_but_not_sent(tmp_path, monkeyp
     monkeypatch.setattr(SpriteDetector, "calibrateSpriteDetections", lambda *args: None)
 
     uploader = FakeUploader()
-    recorder = SpriteDetector.NightRecorder(config, night, uploader, {})
+    recorder = SpriteDetector.NightRecorder(config, night, uploader)
     detector = SpriteDetector.NightDetector(config, night, recorder, None, "no platepar")
 
     for name in names:
@@ -651,7 +651,7 @@ def test_burst_is_recorded_as_rejected(tmp_path, monkeypatch):
     fakeDetections(monkeypatch, set(names[:5]))
     uploader = FakeUploader()
 
-    recorder = SpriteDetector.NightRecorder(config, night, uploader, {})
+    recorder = SpriteDetector.NightRecorder(config, night, uploader)
     detector = SpriteDetector.NightDetector(config, night, recorder, None, None)
 
     for name in names:
@@ -670,7 +670,7 @@ def test_images_are_capped_per_night(tmp_path, monkeypatch):
     night, names = makeNight(tmp_path, 4)
     fakeDetections(monkeypatch, set(names))
 
-    recorder = SpriteDetector.NightRecorder(config, night, FakeUploader(), {})
+    recorder = SpriteDetector.NightRecorder(config, night, FakeUploader())
     detector = SpriteDetector.NightDetector(config, night, recorder, None, None)
 
     for name in names:
@@ -697,7 +697,7 @@ def test_nightly_cap_stops_inference_and_still_decides_pending(tmp_path, monkeyp
     monkeypatch.setattr(SpriteDetector, "detectSpritesInFF", detect)
     monkeypatch.setattr(SpriteDetector, "calibrateSpriteDetections", lambda *args: None)
 
-    recorder = SpriteDetector.NightRecorder(config, night, FakeUploader(), {})
+    recorder = SpriteDetector.NightRecorder(config, night, FakeUploader())
     detector = SpriteDetector.NightDetector(config, night, recorder, None, None)
 
     for name in names:
@@ -815,3 +815,152 @@ def test_offline_run_refuses_to_record_a_night_twice(tmp_path, monkeypatch):
     assert again.n_confirmed == 1
     with open(SpriteProducts.csvPath(night)) as f:
         assert f.read().count("confirmed") == 1
+
+
+### Platepar sent to the server ###
+
+
+TEMPLATE_PLATEPAR = os.path.join(REPO_ROOT, "share", "platepar_templates", "template_generic_720p_4mm.cal")
+
+
+def templatePlatepar(with_stars=True):
+    """ The generic 720p platepar shipped with RMS, as station XX0001, with a star list like a real one. """
+
+    from RMS.Formats.Platepar import Platepar
+
+    pp = Platepar()
+    pp.read(TEMPLATE_PLATEPAR)
+    pp.station_code = "XX0001"
+    pp.lat, pp.lon, pp.elev = 43.19, -81.32, 324.0
+
+    if with_stars:
+        pp.star_list = [[2461280.5 + i*1e-4, 100.0 + i, 200.0 + i, 3000.0, 310.0, 45.0, 4.5]
+                        for i in range(150)]
+
+    return pp
+
+
+def test_trimmed_platepar_maps_exactly_like_the_full_one():
+
+    from RMS.Formats.Platepar import Platepar
+    from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP
+    from RMS import SpriteAstrometry
+
+    full = templatePlatepar()
+    record, _ = SpriteAstrometry.plateparForServer(full)
+
+    # The server's copy, loaded back the way RMS loads any platepar
+    trimmed = Platepar()
+    trimmed.loadFromDict(json.loads(json.dumps(record)))
+
+    x = np.linspace(0, full.X_res, 7)
+    y = np.linspace(0, full.Y_res, 5)
+    xx, yy = [a.ravel() for a in np.meshgrid(x, y)]
+    jd = [2461280.63]*len(xx)
+
+    _, ra_full, dec_full, _ = xyToRaDecPP(jd, xx, yy, [1]*len(xx), full, extinction_correction=False,
+                                          measurement=True, jd_time=True, precompute_pointing_corr=False)
+    _, ra_trim, dec_trim, _ = xyToRaDecPP(jd, xx, yy, [1]*len(xx), trimmed, extinction_correction=False,
+                                          measurement=True, jd_time=True, precompute_pointing_corr=False)
+
+    assert np.allclose(ra_full, ra_trim, atol=1e-9, rtol=0)
+    assert np.allclose(dec_full, dec_trim, atol=1e-9, rtol=0)
+
+
+def test_trimmed_platepar_leaves_out_the_star_list():
+
+    from RMS import SpriteAstrometry
+
+    full = templatePlatepar()
+    record, _ = SpriteAstrometry.plateparForServer(full)
+
+    for field in ("star_list", "x_poly", "y_poly", "distortion_type_list", "fov_h"):
+        assert field not in record
+
+    # Everything the server requires (spritemap/validation.py) is there
+    for field in ("lat", "lon", "elev", "JD", "X_res", "Y_res", "RA_d", "dec_d", "pos_angle_ref", "F_scale",
+                  "x_poly_fwd", "y_poly_fwd", "x_poly_rev", "y_poly_rev", "distortion_type"):
+        assert field in record
+
+    # Far smaller than the file, and within the server's 32 KiB limit
+    trimmed_size = len(json.dumps(record))
+    full_size = len(full.jsonStr())
+    assert trimmed_size < 4096
+    assert trimmed_size < full_size/3
+
+
+def test_platepar_key_is_stable_and_changes_with_the_calibration():
+
+    from RMS import SpriteAstrometry
+
+    pp = templatePlatepar()
+    record, sha_a = SpriteAstrometry.plateparForServer(pp)
+
+    # Same platepar, same key; the star list does not matter
+    assert SpriteAstrometry.plateparForServer(templatePlatepar(with_stars=False))[1] == sha_a
+
+    # The key is the SHA-256 of the canonical JSON
+    text = json.dumps(record, sort_keys=True, separators=(",", ":"))
+    assert sha_a == hashlib.sha256(text.encode("ascii")).hexdigest()
+
+    # Any change to the calibration is a different platepar
+    pp.RA_d += 0.01
+    assert SpriteAstrometry.plateparForServer(pp)[1] != sha_a
+
+
+def test_platepar_key_matches_the_server():
+
+    # Only when the server package is importable, e.g. both repositories checked out side by side
+    validation = pytest.importorskip("spritemap.validation")
+    from RMS import SpriteAstrometry
+
+    record, sha256 = SpriteAstrometry.plateparForServer(templatePlatepar())
+
+    # The server reads the payload JSON, so compare with what it gets after a round trip
+    assert validation.canonicalPlatepar(json.loads(json.dumps(record)))[1] == sha256
+
+
+def test_platepar_with_a_nan_is_not_sent():
+
+    from RMS import SpriteAstrometry
+
+    pp = templatePlatepar()
+    pp.F_scale = float("nan")
+
+    assert SpriteAstrometry.plateparForServer(pp) == (None, None)
+    assert SpriteAstrometry.plateparForServer(None) == (None, None)
+
+
+def test_payload_and_local_record_carry_the_platepar(tmp_path, monkeypatch):
+
+    from RMS import SpriteAstrometry
+
+    config = makeConfig(tmp_path)
+    night, names = makeNight(tmp_path, 3)
+    fakeDetections(monkeypatch, {names[1]})
+    uploader = FakeUploader()
+
+    pp = templatePlatepar()
+    record, sha256 = SpriteAstrometry.plateparForServer(pp)
+
+    recorder = SpriteDetector.NightRecorder(config, night, uploader, pp, "/somewhere/platepar_cmn2010.cal")
+    detector = SpriteDetector.NightDetector(config, night, recorder, None, None)
+    for name in names:
+        detector.processFF(name, "model")
+    detector.finish()
+
+    # The payload posted to the server has the trimmed platepar, byte for byte what the key was computed from
+    with open(uploader.enqueued[0][1]) as f:
+        payload = json.load(f)
+    assert payload["platepar"] == record
+    assert hashlib.sha256(json.dumps(payload["platepar"], sort_keys=True, separators=(",", ":")).encode(
+        "ascii")).hexdigest() == sha256
+
+    # The local record names the same platepar
+    with open(recorder.jsonl_path) as f:
+        local = json.loads(f.readline())
+    assert local["platepar"]["sha256"] == sha256
+    assert local["platepar"]["source_path"] == "/somewhere/platepar_cmn2010.cal"
+
+    # Well within the server's 1 MiB body limit
+    assert len(json.dumps(payload)) < 16*1024

@@ -51,7 +51,8 @@ from RMS.Formats.Platepar import Platepar
 from RMS.Logger import getLogger, getLoggingQueue, initChildProcess
 from RMS.Misc import AtomicFlag
 from RMS.Routines import MaskImage
-from RMS.SpriteAstrometry import calibrateSpriteDetections, plateparProvenance, plateparUsable
+from RMS.SpriteAstrometry import calibrateSpriteDetections, plateparForServer, plateparProvenance, \
+    plateparUsable
 from RMS.SpriteDetection import SPRITE_TFLITE_AVAILABLE, SPRITE_TFLITE_BACKEND, detectSpritesInFF, \
     getSpriteInterpreter
 from RMS.SpriteFilter import SpriteFalsePositiveFilter
@@ -133,20 +134,28 @@ class NightRecorder(object):
         Shared by the live process and the offline run, so that both write exactly the same products.
     """
 
-    def __init__(self, config, night_data_dir, uploader, platepar_info):
+    def __init__(self, config, night_data_dir, uploader, platepar=None, platepar_path=None):
         """
         Arguments:
             config: [Config]
             night_data_dir: [str] Night directory, where the FF files are and the products go.
             uploader: [SpriteUploadWorker or None] Where confirmed payloads are sent. None to send nothing.
-            platepar_info: [dict] Provenance of the platepar used, from plateparProvenance().
+
+        Keyword arguments:
+            platepar: [Platepar or None] Platepar the detections are calibrated with. None by default.
+            platepar_path: [str or None] Where it was loaded from. None by default.
         """
 
         self.config = config
         self.night_data_dir = night_data_dir
         self.night_dir_name = os.path.basename(os.path.normpath(night_data_dir))
         self.uploader = uploader
-        self.platepar_info = platepar_info
+
+        # The trimmed platepar goes with every payload; the server keeps one copy under its SHA-256, which
+        #   the local record also carries so the two can be matched
+        self.server_platepar, platepar_sha256 = plateparForServer(platepar)
+        self.platepar_info = plateparProvenance(platepar, platepar_path)
+        self.platepar_info["sha256"] = platepar_sha256
 
         self.csv_path = SpriteProducts.csvPath(night_data_dir)
         self.jsonl_path = SpriteProducts.jsonlPath(night_data_dir)
@@ -244,7 +253,8 @@ class NightRecorder(object):
             return
 
         payload, reason = SpriteProducts.buildSpritePayload(
-            self.config, ff_name, ff_start, fps, detections, self.night_dir_name)
+            self.config, ff_name, ff_start, fps, detections, self.night_dir_name,
+            platepar=self.server_platepar)
 
         # The server triangulates from azimuth and altitude; without them it has no use for the detection
         if payload is None:
@@ -534,8 +544,7 @@ class SpriteDetector(multiprocessing.Process):
         uploader = SpriteUploadWorker(self.config)
         uploader.start()
 
-        recorder = NightRecorder(self.config, self.night_data_dir, uploader,
-                                 plateparProvenance(platepar, platepar_path))
+        recorder = NightRecorder(self.config, self.night_data_dir, uploader, platepar, platepar_path)
         detector = NightDetector(self.config, self.night_data_dir, recorder, platepar, platepar_reason)
 
         log.info("Sprite detector started ({:s} backend, platepar: {:s}, uploads: {:s})".format(
@@ -712,7 +721,7 @@ def runSpriteDetectionDirectory(dir_path, config, upload=False, overwrite=False)
         uploader = SpriteUploadWorker(config)
         uploader.start()
 
-    recorder = NightRecorder(config, dir_path, uploader, plateparProvenance(platepar, platepar_path))
+    recorder = NightRecorder(config, dir_path, uploader, platepar, platepar_path)
     detector = NightDetector(config, dir_path, recorder, platepar, platepar_reason)
 
     log.info("Running sprite detection on {:d} FF file(s) in {:s}".format(len(ff_names), dir_path))

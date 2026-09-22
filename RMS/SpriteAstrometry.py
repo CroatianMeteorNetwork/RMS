@@ -17,15 +17,20 @@
 """ Sky coordinates for sprite detections.
 
     The conversion follows RMS/Astrometry/ApplyAstrometryECSV.py: xyToRaDecPP with measurement=True gives
-    true J2000 RA/Dec (refraction is removed there when the platepar was fitted with it), and
-    trueRaDec2ApparentAltAz with refraction=False gives the geometric azimuth and altitude of date. The
-    receiving server triangulates, so it needs true directions, not refracted ones.
+    true J2000 RA/Dec, and trueRaDec2ApparentAltAz with refraction=False gives the geometric azimuth and
+    altitude of date. The receiving server triangulates, so it needs true directions, not refracted ones.
+
+    Refraction is always taken out: explicitly when the platepar was fitted with refraction on, and as part
+    of the fitted distortion when it was fitted with refraction off. Either kind of platepar is used.
 
     Each detection has its own frame time, so the pointing correction is computed per point
     (precompute_pointing_corr=False); the shortcut is only valid when all Julian dates are identical.
 """
 
 from __future__ import print_function, division, absolute_import
+
+import hashlib
+import json
 
 import numpy as np
 
@@ -61,6 +66,18 @@ N_POINTS = len(POINT_KEYS)
 # Station codes a default or unset platepar carries
 _UNSET_STATION_CODES = ("", "NONE")
 
+# Platepar fields sent to the server: what maps pixels to the sky and back, what says where the calibration
+#   came from, and the few photometry numbers without which RMS's xyToRaDecPP will not run. The star list and
+#   the old duplicate fields are left out; they make up most of a platepar file.
+PLATEPAR_SERVER_FIELDS = (
+    "version", "station_code", "lat", "lon", "elev", "JD", "Ho", "UT_corr", "X_res", "Y_res",
+    "RA_d", "dec_d", "pos_angle_ref", "F_scale", "az_centre", "alt_centre", "rotation_from_horiz",
+    "x_poly_fwd", "y_poly_fwd", "x_poly_rev", "y_poly_rev", "distortion_type", "equal_aspect",
+    "force_distortion_centre", "asymmetry_corr", "refraction", "measurement_apparent_to_true_refraction",
+    "auto_check_fit_refined", "auto_recalibrated",
+    "mag_0", "mag_lev", "vignetting_coeff", "vignetting_fixed", "gamma", "extinction_scale",
+)
+
 
 
 def plateparUsable(platepar, ncols, nrows, config):
@@ -93,12 +110,6 @@ def plateparUsable(platepar, ncols, nrows, config):
     if (int(platepar.X_res), int(platepar.Y_res)) != (int(ncols), int(nrows)):
         return False, "platepar resolution {:d}x{:d} does not match the FF resolution {:d}x{:d}".format(
             int(platepar.X_res), int(platepar.Y_res), int(ncols), int(nrows))
-
-    # Without either refraction flag the coordinates would be neither true nor apparent
-    refraction = bool(getattr(platepar, "refraction", True))
-    meas_refr = bool(getattr(platepar, "measurement_apparent_to_true_refraction", False))
-    if (not refraction) and (not meas_refr):
-        return False, "platepar has refraction and measurement_apparent_to_true_refraction both off"
 
     # An unrefined platepar is still usable, the caller warns about it once
     refined = bool(getattr(platepar, "auto_check_fit_refined", False))
@@ -148,6 +159,47 @@ def plateparProvenance(platepar, platepar_path):
         "auto_check_fit_refined": bool(getattr(platepar, "auto_check_fit_refined", False)),
         "auto_recalibrated": bool(getattr(platepar, "auto_recalibrated", False)),
     }
+
+
+
+def plateparForServer(platepar):
+    """ The platepar as it is sent to the server: trimmed to the mapping fields, with its key.
+
+        The server stores each distinct platepar once, under the SHA-256 of its canonical JSON (sorted keys,
+        no whitespace), and the frames refer to it. The same key is computed here, so a local record can be
+        matched with the server's copy.
+
+    Arguments:
+        platepar: [Platepar or None]
+
+    Return:
+        (record, sha256): [tuple]
+            record: [dict or None] Plain JSON types only. None if there is no platepar or it cannot be sent.
+            sha256: [str or None] Hex digest of the canonical JSON of record.
+    """
+
+    if platepar is None:
+        return None, None
+
+    # RMS's own serialization turns the numpy arrays into lists, the same way the platepar file is written
+    try:
+        full = json.loads(platepar.jsonStr())
+
+    except Exception as e:
+        log.warning("The platepar could not be serialized for the sprite server: {:s}".format(repr(e)))
+        return None, None
+
+    record = dict((key, full[key]) for key in PLATEPAR_SERVER_FIELDS if key in full)
+
+    # The server refuses a platepar with NaN or infinity anywhere, and with it the whole frame
+    try:
+        text = json.dumps(record, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False)
+
+    except ValueError:
+        log.warning("The platepar has values that are not finite numbers, it is not sent to the server")
+        return None, None
+
+    return record, hashlib.sha256(text.encode("ascii")).hexdigest()
 
 
 
