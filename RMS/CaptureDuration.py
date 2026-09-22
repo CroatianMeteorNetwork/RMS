@@ -146,11 +146,20 @@ def captureDuration(lat, lon, elevation, current_time=None, continuous_capture=N
         
 
 
-    next_set = o.next_setting(s).datetime()
-    
+    # The next sunset may not exist even though a sunrise does: on the last night before polar day
+    # the Sun rises and then never sets (AlwaysUpError), and next to the poles ephem can also
+    # report NeverUpError while the Sun skims the horizon. In both cases the Sun is below the
+    # capture horizon now (a sunrise is still ahead), so it is night: capture until the sunrise
+    try:
+        next_set = o.next_setting(s).datetime()
 
-    # If the next sunset is later than the next sunrise, it means that it is night, and capturing should start immediately
-    if next_set > next_rise:
+    except (ephem.AlwaysUpError, ephem.NeverUpError):
+        next_set = None
+
+
+    # If the next sunset is later than the next sunrise (or there is none), it means that it is
+    # night, and capturing should start immediately
+    if (next_set is None) or (next_set > next_rise):
 
         start_time = True
 

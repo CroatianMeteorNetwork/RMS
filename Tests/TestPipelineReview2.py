@@ -357,3 +357,44 @@ def testStopCaptureAbandonsUnkillableProcess(monkeypatch):
 
     assert fake.join_timeouts, 'stopCapture never joined'
     assert all(t is not None for t in fake.join_timeouts), 'unbounded join: {}'.format(fake.join_timeouts)
+
+
+# ---------------------------------------------------------------------------
+# Item 5: captureDuration on the last night before polar day
+
+# (lat, lon, first time, last time, step in minutes, continuous_capture). The windows contain the
+# times where the next sunrise exists but next_setting() raised AlwaysUpError/NeverUpError
+_POLAR_WINDOWS = [
+    (72.0, 15.0, (2026, 4, 20, 22, 0), (2026, 4, 21, 0, 0), 2, None),
+    (74.0, 15.0, (2026, 4, 15, 22, 30), (2026, 4, 15, 23, 30), 2, None),
+    (76.0, 15.0, (2026, 4, 9, 22, 10), (2026, 4, 9, 23, 50), 2, None),
+    (80.0, 15.0, (2026, 3, 30, 22, 30), (2026, 3, 30, 23, 30), 2, None),
+    (80.0, 15.0, (2026, 3, 21, 22, 10), (2026, 3, 21, 23, 58), 2, True),
+    (-77.85, 166.67, (2026, 10, 8, 11, 40), (2026, 10, 8, 13, 30), 2, None),
+    (89.9, 0.0, (2026, 3, 5, 9, 0), (2026, 3, 5, 10, 0), 2, None),
+    (89.9, 0.0, (2026, 10, 6, 23, 30), (2026, 10, 8, 6, 30), 10, None),
+    ]
+
+
+@pytest.mark.parametrize('lat, lon, t_beg, t_end, step, continuous', _POLAR_WINDOWS)
+def testCaptureDurationLastNightBeforePolarDay(lat, lon, t_beg, t_end, step, continuous):
+    """ captureDuration must not raise when the next sunset does not exist, and must return a sane
+        start time and duration throughout the window.
+    """
+
+    import datetime
+    from RMS.CaptureDuration import captureDuration
+
+    t = datetime.datetime(*t_beg)
+    t_end = datetime.datetime(*t_end)
+    while t <= t_end:
+
+        start_time, duration = captureDuration(lat, lon, 0, current_time=t, continuous_capture=continuous)
+
+        assert 0 < duration <= 23*3600, (t, start_time, duration)
+        if not isinstance(start_time, bool):
+            assert start_time >= t - datetime.timedelta(minutes=1), (t, start_time)
+        else:
+            assert start_time is True
+
+        t += datetime.timedelta(minutes=step)
