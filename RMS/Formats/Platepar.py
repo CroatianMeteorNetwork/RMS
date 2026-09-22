@@ -1644,7 +1644,7 @@ class Platepar(object):
                         else:
                             dist_label = "radial7-odd"
                         # Debug: show RA/Dec at each iteration
-                        iter_ra, iter_dec, _ = normalizeRaDec(360*res.x[0], 90*res.x[1])
+                        iter_ra, iter_dec, iter_pos_angle_offset = normalizeRaDec(360*res.x[0], 90*res.x[1])
                         print("      Iter {}: {} (w={}) fit on {}, {} outliers, RMSD={:.2f}', RA={:.2f} Dec={:.2f}".format(
                             iteration + 1, dist_label, weight, len(subset_indices),
                             np.sum(iteration_outliers), rmsd_arcmin, iter_ra, iter_dec))
@@ -1656,7 +1656,7 @@ class Platepar(object):
                             pp_iter = copy.deepcopy(self)
                             pp_iter.RA_d = iter_ra
                             pp_iter.dec_d = iter_dec
-                            pp_iter.pos_angle_ref = (360 * res.x[2]) % 360
+                            pp_iter.pos_angle_ref = (360*res.x[2] + iter_pos_angle_offset) % 360
                             pp_iter.F_scale = f_scale_fixed if fixed_scale else abs(res.x[3])
                             if len(res.x) > 4:
                                 pp_iter.x_poly_fwd = np.array(res.x[4:])
