@@ -532,6 +532,46 @@ def extractStarsImgHandle(img_handle,
 
 
 
+def duplicateDetectionKeepMask(x_arr, y_arr, intens_arr, radius):
+    """ Flag detections that converged to the same position after PSF fitting.
+
+        All pairs closer than the radius are found with a KD-tree and walked in the order query_pairs
+        returns them; for every pair whose two members are both still kept, the fainter one (the second on
+        an equal intensity) is dropped. The rule is greedy and order dependent (a chain of pairs can end
+        differently when walked in another order), so the walk is kept sequential and only made cheap:
+        plain Python lists instead of per-pair NumPy scalar indexing.
+
+    Arguments:
+        x_arr: [array-like] X coordinates of the fitted detections.
+        y_arr: [array-like] Y coordinates of the fitted detections.
+        intens_arr: [array-like] Intensities of the fitted detections.
+        radius: [float] Two detections closer than this are duplicates (px).
+
+    Return:
+        keep: [ndarray of bool] True for the detections to keep.
+    """
+
+    n_detections = len(x_arr)
+    keep = [True]*n_detections
+    intens = list(intens_arr)
+
+    # Find all pairs within the radius using a KD-tree
+    tree = cKDTree(np.column_stack([np.asarray(x_arr, dtype=np.float64),
+                                    np.asarray(y_arr, dtype=np.float64)]))
+    pairs = tree.query_pairs(radius, output_type='ndarray')
+
+    # Process pairs: for each duplicate pair, discard the fainter detection
+    for i, j in pairs.tolist():
+        if not keep[i] or not keep[j]:
+            continue
+        if intens[j] > intens[i]:
+            keep[i] = False
+        else:
+            keep[j] = False
+
+    return np.array(keep, dtype=bool)
+
+
 def fitPSF(img, img_median, x_init, y_init, gamma=1.0, segment_radius=4, roundness_threshold=0.5, 
            max_feature_ratio=0.8, bit_depth=8):
     """ Fit a 2D Gaussian to the star candidate cutout to check if it's a star.
@@ -779,22 +819,7 @@ def fitPSF(img, img_median, x_init, y_init, gamma=1.0, segment_radius=4, roundne
     # This happens when a bright star with a wide PSF produces multiple local maxima
     # (spaced > neighborhood_size apart) whose PSF fits all converge to the same center.
     if len(x_fitted) > 1:
-        x_arr_f = np.array(x_fitted)
-        y_arr_f = np.array(y_fitted)
-        intens_arr_f = np.array(intensity_fitted)
-        keep = np.ones(len(x_fitted), dtype=bool)
-
-        # Find all pairs within segment_radius using a KD-tree
-        tree = cKDTree(np.column_stack([x_arr_f, y_arr_f]))
-        pairs = tree.query_pairs(segment_radius, output_type='ndarray')
-        # Process pairs: for each duplicate pair, discard the fainter detection
-        for i, j in pairs:
-            if not keep[i] or not keep[j]:
-                continue
-            if intens_arr_f[j] > intens_arr_f[i]:
-                keep[i] = False
-            else:
-                keep[j] = False
+        keep = duplicateDetectionKeepMask(x_fitted, y_fitted, intensity_fitted, segment_radius)
 
         n_dupes = np.sum(~keep)
         if n_dupes > 0:

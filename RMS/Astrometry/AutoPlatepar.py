@@ -22,6 +22,7 @@ from __future__ import print_function, division, absolute_import
 import os
 
 import numpy as np
+from scipy.spatial import cKDTree
 
 from RMS.Astrometry.Conversions import date2JD, JD2HourAngle, JD2LST, jd2YearsFromJ2000
 from RMS.Astrometry.Conversions import trueRaDec2ApparentAltAz
@@ -50,6 +51,52 @@ DEFAULT_REFRACTION = True
 # Maximum pixel distance between an NN-fitted star position and a detected star for the detection's
 #   FWHM/SNR/saturation to be attached to the pair (the fitted star_list only carries x, y, intensity)
 NN_PAIR_ASSOC_RADIUS_PX = 3.0
+
+
+def associateDetections(star_x, star_y, x_data, y_data, radius=NN_PAIR_ASSOC_RADIUS_PX):
+    """ Find the closest detection to every fitted star, if it is within the association radius.
+
+        Equivalent to taking, for every star, np.argmin of the distances to all detections and accepting it
+        if the distance is below the radius, but done with one KD-tree query in O((N + M) log M) instead of
+        an O(N*M) Python loop.
+
+    Arguments:
+        star_x: [ndarray] X image coordinates of the fitted stars.
+        star_y: [ndarray] Y image coordinates of the fitted stars.
+        x_data: [ndarray] X image coordinates of the detections.
+        y_data: [ndarray] Y image coordinates of the detections.
+
+    Keyword arguments:
+        radius: [float] Maximum association distance (px). NN_PAIR_ASSOC_RADIUS_PX by default.
+
+    Return:
+        closest_idx: [ndarray of int] Index of the associated detection for every star, -1 if none is
+            within the radius.
+    """
+
+    star_x = np.atleast_1d(np.asarray(star_x, dtype=np.float64))
+    star_y = np.atleast_1d(np.asarray(star_y, dtype=np.float64))
+    x_data = np.asarray(x_data, dtype=np.float64)
+    y_data = np.asarray(y_data, dtype=np.float64)
+
+    closest_idx = -np.ones(len(star_x), dtype=int)
+
+    # Without detections nothing can be associated. The same holds when any coordinate is non-finite: the
+    #   per-star argmin over distances containing a NaN selected that NaN, which never passed the radius
+    #   test, so no star was associated - keep that so the result does not change
+    if (len(x_data) == 0) or (not np.all(np.isfinite(x_data))) or (not np.all(np.isfinite(y_data))) \
+        or (not np.all(np.isfinite(star_x))) or (not np.all(np.isfinite(star_y))):
+
+        return closest_idx
+
+    # One nearest-neighbour query for all stars; the upper bound only prunes the search, the strict
+    #   radius test below is the same as the original comparison
+    tree = cKDTree(np.column_stack([x_data, y_data]))
+    distances, indices = tree.query(np.column_stack([star_x, star_y]), k=1, distance_upper_bound=radius)
+    associated = distances < radius
+    closest_idx[associated] = indices[associated]
+
+    return closest_idx
 
 
 def scoreFrameDistribution(star_data, img_width, img_height, n_grid=4):
@@ -623,20 +670,23 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
     paired_stars = PairedStars()
 
     if hasattr(platepar, 'star_list') and platepar.star_list:
-        for entry in platepar.star_list:
-            # star_list format: [jd, x, y, intensity, ra, dec, mag]
+
+        # Find the closest detected star of every fitted star (one KD-tree query for all of them) to get
+        #   the FWHM, SNR and saturation
+        # star_list format: [jd, x, y, intensity, ra, dec, mag]
+        star_arr = np.array([entry[1:3] for entry in platepar.star_list], dtype=np.float64)
+        closest_indices = associateDetections(star_arr[:, 0], star_arr[:, 1], x_data, y_data,
+                                              radius=NN_PAIR_ASSOC_RADIUS_PX)
+
+        for entry, closest_idx in zip(platepar.star_list, closest_indices):
             _, img_x, img_y, intensity, cat_ra, cat_dec, cat_mag = entry
             sky_obj = CatalogStar(cat_ra, cat_dec, cat_mag)
 
-            # Find closest detected star to get FWHM, SNR, saturation
             fwhm, snr, saturated = 2.5, 1.0, False
-            if len(x_data) > 0:
-                distances = np.sqrt((x_data - img_x)**2 + (y_data - img_y)**2)
-                closest_idx = np.argmin(distances)
-                if distances[closest_idx] < NN_PAIR_ASSOC_RADIUS_PX:
-                    fwhm = input_fwhm[closest_idx]
-                    snr = input_snr[closest_idx]
-                    saturated = input_saturated[closest_idx] > 0
+            if closest_idx >= 0:
+                fwhm = input_fwhm[closest_idx]
+                snr = input_snr[closest_idx]
+                saturated = input_saturated[closest_idx] > 0
 
             paired_stars.addPair(img_x, img_y, fwhm, intensity, sky_obj, snr=snr, saturated=saturated)
 

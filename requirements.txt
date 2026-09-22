@@ -16,7 +16,10 @@ pyephem>=3.7.6.0
 cython>=0.27.3 ; python_version<'3.13'
 # NumPy 2 headers require Cython >= 3.0.6 to build the .pyx modules
 cython>=3.0.6 ; python_version>='3.13'
-scipy>=1.0.0
+# RMS.ExtractStars calls cKDTree.query_pairs(..., output_type='ndarray'), which SciPy only grew in
+# 1.6. That is also the first SciPy release without Python 3.6 support, which costs nothing here:
+# pyqtgraph 0.12 below already requires Python 3.7 or newer.
+scipy>=1.6
 Pillow>=4.3.0
 astropy>=2.0.3
 imreg_dft @ git+https://github.com/matejak/imreg_dft@master

@@ -126,10 +126,15 @@ def getPairedStarsSkyPositions(img_x, img_y, jd, platepar):
         (ra_array, dec_array): [tuple of ndarrays] Arrays of RA and Dec of stars on the image.
     """
 
-    # Compute RA, Dec of image stars
+    # All stars share the same time, so convert the JD to a date tuple and back once and broadcast it. This
+    #   gives exactly the same JD per star as converting the tuple once per star, without the O(N) Python
+    #   loop in xyToRaDecPP
     img_time = jd2Date(jd)
+    jd_data = np.full(len(img_x), date2JD(*img_time), dtype=np.float64)
+
+    # Compute RA, Dec of image stars (no levels are given, which skips the unused magnitude computation)
     _, ra_array, dec_array, _ = RMS.Astrometry.ApplyAstrometry.xyToRaDecPP(
-        len(img_x) * [img_time], img_x, img_y, len(img_x) * [1], platepar, extinction_correction=False,
+        jd_data, img_x, img_y, None, platepar, extinction_correction=False, jd_time=True,
         precompute_pointing_corr=True
     )
 
@@ -217,6 +222,63 @@ def _raDecToUnitVectors(ra_deg, dec_deg):
     dec = np.radians(dec_deg)
     cos_dec = np.cos(dec)
     return np.column_stack([cos_dec*np.cos(ra), cos_dec*np.sin(ra), np.sin(dec)])
+
+
+def _nearestCatalogStars(ra_det, dec_det, ra_cat, dec_cat, cat_tree=None):
+    """Find the nearest catalog star of every detected star.
+
+    Equivalent to taking the row-wise argmin/min of the dense N x M angularSeparation matrix, but in
+    O(N log M) instead of O(N*M). The nearest neighbour is found with a KD-tree of unit vectors (the
+    chord distance 2*sin(sep/2) is monotonic in the angular separation, so the nearest neighbour is the
+    same), and the separation of every matched pair is then recomputed with angularSeparation so the
+    returned values are the same numbers the dense matrix produced.
+
+    Arguments:
+        ra_det: [ndarray] Right ascensions of the detected stars (deg).
+        dec_det: [ndarray] Declinations of the detected stars (deg).
+        ra_cat: [ndarray] Right ascensions of the catalog stars (deg).
+        dec_cat: [ndarray] Declinations of the catalog stars (deg).
+
+    Keyword arguments:
+        cat_tree: [cKDTree] Prebuilt tree of the catalog unit vectors (see _raDecToUnitVectors). If None,
+            it is built here.
+
+    Return:
+        (nearest_indices, nearest_sep): [tuple of ndarrays]
+            nearest_indices: [ndarray of int] Index of the nearest catalog star for every detection.
+            nearest_sep: [ndarray] Angular separation to that catalog star (radians).
+    """
+
+    ra_det = np.asarray(ra_det, dtype=np.float64)
+    dec_det = np.asarray(dec_det, dtype=np.float64)
+    ra_cat = np.asarray(ra_cat, dtype=np.float64)
+    dec_cat = np.asarray(dec_cat, dtype=np.float64)
+
+    # Build the catalog tree if one was not given
+    if cat_tree is None:
+        cat_tree = cKDTree(_raDecToUnitVectors(ra_cat, dec_cat))
+
+    # The tree query rejects non-finite points, while the dense matrix gave such detections a NaN row
+    #   (argmin 0, min NaN). Reproduce that so degenerate projections are handled the same way
+    det_vectors = _raDecToUnitVectors(ra_det, dec_det)
+    finite = np.all(np.isfinite(det_vectors), axis=1)
+
+    nearest_indices = np.zeros(len(ra_det), dtype=np.intp)
+    nearest_sep = np.full(len(ra_det), np.nan, dtype=np.float64)
+
+    if np.any(finite):
+
+        _, nearest_indices[finite] = cat_tree.query(det_vectors[finite], k=1)
+
+        # Recompute the separation of the matched pairs with the same formula the dense matrix used
+        nearest_sep[finite] = angularSeparation(
+            np.radians(ra_det[finite]),
+            np.radians(dec_det[finite]),
+            np.radians(ra_cat[nearest_indices[finite]]),
+            np.radians(dec_cat[nearest_indices[finite]]),
+        )
+
+    return nearest_indices, nearest_sep
 
 
 class Platepar(object):
@@ -685,8 +747,9 @@ class Platepar(object):
 
         # Pre-extract detected star positions (constant across iterations)
         img_x, img_y, _ = img_stars.T
+        img_coords = np.column_stack([img_x, img_y])
 
-        def _calcPointingNNCostPixel(params, pp_work, jd, ra_catalog, dec_catalog, img_x, img_y, fixed_scale):
+        def _calcPointingNNCostPixel(params, pp_work, jd, ra_catalog, dec_catalog, img_coords, fixed_scale):
             """NN cost function in pixel space for pointing fit.
 
             Projects catalog stars to image coordinates and computes pixel-space NN distances.
@@ -712,10 +775,13 @@ class Platepar(object):
             if len(cat_x_valid) < 3:
                 return 1e10  # Return large cost if too few valid catalog stars
 
-            # Use KD-tree for fast nearest-neighbor search (O(N log M) vs O(N*M))
+            # Use KD-tree for fast nearest-neighbor search (O(N log M) vs O(N*M)). The residual is the
+            #   distance from every detection to its nearest projected catalog star, so the tree has to be
+            #   built on the projected catalog (which moves every evaluation) - building it on the static
+            #   detections would answer the reverse question. The sliding-midpoint, non-compacted build is
+            #   ~2x cheaper than the default and the exact nearest distances it returns are identical.
             cat_coords = np.column_stack([cat_x_valid, cat_y_valid])
-            tree = cKDTree(cat_coords)
-            img_coords = np.column_stack([img_x, img_y])
+            tree = cKDTree(cat_coords, balanced_tree=False, compact_nodes=False)
             nn_distances, _ = tree.query(img_coords, k=1)
 
             # Use RMSD (root mean square deviation) as cost
@@ -737,7 +803,7 @@ class Platepar(object):
         res = scipy.optimize.minimize(
             _calcPointingNNCostPixel,
             p0,
-            args=(pp_work, jd, ra_catalog, dec_catalog, img_x, img_y, fixed_scale),
+            args=(pp_work, jd, ra_catalog, dec_catalog, img_coords, fixed_scale),
             method='Nelder-Mead',
             options={'maxiter': 5000, 'adaptive': True, 'initial_simplex': simplex},
         )
@@ -759,8 +825,7 @@ class Platepar(object):
             return False, res.fun, 0.0, 0.0
 
         cat_coords = np.column_stack([cat_x_valid, cat_y_valid])
-        tree = cKDTree(cat_coords)
-        img_coords = np.column_stack([img_x, img_y])
+        tree = cKDTree(cat_coords, balanced_tree=False, compact_nodes=False)
         nn_distances, _ = tree.query(img_coords, k=1)
 
         # Count inliers (matches within threshold)
@@ -1475,7 +1540,11 @@ class Platepar(object):
 
                         # Pre-filter catalog to FOV using current pointing (from start_params)
                         # This avoids re-filtering inside every optimizer function evaluation
-                        pp_filter = copy.deepcopy(self)
+                        # A shallow copy is enough: the projection functions only read the platepar
+                        #   and the parameters below are rebound (not mutated in place), so self and its
+                        #   arrays are untouched. The same copy is reused for the scoring below.
+                        pp_work = copy.copy(self)
+                        pp_filter = pp_work
                         pp_filter.RA_d, pp_filter.dec_d, pos_angle_offset = \
                             normalizeRaDec(360*start_params[0], 90*start_params[1])
                         pp_filter.pos_angle_ref = (360 * start_params[2] + pos_angle_offset) % 360
@@ -1520,8 +1589,8 @@ class Platepar(object):
                         print("        opt: {} iters, {} fev, {} (fatol={})".format(
                             res.nit, res.nfev, exit_reason, ransac_opts['fatol']))
 
-                        # Score on ALL stars
-                        pp_temp = copy.deepcopy(self)
+                        # Score on ALL stars (reusing the shallow working copy from the FOV filter)
+                        pp_temp = pp_work
                         ra_ref, dec_ref, pos_angle_ref, F_scale = res.x[:4]
                         pp_temp.RA_d, pp_temp.dec_d, pos_angle_offset = normalizeRaDec(360*ra_ref, 90*dec_ref)
                         pp_temp.pos_angle_ref = (360 * pos_angle_ref + pos_angle_offset) % 360
@@ -1542,13 +1611,9 @@ class Platepar(object):
                         catalog_stars_iter = catalog_stars[in_fov_iter]
                         ra_catalog, dec_catalog, _ = catalog_stars_iter.T
 
-                        # Vectorized NN: compute NxM separation matrix
-                        ra_det_rad = np.radians(ra_det)[:, np.newaxis]  # (N, 1)
-                        dec_det_rad = np.radians(dec_det)[:, np.newaxis]  # (N, 1)
-                        ra_cat_rad = np.radians(ra_catalog)[np.newaxis, :]  # (1, M)
-                        dec_cat_rad = np.radians(dec_catalog)[np.newaxis, :]  # (1, M)
-                        sep_matrix = angularSeparation(ra_det_rad, dec_det_rad, ra_cat_rad, dec_cat_rad)
-                        nn_seps = np.min(sep_matrix, axis=1)  # (N,)
+                        # Nearest catalog star of every detection (KD-tree, O(N log M)); the separations
+                        #   are the same values the dense NxM matrix row minima gave
+                        _, nn_seps = _nearestCatalogStars(ra_det, dec_det, ra_catalog, dec_catalog)
 
                         median_sep = np.median(nn_seps)
                         base_threshold = 3.0 * median_sep
@@ -1673,27 +1738,22 @@ class Platepar(object):
                     catalog_stars_fov = catalog_stars[in_fov_final]
                     ra_catalog, dec_catalog, _ = catalog_stars_fov.T
 
-                    # Vectorized NN matching: compute NxM separation matrix
-                    ra_det_rad = np.radians(ra_det)[:, np.newaxis]  # (N, 1)
-                    dec_det_rad = np.radians(dec_det)[:, np.newaxis]  # (N, 1)
-                    ra_cat_rad = np.radians(ra_catalog)[np.newaxis, :]  # (1, M)
-                    dec_cat_rad = np.radians(dec_catalog)[np.newaxis, :]  # (1, M)
-                    sep_matrix = angularSeparation(ra_det_rad, dec_det_rad, ra_cat_rad, dec_cat_rad)
-                    nearest_indices = np.argmin(sep_matrix, axis=1)  # (N,)
-                    nearest_sep = np.min(sep_matrix, axis=1)         # (N,)
+                    # NN matching: nearest catalog star of every detection (KD-tree, O(N log M) instead
+                    #   of the dense NxM separation matrix)
+                    nearest_indices, nearest_sep = _nearestCatalogStars(ra_det, dec_det, ra_catalog,
+                                                                         dec_catalog)
 
-                    # Enforce one-to-one matching. argmin is per-detection and non-injective, so two
-                    #   detected stars can claim the same catalog star (a duplicate) - which then
-                    #   shows up as a gross residual and inflates the RMSD. Resolve conflicts by
-                    #   keeping, for each catalog star, only the closest detection; drop the rest.
+                    # Enforce one-to-one matching. The nearest neighbour is per-detection and
+                    #   non-injective, so two detected stars can claim the same catalog star (a
+                    #   duplicate) - which then shows up as a gross residual and inflates the RMSD.
+                    #   Resolve conflicts by keeping, for each catalog star, only the closest detection;
+                    #   drop the rest. Walking the detections in order of increasing separation and
+                    #   keeping the first claim of every catalog star is the same as taking the first
+                    #   occurrence of every catalog index in that order.
+                    sep_order = np.argsort(nearest_sep)
+                    _, first_claim = np.unique(nearest_indices[sep_order], return_index=True)
                     keep_mask = np.zeros(len(nearest_indices), dtype=bool)
-                    seen_catalog = set()
-                    for det_i in np.argsort(nearest_sep):
-                        cat_i = int(nearest_indices[det_i])
-                        if cat_i in seen_catalog:
-                            continue
-                        seen_catalog.add(cat_i)
-                        keep_mask[det_i] = True
+                    keep_mask[sep_order[first_claim]] = True
 
                     n_dupes = int(np.sum(~keep_mask))
                     if n_dupes > 0:
