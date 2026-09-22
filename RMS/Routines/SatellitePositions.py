@@ -207,11 +207,8 @@ def loadTLEs(cache_dir, cache_file_name="active.txt",
     # If time of interest is provided, try to find the closest file in cache
     if time_of_interest is not None and use_daily_cache and os.path.exists(cache_dir):
         
-        # Use existing function to find the closest file
-        # We need to handle the case where findClosestTLEFile returns None (meaning "now" is closer or no files)
-        # But findClosestTLEFile logic assumes we might want to download if "now" is closer.
-        # Let's reuse its logic but prioritize the file if it exists.
-        
+        # Prefer the cached TLE file closest to the time of interest, if any (None means no cached file is
+        #   closer than a fresh download, in which case the default download logic below is used)
         found_file = findClosestTLEFile(cache_dir, time_of_interest)
         
         if found_file:
@@ -241,7 +238,7 @@ def loadTLEs(cache_dir, cache_file_name="active.txt",
         # Generate cache file path with optional daily naming
         if use_daily_cache:
             # Create date-stamped filename: TLE_YYYYMMDD_HHMMSS_<original_name>
-            now = datetime.datetime.utcnow()
+            now = datetime.datetime.now(datetime.timezone.utc)
             date_str = now.strftime("%Y%m%d")
             
             # Check if today's cache already exists
@@ -558,7 +555,7 @@ if __name__ == "__main__":
                  print("Invalid time format. Use YYYYMMDD_HHMMSS or ISO format.")
                  exit(1)
     else:
-        t_start = datetime.datetime.utcnow()
+        t_start = datetime.datetime.now(datetime.timezone.utc)
 
     # Ensure UTC
     if t_start.tzinfo is None:
