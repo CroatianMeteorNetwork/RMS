@@ -13222,10 +13222,8 @@ class PlateTool(QtWidgets.QMainWindow):
         if help_index == -1:
             return False
 
-        self.tab.setCurrentIndex(help_index)
-        self.tab.index = help_index
-        self.tab.maximized = True
-        self.tab.applyTabWidth()
+        # Go through the normal tab change, so e.g. leaving the Mask tab exits the brush mode
+        self.tab.showTab(help_index)
         return True
 
 

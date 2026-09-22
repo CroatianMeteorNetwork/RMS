@@ -1221,3 +1221,23 @@ def testCtrlDigitDistortionShortcuts(plateTool, monkeypatch, digit, dist_type):
         expected = copy.deepcopy(pt.platepar)
         expected.setDistortionType(dist_type)
         assert np.array_equal(pt.platepar.x_poly_fwd, expected.x_poly_fwd)
+
+
+def testHelpFromMaskTabLeavesMaskModes(plateTool, qapp):
+    """ Opening the Help from the Mask tab runs the Mask tab leave logic. """
+
+    pt = plateTool
+    pt.show()
+    qapp.processEvents()
+
+    _openMaskTab(pt)
+    pt.tab.mask.brush_button.setChecked(True)
+    pt.toggleMaskBrushMode()
+    assert pt.mask_brush_mode and not pt.img_frame.panning_enabled
+
+    pt.openHelp()
+
+    assert pt.tab.currentWidget() is pt.tab.help
+    assert not pt.mask_brush_mode
+    assert not pt.brush_cursor.isVisible()
+    assert pt.img_frame.panning_enabled

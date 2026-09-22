@@ -1565,18 +1565,32 @@ class RightOptionsTab(QtWidgets.QTabWidget, ScaledSizeHelper):
         else:
             self.setFixedWidth(self.minimizedWidth())
 
+    def showTab(self, index):
+        """ Open the tab at the given index, maximized, running the GUI's tab change logic (e.g. leaving
+            the Mask tab) through sigTabChanged. Unlike a click on the current tab, this never collapses
+            the panel.
+
+        Arguments:
+            index: [int] Index of the tab to open.
+        """
+
+        old_index = self.index
+
+        self.setCurrentIndex(index)
+        self.index = index
+        self.maximized = True
+        self.applyTabWidth()
+
+        if index != old_index:
+            self.sigTabChanged.emit(old_index, index)
+
     def onTabBarClicked(self, index):
         """ Switch to the clicked tab, or collapse/expand the panel when the current tab is clicked
             again. """
 
-        old_index = self.index
-
         # Clicking another tab always shows it maximized (wider for Help, normal for everything else)
         if index != self.index:
-            self.index = index
-            self.maximized = True
-            self.applyTabWidth()
-            self.sigTabChanged.emit(old_index, index)
+            self.showTab(index)
 
         # Clicking the current tab toggles the panel
         else:
