@@ -7612,9 +7612,13 @@ class PlateTool(QtWidgets.QMainWindow):
             if poly_idx < len(self.mask_polygons):
                 polygon = self.mask_polygons[poly_idx]
 
+                # All copies of the vertex go (the bridge vertices of a keyhole polygon are repeated)
+                copies = self._coincidentVertices(poly_idx, vert_idx)
+
                 # Keep polygon if it still has at least 3 vertices
-                if len(polygon) > 3:
-                    del polygon[vert_idx]
+                if len(polygon) - len(copies) >= 3:
+                    for idx in sorted(copies, reverse=True):
+                        del polygon[idx]
                     self.tab.mask.setUnsaved(True)
                     self.updateMaskDisplay()
                     self._updateMaskStatus()
@@ -7625,6 +7629,24 @@ class PlateTool(QtWidgets.QMainWindow):
                     self.tab.mask.setUnsaved(True)
                     self.updateMaskDisplay()
                     self._updateMaskStatus()
+
+
+    def _coincidentVertices(self, poly_idx, vert_idx):
+        """ Indices of the vertices of a polygon at the same position as the given one (including it).
+            The bridge vertices of the keyhole polygons made for masks with holes are repeated.
+
+        Arguments:
+            poly_idx: [int] Polygon index.
+            vert_idx: [int] Vertex index.
+
+        Return:
+            [list] Vertex indices.
+        """
+
+        polygon = self.mask_polygons[poly_idx]
+        vx, vy = polygon[vert_idx]
+
+        return [i for i, (x, y) in enumerate(polygon) if (x == vx) and (y == vy)]
 
 
     def moveMaskVertex(self, vertex_ref, new_x, new_y):
@@ -7664,7 +7686,11 @@ class PlateTool(QtWidgets.QMainWindow):
         else:
             poly_idx, vert_idx = vertex_ref
             if poly_idx < len(self.mask_polygons) and vert_idx < len(self.mask_polygons[poly_idx]):
-                self.mask_polygons[poly_idx][vert_idx] = (new_x, new_y)
+
+                # Move all copies of the vertex together, so the bridge of a keyhole polygon (whose
+                #   vertices are repeated) stays closed
+                for idx in self._coincidentVertices(poly_idx, vert_idx):
+                    self.mask_polygons[poly_idx][idx] = (new_x, new_y)
                 self.tab.mask.setUnsaved(True)
 
         self.updateMaskDisplay()

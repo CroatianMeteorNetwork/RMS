@@ -1704,3 +1704,36 @@ def testSkyFitLMFitExcludesCappedStars(plateTool, monkeypatch):
     assert masks
     assert masks[-1][:4] == [True, True, True, True]
     assert not any(masks[-1][4:])
+
+
+def testKeyholeBridgeVertexMovesAndDeletesTogether(plateTool, stationDir):
+    """ Dragging or deleting a bridge vertex of a keyhole polygon (mask with a hole) handles all its
+        copies, so the polygon does not tear. """
+
+    import cv2
+
+    pt = plateTool
+    mask_img = np.zeros((720, 1280), np.uint8)
+    cv2.circle(mask_img, (640, 360), 300, 255, -1)
+    mask_path = os.path.join(stationDir, "allsky.bmp")
+    cv2.imwrite(mask_path, mask_img)
+    assert pt.loadMaskFromFile(mask_path)
+    assert len(pt.mask_polygons) == 1
+    polygon = pt.mask_polygons[0]
+
+    # A repeated vertex is a bridge vertex
+    counts = {}
+    for v in polygon:
+        counts[v] = counts.get(v, 0) + 1
+    bridge = [v for v, n in counts.items() if n > 1]
+    assert bridge
+    vert_idx = polygon.index(bridge[0])
+
+    pt.moveMaskVertex((0, vert_idx), 700.0, 300.0)
+    assert polygon.count((700.0, 300.0)) == counts[bridge[0]]
+    assert bridge[0] not in polygon
+
+    n_before = len(polygon)
+    pt.deleteMaskVertex((0, polygon.index((700.0, 300.0))))
+    assert (700.0, 300.0) not in pt.mask_polygons[0]
+    assert len(pt.mask_polygons[0]) == n_before - counts[bridge[0]]
