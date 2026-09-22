@@ -2,7 +2,7 @@
 
     Listens on 127.0.0.1 on a free port, records every request and verifies each signature on its own,
     with the station's public key and a canonical string rebuilt from what actually arrived (method, path,
-    headers and the hash of the received body). It does not share code with RMS/SpriteUpload.py, so a bug
+    headers and the hash of the received body). It does not share code with RMS/Sprite/Upload.py, so a bug
     in the client's canonical string shows up as a failed verification here.
 
     Responses can be scripted per method and path prefix; otherwise it answers like the real server:

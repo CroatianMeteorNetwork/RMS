@@ -1,4 +1,4 @@
-""" Tests for RMS/SpriteUpload.py, the signed upload client of the spritemap server.
+""" Tests for RMS/Sprite/Upload.py, the signed upload client of the spritemap server.
 
     Every test that talks HTTP uses Tests/SpriteFakeServer.py on 127.0.0.1; there is no network access.
     Keys are generated in the tests and written to tmp_path, both as PEM and as OpenSSH files.
@@ -28,7 +28,7 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, ed25519, padding, rsa
 
 import RMS.ConfigReader as cr
-import RMS.SpriteUpload as su
+import RMS.Sprite.Upload as su
 from Tests.SpriteFakeServer import FakeSpriteServer, verifySignature
 
 
@@ -328,9 +328,9 @@ def testNoCryptographyDisables(tmp_path, rsa_key_path, monkeypatch):
         if name == "cryptography" or name.startswith("cryptography."):
             monkeypatch.setitem(sys.modules, name, None)
     monkeypatch.setitem(sys.modules, "cryptography", None)
-    monkeypatch.delitem(sys.modules, "RMS.SpriteUpload")
+    monkeypatch.delitem(sys.modules, "RMS.Sprite.Upload")
 
-    fresh = importlib.import_module("RMS.SpriteUpload")
+    fresh = importlib.import_module("RMS.Sprite.Upload")
     assert fresh is not su
 
     w = fresh.SpriteUploadWorker(_makeConfig(tmp_path, rsa_key_path, "https://sprites.example.org"))

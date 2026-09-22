@@ -1,5 +1,5 @@
-""" Tests for the sprite detector core: RMS/SpriteDetection.py, RMS/SpriteAstrometry.py and
-RMS/SpriteFilter.py.
+""" Tests for the sprite detector core: RMS/Sprite/Detection.py, RMS/Sprite/Astrometry.py and
+RMS/Sprite/Filter.py.
 
 All FF files are synthetic and built in memory, no disk and no model are needed, except for one inference
 smoke test that is skipped without a TFLite backend or the model file.
@@ -25,14 +25,14 @@ from PIL import Image
 from RMS.ConfigReader import Config
 from RMS.Formats.FFStruct import FFStruct
 from RMS.Formats.FFfile import reconstructFrame
-import RMS.SpriteAstrometry as SpriteAstrometry
-import RMS.SpriteDetection as SpriteDetection
-import RMS.SpriteFilter as SpriteFilter
+import RMS.Sprite.Astrometry as Astrometry
+import RMS.Sprite.Detection as Detection
+import RMS.Sprite.Filter as Filter
 
 
 REPO_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
 FF_NAME = "FF_XX0001_20250101_020520_353_0005120.fits"
-CORE_MODULES = ["RMS/SpriteFilter.py", "RMS/SpriteDetection.py", "RMS/SpriteAstrometry.py"]
+CORE_MODULES = ["RMS/Sprite/Filter.py", "RMS/Sprite/Detection.py", "RMS/Sprite/Astrometry.py"]
 
 
 # ###########################################################################
@@ -126,8 +126,8 @@ def fakeModel(monkeypatch):
     """ Patch the interpreter loader; set .output on the returned object before running detection. """
 
     fake = FakeInterpreter(modelOutput([]))
-    monkeypatch.setattr(SpriteDetection, "getSpriteInterpreter", lambda path: (fake, INPUT_DETAILS))
-    monkeypatch.setattr(SpriteDetection, "_resized_mask_cache", {"source": None, "shape": None,
+    monkeypatch.setattr(Detection, "getSpriteInterpreter", lambda path: (fake, INPUT_DETAILS))
+    monkeypatch.setattr(Detection, "_resized_mask_cache", {"source": None, "shape": None,
         "resized": None})
 
     return fake
@@ -146,10 +146,10 @@ def test_artifact_histogram_equals_reconstruct_loop():
     x0, y0, x1, y1 = 5, 7, 50, 40
     is_loop, idx_loop, share_loop, d_loop = prArtifactLoop(ff, x0, y0, x1, y1)
 
-    d = SpriteDetection.boxLightPerFrame(ff, x0, y0, x1, y1)
+    d = Detection.boxLightPerFrame(ff, x0, y0, x1, y1)
     np.testing.assert_array_equal(d, d_loop)
 
-    is_sprite, idx, share = SpriteDetection.spriteArtifactFilter(ff, x0, y0, x1, y1)
+    is_sprite, idx, share = Detection.spriteArtifactFilter(ff, x0, y0, x1, y1)
     assert is_sprite == is_loop
     assert idx == idx_loop
     assert share == share_loop
@@ -160,12 +160,12 @@ def test_artifact_single_frame_flash_passes_spread_fails():
     ff.maxpixel[15:25, 15:25] = 200
     ff.maxframe[15:25, 15:25] = 42
 
-    is_sprite, idx, share = SpriteDetection.spriteArtifactFilter(ff, 10, 10, 30, 30)
+    is_sprite, idx, share = Detection.spriteArtifactFilter(ff, 10, 10, 30, 30)
     assert is_sprite and idx == 42 and share == 1.0
 
     # Same light over 100 frames, 1% per frame
     ff.maxframe[15:25, 15:25] = np.arange(100).reshape(10, 10)
-    is_sprite, idx, share = SpriteDetection.spriteArtifactFilter(ff, 10, 10, 30, 30)
+    is_sprite, idx, share = Detection.spriteArtifactFilter(ff, 10, 10, 30, 30)
     assert not is_sprite
     assert abs(share - 0.01) < 1e-12
 
@@ -174,7 +174,7 @@ def test_artifact_zero_roi_no_warning():
     ff = makeFF()
     with warnings.catch_warnings():
         warnings.simplefilter("error")
-        assert SpriteDetection.spriteArtifactFilter(ff, 10, 10, 30, 30) == (False, 0, 0.0)
+        assert Detection.spriteArtifactFilter(ff, 10, 10, 30, 30) == (False, 0, 0.0)
 
 
 def test_artifact_nframes_unknown():
@@ -182,7 +182,7 @@ def test_artifact_nframes_unknown():
     ff.maxpixel[20, 20] = 100
     ff.maxframe[20, 20] = 7
 
-    is_sprite, idx, share = SpriteDetection.spriteArtifactFilter(ff, 10, 10, 30, 30)
+    is_sprite, idx, share = Detection.spriteArtifactFilter(ff, 10, 10, 30, 30)
     assert is_sprite and idx == 7
 
 
@@ -193,9 +193,9 @@ def test_artifact_histogram_truncated_to_nframes():
     ff.maxpixel[21, 21] = 10
     ff.maxframe[21, 21] = 3
 
-    d = SpriteDetection.boxLightPerFrame(ff, 10, 10, 30, 30)
+    d = Detection.boxLightPerFrame(ff, 10, 10, 30, 30)
     assert len(d) == 100
-    assert SpriteDetection.spriteArtifactFilter(ff, 10, 10, 30, 30)[1] == 3
+    assert Detection.spriteArtifactFilter(ff, 10, 10, 30, 30)[1] == 3
 
 
 def test_artifact_box_clipped_not_raised():
@@ -204,15 +204,15 @@ def test_artifact_box_clipped_not_raised():
     ff.maxframe[60, 60] = 9
 
     # Partly outside the frame
-    assert SpriteDetection.spriteArtifactFilter(ff, 50, 50, 100, 100)[:2] == (True, 9)
+    assert Detection.spriteArtifactFilter(ff, 50, 50, 100, 100)[:2] == (True, 9)
 
     # Reversed corners
-    assert SpriteDetection.spriteArtifactFilter(ff, 100, 100, 50, 50)[:2] == (True, 9)
+    assert Detection.spriteArtifactFilter(ff, 100, 100, 50, 50)[:2] == (True, 9)
 
     # Entirely outside and degenerate, still at least one pixel and no exception
-    SpriteDetection.spriteArtifactFilter(ff, 200, 200, 300, 300)
-    SpriteDetection.spriteArtifactFilter(ff, -20, -20, -10, -10)
-    SpriteDetection.spriteArtifactFilter(ff, 30, 30, 30, 30)
+    Detection.spriteArtifactFilter(ff, 200, 200, 300, 300)
+    Detection.spriteArtifactFilter(ff, -20, -20, -10, -10)
+    Detection.spriteArtifactFilter(ff, 30, 30, 30, 30)
 
 
 def test_artifact_brightest_frame_wins():
@@ -222,13 +222,13 @@ def test_artifact_brightest_frame_wins():
     ff.maxpixel[25:28, 25:28] = 250
     ff.maxframe[25:28, 25:28] = 200
 
-    assert SpriteDetection.spriteArtifactFilter(ff, 10, 10, 30, 30)[1] == 200
+    assert Detection.spriteArtifactFilter(ff, 10, 10, 30, 30)[1] == 200
 
 
 def test_artifact_no_maxframe_and_background():
     ff = makeFF()
     ff.maxframe = None
-    assert SpriteDetection.spriteArtifactFilter(ff, 0, 0, 10, 10) == (True, 0, 1.0)
+    assert Detection.spriteArtifactFilter(ff, 0, 0, 10, 10) == (True, 0, 1.0)
 
     # A static star (maxpixel == avepixel) dominates raw maxpixel but not the background-subtracted light
     ff = makeFF()
@@ -237,8 +237,8 @@ def test_artifact_no_maxframe_and_background():
     ff.maxframe[20:24, 20:24] = 77
     ff.maxpixel[15, 15] = 60
     ff.maxframe[15, 15] = 5
-    assert SpriteDetection.spriteArtifactFilter(ff, 10, 10, 30, 30)[1] == 77
-    assert SpriteDetection.spriteArtifactFilter(ff, 10, 10, 30, 30, subtract_background=True)[1] == 5
+    assert Detection.spriteArtifactFilter(ff, 10, 10, 30, 30)[1] == 77
+    assert Detection.spriteArtifactFilter(ff, 10, 10, 30, 30, subtract_background=True)[1] == 5
 
 
 # ###########################################################################
@@ -246,7 +246,7 @@ def test_artifact_no_maxframe_and_background():
 # ###########################################################################
 
 def test_frame_time_uses_milliseconds():
-    t = SpriteDetection.spriteFrameTime(FF_NAME, 128, 25.0)
+    t = Detection.spriteFrameTime(FF_NAME, 128, 25.0)
     assert t == datetime.datetime(2025, 1, 1, 2, 5, 25, 473000)
     assert t.tzinfo is None
 
@@ -256,7 +256,7 @@ def test_frame_time_uses_milliseconds():
         + datetime.timedelta(seconds=128/25.0)
     assert (t - pr_time) == datetime.timedelta(milliseconds=353)
 
-    assert SpriteDetection.formatIsoTimestamp(t) == "2025-01-01T02:05:25.473000Z"
+    assert Detection.formatIsoTimestamp(t) == "2025-01-01T02:05:25.473000Z"
 
 
 def test_detection_uses_ff_fps(fakeModel):
@@ -268,14 +268,14 @@ def test_detection_uses_ff_fps(fakeModel):
     config = makeConfig()
     config.fps = 25.0
 
-    dets = SpriteDetection.detectSpritesInFF(ff, FF_NAME, config, "sprite_detector.tflite")
+    dets = Detection.detectSpritesInFF(ff, FF_NAME, config, "sprite_detector.tflite")
     assert len(dets) == 1
     assert dets[0]["frame_index"] == 100
     assert dets[0]["event_time"] == datetime.datetime(2025, 1, 1, 2, 5, 25, 353000)
 
     # Without a header rate the config rate is used
     ff.fps = -1
-    dets = SpriteDetection.detectSpritesInFF(ff, FF_NAME, config, "sprite_detector.tflite")
+    dets = Detection.detectSpritesInFF(ff, FF_NAME, config, "sprite_detector.tflite")
     assert dets[0]["event_time"] == datetime.datetime(2025, 1, 1, 2, 5, 24, 353000)
 
 
@@ -287,7 +287,7 @@ def test_detections_get_own_julian_dates(fakeModel):
     ff.maxframe[45:50, 45:50] = 255
     fakeModel.output = modelOutput([(0.12, 0.12, 0.2, 0.2, 1, 0.9), (0.74, 0.74, 0.2, 0.2, 1, 0.8)])
 
-    dets = SpriteDetection.detectSpritesInFF(ff, FF_NAME, makeConfig(), "m.tflite")
+    dets = Detection.detectSpritesInFF(ff, FF_NAME, makeConfig(), "m.tflite")
     assert [d["frame_index"] for d in dets] == [0, 255]
     assert [d["detection_index"] for d in dets] == [0, 1]
     assert abs((dets[1]["jd"] - dets[0]["jd"]) - 255/25.0/86400) < 1e-9
@@ -304,7 +304,7 @@ def test_detection_record_and_box_scaling(fakeModel):
     fakeModel.output = modelOutput([(0.5, 0.5, 0.25, 0.25, 0, 0.9)])
 
     config = makeConfig()
-    dets = SpriteDetection.detectSpritesInFF(ff, FF_NAME, config, "/x/sprite_detector.tflite")
+    dets = Detection.detectSpritesInFF(ff, FF_NAME, config, "/x/sprite_detector.tflite")
     assert len(dets) == 1
     det = dets[0]
 
@@ -331,11 +331,11 @@ def test_box_pixel_units_and_clipping(fakeModel):
 
     # Boxes in 320 px model input units give the same FF box
     fakeModel.output = modelOutput([(160.0, 160.0, 80.0, 80.0, 1, 0.9)])
-    det = SpriteDetection.detectSpritesInFF(ff, FF_NAME, makeConfig(), "m.tflite")[0]
+    det = Detection.detectSpritesInFF(ff, FF_NAME, makeConfig(), "m.tflite")[0]
     assert (det["box_x1"], det["box_y1"], det["box_x2"], det["box_y2"]) == (24, 24, 40, 40)
 
     # A box hanging over the edge is clipped, a zero-size box gets one pixel
-    boxes = SpriteDetection._scaleBoxes(np.array([[0.9, -0.1, 1.2, 0.2], [0.5, 0.5, 0.5, 0.5]]),
+    boxes = Detection._scaleBoxes(np.array([[0.9, -0.1, 1.2, 0.2], [0.5, 0.5, 0.5, 0.5]]),
         INPUT_DETAILS, 64, 64)
     assert boxes[0] == (57, 0, 64, 12)
     assert boxes[1] == (32, 32, 33, 33)
@@ -349,10 +349,10 @@ def test_confidence_from_config(fakeModel):
 
     config = makeConfig()
     config.sprite_confidence = 0.6
-    assert SpriteDetection.detectSpritesInFF(ff, FF_NAME, config, "m.tflite") == []
+    assert Detection.detectSpritesInFF(ff, FF_NAME, config, "m.tflite") == []
 
     config.sprite_confidence = 0.4
-    assert len(SpriteDetection.detectSpritesInFF(ff, FF_NAME, config, "m.tflite")) == 1
+    assert len(Detection.detectSpritesInFF(ff, FF_NAME, config, "m.tflite")) == 1
 
 
 def test_artifact_rejected_detection_dropped(fakeModel):
@@ -361,7 +361,7 @@ def test_artifact_rejected_detection_dropped(fakeModel):
     ff.maxframe[28:38, 28:38] = np.arange(100).reshape(10, 10)
     fakeModel.output = modelOutput([(0.5, 0.5, 0.3, 0.3, 1, 0.9)])
 
-    assert SpriteDetection.detectSpritesInFF(ff, FF_NAME, makeConfig(), "m.tflite") == []
+    assert Detection.detectSpritesInFF(ff, FF_NAME, makeConfig(), "m.tflite") == []
 
 
 def test_mask_is_applied_and_resized(fakeModel):
@@ -371,13 +371,13 @@ def test_mask_is_applied_and_resized(fakeModel):
     maxpixel_orig = ff.maxpixel.copy()
     config = makeConfig()
 
-    SpriteDetection.detectSpritesInFF(ff, FF_NAME, config, "m.tflite")
+    Detection.detectSpritesInFF(ff, FF_NAME, config, "m.tflite")
     unmasked_input = fakeModel.inputs[-1]
 
     # Left half masked out
     mask = np.full((64, 64), 255, dtype=np.uint8)
     mask[:, :32] = 0
-    SpriteDetection.detectSpritesInFF(ff, FF_NAME, config, "m.tflite", mask=mask)
+    Detection.detectSpritesInFF(ff, FF_NAME, config, "m.tflite", mask=mask)
     masked_input = fakeModel.inputs[-1]
 
     assert not np.array_equal(unmasked_input, masked_input)
@@ -392,13 +392,13 @@ def test_mask_is_applied_and_resized(fakeModel):
     # A half-resolution mask is resized with nearest-neighbour, not ignored
     small_mask = np.full((32, 32), 255, dtype=np.uint8)
     small_mask[:, :16] = 0
-    SpriteDetection.detectSpritesInFF(ff, FF_NAME, config, "m.tflite", mask=small_mask)
+    Detection.detectSpritesInFF(ff, FF_NAME, config, "m.tflite", mask=small_mask)
     np.testing.assert_array_equal(fakeModel.inputs[-1], masked_input)
 
     # The resized mask is cached and reused for the same mask object
-    cached = SpriteDetection._resized_mask_cache["resized"]
-    SpriteDetection.detectSpritesInFF(ff, FF_NAME, config, "m.tflite", mask=small_mask)
-    assert SpriteDetection._resized_mask_cache["resized"] is cached
+    cached = Detection._resized_mask_cache["resized"]
+    Detection.detectSpritesInFF(ff, FF_NAME, config, "m.tflite", mask=small_mask)
+    assert Detection._resized_mask_cache["resized"] is cached
 
 
 def test_preprocessing_identical_to_pr(fakeModel):
@@ -406,7 +406,7 @@ def test_preprocessing_identical_to_pr(fakeModel):
     ff = makeFF(nrows=72, ncols=128)
     ff.maxpixel = rng.randint(0, 256, size=(72, 128)).astype(np.uint8)
 
-    SpriteDetection.detectSpritesInFF(ff, FF_NAME, makeConfig(), "m.tflite")
+    Detection.detectSpritesInFF(ff, FF_NAME, makeConfig(), "m.tflite")
 
     # The PR's preprocessing, channels-first
     image = Image.fromarray(ff.maxpixel).convert("RGB").convert("RGB")
@@ -424,22 +424,22 @@ def test_process_predictions_nms_and_caps():
     boxes = [(0.1, 0.1, 0.1, 0.1, 1, 0.9), (0.105, 0.1, 0.1, 0.1, 1, 0.8), (0.11, 0.1, 0.1, 0.1, 1, 0.7)]
     boxes += [(0.3 + 0.12*i, 0.5, 0.05, 0.05, 1, 0.6 - 0.01*i) for i in range(5)]
     boxes += [(0.5, 0.9, 0.05, 0.05, 0, 0.95), (0.8, 0.9, 0.05, 0.05, 0, 0.5)]
-    out = SpriteDetection.processPredictions(modelOutput(boxes))
+    out = Detection.processPredictions(modelOutput(boxes))
 
     assert int(np.sum(out[:, 5] == 1)) == 4
     assert int(np.sum(out[:, 5] == 0)) == 1
     assert np.all(np.diff(out[:, 4]) <= 0)
-    assert SpriteDetection.processPredictions(modelOutput([])).shape == (0, 6)
+    assert Detection.processPredictions(modelOutput([])).shape == (0, 6)
 
 
 def test_class_names():
-    assert SpriteDetection.CLASS_NAMES == {0: "elve", 1: "sprite"}
+    assert Detection.CLASS_NAMES == {0: "elve", 1: "sprite"}
 
 
 def test_inference_smoke():
-    if SpriteDetection.SPRITE_TFLITE_BACKEND == "litert":
+    if Detection.SPRITE_TFLITE_BACKEND == "litert":
         pytest.importorskip("ai_edge_litert.interpreter")
-    elif SpriteDetection.SPRITE_TFLITE_BACKEND == "tf_full":
+    elif Detection.SPRITE_TFLITE_BACKEND == "tf_full":
         pytest.importorskip("tensorflow")
     else:
         pytest.importorskip("tflite_runtime.interpreter")
@@ -453,11 +453,11 @@ def test_inference_smoke():
     ff.maxpixel = rng.randint(0, 40, size=(720, 1280)).astype(np.uint8)
     ff.maxframe = rng.randint(0, 256, size=(720, 1280)).astype(np.uint8)
 
-    dets = SpriteDetection.detectSpritesInFF(ff, FF_NAME, makeConfig(), model_path)
+    dets = Detection.detectSpritesInFF(ff, FF_NAME, makeConfig(), model_path)
     assert isinstance(dets, list)
 
-    interpreter, input_details = SpriteDetection.getSpriteInterpreter(model_path)
-    assert SpriteDetection.getSpriteInterpreter(model_path)[0] is interpreter
+    interpreter, input_details = Detection.getSpriteInterpreter(model_path)
+    assert Detection.getSpriteInterpreter(model_path)[0] is interpreter
 
 
 # ###########################################################################
@@ -498,11 +498,11 @@ def test_astrometry_call_arguments(monkeypatch):
         calls["altaz"] = (np.array(jd), kwargs)
         return ra + 100.0, dec + 50.0
 
-    monkeypatch.setattr(SpriteAstrometry, "xyToRaDecPP", fakeXY)
-    monkeypatch.setattr(SpriteAstrometry, "trueRaDec2ApparentAltAz", fakeAltAz)
+    monkeypatch.setattr(Astrometry, "xyToRaDecPP", fakeXY)
+    monkeypatch.setattr(Astrometry, "trueRaDec2ApparentAltAz", fakeAltAz)
 
     dets = [makeDetection(2460000.1), makeDetection(2460000.2, 1, 2, 3, 4)]
-    SpriteAstrometry.calibrateSpriteDetections(dets, makePlatepar(), True, None)
+    Astrometry.calibrateSpriteDetections(dets, makePlatepar(), True, None)
 
     jd_arr, x_arr, y_arr, kwargs = calls["xy"]
     assert kwargs == {"extinction_correction": False, "measurement": True, "jd_time": True,
@@ -525,7 +525,7 @@ def test_astrometry_call_arguments(monkeypatch):
 def test_astrometry_real_platepar():
     pp = makePlatepar()
     dets = [makeDetection(2460000.5), makeDetection(2460000.5 + 1/24.0)]
-    SpriteAstrometry.calibrateSpriteDetections(dets, pp, True, None)
+    Astrometry.calibrateSpriteDetections(dets, pp, True, None)
 
     for det in dets:
         assert det["astrometry_ok"]
@@ -539,20 +539,20 @@ def test_astrometry_real_platepar():
 
 
 def test_astrometry_failure_is_per_ff(monkeypatch):
-    real_xy = SpriteAstrometry.xyToRaDecPP
+    real_xy = Astrometry.xyToRaDecPP
 
     def flakyXY(time_data, *args, **kwargs):
         if time_data[0] < 2460000.3:
             raise ValueError("boom")
         return real_xy(time_data, *args, **kwargs)
 
-    monkeypatch.setattr(SpriteAstrometry, "xyToRaDecPP", flakyXY)
+    monkeypatch.setattr(Astrometry, "xyToRaDecPP", flakyXY)
     pp = makePlatepar()
 
     ff1 = [makeDetection(2460000.1), makeDetection(2460000.1)]
     ff2 = [makeDetection(2460000.5)]
-    SpriteAstrometry.calibrateSpriteDetections(ff1, pp, True, None)
-    SpriteAstrometry.calibrateSpriteDetections(ff2, pp, True, None)
+    Astrometry.calibrateSpriteDetections(ff1, pp, True, None)
+    Astrometry.calibrateSpriteDetections(ff2, pp, True, None)
 
     for det in ff1:
         assert det["astrometry_ok"] is False
@@ -564,51 +564,51 @@ def test_astrometry_failure_is_per_ff(monkeypatch):
 
 def test_astrometry_not_usable_marks_all():
     dets = [makeDetection(2460000.1), makeDetection(2460000.2)]
-    SpriteAstrometry.calibrateSpriteDetections(dets, None, False, "no platepar")
+    Astrometry.calibrateSpriteDetections(dets, None, False, "no platepar")
     assert all(d["astrometry_ok"] is False and d["astrometry_reason"] == "no platepar" for d in dets)
 
 
 def test_platepar_usable():
     config = makeConfig()
 
-    assert SpriteAstrometry.plateparUsable(None, 64, 64, config)[0] is False
+    assert Astrometry.plateparUsable(None, 64, 64, config)[0] is False
 
-    ok, reason = SpriteAstrometry.plateparUsable(makePlatepar(station_code="YY0002"), 64, 64, config)
+    ok, reason = Astrometry.plateparUsable(makePlatepar(station_code="YY0002"), 64, 64, config)
     assert not ok and "YY0002" in reason
 
     # Unset station code (the Platepar default is the string "None") and a lower-case match are fine
-    assert SpriteAstrometry.plateparUsable(makePlatepar(station_code="None", auto_recalibrated=True), 64, 64,
+    assert Astrometry.plateparUsable(makePlatepar(station_code="None", auto_recalibrated=True), 64, 64,
         config) == (True, None)
-    assert SpriteAstrometry.plateparUsable(makePlatepar(station_code="xx0001", auto_recalibrated=True), 64,
+    assert Astrometry.plateparUsable(makePlatepar(station_code="xx0001", auto_recalibrated=True), 64,
         64, config) == (True, None)
 
-    ok, reason = SpriteAstrometry.plateparUsable(makePlatepar(), 1280, 720, config)
+    ok, reason = Astrometry.plateparUsable(makePlatepar(), 1280, 720, config)
     assert not ok and "resolution" in reason
 
     # Refraction is always taken out, explicitly or inside the fitted distortion, so a platepar fitted with
     #   refraction off is used like any other
-    ok, reason = SpriteAstrometry.plateparUsable(makePlatepar(refraction=False,
+    ok, reason = Astrometry.plateparUsable(makePlatepar(refraction=False,
         measurement_apparent_to_true_refraction=False, auto_check_fit_refined=True), 64, 64, config)
     assert ok and reason is None
 
-    ok, reason = SpriteAstrometry.plateparUsable(makePlatepar(refraction=False,
+    ok, reason = Astrometry.plateparUsable(makePlatepar(refraction=False,
         measurement_apparent_to_true_refraction=True, auto_check_fit_refined=True), 64, 64, config)
     assert ok and reason is None
 
     # Neither automatic refinement flag: usable, with a caveat
-    ok, reason = SpriteAstrometry.plateparUsable(makePlatepar(auto_check_fit_refined=False,
+    ok, reason = Astrometry.plateparUsable(makePlatepar(auto_check_fit_refined=False,
         auto_recalibrated=False), 64, 64, config)
     assert ok and reason
 
 
 def test_platepar_provenance():
     pp = makePlatepar(auto_check_fit_refined=True)
-    prov = SpriteAstrometry.plateparProvenance(pp, "/data/platepar_cmn2010.cal")
+    prov = Astrometry.plateparProvenance(pp, "/data/platepar_cmn2010.cal")
     assert prov == {"JD": float(pp.JD), "source_path": "/data/platepar_cmn2010.cal", "X_res": 64,
         "Y_res": 64, "refraction": True, "measurement_apparent_to_true_refraction": False,
         "auto_check_fit_refined": True, "auto_recalibrated": False}
 
-    prov_none = SpriteAstrometry.plateparProvenance(None, None)
+    prov_none = Astrometry.plateparProvenance(None, None)
     assert set(prov_none.keys()) == set(prov.keys())
 
 
@@ -620,7 +620,7 @@ def runFilter(events, window_sec=60.0, max_detections=3):
     """ Feed (timestamp, ff_name or None) events, None meaning a tick; return confirmed names in order. """
 
     confirmed = []
-    fp = SpriteFilter.SpriteFalsePositiveFilter(lambda c: confirmed.append(c.ff_name), window_sec=window_sec,
+    fp = Filter.SpriteFalsePositiveFilter(lambda c: confirmed.append(c.ff_name), window_sec=window_sec,
         max_detections=max_detections)
     for ts, name in events:
         if name is None:
@@ -642,7 +642,7 @@ def test_filter_burst_confirms_none():
 def test_filter_isolated_confirm_and_latency():
     t0 = 1.7e9
     confirmed = []
-    fp = SpriteFilter.SpriteFalsePositiveFilter(lambda c: confirmed.append((c.ff_name, c.detections)))
+    fp = Filter.SpriteFalsePositiveFilter(lambda c: confirmed.append((c.ff_name, c.detections)))
     fp.addCandidate(t0, "a", ["det"])
 
     # Still pending exactly at the window edge, confirmed once past it
@@ -678,7 +678,7 @@ def test_filter_independent_of_wall_clock(monkeypatch):
     monkeypatch.setattr(time, "monotonic", jumpyTime)
 
     confirmed = []
-    fp = SpriteFilter.SpriteFalsePositiveFilter(lambda c: confirmed.append(c.ff_name))
+    fp = Filter.SpriteFalsePositiveFilter(lambda c: confirmed.append(c.ff_name))
     for i, (ts, name) in enumerate(events):
         if i % 50 == 0:
             time.sleep(0.001)
@@ -695,7 +695,7 @@ def test_filter_independent_of_wall_clock(monkeypatch):
 def test_filter_flush_once():
     t0 = 1.7e9
     confirmed = []
-    fp = SpriteFilter.SpriteFalsePositiveFilter(lambda c: confirmed.append(c.ff_name))
+    fp = Filter.SpriteFalsePositiveFilter(lambda c: confirmed.append(c.ff_name))
     fp.addCandidate(t0, "a", [])
     fp.addCandidate(t0 + 20, "b", [])
     assert fp.pending() == 2
@@ -710,7 +710,7 @@ def test_filter_flush_once():
 def test_filter_clock_monotonic():
     t0 = 1.7e9
     confirmed = []
-    fp = SpriteFilter.SpriteFalsePositiveFilter(lambda c: confirmed.append(c.ff_name))
+    fp = Filter.SpriteFalsePositiveFilter(lambda c: confirmed.append(c.ff_name))
     fp.addCandidate(t0, "a", [])
     fp.tick(t0 + 100)
     assert confirmed == ["a"]
@@ -726,7 +726,7 @@ def test_filter_rejected_callback_exactly_once():
     t0 = 1.7e9
     confirmed = []
     rejected = []
-    fp = SpriteFilter.SpriteFalsePositiveFilter(lambda c: confirmed.append(c.ff_name),
+    fp = Filter.SpriteFalsePositiveFilter(lambda c: confirmed.append(c.ff_name),
         on_rejected=lambda c: rejected.append(c.ff_name))
 
     # A burst of five, then an isolated one ten minutes later, resolved by ticks
@@ -749,7 +749,7 @@ def test_filter_rejected_callback_exactly_once():
     assert fp.pending() == 0
 
     # Without on_rejected a burst is simply dropped
-    fp = SpriteFilter.SpriteFalsePositiveFilter(lambda c: confirmed.append(c.ff_name))
+    fp = Filter.SpriteFalsePositiveFilter(lambda c: confirmed.append(c.ff_name))
     for i in range(5):
         fp.addCandidate(t0 + i, "d{:d}".format(i), [])
     fp.flush()
@@ -757,7 +757,7 @@ def test_filter_rejected_callback_exactly_once():
 
 
 def test_filter_candidate_slots():
-    c = SpriteFilter.SpriteCandidate(1.0, "x", [])
+    c = Filter.SpriteCandidate(1.0, "x", [])
     assert not hasattr(c, "__dict__")
     assert c.tainted is False
 
@@ -775,7 +775,7 @@ def test_deterministic_matches_streaming_and_order():
         ties = ties[ties > 0]
         t[ties] = t[ties - 1]
 
-        accepted = SpriteFilter.filterCandidatesDeterministic(t)
+        accepted = Filter.filterCandidatesDeterministic(t)
 
         confirmed = runFilter([(ts, i) for i, ts in enumerate(t)])
         streamed = np.zeros(n, dtype=bool)
@@ -783,18 +783,18 @@ def test_deterministic_matches_streaming_and_order():
         np.testing.assert_array_equal(accepted, streamed)
 
         perm = rng.permutation(n)
-        np.testing.assert_array_equal(SpriteFilter.filterCandidatesDeterministic(t[perm]), accepted[perm])
+        np.testing.assert_array_equal(Filter.filterCandidatesDeterministic(t[perm]), accepted[perm])
 
 
 def test_deterministic_simple_cases():
     t0 = 1.7e9
     burst = [t0 + 10*i for i in range(5)]
-    assert not SpriteFilter.filterCandidatesDeterministic(burst).any()
-    assert SpriteFilter.filterCandidatesDeterministic([t0, t0 + 600]).all()
-    assert SpriteFilter.filterCandidatesDeterministic([]).shape == (0,)
+    assert not Filter.filterCandidatesDeterministic(burst).any()
+    assert Filter.filterCandidatesDeterministic([t0, t0 + 600]).all()
+    assert Filter.filterCandidatesDeterministic([]).shape == (0,)
 
     # Exactly max_detections in the window is still fine
-    assert SpriteFilter.filterCandidatesDeterministic([t0, t0 + 10, t0 + 20]).all()
+    assert Filter.filterCandidatesDeterministic([t0, t0 + 10, t0 + 20]).all()
 
 
 # ###########################################################################

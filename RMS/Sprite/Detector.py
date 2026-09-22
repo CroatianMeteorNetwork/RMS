@@ -23,11 +23,11 @@
     minute after it happened, is recorded in the night directory and handed to the upload worker, which sends
     it to the sprite server in the background.
 
-    The pieces live in their own modules: RMS.SpriteDetection (model and artifact filter),
-    RMS.SpriteAstrometry, RMS.SpriteFilter, RMS.SpriteProducts (everything written to disk) and
-    RMS.SpriteUpload. This module only runs them, live or offline:
+    The pieces live in their own modules: RMS.Sprite.Detection (model and artifact filter),
+    RMS.Sprite.Astrometry, RMS.Sprite.Filter, RMS.Sprite.Products (everything written to disk) and
+    RMS.Sprite.Upload. This module only runs them, live or offline:
 
-        python -m RMS.SpriteDetector ~/RMS_data/CapturedFiles/XX0001_20260827_230000_123456
+        python -m RMS.Sprite.Detector ~/RMS_data/CapturedFiles/XX0001_20260827_230000_123456
 """
 
 from __future__ import print_function, division, absolute_import
@@ -45,19 +45,19 @@ try:
 except ImportError:
     import Queue as queue
 
-from RMS.DownloadSpriteModel import downloadSpriteModel, spriteModelReady
+from RMS.Sprite.DownloadModel import downloadSpriteModel, spriteModelReady
 from RMS.Formats import FFfile
 from RMS.Formats.Platepar import Platepar
 from RMS.Logger import getLogger, getLoggingQueue, initChildProcess
 from RMS.Misc import AtomicFlag
 from RMS.Routines import MaskImage
-from RMS.SpriteAstrometry import calibrateSpriteDetections, plateparForServer, plateparProvenance, \
+from RMS.Sprite.Astrometry import calibrateSpriteDetections, plateparForServer, plateparProvenance, \
     plateparUsable
-from RMS.SpriteDetection import SPRITE_TFLITE_AVAILABLE, SPRITE_TFLITE_BACKEND, detectSpritesInFF, \
+from RMS.Sprite.Detection import SPRITE_TFLITE_AVAILABLE, SPRITE_TFLITE_BACKEND, detectSpritesInFF, \
     getSpriteInterpreter
-from RMS.SpriteFilter import SpriteFalsePositiveFilter
-from RMS import SpriteProducts
-from RMS.SpriteUpload import SpriteUploadWorker
+from RMS.Sprite.Filter import SpriteFalsePositiveFilter
+from RMS.Sprite import Products
+from RMS.Sprite.Upload import SpriteUploadWorker
 
 
 # Get the logger from the main module
@@ -157,8 +157,8 @@ class NightRecorder(object):
         self.platepar_info = plateparProvenance(platepar, platepar_path)
         self.platepar_info["sha256"] = platepar_sha256
 
-        self.csv_path = SpriteProducts.csvPath(night_data_dir)
-        self.jsonl_path = SpriteProducts.jsonlPath(night_data_dir)
+        self.csv_path = Products.csvPath(night_data_dir)
+        self.jsonl_path = Products.jsonlPath(night_data_dir)
 
         # Counts reported at the end of the night
         self.n_confirmed = 0
@@ -173,7 +173,7 @@ class NightRecorder(object):
 
         self.n_rejected += 1
 
-        SpriteProducts.appendSpriteCSV(self.csv_path, candidate.detections, "burst_rejected")
+        Products.appendSpriteCSV(self.csv_path, candidate.detections, "burst_rejected")
 
 
     def onConfirmed(self, candidate):
@@ -191,7 +191,7 @@ class NightRecorder(object):
             ff_name, ", ".join("{:s} {:.2f}".format(det["detection_type"], det["confidence"])
                                for det in detections)))
 
-        SpriteProducts.appendSpriteCSV(self.csv_path, detections, "confirmed")
+        Products.appendSpriteCSV(self.csv_path, detections, "confirmed")
 
         # The images need the FF, which is still in the night directory. It is read again rather than kept
         #   in memory for the minute it takes the filter to confirm it.
@@ -204,9 +204,9 @@ class NightRecorder(object):
         fps = detections[0].get("fps", self.config.fps)
 
         # Full record of what was found and how it was calibrated, for the nightly archive
-        SpriteProducts.appendSpriteJSONL(self.jsonl_path, {
+        Products.appendSpriteJSONL(self.jsonl_path, {
             "ff_name": ff_name,
-            "ff_start": SpriteProducts.formatIsoTimestamp(ff_start),
+            "ff_start": Products.formatIsoTimestamp(ff_start),
             "fps": fps,
             "platepar": self.platepar_info,
             "detections": detections,
@@ -232,8 +232,8 @@ class NightRecorder(object):
         if ff is None:
             return None, None
 
-        marked_path, unmarked_path = SpriteProducts.imagePaths(self.night_data_dir, ff_name)
-        written = SpriteProducts.writeDetectionImages(ff, detections, marked_path, unmarked_path)
+        marked_path, unmarked_path = Products.imagePaths(self.night_data_dir, ff_name)
+        written = Products.writeDetectionImages(ff, detections, marked_path, unmarked_path)
 
         # Count the FF once, however many of its two images were written
         if any(written):
@@ -252,7 +252,7 @@ class NightRecorder(object):
         if (self.uploader is None) or (not self.uploader.isEnabled()):
             return
 
-        payload, reason = SpriteProducts.buildSpritePayload(
+        payload, reason = Products.buildSpritePayload(
             self.config, ff_name, ff_start, fps, detections, self.night_dir_name,
             platepar=self.server_platepar)
 
@@ -267,10 +267,10 @@ class NightRecorder(object):
 
             return
 
-        payload_path = os.path.join(SpriteProducts.uploadDir(self.config, self.night_data_dir),
-                                    SpriteProducts.ffStem(ff_name) + ".json")
+        payload_path = os.path.join(Products.uploadDir(self.config, self.night_data_dir),
+                                    Products.ffStem(ff_name) + ".json")
 
-        if not SpriteProducts.writeUploadPayload(payload, payload_path):
+        if not Products.writeUploadPayload(payload, payload_path):
             return
 
         # The files the server may ask for later, once a second station has seen the same event
@@ -535,7 +535,7 @@ class SpriteDetector(multiprocessing.Process):
             return
 
         # Old upload payloads are cleared once a night
-        SpriteProducts.pruneUploadDirs(self.config)
+        Products.pruneUploadDirs(self.config)
 
         platepar, platepar_path = loadStationPlatepar(self.config, self.night_data_dir)
         platepar_reason = None if platepar is not None else "no platepar found"
@@ -696,8 +696,8 @@ def runSpriteDetectionDirectory(dir_path, config, upload=False, overwrite=False)
         return None
 
     # Running twice would record every detection twice; replacing is an explicit choice
-    csv_path = SpriteProducts.csvPath(dir_path)
-    jsonl_path = SpriteProducts.jsonlPath(dir_path)
+    csv_path = Products.csvPath(dir_path)
+    jsonl_path = Products.jsonlPath(dir_path)
     if os.path.isfile(csv_path) or os.path.isfile(jsonl_path):
 
         if not overwrite:

@@ -23,9 +23,9 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), os.pa
 import RMS.ConfigReader as cr  # noqa: E402
 from RMS.Formats import FFfile  # noqa: E402
 from RMS.Formats.FFStruct import FFStruct  # noqa: E402
-from RMS import DownloadSpriteModel  # noqa: E402
-from RMS import SpriteDetector  # noqa: E402
-from RMS import SpriteProducts  # noqa: E402
+from RMS.Sprite import DownloadModel  # noqa: E402
+from RMS.Sprite import Detector  # noqa: E402
+from RMS.Sprite import Products  # noqa: E402
 
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
@@ -97,7 +97,7 @@ def writeFF(directory, ff_name, nrows=48, ncols=64):
 
 
 def detection(ff_name, astrometry_ok=True, confidence=0.9, detection_type="sprite"):
-    """ A detection record as RMS.SpriteDetection and RMS.SpriteAstrometry produce it. """
+    """ A detection record as RMS.Sprite.Detection and RMS.Sprite.Astrometry produce it. """
 
     event = FFfile.filenameToDatetime(ff_name) + datetime.timedelta(seconds=128/25.0)
 
@@ -184,7 +184,7 @@ def test_image_names_are_accepted_by_the_server(tmp_path):
 
     # The first version named them <ff_name>_marked.png, with .fits still in the name, which the server
     #   refuses
-    marked, unmarked = SpriteProducts.imagePaths(str(tmp_path), FF_NAME)
+    marked, unmarked = Products.imagePaths(str(tmp_path), FF_NAME)
 
     for path in (marked, unmarked):
         name = os.path.basename(path)
@@ -198,7 +198,7 @@ def test_payload_keeps_only_detections_with_astrometry(tmp_path):
     ff_start = FFfile.filenameToDatetime(FF_NAME)
     dets = [detection(FF_NAME, astrometry_ok=True), detection(FF_NAME, astrometry_ok=False)]
 
-    payload, reason = SpriteProducts.buildSpritePayload(config, FF_NAME, ff_start, 25.0, dets, "XX0001_night")
+    payload, reason = Products.buildSpritePayload(config, FF_NAME, ff_start, 25.0, dets, "XX0001_night")
 
     assert reason is None
     assert len(payload["detections"]) == 1
@@ -210,7 +210,7 @@ def test_payload_is_none_without_any_astrometry(tmp_path):
     config = makeConfig(tmp_path)
     ff_start = FFfile.filenameToDatetime(FF_NAME)
 
-    payload, reason = SpriteProducts.buildSpritePayload(
+    payload, reason = Products.buildSpritePayload(
         config, FF_NAME, ff_start, 25.0, [detection(FF_NAME, astrometry_ok=False)], "night")
 
     assert payload is None
@@ -223,7 +223,7 @@ def test_payload_matches_the_server_contract(tmp_path):
     config.stationID = "xx0001"
     ff_start = FFfile.filenameToDatetime(FF_NAME)
 
-    payload, _ = SpriteProducts.buildSpritePayload(config, FF_NAME, ff_start, 25.0, [detection(FF_NAME)],
+    payload, _ = Products.buildSpritePayload(config, FF_NAME, ff_start, 25.0, [detection(FF_NAME)],
                                                    "night")
 
     # Station upper-cased, the FF block start with its milliseconds, the frame rate the indices refer to
@@ -239,7 +239,7 @@ def test_payload_matches_the_server_contract(tmp_path):
 
     # Only fields the server knows, and every one it requires
     det = payload["detections"][0]
-    assert set(det) <= set(SpriteProducts.PAYLOAD_DETECTION_FIELDS)
+    assert set(det) <= set(Products.PAYLOAD_DETECTION_FIELDS)
     assert {"azimuth", "altitude", "timestamp", "frame_index"} <= set(det)
     assert all("box_azimuth_{:d}".format(n) in det for n in range(1, 5))
 
@@ -249,7 +249,7 @@ def test_payload_caps_detections_at_twenty(tmp_path):
     config = makeConfig(tmp_path)
     dets = [detection(FF_NAME, confidence=i/100.0) for i in range(30)]
 
-    payload, _ = SpriteProducts.buildSpritePayload(config, FF_NAME, FFfile.filenameToDatetime(FF_NAME),
+    payload, _ = Products.buildSpritePayload(config, FF_NAME, FFfile.filenameToDatetime(FF_NAME),
                                                    25.0, dets, "night")
 
     assert len(payload["detections"]) == 20
@@ -261,11 +261,11 @@ def test_upload_payload_bytes_are_final(tmp_path):
     # The worker posts these bytes on every attempt; they must not change once written, or every retry would
     #   be a new submission to the server
     config = makeConfig(tmp_path)
-    payload, _ = SpriteProducts.buildSpritePayload(config, FF_NAME, FFfile.filenameToDatetime(FF_NAME),
+    payload, _ = Products.buildSpritePayload(config, FF_NAME, FFfile.filenameToDatetime(FF_NAME),
                                                    25.0, [detection(FF_NAME)], "night")
 
     path = str(tmp_path/"payload.json")
-    assert SpriteProducts.writeUploadPayload(payload, path)
+    assert Products.writeUploadPayload(payload, path)
 
     with open(path, "rb") as f:
         first = f.read()
@@ -284,14 +284,14 @@ def test_csv_header_written_once_and_status_recorded(tmp_path):
 
     path = str(tmp_path/"night_sprites.csv")
 
-    SpriteProducts.appendSpriteCSV(path, [detection(FF_NAME)], "confirmed")
-    SpriteProducts.appendSpriteCSV(path, [detection(FF_NAME, astrometry_ok=False)], "burst_rejected")
+    Products.appendSpriteCSV(path, [detection(FF_NAME)], "confirmed")
+    Products.appendSpriteCSV(path, [detection(FF_NAME, astrometry_ok=False)], "burst_rejected")
 
     with open(path) as f:
         lines = f.read().splitlines()
 
     assert len(lines) == 3
-    assert lines[0].split(";") == SpriteProducts.CSV_COLUMNS
+    assert lines[0].split(";") == Products.CSV_COLUMNS
     assert lines[1].split(";")[1] == "confirmed"
     assert lines[2].split(";")[1] == "burst_rejected"
 
@@ -300,9 +300,9 @@ def test_writers_do_not_raise_on_an_unwritable_path(tmp_path):
 
     missing_dir = str(tmp_path/"missing"/"x.csv")
 
-    assert SpriteProducts.appendSpriteCSV(missing_dir, [detection(FF_NAME)], "confirmed") is False
-    assert SpriteProducts.appendSpriteJSONL(missing_dir, {"a": 1}) is False
-    assert SpriteProducts.writeUploadPayload({"a": 1}, missing_dir) is False
+    assert Products.appendSpriteCSV(missing_dir, [detection(FF_NAME)], "confirmed") is False
+    assert Products.appendSpriteJSONL(missing_dir, {"a": 1}) is False
+    assert Products.writeUploadPayload({"a": 1}, missing_dir) is False
 
 
 def test_image_writer_always_returns_a_pair(tmp_path):
@@ -311,7 +311,7 @@ def test_image_writer_always_returns_a_pair(tmp_path):
     ff = FFStruct()
     ff.maxpixel = None
 
-    result = SpriteProducts.writeDetectionImages(ff, [detection(FF_NAME)], str(tmp_path/"m.jpg"),
+    result = Products.writeDetectionImages(ff, [detection(FF_NAME)], str(tmp_path/"m.jpg"),
                                                  str(tmp_path/"u.jpg"))
 
     assert result == (None, None)
@@ -320,9 +320,9 @@ def test_image_writer_always_returns_a_pair(tmp_path):
 def test_images_written_as_jpeg(tmp_path):
 
     ff = writeFF(tmp_path, FF_NAME)
-    marked, unmarked = SpriteProducts.imagePaths(str(tmp_path), FF_NAME)
+    marked, unmarked = Products.imagePaths(str(tmp_path), FF_NAME)
 
-    result = SpriteProducts.writeDetectionImages(ff, [detection(FF_NAME)], marked, unmarked)
+    result = Products.writeDetectionImages(ff, [detection(FF_NAME)], marked, unmarked)
 
     assert result == (marked, unmarked)
     for path in result:
@@ -335,7 +335,7 @@ def test_jsonl_serialises_datetimes_and_numpy(tmp_path):
     path = str(tmp_path/"night_sprites.json")
     record = {"when": datetime.datetime(2026, 8, 28, 3, 14, 22), "n": np.int64(3), "x": np.float32(1.5)}
 
-    assert SpriteProducts.appendSpriteJSONL(path, record)
+    assert Products.appendSpriteJSONL(path, record)
 
     with open(path) as f:
         loaded = json.loads(f.readline())
@@ -347,13 +347,13 @@ def test_old_upload_directories_are_pruned(tmp_path):
 
     config = makeConfig(tmp_path)
 
-    old = SpriteProducts.uploadDir(config, str(tmp_path/"XX0001_20260701_000000_000000"))
-    new = SpriteProducts.uploadDir(config, str(tmp_path/"XX0001_20260827_000000_000000"))
+    old = Products.uploadDir(config, str(tmp_path/"XX0001_20260701_000000_000000"))
+    new = Products.uploadDir(config, str(tmp_path/"XX0001_20260827_000000_000000"))
 
     long_ago = time.time() - 40*86400
     os.utime(old, (long_ago, long_ago))
 
-    assert SpriteProducts.pruneUploadDirs(config) == 1
+    assert Products.pruneUploadDirs(config) == 1
     assert not os.path.exists(old)
     assert os.path.isdir(new)
 
@@ -370,20 +370,20 @@ def test_model_ready_checks_the_checksum(tmp_path, monkeypatch):
 
     good = hashlib.sha256(b"model bytes").hexdigest()
 
-    monkeypatch.setattr(DownloadSpriteModel, "KNOWN_MODEL_SHA256", {config.sprite_model_file: good})
-    assert DownloadSpriteModel.spriteModelReady(config)
+    monkeypatch.setattr(DownloadModel, "KNOWN_MODEL_SHA256", {config.sprite_model_file: good})
+    assert DownloadModel.spriteModelReady(config)
 
-    monkeypatch.setattr(DownloadSpriteModel, "KNOWN_MODEL_SHA256", {config.sprite_model_file: "0"*64})
-    assert not DownloadSpriteModel.spriteModelReady(config)
+    monkeypatch.setattr(DownloadModel, "KNOWN_MODEL_SHA256", {config.sprite_model_file: "0"*64})
+    assert not DownloadModel.spriteModelReady(config)
 
     # A model this code does not know is taken as it is
-    monkeypatch.setattr(DownloadSpriteModel, "KNOWN_MODEL_SHA256", {})
-    assert DownloadSpriteModel.spriteModelReady(config)
+    monkeypatch.setattr(DownloadModel, "KNOWN_MODEL_SHA256", {})
+    assert DownloadModel.spriteModelReady(config)
 
 
 def test_known_model_hash_is_the_published_model():
 
-    assert DownloadSpriteModel.KNOWN_MODEL_SHA256["sprite_detector.tflite"] == \
+    assert DownloadModel.KNOWN_MODEL_SHA256["sprite_detector.tflite"] == \
         "a73da954ab97a7b68683edc249eafe457f1085bfd8d619f05c9e0d94cdad831a"
 
 
@@ -416,7 +416,7 @@ def fakeWeb(monkeypatch, response=None, error=None):
             raise error
         return response
 
-    monkeypatch.setattr(DownloadSpriteModel.urllib_request, "urlopen", urlopen)
+    monkeypatch.setattr(DownloadModel.urllib_request, "urlopen", urlopen)
 
     return requested
 
@@ -425,13 +425,13 @@ def test_download_puts_a_verified_model_in_place(tmp_path, monkeypatch):
 
     config = makeConfig(tmp_path)
     content = b"the real model"
-    monkeypatch.setattr(DownloadSpriteModel, "KNOWN_MODEL_SHA256",
+    monkeypatch.setattr(DownloadModel, "KNOWN_MODEL_SHA256",
                         {config.sprite_model_file: hashlib.sha256(content).hexdigest()})
 
     response = FakeResponse(content)
     requested = fakeWeb(monkeypatch, response)
 
-    assert DownloadSpriteModel.downloadSpriteModel(config)
+    assert DownloadModel.downloadSpriteModel(config)
 
     with open(config.sprite_model_path, "rb") as f:
         assert f.read() == content
@@ -444,17 +444,17 @@ def test_download_puts_a_verified_model_in_place(tmp_path, monkeypatch):
     assert context.verify_mode == ssl.CERT_REQUIRED
 
     # Already there and intact: not downloaded again
-    assert DownloadSpriteModel.downloadSpriteModel(config)
+    assert DownloadModel.downloadSpriteModel(config)
     assert len(requested) == 1
 
 
 def test_download_with_the_wrong_checksum_is_discarded(tmp_path, monkeypatch):
 
     config = makeConfig(tmp_path)
-    monkeypatch.setattr(DownloadSpriteModel, "KNOWN_MODEL_SHA256", {config.sprite_model_file: "0"*64})
+    monkeypatch.setattr(DownloadModel, "KNOWN_MODEL_SHA256", {config.sprite_model_file: "0"*64})
     fakeWeb(monkeypatch, FakeResponse(b"tampered"))
 
-    assert not DownloadSpriteModel.downloadSpriteModel(config)
+    assert not DownloadModel.downloadSpriteModel(config)
     assert not os.path.exists(config.sprite_model_path)
     assert not os.path.exists(config.sprite_model_path + ".download")
 
@@ -465,22 +465,22 @@ def test_download_fails_cleanly(tmp_path, monkeypatch):
     tmp_file = config.sprite_model_path + ".download"
 
     # Not published on the server
-    fakeWeb(monkeypatch, error=DownloadSpriteModel.urllib_error.HTTPError(
+    fakeWeb(monkeypatch, error=DownloadModel.urllib_error.HTTPError(
         "https://x", 404, "Not Found", {}, None))
-    assert not DownloadSpriteModel.downloadSpriteModel(config)
+    assert not DownloadModel.downloadSpriteModel(config)
 
     # No network
-    fakeWeb(monkeypatch, error=DownloadSpriteModel.urllib_error.URLError("no route to host"))
-    assert not DownloadSpriteModel.downloadSpriteModel(config)
+    fakeWeb(monkeypatch, error=DownloadModel.urllib_error.URLError("no route to host"))
+    assert not DownloadModel.downloadSpriteModel(config)
 
     # Connection cut short: fewer bytes than announced
     fakeWeb(monkeypatch, FakeResponse(b"half", length=100))
-    assert not DownloadSpriteModel.downloadSpriteModel(config)
+    assert not DownloadModel.downloadSpriteModel(config)
     assert not os.path.exists(tmp_file)
 
     # Far too big to be a model
-    fakeWeb(monkeypatch, FakeResponse(b"x", length=DownloadSpriteModel.MAX_MODEL_BYTES + 1))
-    assert not DownloadSpriteModel.downloadSpriteModel(config)
+    fakeWeb(monkeypatch, FakeResponse(b"x", length=DownloadModel.MAX_MODEL_BYTES + 1))
+    assert not DownloadModel.downloadSpriteModel(config)
     assert not os.path.exists(tmp_file)
 
     assert not os.path.exists(config.sprite_model_path)
@@ -492,7 +492,7 @@ def test_download_refuses_plain_http(tmp_path, monkeypatch):
     config.sprite_model_base_url = "http://globalmeteornetwork.org/projects/sprite_detector"
     requested = fakeWeb(monkeypatch, FakeResponse(b"x"))
 
-    assert not DownloadSpriteModel.downloadSpriteModel(config)
+    assert not DownloadModel.downloadSpriteModel(config)
     assert requested == []
 
 
@@ -509,7 +509,7 @@ def test_unix_time_ignores_the_local_timezone(monkeypatch):
     dt = datetime.datetime(2026, 7, 15, 3, 0, 0)
 
     try:
-        assert SpriteDetector.unixTime(dt) == 1784084400.0
+        assert Detector.unixTime(dt) == 1784084400.0
     finally:
         monkeypatch.delenv("TZ")
         time.tzset()
@@ -528,7 +528,7 @@ def test_platepar_found_in_the_config_directory(tmp_path):
     pp.station_code = "XX0001"
     pp.write(os.path.join(config.config_file_path, config.platepar_name))
 
-    platepar, path = SpriteDetector.loadStationPlatepar(config, str(night))
+    platepar, path = Detector.loadStationPlatepar(config, str(night))
 
     assert platepar is not None
     assert path == os.path.join(config.config_file_path, config.platepar_name)
@@ -544,7 +544,7 @@ def test_platepar_in_the_night_directory_wins(tmp_path):
     for directory in (config.config_file_path, str(night)):
         Platepar().write(os.path.join(directory, config.platepar_name))
 
-    _, path = SpriteDetector.loadStationPlatepar(config, str(night))
+    _, path = Detector.loadStationPlatepar(config, str(night))
 
     assert path == os.path.join(str(night), config.platepar_name)
 
@@ -553,7 +553,7 @@ def test_no_platepar(tmp_path):
 
     config = makeConfig(tmp_path)
 
-    assert SpriteDetector.loadStationPlatepar(config, str(tmp_path)) == (None, None)
+    assert Detector.loadStationPlatepar(config, str(tmp_path)) == (None, None)
 
 
 def fakeDetections(monkeypatch, hits):
@@ -566,8 +566,8 @@ def fakeDetections(monkeypatch, hits):
         for det in dets:
             det["astrometry_ok"] = True
 
-    monkeypatch.setattr(SpriteDetector, "detectSpritesInFF", detect)
-    monkeypatch.setattr(SpriteDetector, "calibrateSpriteDetections", calibrate)
+    monkeypatch.setattr(Detector, "detectSpritesInFF", detect)
+    monkeypatch.setattr(Detector, "calibrateSpriteDetections", calibrate)
 
 
 def makeNight(tmp_path, n_ff, spacing=600):
@@ -590,8 +590,8 @@ def test_recorder_writes_products_and_hands_payload_to_the_uploader(tmp_path, mo
     fakeDetections(monkeypatch, {names[1]})
     uploader = FakeUploader()
 
-    recorder = SpriteDetector.NightRecorder(config, night, uploader)
-    detector = SpriteDetector.NightDetector(config, night, recorder, None, None)
+    recorder = Detector.NightRecorder(config, night, uploader)
+    detector = Detector.NightDetector(config, night, recorder, None, None)
 
     for name in names:
         detector.processFF(name, "model")
@@ -605,7 +605,7 @@ def test_recorder_writes_products_and_hands_payload_to_the_uploader(tmp_path, mo
     with open(recorder.jsonl_path) as f:
         assert json.loads(f.readline())["ff_name"] == names[1]
 
-    marked, unmarked = SpriteProducts.imagePaths(night, names[1])
+    marked, unmarked = Products.imagePaths(night, names[1])
     assert os.path.isfile(marked) and os.path.isfile(unmarked)
 
     # One payload queued, with the files the server may ask for later
@@ -624,12 +624,12 @@ def test_detection_without_astrometry_is_recorded_but_not_sent(tmp_path, monkeyp
     def detect(ff, ff_name, config, model_path, mask=None):
         return [detection(ff_name, astrometry_ok=False)] if ff_name in names[1:3] else []
 
-    monkeypatch.setattr(SpriteDetector, "detectSpritesInFF", detect)
-    monkeypatch.setattr(SpriteDetector, "calibrateSpriteDetections", lambda *args: None)
+    monkeypatch.setattr(Detector, "detectSpritesInFF", detect)
+    monkeypatch.setattr(Detector, "calibrateSpriteDetections", lambda *args: None)
 
     uploader = FakeUploader()
-    recorder = SpriteDetector.NightRecorder(config, night, uploader)
-    detector = SpriteDetector.NightDetector(config, night, recorder, None, "no platepar")
+    recorder = Detector.NightRecorder(config, night, uploader)
+    detector = Detector.NightDetector(config, night, recorder, None, "no platepar")
 
     for name in names:
         detector.processFF(name, "model")
@@ -651,8 +651,8 @@ def test_burst_is_recorded_as_rejected(tmp_path, monkeypatch):
     fakeDetections(monkeypatch, set(names[:5]))
     uploader = FakeUploader()
 
-    recorder = SpriteDetector.NightRecorder(config, night, uploader)
-    detector = SpriteDetector.NightDetector(config, night, recorder, None, None)
+    recorder = Detector.NightRecorder(config, night, uploader)
+    detector = Detector.NightDetector(config, night, recorder, None, None)
 
     for name in names:
         detector.processFF(name, "model")
@@ -670,8 +670,8 @@ def test_images_are_capped_per_night(tmp_path, monkeypatch):
     night, names = makeNight(tmp_path, 4)
     fakeDetections(monkeypatch, set(names))
 
-    recorder = SpriteDetector.NightRecorder(config, night, FakeUploader())
-    detector = SpriteDetector.NightDetector(config, night, recorder, None, None)
+    recorder = Detector.NightRecorder(config, night, FakeUploader())
+    detector = Detector.NightDetector(config, night, recorder, None, None)
 
     for name in names:
         detector.processFF(name, "model")
@@ -694,11 +694,11 @@ def test_nightly_cap_stops_inference_and_still_decides_pending(tmp_path, monkeyp
         calls.append(ff_name)
         return [detection(ff_name)]
 
-    monkeypatch.setattr(SpriteDetector, "detectSpritesInFF", detect)
-    monkeypatch.setattr(SpriteDetector, "calibrateSpriteDetections", lambda *args: None)
+    monkeypatch.setattr(Detector, "detectSpritesInFF", detect)
+    monkeypatch.setattr(Detector, "calibrateSpriteDetections", lambda *args: None)
 
-    recorder = SpriteDetector.NightRecorder(config, night, FakeUploader())
-    detector = SpriteDetector.NightDetector(config, night, recorder, None, None)
+    recorder = Detector.NightRecorder(config, night, FakeUploader())
+    detector = Detector.NightDetector(config, night, recorder, None, None)
 
     for name in names:
         detector.processFF(name, "model")
@@ -719,10 +719,10 @@ def test_live_loop_exits_promptly_on_a_quiet_night(tmp_path, monkeypatch):
     fakeDetections(monkeypatch, {names[0]})
 
     uploader = FakeUploader()
-    monkeypatch.setattr(SpriteDetector, "SpriteUploadWorker", lambda config: uploader)
-    monkeypatch.setattr(SpriteDetector.SpriteDetector, "prepareModel", lambda self, path: True)
+    monkeypatch.setattr(Detector, "SpriteUploadWorker", lambda config: uploader)
+    monkeypatch.setattr(Detector.SpriteDetector, "prepareModel", lambda self, path: True)
 
-    sprite_detector = SpriteDetector.SpriteDetector(night, config)
+    sprite_detector = Detector.SpriteDetector(night, config)
     for name in names:
         sprite_detector.input_queue.put((night, name))
 
@@ -744,7 +744,7 @@ def test_live_loop_exits_promptly_on_a_quiet_night(tmp_path, monkeypatch):
 
     # It confirmed the one detection on the way out and stopped the uploader
     assert uploader.started and uploader.stopped
-    with open(SpriteProducts.csvPath(night)) as f:
+    with open(Products.csvPath(night)) as f:
         assert "confirmed" in f.read()
 
 
@@ -753,7 +753,7 @@ def test_disabled_detector_keeps_the_queue_empty(tmp_path):
     # Without a model the process keeps draining its queue, otherwise the Compressor warns all night that the
     #   detector is behind
     config = makeConfig(tmp_path)
-    sprite_detector = SpriteDetector.SpriteDetector(str(tmp_path), config)
+    sprite_detector = Detector.SpriteDetector(str(tmp_path), config)
 
     for i in range(3):
         sprite_detector.input_queue.put((str(tmp_path), ffName(i)))
@@ -772,7 +772,7 @@ def test_disabled_detector_keeps_the_queue_empty(tmp_path):
     assert sprite_detector.input_queue.empty()
 
 
-class CrashingDetector(SpriteDetector.SpriteDetector):
+class CrashingDetector(Detector.SpriteDetector):
     """ A detector whose work fails at once. """
 
     def runDetection(self):
@@ -799,21 +799,21 @@ def test_offline_run_refuses_to_record_a_night_twice(tmp_path, monkeypatch):
     config = makeConfig(tmp_path)
     night, names = makeNight(tmp_path, 2)
     fakeDetections(monkeypatch, {names[0]})
-    monkeypatch.setattr(SpriteDetector, "SPRITE_TFLITE_AVAILABLE", True)
-    monkeypatch.setattr(SpriteDetector, "spriteModelReady", lambda config: True)
+    monkeypatch.setattr(Detector, "SPRITE_TFLITE_AVAILABLE", True)
+    monkeypatch.setattr(Detector, "spriteModelReady", lambda config: True)
 
-    first = SpriteDetector.runSpriteDetectionDirectory(night, config)
+    first = Detector.runSpriteDetectionDirectory(night, config)
     assert first.n_confirmed == 1
 
     # Again without --overwrite: refused, nothing duplicated
-    assert SpriteDetector.runSpriteDetectionDirectory(night, config) is None
-    with open(SpriteProducts.csvPath(night)) as f:
+    assert Detector.runSpriteDetectionDirectory(night, config) is None
+    with open(Products.csvPath(night)) as f:
         assert f.read().count("confirmed") == 1
 
     # With --overwrite: replaced, still one record
-    again = SpriteDetector.runSpriteDetectionDirectory(night, config, overwrite=True)
+    again = Detector.runSpriteDetectionDirectory(night, config, overwrite=True)
     assert again.n_confirmed == 1
-    with open(SpriteProducts.csvPath(night)) as f:
+    with open(Products.csvPath(night)) as f:
         assert f.read().count("confirmed") == 1
 
 
@@ -844,10 +844,10 @@ def test_trimmed_platepar_maps_exactly_like_the_full_one():
 
     from RMS.Formats.Platepar import Platepar
     from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP
-    from RMS import SpriteAstrometry
+    from RMS.Sprite import Astrometry
 
     full = templatePlatepar()
-    record, _ = SpriteAstrometry.plateparForServer(full)
+    record, _ = Astrometry.plateparForServer(full)
 
     # The server's copy, loaded back the way RMS loads any platepar
     trimmed = Platepar()
@@ -869,10 +869,10 @@ def test_trimmed_platepar_maps_exactly_like_the_full_one():
 
 def test_trimmed_platepar_leaves_out_the_star_list():
 
-    from RMS import SpriteAstrometry
+    from RMS.Sprite import Astrometry
 
     full = templatePlatepar()
-    record, _ = SpriteAstrometry.plateparForServer(full)
+    record, _ = Astrometry.plateparForServer(full)
 
     for field in ("star_list", "x_poly", "y_poly", "distortion_type_list", "fov_h"):
         assert field not in record
@@ -891,13 +891,13 @@ def test_trimmed_platepar_leaves_out_the_star_list():
 
 def test_platepar_key_is_stable_and_changes_with_the_calibration():
 
-    from RMS import SpriteAstrometry
+    from RMS.Sprite import Astrometry
 
     pp = templatePlatepar()
-    record, sha_a = SpriteAstrometry.plateparForServer(pp)
+    record, sha_a = Astrometry.plateparForServer(pp)
 
     # Same platepar, same key; the star list does not matter
-    assert SpriteAstrometry.plateparForServer(templatePlatepar(with_stars=False))[1] == sha_a
+    assert Astrometry.plateparForServer(templatePlatepar(with_stars=False))[1] == sha_a
 
     # The key is the SHA-256 of the canonical JSON
     text = json.dumps(record, sort_keys=True, separators=(",", ":"))
@@ -905,16 +905,16 @@ def test_platepar_key_is_stable_and_changes_with_the_calibration():
 
     # Any change to the calibration is a different platepar
     pp.RA_d += 0.01
-    assert SpriteAstrometry.plateparForServer(pp)[1] != sha_a
+    assert Astrometry.plateparForServer(pp)[1] != sha_a
 
 
 def test_platepar_key_matches_the_server():
 
     # Only when the server package is importable, e.g. both repositories checked out side by side
     validation = pytest.importorskip("spritemap.validation")
-    from RMS import SpriteAstrometry
+    from RMS.Sprite import Astrometry
 
-    record, sha256 = SpriteAstrometry.plateparForServer(templatePlatepar())
+    record, sha256 = Astrometry.plateparForServer(templatePlatepar())
 
     # The server reads the payload JSON, so compare with what it gets after a round trip
     assert validation.canonicalPlatepar(json.loads(json.dumps(record)))[1] == sha256
@@ -922,18 +922,18 @@ def test_platepar_key_matches_the_server():
 
 def test_platepar_with_a_nan_is_not_sent():
 
-    from RMS import SpriteAstrometry
+    from RMS.Sprite import Astrometry
 
     pp = templatePlatepar()
     pp.F_scale = float("nan")
 
-    assert SpriteAstrometry.plateparForServer(pp) == (None, None)
-    assert SpriteAstrometry.plateparForServer(None) == (None, None)
+    assert Astrometry.plateparForServer(pp) == (None, None)
+    assert Astrometry.plateparForServer(None) == (None, None)
 
 
 def test_payload_and_local_record_carry_the_platepar(tmp_path, monkeypatch):
 
-    from RMS import SpriteAstrometry
+    from RMS.Sprite import Astrometry
 
     config = makeConfig(tmp_path)
     night, names = makeNight(tmp_path, 3)
@@ -941,10 +941,10 @@ def test_payload_and_local_record_carry_the_platepar(tmp_path, monkeypatch):
     uploader = FakeUploader()
 
     pp = templatePlatepar()
-    record, sha256 = SpriteAstrometry.plateparForServer(pp)
+    record, sha256 = Astrometry.plateparForServer(pp)
 
-    recorder = SpriteDetector.NightRecorder(config, night, uploader, pp, "/somewhere/platepar_cmn2010.cal")
-    detector = SpriteDetector.NightDetector(config, night, recorder, None, None)
+    recorder = Detector.NightRecorder(config, night, uploader, pp, "/somewhere/platepar_cmn2010.cal")
+    detector = Detector.NightDetector(config, night, recorder, None, None)
     for name in names:
         detector.processFF(name, "model")
     detector.finish()

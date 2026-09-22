@@ -42,7 +42,7 @@ from PIL import Image, ImageDraw
 
 from RMS.Logger import getLogger
 from RMS.Misc import RmsDateTime
-from RMS.SpriteDetection import formatIsoTimestamp
+from RMS.Sprite.Detection import formatIsoTimestamp
 
 
 # Get the logger from the main module
@@ -358,7 +358,7 @@ def buildSpritePayload(config, ff_name, ff_start, fps, detections, night_dir_nam
 
     Keyword arguments:
         platepar: [dict or None] Trimmed platepar the directions were computed with, from
-            RMS.SpriteAstrometry.plateparForServer(). The server stores each distinct one once. None to send
+            RMS.Sprite.Astrometry.plateparForServer(). The server stores each distinct one once. None to send
             none. None by default.
 
     Return:

@@ -174,7 +174,7 @@ from RMS.CaptureModeSwitcher import captureModeSwitcher
 from RMS.Compression import Compressor
 from RMS.DeleteOldObservations import deleteOldObservations
 from RMS.DetectStarsAndMeteors import detectStarsAndMeteors
-from RMS.SpriteDetector import startSpriteDetector, stopSpriteDetector
+from RMS.Sprite.Detector import startSpriteDetector, stopSpriteDetector
 from RMS.Formats.FFfile import validFFName
 from RMS.Misc import mkdirP, RmsDateTime, UTCFromTimestamp, setMultiprocessingStartMethod, frameBufferShape
 from RMS.QueuedPool import QueuedPool
