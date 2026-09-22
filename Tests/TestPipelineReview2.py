@@ -1121,3 +1121,37 @@ def testUpdaterKernelFallbackComparesRunningFlavour(tmp_path, running, installed
         assert out == 'REBOOT {:s}'.format(target)
     else:
         assert out == 'NOREBOOT'
+
+
+# ---------------------------------------------------------------------------
+# Item 21: arithmetic increments under set -e in the update scripts
+
+@posix_only
+def testPostIncrementFromZeroAbortsUnderErrexit():
+    """ The bash behaviour behind the fix: ((n++)) with n=0 returns status 1 and aborts a set -e
+        script, while n=$((n + 1)) does not.
+    """
+
+    import subprocess
+
+    bad = subprocess.run(['bash', '-c', 'set -Eeuo pipefail; n=0; ((n++)); echo reached'],
+        stdout=subprocess.PIPE, timeout=30)
+    good = subprocess.run(['bash', '-c', 'set -Eeuo pipefail; n=0; n=$((n + 1)); echo reached $n'],
+        stdout=subprocess.PIPE, timeout=30)
+
+    assert bad.returncode != 0 and b'reached' not in bad.stdout
+    assert good.returncode == 0 and good.stdout.strip() == b'reached 1'
+
+
+@pytest.mark.parametrize('rel_path', ['Scripts/RMS_Update.sh', 'Scripts/MultiCamLinux/GRMSUpdater.sh'])
+def testUpdateScriptsHaveNoBarePostIncrement(rel_path):
+    """ The errexit update scripts must not use bare ((var++)) / ((var--)) statements. """
+
+    import re
+
+    with open(os.path.join(RMS_ROOT, rel_path)) as f:
+        src = f.read()
+
+    assert 'set -Eeuo pipefail' in src
+    bare = re.findall(r'^\s*\(\(\s*\w+\s*(?:\+\+|--)\s*\)\)\s*$', src, re.MULTILINE)
+    assert bare == []

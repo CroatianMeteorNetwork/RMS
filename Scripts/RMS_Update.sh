@@ -390,7 +390,7 @@ switch_branch_interactive() {
             fi
             return
         else
-            ((attempts++))
+            attempts=$((attempts + 1))
             if (( attempts < max_attempts )); then
                 print_status "error" "Invalid selection. Please try again (attempt $attempts/$max_attempts)."
                 interactive_sleep 1
@@ -1523,7 +1523,7 @@ PY
             build_success=true
             break
         else
-            ((build_attempts++))
+            build_attempts=$((build_attempts + 1))
             if (( build_attempts < max_build_attempts )); then
                 print_status "warning" "Build failed (attempt $build_attempts/$max_build_attempts). Cleaning and retrying..."
                 # Clean build artifacts and try again
