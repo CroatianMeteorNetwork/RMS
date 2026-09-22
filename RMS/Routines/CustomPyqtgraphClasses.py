@@ -1079,6 +1079,11 @@ class PointingIndicator(pg.GraphicsObject):
 
 
     def setData(self, angle, east_angle, azimuth, elevation, step_px, precision, valid_zenith):
+
+        # Qt has to drop the old bounds from its scene index before anything boundingRect() reads
+        #   (step_px, device_scale_x) changes, or the item can be left stale or clipped in the index
+        self.prepareGeometryChange()
+
         self.angle = float(angle)
         self.east_angle = float(east_angle)
         self.azimuth = float(azimuth)
@@ -1087,15 +1092,17 @@ class PointingIndicator(pg.GraphicsObject):
         self.precision = int(precision)
         self.valid_zenith = bool(valid_zenith)
         self.device_scale_x = self._deviceScaleX()
-        self.prepareGeometryChange()
         self.update()
 
 
     def refresh(self):
         """ Recompute geometry and repaint. Connect this to the view's range-change signal so the
             step bar (which scales with zoom) is redrawn with up-to-date bounds. """
-        self.device_scale_x = self._deviceScaleX()
+
+        # Notify Qt before the cached scale that boundingRect() depends on is replaced
         self.prepareGeometryChange()
+
+        self.device_scale_x = self._deviceScaleX()
         self.update()
 
 

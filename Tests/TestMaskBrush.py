@@ -6,7 +6,7 @@ import numpy as np
 import cv2
 
 from RMS.Routines.MaskImage import compositeMaskLayers, maskRasterResiduals, decomposeMaskImage, \
-    resampleMaskLayers, paintBrushSegment, PAINT_MASKED, PAINT_UNMASKED
+    paintBrushSegment, PAINT_MASKED, PAINT_UNMASKED
 
 
 class TestPaintLayerCompositing:
@@ -166,41 +166,6 @@ class TestResidualDetection:
         np.testing.assert_array_equal(mask, remask)
 
 
-class TestResampleMaskLayers:
-    """ A mask saved for another frame size is rescaled, polygons included. """
-
-    def test_same_size_is_passthrough(self):
-        polygons = [[(10.0, 10.0), (50.0, 10.0), (50.0, 50.0)]]
-        paint = np.zeros((80, 100), dtype=np.uint8)
-        out_polygons, out_paint = resampleMaskLayers(polygons, paint, (100, 80), (100, 80))
-        assert out_polygons is polygons
-        assert out_paint is paint
-
-    def test_polygons_and_paint_scale_together(self):
-        polygons = [[(10, 10), (50, 10), (50, 50), (10, 50)]]
-        paint = np.zeros((80, 100), dtype=np.uint8)
-        paint[60:70, 60:70] = PAINT_MASKED
-
-        # Double the size in both axes
-        out_polygons, out_paint = resampleMaskLayers(polygons, paint, (100, 80), (200, 160))
-
-        assert out_polygons == [[(20, 20), (100, 20), (100, 100), (20, 100)]]
-        assert out_paint.shape == (160, 200)
-        assert out_paint[130, 130] == PAINT_MASKED
-        assert out_paint[110, 110] == 0
-
-        # The rescaled layers render the same picture, only larger
-        small = compositeMaskLayers(polygons, paint, 100, 80)
-        large = compositeMaskLayers(out_polygons, out_paint, 200, 160)
-        assert large[40, 40] == small[20, 20] == 0
-        assert large[130, 130] == small[65, 65] == 0
-        assert large[150, 10] == small[75, 5] == 255
-
-    def test_none_paint_stays_none(self):
-        _, out_paint = resampleMaskLayers([], None, (100, 80), (50, 40))
-        assert out_paint is None
-
-
 class TestBrushSegment:
     """ The brush footprint must be the same disc along the whole stroke. """
 
@@ -259,3 +224,43 @@ class TestCoordinateConsistency:
         assert paint[10, 180] == PAINT_MASKED
         assert paint[10, 0] == 0
         assert paint.shape == (h, w)
+
+
+class TestMaskResizeConsistency(object):
+    """ A mask loaded at a different size must be resized as a raster before it is decomposed. """
+
+    def testDecomposingTheResizedRasterReproducesIt(self):
+        """ Polygons plus residuals of the resized raster composite back to exactly that raster. """
+
+        # A rectangle whose edges do not land on a scale boundary
+        mask = np.full((80, 100), 255, dtype=np.uint8)
+        mask[10:51, 10:51] = 0
+
+        # This is the order loadMaskFromFile uses: resize the raster, then decompose it
+        resized = cv2.resize(mask, (200, 160), interpolation=cv2.INTER_NEAREST)
+        polygons, paint_layer = decomposeMaskImage(resized)
+
+        composite = compositeMaskLayers(polygons, paint_layer, 200, 160)
+
+        # The editable overlay and the mask handed to star detection agree everywhere
+        assert np.array_equal(composite, resized)
+
+
+    def testScalingPolygonsInsteadLosesBoundaryPixels(self):
+        """ Scaling the vertices of the source-size polygons does not reproduce the resized raster.
+
+            This is why the raster is resized first. Kept as a test so the order is not swapped back.
+        """
+
+        mask = np.full((80, 100), 255, dtype=np.uint8)
+        mask[10:51, 10:51] = 0
+
+        resized = cv2.resize(mask, (200, 160), interpolation=cv2.INTER_NEAREST)
+
+        # Decompose at the source size and scale the polygon vertices, as the old load path did
+        polygons, _ = decomposeMaskImage(mask)
+        scaled_polygons = [[(x*2.0, y*2.0) for x, y in polygon] for polygon in polygons]
+
+        composite = compositeMaskLayers(scaled_polygons, None, 200, 160)
+
+        assert not np.array_equal(composite, resized)

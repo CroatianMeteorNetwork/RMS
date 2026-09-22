@@ -204,7 +204,7 @@ from RMS.Routines.GreatCircle import fitGreatCircle, greatCircle
 from RMS.Routines.SphericalPolygonCheck import sphericalPolygonCheck
 from RMS.Routines.Image import loadFlat, loadDark, applyFlat, applyDark, signalToNoise, gammaCorrectionImage, adjustLevels, saveImage, loadImage
 from RMS.Routines.MaskImage import getMaskFile, MaskStructure, compositeMaskLayers, decomposeMaskImage, \
-    resampleMaskLayers, paintBrushSegment
+    paintBrushSegment
 from RMS.Routines import RollingShutterCorrection
 from RMS.Misc import maxDistBetweenPoints, getRmsRootDir
 from Utils.KalmanFilter import KalmanFilter
@@ -7127,13 +7127,11 @@ class PlateTool(QtWidgets.QMainWindow):
 
         self.mask_current_polygon = []
 
-        # Convert the masked regions to editable polygons, with the pixels the simplified polygons don't
-        #   reproduce (prior brush strokes, boundary pixels rounded away) captured in the paint layer
-        self.mask_polygons, paint_layer = decomposeMaskImage(mask_img)
-
-        # A mask saved for a different frame size than the current image has to be rescaled, polygons
-        #   included, otherwise the polygons stay in the file's pixel coordinates while the paint layer
-        #   gets resampled at render time
+        # A mask saved for a different frame size than the current image is resampled to the image size
+        #   before anything is derived from it. Rescaling the polygons separately would not reproduce the
+        #   nearest-neighbour resize of the raster (a run of N pixels scales to a run of N*scale, while
+        #   scaled vertices span one pixel less), which would leave the editable overlay disagreeing with
+        #   the mask handed to star detection along the right and bottom boundaries.
         mask_height, mask_width = mask_img.shape[:2]
         if self.img.data is not None:
 
@@ -7143,9 +7141,11 @@ class PlateTool(QtWidgets.QMainWindow):
             if (mask_width, mask_height) != (img_width, img_height):
                 print("Mask size {}x{} != image size {}x{}; resampling the mask to fit".format(mask_width,
                     mask_height, img_width, img_height))
-                self.mask_polygons, paint_layer = resampleMaskLayers(self.mask_polygons, paint_layer,
-                    (mask_width, mask_height), (img_width, img_height))
                 mask_img = cv2.resize(mask_img, (img_width, img_height), interpolation=cv2.INTER_NEAREST)
+
+        # Convert the masked regions to editable polygons, with the pixels the simplified polygons don't
+        #   reproduce (prior brush strokes, boundary pixels rounded away) captured in the paint layer
+        self.mask_polygons, paint_layer = decomposeMaskImage(mask_img)
 
         if paint_layer is not None:
             self.mask_paint_layer = paint_layer
