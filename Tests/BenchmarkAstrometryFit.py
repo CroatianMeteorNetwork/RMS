@@ -12,6 +12,8 @@
     This is a script, not a pytest test. Run it as:
 
         python -m Tests.BenchmarkAstrometryFit [--repeats N] [--seed S]
+
+    Running the file directly works as well, the import path is set up below either way.
 """
 
 from __future__ import print_function, division, absolute_import
@@ -20,8 +22,15 @@ import argparse
 import contextlib
 import copy
 import io
+import os
 import sys
 import time
+
+# Running this file directly puts Tests/ first on the import path, so RMS would be imported from an
+#   installed copy instead of this checkout and the numbers would describe the wrong code. Put the
+#   repository root first, which makes both "python Tests/BenchmarkAstrometryFit.py" and
+#   "python -m Tests.BenchmarkAstrometryFit" measure the working tree.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import numpy as np
 from scipy.spatial import cKDTree
