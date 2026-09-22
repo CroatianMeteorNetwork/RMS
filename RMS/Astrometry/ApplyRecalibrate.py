@@ -29,6 +29,7 @@ from RMS.Astrometry.ApplyAstrometry import (
     extinctionCorrectionTrueToApparent,
     getFOVSelectionRadius,
     photometryFitRobust,
+    raDecToXYPP,
     rotationWrtHorizon,
     xyToRaDecPP,
 )
@@ -96,6 +97,45 @@ def loadRecalibratedPlatepar(dir_path, config, file_list=None, type='meteor'):
         return recalibrated_platepars
 
     return None
+
+
+def coverageMatchFraction(n_matched, n_detected, catalog_stars, jd, platepar):
+    """ Compute the fraction of the stars which could have been matched that actually were matched.
+
+    Stars can only be matched to catalog stars down to the limiting magnitude, so the number of
+    possible matches is the smaller of the number of detected stars and the number of catalog stars
+    which project inside the image. Dividing by the number of detections alone would reject every fit
+    of a camera which detects stars fainter than the catalog limit.
+
+    Arguments:
+        n_matched: [int] Number of matched stars.
+        n_detected: [int] Number of detected image stars used for matching.
+        catalog_stars: [ndarray] Catalog stars (RA, dec, mag, ...) already limited to the limiting
+            magnitude used for matching.
+        jd: [float] Julian date of the image.
+        platepar: [Platepar instance] Platepar used to project the catalog stars.
+
+    Return:
+        (match_fraction, n_possible): [tuple]
+            - match_fraction: [float] Fraction of the possible matches which were matched.
+            - n_possible: [int] Number of possible matches (the denominator of the fraction).
+    """
+
+    # Count the catalog stars which project inside the image at the time of the image
+    n_catalog_in_fov = 0
+    if len(catalog_stars):
+        cat_x, cat_y = raDecToXYPP(catalog_stars[:, 0], catalog_stars[:, 1], jd, platepar)
+        n_catalog_in_fov = int(np.count_nonzero(
+            (cat_x >= 0) & (cat_x < platepar.X_res) & (cat_y >= 0) & (cat_y < platepar.Y_res)
+        ))
+
+    # The number of possible matches is limited by both the detections and the catalog
+    n_possible = min(n_detected, n_catalog_in_fov)
+
+    if n_possible <= 0:
+        return 0.0, n_possible
+
+    return n_matched/n_possible, n_possible
 
 
 def recalibrateFF(
@@ -396,14 +436,19 @@ def recalibrateFF(
         #   fraction rejects those fits (the frame keeps the previous good platepar) while accepting
         #   genuine fits - including after a real camera move, which re-matches the whole field at
         #   the new pointing
+        #   The fraction is taken of the possible matches, i.e. the smaller of the number of detected
+        #   stars and the number of catalog stars (at the matching limiting magnitude) inside the image,
+        #   so a camera detecting stars fainter than the catalog limit is not rejected every night
         n_detected = len(star_dict_ff[jd])
-        match_fraction = len(image_stars)/n_detected if n_detected > 0 else 0.0
+        match_fraction, n_possible = coverageMatchFraction(
+            len(image_stars), n_detected, catalog_stars, jd, working_platepar
+        )
 
         if match_fraction < min_match_fraction:
-            log.info('Rejecting refined platepar, only {:d}/{:d} = {:.2f} of detected stars '
-                     'matched within {:.2f} px (< {:.2f})'.format(len(image_stars), n_detected,
-                                                                  match_fraction, min_match_radius,
-                                                                  min_match_fraction))
+            log.info('Rejecting refined platepar, only {:d}/{:d} = {:.2f} of possible star matches '
+                     '({:d} detected) matched within {:.2f} px (< {:.2f})'.format(
+                         len(image_stars), n_possible, match_fraction, n_detected, min_match_radius,
+                         min_match_fraction))
             return None, min_match_radius
 
         ### PHOTOMETRY FIT ###
