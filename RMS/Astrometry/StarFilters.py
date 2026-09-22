@@ -242,9 +242,8 @@ def filterBlendedStars(paired_stars, catalog_stars, platepar, jd, lim_mag,
         # Find the catalog stars within each star's blend radius with a KD-tree (O(N log M) instead of the
         #   dense N x M distance matrix). The ball query is inclusive (dist <= r) and returns everything
         #   for a negative radius, so non-positive or non-finite radii are queried with 0 and the exact
-        #   (0.1 < dist < r) rule is re-applied on the candidates below. The candidate order does not
-        #   matter, but return_sorted is not passed: it only exists in scipy >= 1.2 and requirements.txt
-        #   still allows 1.0
+        #   (0.1 < dist < r) rule is re-applied on the candidates below. Only membership is used, so the
+        #   candidates are left in whatever order the query returns them
         matched_coords = np.column_stack([all_matched_x, all_matched_y])
         query_radii = np.where(np.isfinite(blend_radii) & (blend_radii > 0), blend_radii, 0.0)
         catalog_tree = cKDTree(np.column_stack([catalog_x, catalog_y]))
