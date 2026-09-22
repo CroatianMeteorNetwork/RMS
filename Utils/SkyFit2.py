@@ -245,13 +245,41 @@ def photometryExcludeList(saturation_list, variable_star_list, min_stars=3):
     return [False]*total_stars
 
 
+def _configSectionName(line):
+    """ Return the section name of a config file section header line, the way configparser reads it.
+
+        configparser matches the stripped line against \[(?P<header>.+)\] and does not strip the name
+        itself, so '[ StarExtraction ]' is a section called ' StarExtraction '.
+
+    Arguments:
+        line: [str] Config file line.
+
+    Return:
+        [str] Section name, or None if the line is not a section header.
+    """
+
+    stripped = line.strip()
+
+    # Comments, and an inline comment after the header
+    if stripped.startswith((';', '#')):
+        return None
+    stripped = re.sub(r'\s+;.*$', '', stripped)
+
+    section_match = re.match(r'\[(.+)\]$', stripped)
+    if section_match is None:
+        return None
+
+    return section_match.group(1)
+
+
 def updateConfigLines(lines, updates):
     """ Set the given keys in the lines of an RMS .config file, keeping everything else as it is.
 
         A key line is recognised whatever the spelling configparser accepts ('key: value', 'key:value',
         'key=value', 'key = value'), and the key name is compared case-insensitively like configparser
-        does. The original key spelling, delimiter, spacing and any ';' inline comment are kept. Keys that
-        are not in the file are added at the end of their section, and missing sections are appended.
+        does. The original key spelling, delimiter, spacing, line ending (LF or CRLF) and any ';' inline
+        comment are kept. Keys that are not in the file are added at the end of their section, and
+        missing sections are appended, with the line ending the file uses.
 
     Arguments:
         lines: [list] Lines of the config file, with their line endings.
@@ -261,27 +289,51 @@ def updateConfigLines(lines, updates):
         new_lines: [list] Updated lines.
     """
 
-    # A section header, and a key line with its delimiter and an optional ';' inline comment
-    section_re = re.compile(r'^\s*\[([^\]]+)\]')
-    key_re = re.compile(r'^(\s*)([^:=\s;#\[][^:=]*?)(\s*[:=]\s*)(.*?)(\s+;.*)?(\r?\n)?$')
+    # A key line with its delimiter, an optional ';' inline comment and the line ending. Only spaces and
+    #   tabs are matched around the delimiter, so an empty value never swallows the line ending
+    key_re = re.compile(r'^([ \t]*)([^:=\s;#\[][^:=\r\n]*?)([ \t]*[:=][ \t]*)(.*?)([ \t]+;.*?)?(\r?\n)?$')
+
+    # The line ending of the file, for the lines that are added
+    eol_default = "\r\n" if any(line.endswith("\r\n") for line in lines) else "\n"
 
     applied = {section: {k: False for k in keys} for section, keys in updates.items()}
     wanted = {section: {k.lower(): k for k in keys} for section, keys in updates.items()}
     current_section = None
 
+    # Indentation of the last key line. A line indented deeper than it is a continuation of that key's
+    #   value for configparser, not a key of its own. The continuation of a replaced value is dropped
+    last_key_indent = None
+    last_key_replaced = False
+
     # Replace the values of the keys that already exist
     new_lines = []
     for line in lines:
 
-        section_match = section_re.match(line)
-        if section_match:
-            current_section = section_match.group(1).strip()
+        section_name = _configSectionName(line)
+        if section_name is not None:
+            current_section = section_name
+            last_key_indent = None
             new_lines.append(line)
             continue
 
-        key_match = None
-        if current_section in updates:
-            key_match = key_re.match(line)
+        # Blank and comment lines neither start nor end a value
+        if (not line.strip()) or line.strip().startswith((';', '#')):
+            new_lines.append(line)
+            continue
+
+        indent_level = len(line) - len(line.lstrip())
+        if (last_key_indent is not None) and (indent_level > last_key_indent):
+            if not last_key_replaced:
+                new_lines.append(line)
+            continue
+
+        key_match = key_re.match(line)
+        if key_match is not None:
+            last_key_indent = indent_level
+            last_key_replaced = False
+
+        if current_section not in updates:
+            key_match = None
 
         if key_match is not None:
 
@@ -290,8 +342,9 @@ def updateConfigLines(lines, updates):
 
             if key_name is not None:
                 new_lines.append(indent + key + delim + updates[current_section][key_name]
-                                 + (comment or "") + (eol or "\n"))
+                                 + (comment or "") + (eol or eol_default))
                 applied[current_section][key_name] = True
+                last_key_replaced = True
                 continue
 
         new_lines.append(line)
@@ -308,11 +361,11 @@ def updateConfigLines(lines, updates):
         in_section = False
         for i, line in enumerate(new_lines):
 
-            section_match = section_re.match(line)
-            if section_match:
+            section_name = _configSectionName(line)
+            if section_name is not None:
                 if in_section:
                     break
-                in_section = (section_match.group(1).strip() == section)
+                in_section = (section_name == section)
                 if in_section:
                     insert_idx = i + 1
 
@@ -322,16 +375,16 @@ def updateConfigLines(lines, updates):
         # Append a whole new section if it does not exist
         if insert_idx is None:
             if new_lines and not new_lines[-1].endswith("\n"):
-                new_lines[-1] += "\n"
-            new_lines.append("\n[{:s}]\n".format(section))
+                new_lines[-1] += eol_default
+            new_lines.append("{:s}[{:s}]{:s}".format(eol_default, section, eol_default))
             for key in missing_keys:
-                new_lines.append("{:s}: {:s}\n".format(key, updates[section][key]))
+                new_lines.append("{:s}: {:s}{:s}".format(key, updates[section][key], eol_default))
 
         else:
             if not new_lines[insert_idx - 1].endswith("\n"):
-                new_lines[insert_idx - 1] += "\n"
+                new_lines[insert_idx - 1] += eol_default
             for key in reversed(missing_keys):
-                new_lines.insert(insert_idx, "{:s}: {:s}\n".format(key, updates[section][key]))
+                new_lines.insert(insert_idx, "{:s}: {:s}{:s}".format(key, updates[section][key], eol_default))
 
     return new_lines
 
@@ -7007,18 +7060,31 @@ class PlateTool(QtWidgets.QMainWindow):
         if catalog_mag_limit is not None:
             updates["Calibration"] = {"catalog_mag_limit": "{:.1f}".format(catalog_mag_limit)}
 
-        # Read the existing file
+        # Read the existing file. newline='' keeps the line endings (CRLF stays CRLF), and the encoding
+        #   is the one RMS reads the config with
         if os.path.exists(config_path):
-            with open(config_path, 'r') as f:
+            with open(config_path, 'r', newline='', encoding='utf-8') as f:
                 lines = f.readlines()
         else:
             lines = []
 
         new_lines = updateConfigLines(lines, updates)
 
-        # Write back
-        with open(config_path, 'w') as f:
-            f.writelines(new_lines)
+        # Write back through a temporary file in the same directory, so a failed write never leaves a
+        #   truncated config behind
+        tmp_path = config_path + ".tmp"
+        try:
+            with open(tmp_path, 'w', newline='', encoding='utf-8') as f:
+                f.writelines(new_lines)
+
+            if os.path.exists(config_path):
+                shutil.copymode(config_path, tmp_path)
+
+            os.replace(tmp_path, config_path)
+
+        finally:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
 
         print(f"Saved star detection settings to: {config_path}")
         print(f"  intensity_threshold: {self.override_intensity_threshold}")

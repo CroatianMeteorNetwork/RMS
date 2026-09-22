@@ -1505,3 +1505,91 @@ def testFailedQuickAlignmentKeepsPlateparObjectAndStash(plateTool, monkeypatch):
     pm._checkCoeffStashOwner()
     assert pm._coeff_stash == stash
     assert pm.distortion_dialog.platepar is pp
+
+
+def testConfigWriteKeepsCRLFAndEncoding(tmp_path, quietMessages):
+    """ A CRLF config with non-ASCII text keeps every byte except the updated lines. """
+
+    with open(TEMPLATE_CONFIG, encoding='utf-8') as f:
+        text = f.read()
+    text = text.replace("stationID: XX0001", "stationID: XX0001 ; Križevci, Čakovec")
+    raw = text.replace("\n", "\r\n").encode('utf-8')
+
+    cfg_path = str(tmp_path / ".config")
+    with open(cfg_path, 'wb') as f:
+        f.write(raw)
+
+    pt = _fakePlateTool(cfg_path)
+    pt._writeStarDetectionConfig(cfg_path, backup=False)
+
+    with open(cfg_path, 'rb') as f:
+        new_raw = f.read()
+
+    old_lines = raw.split(b"\r\n")
+    new_lines = new_raw.split(b"\r\n")
+    assert b"\n" not in new_raw.replace(b"\r\n", b"")
+    assert len(new_lines) == len(old_lines)
+
+    changed = [(a, b) for a, b in zip(old_lines, new_lines) if a != b]
+    changed_keys = {b.split(b":")[0] for _, b in changed}
+    assert changed_keys <= {b"intensity_threshold", b"neighborhood_size", b"max_stars", b"segment_radius",
+                            b"max_feature_ratio", b"roundness_threshold"}
+    assert cr.parse(cfg_path).intensity_threshold == 41
+
+
+@pytest.mark.parametrize("text, check", [
+    # An empty value must not swallow the line ending
+    ("[StarExtraction]\nmax_stars: \nsegment_radius: 3\n", None),
+    # configparser does not strip section names, so this is not the StarExtraction section
+    ("[ StarExtraction ]\nmax_stars: 1\n", "[ StarExtraction ]\nmax_stars: 1\n"),
+    # An indented line is the continuation of the value above it
+    ("[StarExtraction]\nmax_stars: 200\n  intensity_threshold: 5\n", None),
+])
+def testUpdateConfigLinesParserEdgeCases(text, check):
+    """ The updated lines parse with the strict parser to exactly the new values. """
+
+    import configparser
+
+    updates = {"StarExtraction": {"max_stars": "300", "segment_radius": "6", "intensity_threshold": "25"}}
+    out = "".join(SF.updateConfigLines(text.splitlines(True), updates))
+
+    parser = configparser.RawConfigParser(inline_comment_prefixes=(';',), strict=True)
+    parser.read_string(out)
+    for key, value in updates["StarExtraction"].items():
+        assert parser.get("StarExtraction", key) == value
+
+    if check is not None:
+        assert out.startswith(check)
+
+
+def testSaveConfigWriteFailureKeepsConfigAndBackup(tmp_path, quietMessages, monkeypatch):
+    """ A config write that fails while writing keeps the config and its backup and is reported. """
+
+    cfg_path = str(tmp_path / ".config")
+    shutil.copy(TEMPLATE_CONFIG, cfg_path)
+    with open(cfg_path, 'rb') as f:
+        original = f.read()
+
+    pt = _fakePlateTool(cfg_path)
+
+    # The lines are only produced while the file is being written
+    class FailingLines(object):
+        def __iter__(self):
+            yield "[StarExtraction]\n"
+            raise IOError("disk full")
+
+    monkeypatch.setattr(SF, "updateConfigLines", lambda lines, updates: FailingLines())
+
+    dialog = types.SimpleNamespace(plate_tool=pt, _refreshAll=lambda: None)
+    SF.CalibrationFilesDialog._saveFile(dialog, "Config", [str(tmp_path)])
+
+    with open(cfg_path, 'rb') as f:
+        assert f.read() == original
+
+    backups = [f for f in os.listdir(str(tmp_path)) if ".bak." in f]
+    assert len(backups) == 1
+    with open(str(tmp_path / backups[0]), 'rb') as f:
+        assert f.read() == original
+
+    assert not [f for f in os.listdir(str(tmp_path)) if f.endswith(".tmp")]
+    assert any(m.get("message_type") == "error" and "failed" in m.get("message", "") for m in quietMessages)
