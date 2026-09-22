@@ -635,3 +635,68 @@ def testKeyboardViewKeysKeepPlateparUnmodified(plateTool):
         _pressKey(pt, key)
 
     assert not pt.platepar_modified
+
+
+###################################################################################################
+# MASK EDITING
+###################################################################################################
+
+class _FakeMouseEvent(object):
+    """ Minimal mouse press event at an image position, for PlateTool.onMousePressed. """
+
+    def __init__(self, pt, x, y, button):
+        from pyqtgraph.Qt import QtCore
+        self._pos = pt.img_frame.mapViewToScene(QtCore.QPointF(x + 0.5, y + 0.5))
+        self._button = button
+
+    def button(self):
+        return self._button
+
+    def scenePos(self):
+        return self._pos
+
+
+def _loadHorizonMask(pt, dir_path):
+    """ Load a mask with a horizon polygon along the bottom of the image. """
+
+    import cv2
+
+    mask = np.full((720, 1280), 255, np.uint8)
+    cv2.fillPoly(mask, [np.array([[0, 600], [400, 550], [900, 620], [1279, 580], [1279, 719], [0, 719]])], 0)
+    mask_path = os.path.join(dir_path, "mask_horizon.bmp")
+    cv2.imwrite(mask_path, mask)
+    pt.loadMaskFromFile(mask_path)
+
+    return mask
+
+
+def _vertexCount(pt):
+    return sum(len(poly) for poly in pt.mask_polygons)
+
+
+def testMaskVerticesOnlyEditedOnMaskTab(plateTool, stationDir, qapp):
+    """ A right click near a mask vertex only deletes it on the Mask tab. """
+
+    from pyqtgraph.Qt import QtCore
+
+    pt = plateTool
+    pt.show()
+    pt.resize(1600, 1000)
+    qapp.processEvents()
+
+    _loadHorizonMask(pt, stationDir)
+    n_vertices = _vertexCount(pt)
+    right = QtCore.Qt.MouseButton.RightButton
+
+    # On another tab, and in the manual reduction mode, the vertex is left alone
+    vx, vy = pt.mask_polygons[0][1]
+    assert not pt.isMaskTabCurrent()
+    pt.onMousePressed(_FakeMouseEvent(pt, vx + 3, vy + 3, right))
+    assert _vertexCount(pt) == n_vertices
+
+    # On the Mask tab it is deleted
+    mask_idx = pt.tab.indexOf(pt.tab.mask)
+    pt.tab.setCurrentIndex(mask_idx)
+    pt.tab.onTabBarClicked(mask_idx)
+    pt.onMousePressed(_FakeMouseEvent(pt, vx + 3, vy + 3, right))
+    assert _vertexCount(pt) == n_vertices - 1

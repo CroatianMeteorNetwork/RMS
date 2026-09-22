@@ -6915,6 +6915,19 @@ class PlateTool(QtWidgets.QMainWindow):
         self.updatePanningEnabled()
 
 
+    def isMaskTabCurrent(self):
+        """ Check whether the Mask tab is the open tab.
+
+        Return:
+            [bool] True if the Mask tab exists and is open.
+        """
+
+        if not (hasattr(self, 'tab') and hasattr(self.tab, 'mask')):
+            return False
+
+        return self.tab.currentIndex() == self.tab.indexOf(self.tab.mask)
+
+
     def updatePanningEnabled(self):
         """ Enable or disable panning the image frame with a mouse drag.
 
@@ -6929,9 +6942,8 @@ class PlateTool(QtWidgets.QMainWindow):
         block_panning = False
 
         # Block panning while the mask tab is open, as drags are used for polygon and brush editing
-        if hasattr(self, 'tab') and hasattr(self.tab, 'mask'):
-            if self.tab.currentIndex() == self.tab.indexOf(self.tab.mask):
-                block_panning = True
+        if self.isMaskTabCurrent():
+            block_panning = True
 
         # Block panning while the mask brush is active
         if getattr(self, 'mask_brush_mode', False):
@@ -11223,6 +11235,11 @@ class PlateTool(QtWidgets.QMainWindow):
         self.press_scene_y = pos.y()
         self.press_button = event.button()
         self.press_modifiers = modifiers
+
+        # The mask is only edited on the Mask tab. Elsewhere a click near a mask vertex is meant for
+        #   something else (e.g. a right click to unpair a star near the horizon)
+        if not self.isMaskTabCurrent():
+            return
 
         # Handle brush painting
         if self.mask_brush_mode:
