@@ -11275,7 +11275,51 @@ class PlateTool(QtWidgets.QMainWindow):
         # Star picking is handled in onMouseReleased to distinguish clicks from drags (panning)
 
 
+    def _plateparFingerprint(self):
+        """ Values of the platepar that the keyboard shortcuts edit, to detect an unsaved change.
+
+            The reference time is left out, as it follows the image and is not an edit.
+
+        Return:
+            [tuple] or None if there is no platepar.
+        """
+
+        pp = self.platepar
+        if pp is None:
+            return None
+
+        scalars = tuple(getattr(pp, name, None) for name in (
+            'RA_d', 'dec_d', 'pos_angle_ref', 'F_scale', 'az_centre', 'alt_centre', 'extinction_scale',
+            'refraction', 'distortion_type', 'equal_aspect', 'asymmetry_corr', 'force_distortion_centre',
+            'vignetting_coeff', 'vignetting_fixed'))
+
+        polys = tuple(np.asarray(getattr(pp, name)).tobytes() for name in (
+            'x_poly_fwd', 'x_poly_rev', 'y_poly_fwd', 'y_poly_rev'))
+
+        return scalars + polys
+
+
     def keyPressEvent(self, event):
+        """ Handle all keyboard shortcuts, and flag the platepar as modified if a shortcut changed it.
+
+        Arguments:
+            event: [QKeyEvent] Key press event.
+        """
+
+        # Snapshot the platepar, so every shortcut that edits it (WASD, Q/E, scale, the number keys,
+        #   the distortion type, a fit...) marks it as unsaved without each having to remember to
+        platepar = getattr(self, 'platepar', None)
+        before = self._plateparFingerprint() if platepar is not None else None
+
+        self._handleKeyPress(event)
+
+        # A different platepar object means a platepar was loaded, which is not an edit
+        if (platepar is not None) and (self.platepar is platepar):
+            if self._plateparFingerprint() != before:
+                self.platepar_modified = True
+
+
+    def _handleKeyPress(self, event):
         """ Handle all keyboard shortcuts. The bindings are grouped into the ones which are always
             available, and the ones which are only active in the skyfit or the manualreduction mode.
 

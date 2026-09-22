@@ -582,3 +582,56 @@ def testChangeStationCancelKeepsCurrentStation(plateTool, secondStationDir):
     after = (pt.dir_path, pt.config.config_file_name, pt.platepar_file, pt.img_handle.dir_path,
              id(pt.catalog_stars), id(pt.mask))
     assert after == before
+
+
+###################################################################################################
+# KEYBOARD
+###################################################################################################
+
+def _pressKey(pt, key, modifiers=None):
+    """ Send a key press to the plate tool.
+
+    Arguments:
+        pt: [PlateTool] The plate tool.
+        key: [Qt.Key] Key to press.
+
+    Keyword arguments:
+        modifiers: [Qt.KeyboardModifier] Modifiers of the event. None (default) for no modifier.
+    """
+
+    from pyqtgraph.Qt import QtCore, QtGui
+
+    if modifiers is None:
+        modifiers = QtCore.Qt.KeyboardModifier.NoModifier
+
+    event = QtGui.QKeyEvent(QtCore.QEvent.Type.KeyPress, key, modifiers)
+    pt.keyPressEvent(event)
+
+
+@pytest.mark.parametrize("key_name", ["Key_W", "Key_A", "Key_Q", "Key_E", "Key_Up", "Key_1", "Key_9"])
+def testKeyboardEditMarksPlateparModified(plateTool, key_name):
+    """ Keyboard edits of the platepar trigger the unsaved changes prompt. """
+
+    from pyqtgraph.Qt import QtCore
+
+    pt = plateTool
+    assert pt.mode == 'skyfit'
+    pt.platepar_modified = False
+
+    _pressKey(pt, getattr(QtCore.Qt.Key, key_name))
+
+    assert pt.platepar_modified
+
+
+def testKeyboardViewKeysKeepPlateparUnmodified(plateTool):
+    """ Keys that do not edit the platepar do not mark it modified. """
+
+    from pyqtgraph.Qt import QtCore
+
+    pt = plateTool
+    pt.platepar_modified = False
+
+    for key in (QtCore.Qt.Key.Key_M, QtCore.Qt.Key.Key_H, QtCore.Qt.Key.Key_Right, QtCore.Qt.Key.Key_Plus):
+        _pressKey(pt, key)
+
+    assert not pt.platepar_modified
