@@ -761,21 +761,124 @@ def testStopPendingCaptureStopsOnceAndRecordsDroppedFrames(tmp_path, monkeypatch
     assert recorded == {(str(tmp_path), 'dropped_frames'): 5}
 
 
-def testRebootStopsPendingCaptureBeforeShutdownCommand():
-    """ In the main loop the pending capture is stopped right before the reboot command, and again
-        (no-op if already stopped) before capture resumes after a reboot that did not happen.
+def testMainLoopStopsPendingCaptureBeforeResuming():
+    """ After tryRebootAfterProcessing returns (no reboot), the main loop stops the pending capture
+        before runCapture can start a second one.
     """
 
     with open(os.path.join(RMS_ROOT, 'RMS', 'StartCapture.py')) as f:
         src = f.read()
 
     main_src = src[src.index('if __name__ == "__main__":'):]
-    i_stop = main_src.index('stopPendingCapture()')
-    i_reboot = main_src.index("os.system('sudo shutdown -r now')")
+    i_call = main_src.index('tryRebootAfterProcessing(')
     i_resume = main_src.index('Reboot did not happen, resuming capture')
 
-    assert i_stop < i_reboot
-    assert 'stopPendingCapture()' in main_src[i_reboot:i_resume]
+    assert 'stopPendingCapture()' in main_src[i_call:i_resume]
+
+
+class _Uploading(object):
+    """ Upload manager stand-in whose upload_in_progress flag is controlled by the test. """
+
+    def __init__(self):
+
+        import threading
+
+        self.upload_in_progress = threading.Event()
+
+
+def _rebootHarness(monkeypatch, tmp_path, uploading_iterations, dusk_after=None):
+    """ Drive tryRebootAfterProcessing with fakes for the capture, sleep and os.system.
+
+    Arguments:
+        uploading_iterations: [int] Number of 1-minute waits during which an upload is in progress.
+
+    Keyword arguments:
+        dusk_after: [int] Number of 1-minute waits after which the mode switcher turns to night, or
+            None for never.
+
+    Return:
+        events: [list] Ordered log of 'stop', 'reboot' and 'wait' events.
+    """
+
+    import types
+    import RMS.StartCapture as sc
+
+    events = []
+
+    class _Capture(object):
+        def stopCapture(self):
+            events.append('stop')
+            return 0
+
+    monkeypatch.setattr(sc, 'log', logging.getLogger('rmslogger'), raising=False)
+    monkeypatch.setattr(sc, 'getObservationSummaryDict', lambda night_dir: {'night_data_dir': night_dir})
+    monkeypatch.setattr(sc, 'addObsParam', lambda d, k, v: None)
+    monkeypatch.setattr(sc, 'REBOOT_PENDING_CAPTURE', (_Capture(), str(tmp_path)))
+
+    upload_manager = _Uploading()
+    daytime_mode = multiprocessing.Value('b', True, lock=False)
+    waits = [0]
+
+    def fakeSleep(seconds):
+
+        # Only the 1-minute retry waits count; the uploads and dusk follow them
+        if seconds != 60:
+            return
+
+        waits[0] += 1
+        events.append('wait')
+        if waits[0] >= uploading_iterations:
+            upload_manager.upload_in_progress.clear()
+        if (dusk_after is not None) and (waits[0] >= dusk_after):
+            daytime_mode.value = False
+
+    def fakeSystem(cmd):
+
+        # A failed reboot command: the helper gives up at once
+        events.append('reboot')
+        return 256
+
+    monkeypatch.setattr(sc, 'time', types.SimpleNamespace(sleep=fakeSleep, time=time.time))
+    monkeypatch.setattr(sc.os, 'system', fakeSystem)
+
+    if uploading_iterations:
+        upload_manager.upload_in_progress.set()
+
+    config = types.SimpleNamespace(continuous_capture=True, data_dir=str(tmp_path),
+        reboot_lock_file='.reboot_lock')
+    sc.tryRebootAfterProcessing(config, upload_manager, True, daytime_mode=daytime_mode)
+
+    return events
+
+
+def testRebootKeepsCapturingUntilTheRebootIsIssued(tmp_path, monkeypatch):
+    """ The capture keeps running through the upload wait and is stopped right before the reboot. """
+
+    events = _rebootHarness(monkeypatch, tmp_path, uploading_iterations=3)
+
+    assert events == ['wait', 'wait', 'wait', 'stop', 'reboot']
+
+
+def testRebootWaitStopsCaptureAtDusk(tmp_path, monkeypatch):
+    """ If night mode starts while the reboot waits, the daytime capture is stopped then, once. """
+
+    events = _rebootHarness(monkeypatch, tmp_path, uploading_iterations=5, dusk_after=2)
+
+    assert events == ['wait', 'wait', 'stop', 'wait', 'wait', 'wait', 'reboot']
+
+
+def testRebootNeverIssuedLeavesCaptureToMainLoop(tmp_path, monkeypatch):
+    """ If the retries run out in daylight, the helper leaves the capture running (the main loop
+        stops it before resuming) and never issues the reboot.
+    """
+
+    import RMS.StartCapture as sc
+
+    events = _rebootHarness(monkeypatch, tmp_path, uploading_iterations=10**6)
+
+    assert events.count('wait') == 4*60
+    assert ('stop' not in events) and ('reboot' not in events)
+    assert sc.REBOOT_PENDING_CAPTURE is not None
 
 
 # ---------------------------------------------------------------------------
@@ -1280,3 +1383,27 @@ def testUploadManagerStopAbandonsUnkillableProcess(monkeypatch):
 
     assert all(t is not None for t in fake.join_timeouts), fake.join_timeouts
     assert signals == [9]
+
+
+def testStopPendingCaptureSkipsFinalizedSummary(tmp_path, monkeypatch):
+    """ Once the night was finalized, stopping the pending capture must not recreate a working
+        observation summary for the dropped frame count.
+    """
+
+    import RMS.StartCapture as sc
+    import RMS.Formats.ObservationSummary as osm
+    from RMS.Misc import getRMSStyleFileName
+
+    night_dir = str(tmp_path/'XX0001_20260101_000000_000000')
+    os.makedirs(night_dir)
+    with open(getRMSStyleFileName(night_dir, osm.OBSERVATION_SUMMARY_NAME_JSON), 'w') as f:
+        f.write('{}')
+
+    monkeypatch.setattr(sc, 'log', logging.getLogger('rmslogger'), raising=False)
+    bc = _StoppableCapture()
+    monkeypatch.setattr(sc, 'REBOOT_PENDING_CAPTURE', (bc, night_dir))
+
+    sc.stopPendingCapture()
+
+    assert bc.stops == 1
+    assert not os.path.exists(getRMSStyleFileName(night_dir, osm.OBSERVATION_SUMMARY_WORKING_NAME_JSON))

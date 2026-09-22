@@ -193,7 +193,8 @@ _early_station_lock = _earlyStationLock()
 
 
 import git
-from RMS.Formats.ObservationSummary import addObsParam, getObservationSummaryDict
+from RMS.Formats.ObservationSummary import addObsParam, getObservationSummaryDict, \
+    OBSERVATION_SUMMARY_NAME_JSON, OBSERVATION_SUMMARY_WORKING_NAME_JSON
 
 import numpy as np
 
@@ -209,7 +210,8 @@ from RMS.Compression import Compressor
 from RMS.DeleteOldObservations import deleteOldObservations
 from RMS.DetectStarsAndMeteors import detectStarsAndMeteors
 from RMS.Formats.FFfile import validFFName
-from RMS.Misc import mkdirP, RmsDateTime, UTCFromTimestamp, setMultiprocessingStartMethod, frameBufferShape
+from RMS.Misc import mkdirP, RmsDateTime, UTCFromTimestamp, setMultiprocessingStartMethod, frameBufferShape, \
+    getRMSStyleFileName
 from RMS.QueuedPool import QueuedPool
 from RMS.Reprocess import getPlatepar, processNight, processFramesFiles, nightProcessingState, \
     readProcessingStatus, updateProcessingStatus, NIGHT_PROCESSED, NIGHT_LEGACY_PROCESSED
@@ -1204,9 +1206,14 @@ def stopPendingCapture():
         dropped_frames = bc.stopCapture()
         log.info('Total number of late or dropped frames: ' + str(dropped_frames))
 
-        # Record the dropped frame count in the observation summary, same as the normal stop path
-        obs_dict = getObservationSummaryDict(night_data_dir)
-        addObsParam(obs_dict, "dropped_frames", dropped_frames)
+        # Record the dropped frame count in the observation summary, same as the normal stop path.
+        #   Not once the night was finalized (final JSON written, working JSON removed): the summary
+        #   is archived already, and writing would only leave an orphaned working JSON behind
+        finalized = os.path.isfile(getRMSStyleFileName(night_data_dir, OBSERVATION_SUMMARY_NAME_JSON)) \
+            and (not os.path.isfile(getRMSStyleFileName(night_data_dir, OBSERVATION_SUMMARY_WORKING_NAME_JSON)))
+        if not finalized:
+            obs_dict = getObservationSummaryDict(night_data_dir)
+            addObsParam(obs_dict, "dropped_frames", dropped_frames)
 
     except Exception:
         log.exception('Stopping the capture before the reboot failed')
@@ -1394,6 +1401,116 @@ def processIncompleteCaptures(config, upload_manager):
                 log.info("Capture should have started, do not start reprocessing another directory")
                 break
 
+
+
+
+def tryRebootAfterProcessing(config, upload_manager, start_time, daytime_mode=None):
+    """ Reboot the computer after the night was processed, waiting (up to 4 hours) while an upload is
+        in progress or the reboot lock file exists.
+
+        In continuous mode the daytime capture left running by runCapture (REBOOT_PENDING_CAPTURE) is
+        stopped right before the reboot command, or as soon as the mode switcher turns to night mode
+        during the wait. Returns without rebooting if the reboot command fails, the retries run out
+        or, in standard mode, the capture should start.
+
+    Arguments:
+        config: [config object] Configuration read from the .config file.
+        upload_manager: [UploadManager object] Upload manager whose upload in progress delays the
+            reboot, or None.
+        start_time: [datetime or bool] Start time of the next capture (see captureDuration).
+
+    Keyword arguments:
+        daytime_mode: [multiprocessing.Value] Shared day/night flag of the continuous mode switcher, or
+            None. None by default.
+    """
+
+    log.info("Trying to reboot after processing in 30 seconds...")
+    time.sleep(30)
+
+    # Try rebooting for 4 hours, stop if capture should run
+    for reboot_try in range(4*60):
+
+        # Continuous mode: the daytime capture keeps running while the reboot waits, but once the
+        #   mode switcher turns to night there is no compressor for its frames - stop it then
+        if (daytime_mode is not None) and (not daytime_mode.value) and (REBOOT_PENDING_CAPTURE is not None):
+            log.info("Night mode started while waiting to reboot, stopping the daytime capture")
+            stopPendingCapture()
+
+        reboot_go = True
+
+        # Check if the upload manager is uploading
+        if upload_manager is not None:
+
+            # Prevent rebooting if the upload manager is uploading
+            if upload_manager.upload_in_progress.is_set():
+                log.info("Reboot delayed for 1 minute due to upload...")
+                reboot_go = False
+
+        # Check if the reboot lock file exists
+        reboot_lock_file_path = os.path.join(config.data_dir, config.reboot_lock_file)
+        if os.path.exists(reboot_lock_file_path):
+            log.info("Reboot delayed for 1 minute because the lock file exists: {:s}".format(reboot_lock_file_path))
+            reboot_go = False
+
+
+        # Reboot the computer
+        if reboot_go:
+
+            log.info('Rebooting now!')
+
+            # Continuous mode: the capture only stops now, right before the reboot
+            stopPendingCapture()
+
+            # Reboot the computer (script needs sudo privileges, works only on Linux)
+            try:
+                exit_status = os.system('sudo shutdown -r now')
+
+                if exit_status == 0:
+
+                    # The reboot command was accepted - wait in place for the system to go
+                    # down. Don't re-run the command, as a repeat invocation during the
+                    # shutdown can return non-zero and falsely report a failure
+                    log.info('Reboot command accepted, waiting for the system to go down...')
+                    time.sleep(300)
+                    log.error('System still running 5 minutes after the reboot command '
+                        'succeeded, giving up on rebooting')
+
+                else:
+
+                    # os.system returns a wait status, not the exit code directly
+                    if hasattr(os, 'waitstatus_to_exitcode'):
+                        exit_code = os.waitstatus_to_exitcode(exit_status)
+                    else:
+                        exit_code = exit_status >> 8
+
+                    log.error('Reboot command failed with exit code {}, '
+                        'giving up on rebooting'.format(exit_code))
+
+                break
+
+            except Exception as e:
+                log.debug('Rebooting failed with message:\n' + repr(e))
+                log.debug(repr(traceback.format_exception(*sys.exc_info())))
+
+        else:
+
+            # Wait one more minute and try again to reboot
+            time.sleep(60)
+
+
+        ### Stop reboot tries if it's time to capture ###
+        if (not config.continuous_capture):
+            
+            if isinstance(start_time, bool):
+                if start_time:
+                    break
+
+            time_now = RmsDateTime.utcnow()
+            waiting_time = start_time - time_now
+            if waiting_time.total_seconds() <= 0:
+                break
+
+        ### ###
 
 
 
@@ -1616,87 +1733,7 @@ if __name__ == "__main__":
         # Reboot the computer after processing is done for the previous night
         if ran_once and config.reboot_after_processing:
 
-            log.info("Trying to reboot after processing in 30 seconds...")
-            time.sleep(30)
-
-            # Try rebooting for 4 hours, stop if capture should run
-            for reboot_try in range(4*60):
-
-                reboot_go = True
-
-                # Check if the upload manager is uploading
-                if upload_manager is not None:
-
-                    # Prevent rebooting if the upload manager is uploading
-                    if upload_manager.upload_in_progress.is_set():
-                        log.info("Reboot delayed for 1 minute due to upload...")
-                        reboot_go = False
-
-                # Check if the reboot lock file exists
-                reboot_lock_file_path = os.path.join(config.data_dir, config.reboot_lock_file)
-                if os.path.exists(reboot_lock_file_path):
-                    log.info("Reboot delayed for 1 minute because the lock file exists: {:s}".format(reboot_lock_file_path))
-                    reboot_go = False
-
-
-                # Reboot the computer
-                if reboot_go:
-
-                    log.info('Rebooting now!')
-
-                    # Continuous mode: the capture only stops now, right before the reboot
-                    stopPendingCapture()
-
-                    # Reboot the computer (script needs sudo privileges, works only on Linux)
-                    try:
-                        exit_status = os.system('sudo shutdown -r now')
-
-                        if exit_status == 0:
-
-                            # The reboot command was accepted - wait in place for the system to go
-                            # down. Don't re-run the command, as a repeat invocation during the
-                            # shutdown can return non-zero and falsely report a failure
-                            log.info('Reboot command accepted, waiting for the system to go down...')
-                            time.sleep(300)
-                            log.error('System still running 5 minutes after the reboot command '
-                                'succeeded, giving up on rebooting')
-
-                        else:
-
-                            # os.system returns a wait status, not the exit code directly
-                            if hasattr(os, 'waitstatus_to_exitcode'):
-                                exit_code = os.waitstatus_to_exitcode(exit_status)
-                            else:
-                                exit_code = exit_status >> 8
-
-                            log.error('Reboot command failed with exit code {}, '
-                                'giving up on rebooting'.format(exit_code))
-
-                        break
-
-                    except Exception as e:
-                        log.debug('Rebooting failed with message:\n' + repr(e))
-                        log.debug(repr(traceback.format_exception(*sys.exc_info())))
-
-                else:
-
-                    # Wait one more minute and try again to reboot
-                    time.sleep(60)
-
-
-                ### Stop reboot tries if it's time to capture ###
-                if (not config.continuous_capture):
-                    
-                    if isinstance(start_time, bool):
-                        if start_time:
-                            break
-
-                    time_now = RmsDateTime.utcnow()
-                    waiting_time = start_time - time_now
-                    if waiting_time.total_seconds() <= 0:
-                        break
-
-                ### ###
+            tryRebootAfterProcessing(config, upload_manager, start_time, daytime_mode=daytime_mode)
 
             # If reboot didn't happen in continuous capture mode, reset so capture resumes normally.
             #   Stop the old capture first if the reboot was never issued, so that runCapture does
