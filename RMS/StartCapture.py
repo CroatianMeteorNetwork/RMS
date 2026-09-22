@@ -761,9 +761,10 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
                 with open(capture_resume_file_path, 'w') as f:
                     pass
 
-                # Initialize the detector
+                # Initialize the detector. The config gives the workers the same RMS-only log filter
+                #   as the other children, so third-party DEBUG records stay out of the bounded queue
                 detector = QueuedPool(detectStarsAndMeteors, cores=1, log=log, delay_start=delay_detection, \
-                    backup_dir=night_data_dir, input_queue_maxsize=None)
+                    backup_dir=night_data_dir, input_queue_maxsize=None, config=config)
                 detector.startPool()
 
 

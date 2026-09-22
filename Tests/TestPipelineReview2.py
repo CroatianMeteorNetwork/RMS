@@ -645,3 +645,25 @@ def testUploadManagerLoopReleasesLocksWhileWaiting(monkeypatch, which):
         loop.join(5)
 
     assert stub.uploads == (1 if which == 'last' else 0)
+
+
+# ---------------------------------------------------------------------------
+# Item 10: the nightly detector pool gets the config (log filter in the workers)
+
+@pytest.mark.parametrize('rel_path', ['RMS/StartCapture.py', 'RMS/DetectStarsAndMeteors.py'])
+def testQueuedPoolCallsPassConfig(rel_path):
+    """ Every QueuedPool created by the capture/detection entry points passes config=, so the
+        workers attach the InRmsFilter to their queue handler.
+    """
+
+    import ast
+
+    with open(os.path.join(RMS_ROOT, rel_path)) as f:
+        tree = ast.parse(f.read())
+
+    calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+        and (n.func.id == 'QueuedPool')]
+
+    assert calls
+    for call in calls:
+        assert 'config' in [kw.arg for kw in call.keywords], 'line {:d}'.format(call.lineno)
