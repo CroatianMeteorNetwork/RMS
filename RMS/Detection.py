@@ -364,63 +364,63 @@ def merge3DLines(line_list, vect_angle_thresh, last_count=0):
 
 
 
-# Count the images rejected by the white ratio check to rate limit the warning below. QueuedPool workers
-#   are long-lived and each process keeps its own count across images; this is not a run-wide total and
-#   must not be reported as one
-_white_ratio_reject_count = 0
-
-
-def checkWhiteRatio(img_thres, ff, max_white_ratio):
+def checkWhiteRatio(img_thres, ff, max_white_ratio, diagnostics=None):
     """ Checks if there are too many threshold passers on an image.
 
     Arguments:
         img_thres: [ndarray] Thresholded image.
-        ff: [FF structure] FF file structure, used for the image dimensions.
-        max_white_ratio: [float] Maximum allowed ratio between the threshold passers and all pixels.
+        ff: [FF object] FF whose planes were thresholded.
+        max_white_ratio: [float] Maximum allowed ratio between threshold passers and all pixels.
+
+    Keyword arguments:
+        diagnostics: [dict] If given, the outcome of the check is recorded in it (see getLines) so the
+            caller can report a night whose images were mostly skipped. None by default.
 
     Return:
-        [bool] True if the image is usable, False if it has too many threshold passers.
+        [bool] True if the image passed the check, False if it should be skipped.
     """
 
-    global _white_ratio_reject_count
-
-    # Check if the image is too "white" and any further processing makes no sense
-    # Compute the radio between the number of threshold passers and all pixels
-    white_ratio = np.count_nonzero(img_thres)/float(ff.nrows*ff.ncols)
+    # Compute the ratio between the number of threshold passers and all pixels
+    white_ratio = float(np.count_nonzero(img_thres))/(ff.nrows*ff.ncols)
 
     logDebug('white ratio: {:.6f}'.format(white_ratio))
 
-    if white_ratio > max_white_ratio:
+    passed = white_ratio <= max_white_ratio
 
-        _white_ratio_reject_count += 1
+    if diagnostics is not None:
+        diagnostics['white_ratio_checks'] = diagnostics.get('white_ratio_checks', 0) + 1
+        diagnostics['white_ratio_max'] = max(white_ratio, diagnostics.get('white_ratio_max', 0.0))
 
-        msg = ("Too many threshold passers! White ratio is {:.4f}, which is higher than the "\
-            "max_white_ratio threshold: {:.4f}, so detection is skipped for this image. "\
-            "This is expected on bright or cloudy images, but "\
-            "if it happens on every image of a clear night the detection k1/j1 thresholds are "\
-            "too low for this camera (e.g. video paths that smooth per-pixel temporal noise, "\
-            "such as software re-encoded streams, can push the stdpixel-based threshold below "\
-            "the maxpixel noise floor).").format(white_ratio, max_white_ratio)
+    if not passed:
 
-        # Make the first rejection (and every 100th) visible at the warning level - a station whose every
-        #   image is rejected is effectively blind to meteors, and outside of debug logging this used to be
-        #   completely silent
-        if (_white_ratio_reject_count == 1) or (_white_ratio_reject_count%100 == 0):
-            log.warning(msg)
+        # A single skipped image is normal (bright, cloudy or twilight sky where the maxpixel runs far
+        # above the average over a large area), so it is only logged at debug level. A station whose
+        # images are mostly skipped is reported once for the whole night by the caller of detection,
+        # from the diagnostics recorded here
+        log.debug(("Too many threshold passers! White ratio is {:.4f}, which is higher than the "
+            "max_white_ratio threshold: {:.4f}, skipping the image.").format(white_ratio, max_white_ratio))
 
-        else:
-            log.debug(msg)
+        if diagnostics is not None:
 
-        return False
+            diagnostics['white_ratio_rejections'] = diagnostics.get('white_ratio_rejections', 0) + 1
 
+            # Measure how far the maxpixel noise floor sits above the temporal noise the threshold is
+            # built from. On a healthy camera the median maxpixel excess over avepixel is a few
+            # stdpixel. Video paths that smooth per-pixel temporal noise (software re-encoded or some
+            # IP camera streams) shrink stdpixel far below the excess, which puts the k1*stdpixel + j1
+            # threshold under the noise floor on every clear image
+            if 'maxpixel_excess_median' not in diagnostics:
+                excess = ff.maxpixel.astype(np.float64) - ff.avepixel.astype(np.float64)
+                diagnostics['maxpixel_excess_median'] = float(np.median(excess))
+                diagnostics['stdpixel_median'] = float(np.median(ff.stdpixel))
 
-    return True
+    return passed
 
 
 
 
 def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_white_ratio, \
-    mask=None, flat_struct=None, dark=None, debug=False):
+    mask=None, flat_struct=None, dark=None, debug=False, diagnostics=None):
     """ Get (rho, phi) pairs for each meteor present on the image using KHT.
 
     Arguments:
@@ -434,6 +434,12 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
         mask: [MaskStruct] Mask structure.
         flat_struct: [FlatStruct]  Flat frame structure.
         dark: [ndarray] Dark frame.
+        debug: [bool] Show the thresholded image of every time window. False by default.
+        diagnostics: [dict] If given, the white ratio checks are recorded in it: 'white_ratio_checks'
+            and 'white_ratio_rejections' count the checks and the skipped images (one check per FF, or
+            one per time window for other inputs), 'white_ratio_max' is the largest ratio seen, and
+            'maxpixel_excess_median' and 'stdpixel_median' describe the noise floor of the first
+            skipped image. None by default.
 
 
     Return:
@@ -453,7 +459,7 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
         # show("thresholded ALL", img_thres)
 
         # Check if there are too many threshold passers, if so report that no lines were found
-        if not checkWhiteRatio(img_thres, img_handle.ff, max_white_ratio):
+        if not checkWhiteRatio(img_thres, img_handle.ff, max_white_ratio, diagnostics=diagnostics):
             return line_results
 
 
@@ -496,7 +502,7 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
             img = thresholdFF(img_handle.ff, k1, j1, mask=mask)
 
             # Check if there are too many threshold passers, if so report that no lines were found
-            if not checkWhiteRatio(img, img_handle.ff, max_white_ratio):
+            if not checkWhiteRatio(img, img_handle.ff, max_white_ratio, diagnostics=diagnostics):
                 continue
 
 
@@ -1073,7 +1079,8 @@ def thresholdAndCorrectGammaFF(img_handle, config, mask):
 
 
 
-def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, asgard=False, debug=False):
+def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, asgard=False, debug=False, \
+    diagnostics=None):
     """ Detect meteors on the given image. Here are the steps in the detection:
             - input image (FF bin format file) is thresholded (converted to black and white)
             - several morphological operations are applied to clean the image
@@ -1096,6 +1103,8 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
         asgard: [bool] If True, the vid file sequence number will be added in with the frame. False by 
             default, in which case only the frame number will be in the centroids.
         debug: [bool] If True, graphs for testing the detection settings will be shown. False by default.
+        diagnostics: [dict] If given, the white ratio checks are recorded in it (see getLines). None by
+            default.
     
     Return:
         meteor_detections: [list] a list of detected meteors, with these elements:
@@ -1135,7 +1144,7 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
     # Get lines on the image
     line_list = getLines(img_handle, config.k1_det, config.j1_det, config.time_slide, config.time_window_size,
         config.max_lines_det, config.max_white_ratio, mask=mask, \
-        flat_struct=flat_struct, dark=dark, debug=debug)
+        flat_struct=flat_struct, dark=dark, debug=debug, diagnostics=diagnostics)
 
     # logDebug('List of lines:', line_list)
 
