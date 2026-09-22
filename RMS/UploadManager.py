@@ -645,14 +645,25 @@ class UploadManager(multiprocessing.Process):
         if self.is_alive():
             log.error(
                 "UploadManager still alive after terminate() & %d more seconds. "
-                "It may be stuck in a non-interruptible blocking call.",
+                "It may be stuck in a non-interruptible blocking call, sending SIGKILL.",
                 short_wait
             )
+
+            # SIGKILL (numeric: signal.SIGKILL does not exist on Windows)
+            try:
+                os.kill(self.pid, 9)
+            except (OSError, AttributeError):
+                pass
+
         else:
             log.info("UploadManager terminated (after forced terminate).")
 
-        # Always join to reap zombie (returns instantly if already dead)
-        self.join()
+        # Reap the zombie, bounded: a process stuck in uninterruptible I/O survives even SIGKILL,
+        #   and an unbounded join would wedge the shutdown of StartCapture on it
+        self.join(short_wait)
+        if self.is_alive():
+            log.warning("UploadManager survived SIGKILL (uninterruptible I/O?), abandoning it")
+
         self._shutdownManager()
 
 

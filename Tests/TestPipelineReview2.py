@@ -1216,3 +1216,46 @@ def testCompressorStopWaitsForNormalExit(method):
 
     assert not fake.terminated, 'a normally exiting compressor was terminated'
     assert fake.exitcode == 0
+
+
+# ---------------------------------------------------------------------------
+# Review 2, item 2: UploadManager.stop must not join an unkillable process without a bound
+
+class _UnkillableUploader(object):
+    """ Stand-in for an UploadManager that survives terminate and SIGKILL. """
+
+    def __init__(self):
+
+        from RMS.Misc import AtomicFlag
+
+        self.exit = AtomicFlag()
+        self.pid = 999999999
+        self._mgr = None
+        self.join_timeouts = []
+
+    def is_alive(self):
+        return True
+
+    def terminate(self):
+        pass
+
+    def join(self, timeout=None):
+        self.join_timeouts.append(timeout)
+
+    def _shutdownManager(self):
+        pass
+
+
+def testUploadManagerStopAbandonsUnkillableProcess(monkeypatch):
+    """ stop() escalates to SIGKILL and gives up instead of joining forever. """
+
+    import RMS.UploadManager as um
+
+    signals = []
+    monkeypatch.setattr(um.os, 'kill', lambda pid, sig: signals.append(sig))
+
+    fake = _UnkillableUploader()
+    um.UploadManager.stop(fake, timeout=0.01)
+
+    assert all(t is not None for t in fake.join_timeouts), fake.join_timeouts
+    assert signals == [9]
