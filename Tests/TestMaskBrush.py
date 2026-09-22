@@ -1,59 +1,16 @@
-"""Tests for brush mask painting logic (no GUI dependencies)."""
+""" Tests for the SkyFit2 mask editing helpers in RMS.Routines.MaskImage (no GUI dependencies). """
+
+from __future__ import print_function, division, absolute_import
 
 import numpy as np
 import cv2
-import pytest
 
-
-def generate_mask_image(mask_polygons, mask_paint_layer, img_width, img_height):
-    """Reimplementation of SkyFit2.generateMaskImage for testing."""
-    mask = np.full((img_height, img_width), 255, dtype=np.uint8)
-
-    for polygon in mask_polygons:
-        pts = np.array(polygon, dtype=np.int32)
-        cv2.fillPoly(mask, [pts], 0)
-
-    if mask_paint_layer is not None:
-        mask[mask_paint_layer == 1] = 0
-        mask[mask_paint_layer == 2] = 255
-
-    return mask
-
-
-def overlay_from_mask(mask_polygons, mask_paint_layer, img_width, img_height):
-    """Reimplementation of SkyFit2.updateMaskOverlayImage logic for testing."""
-    mask_img = np.zeros((img_height, img_width), dtype=np.uint8)
-
-    for polygon in mask_polygons:
-        pts = np.array(polygon, dtype=np.int32)
-        cv2.fillPoly(mask_img, [pts], 1)
-
-    if mask_paint_layer is not None:
-        mask_img[mask_paint_layer == 1] = 1
-        mask_img[mask_paint_layer == 2] = 0
-
-    return mask_img
-
-
-def compute_residuals(mask_img, mask_polygons):
-    """Reimplementation of loadMaskFromFile residual detection."""
-    polygon_mask = np.full_like(mask_img, 255)
-    for polygon in mask_polygons:
-        pts = np.array(polygon, dtype=np.int32)
-        cv2.fillPoly(polygon_mask, [pts], 0)
-
-    img_height, img_width = mask_img.shape[:2]
-    paint_layer = np.zeros((img_height, img_width), dtype=np.uint8)
-    paint_layer[(mask_img == 0) & (polygon_mask == 255)] = 1
-    paint_layer[(mask_img == 255) & (polygon_mask == 0)] = 2
-
-    if np.any(paint_layer != 0):
-        return paint_layer
-    return None
+from RMS.Routines.MaskImage import compositeMaskLayers, maskRasterResiduals, decomposeMaskImage, \
+    paintBrushSegment, PAINT_MASKED, PAINT_UNMASKED
 
 
 class TestPaintLayerCompositing:
-    """Test that paint layer correctly overrides polygon mask."""
+    """ The paint layer must override the polygon fill. """
 
     def setup_method(self):
         self.width = 100
@@ -61,7 +18,9 @@ class TestPaintLayerCompositing:
 
     def test_polygon_only(self):
         polygons = [[(10, 10), (50, 10), (50, 50), (10, 50)]]
-        mask = generate_mask_image(polygons, None, self.width, self.height)
+        mask = compositeMaskLayers(polygons, None, self.width, self.height)
+        assert mask.shape == (self.height, self.width)
+        assert mask.dtype == np.uint8
         assert mask[10, 10] == 0
         assert mask[30, 30] == 0
         assert mask[0, 0] == 255
@@ -69,57 +28,66 @@ class TestPaintLayerCompositing:
 
     def test_brush_mask_only(self):
         paint = np.zeros((self.height, self.width), dtype=np.uint8)
-        cv2.circle(paint, (60, 40), 10, 1, -1)
-        mask = generate_mask_image([], paint, self.width, self.height)
+        cv2.circle(paint, (60, 40), 10, PAINT_MASKED, -1)
+        mask = compositeMaskLayers([], paint, self.width, self.height)
         assert mask[40, 60] == 0
         assert mask[0, 0] == 255
 
     def test_brush_erase_inside_polygon(self):
         polygons = [[(0, 0), (99, 0), (99, 79), (0, 79)]]
         paint = np.zeros((self.height, self.width), dtype=np.uint8)
-        cv2.circle(paint, (50, 40), 10, 2, -1)
+        cv2.circle(paint, (50, 40), 10, PAINT_UNMASKED, -1)
 
-        mask = generate_mask_image(polygons, paint, self.width, self.height)
+        mask = compositeMaskLayers(polygons, paint, self.width, self.height)
         assert mask[40, 50] == 255
         assert mask[0, 0] == 0
 
     def test_brush_overrides_polygon(self):
         polygons = [[(20, 20), (40, 20), (40, 40), (20, 40)]]
         paint = np.zeros((self.height, self.width), dtype=np.uint8)
-        paint[25, 25] = 2
+        paint[25, 25] = PAINT_UNMASKED
 
-        mask = generate_mask_image(polygons, paint, self.width, self.height)
+        mask = compositeMaskLayers(polygons, paint, self.width, self.height)
         assert mask[25, 25] == 255
         assert mask[30, 30] == 0
 
     def test_empty_paint_layer_no_effect(self):
         polygons = [[(10, 10), (50, 10), (50, 50), (10, 50)]]
         paint = np.zeros((self.height, self.width), dtype=np.uint8)
-        mask_with = generate_mask_image(polygons, paint, self.width, self.height)
-        mask_without = generate_mask_image(polygons, None, self.width, self.height)
+        mask_with = compositeMaskLayers(polygons, paint, self.width, self.height)
+        mask_without = compositeMaskLayers(polygons, None, self.width, self.height)
         np.testing.assert_array_equal(mask_with, mask_without)
+
+    def test_mismatched_paint_layer_is_resampled(self):
+        """ A paint layer saved for a smaller frame is scaled up with nearest-neighbour interpolation. """
+
+        paint = np.zeros((40, 50), dtype=np.uint8)
+        paint[10:20, 10:20] = PAINT_MASKED
+        mask = compositeMaskLayers([], paint, self.width, self.height)
+        assert mask.shape == (self.height, self.width)
+        assert mask[30, 30] == 0
+        assert mask[10, 10] == 255
 
 
 class TestOverlayConsistency:
-    """Test that overlay display matches the saved mask."""
+    """ The overlay (1 = masked) must show exactly the pixels the saved mask (0 = masked) masks. """
 
     def test_overlay_matches_mask(self):
         w, h = 100, 80
         polygons = [[(10, 10), (50, 10), (50, 50), (10, 50)]]
         paint = np.zeros((h, w), dtype=np.uint8)
-        cv2.circle(paint, (70, 60), 8, 1, -1)
-        paint[30, 30] = 2
+        cv2.circle(paint, (70, 60), 8, PAINT_MASKED, -1)
+        paint[30, 30] = PAINT_UNMASKED
 
-        mask = generate_mask_image(polygons, paint, w, h)
-        overlay = overlay_from_mask(polygons, paint, w, h)
+        mask = compositeMaskLayers(polygons, paint, w, h)
+        overlay = compositeMaskLayers(polygons, paint, w, h, masked_value=1, unmasked_value=0)
 
-        masked_pixels = (mask == 0)
-        overlay_pixels = (overlay == 1)
-        np.testing.assert_array_equal(masked_pixels, overlay_pixels)
+        np.testing.assert_array_equal(mask == 0, overlay == 1)
+        assert set(np.unique(overlay).tolist()) <= {0, 1}
 
 
 class TestUndoSystem:
-    """Test the undo snapshot logic."""
+    """ Test the undo snapshot logic. """
 
     def test_undo_restores_previous_state(self):
         h, w = 80, 100
@@ -158,47 +126,29 @@ class TestUndoSystem:
 
 
 class TestResidualDetection:
-    """Test loadMaskFromFile residual logic."""
+    """ Loading a mask must recover polygons plus the raster residuals so the round trip is lossless. """
 
     def test_pure_polygon_mask_no_residual(self):
         w, h = 100, 80
         polygons = [[(10, 10), (50, 10), (50, 50), (10, 50)]]
-        mask = generate_mask_image(polygons, None, w, h)
+        mask = compositeMaskLayers(polygons, None, w, h)
 
-        # Simulate load: find contours, simplify
-        inverted = cv2.bitwise_not(mask)
-        contours, _ = cv2.findContours(inverted, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        loaded_polygons = []
-        for contour in contours:
-            epsilon = 0.002 * cv2.arcLength(contour, True)
-            approx = cv2.approxPolyDP(contour, epsilon, True)
-            points = [(float(pt[0][0]), float(pt[0][1])) for pt in approx]
-            if len(points) >= 3:
-                loaded_polygons.append(points)
+        loaded_polygons, residual = decomposeMaskImage(mask)
 
-        residual = compute_residuals(mask, loaded_polygons)
         # Rectangle should round-trip perfectly
+        assert len(loaded_polygons) == 1
         assert residual is None
+        assert maskRasterResiduals(mask, loaded_polygons) is None
 
     def test_brush_strokes_create_residual(self):
         w, h = 100, 80
         paint = np.zeros((h, w), dtype=np.uint8)
-        cv2.circle(paint, (50, 40), 15, 1, -1)
-        mask = generate_mask_image([], paint, w, h)
-
-        inverted = cv2.bitwise_not(mask)
-        contours, _ = cv2.findContours(inverted, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        loaded_polygons = []
-        for contour in contours:
-            epsilon = 0.002 * cv2.arcLength(contour, True)
-            approx = cv2.approxPolyDP(contour, epsilon, True)
-            points = [(float(pt[0][0]), float(pt[0][1])) for pt in approx]
-            if len(points) >= 3:
-                loaded_polygons.append(points)
+        cv2.circle(paint, (50, 40), 15, PAINT_MASKED, -1)
+        mask = compositeMaskLayers([], paint, w, h)
 
         # Round-trip via residual detection must recover the original mask exactly
-        residual = compute_residuals(mask, loaded_polygons)
-        remask = generate_mask_image(loaded_polygons, residual, w, h)
+        loaded_polygons, residual = decomposeMaskImage(mask)
+        remask = compositeMaskLayers(loaded_polygons, residual, w, h)
         np.testing.assert_array_equal(mask, remask,
             err_msg="Brush stroke round-trip via residual detection lost pixels")
 
@@ -206,44 +156,111 @@ class TestResidualDetection:
         w, h = 100, 80
         polygons = [[(0, 0), (99, 0), (99, 79), (0, 79)]]
         paint = np.zeros((h, w), dtype=np.uint8)
-        cv2.circle(paint, (50, 40), 10, 2, -1)
-        mask = generate_mask_image(polygons, paint, w, h)
+        cv2.circle(paint, (50, 40), 10, PAINT_UNMASKED, -1)
+        mask = compositeMaskLayers(polygons, paint, w, h)
 
-        # Load and reconstruct
-        inverted = cv2.bitwise_not(mask)
-        contours, _ = cv2.findContours(inverted, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        loaded_polygons = []
-        for contour in contours:
-            epsilon = 0.002 * cv2.arcLength(contour, True)
-            approx = cv2.approxPolyDP(contour, epsilon, True)
-            points = [(float(pt[0][0]), float(pt[0][1])) for pt in approx]
-            if len(points) >= 3:
-                loaded_polygons.append(points)
-
-        residual = compute_residuals(mask, loaded_polygons)
-        # The erased hole will be captured as a contour, but the polygon
-        # approximation of the hole boundary may differ slightly
-        # In either case, the overall mask should be reconstructable
-        remask = generate_mask_image(loaded_polygons, residual, w, h)
+        # The erased hole boundary may not be reproduced by the polygon approximation, but the overall
+        #   mask must be reconstructable
+        loaded_polygons, residual = decomposeMaskImage(mask)
+        remask = compositeMaskLayers(loaded_polygons, residual, w, h)
         np.testing.assert_array_equal(mask, remask)
 
 
+class TestBrushSegment:
+    """ The brush footprint must be the same disc along the whole stroke. """
+
+    def test_first_point_is_a_disc(self):
+        paint = np.zeros((80, 100), dtype=np.uint8)
+        center = paintBrushSegment(paint, None, (50, 40), 5, PAINT_MASKED)
+        assert center == (50, 40)
+        expected = np.zeros_like(paint)
+        cv2.circle(expected, (50, 40), 5, PAINT_MASKED, -1)
+        np.testing.assert_array_equal(paint, expected)
+
+    def test_segment_ends_match_the_disc(self):
+        """ Every point of a stroke gets the full disc, the start and end included. """
+
+        radius = 6
+        paint = np.zeros((80, 100), dtype=np.uint8)
+        pos = paintBrushSegment(paint, None, (20, 40), radius, PAINT_MASKED)
+        paintBrushSegment(paint, pos, (70, 40), radius, PAINT_MASKED)
+
+        disc_start = np.zeros_like(paint)
+        cv2.circle(disc_start, (20, 40), radius, 1, -1)
+        disc_end = np.zeros_like(paint)
+        cv2.circle(disc_end, (70, 40), radius, 1, -1)
+
+        assert np.all(paint[disc_start == 1] == PAINT_MASKED)
+        assert np.all(paint[disc_end == 1] == PAINT_MASKED)
+
+        # The gap between the two positions is filled
+        assert np.all(paint[40, 20:71] == PAINT_MASKED)
+
+        # Nothing far away is touched
+        assert paint[10, 10] == 0
+        assert paint[70, 90] == 0
+
+    def test_coordinates_are_clamped(self):
+        paint = np.zeros((80, 100), dtype=np.uint8)
+        center = paintBrushSegment(paint, None, (1e6, -1e6), 3, PAINT_MASKED)
+        assert center == (99, 0)
+        assert paint[0, 99] == PAINT_MASKED
+
+    def test_erase_value(self):
+        paint = np.zeros((80, 100), dtype=np.uint8)
+        paint[:] = PAINT_MASKED
+        paintBrushSegment(paint, None, (50, 40), 4, PAINT_UNMASKED)
+        assert paint[40, 50] == PAINT_UNMASKED
+        assert paint[0, 0] == PAINT_MASKED
+
+
 class TestCoordinateConsistency:
-    """Test that paint layer coordinates match the image frame."""
+    """ Paint layer indexing is row = y, col = x. """
 
     def test_paint_at_specific_point(self):
         w, h = 200, 150  # Non-square to catch axis swaps
         paint = np.zeros((h, w), dtype=np.uint8)
-        # Paint at x=180, y=10 (near right edge, near top)
-        cv2.circle(paint, (180, 10), 5, 1, -1)
-        assert paint[10, 180] == 1
+        paintBrushSegment(paint, None, (180, 10), 5, PAINT_MASKED)
+        assert paint[10, 180] == PAINT_MASKED
         assert paint[10, 0] == 0
-        # Verify array indexing: row=y, col=x
         assert paint.shape == (h, w)
 
-    def test_line_connects_points(self):
-        w, h = 100, 80
-        paint = np.zeros((h, w), dtype=np.uint8)
-        cv2.line(paint, (10, 40), (90, 40), 1, thickness=4)
-        assert paint[40, 50] == 1
-        assert paint[0, 50] == 0
+
+class TestMaskResizeConsistency(object):
+    """ A mask loaded at a different size must be resized as a raster before it is decomposed. """
+
+    def testDecomposingTheResizedRasterReproducesIt(self):
+        """ Polygons plus residuals of the resized raster composite back to exactly that raster. """
+
+        # A rectangle whose edges do not land on a scale boundary
+        mask = np.full((80, 100), 255, dtype=np.uint8)
+        mask[10:51, 10:51] = 0
+
+        # This is the order loadMaskFromFile uses: resize the raster, then decompose it
+        resized = cv2.resize(mask, (200, 160), interpolation=cv2.INTER_NEAREST)
+        polygons, paint_layer = decomposeMaskImage(resized)
+
+        composite = compositeMaskLayers(polygons, paint_layer, 200, 160)
+
+        # The editable overlay and the mask handed to star detection agree everywhere
+        assert np.array_equal(composite, resized)
+
+
+    def testScalingPolygonsInsteadLosesBoundaryPixels(self):
+        """ Scaling the vertices of the source-size polygons does not reproduce the resized raster.
+
+            This is why the raster is resized first. Kept as a test so the order is not swapped back.
+        """
+
+        mask = np.full((80, 100), 255, dtype=np.uint8)
+        mask[10:51, 10:51] = 0
+
+        resized = cv2.resize(mask, (200, 160), interpolation=cv2.INTER_NEAREST)
+
+        # Decompose at the source size and scale the polygon vertices, as the old load path did
+        polygons, _ = decomposeMaskImage(mask)
+        scaled_polygons = [[(x*2.0, y*2.0) for x, y in polygon] for polygon in polygons]
+
+        composite = compositeMaskLayers(scaled_polygons, None, 200, 160)
+
+        assert not np.array_equal(composite, resized)
