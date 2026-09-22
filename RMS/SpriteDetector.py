@@ -14,1383 +14,765 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+""" Live sprite and elve detection during capture, and the same detection run offline over a night directory.
+
+    During capture, the Compressor hands every new FF file to a SpriteDetector process through a small
+    bounded queue. For each FF the process runs the model, keeps detections that pass the artifact filter,
+    computes their sky coordinates with the station's platepar, and feeds them to a sliding-window filter that
+    throws away bursts (clouds lit by a storm, an aircraft). A detection confirmed by that filter, about a
+    minute after it happened, is recorded in the night directory and handed to the upload worker, which sends
+    it to the sprite server in the background.
+
+    The pieces live in their own modules: RMS.SpriteDetection (model and artifact filter),
+    RMS.SpriteAstrometry, RMS.SpriteFilter, RMS.SpriteProducts (everything written to disk) and
+    RMS.SpriteUpload. This module only runs them, live or offline:
+
+        python -m RMS.SpriteDetector ~/RMS_data/CapturedFiles/XX0001_20260827_230000_123456
+"""
+
 from __future__ import print_function, division, absolute_import
 
-import base64
-import collections
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.asymmetric import padding, rsa, ed25519, ec
-from cryptography.hazmat.primitives.serialization import load_ssh_private_key
-import csv
-import json
+import datetime
 import multiprocessing
 import os
-import queue
-import shutil
 import signal
+import sys
 import time
-import urllib.request
-import urllib.error
-from datetime import datetime, timezone
+import traceback
 
-import numpy as np
-from PIL import Image, ImageDraw
+try:
+    import queue
+except ImportError:
+    import Queue as queue
 
-from RMS.Formats.FFfile import reconstructFrame
-from RMS.Formats.FFfits import read as readFFfile
+from RMS.DownloadSpriteModel import downloadSpriteModel, spriteModelReady
+from RMS.Formats import FFfile
+from RMS.Formats.Platepar import Platepar
 from RMS.Logger import getLogger, getLoggingQueue, initChildProcess
 from RMS.Misc import AtomicFlag
 from RMS.Routines import MaskImage
-from Utils.FalsePositiveFilter import FalsePositiveFilter
-
-# Some functions were adapted from the yolov5 github repository (utils/general.py)
-
-
-# --- TensorFlow-Lite import cascade -----------------------------------------
-#
-# 1.  ai-edge-litert      <- new LiteRT wheels
-# 2.  tflite_runtime      <- legacy stand-alone wheels
-# 3.  tensorflow          <- TF proper, last-ditch fallback
-
-TFLITE_AVAILABLE = False
-TFLITE_BACKEND = "none"
-
-try:
-    from ai_edge_litert.interpreter import Interpreter
-    TFLITE_AVAILABLE = True
-    TFLITE_BACKEND = "litert"
-except ImportError:
-    try:
-        from tflite_runtime.interpreter import Interpreter
-        TFLITE_AVAILABLE = True
-        TFLITE_BACKEND = "tflite_runtime"
-    except ImportError:
-        try:
-            os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
-            from tensorflow.lite.python.interpreter import Interpreter
-            TFLITE_AVAILABLE = True
-            TFLITE_BACKEND = "tf_full"
-        except ImportError:
-            TFLITE_AVAILABLE = False
-
-
-# --- Astrometry imports (optional — calibration disabled if not available) ---
-
-ASTROMETRY_AVAILABLE = False
-
-try:
-    from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP
-    from RMS.Astrometry.Conversions import trueRaDec2ApparentAltAz, datetime2JD
-    from RMS.Formats.Platepar import Platepar
-    ASTROMETRY_AVAILABLE = True
-except ImportError:
-    Platepar = None
+from RMS.SpriteAstrometry import calibrateSpriteDetections, plateparProvenance, plateparUsable
+from RMS.SpriteDetection import SPRITE_TFLITE_AVAILABLE, SPRITE_TFLITE_BACKEND, detectSpritesInFF, \
+    getSpriteInterpreter
+from RMS.SpriteFilter import SpriteFalsePositiveFilter
+from RMS import SpriteProducts
+from RMS.SpriteUpload import SpriteUploadWorker
 
 
 # Get the logger from the main module
 log = getLogger("rmslogger")
 
 
-def _formatTimestamp(ts_float):
-    """ Format a Unix timestamp as an ISO 8601 UTC string with microseconds.
+# FF files waiting for the detector. An FF block is 10 s long, so this is over a minute of backlog; when it is
+#   full the Compressor skips files for sprite detection rather than wait (see RMS.Compression)
+INPUT_QUEUE_MAXSIZE = 8
+
+# How long the upload worker may keep sending at the end of the night before it gives up for now. Anything
+#   unsent stays queued on disk for the next night.
+UPLOAD_DRAIN_TIMEOUT = 60
+
+# How long stop() waits for the process to finish its last minute of filtering and the upload drain
+SHUTDOWN_TIMEOUT = UPLOAD_DRAIN_TIMEOUT + 60
+
+
+def unixTime(dt):
+    """ Seconds since the epoch of a naive UTC datetime.
+
+        datetime.timestamp() would take a naive value to be local time, which is wrong on any station that
+        is not set to UTC.
 
     Arguments:
-        ts_float: [float] Unix timestamp.
+        dt: [datetime] Naive, in UTC.
 
     Return:
-        [str] ISO 8601 string, e.g. "2025-01-01T12:00:00.123456Z".
+        [float]
     """
 
-    ts_utc = time.gmtime(ts_float)
-    micros = int((ts_float % 1) * 1000000)
-    timestamp_iso = time.strftime("%Y-%m-%dT%H:%M:%S", ts_utc)
-    timestamp_iso += ".{:06d}Z".format(micros)
-    return timestamp_iso
+    return (dt - datetime.datetime(1970, 1, 1)).total_seconds()
 
 
-# Module-level caches (one per process, survive across calls)
-_interpreter_cache = {}
-_mask_cache = {}
-_resized_mask_cache = {}
+def loadStationPlatepar(config, night_data_dir):
+    """ Load the platepar used for sprite astrometry, and say where it came from.
 
-
-# Detection class names and colors
-CLASS_NAMES = {0: "elf", 1: "sprite"}
-CLASS_COLORS = {0: "red", 1: "blue"}
-IOU_THRES = 0.1
-MAX_DET = {0: 1, 1: 4}  # 0=elf: max 1, 1=sprite: max 4
-
-
-# ###########################################################################
-#                       Inference utility functions
-# ###########################################################################
-
-def _getInterpreter(model_path):
-    """ Lazily create and cache a TFLite interpreter per worker process.
+        Same order as RMS.Formats.Platepar.findBestPlatepar: the night directory first, then the directory of
+        the configuration file. During capture the night directory has no platepar yet, so this is normally
+        the station's standing platepar.
 
     Arguments:
-        model_path: [str] Path to the TFLite model file.
+        config: [Config]
+        night_data_dir: [str] Night directory.
 
     Return:
-        [tuple] (interpreter, input_details, output_details)
+        [tuple] (platepar, path), or (None, None) if there is no readable platepar.
     """
 
-    if model_path not in _interpreter_cache:
+    candidates = [os.path.join(night_data_dir, config.platepar_name),
+                  os.path.join(config.config_file_path, config.platepar_name)]
 
-        interpreter = Interpreter(model_path=model_path)
-        interpreter.allocate_tensors()
+    for path in candidates:
 
-        input_details = interpreter.get_input_details()[0]
-        output_details = interpreter.get_output_details()[0]
-
-        log.debug("TFLite interpreter created (backend: {:s})".format(TFLITE_BACKEND))
-        log.debug("Input: shape={:s}, dtype={:s}".format(
-            str(input_details["shape"]), str(input_details["dtype"])))
-
-        _interpreter_cache[model_path] = (interpreter, input_details, output_details)
-
-    return _interpreter_cache[model_path]
-
-
-def xywh2xyxy(x):
-    """ Convert nx4 boxes from [x, y, w, h] to [x1, y1, x2, y2].
-
-    Arguments:
-        x: [ndarray] Boxes in xywh format, shape (N, 4).
-
-    Return:
-        [ndarray] Boxes in xyxy format, shape (N, 4).
-    """
-
-    y = np.copy(x)
-    y[..., 0] = x[..., 0] - x[..., 2] / 2
-    y[..., 1] = x[..., 1] - x[..., 3] / 2
-    y[..., 2] = x[..., 0] + x[..., 2] / 2
-    y[..., 3] = x[..., 1] + x[..., 3] / 2
-    return y
-
-
-def boxIouBatch(boxes_a, boxes_b):
-    """ Compute IoU between two sets of bounding boxes.
-
-    Arguments:
-        boxes_a: [ndarray] First set of boxes in xyxy format, shape (N, 4).
-        boxes_b: [ndarray] Second set of boxes in xyxy format, shape (M, 4).
-
-    Return:
-        [ndarray] IoU matrix, shape (N, M).
-    """
-
-    def box_area(box):
-        return (box[2] - box[0]) * (box[3] - box[1])
-
-    area_a = box_area(boxes_a.T)
-    area_b = box_area(boxes_b.T)
-
-    top_left = np.maximum(boxes_a[:, None, :2], boxes_b[:, :2])
-    bottom_right = np.minimum(boxes_a[:, None, 2:], boxes_b[:, 2:])
-
-    area_inter = np.prod(np.clip(bottom_right - top_left, a_min=0, a_max=None), 2)
-
-    return area_inter / (area_a[:, None] + area_b - area_inter)
-
-
-def nms(predictions, iou_threshold=0.45):
-    """ Non-maximum suppression on detection predictions.
-
-    Arguments:
-        predictions: [ndarray] Predictions with columns [x1, y1, x2, y2, score], shape (N, 5).
-
-    Keyword arguments:
-        iou_threshold: [float] IoU threshold for suppression. Default 0.45.
-
-    Return:
-        [ndarray] Boolean mask of kept predictions, shape (N,).
-    """
-
-    rows, columns = predictions.shape
-
-    sort_index = np.flip(predictions[:, 4].argsort())
-    predictions = predictions[sort_index]
-
-    boxes = predictions[:, :4]
-    ious = boxIouBatch(boxes, boxes)
-    ious = ious - np.eye(rows)
-
-    keep = np.ones(rows, dtype=bool)
-
-    for index, iou in enumerate(ious):
-        if not keep[index]:
-            continue
-        condition = iou > iou_threshold
-        keep = keep & ~condition
-
-    return keep[sort_index.argsort()]
-
-
-def loadMask(config):
-    """ Load the station mask if available.
-
-    Arguments:
-        config: [Configuration object]
-
-    Return:
-        [MaskStructure or None] Loaded mask, or None if not found.
-    """
-
-    mask = None
-    mask_path_default = os.path.join(config.config_file_path, config.mask_file)
-
-    if os.path.exists(mask_path_default):
-        mask_path = os.path.abspath(mask_path_default)
-        mask = MaskImage.loadMask(mask_path)
-
-    return mask
-
-
-def getPrediction(frame, interpreter, input_details, mask=None, resized_mask_cache=None):
-    """ Run TFLite inference on a single frame.
-
-    Arguments:
-        frame: [PIL.Image] Input image.
-        interpreter: [Interpreter] TFLite interpreter.
-        input_details: [dict] Model input details.
-
-    Keyword arguments:
-        mask: [MaskStructure or None] Station mask.
-        resized_mask_cache: [list] Mutable list used as a cache for the resized mask. Pass a list with one
-            element [None] to enable caching across calls within the same worker.
-
-    Return:
-        [tuple] (prediction, image) where prediction is the raw model output and image is the
-            preprocessed PIL image.
-    """
-
-    # Apply mask if available
-    if mask is not None:
-
-        frame_arr = np.array(frame)
-
-        # Check if we need to compute the resized mask
-        if resized_mask_cache is not None and resized_mask_cache[0] is None \
-                and frame_arr.shape[:2] != mask.img.shape[:2]:
-
-            log.debug("Rescaling mask and caching it")
-            mask_img = Image.fromarray(mask.img)
-            mask_resized = mask_img.resize((frame.width, frame.height))
-            resized_mask_cache[0] = np.array(mask_resized.convert("RGB"))
-
-        if resized_mask_cache is not None and resized_mask_cache[0] is not None:
-            image = Image.fromarray(
-                MaskImage.maskImage(frame_arr, resized_mask_cache[0], image=True))
-        else:
-            image = Image.fromarray(MaskImage.maskImage(frame_arr, mask))
-    else:
-        image = frame
-
-    input_shape = input_details["shape"]
-    image = image.convert("RGB")
-
-    if input_shape[1] == 3:  # channels-first: [1, 3, H, W]
-        h, w = input_shape[2], input_shape[3]
-        image = image.resize((w, h))
-        input_data = np.array(image, dtype=np.float32)
-        input_data /= 255
-        input_data = np.transpose(input_data, (2, 0, 1))
-        input_data = input_data[None]
-    else:  # channels-last: [1, H, W, 3]
-        h, w = input_shape[1], input_shape[2]
-        image = image.resize((w, h))
-        input_data = np.array(image, dtype=np.float32)
-        input_data /= 255
-        input_data = input_data[None]
-
-    interpreter.set_tensor(input_details["index"], input_data)
-    interpreter.invoke()
-
-    output_details = interpreter.get_output_details()[0]
-    prediction = interpreter.get_tensor(output_details["index"])
-
-    return prediction, image
-
-
-def processPredictions(prediction, conf_thres=0.386):
-    """ Process raw model output into filtered detections with NMS.
-
-    Arguments:
-        prediction: [ndarray] Raw model output tensor.
-
-    Keyword arguments:
-        conf_thres: [float] Confidence threshold. Default 0.386.
-
-    Return:
-        [ndarray] Filtered detections with columns [x1, y1, x2, y2, conf, class_id], shape (N, 6).
-            Returns empty array with shape (0, 6) if no detections.
-    """
-
-    x = prediction[0]
-    x = x.T
-
-    boxes = x[:, :4]
-    class_scores = x[:, 4:]
-    class_ids = np.argmax(class_scores, axis=1)
-    conf = np.max(class_scores, axis=1)
-
-    mask = conf > conf_thres
-    boxes, conf, class_ids = boxes[mask], conf[mask], class_ids[mask]
-
-    if boxes.shape[0] == 0:
-        return np.zeros((0, 6))
-
-    boxes_xyxy = xywh2xyxy(boxes)
-    x = np.concatenate([boxes_xyxy, conf[:, None], class_ids[:, None]], axis=1)
-
-    kept_rows = []
-    for cid in np.unique(class_ids):
-        class_mask = x[:, 5] == cid
-        x_cls = x[class_mask]
-        x_cls = x_cls[np.argsort(x_cls[:, 4])[::-1]]
-        keep = nms(x_cls[:, :5], IOU_THRES)
-        x_cls = x_cls[keep]
-
-        cls_max_det = MAX_DET.get(int(cid))
-        if cls_max_det is not None and cls_max_det > 0:
-            x_cls = x_cls[:cls_max_det]
-        kept_rows.append(x_cls)
-
-    output = np.concatenate(kept_rows, axis=0)
-    output = output[np.argsort(output[:, 4])[::-1]]
-
-    return output if output.shape[0] > 0 else np.zeros((0, 6))
-
-
-# ###########################################################################
-#                       Detection + calibration
-# ###########################################################################
-
-def detectSpritesInFF(data_dir, ff_name, model_path, config, platepar=None):
-    """ Run sprite detection on a single FF file.
-
-    Core detection function usable standalone or from the SpriteDetector process.
-    Creates/caches the TFLite interpreter per process.
-
-    Arguments:
-        data_dir: [str] Path to the night data directory.
-        ff_name: [str] Name of the FF file.
-        model_path: [str] Path to the TFLite model file.
-        config: [Configuration object]
-
-    Keyword arguments:
-        platepar: [Platepar or None] Platepar for alt/az calibration.
-
-    Return:
-        [tuple] (ff_name, detections_list, timestamp, jd) where each detection is a dict with
-            image/sky coordinates. Returns (ff_name, [], timestamp, None) on error.
-
-    Mask behavior:
-        The station mask is only loaded and applied when config.sprite_use_mask is enabled.
-    """
-
-    # Extract timestamp from FF filename
-    basename = os.path.basename(ff_name)
-    parts = basename.split("_")
-    date_str, time_str = parts[2], parts[3]
-    dt = datetime.strptime(date_str + time_str, "%Y%m%d%H%M%S").replace(tzinfo=timezone.utc)
-    timestamp = dt.timestamp()
-
-    # Compute JD for astrometry
-    jd = None
-    if ASTROMETRY_AVAILABLE and platepar is not None:
-        jd = datetime2JD(dt)
-
-    # Load interpreter lazily in this process
-    try:
-        interpreter, input_details, output_details = _getInterpreter(model_path)
-    except Exception as e:
-        log.error("Failed to load TFLite model from {:s}: {:s}".format(model_path, repr(e)))
-        return (ff_name, [], timestamp, jd)
-
-    # Read FF file
-    try:
-        ff = readFFfile(data_dir, ff_name)
-    except FileNotFoundError:
-        log.error("File {:s} not found in {:s}. Skipping.".format(ff_name, data_dir))
-        return (ff_name, [], timestamp, jd)
-
-    # Use maxpixel as input (consider max-ave after model retraining)
-    image = Image.fromarray(ff.maxpixel).convert("RGB")
-
-    # Load mask once per process (only if mask application is enabled)
-    mask = None
-    resized_mask = None
-    if config.sprite_use_mask:
-        mask_key = config.config_file_path
-        if mask_key not in _mask_cache:
-            _mask_cache[mask_key] = loadMask(config)
-            _resized_mask_cache[mask_key] = [None]
-        mask = _mask_cache[mask_key]
-        resized_mask = _resized_mask_cache[mask_key]
-
-    prediction, image = getPrediction(image, interpreter, input_details, mask=mask,
-                                      resized_mask_cache=resized_mask)
-
-    # Process predictions
-    output = processPredictions(prediction)
-
-    if output.size == 0:
-        log.debug("No detections in {:s}.".format(ff_name))
-        return (ff_name, [], timestamp, jd)
-
-    # Build detection result list
-    detections = []
-    model_name = os.path.splitext(os.path.basename(model_path))[0]
-
-    for i in output:
-        class_id = int(i[5])
-        detection_type = CLASS_NAMES.get(class_id, "unknown_{:d}".format(class_id))
-
-        x1 = int(i[0] * config.width)
-        y1 = int(i[1] * config.height)
-        x2 = int(i[2] * config.width)
-        y2 = int(i[3] * config.height)
-
-        is_sprite, frame_index = tle_artifact_filter(ff, x1, y1, x2, y2)
-        time_offset = frame_index / config.fps
-        timestamp2 = timestamp + time_offset
-        if not is_sprite:
-            log.debug("Detection rejected.")
+        if not os.path.isfile(path):
             continue
 
-        centroid_x = (x1 + x2) / 2.0
-        centroid_y = (y1 + y2) / 2.0
+        # Platepar.read returns False instead of raising when the file is missing
+        try:
+            platepar = Platepar()
+            if platepar.read(path, use_flat=config.use_flat) is not False:
+                return platepar, path
 
-        detections.append({
-            "image_name": ff_name,
-            "timestamp": _formatTimestamp(timestamp2),
-            "detection_type": detection_type,
-            "model": model_name,
-            "confidence": float(i[4]),
-            "centroid_x": centroid_x,
-            "centroid_y": centroid_y,
-            "box_x1": x1,
-            "box_y1": y1,
-            "box_x2": x2,
-            "box_y2": y2,
+        except Exception as e:
+            log.warning("Could not read the platepar {:s}: {:s}".format(path, repr(e)))
+
+    return None, None
+
+
+class NightRecorder(object):
+    """ Everything that happens to the confirmed and rejected detections of one night: the CSV, the JSON
+        record, the images and the hand-over to the upload worker.
+
+        Shared by the live process and the offline run, so that both write exactly the same products.
+    """
+
+    def __init__(self, config, night_data_dir, uploader, platepar_info):
+        """
+        Arguments:
+            config: [Config]
+            night_data_dir: [str] Night directory, where the FF files are and the products go.
+            uploader: [SpriteUploadWorker or None] Where confirmed payloads are sent. None to send nothing.
+            platepar_info: [dict] Provenance of the platepar used, from plateparProvenance().
+        """
+
+        self.config = config
+        self.night_data_dir = night_data_dir
+        self.night_dir_name = os.path.basename(os.path.normpath(night_data_dir))
+        self.uploader = uploader
+        self.platepar_info = platepar_info
+
+        self.csv_path = SpriteProducts.csvPath(night_data_dir)
+        self.jsonl_path = SpriteProducts.jsonlPath(night_data_dir)
+
+        # Counts reported at the end of the night
+        self.n_confirmed = 0
+        self.n_rejected = 0
+        self.n_images = 0
+        self.n_not_sent = 0
+        self.not_sent_logged = False
+
+
+    def onRejected(self, candidate):
+        """ A burst of detections was thrown away by the false-positive filter; record it and move on. """
+
+        self.n_rejected += 1
+
+        SpriteProducts.appendSpriteCSV(self.csv_path, candidate.detections, "burst_rejected")
+
+
+    def onConfirmed(self, candidate):
+        """ A detection passed the false-positive filter: record it, draw it and hand it to the uploader.
+
+        Arguments:
+            candidate: [SpriteCandidate] From the false-positive filter.
+        """
+
+        ff_name = candidate.ff_name
+        detections = candidate.detections
+
+        self.n_confirmed += 1
+        log.info("Sprite detection confirmed in {:s}: {:s}".format(
+            ff_name, ", ".join("{:s} {:.2f}".format(det["detection_type"], det["confidence"])
+                               for det in detections)))
+
+        SpriteProducts.appendSpriteCSV(self.csv_path, detections, "confirmed")
+
+        # The images need the FF, which is still in the night directory. It is read again rather than kept
+        #   in memory for the minute it takes the filter to confirm it.
+        marked_path, unmarked_path = None, None
+        if self.n_images < self.config.sprite_max_images:
+            marked_path, unmarked_path = self.writeImages(ff_name, detections)
+
+        # FF start time and frame rate, as the frame indices refer to them
+        ff_start = FFfile.filenameToDatetime(ff_name)
+        fps = detections[0].get("fps", self.config.fps)
+
+        # Full record of what was found and how it was calibrated, for the nightly archive
+        SpriteProducts.appendSpriteJSONL(self.jsonl_path, {
+            "ff_name": ff_name,
+            "ff_start": SpriteProducts.formatIsoTimestamp(ff_start),
+            "fps": fps,
+            "platepar": self.platepar_info,
+            "detections": detections,
         })
 
-    # Calibrate with platepar (add RA/Dec J2000 and alt/az)
-    if jd is not None and platepar is not None:
-        _calibrateDetections(detections, jd, platepar)
+        self.sendToServer(ff_name, ff_start, fps, detections, marked_path, unmarked_path)
 
-    log.info("Detection on {:s}! {:d} object(s) found.".format(ff_name, len(detections)))
 
-    return (ff_name, detections, timestamp, jd)
-
-def tle_artifact_filter(ff, x0, y0, x1, y1, k=1, thres=0.1):
-    """
-    Determine whether a bounding-box region is a sprite or an artifact.
-
-    The filter computes the cumulative field sum over the region for each
-    frame of the loaded FF file, takes the incremental (per-frame) increases
-    of that cumulative sum, and checks how large a share of the total
-    increase is contributed by the ``k`` largest increments.
-
-    A high "max incremental share" indicates that most of the flash took place
-    abruptly within a very small number of frames (typical of a real sprite),
-    while a share close to the mean indicates a gradual, spreading flash that
-    is more consistent with an artifact.
-
-    Args:
-        ff (:class:`FStruct`): Loaded FF file containing the frames to process.
-        x0 (int): X value of the upper-left corner of the bounding box.
-        y0 (int): Y value of the upper-left corner of the bounding box.
-        x1 (int): X value of the lower-right corner of the bounding box.
-        y1 (int): Y value of the lower-right corner of the bounding box.
-        k (int, optional): Number of largest incremental field sums used to
-            calculate the max incremental share. Defaults to 1.
-        thres (float, optional): Share threshold below which detection is
-            considered an artifact. Defaults to 0.1.
-
-    Returns:
-        (bool, int): A tuple containing the filter decision and index of the frame with the largest
-        incremental field sum:
-
-        - ``bool`` -- True if the region is considered a sprite (share > 0.1),
-          False if it is considered an artifact.
-        - ``float`` -- The index of the frame with the largest incremental field sum across
-          all frames.
-    """
-    nframes = int(ff.nframes)
-    fieldsums = np.empty(nframes, dtype=np.float64)
-
-    fieldsum = 0
-    for i in range(nframes):
-        frame = reconstructFrame(ff, i)
-        roi = frame[y0:y1, x0:x1]
-        fieldsum += roi.sum()
-        fieldsums[i] = fieldsum
-
-    d = np.diff(fieldsums, prepend=0)
-    # share = d.max() / d.sum()  #original one
-    share = np.sort(d)[-k:].sum() / d.sum()
-
-    is_sprite = share > thres
-    frame_idx = np.argmax(d)
-    return is_sprite, frame_idx
-
-def _calibrateDetections(detections, jd, platepar):
-    """ Add RA/Dec J2000 and alt/az to each detection using the platepar.
-
-    Converts centroid and all 4 bounding box corners from image coordinates to sky coordinates.
-    Uses trueRaDec2ApparentAltAz which handles J2000-to-epoch-of-date precession and refraction.
-
-    Arguments:
-        detections: [list] List of detection dicts (modified in place).
-        jd: [float] Julian date of the observation.
-        platepar: [Platepar] Platepar for the astrometric solution.
-    """
-
-    # Key names for the 5 calibrated points: centroid + 4 box corners
-    point_keys = [
-        ("ra_j2000", "dec_j2000", "azimuth", "altitude"),
-        ("box_ra_j2000_1", "box_dec_j2000_1", "box_azimuth_1", "box_altitude_1"),
-        ("box_ra_j2000_2", "box_dec_j2000_2", "box_azimuth_2", "box_altitude_2"),
-        ("box_ra_j2000_3", "box_dec_j2000_3", "box_azimuth_3", "box_altitude_3"),
-        ("box_ra_j2000_4", "box_dec_j2000_4", "box_azimuth_4", "box_altitude_4"),
-    ]
-
-    for det in detections:
-
-        cx, cy = det["centroid_x"], det["centroid_y"]
-        x1, y1 = float(det["box_x1"]), float(det["box_y1"])
-        x2, y2 = float(det["box_x2"]), float(det["box_y2"])
-
-        # 5 points: centroid, top-left, bottom-left, top-right, bottom-right
-        xs = [cx, x1, x1, x2, x2]
-        ys = [cy, y1, y2, y1, y2]
-        jds = [jd] * 5
-        levels = [1] * 5
-
-        try:
-            _, ra_data, dec_data, _ = xyToRaDecPP(
-                jds, xs, ys, levels, platepar,
-                jd_time=True, extinction_correction=False,
-                precompute_pointing_corr=True
-            )
-        except Exception as e:
-            log.debug("Astrometry calibration failed for {:s}: {:s}".format(
-                det.get("image_name", "?"), repr(e)))
-            return
-
-        for i, (ra, dec) in enumerate(zip(ra_data, dec_data)):
-
-            ra_key, dec_key, az_key, alt_key = point_keys[i]
-
-            az, alt = trueRaDec2ApparentAltAz(
-                float(ra), float(dec), jd, platepar.lat, platepar.lon, refraction=True
-            )
-
-            det[ra_key] = round(float(ra), 5)
-            det[dec_key] = round(float(dec), 5)
-            det[az_key] = round(float(az), 3)
-            det[alt_key] = round(float(alt), 3)
-
-
-# ###########################################################################
-#                       File I/O utility functions
-# ###########################################################################
-
-def _appendCSV(csv_path, ff_name, detections, timestamp):
-    """ Append detection rows to the CSV file, creating the header if needed.
-
-    Arguments:
-        csv_path: [str] Path to the output CSV file.
-        ff_name: [str] Name of the FF file.
-        detections: [list] List of detection dicts.
-        timestamp: [float] UTC timestamp of the detection.
-    """
-
-    file_exists = os.path.isfile(csv_path) and os.path.getsize(csv_path) > 0
-
-    with open(csv_path, "a", newline="") as csvfile:
-        writer = csv.writer(csvfile, delimiter=";", quotechar="|", quoting=csv.QUOTE_MINIMAL)
-
-        if not file_exists:
-            writer.writerow([
-                "image name", "timestamp", "detection type", "model", "confidence",
-                "centroid x", "centroid y", "box x1", "box y1", "box x2", "box y2",
-                "ra_j2000", "dec_j2000", "azimuth", "altitude",
-                "box_ra_j2000_1", "box_dec_j2000_1", "box_azimuth_1", "box_altitude_1",
-                "box_ra_j2000_2", "box_dec_j2000_2", "box_azimuth_2", "box_altitude_2",
-                "box_ra_j2000_3", "box_dec_j2000_3", "box_azimuth_3", "box_altitude_3",
-                "box_ra_j2000_4", "box_dec_j2000_4", "box_azimuth_4", "box_altitude_4",
-            ])
-
-        for det in detections:
-            writer.writerow([
-                det.get("image_name", ff_name),
-                det.get("timestamp", ""),
-                det.get("detection_type", ""),
-                det.get("model", ""),
-                det.get("confidence", ""),
-                det.get("centroid_x", ""),
-                det.get("centroid_y", ""),
-                det.get("box_x1", ""),
-                det.get("box_y1", ""),
-                det.get("box_x2", ""),
-                det.get("box_y2", ""),
-                det.get("ra_j2000", ""),
-                det.get("dec_j2000", ""),
-                det.get("azimuth", ""),
-                det.get("altitude", ""),
-                det.get("box_ra_j2000_1", ""),
-                det.get("box_dec_j2000_1", ""),
-                det.get("box_azimuth_1", ""),
-                det.get("box_altitude_1", ""),
-                det.get("box_ra_j2000_2", ""),
-                det.get("box_dec_j2000_2", ""),
-                det.get("box_azimuth_2", ""),
-                det.get("box_altitude_2", ""),
-                det.get("box_ra_j2000_3", ""),
-                det.get("box_dec_j2000_3", ""),
-                det.get("box_azimuth_3", ""),
-                det.get("box_altitude_3", ""),
-                det.get("box_ra_j2000_4", ""),
-                det.get("box_dec_j2000_4", ""),
-                det.get("box_azimuth_4", ""),
-                det.get("box_altitude_4", ""),
-            ])
-
-
-def _markSprites(detections, data_dir, ff_name, save_dir, config):
-    """ Draw detection boxes on the image and save marked/unmarked copies.
-
-    Arguments:
-        detections: [list] List of detection dicts.
-        data_dir: [str] Path to the night data directory.
-        ff_name: [str] Name of the FF file.
-        save_dir: [str] Path to the output directory.
-        config: [Configuration object]
-
-    Return:
-        [str or None] Path to the saved marked image, or None on error.
-    """
-
-    try:
-        ff = readFFfile(data_dir, ff_name)
-    except FileNotFoundError:
-        log.error("Cannot mark {:s}: file not found.".format(ff_name))
-        return None
-
-    image = Image.fromarray(ff.maxpixel).convert("RGB")
-    edit_image = image.copy()
-    draw = ImageDraw.Draw(edit_image)
-
-    for det in detections:
-        class_name = det["detection_type"]
-        confidence = det["confidence"]
-
-        top_left = (det["box_x1"], det["box_y1"])
-        bottom_right = (det["box_x2"], det["box_y2"])
-
-        color = "blue" if "sprite" in class_name else "red"
-        draw.rectangle([top_left, bottom_right], outline=color, width=1)
-
-        text_position = (top_left[0], top_left[1] - 20)
-        draw.text(text_position, "{:s}-{:.3f}".format(class_name, confidence), fill=color)
-
-    marked_dir = os.path.join(save_dir, "marked")
-    os.makedirs(marked_dir, exist_ok=True)
-    marked_path = os.path.join(marked_dir, "{:s}_marked.png".format(ff_name))
-    edit_image.save(marked_path)
-
-    unmarked_dir = os.path.join(save_dir, "unmarked")
-    os.makedirs(unmarked_dir, exist_ok=True)
-    unmarked_path = os.path.join(unmarked_dir, "{:s}_unmarked.png".format(ff_name))
-    image.save(unmarked_path)
-
-    return marked_path, unmarked_path
-
-
-def _copyFFFile(data_dir, ff_name, save_dir):
-    """ Copy an FF file to the sprite output directory.
-
-    Arguments:
-        data_dir: [str] Path to the night data directory.
-        ff_name: [str] Name of the FF file.
-        save_dir: [str] Path to the sprite output directory.
-    """
-
-    try:
-        src_path = os.path.join(data_dir, ff_name)
-        ffs_dir = os.path.join(save_dir, "FFs")
-        os.makedirs(ffs_dir, exist_ok=True)
-        dst_path = os.path.join(ffs_dir, ff_name)
-
-        shutil.copy2(src_path, dst_path)
-        log.info("Copied {:s} to {:s}".format(ff_name, ffs_dir))
-    except Exception as e:
-        log.error("Failed to copy FF file {:s}: {:s}".format(ff_name, repr(e)))
-
-# ###########################################################################
-#                       Cryptography utility functions
-# ###########################################################################
-
-def sign_bytes(private_key, message: bytes) -> bytes:
-    if isinstance(private_key, rsa.RSAPrivateKey):
-        return private_key.sign(message, padding.PKCS1v15(), hashes.SHA256())
-    elif isinstance(private_key, ed25519.Ed25519PrivateKey):
-        # Ed25519 hashes internally; no separate digest algorithm to choose.
-        return private_key.sign(message)
-    elif isinstance(private_key, ec.EllipticCurvePrivateKey):
-        return private_key.sign(message, ec.ECDSA(hashes.SHA256()))
-    else:
-        raise TypeError(f"Unsupported private key type: {type(private_key)}")
-
-# ###########################################################################
-#                       HTTPS upload client
-# ###########################################################################
-
-class SpriteUploader(object):
-    """ HTTPS client for the sprite detection REST API.
-
-    Handles JSON detection uploads and optional FF file uploads with retry,
-    exponential backoff, and disk-backed queue for network resilience.
-    Uses urllib.request (stdlib) — no external HTTP library needed.
-    All uploads require HTTPS for data security.
-
-    Arguments:
-        config: [Configuration object]
-        pending_file_path: [str] Path to the JSONL file for crash-recovery persistence.
-    """
-
-    def __init__(self, config, pending_file_path):
-
-        self.base_url = config.sprite_upload_url.rstrip("/") if config.sprite_upload_url else ""
-        self.timeout = config.sprite_upload_timeout
-        self.upload_ff = config.sprite_upload_ff
-        self.station_id = config.stationID
-        self.private_key_path = config.rsa_private_key
-        self.pending_file = pending_file_path
-
-        # (payload_dict, attempt_count, next_retry_time) as mutable lists
-        self._deque = collections.deque()
-        # (ff_path, ff_name, attempt_count, next_retry_time)
-        self._ff_deque = collections.deque()
-
-    def queueDetection(self, payload):
-        """ Queue a confirmed detection payload for HTTPS upload.
-
-        Arguments:
-            payload: [dict] Detection payload to upload.
-        """
-
-        self._deque.append([payload, 0, 0])
-        self._savePending()
-
-    def queueFFFile(self, ff_path, ff_name):
-        """ Queue an FF file for HTTPS upload (when sprite_upload_ff is enabled).
-
-        Arguments:
-            ff_path: [str] Full path to the FF file.
-            ff_name: [str] FF filename.
-        """
-
-        if self.upload_ff and os.path.isfile(ff_path):
-            self._ff_deque.append([ff_path, ff_name, 0, 0])
-
-    def processQueue(self):
-        """ Try to upload one pending item. Non-blocking: processes one JSON and one FF per call. """
-
-        if not self.base_url:
-            return
-
-        now = time.time()
-
-        # Try one JSON detection upload
-        if self._deque:
-            item = self._deque[0]
-            payload, attempts, next_retry = item[0], item[1], item[2]
-
-            if now >= next_retry:
-                if self._postJSON(payload):
-                    self._deque.popleft()
-                    self._savePending()
-                    log.info("Sprite detection uploaded successfully.")
-                elif attempts < 5:
-                    backoff = min(15 * (2 ** attempts), 300)
-                    item[1] = attempts + 1
-                    item[2] = now + backoff
-                    log.debug("Upload retry {:d}/5 in {:d}s".format(attempts + 1, int(backoff)))
-                else:
-                    log.warning("Dropping detection after 5 retries: {:s}".format(
-                        payload.get("ff_name", "?")))
-                    self._deque.popleft()
-                    self._savePending()
-
-        # Try one FF file upload (lower priority)
-        if self._ff_deque:
-            item = self._ff_deque[0]
-            ff_path, ff_name, attempts, next_retry = item[0], item[1], item[2], item[3]
-
-            if now >= next_retry:
-                if self._postFile(ff_path, ff_name):
-                    self._ff_deque.popleft()
-                    log.info("FF file {:s} uploaded successfully.".format(ff_name))
-                elif attempts < 3:
-                    backoff = min(30 * (2 ** attempts), 300)
-                    item[2] = attempts + 1
-                    item[3] = now + backoff
-                else:
-                    log.warning("Dropping FF upload after 3 retries: {:s}".format(ff_name))
-                    self._ff_deque.popleft()
-
-    def _postJSON(self, payload):
-        """ POST detection JSON to /api/v1/detections.
-
-        Arguments:
-            payload: [dict] Detection payload.
+    def writeImages(self, ff_name, detections):
+        """ Write the marked and unmarked images of a confirmed FF into the night directory.
 
         Return:
-            [bool] True on HTTP 2xx response.
+            [tuple] (marked_path, unmarked_path), None for any that could not be written.
         """
 
-        url = self.base_url + "/api/v1/detections"
-        payload["sent_at"] = _formatTimestamp(time.time())
-        data = json.dumps(payload).encode("utf-8")
-
-        if os.path.exists(self.private_key_path):
-            with open(self.private_key_path, "rb") as f:
-                private_key = load_ssh_private_key(f.read(), password=None)
-            try:
-                signature = sign_bytes(private_key, data)
-            except TypeError:
-                log.debug("Unsupported private key format for signing payload.")
-                return False
-        else:
-            log.debug("No private key available.")
-            return False
-
-        req = urllib.request.Request(
-            url,
-            data=data,
-            headers={
-                "Content-Type": "application/json",
-                "X-Station-Id": self.station_id,
-                "X-Signature": signature.hex(),
-            },
-            method="POST",
-        )
-
         try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
-                return 200 <= resp.status < 300
-        except urllib.error.HTTPError as e:
-            log.debug(
-                "Sprite API upload failed: {!r} | Status: {} | Response: {}".format(
-                    e, getattr(e, "code", None), json.loads(e.read().decode("utf-8"))
-                )
-            )
-            return False
+            ff = FFfile.read(self.night_data_dir, ff_name, verbose=False)
+
         except Exception as e:
-            log.debug("Sprite API upload failed: {:s}".format(repr(e)))
-            return False
+            log.warning("Could not read {:s} to draw the sprite images: {:s}".format(ff_name, repr(e)))
+            return None, None
 
-    def _postFile(self, ff_path, ff_name):
-        """ POST FF file as multipart/form-data to /api/v1/files.
+        if ff is None:
+            return None, None
 
-        Arguments:
-            ff_path: [str] Full path to the FF file.
-            ff_name: [str] FF filename.
+        marked_path, unmarked_path = SpriteProducts.imagePaths(self.night_data_dir, ff_name)
+        written = SpriteProducts.writeDetectionImages(ff, detections, marked_path, unmarked_path)
 
-        Return:
-            [bool] True on HTTP 2xx response.
-        """
+        # Count the FF once, however many of its two images were written
+        if any(written):
+            self.n_images += 1
 
-        url = self.base_url + "/api/v1/files"
-        boundary = "----RMSSpriteUpload"
+        # Say once that the rest of the night goes without images
+        if self.n_images == self.config.sprite_max_images:
+            log.info("Written the maximum of {:d} sprite images for this night".format(self.n_images))
 
-        try:
-            with open(ff_path, "rb") as f:
-                file_data = f.read()
-        except Exception as e:
-            log.error("Failed to read FF file {:s}: {:s}".format(ff_path, repr(e)))
-            return False
+        return written
 
-        # Build multipart body
-        parts = []
-        parts.append("--{}\r\n".format(boundary).encode())
-        parts.append(b"Content-Disposition: form-data; name=\"station_id\"\r\n\r\n")
-        parts.append("{}\r\n".format(self.station_id).encode())
-        parts.append("--{}\r\n".format(boundary).encode())
-        parts.append(b"Content-Disposition: form-data; name=\"ff_name\"\r\n\r\n")
-        parts.append("{}\r\n".format(ff_name).encode())
-        parts.append("--{}\r\n".format(boundary).encode())
-        parts.append("Content-Disposition: form-data; name=\"file\"; filename=\"{}\"\r\n".format(
-            ff_name).encode())
-        parts.append(b"Content-Type: application/octet-stream\r\n\r\n")
-        parts.append(file_data)
-        parts.append("\r\n--{}--\r\n".format(boundary).encode())
 
-        body = b"".join(parts)
-        if os.path.exists(self.private_key_path):
-            with open(self.private_key_path, "rb") as f:
-                private_key = load_ssh_private_key(f.read(), password=None)
-            try:
-                signature = sign_bytes(private_key, body)
-            except TypeError:
-                log.debug("Unsupported private key format for signing payload.")
-                return False
-        else:
-            log.debug("No private key available.")
-            return False
+    def sendToServer(self, ff_name, ff_start, fps, detections, marked_path, unmarked_path):
+        """ Build the payload for the sprite server and queue it, unless there is nothing it could use. """
 
-        req = urllib.request.Request(
-            url,
-            data=body,
-            headers={
-                "Content-Type": "multipart/form-data; boundary={}".format(boundary),
-                "X-Station-Id": self.station_id,
-                "X-Signature": signature.hex(),
-            },
-            method="POST",
-        )
-
-        try:
-            file_timeout = min(self.timeout * 10, 120)
-            with urllib.request.urlopen(req, timeout=file_timeout) as resp:
-                return 200 <= resp.status < 300
-        except urllib.error.HTTPError as e:
-            log.debug(
-                "Sprite FF upload failed: {!r} | Status: {} | Response: {}".format(
-                    e, getattr(e, "code", None), json.loads(e.read().decode("utf-8"))
-                )
-            )
-            return False
-        except Exception as e:
-            log.debug("Sprite FF upload failed: {:s}".format(repr(e)))
-            return False
-
-    def loadPending(self):
-        """ Load pending uploads from disk for crash recovery. """
-
-        if not os.path.isfile(self.pending_file):
+        if (self.uploader is None) or (not self.uploader.isEnabled()):
             return
 
-        try:
-            with open(self.pending_file, "r") as f:
-                for line in f:
-                    line = line.strip()
-                    if line:
-                        payload = json.loads(line)
-                        self._deque.append([payload, 0, 0])
+        payload, reason = SpriteProducts.buildSpritePayload(
+            self.config, ff_name, ff_start, fps, detections, self.night_dir_name)
 
-            if self._deque:
-                log.info("Loaded {:d} pending sprite uploads from disk.".format(len(self._deque)))
+        # The server triangulates from azimuth and altitude; without them it has no use for the detection
+        if payload is None:
+            self.n_not_sent += 1
+
+            if not self.not_sent_logged:
+                log.warning("Sprite detection in {:s} not sent to the server: {:s}. Further ones for the "
+                            "same reason are counted, not logged.".format(ff_name, reason))
+                self.not_sent_logged = True
+
+            return
+
+        payload_path = os.path.join(SpriteProducts.uploadDir(self.config, self.night_data_dir),
+                                    SpriteProducts.ffStem(ff_name) + ".json")
+
+        if not SpriteProducts.writeUploadPayload(payload, payload_path):
+            return
+
+        # The files the server may ask for later, once a second station has seen the same event
+        files = {"ff": os.path.join(self.night_data_dir, ff_name)}
+        if marked_path:
+            files["marked"] = marked_path
+        if unmarked_path:
+            files["unmarked"] = unmarked_path
+
+        self.uploader.enqueueDetections(ff_name, payload_path, files)
+
+
+    def summary(self):
+        """ One line describing the night, for the log. """
+
+        text = "{:d} confirmed, {:d} rejected as bursts, {:d} with images".format(
+            self.n_confirmed, self.n_rejected, self.n_images)
+
+        if self.n_not_sent:
+            text += ", {:d} not sent for lack of astrometry".format(self.n_not_sent)
+
+        return text
+
+
+class NightDetector(object):
+    """ Runs the detection of one night, one FF at a time: model, artifact filter, astrometry and the
+        false-positive filter. Used by the live process and by the offline run.
+    """
+
+    def __init__(self, config, night_data_dir, recorder, platepar, platepar_reason):
+        """
+        Arguments:
+            config: [Config]
+            night_data_dir: [str] Night directory.
+            recorder: [NightRecorder] Receives the confirmed and rejected detections.
+            platepar: [Platepar or None] Platepar for the sky coordinates.
+            platepar_reason: [str or None] Why the platepar cannot be used, if it was already known.
+        """
+
+        self.config = config
+        self.night_data_dir = night_data_dir
+        self.recorder = recorder
+
+        self.platepar = platepar
+        self.platepar_reason = platepar_reason
+
+        # The platepar check depends on the frame size, so it is done on the first FF and repeated only if
+        #   the size ever changes
+        self.gate_size = None
+        self.gate_ok = False
+        self.gate_reason = platepar_reason
+        self.gate_warned = False
+
+        # The station mask, loaded once, only when it is to be used
+        self.mask = self.loadMask() if config.sprite_use_mask else None
+
+        self.fp_filter = SpriteFalsePositiveFilter(recorder.onConfirmed, on_rejected=recorder.onRejected)
+
+        # Per-night cap on FF blocks with detections
+        self.n_detected_ffs = 0
+        self.capped = False
+
+        self.n_processed = 0
+
+
+    def loadMask(self):
+        """ Load the station mask image, or None if there is none. """
+
+        mask_path = os.path.join(self.config.config_file_path, self.config.mask_file)
+
+        if not os.path.isfile(mask_path):
+            log.warning("sprite_use_mask is set but there is no mask at {:s}; running unmasked".format(
+                mask_path))
+            return None
+
+        try:
+            mask = MaskImage.loadMask(mask_path)
+            return mask.img if mask is not None else None
 
         except Exception as e:
-            log.error("Failed to load pending uploads: {:s}".format(repr(e)))
+            log.warning("Could not load the mask {:s}, running unmasked: {:s}".format(mask_path, repr(e)))
+            return None
 
-    def _savePending(self):
-        """ Write pending uploads to disk (JSONL). Atomic via tmp + replace. """
 
-        tmp_path = self.pending_file + ".tmp"
+    def checkPlatepar(self, ff):
+        """ Decide once per frame size whether the platepar can be used for this night's detections. """
+
+        size = (ff.ncols, ff.nrows)
+
+        if size == self.gate_size:
+            return
+
+        self.gate_size = size
+
+        if self.platepar is None:
+            self.gate_ok = False
+            self.gate_reason = self.platepar_reason or "no platepar"
+
+        else:
+            self.gate_ok, self.gate_reason = plateparUsable(self.platepar, ff.ncols, ff.nrows, self.config)
+
+        # Once a night is enough to say that the directions are unavailable or may be off
+        if (not self.gate_ok) and (not self.gate_warned):
+            log.warning("Sprite detections will have no sky coordinates: {:s}".format(self.gate_reason))
+            self.gate_warned = True
+
+        elif self.gate_ok and self.gate_reason and (not self.gate_warned):
+            log.warning("Sprite astrometry: {:s}".format(self.gate_reason))
+            self.gate_warned = True
+
+
+    def processFF(self, ff_name, model_path):
+        """ Run everything on one FF file.
+
+        Arguments:
+            ff_name: [str] FF file name, in the night directory.
+            model_path: [str] Path to the model.
+        """
+
+        self.n_processed += 1
+
+        # The FF start time drives the false-positive filter; it comes from the name, without reading the file
+        ff_start = FFfile.filenameToDatetime(ff_name)
+        t_ff = unixTime(ff_start)
+
+        # Past the night's cap, only the filter's clock moves on, so the pending detections still get decided
+        if self.capped:
+            self.fp_filter.tick(t_ff)
+            return
+
+        ff = FFfile.read(self.night_data_dir, ff_name, verbose=False)
+
+        if ff is None:
+            log.warning("Could not read {:s} for sprite detection".format(ff_name))
+            self.fp_filter.tick(t_ff)
+            return
+
+        detections = detectSpritesInFF(ff, ff_name, self.config, model_path, mask=self.mask)
+
+        if detections:
+
+            # Sky coordinates, with this FF's own frame times
+            self.checkPlatepar(ff)
+            calibrateSpriteDetections(detections, self.platepar, self.gate_ok, self.gate_reason)
+
+            # Remember the frame rate the indices refer to, for the payload
+            for det in detections:
+                det["fps"] = ff.fps if ff.fps > 0 else self.config.fps
+
+            self.fp_filter.addCandidate(t_ff, ff_name, detections)
+            self.n_detected_ffs += 1
+
+            # A night with this many hits is a night of false positives; stop spending CPU on it
+            cap = self.config.sprite_max_detections_per_night
+            if (cap > 0) and (self.n_detected_ffs >= cap):
+                self.capped = True
+                log.warning("{:d} FF files with sprite detections tonight, the most allowed by "
+                            "sprite_max_detections_per_night; sprite detection is off for the rest of the "
+                            "night".format(self.n_detected_ffs))
+
+        self.fp_filter.tick(t_ff)
+
+
+    def finish(self):
+        """ Decide every detection still waiting in the false-positive filter. """
 
         try:
-            with open(tmp_path, "w") as f:
-                for item in self._deque:
-                    f.write(json.dumps(item[0]) + "\n")
-            os.replace(tmp_path, self.pending_file)
+            self.fp_filter.flush()
+
         except Exception as e:
-            log.error("Failed to save pending uploads: {:s}".format(repr(e)))
+            log.error("Flushing the sprite false-positive filter failed: {:s}".format(repr(e)))
 
-    def flush(self):
-        """ Try to upload all pending items (best-effort, for shutdown). """
-
-        max_attempts = len(self._deque) + len(self._ff_deque)
-        for _ in range(max_attempts):
-            self.processQueue()
-
-
-# ###########################################################################
-#               SpriteDetector — dedicated real-time process
-# ###########################################################################
 
 class SpriteDetector(multiprocessing.Process):
-    """ Dedicated process for real-time sprite/elve detection and upload.
+    """ Process that runs sprite detection on every FF file of the night, as the Compressor writes them.
 
-    Runs TFLite inference on every FF frame during capture, applies the FalsePositiveFilter in
-    real-time, and uploads confirmed detections via HTTPS to a REST API. Follows the UploadManager
-    and EventMonitor pattern: a long-running multiprocessing.Process with AtomicFlag signaling.
-
-    The Compressor feeds FF filenames into input_queue; this process pulls them, runs inference,
-    calibrates with the platepar, filters, saves outputs to SpriteData, and uploads.
-
-    Arguments:
-        night_data_dir: [str] Path to the night data directory.
-        config: [Configuration object]
+        The Compressor puts (directory, FF name) on input_queue. The process stops when stop() is called and
+        the queue is empty; it then confirms the last minute of detections and gives the upload worker a
+        bounded time to send what is pending.
     """
 
     def __init__(self, night_data_dir, config):
+        """
+        Arguments:
+            night_data_dir: [str] Night directory the Compressor writes into.
+            config: [Config]
+        """
 
         super(SpriteDetector, self).__init__()
 
         self.night_data_dir = night_data_dir
         self.config = config
-        self.input_queue = multiprocessing.Queue()
 
+        # Bounded, so a slow machine drops files for sprite detection instead of queueing all night
+        self.input_queue = multiprocessing.Queue(maxsize=INPUT_QUEUE_MAXSIZE)
+
+        # Lock-free flags, as in the other capture processes
         self.exit = AtomicFlag()
         self.run_exited = AtomicFlag()
 
-        self.model_path = os.path.join(config.rms_root_dir, "share", "sprite_detector.tflite")
         self.logging_queue = getLoggingQueue()
 
-        self.max_daily_detections = 150
 
     def stop(self):
-        """ Signal exit, wait for queue drain and flush, then join the process. """
+        """ Ask the process to finish, wait for it, and make sure it is gone. Never raises. """
 
         self.exit.set()
-        log.debug("Sprite detector exit flag set")
 
+        # Wait for the process to finish its last filtering and the upload drain, but not for a process that
+        #   has already died, whose flag would never be set
         t_beg = time.time()
-        while not self.run_exited.is_set():
-            time.sleep(0.01)
-            if (time.time() - t_beg) > 60:
-                log.debug("Waited 60s for sprite detector to finish, killing it...")
+        while (not self.run_exited.is_set()) and self.is_alive():
+
+            if (time.time() - t_beg) > SHUTDOWN_TIMEOUT:
+                log.warning("Sprite detector did not finish within {:d} s, stopping it".format(
+                    SHUTDOWN_TIMEOUT))
                 break
 
-        log.debug("Joining sprite detector...")
+            time.sleep(0.1)
 
+        self.join(5)
+
+        # Escalate only if it is still there. SIGINT would not help: child processes ignore it.
         if self.is_alive():
-            log.info("Sprite detector still alive, sending interrupt...")
+            self.terminate()
+            self.join(5)
+
+        if self.is_alive() and self.pid:
             try:
-                if self.pid:
-                    os.kill(self.pid, signal.SIGINT)
-                self.join(5)
+                os.kill(self.pid, signal.SIGKILL)
 
-                if self.is_alive():
-                    log.warning("Sprite detector still alive after interrupt, terminating...")
-                    self.terminate()
-
-            except ProcessLookupError:
-                log.info("Sprite detector already terminated.")
-            except Exception as e:
-                log.error("Error during sprite detector shutdown: {:s}".format(repr(e)))
-                self.terminate()
+            except (OSError, AttributeError):
+                pass
 
             self.join(5)
 
-            if self.is_alive():
-                log.warning("Sprite detector survived terminate, sending SIGKILL...")
-                try:
-                    os.kill(self.pid, signal.SIGKILL)
-                except (OSError, AttributeError):
-                    pass
-
-            self.join()
-
-        else:
-            self.join(timeout=5)
-
-        log.debug("Sprite detector stopped.")
 
     def run(self):
-        """ Main loop: pull FF files, run inference, calibrate, filter, save, and upload. """
+        """ Process entry point. Everything is guarded, so a failure can never leave stop() waiting. """
 
         initChildProcess(self.logging_queue, self.config)
 
-        # Initialize TFLite interpreter
         try:
-            _getInterpreter(self.model_path)
+            self.runDetection()
+
         except Exception as e:
-            log.error("Failed to initialize TFLite interpreter: {:s}".format(repr(e)))
+            log.error("Sprite detector failed: {:s}".format(repr(e)))
+            log.error(repr(traceback.format_exception(*sys.exc_info())))
+
+        finally:
             self.run_exited.set()
+
+
+    def runDetection(self):
+        """ The night's work: prepare, then detect on every FF until told to stop. """
+
+        model_path = self.config.sprite_model_path
+
+        # The model is downloaded here rather than before capture starts, so a slow link cannot delay capture
+        if not self.prepareModel(model_path):
+            self.discardQueue()
             return
 
-        # Load platepar for coordinate calibration
-        platepar = self._loadPlatepar()
+        # Old upload payloads are cleared once a night
+        SpriteProducts.pruneUploadDirs(self.config)
 
-        # Set up output directory (SpriteData/<night>/)
-        night_dir_name = os.path.basename(self.night_data_dir)
-        save_dir = os.path.join(
-            self.config.data_dir, self.config.sprite_dir, night_dir_name
-        )
+        platepar, platepar_path = loadStationPlatepar(self.config, self.night_data_dir)
+        platepar_reason = None if platepar is not None else "no platepar found"
 
-        # CSV file path
-        csv_path = os.path.join(
-            self.night_data_dir,
-            "{:s}_sprite_detections.csv".format(night_dir_name),
-        )
+        # The upload worker sends in the background; it does nothing when uploading is not configured
+        uploader = SpriteUploadWorker(self.config)
+        uploader.start()
 
-        # Upload client with disk-backed queue
-        pending_path = os.path.join(self.config.data_dir, "SPRITE_UPLOADS_PENDING.jsonl")
-        uploader = SpriteUploader(self.config, pending_path)
-        uploader.loadPending()
+        recorder = NightRecorder(self.config, self.night_data_dir, uploader,
+                                 plateparProvenance(platepar, platepar_path))
+        detector = NightDetector(self.config, self.night_data_dir, recorder, platepar, platepar_reason)
 
-        # FP filter with real-time confirmed-detection callback
-        fp_filter = FalsePositiveFilter(60, 3,
-            lambda det: self._onConfirmed(det, save_dir, csv_path, uploader, night_dir_name))
+        log.info("Sprite detector started ({:s} backend, platepar: {:s}, uploads: {:s})".format(
+            SPRITE_TFLITE_BACKEND, platepar_path or "none", "on" if uploader.isEnabled() else "off"))
 
-        log.info("Sprite detector process started.")
-        number_of_detections = 0
-        while True:
+        try:
+            while True:
 
-            # Exit when flagged and queue is drained
-            if self.exit.is_set() and self.input_queue.empty() and number_of_detections > self.max_daily_detections:
-                break
+                # Finish when asked to and nothing is left in the queue
+                if self.exit.is_set() and self.input_queue.empty():
+                    break
 
-            try:
-                data_dir, ff_name = self.input_queue.get(timeout=1.0)
-            except queue.Empty:
-                fp_filter.tick(time.time())
-                uploader.processQueue()
-                continue
+                try:
+                    _, ff_name = self.input_queue.get(timeout=1.0)
 
-            # Run detection + calibration on this FF file
-            _, detections, timestamp, jd = detectSpritesInFF(
-                data_dir, ff_name, self.model_path, self.config, platepar=platepar)
+                except queue.Empty:
+                    continue
 
-            # Feed FP filter (even with no detections, tick advances the window)
-            if detections:
-                fp_filter.addDetection(timestamp, detections, ff_name)
-                number_of_detections += 1
-            fp_filter.tick(timestamp)
+                # One bad FF must not end the night's detection
+                try:
+                    detector.processFF(ff_name, model_path)
 
-            # Try uploads between detections (~7s of idle time per cycle)
-            uploader.processQueue()
+                except Exception as e:
+                    log.error("Sprite detection failed on {:s}: {:s}".format(ff_name, repr(e)))
+                    log.debug(repr(traceback.format_exception(*sys.exc_info())))
 
-        # Final flush: expire all remaining buffered detections
-        fp_filter.flush(time.time() + 120)
-        uploader.flush()
+        finally:
 
-        log.info("Sprite detector process exiting.")
-        self.run_exited.set()
+            # Decide the last minute of detections, then let the uploads catch up for a while
+            detector.finish()
+            uploader.stop(drain_timeout=UPLOAD_DRAIN_TIMEOUT)
 
-    def _loadPlatepar(self):
-        """ Load the platepar for coordinate calibration.
+            log.info("Sprite detector finished: {:d} FF file(s) processed, {:s}".format(
+                detector.n_processed, recorder.summary()))
+
+
+    def prepareModel(self, model_path):
+        """ Make sure the model is there and loads.
 
         Return:
-            [Platepar or None] Loaded platepar, or None if unavailable.
+            [bool] True if detection can run.
         """
 
-        if not ASTROMETRY_AVAILABLE or Platepar is None:
-            log.warning("Astrometry modules not available — alt/az calibration disabled.")
-            return None
+        if not spriteModelReady(self.config):
+            if not downloadSpriteModel(self.config):
+                log.warning("Sprite detection is off tonight: the model is not available")
+                return False
 
-        pp = Platepar()
+        # Load it now, so a broken model is reported once rather than on every FF
+        try:
+            getSpriteInterpreter(model_path)
 
-        # Try config directory first, then night data directory (same as getPlatepar in Reprocess.py)
-        pp_path = os.path.join(os.path.dirname(self.config.config_file_path),
-                               self.config.platepar_name)
+        except Exception as e:
+            log.error("Sprite detection is off tonight: the model {:s} does not load: {:s}".format(
+                model_path, repr(e)))
+            return False
 
-        if not os.path.isfile(pp_path):
-            pp_path = os.path.join(self.night_data_dir, self.config.platepar_name)
+        return True
 
-        if os.path.isfile(pp_path):
+
+    def discardQueue(self):
+        """ Keep emptying the queue until stopped, when detection cannot run.
+
+            Otherwise the queue fills up and the Compressor keeps reporting that the detector is behind.
+        """
+
+        while not (self.exit.is_set() and self.input_queue.empty()):
             try:
-                pp.read(pp_path, use_flat=self.config.use_flat)
-                log.info("Platepar loaded from {:s}".format(pp_path))
-                return pp
-            except Exception as e:
-                log.error("Failed to read platepar: {:s}".format(repr(e)))
-                return None
+                self.input_queue.get(timeout=1.0)
 
-        log.warning("No platepar found — alt/az calibration disabled.")
+            except queue.Empty:
+                pass
+
+
+def startSpriteDetector(night_data_dir, config):
+    """ Start the sprite detector for a night of capture, if it can run.
+
+    Arguments:
+        night_data_dir: [str] Night directory.
+        config: [Config]
+
+    Return:
+        [SpriteDetector or None] The running process, or None if sprite detection cannot run here.
+    """
+
+    if not SPRITE_TFLITE_AVAILABLE:
+        log.warning("Sprite detection is enabled but no TFLite backend is installed; skipping it")
         return None
 
-    def _onConfirmed(self, det, save_dir, csv_path, uploader, night_dir_name):
-        """ Handle a confirmed detection that passed the FalsePositiveFilter.
+    try:
+        sprite_detector = SpriteDetector(night_data_dir, config)
+        sprite_detector.start()
 
-        Arguments:
-            det: [Detection] Confirmed detection from the FP filter.
-            save_dir: [str] Path to the SpriteData output directory.
-            csv_path: [str] Path to the CSV file.
-            uploader: [SpriteUploader] Upload client.
-            night_dir_name: [str] Night directory basename.
-        """
+    except Exception as e:
+        log.error("Could not start the sprite detector: {:s}".format(repr(e)))
+        return None
 
-        ff_name = det.filename
-        detections = det.data
-        data_dir = self.night_data_dir
+    log.info("Sprite detector started")
 
-        log.info("Confirmed sprite detection in {:s}".format(ff_name))
+    return sprite_detector
 
-        # Ensure output dirs exist
-        os.makedirs(save_dir, exist_ok=True)
-        json_dir = os.path.join(save_dir, "data")
-        os.makedirs(json_dir, exist_ok=True)
 
-        # Write CSV row(s) for this detection
-        _appendCSV(csv_path, ff_name, detections, det.timestamp)
+def stopSpriteDetector(sprite_detector):
+    """ Stop the sprite detector. Never raises, so capture shutdown always goes on.
 
-        # Save marked/unmarked images
-        marked_image_path, unmarked_image_path = _markSprites(detections, data_dir, ff_name, save_dir, self.config)
+    Arguments:
+        sprite_detector: [SpriteDetector]
+    """
 
-        # Copy FF file to sprite output directory
-        _copyFFFile(data_dir, ff_name, save_dir)
+    try:
+        log.info("Stopping the sprite detector...")
+        sprite_detector.stop()
+        log.info("Sprite detector stopped")
 
-        # Write per-detection JSON
-        json_path = os.path.join(json_dir, "{:s}.json".format(ff_name))
+    except Exception as e:
+        log.error("Error while stopping the sprite detector: {:s}".format(repr(e)))
+
+
+### Offline run over a night directory ###
+
+
+def runSpriteDetectionDirectory(dir_path, config, upload=False, overwrite=False):
+    """ Run sprite detection over every FF file of a night directory, as the live detector would have.
+
+        The FF files are processed in time order through the same false-positive filter as during capture, so
+        the result is what the live detector would have produced. It is the way to add sprite detections to a
+        night that was captured without them.
+
+    Arguments:
+        dir_path: [str] Night directory.
+        config: [Config]
+
+    Keyword arguments:
+        upload: [bool] Send confirmed detections to the sprite server. False by default.
+        overwrite: [bool] Replace this night's sprite products instead of refusing to run. False by default.
+
+    Return:
+        [NightRecorder or None] With the night's counts, or None if nothing ran.
+    """
+
+    if not SPRITE_TFLITE_AVAILABLE:
+        log.error("No TFLite backend is installed, sprite detection cannot run")
+        return None
+
+    model_path = config.sprite_model_path
+
+    if (not spriteModelReady(config)) and (not downloadSpriteModel(config)):
+        log.error("The sprite model {:s} is not available".format(model_path))
+        return None
+
+    # Running twice would record every detection twice; replacing is an explicit choice
+    csv_path = SpriteProducts.csvPath(dir_path)
+    jsonl_path = SpriteProducts.jsonlPath(dir_path)
+    if os.path.isfile(csv_path) or os.path.isfile(jsonl_path):
+
+        if not overwrite:
+            log.error("{:s} already has sprite products; run with --overwrite to replace them".format(
+                dir_path))
+            return None
+
+        for path in (csv_path, jsonl_path):
+            if os.path.isfile(path):
+                os.remove(path)
+
+    # Time order, as the live detector sees them
+    ff_names = sorted([name for name in os.listdir(dir_path) if FFfile.validFFName(name)],
+                      key=FFfile.filenameToDatetime)
+
+    platepar, platepar_path = loadStationPlatepar(config, dir_path)
+    platepar_reason = None if platepar is not None else "no platepar found"
+
+    uploader = None
+    if upload:
+        uploader = SpriteUploadWorker(config)
+        uploader.start()
+
+    recorder = NightRecorder(config, dir_path, uploader, plateparProvenance(platepar, platepar_path))
+    detector = NightDetector(config, dir_path, recorder, platepar, platepar_reason)
+
+    log.info("Running sprite detection on {:d} FF file(s) in {:s}".format(len(ff_names), dir_path))
+
+    for ff_name in ff_names:
         try:
-            with open(json_path, "w", encoding="utf-8") as f:
-                json.dump(detections, f, indent=4)
+            detector.processFF(ff_name, model_path)
+
         except Exception as e:
-            log.error("Failed to write JSON {:s}: {:s}".format(json_path, repr(e)))
+            log.error("Sprite detection failed on {:s}: {:s}".format(ff_name, repr(e)))
 
-        # Build and queue upload payload
-        if uploader.base_url:
+    detector.finish()
 
-            # Format timestamp as ISO 8601
-            timestamp_iso = _formatTimestamp(det.timestamp)
+    if uploader is not None:
+        uploader.stop(drain_timeout=UPLOAD_DRAIN_TIMEOUT)
 
-            payload = {
-                "station_id": self.config.stationID,
-                "timestamp": timestamp_iso,
-                "ff_name": ff_name,
-                "night_dir": night_dir_name,
-                "latitude": self.config.latitude,
-                "longitude": self.config.longitude,
-                "elevation": self.config.elevation,
-                "detections": detections,
-            }
+    log.info("Sprite detection finished: {:s}".format(recorder.summary()))
 
-            # Encode marked image as base64 PNG
-            if marked_image_path and os.path.isfile(marked_image_path):
-                try:
-                    with open(marked_image_path, "rb") as f:
-                        payload["marked_image"] = base64.b64encode(f.read()).decode("ascii")
-                except Exception:
-                    pass     
-            # Encode unmarked image as base64 PNG
-            if unmarked_image_path and os.path.isfile(unmarked_image_path):
-                try:
-                    with open(unmarked_image_path, "rb") as f:
-                        payload["unmarked_image"] = base64.b64encode(f.read()).decode("ascii")
-                except Exception:
-                    pass
+    return recorder
 
-            uploader.queueDetection(payload)
-
-            # Queue FF file for upload if enabled
-            ff_path = os.path.join(data_dir, ff_name)
-            uploader.queueFFFile(ff_path, ff_name)
-
-
-# ###########################################################################
-#                       Standalone CLI
-# ###########################################################################
 
 if __name__ == "__main__":
 
     import argparse
-    import logging
 
-    model_path_default = "share/sprite_detector.tflite"
+    import RMS.ConfigReader as cr
+    from RMS.Logger import LoggingManager
 
-    logger = logging.getLogger("rmslogger")
-    logger.setLevel(logging.DEBUG)
-    logger.propagate = False
 
-    handler = logging.StreamHandler()
-    handler.setLevel(logging.DEBUG)
-    formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-    handler.setFormatter(formatter)
-    logger.addHandler(handler)
+    arg_parser = argparse.ArgumentParser(
+        description="Run sprite detection on the FF files of a night directory.")
+    arg_parser.add_argument("dir_path", type=str, help="Night directory with FF files.")
+    arg_parser.add_argument("-c", "--config", nargs=1, metavar="CONFIG_PATH", type=str,
+                            help="Path to a config file which will be used instead of the default one.")
+    arg_parser.add_argument("--model", type=str, help="Model file to use instead of the configured one.")
+    arg_parser.add_argument("--confidence", type=float,
+                            help="Minimum model confidence, instead of the configured sprite_confidence.")
+    arg_parser.add_argument("--upload", action="store_true",
+                            help="Send confirmed detections to the configured sprite server.")
+    arg_parser.add_argument("--overwrite", action="store_true",
+                            help="Replace sprite products already in the directory.")
+    cml_args = arg_parser.parse_args()
 
-    parser = argparse.ArgumentParser(description="Run sprite detection on FF files")
-    parser.add_argument("folder_path", help="Path to the folder containing FF files")
-    parser.add_argument(
-        "--model", "-m", default=model_path_default,
-        help="Path to the TFLite model file (default: %(default)s)")
-    parser.add_argument(
-        "--confidence", "-c", type=float, default=0.386,
-        help="Confidence threshold for detection (default: %(default)s)")
+    dir_path = os.path.abspath(os.path.expanduser(cml_args.dir_path))
+    config = cr.loadConfigFromDirectory(cml_args.config, dir_path)
 
-    args = parser.parse_args()
+    # Command line overrides of the configuration
+    if cml_args.model:
+        config.sprite_model_path = os.path.abspath(cml_args.model)
+        config.sprite_model_file = os.path.basename(config.sprite_model_path)
 
-    if not TFLITE_AVAILABLE:
-        logger.warning("TensorFlow Lite is not available. Sprite detection skipped.")
-    else:
-        import RMS.ConfigReader as cr
+    if cml_args.confidence is not None:
+        config.sprite_confidence = cml_args.confidence
 
-        config = cr.parse(".config")
+    # Log to the console and to the usual log directory
+    log_manager = LoggingManager()
+    log_manager.initLogging(config, "sprites_")
+    log = getLogger("rmslogger")
 
-        # Load platepar if available
-        pp = None
-        if ASTROMETRY_AVAILABLE and Platepar is not None:
-            pp = Platepar()
-            pp_path = os.path.join(os.path.dirname(config.config_file_path),
-                                   config.platepar_name)
-            if not os.path.isfile(pp_path):
-                pp_path = os.path.join(args.folder_path, config.platepar_name)
-            if os.path.isfile(pp_path):
-                pp.read(pp_path, use_flat=config.use_flat)
-                logger.info("Platepar loaded from {:s}".format(pp_path))
-            else:
-                pp = None
-                logger.warning("No platepar found — alt/az calibration disabled.")
+    recorder = runSpriteDetectionDirectory(dir_path, config, upload=cml_args.upload,
+                                           overwrite=cml_args.overwrite)
 
-        files = sorted([
-            f for f in os.listdir(args.folder_path)
-            if f.startswith("FF_") and f.endswith(".fits")
-        ])
-
-        logger.info("Processing {:d} FF files...".format(len(files)))
-
-        # Collect all detections
-        all_detections = []
-        for filename in files:
-            ff_name, detections, timestamp, jd = detectSpritesInFF(
-                args.folder_path, filename, args.model, config, platepar=pp)
-            if detections:
-                all_detections.append((ff_name, detections, timestamp))
-            time.sleep(0.1)
-
-        if not all_detections:
-            logger.info("No sprite detections found.")
-        else:
-            # Sort by timestamp and run FP filter
-            all_detections.sort(key=lambda x: x[2])
-
-            save_dir = os.path.join(config.data_dir, config.sprite_dir,
-                                    os.path.basename(args.folder_path))
-            csv_path = os.path.join(
-                args.folder_path,
-                "{:s}_sprite_detections.csv".format(os.path.basename(args.folder_path)),
-            )
-
-            confirmed = []
-
-            def on_confirmed(det):
-                confirmed.append(det)
-
-            fp_filter = FalsePositiveFilter(60, 3, on_confirmed)
-
-            for ff_name, detections, timestamp in all_detections:
-                fp_filter.addDetection(timestamp, detections, ff_name)
-
-            # Flush remaining
-            last_timestamp = all_detections[-1][2]
-            fp_filter.flush(last_timestamp + 61)
-
-            logger.info("{:d} detections, {:d} passed filter.".format(
-                len(all_detections), len(confirmed)))
-
-            # Write CSV for all detections
-            for ff_name, detections, timestamp in all_detections:
-                _appendCSV(csv_path, ff_name, detections, timestamp)
-
-            # Process confirmed detections
-            for det in confirmed:
-                _markSprites(det.data, args.folder_path, det.filename, save_dir, config)
-                _copyFFFile(args.folder_path, det.filename, save_dir)
-
-                json_dir = os.path.join(save_dir, "data")
-                os.makedirs(json_dir, exist_ok=True)
-                json_path = os.path.join(json_dir, "{:s}.json".format(det.filename))
-                with open(json_path, "w", encoding="utf-8") as f:
-                    json.dump(det.data, f, indent=4)
-
-            logger.info("Processing complete. {:d} confirmed events saved to {:s}".format(
-                len(confirmed), save_dir))
+    sys.exit(0 if recorder is not None else 1)

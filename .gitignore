@@ -121,3 +121,6 @@ Catalogs/GMN_StarCatalog_LM12.0.bin
 # Agents
 .agents/
 skills-lock.json
+# Downloaded at run time from the GMN server, see RMS/DownloadSpriteModel.py
+share/sprite_detector.tflite
+share/sprite_detector.tflite.download

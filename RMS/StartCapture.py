@@ -17,6 +17,7 @@
 from __future__ import print_function, absolute_import
 
 import os
+import glob
 import sys
 import argparse
 import time
@@ -173,7 +174,7 @@ from RMS.CaptureModeSwitcher import captureModeSwitcher
 from RMS.Compression import Compressor
 from RMS.DeleteOldObservations import deleteOldObservations
 from RMS.DetectStarsAndMeteors import detectStarsAndMeteors
-from RMS.SpriteDetector import SpriteDetector, TFLITE_AVAILABLE as SPRITE_TFLITE_AVAILABLE
+from RMS.SpriteDetector import startSpriteDetector, stopSpriteDetector
 from RMS.Formats.FFfile import validFFName
 from RMS.Misc import mkdirP, RmsDateTime, UTCFromTimestamp, setMultiprocessingStartMethod, frameBufferShape
 from RMS.QueuedPool import QueuedPool
@@ -749,14 +750,10 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
                     backup_dir=night_data_dir, input_queue_maxsize=None)
                 detector.startPool()
 
-                # Initialize the sprite detector if enabled
-                sprite_detector = None
-                if config.detect_sprites and SPRITE_TFLITE_AVAILABLE:
-                    log.info("Sprite detection enabled.")
-                    sprite_detector = SpriteDetector(night_data_dir, config)
-                    sprite_detector.start()
-                elif config.detect_sprites:
-                    log.warning("Sprite detection enabled but TFLite not available. Skipping.")
+                # Start the sprite detector, if enabled. It needs a TFLite backend and the model; without
+                #   them it logs why and capture goes on without it
+                if config.detect_sprites:
+                    sprite_detector = startSpriteDetector(night_data_dir, config)
 
 
                 # If the capture is being resumed into the directory, load all previously saved FF files
@@ -1012,6 +1009,10 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
                     if detector is not None:
                         del detector
 
+                    # Stop the sprite detector too, or it is left running without a parent
+                    if sprite_detector is not None:
+                        stopSpriteDetector(sprite_detector)
+
                     sys.exit()
 
 
@@ -1029,14 +1030,10 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
                 # Shut down the Manager server process now that results are collected
                 detector.shutdownManager()
 
-                # Stop the sprite detector (real-time — results already saved)
+                # Stop the sprite detector. It works in real time, so its results are already written; stopping
+                #   it confirms the last minute of detections and finishes pending uploads
                 if sprite_detector is not None:
-                    try:
-                        log.info('Stopping sprite detector...')
-                        sprite_detector.stop()
-                        log.info('Sprite detector stopped.')
-                    except Exception as e:
-                        log.error("Error stopping sprite detector: {:s}".format(repr(e)))
+                    stopSpriteDetector(sprite_detector)
 
             else:
 
@@ -1560,10 +1557,14 @@ if __name__ == "__main__":
                         log.info("Reboot delayed for 1 minute due to upload...")
                         reboot_go = False
 
-                # Check if the reboot lock file exists
+                # Check if a reboot lock file exists. Several holders can each take their own, named after the
+                #   lock file with a suffix (the sprite uploader uses <lock file>.sprite), so that one holder
+                #   removing its lock cannot release another's
                 reboot_lock_file_path = os.path.join(config.data_dir, config.reboot_lock_file)
-                if os.path.exists(reboot_lock_file_path):
-                    log.info("Reboot delayed for 1 minute because the lock file exists: {:s}".format(reboot_lock_file_path))
+                reboot_locks = glob.glob(reboot_lock_file_path + "*")
+                if reboot_locks:
+                    log.info("Reboot delayed for 1 minute because a lock file exists: {:s}".format(
+                        ", ".join(reboot_locks)))
                     reboot_go = False
 
 

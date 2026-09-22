@@ -73,9 +73,9 @@ class Compressor(multiprocessing.Process):
             sprite_queue: [multiprocessing.Queue or None] Input queue for sprite detection process.
 
         """
-
+        
         super(Compressor, self).__init__()
-
+        
         self.data_dir = data_dir
         # array1/array2 are multiprocessing.Array BASE objects (picklable across forkserver/spawn).
         # The numpy views over them are rebuilt in run() so they stay backed by the same shared
@@ -89,7 +89,11 @@ class Compressor(multiprocessing.Process):
         self.config = config
 
         self.detector = detector
+
+        # Bounded queue of the sprite detector, or None. Fed without blocking (see run())
         self.sprite_queue = sprite_queue
+        self.sprite_dropped = 0
+        self.sprite_drop_logged = 0.0
 
         # Lock-free flags: these are set/polled across processes and must never be able to
         # deadlock, even if a process sharing them is killed (see AtomicFlag)
@@ -102,6 +106,7 @@ class Compressor(multiprocessing.Process):
         # Grab the logging queue on the parent side so the child can re-attach logging
         # under the 'forkserver'/'spawn' start methods (handlers are not inherited there)
         self.logging_queue = getLoggingQueue()
+
 
     def compress(self, frames):
         """ Compress frames to the FTP-compatible array and extract sums of intensities per every field.
@@ -270,6 +275,7 @@ class Compressor(multiprocessing.Process):
             log.debug("Compression process not alive, joining to reap resources")
             self.join(timeout=5)
 
+        # Return the detector and live viewer objects because they were updated in this namespace
         return self.detector
     
 
@@ -448,8 +454,21 @@ class Compressor(multiprocessing.Process):
                 self.detector.addJob([self.data_dir, filename, self.config])
                 log.debug('Added file for detection: {:s}'.format(filename))
 
+            # Hand the file to the sprite detector. This must never block: compression is on the capture
+            #   critical path, and the sprite detector can fall behind on a slow machine. When its queue is
+            #   full the file is skipped for sprite detection only.
             if self.sprite_queue is not None:
-                self.sprite_queue.put((self.data_dir, filename))
+                try:
+                    self.sprite_queue.put_nowait((self.data_dir, filename))
+
+                except Exception:
+                    self.sprite_dropped += 1
+
+                    # Say so at most once a minute, with the running count
+                    if (time.time() - self.sprite_drop_logged) > 60:
+                        log.warning("Sprite detector is behind, {:d} FF file(s) skipped for sprite "
+                                    "detection so far".format(self.sprite_dropped))
+                        self.sprite_drop_logged = time.time()
 
 
         log.debug('Compression run exit')
