@@ -510,12 +510,18 @@ def testRadial3OddMatchesRadial5OddWithZeroK2(flag_state):
         pp.force_distortion_centre, pp.equal_aspect, pp.asymmetry_corr = flag_state
         pp.setDistortionType(dist_type, reset_params=True)
 
-        # Same k1 in both, the extra radial5-odd k2 is zero
+        # Same k1 in both, the extra radial5-odd k2 is zero. Every array is a view into a larger buffer
+        #   whose next element is large, so reading one past the end would show up if it were used
         coeffs = {'x0': 0.001, 'y0': -0.002, 'xy': 0.003, 'a1': 0.002, 'a2': 0.1, 'k1': 0.05}
-        pp.x_poly_fwd = pp.buildRadialCoeffs(coeffs)
-        pp.x_poly_rev = pp.buildRadialCoeffs(dict(coeffs, k1=-0.05))
-        pp.y_poly_fwd = pp.x_poly_fwd.copy()
-        pp.y_poly_rev = pp.x_poly_rev.copy()
+
+        def _paddedView(values):
+            buffer = np.append(values, 1e3)
+            return buffer[:len(values)]
+
+        pp.x_poly_fwd = _paddedView(pp.buildRadialCoeffs(coeffs))
+        pp.x_poly_rev = _paddedView(pp.buildRadialCoeffs(dict(coeffs, k1=-0.05)))
+        pp.y_poly_fwd = _paddedView(pp.x_poly_fwd)
+        pp.y_poly_rev = _paddedView(pp.x_poly_rev)
         pp.x_poly = pp.x_poly_fwd
         pp.y_poly = pp.y_poly_fwd
 
