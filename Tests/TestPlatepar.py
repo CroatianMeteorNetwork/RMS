@@ -323,3 +323,80 @@ def testNNFitRejectionRestoresPlatepar():
 
     assert _plateparState(pp) == state
     assert pp.star_list == []
+
+
+def _nnPointingScene(false_fraction, dec_d=None, seed=2):
+    """ Synthetic camera, catalog and detections from the astrometry benchmark. """
+
+    from Tests.BenchmarkAstrometryFit import (buildSyntheticPlatepar, buildSyntheticCatalog,
+        buildSyntheticDetections)
+
+    pp = buildSyntheticPlatepar()
+
+    # Optionally point the camera close to the celestial pole
+    if dec_d is not None:
+        pp.F_scale = 40.0
+        pp.refraction = False
+        pp.RA_d, pp.dec_d, pp.pos_angle_ref = 10.0, dec_d, 30.0
+        pp.updateRefAltAz()
+
+    catalog = buildSyntheticCatalog(pp, np.random.RandomState(1), n_target=1500)
+    img_stars, _ = buildSyntheticDetections(pp, catalog, np.random.RandomState(seed),
+        false_fraction=false_fraction)
+
+    return pp, catalog, img_stars
+
+
+def _medianProjectionError(pp_true, pp_fit, catalog):
+    """ Median pixel distance between the catalog projected with the true and the fitted platepar. """
+
+    from RMS.Astrometry.ApplyAstrometry import raDecToXYPP
+
+    x0, y0 = raDecToXYPP(catalog[:, 0], catalog[:, 1], pp_true.JD, pp_true)
+    x1, y1 = raDecToXYPP(catalog[:, 0], catalog[:, 1], pp_true.JD, pp_fit)
+    in_img = (x0 >= 0) & (x0 < pp_true.X_res) & (y0 >= 0) & (y0 < pp_true.Y_res)
+
+    return np.median(np.hypot(x1 - x0, y1 - y0)[in_img])
+
+
+def testFitPointingNNNormalizesPolarPointing():
+    """ A polar camera fitted from the other side of the pole must get a valid, normalized pointing.
+
+        Starting at RA + 180 deg with the position angle rotated by 180 deg is the same field seen across
+        the pole, so the optimizer converges beyond dec = 90 deg. That must be stored as a proper pointing.
+    """
+
+    import copy
+
+    pp, catalog, img_stars = _nnPointingScene(0.1, dec_d=89.7)
+
+    pp_fit = copy.deepcopy(pp)
+    pp_fit.RA_d = (pp_fit.RA_d + 180.0)%360
+    pp_fit.pos_angle_ref += 180.0
+
+    success, _, _, _ = pp_fit.fitPointingNN(pp.JD, img_stars, catalog)
+
+    assert success
+    assert -90.0 <= pp_fit.dec_d <= 90.0
+    assert 0.0 <= pp_fit.RA_d < 360.0
+    assert _medianProjectionError(pp, pp_fit, catalog) < 0.1
+
+
+@pytest.mark.parametrize("false_fraction", [0.1, 0.3])
+def testFitPointingNNRobustToFalseDetections(false_fraction):
+    """ False detections must not bias the NN pointing fit (the plain RMSD gave 0.2-0.5 px errors). """
+
+    import copy
+
+    pp, catalog, img_stars = _nnPointingScene(false_fraction)
+
+    pp_fit = copy.deepcopy(pp)
+    pp_fit.RA_d += 0.4
+    pp_fit.dec_d += 0.3
+    pp_fit.pos_angle_ref += 0.2
+
+    success, _, inlier_fraction, _ = pp_fit.fitPointingNN(pp.JD, img_stars, catalog)
+
+    assert success
+    assert inlier_fraction > 0.7
+    assert _medianProjectionError(pp, pp_fit, catalog) < 0.1

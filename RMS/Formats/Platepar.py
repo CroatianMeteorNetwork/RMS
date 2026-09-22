@@ -773,7 +773,29 @@ class Platepar(object):
         img_x, img_y, _ = img_stars.T
         img_coords = np.column_stack([img_x, img_y])
 
-        def _calcPointingNNCostPixel(params, pp_work, jd, ra_catalog, dec_catalog, img_coords, fixed_scale):
+        def _setNNPointing(pp, params, fixed_scale):
+            """ Set the pointing of the given platepar from the optimizer parameters.
+
+                The declination is stepped freely by the optimizer, so the pointing is normalized back
+                onto the sphere and the position angle is rotated by the offset of a pole crossing, which
+                keeps the projected field continuous for cameras pointing near the celestial pole.
+
+            Arguments:
+                pp: [Platepar] Platepar which is updated in place.
+                params: [list] RA_d, dec_d, pos_angle_ref and, if the scale is not fixed, F_scale.
+                fixed_scale: [bool] Keep the scale fixed.
+
+            Return:
+                None
+            """
+
+            pp.RA_d, pp.dec_d, pos_angle_offset = normalizeRaDec(params[0], params[1])
+            pp.pos_angle_ref = (params[2] + pos_angle_offset)%360
+            if not fixed_scale:
+                pp.F_scale = abs(params[3])
+
+        def _calcPointingNNCostPixel(params, pp_work, jd, ra_catalog, dec_catalog, img_coords, fixed_scale,
+                                     truncation=None):
             """ NN cost function in pixel space for the pointing fit.
 
                 Projects catalog stars to image coordinates and computes pixel-space NN distances. This is
@@ -790,15 +812,19 @@ class Platepar(object):
                 img_coords: [ndarray] (N, 2) array of detected star x, y positions.
                 fixed_scale: [bool] Keep the scale fixed.
 
+            Keyword arguments:
+                truncation: [float] If given, the NN distances are capped at this value (px) so that far
+                    (false) detections do not pull the solution. None by default (plain RMSD).
+
             Return:
-                rmsd: [float] RMSD of the NN distances (px), or 1e10 if too few catalog stars project
-                    inside the image.
+                rmsd: [float] RMSD of the (capped) NN distances (px), or 1e10 if too few catalog stars
+                    project inside the image.
             """
 
-            # Update the working platepar with the current parameters (no copy needed)
-            pp_work.RA_d, pp_work.dec_d, pp_work.pos_angle_ref = params[:3]
-            if not fixed_scale:
-                pp_work.F_scale = abs(params[3])
+            # Update the working platepar with the current parameters (no copy needed). The optimizer
+            #   steps the declination freely, so bring the pointing back onto the sphere and rotate the
+            #   position angle by the offset of a pole crossing (polar cameras)
+            _setNNPointing(pp_work, params, fixed_scale)
 
             # Project catalog stars to image coordinates
             cat_x, cat_y = raDecToXYPP(ra_catalog, dec_catalog, jd, pp_work)
@@ -820,6 +846,10 @@ class Platepar(object):
             cat_coords = np.column_stack([cat_x_valid, cat_y_valid])
             tree = cKDTree(cat_coords, balanced_tree=False, compact_nodes=False)
             nn_distances, _ = tree.query(img_coords, k=1)
+
+            # Cap the NN distances if requested
+            if truncation is not None:
+                nn_distances = np.minimum(nn_distances, truncation)
 
             # Use the RMSD (root mean square deviation) as the cost - this normalizes by the number of stars
             #   and gives interpretable units (pixels)
@@ -847,11 +877,30 @@ class Platepar(object):
             options={'maxiter': 5000, 'adaptive': True, 'initial_simplex': simplex},
         )
 
+        # Refine the pointing with a truncated cost. The plain RMSD above has a wide basin, so it recovers
+        #   large pointing errors, but every false detection pulls the solution by its full distance (a
+        #   0.2-0.5 px bias with 10-30% false detections). Capping the NN distance at the inlier threshold
+        #   stops the far detections from pulling, but the capped cost is flat far from the solution, so
+        #   it is only used as a second stage started close to the solution with a small simplex
+        inlier_threshold = 5.0  # pixels
+        simplex_refine = buildNelderMeadSimplex(res.x, res.x[1], mode="fixed", angular_step=0.1)
+        res_refine = scipy.optimize.minimize(
+            _calcPointingNNCostPixel,
+            res.x,
+            args=(pp_work, jd, ra_catalog, dec_catalog, img_coords, fixed_scale, inlier_threshold),
+            method='Nelder-Mead',
+            options={'maxiter': 5000, 'adaptive': True, 'initial_simplex': simplex_refine},
+        )
+        res.x = res_refine.x
+        res.success = res.success and res_refine.success
+
+        # Report the plain RMSD of all NN distances at the refined pointing
+        res.fun = _calcPointingNNCostPixel(res.x, pp_work, jd, ra_catalog, dec_catalog, img_coords,
+                                           fixed_scale)
+
         # Check the inlier fraction, which is more robust than the RMSD skewed by outliers. Recompute the
         #   NN distances with the fitted parameters
-        pp_work.RA_d, pp_work.dec_d, pp_work.pos_angle_ref = res.x[:3]
-        if not fixed_scale:
-            pp_work.F_scale = abs(res.x[3])
+        _setNNPointing(pp_work, res.x, fixed_scale)
         cat_x, cat_y = raDecToXYPP(ra_catalog, dec_catalog, jd, pp_work)
         valid_mask = (cat_x >= 0) & (cat_x < pp_work.X_res) & (cat_y >= 0) & (cat_y < pp_work.Y_res)
         cat_x_valid = cat_x[valid_mask]
@@ -869,7 +918,6 @@ class Platepar(object):
         nn_distances, _ = tree.query(img_coords, k=1)
 
         # Count the inliers (matches within the threshold)
-        inlier_threshold = 5.0  # pixels
         min_inlier_fraction = 0.5  # require 50% of detected stars to match
         inlier_mask = nn_distances < inlier_threshold
         n_inliers = np.sum(inlier_mask)
@@ -882,10 +930,8 @@ class Platepar(object):
         if inlier_fraction < min_inlier_fraction:
             return False, res.fun, inlier_fraction, 0.0
 
-        # Update the fitted parameters
-        self.RA_d, self.dec_d, self.pos_angle_ref = res.x[:3]
-        if not fixed_scale:
-            self.F_scale = abs(res.x[3])
+        # Update the fitted parameters (normalized the same way as in the cost function)
+        _setNNPointing(self, res.x, fixed_scale)
 
         # Update JD and Ho to match the observation time, which ensures the fitted RA_d is consistent with
         #   the new reference time
