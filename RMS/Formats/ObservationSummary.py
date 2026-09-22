@@ -1713,9 +1713,33 @@ def getObservationSummaryDict(data_dir, final=False, config=None):
 
             return d
 
-    # No file yet - start a new summary holding only the night directory
-    log.info("Creating a new observation summary dictionary")
-    d = {'night_data_dir': data_dir}
+    # No working file. finalizeObservationSummary removes it once the final JSON is written, so a
+    # night reprocessed after that (e.g. archiving failed after the summary was finalized) must
+    # start from the final summary. Starting empty would overwrite the final summary without the
+    # start-of-session values (start_time, stationID, commit, hardware, camera, media_backend,
+    # dropped_frames), which are only recorded during capture
+    d = {}
+    final_json_path = getRMSStyleFileName(data_dir, OBSERVATION_SUMMARY_NAME_JSON)
+    if (not final) and os.path.isfile(final_json_path):
+        try:
+            with open(final_json_path, "r") as f:
+                d = json.load(f)
+
+            if not isinstance(d, dict):
+                d = {}
+
+            log.info("Seeding the observation summary from {}".format(os.path.basename(final_json_path)))
+
+        except Exception as e:
+            log.warning("Could not read {} to seed the observation summary: {}".format(
+                os.path.basename(final_json_path), repr(e)))
+            d = {}
+
+    # Otherwise start a new summary holding only the night directory
+    if not d:
+        log.info("Creating a new observation summary dictionary")
+
+    d['night_data_dir'] = data_dir
     saveObservationSummaryDict(d, data_dir)
 
     return d

@@ -537,3 +537,41 @@ def testNTPSocketFailureReturnsThreeValues(monkeypatch):
 
     assert osm.timestampFromNTP('ntp.example') == (None, None, 'ntp.example')
     assert sock.closed
+
+
+# ---------------------------------------------------------------------------
+# Item 8: a reprocess after finalize must not lose the start-of-session summary values
+
+def testObservationSummaryReseededFromFinalJson(tmp_path):
+    """ With the working JSON removed by finalize, the next working dict starts from the final
+        summary instead of from an empty dict.
+    """
+
+    import RMS.ConfigReader as cr
+    import RMS.Formats.ObservationSummary as osm
+    from RMS.Misc import getRMSStyleFileName
+
+    config = cr.Config()
+    night_dir = str(tmp_path/'XX0001_20260101_000000_000000')
+    os.makedirs(night_dir)
+
+    # Start-of-session values recorded during capture
+    d = osm.getObservationSummaryDict(night_dir)
+    osm.addObsParam(d, 'start_time', '2026-01-01T00:00:00+00:00')
+    osm.addObsParam(d, 'stationID', 'XX0001')
+    osm.addObsParam(d, 'media_backend', 'gst')
+
+    # Finalize writes the final JSON and removes the working one
+    osm.writeToJSON(config, getRMSStyleFileName(night_dir, osm.OBSERVATION_SUMMARY_NAME_JSON), night_dir)
+    os.unlink(getRMSStyleFileName(night_dir, osm.OBSERVATION_SUMMARY_WORKING_NAME_JSON))
+
+    # Reprocessing loads the working dict again
+    d = osm.getObservationSummaryDict(night_dir)
+
+    assert d.get('start_time') == '2026-01-01T00:00:00+00:00'
+    assert d.get('stationID') == 'XX0001'
+    assert d.get('media_backend') == 'gst'
+    assert d.get('night_data_dir') == night_dir
+
+    # And it was persisted as the working JSON
+    assert os.path.isfile(getRMSStyleFileName(night_dir, osm.OBSERVATION_SUMMARY_WORKING_NAME_JSON))
