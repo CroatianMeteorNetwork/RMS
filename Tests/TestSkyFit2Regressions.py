@@ -873,3 +873,66 @@ def testStarDetectionSlidersKeepConfigValues(qapp, stationDir, quietMessages):
     finally:
         pt.close()
         pt.deleteLater()
+
+
+###################################################################################################
+# BEST FRAME PLACEHOLDER
+###################################################################################################
+
+def testValidFFNameRejectsPngWithoutFormat():
+    """ The RMS directory scanners (validFFName without fmt) never take a PNG for an FF file. """
+
+    from RMS.Formats.FFfile import validFFName
+    from RMS.Formats.FrameInterface import validFFImageName
+
+    name = "FF_AU000A_20250817_194808_532_0524288_placeholder.png"
+
+    assert not validFFName(name)
+    assert validFFName(name, fmt='png')
+    assert validFFName("FF_AU000A_20250817_194808_532_0524288.fits")
+
+    # The FF image handle opens the placeholders explicitly
+    assert validFFImageName(name)
+
+
+def testBestFramePlaceholderNotLeftInDataFolder(plateTool, monkeypatch):
+    """ The auto fit on a frame without an image uses a placeholder that is not written to the data
+        folder, and gets the re-detected stars of that frame. """
+
+    from pyqtgraph.Qt import QtWidgets
+
+    pt = plateTool
+    real_ff = pt.img_handle.name()
+    missing_ff = "FF_AU000A_20250817_200000_000_0600000.fits"
+
+    stars = pt.calstars[real_ff]
+    pt.calstars[missing_ff] = stars
+    pt.star_detection_override_data[missing_ff] = stars
+
+    # The missing frame is the best one
+    monkeypatch.setattr(SF, "selectBestFrame",
+                        lambda data, *a, **k: (missing_ff if missing_ff in data else real_ff, 1.0, {}))
+
+    # Choose the auto fit in the dialog, and skip the fit itself
+    def clickedButton(self):
+        for button in self.buttons():
+            if button.text().startswith("Auto Fit"):
+                return button
+        return None
+
+    monkeypatch.setattr(QtWidgets.QMessageBox, "clickedButton", clickedButton)
+    fits = []
+    pt.autoFitAstrometryNet = lambda: fits.append(pt.img_handle.name())
+
+    pt.findBestFrame()
+
+    placeholder_name = "FF_AU000A_20250817_200000_000_0600000_placeholder.png"
+    assert fits == [placeholder_name]
+    assert not any("_placeholder" in f for f in os.listdir(pt.dir_path))
+    assert pt.star_detection_override_data[placeholder_name] is stars
+
+    # The placeholder can be shown again after navigating away
+    pt.nextImg(n=1)
+    pt.nextImg(n=-1)
+    assert pt.img_handle.name() == placeholder_name
+    assert np.all(pt.img_handle.loadChunk().avepixel <= 40)

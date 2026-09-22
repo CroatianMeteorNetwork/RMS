@@ -287,7 +287,7 @@ import RMS.ConfigReader as cr
 from RMS.ExtractStars import extractStarsAndSave, extractStarsFF
 import RMS.Formats.CALSTARS as CALSTARS
 from RMS.Formats.Platepar import Platepar, getCatalogStarsImagePositions
-from RMS.Formats.FFfile import convertFRNameToFF, constructFFName
+from RMS.Formats.FFfile import convertFRNameToFF, constructFFName, ffStructFromImage
 from RMS.Formats.FrameInterface import detectInputTypeFolder, detectInputTypeFile
 from RMS.Formats.FTPdetectinfo import writeFTPdetectinfo
 from RMS.Formats import StarCatalog
@@ -14252,7 +14252,7 @@ class PlateTool(QtWidgets.QMainWindow):
             return
 
         # Check that the image handle is a multi-image handle with an ff_list
-        if not hasattr(self.img_handle, 'ff_list'):
+        if not hasattr(self.img_handle, 'ff_list') or not hasattr(self.img_handle, 'addMemoryFF'):
             QtWidgets.QMessageBox.warning(
                 self, "Single Image",
                 "This feature requires multiple images (FF files)."
@@ -14386,37 +14386,27 @@ class PlateTool(QtWidgets.QMainWindow):
                             valid = (x_coords >= 0) & (x_coords < width)
                             placeholder[y_coords[valid], x_coords[valid]] = 40
 
-                    # Save the placeholder next to the data, named after the best FF file
+                    # The placeholder is named after the best FF file, so the image handle takes the
+                    #   frame time from its name. It only exists in memory: a file in the data folder
+                    #   would be left behind and taken for an image by other tools
                     base_name = os.path.splitext(best_ff)[0]
                     placeholder_name = f"{base_name}_placeholder.png"
-                    placeholder_path = os.path.join(self.dir_path, placeholder_name)
 
-                    img_pil = Image.fromarray(placeholder)
-                    img_pil.save(placeholder_path)
-                    print(f"Created placeholder image: {placeholder_path}")
-
-                    # Carry the detected stars over to the placeholder image
+                    # Carry the detected stars (and the re-detected ones) over to the placeholder image
                     if best_ff in self.calstars:
                         self.calstars[placeholder_name] = self.calstars[best_ff]
+                    if best_ff in self.star_detection_override_data:
+                        self.star_detection_override_data[placeholder_name] = \
+                            self.star_detection_override_data[best_ff]
 
-                    # Refresh the file list and navigate to the placeholder
-                    self.img_handle = detectInputTypeFolder(
-                        self.dir_path, self.config,
-                        beginning_time=None, fps=self.fps
-                    )
-                    self.img.changeHandle(self.img_handle)
+                    # Add the placeholder to the image list and navigate to it
+                    target_index = self.img_handle.addMemoryFF(placeholder_name,
+                                                               ffStructFromImage(placeholder))
+                    print(f"Created placeholder image: {placeholder_name}")
 
-                    target_index = None
-                    for i, ff_path in enumerate(self.img_handle.ff_list):
-                        if os.path.basename(ff_path) == placeholder_name:
-                            target_index = i
-                            break
-
-                    if target_index is not None:
-                        current_index = self.img_handle.current_ff_index
-                        delta = target_index - current_index
-                        if delta != 0:
-                            self.nextImg(n=delta)
+                    delta = target_index - self.img_handle.current_ff_index
+                    if delta != 0:
+                        self.nextImg(n=delta)
 
                     # Use the same auto-fit path as the fit parameters panel
                     self.autoFitAstrometryNet()
