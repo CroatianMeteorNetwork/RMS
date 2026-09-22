@@ -2436,10 +2436,8 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         self.gui = gui
 
         # Stash for coefficients that get hidden when reducing the coefficient count, so they can be
-        #   restored when the flags are toggled back
-        self._coeff_stash = {
-            'x_fwd': {}, 'x_rev': {}, 'y_fwd': {}, 'y_rev': {}
-        }
+        #   restored when the flags are toggled back. It belongs to one platepar object only
+        self.resetCoeffStash()
 
         full_layout = QtWidgets.QVBoxLayout()
         full_layout.setContentsMargins(*self.scaledMargins(0.5, 0.25))
@@ -2776,9 +2774,31 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         self.updateRestoreDefaultsButton()
         self.sigRefractionToggled.emit()
 
+    def resetCoeffStash(self):
+        """ Forget the stashed coefficients and tie the stash to the current platepar.
+
+            Must be done whenever another platepar is loaded, otherwise the zero coefficients of the new
+            platepar would be filled with the old platepar's values, which would then be saved.
+        """
+
+        self._coeff_stash = {
+            'x_fwd': {}, 'x_rev': {}, 'y_fwd': {}, 'y_rev': {}
+        }
+        self._coeff_stash_platepar = getattr(self.gui, 'platepar', None)
+
+
+    def _checkCoeffStashOwner(self):
+        """ Reset the stash if the GUI platepar is not the one the stash was filled from. """
+
+        if self._coeff_stash_platepar is not getattr(self.gui, 'platepar', None):
+            self.resetCoeffStash()
+
+
     def _stashCurrentCoeffs(self):
         """ Stash the current non-zero radial coefficients so they can be restored when switching back
             to a distortion type/flags that need them. No-op for non-radial distortion types. """
+
+        self._checkCoeffStashOwner()
 
         pp = self.gui.platepar
 
@@ -2810,6 +2830,8 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
     def _restoreCoeffsFromStash(self):
         """ Restore stashed coefficient values where the current values are zero and rebuild the
             platepar polynomials. No-op for non-radial distortion types. """
+
+        self._checkCoeffStashOwner()
 
         pp = self.gui.platepar
 
@@ -2844,6 +2866,10 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
             pp.x_poly_rev = pp.buildRadialCoeffs(x_coeffs_rev, pp.distortion_type)
             pp.y_poly_fwd = pp.buildRadialCoeffs(y_coeffs_fwd, pp.distortion_type)
             pp.y_poly_rev = pp.buildRadialCoeffs(y_coeffs_rev, pp.distortion_type)
+
+            # Never leave arrays of another length than the distortion type needs
+            pp.padDictParams()
+
             pp.x_poly = pp.x_poly_fwd
             pp.y_poly = pp.y_poly_fwd
 
@@ -2889,11 +2915,23 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         # Stash current coefficients before changing type (only for radial types)
         self._stashCurrentCoeffs()
 
+        # Switching between polynomial and radial, or between the all and the odd radial powers, makes
+        #   setDistortionType reset the parameters: the k slots then mean other powers, so the stash
+        #   must not be put back
+        old_dist_type = pp.distortion_type
+        forced_reset = (new_dist_type[:4] != old_dist_type[:4])
+        if new_dist_type.startswith("radial") and (new_dist_type[-3:] != old_dist_type[-3:]):
+            forced_reset = True
+
         # Change the distortion type
         pp.setDistortionType(new_dist_type, reset_params=False)
 
+        if forced_reset:
+            self.resetCoeffStash()
+
         # Restore any zeros from stash (only for radial types)
-        self._restoreCoeffsFromStash()
+        else:
+            self._restoreCoeffsFromStash()
 
     def onEqualAspectToggled(self):
         """ Apply the equal aspect checkbox to the platepar, keeping hidden coefficients recoverable. """
@@ -3143,8 +3181,18 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         # Update platepar reference in distortion dialog in case a new platepar was loaded
         self.distortion_dialog.updatePlatepar(self.gui.platepar)
 
+        # A different platepar was loaded, the stashed coefficients are not its own
+        self._checkCoeffStashOwner()
+
+        # Only show the platepar's distortion type. Letting the combo box fire onIndexChanged here
+        #   would apply a distortion type change (and the stash) to the platepar that was just loaded
+        self.distortion_type.blockSignals(True)
         self.distortion_type.setCurrentIndex(
             self.gui.platepar.distortion_type_list.index(self.gui.platepar.distortion_type))
+        self.distortion_type.blockSignals(False)
+        self.fit_parameters.changeNumberShown(self.gui.platepar.poly_length)
+        self.fit_parameters.updateValues()
+
         self.extinction_scale.setValue(self.gui.platepar.extinction_scale)
         
         self.vignetting_coeff.setValue(self.gui.platepar.vignetting_coeff)

@@ -9,6 +9,7 @@ import copy
 import functools
 import os
 import shutil
+import tarfile
 import types
 
 import numpy as np
@@ -23,11 +24,92 @@ try:
 except SystemExit:
     pytest.skip("SkyFit2 could not import its Qt dependencies", allow_module_level=True)
 
+from pyqtgraph.Qt import QtWidgets
+
 import RMS.ConfigReader as cr
+import RMS.Routines.CustomPyqtgraphClasses as CPC
 
 
 REPO_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TEMPLATE_CONFIG = os.path.join(REPO_DIR, ".config")
+STATIONS_ARCHIVE = os.path.join(REPO_DIR, "Tests", "ExampleStationData", "stations.tar.bz2")
+
+
+###################################################################################################
+# FIXTURES
+###################################################################################################
+
+@pytest.fixture(scope="module")
+def qapp():
+    """ The offscreen QApplication shared by the GUI tests. """
+
+    app = QtWidgets.QApplication.instance()
+    if app is None:
+        try:
+            app = QtWidgets.QApplication([])
+        except Exception as e:
+            pytest.skip("No Qt application could be created: {}".format(e))
+
+    return app
+
+
+@pytest.fixture(scope="module")
+def stationArchive(tmp_path_factory):
+    """ The example station AU000A, extracted once per module. """
+
+    if not os.path.isfile(STATIONS_ARCHIVE):
+        pytest.skip("The example station archive is missing")
+
+    out_dir = str(tmp_path_factory.mktemp("stations"))
+    with tarfile.open(STATIONS_ARCHIVE, "r:bz2") as tar:
+        members = [m for m in tar.getmembers() if m.name.startswith("Stations/AU000A")]
+        tar.extractall(out_dir, members=members)
+
+    return os.path.join(out_dir, "Stations", "AU000A")
+
+
+@pytest.fixture
+def stationDir(stationArchive, tmp_path):
+    """ A fresh copy of the example station for each test. """
+
+    dir_path = str(tmp_path / "AU000A")
+    shutil.copytree(stationArchive, dir_path)
+
+    return dir_path
+
+
+@pytest.fixture
+def quietMessages(monkeypatch):
+    """ Record the SkyFit2 message boxes instead of showing them, and answer questions with Yes. """
+
+    messages = []
+    record = lambda *a, **k: messages.append(k)
+    monkeypatch.setattr(SF, "qmessagebox", record)
+    monkeypatch.setattr(CPC, "qmessagebox", record)
+
+    yes = QtWidgets.QMessageBox.StandardButton.Yes
+    monkeypatch.setattr(QtWidgets.QMessageBox, "question", staticmethod(lambda *a, **k: yes))
+    for name in ("warning", "information", "critical"):
+        monkeypatch.setattr(QtWidgets.QMessageBox, name, staticmethod(lambda *a, **k: None))
+    monkeypatch.setattr(QtWidgets.QMessageBox, "exec", lambda self: 0, raising=False)
+    monkeypatch.setattr(QtWidgets.QMessageBox, "exec_", lambda self: 0, raising=False)
+
+    return messages
+
+
+@pytest.fixture
+def plateTool(qapp, stationDir, quietMessages):
+    """ A SkyFit2 PlateTool on a fresh copy of the example station. """
+
+    config = cr.loadConfigFromDirectory('.config', stationDir)
+    pt = SF.PlateTool(stationDir, config)
+    qapp.processEvents()
+
+    yield pt
+
+    pt.close()
+    pt.deleteLater()
+    qapp.processEvents()
 
 
 ###################################################################################################
@@ -63,16 +145,6 @@ def _fakePlateTool(config_path, **overrides):
     pt.updateFileManagerButton = lambda: None
 
     return pt
-
-
-@pytest.fixture
-def quietMessages(monkeypatch):
-    """ Record the SkyFit2 message boxes instead of showing them. """
-
-    messages = []
-    monkeypatch.setattr(SF, "qmessagebox", lambda *a, **k: messages.append(k))
-
-    return messages
 
 
 @pytest.mark.parametrize("spelling", ["{k}: {v}", "{k}:{v}", "{k}={v}", "{k} = {v}", "{k} : {v}  ; note"])
@@ -186,3 +258,65 @@ def testSaveConfigFailureNotReported(tmp_path, quietMessages, monkeypatch):
     assert pt.config.intensity_threshold == orig_threshold
     assert any(m.get("message_type") == "error" and "failed" in m.get("message", "") for m in quietMessages)
     assert not any(m.get("title") == "Settings Saved" for m in quietMessages)
+
+
+###################################################################################################
+# PLATEPAR PARAMETER MANAGER
+###################################################################################################
+
+def testCoeffStashNotCarriedToNewPlatepar(plateTool, tmp_path):
+    """ Loading another platepar must not fill its zero coefficients with the previous platepar's. """
+
+    pt = plateTool
+    pm = pt.tab.param_manager
+
+    # Fill the stash from the current platepar with a flag round trip
+    pm._stashCurrentCoeffs()
+    assert any(pm._coeff_stash['x_fwd'].values())
+
+    # Platepar B has zero distortion except one coefficient
+    B = copy.deepcopy(pt.platepar)
+    B.setDistortionType("radial5-odd", reset_params=True)
+    B.x_poly_fwd[:] = 0
+    B.x_poly_rev[:] = 0
+    B.y_poly_fwd[:] = 0
+    B.y_poly_rev[:] = 0
+    B.x_poly_fwd[-2] = 0.123
+    b_path = str(tmp_path / "B.cal")
+    B.write(b_path)
+
+    dialog = SF.CalibrationFilesDialog(pt)
+    dialog._loadFile("Platepar", b_path)
+
+    assert pt.platepar.distortion_type == "radial5-odd"
+    assert np.allclose(pt.platepar.x_poly_fwd, B.x_poly_fwd)
+
+    # A flag round trip on B restores B's values only
+    pm._remapCoeffsWithStash('equal_aspect', not pt.platepar.equal_aspect)
+    pm._remapCoeffsWithStash('equal_aspect', not pt.platepar.equal_aspect)
+    assert np.allclose(pt.platepar.x_poly_fwd, B.x_poly_fwd)
+
+
+@pytest.mark.parametrize("new_type", ["radial3-all", "radial4-all", "radial5-all", "radial3-odd", "radial7-odd",
+                                      "radial9-odd"])
+def testDistortionTypeSwitchKeepsArrayLength(plateTool, new_type):
+    """ Switching the distortion type through the combo box always leaves poly_length coefficients, and a
+        switch between the all and the odd powers does not restore coefficients of the other kind. """
+
+    pt = plateTool
+    pm = pt.tab.param_manager
+    old_type = pt.platepar.distortion_type
+
+    # A plain type change with the forced parameter reset, for comparison
+    expected = copy.deepcopy(pt.platepar)
+    expected.setDistortionType(new_type, reset_params=False)
+
+    pm.distortion_type.setCurrentIndex(pt.platepar.distortion_type_list.index(new_type))
+
+    pp = pt.platepar
+    for arr in (pp.x_poly_fwd, pp.x_poly_rev, pp.y_poly_fwd, pp.y_poly_rev):
+        assert len(arr) == pp.poly_length
+
+    if new_type[-3:] != old_type[-3:]:
+        assert np.allclose(pp.x_poly_fwd, expected.x_poly_fwd)
+        assert np.allclose(pp.y_poly_rev, expected.y_poly_rev)
