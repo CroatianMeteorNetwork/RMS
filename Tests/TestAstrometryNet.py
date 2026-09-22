@@ -79,3 +79,48 @@ def testRotationEqStandardWrapsRA(ra_mid):
 
     expected = np.degrees(np.arctan2(0.001, 0.002))%360
     assert np.isclose(rot, expected)
+
+
+def _solveStarList(monkeypatch, fov_w_range, fov_w_hint, with_centre):
+    """ Run a star-list solve with the fake solver and return the recorded hints and the true scale. """
+
+    record = {}
+    monkeypatch.setattr(AstrometryNet, 'astrometry', _fakeAstrometry(record), raising=False)
+
+    width, height = 1920, 1080
+    rng = np.random.default_rng(0)
+    x_data = rng.uniform(0, width, 400)
+    y_data = rng.uniform(0, height, 400)
+
+    centre = dict(x_center=width/2, y_center=height/2) if with_centre else {}
+
+    AstrometryNet.astrometryNetSolveLocal(
+        x_data=x_data, y_data=y_data, fov_w_range=fov_w_range, fov_w_hint=fov_w_hint,
+        input_intensities=rng.uniform(1, 10, 400), **centre
+    )
+
+    return record, fov_w_hint*3600.0/width
+
+
+@pytest.mark.parametrize("fov", [60, 100, 120, 150])
+def testStarListSizeHintWithoutImageCentre(monkeypatch, fov):
+    """ Without an image or centre the width comes from the extent of all (unfiltered) stars. """
+
+    record, true_scale = _solveStarList(monkeypatch, [0.75*fov, 1.5*fov], fov, with_centre=False)
+
+    hint = record['hint']
+    assert hint['lower_arcsec_per_pixel'] <= true_scale <= hint['upper_arcsec_per_pixel']
+
+    # The star extent is slightly smaller than the image, so the scale is at most a little larger
+    assert np.isclose(hint['lower_arcsec_per_pixel'], 0.75*true_scale, rtol=0.02)
+
+
+@pytest.mark.parametrize("with_centre", [True, False])
+def testWideFOVHintWithoutRange(monkeypatch, with_centre):
+    """ A wide FOV hint without a FOV range must still give a scale hint around the hinted FOV. """
+
+    record, true_scale = _solveStarList(monkeypatch, None, 120, with_centre=with_centre)
+
+    hint = record['hint']
+    assert hint['lower_arcsec_per_pixel'] <= true_scale <= hint['upper_arcsec_per_pixel']
+    assert np.isclose(hint['upper_arcsec_per_pixel'], 2*hint['lower_arcsec_per_pixel'])

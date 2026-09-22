@@ -181,6 +181,11 @@ def astrometryNetSolveLocal(ff_file_path=None, img=None, mask=None, x_data=None,
             # Update the FOV range to reflect the filtered central region
             filtered_fov = estimated_fov * central_fov_fraction * 2
             fov_w_range = [filtered_fov * 0.75, filtered_fov * 1.5]
+
+            # If only the FOV hint was given, derive the full image FOV range for the pixel scale hint from
+            #   it with the same margins
+            if fov_w_range_full is None:
+                fov_w_range_full = [estimated_fov * 0.75, estimated_fov * 1.5]
             print("  -> Filtering to central {:.1f} deg, Stars: {:d} -> {:d}".format(
                 filtered_fov, original_count, len(x_data)))
             print("  -> Updated FOV range for scale selection: {:.1f} - {:.1f} deg".format(
