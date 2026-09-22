@@ -62,7 +62,7 @@ def stationArchive(tmp_path_factory):
 
     out_dir = str(tmp_path_factory.mktemp("stations"))
     with tarfile.open(STATIONS_ARCHIVE, "r:bz2") as tar:
-        members = [m for m in tar.getmembers() if m.name.startswith("Stations/AU000A")]
+        members = [m for m in tar.getmembers() if m.name.startswith(("Stations/AU000A", "Stations/AU000C"))]
         tar.extractall(out_dir, members=members)
 
     return os.path.join(out_dir, "Stations", "AU000A")
@@ -74,6 +74,16 @@ def stationDir(stationArchive, tmp_path):
 
     dir_path = str(tmp_path / "AU000A")
     shutil.copytree(stationArchive, dir_path)
+
+    return dir_path
+
+
+@pytest.fixture
+def secondStationDir(stationArchive, tmp_path):
+    """ A fresh copy of the example station AU000C, next to the AU000A copy. """
+
+    dir_path = str(tmp_path / "AU000C")
+    shutil.copytree(os.path.join(os.path.dirname(stationArchive), "AU000C"), dir_path)
 
     return dir_path
 
@@ -528,3 +538,47 @@ def testRadialFitWithTooFewStarsFitsPointing(stationDir):
     # The pointing moved, and the same way as a pointing-only fit
     assert abs(results[1] - ra_start) > 0.1
     assert results[1] == pytest.approx(results[0], abs=1e-6)
+
+
+###################################################################################################
+# STATION CHANGE
+###################################################################################################
+
+def testChangeStationResetsStationState(plateTool, secondStationDir):
+    """ Calibration state of station A is not carried over to station B. """
+
+    pt = plateTool
+
+    # State that belongs to station A
+    pt.flat_image_data = np.full((720, 1280), 7, np.uint8)
+    pt.catalog_lm_tuned = True
+    pt.tuned_cat_lim_mag = 4.3
+    pt.dark = np.zeros_like(pt.img.data)
+    pt.dark_source_path = os.path.join(pt.dir_path, 'dark.bmp')
+    pt.star_detection_override_enabled = True
+    pt.star_detection_override_data = {'FF_A.fits': [[1, 2, 3]]}
+    pt._original_config_gamma = 0.7
+
+    assert pt.changeStation(secondStationDir)
+
+    assert pt.flat_image_data is None or not np.all(pt.flat_image_data == 7)
+    assert pt.dark is None and pt.dark_source_path is None and pt.img.dark is None
+    assert not pt.catalog_lm_tuned and not hasattr(pt, 'tuned_cat_lim_mag')
+    assert not pt.star_detection_override_enabled and pt.star_detection_override_data == {}
+    assert pt._original_config_gamma is None
+    assert len(pt.unsuitable_stars) == 0
+
+
+def testChangeStationCancelKeepsCurrentStation(plateTool, secondStationDir):
+    """ Cancelling the platepar picker leaves the current station fully loaded. """
+
+    pt = plateTool
+    before = (pt.dir_path, pt.config.config_file_name, pt.platepar_file, pt.img_handle.dir_path,
+              id(pt.catalog_stars), id(pt.mask))
+
+    pt._findPlatepar = lambda *a, **k: None
+    assert pt.changeStation(secondStationDir) is False
+
+    after = (pt.dir_path, pt.config.config_file_name, pt.platepar_file, pt.img_handle.dir_path,
+             id(pt.catalog_stars), id(pt.mask))
+    assert after == before

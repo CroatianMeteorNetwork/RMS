@@ -4047,6 +4047,28 @@ class PlateTool(QtWidgets.QMainWindow):
         if os.path.isfile(dir_path):
             dir_path = os.path.dirname(dir_path)
 
+        # Load the config of the new station without touching the current one yet - use the override if
+        #   provided, otherwise auto-detect it from the dir
+        try:
+            if config_override is not None:
+                new_config = cr.loadConfigFromDirectory(config_override, dir_path)
+            else:
+                new_config = cr.loadConfigFromDirectory('.', dir_path)
+
+        except Exception as e:
+            traceback.print_exc()
+            qmessagebox(title="Change Station Failed",
+                         message="Could not load the config from:\n{}\n\nError: {}".format(dir_path, repr(e)),
+                         message_type="error")
+            return False
+
+        # Ask for the platepar before anything is changed, so cancelling leaves the current station
+        #   fully loaded
+        platepar_path = self._findPlatepar(dir_path, platepar_name=new_config.platepar_name)
+
+        if platepar_path is None:
+            return False
+
         # Remember the current state so it can be restored if the load fails
         prev_input_path = self.input_path
         prev_dir_path = self.dir_path
@@ -4056,15 +4078,13 @@ class PlateTool(QtWidgets.QMainWindow):
         try:
             self.input_path = dir_path
             self.dir_path = dir_path
-
-            # Load config - use override if provided, otherwise auto-detect from dir
-            if config_override is not None:
-                self.config = cr.loadConfigFromDirectory(config_override, self.dir_path)
-            else:
-                self.config = cr.loadConfigFromDirectory('.', self.dir_path)
+            self.config = new_config
 
             # Force the CV2 backend
             self.config.media_backend = 'cv2'
+
+            # Forget the calibration state that belonged to the previous station
+            self._resetStationState()
 
             # Update original catalog file and band ratios for the new station
             self._original_catalog_file = self.config.star_catalog_file
@@ -4101,13 +4121,6 @@ class PlateTool(QtWidgets.QMainWindow):
             self.catalog_stars = self.loadCatalogStars(self.config.catalog_mag_limit)
             self.cat_lim_mag = self.config.catalog_mag_limit
             self.loadCalstars()
-
-            # Search for platepar files in the new directory, prompt if ambiguous
-            platepar_path = self._findPlatepar()
-
-            # User cancelled - abort folder change
-            if platepar_path is None:
-                return False
 
             # Load the chosen platepar, or a blank one
             if platepar_path:
@@ -4152,6 +4165,9 @@ class PlateTool(QtWidgets.QMainWindow):
             # Populate menus with mode-specific actions (including F1 shortcut)
             self.changeMode(self.mode)
 
+            # Offer the new station's flat.bmp as the mask editing background
+            self.checkAndSetupFlatForMask()
+
             # Load UWO flat/dark if applicable
             if self.usingUWOData():
 
@@ -4195,6 +4211,48 @@ class PlateTool(QtWidgets.QMainWindow):
                          message="Could not load station from:\n{}\n\nError: {}".format(dir_path, repr(e)),
                          message_type="error")
             return False
+
+
+    def _resetStationState(self):
+        """ Reset the state that belongs to the loaded station, before another station is loaded.
+
+            Covers the tuned catalog LM, the star detection overrides and their gamma, the first fit
+            flag, the flat and the dark with their sources, the mask editing flat and the unsuitable
+            stars. The picks, the pairs, the mask, the catalog and the platepar are replaced by
+            changeStation itself.
+        """
+
+        # Catalog LM found by the tuner of the previous station
+        self.catalog_lm_tuned = False
+        if hasattr(self, 'tuned_cat_lim_mag'):
+            del self.tuned_cat_lim_mag
+
+        # Star detection overrides (re-detected stars per FF file and the gamma they were made with)
+        self.star_detection_override_enabled = False
+        self.star_detection_override_data = {}
+        self._original_config_gamma = None
+        if hasattr(self, 'tab') and hasattr(self.tab, 'star_detection'):
+            self.tab.star_detection.use_override_checkbox.setChecked(False)
+            self.tab.star_detection.updateStatus(False)
+
+        # The first fit on the new station has to start from scratch
+        self.first_platepar_fit = True
+
+        # Flat and dark of the previous station
+        self.flat_struct = None
+        self.flat_source_path = None
+        self.dark = None
+        self.dark_source_path = None
+        for img_item in (getattr(self, 'img', None), getattr(self, 'img_zoom', None)):
+            if img_item is not None:
+                img_item.flat_struct = None
+                img_item.dark = None
+
+        # Flat used as the mask editing background
+        self.flat_image_data = None
+        self.mask_use_flat_background = False
+
+        self.unsuitable_stars = PairedStars()
 
 
     def onRefractionChanged(self):
@@ -15400,7 +15458,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 self._star_label_html_name[i] = f'<a href="https://simbad.cds.unistra.fr/simbad/sim-id?Ident={url_name}" style="color: #dddddd; text-decoration: none;">{display_name}</a>'
 
 
-    def _findPlatepar(self, dir_path=None):
+    def _findPlatepar(self, dir_path=None, platepar_name=None):
         """ Search for a platepar file in the given directory.
 
             If the default platepar name exists and is the only .cal file, its path is returned
@@ -15409,6 +15467,8 @@ class PlateTool(QtWidgets.QMainWindow):
 
         Keyword arguments:
             dir_path: [str] Directory to search. self.dir_path by default.
+            platepar_name: [str] Default platepar file name. config.platepar_name of the loaded config by
+                default.
 
         Return:
             platepar_path: [str or None] Path to the selected platepar file, an empty string if the
@@ -15419,7 +15479,10 @@ class PlateTool(QtWidgets.QMainWindow):
         if dir_path is None:
             dir_path = self.dir_path
 
-        default_path = os.path.join(dir_path, self.config.platepar_name)
+        if platepar_name is None:
+            platepar_name = self.config.platepar_name
+
+        default_path = os.path.join(dir_path, platepar_name)
         cal_files = sorted(glob.glob(os.path.join(dir_path, '*.cal')))
 
         # The default name exists and is the only .cal file, so use it directly
