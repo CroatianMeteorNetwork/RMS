@@ -761,3 +761,53 @@ def testUnreadableMaskNotReportedLoaded(plateTool, stationDir):
     assert pt.loadMaskFromFile(bad_path) is False
     assert pt.mask_source_path == source_before
     assert pt.mask_polygons == polygons_before
+
+
+def _openMaskTab(pt):
+    """ Open the Mask tab the way a click on its tab does. """
+
+    mask_idx = pt.tab.indexOf(pt.tab.mask)
+    pt.tab.setCurrentIndex(mask_idx)
+    pt.tab.onTabBarClicked(mask_idx)
+
+
+@pytest.mark.parametrize("start_mode", ["skyfit", "manualreduction"])
+def testModeSwitchKeepsMaskTabAndLeavesBrush(plateTool, qapp, start_mode):
+    """ A mode switch on the Mask tab keeps the Mask tab open, leaves the brush mode and keeps the
+        overlays hidden. """
+
+    pt = plateTool
+    pt.show()
+    qapp.processEvents()
+
+    pt.changeMode(start_mode)
+    _openMaskTab(pt)
+    pt.tab.mask.brush_button.setChecked(True)
+    pt.toggleMaskBrushMode()
+    assert pt.mask_brush_mode
+
+    other_mode = "manualreduction" if start_mode == "skyfit" else "skyfit"
+    pt.changeMode(other_mode)
+    qapp.processEvents()
+
+    assert pt.tab.currentWidget() is pt.tab.mask
+    assert pt.tab.index == pt.tab.currentIndex()
+    assert not pt.mask_brush_mode
+    assert not pt.brush_cursor.isVisible()
+    assert not pt.img_frame.panning_enabled
+    assert not pt.pick_marker.isVisible()
+    assert not pt.sel_cat_star_markers.isVisible()
+
+
+def testModeSwitchFromRemovedTabShowsExistingTab(plateTool, qapp):
+    """ Switching to manual reduction from a skyfit-only tab does not land on the Mask tab unannounced. """
+
+    pt = plateTool
+    station_idx = pt.tab.indexOf(pt.tab.geolocation)
+    pt.tab.setCurrentIndex(station_idx)
+    pt.tab.onTabBarClicked(station_idx)
+
+    pt.changeMode("manualreduction")
+
+    assert pt.tab.currentWidget() is not pt.tab.mask
+    assert pt.img_frame.panning_enabled

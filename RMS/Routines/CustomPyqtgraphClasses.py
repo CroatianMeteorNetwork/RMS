@@ -1587,7 +1587,28 @@ class RightOptionsTab(QtWidgets.QTabWidget, ScaledSizeHelper):
         self.gui.view_widget.setFocus()
 
 
+    def _showWidgetAfterRebuild(self, widget):
+        """ Show the given tab page again after the tabs were rebuilt for another mode.
+
+            The tab indices change when the mode-specific tabs are removed and inserted, so the page is
+            looked up by the widget instead of reusing the old index (which would open another tab
+            without its enter/leave logic running). Falls back to the first tab if the page is gone.
+
+        Arguments:
+            widget: [QWidget] The page that was shown before the rebuild, or None.
+        """
+
+        index = self.indexOf(widget) if widget is not None else -1
+        if index < 0:
+            index = 0
+
+        self.index = index
+        self.setCurrentIndex(index)
+        self.applyTabWidth()
+
     def onSkyFit(self):
+
+        current_widget = self.widget(self.index)
 
         # Remove ManualReduction-specific tabs
         self.removeTabText('Debruijn')
@@ -1597,9 +1618,11 @@ class RightOptionsTab(QtWidgets.QTabWidget, ScaledSizeHelper):
         self.insertTab(2, self.geolocation, "Station")
         self.settings.onSkyFit()
 
-        self.setCurrentIndex(self.index)
+        self._showWidgetAfterRebuild(current_widget)
 
     def onManualReduction(self):
+
+        current_widget = self.widget(self.index)
 
         # Remove Skyfit-specific tabs
         self.removeTabText("Fit Parameters")
@@ -1610,7 +1633,7 @@ class RightOptionsTab(QtWidgets.QTabWidget, ScaledSizeHelper):
         if self.gui.img.img_handle.input_type == 'dfn':
             self.insertTab(1, self.debruijn, 'Debruijn')
 
-        self.setCurrentIndex(self.index)
+        self._showWidgetAfterRebuild(current_widget)
 
     def removeTabText(self, text):
         """

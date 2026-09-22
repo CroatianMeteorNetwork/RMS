@@ -3900,6 +3900,13 @@ class PlateTool(QtWidgets.QMainWindow):
         else:
             first_time = False
 
+        # Leave the mask editing modes when the mode changes (in both directions), otherwise brush
+        #   painting and the mouse panning lock would survive into the other mode
+        if not first_time:
+            if getattr(self, 'mask_brush_mode', False):
+                self._exitBrushMode()
+            if getattr(self, 'mask_draw_mode', False):
+                self.closeMaskPolygon()
 
         if new_mode == 'skyfit':
 
@@ -3966,13 +3973,6 @@ class PlateTool(QtWidgets.QMainWindow):
             if hasattr(self, 'pointing_indicator'):
                 self.pointing_indicator.hide()
 
-            # Leave the mask editing modes, otherwise brush painting and the mouse panning lock would
-            #   survive into the manual reduction mode
-            if getattr(self, 'mask_brush_mode', False):
-                self._exitBrushMode()
-            if getattr(self, 'mask_draw_mode', False):
-                self.closeMaskPolygon()
-
             self.img_type_flag = 'avepixel'
             self.tab.settings.updateMaxAvePixel()
             self.img_zoom.loadImage(self.mode, self.img_type_flag)
@@ -4006,10 +4006,11 @@ class PlateTool(QtWidgets.QMainWindow):
             self.cursor.hide()
             self.cursor2.hide()
 
-            # Re-evaluate the mouse panning lock for the new mode
-            self.updatePanningEnabled()
-
             self.tab.onManualReduction()
+
+            # Re-evaluate the mouse panning lock for the new mode, after the tab rebuild decided which
+            #   tab is open
+            self.updatePanningEnabled()
 
             # Refresh mode-aware Help content
             self.tab.help.updateHelp()
@@ -4023,6 +4024,11 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Update the great circle
             self.updateGreatCircle()
+
+        # The mode switch reloads the image and shows the mode's overlays. If the Mask tab stays open,
+        #   apply its entering logic again (hide the picks and fit overlays, show the flat if enabled)
+        if (not first_time) and self.isMaskTabCurrent():
+            self.onTabChanged(-1, self.tab.indexOf(self.tab.mask))
 
 
     def changeStation(self, dir_path=None, config_override=None):
