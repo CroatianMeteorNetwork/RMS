@@ -5714,17 +5714,18 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.star_detection.tune_button.setEnabled(False)
         QtWidgets.QApplication.processEvents()
 
-        # Store original config values before try block for finally
+        # Store the original config values before the try block, the probes below patch them into the
+        #   config (extractStarsFF reads the parameters from it) and the finally block puts them back
         original_max_stars = self.config.max_stars
+        original_intensity_threshold = self.config.intensity_threshold
+        original_segment_radius = self.config.segment_radius
+        original_max_feature_ratio = self.config.max_feature_ratio
+        original_roundness_threshold = self.config.roundness_threshold
 
         try:
 
             # Compute JD for the current image
             jd = date2JD(*self.img_handle.currentTime())
-
-            # Store original config values
-            original_intensity_threshold = self.config.intensity_threshold
-            original_segment_radius = self.config.segment_radius
 
             # Temporarily increase max_stars limit during tuning
             self.config.max_stars = max(2000, original_max_stars)
@@ -6069,10 +6070,16 @@ class PlateTool(QtWidgets.QMainWindow):
             qmessagebox(message=result_msg, title="Tuning Complete", message_type="info")
 
         finally:
-            # Restore button state and config
+
+            # Restore button state and config. The tuned values live in the overrides, the config always
+            #   keeps the values it was loaded with, whether the tuning succeeded, was aborted or failed
             self.tab.star_detection.tune_button.setText("Tune")
             self.tab.star_detection.tune_button.setEnabled(True)
             self.config.max_stars = original_max_stars
+            self.config.intensity_threshold = original_intensity_threshold
+            self.config.segment_radius = original_segment_radius
+            self.config.max_feature_ratio = original_max_feature_ratio
+            self.config.roundness_threshold = original_roundness_threshold
 
 
     def _countTrueFalsePositives(self, ff_name, intensity_threshold, segment_radius,

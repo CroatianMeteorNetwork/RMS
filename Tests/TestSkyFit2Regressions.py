@@ -994,3 +994,22 @@ def testAutoFitRestoresConfigCatalogLM(plateTool, method):
     getattr(pt, method)()
 
     assert pt.config.catalog_mag_limit == config_lm
+
+
+def testAbortedTuningRestoresConfig(plateTool):
+    """ An aborted star detection tuning leaves the detection parameters of the config as loaded. """
+
+    pt = plateTool
+    names = ["max_stars", "intensity_threshold", "segment_radius", "max_feature_ratio", "roundness_threshold"]
+
+    # Overrides that differ from the config, which the probes patch into the config
+    pt.override_max_feature_ratio = pt.config.max_feature_ratio + 0.1
+    pt.override_roundness_threshold = pt.config.roundness_threshold + 0.1
+    before = {name: getattr(pt.config, name) for name in names}
+
+    # Abort at the final success gate, after all the detection probes ran
+    pt._findOptimalCatalogLM = lambda *a, **k: None
+
+    pt.tuneStarDetection()
+
+    assert {name: getattr(pt.config, name) for name in names} == before
