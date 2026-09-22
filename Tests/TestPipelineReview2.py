@@ -715,3 +715,57 @@ def testRunWithTimeoutLateCompletionRace(monkeypatch):
 
     assert success is False
     assert cleaned.wait(5), 'caller reported a timeout but the late cleanup never ran'
+
+
+# ---------------------------------------------------------------------------
+# Item 12: continuous mode keeps capturing until the reboot is issued
+
+class _StoppableCapture(object):
+    """ BufferedCapture stand-in counting stopCapture calls. """
+
+    def __init__(self):
+        self.stops = 0
+
+    def stopCapture(self):
+        self.stops += 1
+        return 5
+
+
+def testStopPendingCaptureStopsOnceAndRecordsDroppedFrames(tmp_path, monkeypatch):
+    """ The capture handed over for the reboot is stopped exactly once, with its dropped frame count
+        recorded, however many times stopPendingCapture is called.
+    """
+
+    import RMS.StartCapture as sc
+
+    recorded = {}
+    monkeypatch.setattr(sc, 'log', logging.getLogger('rmslogger'), raising=False)
+    monkeypatch.setattr(sc, 'getObservationSummaryDict', lambda night_dir: {'night_data_dir': night_dir})
+    monkeypatch.setattr(sc, 'addObsParam', lambda d, k, v: recorded.update({(d['night_data_dir'], k): v}))
+
+    bc = _StoppableCapture()
+    monkeypatch.setattr(sc, 'REBOOT_PENDING_CAPTURE', (bc, str(tmp_path)))
+
+    sc.stopPendingCapture()
+    sc.stopPendingCapture()
+
+    assert bc.stops == 1
+    assert sc.REBOOT_PENDING_CAPTURE is None
+    assert recorded == {(str(tmp_path), 'dropped_frames'): 5}
+
+
+def testRebootStopsPendingCaptureBeforeShutdownCommand():
+    """ In the main loop the pending capture is stopped right before the reboot command, and again
+        (no-op if already stopped) before capture resumes after a reboot that did not happen.
+    """
+
+    with open(os.path.join(RMS_ROOT, 'RMS', 'StartCapture.py')) as f:
+        src = f.read()
+
+    main_src = src[src.index('if __name__ == "__main__":'):]
+    i_stop = main_src.index('stopPendingCapture()')
+    i_reboot = main_src.index("os.system('sudo shutdown -r now')")
+    i_resume = main_src.index('Reboot did not happen, resuming capture')
+
+    assert i_stop < i_reboot
+    assert 'stopPendingCapture()' in main_src[i_reboot:i_resume]

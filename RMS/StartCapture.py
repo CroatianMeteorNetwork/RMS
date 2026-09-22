@@ -18,6 +18,7 @@ from __future__ import print_function, absolute_import
 
 import os
 import sys
+import atexit
 import argparse
 import time
 import datetime
@@ -207,6 +208,11 @@ from Utils.AuditConfig import compareConfigs
 
 # Flag indicating that capturing should be stopped
 STOP_CAPTURE = False
+
+# Continuous mode: (BufferedCapture, night_data_dir) of the daytime capture runCapture left running
+#   while the main loop waits to reboot, or None (see stopPendingCapture)
+REBOOT_PENDING_CAPTURE = None
+_pending_capture_atexit = False
 
 def breakHandler(signum, frame):
     """ Handles what happens when Ctrl+C is pressed. """
@@ -429,7 +435,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         night_archive_dir: [str] Path to the archive folder of the processed night.
     """
 
-    global STOP_CAPTURE
+    global STOP_CAPTURE, REBOOT_PENDING_CAPTURE, _pending_capture_atexit
 
 
     # Check if resuming capture to the last capture directory
@@ -1140,19 +1146,21 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         # Continuous mode: if the program just got done with nighttime processing and needs to reboot
         elif (not config.continuous_capture) or (not daytime_mode_prev and config.reboot_after_processing):
 
-            # Continuous mode: stop the capture before returning for the reboot. If the reboot
-            # fails, the main loop calls runCapture again - the old capture must not be left
-            # running, or two captures will run in parallel and save every frame twice, with the
-            # old one stamping a stale day/night suffix (it holds the previous daytime_mode)
+            # Continuous mode: hand the running daytime capture to the main loop, which stops it
+            # right before issuing the reboot (stopPendingCapture). Stopping it here left a
+            # daytime capture gap for as long as uploads or the reboot lock file delay the reboot
+            # (up to 4 hours). If the reboot does not happen, the main loop stops it before calling
+            # runCapture again - the old capture must not be left running, or two captures will
+            # run in parallel and save every frame twice, with the old one stamping a stale
+            # day/night suffix (it holds the previous daytime_mode)
             if config.continuous_capture:
-                log.info('Ending capture before reboot...')
-                dropped_frames = bc.stopCapture()
-                log.info('Total number of late or dropped frames: ' + str(dropped_frames))
+                log.info('Leaving the capture running until the reboot is issued...')
+                REBOOT_PENDING_CAPTURE = (bc, night_data_dir)
 
-                # Record the dropped frame count in the observation summary, same as the
-                # normal stop path above
-                obs_dict = getObservationSummaryDict(night_data_dir)
-                addObsParam(obs_dict, "dropped_frames", dropped_frames)
+                # Safety net: never leave it running if the program exits in the meantime
+                if not _pending_capture_atexit:
+                    atexit.register(stopPendingCapture)
+                    _pending_capture_atexit = True
 
             break
 
@@ -1160,6 +1168,34 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
 
     return night_archive_dir
+
+
+
+def stopPendingCapture():
+    """ Stop the capture runCapture left running for the reboot in continuous mode, if any, and
+        record its dropped frame count in the observation summary. Safe to call more than once.
+    """
+
+    global REBOOT_PENDING_CAPTURE
+
+    if REBOOT_PENDING_CAPTURE is None:
+        return
+
+    bc, night_data_dir = REBOOT_PENDING_CAPTURE
+    REBOOT_PENDING_CAPTURE = None
+
+    # Stop the capture
+    log.info('Ending capture before reboot...')
+    try:
+        dropped_frames = bc.stopCapture()
+        log.info('Total number of late or dropped frames: ' + str(dropped_frames))
+
+        # Record the dropped frame count in the observation summary, same as the normal stop path
+        obs_dict = getObservationSummaryDict(night_data_dir)
+        addObsParam(obs_dict, "dropped_frames", dropped_frames)
+
+    except Exception:
+        log.exception('Stopping the capture before the reboot failed')
 
 
 
@@ -1594,6 +1630,9 @@ if __name__ == "__main__":
 
                     log.info('Rebooting now!')
 
+                    # Continuous mode: the capture only stops now, right before the reboot
+                    stopPendingCapture()
+
                     # Reboot the computer (script needs sudo privileges, works only on Linux)
                     try:
                         exit_status = os.system('sudo shutdown -r now')
@@ -1645,8 +1684,11 @@ if __name__ == "__main__":
 
                 ### ###
 
-            # If reboot didn't happen in continuous capture mode, reset so capture resumes normally
+            # If reboot didn't happen in continuous capture mode, reset so capture resumes normally.
+            #   Stop the old capture first if the reboot was never issued, so that runCapture does
+            #   not start a second one next to it
             if config.continuous_capture:
+                stopPendingCapture()
                 log.warning("Reboot did not happen, resuming capture")
                 ran_once = False
 
