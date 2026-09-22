@@ -6,3 +6,9 @@ requires = [
     "numpy"          # satisfies the guarded import above
 ]
 build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+# The test modules in Tests/ are named TestXxx.py, which the default discovery globs (test_*.py and
+# *_test.py) do not match, so a plain "pytest" silently collected only the handful of lowercase ones.
+# Both spellings are accepted so either naming is picked up.
+python_files = ["Test*.py", "test_*.py"]
