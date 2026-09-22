@@ -55,7 +55,8 @@ class Compressor(multiprocessing.Process):
 
     running = False
     
-    def __init__(self, data_dir, array1, start_time1, array2, start_time2, config, detector=None):
+    def __init__(self, data_dir, array1, start_time1, array2, start_time2, config, detector=None,
+                 sprite_queue=None):
         """
 
         Arguments:
@@ -69,6 +70,7 @@ class Compressor(multiprocessing.Process):
         Keyword arguments:
             detector: [Detector object] Handle to Detector object used for running star extraction and
                 meteor detection.
+            sprite_queue: [multiprocessing.Queue or None] Input queue for sprite detection process.
 
         """
         
@@ -87,6 +89,11 @@ class Compressor(multiprocessing.Process):
         self.config = config
 
         self.detector = detector
+
+        # Bounded queue of the sprite detector, or None. Fed without blocking (see run())
+        self.sprite_queue = sprite_queue
+        self.sprite_dropped = 0
+        self.sprite_drop_logged = 0.0
 
         # Lock-free flags: these are set/polled across processes and must never be able to
         # deadlock, even if a process sharing them is killed (see AtomicFlag)
@@ -447,6 +454,21 @@ class Compressor(multiprocessing.Process):
                 self.detector.addJob([self.data_dir, filename, self.config])
                 log.debug('Added file for detection: {:s}'.format(filename))
 
+            # Hand the file to the sprite detector. This must never block: compression is on the capture
+            #   critical path, and the sprite detector can fall behind on a slow machine. When its queue is
+            #   full the file is skipped for sprite detection only.
+            if self.sprite_queue is not None:
+                try:
+                    self.sprite_queue.put_nowait((self.data_dir, filename))
+
+                except Exception:
+                    self.sprite_dropped += 1
+
+                    # Say so at most once a minute, with the running count
+                    if (time.time() - self.sprite_drop_logged) > 60:
+                        log.warning("Sprite detector is behind, {:d} FF file(s) skipped for sprite "
+                                    "detection so far".format(self.sprite_dropped))
+                        self.sprite_drop_logged = time.time()
 
 
         log.debug('Compression run exit')

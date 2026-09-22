@@ -397,6 +397,19 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
     extra_files = []
 
 
+    # Add the record of the night's sprite detections to the archive. The CSV and the detection images are
+    #   picked up by the archiver on their own; the JSON record is not, as it takes no .json files by default
+    if config.detect_sprites:
+        try:
+            for file_name in sorted(os.listdir(night_data_dir)):
+                if file_name.endswith("_sprites.json"):
+                    extra_files.append(os.path.join(night_data_dir, file_name))
+
+        except Exception as e:
+            log.warning("Adding the sprite detections to the archive failed with the message:\n" + repr(e))
+            log.warning(repr(traceback.format_exception(*sys.exc_info())))
+
+
     # Add relevant FT files the upload archive.
     if config.save_frame_times:
 

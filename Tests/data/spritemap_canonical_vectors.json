@@ -1,0 +1,66 @@
+{
+  "_comment": "Generated from spritemap/signing.py buildCanonicalString (spritemap-data-pipeline). Regenerate when PROTOCOL_VERSION changes. No keys in this file.",
+  "protocol_version": "SPRITEMAP-V1",
+  "vectors": [
+    {
+      "name": "detections POST",
+      "method": "POST",
+      "path": "/api/v1/detections",
+      "station_id": "US0001",
+      "timestamp": 1788000000,
+      "body_sha256": "a1c8a7bf7d6a797a5a6944cf8d39c6c780079c979a95ff4e7da2ad3e1246c970",
+      "body_hex": "5b7b2273746174696f6e5f6964223a2022555330303031227d5d",
+      "canonical": "SPRITEMAP-V1\nPOST\n/api/v1/detections\nUS0001\n1788000000\na1c8a7bf7d6a797a5a6944cf8d39c6c780079c979a95ff4e7da2ad3e1246c970"
+    },
+    {
+      "name": "file PUT",
+      "method": "PUT",
+      "path": "/api/v1/files/FF_US0001_20260828_031422_123_0000512.fits",
+      "station_id": "US0001",
+      "timestamp": 1788000123,
+      "body_sha256": "1b7d568b1bcfe9e406b936e0e5756bdc6530ec779c084819708577b359d2cf20",
+      "body_hex": "53494d504c4520203d202020202020202020202020202020202020202054",
+      "canonical": "SPRITEMAP-V1\nPUT\n/api/v1/files/FF_US0001_20260828_031422_123_0000512.fits\nUS0001\n1788000123\n1b7d568b1bcfe9e406b936e0e5756bdc6530ec779c084819708577b359d2cf20"
+    },
+    {
+      "name": "requests GET empty body",
+      "method": "GET",
+      "path": "/api/v1/stations/US0001/requests",
+      "station_id": "US0001",
+      "timestamp": 1788000456,
+      "body_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "body_hex": "",
+      "canonical": "SPRITEMAP-V1\nGET\n/api/v1/stations/US0001/requests\nUS0001\n1788000456\ne3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "lower-case station id",
+      "method": "POST",
+      "path": "/api/v1/detections",
+      "station_id": "us000a",
+      "timestamp": 1788000789,
+      "body_sha256": "f9d86028c6e0d64e225186f96acb69338b2c59764df79162107f5c4bb34d1310",
+      "body_hex": "7b2261223a20317d",
+      "canonical": "SPRITEMAP-V1\nPOST\n/api/v1/detections\nUS000A\n1788000789\nf9d86028c6e0d64e225186f96acb69338b2c59764df79162107f5c4bb34d1310"
+    },
+    {
+      "name": "lower-case method",
+      "method": "put",
+      "path": "/api/v1/files/FF_CA0002_20260901_235959_999_0001024_marked.jpg",
+      "station_id": "ca0002",
+      "timestamp": 1788001000,
+      "body_sha256": "ba4f25bf16ba4be6bc7d3276fafeb67f9eb3c5df042bc3a405e1af15b921eed7",
+      "body_hex": "ffd8ffe0",
+      "canonical": "SPRITEMAP-V1\nPUT\n/api/v1/files/FF_CA0002_20260901_235959_999_0001024_marked.jpg\nCA0002\n1788001000\nba4f25bf16ba4be6bc7d3276fafeb67f9eb3c5df042bc3a405e1af15b921eed7"
+    },
+    {
+      "name": "float timestamp truncated",
+      "method": "POST",
+      "path": "/api/v1/detections",
+      "station_id": "HR000A",
+      "timestamp": 1788002000.9,
+      "body_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "body_hex": "",
+      "canonical": "SPRITEMAP-V1\nPOST\n/api/v1/detections\nHR000A\n1788002000\ne3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ]
+}

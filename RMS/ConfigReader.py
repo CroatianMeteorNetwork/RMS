@@ -316,6 +316,45 @@ class Config:
         # Zero means keep them all
         self.times_days_to_keep = 8
 
+        ##### Sprite detection
+
+        # Run the sprite/elve detector on every captured FF block, during capture
+        self.detect_sprites = False
+
+        # Detection model in the share directory. It is not part of the repository; it is downloaded from
+        #   the GMN server into share/ the first time sprite detection starts
+        self.sprite_model_file = "sprite_detector.tflite"
+        self.sprite_model_path = os.path.join(self.rms_root_dir, "share", self.sprite_model_file)
+
+        # Web directory the model is downloaded from, over HTTPS
+        self.sprite_model_base_url = "https://globalmeteornetwork.org/projects/sprite_detector"
+
+        # Minimum model confidence for a detection
+        self.sprite_confidence = 0.386
+
+        # Apply the station mask to the image before inference. The model was trained on unmasked images
+        self.sprite_use_mask = False
+
+        # Most marked detection images written per night
+        self.sprite_max_images = 20
+
+        # Stop looking for sprites for the rest of the night after this many FF blocks with detections.
+        #   Guards against a night of false positives, e.g. clouds lit by a storm. Zero disables the cap
+        self.sprite_max_detections_per_night = 150
+
+        # Base URL of the sprite server. Empty keeps all detections on the station
+        self.sprite_upload_url = ""
+
+        # Timeout of a request to the sprite server (seconds)
+        self.sprite_upload_timeout = 30.0
+
+        # Upload an FF file when the sprite server asks for it, which it does once a second station has
+        #   seen the same event
+        self.sprite_upload_ff = True
+
+        # Allow a plain http URL, only for a server on this machine. For testing only
+        self.sprite_upload_allow_insecure = False
+
         # Space quotas in GB
 
 
@@ -915,6 +954,54 @@ def parseSystem(config, parser):
         config.pub_elevation = parser.getfloat(section, "public_elevation")
 
 
+def parseSpriteDetection(config, parser, section):
+    """ Read the sprite detection options, which live in the [Capture] section.
+
+    Arguments:
+        config: [Config] Configuration object to update.
+        parser: [RawConfigParser] Parsed configuration file.
+        section: [str] Name of the section holding the options.
+    """
+
+    if parser.has_option(section, "detect_sprites"):
+        config.detect_sprites = parser.getboolean(section, "detect_sprites")
+
+    # The model path is derived from the file name, like the meteor ML model
+    if parser.has_option(section, "sprite_model_file"):
+        config.sprite_model_file = parser.get(section, "sprite_model_file")
+        config.sprite_model_path = os.path.join(config.rms_root_dir, "share", config.sprite_model_file)
+
+    if parser.has_option(section, "sprite_model_base_url"):
+        config.sprite_model_base_url = parser.get(section, "sprite_model_base_url").strip()
+
+    if parser.has_option(section, "sprite_confidence"):
+        config.sprite_confidence = parser.getfloat(section, "sprite_confidence")
+
+    if parser.has_option(section, "sprite_use_mask"):
+        config.sprite_use_mask = parser.getboolean(section, "sprite_use_mask")
+
+    if parser.has_option(section, "sprite_max_images"):
+        config.sprite_max_images = parser.getint(section, "sprite_max_images")
+
+    if parser.has_option(section, "sprite_max_detections_per_night"):
+        config.sprite_max_detections_per_night = parser.getint(section, "sprite_max_detections_per_night")
+
+    # An empty value or "none" both mean that nothing is uploaded
+    if parser.has_option(section, "sprite_upload_url"):
+        config.sprite_upload_url = parser.get(section, "sprite_upload_url").strip()
+        if config.sprite_upload_url.lower() == "none":
+            config.sprite_upload_url = ""
+
+    if parser.has_option(section, "sprite_upload_timeout"):
+        config.sprite_upload_timeout = parser.getfloat(section, "sprite_upload_timeout")
+
+    if parser.has_option(section, "sprite_upload_ff"):
+        config.sprite_upload_ff = parser.getboolean(section, "sprite_upload_ff")
+
+    if parser.has_option(section, "sprite_upload_allow_insecure"):
+        config.sprite_upload_allow_insecure = parser.getboolean(section, "sprite_upload_allow_insecure")
+
+
 def parseCapture(config, parser):
     section = "Capture"
     
@@ -973,6 +1060,8 @@ def parseCapture(config, parser):
 
     if parser.has_option(section, "times_days_to_keep"):
         config.times_days_to_keep = int(parser.get(section, "times_days_to_keep"))
+
+    parseSpriteDetection(config, parser, section)
 
     if parser.has_option(section, "quota_management_enabled"):
         config.quota_management_enabled = parser.getboolean(section, "quota_management_enabled")
