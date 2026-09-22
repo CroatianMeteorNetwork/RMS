@@ -279,8 +279,9 @@ def limitingMagnitude(mags, snr_arr, snr_targets=(5, 10), exclude_mask=None):
         snr_arr: [ndarray] Signal-to-noise ratio per star.
 
     Keyword arguments:
-        snr_targets: [tuple] S/N values at which to report the limiting magnitude.
-        exclude_mask: [ndarray of bool] True = exclude star from the fit (e.g. saturated).
+        snr_targets: [tuple] S/N values at which to report the limiting magnitude. (5, 10) by default.
+        exclude_mask: [ndarray of bool] True = exclude star from the fit (e.g. saturated). None by
+            default, i.e. no stars are excluded.
 
     Return:
         [dict] or None if the fit cannot be performed. Keys:
@@ -311,7 +312,7 @@ def limitingMagnitude(mags, snr_arr, snr_targets=(5, 10), exclude_mask=None):
     a, b = np.polyfit(mags_fit, log_snr, 1)
 
     # A non-negative slope is unphysical (fainter stars must have lower S/N) and makes the
-    # limiting magnitude inversion meaningless
+    #   limiting magnitude inversion meaningless
     if a >= 0:
         return None
 
@@ -322,7 +323,7 @@ def limitingMagnitude(mags, snr_arr, snr_targets=(5, 10), exclude_mask=None):
     r2 = 1.0 - ss_res/ss_tot if ss_tot > 0 else 0.0
 
     # Invert the model so the limiting magnitude is expressed directly as a function of S/N:
-    # LM = (1/a)*log10(S/N) - b/a
+    #   LM = (1/a)*log10(S/N) - b/a
     c = 1.0/a
     d = -b/a
     lm = {target: c*np.log10(target) + d for target in snr_targets}
@@ -618,8 +619,8 @@ def screenNudgeToAzAltDelta(platepar, screen_dx, screen_dy, key_increment, scree
     Keyword arguments:
         screen_y_sign: [int] Sign mapping the image +Y axis to the screen vertical. -1 when the image
             view is Y-inverted for display (SkyFit2 calls img_frame.invertY()), i.e. image +Y is screen
-            down. Default: -1.
-        h_px: [float] Finite-difference pixel step used to sample the local Jacobian. Default: 10.
+            down. -1 by default.
+        h_px: [float] Finite-difference pixel step used to sample the local Jacobian. 10 by default.
 
     Return:
         (delta_az, delta_alt): [tuple of float] Degrees to add to az_centre/alt_centre. Returns
@@ -675,6 +676,7 @@ def screenNudgeToAzAltDelta(platepar, screen_dx, screen_dy, key_increment, scree
             return 0.0, 0.0
         return float(np.clip(d_az, -AZ_DELTA_CAP, AZ_DELTA_CAP)), float(d_alt)
 
+    # Normalize the tangent to a unit direction
     t = t/tn
 
     # Great-circle normal for the requested screen motion
@@ -721,9 +723,10 @@ def fovCentreZenithDirection(platepar, h_px=10, centre=None):
         platepar: [Platepar object] Input platepar.
 
     Keyword arguments:
-        h_px: [float] Finite-difference pixel step. Default: 10.
-        centre: [tuple or None] (x, y) image pixel to evaluate at. Defaults to the image centre; pass the
-            distortion centre (optical axis) to match the indicator that is pinned there.
+        h_px: [float] Finite-difference pixel step. 10 by default.
+        centre: [tuple or None] (x, y) image pixel to evaluate at. None by default, which evaluates at
+            the image centre; pass the distortion centre (optical axis) to match the indicator that is
+            pinned there.
 
     Return:
         (angle_screen_deg, east_screen_deg, azimuth_deg, elevation_deg, valid):
@@ -741,6 +744,7 @@ def fovCentreZenithDirection(platepar, h_px=10, centre=None):
     ELEV_VALID_MAX = 89.5       # above this elevation the zenith direction is meaningless
 
     def _wrap(d):
+        # Wrap an angle difference (radians) to the (-pi, pi] range
         return (d + np.pi)%(2*np.pi) - np.pi
 
     def _azalt(x, y):
@@ -751,11 +755,13 @@ def fovCentreZenithDirection(platepar, h_px=10, centre=None):
             np.radians(platepar.lat), np.radians(platepar.lon), platepar.refraction)
         return az, alt
 
+    # Evaluate at the image centre unless another pixel is given
     if centre is None:
         xc, yc = platepar.X_res/2, platepar.Y_res/2
     else:
         xc, yc = centre
 
+    # Sample the pointing at the centre and one step along each image axis
     az0, alt0 = _azalt(xc, yc)
     azx, altx = _azalt(xc + h_px, yc)
     azy, alty = _azalt(xc, yc + h_px)
