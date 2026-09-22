@@ -129,6 +129,97 @@ def computeSolarSystemMagnitude(body_name, body, sun, time):
     return mag
 
 
+def updateConfigLines(lines, updates):
+    """ Set the given keys in the lines of an RMS .config file, keeping everything else as it is.
+
+        A key line is recognised whatever the spelling configparser accepts ('key: value', 'key:value',
+        'key=value', 'key = value'), and the key name is compared case-insensitively like configparser
+        does. The original key spelling, delimiter, spacing and any ';' inline comment are kept. Keys that
+        are not in the file are added at the end of their section, and missing sections are appended.
+
+    Arguments:
+        lines: [list] Lines of the config file, with their line endings.
+        updates: [dict] {section: {key: value_str}} of the values to write.
+
+    Return:
+        new_lines: [list] Updated lines.
+    """
+
+    # A section header, and a key line with its delimiter and an optional ';' inline comment
+    section_re = re.compile(r'^\s*\[([^\]]+)\]')
+    key_re = re.compile(r'^(\s*)([^:=\s;#\[][^:=]*?)(\s*[:=]\s*)(.*?)(\s+;.*)?(\r?\n)?$')
+
+    applied = {section: {k: False for k in keys} for section, keys in updates.items()}
+    wanted = {section: {k.lower(): k for k in keys} for section, keys in updates.items()}
+    current_section = None
+
+    # Replace the values of the keys that already exist
+    new_lines = []
+    for line in lines:
+
+        section_match = section_re.match(line)
+        if section_match:
+            current_section = section_match.group(1).strip()
+            new_lines.append(line)
+            continue
+
+        key_match = None
+        if current_section in updates:
+            key_match = key_re.match(line)
+
+        if key_match is not None:
+
+            indent, key, delim, _, comment, eol = key_match.groups()
+            key_name = wanted[current_section].get(key.strip().lower())
+
+            if key_name is not None:
+                new_lines.append(indent + key + delim + updates[current_section][key_name]
+                                 + (comment or "") + (eol or "\n"))
+                applied[current_section][key_name] = True
+                continue
+
+        new_lines.append(line)
+
+    # Add any missing keys, at the end of their section or in a new section
+    for section, keys in updates.items():
+
+        missing_keys = [k for k, was_applied in applied[section].items() if not was_applied]
+        if not missing_keys:
+            continue
+
+        # Find the last non-comment line of the section
+        insert_idx = None
+        in_section = False
+        for i, line in enumerate(new_lines):
+
+            section_match = section_re.match(line)
+            if section_match:
+                if in_section:
+                    break
+                in_section = (section_match.group(1).strip() == section)
+                if in_section:
+                    insert_idx = i + 1
+
+            elif in_section and line.strip() and not line.strip().startswith((';', '#')):
+                insert_idx = i + 1
+
+        # Append a whole new section if it does not exist
+        if insert_idx is None:
+            if new_lines and not new_lines[-1].endswith("\n"):
+                new_lines[-1] += "\n"
+            new_lines.append("\n[{:s}]\n".format(section))
+            for key in missing_keys:
+                new_lines.append("{:s}: {:s}\n".format(key, updates[section][key]))
+
+        else:
+            if not new_lines[insert_idx - 1].endswith("\n"):
+                new_lines[insert_idx - 1] += "\n"
+            for key in reversed(missing_keys):
+                new_lines.insert(insert_idx, "{:s}: {:s}\n".format(key, updates[section][key]))
+
+    return new_lines
+
+
 import matplotlib.gridspec as gridspec
 import matplotlib.ticker as ticker
 import scipy.optimize
@@ -2155,28 +2246,35 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
                     # Only write the catalog LM if it was tuned and the user kept it checked
                     catalog_lm = pt.tuned_cat_lim_mag if save_lm else None
 
-                    # Copy the config to the target, then write overrides into the copy
-                    if os.path.realpath(src) != os.path.realpath(dest):
-                        shutil.copy2(src, dest)
-                        pt._writeStarDetectionConfig(dest, catalog_mag_limit=catalog_lm)
+                    is_loaded_config = (os.path.realpath(src) == os.path.realpath(dest))
 
-                    # Same file - write overrides in-place (backup handled by _writeStarDetectionConfig)
+                    # A config that already exists at the target belongs to that station (its ID,
+                    #   coordinates, camera settings). Only patch the star detection keys in it, after
+                    #   backing it up. A new target starts as a copy of the loaded config, which needs
+                    #   no backup. A failed write raises and is reported below, not as saved
+                    if os.path.exists(dest):
+                        pt._writeStarDetectionConfig(dest, catalog_mag_limit=catalog_lm)
                     else:
-                        pt._writeStarDetectionConfig(dest, catalog_mag_limit=catalog_lm)
+                        shutil.copy2(src, dest)
+                        pt._writeStarDetectionConfig(dest, catalog_mag_limit=catalog_lm, backup=False)
 
-                    # Sync in-memory config attrs so modified state is cleared
-                    pt.config.intensity_threshold = pt.override_intensity_threshold
-                    pt.config.neighborhood_size = pt.override_neighborhood_size
-                    pt.config.max_stars = pt.configMaxStars()
-                    pt.config.segment_radius = pt.override_segment_radius
-                    pt.config.max_feature_ratio = pt.override_max_feature_ratio
-                    pt.config.roundness_threshold = pt.override_roundness_threshold
+                    # Sync the in-memory config only when the loaded config file itself was written, so
+                    #   the modified state still shows while the loaded file holds the old values
+                    if is_loaded_config:
 
-                    # Match the one decimal the file holds
-                    if catalog_lm is not None:
-                        pt.config.catalog_mag_limit = round(catalog_lm, 1)
+                        pt.config.intensity_threshold = pt.override_intensity_threshold
+                        pt.config.neighborhood_size = pt.override_neighborhood_size
+                        pt.config.max_stars = pt.configMaxStars()
+                        pt.config.segment_radius = pt.override_segment_radius
+                        pt.config.max_feature_ratio = pt.override_max_feature_ratio
+                        pt.config.roundness_threshold = pt.override_roundness_threshold
 
-                    pt._updateConfigSaveButtonState()
+                        # Match the one decimal the file holds
+                        if catalog_lm is not None:
+                            pt.config.catalog_mag_limit = round(catalog_lm, 1)
+
+                        pt._updateConfigSaveButtonState()
+
                     results.append("Config saved to: " + dest)
                 except Exception as e:
                     results.append("Config save to {} failed: {}".format(target_dir, repr(e)))
@@ -6578,11 +6676,12 @@ class PlateTool(QtWidgets.QMainWindow):
         return final_lm
 
 
-    def _writeStarDetectionConfig(self, config_path, catalog_mag_limit=None):
+    def _writeStarDetectionConfig(self, config_path, catalog_mag_limit=None, backup=True):
         """ Write the star detection override parameters to the given config file, backing it up first.
 
-            Preserves comments and formatting by doing surgical line updates. Uses the ': ' separator
-            like the RMS config format. Missing keys and sections are appended.
+            Preserves comments and formatting by doing surgical line updates (see updateConfigLines).
+            Missing keys and sections are appended. Errors are not caught: the caller must report them
+            and must not treat the settings as saved.
 
         Arguments:
             config_path: [str] Path to the config file to update.
@@ -6590,13 +6689,18 @@ class PlateTool(QtWidgets.QMainWindow):
         Keyword arguments:
             catalog_mag_limit: [float] Catalog limiting magnitude to write. None (default) leaves the
                 one in the config alone.
+            backup: [bool] Copy an existing file to a timestamped backup before changing it. True by
+                default.
+
+        Return:
+            backup_path: [str] Path of the backup, None if no backup was made.
         """
 
-        import re
         from datetime import datetime
 
-        # Backup existing config before overwriting
-        if os.path.exists(config_path):
+        # Backup existing config before overwriting. A failed backup aborts the write
+        backup_path = None
+        if backup and os.path.exists(config_path):
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             base, ext = os.path.splitext(config_path)
             backup_path = "{}.bak.{}{}".format(base, timestamp, ext)
@@ -6620,92 +6724,30 @@ class PlateTool(QtWidgets.QMainWindow):
         if catalog_mag_limit is not None:
             updates["Calibration"] = {"catalog_mag_limit": "{:.1f}".format(catalog_mag_limit)}
 
-        try:
+        # Read the existing file
+        if os.path.exists(config_path):
+            with open(config_path, 'r') as f:
+                lines = f.readlines()
+        else:
+            lines = []
 
-            # Read existing file
-            if os.path.exists(config_path):
-                with open(config_path, 'r') as f:
-                    lines = f.readlines()
-            else:
-                lines = []
+        new_lines = updateConfigLines(lines, updates)
 
-            # Track which updates were applied
-            applied = {section: {k: False for k in keys} for section, keys in updates.items()}
-            current_section = None
+        # Write back
+        with open(config_path, 'w') as f:
+            f.writelines(new_lines)
 
-            # Update existing lines
-            new_lines = []
-            for line in lines:
-                stripped = line.strip()
+        print(f"Saved star detection settings to: {config_path}")
+        print(f"  intensity_threshold: {self.override_intensity_threshold}")
+        print(f"  segment_radius: {self.override_segment_radius}")
+        print(f"  max_stars: {self.configMaxStars()}")
+        if catalog_mag_limit is not None:
+            print(f"  catalog_mag_limit: {catalog_mag_limit:.1f}")
 
-                # Track current section
-                section_match = re.match(r'\s*\[([^\]]+)\]', stripped)
-                if section_match:
-                    current_section = section_match.group(1)
-                    new_lines.append(line)
-                    continue
+        qmessagebox(message=f"Star detection settings saved to:\n{config_path}",
+                   title="Settings Saved", message_type="info")
 
-                # Check if this line is a key we want to update
-                updated = False
-                if current_section and ': ' in stripped and not stripped.startswith((';', '#')):
-                    key = stripped.split(': ')[0].strip()
-                    if current_section in updates and key in updates[current_section]:
-                        value = updates[current_section][key]
-                        new_lines.append(f"{key}: {value}\n")
-                        applied[current_section][key] = True
-                        updated = True
-
-                if not updated:
-                    new_lines.append(line)
-
-            # Add any missing sections/keys at the end
-            for section, keys in updates.items():
-                missing_keys = [k for k, was_applied in applied[section].items() if not was_applied]
-                if not missing_keys:
-                    continue
-
-                # Append a whole new section if it doesn't exist
-                section_exists = any(f'[{section}]' in line for line in new_lines)
-                if not section_exists:
-                    new_lines.append(f"\n[{section}]\n")
-                    for key in missing_keys:
-                        new_lines.append(f"{key}: {updates[section][key]}\n")
-
-                # Otherwise find the section end and insert the keys there
-                else:
-                    insert_idx = None
-                    in_section = False
-                    for i, line in enumerate(new_lines):
-                        if f'[{section}]' in line:
-                            in_section = True
-                            insert_idx = i + 1
-                        elif in_section:
-                            if line.strip().startswith('['):
-                                break
-                            if line.strip() and not line.strip().startswith(';'):
-                                insert_idx = i + 1
-
-                    if insert_idx is not None:
-                        for key in reversed(missing_keys):
-                            new_lines.insert(insert_idx, f"{key}: {updates[section][key]}\n")
-
-            # Write back
-            with open(config_path, 'w') as f:
-                f.writelines(new_lines)
-
-            print(f"Saved star detection settings to: {config_path}")
-            print(f"  intensity_threshold: {self.override_intensity_threshold}")
-            print(f"  segment_radius: {self.override_segment_radius}")
-            print(f"  max_stars: {self.configMaxStars()}")
-            if catalog_mag_limit is not None:
-                print(f"  catalog_mag_limit: {catalog_mag_limit:.1f}")
-
-            qmessagebox(message=f"Star detection settings saved to:\n{config_path}",
-                       title="Settings Saved", message_type="info")
-
-        except Exception as e:
-            qmessagebox(message=f"Error saving config:\n{str(e)}",
-                       title="Save Error", message_type="warning")
+        return backup_path
 
 
     ###################################################################################################
