@@ -1377,3 +1377,38 @@ def testForcedCentreRoundTripRestoresFittedCentre(plateTool, monkeypatch, forced
         assert getattr(pp, name)[0] == pytest.approx(0.05)
         assert getattr(pp, name)[1] == pytest.approx(-0.03)
     assert np.allclose(pp.x_poly_fwd[2:], k_before)
+
+
+@pytest.mark.parametrize("at_startup", [False, True])
+def testStateOnPlaceholderReopensOnPlaceholder(plateTool, stationDir, qapp, at_startup):
+    """ A state saved while the in-memory best frame placeholder is shown reopens on it, at its time. """
+
+    pt = plateTool
+    placeholder_name = "FF_AU000A_20250817_200000_000_0600000_placeholder.png"
+    pt.calstars[placeholder_name] = pt.calstars[pt.img_handle.name()]
+    idx = pt.img_handle.addMemoryFF(placeholder_name,
+                                    SF.ffStructFromImage(np.full((720, 1280), 24, np.uint8)))
+    pt.nextImg(n=idx - pt.img_handle.current_ff_index)
+    saved_time = pt.img_handle.currentTime()
+    assert pt.img_handle.name() == placeholder_name
+
+    pt.saveState()
+
+    if at_startup:
+        pt2 = SF.PlateTool.__new__(SF.PlateTool)
+        super(SF.PlateTool, pt2).__init__()
+    else:
+        config = cr.loadConfigFromDirectory('.config', stationDir)
+        pt2 = SF.PlateTool(stationDir, config)
+
+    try:
+        pt2.loadState(stationDir, 'skyFitMR_latest.state')
+        qapp.processEvents()
+
+        assert pt2.img_handle.name() == placeholder_name
+        assert pt2.img_handle.currentTime() == saved_time
+        assert np.all(pt2.img_handle.loadChunk().avepixel == 24)
+        assert not any("_placeholder" in f for f in os.listdir(stationDir))
+    finally:
+        pt2.close()
+        pt2.deleteLater()

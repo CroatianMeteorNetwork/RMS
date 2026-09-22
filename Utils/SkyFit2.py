@@ -10177,7 +10177,13 @@ class PlateTool(QtWidgets.QMainWindow):
         # Save the FF file name if the input type is FF
         if self.img_handle.input_type == 'ff':
             dic['ff_file'] = self.img_handle.name()
-            
+
+            # Images which only exist in memory (the best frame placeholder) are not on disk, so they
+            #   are saved with the state
+            memory_ffs = getattr(self.img_handle, 'memory_ffs', None)
+            if memory_ffs:
+                dic['memory_ffs'] = dict(memory_ffs)
+
         savePickle(dic, self.dir_path, 'skyFitMR_latest.state')
         print("Saved state to file")
 
@@ -10409,6 +10415,37 @@ class PlateTool(QtWidgets.QMainWindow):
             pass
 
 
+    def _restoreStateImage(self, variables):
+        """ Make the image a state was saved on the current image of the (new) image handle.
+
+            The in-memory images saved with the state (the best frame placeholder) are added to the
+            handle first, as they are not on disk.
+
+        Arguments:
+            variables: [dict] The loaded state.
+
+        Return:
+            [bool] True if the current image was changed.
+        """
+
+        handle = getattr(self, 'img_handle', None)
+        if (handle is None) or (getattr(handle, 'input_type', None) != 'ff'):
+            return False
+
+        # Put the in-memory images back
+        if hasattr(handle, 'addMemoryFF'):
+            for ff_name, ff in (variables.get('memory_ffs') or {}).items():
+                handle.addMemoryFF(ff_name, ff)
+
+        ff_file = variables.get('ff_file')
+        if (ff_file is None) or (ff_file not in handle.ff_list) or (ff_file == handle.name()):
+            return False
+
+        handle.setCurrentFF(ff_file)
+
+        return True
+
+
     def findLoadState(self):
         """ Opens file dialog to find .state file to load then calls loadState """
 
@@ -10449,6 +10486,9 @@ class PlateTool(QtWidgets.QMainWindow):
         variables = loadPickle(dir_path, state_name)
         for k, v in variables.items():
             setattr(self, k, v)
+
+        # The in-memory images belong to the image handle, not to the plate tool
+        self.__dict__.pop('memory_ffs', None)
 
         # Defaults for the attributes that state files saved by older versions do not have. The star
         #   detection overrides start at the config values, as they do on a normal start
@@ -10857,10 +10897,20 @@ class PlateTool(QtWidgets.QMainWindow):
 
             self.setupUI(loaded_file=True)
 
+            # Go to the image the state was saved on, and show it
+            if self._restoreStateImage(variables):
+                self.img.changeHandle(self.img_handle)
+                self.img_zoom.changeHandle(self.img_handle)
+                self.updateCalstars()
+                self.updateStars()
+                self.updateLeftLabels()
+                self.updateImageNavigationDisplay()
+
         else:
-            
-            # Get and set the new img_handle
-            self.detectInputType(load=True)  
+
+            # Get and set the new img_handle, on the image the state was saved on
+            self.detectInputType(load=True)
+            self._restoreStateImage(variables)
             self.img.changeHandle(self.img_handle)
             self.img_zoom.changeHandle(self.img_handle)
 
