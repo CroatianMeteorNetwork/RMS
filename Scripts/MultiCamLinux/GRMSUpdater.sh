@@ -107,6 +107,15 @@ regex_for() {
 }
 
 # ------------------------------------------------------------
+#  kernel_flavour() – kernel release without its version part
+#  (6.6.31+rpt-rpi-v8 -> +rpt-rpi-v8, 5.10.103-v7l+ -> -v7l+,
+#   6.1.0-18-amd64 -> -amd64)
+# ------------------------------------------------------------
+kernel_flavour() {
+    sed -E 's/^[0-9]+(\.[0-9]+)*(-[0-9]+)?//' <<< "$1"
+}
+
+# ------------------------------------------------------------
 #  should_reboot() – check if system reboot is requested
 # ------------------------------------------------------------
 should_reboot() {
@@ -123,9 +132,17 @@ should_reboot() {
             return 0
         fi
         # Fallback: compare running kernel to latest installed (works on RPi OS / Debian).
-        local running latest last_target
+        # Only kernels of the running flavour count: Raspberry Pi OS installs several
+        # flavours side by side (e.g. 6.6.31+rpt-rpi-v8 and 6.6.31+rpt-rpi-2712), and
+        # comparing against the newest of all of them requested a reboot on every run.
+        local running latest last_target flavour
         running="$(uname -r)"
-        latest="$(ls /lib/modules/ | sort -V | tail -1)"
+        flavour="$(kernel_flavour "$running")"
+        latest="$(ls /lib/modules/ 2>/dev/null | while read -r kver; do
+                      if [[ "$(kernel_flavour "$kver")" == "$flavour" ]]; then
+                          echo "$kver"
+                      fi
+                  done | sort -V | tail -1 || true)"
         if [[ -n "$latest" && "$running" != "$latest" ]]; then
             # Loop guard: if the latest installed kernel never becomes the running one
             # (unbootable kernel, bootloader pinned to an older version, RPi

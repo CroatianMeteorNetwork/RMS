@@ -1051,3 +1051,73 @@ def testFovKMLEmptyPolygon(tmp_path, monkeypatch, sides, plot_station):
         kml = f.read()
 
     assert kml.rstrip().endswith('</kml>')
+
+
+# ---------------------------------------------------------------------------
+# Item 20: GRMSUpdater.sh kernel-mismatch reboot fallback
+
+def _extractShellFunction(src, name):
+    """ Return the text of a top-level bash function from a script. """
+
+    lines = src.split('\n')
+    start = lines.index('{:s}() {{'.format(name))
+    end = lines.index('}', start)
+    return '\n'.join(lines[start:end + 1])
+
+
+@posix_only
+@pytest.mark.parametrize('running, installed, expect_reboot, target', [
+
+    # Raspberry Pi 5 with all Raspberry Pi OS flavours installed and nothing newer
+    ('6.6.31+rpt-rpi-2712', ['6.6.31+rpt-rpi-2712', '6.6.31+rpt-rpi-v7', '6.6.31+rpt-rpi-v7l',
+        '6.6.31+rpt-rpi-v8'], False, ''),
+
+    # A newer kernel of the running flavour is installed
+    ('6.6.31+rpt-rpi-2712', ['6.6.31+rpt-rpi-2712', '6.6.51+rpt-rpi-2712', '6.6.51+rpt-rpi-v8'], True,
+        '6.6.51+rpt-rpi-2712'),
+
+    # Older Raspberry Pi OS naming
+    ('5.10.103-v7l+', ['5.10.103+', '5.10.103-v7+', '5.10.103-v7l+', '5.10.103-v8+'], False, ''),
+
+    # Debian: the ABI number changes between versions of one flavour
+    ('6.1.0-18-amd64', ['6.1.0-18-amd64', '6.1.0-21-amd64'], True, '6.1.0-21-amd64'),
+    ])
+def testUpdaterKernelFallbackComparesRunningFlavour(tmp_path, running, installed, expect_reboot, target):
+    """ should_reboot's kernel fallback only compares kernels of the running flavour. """
+
+    import subprocess
+
+    with open(os.path.join(RMS_ROOT, 'Scripts', 'MultiCamLinux', 'GRMSUpdater.sh')) as f:
+        src = f.read()
+
+    modules_dir = tmp_path/'modules'
+    modules_dir.mkdir()
+    for kver in installed:
+        (modules_dir/kver).mkdir()
+
+    # Keep the host's reboot flag file out of the test
+    functions = _extractShellFunction(src, 'should_reboot').replace('/var/run/reboot-required',
+        str(tmp_path/'no-reboot-required'))
+    if 'kernel_flavour() {' in src:
+        functions = _extractShellFunction(src, 'kernel_flavour') + '\n' + functions
+
+    script = '\n'.join([
+        'set -Eeuo pipefail',
+        'log_message() { :; }',
+        'uname() {{ echo {:s}; }}'.format(running),
+        'ls() {{ command ls {:s}; }}'.format(str(modules_dir)),
+        'REBOOT_MODE=if-needed',
+        'REBOOT_STAMP_FILE={:s}'.format(str(tmp_path/'stamp')),
+        functions,
+        'if should_reboot; then echo "REBOOT $REBOOT_KERNEL_TARGET"; else echo "NOREBOOT"; fi',
+        ])
+
+    res = subprocess.run(['bash', '-c', script], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        timeout=30)
+    out = res.stdout.decode().strip()
+
+    assert res.returncode == 0, out
+    if expect_reboot:
+        assert out == 'REBOOT {:s}'.format(target)
+    else:
+        assert out == 'NOREBOOT'
