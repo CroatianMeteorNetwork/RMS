@@ -41,13 +41,16 @@ F_SCALE = 27.0  # px/deg
 JD_OBS = 2459580.75  # 2022-01-01 06:00 UTC
 
 
+### Synthetic field builders ###
+
 def buildSyntheticPlatepar():
     """ Build a synthetic radial7-odd platepar with small distortion coefficients.
 
     Return:
-        platepar: [Platepar]
+        pp: [Platepar] Platepar of the synthetic 1920x1080 camera, pointed south at 45 deg altitude.
     """
 
+    # Start from a radial7-odd platepar and set the image size and the plate scale
     pp = Platepar(distortion_type="radial7-odd")
 
     pp.X_res = X_RES
@@ -56,6 +59,7 @@ def buildSyntheticPlatepar():
     pp.fov_h = X_RES/F_SCALE
     pp.fov_v = Y_RES/F_SCALE
 
+    # Station location and time of the synthetic observation
     pp.lat = 43.0
     pp.lon = -81.0
     pp.elev = 300.0
@@ -86,8 +90,9 @@ def buildSyntheticCatalog(pp, rng, n_target=3000, cone_radius_deg=45.0):
         rng: [np.random.RandomState] Random generator.
 
     Keyword arguments:
-        n_target: [int] Approximate number of stars to keep in the FOV.
-        cone_radius_deg: [float] Radius of the cone around the pointing to sample from.
+        n_target: [int] Approximate number of stars to keep in the FOV. 3000 by default.
+        cone_radius_deg: [float] Radius of the cone around the pointing to sample from (deg). 45 by
+            default.
 
     Return:
         catalog_stars: [ndarray] (M, 3) array of (ra, dec, mag), sorted by magnitude.
@@ -130,30 +135,35 @@ def buildSyntheticDetections(pp, catalog_stars, rng, noise_px=0.3, drop_fraction
         rng: [np.random.RandomState] Random generator.
 
     Keyword arguments:
-        noise_px: [float] Gaussian centroid noise (px).
-        drop_fraction: [float] Fraction of catalog stars that are not detected.
-        false_fraction: [float] Fraction of false detections added, relative to the kept stars.
+        noise_px: [float] Gaussian centroid noise (px). 0.3 by default.
+        drop_fraction: [float] Fraction of catalog stars that are not detected. 0.3 by default.
+        false_fraction: [float] Fraction of false detections added, relative to the kept stars. 0.1 by
+            default.
 
     Return:
         img_stars: [ndarray] (N, 3) array of (x, y, intensity).
         truth_cat_idx: [ndarray] Catalog index for every detection (-1 for false detections).
     """
 
+    # Project the catalog onto the image and blur the centroids with Gaussian noise
     ra, dec, mag = catalog_stars.T
     x, y = raDecToXYPP(ra, dec, JD_OBS, pp)
     x = x + rng.normal(0.0, noise_px, len(x))
     y = y + rng.normal(0.0, noise_px, len(y))
     intensity = 1000.0*10**(-0.4*(mag - 8.0))
 
+    # Drop a fraction of the stars and everything that fell outside the image
     keep = rng.uniform(size=len(x)) > drop_fraction
     in_img = (x >= 0) & (x < X_RES) & (y >= 0) & (y < Y_RES)
     keep &= in_img
 
+    # Sprinkle false detections over the image, with intensities in the faint half of the real range
     n_false = int(false_fraction*np.sum(keep))
     x_false = rng.uniform(0, X_RES, n_false)
     y_false = rng.uniform(0, Y_RES, n_false)
     int_false = 10**rng.uniform(np.log10(intensity.min()), np.log10(np.median(intensity)), n_false)
 
+    # Stack the real and the false detections, keeping the catalog index of every real one
     img_stars = np.vstack([
         np.column_stack([x[keep], y[keep], intensity[keep]]),
         np.column_stack([x_false, y_false, int_false]),
@@ -169,10 +179,18 @@ def buildSyntheticDetections(pp, catalog_stars, rng, noise_px=0.3, drop_fraction
 def buildPairedStars(pp, catalog_stars, img_stars, truth_cat_idx, rng):
     """ Build a PairedStars object from the true detections.
 
+    Arguments:
+        pp: [Platepar] Synthetic platepar. Kept for a uniform builder signature, it is not read.
+        catalog_stars: [ndarray] (M, 3) array of (ra, dec, mag).
+        img_stars: [ndarray] (N, 3) array of (x, y, intensity).
+        truth_cat_idx: [ndarray] Catalog index for every detection (-1 for false detections).
+        rng: [np.random.RandomState] Random generator.
+
     Return:
-        paired_stars: [PairedStars]
+        paired_stars: [PairedStars] Image/catalog pairs for every true detection, with a random FWHM.
     """
 
+    # Pair every real detection with the catalog star it was projected from, skipping false detections
     paired_stars = PairedStars()
     for (x, y, intens), cat_i in zip(img_stars, truth_cat_idx):
         if cat_i < 0:
@@ -186,8 +204,19 @@ def buildPairedStars(pp, catalog_stars, img_stars, truth_cat_idx, rng):
 
 def _duplicateKeepMaskReference(x_arr, y_arr, intens_arr, radius):
     """ Inline copy of the PSF duplicate removal loop from ExtractStars.fitPSF, used when the library
-        does not expose the helper yet. """
+        does not expose the helper yet.
 
+    Arguments:
+        x_arr: [ndarray] X image coordinates of the detections.
+        y_arr: [ndarray] Y image coordinates of the detections.
+        intens_arr: [ndarray] Intensity of every detection.
+        radius: [float] Detections closer than this (px) are treated as duplicates.
+
+    Return:
+        keep: [ndarray] Boolean mask of the detections that survive the duplicate removal.
+    """
+
+    # Find all pairs of detections that are closer than the radius
     keep = np.ones(len(x_arr), dtype=bool)
     tree = cKDTree(np.column_stack([x_arr, y_arr]))
     pairs = tree.query_pairs(radius, output_type='ndarray')
@@ -204,9 +233,22 @@ def _duplicateKeepMaskReference(x_arr, y_arr, intens_arr, radius):
     return keep
 
 
-def timeIt(func, repeats):
-    """ Run func repeats times and return (best, mean) wall time in seconds and the last result. """
+### Benchmarks ###
 
+def timeIt(func, repeats):
+    """ Run func repeats times and return the best and the mean wall time.
+
+    Arguments:
+        func: [function] Zero-argument callable to time.
+        repeats: [int] Number of times to run it.
+
+    Return:
+        best: [float] Shortest run time (s).
+        mean: [float] Mean run time (s).
+        result: [object] Return value of the last run.
+    """
+
+    # Time every repeat separately, the shortest run is the least noisy estimate
     times = []
     result = None
     for _ in range(repeats):
@@ -218,8 +260,19 @@ def timeIt(func, repeats):
 
 
 def benchmarkFitPointingNN(pp, catalog_stars, img_stars, repeats):
-    """ (a) fitPointingNN on a pointing perturbed by ~0.5 deg. """
+    """ (a) fitPointingNN on a pointing perturbed by ~0.5 deg.
 
+    Arguments:
+        pp: [Platepar] Synthetic ground-truth platepar.
+        catalog_stars: [ndarray] (M, 3) array of (ra, dec, mag).
+        img_stars: [ndarray] (N, 3) array of (x, y, intensity).
+        repeats: [int] Number of times to run the fit.
+
+    Return:
+        None
+    """
+
+    # Perturb the pointing and refit it, suppressing the per-fit console output
     def run():
         pp_pert = copy.deepcopy(pp)
         pp_pert.RA_d = (pp_pert.RA_d + 0.4/np.cos(np.radians(pp.dec_d))) % 360
@@ -229,6 +282,7 @@ def benchmarkFitPointingNN(pp, catalog_stars, img_stars, repeats):
             res = pp_pert.fitPointingNN(JD_OBS, img_stars, catalog_stars, fixed_scale=True)
         return res, pp_pert
 
+    # Report the timing together with how far the recovered pointing is from the truth
     best, mean, (res, pp_fit) = timeIt(run, repeats)
     dra = ((pp_fit.RA_d - pp.RA_d + 180) % 360 - 180)*np.cos(np.radians(pp.dec_d))
     ddec = pp_fit.dec_d - pp.dec_d
@@ -238,8 +292,19 @@ def benchmarkFitPointingNN(pp, catalog_stars, img_stars, repeats):
 
 
 def benchmarkFitAstrometryRansac(pp, catalog_stars, img_stars, repeats):
-    """ (b) full RANSAC fitAstrometry path with the NN cost, as run by AutoPlatepar. """
+    """ (b) full RANSAC fitAstrometry path with the NN cost, as run by AutoPlatepar.
 
+    Arguments:
+        pp: [Platepar] Synthetic ground-truth platepar.
+        catalog_stars: [ndarray] (M, 3) array of (ra, dec, mag).
+        img_stars: [ndarray] (N, 3) array of (x, y, intensity).
+        repeats: [int] Number of times to run the fit.
+
+    Return:
+        None
+    """
+
+    # Start from a slightly offset pointing and a reset radial5-odd distortion, as AutoPlatepar does
     def run():
         pp_start = copy.deepcopy(pp)
         pp_start.RA_d = (pp_start.RA_d + 0.05) % 360
@@ -255,10 +320,14 @@ def benchmarkFitAstrometryRansac(pp, catalog_stars, img_stars, repeats):
         return result, pp_start
 
     best, mean, (result, pp_fit) = timeIt(run, repeats)
+
+    # A failed fit returns nothing to measure the residuals on
     if result is None:
-        print("(b) fitAstrometry RANSAC: best {:7.3f} s  mean {:7.3f} s   -> returned None".format(best, mean))
+        print("(b) fitAstrometry RANSAC: best {:7.3f} s  mean {:7.3f} s   -> returned None".format(
+            best, mean))
         return
 
+    # Compute the image residual of the matched pairs under the fitted platepar
     img_matched, cat_matched = result
     x, y = raDecToXYPP(cat_matched[:, 0], cat_matched[:, 1], JD_OBS, pp_fit)
     rmsd = np.sqrt(np.mean((x - img_matched[:, 0])**2 + (y - img_matched[:, 1])**2))
@@ -268,7 +337,17 @@ def benchmarkFitAstrometryRansac(pp, catalog_stars, img_stars, repeats):
 
 
 def benchmarkFilterBlendedStars(pp, catalog_stars, paired_stars, repeats):
-    """ (c) filterBlendedStars on the true pairs. """
+    """ (c) filterBlendedStars on the true pairs.
+
+    Arguments:
+        pp: [Platepar] Synthetic ground-truth platepar.
+        catalog_stars: [ndarray] (M, 3) array of (ra, dec, mag).
+        paired_stars: [PairedStars] Image/catalog pairs of the true detections.
+        repeats: [int] Number of times to run the filter.
+
+    Return:
+        None
+    """
 
     def run():
         return filterBlendedStars(paired_stars, catalog_stars, pp, JD_OBS, lim_mag=9.0)
@@ -279,7 +358,16 @@ def benchmarkFilterBlendedStars(pp, catalog_stars, paired_stars, repeats):
 
 
 def benchmarkDuplicateRemoval(img_stars, rng, repeats):
-    """ (d) ExtractStars PSF duplicate removal on detections with injected duplicates. """
+    """ (d) ExtractStars PSF duplicate removal on detections with injected duplicates.
+
+    Arguments:
+        img_stars: [ndarray] (N, 3) array of (x, y, intensity).
+        rng: [np.random.RandomState] Random generator used to inject the duplicates.
+        repeats: [int] Number of times to run the duplicate removal.
+
+    Return:
+        None
+    """
 
     # Inject duplicates: 15% of the stars get a second detection converging within the segment radius
     n_dup = int(0.15*len(img_stars))
@@ -293,6 +381,7 @@ def benchmarkDuplicateRemoval(img_stars, rng, repeats):
     x_arr, y_arr, intens_arr = all_stars.T
     segment_radius = 4
 
+    # Prefer the library helper, fall back to the inline copy on older branches
     helper = getattr(ExtractStars, "duplicateDetectionKeepMask", None)
     label = "library helper" if helper is not None else "inline reference copy"
     if helper is None:
@@ -306,9 +395,16 @@ def benchmarkDuplicateRemoval(img_stars, rng, repeats):
         best, mean, len(x_arr), int(np.sum(~keep)), label))
 
 
-def main():
-    """ Parse the command line arguments, build the synthetic field and run the selected benchmarks. """
+### Entry point ###
 
+def main():
+    """ Parse the command line arguments, build the synthetic field and run the selected benchmarks.
+
+    Return:
+        None
+    """
+
+    # Parse the command line arguments
     parser = argparse.ArgumentParser(description="Benchmark the astrometric fitting hot spots.")
     parser.add_argument("--repeats", type=int, default=3, help="Repeats per benchmark (best is reported).")
     parser.add_argument("--seed", type=int, default=12345, help="Random seed for the synthetic field.")
@@ -316,20 +412,24 @@ def main():
     parser.add_argument("--skip", default="", help="Comma-separated benchmarks to skip, e.g. 'b,d'.")
     args = parser.parse_args()
 
+    # Seed the generator and read the list of benchmarks to skip
     rng = np.random.RandomState(args.seed)
     skip = set(s.strip() for s in args.skip.split(",") if s.strip())
 
+    # Build the synthetic star field once and share it between the benchmarks
     pp = buildSyntheticPlatepar()
     catalog_stars = buildSyntheticCatalog(pp, rng, n_target=args.n_catalog)
     img_stars, truth = buildSyntheticDetections(pp, catalog_stars, rng)
     paired_stars = buildPairedStars(pp, catalog_stars, img_stars, truth, rng)
 
+    # Describe the field that the benchmarks run on
     print("Synthetic field: {:d} catalog stars in FOV, {:d} detections ({:d} false), {:d} true pairs".format(
         len(catalog_stars), len(img_stars), int(np.sum(truth < 0)), len(paired_stars)))
     print("Platepar: RA={:.3f} Dec={:.3f} rot={:.2f} F_scale={:.2f} {}".format(
         pp.RA_d, pp.dec_d, pp.pos_angle_ref, pp.F_scale, pp.distortion_type))
     print()
 
+    # Run the benchmarks that were not skipped
     if "a" not in skip:
         benchmarkFitPointingNN(pp, catalog_stars, img_stars, args.repeats)
     if "b" not in skip:
