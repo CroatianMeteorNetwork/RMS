@@ -864,6 +864,23 @@ def fitPSF(img, img_median, x_init, y_init, gamma=1.0, segment_radius=4, roundne
 
 
 
+def printStarTable(star_data):
+    """ Print the extracted stars of one FF file as a table.
+
+    Arguments:
+        star_data: [list] Star rows in the CALSTARS column order: Y (row), X (column), IntensSum, Ampltd,
+            FWHM, BgLvl, SNR, NSatPx.
+
+    Return:
+        None
+    """
+
+    print('  ROW     COL       amp  intens FWHM Bg SNR SatCount')
+    for y, x, intensity, amplitude, fwhm, background, snr, saturated_count in star_data:
+        print(' {:7.2f} {:7.2f} {:6d} {:6d} {:5.2f} {:6d} {:5.2f} {:6d}'.format(round(y, 2), round(x, 2),
+            int(amplitude), int(intensity), fwhm, int(background), snr, int(saturated_count)))
+
+
 def plotStars(img, x2, y2, bit_depth=None, title=None, x_fitted=None, y_fitted=None):
     """ Plots detected stars on the input image.
 
@@ -1133,13 +1150,10 @@ if __name__ == "__main__":
 
         print()
         print(ff_name)
-        print('  ROW     COL       amp  intens FWHM Bg SNR SatCount')
-        for x, y, max_ampl, level, fwhm, background, snr, saturated_count in star_data:
-            print(' {:7.2f} {:7.2f} {:6d} {:6d} {:5.2f} {:6d} {:5.2f} {:6d}'.format(round(y, 2), round(x, 2), int(max_ampl), \
-                int(level), fwhm, int(background), snr, saturated_count))
+        printStarTable(star_data)
 
-
-        x2, y2, amplitude, intensity, fwhm_data, background, snr, saturated_count = np.array(star_data).T
+        # Unpack the CALSTARS columns: Y X IntensSum Ampltd FWHM BgLvl SNR NSatPx
+        y2, x2, intensity, amplitude, fwhm_data, background, snr, saturated_count = np.array(star_data).T
 
         # Store the star info to list        
         x_list += x2.tolist()

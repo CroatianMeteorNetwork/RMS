@@ -304,3 +304,14 @@ def testExtractStarsFFUsesDataBitDepth(monkeypatch):
 
     assert counts[0] > 20
     assert counts[0] == counts[1]
+
+
+def testPrintStarTableUsesCalstarsColumnOrder(capsys):
+    """ The CLI table must print the CALSTARS columns (Y X IntensSum Ampltd ...) under the right headers. """
+
+    # Y = 10.5, X = 20.25, IntensSum = 500, Ampltd = 50, FWHM = 2.5, BgLvl = 30, SNR = 12.5, NSatPx = 0
+    ExtractStars.printStarTable([(10.5, 20.25, 500.0, 50.0, 2.5, 30.0, 12.5, 0)])
+
+    lines = capsys.readouterr().out.strip().splitlines()
+    assert lines[0].split()[:4] == ['ROW', 'COL', 'amp', 'intens']
+    assert lines[1].split()[:4] == ['10.50', '20.25', '50', '500']
