@@ -1208,6 +1208,7 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
 
     FILE_TYPES = ["Platepar", "Config", "Mask", "Flat", "Dark"]
 
+
     def __init__(self, plate_tool, parent=None):
         """ Build the File Manager dialog.
 
@@ -1316,6 +1317,7 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
 
         self._openPath(dir_path)
 
+
     def _onOpenFile(self):
         """ Prompt to select a video file, warn about unsaved changes, and reload. """
 
@@ -1330,6 +1332,7 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
             return
 
         self._openPath(path)
+
 
     def _openPath(self, path):
         """ Warn about unsaved changes and load the given path via PlateTool.changeStation.
@@ -1387,6 +1390,7 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
         except Exception:
             return None
 
+
     def _detectStationFolder(self):
         """ Detect the station folder by probing known paths for a .config with a matching stationID.
 
@@ -1427,6 +1431,7 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
             return ("Station", rms_dir)
 
         return None
+
 
     def _buildLocationList(self):
         """ Build the deduplicated list of known (label, path) locations into self._locations. """
@@ -1473,6 +1478,7 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
 
         self._locations = entries
 
+
     @staticmethod
     def _shortenPath(path):
         """ Shorten a path for display by replacing the home directory with ~. """
@@ -1482,6 +1488,7 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
             return "~" + path[len(home):]
 
         return path
+
 
     def _locationMenuLabel(self, label, path):
         """ Menu entry text for a known location: "<label> - <shortened path>". """
@@ -1570,6 +1577,7 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
             label.setStyleSheet("color: #e65100; font-weight: bold;")  # amber
         else:
             label.setStyleSheet("color: gray;")
+
 
     def _refreshAll(self):
         """ Refresh the station section and all file sections from the current PlateTool state. """
@@ -1725,6 +1733,7 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
 
         self._loadFile(ftype, path)
 
+
     def _browseForLoad(self, ftype):
         """ Open a file browser appropriate for the given file type.
 
@@ -1765,6 +1774,7 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
                 "Image files (*.png *.jpg *.bmp *.nef *.cr2);;All files (*)")
             return path
         return None
+
 
     def _loadFile(self, ftype, path):
         """ Load a single file type from the given path and report the outcome in a message box.
@@ -2227,6 +2237,7 @@ class QFOVinputDialog(QtWidgets.QDialog):
 
     lenses = "none"
     lenses_vbox = None
+
 
     def __init__(self, *args, **kwargs):
         """ Build the dialog which asks the user for the FOV centre, the rotation and the lens
@@ -2888,6 +2899,7 @@ class PlateTool(QtWidgets.QMainWindow):
     def hasData(self):
         """ Return True if image data is loaded. """
         return self.img_handle is not None
+
 
     def closeEvent(self, event):
         """ Handle window close event to properly exit application. """
@@ -4088,6 +4100,7 @@ class PlateTool(QtWidgets.QMainWindow):
                          message_type="error")
             return False
 
+
     def onRefractionChanged(self):
         """ Parameter tab callback: apply a change of the refraction flag to the pointing and the picks. """
 
@@ -4185,6 +4198,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.updateStars()
         self.updateLeftLabels()
 
+
     def onFrameResize(self):
         """ What happens when the window is resized. """
 
@@ -4203,6 +4217,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # The geo point markers are sized relative to the displayed image, so they have to be rescaled
         self.updateGeoMarkerSize()
+
 
     def mouseOverStatus(self, x, y):
         """ Format the status message which will be printed in the status bar below the plot.
@@ -4286,6 +4301,7 @@ class PlateTool(QtWidgets.QMainWindow):
         """ Update bottom label with current mouse position """
         self.status_bar.showMessage(self.mouseOverStatus(self.mouse_x, self.mouse_y))
 
+
     def updateFileManagerButton(self):
         """ Update the File Manager button style - amber when anything (platepar, config or mask) is
             unsaved. """
@@ -4306,6 +4322,7 @@ class PlateTool(QtWidgets.QMainWindow):
             )
         else:
             self.file_manager_button.setStyleSheet("")
+
 
     def updateLeftLabels(self):
         """ Update the two labels on the left with their information """
@@ -5083,15 +5100,18 @@ class PlateTool(QtWidgets.QMainWindow):
         self.override_intensity_threshold = value
         self._updateConfigSaveButtonState()
 
+
     def updateNeighborhoodSize(self, value):
         """ Star Detection tab slider callback: set the neighbourhood size override (px). """
         self.override_neighborhood_size = value
         self._updateConfigSaveButtonState()
 
+
     def updateMaxStars(self, value):
         """ Star Detection tab slider callback: set the maximum number of stars override. """
         self.override_max_stars = value
         self._updateConfigSaveButtonState()
+
 
     def updateGamma(self, value):
         """ Star Detection tab slider callback: set the gamma override. Unlike the other overrides the
@@ -5108,20 +5128,24 @@ class PlateTool(QtWidgets.QMainWindow):
 
         self.updateLeftLabels()
 
+
     def updateSegmentRadius(self, value):
         """ Star Detection tab slider callback: set the segment radius override (px). """
         self.override_segment_radius = value
         self._updateConfigSaveButtonState()
+
 
     def updateMaxFeatureRatio(self, value):
         """ Star Detection tab slider callback: set the maximum feature ratio override. """
         self.override_max_feature_ratio = value
         self._updateConfigSaveButtonState()
 
+
     def updateRoundnessThreshold(self, value):
         """ Star Detection tab slider callback: set the roundness threshold override. """
         self.override_roundness_threshold = value
         self._updateConfigSaveButtonState()
+
 
     def isConfigModified(self):
         """ Check if the Star Detection overrides (or the tuned catalog LM) differ from the loaded config.
@@ -5148,6 +5172,7 @@ class PlateTool(QtWidgets.QMainWindow):
             or self.isTunedCatalogLMUnsaved()
         )
 
+
     def configMaxStars(self):
         """ Return the max_stars value that a config save writes.
 
@@ -5158,6 +5183,7 @@ class PlateTool(QtWidgets.QMainWindow):
             [int] max_stars to write.
         """
         return max(self.override_max_stars, MIN_CONFIG_MAX_STARS)
+
 
     def isTunedCatalogLMUnsaved(self):
         """ Check if the tuner found a catalog LM that is not the one in the config.
@@ -5177,6 +5203,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         return abs(round(self.tuned_cat_lim_mag, 1) - cfg_lm) > 0.05
 
+
     def _updateConfigSaveButtonState(self):
         """ Enable/disable the Save Config button (and the File Manager glow) based on whether the
             overrides differ from the config. """
@@ -5186,6 +5213,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self.tab.star_detection.save_config_button.setEnabled(self.isConfigModified())
 
         self.updateFileManagerButton()
+
 
     def updateCatalogLMFromStarDetection(self, value):
         """ Star Detection tab spinbox callback: set the working catalog limiting magnitude, reload the
@@ -6373,6 +6401,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         return peak_ratio, peak_count, current_count
 
+
     def _findOptimalCatalogLM(self, jd, detected_x, detected_y, target_matches, match_radius=2.0):
         """ Find the catalog limiting magnitude where catalog stars match the detected true positive
             positions. Uses a coarse then a fine search to find the peak number of matches, stopping
@@ -6715,6 +6744,7 @@ class PlateTool(QtWidgets.QMainWindow):
         if self.img.data is not None:
             self.mask = MaskStructure(self.generateMaskImage())
 
+
     def toggleMaskDrawMode(self):
         """ Mask tab callback: enter or leave the polygon drawing mode, following the Draw button state.
             Leaving the mode closes the polygon in progress if it has at least 3 vertices. """
@@ -6742,6 +6772,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         self.updateMaskDisplay()
         self._updateMaskStatus()
+
 
     def toggleMaskBrushMode(self):
         """ Mask tab callback: enter or leave the brush painting mode, following the Brush button
@@ -6773,6 +6804,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.updateMaskDisplay()
         self._updateMaskStatus()
 
+
     def _exitBrushMode(self):
         """ Deactivate brush painting and reset all brush interaction state. """
 
@@ -6783,6 +6815,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.brush_cursor.hide()
         self.tab.mask.setBrushMode(False)
         self.updatePanningEnabled()
+
 
     def updatePanningEnabled(self):
         """ Enable or disable panning the image frame with a mouse drag.
@@ -6813,6 +6846,7 @@ class PlateTool(QtWidgets.QMainWindow):
             block_panning = True
 
         self.img_frame.panning_enabled = not block_panning
+
 
     def addMaskPoint(self, x, y):
         """ Add a vertex to the polygon being drawn, snapping it to the image edge when close to it.
@@ -6846,6 +6880,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.mask.updateStatus(len(self.mask_polygons), len(self.mask_current_polygon),
                                            has_brush_strokes=self._hasBrushStrokes())
 
+
     def closeMaskPolygon(self):
         """ Close the polygon being drawn (if it has at least 3 vertices) and leave the drawing mode. """
 
@@ -6857,6 +6892,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.mask.setDrawMode(False)
         self.updateMaskDisplay()
         self._updateMaskStatus()
+
 
     def clearMaskPolygons(self):
         """ Clear all mask polygons and the paint layer (full visual reset). """
@@ -6873,10 +6909,12 @@ class PlateTool(QtWidgets.QMainWindow):
         self.updateMaskDisplay()
         self._updateMaskStatus()
 
+
     def setBrushSize(self, size):
         """ Mask tab slider callback: set the brush radius in image pixels. """
         self.mask_brush_radius = size
         self.brush_cursor.setRadius(size)
+
 
     def brushStrokeBegin(self):
         """ Save a compressed undo snapshot before a new brush stroke begins.
@@ -6901,6 +6939,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self.mask_brush_stroke_history.pop(0)
 
         self.tab.mask.setUndoEnabled(True)
+
 
     def brushPaintAt(self, x, y):
         """ Paint or erase a brush disc at (x, y), filling the gap from the last position.
@@ -6937,6 +6976,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         self.updateMaskOverlayImage()
 
+
     def undoBrushStroke(self):
         """ Undo the last brush stroke by restoring the previous snapshot. """
 
@@ -6959,6 +6999,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.mask.setUndoEnabled(len(self.mask_brush_stroke_history) > 0)
         self.updateMaskOverlayImage()
 
+
     def clearBrushStrokes(self):
         """ Clear all brush paint strokes and the undo history. """
 
@@ -6969,14 +7010,17 @@ class PlateTool(QtWidgets.QMainWindow):
         self.updateMaskDisplay()
         self._updateMaskStatus()
 
+
     def _hasBrushStrokes(self):
         """ Check if there are any brush strokes on the paint layer. """
         return self.mask_paint_layer is not None and np.any(self.mask_paint_layer != 0)
+
 
     def _updateMaskStatus(self):
         """ Update the mask tab status label with the polygon + brush info. """
         self.tab.mask.updateStatus(len(self.mask_polygons),
                                     has_brush_strokes=self._hasBrushStrokes())
+
 
     def invertMaskPolygons(self):
         """ Invert the current mask by tracing the unmasked regions of the rendered mask image into new
@@ -7018,6 +7062,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.updateMaskDisplay()
         self._updateMaskStatus()
 
+
     def findNearestMaskVertex(self, x, y, threshold=15):
         """ Find the nearest polygon vertex to (x, y) within the threshold.
 
@@ -7052,6 +7097,7 @@ class PlateTool(QtWidgets.QMainWindow):
                     result = (poly_idx, vert_idx)
 
         return result
+
 
     def findNearestMaskEdge(self, x, y, threshold=15):
         """ Find the nearest polygon edge to (x, y) within the threshold.
@@ -7115,6 +7161,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         return result
 
+
     def insertMaskVertex(self, edge_ref, x, y):
         """ Insert a new vertex at position (x, y) into the edge found by findNearestMaskEdge.
 
@@ -7140,6 +7187,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.tab.mask.setUnsaved(True)
                 self.updateMaskDisplay()
                 self._updateMaskStatus()
+
 
     def deleteMaskVertex(self, vertex_ref):
         """ Delete a vertex from a polygon. A completed polygon that would drop below 3 vertices is
@@ -7178,6 +7226,7 @@ class PlateTool(QtWidgets.QMainWindow):
                     self.tab.mask.setUnsaved(True)
                     self.updateMaskDisplay()
                     self._updateMaskStatus()
+
 
     def moveMaskVertex(self, vertex_ref, new_x, new_y):
         """ Move a vertex to a new position, snapping it to the image edge when close to it.
@@ -7221,6 +7270,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         self.updateMaskDisplay()
         self._updateMaskStatus()
+
 
     def updateMaskDisplay(self):
         """ Redraw all mask graphics items: the polygon being drawn, the completed polygon outlines and
@@ -7272,6 +7322,7 @@ class PlateTool(QtWidgets.QMainWindow):
         # Update mask overlay
         self.updateMaskOverlayImage()
 
+
     def updateMaskOverlayImage(self):
         """ Rebuild the semi-transparent red overlay that shows the current mask.
 
@@ -7308,6 +7359,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.mask_overlay.setImage(mask_img.T)
         self.mask_overlay.show()
 
+
     def toggleMaskOverlay(self, visible):
         """ Mask tab callback: show or hide the mask overlay, the polygon outlines and the vertex
             markers.
@@ -7331,6 +7383,7 @@ class PlateTool(QtWidgets.QMainWindow):
             for item in self.mask_polygon_items:
                 item.hide()
             self.mask_completed_vertex_markers.hide()
+
 
     def loadFlatImage(self):
         """ Load flat.bmp from the data directory into self.flat_image_data, if it exists.
@@ -7363,6 +7416,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self.flat_image_data = None
             return False
 
+
     def checkAndSetupFlatForMask(self):
         """ Check for flat.bmp and set up the mask tab "use flat" option accordingly. """
 
@@ -7375,6 +7429,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         if flat_exists:
             self.mask_use_flat_background = True
+
 
     def toggleMaskFlatBackground(self, use_flat):
         """ Mask tab callback: toggle between flat.bmp and the current image as the mask editing
@@ -7420,6 +7475,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.calstar_markers2.show()
                 self.calstar_markers_outer.show()
                 self.calstar_markers_outer2.show()
+
 
     def onTabChanged(self, old_index, new_index):
         """ Right panel tab change callback. Entering the mask tab hides the picks and fit overlays (and
@@ -7528,6 +7584,7 @@ class PlateTool(QtWidgets.QMainWindow):
         else:
             self.img_frame.panning_enabled = True
 
+
     def generateMaskImage(self):
         """ Generate the mask.bmp array from the polygons and the brush paint layer.
 
@@ -7548,6 +7605,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Polygons + brush paint layer in the mask.bmp convention (0 = masked, 255 = unmasked)
         return compositeMaskLayers(self.mask_polygons, self.mask_paint_layer, img_width, img_height)
+
 
     def saveMask(self):
         """ Ask for a file name, save the mask to it and update self.mask for star detection. """
@@ -7570,6 +7628,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self._updateMaskStatus()
             self.updateFileManagerButton()
 
+
     def loadMaskDialog(self):
         """ Ask for a mask file and load it. """
 
@@ -7582,6 +7641,7 @@ class PlateTool(QtWidgets.QMainWindow):
             # Remember the directory for next time
             self.last_mask_dir = os.path.dirname(file_path)
             self.loadMaskFromFile(file_path)
+
 
     def loadMaskFromFile(self, mask_path):
         """ Load a mask image and convert the masked regions to editable polygons.
@@ -7711,6 +7771,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.pick_marker2.addPoints(pos=current, size=30, pen=current_pen)
         self.pick_marker2.addPoints(pos=data1, size=10, pen=pick_color)
         self.pick_marker2.addPoints(pos=data2, size=10, pen=gap_color)
+
 
     def updateFitResiduals(self):
         """ Draw fit residual lines. """
@@ -8504,6 +8565,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
             fig_p.tight_layout()
             fig_p.show()
+
 
     def onPhotometryPlotPick(self, event):
         """ Highlight a star in the main window (and on every plot panel) when clicked in the photometry
@@ -10608,6 +10670,7 @@ class PlateTool(QtWidgets.QMainWindow):
         # Don't consume other events
         return False
 
+
     def handleMouseRelease(self, button, scene_x, scene_y):
         """ Finish a mouse press on the image: end a brush stroke or vertex drag, or pick a star if the
             press was a click rather than a drag. Called from eventFilter.
@@ -10656,6 +10719,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.press_modifiers = None
         self.clicked = 0
 
+
     def onMouseReleased(self, event):
         """ ViewBox mouse release callback: end a vertex drag or brush stroke. Star picking is handled
             in handleMouseRelease, as the ViewBox does not receive the release during panning. """
@@ -10674,6 +10738,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self.clicked = 0
             self._updateMaskStatus()
             return
+
 
     def handleStarPick(self, button, modifiers):
         """ Handle a click (not a drag) in the star picking mode: centroid and pair a star in skyfit, or
@@ -11049,6 +11114,7 @@ class PlateTool(QtWidgets.QMainWindow):
                     return
 
         # Star picking is handled in onMouseReleased to distinguish clicks from drags (panning)
+
 
     def keyPressEvent(self, event):
         """ Handle all keyboard shortcuts. The bindings are grouped into the ones which are always
@@ -12780,6 +12846,7 @@ class PlateTool(QtWidgets.QMainWindow):
         else:
             self.v_zoom.hide()
 
+
     def toggleInfo(self):
         """ Show/hide the on-image overlays: the top-left info panel and, while picking, the
         star-picking key hints.
@@ -12864,6 +12931,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.img.setLevels(self.tab.hist.getLevels())
         self.img_zoom.setLevels(self.tab.hist.getLevels())
         self.updateLeftLabels()
+
 
     def updateConstellations(self):
         """ Project and draw the constellation lines that have at least one end inside the FOV. """
@@ -13013,6 +13081,7 @@ class PlateTool(QtWidgets.QMainWindow):
         # Update the checkbox
         self.tab.settings.updateShowCatStars()
 
+
     def toggleShowSpectralType(self):
         """ Toggle showing/hiding spectral types. """
         self.show_spectral_type = not self.show_spectral_type
@@ -13022,6 +13091,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Update the checkbox
         self.tab.settings.updateShowSpectralType()
+
 
     def toggleShowStarNames(self):
         """ Toggle showing/hiding star names. """
@@ -13033,11 +13103,13 @@ class PlateTool(QtWidgets.QMainWindow):
         # Update the checkbox
         self.tab.settings.updateShowStarNames()
 
+
     def toggleApparentMagCorr(self):
         """ Toggle apparent magnitude correction for catalog star display. """
         self.apparent_mag_corr_enabled = not self.apparent_mag_corr_enabled
         self.updateStars()
         self.tab.settings.updateApparentMagCorr()
+
 
     def onLabelMagLimitChanged(self, value):
         """ Settings tab callback: set the faintest magnitude for which star labels are shown. """
@@ -13051,6 +13123,7 @@ class PlateTool(QtWidgets.QMainWindow):
         if self.show_star_names or self.show_spectral_type:
             self.updateStars()
 
+
     def onGeoMarkerScaleChanged(self, value):
         """ Settings tab callback: set the geo point marker size multiplier. """
 
@@ -13058,6 +13131,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Only the marker size changes, so there is no need for a full redraw
         self.updateGeoMarkerSize()
+
 
     def toggleShowConstellations(self):
         """ Toggle showing/hiding constellation lines. """
@@ -13089,6 +13163,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         self.photometry()
 
+
     def toggleShowCalStars(self):
         """ Toggle whether to show the calstars (green circles) """
         self.draw_calstars = not self.draw_calstars
@@ -13102,6 +13177,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self.calstar_markers2.hide()
             self.calstar_markers_outer.hide()
             self.calstar_markers_outer2.hide()
+
 
     def toggleShowAstrometryNetStars(self):
         """ Toggle showing the astrometry.net matched (cyan) and quad (magenta) star markers. """
@@ -13122,6 +13198,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self.astrometry_matched_markers2.hide()
             self.astrometry_quad_markers.hide()
             self.astrometry_quad_markers2.hide()
+
 
     def updateAstrometryNetStarMarkers(self):
         """ Update the astrometry.net star markers from the stored solution info (cleared if there is no
@@ -13156,6 +13233,7 @@ class PlateTool(QtWidgets.QMainWindow):
         else:
             self.astrometry_quad_markers.setData(pos=[])
             self.astrometry_quad_markers2.setData(pos=[])
+
 
     def toggleSatelliteTracks(self):
         """ Toggle showing the satellite tracks computed from the TLEs. """
@@ -15319,6 +15397,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self.tab.param_manager.updatePlatepar()
             self.updateLeftLabels()
 
+
     def savePlatepar(self):
         """  Save platepar to a file """
 
@@ -15332,6 +15411,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.updateFileManagerButton()
         print('Platepar written to:', self.platepar_file)
 
+
     def saveDefaultPlatepar(self):
         """ Ask the user where to save the platepar which is used as the default for the station. """
 
@@ -15344,6 +15424,7 @@ class PlateTool(QtWidgets.QMainWindow):
         if file_path:
             self.platepar.write(file_path, fmt=self.platepar_fmt)
             print('Default platepar written to:', file_path)
+
 
     def showCalibrationFilesDialog(self, save_ftype=None):
         """ Open the File Manager dialog, optionally auto-triggering the Save flow for one file type.
@@ -15362,6 +15443,7 @@ class PlateTool(QtWidgets.QMainWindow):
             dlg.close()
         else:
             dlg.exec()
+
 
     def saveCurrentFrame(self):
         """ Saves the current frame to disk. """
@@ -15392,6 +15474,7 @@ class PlateTool(QtWidgets.QMainWindow):
         saveImage(frame_file_path, self.img.getFrame())
 
         print('Frame {:.1f} saved to: {:s}'.format(self.img.getFrame(), frame_file_path))
+
 
     def makeNewPlatepar(self):
         """ Make a new platepar from the loaded one, but set the parameters from the config file. """
@@ -16485,6 +16568,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.updateLeftLabels()
         self.updateStars()
 
+
     def showAstrometryFitPlots(self, force_update=False):
         """ Show window with astrometry fit details. Toggle on/off if already open. """
 
@@ -16815,6 +16899,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         fig_a.tight_layout()
         fig_a.show()
+
 
     def onAstrometryPlotPick(self, event):
         """ Highlight a star in the main window when clicked in the astrometry residuals plot. """
@@ -17409,6 +17494,7 @@ class PlateTool(QtWidgets.QMainWindow):
         ##########
         return pixel_list
 
+
     def drawPhotometryColoring(self):
         """ Updates image to have the colouring in the current frame """
 
@@ -17870,6 +17956,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self.drawSatelliteTracks()
         else:
             print("Cannot load satellite tracks: Skyfield not available.")
+
 
     def drawSatelliteTracks(self):
         """ Draws satellite tracks on the image. """
