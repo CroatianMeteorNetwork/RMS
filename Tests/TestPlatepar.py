@@ -312,15 +312,47 @@ def testNNFitRejectionRestoresPlatepar():
     img_stars = np.c_[rng.uniform(20, pp.X_res - 20, n_det), rng.uniform(20, pp.Y_res - 20, n_det),
                       np.ones(n_det)]
 
-    # Point the platepar somewhere the catalog does not cover much, so the RMSD is large
+    # Point the platepar somewhere the catalog does not cover much, so the RMSD is large. The scale is held
+    #   fixed so the fit cannot shrink the field onto a single catalog star, and the scene is seeded, so the
+    #   fit is always rejected
     pp.RA_d = (pp.RA_d + 25.0)%360
     state = _plateparState(pp)
 
+    result = pp.fitAstrometry(pp.JD, img_stars, catalog, first_platepar_fit=True, use_nn_cost=True,
+        fixed_scale=True)
+
+    assert result is None
+    assert _plateparState(pp) == state
+    assert pp.star_list == []
+
+
+@pytest.mark.parametrize("n_det", [30, 60])
+def testNNFitWithPolyDistortionIsRejectedBeforeFitting(monkeypatch, n_det):
+    """ The NN mode with a polynomial distortion must be rejected before any fit on index-paired stars.
+
+        The catalog and the detections have different lengths, which used to make the polynomial fit
+        raise before the rejection was reached.
+    """
+
+    from RMS.Formats import Platepar as PlateparModule
+
+    pp = _nnStartPlatepar()
+    pp.setDistortionType("poly3+radial", reset_params=True)
+    rng = np.random.default_rng(3)
+    catalog = _nnCatalog(pp, 50, rng)
+    img_stars = np.c_[rng.uniform(20, pp.X_res - 20, n_det), rng.uniform(20, pp.Y_res - 20, n_det),
+                      np.ones(n_det)]
+
+    # No least squares fit may run
+    def noFit(*args, **kwargs):
+        raise AssertionError("A distortion fit was run in the NN mode with a polynomial distortion")
+
+    monkeypatch.setattr(PlateparModule.scipy.optimize, 'least_squares', noFit)
+
+    state = _plateparState(pp)
     result = pp.fitAstrometry(pp.JD, img_stars, catalog, first_platepar_fit=True, use_nn_cost=True)
 
-    if result is not None:
-        pytest.skip("The synthetic scene unexpectedly produced an accepted NN fit")
-
+    assert result is None
     assert _plateparState(pp) == state
     assert pp.star_list == []
 

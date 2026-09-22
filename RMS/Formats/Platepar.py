@@ -1368,6 +1368,20 @@ class Platepar(object):
         # Fit the polynomial distortion parameters if there are enough picked stars
         min_fit_stars = self.poly_length + 1
 
+        # The NN mode only exists as the RANSAC of the radial distortion fit. In any other case (a
+        #   polynomial distortion, too few stars for the distortion fit, or only the pointing requested) the
+        #   catalog stars are not matched to the image stars, so fitting them or pairing them by index would
+        #   use bogus pairs - reject the NN fit before any fitting is done
+        if use_nn_cost and (
+            (not self.distortion_type.startswith("radial"))
+            or (len(img_stars) < min_fit_stars)
+            or fit_only_pointing
+        ):
+            log.info("    -> NN fit not run ({:s}, {:d} stars, {:d} needed, fit_only_pointing={}), "
+                     "skipping it".format(self.distortion_type, len(img_stars), min_fit_stars,
+                                          fit_only_pointing))
+            return _rejectNNFit()
+
         if (len(img_stars) >= min_fit_stars) and (not fit_only_pointing):
 
             # Fit the polynomial distortion
@@ -2075,14 +2089,6 @@ class Platepar(object):
         else:
             if len(img_stars) < min_fit_stars:
                 print('Too few stars to fit the distortion, only the astrometric parameters where fitted!')
-
-        # In the NN mode the catalog stars are not matched to the image stars, so pairing them by index
-        #   below would produce bogus pairs. Reaching this point in the NN mode means the RANSAC did not
-        #   run (too few stars for the distortion fit, or only the pointing was requested), so reject it
-        if use_nn_cost:
-            log.info("    -> NN fit not run ({:d} stars, {:d} needed, fit_only_pointing={}), skipping it".format(
-                len(img_stars), min_fit_stars, fit_only_pointing))
-            return _rejectNNFit()
 
         # Set the list of stars used for the fit to the platepar. Note that use_nn_cost=True returns early
         #   after the RANSAC, so this only runs for matched-pair fits
