@@ -3922,9 +3922,37 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
             self.status_label.setText('Using original CALSTARS')
             self.status_label.setStyleSheet(f"color: gray; font-size: 9pt; padding: {pad}px;")
 
+    def _setSliderQuietly(self, key, slider_value, label_text):
+        """ Show a value on a slider without emitting its change signal, widening the slider range if
+            the value is outside it.
+
+        Arguments:
+            key: [str] Slider key in self.sliders.
+            slider_value: [int] Slider position.
+            label_text: [str] Text of the value label.
+        """
+
+        slider = self.sliders[key]
+
+        # Never clamp a config value to the slider range, the range follows the value instead
+        if slider_value > slider.maximum():
+            slider.setMaximum(slider_value)
+        if slider_value < slider.minimum():
+            slider.setMinimum(slider_value)
+
+        slider.blockSignals(True)
+        slider.setValue(slider_value)
+        slider.blockSignals(False)
+
+        self.slider_labels[key].setText(label_text)
+
     def loadFromConfig(self, config):
         """ Initialize the sliders from the config values (attributes missing from the config are
             skipped).
+
+            Only the sliders are updated: no change signal is emitted, so the overrides keep the exact
+            config values instead of the slider's integer steps (e.g. int(0.57999*100) = 57), and loading
+            the config does not mark it as modified.
 
         Arguments:
             config: [Config] RMS configuration.
@@ -3945,20 +3973,25 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
             thr_max = max(self.intensity_threshold_slider.maximum(), bitdepth_default_max,
                           int(config.intensity_threshold*3))
             self.intensity_threshold_slider.setMaximum(thr_max)
-            self.intensity_threshold_slider.setValue(config.intensity_threshold)
+            self._setSliderQuietly('intensity_threshold', int(round(config.intensity_threshold)),
+                                   str(config.intensity_threshold))
 
         if hasattr(config, 'neighborhood_size'):
-            self.neighborhood_size_slider.setValue(config.neighborhood_size)
+            self._setSliderQuietly('neighborhood_size', int(round(config.neighborhood_size)),
+                                   str(config.neighborhood_size))
         if hasattr(config, 'max_stars'):
-            self.max_stars_slider.setValue(config.max_stars)
+            self._setSliderQuietly('max_stars', int(round(config.max_stars)), str(config.max_stars))
         if hasattr(config, 'gamma'):
-            self.gamma_slider.setValue(int(config.gamma * 100))
+            self._setSliderQuietly('gamma', int(round(config.gamma*100)), '{:.2f}'.format(config.gamma))
         if hasattr(config, 'segment_radius'):
-            self.segment_radius_slider.setValue(config.segment_radius)
+            self._setSliderQuietly('segment_radius', int(round(config.segment_radius)),
+                                   str(config.segment_radius))
         if hasattr(config, 'max_feature_ratio'):
-            self.max_feature_ratio_slider.setValue(int(config.max_feature_ratio * 100))
+            self._setSliderQuietly('max_feature_ratio', int(round(config.max_feature_ratio*100)),
+                                   '{:.2f}'.format(config.max_feature_ratio))
         if hasattr(config, 'roundness_threshold'):
-            self.roundness_threshold_slider.setValue(int(config.roundness_threshold * 100))
+            self._setSliderQuietly('roundness_threshold', int(round(config.roundness_threshold*100)),
+                                   '{:.2f}'.format(config.roundness_threshold))
 
 
 class BrushCursorItem(pg.GraphicsObject):

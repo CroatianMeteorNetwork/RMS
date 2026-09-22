@@ -5255,8 +5255,9 @@ class PlateTool(QtWidgets.QMainWindow):
         if hasattr(self.config, 'roundness_threshold'):
             self.override_roundness_threshold = self.config.roundness_threshold
 
-        # Update UI sliders
+        # Update UI sliders (without emitting their change signals)
         self.tab.star_detection.loadFromConfig(self.config)
+        self._updateConfigSaveButtonState()
 
 
     def updateIntensityThreshold(self, value):

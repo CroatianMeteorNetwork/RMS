@@ -834,3 +834,42 @@ def testInvertMaskIsExact(plateTool, stationDir):
 
     pt.invertMaskPolygons()
     assert np.array_equal(pt.generateMaskImage(), mask_img)
+
+
+###################################################################################################
+# STAR DETECTION TAB
+###################################################################################################
+
+def testStarDetectionSlidersKeepConfigValues(qapp, stationDir, quietMessages):
+    """ Loading a config with values outside the slider ranges or between slider steps keeps the exact
+        config values as the overrides and does not mark the config modified. """
+
+    cfg_path = os.path.join(stationDir, ".config")
+    with open(cfg_path) as f:
+        lines = f.readlines()
+    lines = SF.updateConfigLines(lines, {"StarExtraction": {
+        "max_stars": "8000", "max_feature_ratio": "0.57999", "neighborhood_size": "57",
+        "roundness_threshold": "0.333", "segment_radius": "25"}})
+    with open(cfg_path, 'w') as f:
+        f.writelines(lines)
+
+    config = cr.loadConfigFromDirectory('.config', stationDir)
+    pt = SF.PlateTool(stationDir, config)
+    qapp.processEvents()
+
+    try:
+        assert pt.override_max_stars == 8000
+        assert pt.override_max_feature_ratio == pytest.approx(0.57999)
+        assert pt.override_neighborhood_size == 57
+        assert pt.override_roundness_threshold == pytest.approx(0.333)
+        assert pt.override_segment_radius == 25
+        assert not pt.isConfigModified()
+
+        # The sliders show the values instead of clamping them
+        sd = pt.tab.star_detection
+        assert sd.max_stars_slider.value() == 8000
+        assert sd.max_feature_ratio_slider.value() == 58
+        assert sd.neighborhood_size_slider.value() == 57
+    finally:
+        pt.close()
+        pt.deleteLater()
