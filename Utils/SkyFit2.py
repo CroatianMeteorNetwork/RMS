@@ -6433,7 +6433,7 @@ class PlateTool(QtWidgets.QMainWindow):
             # Filter catalog to stars actually in front of camera (prevent back-projection). Use
             #   angular distance in celestial coordinates, not self.filterCatalogStarsInsideFOV which
             #   incorrectly uses self.cat_lim_mag instead of the test catalog's LM
-            in_fov = catalogInFOVMask(test_catalog[:, 0], test_catalog[:, 1], self.platepar)
+            in_fov = catalogInFOVMask(test_catalog[:, 0], test_catalog[:, 1], self.platepar, jd)
             test_catalog = test_catalog[in_fov]
 
             if len(test_catalog) == 0:

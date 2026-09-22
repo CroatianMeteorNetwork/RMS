@@ -14,7 +14,7 @@ from __future__ import print_function, division, absolute_import
 import numpy as np
 
 from RMS.Astrometry.StarClasses import PairedStars
-from RMS.Astrometry.ApplyAstrometry import extinctionCorrectionTrueToApparent, raDecToXYPP
+from RMS.Astrometry.ApplyAstrometry import extinctionCorrectionTrueToApparent, raDecToXYPP, xyToRaDecPP
 from RMS.Math import angularSeparationDeg
 
 
@@ -54,16 +54,22 @@ def fovRadiusDeg(platepar, margin=DEFAULT_FOV_RADIUS_MARGIN):
 
 
 
-def catalogInFOVMask(catalog_ra, catalog_dec, platepar, margin=DEFAULT_FOV_RADIUS_MARGIN):
-    """ Select the catalog stars within the FOV radius of the platepar pointing.
+def catalogInFOVMask(catalog_ra, catalog_dec, platepar, jd, margin=DEFAULT_FOV_RADIUS_MARGIN):
+    """ Select the catalog stars within the FOV radius of where the camera points at the given time.
 
         This is used before projecting catalog stars to image coordinates, as stars behind the camera
         can otherwise project to valid-looking pixel positions.
 
+        The cone is centred on the sky position of the image centre at jd, not on the platepar's
+        reference pointing (RA_d, dec_d). The reference pointing belongs to platepar.JD, and for a
+        fixed camera the RA of the field moves by about 15 deg per hour of sidereal time, so centring on
+        it would drop the real field entirely a few hours away from the reference time on a narrow lens.
+
     Arguments:
         catalog_ra: [ndarray] Catalog right ascensions (deg).
         catalog_dec: [ndarray] Catalog declinations (deg).
-        platepar: [Platepar object] Platepar with the reference pointing RA_d, dec_d (deg).
+        platepar: [Platepar object] Platepar of the image.
+        jd: [float] Julian date of the image.
 
     Keyword arguments:
         margin: [float] Multiplicative margin on the FOV radius. 1.5 by default.
@@ -72,8 +78,12 @@ def catalogInFOVMask(catalog_ra, catalog_dec, platepar, margin=DEFAULT_FOV_RADIU
         in_fov: [ndarray of bool] True for catalog stars within the FOV radius.
     """
 
+    # Sky position of the image centre at the time of the image
+    _, ra_centre, dec_centre, _ = xyToRaDecPP([jd], [platepar.X_res/2.0], [platepar.Y_res/2.0], [1],
+        platepar, extinction_correction=False, jd_time=True)
+
     # Angular distance from the pointing to every catalog star
-    ang_dist_deg = angularSeparationDeg(platepar.RA_d, platepar.dec_d, np.asarray(catalog_ra),
+    ang_dist_deg = angularSeparationDeg(ra_centre[0], dec_centre[0], np.asarray(catalog_ra),
         np.asarray(catalog_dec))
 
     return ang_dist_deg < fovRadiusDeg(platepar, margin=margin)
@@ -206,7 +216,7 @@ def filterBlendedStars(paired_stars, catalog_stars, platepar, jd, lim_mag,
 
     # Keep only the stars in front of the camera (within the FOV radius plus a margin). This prevents
     # false positives from stars behind the camera that could project to valid-looking pixel coordinates.
-    in_fov = catalogInFOVMask(catalog_ra, catalog_dec, platepar)
+    in_fov = catalogInFOVMask(catalog_ra, catalog_dec, platepar, jd)
     catalog_ra = catalog_ra[in_fov]
     catalog_dec = catalog_dec[in_fov]
 
