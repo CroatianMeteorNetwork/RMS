@@ -237,8 +237,13 @@ class Compressor(multiprocessing.Process):
 
         log.debug('Compression joined!')
 
-        # If the process didn't exit cleanly, terminate it. No SIGINT step first: the compressor
-        # ignores SIGINT (initChildProcess), so it only wasted 5 s of the stop
+        # Give a compressor that is exiting normally time to finish: run() sets run_exited and
+        # then flushes its final log records (up to 2 s) before os._exit(). No SIGINT here - the
+        # compressor ignores SIGINT (initChildProcess), so it would change nothing
+        if self.is_alive():
+            self.join(5)
+
+        # If the process still didn't exit, terminate it
         if self.is_alive():
             log.warning("Compression process still alive, forcing termination")
             try:

@@ -1155,3 +1155,64 @@ def testUpdateScriptsHaveNoBarePostIncrement(rel_path):
     assert 'set -Eeuo pipefail' in src
     bare = re.findall(r'^\s*\(\(\s*\w+\s*(?:\+\+|--)\s*\)\)\s*$', src, re.MULTILINE)
     assert bare == []
+
+
+class _ExitingCompressorMixin(object):
+    """ Mimics the end of Compressor.run(): run_exited is set, then the exit flush takes a while
+        before os._exit(0).
+    """
+
+    def setUp(self):
+
+        from RMS.Misc import AtomicFlag
+
+        self.exit = AtomicFlag()
+        self.run_exited = AtomicFlag()
+        self.detector = None
+        self.terminated = False
+
+    def run(self):
+
+        while not self.exit.is_set():
+            time.sleep(0.01)
+
+        self.run_exited.set()
+
+        # flushChildLogging() on a busy queue
+        time.sleep(0.3)
+        os._exit(0)
+
+    def terminate(self):
+
+        self.terminated = True
+        super(_ExitingCompressorMixin, self).terminate()
+
+
+# One module-level class per start method, so the process pickles under forkserver
+_EXITING_COMPRESSORS = {}
+for _method in _startMethods():
+    _cls_name = '_ExitingCompressor_' + _method
+    globals()[_cls_name] = type(_cls_name, (_ExitingCompressorMixin,
+        multiprocessing.get_context(_method).Process), {})
+    _EXITING_COMPRESSORS[_method] = globals()[_cls_name]
+
+
+@posix_only
+@pytest.mark.parametrize('method', _startMethods())
+def testCompressorStopWaitsForNormalExit(method):
+    """ A compressor that set run_exited and is still flushing its logs must be allowed to exit on
+        its own, not be terminated mid-flush.
+    """
+
+    import RMS.Compression as comp
+
+    fake = _EXITING_COMPRESSORS[method]()
+    fake.setUp()
+    fake.start()
+    time.sleep(0.3)
+
+    comp.Compressor.stop(fake)
+    _joinOrKill(fake, 10)
+
+    assert not fake.terminated, 'a normally exiting compressor was terminated'
+    assert fake.exitcode == 0
