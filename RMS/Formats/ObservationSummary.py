@@ -793,10 +793,11 @@ def timestampFromNTP(addr='time.cloudflare.com'):
         addr: [str] Address of the NTP server to use. 'time.cloudflare.com' by default.
 
     Return:
-        adjusted_time: [float] Time in seconds since epoch, or None on failure.
+        adjusted_time: [float] Estimate of the remote clock's time (seconds since epoch) at the moment
+            the reply was received, or None on failure.
         estimated_network_delay: [float] Estimated network delay (average of outgoing and return legs),
             or None on failure.
-        addr: [str] The NTP server address that was queried (omitted on a socket failure).
+        addr: [str] The NTP server address that was queried.
     """
 
     REF_TIME_1970 = 2208988800  # Reference time
@@ -810,10 +811,12 @@ def timestampFromNTP(addr='time.cloudflare.com'):
         local_clock_receive_timestamp = time.time()
     except socket.timeout:
         log.warning("NTP request timed out")
-        return None, None
+        return None, None, addr
     except Exception as e:
         log.warning("NTP request failed: {}".format(e))
-        return None, None
+        return None, None, addr
+    finally:
+        client.close()
     if data:
 
         # For NTP the fractional seconds is a 32 bit counter
@@ -838,11 +841,14 @@ def timestampFromNTP(addr='time.cloudflare.com'):
         if estimated_network_delay < 0:
             return None, None, addr
 
-        # Now calculate estimated clock offsets
+        # Now calculate estimated clock offsets. The offset is remote minus local (standard NTP
+        #   theta = ((T2 - T1) + (T3 - T4))/2), so the remote clock's time at the moment the reply
+        #   arrived is the local receive time plus the offset. Adding the offset to the remote
+        #   transmit time instead counted it twice
         clock_offset_out_leg = remote_clock_time_receive_timestamp - local_clock_transmit_timestamp
         clock_offset_return_leg = remote_clock_time_transmit_timestamp - local_clock_receive_timestamp
         estimated_offset = (clock_offset_out_leg + clock_offset_return_leg)/2
-        adjusted_time = remote_clock_time_transmit_timestamp + estimated_offset
+        adjusted_time = local_clock_receive_timestamp + estimated_offset
         return adjusted_time, estimated_network_delay, addr
     else:
         return None, None, addr
