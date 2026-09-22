@@ -11015,6 +11015,12 @@ class PlateTool(QtWidgets.QMainWindow):
         # Star picking is handled in onMouseReleased to distinguish clicks from drags (panning)
 
     def keyPressEvent(self, event):
+        """ Handle all keyboard shortcuts. The bindings are grouped into the ones which are always
+            available, and the ones which are only active in the skyfit or the manualreduction mode.
+
+        Arguments:
+            event: [QKeyEvent] Key press event.
+        """
 
         # Don't run shortcuts while typing in a text input (e.g. the Help search box). Escape is still
         #   allowed through (it returns focus to the image)
@@ -11103,8 +11109,6 @@ class PlateTool(QtWidgets.QMainWindow):
         # Toggle satellite tracks
         elif event.key() == QtCore.Qt.Key.Key_T and (modifiers == QtCore.Qt.KeyboardModifier.ControlModifier):
              self.toggleSatelliteTracks()
-
-
 
         # Load the flat
         elif event.key() == QtCore.Qt.Key.Key_F and (modifiers == QtCore.Qt.KeyboardModifier.ControlModifier):
@@ -11373,19 +11377,17 @@ class PlateTool(QtWidgets.QMainWindow):
             elif event.key() == QtCore.Qt.Key.Key_S:
                 self.nudgeReferenceScreen(0, -1)
 
-            # Pan to unmatched star most distant from all other matched stars
-
+            # Pan to the unmatched star most distant from all the other matched stars
             elif event.key() == QtCore.Qt.Key.Key_U and modifiers == QtCore.Qt.KeyboardModifier.ControlModifier:
 
                 self.jumpNextStar(miss_this_one=False)
 
+            # Toggle automatically panning to the next star after a pair is made
             elif event.key() == QtCore.Qt.Key.Key_O and modifiers == QtCore.Qt.KeyboardModifier.ControlModifier:
 
                 self.toggleAutoPan()
                 self.tab.settings.updateAutoPan()
                 self.updateBottomLabel()
-
-
 
             # Move rotation parameter (plain Q only, not Shift+Q)
             elif event.key() == QtCore.Qt.Key.Key_Q and not (modifiers == QtCore.Qt.KeyboardModifier.ShiftModifier):
@@ -11605,7 +11607,8 @@ class PlateTool(QtWidgets.QMainWindow):
             # Force distortion centre to image centre
             elif event.key() == QtCore.Qt.Key.Key_B:
                 if self.platepar is not None:
-                    # Use remapCoeffsForFlagChange to preserve distortion coefficients
+
+                    # Use remapCoeffsForFlagChange to preserve the distortion coefficients
                     new_value = not self.platepar.force_distortion_centre
                     self.platepar.remapCoeffsForFlagChange('force_distortion_centre', new_value)
 
@@ -11620,7 +11623,8 @@ class PlateTool(QtWidgets.QMainWindow):
             elif event.key() == QtCore.Qt.Key.Key_G:
 
                 if self.platepar is not None:
-                    # Use remapCoeffsForFlagChange to preserve distortion coefficients
+
+                    # Use remapCoeffsForFlagChange to preserve the distortion coefficients
                     new_value = not self.platepar.equal_aspect
                     self.platepar.remapCoeffsForFlagChange('equal_aspect', new_value)
 
@@ -11635,7 +11639,8 @@ class PlateTool(QtWidgets.QMainWindow):
             elif event.key() == QtCore.Qt.Key.Key_Y:
 
                 if self.platepar is not None:
-                    # Use remapCoeffsForFlagChange to preserve distortion coefficients
+
+                    # Use remapCoeffsForFlagChange to preserve the distortion coefficients
                     new_value = not self.platepar.asymmetry_corr
                     self.platepar.remapCoeffsForFlagChange('asymmetry_corr', new_value)
 
@@ -11645,35 +11650,34 @@ class PlateTool(QtWidgets.QMainWindow):
                     self.updateDistortion()
                     self.tab.param_manager.onIndexChanged()
 
-
-            # Get initial parameters from astrometry.net (same as Auto Fit button)
+            # Get initial parameters from astrometry.net (the same as the Auto Fit button)
             elif (event.key() == QtCore.Qt.Key.Key_X) and ((modifiers == QtCore.Qt.KeyboardModifier.ControlModifier) \
                 or (modifiers == (QtCore.Qt.KeyboardModifier.ControlModifier
                                   | QtCore.Qt.KeyboardModifier.ShiftModifier))):
 
-                # Use the same auto-fit path as the button (includes catalog balancing, quick alignment)
+                # Use the same auto-fit path as the button, which includes the catalog balancing and the
+                #   quick alignment
                 self.autoFitAstrometryNet()
 
-            # Test quick align with config mag limit (Shift+Q) - simulates CheckFit/ApplyRecalibrate
+            # Test the quick align with the config mag limit (Shift+Q), which simulates
+            #   CheckFit/ApplyRecalibrate
             elif (event.key() == QtCore.Qt.Key.Key_Q) and (modifiers == QtCore.Qt.KeyboardModifier.ShiftModifier):
                 self.testQuickAlignWithConfigMagLimit()
-
 
             # Toggle showing detected stars
             elif event.key() == QtCore.Qt.Key.Key_C:
                 self.toggleShowCalStars()
                 self.tab.settings.updateShowCalStars()
-                # updates image automatically
 
+                # The image is updated automatically
 
-            # Save the point to the matched stars list by pressing Enter or Space or to the
-            # unsuitable stars
-
+            # Save the point to the matched stars list by pressing Enter or Space, or to the unsuitable
+            #   stars
             elif (event.key() == QtCore.Qt.Key.Key_Return) or (event.key() == QtCore.Qt.Key.Key_Enter) \
                 or (event.key() == QtCore.Qt.Key.Key_Space):
 
                 if self.star_pick_mode:
-                    
+
                     # Check if the star has been skipped
                     unsuitable = False
                     if modifiers == QtCore.Qt.KeyboardModifier.ControlModifier:
@@ -11695,7 +11699,8 @@ class PlateTool(QtWidgets.QMainWindow):
                     
                     if unsuitable:
 
-                        print("Unsuitable star at coordinates: ({}, {})".format(self.current_autopan_x, self.current_autopan_y))
+                        print("Unsuitable star at coordinates: ({}, {})".format(self.current_autopan_x, \
+                            self.current_autopan_y))
 
                         self.unsuitable_stars.addPair(self.current_autopan_x, self.current_autopan_y,
                                                         0, 0, None)
@@ -11705,7 +11710,8 @@ class PlateTool(QtWidgets.QMainWindow):
                         self.unsuitable_star_markers2.addPoints(x=[self.current_autopan_x],
                                                                 y=[self.current_autopan_y])
 
-                    # If the catalog star, planet, or geo point has been selected, save the pair to the list
+                    # If the catalog star, the planet or the geo point has been selected, save the pair
+                    #   to the list
                     if self.cursor.mode == 1:
 
                         # Star catalog points
@@ -12512,19 +12518,31 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
     def keyReleaseEvent(self, event):
-        
+        """ Drop the released key from the list of held keys and leave the photometry coloring mode when
+            SHIFT is let go in the manual reduction mode.
+
+        Arguments:
+            event: [QKeyEvent] Key release event.
+        """
+
+        # This will fail for key presses which are not passed to keyPressEvent (taken by a menu hotkey)
         try:
             self.keys_pressed.remove(event.key())
         except ValueError:
-            pass  # this will happen for key presses that are not passed to keypressevent (taken by menu hotkey)
-        
+            pass
+
+        # Read the modifiers (e.g. CTRL, SHIFT)
         modifiers = QtWidgets.QApplication.keyboardModifiers()
         qmodifiers = QtWidgets.QApplication.queryKeyboardModifiers()
 
         if self.mode == 'skyfit':
             pass
+
         else:
+
+            # Leave the photometry coloring mode when SHIFT is released
             if qmodifiers != QtCore.Qt.KeyboardModifier.ShiftModifier:
+
                 self.cursor.setMode(0)
 
                 # Re-enable panning after the photometry coloring is done
@@ -13104,8 +13122,9 @@ class PlateTool(QtWidgets.QMainWindow):
             self.astrometry_quad_markers2.setData(pos=[])
 
     def toggleSatelliteTracks(self):
-        """ Toggle whether to show satellite tracks """
+        """ Toggle showing the satellite tracks computed from the TLEs. """
 
+        # Skyfield is needed to propagate the TLEs
         if not SKYFIELD_AVAILABLE:
             print("Skyfield not available - cannot show satellite tracks.")
             return
@@ -13113,10 +13132,12 @@ class PlateTool(QtWidgets.QMainWindow):
         self.show_sattracks = not self.show_sattracks
         print(f"Satellite tracks: {self.show_sattracks}")
 
+        # Compute and draw the tracks
         if self.show_sattracks:
             self.loadSatelliteTracks()
+
+        # Drawing the tracks with the flag off clears them from the display
         else:
-            # Will clear if self.show_sattracks is False
             self.drawSatelliteTracks()
 
     def toggleShowPicks(self):
@@ -17720,10 +17741,12 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
     def clearSatelliteTracks(self):
-        """ Clear satellite tracks from display and memory. """
-        
+        """ Clear the satellite tracks from the display and from the memory. """
+
         self.satellite_tracks = []
-        self.drawSatelliteTracks()  # Redraw (will clear since list is empty)
+
+        # Redrawing with an empty list clears the tracks from the display
+        self.drawSatelliteTracks()
 
     def loadTLEFileDialog(self):
         """ Opens a file dialog to choose a TLE file and loads it. """
