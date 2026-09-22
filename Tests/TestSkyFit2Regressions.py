@@ -1593,3 +1593,33 @@ def testSaveConfigWriteFailureKeepsConfigAndBackup(tmp_path, quietMessages, monk
 
     assert not [f for f in os.listdir(str(tmp_path)) if f.endswith(".tmp")]
     assert any(m.get("message_type") == "error" and "failed" in m.get("message", "") for m in quietMessages)
+
+
+@pytest.mark.parametrize("key_name, modifier_name", [("Key_U", "ControlModifier"),
+                                                      ("Key_Space", "ShiftModifier")])
+def testJumpKeysKeepPlateparUnmodified(plateTool, monkeypatch, key_name, modifier_name):
+    """ Jumping to the next star re-derives RA/Dec from the pointing, which is not a platepar edit. """
+
+    from pyqtgraph.Qt import QtCore, QtWidgets
+
+    pt = plateTool
+    modifier = getattr(QtCore.Qt.KeyboardModifier, modifier_name)
+    monkeypatch.setattr(QtWidgets.QApplication, "keyboardModifiers", staticmethod(lambda: modifier))
+    monkeypatch.setattr(QtWidgets.QApplication, "queryKeyboardModifiers", staticmethod(lambda: modifier))
+
+    pt.star_pick_mode = True
+    pt.platepar_modified = False
+
+    _pressKey(pt, getattr(QtCore.Qt.Key, key_name), modifier)
+
+    assert not pt.platepar_modified
+
+
+def testPlateparFingerprintTolerance():
+    """ Float rounding and the 0/360 wrap are not changes, a real nudge is. """
+
+    fp = lambda az: ((az, 45.0, 10.0, 0.0, 14.5), (np.zeros(3),))
+
+    assert not SF.PlateTool._plateparFingerprintsDiffer(fp(359.9999999999999), fp(0.0))
+    assert not SF.PlateTool._plateparFingerprintsDiffer(fp(120.0), fp(120.0 + 1e-13))
+    assert SF.PlateTool._plateparFingerprintsDiffer(fp(120.0), fp(120.001))

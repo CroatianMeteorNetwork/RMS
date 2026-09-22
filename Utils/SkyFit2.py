@@ -11654,10 +11654,13 @@ class PlateTool(QtWidgets.QMainWindow):
     def _plateparFingerprint(self):
         """ Values of the platepar that the keyboard shortcuts edit, to detect an unsaved change.
 
-            The reference time is left out, as it follows the image and is not an edit.
+            The pointing is taken as the reference azimuth and altitude, which the edits change. RA/Dec
+            are left out, as they are re-derived from az/alt at the image time (updateRefRADec) by view
+            keys such as the jump to the next star, which is not an edit. The reference time is left out
+            too, as it follows the image.
 
         Return:
-            [tuple] or None if there is no platepar.
+            [tuple] (scalars, polys), or None if there is no platepar.
         """
 
         pp = self.platepar
@@ -11665,14 +11668,54 @@ class PlateTool(QtWidgets.QMainWindow):
             return None
 
         scalars = tuple(getattr(pp, name, None) for name in (
-            'RA_d', 'dec_d', 'pos_angle_ref', 'F_scale', 'az_centre', 'alt_centre', 'extinction_scale',
+            'az_centre', 'alt_centre', 'pos_angle_ref', 'rotation_from_horiz', 'F_scale', 'extinction_scale',
             'refraction', 'distortion_type', 'equal_aspect', 'asymmetry_corr', 'force_distortion_centre',
             'vignetting_coeff', 'vignetting_fixed'))
 
-        polys = tuple(np.asarray(getattr(pp, name)).tobytes() for name in (
+        polys = tuple(np.array(getattr(pp, name), dtype=np.float64) for name in (
             'x_poly_fwd', 'x_poly_rev', 'y_poly_fwd', 'y_poly_rev'))
 
-        return scalars + polys
+        return scalars, polys
+
+
+    @staticmethod
+    def _plateparFingerprintsDiffer(before, after, angle_tol=1e-9):
+        """ Compare two _plateparFingerprint values, ignoring float rounding (e.g. of (x + 360) % 360).
+
+        Arguments:
+            before: [tuple] Fingerprint before.
+            after: [tuple] Fingerprint after.
+
+        Keyword arguments:
+            angle_tol: [float] Tolerance of the float values (deg for the angles). 1e-9 by default.
+
+        Return:
+            [bool] True if the platepar was changed.
+        """
+
+        if (before is None) or (after is None):
+            return before is not after
+
+        scalars_before, polys_before = before
+        scalars_after, polys_after = after
+
+        for a, b in zip(scalars_before, scalars_after):
+
+            if isinstance(a, float) and isinstance(b, float):
+
+                # Angles which wrap around, e.g. 359.999999999 vs 0.0
+                diff = abs(a - b)
+                if min(diff, abs(diff - 360.0)) > angle_tol:
+                    return True
+
+            elif a != b:
+                return True
+
+        for a, b in zip(polys_before, polys_after):
+            if (a.shape != b.shape) or not np.allclose(a, b, rtol=0.0, atol=1e-15):
+                return True
+
+        return False
 
 
     def keyPressEvent(self, event):
@@ -11691,7 +11734,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # A different platepar object means a platepar was loaded, which is not an edit
         if (platepar is not None) and (self.platepar is platepar):
-            if self._plateparFingerprint() != before:
+            if self._plateparFingerprintsDiffer(before, self._plateparFingerprint()):
                 self.platepar_modified = True
 
 
