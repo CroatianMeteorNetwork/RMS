@@ -11,7 +11,8 @@ from multiprocessing import Manager
 import paramiko
 
 from RMS.Logger import LoggingManager, getLogger, getLoggingQueue, initChildProcess
-from RMS.Misc import mkdirP, UTCFromTimestamp, runWithTimeout, AtomicFlag, BoundedLock
+from RMS.Misc import mkdirP, UTCFromTimestamp, runWithTimeout, AtomicFlag, BoundedLock, \
+    setParentDeathSignal, exitIfParentGone
 
 # Suppress Paramiko internal errors before they appear in logs
 getLogger("paramiko.transport").setLevel(logging.CRITICAL)
@@ -586,6 +587,9 @@ class UploadManager(multiprocessing.Process):
         # under the 'forkserver'/'spawn' start methods (handlers are not inherited there)
         self.logging_queue = getLoggingQueue()
 
+        # PID of the logical parent, captured here because __init__ runs in the parent (see run())
+        self.parent_pid = os.getpid()
+
 
     def __getstate__(self):
         """ Return a picklable representation of the manager.
@@ -914,8 +918,15 @@ class UploadManager(multiprocessing.Process):
     def run(self):
         """ Try uploading the files every 15 minutes. """
 
+        # Die with the parent: an orphaned upload manager would keep working on the upload queue
+        # file alongside the one of the respawned instance
+        setParentDeathSignal()
+
         # Re-establish logging and signal handling in the child (no-op under 'fork')
         initChildProcess(self.logging_queue, self.config)
+
+        # The parent may have died before the death signal was armed
+        exitIfParentGone(self.parent_pid, 'UploadManager')
 
         # Load the file queue from disk
         self.loadQueue()

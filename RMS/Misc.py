@@ -349,6 +349,38 @@ def setParentDeathSignal(sig=9):
         log.debug("setParentDeathSignal: unavailable (%s)", e)
 
 
+def exitIfParentGone(parent_pid, name):
+    """ Exit this child process at once if its logical parent process no longer exists.
+
+        Complements setParentDeathSignal() for the window before the death signal was armed: a
+        parent that died between the fork and the prctl() call never delivers the signal, and
+        the getppid() == 1 check there misses subreapers and the 'forkserver' start method,
+        where the OS parent is not the logical parent. Call it right after setParentDeathSignal()
+        with the PID captured in the child's __init__ (which runs in the parent).
+
+        POSIX only: on Windows signal 0 is CTRL_C_EVENT, so os.kill(pid, 0) is not a liveness
+        probe there.
+
+    Arguments:
+        parent_pid: [int] PID of the logical parent, or None to skip the check.
+        name: [str] Process name used in the log message.
+    """
+
+    # Nothing to check against
+    if (os.name != 'posix') or (parent_pid is None):
+        return
+
+    # ESRCH only: an EPERM from a live parent owned by another user must not look like a death
+    try:
+        os.kill(parent_pid, 0)
+    except ProcessLookupError:
+        log.warning("%s: parent process %d is gone, exiting orphan", name, parent_pid)
+        flushChildLogging(timeout=1.0)
+        os._exit(0)
+    except OSError:
+        pass
+
+
 def interruptibleWait(seconds):
     """ Wait for the specified number of seconds, but allow interruption by Ctrl+C.
 

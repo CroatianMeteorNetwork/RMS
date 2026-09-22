@@ -44,7 +44,8 @@ from RMS.Misc import obfuscatePassword
 from RMS.Routines.GstreamerCapture import GstVideoFile, getStructureValue
 from RMS.Formats.ObservationSummary import addObsParam, getObservationSummaryDict
 from RMS.RawFrameSave import RawFrameSaver
-from RMS.Misc import RmsDateTime, mkdirP, UTCFromTimestamp, frameBufferShape, runWithTimeout, AtomicFlag
+from RMS.Misc import RmsDateTime, mkdirP, UTCFromTimestamp, frameBufferShape, runWithTimeout, AtomicFlag, \
+    setParentDeathSignal, exitIfParentGone
 from RMS.Formats import FTfile, FTStruct
 from RMS.Logger import LoggingManager, getLogger, gstDebugLogger, getLoggingQueue, initChildProcess
 from RMS.CaptureModeSwitcher import switchCameraMode
@@ -244,6 +245,9 @@ class BufferedCapture(Process):
         # Grab the logging queue on the parent side so the child can re-attach logging
         # under the 'forkserver'/'spawn' start methods (handlers are not inherited there)
         self.logging_queue = getLoggingQueue()
+
+        # PID of the logical parent, captured here because __init__ runs in the parent (see run())
+        self.parent_pid = os.getpid()
 
 
     def startCapture(self, cameraID=0):
@@ -1841,8 +1845,16 @@ class BufferedCapture(Process):
         """ Main process function - initializes all process-specific resources and runs capture loop.
         """
         try:
+            # Die with the parent: an orphaned capture would keep the camera streaming after
+            # StartCapture was killed, and the respawned instance would run a second capture on
+            # the same camera once the station lock is released
+            setParentDeathSignal()
+
             # Re-establish logging and signal handling in the child (no-op under 'fork')
             initChildProcess(self.logging_queue, self.config)
+
+            # The parent may have died before the death signal was armed
+            exitIfParentGone(self.parent_pid, 'BufferedCapture')
 
             # Rebuild numpy views over the shared frame buffers in this process. Under
             # forkserver/spawn the views cannot be inherited, so build them here from the

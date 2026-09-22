@@ -193,3 +193,125 @@ def testChildExitWithAbandonedQueueIsBounded(method):
     assert not killed, 'child hung at exit joining the logging queue feeder'
     assert p.exitcode == 0
     assert elapsed < 15
+
+
+# ---------------------------------------------------------------------------
+# Item 3: capture children must die with StartCapture
+
+def _exitIfParentGoneChild(parent_pid):
+    """ Child side: run the orphan check against the given PID; exit 3 if it returns. """
+
+    from RMS.Misc import exitIfParentGone
+
+    exitIfParentGone(parent_pid, 'test')
+    os._exit(3)
+
+
+def _shortLived():
+    """ A process that exits at once. """
+
+    pass
+
+
+@posix_only
+@pytest.mark.parametrize('method', _startMethods())
+def testExitIfParentGone(method):
+    """ exitIfParentGone exits 0 when the parent PID is gone and returns while it is alive. """
+
+    ctx = multiprocessing.get_context(method)
+
+    # A PID that certainly belonged to a process that is gone now
+    dead = ctx.Process(target=_shortLived)
+    dead.start()
+    dead.join(10)
+
+    p = ctx.Process(target=_exitIfParentGoneChild, args=(dead.pid,))
+    p.start()
+    assert not _joinOrKill(p, 15)
+    assert p.exitcode == 0
+
+    p = ctx.Process(target=_exitIfParentGoneChild, args=(os.getpid(),))
+    p.start()
+    assert not _joinOrKill(p, 15)
+    assert p.exitcode == 3
+
+
+def _guardedSleeper(pid_queue):
+    """ Grandchild side: arm the parent death signal like the capture children, then sleep. """
+
+    from RMS.Misc import setParentDeathSignal
+
+    setParentDeathSignal()
+    pid_queue.put(os.getpid())
+    time.sleep(60)
+
+
+def _middleParent(pid_queue):
+    """ Child side: start a guarded grandchild and wait to be killed. """
+
+    ctx = multiprocessing.get_context('fork')
+    p = ctx.Process(target=_guardedSleeper, args=(pid_queue,))
+    p.start()
+    time.sleep(60)
+
+
+@pytest.mark.skipif(not sys.platform.startswith('linux'), reason='PR_SET_PDEATHSIG is Linux-only')
+def testParentDeathSignalKillsOrphan():
+    """ A child that armed setParentDeathSignal dies when its parent is SIGKILLed. """
+
+    import signal
+
+    ctx = multiprocessing.get_context('fork')
+    pid_queue = ctx.Queue()
+    middle = ctx.Process(target=_middleParent, args=(pid_queue,))
+    middle.start()
+    grandchild = pid_queue.get(timeout=15)
+
+    os.kill(middle.pid, signal.SIGKILL)
+    middle.join(10)
+
+    # The grandchild is not our child, so poll its existence
+    deadline = time.monotonic() + 10
+    alive = True
+    while alive and (time.monotonic() < deadline):
+        try:
+            os.kill(grandchild, 0)
+            time.sleep(0.1)
+        except ProcessLookupError:
+            alive = False
+
+    if alive:
+        os.kill(grandchild, signal.SIGKILL)
+
+    assert not alive, 'orphaned child survived its parent'
+
+
+@pytest.mark.parametrize('rel_path, class_name', [
+    ('RMS/BufferedCapture.py', 'BufferedCapture'),
+    ('RMS/Compression.py', 'Compressor'),
+    ('RMS/UploadManager.py', 'UploadManager'),
+    ('RMS/EventMonitor.py', 'EventMonitor'),
+    ])
+def testCaptureChildrenArmOrphanProtection(rel_path, class_name):
+    """ The long-running children of StartCapture record the parent PID in __init__ and arm the
+        orphan protection in run(). Checked on the source (AST) to avoid the modules' heavy imports.
+    """
+
+    import ast
+
+    with open(os.path.join(RMS_ROOT, rel_path)) as f:
+        tree = ast.parse(f.read())
+
+    cls = [n for n in tree.body if isinstance(n, ast.ClassDef) and (n.name == class_name)][0]
+    methods = dict((n.name, n) for n in cls.body if isinstance(n, ast.FunctionDef))
+
+    def calledNames(fn):
+        return set(n.func.id for n in ast.walk(fn) if isinstance(n, ast.Call)
+            and isinstance(n.func, ast.Name))
+
+    init_src = ast.dump(methods['__init__'])
+    assert "attr='parent_pid'" in init_src
+
+    run_calls = calledNames(methods['run'])
+    assert 'setParentDeathSignal' in run_calls
+    assert 'exitIfParentGone' in run_calls
