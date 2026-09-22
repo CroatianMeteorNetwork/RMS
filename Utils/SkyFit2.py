@@ -416,7 +416,8 @@ except Exception as exc:
 
 
 # Distortion types set with CTRL + digit in the skyfit mode, as (key, distortion type) pairs. Pairs, not a
-#   dict, so the keys are compared with == on every Qt binding
+#   dict, so the keys are compared with == on every Qt binding. Keep the keyboard reference in
+#   RMS.Routines.SkyFitHelp (_topicShortcutsSkyfit) in sync
 CTRL_DIGIT_DISTORTION_TYPES = [
     (QtCore.Qt.Key.Key_1, "poly3+radial"),
     (QtCore.Qt.Key.Key_2, "poly3+radial3"),
@@ -12021,8 +12022,9 @@ class PlateTool(QtWidgets.QMainWindow):
         # Handle keys in the SkyFit mode
         elif self.mode == 'skyfit':
 
-            # Change the distortion type with CTRL + 1..6 (poly3+radial, poly3+radial3, radial3/5/7/9-odd,
-            #   as listed in the Help). The types are looked up by name, so the list order doesn't matter
+            # Change the distortion type with CTRL + 1..6 (CTRL_DIGIT_DISTORTION_TYPES, listed in the
+            #   SkyFit keyboard reference in RMS.Routines.SkyFitHelp). The types are looked up by name, so
+            #   the order of the platepar distortion type list doesn't matter
             if (modifiers == QtCore.Qt.KeyboardModifier.ControlModifier) \
                 and any(event.key() == key for key, _ in CTRL_DIGIT_DISTORTION_TYPES):
 

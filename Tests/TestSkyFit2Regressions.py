@@ -1195,8 +1195,8 @@ def testArrowKeysLeftToSlidersAndCombos(plateTool):
                                               (4, "radial5-odd"), (5, "radial7-odd"), (6, "radial9-odd"),
                                               (7, None)])
 def testCtrlDigitDistortionShortcuts(plateTool, monkeypatch, digit, dist_type):
-    """ CTRL + digit sets the distortion type from the Help list and nothing else; unbound combinations
-        do nothing (no IndexError, no coefficient edit). """
+    """ CTRL + digit sets the distortion type of the keyboard reference and nothing else; unbound
+        combinations do nothing (no IndexError, no coefficient edit). """
 
     from pyqtgraph.Qt import QtCore, QtWidgets
 
@@ -1737,3 +1737,14 @@ def testKeyholeBridgeVertexMovesAndDeletesTogether(plateTool, stationDir):
     pt.deleteMaskVertex((0, polygon.index((700.0, 300.0))))
     assert (700.0, 300.0) not in pt.mask_polygons[0]
     assert len(pt.mask_polygons[0]) == n_before - counts[bridge[0]]
+
+
+def testCtrlDigitShortcutsInKeyboardReference(plateTool):
+    """ The keyboard reference lists every CTRL + digit distortion type with its digit. """
+
+    from RMS.Routines import SkyFitHelp
+
+    html = SkyFitHelp._topicShortcutsSkyfit(plateTool)
+
+    for digit, (_, dist_type) in enumerate(SF.CTRL_DIGIT_DISTORTION_TYPES, start=1):
+        assert "{:d} {:s}".format(digit, dist_type) in html

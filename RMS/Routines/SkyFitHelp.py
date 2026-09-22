@@ -938,7 +938,8 @@ def _topicShortcutsSkyfit(gui):
         ("9 / 0", "Extinction scale"),
         ("T", "Toggle refraction correction"),
         ("G / Y / B", "Equal aspect / asymmetry / dist=centre (radial only)"),
-        (c + " + 1..6", "Distortion model: poly3+radial, poly3+radial3, radial3/5/7/9"),
+        (c + " + 1..6", "Distortion model: 1 poly3+radial, 2 poly3+radial3, 3 radial3-odd, "
+                        "4 radial5-odd, 5 radial7-odd, 6 radial9-odd"),
     ])
     display = _shortcutTable([
         ("R / F", "Limiting magnitude"),
