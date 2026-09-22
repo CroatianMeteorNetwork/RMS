@@ -13648,7 +13648,8 @@ class PlateTool(QtWidgets.QMainWindow):
 
             alignPlatepar() is used to refine the pointing, and the fit is then checked by counting the
             matched stars. If that succeeds, a full NN-based astrometry fit is performed. If any step
-            fails, False is returned so the caller can fall back to astrometry.net.
+            fails, the platepar, the fit flags and the catalog LM are restored to what they were before
+            the call and False is returned so the caller can fall back to astrometry.net.
 
         Keyword arguments:
             pointing_only: [bool] If True, skip the NN RANSAC distortion fitting and only refine the
@@ -13657,6 +13658,37 @@ class PlateTool(QtWidgets.QMainWindow):
 
         Return:
             success: [bool] True if the quick alignment succeeded and astrometry.net can be skipped.
+        """
+
+        # Snapshot everything a failed attempt could change (the fit forces its own distortion model
+        #   and flags on the platepar before it knows whether it will succeed)
+        saved_platepar = copy.deepcopy(self.platepar)
+        saved_fit_only_pointing = self.fit_only_pointing
+        saved_cat_lim_mag = self.cat_lim_mag
+
+        success = self._runQuickAlignment(pointing_only=pointing_only)
+
+        # Put the user's platepar and settings back after a failure
+        if not success:
+
+            self.platepar = saved_platepar
+            self.fit_only_pointing = saved_fit_only_pointing
+
+            if self.cat_lim_mag != saved_cat_lim_mag:
+                self.cat_lim_mag = saved_cat_lim_mag
+                self.catalog_stars = self.loadCatalogStars(self.cat_lim_mag)
+
+        return success
+
+
+    def _runQuickAlignment(self, pointing_only=False):
+        """ Run the quick alignment steps for tryQuickAlignment, which restores the state on failure.
+
+        Keyword arguments:
+            pointing_only: [bool] See tryQuickAlignment.
+
+        Return:
+            success: [bool] True if the quick alignment succeeded.
         """
 
         print()
@@ -13871,6 +13903,12 @@ class PlateTool(QtWidgets.QMainWindow):
                     self.platepar.RA_d, self.platepar.dec_d, 60/self.platepar.F_scale))
             except Exception as e:
                 print("  NN fit failed: {} - falling back to astrometry.net".format(str(e)))
+                return False
+
+            # fitAstrometry returns None when it rejects the NN fit (too few stars, no RANSAC fit, RMSD
+            #   too large). That is a failure, not an alignment with no stars
+            if ransac_result is None:
+                print("  NN fit rejected - falling back to astrometry.net")
                 return False
 
             # Populate paired_stars directly from the RANSAC matched pairs
@@ -14631,6 +14669,9 @@ class PlateTool(QtWidgets.QMainWindow):
             platepar: [Platepar] The platepar with the applied solution, or None if astrometry.net failed.
         """
 
+        # The platepar before the recalibration, restored if the NN refinement is rejected
+        original_platepar = copy.deepcopy(self.platepar)
+
         # Solve with astrometry.net
         solution = self._solveAstrometryNet(upload_image=upload_image, wide_fov_search=wide_fov_search)
 
@@ -14841,27 +14882,44 @@ class PlateTool(QtWidgets.QMainWindow):
             # Callback which updates the display at each RANSAC iteration (visual debugging)
             iteration_callback = self._makeIterationCallback()
 
+            nn_result = None
             try:
-                self.platepar.fitAstrometry(
+                nn_result = self.platepar.fitAstrometry(
                     jd, img_stars_arr, catalog_stars_extended,  # Extended catalog for edge stars
                     first_platepar_fit=True,
                     use_nn_cost=True,
                     final_catalog_stars=tuned_catalog,
                     iteration_callback=iteration_callback
                 )
-                print("  NN fit complete: RA={:.2f} Dec={:.2f} Scale={:.3f} arcmin/px".format(
-                    self.platepar.RA_d, self.platepar.dec_d, 60/self.platepar.F_scale))
             except Exception as e:
                 print("  NN fit failed: {}".format(str(e)))
 
-            # Populate paired_stars from the NN matches for the visualization
+            # A rejected or failed NN fit leaves nothing to fit: the platepar star_list still holds the
+            #   pairs of an earlier fit (possibly of another image), so it must not be used. Put the
+            #   platepar from before the recalibration back
+            if nn_result is None:
+                print("  NN fit rejected - restoring the platepar from before the auto fit")
+                self.platepar = original_platepar
+                self.fit_only_pointing = user_fit_only_pointing
+                self.updateStars()
+                self.status_bar.showMessage("Auto-fit failed: the NN refinement was rejected")
+                qmessagebox(title='Auto-fit failed',
+                            message='The NN refinement of the astrometry.net solution was rejected.\n\n'
+                                    'The platepar was restored to its state before the auto fit.',
+                            message_type="warning")
+                return None
+
+            print("  NN fit complete: RA={:.2f} Dec={:.2f} Scale={:.3f} arcmin/px".format(
+                self.platepar.RA_d, self.platepar.dec_d, 60/self.platepar.F_scale))
+
+            # Populate paired_stars from the NN matches returned by the fit
+            img_stars_matched, catalog_matched = nn_result
             self.paired_stars = PairedStars()
-            if self.platepar.star_list:
+            if len(img_stars_matched) > 0:
 
-                for entry in self.platepar.star_list:
+                for (x, y, intensity), cat_star in zip(img_stars_matched, catalog_matched):
 
-                    # The star_list format is: [jd, x, y, intensity, ra, dec, mag]
-                    _, x, y, intensity, ra, dec, mag = entry
+                    ra, dec, mag = cat_star[:3]
                     sky_obj = CatalogStar(ra, dec, mag)
 
                     # Look up the SNR, FWHM and saturation in calstars by finding the nearest detected
@@ -14878,7 +14936,7 @@ class PlateTool(QtWidgets.QMainWindow):
                             saturated = det_saturated[closest_idx] > 0
 
                     self.paired_stars.addPair(x, y, fwhm, intensity, sky_obj, snr=snr, saturated=saturated)
-                print("  Loaded {} matched pairs".format(len(self.platepar.star_list)))
+                print("  Loaded {} matched pairs".format(len(self.paired_stars)))
 
         # Finalize the fit with the user's settings
         if len(self.paired_stars) >= 10:

@@ -397,3 +397,97 @@ def testLoadStateMidSessionResetsMaskModes(plateTool, stationDir, qapp):
     assert not pt.mask_brush_painting
     assert not tab.mask.brush_button.isChecked()
     assert pt.img_frame.panning_enabled == (tab.currentIndex() != mask_idx)
+
+
+###################################################################################################
+# AUTOMATIC FITS
+###################################################################################################
+
+def _astrometryNetStandIn(pt):
+    """ An astrometry.net answer made from the loaded platepar's own pointing.
+
+    Arguments:
+        pt: [PlateTool] The plate tool.
+
+    Return:
+        solution: [tuple] In the format returned by PlateTool._solveAstrometryNet.
+    """
+
+    from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, rotationWrtStandard
+
+    pp = pt.platepar
+    t = pt.img_handle.currentTime()
+    _, ra, dec, _ = xyToRaDecPP([t], [pp.X_res/2], [pp.Y_res/2], [1], pp, extinction_correction=False)
+
+    return (ra[0], dec[0], rotationWrtStandard(pp), pp.F_scale, 53.7, 30.0, None, None)
+
+
+def _plateparState(pp):
+    """ The platepar values an automatic fit must not change when it fails. """
+
+    return (pp.distortion_type, pp.equal_aspect, pp.asymmetry_corr, pp.force_distortion_centre,
+            pp.refraction, pp.RA_d, pp.dec_d, pp.F_scale, tuple(pp.x_poly_fwd))
+
+
+@pytest.mark.parametrize("failure", ["none", "raise"])
+def testQuickAlignmentFailureRestoresPlatepar(plateTool, monkeypatch, failure):
+    """ A rejected (None) or crashed NN fit makes the quick alignment fail and restores the platepar. """
+
+    from RMS.Formats.Platepar import Platepar
+
+    orig_fit = Platepar.fitAstrometry
+    nn_calls = []
+
+    def fakeFit(self, jd, img, cat, *args, **kwargs):
+
+        # Emulate the NN exits after the RANSAC stages already changed the platepar
+        if kwargs.get('use_nn_cost'):
+            nn_calls.append(1)
+            self.setDistortionType("radial7-odd", reset_params=False)
+            self.RA_d += 1.0
+            if failure == "raise":
+                raise RuntimeError("simulated NN failure")
+            return None
+
+        return orig_fit(self, jd, img, cat, *args, **kwargs)
+
+    pt = plateTool
+    before = _plateparState(pt.platepar)
+    lm_before = pt.cat_lim_mag
+
+    monkeypatch.setattr(Platepar, "fitAstrometry", fakeFit)
+
+    assert pt.tryQuickAlignment() is False
+    assert nn_calls
+    assert _plateparState(pt.platepar) == before
+    assert pt.cat_lim_mag == lm_before
+
+
+def testInitialParamsRejectedNNFitRestoresPlatepar(plateTool, monkeypatch):
+    """ A rejected NN fit in the full recalibration does not fit the stale star_list of the platepar. """
+
+    from RMS.Formats.Platepar import Platepar
+
+    orig_fit = Platepar.fitAstrometry
+    nn_calls = []
+
+    def fakeFit(self, jd, img, cat, *args, **kwargs):
+        if kwargs.get('use_nn_cost'):
+            nn_calls.append(1)
+            return None
+        return orig_fit(self, jd, img, cat, *args, **kwargs)
+
+    pt = plateTool
+
+    # The example platepar carries the star list of the night it was made on
+    assert len(pt.platepar.star_list) > 0
+    before = _plateparState(pt.platepar)
+
+    solution = _astrometryNetStandIn(pt)
+    pt._solveAstrometryNet = lambda *a, **k: solution
+    monkeypatch.setattr(Platepar, "fitAstrometry", fakeFit)
+
+    assert pt.getInitialParamsAstrometryNet(upload_image=False) is None
+    assert nn_calls
+    assert len(pt.paired_stars) == 0
+    assert _plateparState(pt.platepar) == before
