@@ -79,6 +79,8 @@ def extractStars(img, img_median=None, mask=None, gamma=1.0, max_star_candidates
             (hot pixels are narrow, while stars are round).
         max_feature_ratio: [float] Maximum ratio between 2 sigma of the star and the image segment area.
         bit_depth: [int] Bit depth of the image. 8 bits by default.
+        extra_info: [dict] Optional dictionary which receives the number of raw local maxima under the
+            'num_candidates' key. None by default.
         show_candidates: [bool] Show the raw star candidates before PSF fitting and the successfully fitted
             stars afterwards. False by default.
     
@@ -303,6 +305,8 @@ def extractStarsFF(
         flat_struct: [Flat struct] Structure containing the flat field. None by default.
         dark: [ndarray] Dark frame. None by default.
         mask: [ndarray] Mask image. None by default.
+        extra_info: [dict] Optional dictionary passed to extractStars which receives the number of raw
+            local maxima under the 'num_candidates' key. None by default.
         show_candidates: [bool] Show the raw star candidates before PSF fitting and the successfully fitted
             stars afterwards. False by default.
 
@@ -513,8 +517,8 @@ def extractStarsImgHandle(img_handle,
             )
 
 
-        # CALSTARS format: Y(0) X(1) IntensSum(2) Ampltd(3) FWHM(4) BgLvl(5) SNR(6) NSatPx(7)
-        # Note: intensity=IntensSum (integrated), amplitude=Ampltd (peak)
+        # CALSTARS format: Y(0) X(1) IntensSum(2) Ampltd(3) FWHM(4) BgLvl(5) SNR(6) NSatPx(7), where
+        #   intensity=IntensSum (integrated) and amplitude=Ampltd (peak)
         star_list.append(
             [ff_name, list(zip(y_arr, x_arr, intensity, amplitude, fwhm, background, snr, saturated_count))]
              )
@@ -560,10 +564,13 @@ def duplicateDetectionKeepMask(x_arr, y_arr, intens_arr, radius):
                                     np.asarray(y_arr, dtype=np.float64)]))
     pairs = tree.query_pairs(radius, output_type='ndarray')
 
-    # Process pairs: for each duplicate pair, discard the fainter detection
+    # Process the pairs: for each duplicate pair, discard the fainter detection
     for i, j in pairs.tolist():
+
+        # Skip pairs where one member was already dropped
         if not keep[i] or not keep[j]:
             continue
+
         if intens[j] > intens[i]:
             keep[i] = False
         else:
@@ -603,8 +610,8 @@ def fitPSF(img, img_median, x_init, y_init, gamma=1.0, segment_radius=4, roundne
     snr_fitted = []
     saturated_count_fitted = []
 
-    # Initial guess for positions and sigmas (amplitude and offset are seeded per-star
-    # below from the actual segment, so the fit converges at any bit depth).
+    # Initial guess for the positions and sigmas (the amplitude and offset are seeded per-star below from
+    #   the actual segment, so the fit converges at any bit depth)
     init_pos_sigma = (segment_radius, segment_radius, 1.0, 1.0, 0.0)
 
     # Get the image dimensions
@@ -655,9 +662,9 @@ def fitPSF(img, img_median, x_init, y_init, gamma=1.0, segment_radius=4, roundne
         # Estimate saturation level from image type
         saturation = (2**bit_depth - 1)*np.ones_like(y_ind)
 
-        # Seed the amplitude from this segment's peak so the fit converges regardless of bit
-        # depth. A fixed amplitude guess (e.g. 30, an 8-bit value) starts ~1000x too low on
-        # 16-bit data, so bright stars never converge within maxfev and are silently dropped.
+        # Seed the amplitude from this segment's peak so the fit converges regardless of the bit depth. A
+        #   fixed amplitude guess (e.g. 30, an 8-bit value) starts ~1000x too low on 16-bit data, so bright
+        #   stars never converge within maxfev and are silently dropped
         amp_guess = max(float(np.max(star_seg)) - img_median, 1.0)
         initial_guess = (amp_guess,) + init_pos_sigma + (img_median,)
 
@@ -746,9 +753,9 @@ def fitPSF(img, img_median, x_init, y_init, gamma=1.0, segment_radius=4, roundne
         # Compute the number of pixels inside the 3 sigma ellipse around the star
         star_px_area = np.pi*(3*sigma_x)*(3*sigma_y)
 
-        # Estimate the standard deviation of the background from the segment area outside the star.
-        # The crop indices are in the full-segment frame, so gamma correct the full segment and
-        # NaN out the 3 sigma star region, leaving only the surrounding sky.
+        # Estimate the standard deviation of the background from the segment area outside the star. The
+        #   crop indices are in the full-segment frame, so gamma correct the full segment and NaN out the
+        #   3 sigma star region, leaving only the surrounding sky
         star_seg_corr = Image.gammaCorrectionImage(star_seg.astype(np.float32), gamma,
                                                    wp=gamma_wp, out_type=np.float32)
         star_seg_bg = np.copy(star_seg_corr)
@@ -815,12 +822,13 @@ def fitPSF(img, img_median, x_init, y_init, gamma=1.0, segment_radius=4, roundne
         # plt.clf()
         # plt.close()
 
-    # Deduplicate detections that converged to the same position after PSF fitting.
-    # This happens when a bright star with a wide PSF produces multiple local maxima
-    # (spaced > neighborhood_size apart) whose PSF fits all converge to the same center.
+    # Deduplicate the detections that converged to the same position after PSF fitting. This happens when
+    #   a bright star with a wide PSF produces multiple local maxima (spaced > neighborhood_size apart)
+    #   whose PSF fits all converge to the same centre
     if len(x_fitted) > 1:
         keep = duplicateDetectionKeepMask(x_fitted, y_fitted, intensity_fitted, segment_radius)
 
+        # Drop the duplicates from every output list
         n_dupes = np.sum(~keep)
         if n_dupes > 0:
             indices = np.where(keep)[0]
@@ -864,6 +872,7 @@ def plotStars(img, x2, y2, bit_depth=None, title=None, x_fitted=None, y_fitted=N
     if hasattr(img, 'avepixel'):
         img = img.avepixel
 
+    # Infer the bit depth from the integer data type, floating-point images default to 8 bits
     if bit_depth is None:
         if np.issubdtype(img.dtype, np.integer):
             bit_depth = np.iinfo(img.dtype).bits
@@ -900,6 +909,7 @@ def plotStars(img, x2, y2, bit_depth=None, title=None, x_fitted=None, y_fitted=N
             markeredgewidth=1.5, color='lime', label='PSF-fitted stars'
         )
 
+    # Only show the legend when there is something to label
     if len(x2) or ((x_fitted is not None) and len(x_fitted)):
         ax.legend(loc='upper right')
 
@@ -1016,9 +1026,9 @@ def extractStarsAndSave(config, ff_dir, show_candidates=False):
             continue
 
 
-        # Construct the table of the star parameters
-        # CALSTARS format: Y(0) X(1) IntensSum(2) Ampltd(3) FWHM(4) BgLvl(5) SNR(6) NSatPx(7)
-        # Note: intensity=IntensSum (integrated), amplitude=Ampltd (peak)
+        # Construct the table of the star parameters. CALSTARS format: Y(0) X(1) IntensSum(2) Ampltd(3)
+        #   FWHM(4) BgLvl(5) SNR(6) NSatPx(7), where intensity=IntensSum (integrated) and amplitude=Ampltd
+        #   (peak)
         star_data = list(zip(y2, x2, intensity, amplitude, fwhm_data, background, snr, saturated_count))
 
         # Add star info to the star list
@@ -1053,8 +1063,8 @@ def extractStarsAndSave(config, ff_dir, show_candidates=False):
 
 if __name__ == "__main__":
 
-    # Pin the multiprocessing start method for consistent behavior across Python versions
-    # (3.6-3.14). Must be done before any Process/Pool is created.
+    # Pin the multiprocessing start method for consistent behaviour across Python versions (3.6-3.14).
+    #   Must be done before any Process/Pool is created
     setMultiprocessingStartMethod()
 
     ### COMMAND LINE ARGUMENTS

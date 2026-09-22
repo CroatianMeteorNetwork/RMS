@@ -364,14 +364,23 @@ def merge3DLines(line_list, vect_angle_thresh, last_count=0):
 
 
 
-# Count images rejected by the white ratio check to rate limit the warning below. QueuedPool
-# workers are long-lived and each process keeps its own count across images; this is not a
-# run-wide total and must not be reported as one.
+# Count the images rejected by the white ratio check to rate limit the warning below. QueuedPool workers
+#   are long-lived and each process keeps its own count across images; this is not a run-wide total and
+#   must not be reported as one
 _white_ratio_reject_count = 0
 
 
 def checkWhiteRatio(img_thres, ff, max_white_ratio):
-    """ Checks if there are too many threshold passers on an image. """
+    """ Checks if there are too many threshold passers on an image.
+
+    Arguments:
+        img_thres: [ndarray] Thresholded image.
+        ff: [FF structure] FF file structure, used for the image dimensions.
+        max_white_ratio: [float] Maximum allowed ratio between the threshold passers and all pixels.
+
+    Return:
+        [bool] True if the image is usable, False if it has too many threshold passers.
+    """
 
     global _white_ratio_reject_count
 
@@ -393,9 +402,9 @@ def checkWhiteRatio(img_thres, ff, max_white_ratio):
             "such as software re-encoded streams, can push the stdpixel-based threshold below "\
             "the maxpixel noise floor).").format(white_ratio, max_white_ratio)
 
-        # Make the first rejection (and every 100th) visible at warning level - a station whose
-        # every image is rejected is effectively blind to meteors, and outside of debug logging
-        # this used to be completely silent
+        # Make the first rejection (and every 100th) visible at the warning level - a station whose every
+        #   image is rejected is effectively blind to meteors, and outside of debug logging this used to be
+        #   completely silent
         if (_white_ratio_reject_count == 1) or (_white_ratio_reject_count%100 == 0):
             log.warning(msg)
 
@@ -1209,13 +1218,12 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                 maxpix_elements = img_handle.ff.maxpixel[ys,xs].astype(np.float64)
                 weights = maxpix_elements/np.sum(maxpix_elements)
 
-                # Random sample the point, sampling is weighted by pixel intensity.
-                # Use a fixed-seed local generator so reprocessing the same data is
-                # reproducible (the global RNG is unseeded; this matches the seeded-RNG
-                # convention used elsewhere in RMS, e.g. ApplyRecalibrate). The generator is
-                # deliberately re-created per line: every line then draws from the same state,
-                # so a line's subsample does not depend on how many lines preceded it.
-                # Constructing a Generator costs microseconds, so this is not a hot spot.
+                # Random sample the point, sampling is weighted by pixel intensity. Use a fixed-seed local
+                #   generator so reprocessing the same data is reproducible (the global RNG is unseeded; this
+                #   matches the seeded-RNG convention used elsewhere in RMS, e.g. ApplyRecalibrate). The
+                #   generator is deliberately re-created per line: every line then draws from the same
+                #   state, so a line's subsample does not depend on how many lines preceded it. Constructing
+                #   a Generator costs microseconds, so this is not a hot spot
                 rng = np.random.default_rng(0)
                 indices = rng.choice(len(zs), config.max_points_det, replace=False, p=weights)
                 ys = ys[indices]
