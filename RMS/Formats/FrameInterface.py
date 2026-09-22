@@ -2033,6 +2033,51 @@ class InputTypeImages(InputType):
 
 
 
+    def _floatFitsToUint16(self, frame):
+        """ Convert a floating point FITS image to uint16 with a mapping fixed for the sequence.
+
+            The offset and scale are taken from the first float image loaded from this directory and
+            reused for every later one: a per-image offset (the old frame - min(frame)) made the
+            levels jump from image to image. The minimum is moved to 0 (NaN-safe). The values are
+            rescaled only when their range does not fit uint16 as it is: a range <= 1 (normalised
+            [0, 1] images would otherwise collapse to 0 and 1) or > 65535. NaN pixels become 0.
+
+        Arguments:
+            frame: [ndarray] Floating point image.
+
+        Return:
+            [ndarray] uint16 image.
+        """
+
+        # Fix the mapping on the first float image of the sequence
+        if getattr(self, "_float_fits_mapping", None) is None:
+
+            # All-NaN images carry no levels, map them as they are
+            if np.all(np.isnan(frame)):
+                offset, value_range = 0.0, 0.0
+            else:
+                offset = float(np.nanmin(frame))
+                value_range = float(np.nanmax(frame)) - offset
+
+            # Rescale only if the range does not fit uint16 as it is
+            if (value_range > 0) and ((value_range <= 1) or (value_range > 65535)):
+                scale = 65535.0/value_range
+            else:
+                scale = 1.0
+
+            self._float_fits_mapping = (offset, scale)
+
+        offset, scale = self._float_fits_mapping
+
+        # Apply the mapping, zero the NaN pixels and clip to the uint16 range
+        frame = (frame.astype(np.float64) - offset)*scale
+        frame[np.isnan(frame)] = 0
+        frame = np.clip(frame, 0, 65535)
+
+        return frame.astype(np.uint16)
+
+
+
     def loadFrame(self, avepixel=None, fr_no=None):
         """ Loads the current frame.
 
@@ -2135,15 +2180,7 @@ class InputTypeImages(InputType):
 
                 # If the FITS image type is floating point, convert it to uint16
                 if np.issubdtype(frame.dtype, np.floating):
-
-                    # Rebalance the image so that the minimum is at 0
-                    frame = frame - np.min(frame)
-
-                    # Limit the maximum value to 65535
-                    frame = np.clip(frame, 0, 65535)
-
-                    # Cast to uint16
-                    frame = frame.astype(np.uint16)
+                    frame = self._floatFitsToUint16(frame)
 
 
                 # # Flip image vertically

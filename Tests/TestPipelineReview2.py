@@ -894,3 +894,71 @@ def testEmptyConfigValueKeepsDefault(tmp_path, option):
     assert getattr(config, option) == getattr(default, option)
     if option == 'ml_model_file':
         assert config.ml_model_path == default.ml_model_path
+
+
+# ---------------------------------------------------------------------------
+# Item 16: float FITS images in an image directory
+
+def _floatFitsInput():
+    """ An InputTypeImages stand-in carrying only the float conversion state. """
+
+    from RMS.Formats.FrameInterface import InputTypeImages
+
+    return InputTypeImages.__new__(InputTypeImages)
+
+
+def testFloatFitsOffsetFixedForSequence():
+    """ The same pixel value maps to the same level in every image of a sequence, whatever the
+        minimum of each image.
+    """
+
+    import numpy as np
+    from RMS.Formats.FrameInterface import InputTypeImages
+
+    inp = _floatFitsInput()
+
+    frame1 = np.array([[100.0, 1100.0], [600.0, 5000.0]])
+    frame2 = np.array([[300.0, 1100.0], [600.0, 5000.0]])
+
+    out1 = InputTypeImages._floatFitsToUint16(inp, frame1)
+    out2 = InputTypeImages._floatFitsToUint16(inp, frame2)
+
+    assert out1.dtype == np.uint16
+    assert out1[0, 1] == out2[0, 1] == 1000
+    assert out2[0, 0] == 200
+
+
+def testFloatFitsNormalisedImageKeepsLevels():
+    """ A normalised [0, 1] image is rescaled instead of collapsing to 0 and 1, and NaN pixels
+        become 0.
+    """
+
+    import numpy as np
+    from RMS.Formats.FrameInterface import InputTypeImages
+
+    inp = _floatFitsInput()
+    frame = np.array([[0.0, 0.25], [1.0, np.nan]], dtype=np.float32)
+
+    out = InputTypeImages._floatFitsToUint16(inp, frame)
+
+    assert out[0, 0] == 0
+    assert abs(int(out[0, 1]) - 16384) <= 1
+    assert abs(int(out[1, 0]) - 65535) <= 1
+    assert out[1, 1] == 0
+    assert len(np.unique(out)) == 3
+
+
+def testFloatFitsWideRangeRescaled():
+    """ A range beyond 65535 is compressed into uint16 instead of clipped. """
+
+    import numpy as np
+    from RMS.Formats.FrameInterface import InputTypeImages
+
+    inp = _floatFitsInput()
+    frame = np.array([[0.0, 65535.0], [131070.0, 200000.0]])
+
+    out = InputTypeImages._floatFitsToUint16(inp, frame)
+
+    assert out[1, 1] == 65535
+    assert 0 < out[1, 0] < 65535
+    assert out[0, 1] < out[1, 0]
