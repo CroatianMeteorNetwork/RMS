@@ -1412,3 +1412,34 @@ def testStateOnPlaceholderReopensOnPlaceholder(plateTool, stationDir, qapp, at_s
     finally:
         pt2.close()
         pt2.deleteLater()
+
+
+@pytest.mark.parametrize("failing_step", ["detectInputType", "loadCatalogStars"])
+def testChangeStationFailureKeepsCurrentStationState(plateTool, secondStationDir, failing_step):
+    """ A station change that fails part way keeps the calibration state of the current station. """
+
+    pt = plateTool
+    flat, dark = object(), np.zeros_like(pt.img.data)
+    pt.flat_struct = flat
+    pt.img.flat_struct = flat
+    pt.dark = dark
+    pt.catalog_lm_tuned = True
+    pt.tuned_cat_lim_mag = 6.1
+    pt.star_detection_override_enabled = True
+    pt.star_detection_override_data = {'FF_A.fits': [[1, 2, 3]]}
+    unsuitable = pt.unsuitable_stars
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("simulated failure")
+
+    setattr(pt, failing_step, fail)
+
+    assert pt.changeStation(secondStationDir) is False
+
+    assert pt.flat_struct is flat and pt.img.flat_struct is flat
+    assert pt.dark is dark
+    assert pt.catalog_lm_tuned and pt.tuned_cat_lim_mag == 6.1
+    assert pt.star_detection_override_enabled
+    assert pt.star_detection_override_data == {'FF_A.fits': [[1, 2, 3]]}
+    assert pt.unsuitable_stars is unsuitable
+    assert pt.tab.star_detection.use_override_checkbox.isChecked()

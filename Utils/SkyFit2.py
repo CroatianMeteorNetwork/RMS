@@ -4241,6 +4241,7 @@ class PlateTool(QtWidgets.QMainWindow):
         prev_dir_path = self.dir_path
         prev_config = self.config
         prev_img_handle = self.img_handle if self.hasData() else None
+        prev_station_state = self._stationStateSnapshot()
 
         try:
             self.input_path = dir_path
@@ -4374,10 +4375,59 @@ class PlateTool(QtWidgets.QMainWindow):
             if prev_img_handle is not None:
                 self.img_handle = prev_img_handle
 
+            # Put back the calibration state of the current station, which was reset for the new one
+            self._restoreStationState(prev_station_state)
+
             qmessagebox(title="Change Station Failed",
                          message="Could not load station from:\n{}\n\nError: {}".format(dir_path, repr(e)),
                          message_type="error")
             return False
+
+
+    # Attributes reset by _resetStationState, and restored by changeStation if the new station fails
+    STATION_STATE_ATTRIBUTES = ('catalog_lm_tuned', 'tuned_cat_lim_mag', 'star_detection_override_enabled',
+                                'star_detection_override_data', '_original_config_gamma', 'first_platepar_fit',
+                                'flat_struct', 'flat_source_path', 'dark', 'dark_source_path',
+                                'flat_image_data', 'mask_use_flat_background', 'unsuitable_stars')
+
+
+    def _stationStateSnapshot(self):
+        """ Snapshot the per-station state that _resetStationState resets.
+
+        Return:
+            snapshot: [dict] Attribute values (missing attributes are left out), and the flat and dark of
+                the image items.
+        """
+
+        snapshot = {k: getattr(self, k) for k in self.STATION_STATE_ATTRIBUTES if hasattr(self, k)}
+
+        snapshot['_image_items'] = [(item, item.flat_struct, item.dark)
+                                    for item in (getattr(self, 'img', None), getattr(self, 'img_zoom', None))
+                                    if item is not None]
+
+        return snapshot
+
+
+    def _restoreStationState(self, snapshot):
+        """ Restore the per-station state from a _stationStateSnapshot snapshot.
+
+        Arguments:
+            snapshot: [dict] The snapshot.
+        """
+
+        for k in self.STATION_STATE_ATTRIBUTES:
+            if k in snapshot:
+                setattr(self, k, snapshot[k])
+            elif hasattr(self, k):
+                delattr(self, k)
+
+        for item, flat_struct, dark in snapshot.get('_image_items', []):
+            item.flat_struct = flat_struct
+            item.dark = dark
+
+        if hasattr(self, 'tab') and hasattr(self.tab, 'star_detection'):
+            self.tab.star_detection.use_override_checkbox.setChecked(self.star_detection_override_enabled)
+            self.tab.star_detection.updateStatus(self.star_detection_override_enabled)
 
 
     def _resetStationState(self):
