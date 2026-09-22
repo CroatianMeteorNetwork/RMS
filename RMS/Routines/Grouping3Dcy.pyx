@@ -515,6 +515,11 @@ def thresholdAndSubsample(np.ndarray[UINT8_TYPE_t, ndim=3] frames, \
                 # Subsample frame in f*f squares
                 y2 = int(floor(y//f))
                 x2 = int(floor(x//f))
+
+                # Skip the partial edge block when the image size is not a multiple of f, as the count
+                #   array only covers the full blocks (writing past it would corrupt the next frame)
+                if (y2 >= shape_y) or (x2 >= shape_x):
+                    continue
                 
                 # Check if there are enough of threshold passers inside of this square
                 if count[n, y2, x2] >= min_points:
