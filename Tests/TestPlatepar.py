@@ -138,3 +138,103 @@ def testProjectionIsContinuousAcrossThePole():
     steps = [np.max(np.abs(positions[i + 1] - positions[i])) for i in range(len(positions) - 1)]
 
     assert max(steps) < 5.0
+
+
+RADIAL_TYPES = ["radial3-all", "radial4-all", "radial5-all", "radial3-odd", "radial5-odd", "radial7-odd",
+                "radial9-odd"]
+
+RADIAL_FLAGS = [
+    # (flag name, restricted value, free value)
+    ('force_distortion_centre', True, False),
+    ('equal_aspect', True, False),
+    ('asymmetry_corr', False, True),
+]
+
+
+def _radialPlatepar(dist_type):
+    """ A platepar with a radial distortion with all flags in the restricted state and non-zero ks. """
+
+    from RMS.Formats.Platepar import Platepar
+
+    pp = Platepar()
+    pp.X_res, pp.Y_res = 1920, 1080
+    pp.F_scale = 1920/90.0
+    pp.JD = 2460000.5
+    pp.RA_d, pp.dec_d = 100.0, 30.0
+    pp.pos_angle_ref = 20.0
+    pp.lat, pp.lon = 45.0, 15.0
+    pp.refraction = False
+
+    pp.force_distortion_centre = True
+    pp.equal_aspect = True
+    pp.asymmetry_corr = False
+    pp.setDistortionType(dist_type, reset_params=True)
+
+    # Set small, non-zero radial coefficients (the array only contains the ks in this flag state)
+    n = pp.poly_length
+    ks = 0.02*(np.arange(n) + 1)*(-1)**np.arange(n)
+    pp.x_poly_fwd = ks.copy()
+    pp.x_poly_rev = -ks.copy()
+    pp.y_poly_fwd = ks.copy()
+    pp.y_poly_rev = -ks.copy()
+    pp.x_poly = pp.x_poly_fwd
+    pp.y_poly = pp.y_poly_fwd
+
+    return pp
+
+
+def _projection(pp):
+    """ Project an image grid to the sky and a sky grid to the image, both used as a fingerprint. """
+
+    from RMS.Astrometry.ApplyAstrometry import raDecToXYPP, xyToRaDecPP
+
+    xs, ys = np.meshgrid(np.linspace(10, pp.X_res - 10, 9), np.linspace(10, pp.Y_res - 10, 7))
+    xs, ys = xs.ravel(), ys.ravel()
+
+    _, ra, dec, _ = xyToRaDecPP(len(xs)*[pp.JD], xs, ys, np.ones(len(xs)), pp, extinction_correction=False,
+        jd_time=True)
+    x_back, y_back = raDecToXYPP(ra, dec, pp.JD, pp)
+
+    return np.c_[ra, dec], np.c_[x_back, y_back]
+
+
+@pytest.mark.parametrize("dist_type", RADIAL_TYPES)
+def testBuildRadialCoeffsMatchesPolyLength(dist_type):
+    """ Rebuilding the coefficients must give an array of the length the distortion type uses. """
+
+    pp = _radialPlatepar(dist_type)
+
+    for flag_state in [(True, True, False), (False, False, True)]:
+        pp.force_distortion_centre, pp.equal_aspect, pp.asymmetry_corr = flag_state
+        pp.setDistortionType(dist_type, reset_params=False)
+
+        coeffs = pp.buildRadialCoeffs(pp.extractRadialCoeffs(np.arange(1, 20, dtype=float)))
+
+        assert len(coeffs) == pp.poly_length
+
+
+@pytest.mark.parametrize("dist_type", RADIAL_TYPES)
+@pytest.mark.parametrize("flag_name, restricted_value, free_value", RADIAL_FLAGS)
+def testRadialFlagToggleKeepsProjection(dist_type, flag_name, restricted_value, free_value):
+    """ Freeing a distortion flag (and restricting it back) must not change the projection.
+
+        The newly freed parameters start at the values the restricted state implies (the forced centre is
+        half a pixel from the image centre, zero aspect and asymmetry), and every radial coefficient must be
+        carried over.
+    """
+
+    pp = _radialPlatepar(dist_type)
+    sky_ref, img_ref = _projection(pp)
+
+    # Free the flag
+    assert pp.remapCoeffsForFlagChange(flag_name, free_value)
+    assert len(pp.x_poly_fwd) == pp.poly_length
+    sky, img = _projection(pp)
+    assert np.max(np.abs(img - img_ref)) < 1e-6
+    assert np.max(np.abs(sky - sky_ref)) < 1e-6/3600
+
+    # Restrict it again
+    assert pp.remapCoeffsForFlagChange(flag_name, restricted_value)
+    sky, img = _projection(pp)
+    assert np.max(np.abs(img - img_ref)) < 1e-6
+    assert np.max(np.abs(sky - sky_ref)) < 1e-6/3600

@@ -2082,6 +2082,13 @@ class Platepar(object):
         result = {'x0': 0.0, 'y0': 0.0, 'xy': 0.0, 'a1': 0.0, 'a2': 0.0,
                   'k1': 0.0, 'k2': 0.0, 'k3': 0.0, 'k4': 0.0}
 
+        # A forced distortion centre is placed half a pixel from the image centre (same as in
+        #   CyFunctions.pyx), so store the equivalent normalized offsets - freeing the centre then keeps the
+        #   projection unchanged
+        if self.force_distortion_centre:
+            result['x0'] = 0.5/(self.X_res/2.0)
+            result['y0'] = 0.5/(self.Y_res/2.0)
+
         # Extract the coefficients based on the current flags
         idx = 0
 
@@ -2163,18 +2170,16 @@ class Platepar(object):
             result.append(coeffs_dict.get('a1', 0.0))
             result.append(coeffs_dict.get('a2', 0.0))
 
-        # Radial distortion coefficients - the number depends on the target type
-        result.append(coeffs_dict.get('k1', 0.0))
+        # Radial distortion coefficients - the number depends on the target type (the layout read by
+        #   CyFunctions.pyx: radial3-all uses k1..k2, radial4-all k1..k3, radial5-all k1..k4, and the odd
+        #   types radial3/5/7/9-odd use k1, k1..k2, k1..k3 and k1..k4)
+        n_radial_coeffs = {
+            "radial3-all": 2, "radial4-all": 3, "radial5-all": 4,
+            "radial3-odd": 1, "radial5-odd": 2, "radial7-odd": 3, "radial9-odd": 4,
+        }[target_dist_type]
 
-        if target_dist_type in ["radial5-odd", "radial7-odd", "radial9-odd",
-                                "radial4-all", "radial5-all"]:
-            result.append(coeffs_dict.get('k2', 0.0))
-
-        if target_dist_type in ["radial7-odd", "radial9-odd", "radial5-all"]:
-            result.append(coeffs_dict.get('k3', 0.0))
-
-        if target_dist_type in ["radial9-odd"]:
-            result.append(coeffs_dict.get('k4', 0.0))
+        for k_name in ['k1', 'k2', 'k3', 'k4'][:n_radial_coeffs]:
+            result.append(coeffs_dict.get(k_name, 0.0))
 
         return np.array(result)
 
