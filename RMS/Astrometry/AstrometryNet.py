@@ -12,7 +12,8 @@ from astropy.wcs import WCS
 from RMS.ExtractStars import extractStarsAuto
 from RMS.Formats.FFfile import read as readFF
 from RMS.Formats.Platepar import Platepar
-from RMS.Astrometry.AstrometryNetNova import novaAstrometryNetSolve, PRIMARY_API_URL, FALLBACK_API_URL
+from RMS.Astrometry.AstrometryNetNova import (novaAstrometryNetSolve, rotationEqStandard, PRIMARY_API_URL,
+    FALLBACK_API_URL)
 from RMS.Astrometry.ApplyAstrometry import raDecToXYPP
 from RMS.Astrometry.CyFunctions import cyTrueRaDec2ApparentAltAz
 from RMS.Logger import getLogger
@@ -407,8 +408,7 @@ def astrometryNetSolveLocal(ff_file_path=None, img=None, mask=None, x_data=None,
         ra_right, dec_right = wcs_obj.all_pix2world(x_right, y_right, 1)
 
         # Compute the equatorial orientation
-        rot_eq_standard = np.degrees(np.arctan2(np.radians(dec_mid) - np.radians(dec_right), \
-            np.radians(ra_mid) - np.radians(ra_right)))%360
+        rot_eq_standard = rotationEqStandard(ra_mid, dec_mid, ra_right, dec_right)
 
 
         # Compute the scale in px/deg

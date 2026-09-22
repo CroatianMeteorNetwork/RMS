@@ -65,3 +65,17 @@ def testStarListSizeHintContainsTruePixelScale(monkeypatch, fov):
     assert hint['lower_arcsec_per_pixel'] <= true_scale <= hint['upper_arcsec_per_pixel']
     assert np.isclose(hint['lower_arcsec_per_pixel'], 0.75*true_scale)
     assert np.isclose(hint['upper_arcsec_per_pixel'], 1.5*true_scale)
+
+
+@pytest.mark.parametrize("ra_mid", [0.001, 120.0, 359.999])
+def testRotationEqStandardWrapsRA(ra_mid):
+    """ The orientation must not flip by 180 deg when the RA difference straddles RA = 0. """
+
+    from RMS.Astrometry.AstrometryNetNova import rotationEqStandard
+
+    # The point right of the centre is 0.002 deg lower in RA and 0.001 deg lower in Dec
+    ra_right = (ra_mid - 0.002)%360
+    rot = rotationEqStandard(ra_mid, 30.0, ra_right, 29.999)
+
+    expected = np.degrees(np.arctan2(0.001, 0.002))%360
+    assert np.isclose(rot, expected)
