@@ -174,7 +174,7 @@ def _blendedIndicesDenseReference(paired_stars, catalog_stars, platepar, jd, lim
     bright_mask = catalog_stars[:, 2] < (lim_mag + mag_margin)
     catalog_ra = catalog_stars[bright_mask, 0]
     catalog_dec = catalog_stars[bright_mask, 1]
-    in_fov = catalogInFOVMask(catalog_ra, catalog_dec, platepar)
+    in_fov = catalogInFOVMask(catalog_ra, catalog_dec, platepar, jd)
     catalog_x, catalog_y = raDecToXYPP(catalog_ra[in_fov], catalog_dec[in_fov], jd, platepar)
 
     check_indices, ra_list, dec_list, radii = [], [], [], []
