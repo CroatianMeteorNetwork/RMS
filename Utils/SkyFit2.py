@@ -7815,10 +7815,12 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
     def updateDistortionCenterMarker(self):
-        """Update the distortion center (optical axis) marker position."""
+        """ Update the distortion center (optical axis) marker position and the pointing indicator. """
+
         if self.platepar:
-            # Get the distortion center from the platepar
-            # getDistortionCentre returns the actual center position (includes 0.5 offset from CyFunctions)
+
+            # Get the distortion center from the platepar. getDistortionCentre returns the actual center
+            #   position (includes 0.5 offset from CyFunctions)
             x_centre, y_centre = self.platepar.getDistortionCentre()
 
             self.distortion_center_marker.setData(x=[x_centre], y=[y_centre])
@@ -7837,20 +7839,21 @@ class PlateTool(QtWidgets.QMainWindow):
             return
 
         try:
+
             # Anchor the glyph at the optical axis (same point as the red plus)
             x_centre, y_centre = self.platepar.getDistortionCentre()
 
-            # Screen direction toward the zenith + East along the horizon + apparent az/elev, evaluated at
-            # the optical axis so the readout matches where the glyph is pinned
+            # Screen direction toward the zenith + East along the horizon + apparent az/elev, evaluated
+            #   at the optical axis so the readout matches where the glyph is pinned
             angle_screen, east_screen, azimuth, elevation, valid = fovCentreZenithDirection(self.platepar, \
                 centre=(x_centre, y_centre))
 
             # On-screen size of one WASD step: panStepDeg is the FOV-relative angular step (deg) and
-            # F_scale is the reference plate scale (px/deg) at the centre
+            #   F_scale is the reference plate scale (px/deg) at the centre
             step_px = abs(self.panStepDeg()*self.platepar.F_scale)
 
             # Az/Alt readout precision scales with the FOV: integer degrees for wide/all-sky fields, more
-            # decimals for narrow fields where finer pointing matters
+            #   decimals for narrow fields where finer pointing matters
             fov_h, fov_v = computeFOVSize(self.platepar)
             fov_diag = np.hypot(fov_h, fov_v)
             if fov_diag >= 60:
@@ -7981,8 +7984,8 @@ class PlateTool(QtWidgets.QMainWindow):
 
         ### Make a photometry plot
 
-        # Highly variable star types to exclude from photometric calibration
-        # These can vary by many magnitudes, making them unreliable for photometry
+        # Highly variable star types to exclude from photometric calibration. These can vary by many
+        #   magnitudes, making them unreliable for photometry
         EXCLUDE_FROM_PHOTOMETRY = {
             'Mira', 'Mira_Candidate',  # Can vary by 6-8 magnitudes
             'RCrBV*', 'RCrBV*_Candidate',  # R CrB stars can fade by 8+ magnitudes
@@ -8026,7 +8029,9 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Check if this is a highly variable star that should be excluded from photometry
             is_variable = False
-            if hasattr(self, 'catalog_stars_simbad_otypes') and self.catalog_stars_simbad_otypes is not None:
+            if hasattr(self, 'catalog_stars_simbad_otypes') \
+                and self.catalog_stars_simbad_otypes is not None:
+
                 # Find the closest catalog star by RA/Dec to get its object type
                 ra_diff = np.abs(self.catalog_stars[:, 0] - star_ra)
                 dec_diff = np.abs(self.catalog_stars[:, 1] - star_dec)
@@ -8077,24 +8082,27 @@ class PlateTool(QtWidgets.QMainWindow):
         # Set the fit weights so that everyting with SNR > 10 is weighted the maximum value
         weights = np.clip(snr_list, 0, 10)/10.0
 
-        # We need at least 3 stars for a robust photometry fit.
-        # Preferably, saturated and highly variable stars are excluded from the fit.
-        # First, let's compute the total number of stars and how many remain if we exclude both.
+        # We need at least 3 stars for a robust photometry fit. Preferably, saturated and highly variable
+        #   stars are excluded from the fit. First, compute the total number of stars and how many remain
+        #   if we exclude both
         total_stars = len(saturation_list)
         exclude_both = [sat or var for sat, var in zip(saturation_list, variable_star_list)]
         good_stars_count = total_stars - sum(exclude_both)
-        
+
+        # We have enough stars, exclude both saturated and variable stars
         if good_stars_count >= 3:
-            # We have enough stars, exclude both saturated and variable stars
             exclude_list = exclude_both
+
+        # Not enough stars. Check if we have enough by only excluding saturated stars
         else:
-            # Not enough stars. Check if we have enough by only excluding saturated stars
             non_saturated_count = total_stars - sum(saturation_list)
+
+            # Include variable stars in the fit, but still exclude saturated stars
             if non_saturated_count >= 3:
-                # Include variable stars in the fit, but still exclude saturated stars
                 exclude_list = saturation_list
+
+            # Still not enough. We have to include all stars to ensure the fit works
             else:
-                # Still not enough. We have to include all stars to ensure the fit works
                 exclude_list = [False] * total_stars
 
         # Fit the photometric offset (disable vignetting fit if a flat is used)
@@ -8113,8 +8121,8 @@ class PlateTool(QtWidgets.QMainWindow):
         self.platepar.vignetting_coeff = vignetting_coeff
 
         # Fit the limiting magnitude model: log10(S/N) vs the calibrated (vignetting + extinction
-        # corrected) apparent magnitude. The predicted magnitude per star equals the catalog
-        # magnitude minus the fit residual. Saturated stars are excluded (their flux is capped).
+        #   corrected) apparent magnitude. The predicted magnitude per star equals the catalog magnitude
+        #   minus the fit residual. Saturated stars are excluded (their flux is capped)
         predicted_mags = np.array(catalog_mags) - np.array(self.photom_fit_resids)
         self.limiting_mag_info = limitingMagnitude(
             predicted_mags, np.array(snr_list), snr_targets=(5, 10),
@@ -8187,7 +8195,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
             self.residual_text.update()
 
-        # Check if the photometry plot should be auto-updated
+        # Check if the photometry plot should be auto-updated (it is, while it is open)
         if (not show_plot) and (not force_update) and (self.fig_photometry is not None):
             if plt.fignum_exists(self.fig_photometry.number):
                 force_update = True
@@ -8425,7 +8433,7 @@ class PlateTool(QtWidgets.QMainWindow):
             if self.limiting_mag_info is not None:
 
                 # Colors set so the yellower line (higher S/N, brighter LM) is on the left and the
-                # greener line (lower S/N, fainter LM) is on the right
+                #   greener line (lower S/N, fainter LM) is on the right
                 lm_colors = {5: 'green', 10: 'darkorange'}
                 for snr_target, lm_mag in self.limiting_mag_info['lm'].items():
                     ax_m.axvline(lm_mag, linestyle='dashed', alpha=0.8,
@@ -8445,9 +8453,11 @@ class PlateTool(QtWidgets.QMainWindow):
 
             ###
 
+            # Keep the plotted stars so a click in the plot can highlight the star in the image
             self.photometry_fit_x_list = [sc[0] for sc in star_coords]
             self.photometry_fit_y_list = [sc[1] for sc in star_coords]
 
+            # Empty red circles on every panel, moved onto the picked star
             self.photometry_plot_highlight_artists = {
                 'ax_p': ax_p.plot([], [], 'ro', mfc='none', markersize=10, zorder=10)[0],
                 'ax_r': ax_r.plot([], [], 'ro', mfc='none', markersize=10, zorder=10)[0],
@@ -8468,29 +8478,36 @@ class PlateTool(QtWidgets.QMainWindow):
             fig_p.show()
 
     def onPhotometryPlotPick(self, event):
-        """ Highlight a star in the main window when clicked in the photometry residuals plot. """
-        if event.mouseevent.button != 1:  # Left click only
+        """ Highlight a star in the main window (and on every plot panel) when clicked in the photometry
+            residuals plot.
+
+        Arguments:
+            event: [matplotlib PickEvent]
+        """
+
+        # Left click only
+        if event.mouseevent.button != 1:
             return
-            
+
         ind = event.ind
         if len(ind) == 0:
             return
-            
+
         # Get the first picked index
         star_idx = ind[0]
-        
+
         if not hasattr(self, 'photometry_fit_x_list') or star_idx >= len(self.photometry_fit_x_list):
             return
-            
+
         img_x = self.photometry_fit_x_list[star_idx]
         img_y = self.photometry_fit_y_list[star_idx]
-        
+
         # Update the highlight markers (coordinates in pyqtgraph are x + 0.5, y + 0.5)
         self.astrometry_plot_highlight_marker.setData(x=[img_x + 0.5], y=[img_y + 0.5])
         self.astrometry_plot_highlight_marker2.setData(x=[img_x + 0.5], y=[img_y + 0.5])
         self.astrometry_plot_highlight_marker_outer.setData(x=[img_x + 0.5], y=[img_y + 0.5])
         self.astrometry_plot_highlight_marker2_outer.setData(x=[img_x + 0.5], y=[img_y + 0.5])
-        
+
         # Ensure the markers are visible
         self.astrometry_plot_highlight_marker.show()
         self.astrometry_plot_highlight_marker2.show()
@@ -8501,17 +8518,20 @@ class PlateTool(QtWidgets.QMainWindow):
         if hasattr(self, 'photometry_fit_data') and hasattr(self, 'photometry_plot_highlight_artists'):
             for key, (x_arr, y_arr) in self.photometry_fit_data.items():
                 if star_idx < len(x_arr) and star_idx < len(y_arr):
-                    self.photometry_plot_highlight_artists[key].set_data([x_arr[star_idx]], [y_arr[star_idx]])
+                    self.photometry_plot_highlight_artists[key].set_data([x_arr[star_idx]], \
+                        [y_arr[star_idx]])
+
             if self.fig_photometry is not None:
                 self.fig_photometry.canvas.draw_idle()
 
 
     def fitBandRatio(self):
-        """Fit the optimal G:BP:RP band ratio that minimizes photometric residuals.
+        """ Fit the optimal G:BP:RP band ratio that minimizes the photometric residuals.
 
-        Performs a 2D grid search over G, BP, RP flux fractions (rG + rBP + rRP = 1),
-        runs photometryFit for each combination, and reports the ratio with the
-        lowest stddev. The result is printed as a config-ready string.
+            Performs a 2D grid search over G, BP, RP flux fractions (rG + rBP + rRP = 1), runs
+            photometryFit for each combination, and reports the ratio with the lowest stddev. The result
+            is printed as a config-ready string. If the catalog has BVRI magnitudes, a B:V:R:Ic ratio is
+            fitted as well, and a comparison plot is shown.
         """
 
         # Check that we have individual G/BP/RP magnitudes
@@ -8587,17 +8607,17 @@ class PlateTool(QtWidgets.QMainWindow):
             if any(np.isnan(v) or v == 0 for v in [g_val, bp_val, rp_val]):
                 continue
 
-            # Skip stars with unreliable Gaia BP/RP photometry.
-            # For very bright stars (G < ~3), Gaia detectors saturate and BP/RP
-            # values can be wildly wrong (e.g. BP = -2.87 for a G = 0.57 star).
-            # Filter on BP-RP color: physical range is about [-0.5, 5.0].
+            # Skip stars with unreliable Gaia BP/RP photometry. For very bright stars (G < ~3), Gaia
+            #   detectors saturate and BP/RP values can be wildly wrong (e.g. BP = -2.87 for a G = 0.57
+            #   star). Filter on BP-RP color: physical range is about [-0.5, 5.0]
             bp_rp = bp_val - rp_val
             if bp_rp < -0.5 or bp_rp > 5.0:
                 continue
 
             # Check variable star exclusion
             is_variable = False
-            if hasattr(self, 'catalog_stars_simbad_otypes') and self.catalog_stars_simbad_otypes is not None:
+            if hasattr(self, 'catalog_stars_simbad_otypes') \
+                and self.catalog_stars_simbad_otypes is not None:
                 otype = self.catalog_stars_simbad_otypes[closest_idx].strip()
                 if otype in EXCLUDE_FROM_PHOTOMETRY:
                     is_variable = True
@@ -8657,8 +8677,8 @@ class PlateTool(QtWidgets.QMainWindow):
 
         jd = date2JD(*self.img_handle.currentTime())
 
-        # 2D grid search over (rG, rBP) with rRP = 1 - rG - rBP
-        # Step size of 0.05 gives ~210 valid grid points
+        # 2D grid search over (rG, rBP) with rRP = 1 - rG - rBP. Step size of 0.05 gives ~210 valid grid
+        #   points
         step = 0.05
         grid_vals = np.arange(0, 1 + step/2, step)
         best_stddev = np.inf
@@ -8669,8 +8689,10 @@ class PlateTool(QtWidgets.QMainWindow):
 
         for rg in grid_vals:
             for rbp in grid_vals:
+
+                # Skip fractions that don't sum to 1 (allow tiny float error)
                 rrp = 1.0 - rg - rbp
-                if rrp < -0.001:  # Allow tiny float error
+                if rrp < -0.001:
                     continue
                 rrp = max(rrp, 0.0)
 
@@ -8764,11 +8786,12 @@ class PlateTool(QtWidgets.QMainWindow):
         print("=" * 60)
         print()
 
-        # Vignetting vs extinction interaction: 2D sweep to show how the optimal
-        # extinction scale changes as a function of fixed vignetting coefficient.
-        # This reveals the degeneracy between the two corrections.
+        # Vignetting vs extinction interaction: 2D sweep to show how the optimal extinction scale
+        #   changes as a function of fixed vignetting coefficient. This reveals the degeneracy between
+        #   the two corrections
         current_ext_scale = self.platepar.extinction_scale
         if abs(current_ext_scale) > 0.001:
+
             # Extract scale-independent per-star extinction delta
             ext_delta_arr = np.array(best_mags_ext) - best_mags
             raw_ext_delta = ext_delta_arr / current_ext_scale
@@ -8827,7 +8850,8 @@ class PlateTool(QtWidgets.QMainWindow):
             print("=" * 60)
             print()
 
-        # --- BVRI band ratio fit (optimizer) ---
+        ### BVRI band ratio fit (optimizer) ###
+
         has_bvri_data = len(b_mags) >= 3
         bvri_fit_result = None  # Will hold (params, stddev, mags_ext, fit_params) if successful
 
@@ -8859,6 +8883,9 @@ class PlateTool(QtWidgets.QMainWindow):
             exclude_list_bvri = [exclude_list[j] for j in bvri_idx]
 
             def bvri_objective(params):
+                """ Photometry fit stddev for the given (rB, rV, rR) fractions, rI = 1 - rB - rV - rR.
+                    Large penalty for negative fractions or a failed fit. """
+
                 rB, rV, rR = params
                 rI = 1.0 - rB - rV - rR
                 if rB < 0 or rV < 0 or rR < 0 or rI < 0:
@@ -8894,6 +8921,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
             best_rb, best_rv, best_rr = best_bvri_result.x
             best_ri = 1.0 - best_rb - best_rv - best_rr
+
             # Clamp negatives from float noise
             best_rb, best_rv, best_rr, best_ri = [max(0, x) for x in [best_rb, best_rv, best_rr, best_ri]]
 
@@ -8913,18 +8941,20 @@ class PlateTool(QtWidgets.QMainWindow):
             except Exception:
                 bvri_fit_result = None
 
-            # Compute stddev for the current/default BVRI ratios for comparison
-            # Use config BVRI ratios if set, otherwise fall back to Sony CMOS default
+            # Compute stddev for the current/default BVRI ratios for comparison. Use config BVRI ratios
+            #   if set, otherwise fall back to Sony CMOS default
             cur_bvri = self.config.star_catalog_band_ratios  # [B, V, R, Ic, G, BP, RP]
             cur_rb, cur_rv, cur_rr, cur_ri = cur_bvri[0], cur_bvri[1], cur_bvri[2], cur_bvri[3]
             cur_bvri_sum = cur_rb + cur_rv + cur_rr + cur_ri
+
+            # Fall back to Sony CMOS default
             if cur_bvri_sum == 0:
-                # Fall back to Sony CMOS default
                 cur_rb, cur_rv, cur_rr, cur_ri = 0.15, 0.30, 0.25, 0.30
                 cur_bvri_sum = 1.0
                 cur_bvri_label = "Sony default"
             else:
                 cur_bvri_label = "config"
+
             # Normalize to sum=1 for fair comparison
             cur_rb_n = cur_rb/cur_bvri_sum
             cur_rv_n = cur_rv/cur_bvri_sum
@@ -8966,6 +8996,7 @@ class PlateTool(QtWidgets.QMainWindow):
             print()
 
         ### Comparison plot ###
+
         exclude_arr = np.array(exclude_list, dtype=bool)
         px_arr = np.array(px_intens_list)
         radius_arr = np.array(radius_list)
@@ -8984,7 +9015,7 @@ class PlateTool(QtWidgets.QMainWindow):
         fig = plt.figure(figsize=(4.5*n_cols, 5))
         gs_plot = gridspec.GridSpec(1, n_cols, width_ratios=[1]*n_cols)
 
-        # --- Left panel: ternary heatmap as 2D G vs BP (RP = 1-G-BP) ---
+        # Left panel: ternary heatmap as 2D G vs BP (RP = 1-G-BP)
         ax_heat = fig.add_subplot(gs_plot[0])
         n_grid = len(grid_vals)
         heatmap = np.full((n_grid, n_grid), np.nan)
@@ -9016,8 +9047,10 @@ class PlateTool(QtWidgets.QMainWindow):
         # Fit line x range
         x_line = np.linspace(x_min, x_max, 10)
 
-        # Helper to plot a photometry panel (matching the style of the main photometry plot)
         def plot_photom_panel(ax, cat_mags, lsp_raw, lsp_corr, fit_params, title, ylabel):
+            """ Plot one photometry panel (matching the style of the main photometry plot): raw and
+                vignetting-corrected points, excluded stars circled, and the fit line. """
+
             incl = ~exclude_arr
 
             # Raw points (red)
@@ -9051,14 +9084,14 @@ class PlateTool(QtWidgets.QMainWindow):
             ax.invert_yaxis()
             ax.grid(True, alpha=0.3)
 
-        # --- Center panel: current band ratios ---
+        # Center panel: current band ratios
         ax_cur = fig.add_subplot(gs_plot[1])
         plot_photom_panel(ax_cur, current_mags_ext_arr, lsp_raw, lsp_corr_current,
                           current_params,
                           "Current: $\\sigma$ = {:.3f} mag".format(current_stddev),
                           "Catalog mag ({:s})".format(self.mag_band_string))
 
-        # --- Right panel: best G:BP:RP ---
+        # Right panel: best G:BP:RP
         ax_best = fig.add_subplot(gs_plot[2])
         plot_photom_panel(ax_best, best_mags_ext_arr, lsp_raw, lsp_corr_best,
                           best_params,
@@ -9066,7 +9099,7 @@ class PlateTool(QtWidgets.QMainWindow):
                           "Catalog mag ({:.0f}G+{:.0f}BP+{:.0f}RP)".format(
                               best_rg*100, best_rbp*100, best_rrp*100))
 
-        # --- BVRI panel (if available) ---
+        # BVRI panel (if available)
         if bvri_fit_result is not None:
             bvri_params_opt, bvri_stddev_opt, bvri_mags_ext, bvri_fit_params_phot = bvri_fit_result
             bvri_rb, bvri_rv, bvri_rr = bvri_params_opt
@@ -9091,8 +9124,8 @@ class PlateTool(QtWidgets.QMainWindow):
             ax_bvri.scatter(-2.5*bvri_lsp_corr[incl_bvri], bvri_mags_ext_arr[incl_bvri],
                             s=5, c='b', alpha=0.5, zorder=3, label="Vig. corrected")
             if np.any(bvri_exclude_arr):
-                ax_bvri.scatter(-2.5*bvri_lsp_corr[bvri_exclude_arr], bvri_mags_ext_arr[bvri_exclude_arr],
-                                s=20, zorder=2, edgecolor='r', facecolor='none')
+                ax_bvri.scatter(-2.5*bvri_lsp_corr[bvri_exclude_arr], \
+                    bvri_mags_ext_arr[bvri_exclude_arr], s=20, zorder=2, edgecolor='r', facecolor='none')
 
             photom_offset_bvri, vig_coeff_bvri = bvri_fit_params_phot
             fit_info_bvri = "{:+.1f}*LSP + {:.2f}".format(-2.5, photom_offset_bvri) \
@@ -9122,18 +9155,19 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
     def filterPhotometricOutliers(self, sigma_threshold=2.5):
+        """ Filter paired_stars by removing photometric outliers.
+
+            Performs preliminary photometry and removes stars whose magnitude residuals exceed
+            sigma_threshold standard deviations. Saturated stars and geo points are left alone.
+
+        Keyword arguments:
+            sigma_threshold: [float] Number of standard deviations for outlier detection. 2.5 by default.
+
+        Return:
+            removed_count: [int] Number of stars removed.
         """
-        Filter paired_stars by removing photometric outliers.
 
-        Performs preliminary photometry and removes stars whose magnitude
-        residuals exceed sigma_threshold standard deviations.
-
-        Arguments:
-            sigma_threshold: [float] Number of standard deviations for outlier detection.
-
-        Returns:
-            int: Number of stars removed.
-        """
+        # Too few stars for meaningful statistics
         if len(self.paired_stars) < 10:
             return 0
 
@@ -9188,7 +9222,8 @@ class PlateTool(QtWidgets.QMainWindow):
         median = np.median(mag_residuals)
         std = np.std(mag_residuals)
 
-        if std < 0.01:  # Avoid division issues
+        # Avoid division issues
+        if std < 0.01:
             return 0
 
         # Find outliers
@@ -9213,21 +9248,23 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
     def filterPositionalOutliers(self, sigma_threshold=3.0, abs_floor_px=3.0):
-        """
-        Remove paired stars whose image position is far from the catalog projection.
+        """ Remove paired stars whose image position is far from the catalog projection.
 
-        Run *after* a fit: re-projects each paired catalog star with the current platepar and drops
-        pairs whose positional residual is a gross outlier - typically a wrong or duplicate match
-        that survived NN/RANSAC and otherwise inflates the final RMSD. The threshold is robust
-        (median + sigma*MAD) and floored at abs_floor_px so a tight fit is never over-clipped.
+            Run *after* a fit: re-projects each paired catalog star with the current platepar and drops
+            pairs whose positional residual is a gross outlier - typically a wrong or duplicate match
+            that survived NN/RANSAC and otherwise inflates the final RMSD. The threshold is robust
+            (median + sigma*MAD) and floored at abs_floor_px so a tight fit is never over-clipped.
 
-        Arguments:
-            sigma_threshold: [float] Robust-sigma multiplier for outlier detection.
+        Keyword arguments:
+            sigma_threshold: [float] Robust-sigma multiplier for outlier detection. 3.0 by default.
             abs_floor_px: [float] Minimum residual (px) to consider an outlier, protecting tight fits.
+                3.0 by default.
 
-        Returns:
-            int: Number of stars removed.
+        Return:
+            removed_count: [int] Number of stars removed.
         """
+
+        # Too few stars for meaningful statistics
         if len(self.paired_stars) < 15:
             return 0
 
@@ -9249,6 +9286,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         outlier_indices = set(np.where(errs > thresh)[0].tolist())
 
+        # Rebuild the paired stars without the outliers
         if len(outlier_indices) > 0:
             new_paired_stars = PairedStars()
             for i, (x, y, fwhm, intens_acc, obj, snr, saturated) in enumerate(
@@ -9265,22 +9303,24 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
     def filterBlendedStars(self, fwhm_mult=2.0, mag_margin=0.3):
+        """ Filter paired_stars by removing likely blended stars.
+
+            A star is considered blended if there are other catalog stars (brighter than
+            lim_mag + mag_margin) within fwhm_mult * FWHM pixels of the star.
+
+        Keyword arguments:
+            fwhm_mult: [float] Multiplier of the star's FWHM for blend detection radius. 2.0 by default.
+            mag_margin: [float] Margin above limiting magnitude for catalog stars to consider. 0.3 by
+                default.
+
+        Return:
+            removed_count: [int] Number of stars removed.
         """
-        Filter paired_stars by removing likely blended stars.
 
-        A star is considered blended if there are other catalog stars (brighter
-        than lim_mag + mag_margin) within fwhm_mult * FWHM pixels of the star.
-
-        Arguments:
-            fwhm_mult: [float] Multiplier of the star's FWHM for blend detection radius.
-            mag_margin: [float] Margin above limiting magnitude for catalog stars to consider.
-
-        Returns:
-            int: Number of stars removed.
-        """
-        # Get FOV-filtered catalog stars for neighbor lookup
-        # Using filtered catalog prevents false positives from stars behind the camera
-        if hasattr(self, 'catalog_stars_filtered_unmasked') and self.catalog_stars_filtered_unmasked is not None:
+        # Get FOV-filtered catalog stars for neighbor lookup. Using the filtered catalog prevents false
+        #   positives from stars behind the camera
+        if hasattr(self, 'catalog_stars_filtered_unmasked') \
+            and self.catalog_stars_filtered_unmasked is not None:
             catalog_for_blend = self.catalog_stars_filtered_unmasked
         elif hasattr(self, 'catalog_stars') and self.catalog_stars is not None:
             catalog_for_blend = self.catalog_stars
@@ -9306,15 +9346,15 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
     def balanceCatalogMagnitude(self):
-        """
-        Balance catalog magnitude limit to have ~2x more catalog stars than detected stars.
+        """ Balance the catalog magnitude limit to have ~2x more catalog stars than detected stars.
 
-        This improves NN matching by ensuring a good ratio between detected and catalog stars.
-        Updates self.cat_lim_mag and reloads catalog_stars if needed.
+            This improves NN matching by ensuring a good ratio between detected and catalog stars.
+            Updates self.cat_lim_mag (and the config) and reloads catalog_stars if needed.
 
-        Returns:
-            bool: True if balancing was performed, False otherwise.
+        Return:
+            [bool] True if balancing was performed, False otherwise.
         """
+
         # Get current FF file name
         ff_name_c = convertFRNameToFF(self.img_handle.name())
 
@@ -9345,8 +9385,8 @@ class PlateTool(QtWidgets.QMainWindow):
         target_min = int(n_detected * 1.5)
         target_max = int(n_detected * 2.5)
 
+        # Already in range
         if target_min <= n_catalog <= target_max:
-            # Already in range
             print("Catalog balance OK: {} catalog stars for {} detected (target {}-{})".format(
                 n_catalog, n_detected, target_min, target_max))
             return False
@@ -9356,25 +9396,29 @@ class PlateTool(QtWidgets.QMainWindow):
             n_catalog, n_detected))
         print("  Target range: {:d} - {:d} catalog stars".format(target_min, target_max))
 
-        # Binary search for optimal magnitude limit
-        # Use actual current limit, not config default (user may have adjusted with +/-)
+        # Binary search for optimal magnitude limit. Use actual current limit, not config default (user
+        #   may have adjusted with +/-)
         original_mag_limit = self.cat_lim_mag
         current_mag_limit = original_mag_limit
         mag_low, mag_high = 3.0, 12.0
         best_mag_limit = current_mag_limit
         best_n_catalog = n_catalog
 
-        for iteration in range(10):  # Max 10 iterations
+        # Max 10 iterations
+        for iteration in range(10):
+
+            # Need more catalog stars - increase mag limit
             if n_catalog < target_min:
-                # Need more catalog stars - increase mag limit
                 mag_low = current_mag_limit
                 current_mag_limit = (current_mag_limit + mag_high) / 2.0
+
+            # Too many catalog stars - decrease mag limit
             elif n_catalog > target_max:
-                # Too many catalog stars - decrease mag limit
                 mag_high = current_mag_limit
                 current_mag_limit = (mag_low + current_mag_limit) / 2.0
+
+            # In range, done
             else:
-                # In range, done
                 break
 
             # Reload catalog with new limit
@@ -9400,7 +9444,8 @@ class PlateTool(QtWidgets.QMainWindow):
                 break
 
             # Track best result so far
-            if abs(n_catalog - (target_min + target_max)/2) < abs(best_n_catalog - (target_min + target_max)/2):
+            if abs(n_catalog - (target_min + target_max)/2) \
+                < abs(best_n_catalog - (target_min + target_max)/2):
                 best_mag_limit = current_mag_limit
                 best_n_catalog = n_catalog
 
