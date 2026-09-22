@@ -73,6 +73,22 @@ GMN_CATALOG_DTYPE_V2 = np.dtype([
 ])
 
 
+class UnsupportedCatalogVersionError(ValueError):
+    """ The GMN catalog file is intact but in a format (column count) this reader does not support, e.g. a
+        catalog version newer than this RMS version. Such a file must not be treated as corrupt, deleted and
+        re-downloaded (it would be the same file again on every start).
+    """
+    pass
+
+
+# Errors which mean that the catalog file cannot be read by this process although the file itself may be
+#   fine (e.g. wrong permissions), so it must not be deleted. PermissionError does not exist in Python 2
+try:
+    CATALOG_ACCESS_ERRORS = (PermissionError,)
+except NameError:
+    CATALOG_ACCESS_ERRORS = ()
+
+
 def gmnCatalogDtype(num_columns):
     """ Select the GMN catalog dtype based on the number of columns declared in the header.
 
@@ -92,7 +108,7 @@ def gmnCatalogDtype(num_columns):
         return GMN_CATALOG_DTYPE_V2
 
     # Any other column count is a format this reader does not know how to decode
-    raise ValueError("Unsupported GMN star catalog format: {:d} columns declared in the header "
+    raise UnsupportedCatalogVersionError("Unsupported GMN star catalog format: {:d} columns declared in the header "
                      "(expected 18 for v1 or 20 for v2)".format(num_columns))
 
 
@@ -232,6 +248,11 @@ def loadGMNCatalog(dir_path, use_full_catalog, full_name, full_url, fallback_nam
             try:
                 return loadGMNStarCatalog(full_path, catalog_file=full_name, **load_kwargs)
 
+            # An unsupported (e.g. newer) catalog version or a file this process may not read is not
+            #   corrupt - keep it and fall back to the bundled catalog
+            except (UnsupportedCatalogVersionError,) + CATALOG_ACCESS_ERRORS as e:
+                print("Full star catalog '{}' cannot be used ({}), keeping the file.".format(full_name, e))
+
             except CORRUPT_CATALOG_ERRORS as e:
                 print("Full star catalog '{}' is corrupt ({}) - re-downloading.".format(full_name, e))
                 removeFileSilently(full_path)
@@ -240,6 +261,8 @@ def loadGMNCatalog(dir_path, use_full_catalog, full_name, full_url, fallback_nam
                 if downloadCatalog(full_url, dir_path, full_name):
                     try:
                         return loadGMNStarCatalog(full_path, catalog_file=full_name, **load_kwargs)
+                    except (UnsupportedCatalogVersionError,) + CATALOG_ACCESS_ERRORS as e2:
+                        print("Re-downloaded catalog cannot be used ({}), keeping the file.".format(e2))
                     except CORRUPT_CATALOG_ERRORS as e2:
                         print("Re-downloaded catalog still unreadable ({}).".format(e2))
                         removeFileSilently(full_path)
@@ -426,12 +449,24 @@ def loadGMNStarCatalog(file_path,
             num_columns = int(np.fromfile(fid, dtype=np.uint32, count=1)[0])
             fid.read(declared_header_size - 12)  # Skip column names
 
-            # Select data types based on number of columns (v1=18, v2=20)
-            data_types = gmnCatalogDtype(num_columns)
+            # Select data types based on number of columns (v1=18, v2=20). An unknown column count is
+            #   only reported as an unsupported version if the data itself is intact (decompresses), a
+            #   garbled header of a corrupt file must still be reported as corruption
+            try:
+                data_types = gmnCatalogDtype(num_columns)
+                unsupported_error = None
+            except UnsupportedCatalogVersionError as e:
+                data_types = None
+                unsupported_error = e
 
             # Read and decompress the catalog data
             compressed_data = fid.read()
             decompressed_data = zlib.decompress(compressed_data)
+
+            # The file is intact, but its format is not supported
+            if unsupported_error is not None:
+                raise unsupported_error
+
             catalog_data = np.frombuffer(decompressed_data, dtype=data_types, count=num_rows)
 
         # Cache the catalog data for future use
