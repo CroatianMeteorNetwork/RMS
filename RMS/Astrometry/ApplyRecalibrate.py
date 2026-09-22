@@ -1027,8 +1027,12 @@ def recalibrateIndividualFFsAndApplyAstrometry(
                             # Only use neighbours with a usable photometric solution. Averaging in a
                             #   non-finite value would make the average non-finite and, as the average is
                             #   written back to all neighbours, the non-finite value would spread to all
-                            #   FF files of the night through overlapping neighbourhoods
+                            #   FF files of the night through overlapping neighbourhoods. A zero standard
+                            #   deviation marks a degenerate fit (not calibrated), which is skipped too
                             if not (np.isfinite(mag_lev_tmp) and np.isfinite(mag_lev_stddev_tmp)):
+                                continue
+
+                            if mag_lev_stddev_tmp <= 0:
                                 continue
 
                             photom_offset_tmp_list.append(mag_lev_tmp)

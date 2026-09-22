@@ -381,11 +381,20 @@ def photometryFit(px_intens_list, radius_list, catalog_mags, fixed_vignetting=No
         exclude_list = np.array(exclude_list, dtype=np.int32)
 
 
-    # Filter the data points to exclude the ones which are marked for exclusion
-    px_intens_list_fit = np.array(px_intens_list)[exclude_list == 0]
-    radius_list_fit = np.array(radius_list)[exclude_list == 0]
-    catalog_mags_fit = np.array(catalog_mags)[exclude_list == 0]
-    weights_fit = np.array(weights)[exclude_list == 0]
+    # Select the data points used for the fit: skip the ones marked for exclusion and the ones which cannot
+    #   be fitted - an intensity <= 0 has no logarithm, and a single NaN would make the cost NaN, in which
+    #   case the optimizer returns the initial guess (mag_lev = 10) as if it were a fit
+    px_intens_arr = np.array(px_intens_list, dtype=np.float64)
+    radius_arr = np.array(radius_list, dtype=np.float64)
+    catalog_mags_arr = np.array(catalog_mags, dtype=np.float64)
+    fit_mask = (exclude_list == 0) & np.isfinite(px_intens_arr) & (px_intens_arr > 0) \
+        & np.isfinite(radius_arr) & np.isfinite(catalog_mags_arr)
+
+    # Filter the data points
+    px_intens_list_fit = px_intens_arr[fit_mask]
+    radius_list_fit = radius_arr[fit_mask]
+    catalog_mags_fit = catalog_mags_arr[fit_mask]
+    weights_fit = np.array(weights)[fit_mask]
 
     # Fit a line to the star data, where only the intercept has to be estimated
     p0 = [10.0, 0.0]
@@ -400,13 +409,13 @@ def photometryFit(px_intens_list, radius_list, catalog_mags, fixed_vignetting=No
 
     photom_params = (photom_offset, vignetting_coeff)
 
-    # Calculate the fit residuals
-    fit_resids = np.array(catalog_mags) - photomLine((np.array(px_intens_list), np.array(radius_list)), \
-        *photom_params)
+    # Calculate the fit residuals (NaN for the data points which could not be fitted)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        fit_resids = catalog_mags_arr - photomLine((px_intens_arr, radius_arr), *photom_params)
     
-    # Compute the fit standard deviation excluding the excluded data points and including the weights
+    # Compute the fit standard deviation of the fitted data points, including the weights
     #fit_stddev = np.std(fit_resids[exclude_list == 0])
-    fit_stddev = np.sqrt(np.sum(weights_fit*(fit_resids[exclude_list == 0])**2)/np.sum(weights_fit))
+    fit_stddev = np.sqrt(np.sum(weights_fit*(fit_resids[fit_mask])**2)/np.sum(weights_fit))
 
     return photom_params, fit_stddev, fit_resids
 
