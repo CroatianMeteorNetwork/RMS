@@ -9895,6 +9895,11 @@ class PlateTool(QtWidgets.QMainWindow):
             self.img_zoom.loadImage(self.mode, self.img_type_flag)
             self.img.loadImage(self.mode, self.img_type_flag)
 
+            # On the Mask tab with the flat as the background, keep showing the flat
+            if self.isMaskTabCurrent() and self.mask_use_flat_background \
+                and (self.flat_image_data is not None):
+                self.img.setImage(self.flat_image_data.T)
+
             # remove markers
             self.calstar_markers.setData(pos=[])
             self.calstar_markers2.setData(pos=[])

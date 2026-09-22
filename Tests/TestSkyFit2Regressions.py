@@ -1241,3 +1241,18 @@ def testHelpFromMaskTabLeavesMaskModes(plateTool, qapp):
     assert not pt.mask_brush_mode
     assert not pt.brush_cursor.isVisible()
     assert pt.img_frame.panning_enabled
+
+
+def testNextImageKeepsMaskFlatBackground(plateTool):
+    """ Changing the image on the Mask tab keeps the flat shown as the mask editing background. """
+
+    pt = plateTool
+    flat = np.full((720, 1280), 77, np.uint8)
+    pt.flat_image_data = flat
+    pt.mask_use_flat_background = True
+    _openMaskTab(pt)
+    assert np.all(pt.img.image == 77)
+
+    pt.nextImg(n=1)
+
+    assert np.all(pt.img.image == 77)
