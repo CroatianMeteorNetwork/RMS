@@ -2849,20 +2849,45 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         y_coeffs_fwd = pp.extractRadialCoeffs(pp.y_poly_fwd)
         y_coeffs_rev = pp.extractRadialCoeffs(pp.y_poly_rev)
 
-        # Only stash non-zero values, a zero means the coefficient is unused for the current type
+        # Only stash non-zero values, a zero means the coefficient is unused for the current type. With a
+        #   forced distortion centre the centre is not a fitted value (whatever extractRadialCoeffs reports
+        #   for it), so it must not replace a stashed free centre
         if x_coeffs_fwd is not None:
-            for key, val in x_coeffs_fwd.items():
-                if val != 0.0:
-                    self._coeff_stash['x_fwd'][key] = val
-            for key, val in x_coeffs_rev.items():
-                if val != 0.0:
-                    self._coeff_stash['x_rev'][key] = val
-            for key, val in y_coeffs_fwd.items():
-                if val != 0.0:
-                    self._coeff_stash['y_fwd'][key] = val
-            for key, val in y_coeffs_rev.items():
-                if val != 0.0:
-                    self._coeff_stash['y_rev'][key] = val
+            for stash_key, coeffs in (('x_fwd', x_coeffs_fwd), ('x_rev', x_coeffs_rev),
+                                      ('y_fwd', y_coeffs_fwd), ('y_rev', y_coeffs_rev)):
+                for key, val in coeffs.items():
+                    if pp.force_distortion_centre and (key in ('x0', 'y0')):
+                        continue
+                    if val != 0.0:
+                        self._coeff_stash[stash_key][key] = val
+
+    @staticmethod
+    def _isEmptyCoeff(pp, key, val):
+        """ Check if a radial coefficient holds no fitted value and may be restored from the stash.
+
+            Zero means unused. For the distortion centre, the forced centre value (0.5/(res/2), what
+            CyFunctions uses with force_distortion_centre, and what extractRadialCoeffs may report then)
+            is not a fitted value either.
+
+        Arguments:
+            pp: [Platepar] The platepar.
+            key: [str] Logical coefficient name ('x0', 'y0', 'k1', ...).
+            val: [float] Current value.
+
+        Return:
+            [bool] True if the value can be replaced by the stashed one.
+        """
+
+        if val == 0.0:
+            return True
+
+        if key == 'x0':
+            return bool(np.isclose(val, 0.5/(pp.X_res/2.0)))
+
+        if key == 'y0':
+            return bool(np.isclose(val, 0.5/(pp.Y_res/2.0)))
+
+        return False
 
     def _restoreCoeffsFromStash(self):
         """ Restore stashed coefficient values where the current values are zero and rebuild the
@@ -2884,19 +2909,12 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
 
         if x_coeffs_fwd is not None:
 
-            # Restore stashed values where current value is zero
-            for key, val in self._coeff_stash['x_fwd'].items():
-                if x_coeffs_fwd.get(key, 0.0) == 0.0:
-                    x_coeffs_fwd[key] = val
-            for key, val in self._coeff_stash['x_rev'].items():
-                if x_coeffs_rev.get(key, 0.0) == 0.0:
-                    x_coeffs_rev[key] = val
-            for key, val in self._coeff_stash['y_fwd'].items():
-                if y_coeffs_fwd.get(key, 0.0) == 0.0:
-                    y_coeffs_fwd[key] = val
-            for key, val in self._coeff_stash['y_rev'].items():
-                if y_coeffs_rev.get(key, 0.0) == 0.0:
-                    y_coeffs_rev[key] = val
+            # Restore stashed values where the current value holds no fitted value
+            for stash_key, coeffs in (('x_fwd', x_coeffs_fwd), ('x_rev', x_coeffs_rev),
+                                      ('y_fwd', y_coeffs_fwd), ('y_rev', y_coeffs_rev)):
+                for key, val in self._coeff_stash[stash_key].items():
+                    if self._isEmptyCoeff(pp, key, coeffs.get(key, 0.0)):
+                        coeffs[key] = val
 
             # Rebuild coefficient arrays with restored values
             pp.x_poly_fwd = pp.buildRadialCoeffs(x_coeffs_fwd, pp.distortion_type)

@@ -1337,3 +1337,43 @@ def testCalibrationReportLMExcludesCappedAndSaturated():
 
     assert list(limitingMagnitudeExcludeMask(stars)) == [True, True, False]
     assert list(limitingMagnitudeExcludeMask(stars[:, :7])) == [True, False, False]
+
+
+@pytest.mark.parametrize("forced_centre_reported", [False, True])
+def testForcedCentreRoundTripRestoresFittedCentre(plateTool, monkeypatch, forced_centre_reported):
+    """ Forcing the distortion centre and releasing it again gives back the fitted free centre, whether
+        extractRadialCoeffs reports 0 (old) or the forced 0.5/(res/2) value (new) for a forced centre. """
+
+    from RMS.Formats.Platepar import Platepar
+
+    if forced_centre_reported:
+
+        orig_extract = Platepar.extractRadialCoeffs
+
+        def extractWithForcedCentre(self, x_poly=None):
+            coeffs = orig_extract(self, x_poly)
+            if (coeffs is not None) and self.force_distortion_centre:
+                coeffs['x0'] = 0.5/(self.X_res/2.0)
+                coeffs['y0'] = 0.5/(self.Y_res/2.0)
+            return coeffs
+
+        monkeypatch.setattr(Platepar, "extractRadialCoeffs", extractWithForcedCentre)
+
+    pt = plateTool
+    pm = pt.tab.param_manager
+    pp = pt.platepar
+    assert pp.distortion_type.startswith("radial")
+
+    pp.remapCoeffsForFlagChange('force_distortion_centre', False)
+    for name in ('x_poly_fwd', 'x_poly_rev'):
+        getattr(pp, name)[0] = 0.05
+        getattr(pp, name)[1] = -0.03
+    k_before = np.array(pp.x_poly_fwd[2:])
+
+    pm._remapCoeffsWithStash('force_distortion_centre', True)
+    pm._remapCoeffsWithStash('force_distortion_centre', False)
+
+    for name in ('x_poly_fwd', 'x_poly_rev'):
+        assert getattr(pp, name)[0] == pytest.approx(0.05)
+        assert getattr(pp, name)[1] == pytest.approx(-0.03)
+    assert np.allclose(pp.x_poly_fwd[2:], k_before)
