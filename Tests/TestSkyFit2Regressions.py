@@ -1645,3 +1645,38 @@ def testFileManagerSavesForeignPlateparUnderConfigName(plateTool, stationDir, tm
     saved.read(os.path.join(stationDir, pt.config.platepar_name))
     assert saved.RA_d == pytest.approx(pt.platepar.RA_d)
     assert not os.path.exists(os.path.join(stationDir, "foo_backup.cal"))
+
+
+@pytest.mark.parametrize("path", ["no_refinement", "too_few_pairs"])
+def testInitialParamsKeepsUserDistortionWithoutFinalFit(plateTool, monkeypatch, path):
+    """ When the full recalibration does not get to the final fit, the user's distortion model and flags
+        are kept and only the astrometry.net pointing is applied. """
+
+    from pyqtgraph.Qt import QtWidgets
+    from RMS.Formats.Platepar import Platepar
+
+    pt = plateTool
+    pp = pt.platepar
+    before = (pp.distortion_type, pp.equal_aspect, pp.asymmetry_corr, pp.force_distortion_centre,
+              pp.refraction, tuple(pp.x_poly_fwd), pp.F_scale)
+
+    solution = _astrometryNetStandIn(pt)
+    pt._solveAstrometryNet = lambda *a, **k: solution
+
+    if path == "no_refinement":
+        no = QtWidgets.QMessageBox.StandardButton.No
+        monkeypatch.setattr(QtWidgets.QMessageBox, "question", staticmethod(lambda *a, **k: no))
+
+    else:
+        # The NN fit only returns a few pairs
+        stars = np.array(pp.star_list)[:5]
+        monkeypatch.setattr(Platepar, "fitAstrometry",
+                            lambda self, *a, **k: (stars[:, 1:4], stars[:, 4:7]) if k.get('use_nn_cost')
+                            else None)
+
+    pt.getInitialParamsAstrometryNet(upload_image=False)
+
+    pp = pt.platepar
+    after = (pp.distortion_type, pp.equal_aspect, pp.asymmetry_corr, pp.force_distortion_centre,
+             pp.refraction, tuple(pp.x_poly_fwd), pp.F_scale)
+    assert after == before

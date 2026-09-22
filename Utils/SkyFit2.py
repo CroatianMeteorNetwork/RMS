@@ -14939,6 +14939,28 @@ class PlateTool(QtWidgets.QMainWindow):
         return solution
 
 
+    def _applyPointingToOriginalPlatepar(self, original_platepar, solution):
+        """ Put the platepar from before an auto fit back (distortion model, flags, scale) and apply the
+            astrometry.net pointing to it.
+
+            The solved scale is only used when the original platepar has no distortion, as a fitted
+            distortion model is calibrated together with its own scale.
+
+        Arguments:
+            original_platepar: [Platepar] Copy of the platepar from before the auto fit.
+            solution: [tuple] The astrometry.net solution, as returned by _solveAstrometryNet.
+        """
+
+        self._restorePlateparInPlace(self.platepar, copy.deepcopy(original_platepar))
+
+        has_distortion = any(np.any(np.asarray(getattr(self.platepar, name)) != 0)
+                             for name in ('x_poly_fwd', 'y_poly_fwd'))
+        if not has_distortion:
+            self.platepar.F_scale = solution[3]
+
+        self._applyAstrometryNetPointing(solution)
+
+
     def _applyAstrometryNetPointing(self, solution):
         """ Apply the astrometry.net pointing to the existing platepar, preserving the distortion.
 
@@ -15288,6 +15310,13 @@ class PlateTool(QtWidgets.QMainWindow):
                 QtWidgets.QMessageBox.StandardButton.Yes)
 
         if reply == QtWidgets.QMessageBox.StandardButton.No:
+
+            # Keep the user's distortion model and flags, only the astrometry.net pointing is applied
+            self._applyPointingToOriginalPlatepar(original_platepar, solution)
+            self.fit_only_pointing = user_fit_only_pointing
+            self.updateStars()
+            self.updateLeftLabels()
+
             self.status_bar.showMessage("Astrometry.net solution applied (no refinement)")
             return self.platepar
 
@@ -15459,14 +15488,11 @@ class PlateTool(QtWidgets.QMainWindow):
             # Update the display
             self.updateStars()
             self.status_bar.showMessage("Auto-fit complete: {:d} stars matched".format(len(self.paired_stars)))
-        # Restore the user's settings even if the fit failed
+        # Too few pairs to fit: keep the user's distortion model and flags, with the astrometry.net
+        #   pointing applied
         else:
 
-            self.platepar.equal_aspect = user_equal_aspect
-            self.platepar.asymmetry_corr = user_asymmetry_corr
-            self.platepar.force_distortion_centre = user_force_distortion_centre
-            self.platepar.setDistortionType(user_distortion_type, reset_params=True)
-            self.platepar.refraction = user_refraction
+            self._applyPointingToOriginalPlatepar(original_platepar, solution)
             self.fit_only_pointing = user_fit_only_pointing
 
             print("  Not enough matched stars for fitting (need >= 10)")
