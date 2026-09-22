@@ -1407,3 +1407,48 @@ def testStopPendingCaptureSkipsFinalizedSummary(tmp_path, monkeypatch):
 
     assert bc.stops == 1
     assert not os.path.exists(getRMSStyleFileName(night_dir, osm.OBSERVATION_SUMMARY_WORKING_NAME_JSON))
+
+
+# ---------------------------------------------------------------------------
+# Review 2, item 6: a child exiting normally delivers all its records through the exit hook
+
+def _childLogsAndReturns(q, n):
+    """ Child side: attach child logging, log n records and return normally. """
+
+    from RMS.Logger import initChildLogging
+
+    initChildLogging(q, None)
+    for i in range(n):
+        logging.getLogger('rmslogger').warning('record %d %s', i, 'y'*100)
+
+
+@posix_only
+@pytest.mark.parametrize('method', _startMethods())
+@pytest.mark.parametrize('n', [10, 5000])
+def testChildNormalExitDeliversAllRecords(method, n):
+    """ The bounded exit flush must not cut off records a live listener is still reading. """
+
+    import queue
+
+    ctx = multiprocessing.get_context(method)
+    q = ctx.Queue(100000)
+
+    p = ctx.Process(target=_childLogsAndReturns, args=(q, n))
+    p.start()
+
+    # Read like the listener until everything arrived or the child is gone and the queue is empty
+    got = 0
+    deadline = time.monotonic() + 30
+    while (got < n) and (time.monotonic() < deadline):
+        try:
+            q.get(timeout=1.0)
+            got += 1
+        except queue.Empty:
+            if not p.is_alive():
+                break
+
+    killed = _joinOrKill(p, 10)
+
+    assert not killed
+    assert p.exitcode == 0
+    assert got == n
