@@ -24,7 +24,7 @@ def makePlatepar(az_centre, alt_centre, pos_angle_ref=0.0, f_scale=14.5):
         f_scale: [float] Plate scale (px/deg).
 
     Return:
-        pp: [Platepar]
+        pp: [Platepar] Platepar with the reference pointing and the plate scale set.
     """
 
     pp = Platepar()

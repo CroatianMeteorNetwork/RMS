@@ -510,9 +510,9 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
         photom_offset, _ = photom_params
 
         # Fit the limiting magnitude model: log10(S/N) vs the calibrated (vignetting + extinction
-        # corrected) apparent magnitude. Use the full unfiltered matched set, aligned with the S/N column
-        # of the CALSTARS rows (column 6). Older CALSTARS files have no S/N column, in which case the
-        # limiting magnitude cannot be fit.
+        #   corrected) apparent magnitude. Use the full unfiltered matched set, aligned with the S/N
+        #   column of the CALSTARS rows (column 6). Older CALSTARS files have no S/N column, in which
+        #   case the limiting magnitude cannot be fit
         lm_info = None
         if image_stars.shape[1] > 6:
             lm_pred_mags = photomLine((lm_intens, lm_radius), photom_offset, platepar.vignetting_coeff)
@@ -557,8 +557,8 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
             + "\nVignetting coeff = {:.5f}".format(platepar.vignetting_coeff) \
             + "\nGamma = {:.2f}".format(platepar.gamma)
 
-        # Add the limiting magnitude model equation to the info string (the per-target LM values
-        # are shown by the axhline legend entries below, so only the equation is added here)
+        # Add the limiting magnitude model equation to the info string (the per-target LM values are
+        #   shown by the axhline legend entries below, so only the equation is added here)
         if lm_info is not None:
             photometry_info += "\n" + lm_info['eqn_str'].split('\n')[0]
 
@@ -580,8 +580,8 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
                     color=lm_colors.get(snr_target, 'm'),
                     label="LM = {:.2f} mag @ S/N = {:g}".format(lm_mag, snr_target))
 
-        # Split the legend so it does not crowd one corner and hide the data: the photometry
-        # calibration entries go top-left, the limiting-magnitude lines go bottom-right
+        # Split the legend so that it does not crowd one corner and hide the data: the photometry
+        #   calibration entries go top-left, the limiting magnitude lines go bottom-right
         handles, labels = ax_p.get_legend_handles_labels()
         main_handles = [(h, l) for h, l in zip(handles, labels) if '@ S/N' not in l]
         lm_handles = [(h, l) for h, l in zip(handles, labels) if '@ S/N' in l]

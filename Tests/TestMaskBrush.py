@@ -13,10 +13,15 @@ class TestPaintLayerCompositing:
     """ The paint layer must override the polygon fill. """
 
     def setup_method(self):
+        """ Set the size of the test image. """
+
         self.width = 100
         self.height = 80
 
+
     def test_polygon_only(self):
+        """ A polygon alone masks its interior and leaves the rest of the image unmasked. """
+
         polygons = [[(10, 10), (50, 10), (50, 50), (10, 50)]]
         mask = compositeMaskLayers(polygons, None, self.width, self.height)
         assert mask.shape == (self.height, self.width)
@@ -26,14 +31,20 @@ class TestPaintLayerCompositing:
         assert mask[0, 0] == 255
         assert mask[70, 90] == 255
 
+
     def test_brush_mask_only(self):
+        """ A brush painted disc masks its pixels when there are no polygons. """
+
         paint = np.zeros((self.height, self.width), dtype=np.uint8)
         cv2.circle(paint, (60, 40), 10, PAINT_MASKED, -1)
         mask = compositeMaskLayers([], paint, self.width, self.height)
         assert mask[40, 60] == 0
         assert mask[0, 0] == 255
 
+
     def test_brush_erase_inside_polygon(self):
+        """ A brush erased disc unmasks pixels which are inside a polygon. """
+
         polygons = [[(0, 0), (99, 0), (99, 79), (0, 79)]]
         paint = np.zeros((self.height, self.width), dtype=np.uint8)
         cv2.circle(paint, (50, 40), 10, PAINT_UNMASKED, -1)
@@ -42,7 +53,10 @@ class TestPaintLayerCompositing:
         assert mask[40, 50] == 255
         assert mask[0, 0] == 0
 
+
     def test_brush_overrides_polygon(self):
+        """ A single erased pixel overrides the polygon underneath it. """
+
         polygons = [[(20, 20), (40, 20), (40, 40), (20, 40)]]
         paint = np.zeros((self.height, self.width), dtype=np.uint8)
         paint[25, 25] = PAINT_UNMASKED
@@ -51,12 +65,16 @@ class TestPaintLayerCompositing:
         assert mask[25, 25] == 255
         assert mask[30, 30] == 0
 
+
     def test_empty_paint_layer_no_effect(self):
+        """ An all-zero paint layer renders the same mask as no paint layer at all. """
+
         polygons = [[(10, 10), (50, 10), (50, 50), (10, 50)]]
         paint = np.zeros((self.height, self.width), dtype=np.uint8)
         mask_with = compositeMaskLayers(polygons, paint, self.width, self.height)
         mask_without = compositeMaskLayers(polygons, None, self.width, self.height)
         np.testing.assert_array_equal(mask_with, mask_without)
+
 
     def test_mismatched_paint_layer_is_resampled(self):
         """ A paint layer saved for a smaller frame is scaled up with nearest-neighbour interpolation. """
@@ -73,6 +91,8 @@ class TestOverlayConsistency:
     """ The overlay (1 = masked) must show exactly the pixels the saved mask (0 = masked) masks. """
 
     def test_overlay_matches_mask(self):
+        """ The 1/0 overlay marks exactly the pixels which the 0/255 mask masks. """
+
         w, h = 100, 80
         polygons = [[(10, 10), (50, 10), (50, 50), (10, 50)]]
         paint = np.zeros((h, w), dtype=np.uint8)
@@ -90,6 +110,8 @@ class TestUndoSystem:
     """ Test the undo snapshot logic. """
 
     def test_undo_restores_previous_state(self):
+        """ Popping the history restores the paint layer as it was before each stroke. """
+
         h, w = 80, 100
         history = []
 
@@ -114,7 +136,10 @@ class TestUndoSystem:
         paint = history.pop()
         assert paint is None
 
+
     def test_max_undo_depth(self):
+        """ The history is capped at the maximum undo depth, dropping the oldest snapshots. """
+
         max_undo = 5
         history = []
         for i in range(10):
@@ -129,6 +154,8 @@ class TestResidualDetection:
     """ Loading a mask must recover polygons plus the raster residuals so the round trip is lossless. """
 
     def test_pure_polygon_mask_no_residual(self):
+        """ A mask made only of a rectangle decomposes back into a polygon with no residuals. """
+
         w, h = 100, 80
         polygons = [[(10, 10), (50, 10), (50, 50), (10, 50)]]
         mask = compositeMaskLayers(polygons, None, w, h)
@@ -140,7 +167,10 @@ class TestResidualDetection:
         assert residual is None
         assert maskRasterResiduals(mask, loaded_polygons) is None
 
+
     def test_brush_strokes_create_residual(self):
+        """ A brush painted mask survives the decompose/composite round trip without losing pixels. """
+
         w, h = 100, 80
         paint = np.zeros((h, w), dtype=np.uint8)
         cv2.circle(paint, (50, 40), 15, PAINT_MASKED, -1)
@@ -152,7 +182,10 @@ class TestResidualDetection:
         np.testing.assert_array_equal(mask, remask,
             err_msg="Brush stroke round-trip via residual detection lost pixels")
 
+
     def test_erase_inside_polygon_creates_residual(self):
+        """ A polygon with a brush erased hole survives the decompose/composite round trip. """
+
         w, h = 100, 80
         polygons = [[(0, 0), (99, 0), (99, 79), (0, 79)]]
         paint = np.zeros((h, w), dtype=np.uint8)
@@ -170,13 +203,18 @@ class TestResampleMaskLayers:
     """ A mask saved for another frame size is rescaled, polygons included. """
 
     def test_same_size_is_passthrough(self):
+        """ Rescaling to the same size returns the original objects untouched. """
+
         polygons = [[(10.0, 10.0), (50.0, 10.0), (50.0, 50.0)]]
         paint = np.zeros((80, 100), dtype=np.uint8)
         out_polygons, out_paint = resampleMaskLayers(polygons, paint, (100, 80), (100, 80))
         assert out_polygons is polygons
         assert out_paint is paint
 
+
     def test_polygons_and_paint_scale_together(self):
+        """ Both the polygons and the paint layer are scaled by the same factor. """
+
         polygons = [[(10, 10), (50, 10), (50, 50), (10, 50)]]
         paint = np.zeros((80, 100), dtype=np.uint8)
         paint[60:70, 60:70] = PAINT_MASKED
@@ -196,7 +234,10 @@ class TestResampleMaskLayers:
         assert large[130, 130] == small[65, 65] == 0
         assert large[150, 10] == small[75, 5] == 255
 
+
     def test_none_paint_stays_none(self):
+        """ A missing paint layer stays missing after the rescaling. """
+
         _, out_paint = resampleMaskLayers([], None, (100, 80), (50, 40))
         assert out_paint is None
 
@@ -205,12 +246,15 @@ class TestBrushSegment:
     """ The brush footprint must be the same disc along the whole stroke. """
 
     def test_first_point_is_a_disc(self):
+        """ The first point of a stroke stamps a full disc, not a single pixel. """
+
         paint = np.zeros((80, 100), dtype=np.uint8)
         center = paintBrushSegment(paint, None, (50, 40), 5, PAINT_MASKED)
         assert center == (50, 40)
         expected = np.zeros_like(paint)
         cv2.circle(expected, (50, 40), 5, PAINT_MASKED, -1)
         np.testing.assert_array_equal(paint, expected)
+
 
     def test_segment_ends_match_the_disc(self):
         """ Every point of a stroke gets the full disc, the start and end included. """
@@ -235,13 +279,19 @@ class TestBrushSegment:
         assert paint[10, 10] == 0
         assert paint[70, 90] == 0
 
+
     def test_coordinates_are_clamped(self):
+        """ A brush position far outside the image is clamped to the image edge. """
+
         paint = np.zeros((80, 100), dtype=np.uint8)
         center = paintBrushSegment(paint, None, (1e6, -1e6), 3, PAINT_MASKED)
         assert center == (99, 0)
         assert paint[0, 99] == PAINT_MASKED
 
+
     def test_erase_value(self):
+        """ Painting with the erase value unmasks the pixels under the brush. """
+
         paint = np.zeros((80, 100), dtype=np.uint8)
         paint[:] = PAINT_MASKED
         paintBrushSegment(paint, None, (50, 40), 4, PAINT_UNMASKED)
@@ -253,7 +303,11 @@ class TestCoordinateConsistency:
     """ Paint layer indexing is row = y, col = x. """
 
     def test_paint_at_specific_point(self):
-        w, h = 200, 150  # Non-square to catch axis swaps
+        """ The (x, y) brush position lands at the [y, x] index of the paint layer. """
+
+        # A non-square image is used to catch axis swaps
+        w, h = 200, 150
+
         paint = np.zeros((h, w), dtype=np.uint8)
         paintBrushSegment(paint, None, (180, 10), 5, PAINT_MASKED)
         assert paint[10, 180] == PAINT_MASKED
