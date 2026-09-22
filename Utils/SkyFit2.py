@@ -7153,39 +7153,23 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
     def invertMaskPolygons(self):
-        """ Invert the current mask by tracing the unmasked regions of the rendered mask image into new
-            polygons. The brush layer is dropped, as it is baked into the traced polygons. """
+        """ Invert the current mask exactly: the rendered mask image is inverted and decomposed into new
+            polygons, with any raster residuals in the paint layer. The brush undo history is dropped,
+            as the strokes are baked into the new layers. """
 
         if self.img.data is None:
             return
 
-        # Generate current binary mask
-        current_mask_img = self.generateMaskImage()
+        # Invert the rendered mask (0 = masked, 255 = unmasked), so masked and unmasked swap exactly,
+        #   including holes and brush strokes
+        inverted_mask_img = 255 - self.generateMaskImage()
 
-        # Find contours of the currently unmasked regions. current_mask_img has 0 for masked, 255 for
-        #   unmasked, and findContours finds the contours of regions with value 255
-        contours, _ = cv2.findContours(current_mask_img, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
-
-        self.mask_polygons = []
+        # Decompose it into editable polygons (holes become keyhole polygons) plus the raster residuals
+        self.mask_polygons, self.mask_paint_layer = decomposeMaskImage(inverted_mask_img)
         self.mask_current_polygon = []
-
-        for contour in contours:
-
-            # Approximate the contour to a polygon to reduce the number of vertices. epsilon is the
-            #   maximum distance from contour to approximated contour
-            epsilon = 0.002*cv2.arcLength(contour, True)
-            approx = cv2.approxPolyDP(contour, epsilon, True)
-
-            # Extract the points into a flat list of (x, y) coordinate tuples
-            points = [(float(pt[0][0]), float(pt[0][1])) for pt in approx]
-
-            # Only add to mask polygons if it has at least 3 points (a valid polygon)
-            if len(points) >= 3:
-                self.mask_polygons.append(points)
 
         print(f"Mask inverted: {len(self.mask_polygons)} new polygon(s) created.")
 
-        self.mask_paint_layer = None
         self.mask_brush_stroke_history = []
         self.tab.mask.setUndoEnabled(False)
         self.tab.mask.setUnsaved(True)

@@ -811,3 +811,26 @@ def testModeSwitchFromRemovedTabShowsExistingTab(plateTool, qapp):
 
     assert pt.tab.currentWidget() is not pt.tab.mask
     assert pt.img_frame.panning_enabled
+
+
+def testInvertMaskIsExact(plateTool, stationDir):
+    """ Inverting swaps masked and unmasked exactly, also for masks with holes. """
+
+    import cv2
+
+    pt = plateTool
+
+    # An all-sky style mask: a masked ring around an unmasked disc, plus a masked tree inside
+    mask_img = np.zeros((720, 1280), np.uint8)
+    cv2.circle(mask_img, (640, 360), 340, 255, -1)
+    cv2.rectangle(mask_img, (600, 600), (660, 690), 0, -1)
+    mask_path = os.path.join(stationDir, "allsky.bmp")
+    cv2.imwrite(mask_path, mask_img)
+    assert pt.loadMaskFromFile(mask_path)
+    assert np.array_equal(pt.generateMaskImage(), mask_img)
+
+    pt.invertMaskPolygons()
+    assert np.array_equal(pt.generateMaskImage(), 255 - mask_img)
+
+    pt.invertMaskPolygons()
+    assert np.array_equal(pt.generateMaskImage(), mask_img)
