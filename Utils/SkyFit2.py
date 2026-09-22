@@ -13391,18 +13391,21 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
     def tryQuickAlignment(self, pointing_only=False):
-        """ Try to align platepar using existing pointing as starting point.
+        """ Try to align the platepar using the existing pointing as the starting point.
 
-        Uses alignPlatepar() to refine pointing, then checks if the fit is good enough
-        by counting matched stars. If successful, performs NN-based astrometry fit.
+            alignPlatepar() is used to refine the pointing, and the fit is then checked by counting the
+            matched stars. If that succeeds, a full NN-based astrometry fit is performed. If any step
+            fails, False is returned so the caller can fall back to astrometry.net.
 
-        Arguments:
-            pointing_only: [bool] If True, skip NN RANSAC distortion fitting and only refine
-                pointing. Uses simple proximity matching instead. Preserves existing distortion.
+        Keyword arguments:
+            pointing_only: [bool] If True, skip the NN RANSAC distortion fitting and only refine the
+                pointing using simple proximity matching, preserving the existing distortion. False by
+                default.
 
-        Returns:
-            success: [bool] True if quick alignment succeeded and we can skip astrometry.net
+        Return:
+            success: [bool] True if the quick alignment succeeded and astrometry.net can be skipped.
         """
+
         print()
         print("Trying quick alignment with existing platepar...")
         self.status_bar.showMessage("Trying quick alignment...")
@@ -13425,11 +13428,12 @@ class PlateTool(QtWidgets.QMainWindow):
             print("  Less than 10 detected stars - falling back to astrometry.net")
             return False
 
-        # Get detected star coordinates (note: calstars format is [y, x, ...])
-        # CALSTARS format: Y(0) X(1) IntensSum(2) Ampltd(3) FWHM(4) BgLvl(5) SNR(6) NSatPx(7)
+        # Get the detected star coordinates. The CALSTARS format is:
+        #   Y(0) X(1) IntensSum(2) Ampltd(3) FWHM(4) BgLvl(5) SNR(6) NSatPx(7)
         det_y = detected_stars[:, 0]
         det_x = detected_stars[:, 1]
-        # Use index 2 (IntensSum/integrated intensity) not index 3 (Ampltd/peak amplitude)
+
+        # Use index 2 (IntensSum, the integrated intensity), not index 3 (Ampltd, the peak amplitude)
         det_intens = detected_stars[:, 2] if detected_stars.shape[1] > 2 else np.ones(len(det_x))
         det_fwhm = detected_stars[:, 4] if detected_stars.shape[1] > 4 else np.zeros(len(det_x))
         det_snr = detected_stars[:, 6] if detected_stars.shape[1] > 6 else np.ones(len(det_x))
@@ -13441,11 +13445,11 @@ class PlateTool(QtWidgets.QMainWindow):
         # Compute JD
         jd = date2JD(*calstars_time)
 
-        # Try alignPlatepar to refine pointing
-        # Pass full CALSTARS data so alignPlatepar can infer catalog LM from intensities
-
-        # Callback to update display when catalog LM changes during balancing
+        # Callback which updates the display when the catalog LM changes during balancing
         lm_callback = self._makeLMCallback()
+
+        # Try alignPlatepar to refine the pointing. The full CALSTARS data is passed so that
+        #   alignPlatepar can infer the catalog LM from the intensities
 
         try:
             pp_aligned, inferred_lm = alignPlatepar(self.config, self.platepar, calstars_time,
@@ -13454,12 +13458,12 @@ class PlateTool(QtWidgets.QMainWindow):
             print("  alignPlatepar failed: {} - falling back to astrometry.net".format(str(e)))
             return False
 
-        # Check if alignPlatepar returned the original platepar (same object = fit failed)
+        # Check if alignPlatepar returned the original platepar (the same object means the fit failed)
         if pp_aligned is self.platepar:
             print("  alignPlatepar did not converge - falling back to astrometry.net")
             return False
 
-        # alignPlatepar succeeded - proceed to full NN fit
+        # alignPlatepar succeeded, so proceed to the full NN fit
         print("  alignPlatepar succeeded: RA={:.2f} Dec={:.2f}".format(
             pp_aligned.RA_d, pp_aligned.dec_d))
         self.platepar = pp_aligned
@@ -13482,21 +13486,21 @@ class PlateTool(QtWidgets.QMainWindow):
         user_refraction = self.platepar.refraction
         user_fit_only_pointing = self.fit_only_pointing
 
-        # Filter catalog stars to those in FOV (prevents back-projection issues)
+        # Filter the catalog stars to those inside the FOV (prevents back-projection issues)
         _, catalog_stars_fov = self.filterCatalogStarsInsideFOV(self.catalog_stars)
 
         # Project FOV-filtered catalog to image coordinates
         catalog_x, catalog_y, _ = getCatalogStarsImagePositions(
             catalog_stars_fov, jd, self.platepar)
 
-        # Filter by image bounds
+        # Filter by the image bounds
         in_image = (catalog_x >= 0) & (catalog_x < self.platepar.X_res) & \
                    (catalog_y >= 0) & (catalog_y < self.platepar.Y_res)
         catalog_stars_filtered = catalog_stars_fov[in_image]
         catalog_x_filtered = catalog_x[in_image]
         catalog_y_filtered = catalog_y[in_image]
 
-        # Then filter by mask
+        # Then filter by the mask
         catalog_stars_filtered, _ = self.filterCatalogStarsByMask(
             catalog_x_filtered, catalog_y_filtered, catalog_stars_filtered)
 
@@ -13511,8 +13515,9 @@ class PlateTool(QtWidgets.QMainWindow):
             brightest_idx = np.argsort(catalog_stars_filtered[:, 2])[:nn_catalog_cap]
             catalog_stars_filtered = catalog_stars_filtered[brightest_idx]
 
+        # Pointing-only mode: use recalibrateFF, the same path as the night processing
         if pointing_only:
-            # --- Pointing-only mode: use recalibrateFF (same as night processing) ---
+
             print()
             print("Recalibrating pointing (same path as night processing)...")
             self.status_bar.showMessage("Recalibrating pointing...")
@@ -13521,9 +13526,10 @@ class PlateTool(QtWidgets.QMainWindow):
             # Build star_dict_ff in the format recalibrateFF expects: {jd: calstars_array}
             star_dict_ff = {jd: detected_stars}
 
-            # Run recalibrateFF — fits pointing + scale via Nelder-Mead, preserves distortion.
-            # Disable the star coverage gate - it guards the unattended nightly pipeline against
-            # chaining bad fits forward, but here the fit is user-triggered and visually inspected
+            # Run recalibrateFF, which fits the pointing and the scale via Nelder-Mead and preserves
+            #   the distortion. The star coverage gate is disabled here - it guards the unattended
+            #   nightly pipeline against chaining bad fits forward, but this fit is user-triggered and
+            #   visually inspected
             result, min_match_radius = recalibrateFF(
                 self.config, self.platepar, jd, star_dict_ff, self.catalog_stars,
                 ignore_distance_threshold=True, min_match_fraction=0.0
@@ -13537,7 +13543,8 @@ class PlateTool(QtWidgets.QMainWindow):
             print("  recalibrateFF succeeded (min match radius: {:.1f} px)".format(
                 min_match_radius))
 
-            # Populate paired_stars for GUI display by projecting catalog and matching
+            # Populate paired_stars for the GUI display by projecting the catalog and matching it to the
+            #   detected stars
             cat_x_proj, cat_y_proj, _ = getCatalogStarsImagePositions(
                 catalog_stars_filtered, jd, self.platepar)
 
@@ -13565,23 +13572,24 @@ class PlateTool(QtWidgets.QMainWindow):
 
             return True
 
+        # Full mode: NN RANSAC fit with distortion
         else:
-            # --- Full mode: NN RANSAC fit with distortion ---
 
-            # Use standard fitting settings for NN fit, but KEEP existing distortion params
-            # The aligned platepar from alignPlatepar() has good pointing AND distortion coefficients
-            # Setting reset_params=True would zero out distortion and cause RANSAC to diverge
-            # IMPORTANT: Use remapCoeffsForFlagChange() when changing flags that affect coefficient structure
+            # Use the standard fitting settings for the NN fit, but KEEP the existing distortion
+            #   parameters. The aligned platepar from alignPlatepar() has a good pointing AND distortion
+            #   coefficients, and setting reset_params=True would zero out the distortion and make RANSAC
+            #   diverge. remapCoeffsForFlagChange() must be used when changing flags that affect the
+            #   coefficient structure
             self.platepar.refraction = True
             self.platepar.remapCoeffsForFlagChange('equal_aspect', True)
             self.platepar.remapCoeffsForFlagChange('asymmetry_corr', False)
             self.platepar.remapCoeffsForFlagChange('force_distortion_centre', False)
             self.platepar.setDistortionType("radial5-odd", reset_params=False)
 
-            # Prepare detected stars array for NN fit
+            # Prepare the detected stars array for the NN fit
             img_stars_arr = np.column_stack([det_x, det_y, det_intens])
 
-            # Perform full NN-based fit
+            # Perform the full NN-based fit
             print()
             print("NN-based fitting...")
             print("  Starting from: RA={:.2f} Dec={:.2f} Scale={:.3f} arcmin/px".format(
@@ -13591,12 +13599,12 @@ class PlateTool(QtWidgets.QMainWindow):
             QtWidgets.QApplication.processEvents()
 
             try:
-                # Load tuned catalog if available for final fitting stages
+                # Load the tuned catalog, if available, for the final fitting stages
                 tuned_catalog = None
                 if getattr(self, 'catalog_lm_tuned', False) and hasattr(self, 'tuned_cat_lim_mag'):
                     tuned_catalog = self.loadCatalogStars(self.tuned_cat_lim_mag)
 
-                # Callback to update display at each RANSAC iteration (visual debugging)
+                # Callback which updates the display at each RANSAC iteration (visual debugging)
                 iteration_callback = self._makeIterationCallback()
 
                 ransac_result = self.platepar.fitAstrometry(
@@ -13612,7 +13620,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 print("  NN fit failed: {} - falling back to astrometry.net".format(str(e)))
                 return False
 
-            # Populate paired_stars directly from RANSAC matched pairs
+            # Populate paired_stars directly from the RANSAC matched pairs
             self.paired_stars = PairedStars()
 
             if ransac_result is not None:
@@ -13622,7 +13630,7 @@ class PlateTool(QtWidgets.QMainWindow):
                     cat_star = catalog_matched[i]
                     sky_obj = CatalogStar(cat_star[0], cat_star[1], cat_star[2])
 
-                    # Look up FWHM, SNR, and saturation from detected stars
+                    # Look up the FWHM, SNR and saturation from the detected stars
                     fwhm, snr, saturated = 2.5, 1.0, False
                     if len(det_x) > 0:
                         distances = np.sqrt((det_x - img_x)**2 + (det_y - img_y)**2)
@@ -13643,21 +13651,22 @@ class PlateTool(QtWidgets.QMainWindow):
 
             print("  Matched {} star pairs".format(len(self.paired_stars)))
 
-        # Restore user's distortion settings for final refinement fit
-        # Use remapCoeffsForFlagChange to properly handle coefficient structure changes
+        # Restore the user's distortion settings for the final refinement fit.
+        #   remapCoeffsForFlagChange is used to properly handle the coefficient structure changes
         self.platepar.remapCoeffsForFlagChange('equal_aspect', user_equal_aspect)
         self.platepar.remapCoeffsForFlagChange('asymmetry_corr', user_asymmetry_corr)
         self.platepar.remapCoeffsForFlagChange('force_distortion_centre', user_force_distortion_centre)
         self.platepar.refraction = user_refraction
         self.fit_only_pointing = user_fit_only_pointing
-        # Now set distortion type which will adjust poly_length and pad coefficients
-        # Use reset_params=False to preserve the fitted coefficients, just add zeros for new terms
+
+        # Now set the distortion type, which will adjust poly_length and pad the coefficients.
+        #   reset_params=False preserves the fitted coefficients and only adds zeros for the new terms
         self.platepar.setDistortionType(user_distortion_type, reset_params=False)
 
         # Filter photometric outliers and blended stars before the final fit
         self._filterPairsBeforeFinalFit()
 
-        # Do a final fit with user's distortion settings
+        # Do a final fit with the user's distortion settings
         if len(self.paired_stars) >= 10:
             if pointing_only:
                 print("Final pointing-only fit...")
@@ -13669,7 +13678,7 @@ class PlateTool(QtWidgets.QMainWindow):
             # Sigma-clip gross positional mispairs that survived NN/RANSAC, then refit once
             self._sigmaClipPairsAndRefit()
 
-        # Restore fit_only_pointing after pointing-only fit
+        # Restore fit_only_pointing after the pointing-only fit
         self.fit_only_pointing = user_fit_only_pointing
 
         # Reset photometry fit residuals
@@ -13681,10 +13690,11 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
     def testQuickAlignWithConfigMagLimit(self):
-        """ Test quick align using config.catalog_mag_limit (simulates CheckFit/ApplyRecalibrate).
+        """ Test the quick align using config.catalog_mag_limit, which simulates what CheckFit and
+            ApplyRecalibrate do.
 
-        This is a diagnostic tool to test how NNalign performs with the same catalog
-        that CheckFit and ApplyRecalibrate would use.
+            This is a diagnostic tool which tests how NNalign performs with the same catalog that
+            CheckFit and ApplyRecalibrate would use.
         """
 
         print(flush=True)
@@ -13694,16 +13704,16 @@ class PlateTool(QtWidgets.QMainWindow):
         print("      (Current SkyFit2 cat_lim_mag = {:.1f})".format(self.cat_lim_mag), flush=True)
         print("=" * 70, flush=True)
 
-        # Store original platepar values to verify it's not modified
+        # Store the original platepar values to verify that the platepar is not modified
         orig_ra = self.platepar.RA_d
         orig_dec = self.platepar.dec_d
         orig_rot = self.platepar.pos_angle_ref
         print("  BEFORE: RA={:.4f} Dec={:.4f} Rot={:.4f}".format(orig_ra, orig_dec, orig_rot), flush=True)
 
-        # Get detected stars from current image (same as tryQuickAlignment)
+        # Get the detected stars from the current image (the same as tryQuickAlignment does)
         ff_name_c = self.img_handle.current_ff_file if hasattr(self.img_handle, 'current_ff_file') else None
 
-        # Use override data if enabled and available, otherwise use original CALSTARS
+        # Use the override data if it is enabled and available, otherwise use the original CALSTARS
         detected_stars = None
         if self.star_detection_override_enabled and ff_name_c in self.star_detection_override_data:
             detected_stars = np.array(self.star_detection_override_data[ff_name_c])
@@ -13715,7 +13725,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 0 if detected_stars is None else len(detected_stars)), flush=True)
             return
 
-        # Get time for current image
+        # Get the time of the current image
         if hasattr(self.img_handle, 'currentFrameTime'):
             calstars_time = list(self.img_handle.currentFrameTime(dt_obj=False))
             if len(calstars_time) == 6:
@@ -13729,12 +13739,12 @@ class PlateTool(QtWidgets.QMainWindow):
         print("  Image time: {}-{:02d}-{:02d} {:02d}:{:02d}:{:02d}".format(*calstars_time[:6]), flush=True)
         sys.stdout.flush()
 
-        # Call alignPlatepar (same as CheckFit/ApplyRecalibrate would)
-        # Pass full CALSTARS data so alignPlatepar can infer catalog LM from intensities
+        # Call alignPlatepar, the same as CheckFit/ApplyRecalibrate would. The full CALSTARS data is
+        #   passed so that alignPlatepar can infer the catalog LM from the intensities
         print("  Calling alignPlatepar()...", flush=True)
         sys.stdout.flush()
 
-        # Callback to update display when catalog LM changes during balancing
+        # Callback which updates the display when the catalog LM changes during balancing
         lm_callback = self._makeLMCallback()
 
         try:
@@ -13745,18 +13755,18 @@ class PlateTool(QtWidgets.QMainWindow):
             traceback.print_exc()
             return
 
-        # Check if original platepar was modified (it shouldn't be!)
+        # Check if the original platepar was modified (it should not be!)
         if self.platepar.RA_d != orig_ra or self.platepar.dec_d != orig_dec:
             print("  WARNING: Original platepar was MODIFIED! This is a bug!", flush=True)
             print("    RA: {:.4f} -> {:.4f}".format(orig_ra, self.platepar.RA_d), flush=True)
             print("    Dec: {:.4f} -> {:.4f}".format(orig_dec, self.platepar.dec_d), flush=True)
 
-        # Check if platepar changed
+        # Check if the platepar changed
         if pp_aligned is self.platepar:
             print("  alignPlatepar returned ORIGINAL platepar (fit failed or drift exceeded)", flush=True)
             return
 
-        # Report results
+        # Report the results
         print("  alignPlatepar result:", flush=True)
         print("    RA:  {:.4f} -> {:.4f} deg (delta: {:.4f})".format(
             orig_ra, pp_aligned.RA_d, pp_aligned.RA_d - orig_ra), flush=True)
@@ -13776,7 +13786,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.platepar.rotation_from_horiz = rotationWrtHorizon(self.platepar)
         self.platepar.updateRefAltAz()
 
-        # Update display
+        # Update the display
         self.updateStars()
         self.updateLeftLabels()
         self.updateDistortion()
@@ -13789,12 +13799,15 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
     def findBestFrame(self):
-        """ Find the frame with the best star distribution for calibration.
+        """ Find the frame with the best star distribution for the calibration.
 
-        Uses the CALSTARS data to score each frame based on spatial distribution
-        of detected stars. Navigates to the best frame.
+            The CALSTARS data is used to score each frame based on the spatial distribution of the
+            detected stars. The user is then offered to either auto fit on the best frame (creating a
+            placeholder image if the image itself is not on disk), or to navigate to the best frame for
+            which an image is available.
         """
-        # Check if we have CALSTARS data
+
+        # Check that there is either CALSTARS data or re-detected star data
         has_calstars = hasattr(self, 'calstars') and self.calstars and len(self.calstars) > 0
         has_overrides = (hasattr(self, 'star_detection_override_data')
                          and self.star_detection_override_data)
@@ -13806,7 +13819,7 @@ class PlateTool(QtWidgets.QMainWindow):
             )
             return
 
-        # Check if we have a multi-image handle with ff_list
+        # Check that the image handle is a multi-image handle with an ff_list
         if not hasattr(self.img_handle, 'ff_list'):
             QtWidgets.QMessageBox.warning(
                 self, "Single Image",
@@ -13817,25 +13830,27 @@ class PlateTool(QtWidgets.QMainWindow):
         self.status_bar.showMessage("Finding best frame...")
         QtWidgets.QApplication.processEvents()
 
-        # Get image dimensions from config
+        # Get the image dimensions from the config
         img_width = self.config.width
         img_height = self.config.height
 
-        # Merge star data: start with original CALSTARS, override per-image
-        # where re-detected data exists
+        # Merge the star data: start with the original CALSTARS and override it per image where
+        #   re-detected data exists
         merged_calstars = dict(self.calstars) if has_calstars else {}
         if has_overrides:
             merged_calstars.update(self.star_detection_override_data)
 
-        # Build set of available image filenames (basenames only), excluding placeholders
+        # Build the set of available image file names (basenames only), excluding the placeholders
         available_images = set()
         for ff_path in self.img_handle.ff_list:
+
             basename = os.path.basename(ff_path)
-            # Skip placeholder images
+
+            # Skip the placeholder images
             if "_placeholder" not in basename:
                 available_images.add(basename)
 
-        # Find the best frame from all merged data
+        # Find the best frame using all the merged data
         best_ff, best_score, all_scores = selectBestFrame(
             merged_calstars, img_width, img_height, verbose=False
         )
@@ -13848,10 +13863,10 @@ class PlateTool(QtWidgets.QMainWindow):
             self.status_bar.showMessage("Best frame search failed")
             return
 
-        # Check if best frame is available in the image list
+        # Check if the best frame is available in the image list
         best_ff_available = best_ff in available_images
 
-        # Find best frame among only available images
+        # Find the best frame among the available images only
         calstars_available = {k: v for k, v in merged_calstars.items() if k in available_images}
 
         if len(calstars_available) == 0:
@@ -13870,11 +13885,13 @@ class PlateTool(QtWidgets.QMainWindow):
         selected_ff = None
         selected_score = None
 
+        # Ask the user what to do with the best frame
         if best_available_ff is not None:
+
             msg_box = QtWidgets.QMessageBox(self)
             msg_box.setWindowTitle("Best Frame for Calibration")
 
-            # Get star counts for display
+            # Get the star counts for the display
             n_stars_best = len(merged_calstars.get(best_ff, []))
             n_stars_available = len(merged_calstars.get(best_available_ff, []))
 
@@ -13899,10 +13916,13 @@ class PlateTool(QtWidgets.QMainWindow):
 
             clicked = msg_box.clickedButton()
 
+            # Auto fit on the best frame
             if clicked == auto_fit_btn:
+
+                # Image on disk - navigate to it and use the standard auto-fit, which tries the quick
+                #   alignment with the existing platepar first
                 if best_ff in available_images:
-                    # Image on disk - navigate to it and use the standard auto-fit
-                    # (which tries quick alignment with the existing platepar first)
+
                     target_index = None
                     for i, ff_path in enumerate(self.img_handle.ff_list):
                         if os.path.basename(ff_path) == best_ff:
@@ -13917,11 +13937,14 @@ class PlateTool(QtWidgets.QMainWindow):
 
                     self.autoFitAstrometryNet()
 
+                # Image not on disk - create a placeholder, navigate to it, then fit
                 else:
-                    # Image not on disk - create placeholder, navigate to it, then fit
+
+                    # Make a uniform dark background
                     height, width = self.config.height, self.config.width
                     placeholder = np.full((height, width), 24, dtype=np.uint8)
 
+                    # Draw diagonal stripes on the placeholder so it is clearly not a real image
                     stripe_width = 40
                     stripe_spacing = 80
                     for i in range(-(height + width), height + width, stripe_spacing):
@@ -13931,6 +13954,7 @@ class PlateTool(QtWidgets.QMainWindow):
                             valid = (x_coords >= 0) & (x_coords < width)
                             placeholder[y_coords[valid], x_coords[valid]] = 40
 
+                    # Save the placeholder next to the data, named after the best FF file
                     base_name = os.path.splitext(best_ff)[0]
                     placeholder_name = f"{base_name}_placeholder.png"
                     placeholder_path = os.path.join(self.dir_path, placeholder_name)
@@ -13939,10 +13963,11 @@ class PlateTool(QtWidgets.QMainWindow):
                     img_pil.save(placeholder_path)
                     print(f"Created placeholder image: {placeholder_path}")
 
+                    # Carry the detected stars over to the placeholder image
                     if best_ff in self.calstars:
                         self.calstars[placeholder_name] = self.calstars[best_ff]
 
-                    # Refresh file list and navigate to placeholder
+                    # Refresh the file list and navigate to the placeholder
                     self.img_handle = detectInputTypeFolder(
                         self.dir_path, self.config,
                         beginning_time=None, fps=self.fps
@@ -13966,16 +13991,20 @@ class PlateTool(QtWidgets.QMainWindow):
 
                 return
 
+            # Only navigate to the best frame which has an image
             elif clicked == navigate_btn:
+
                 if best_ff_available:
                     selected_ff = best_ff
                     selected_score = best_score
                 else:
                     selected_ff = best_available_ff
                     selected_score = best_available_score
+            # The dialog was cancelled
             else:
                 self.status_bar.showMessage("Best frame search cancelled")
                 return
+
         else:
             QtWidgets.QMessageBox.warning(
                 self, "No Valid Frame",
@@ -13984,15 +14013,15 @@ class PlateTool(QtWidgets.QMainWindow):
             self.status_bar.showMessage("No valid frame found")
             return
 
-        # Find the index of selected frame in ff_list
+        # Find the index of the selected frame in ff_list
         target_index = None
         for i, ff_name in enumerate(self.img_handle.ff_list):
             if os.path.basename(ff_name) == selected_ff or ff_name == selected_ff:
                 target_index = i
                 break
 
+        # This should not happen at this point, but handle it gracefully
         if target_index is None:
-            # Should not happen at this point, but handle gracefully
             self.status_bar.showMessage("Error finding frame index")
             return
 
@@ -14003,7 +14032,7 @@ class PlateTool(QtWidgets.QMainWindow):
         if delta != 0:
             self.nextImg(n=delta)
 
-        # Get score details for status message
+        # Get the score details for the status message
         score_info = all_scores.get(selected_ff, {})
         n_stars = score_info.get('quality_details', {}).get('n_stars', 0)
 
@@ -14017,21 +14046,23 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
     def _solveAstrometryNet(self, upload_image=False, wide_fov_search=False):
-        """ Solve astrometry.net to get pointing at image center.
+        """ Run an astrometry.net solve to get the pointing at the image centre.
 
-        Extracted from getInitialParamsAstrometryNet so it can be called independently.
+            Extracted from getInitialParamsAstrometryNet so that it can be called independently. If the
+            tight FOV search fails, the function calls itself once more with a wide FOV search.
 
-        Arguments:
-            upload_image: [bool] If True, upload the whole image to astrometry.net.
-            wide_fov_search: [bool] If True, use a wide FOV search range (2 deg to 200 deg)
-                instead of the config-based range. Used as fallback when tight search fails.
+        Keyword arguments:
+            upload_image: [bool] If True, upload the whole image to astrometry.net instead of only the
+                detected star list. False by default.
+            wide_fov_search: [bool] If True, use a wide FOV search range (2 deg to 200 deg) instead of
+                the config-based range. Used as a fallback when the tight search fails. False by default.
 
-        Returns:
-            solution: [tuple] (ra, dec, rot_standard, scale, fov_w, fov_h, star_data, solution_info)
-                or None if solving failed.
+        Return:
+            solution: [tuple] (ra, dec, rot_standard, scale, fov_w, fov_h, star_data, solution_info), or
+                None if the solving failed.
         """
 
-        # Show status and process events so GUI updates
+        # Show the status and process the events so that the GUI updates
         if wide_fov_search:
             self.status_bar.showMessage("Solving with astrometry.net (wide FOV search)...")
         else:
@@ -14041,12 +14072,15 @@ class PlateTool(QtWidgets.QMainWindow):
         fail = False
         solution = None
 
-        # Construct FOV width estimate
+        # Construct the FOV width estimate
         if wide_fov_search:
-            # Wide search range covers all common lens types (2 deg telephoto to 200 deg fisheye)
+
+            # The wide search range covers all common lens types (2 deg telephoto to 200 deg fisheye)
             fov_w_range = [2, max(200, 1.5*self.config.fov_w)]
+
         else:
-            # Tight search range based on config (0.75x to 1.5x)
+
+            # Tight search range based on the config (0.75x to 1.5x)
             fov_w_range = [0.75*self.config.fov_w, 1.5*self.config.fov_w]
 
         # Handle using FR files too
@@ -14055,10 +14089,10 @@ class PlateTool(QtWidgets.QMainWindow):
         # Find and load a mask file if there is one
         mask = getMaskFile(self.dir_path, self.config)
 
-        # Compute JD for astrometry.net matching
+        # Compute the JD for the astrometry.net matching
         jd = date2JD(*self.img_handle.currentTime())
 
-        # Use override data if enabled and available, otherwise use original CALSTARS
+        # Use the override data if it is enabled and available, otherwise use the original CALSTARS
         has_star_data = False
         star_data = None
         if self.star_detection_override_enabled and ff_name_c in self.star_detection_override_data:
@@ -14077,16 +14111,16 @@ class PlateTool(QtWidgets.QMainWindow):
 
             else:
 
-                # Get star coordinates
+                # Get the star coordinates
                 y_data = star_data[:, 0]
                 x_data = star_data[:, 1]
 
-                # Get star intensities for brightness-based matching (column 2 is IntensSum)
+                # Get the star intensities for the brightness-based matching (column 2 is IntensSum)
                 input_intensities = None
                 if star_data.shape[1] > 2:
                     input_intensities = star_data[:, 2]
 
-                # Get astrometry.net solution, pass the FOV width estimate
+                # Get the astrometry.net solution, passing the FOV width estimate
                 solution = self.runInBackground(astrometryNetSolve,
                                               x_data=x_data, y_data=y_data, fov_w_range=fov_w_range,
                                               fov_w_hint=self.config.fov_w, mask=mask,
@@ -14098,7 +14132,8 @@ class PlateTool(QtWidgets.QMainWindow):
         else:
             fail = True
 
-        # Try finding the solution by uploading the whole image
+        # Try finding the solution by uploading the whole image if the star list solve failed, or if an
+        #   image upload was explicitly requested
         if fail or upload_image:
 
             print("Using the whole image in astrometry.net...")
@@ -14124,7 +14159,8 @@ class PlateTool(QtWidgets.QMainWindow):
                                           lat=self.platepar.lat, lon=self.platepar.lon, jd=jd)
 
         if solution is None:
-            # If tight FOV search failed, try wide search as fallback
+
+            # If the tight FOV search failed, try the wide search as a fallback
             if not wide_fov_search:
                 print("Tight FOV search failed, trying wide FOV search...")
                 return self._solveAstrometryNet(upload_image=upload_image, wide_fov_search=True)
@@ -14136,24 +14172,26 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
     def _applyAstrometryNetPointing(self, solution):
-        """ Apply astrometry.net pointing to existing platepar, preserving distortion.
+        """ Apply the astrometry.net pointing to the existing platepar, preserving the distortion.
 
-        Astrometry.net returns RA/Dec/rotation at the image center, but the platepar's
-        RA_d/dec_d is the tangent point at the distortion center. When the distortion center
-        is offset from image center, a Newton iteration corrects for the difference.
+            Astrometry.net returns the RA/Dec/rotation at the image centre, but the platepar RA_d/dec_d
+            is the tangent point at the distortion centre. When the distortion centre is offset from the
+            image centre, a Newton iteration corrects for the difference.
 
         Arguments:
-            solution: [tuple] (ra, dec, rot_standard, scale, fov_w, fov_h, star_data,
-                solution_info) from _solveAstrometryNet.
+            solution: [tuple] (ra, dec, rot_standard, scale, fov_w, fov_h, star_data, solution_info), as
+                returned by _solveAstrometryNet.
         """
 
+        # Unpack the astrometry.net solution
         ra_astnet, dec_astnet, rot_standard, scale, fov_w, fov_h, star_data, solution_info = solution
 
+        # Compute the time of the current image
         jd = date2JD(*self.img_handle.currentTime())
         calstars_time = list(self.img_handle.currentTime())
 
-        # Set time reference and initial pointing (as if distortion center = image center)
-        # Keep existing F_scale — it's calibrated with the distortion model
+        # Set the time reference and the initial pointing, as if the distortion centre was the image
+        #   centre. The existing F_scale is kept, as it is calibrated together with the distortion model
         self.platepar.JD = jd
         self.platepar.Ho = JD2HourAngle(jd)
 
@@ -14164,10 +14202,10 @@ class PlateTool(QtWidgets.QMainWindow):
         self.platepar.updateRefRADec(skip_rot_update=True)
         self.platepar.pos_angle_ref = rotationWrtStandardToPosAngle(self.platepar, rot_standard)
 
-        # Newton iteration: correct for distortion center offset
-        # The gnomonic projection tangent point (RA_d/dec_d) should be at the distortion center,
-        # not the image center. Each iteration measures where the image center actually maps to
-        # and corrects the tangent point. Converges to <2 arcsec in 3 iterations.
+        # Newton iteration which corrects for the distortion centre offset. The gnomonic projection
+        #   tangent point (RA_d/dec_d) should be at the distortion centre, not at the image centre. Each
+        #   iteration measures where the image centre actually maps to and corrects the tangent point.
+        #   This converges to below 2 arcsec in 3 iterations
         for i in range(3):
             _, ra_actual, dec_actual, _ = xyToRaDecPP(
                 [calstars_time], [self.platepar.X_res/2.0], [self.platepar.Y_res/2.0], [1],
@@ -14200,38 +14238,40 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
     def quickAlign(self):
-        """ Re-fit pointing using existing distortion. Uses astrometry.net if NNalign fails.
+        """ Re-fit the pointing using the existing distortion, using astrometry.net if NNalign fails.
 
-        Flow: tryQuickAlignment -> if fails, astrometry.net solve -> apply pointing
-        (preserving distortion) -> tryQuickAlignment again. Does NOT fall back to full
-        recalibration — distortion is always preserved.
+            The flow is: tryQuickAlignment -> if that fails, an astrometry.net solve -> apply the
+            pointing (preserving the distortion) -> tryQuickAlignment again. This does NOT fall back to a
+            full recalibration, the distortion is always preserved.
         """
 
-        # Show busy state
+        # Show the busy state on the button
         self.tab.param_manager.setQuickAlignButtonBusy(True)
         QtWidgets.QApplication.processEvents()
 
-        # Capture current catalog LM before fitting
+        # Capture the current catalog LM before fitting
         user_cat_lim_mag = self.cat_lim_mag
 
-        # Balance catalog magnitude before fitting
+        # Balance the catalog magnitude before fitting
         self.balanceCatalogMagnitude()
 
-        # Try quick alignment with existing platepar (pointing only, no distortion fitting)
+        # Try the quick alignment with the existing platepar (pointing only, no distortion fitting)
         success = self.tryQuickAlignment(pointing_only=True)
 
+        # NNalign failed, so use astrometry.net to get the correct pointing
         if not success:
-            # NNalign failed — use astrometry.net to get correct pointing
+
             solution = self._solveAstrometryNet(upload_image=False)
 
             if solution is not None:
-                # Apply pointing to existing platepar (preserve distortion)
+
+                # Apply the pointing to the existing platepar, preserving the distortion
                 self._applyAstrometryNetPointing(solution)
 
-                # Try quick alignment again with corrected pointing
+                # Try the quick alignment again with the corrected pointing
                 success = self.tryQuickAlignment(pointing_only=True)
 
-        # Report result
+        # Report the result
         if success:
             self.status_bar.showMessage("Auto pointing succeeded")
         else:
@@ -14249,14 +14289,20 @@ class PlateTool(QtWidgets.QMainWindow):
         self.updateStars()
         self.tab.param_manager.updatePlatepar()
 
-        # Restore button state
+        # Restore the button state
         self.tab.param_manager.setQuickAlignButtonBusy(False)
 
 
     def autoFitAstrometryNet(self):
-        """ Auto fit using astrometry.net. Called from Auto Fit button. """
+        """ Auto fit the platepar, called from the Auto Fit button.
 
-        # If there are existing matched star pairs, warn the user they will be replaced
+            The quick alignment with the existing platepar is tried first, as it is much faster than
+            astrometry.net. If it fails, an astrometry.net solve is used to get the pointing and the
+            quick alignment is retried. Only if that fails as well is a full recalibration with a
+            distortion reset done.
+        """
+
+        # If there are existing matched star pairs, warn the user that they will be replaced
         if len(self.paired_stars) > 0:
             reply = QtWidgets.QMessageBox.question(
                 self,
@@ -14269,35 +14315,38 @@ class PlateTool(QtWidgets.QMainWindow):
             if reply != QtWidgets.QMessageBox.StandardButton.Yes:
                 return
 
-        # Show busy state on button
+        # Show the busy state on the button
         self.tab.param_manager.setAutoFitButtonBusy(True)
         QtWidgets.QApplication.processEvents()
 
-        # Capture current catalog LM before fitting (user may have set this via tune or manually)
+        # Capture the current catalog LM before fitting (the user may have set it via the tuning or
+        #   manually)
         user_cat_lim_mag = self.cat_lim_mag
 
-        # Balance catalog magnitude before any fitting (affects both quick and full paths)
+        # Balance the catalog magnitude before any fitting (this affects both the quick and the full path)
         self.balanceCatalogMagnitude()
 
-        # First, try quick alignment with existing platepar (much faster than astrometry.net)
+        # First, try the quick alignment with the existing platepar (much faster than astrometry.net)
         quick_fit_success = self.tryQuickAlignment()
 
+        # The quick alignment failed, so try astrometry.net to get the correct pointing
         if not quick_fit_success:
-            # Quick alignment failed — try astrometry.net to get correct pointing
+
             solution = self._solveAstrometryNet(upload_image=False)
 
             if solution is not None:
-                # Apply pointing to existing platepar (preserve distortion)
+
+                # Apply the pointing to the existing platepar, preserving the distortion
                 self._applyAstrometryNetPointing(solution)
 
-                # Try quick alignment again with corrected pointing
+                # Try the quick alignment again with the corrected pointing
                 quick_fit_success = self.tryQuickAlignment()
 
+            # Last resort: a full recalibration with a distortion reset
             if not quick_fit_success:
-                # Last resort: full recalibration with distortion reset
                 self.getInitialParamsAstrometryNet(upload_image=False)
 
-        # Restore the user's catalog LM (balancing may have changed it)
+        # Restore the user's catalog LM (the balancing may have changed it)
         if self.cat_lim_mag != user_cat_lim_mag:
             print(f"  Restoring user catalog LM: {user_cat_lim_mag:.1f}")
             self.cat_lim_mag = user_cat_lim_mag
@@ -14309,17 +14358,24 @@ class PlateTool(QtWidgets.QMainWindow):
         self.updateStars()
         self.tab.param_manager.updatePlatepar()
 
-        # Restore button state
+        # Restore the button state
         self.tab.param_manager.setAutoFitButtonBusy(False)
 
 
     def getInitialParamsAstrometryNet(self, upload_image=True, wide_fov_search=False):
         """ Get the estimate of the initial astrometric parameters using astrometry.net.
 
-        Arguments:
-            upload_image: [bool] If True, upload the whole image to astrometry.net.
-            wide_fov_search: [bool] If True, use a wide FOV search range (2° to 200°) instead of
-                the config-based range. Used as fallback when the tight search fails.
+            This is the full recalibration path: the distortion is reset, the pointing is taken from
+            astrometry.net, and the distortion is then re-fitted with the NN cost function before the
+            final fit with the user's settings.
+
+        Keyword arguments:
+            upload_image: [bool] If True, upload the whole image to astrometry.net. True by default.
+            wide_fov_search: [bool] If True, use a wide FOV search range (2 deg to 200 deg) instead of
+                the config-based range. Used as a fallback when the tight search fails. False by default.
+
+        Return:
+            platepar: [Platepar] The platepar with the applied solution, or None if astrometry.net failed.
         """
 
         # Solve with astrometry.net
@@ -14332,11 +14388,11 @@ class PlateTool(QtWidgets.QMainWindow):
                         message_type="error")
             return None
 
-        # Update status: solution found
+        # Update the status to show that a solution was found
         self.status_bar.showMessage("Astrometry.net solution found, processing...")
         QtWidgets.QApplication.processEvents()
 
-        # Compute JD and FF name (needed for post-solve steps)
+        # Compute the JD and the FF name (both are needed for the post-solve steps)
         jd = date2JD(*self.img_handle.currentTime())
         ff_name_c = convertFRNameToFF(self.img_handle.name())
 
@@ -14348,32 +14404,31 @@ class PlateTool(QtWidgets.QMainWindow):
         user_refraction = self.platepar.refraction
         user_fit_only_pointing = self.fit_only_pointing
 
-        # Set intermediate fitting parameters (simple, robust settings)
-        # Use simple settings for stability with few stars during initial passes
+        # Set the intermediate fitting parameters. Simple and robust settings are used for stability
+        #   with few stars during the initial passes
         self.platepar.refraction = True
         self.platepar.equal_aspect = True
         self.platepar.asymmetry_corr = False
         self.platepar.force_distortion_centre = False
 
-        # Start with radial5-odd for initial fitting, reset distortion params
+        # Start with radial5-odd for the initial fitting and reset the distortion parameters
         self.platepar.setDistortionType("radial5-odd", reset_params=True)
-
 
         # Extract the parameters
         ra, dec, rot_standard, scale, fov_w, fov_h, star_data, solution_info = solution
 
-        # Store solution info for potential visualization
+        # Store the solution info for the optional visualization
         self.astrometry_solution_info = solution_info
 
-        # Set the platepar reference JD and compute the reference hour angle
-        # (jd was computed earlier for the astrometry.net call)
+        # Set the platepar reference JD and compute the reference hour angle (the JD was computed
+        #   earlier for the astrometry.net call)
         self.platepar.JD = jd
         self.platepar.Ho = JD2HourAngle(jd)
 
-        # Compute reference azimuth and altitude
+        # Compute the reference azimuth and altitude
         azim, alt = trueRaDec2ApparentAltAz(ra, dec, jd, self.platepar.lat, self.platepar.lon)
 
-        # Set parameters to platepar
+        # Set the parameters to the platepar
         self.platepar.F_scale = scale
         self.platepar.az_centre = azim
         self.platepar.alt_centre = alt
@@ -14382,11 +14437,11 @@ class PlateTool(QtWidgets.QMainWindow):
 
         self.platepar.pos_angle_ref = rotationWrtStandardToPosAngle(self.platepar, rot_standard)
 
-        # Rebalance catalog magnitude now that we have the correct FOV
-        # (initial balancing may have been wrong if config FOV was off)
+        # Rebalance the catalog magnitude now that the correct FOV is known (the initial balancing may
+        #   have been wrong if the config FOV was off)
         self.balanceCatalogMagnitude()
 
-        # Print estimated parameters
+        # Print the estimated parameters
         print()
         print('Astrometry.net solution:')
         print('------------------------')
@@ -14400,7 +14455,7 @@ class PlateTool(QtWidgets.QMainWindow):
         print(' Scale = {:.3f} arcmin/px'.format(60/self.platepar.F_scale))
         print(' FOV = {:.2f} x {:.2f} deg'.format(fov_w, fov_h))
 
-        # Print solution info if available
+        # Print the solution info, if available
         if solution_info is not None:
             quad_stars = solution_info.get('quad_stars', [])
             logodds = solution_info.get('logodds')
@@ -14417,14 +14472,14 @@ class PlateTool(QtWidgets.QMainWindow):
         self.drawPhotometryColoring()
         QtWidgets.QApplication.processEvents()
 
-        # Ask user if they want to continue with NN refinement
-        # Build message with optional FOV mismatch warning
+        # Ask the user whether to continue with the NN refinement, building the message with an optional
+        #   FOV mismatch warning
         msg = 'Astrometry.net found a solution.\n\n'
         msg += 'RA = {:.2f} deg, Dec = {:.2f} deg\n'.format(self.platepar.RA_d, self.platepar.dec_d)
         msg += 'Scale = {:.3f} arcmin/px\n'.format(60/self.platepar.F_scale)
         msg += 'FOV = {:.1f} x {:.1f} deg\n'.format(fov_w, fov_h)
 
-        # Check if solved FOV differs significantly from config FOV (>50% difference)
+        # Check if the solved FOV differs significantly from the config FOV (more than a factor of 2)
         fov_ratio = fov_w / self.config.fov_w if self.config.fov_w > 0 else 1.0
         fov_mismatch = fov_ratio < 0.5 or fov_ratio > 2.0
 
@@ -14435,7 +14490,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         msg += '\nContinue with NN-based refinement?'
 
-        # Use warning icon if FOV mismatch, otherwise question icon
+        # Use the warning icon if there is a FOV mismatch, otherwise use the question icon
         if fov_mismatch:
             msgbox = QtWidgets.QMessageBox(self)
             msgbox.setWindowTitle('Astrometry.net Solution - FOV Mismatch')
@@ -14454,20 +14509,21 @@ class PlateTool(QtWidgets.QMainWindow):
             self.status_bar.showMessage("Astrometry.net solution applied (no refinement)")
             return self.platepar
 
-        # Match detected stars to RMS catalog and fit distortion iteratively
-        # Use RMS's own catalog (better than astrometry.net's index stars)
-        # Iterative approach: start with bright stars + wide radius, fit, then tighten
+        # Match the detected stars to the RMS catalog and fit the distortion iteratively. The RMS catalog
+        #   is used instead of the astrometry.net index stars, as it is better suited for this. The
+        #   iterative approach starts with bright stars and a wide radius, fits, and then tightens
         print()
         print("Iterative star matching with RMS catalog...")
         self.status_bar.showMessage("Matching stars with catalog...")
         QtWidgets.QApplication.processEvents()
 
-        # Use the same catalog filtering as the GUI display (proven to work correctly)
-        # self.catalog_stars is the full catalog, filterCatalogStarsInsideFOV does RA/Dec filtering
+        # Use the same catalog filtering as the GUI display. self.catalog_stars is the full catalog, and
+        #   filterCatalogStarsInsideFOV does the RA/Dec filtering
         _, catalog_stars_extended = self.filterCatalogStarsInsideFOV(self.catalog_stars)
-        print("  Catalog stars within FOV (filterCatalogStarsInsideFOV): {:d}".format(len(catalog_stars_extended)))
+        print("  Catalog stars within FOV (filterCatalogStarsInsideFOV): {:d}".format(
+            len(catalog_stars_extended)))
 
-        # Strict XY filter: project to image and keep only those inside image bounds
+        # Strict XY filter: project to the image and keep only the stars inside the image bounds
         catalog_x_ext, catalog_y_ext, catalog_mag_ext = getCatalogStarsImagePositions(
             catalog_stars_extended, jd, self.platepar)
         in_fov_xy = (catalog_x_ext >= 0) & (catalog_x_ext < self.platepar.X_res) & \
@@ -14484,8 +14540,8 @@ class PlateTool(QtWidgets.QMainWindow):
             catalog_x_fov, catalog_y_fov, catalog_stars)
         print("  Catalog stars after mask filter: {:d}".format(len(catalog_stars)))
 
-        # Get detected stars - use override data if enabled, otherwise CALSTARS
-        # CALSTARS format: Y(0) X(1) IntensSum(2) Ampltd(3) FWHM(4) BgLvl(5) SNR(6) NSatPx(7)
+        # Get the detected stars, using the override data if it is enabled, otherwise CALSTARS. The
+        #   CALSTARS format is: Y(0) X(1) IntensSum(2) Ampltd(3) FWHM(4) BgLvl(5) SNR(6) NSatPx(7)
         detected_stars = None
         if self.star_detection_override_enabled and ff_name_c in self.star_detection_override_data:
             detected_stars = np.array(self.star_detection_override_data[ff_name_c])
@@ -14493,9 +14549,11 @@ class PlateTool(QtWidgets.QMainWindow):
             detected_stars = np.array(self.calstars[ff_name_c])
 
         if detected_stars is not None and len(detected_stars) > 0:
+
             det_y = detected_stars[:, 0]
             det_x = detected_stars[:, 1]
-            # Use index 2 (IntensSum/integrated intensity) not index 3 (Ampltd/peak amplitude)
+
+            # Use index 2 (IntensSum, the integrated intensity), not index 3 (Ampltd, the peak amplitude)
             det_intens = detected_stars[:, 2] if detected_stars.shape[1] > 2 else np.ones(len(det_x))
             det_fwhm = detected_stars[:, 4] if detected_stars.shape[1] > 4 else np.zeros(len(det_x))
             det_snr = detected_stars[:, 6] if detected_stars.shape[1] > 6 else np.ones(len(det_x))
@@ -14507,26 +14565,27 @@ class PlateTool(QtWidgets.QMainWindow):
 
         print("  Detected stars: {:d}".format(len(det_x)))
 
-        # First pass: Use NN cost function to refine pointing + distortion
-        # This doesn't require explicit star matching - more robust for initial fit
+        # First pass: use the NN cost function to refine the pointing and the distortion. This does not
+        #   require an explicit star matching, which makes it more robust for the initial fit
         if len(det_x) >= 10 and len(catalog_stars) >= 10:
+
             print()
             print("NN-based fitting (no explicit matching)...")
 
-            # Prepare detected stars array [x, y, intensity]
+            # Prepare the detected stars array [x, y, intensity]
             img_stars_arr = np.column_stack([det_x, det_y, det_intens])
 
-            # Use NN cost function to fit pointing + distortion
-            # Pass extended catalog (before strict XY filter) - NN iterations re-filter
-            # dynamically as distortion improves, allowing edge stars to "appear"
+            # Use the NN cost function to fit the pointing and the distortion. The extended catalog
+            #   (before the strict XY filter) is passed, as the NN iterations re-filter it dynamically as
+            #   the distortion improves, allowing the edge stars to "appear"
             self.platepar.setDistortionType("radial5-odd", reset_params=True)
 
-            # Load tuned catalog if available for final fitting stages
+            # Load the tuned catalog, if available, for the final fitting stages
             tuned_catalog = None
             if getattr(self, 'catalog_lm_tuned', False) and hasattr(self, 'tuned_cat_lim_mag'):
                 tuned_catalog = self.loadCatalogStars(self.tuned_cat_lim_mag)
 
-            # Callback to update display at each RANSAC iteration (visual debugging)
+            # Callback which updates the display at each RANSAC iteration (visual debugging)
             iteration_callback = self._makeIterationCallback()
 
             try:
@@ -14542,17 +14601,21 @@ class PlateTool(QtWidgets.QMainWindow):
             except Exception as e:
                 print("  NN fit failed: {}".format(str(e)))
 
-            # Populate paired_stars from NN matches for visualization
+            # Populate paired_stars from the NN matches for the visualization
             self.paired_stars = PairedStars()
             if self.platepar.star_list:
+
                 for entry in self.platepar.star_list:
-                    # star_list format: [jd, x, y, intensity, ra, dec, mag]
+
+                    # The star_list format is: [jd, x, y, intensity, ra, dec, mag]
                     _, x, y, intensity, ra, dec, mag = entry
                     sky_obj = CatalogStar(ra, dec, mag)
 
-                    # Look up SNR, FWHM, and saturation from calstars by finding nearest detected star
+                    # Look up the SNR, FWHM and saturation in calstars by finding the nearest detected
+                    #   star
                     fwhm, snr, saturated = 0.0, 1.0, False
                     if len(det_x) > 0:
+
                         # Find the closest detected star to this matched star
                         distances = np.sqrt((det_x - x)**2 + (det_y - y)**2)
                         closest_idx = np.argmin(distances)
@@ -14564,10 +14627,11 @@ class PlateTool(QtWidgets.QMainWindow):
                     self.paired_stars.addPair(x, y, fwhm, intensity, sky_obj, snr=snr, saturated=saturated)
                 print("  Loaded {} matched pairs".format(len(self.platepar.star_list)))
 
-        # Finalize the fit with user's settings
+        # Finalize the fit with the user's settings
         if len(self.paired_stars) >= 10:
-            # Restore user's settings for the final fit
-            # Use remapCoeffsForFlagChange to properly handle coefficient structure changes
+
+            # Restore the user's settings for the final fit. remapCoeffsForFlagChange is used to properly
+            #   handle the coefficient structure changes
             print()
             print("Restoring user settings: {:s}".format(user_distortion_type))
             self.platepar.remapCoeffsForFlagChange('equal_aspect', user_equal_aspect)
@@ -14580,7 +14644,7 @@ class PlateTool(QtWidgets.QMainWindow):
             # Filter photometric outliers and blended stars before the final fit
             self._filterPairsBeforeFinalFit()
 
-            # Do the final fit with user's settings
+            # Do the final fit with the user's settings
             print()
             print("Final fit with user settings...")
             self.status_bar.showMessage("Fitting astrometry with {:d} stars...".format(len(self.paired_stars)))
@@ -14591,13 +14655,14 @@ class PlateTool(QtWidgets.QMainWindow):
             # Sigma-clip gross positional mispairs that survived NN/RANSAC, then refit once
             self._sigmaClipPairsAndRefit()
 
-            # Note: catalog LM restoration is handled by the caller (autoFitAstrometryNet)
+            # Note that the catalog LM restoration is handled by the caller (autoFitAstrometryNet)
 
             # Update the display
             self.updateStars()
             self.status_bar.showMessage("Auto-fit complete: {:d} stars matched".format(len(self.paired_stars)))
+        # Restore the user's settings even if the fit failed
         else:
-            # Restore user's settings even if fit failed
+
             self.platepar.equal_aspect = user_equal_aspect
             self.platepar.asymmetry_corr = user_asymmetry_corr
             self.platepar.force_distortion_centre = user_force_distortion_centre
@@ -14609,7 +14674,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self.updateStars()
             self.status_bar.showMessage("Auto-fit: not enough star matches")
 
-        # Show astrometry.net quad stars if available
+        # Show the astrometry.net quad stars, if available
         if self.astrometry_solution_info is not None:
             quad_count = len(self.astrometry_solution_info.get('quad_stars', []))
             if quad_count > 0:
@@ -14768,13 +14833,18 @@ class PlateTool(QtWidgets.QMainWindow):
 
     def updateFindBestFrameButton(self):
         """ Enable/disable the Find Best Frame button based on the number of frames in CALSTARS. """
+
         if hasattr(self, 'tab') and hasattr(self.tab, 'param_manager'):
-            # Disable button if there's only one frame or no frames
+
+            # Disable the button if there is only one frame or no frames at all
             enable = len(self.calstars) > 1
             self.tab.param_manager.find_best_frame_button.setEnabled(enable)
+
+            # Set the tooltip which explains why the button is disabled
             if not enable:
                 self.tab.param_manager.find_best_frame_button.setToolTip(
                     "Only one frame available - no need to find best frame")
+
             else:
                 self.tab.param_manager.find_best_frame_button.setToolTip(
                     "Find the frame with best star distribution for calibration")
@@ -14796,21 +14866,19 @@ class PlateTool(QtWidgets.QMainWindow):
     def runInBackground(self, func, *args, **kwargs):
         """ Run a blocking function in a background thread while keeping the UI responsive.
 
-        Use this for CPU-bound operations (astrometry solving, catalog loading, etc.)
-        that would otherwise trigger the OS 'application not responding' warning.
-
-        Note: The function must NOT access Qt widgets or shared mutable state.
+            Use this for CPU-bound operations (astrometry solving, catalog loading, etc.) which would
+            otherwise trigger the OS 'application not responding' warning. The function must NOT access
+            the Qt widgets or any shared mutable state. Any exception raised by func is propagated to the
+            caller.
 
         Arguments:
             func: [callable] Function to run.
-            *args, **kwargs: Arguments passed to the function.
+            *args: Positional arguments passed to the function.
+            **kwargs: Keyword arguments passed to the function.
 
-        Returns:
-            The return value of func(*args, **kwargs), or None if another background operation is
-            still running (the request is refused, not queued).
-
-        Raises:
-            Any exception raised by func.
+        Return:
+            [object] The return value of func(*args, **kwargs), or None if another background operation
+                is still running (the request is refused, not queued).
         """
 
         # The processEvents loop below lets the user trigger another long operation (e.g. a second
@@ -14826,8 +14894,10 @@ class PlateTool(QtWidgets.QMainWindow):
 
         try:
             with ThreadPoolExecutor(max_workers=1) as executor:
+
                 future = executor.submit(func, *args, **kwargs)
 
+                # Keep the UI responsive while waiting for the function to finish
                 while not future.done():
                     QtWidgets.QApplication.processEvents()
                     time.sleep(0.05)
