@@ -372,40 +372,6 @@ def decomposeMaskImage(mask_img, epsilon_frac=0.002):
 
 
 
-def resampleMaskLayers(mask_polygons, paint_layer, src_size, dst_size):
-    """ Rescale mask polygons and the paint layer from one image size to another.
-
-        Used when a mask file was saved for a different frame size than the image it is loaded on.
-
-    Arguments:
-        mask_polygons: [list] List of polygons, each a list of (x, y) image coordinates.
-        paint_layer: [ndarray or None] uint8 paint layer of size src_size.
-        src_size: [tuple] (width, height) the layers are currently in.
-        dst_size: [tuple] (width, height) to rescale to.
-
-    Return:
-        (polygons, paint_layer): [tuple] Rescaled polygons and paint layer (None stays None).
-    """
-
-    src_width, src_height = src_size
-    dst_width, dst_height = dst_size
-
-    # Nothing to do for equal sizes
-    if (src_width == dst_width) and (src_height == dst_height):
-        return mask_polygons, paint_layer
-
-    scale_x = dst_width/src_width
-    scale_y = dst_height/src_height
-
-    polygons = [[(x*scale_x, y*scale_y) for x, y in polygon] for polygon in mask_polygons]
-
-    if paint_layer is not None:
-        paint_layer = cv2.resize(paint_layer, (dst_width, dst_height), interpolation=cv2.INTER_NEAREST)
-
-    return polygons, paint_layer
-
-
-
 def paintBrushSegment(paint_layer, prev_pos, pos, radius, value):
     """ Stamp one brush step onto the paint layer, in place.
 
