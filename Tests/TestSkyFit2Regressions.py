@@ -1128,3 +1128,46 @@ def testBandRatioFitWithSaturatedStars(plateTool, monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "Fit stddev: inf" not in out
     assert "Fit stddev:" in out
+
+
+###################################################################################################
+# FILE MANAGER SAVES
+###################################################################################################
+
+def testFileManagerSavesLoadedPlateparFile(plateTool, stationDir):
+    """ The File Manager saves the platepar into the file it was loaded from, not config.platepar_name. """
+
+    pt = plateTool
+    default_path = os.path.join(stationDir, pt.config.platepar_name)
+    other_path = os.path.join(stationDir, "other.cal")
+    shutil.copy(default_path, other_path)
+    with open(default_path) as f:
+        default_before = f.read()
+
+    pt.loadPlatepar(update=True, platepar_file=other_path)
+    pt.platepar.RA_d += 1.0
+
+    dialog = SF.CalibrationFilesDialog(pt)
+    dialog._saveFile("Platepar", [stationDir])
+
+    with open(default_path) as f:
+        assert f.read() == default_before
+
+    from RMS.Formats.Platepar import Platepar
+    saved = Platepar()
+    saved.read(other_path)
+    assert saved.RA_d == pytest.approx(pt.platepar.RA_d)
+    assert pt.platepar_file == other_path
+
+
+def testFileManagerMaskSaveUpdatesDetectionMask(plateTool, stationDir):
+    """ Saving the mask through the File Manager makes it the mask used by star detection. """
+
+    pt = plateTool
+    pt.mask_polygons = [[(0, 0), (200, 0), (200, 200), (0, 200)]]
+    expected = pt.generateMaskImage()
+
+    dialog = SF.CalibrationFilesDialog(pt)
+    dialog._saveFile("Mask", [stationDir])
+
+    assert np.array_equal(pt.mask.img, expected)

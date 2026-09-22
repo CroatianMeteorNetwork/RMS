@@ -2349,9 +2349,22 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
 
             if ftype == "Platepar":
                 try:
-                    dest = os.path.join(target_dir, pt.config.platepar_name)
+
+                    # Save under the name of the loaded platepar file (a platepar picked from several .cal
+                    #   files must not overwrite the default one), or the config name for a new platepar
+                    platepar_name = pt.config.platepar_name
+                    if getattr(pt, 'platepar_file', None):
+                        platepar_name = os.path.basename(pt.platepar_file)
+
+                    dest = os.path.join(target_dir, platepar_name)
                     pt.platepar.write(dest, fmt=pt.platepar_fmt, fov=computeFOVSize(pt.platepar))
                     pt.platepar_modified = False
+
+                    # The platepar saved into the data directory is the loaded file from now on
+                    if (not getattr(pt, 'platepar_file', None)) \
+                        or (os.path.realpath(target_dir) == os.path.realpath(pt.dir_path)):
+                        pt.platepar_file = dest
+
                     results.append("Platepar saved to: " + dest)
                 except Exception as e:
                     results.append("Platepar save to {} failed: {}".format(target_dir, repr(e)))
@@ -2401,8 +2414,12 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
                 try:
                     dest = os.path.join(target_dir, "mask.bmp")
                     mask_img = pt.generateMaskImage()
-                    cv2.imwrite(dest, mask_img)
+                    if not cv2.imwrite(dest, mask_img):
+                        raise IOError("the image could not be written")
                     pt.mask_source_path = dest
+
+                    # Star detection uses the saved mask from now on
+                    pt.mask = MaskStructure(mask_img)
                     if hasattr(pt, 'tab') and hasattr(pt.tab, 'mask'):
                         pt.tab.mask.setUnsaved(False)
                     results.append("Mask saved to: " + dest)
