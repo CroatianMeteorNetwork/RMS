@@ -2036,11 +2036,13 @@ class InputTypeImages(InputType):
     def _floatFitsToUint16(self, frame):
         """ Convert a floating point FITS image to uint16 with a mapping fixed for the sequence.
 
-            The offset and scale are taken from the first float image loaded from this directory and
-            reused for every later one: a per-image offset (the old frame - min(frame)) made the
-            levels jump from image to image. The minimum is moved to 0 (NaN-safe). The values are
-            rescaled only when their range does not fit uint16 as it is: a range <= 1 (normalised
-            [0, 1] images would otherwise collapse to 0 and 1) or > 65535. NaN pixels become 0.
+            The offset and scale are taken from the first float image of this directory with a
+            finite, nonzero range, and reused for every later one: a per-image offset (the old
+            frame - min(frame)) made the levels jump from image to image. The minimum is moved to 0
+            (NaN-safe). The values are rescaled only when their range does not fit uint16 as it is:
+            a range <= 1 (normalised [0, 1] images would otherwise collapse to 0 and 1) or > 65535.
+            Constant or all-NaN images carry no levels to fix the mapping on, so they are mapped on
+            their own (offset only) until such an image is seen. NaN pixels become 0.
 
         Arguments:
             frame: [ndarray] Floating point image.
@@ -2049,25 +2051,35 @@ class InputTypeImages(InputType):
             [ndarray] uint16 image.
         """
 
-        # Fix the mapping on the first float image of the sequence
-        if getattr(self, "_float_fits_mapping", None) is None:
+        mapping = getattr(self, "_float_fits_mapping", None)
 
-            # All-NaN images carry no levels, map them as they are
+        # Fix the mapping on the first float image of the sequence which has levels
+        if mapping is None:
+
+            # All-NaN images carry no levels
             if np.all(np.isnan(frame)):
                 offset, value_range = 0.0, 0.0
             else:
                 offset = float(np.nanmin(frame))
                 value_range = float(np.nanmax(frame)) - offset
 
-            # Rescale only if the range does not fit uint16 as it is
-            if (value_range > 0) and ((value_range <= 1) or (value_range > 65535)):
-                scale = 65535.0/value_range
+            # A constant, all-NaN or non-finite image cannot fix the mapping: map this image on its
+            #   own (offset only, if finite) and wait for one with a finite, nonzero range
+            if (not np.isfinite(value_range)) or (value_range <= 0):
+                mapping = (offset if np.isfinite(offset) else 0.0, 1.0)
+
             else:
-                scale = 1.0
 
-            self._float_fits_mapping = (offset, scale)
+                # Rescale only if the range does not fit uint16 as it is
+                if (value_range <= 1) or (value_range > 65535):
+                    scale = 65535.0/value_range
+                else:
+                    scale = 1.0
 
-        offset, scale = self._float_fits_mapping
+                mapping = (offset, scale)
+                self._float_fits_mapping = mapping
+
+        offset, scale = mapping
 
         # Apply the mapping, zero the NaN pixels and clip to the uint16 range
         frame = (frame.astype(np.float64) - offset)*scale

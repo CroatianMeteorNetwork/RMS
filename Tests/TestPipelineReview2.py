@@ -1590,3 +1590,30 @@ def testParentWatchExitsHardAfterGrace(method):
     assert not killed
     assert p.exitcode == 0
     assert time.monotonic() - t_beg < 8
+
+
+@pytest.mark.parametrize('first', ['constant', 'nan'])
+def testFloatFitsMappingWaitsForAFrameWithLevels(first):
+    """ A constant or all-NaN first image must not fix the mapping: a later normalised [0, 1] image
+        still maps to the 16-bit range.
+    """
+
+    import numpy as np
+    from RMS.Formats.FrameInterface import InputTypeImages
+
+    inp = _floatFitsInput()
+
+    if first == 'constant':
+        frame1 = np.full((2, 2), 0.5)
+    else:
+        frame1 = np.full((2, 2), np.nan)
+
+    out1 = InputTypeImages._floatFitsToUint16(inp, frame1)
+    assert np.all(out1 == 0)
+
+    frame2 = np.array([[0.0, 0.25], [0.5, 1.0]])
+    out2 = InputTypeImages._floatFitsToUint16(inp, frame2)
+
+    assert out2[1, 1] == 65535
+    assert abs(int(out2[0, 1]) - 16384) <= 1
+    assert len(np.unique(out2)) == 4
