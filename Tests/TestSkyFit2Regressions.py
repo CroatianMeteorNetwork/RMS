@@ -1189,3 +1189,35 @@ def testArrowKeysLeftToSlidersAndCombos(plateTool):
 
     # Elsewhere they still navigate the images
     assert pt.eventFilter(pt.tab.hist, right) is True
+
+
+@pytest.mark.parametrize("digit, dist_type", [(1, "poly3+radial"), (2, "poly3+radial3"), (3, "radial3-odd"),
+                                              (4, "radial5-odd"), (5, "radial7-odd"), (6, "radial9-odd"),
+                                              (7, None)])
+def testCtrlDigitDistortionShortcuts(plateTool, monkeypatch, digit, dist_type):
+    """ CTRL + digit sets the distortion type from the Help list and nothing else; unbound combinations
+        do nothing (no IndexError, no coefficient edit). """
+
+    from pyqtgraph.Qt import QtCore, QtWidgets
+
+    pt = plateTool
+    ctrl = QtCore.Qt.KeyboardModifier.ControlModifier
+    monkeypatch.setattr(QtWidgets.QApplication, "keyboardModifiers", staticmethod(lambda: ctrl))
+    monkeypatch.setattr(QtWidgets.QApplication, "queryKeyboardModifiers", staticmethod(lambda: ctrl))
+
+    before_type = pt.platepar.distortion_type
+    before_x = np.array(pt.platepar.x_poly_fwd)
+
+    _pressKey(pt, getattr(QtCore.Qt.Key, "Key_{:d}".format(digit)), ctrl)
+
+    if dist_type is None:
+        assert pt.platepar.distortion_type == before_type
+        assert np.array_equal(pt.platepar.x_poly_fwd, before_x)
+
+    else:
+        assert pt.platepar.distortion_type == dist_type
+
+        # setDistortionType resets the coefficients, the X offset key must not add 0.5 on top
+        expected = copy.deepcopy(pt.platepar)
+        expected.setDistortionType(dist_type)
+        assert np.array_equal(pt.platepar.x_poly_fwd, expected.x_poly_fwd)

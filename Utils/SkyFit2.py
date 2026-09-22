@@ -362,6 +362,21 @@ except Exception as exc:
     sys.exit(1)
 
 
+# Distortion types set with CTRL + digit in the skyfit mode, as (key, distortion type) pairs. Pairs, not a
+#   dict, so the keys are compared with == on every Qt binding
+CTRL_DIGIT_DISTORTION_TYPES = [
+    (QtCore.Qt.Key.Key_1, "poly3+radial"),
+    (QtCore.Qt.Key.Key_2, "poly3+radial3"),
+    (QtCore.Qt.Key.Key_3, "radial3-odd"),
+    (QtCore.Qt.Key.Key_4, "radial5-odd"),
+    (QtCore.Qt.Key.Key_5, "radial7-odd"),
+    (QtCore.Qt.Key.Key_6, "radial9-odd"),
+]
+
+# The digit keys
+DIGIT_KEYS = [getattr(QtCore.Qt.Key, "Key_{:d}".format(i)) for i in range(10)]
+
+
 # Names used unqualified further down. They are taken from the binding that pyqtgraph already
 # selected, so this process never ends up with two Qt bindings loaded at once.
 Qt = QtCore.Qt
@@ -11741,75 +11756,25 @@ class PlateTool(QtWidgets.QMainWindow):
         # Handle keys in the SkyFit mode
         elif self.mode == 'skyfit':
 
-            # Change distortion type to poly3+radial
-            if (event.key() == QtCore.Qt.Key.Key_1) and (modifiers == QtCore.Qt.KeyboardModifier.ControlModifier):
+            # Change the distortion type with CTRL + 1..6 (poly3+radial, poly3+radial3, radial3/5/7/9-odd,
+            #   as listed in the Help). The types are looked up by name, so the list order doesn't matter
+            if (modifiers == QtCore.Qt.KeyboardModifier.ControlModifier) \
+                and any(event.key() == key for key, _ in CTRL_DIGIT_DISTORTION_TYPES):
 
-                self.dist_type_index = 0
-                self.changeDistortionType()
-                self.tab.param_manager.updatePlatepar()
-                self.updateLeftLabels()
-                self.updateDistortion()
-                self.updateStars()
+                dist_type = [name for key, name in CTRL_DIGIT_DISTORTION_TYPES if event.key() == key][0]
+                if dist_type in self.platepar.distortion_type_list:
+                    self.dist_type_index = self.platepar.distortion_type_list.index(dist_type)
+                    self.changeDistortionType()
+                    self.tab.param_manager.updatePlatepar()
+                    self.updateLeftLabels()
+                    self.updateDistortion()
+                    self.updateStars()
 
-            # Change distortion type to poly3+radial3
-            if (event.key() == QtCore.Qt.Key.Key_2) and (modifiers == QtCore.Qt.KeyboardModifier.ControlModifier):
-
-                self.dist_type_index = 1
-                self.changeDistortionType()
-                self.tab.param_manager.updatePlatepar()
-                self.updateLeftLabels()
-                self.updateDistortion()
-                self.updateStars()
-
-            # Change distortion type to poly3+radial5
-            if (event.key() == QtCore.Qt.Key.Key_3) and (modifiers == QtCore.Qt.KeyboardModifier.ControlModifier):
-
-                self.dist_type_index = 6
-                self.changeDistortionType()
-                self.tab.param_manager.updatePlatepar()
-                self.updateLeftLabels()
-                self.updateDistortion()
-                self.updateStars()
-
-            # Change distortion type to radial3
-            elif (event.key() == QtCore.Qt.Key.Key_4) and (modifiers == QtCore.Qt.KeyboardModifier.ControlModifier):
-
-                self.dist_type_index = 7
-                self.changeDistortionType()
-                self.tab.param_manager.updatePlatepar()
-                self.updateLeftLabels()
-                self.updateDistortion()
-                self.updateStars()
-
-            # Change distortion type to radial5
-            elif (event.key() == QtCore.Qt.Key.Key_5) and (modifiers == QtCore.Qt.KeyboardModifier.ControlModifier):
-
-                self.dist_type_index = 8
-                self.changeDistortionType()
-                self.tab.param_manager.updatePlatepar()
-                self.updateLeftLabels()
-                self.updateDistortion()
-                self.updateStars()
-
-            # Change distortion type to radial7
-            elif (event.key() == QtCore.Qt.Key.Key_6) and (modifiers == QtCore.Qt.KeyboardModifier.ControlModifier):
-
-                self.dist_type_index = 9
-                self.changeDistortionType()
-                self.tab.param_manager.updatePlatepar()
-                self.updateLeftLabels()
-                self.updateDistortion()
-                self.updateStars()
-
-            # Change distortion type to radial9
-            elif (event.key() == QtCore.Qt.Key.Key_7) and (modifiers == QtCore.Qt.KeyboardModifier.ControlModifier):
-
-                self.dist_type_index = 10
-                self.changeDistortionType()
-                self.tab.param_manager.updatePlatepar()
-                self.updateLeftLabels()
-                self.updateDistortion()
-                self.updateStars()
+            # The other CTRL + digit combinations are not bound. They must not fall through to the plain
+            #   digit keys below, which edit the distortion coefficients
+            elif (modifiers == QtCore.Qt.KeyboardModifier.ControlModifier) \
+                and any(event.key() == key for key in DIGIT_KEYS):
+                pass
 
             # Make new platepar
             elif (event.key() == QtCore.Qt.Key.Key_N) and (modifiers == QtCore.Qt.KeyboardModifier.ControlModifier):
