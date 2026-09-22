@@ -1256,3 +1256,23 @@ def testNextImageKeepsMaskFlatBackground(plateTool):
     pt.nextImg(n=1)
 
     assert np.all(pt.img.image == 77)
+
+
+def testCtrlZOnMaskTabNeverFits(plateTool, monkeypatch):
+    """ CTRL + Z on the Mask tab with nothing to undo does not refit the plate. """
+
+    from pyqtgraph.Qt import QtCore, QtWidgets
+
+    pt = plateTool
+    ctrl = QtCore.Qt.KeyboardModifier.ControlModifier
+    monkeypatch.setattr(QtWidgets.QApplication, "keyboardModifiers", staticmethod(lambda: ctrl))
+    monkeypatch.setattr(QtWidgets.QApplication, "queryKeyboardModifiers", staticmethod(lambda: ctrl))
+
+    fits = []
+    pt.fitPickedStars = lambda *a, **k: fits.append(1)
+
+    _openMaskTab(pt)
+    pt.mask_brush_stroke_history = []
+    _pressKey(pt, QtCore.Qt.Key.Key_Z, ctrl)
+
+    assert fits == []

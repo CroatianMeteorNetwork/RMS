@@ -11546,12 +11546,13 @@ class PlateTool(QtWidgets.QMainWindow):
                     self.closeMaskPolygon()
                     return
 
-        # Handle brush undo - Ctrl+Z when on mask tab
+        # Handle brush undo - Ctrl+Z when on mask tab. On the Mask tab Ctrl+Z always means undo, so it is
+        #   consumed even with nothing to undo instead of falling through to the plate fit
         if event.key() == QtCore.Qt.Key.Key_Z \
             and (modifiers == QtCore.Qt.KeyboardModifier.ControlModifier):
-            mask_tab_index = self.tab.indexOf(self.tab.mask)
-            if self.tab.currentIndex() == mask_tab_index and self.mask_brush_stroke_history:
-                self.undoBrushStroke()
+            if self.isMaskTabCurrent():
+                if self.mask_brush_stroke_history:
+                    self.undoBrushStroke()
                 return
 
         # When no data is loaded, block all key actions
