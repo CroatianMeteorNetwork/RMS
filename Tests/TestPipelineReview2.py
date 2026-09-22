@@ -1081,6 +1081,20 @@ def _extractShellFunction(src, name):
 
     # Debian: the ABI number changes between versions of one flavour
     ('6.1.0-18-amd64', ['6.1.0-18-amd64', '6.1.0-21-amd64'], True, '6.1.0-21-amd64'),
+
+    # Early Bookworm names carry an ABI revision (-rpiN) that changes with every kernel update
+    ('6.1.0-rpi4-rpi-v8', ['6.1.0-rpi4-rpi-v8', '6.1.0-rpi7-rpi-v8', '6.1.0-rpi7-rpi-2712'], True,
+        '6.1.0-rpi7-rpi-v8'),
+
+    # ... and the later +rpt naming of the same flavour counts as an update too
+    ('6.1.0-rpi7-rpi-v8', ['6.1.0-rpi7-rpi-v8', '6.6.31+rpt-rpi-v8', '6.6.31+rpt-rpi-2712'], True,
+        '6.6.31+rpt-rpi-v8'),
+
+    # Nothing newer of the running flavour among early Bookworm names
+    ('6.1.0-rpi7-rpi-2712', ['6.1.0-rpi7-rpi-2712', '6.1.0-rpi7-rpi-v8', '6.1.0-rpi7-rpi-v7l'], False, ''),
+
+    # Ubuntu
+    ('5.15.0-91-generic', ['5.15.0-91-generic', '5.15.0-94-generic'], True, '5.15.0-94-generic'),
     ])
 def testUpdaterKernelFallbackComparesRunningFlavour(tmp_path, running, installed, expect_reboot, target):
     """ should_reboot's kernel fallback only compares kernels of the running flavour. """

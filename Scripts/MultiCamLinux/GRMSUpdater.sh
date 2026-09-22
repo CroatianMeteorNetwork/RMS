@@ -107,12 +107,15 @@ regex_for() {
 }
 
 # ------------------------------------------------------------
-#  kernel_flavour() – kernel release without its version part
-#  (6.6.31+rpt-rpi-v8 -> +rpt-rpi-v8, 5.10.103-v7l+ -> -v7l+,
-#   6.1.0-18-amd64 -> -amd64)
+#  kernel_flavour() – kernel release without its version and ABI parts,
+#  so kernel updates within one flavour compare equal:
+#    6.6.31+rpt-rpi-v8, 6.1.0-rpi7-rpi-v8 -> rpi-v8
+#    6.12.25+rpt-rpi-2712                 -> rpi-2712
+#    5.10.103-v7l+ -> v7l+,  5.10.103+ -> +
+#    6.1.0-18-amd64 -> amd64,  5.15.0-91-generic -> generic
 # ------------------------------------------------------------
 kernel_flavour() {
-    sed -E 's/^[0-9]+(\.[0-9]+)*(-[0-9]+)?//' <<< "$1"
+    sed -E -e 's/^[0-9]+(\.[0-9]+)*//' -e 's/^(-[0-9]+|-rpi[0-9]+|\+rpt)//' -e 's/^-//' <<< "$1"
 }
 
 # ------------------------------------------------------------
