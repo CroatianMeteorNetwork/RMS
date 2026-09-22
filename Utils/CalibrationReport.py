@@ -12,7 +12,8 @@ import matplotlib.pyplot as plt
 
 from RMS.Astrometry.ApplyAstrometry import computeFOVSize, xyToRaDecPP, raDecToXYPP, \
     photometryFitRobust, correctVignetting, photomLine, rotationWrtHorizon, \
-    extinctionCorrectionTrueToApparent, getFOVSelectionRadius, limitingMagnitude
+    extinctionCorrectionTrueToApparent, getFOVSelectionRadius, limitingMagnitude, \
+    limitingMagnitudeExcludeMask
 from RMS.Astrometry.CheckFit import matchStarsResiduals
 from RMS.Astrometry.Conversions import date2JD, jd2Date, raDec2AltAz
 from RMS.Formats.CALSTARS import readCALSTARS
@@ -29,7 +30,7 @@ pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 from RMS.Astrometry.CyFunctions import subsetCatalog
 
 
-def limitingMagnitudeExcludeMask(image_stars):
+def calstarsLimitingMagnitudeExcludeMask(image_stars):
     """ Flag the CALSTARS stars whose S/N does not follow their flux, for the limiting magnitude fit.
 
         The S/N is capped at 99.99 in the CALSTARS files, and saturated stars (column 7, the number of
@@ -43,12 +44,9 @@ def limitingMagnitudeExcludeMask(image_stars):
         exclude_mask: [ndarray of bool] True for the stars to leave out.
     """
 
-    exclude_mask = image_stars[:, 6] >= 99.99
+    saturated = image_stars[:, 7] if image_stars.shape[1] > 7 else None
 
-    if image_stars.shape[1] > 7:
-        exclude_mask |= image_stars[:, 7] > 0
-
-    return exclude_mask
+    return limitingMagnitudeExcludeMask(image_stars[:, 6], saturated=saturated)
 
 
 
@@ -541,7 +539,7 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
             lm_pred_mags = photomLine((lm_intens, lm_radius), photom_offset, platepar.vignetting_coeff)
 
             lm_info = limitingMagnitude(lm_pred_mags, image_stars[:, 6], snr_targets=(5, 10),
-                                        exclude_mask=limitingMagnitudeExcludeMask(image_stars))
+                                        exclude_mask=calstarsLimitingMagnitudeExcludeMask(image_stars))
 
         ### ###
 

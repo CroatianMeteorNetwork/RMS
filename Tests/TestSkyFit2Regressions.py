@@ -1326,7 +1326,7 @@ def testCalibrationReportLMExcludesCappedAndSaturated():
     """ The limiting magnitude fit of the calibration report leaves out the S/N-capped and saturated
         stars, and works with CALSTARS files without the saturation column. """
 
-    from Utils.CalibrationReport import limitingMagnitudeExcludeMask
+    from Utils.CalibrationReport import calstarsLimitingMagnitudeExcludeMask as limitingMagnitudeExcludeMask
 
     # Y, X, IntensSum, Ampltd, FWHM, BgLvl, SNR, NSatPx
     stars = np.array([
@@ -1680,3 +1680,27 @@ def testInitialParamsKeepsUserDistortionWithoutFinalFit(plateTool, monkeypatch, 
     after = (pp.distortion_type, pp.equal_aspect, pp.asymmetry_corr, pp.force_distortion_centre,
              pp.refraction, tuple(pp.x_poly_fwd), pp.F_scale)
     assert after == before
+
+
+def testSkyFitLMFitExcludesCappedStars(plateTool, monkeypatch):
+    """ SkyFit2's limiting magnitude fit leaves out the S/N-capped stars like the calibration report. """
+
+    pt = plateTool
+    pt.paired_stars = SF.PairedStars()
+    for i, (x, y, intens, ra, dec, mag) in enumerate(np.array(pt.platepar.star_list)[:12, 1:]):
+        snr = 99.99 if i < 3 else 5.0 + i
+        pt.paired_stars.addPair(x, y, 2.0, intens, SF.CatalogStar(ra, dec, mag), snr=snr,
+                                saturated=(i == 3))
+
+    masks = []
+
+    def recordLM(mags, snr_arr, snr_targets=(5, 10), exclude_mask=None):
+        masks.append(list(exclude_mask))
+        return None
+
+    monkeypatch.setattr(SF, "limitingMagnitude", recordLM)
+    pt.photometry()
+
+    assert masks
+    assert masks[-1][:4] == [True, True, True, True]
+    assert not any(masks[-1][4:])

@@ -457,7 +457,7 @@ from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP, \
     rotationWrtHorizon, rotationWrtHorizonToPosAngle, computeFOVSize, photomLine, photometryFit, \
     rotationWrtStandard, rotationWrtStandardToPosAngle, correctVignetting, \
     extinctionCorrectionTrueToApparent, applyAstrometryFTPdetectinfo, getFOVSelectionRadius, \
-    limitingMagnitude, screenNudgeToAzAltDelta, fovCentreZenithDirection
+    limitingMagnitude, limitingMagnitudeExcludeMask, screenNudgeToAzAltDelta, fovCentreZenithDirection
 from RMS.Astrometry.AtmosphericExtinction import atmosphericExtinctionCorrection
 from RMS.Astrometry.StarClasses import CatalogStar, GeoPoint, PlanetPoint, PairedStars
 from RMS.Astrometry.StarFilters import filterPhotometricOutliers, filterBlendedStars, catalogInFOVMask
@@ -8612,7 +8612,7 @@ class PlateTool(QtWidgets.QMainWindow):
         predicted_mags = np.array(catalog_mags) - np.array(self.photom_fit_resids)
         self.limiting_mag_info = limitingMagnitude(
             predicted_mags, np.array(snr_list), snr_targets=(5, 10),
-            exclude_mask=np.array(saturation_list))
+            exclude_mask=limitingMagnitudeExcludeMask(snr_list, saturated=saturation_list))
 
         # Update the values in the platepar tab in the GUI
         self.tab.param_manager.updatePlatepar()
