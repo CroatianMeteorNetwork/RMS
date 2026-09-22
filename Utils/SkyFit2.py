@@ -2505,23 +2505,24 @@ class PlateTool(QtWidgets.QMainWindow):
         if config is None:
             config = cr.Config()
 
+        # The data directory is the input path itself, or the directory of an input file
         self.input_path = input_path
         if input_path is not None:
             if os.path.isfile(self.input_path):
                 self.dir_path = os.path.dirname(self.input_path)
             else:
                 self.dir_path = self.input_path
+
+        # Default directory for empty start
         else:
-            # Default directory for empty start
             rms_data_dir = os.path.expanduser("~/RMS_data")
             self.dir_path = rms_data_dir if os.path.isdir(rms_data_dir) else os.path.expanduser("~")
 
         self.config = config
 
-        # Store original catalog file and band ratios for "Config Default" option.
-        # When the user switches catalogs via the dropdown, onCatalogChanged()
-        # restores these so the magnitude filter uses the same bands as on startup
-        # (rather than falling back to V-band only).
+        # Store original catalog file and band ratios for the "Config Default" option. When the user
+        #   switches catalogs via the dropdown, onCatalogChanged() restores these so the magnitude filter
+        #   uses the same bands as on startup (rather than falling back to V-band only)
         self._original_catalog_file = self.config.star_catalog_file
         self._original_band_ratios = self.config.star_catalog_band_ratios
 
@@ -2748,8 +2749,8 @@ class PlateTool(QtWidgets.QMainWindow):
         # Flag for auto-opening the calibration dialog
         self._show_calibration_dialog_on_start = False
 
+        ### Data-loading path (input provided) ###
         if input_path is not None:
-            # --- Data-loading path (input provided) ---
 
             # Detect data input type and init the image handle
             self.detectInputType(load=True, beginning_time=beginning_time,
@@ -2788,19 +2789,20 @@ class PlateTool(QtWidgets.QMainWindow):
             # Search for platepar files and prompt user if needed
             pp_path = self._findPlatepar()
 
+            # User cancelled - abort loading
             if pp_path is None:
-                # User cancelled — abort loading
                 sys.exit()
 
             if pp_path:
                 self.loadPlatepar(platepar_file=pp_path)
+
+            # User chose to create a blank platepar. Don't auto-open the File Manager in this case, the
+            #   user explicitly chose the blank platepar
             else:
-                # User chose to create a blank platepar
                 self.platepar = Platepar()
                 self.makeNewPlatepar()
                 self.platepar_file = os.path.join(self.dir_path, self.config.platepar_name)
                 self.first_platepar_fit = True
-                # Don't auto-open File Manager — user explicitly chose to create a blank platepar
 
             # Set the given gamma value to platepar
             if gamma is not None:
@@ -2814,7 +2816,8 @@ class PlateTool(QtWidgets.QMainWindow):
             print()
 
         else:
-            # --- Empty construction (no input path) ---
+            ### Empty construction (no input path) ###
+
             self.img_handle = None
             self.catalog_stars = np.empty((0, 4))
             self.cat_lim_mag = self.config.catalog_mag_limit
@@ -2841,9 +2844,11 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Automatically load the flat and bias in UWO data mode
         if self.usingUWOData():
+            # Load the flat and the dark, remembering where they came from for the File Manager
             flat_file, self.flat_struct = self.loadFlat()
             if flat_file:
                 self.flat_source_path = flat_file
+
             dark_file, self.dark = self.loadDark()
             if dark_file:
                 self.dark_source_path = dark_file
@@ -2960,14 +2965,14 @@ class PlateTool(QtWidgets.QMainWindow):
         self.open_help_action.triggered.connect(self.openHelp)
         self.open_help_action.setShortcut('Shift+F1')
 
-        # Jump straight to the keyboard reference. F1 is where users look for the shortcut list,
-        # but it toggles the info panel, so give the cheat sheet its own key and menu entry.
+        # Jump straight to the keyboard reference. F1 is where users look for the shortcut list, but it
+        #   toggles the info panel, so give the cheat sheet its own key and menu entry
         self.keyboard_shortcuts_action = QAction("Keyboard Shortcuts")
         self.keyboard_shortcuts_action.triggered.connect(self.openKeyboardReference)
 
-        # CTRL + ? as an alias: on layouts where / is a shifted key (German, French, ...) the
-        # CTRL + / sequence can never be produced. The first sequence is the one Qt shows in the
-        # menu, so the advertised shortcut stays CTRL + /.
+        # CTRL + ? as an alias: on layouts where / is a shifted key (German, French, ...) the CTRL + /
+        #   sequence can never be produced. The first sequence is the one Qt shows in the menu, so the
+        #   advertised shortcut stays CTRL + /
         self.keyboard_shortcuts_action.setShortcuts([QtGui.QKeySequence('Ctrl+/'),
                                                      QtGui.QKeySequence('Ctrl+?')])
 
@@ -3155,8 +3160,8 @@ class PlateTool(QtWidgets.QMainWindow):
         self._planet_cache_time = None  # Observation time when ephemerides were computed
         self._planet_cache_radec = []   # List of (name, ra, dec, mag) from astropy
 
-        # astrometry.net matched star markers (main window) - cyan color
-        # These show catalog star positions that matched to input stars
+        # astrometry.net matched star markers (main window) - cyan color. These show catalog star
+        #   positions that matched to input stars
         self.astrometry_matched_markers = pg.ScatterPlotItem()
         self.astrometry_matched_markers.setPen('c', width=2)  # cyan
         self.astrometry_matched_markers.setBrush((0, 0, 0, 0))
@@ -3174,8 +3179,8 @@ class PlateTool(QtWidgets.QMainWindow):
         self.astrometry_matched_markers2.setZValue(5)
         self.zoom_window.addItem(self.astrometry_matched_markers2)
 
-        # astrometry.net quad star markers (main window) - magenta color
-        # These are the specific catalog stars used for the initial quad pattern matching
+        # astrometry.net quad star markers (main window) - magenta color. These are the specific catalog
+        #   stars used for the initial quad pattern matching
         self.astrometry_quad_markers = pg.ScatterPlotItem()
         self.astrometry_quad_markers.setPen('m', width=2)  # magenta
         self.astrometry_quad_markers.setBrush((0, 0, 0, 0))
@@ -3314,7 +3319,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.pointing_indicator.hide()
 
         # Refresh the indicator on zoom/pan so the step-size bar (drawn in screen pixels but representing
-        # a real image distance) rescales with the view
+        #   a real image distance) rescales with the view
         self.img_frame.sigRangeChanged.connect(lambda *args: self.pointing_indicator.refresh())
 
         # Distortion center marker (red cross) - zoom window
@@ -3470,7 +3475,8 @@ class PlateTool(QtWidgets.QMainWindow):
         self.spectral_type_text_list = TextItemList()
         self.img_frame.addItem(self.spectral_type_text_list)
 
-        # Plotting item for constellation lines
+        # Plotting items for constellation lines, a wide black background line under a thin white line
+
         # Background (black border)
         self.constellation_lines_bg = pg.PlotCurveItem(
             pen=pg.mkPen((0, 0, 0, 128), width=5), connect='pairs')
@@ -3723,8 +3729,8 @@ class PlateTool(QtWidgets.QMainWindow):
 
         self.setMinimumSize(1200, 800)
 
-        # Size window to 80% of screen dimensions to avoid resize-to-fullscreen issue
-        # while still working on any screen size
+        # Size window to 80% of screen dimensions to avoid resize-to-fullscreen issue while still
+        #   working on any screen size
         screen = QtWidgets.QApplication.primaryScreen().availableGeometry()
         self.resize(int(screen.width() * 0.8), int(screen.height() * 0.8))
 
@@ -3745,8 +3751,9 @@ class PlateTool(QtWidgets.QMainWindow):
             if self._show_calibration_dialog_on_start:
                 self._show_calibration_dialog_on_start = False
                 self.showCalibrationFilesDialog()
+
+        # Show empty-state message
         else:
-            # Show empty-state message
             self.label1.setText("No data loaded.\nUse File > File Manager to open a folder."
                                 "\n\nSHIFT+F1 Help   {:s}+/ Shortcuts".format(self.ctrl_label))
             self.image_navigation_slider.hide()
@@ -3903,18 +3910,23 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
     def changeStation(self, dir_path=None, config_override=None):
-        """
-        Load a new station folder and reload everything. If dir_path is None, a folder picker is shown.
-        Returns True on success, False on cancellation or failure.
+        """ Load a new station folder and reload everything (config, image handle, catalog, platepar,
+            mask, ...). On failure the previous paths and config are restored.
 
-        Arguments:
-            dir_path: [str] Path to data folder or file. If a file, uses its parent directory.
-            config_override: [str or list] Config path override, passed to loadConfigFromDirectory.
+        Keyword arguments:
+            dir_path: [str] Path to data folder or file. If a file, its parent directory is used. If None,
+                a folder picker is shown.
+            config_override: [str or list] Config path override, passed to loadConfigFromDirectory. None
+                by default, the config is auto-detected from the directory.
+
+        Return:
+            [bool] True on success, False on cancellation or failure.
         """
+
+        # Ask for the folder if none was given
         if dir_path is None:
             dir_path = str(QtWidgets.QFileDialog.getExistingDirectory(self, "Select new station folder",
-                                                                      self.dir_path,
-                                                                      QtWidgets.QFileDialog.Option.ShowDirsOnly))
+                self.dir_path, QtWidgets.QFileDialog.Option.ShowDirsOnly))
 
         if not dir_path:
             return False
@@ -3923,6 +3935,7 @@ class PlateTool(QtWidgets.QMainWindow):
         if os.path.isfile(dir_path):
             dir_path = os.path.dirname(dir_path)
 
+        # Remember the current state so it can be restored if the load fails
         prev_input_path = self.input_path
         prev_dir_path = self.dir_path
         prev_config = self.config
@@ -3945,6 +3958,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self._original_catalog_file = self.config.star_catalog_file
             self._original_band_ratios = self.config.star_catalog_band_ratios
 
+            # Detect the data type and init the image handle
             self.detectInputType(use_fr_files=self.use_fr_files)
 
             if self.img_handle is None:
@@ -3971,19 +3985,24 @@ class PlateTool(QtWidgets.QMainWindow):
             self.initMaskFromFile()
             self.updateMaskOverlayImage()
 
+            # Load the catalog and the detected stars of the new station
             self.catalog_stars = self.loadCatalogStars(self.config.catalog_mag_limit)
             self.cat_lim_mag = self.config.catalog_mag_limit
             self.loadCalstars()
 
             # Search for platepar files in the new directory, prompt if ambiguous
             platepar_path = self._findPlatepar()
+
+            # User cancelled - abort folder change
             if platepar_path is None:
-                # User cancelled — abort folder change
                 return False
+
+            # Load the chosen platepar, or a blank one
             if platepar_path:
                 self.loadPlatepar(update=True, platepar_file=platepar_path)
             else:
                 self.loadPlatepar(update=True, platepar_file='')
+
             self.platepar_modified = False
 
             # Update catalog combo box selection
@@ -3999,6 +4018,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
             self.img_frame.autoRange(padding=0)
 
+            # Reset the picks and paired stars of the previous station
             self.paired_stars = PairedStars()
             self.updatePairedStars()
             self.pick_list = {}
@@ -4008,6 +4028,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self.drawPhotometryColoring()
             self.photometry()
 
+            # Redraw everything for the new station
             self.updateStars()
             self.updateDistortion()
             self.updateLeftLabels()
@@ -4021,15 +4042,18 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Load UWO flat/dark if applicable
             if self.usingUWOData():
+
                 flat_file, self.flat_struct = self.loadFlat()
                 if flat_file:
                     self.flat_source_path = flat_file
+
                 dark_file, self.dark = self.loadDark()
                 if dark_file:
                     self.dark_source_path = dark_file
 
                 self.activateWindow()
 
+                # Apply the dark to the flat if the flatbiassub flag is set
                 if self.flatbiassub and (self.flat_struct is not None):
                     self.flat_struct.applyDark(self.dark)
                     self.img.flat_struct = self.flat_struct
@@ -4044,14 +4068,17 @@ class PlateTool(QtWidgets.QMainWindow):
 
             return True
 
+        # Restore the previous state and report the error
         except Exception as e:
             import traceback
             traceback.print_exc()
+
             self.input_path = prev_input_path
             self.dir_path = prev_dir_path
             self.config = prev_config
             if prev_img_handle is not None:
                 self.img_handle = prev_img_handle
+
             qmessagebox(title="Change Station Failed",
                          message="Could not load station from:\n{}\n\nError: {}".format(dir_path, repr(e)),
                          message_type="error")
@@ -4232,7 +4259,9 @@ class PlateTool(QtWidgets.QMainWindow):
         self.status_bar.showMessage(self.mouseOverStatus(self.mouse_x, self.mouse_y))
 
     def updateFileManagerButton(self):
-        """Update the File Manager button style — amber when anything is unsaved."""
+        """ Update the File Manager button style - amber when anything (platepar, config or mask) is
+            unsaved. """
+
         unsaved = False
         if self.hasData():
             if self.platepar_modified:
@@ -4257,7 +4286,7 @@ class PlateTool(QtWidgets.QMainWindow):
             return
 
         # Refresh the optical-axis pointing indicator (zenith arrow, elevation, WASD step size). This
-        # is the common path for the pan (WASD), rotation (Q/E), scale and step-size (+/-) keys.
+        #   is the common path for the pan (WASD), rotation (Q/E), scale and step-size (+/-) keys
         self.updatePointingIndicator()
 
         # Sky fit
@@ -4314,7 +4343,7 @@ class PlateTool(QtWidgets.QMainWindow):
             text_str += 'Refraction = {:s}'.format(str(self.platepar.refraction))
 
         # F1 is the key people press when they want the shortcut list, but it only toggles this
-        # panel - the list itself lives in the Help tab, so say where it is
+        #   panel - the list itself lives in the Help tab, so say where it is
         text_str += "\n\nSHIFT+F1 Help   {:s}+/ Shortcuts".format(self.ctrl_label)
 
         # Only update the text; visibility of the top-left panel is controlled by F1 (toggleInfo)
@@ -4428,6 +4457,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Apply apparent magnitude correction if enabled
         if self.apparent_mag_corr_enabled:
+
             # Extinction: makes stars near horizon dimmer
             ra_catalog = self.catalog_stars[:, 0]
             dec_catalog = self.catalog_stars[:, 1]
@@ -4509,7 +4539,9 @@ class PlateTool(QtWidgets.QMainWindow):
             if common_names_unmasked is None:
                 common_names_unmasked = [None]*len(cat_stars_xy_unmasked)
 
-            iterator = zip(original_indices_unmasked, cat_stars_xy_unmasked, self.catalog_stars_filtered_unmasked, spectral_type_unmasked, star_names_unmasked, common_names_unmasked)
+            iterator = zip(original_indices_unmasked, cat_stars_xy_unmasked, \
+                self.catalog_stars_filtered_unmasked, spectral_type_unmasked, star_names_unmasked, \
+                common_names_unmasked)
 
             for orig_idx, star_xy, star_radec, star_spec, star_name, common_name in iterator:
                 cat_stars_xy.append(star_xy)
@@ -4537,8 +4569,9 @@ class PlateTool(QtWidgets.QMainWindow):
             if common_names_unmasked is None:
                 common_names_unmasked = [None]*len(cat_stars_xy_unmasked)
 
-            iterator = zip(original_indices_unmasked, cat_stars_xy_unmasked, self.catalog_stars_filtered_unmasked, spectral_type_unmasked, star_names_unmasked, common_names_unmasked)
-
+            iterator = zip(original_indices_unmasked, cat_stars_xy_unmasked, \
+                self.catalog_stars_filtered_unmasked, spectral_type_unmasked, star_names_unmasked, \
+                common_names_unmasked)
 
             for orig_idx, star_xy, star_radec, star_spec, star_name, common_name in iterator:
 
@@ -4629,24 +4662,26 @@ class PlateTool(QtWidgets.QMainWindow):
                         iter_common_names = [None] * n_stars
 
 
-                    # Sort by brightness (magnitude) so brightest stars get labels first
-                    # catalog_stars_filtered has (ra, dec, mag) - lower mag = brighter
+                    # Sort by brightness (magnitude) so brightest stars get labels first.
+                    #   catalog_stars_filtered has (ra, dec, mag) - lower mag = brighter
                     if len(self.catalog_stars_filtered) > 0:
                         mags = np.array([s[2] for s in self.catalog_stars_filtered])
                         brightness_order = np.argsort(mags)  # Brightest first
                     else:
                         brightness_order = np.arange(n_stars)
 
-                    # Keep track of placed labels using spatial grid for O(1) overlap checking
-                    # Grid cell size matches exclusion zone
+                    # Keep track of placed labels using a spatial grid for O(1) overlap checking. The
+                    #   grid cell size matches the exclusion zone
                     grid_cell_x = 50
                     grid_cell_y = 15
                     placed_labels_grid = {}  # Dict: (grid_x, grid_y) -> list of (x, y)
 
                     def checkOverlap(x, y):
-                        """Check if position overlaps with any placed label. O(1) average."""
+                        """ Check if the position overlaps with any placed label. O(1) average. """
+
                         gx = int(x // grid_cell_x)
                         gy = int(y // grid_cell_y)
+
                         # Check current cell and adjacent cells
                         for dx in (-1, 0, 1):
                             for dy in (-1, 0, 1):
@@ -4658,16 +4693,19 @@ class PlateTool(QtWidgets.QMainWindow):
                         return False
 
                     def addToGrid(x, y):
-                        """Add position to spatial grid."""
+                        """ Add the position to the spatial grid. """
                         cell = (int(x // grid_cell_x), int(y // grid_cell_y))
                         if cell not in placed_labels_grid:
                             placed_labels_grid[cell] = []
                         placed_labels_grid[cell].append((x, y))
 
                     # Check if we have precomputed HTML available
-                    has_precomputed_spectral = hasattr(self, '_star_label_html_spectral') and self._star_label_html_spectral
-                    has_precomputed_name = hasattr(self, '_star_label_html_name') and self._star_label_html_name
-                    has_original_indices = hasattr(self, '_filtered_original_indices') and self._filtered_original_indices
+                    has_precomputed_spectral = hasattr(self, '_star_label_html_spectral') \
+                        and self._star_label_html_spectral
+                    has_precomputed_name = hasattr(self, '_star_label_html_name') \
+                        and self._star_label_html_name
+                    has_original_indices = hasattr(self, '_filtered_original_indices') \
+                        and self._filtered_original_indices
 
                     # Initialize TextItem cache if not present
                     if not hasattr(self, '_star_label_cache'):
@@ -4684,6 +4722,7 @@ class PlateTool(QtWidgets.QMainWindow):
                         star_mag = mags[i] if i < len(mags) else 99.0
                         if star_mag > self.label_mag_limit:
                             continue
+
                         spec_type = iter_spectral[i] if iter_spectral else None
                         star_name = iter_names[i] if iter_names else None
                         common_name = iter_common_names[i] if iter_common_names else None
@@ -4692,15 +4731,18 @@ class PlateTool(QtWidgets.QMainWindow):
                         has_text = False
 
                         # Get original catalog index for precomputed HTML lookup
-                        orig_idx = self._filtered_original_indices[i] if has_original_indices and i < len(self._filtered_original_indices) else None
+                        orig_idx = self._filtered_original_indices[i] \
+                            if has_original_indices and i < len(self._filtered_original_indices) else None
 
                         # Add spectral type - use precomputed HTML if available
                         if self.show_spectral_type:
-                            if has_precomputed_spectral and orig_idx is not None and self._star_label_html_spectral[orig_idx]:
+                            if has_precomputed_spectral and orig_idx is not None \
+                                and self._star_label_html_spectral[orig_idx]:
                                 html_text += self._star_label_html_spectral[orig_idx]
                                 has_text = True
+
+                            # Fallback to computing HTML (for catalogs loaded before this change)
                             elif (spec_type is not None) and (len(spec_type) > 0):
-                                # Fallback to computing HTML (for catalogs loaded before this change)
                                 hex_color = "#90ee90"  # Default light green
                                 first_char = spec_type[0].upper()
                                 if 'infrared' in spec_type.lower():
@@ -4725,7 +4767,8 @@ class PlateTool(QtWidgets.QMainWindow):
 
                         # Add star name - use precomputed HTML if available
                         if self.show_star_names:
-                            if has_precomputed_name and orig_idx is not None and self._star_label_html_name[orig_idx]:
+                            if has_precomputed_name and orig_idx is not None \
+                                and self._star_label_html_name[orig_idx]:
                                 if has_text:
                                     html_text += "<br>"
                                 html_text += self._star_label_html_name[orig_idx]
@@ -4752,15 +4795,17 @@ class PlateTool(QtWidgets.QMainWindow):
 
                         # Check cache for existing TextItem (keyed by original index + display options)
                         _cache_key = (orig_idx, _cache_key_suffix) if orig_idx is not None else None
+
+                        # Reuse cached TextItem - just update position
                         if _cache_key is not None and _cache_key in self._star_label_cache:
-                            # Reuse cached TextItem - just update position
                             text_item = self._star_label_cache[_cache_key]
                             text_item.setPos(self.catalog_x_filtered[i] - 3,
                                              self.catalog_y_filtered[i] + 0.5)
+
+                        # Create new TextItem with HTML. Anchor (1.0, 0.5) places the text right edge at
+                        #   the anchor point, and the small offset clears the marker without drifting
+                        #   too much on zoom
                         else:
-                            # Create new TextItem with HTML
-                            # Anchor (1.0, 0.5) places text right edge at anchor point
-                            # Small offset clears the marker without drifting too much on zoom
                             text_item = TextItem(html=html_text, anchor=(1.0, 0.5))
                             text_item.setAlign(QtCore.Qt.AlignmentFlag.AlignRight)
                             text_item.setPos(self.catalog_x_filtered[i] - 3,
@@ -4774,17 +4819,19 @@ class PlateTool(QtWidgets.QMainWindow):
             else:
                 print('No catalog stars visible!')
 
+        # Catalog stars not visible - hide the text list
         else:
-            # Catalog stars not visible - hide the text list
             self.spectral_type_text_list.setVisible(False)
 
 
     def updatePlanets(self):
-        """ Update the display of solar system bodies (planets, Moon, Sun). """
+        """ Update the display of solar system bodies (planets, Moon, Sun). The ephemerides are cached
+            per observation time as the astropy calls are expensive. """
 
         if not ASTROPY_AVAILABLE:
             return
 
+        # Hide the bodies together with the catalog stars
         if not self.catalog_stars_visible:
             self.planet_markers.setData(pos=[])
             self.planet_markers2.setData(pos=[])
@@ -4802,9 +4849,10 @@ class PlateTool(QtWidgets.QMainWindow):
 
         ff_jd = date2JD(*obs_time)
 
-        # Check if we need to recompute ephemerides (expensive astropy calls)
-        # Only recompute when the observation time changes
+        # Check if we need to recompute ephemerides (expensive astropy calls). Only recompute when the
+        #   observation time changes
         if self._planet_cache_time != obs_time[:6]:
+
             # Convert to astropy Time
             dt = datetime.datetime(*obs_time[:6])
             t = Time(dt)
@@ -4843,8 +4891,8 @@ class PlateTool(QtWidgets.QMainWindow):
 
                     self._planet_cache_radec.append((display_name, ra_deg, dec_deg, mag))
 
+                # Skip bodies that fail (e.g., if ephemeris data is missing)
                 except Exception as e:
-                    # Skip bodies that fail (e.g., if ephemeris data is missing)
                     pass
 
             self._planet_cache_time = obs_time[:6]
@@ -4861,13 +4909,14 @@ class PlateTool(QtWidgets.QMainWindow):
         fov_ra, fov_dec = self.computeCentreRADec()
 
         # Gate bodies on angular distance from the FOV centre, using the same selection radius as the
-        # catalog star filtering (subsetCatalog). The projected-bounds check below is NOT a sufficient
-        # FOV test on its own: a radial distortion polynomial extrapolated beyond its fit range can fold
-        # far-off-sky points back into the image, so a body well outside the FOV would otherwise project
-        # in-bounds and pop in and out as the pointing changes.
+        #   catalog star filtering (subsetCatalog). The projected-bounds check below is NOT a sufficient
+        #   FOV test on its own: a radial distortion polynomial extrapolated beyond its fit range can
+        #   fold far-off-sky points back into the image, so a body well outside the FOV would otherwise
+        #   project in-bounds and pop in and out as the pointing changes
         fov_radius = getFOVSelectionRadius(self.platepar)
 
         for display_name, ra_deg, dec_deg, mag in self._planet_cache_radec:
+
             # Skip bodies outside the FOV selection radius
             ang_sep = np.degrees(angularSeparation(
                 np.radians(ra_deg), np.radians(dec_deg),
@@ -4909,6 +4958,8 @@ class PlateTool(QtWidgets.QMainWindow):
                 label = TextItem("{} ({})".format(name, mag_str), color=(255, 200, 0), anchor=(1.0, 0.5))
                 label.setPos(planet_x[i] - 15, planet_y[i] + 0.5)
                 self.planet_labels.addTextItem(label)
+
+        # No bodies in the FOV
         else:
             self.planet_markers.setData(pos=[])
             self.planet_markers2.setData(pos=[])
@@ -4957,6 +5008,7 @@ class PlateTool(QtWidgets.QMainWindow):
             star_data = np.array(self.calstars[ff_name_c])
 
         if star_data is not None and len(star_data) > 0:
+
             # Get star coordinates
             y = star_data[:, 0]
             x = star_data[:, 1]
@@ -4976,7 +5028,9 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
     def initStarDetectionOverrides(self):
-        """ Initialize star detection override parameters from config. """
+        """ Initialize the star detection override parameters from the config and sync the Star
+            Detection tab sliders. Parameters missing from the config keep their current values. """
+
         if hasattr(self.config, 'intensity_threshold'):
             self.override_intensity_threshold = self.config.intensity_threshold
         if hasattr(self.config, 'neighborhood_size'):
@@ -4997,22 +5051,25 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
     def updateIntensityThreshold(self, value):
-        """ Update intensity threshold override parameter. """
+        """ Star Detection tab slider callback: set the intensity threshold override (raw ADU). """
         self.override_intensity_threshold = value
         self._updateConfigSaveButtonState()
 
     def updateNeighborhoodSize(self, value):
-        """ Update neighborhood size override parameter. """
+        """ Star Detection tab slider callback: set the neighbourhood size override (px). """
         self.override_neighborhood_size = value
         self._updateConfigSaveButtonState()
 
     def updateMaxStars(self, value):
-        """ Update max stars override parameter. """
+        """ Star Detection tab slider callback: set the maximum number of stars override. """
         self.override_max_stars = value
         self._updateConfigSaveButtonState()
 
     def updateGamma(self, value):
-        """ Update gamma override parameter. """
+        """ Star Detection tab slider callback: set the gamma override. Unlike the other overrides the
+            gamma is applied to the config and platepar right away when the override is active, as it
+            changes the displayed magnitudes. """
+
         self.override_gamma = value
 
         # If override is enabled, also sync config.gamma and platepar.gamma
@@ -5024,47 +5081,66 @@ class PlateTool(QtWidgets.QMainWindow):
         self.updateLeftLabels()
 
     def updateSegmentRadius(self, value):
-        """ Update segment radius override parameter. """
+        """ Star Detection tab slider callback: set the segment radius override (px). """
         self.override_segment_radius = value
         self._updateConfigSaveButtonState()
 
     def updateMaxFeatureRatio(self, value):
-        """ Update max feature ratio override parameter. """
+        """ Star Detection tab slider callback: set the maximum feature ratio override. """
         self.override_max_feature_ratio = value
         self._updateConfigSaveButtonState()
 
     def updateRoundnessThreshold(self, value):
-        """ Update roundness threshold override parameter. """
+        """ Star Detection tab slider callback: set the roundness threshold override. """
         self.override_roundness_threshold = value
         self._updateConfigSaveButtonState()
 
     def isConfigModified(self):
-        """Check if Star Detection overrides differ from the loaded config."""
+        """ Check if the Star Detection overrides (or the tuned catalog LM) differ from the loaded config.
+
+        Return:
+            [bool] True if a config save would change the file.
+        """
+
         cfg = self.config
+
+        # Parameters missing from the config are compared against themselves, i.e. count as unchanged
         return (
-            self.override_intensity_threshold != getattr(cfg, 'intensity_threshold', self.override_intensity_threshold)
-            or self.override_neighborhood_size != getattr(cfg, 'neighborhood_size', self.override_neighborhood_size)
+            self.override_intensity_threshold \
+                != getattr(cfg, 'intensity_threshold', self.override_intensity_threshold)
+            or self.override_neighborhood_size \
+                != getattr(cfg, 'neighborhood_size', self.override_neighborhood_size)
             or self.configMaxStars() != getattr(cfg, 'max_stars', self.configMaxStars())
-            or self.override_segment_radius != getattr(cfg, 'segment_radius', self.override_segment_radius)
-            or abs(self.override_max_feature_ratio - getattr(cfg, 'max_feature_ratio', self.override_max_feature_ratio)) > 1e-6
-            or abs(self.override_roundness_threshold - getattr(cfg, 'roundness_threshold', self.override_roundness_threshold)) > 1e-6
+            or self.override_segment_radius \
+                != getattr(cfg, 'segment_radius', self.override_segment_radius)
+            or abs(self.override_max_feature_ratio \
+                - getattr(cfg, 'max_feature_ratio', self.override_max_feature_ratio)) > 1e-6
+            or abs(self.override_roundness_threshold \
+                - getattr(cfg, 'roundness_threshold', self.override_roundness_threshold)) > 1e-6
             or self.isTunedCatalogLMUnsaved()
         )
 
     def configMaxStars(self):
-        """Return the max_stars value that a config save writes.
+        """ Return the max_stars value that a config save writes.
 
-        Tuning for interactive work can settle on far fewer stars than the nightly processing
-        needs, so the saved value is never allowed below MIN_CONFIG_MAX_STARS.
+            Tuning for interactive work can settle on far fewer stars than the nightly processing needs,
+            so the saved value is never allowed below MIN_CONFIG_MAX_STARS.
+
+        Return:
+            [int] max_stars to write.
         """
         return max(self.override_max_stars, MIN_CONFIG_MAX_STARS)
 
     def isTunedCatalogLMUnsaved(self):
-        """Check if the tuner found a catalog LM that is not the one in the config.
+        """ Check if the tuner found a catalog LM that is not the one in the config.
 
-        Only the tuned LM counts. The working LM (the spinboxes, the R/F keys, plate fitting) is
-        never saved, so it must not mark the config as modified either.
+            Only the tuned LM counts. The working LM (the spinboxes, the R/F keys, plate fitting) is never
+            saved, so it must not mark the config as modified either.
+
+        Return:
+            [bool] True if the tuned LM differs from the config value.
         """
+
         if not getattr(self, 'catalog_lm_tuned', False) or not hasattr(self, 'tuned_cat_lim_mag'):
             return False
 
@@ -5074,13 +5150,23 @@ class PlateTool(QtWidgets.QMainWindow):
         return abs(round(self.tuned_cat_lim_mag, 1) - cfg_lm) > 0.05
 
     def _updateConfigSaveButtonState(self):
-        """Enable/disable the Save Config button based on whether overrides differ from config."""
+        """ Enable/disable the Save Config button (and the File Manager glow) based on whether the
+            overrides differ from the config. """
+
+        # The tab may not exist yet during init
         if hasattr(self, 'tab') and hasattr(self.tab, 'star_detection'):
             self.tab.star_detection.save_config_button.setEnabled(self.isConfigModified())
+
         self.updateFileManagerButton()
 
     def updateCatalogLMFromStarDetection(self, value):
-        """ Update catalog limiting magnitude from Star Detection panel spinbox. """
+        """ Star Detection tab spinbox callback: set the working catalog limiting magnitude, reload the
+            catalog and sync the Settings tab spinbox.
+
+        Arguments:
+            value: [float] Catalog limiting magnitude.
+        """
+
         self.cat_lim_mag = value
         self.catalog_stars = self.loadCatalogStars(self.cat_lim_mag)
 
@@ -5094,11 +5180,14 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
     def toggleStarDetectionOverride(self):
-        """ Toggle between using override detections and original CALSTARS. """
+        """ Toggle between using the override detections and the original CALSTARS, switching the gamma
+            to match the detection source. """
+
         self.star_detection_override_enabled = not self.star_detection_override_enabled
 
         # Update both platepar.gamma and config.gamma to match the detection source
         if self.star_detection_override_enabled:
+
             # Store original config gamma before overriding
             if self._original_config_gamma is None:
                 self._original_config_gamma = getattr(self.config, 'gamma', 1.0)
@@ -5108,8 +5197,9 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.platepar.gamma = self.override_gamma
             self.config.gamma = self.override_gamma
             print(f"Switched to override detections (gamma={self.override_gamma:.3f})")
+
+        # Using original CALSTARS - restore original gamma
         else:
-            # Using original CALSTARS - restore original gamma
             if self._original_config_gamma is not None:
                 if self.platepar is not None:
                     self.platepar.gamma = self._original_config_gamma
@@ -5129,7 +5219,9 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
     def redetectStars(self):
-        """ Re-detect stars on current image using override parameters. """
+        """ Re-detect stars on the current image using the override parameters and switch the display to
+            the override detections. The config is temporarily patched as extractStarsFF reads the
+            parameters from it. """
 
         # Skip placeholder images
         ff_name = self.img_handle.name()
@@ -5146,6 +5238,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Call extractStarsFF with override parameters
         try:
+
             # Temporarily modify config to use override parameters
             original_intensity_threshold = getattr(self.config, 'intensity_threshold', 18)
             original_neighborhood_size = getattr(self.config, 'neighborhood_size', 10)
@@ -5186,12 +5279,17 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.config.roundness_threshold = original_roundness_threshold
 
             if star_list:
-                # extractStarsFF returns: ff_name, x_arr, y_arr, amplitude, intensity, fwhm, background, snr, saturated_count
-                ff_name_ret, x_arr, y_arr, amplitude, intensity, fwhm, background, snr, saturated_count = star_list
 
-                # Construct star data in CALSTARS format: Y(0) X(1) IntensSum(2) Ampltd(3) FWHM(4) BgLvl(5) SNR(6) NSatPx(7)
-                # Note: intensity=IntensSum (integrated), amplitude=Ampltd (peak)
-                star_data = list(zip(y_arr, x_arr, intensity, amplitude, fwhm, background, snr, saturated_count))
+                # extractStarsFF returns: ff_name, x_arr, y_arr, amplitude, intensity, fwhm, background,
+                #   snr, saturated_count
+                ff_name_ret, x_arr, y_arr, amplitude, intensity, fwhm, background, snr, \
+                    saturated_count = star_list
+
+                # Construct star data in CALSTARS format: Y(0) X(1) IntensSum(2) Ampltd(3) FWHM(4)
+                #   BgLvl(5) SNR(6) NSatPx(7). Note: intensity=IntensSum (integrated), amplitude=Ampltd
+                #   (peak)
+                star_data = list(zip(y_arr, x_arr, intensity, amplitude, fwhm, background, snr, \
+                    saturated_count))
 
                 # Store the override detected stars
                 self.star_detection_override_data[ff_name] = star_data
@@ -5212,7 +5310,8 @@ class PlateTool(QtWidgets.QMainWindow):
 
                 self.updateCalstars()
                 num_candidates = extra_info.get('num_candidates')
-                self.tab.star_detection.updateStatus(True, len(star_data), candidate_count=num_candidates)
+                self.tab.star_detection.updateStatus(True, len(star_data), \
+                    candidate_count=num_candidates)
 
             else:
                 print("  No stars detected")
@@ -5224,7 +5323,9 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
     def redetectAllImages(self):
-        """ Re-detect stars on all images using override parameters. """
+        """ Re-detect stars on all FF files on disk using the override parameters and switch the display
+            to the override detections. The GUI is kept responsive between images. """
+
         print("Re-detecting stars on all images...")
 
         # Ensure unsaved mask polygons are applied to the detection
@@ -5288,16 +5389,20 @@ class PlateTool(QtWidgets.QMainWindow):
                     )
 
                     if star_list:
-                        ff_name_ret, x_arr, y_arr, amplitude, intensity, fwhm, background, snr, saturated_count = star_list
-                        # CALSTARS format: Y(0) X(1) IntensSum(2) Ampltd(3) FWHM(4) BgLvl(5) SNR(6) NSatPx(7)
-                        star_data = list(zip(y_arr, x_arr, intensity, amplitude, fwhm, background, snr, saturated_count))
+                        ff_name_ret, x_arr, y_arr, amplitude, intensity, fwhm, background, snr, \
+                            saturated_count = star_list
+
+                        # CALSTARS format: Y(0) X(1) IntensSum(2) Ampltd(3) FWHM(4) BgLvl(5) SNR(6)
+                        #   NSatPx(7)
+                        star_data = list(zip(y_arr, x_arr, intensity, amplitude, fwhm, background, snr, \
+                            saturated_count))
                         self.star_detection_override_data[ff_name] = star_data
-                        
-                        # Store candidate count in star data if needed, or handle separately. 
-                        # For redetectAllImages, we usually just update the main status for the last one
+
+                        # The status shows the counts of the image processed last
                         num_candidates = extra_info.get('num_candidates')
-                        self.tab.star_detection.updateStatus(True, len(star_data), candidate_count=num_candidates)
-                        
+                        self.tab.star_detection.updateStatus(True, len(star_data), \
+                            candidate_count=num_candidates)
+
                         success_count += 1
 
                 except Exception as e:
@@ -5337,6 +5442,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         self.updateCalstars()
 
+        # Show the star count of the current image
         ff_name = self.img_handle.name()
         if ff_name in self.star_detection_override_data:
             self.tab.star_detection.updateStatus(True, len(self.star_detection_override_data[ff_name]))
@@ -5345,17 +5451,23 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
     def tuneStarDetection(self):
-        """
-        Auto-tune star detection parameters by sweeping intensity_threshold downward
-        and finding where false detections start to explode, then optimizing segment_radius.
+        """ Auto-tune the star detection parameters on the current image against the catalog, then apply
+            them to the Star Detection tab and re-detect.
 
-        Algorithm:
-        1. Use current catalog stars projected to image
-        2. Sweep intensity_threshold from 40 down to 3
-        3. Count true positives (within 2px of catalog) vs false positives
-        4. Find threshold where false positive ratio starts exploding
-        5. Sweep segment_radius 3-20 to potentially recover more bright stars
+            Algorithm:
+                1. Project a deep catalog (LM 8.0) to the image, keeping only stars in the FOV and
+                   outside the mask.
+                2. Phase 1: measure the FWHM of bright stars to pick the segment_radius.
+                3. Phase 2: sweep intensity_threshold from high to low, counting true positives (near a
+                   catalog star) vs false positives, and pick the threshold where the false positives
+                   start exploding.
+                4. Phase 3: find the catalog LM that matches the detected true positives.
+                5. Set max_stars from the candidate count with seasonal headroom.
+
+            Tuning is aborted with a message box if the matches are too few or too poor, as that means
+            the platepar is off rather than the parameters.
         """
+
         # Validate platepar exists
         if self.platepar is None:
             qmessagebox(message="A valid platepar is required for tuning.",
@@ -5385,6 +5497,7 @@ class PlateTool(QtWidgets.QMainWindow):
         original_max_stars = self.config.max_stars
 
         try:
+
             # Compute JD for the current image
             jd = date2JD(*self.img_handle.currentTime())
 
@@ -5395,8 +5508,8 @@ class PlateTool(QtWidgets.QMainWindow):
             # Temporarily increase max_stars limit during tuning
             self.config.max_stars = max(2000, original_max_stars)
 
-            # Load a DEEP catalog (LM 8.0) for true/false positive matching
-            # This ensures we don't miscount faint real stars as false positives
+            # Load a DEEP catalog (LM 8.0) for true/false positive matching. This ensures we don't
+            #   miscount faint real stars as false positives
             deep_catalog_lm = 8.0
             deep_catalog = self.loadCatalogStars(deep_catalog_lm)
 
@@ -5405,8 +5518,8 @@ class PlateTool(QtWidgets.QMainWindow):
                     title="Tuning Error", message_type="warning")
                 return
 
-            # Filter catalog to stars actually in FOV (prevents back-projection issues)
-            # Pass lim_mag explicitly to avoid using self.cat_lim_mag which may differ
+            # Filter catalog to stars actually in FOV (prevents back-projection issues). Pass lim_mag
+            #   explicitly to avoid using self.cat_lim_mag which may differ
             _, deep_catalog_fov = self.filterCatalogStarsInsideFOV(deep_catalog, lim_mag=deep_catalog_lm)
             if len(deep_catalog_fov) == 0:
                 qmessagebox(message="No catalog stars visible in FOV.",
@@ -5444,18 +5557,17 @@ class PlateTool(QtWidgets.QMainWindow):
                     title="Tuning Error", message_type="warning")
                 return
 
-            # Phase 1: Determine segment_radius from FWHM of bright stars
-            #
-            # The segment_radius must be large enough to contain the stellar PSF for
-            # the Gaussian fit. The critical filter in fitPSF is:
-            #   4 * sigma_x * sigma_y / segment_radius^2 < max_feature_ratio
-            # For a round star (sigma_x ≈ sigma_y):
-            #   segment_radius > 2 * sigma / sqrt(max_feature_ratio)
-            # Since FWHM = 2.355 * sigma:
-            #   segment_radius > 0.95 * FWHM  (for max_feature_ratio = 0.8)
-            #
-            # We detect bright stars with a generous segment_radius, measure their
-            # FWHMs, then set segment_radius to accommodate the widest stars.
+            ### Phase 1: Determine segment_radius from FWHM of bright stars ###
+
+            # The segment_radius must be large enough to contain the stellar PSF for the Gaussian fit.
+            #   The critical filter in fitPSF is:
+            #       4 * sigma_x * sigma_y / segment_radius^2 < max_feature_ratio
+            #   For a round star (sigma_x ~ sigma_y):
+            #       segment_radius > 2 * sigma / sqrt(max_feature_ratio)
+            #   Since FWHM = 2.355 * sigma:
+            #       segment_radius > 0.95 * FWHM  (for max_feature_ratio = 0.8)
+            #   We detect bright stars with a generous segment_radius, measure their FWHMs, then set
+            #   segment_radius to accommodate the widest stars
             print(f"\n  Phase 1: Determining segment_radius from bright star FWHMs")
             self.status_bar.showMessage("Tuning... measuring star FWHMs")
             QtWidgets.QApplication.processEvents()
@@ -5463,9 +5575,9 @@ class PlateTool(QtWidgets.QMainWindow):
             best_segment, best_true_pos_seg, best_fp_ratio_seg = self._findSegmentRadiusFromFWHM(
                 ff_name, visible_cat_x, visible_cat_y)
 
-            # Early bail-out check after Phase 1
-            # With high intensity threshold (bright stars only), we expect good precision.
-            # If false positive ratio > 80%, the calibration is likely wrong.
+            # Early bail-out check after Phase 1. With high intensity threshold (bright stars only), we
+            #   expect good precision. If the false positive ratio is too high, the calibration is likely
+            #   wrong
             if best_fp_ratio_seg > 0.50:
                 precision_seg = (1.0 - best_fp_ratio_seg) * 100
 
@@ -5488,14 +5600,15 @@ class PlateTool(QtWidgets.QMainWindow):
                     title="Tuning Aborted", message_type="warning")
                 return
 
-            # Phase 2: Sweep intensity threshold from high to low with best segment
+            ### Phase 2: Sweep intensity threshold from high to low with best segment ###
+
             # Continue until we see clear degradation, then analyze all results
             print(f"\n  Phase 2: Intensity threshold sweep (segment_radius={best_segment})")
 
-            # Scale the 8-bit sweep range (40..3) to the camera's working threshold so it
-            # brackets the usable range on high-bit-depth data. A fixed 8-bit sweep lands
-            # below the noise on 16-bit, floods the candidate list past max_stars, and aborts
-            # on the first step. 8-bit configs are unchanged (scale = 1, sweep = 40..3).
+            # Scale the 8-bit sweep range (40..3) to the camera's working threshold so it brackets the
+            #   usable range on high-bit-depth data. A fixed 8-bit sweep lands below the noise on 16-bit,
+            #   floods the candidate list past max_stars, and aborts on the first step. 8-bit configs are
+            #   unchanged (scale = 1, sweep = 40..3)
             if getattr(self.config, 'bit_depth', 8) > 8:
                 thr_scale = max(1.0, self.config.intensity_threshold/20.0)
             else:
@@ -5509,6 +5622,7 @@ class PlateTool(QtWidgets.QMainWindow):
             true_pos_plateau_count = 0
 
             for i, intensity in enumerate(intensity_values):
+
                 self.status_bar.showMessage(f"Tuning... threshold sweep {intensity}")
                 QtWidgets.QApplication.processEvents()
 
@@ -5530,9 +5644,9 @@ class PlateTool(QtWidgets.QMainWindow):
                         true_pos_plateau_count += 1
 
                     # Smart exit conditions:
-                    # 1. fp_ratio > 0.7 - too much noise, unlikely to improve
-                    # 2. true_pos plateaued for 5+ steps AND fp_ratio > 0.4 - diminishing returns
-                    # 3. precision < 0.3 - mostly detecting noise
+                    #   1. fp_ratio > 0.7 - too much noise, unlikely to improve
+                    #   2. true_pos plateaued for 5+ steps AND fp_ratio > 0.4 - diminishing returns
+                    #   3. precision < 0.3 - mostly detecting noise
                     precision = n_true_pos / n_detected
                     if fp_ratio > 0.7:
                         print(f"    -> Stopping: fp_ratio {fp_ratio:.2f} > 0.7 (too noisy)")
@@ -5543,8 +5657,8 @@ class PlateTool(QtWidgets.QMainWindow):
                     if precision < 0.3:
                         print(f"    -> Stopping: precision {precision:.2f} < 0.3 (mostly noise)")
                         break
+                # No detections (too many candidates) - stop here
                 else:
-                    # No detections (too many candidates) - stop here
                     print(f"    threshold={intensity:2d}: no detections (too many candidates)")
                     break
 
@@ -5558,13 +5672,14 @@ class PlateTool(QtWidgets.QMainWindow):
                 ff_name, best_threshold, best_segment, visible_cat_x, visible_cat_y,
                 return_positions=True, extra_info=detection_info)
 
-            # Early bail-out check after Phase 2
-            # If precision is very low, the calibration is likely wrong
+            # Early bail-out check after Phase 2. If precision is very low, the calibration is likely
+            #   wrong
             if n_detected > 0:
                 precision = n_true_pos / n_detected
-                # Bail out if precision < 50% or fewer than 8 true positives. Either means the
-                # detections are noise-dominated / too sparse to fit reliably - which on a bad or
-                # uncalibrated platepar otherwise drives Phase 3 to chase coincidental matches.
+
+                # Bail out if precision < 50% or fewer than 8 true positives. Either means the detections
+                #   are noise-dominated / too sparse to fit reliably - which on a bad or uncalibrated
+                #   platepar otherwise drives Phase 3 to chase coincidental matches
                 if (precision < 0.50) or (n_true_pos < 8):
                     print(f"\n  *** TUNING ABORTED ***")
                     print(f"  Only {n_true_pos} true positive(s) out of {n_detected} detections ({precision:.1%} precision).")
@@ -5596,7 +5711,8 @@ class PlateTool(QtWidgets.QMainWindow):
                     title="Tuning Aborted", message_type="warning")
                 return
 
-            # Phase 3: Find catalog LM that matches the detected true positives
+            ### Phase 3: Find catalog LM that matches the detected true positives ###
+
             print(f"\n  Phase 3: Finding catalog LM to match {n_true_pos} true positives")
             self.status_bar.showMessage(f"Tuning... finding optimal catalog LM")
             QtWidgets.QApplication.processEvents()
@@ -5604,8 +5720,8 @@ class PlateTool(QtWidgets.QMainWindow):
             best_lm = self._findOptimalCatalogLM(jd, tp_x, tp_y, n_true_pos)
 
             # Success gate: _findOptimalCatalogLM returns None when no reliable LM was found (the
-            #   detections could only be matched via a spurious, over-deep catalog). Abort rather
-            #   than apply a junk LM that explodes the catalog and masquerades as a good optimum.
+            #   detections could only be matched via a spurious, over-deep catalog). Abort rather than
+            #   apply a junk LM that explodes the catalog and masquerades as a good optimum
             if best_lm is None:
                 print(f"\n  *** TUNING ABORTED ***")
                 print(f"  Could not find a reliable catalog LM - detections only matched via an "
@@ -5627,14 +5743,13 @@ class PlateTool(QtWidgets.QMainWindow):
             self.config.segment_radius = original_segment_radius
             self.config.max_stars = original_max_stars
 
-            # Update sliders to the optimal values. The threshold slider's default max (200)
-            # is an arbitrary pre-existing ceiling (the 8-bit threshold range is nominally
-            # 0-255, with realistic values in the tens), so on high-bit-depth data the tuned
-            # threshold can exceed it and be silently clamped (leaving the re-detect at the
-            # wrong threshold). Raise the max with headroom *above* the tuned value so the user
-            # can still override upward. Scale the headroom to the tuned value itself, since a
-            # reasonable ceiling differs greatly between 8-bit and 16-bit. Never lower the
-            # existing max, so 8-bit keeps its default 200.
+            # Update sliders to the optimal values. The threshold slider's default max (200) is an
+            #   arbitrary pre-existing ceiling (the 8-bit threshold range is nominally 0-255, with
+            #   realistic values in the tens), so on high-bit-depth data the tuned threshold can exceed
+            #   it and be silently clamped (leaving the re-detect at the wrong threshold). Raise the max
+            #   with headroom *above* the tuned value so the user can still override upward. Scale the
+            #   headroom to the tuned value itself, since a reasonable ceiling differs greatly between
+            #   8-bit and 16-bit. Never lower the existing max, so 8-bit keeps its default 200
             thr_slider = self.tab.star_detection.intensity_threshold_slider
             thr_slider.setMaximum(max(thr_slider.maximum(), int(best_threshold*3)))
             thr_slider.setValue(int(best_threshold))
@@ -5657,10 +5772,13 @@ class PlateTool(QtWidgets.QMainWindow):
             # Count visible catalog stars at new LM (filter to FOV first to prevent back-projection)
             _, catalog_in_fov = self.filterCatalogStarsInsideFOV(self.catalog_stars)
             if catalog_in_fov is not None and len(catalog_in_fov) > 0:
+
                 new_cat_x, new_cat_y, _ = getCatalogStarsImagePositions(
                     catalog_in_fov, jd, self.platepar)
                 in_image = ((new_cat_x >= 0) & (new_cat_x < self.platepar.X_res) &
                            (new_cat_y >= 0) & (new_cat_y < self.platepar.Y_res))
+
+                # Exclude masked stars
                 if self.mask is not None and self.mask.img is not None:
                     if (self.mask.img.shape[0] == self.platepar.Y_res and
                         self.mask.img.shape[1] == self.platepar.X_res):
@@ -5675,8 +5793,8 @@ class PlateTool(QtWidgets.QMainWindow):
             # Enable override mode
             self.tab.star_detection.use_override_checkbox.setChecked(True)
 
-            # Compute seasonal headroom: sweep the year to find peak visible star count
-            # relative to current, so max_stars accommodates the busiest sky.
+            # Compute seasonal headroom: sweep the year to find peak visible star count relative to
+            #   current, so max_stars accommodates the busiest sky
             self.status_bar.showMessage("Tuning... computing seasonal variation")
             QtWidgets.QApplication.processEvents()
             peak_ratio, peak_count, current_count = self._computeSeasonalStarVariation(
@@ -5685,16 +5803,15 @@ class PlateTool(QtWidgets.QMainWindow):
             print(f"  Seasonal variation: {current_count} stars now, {peak_count} at peak "
                   f"(ratio={peak_ratio:.2f}, using {seasonal_factor:.2f}x)")
 
-            # Set max_stars from the measured raw candidate count scaled by seasonal
-            # variation + 15% frame-to-frame buffer, rounded up to nearest 100,
-            # clamped to [400, 2000].
+            # Set max_stars from the measured raw candidate count scaled by seasonal variation + 15%
+            #   frame-to-frame buffer, rounded up to nearest 100, clamped to [400, 2000]
             num_candidates = detection_info.get('num_candidates', n_detected * 3)
             self.override_max_stars = int(np.clip(
                 np.ceil(num_candidates * seasonal_factor * 1.15 / 100) * 100, 400, 2000))
             print(f"  Raw candidates: {num_candidates}, max_stars set to: {self.override_max_stars}")
 
-            # Update the GUI slider to reflect the new max_stars value
-            # First ensure the slider range can accommodate the value
+            # Update the GUI slider to reflect the new max_stars value. First ensure the slider range
+            #   can accommodate the value
             current_max = self.tab.star_detection.max_stars_slider.maximum()
             if self.override_max_stars > current_max:
                 self.tab.star_detection.max_stars_slider.setMaximum(self.override_max_stars)
@@ -5740,8 +5857,12 @@ class PlateTool(QtWidgets.QMainWindow):
     def _countTrueFalsePositives(self, ff_name, intensity_threshold, segment_radius,
                                   catalog_x, catalog_y, match_radius=3.0, return_positions=False,
                                   extra_info=None):
-        """
-        Count true and false positive detections.
+        """ Run the star detection with the given parameters and count the true and false positive
+            detections against the projected catalog. A detection is a true positive if a catalog star is
+            within max(match_radius, 1.5*FWHM) of it.
+
+            The config is modified in place (intensity_threshold, segment_radius, max_feature_ratio,
+            roundness_threshold), the caller restores it.
 
         Arguments:
             ff_name: [str] Name of the FF file.
@@ -5749,14 +5870,22 @@ class PlateTool(QtWidgets.QMainWindow):
             segment_radius: [int] Segment radius for detection.
             catalog_x: [ndarray] X coordinates of visible catalog stars.
             catalog_y: [ndarray] Y coordinates of visible catalog stars.
-            match_radius: [float] Maximum distance in pixels for a match.
-            return_positions: [bool] If True, also return true positive coordinates.
 
-        Returns:
-            (n_true_pos, n_false_pos, n_detected): Tuple of counts.
-            If return_positions=True: (n_true_pos, n_false_pos, n_detected, tp_x, tp_y)
+        Keyword arguments:
+            match_radius: [float] Maximum distance in pixels for a match. 3.0 by default.
+            return_positions: [bool] If True, also return the true positive coordinates. False by
+                default.
+            extra_info: [dict] If given, filled with extra extraction info by extractStarsFF (e.g. the
+                number of candidates). None by default.
+
+        Return:
+            (n_true_pos, n_false_pos, n_detected): [tuple of ints] Counts. All zeros on failure.
+            If return_positions is True: (n_true_pos, n_false_pos, n_detected, tp_x, tp_y), with the
+                true positive coordinates as arrays.
         """
+
         try:
+
             # Set detection parameters - must match what redetectStars uses
             self.config.intensity_threshold = intensity_threshold
             self.config.segment_radius = segment_radius
@@ -5775,7 +5904,8 @@ class PlateTool(QtWidgets.QMainWindow):
                     return 0, 0, 0, np.array([]), np.array([])
                 return 0, 0, 0
 
-            ff_name_ret, x_arr, y_arr, amplitude, intensity, fwhm_arr, background, snr, saturated = star_list
+            ff_name_ret, x_arr, y_arr, amplitude, intensity, fwhm_arr, background, snr, \
+                saturated = star_list
             x_arr = np.asarray(x_arr, dtype=float)
             y_arr = np.asarray(y_arr, dtype=float)
             fwhm_arr = np.asarray(fwhm_arr, dtype=float)
@@ -5786,8 +5916,8 @@ class PlateTool(QtWidgets.QMainWindow):
                     return 0, 0, 0, np.array([]), np.array([])
                 return 0, 0, 0
 
-            # Count matches using KD-tree for fast nearest-neighbor lookup
-            # Dynamic match radius based on FWHM - wide stars have less precise centroids
+            # Count matches using KD-tree for fast nearest-neighbor lookup, with a dynamic match radius
+            #   based on FWHM - wide stars have less precise centroids
             cat_tree = cKDTree(np.column_stack([catalog_x, catalog_y]))
             det_coords = np.column_stack([x_arr, y_arr])
             nn_dist, _ = cat_tree.query(det_coords, k=1)
@@ -5827,8 +5957,8 @@ class PlateTool(QtWidgets.QMainWindow):
 
         from RMS.ExtractStars import extractStars
 
+        # For FF files, use the dedicated FF extraction (reads from disk)
         if self.img_handle.input_type == 'ff':
-            # For FF files, use the dedicated FF extraction (reads from disk)
             star_list = extractStarsFF(
                 self.dir_path,
                 ff_name,
@@ -5843,14 +5973,18 @@ class PlateTool(QtWidgets.QMainWindow):
                 return []
 
             # extractStarsFF returns: (ff_name, x_arr, y_arr, amplitude, intensity, fwhm, bg, snr, sat)
-            ff_name_ret, x_arr, y_arr, amplitude, intensity, fwhm, background, snr, saturated_count = star_list
+            ff_name_ret, x_arr, y_arr, amplitude, intensity, fwhm, background, snr, \
+                saturated_count = star_list
 
-            # Construct CALSTARS format: Y(0) X(1) IntensSum(2) Ampltd(3) FWHM(4) BgLvl(5) SNR(6) NSatPx(7)
-            star_data = list(zip(y_arr, x_arr, intensity, amplitude, fwhm, background, snr, saturated_count))
+            # Construct CALSTARS format: Y(0) X(1) IntensSum(2) Ampltd(3) FWHM(4) BgLvl(5) SNR(6)
+            #   NSatPx(7)
+            star_data = list(zip(y_arr, x_arr, intensity, amplitude, fwhm, background, snr, \
+                saturated_count))
+
             return star_data
 
+        # For video/images/etc., extract stars directly from the currently displayed avepixel
         else:
-            # For video/images/etc., extract stars directly from the currently displayed avepixel
             ff = self.img_handle.ff
             if ff is None:
                 print("  No image data loaded")
@@ -5873,7 +6007,7 @@ class PlateTool(QtWidgets.QMainWindow):
             img_median = np.median(img)
 
             # Check if image is too bright (scale the cutoff to the image bit depth, matching
-            # extractStarsFF/extractStarsImgHandle so high-bit-depth data is not wrongly skipped)
+            #   extractStarsFF/extractStarsImgHandle so high-bit-depth data is not wrongly skipped)
             bit_depth = getattr(self.config, 'bit_depth', 8)
             max_global_intensity = getattr(self.config, 'max_global_intensity', 150)*(2**(bit_depth - 8))
             if img_median > max_global_intensity:
@@ -5904,44 +6038,47 @@ class PlateTool(QtWidgets.QMainWindow):
             x_arr, y_arr, amplitude, intensity, fwhm, background, snr, saturated_count = status
 
             # Construct CALSTARS format
-            star_data = list(zip(y_arr, x_arr, intensity, amplitude, fwhm, background, snr, saturated_count))
+            star_data = list(zip(y_arr, x_arr, intensity, amplitude, fwhm, background, snr, \
+                saturated_count))
+
             return star_data
 
 
     def _findSegmentRadiusFromFWHM(self, ff_name, visible_cat_x, visible_cat_y):
-        """
-        Determine the optimal segment_radius by measuring the FWHM of bright stars.
+        """ Determine the optimal segment_radius by measuring the FWHM of bright stars.
 
-        Detects bright stars with a generous segment_radius, measures their FWHMs,
-        then sets segment_radius to accommodate the widest PSFs. The relationship is:
-            segment_radius > 2 * sigma / sqrt(max_feature_ratio)
-        where sigma = FWHM / 2.355.
+            Detects bright stars with a generous segment_radius, measures their FWHMs, then sets
+            segment_radius to accommodate the widest PSFs. The relationship is:
+                segment_radius > 2 * sigma / sqrt(max_feature_ratio)
+            where sigma = FWHM / 2.355.
 
-        Uses a multiplier of 1.5x the 90th percentile FWHM to provide margin for
-        the Gaussian fit while keeping the segment compact.
+            Uses a multiplier of 1.5x the 90th percentile FWHM to provide margin for the Gaussian fit
+            while keeping the segment compact.
 
         Arguments:
             ff_name: [str] Name of the FF file.
             visible_cat_x: [ndarray] X coordinates of visible catalog stars.
             visible_cat_y: [ndarray] Y coordinates of visible catalog stars.
 
-        Returns:
-            (best_segment, n_true_pos, fp_ratio): Tuple of optimal segment radius,
-                true positive count and false positive ratio from validation.
+        Return:
+            (best_segment, n_true_pos, fp_ratio): [tuple] Optimal segment radius (int, 4 to 20), true
+                positive count and false positive ratio from validation. (4, 0, 1.0) on failure.
         """
-        # Use a generous segment_radius (12) to detect bright stars; segment=12 is large
-        # enough for almost any stellar PSF.
+
+        # Use a generous segment_radius (12) to detect bright stars; segment=12 is large enough for
+        #   almost any stellar PSF
         probe_segment = 12
 
-        # Probe for bright stars. A hardcoded 8-bit threshold (25) lands far below the noise
-        # on high-bit-depth data, flooding the candidate list past max_stars so extractStars
-        # returns nothing. Start at least at the camera's configured threshold and escalate
-        # until a workable detection comes back. 8-bit configs (threshold ~18-25) are
-        # unaffected -- they start at 25 exactly as before.
+        # Probe for bright stars. A hardcoded 8-bit threshold (25) lands far below the noise on
+        #   high-bit-depth data, flooding the candidate list past max_stars so extractStars returns
+        #   nothing. Start at least at the camera's configured threshold and escalate until a workable
+        #   detection comes back. 8-bit configs (threshold ~18-25) are unaffected -- they start at 25
+        #   exactly as before
         base_threshold = max(25, self.config.intensity_threshold)
         probe_thresholds = [base_threshold, 2*base_threshold, 4*base_threshold, 8*base_threshold]
 
         try:
+
             # Save and set config
             orig_intensity = self.config.intensity_threshold
             orig_segment = self.config.segment_radius
@@ -5949,9 +6086,9 @@ class PlateTool(QtWidgets.QMainWindow):
             self.config.max_feature_ratio = self.override_max_feature_ratio
             self.config.roundness_threshold = self.override_roundness_threshold
 
-            # Escalate the threshold until extractStars returns stars. An empty result means
-            # either too many candidates (extractStars bails) or none detected; raising the
-            # threshold resolves the former, which is the high-bit-depth failure mode.
+            # Escalate the threshold until extractStars returns stars. An empty result means either too
+            #   many candidates (extractStars bails) or none detected; raising the threshold resolves
+            #   the former, which is the high-bit-depth failure mode
             star_data = []
             high_threshold = base_threshold
             for high_threshold in probe_thresholds:
@@ -5993,9 +6130,9 @@ class PlateTool(QtWidgets.QMainWindow):
             print(f"    Probe detection (threshold={high_threshold}, segment={probe_segment}): "
                   f"{n_detected} detected, {n_true_pos} matched catalog")
 
+            # Too few matched stars for reliable FWHM statistics, use all detected stars' FWHMs as
+            #   fallback
             if len(matched_fwhms) < 3:
-                # Too few matched stars for reliable FWHM statistics
-                # Use all detected stars' FWHMs as fallback
                 all_fwhms = np.array(fwhm_arr)
                 if len(all_fwhms) > 0:
                     fwhm_90 = np.percentile(all_fwhms, 90)
@@ -6011,10 +6148,8 @@ class PlateTool(QtWidgets.QMainWindow):
             fwhm_median = np.median(all_fwhms)
             fwhm_max = np.max(all_fwhms)
 
-            # Compute segment_radius from FWHM
-            # Need: segment_radius > 2 * sigma / sqrt(max_feature_ratio)
-            # sigma = FWHM / 2.355
-            # With 1.5x margin for robust fitting:
+            # Compute segment_radius from FWHM. Need: segment_radius > 2 * sigma / sqrt(max_feature_ratio)
+            #   with sigma = FWHM / 2.355, and a 1.5x margin for robust fitting
             max_feature_ratio = getattr(self.config, 'max_feature_ratio', 0.8)
             sigma_90 = fwhm_90 / 2.355
             min_segment = 2 * sigma_90 / np.sqrt(max_feature_ratio)
@@ -6039,28 +6174,27 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
     def _findOptimalThreshold(self, results):
-        """
-        Find the optimal intensity threshold from sweep results using the Kneedle
-        algorithm to detect the "knee" in the false positive curve.
+        """ Find the optimal intensity threshold from the sweep results using the Kneedle algorithm to
+            detect the "knee" in the false positive curve.
 
-        The Kneedle algorithm finds the point of maximum curvature in the false
-        positive curve — where noise transitions from gradual to rapid increase.
-        This is the same inflection point a human would visually identify, without
-        requiring any tunable parameters.
+            The Kneedle algorithm finds the point of maximum curvature in the false positive curve -
+            where noise transitions from gradual to rapid increase. This is the same inflection point a
+            human would visually identify, without requiring any tunable parameters.
 
-        Algorithm:
-        1. Plot false_pos vs index (decreasing threshold)
-        2. Normalize both axes to [0, 1]
-        3. Draw a line from the first point to the last point
-        4. Find the point with maximum perpendicular distance from that line
+            Algorithm:
+                1. Plot false_pos vs index (decreasing threshold)
+                2. Normalize both axes to [0, 1]
+                3. Draw a line from the first point to the last point
+                4. Find the point with maximum perpendicular distance from that line
 
         Arguments:
-            results: List of (threshold, n_true_pos, n_false_pos, n_detected) tuples,
-                    sorted from high threshold to low.
+            results: [list] (threshold, n_true_pos, n_false_pos, n_detected) tuples, sorted from high
+                threshold to low.
 
-        Returns:
-            optimal_threshold: [int] The selected threshold value.
+        Return:
+            best_threshold: [int] The selected threshold value. 20 if there are no usable results.
         """
+
         if not results:
             return 20  # Default fallback
 
@@ -6099,8 +6233,8 @@ class PlateTool(QtWidgets.QMainWindow):
         x_range = x.max() - x.min()
         y_range = y.max() - y.min()
 
+        # Degenerate case - constant false positives
         if x_range == 0 or y_range == 0:
-            # Degenerate case — constant false positives
             best = valid[-1]
             prec = best[1] / best[3] if best[3] > 0 else 0
             print(f"    -> Constant false positives, using threshold={best[0]}")
@@ -6115,8 +6249,7 @@ class PlateTool(QtWidgets.QMainWindow):
         x0, y0 = x_norm[0], y_norm[0]
         x1, y1 = x_norm[-1], y_norm[-1]
 
-        # Perpendicular distance from each point to the line
-        # Line equation: a*x + b*y + c = 0
+        # Perpendicular distance from each point to the line, line equation: a*x + b*y + c = 0
         a = y1 - y0
         b = -(x1 - x0)
         c = x1 * y0 - x0 * y1
@@ -6142,26 +6275,28 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
     def _computeSeasonalStarVariation(self, catalog_stars, current_jd):
-        """Compute the ratio of peak-to-current visible star count across all seasons.
+        """ Compute the ratio of peak-to-current visible star count across all seasons.
 
-        Sweeps 24 evenly-spaced sidereal times (one full year) to find the maximum
-        number of catalog stars visible in the FOV for this station's pointing.
+            Sweeps 24 evenly-spaced sidereal times (one full year) to find the maximum number of catalog
+            stars visible in the FOV for this station's pointing.
 
         Arguments:
             catalog_stars: [ndarray] Deep catalog array (ra, dec, mag).
             current_jd: [float] Julian date of the current observation.
 
-        Returns:
+        Return:
             (peak_ratio, peak_count, current_count): [tuple]
-                peak_ratio: peak visible stars / current visible stars.
-                peak_count: maximum visible star count across the year.
-                current_count: visible star count at the current JD.
+                peak_ratio: [float] peak visible stars / current visible stars (2.0 if none visible now).
+                peak_count: [int] maximum visible star count across the year.
+                current_count: [int] visible star count at the current JD.
         """
+
         pp = self.platepar
         fov_radius = getFOVSelectionRadius(pp)
 
         def _count_visible(jd):
-            """Count catalog stars visible in the image at a given JD."""
+            """ Count catalog stars visible in the image (and outside the mask) at a given JD. """
+
             # Get RA/Dec of FOV center at this JD
             img_time = jd2Date(jd)
             _, ra_c, dec_c, _ = xyToRaDecPP(
@@ -6211,29 +6346,38 @@ class PlateTool(QtWidgets.QMainWindow):
         return peak_ratio, peak_count, current_count
 
     def _findOptimalCatalogLM(self, jd, detected_x, detected_y, target_matches, match_radius=2.0):
-        """
-        Find the catalog limiting magnitude where catalog stars match the detected
-        true positive positions. Uses coarse then fine search to find peak matches.
+        """ Find the catalog limiting magnitude where catalog stars match the detected true positive
+            positions. Uses a coarse then a fine search to find the peak number of matches, stopping
+            early when extra catalog depth only buys coincidental matches.
 
         Arguments:
             jd: [float] Julian date for the current image.
             detected_x: [ndarray] X coordinates of detected true positive stars.
             detected_y: [ndarray] Y coordinates of detected true positive stars.
             target_matches: [int] Target number of matches (true positives found).
-            match_radius: [float] Match radius in pixels.
 
-        Returns:
-            optimal_lm: [float] The catalog limiting magnitude.
+        Keyword arguments:
+            match_radius: [float] Match radius in pixels. 2.0 by default.
+
+        Return:
+            final_lm: [float] The catalog limiting magnitude, or None if too few reliable matches were
+                found.
         """
+
         def count_matches_at_lm(test_lm):
-            """Count how many detected stars match catalog at given LM."""
+            """ Count how many detected stars match the catalog at the given LM.
+
+            Return:
+                (n_matched, n_visible): [tuple of ints] Matched detections and visible catalog stars.
+            """
+
             test_catalog = self.loadCatalogStars(test_lm)
             if test_catalog is None or len(test_catalog) == 0:
                 return 0, 0
 
-            # Filter catalog to stars actually in front of camera (prevent back-projection)
-            # Use angular distance in celestial coordinates, not self.filterCatalogStarsInsideFOV
-            # which incorrectly uses self.cat_lim_mag instead of the test catalog's LM
+            # Filter catalog to stars actually in front of camera (prevent back-projection). Use
+            #   angular distance in celestial coordinates, not self.filterCatalogStarsInsideFOV which
+            #   incorrectly uses self.cat_lim_mag instead of the test catalog's LM
             in_fov = catalogInFOVMask(test_catalog[:, 0], test_catalog[:, 1], self.platepar)
             test_catalog = test_catalog[in_fov]
 
@@ -6245,6 +6389,7 @@ class PlateTool(QtWidgets.QMainWindow):
             in_image = ((cat_x >= 0) & (cat_x < self.platepar.X_res) &
                        (cat_y >= 0) & (cat_y < self.platepar.Y_res))
 
+            # Exclude masked stars
             if self.mask is not None and self.mask.img is not None:
                 if (self.mask.img.shape[0] == self.platepar.Y_res and
                     self.mask.img.shape[1] == self.platepar.X_res):
@@ -6271,9 +6416,9 @@ class PlateTool(QtWidgets.QMainWindow):
         print("    Coarse pass (0.5 mag steps):")
         coarse_lm_values = np.arange(3.0, 10.1, 0.5)
 
-        # Guardrails so a bad/uncalibrated platepar can't drive the LM to the max chasing
-        #   coincidental matches: never explore a catalog deeper than COST_CEILING cat/match per
-        #   added match (spurious), nor larger than CATALOG_CAP stars (cause-agnostic bound).
+        # Guardrails so a bad/uncalibrated platepar can't drive the LM to the max chasing coincidental
+        #   matches: never explore a catalog deeper than COST_CEILING cat/match per added match
+        #   (spurious), nor larger than CATALOG_CAP stars (cause-agnostic bound)
         COST_CEILING = 100      # catalog stars per added match above which a match is coincidental
         CATALOG_CAP = 8000      # max catalog stars to consider during the LM search
 
@@ -6283,6 +6428,7 @@ class PlateTool(QtWidgets.QMainWindow):
         prev_costs = []  # track costs for knee detection
 
         for i, test_lm in enumerate(coarse_lm_values):
+
             n_matched, n_catalog = count_matches_at_lm(test_lm)
 
             # Hard catalog-count cap: stop before pulling in an absurd catalog
@@ -6298,14 +6444,16 @@ class PlateTool(QtWidgets.QMainWindow):
 
             if i == 0:
                 print(f"      LM={test_lm:.1f}: {n_matched}/{target_matches} matched ({n_catalog} cat stars)")
+
+            # Judge every added match by how much catalog depth it cost
             elif match_gain > 0:
                 cost = catalog_gain / match_gain
                 print(f"      LM={test_lm:.1f}: {n_matched}/{target_matches} ({coverage:.0%}), "
                       f"+{match_gain} matches, cost={cost:.0f} cat/match")
 
-                # Absolute cost ceiling: a match that costs this many catalog stars is coincidental,
-                #   not real. Applied even with <2 prior costs, which is exactly the sparse-match
-                #   case (bad platepar) that the relative knee below cannot catch.
+                # Absolute cost ceiling: a match that costs this many catalog stars is coincidental, not
+                #   real. Applied even with <2 prior costs, which is exactly the sparse-match case (bad
+                #   platepar) that the relative knee below cannot catch
                 if cost > COST_CEILING:
                     print(f"    -> Spurious match at LM={test_lm:.1f} "
                           f"(cost={cost:.0f} > {COST_CEILING} cat/match); stopping")
@@ -6331,6 +6479,8 @@ class PlateTool(QtWidgets.QMainWindow):
                 # Only update best when there's actual gain
                 best_lm = test_lm
                 best_matches = n_matched
+
+            # No new matches at this depth
             else:
                 print(f"      LM={test_lm:.1f}: {n_matched}/{target_matches} ({coverage:.0%}), no gain")
                 if coverage >= 0.98:
@@ -6359,10 +6509,10 @@ class PlateTool(QtWidgets.QMainWindow):
                 final_matches = n_matched
 
         # Success gate: a good calibration often detects many stars fainter than the cost-effective
-        #   catalog LM, so a low coverage *fraction* is normal (the faint detections legitimately
-        #   have no bright catalog counterpart). Only fail if too few real (low-cost) matches were
-        #   found in absolute terms to align on. The spurious / bad-platepar cases are already
-        #   stopped by the cost ceiling and the Phase 1/2 precision gates upstream.
+        #   catalog LM, so a low coverage *fraction* is normal (the faint detections legitimately have
+        #   no bright catalog counterpart). Only fail if too few real (low-cost) matches were found in
+        #   absolute terms to align on. The spurious / bad-platepar cases are already stopped by the
+        #   cost ceiling and the Phase 1/2 precision gates upstream
         min_matches = 5
         if final_matches < min_matches:
             print(f"    -> Only {final_matches} reliable matches found (< {min_matches}); "
@@ -6374,18 +6524,19 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
     def _writeStarDetectionConfig(self, config_path, catalog_mag_limit=None):
-        """Write star detection parameters to the specified config file.
+        """ Write the star detection override parameters to the given config file, backing it up first.
 
-        Preserves comments and formatting by doing surgical line updates.
-        Uses ': ' separator like the RMS config format.
+            Preserves comments and formatting by doing surgical line updates. Uses the ': ' separator
+            like the RMS config format. Missing keys and sections are appended.
 
         Arguments:
             config_path: [str] Path to the config file to update.
 
         Keyword arguments:
-            catalog_mag_limit: [float] Catalog limiting magnitude to write. None (default) leaves
-                the one in the config alone.
+            catalog_mag_limit: [float] Catalog limiting magnitude to write. None (default) leaves the
+                one in the config alone.
         """
+
         import re
         from datetime import datetime
 
@@ -6409,12 +6560,13 @@ class PlateTool(QtWidgets.QMainWindow):
             },
         }
 
-        # The LM is only written when the tuner found one and the user asked to keep it. Writing it
-        #   on every save would shift the LM that recalibration matches stars at, save after save.
+        # The LM is only written when the tuner found one and the user asked to keep it. Writing it on
+        #   every save would shift the LM that recalibration matches stars at, save after save
         if catalog_mag_limit is not None:
             updates["Calibration"] = {"catalog_mag_limit": "{:.1f}".format(catalog_mag_limit)}
 
         try:
+
             # Read existing file
             if os.path.exists(config_path):
                 with open(config_path, 'r') as f:
@@ -6457,14 +6609,15 @@ class PlateTool(QtWidgets.QMainWindow):
                 if not missing_keys:
                     continue
 
-                # Check if section exists
+                # Append a whole new section if it doesn't exist
                 section_exists = any(f'[{section}]' in line for line in new_lines)
                 if not section_exists:
                     new_lines.append(f"\n[{section}]\n")
                     for key in missing_keys:
                         new_lines.append(f"{key}: {updates[section][key]}\n")
+
+                # Otherwise find the section end and insert the keys there
                 else:
-                    # Find section end and insert keys
                     insert_idx = None
                     in_section = False
                     for i, line in enumerate(new_lines):
