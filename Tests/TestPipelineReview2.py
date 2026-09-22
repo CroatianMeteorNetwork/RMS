@@ -962,3 +962,30 @@ def testFloatFitsWideRangeRescaled():
     assert out[1, 1] == 65535
     assert 0 < out[1, 0] < 65535
     assert out[0, 1] < out[1, 0]
+
+
+# ---------------------------------------------------------------------------
+# Item 17: 16-bit FF FITS files read with the default memmap=True
+
+def testFFfits16BitReadWithMemmap(tmp_path):
+    """ A 16-bit FF file (stored with BZERO) must be readable with the default memmap=True. """
+
+    import numpy as np
+    from RMS.Formats import FFfits
+    from RMS.Formats.FFStruct import FFStruct
+
+    ff = FFStruct()
+    ff.nrows, ff.ncols, ff.nbits, ff.nframes = 4, 5, 16, 256
+    ff.first, ff.camno, ff.fps = 0, 1, 25.0
+    ff.starttime = '2026-01-01T00:00:00.000000'
+    for name in ('maxpixel', 'maxframe', 'avepixel', 'stdpixel'):
+        setattr(ff, name, (np.arange(20).reshape(4, 5)*3000).astype(np.uint16))
+
+    file_name = 'FF_XX0001_20260101_000000_000_0000000.fits'
+    FFfits.write(ff, str(tmp_path), file_name)
+
+    ff_read = FFfits.read(str(tmp_path), file_name, memmap=True)
+
+    assert ff_read.maxpixel.dtype == np.uint16
+    assert np.array_equal(ff_read.maxpixel, ff.maxpixel)
+    assert np.array_equal(ff_read.stdpixel, ff.stdpixel)
