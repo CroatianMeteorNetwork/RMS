@@ -9554,19 +9554,20 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Clear satellite tracks when image changes (they're time-specific)
             self.clearSatelliteTracks()
-            
+
             # Automatically recompute if both auto-compute and satellite display are enabled
             if self.show_sattracks and self.auto_compute_sattracks and SKYFIELD_AVAILABLE:
+
                 # Show computing status text (centered on image)
                 self.sat_computing_text.setPos(self.platepar.X_res / 2, self.platepar.Y_res / 2)
                 self.sat_computing_text.show()
-                
+
                 # Force GUI update to show the text before blocking computation
                 QtWidgets.QApplication.processEvents()
-                
+
                 # Load satellite tracks (this takes time)
                 self.loadSatelliteTracks()
-                
+
                 # Hide computing status text
                 self.sat_computing_text.hide()
 
@@ -9663,11 +9664,12 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
     def jumpToImage(self, image_num):
-        """ Jump directly to a specific image number (1-indexed).
+        """ Jump directly to a specific image number (1-indexed). Image navigation slider callback.
 
         Arguments:
-            image_num: [int] Target image number (1-indexed, 1 to total_images)
+            image_num: [int] Target image number (1-indexed, 1 to total_images).
         """
+
         # Only works in skyfit mode with multiple images
         if self.mode != 'skyfit':
             return
@@ -9680,10 +9682,9 @@ class PlateTool(QtWidgets.QMainWindow):
         target_index = image_num - 1
         current_index = self.img_handle.current_ff_index
 
-        # Calculate delta and navigate
+        # Calculate delta and navigate, blocking the slider signals to prevent recursive calls
         delta = target_index - current_index
         if delta != 0:
-            # Block signals to prevent recursive calls
             self.image_navigation_slider.blockSignals(True)
             self.nextImg(n=delta)
             self.image_navigation_slider.blockSignals(False)
@@ -9760,9 +9761,8 @@ class PlateTool(QtWidgets.QMainWindow):
             if key in dic:
                 del dic[key]
 
-        # Remove other PlotCurveItem objects which cannot be pickled
-        # Generic scrubber for pyqtgraph/qt items
-        # Cover every Qt binding pyqtgraph might have selected, not just PyQt5
+        # Remove other PlotCurveItem objects which cannot be pickled with a generic scrubber for
+        #   pyqtgraph/qt items. Cover every Qt binding pyqtgraph might have selected, not just PyQt5
         unpicklable_modules = ('pyqtgraph', 'PyQt5', 'PyQt6', 'PySide2', 'PySide6',
                                'RMS.Routines.CustomPyqtgraphClasses', 'matplotlib')
         keys_to_remove = []
@@ -9811,8 +9811,9 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
     def _currentImageKey(self):
-        """ Stable identifier for the current image/chunk. Matched pairs are per-image (the
-            detected x,y belong to the displayed image), so saved pairs are keyed by this. """
+        """ Stable identifier for the current image/chunk. Matched pairs are per-image (the detected x,y
+            belong to the displayed image), so saved pairs are keyed by this. """
+
         try:
             return str(self.img_handle.name())
         except Exception:
@@ -9828,8 +9829,8 @@ class PlateTool(QtWidgets.QMainWindow):
                         title="Save pairs", message_type="warning")
             return
 
-        # Serialize current pairs (skip geo points - they reference external arrays and
-        # cannot be reconstructed standalone)
+        # Serialize current pairs (skip geo points - they reference external arrays and cannot be
+        #   reconstructed standalone)
         pairs = []
         n_skipped = 0
         for x, y, fwhm, intens_acc, obj, snr, saturated in self.paired_stars.paired_stars:
@@ -9854,9 +9855,12 @@ class PlateTool(QtWidgets.QMainWindow):
                 if isinstance(existing, dict) and existing.get('format') == 'skyfit_matched_pairs':
                     data = existing
                     data.setdefault('images', {})
-            except Exception:
-                pass  # corrupt/unreadable - start fresh
 
+            # Corrupt/unreadable - start fresh
+            except Exception:
+                pass
+
+        # Store the pairs under the current image, with the image time
         key = self._currentImageKey()
         try:
             jd = date2JD(*self.img_handle.currentTime())
@@ -10009,8 +10013,10 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
     def pairsHint(self):
-        """ If the folder pairs file has saved pairs for the current image, show a status-bar
-            hint. Called on image navigation; silent if there is nothing saved. """
+        """ If the folder pairs file has saved pairs for the current image, show a status-bar hint.
+            Called on image navigation; silent if there is nothing saved. """
+
+        # Never let a bad pairs file interfere with image navigation
         try:
             path = self._pairsFilePath()
             if not os.path.isfile(path):
@@ -10471,10 +10477,21 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
     def eventFilter(self, obj, event):
-        """Event filter to catch mouse release and global keyboard shortcuts."""
+        """ Application-wide event filter that catches the mouse release on the image viewport (the
+            ViewBox doesn't receive it during panning) and forwards global keyboard shortcuts to
+            keyPressEvent, unless a text input has the focus.
+
+        Arguments:
+            obj: [QObject] Object the event was sent to.
+            event: [QEvent]
+
+        Return:
+            [bool] True if the event was consumed.
+        """
 
         # Handle mouse release on view_widget viewport (ViewBox doesn't receive it during panning)
         if event.type() == QtCore.QEvent.Type.MouseButtonRelease:
+
             # Only handle if obj is the view_widget viewport
             if obj == self.view_widget.viewport():
 
@@ -10487,7 +10504,9 @@ class PlateTool(QtWidgets.QMainWindow):
 
                 scene_pos = self.view_widget.mapToScene(widget_pos)
                 self.handleMouseRelease(event.button(), scene_pos.x(), scene_pos.y())
-            return False  # Don't consume the event
+
+            # Don't consume the event
+            return False
 
         # Handle global keyboard shortcuts
         if event.type() == QtCore.QEvent.Type.KeyPress:
@@ -10495,7 +10514,7 @@ class PlateTool(QtWidgets.QMainWindow):
             key = event.key()
 
             # While typing in a text input (e.g. the Help search box), let the widget keep the
-            # keystrokes. Escape still falls through so it can return focus to the image.
+            #   keystrokes. Escape still falls through so it can return focus to the image
             if key != QtCore.Qt.Key.Key_Escape and self._isTextInputFocused():
                 return False
 
@@ -10504,14 +10523,20 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Intercept Ctrl+key combinations (but not when in a text input that needs Ctrl+C/V/X/A)
             if modifiers & QtCore.Qt.KeyboardModifier.ControlModifier:
-                # Don't intercept standard text editing shortcuts in text widgets
+
+                # Don't intercept standard text editing shortcuts in text widgets, let the text widget
+                #   handle copy/paste/cut/select-all
                 if isinstance(obj, (QtWidgets.QLineEdit, QtWidgets.QTextEdit, QtWidgets.QPlainTextEdit)):
-                    if key in (QtCore.Qt.Key.Key_C, QtCore.Qt.Key.Key_V, QtCore.Qt.Key.Key_X, QtCore.Qt.Key.Key_A):
-                        return False  # Let text widget handle copy/paste/cut/select-all
+                    if key in (QtCore.Qt.Key.Key_C, QtCore.Qt.Key.Key_V, QtCore.Qt.Key.Key_X, \
+                        QtCore.Qt.Key.Key_A):
+                        return False
+
                 should_intercept = True
 
             # Intercept arrow keys (for image navigation and scale adjustment)
-            elif key in (QtCore.Qt.Key.Key_Left, QtCore.Qt.Key.Key_Right, QtCore.Qt.Key.Key_Up, QtCore.Qt.Key.Key_Down):
+            elif key in (QtCore.Qt.Key.Key_Left, QtCore.Qt.Key.Key_Right, QtCore.Qt.Key.Key_Up, \
+                QtCore.Qt.Key.Key_Down):
+
                 # Don't intercept if focus is on a spinbox (arrows change values)
                 if not isinstance(obj, (QtWidgets.QSpinBox, QtWidgets.QDoubleSpinBox,
                                        QtWidgets.QAbstractSpinBox)):
@@ -10520,18 +10545,22 @@ class PlateTool(QtWidgets.QMainWindow):
             # Intercept Escape key to return focus to image
             elif key == QtCore.Qt.Key.Key_Escape:
                 self.img_frame.setFocus()
-                if self.star_pick_mode:
-                    # Let the event propagate to keyPressEvent for star pick handling
-                    return False
-                return True  # Consume the event
 
-            # Intercept single-letter shortcuts that should work globally
-            # (but not when typing in text inputs or spinboxes)
-            elif key in (QtCore.Qt.Key.Key_M, QtCore.Qt.Key.Key_R, QtCore.Qt.Key.Key_F, QtCore.Qt.Key.Key_H,
-                         QtCore.Qt.Key.Key_I, QtCore.Qt.Key.Key_P, QtCore.Qt.Key.Key_C, QtCore.Qt.Key.Key_D,
-                         QtCore.Qt.Key.Key_B, QtCore.Qt.Key.Key_V):
-                # Don't intercept if focus is on a text/spin widget
-                # Check the widget and its parent (spinbox line edits have spinbox as parent)
+                # Let the event propagate to keyPressEvent for star pick handling
+                if self.star_pick_mode:
+                    return False
+
+                # Consume the event
+                return True
+
+            # Intercept single-letter shortcuts that should work globally (but not when typing in text
+            #   inputs or spinboxes)
+            elif key in (QtCore.Qt.Key.Key_M, QtCore.Qt.Key.Key_R, QtCore.Qt.Key.Key_F, \
+                QtCore.Qt.Key.Key_H, QtCore.Qt.Key.Key_I, QtCore.Qt.Key.Key_P, QtCore.Qt.Key.Key_C, \
+                QtCore.Qt.Key.Key_D, QtCore.Qt.Key.Key_B, QtCore.Qt.Key.Key_V):
+
+                # Don't intercept if focus is on a text/spin widget. Check the widget and its parent
+                #   (spinbox line edits have spinbox as parent)
                 widget = obj
                 parent = obj.parent() if obj else None
                 is_input = isinstance(widget, (QtWidgets.QLineEdit, QtWidgets.QTextEdit,
@@ -10543,17 +10572,27 @@ class PlateTool(QtWidgets.QMainWindow):
                 if not is_input:
                     should_intercept = True
 
+            # Forward to keyPressEvent and consume the event
             if should_intercept:
-                # Forward to keyPressEvent
                 self.keyPressEvent(event)
-                return True  # Consume the event
+                return True
 
-        return False  # Don't consume other events
+        # Don't consume other events
+        return False
 
     def handleMouseRelease(self, button, scene_x, scene_y):
-        """Handle mouse release for star picking (called from eventFilter)."""
+        """ Finish a mouse press on the image: end a brush stroke or vertex drag, or pick a star if the
+            press was a click rather than a drag. Called from eventFilter.
+
+        Arguments:
+            button: [Qt.MouseButton] Button that was released.
+            scene_x: [float] Scene X coordinate of the release.
+            scene_y: [float] Scene Y coordinate of the release.
+        """
+
         self.mask_dragging_vertex = None
 
+        # End the brush stroke
         if self.mask_brush_painting:
             self.mask_brush_painting = False
             self.mask_brush_erasing = False
@@ -10568,13 +10607,14 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Check if this was a click (not a drag) for star picking
         if self.press_scene_x is not None and self.star_pick_mode:
+
             # Check if mouse moved more than threshold in screen pixels
             drag_distance = np.hypot(scene_x - self.press_scene_x, scene_y - self.press_scene_y)
             click_threshold = 5.0  # screen pixels
 
+            # Update mouse_x/y to the actual click position before picking (press_scene_x/y come from
+            #   pyqtgraph's scenePos which is reliable)
             if drag_distance < click_threshold:
-                # Update mouse_x/y to the actual click position before picking
-                # (press_scene_x/y come from pyqtgraph's scenePos which is reliable)
                 scene_pos = QtCore.QPointF(self.press_scene_x, self.press_scene_y)
                 view_pos = self.img_frame.mapSceneToView(scene_pos)
                 self.mouse_x = view_pos.x()
@@ -10589,8 +10629,12 @@ class PlateTool(QtWidgets.QMainWindow):
         self.clicked = 0
 
     def onMouseReleased(self, event):
+        """ ViewBox mouse release callback: end a vertex drag or brush stroke. Star picking is handled
+            in handleMouseRelease, as the ViewBox does not receive the release during panning. """
+
         self.mask_dragging_vertex = None
 
+        # End the brush stroke
         if self.mask_brush_painting:
             self.mask_brush_painting = False
             self.mask_brush_erasing = False
@@ -10604,7 +10648,14 @@ class PlateTool(QtWidgets.QMainWindow):
             return
 
     def handleStarPick(self, button, modifiers):
-        """Handle star picking on click (not drag). Called from onMouseReleased."""
+        """ Handle a click (not a drag) in the star picking mode: centroid and pair a star in skyfit, or
+            add/remove a pick and colour photometry pixels in manual reduction. Called from
+            handleMouseRelease.
+
+        Arguments:
+            button: [Qt.MouseButton] Button that was clicked.
+            modifiers: [Qt.KeyboardModifiers] Keyboard modifiers held during the press.
+        """
 
         # Add star pair in SkyFit
         if self.mode == 'skyfit':
@@ -10640,7 +10691,8 @@ class PlateTool(QtWidgets.QMainWindow):
 
                             # Use override data if enabled, otherwise CALSTARS
                             star_data = None
-                            if self.star_detection_override_enabled and ff_name_c in self.star_detection_override_data:
+                            if self.star_detection_override_enabled \
+                                and ff_name_c in self.star_detection_override_data:
                                 star_data = np.array(self.star_detection_override_data[ff_name_c])
                             elif ff_name_c in self.calstars:
                                 star_data = np.array(self.calstars[ff_name_c])
@@ -10888,9 +10940,11 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
     def onMousePressed(self, event):
+        """ ViewBox mouse press callback: remember the press for click-vs-drag detection, and start brush
+            strokes or polygon vertex edits when a mask editing mode is active. """
 
         # Decide whether this drag should pan the view or paint. This is called from
-        #   ViewBox.mousePressEvent before it checks the flag, so it applies to this press already.
+        #   ViewBox.mousePressEvent before it checks the flag, so it applies to this press already
         self.updatePanningEnabled()
 
         if event.button() == QtCore.Qt.MouseButton.LeftButton:
@@ -10902,8 +10956,8 @@ class PlateTool(QtWidgets.QMainWindow):
 
         modifiers = QtWidgets.QApplication.keyboardModifiers()
 
-        # Store press position for click vs drag detection (used for star picking)
-        # Use scene coordinates (screen position) not view coordinates, because panning changes view coords
+        # Store press position for click vs drag detection (used for star picking). Use scene
+        #   coordinates (screen position) not view coordinates, because panning changes view coords
         pos = event.scenePos()
         self.press_scene_x = pos.x()
         self.press_scene_y = pos.y()
@@ -10934,17 +10988,25 @@ class PlateTool(QtWidgets.QMainWindow):
             vertex_hit = self.findNearestMaskVertex(click_x, click_y, threshold=15)
 
             if event.button() == QtCore.Qt.MouseButton.LeftButton:
+
+                # Start dragging an existing vertex
                 if vertex_hit is not None:
                     self.mask_dragging_vertex = vertex_hit
                     return
+
+                # CTRL + click on an edge inserts a vertex
                 elif modifiers & QtCore.Qt.KeyboardModifier.ControlModifier:
                     edge_hit = self.findNearestMaskEdge(click_x, click_y, threshold=15)
                     if edge_hit is not None:
                         self.insertMaskVertex(edge_hit, click_x, click_y)
                         return
+
+                # Add a vertex to the polygon being drawn
                 elif self.mask_draw_mode:
                     self.addMaskPoint(click_x, click_y)
                     return
+
+            # Right click on a vertex deletes it
             elif event.button() == QtCore.Qt.MouseButton.RightButton:
                 if vertex_hit is not None:
                     self.deleteMaskVertex(vertex_hit)
@@ -10954,8 +11016,8 @@ class PlateTool(QtWidgets.QMainWindow):
 
     def keyPressEvent(self, event):
 
-        # Don't run shortcuts while typing in a text input (e.g. the Help search box). Escape is
-        # still allowed through (it returns focus to the image).
+        # Don't run shortcuts while typing in a text input (e.g. the Help search box). Escape is still
+        #   allowed through (it returns focus to the image)
         if event.key() != QtCore.Qt.Key.Key_Escape and self._isTextInputFocused():
             return
 
@@ -10963,9 +11025,9 @@ class PlateTool(QtWidgets.QMainWindow):
         modifiers = QtWidgets.QApplication.keyboardModifiers()
         qmodifiers = QtWidgets.QApplication.queryKeyboardModifiers()
 
-        # Strip the GroupSwitchModifier (constantly pressed on some systems for some reason, not used in SkyFit).
-        # Invert the enum member itself instead of an int() of it - on Qt6 bindings the modifier flags are
-        # enum.Flag members, which do not convert to int.
+        # Strip the GroupSwitchModifier (constantly pressed on some systems for some reason, not used in
+        #   SkyFit). Invert the enum member itself instead of an int() of it - on Qt6 bindings the
+        #   modifier flags are enum.Flag members, which do not convert to int
         group_switch = QtCore.Qt.KeyboardModifier.GroupSwitchModifier
         modifiers &= ~group_switch
         qmodifiers &= ~group_switch
@@ -10977,13 +11039,15 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Handle mask drawing - Space or Enter to close polygon
         if self.mask_draw_mode and len(self.mask_current_polygon) >= 3:
-            if event.key() in (QtCore.Qt.Key.Key_Space, QtCore.Qt.Key.Key_Return, QtCore.Qt.Key.Key_Enter):
+            if event.key() in (QtCore.Qt.Key.Key_Space, QtCore.Qt.Key.Key_Return, \
+                QtCore.Qt.Key.Key_Enter):
                 if modifiers == QtCore.Qt.KeyboardModifier.NoModifier:
                     self.closeMaskPolygon()
                     return
 
         # Handle brush undo - Ctrl+Z when on mask tab
-        if event.key() == QtCore.Qt.Key.Key_Z and (modifiers == QtCore.Qt.KeyboardModifier.ControlModifier):
+        if event.key() == QtCore.Qt.Key.Key_Z \
+            and (modifiers == QtCore.Qt.KeyboardModifier.ControlModifier):
             mask_tab_index = self.tab.indexOf(self.tab.mask)
             if self.tab.currentIndex() == mask_tab_index and self.mask_brush_stroke_history:
                 self.undoBrushStroke()
@@ -11178,6 +11242,8 @@ class PlateTool(QtWidgets.QMainWindow):
         # Toggle showing astrometry.net matched stars (Shift+H)
         elif event.key() == QtCore.Qt.Key.Key_H and (modifiers == QtCore.Qt.KeyboardModifier.ShiftModifier):
             self.toggleShowAstrometryNetStars()
+
+            # Report what is shown
             if self.astrometry_solution_info is not None:
                 matched_count = len(self.astrometry_solution_info.get('matched_pairs', []))
                 quad_count = len(self.astrometry_solution_info.get('quad_stars', []))
@@ -12481,12 +12547,17 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Brush mode + Shift: scroll changes brush size; bare scroll falls through to zoom
             if self.mask_brush_mode and (modifier & QtCore.Qt.KeyboardModifier.ShiftModifier):
+
+                # Scale the step with the radius so big brushes resize quickly
                 step = max(1, self.mask_brush_radius // 10)
                 if delta > 0:
                     self.mask_brush_radius = min(200, self.mask_brush_radius + step)
                 elif delta < 0:
                     self.mask_brush_radius = max(1, self.mask_brush_radius - step)
+
                 self.brush_cursor.setRadius(self.mask_brush_radius)
+
+                # Sync the slider without triggering another resize
                 self.tab.mask.brush_size_slider.blockSignals(True)
                 self.tab.mask.brush_size_slider.setValue(self.mask_brush_radius)
                 self.tab.mask.brush_size_value.setText(str(self.mask_brush_radius))
@@ -12543,6 +12614,9 @@ class PlateTool(QtWidgets.QMainWindow):
             with the rotation/scale/distortion keys) and is instead a fraction of the FOV diagonal, so a
             press feels equally responsive on a narrow lens and on an all-sky camera. key_increment still
             acts as a relative sensitivity knob via the +/- keys.
+
+        Return:
+            step: [float] Pan step in degrees, clamped to [MIN_STEP, MAX_STEP].
         """
 
         REF_INCREMENT = 1.0     # key_increment value at which the pan step equals BASE_FRACTION of the FOV
@@ -12567,8 +12641,8 @@ class PlateTool(QtWidgets.QMainWindow):
         """
 
         # Convert the requested screen direction into a change of the apparent reference az/alt. The step
-        # magnitude is FOV-relative (panStepDeg) and the direction is roll-independent. The image view is
-        # Y-inverted for display (img_frame.invertY()), so image +Y is screen down.
+        #   magnitude is FOV-relative (panStepDeg) and the direction is roll-independent. The image view
+        #   is Y-inverted for display (img_frame.invertY()), so image +Y is screen down
         step = self.panStepDeg()
         d_az, d_alt = screenNudgeToAzAltDelta(self.platepar, screen_dx, screen_dy, step, screen_y_sign=-1)
 
@@ -12577,11 +12651,11 @@ class PlateTool(QtWidgets.QMainWindow):
             return
 
         # Decide how the camera roll is carried. Away from the zenith/nadir we keep the rotation w.r.t.
-        # horizon fixed (preserve_rotation) so the horizon stays level while panning azimuth. Close to a
-        # pole that solver is degenerate and traps the pointing, so there we hold the celestial roll
-        # (skip_rot_update) instead, which lets the pointing cross the pole cleanly with the horizon
-        # rotation flipping by ~180 deg. The threshold is at least 5 deg from the pole, and at least one
-        # step (so the crossing press itself is handled in the pole regime).
+        #   horizon fixed (preserve_rotation) so the horizon stays level while panning azimuth. Close to a
+        #   pole that solver is degenerate and traps the pointing, so there we hold the celestial roll
+        #   (skip_rot_update) instead, which lets the pointing cross the pole cleanly with the horizon
+        #   rotation flipping by ~180 deg. The threshold is at least 5 deg from the pole, and at least
+        #   one step (so the crossing press itself is handled in the pole regime)
         near_pole = (90.0 - abs(self.platepar.alt_centre)) < max(step, 5.0)
 
         self.platepar.az_centre += d_az
@@ -12589,10 +12663,12 @@ class PlateTool(QtWidgets.QMainWindow):
 
         self.checkParamRange()
 
+        # Update the reference RA/Dec from the new az/alt
         if near_pole:
             self.platepar.updateRefRADec(skip_rot_update=True)
         else:
             self.platepar.updateRefRADec(preserve_rotation=True)
+
         self.checkParamRange()
 
         # Keep the stored rotation-w.r.t.-horizon in sync with the new pointing for the labels/indicator
@@ -12677,11 +12753,16 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
     def _raiseHelpTab(self):
-        """ Select and maximise the Help tab. Returns True if the tab exists. """
+        """ Select and maximise the Help tab.
+
+        Return:
+            [bool] True if the tab exists.
+        """
 
         help_index = self.tab.indexOf(self.tab.help)
         if help_index == -1:
             return False
+
         self.tab.setCurrentIndex(help_index)
         self.tab.index = help_index
         self.tab.maximized = True
@@ -12697,7 +12778,11 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
     def openHelpTopic(self, topic_id):
-        """ Select and maximise the Help tab, then open a specific help topic page. """
+        """ Select and maximise the Help tab, then open a specific help topic page.
+
+        Arguments:
+            topic_id: [str] Topic id from RMS.Routines.SkyFitHelp.HELP_TOPICS.
+        """
 
         if self._raiseHelpTab():
             self.tab.help.showTopic(topic_id)
@@ -12727,7 +12812,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.updateLeftLabels()
 
     def updateConstellations(self):
-        """ Projects and draws constellation lines. """
+        """ Project and draw the constellation lines that have at least one end inside the FOV. """
 
         if self.constellation_data is None:
             return
@@ -12738,14 +12823,16 @@ class PlateTool(QtWidgets.QMainWindow):
         # Unpack constellation data
         from_ra, from_dec = self.constellation_data[:, 0], self.constellation_data[:, 1]
         to_ra, to_dec = self.constellation_data[:, 2], self.constellation_data[:, 3]
-        
-        # 0. Generate FOV polygon
+
+        # 0. Generate FOV polygon (in RA/Dec), cached per JD as it only changes with the time and the
+        #   platepar
         w = self.platepar.X_res
         h = self.platepar.Y_res
         fov_poly = []
 
         if self.fov_poly_cache is not None and self.fov_poly_jd == jd:
             fov_poly = self.fov_poly_cache
+
         else:
             # Define edges: (x1, y1) -> (x2, y2)
             edges = [
@@ -12754,41 +12841,42 @@ class PlateTool(QtWidgets.QMainWindow):
                 ((w, h), (0, h)),   # Bottom
                 ((0, h), (0, 0))    # Left
             ]
-            
+
             samples_per_side = 10
-            
+
             try:
+                # Sample points along every image edge and project them to the sky
                 for (x_start, y_start), (x_end, y_end) in edges:
                     xs = np.linspace(x_start, x_end, samples_per_side, endpoint=False)
                     ys = np.linspace(y_start, y_end, samples_per_side, endpoint=False)
-                    
+
                     # Prepare inputs
                     n = len(xs)
                     jd_arr = [jd]*n
                     level_arr = [1]*n
-                    
-                    _, r_arr, d_arr, _ = xyToRaDecPP(jd_arr, xs, ys, level_arr, self.platepar, jd_time=True, extinction_correction=False)
-                    
+
+                    _, r_arr, d_arr, _ = xyToRaDecPP(jd_arr, xs, ys, level_arr, self.platepar, \
+                        jd_time=True, extinction_correction=False)
+
                     for r, d in zip(r_arr, d_arr):
                         fov_poly.append((r, d))
-                        
+
                 # Update cache
                 self.fov_poly_cache = fov_poly
                 self.fov_poly_jd = jd
-                
+
             except Exception as e:
                 print(f"Error computing FOV polygon for constellations: {e}")
                 return
 
-        # 1. Filter using sphericalPolygonCheck
-        # Check start and end points
-        # If either is inside, keep the line
+        # 1. Filter using sphericalPolygonCheck - check start and end points, if either is inside, keep
+        #   the line
         test_points_from = np.c_[from_ra, from_dec]
         test_points_to = np.c_[to_ra, to_dec]
-        
+
         mask_from = np.array(sphericalPolygonCheck(fov_poly, test_points_from))
         mask_to = np.array(sphericalPolygonCheck(fov_poly, test_points_to))
-        
+
         # Keep line if EITHER endpoint is inside
         mask = mask_from | mask_to
 
@@ -12796,23 +12884,24 @@ class PlateTool(QtWidgets.QMainWindow):
             from_x, from_y = raDecToXYPP(from_ra[mask], from_dec[mask], jd, self.platepar)
             to_x, to_y = raDecToXYPP(to_ra[mask], to_dec[mask], jd, self.platepar)
 
-            # 2. Filter based on image bounds (keep as redundant safety or remove?)
-            # Spherical check is accurate, but projection might still yield points slightly outside
-            # which is fine. The previous bounds check was mostly for the angular filter artifacts.
-            # We can relax it or remove it, but let's keep a loose one just in case.
-            
-            margin = 200 # Larger margin to allow lines entering from outside
-            in_bounds_from = (from_x > -margin) & (from_x < w + margin) & (from_y > -margin) & (from_y < h + margin)
-            in_bounds_to = (to_x > -margin) & (to_x < w + margin) & (to_y > -margin) & (to_y < h + margin)
+            # 2. Filter based on image bounds as a redundant safety check. The spherical check is
+            #   accurate, but the projection might still yield points slightly outside, which is fine,
+            #   so a loose margin is used to allow lines entering from outside
+            margin = 200
+            in_bounds_from = (from_x > -margin) & (from_x < w + margin) & (from_y > -margin) \
+                & (from_y < h + margin)
+            in_bounds_to = (to_x > -margin) & (to_x < w + margin) & (to_y > -margin) \
+                & (to_y < h + margin)
             mask_bounds = in_bounds_from | in_bounds_to
-            
+
             from_x = from_x[mask_bounds]
             from_y = from_y[mask_bounds]
             to_x = to_x[mask_bounds]
             to_y = to_y[mask_bounds]
 
             if len(from_x) > 0:
-                # Interleave start and end points
+
+                # Interleave start and end points (the curve items are drawn with connect='pairs')
                 pts_x = np.empty((from_x.size + to_x.size,), dtype=from_x.dtype)
                 pts_x[0::2] = from_x
                 pts_x[1::2] = to_x
@@ -12820,16 +12909,18 @@ class PlateTool(QtWidgets.QMainWindow):
                 pts_y = np.empty((from_y.size + to_y.size,), dtype=from_y.dtype)
                 pts_y[0::2] = from_y
                 pts_y[1::2] = to_y
-                
+
                 self.constellation_lines_bg.setData(pts_x, pts_y)
                 self.constellation_lines_bg.show()
 
                 self.constellation_lines_fg.setData(pts_x, pts_y)
                 self.constellation_lines_fg.show()
+
             else:
                 self.constellation_lines_bg.hide()
                 self.constellation_lines_fg.hide()
-            
+
+        # No lines in the FOV
         else:
             self.constellation_lines_bg.hide()
             self.constellation_lines_fg.hide()
@@ -12895,16 +12986,19 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.settings.updateApparentMagCorr()
 
     def onLabelMagLimitChanged(self, value):
-        """ Handle change in label magnitude limit setting. """
+        """ Settings tab callback: set the faintest magnitude for which star labels are shown. """
+
         self.label_mag_limit = value
+
         # Clear cache since we might show different stars now
         self._star_label_cache = {}
+
         # Redraw if labels are visible
         if self.show_star_names or self.show_spectral_type:
             self.updateStars()
 
     def onGeoMarkerScaleChanged(self, value):
-        """ Handle change in the geo point marker size multiplier. """
+        """ Settings tab callback: set the geo point marker size multiplier. """
 
         self.geo_marker_scale = value
 
@@ -12956,15 +13050,19 @@ class PlateTool(QtWidgets.QMainWindow):
             self.calstar_markers_outer2.hide()
 
     def toggleShowAstrometryNetStars(self):
-        """ Toggle whether to show astrometry.net matched stars """
+        """ Toggle showing the astrometry.net matched (cyan) and quad (magenta) star markers. """
+
         self.astrometry_stars_visible = not self.astrometry_stars_visible
+
         if self.astrometry_stars_visible:
             self.astrometry_matched_markers.show()
             self.astrometry_matched_markers2.show()
             self.astrometry_quad_markers.show()
             self.astrometry_quad_markers2.show()
+
             # Update the markers with current solution info
             self.updateAstrometryNetStarMarkers()
+
         else:
             self.astrometry_matched_markers.hide()
             self.astrometry_matched_markers2.hide()
@@ -12972,7 +13070,9 @@ class PlateTool(QtWidgets.QMainWindow):
             self.astrometry_quad_markers2.hide()
 
     def updateAstrometryNetStarMarkers(self):
-        """ Update the astrometry.net star markers from stored solution info """
+        """ Update the astrometry.net star markers from the stored solution info (cleared if there is no
+            solution). """
+
         if self.astrometry_solution_info is None:
             self.astrometry_matched_markers.setData(pos=[])
             self.astrometry_matched_markers2.setData(pos=[])
@@ -13109,21 +13209,25 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
     def filterCatalogStarsByMask(self, catalog_x, catalog_y, catalog_stars=None):
-        """Filter out catalog stars that fall behind the mask.
+        """ Filter out catalog stars that fall behind the mask. If there is no mask, or its size does not
+            match the platepar, all stars are kept.
 
         Arguments:
             catalog_x: [ndarray] X coordinates of catalog stars on the image.
             catalog_y: [ndarray] Y coordinates of catalog stars on the image.
-            catalog_stars: [ndarray] Optional catalog star data (ra, dec, mag) to filter.
-                If None, only returns the mask.
 
-        Returns:
+        Keyword arguments:
+            catalog_stars: [ndarray] Catalog star data (ra, dec, mag) to filter. If None, only the mask
+                is returned. None by default.
+
+        Return:
             If catalog_stars is provided:
-                filtered_catalog_stars: [ndarray] Catalog stars not behind the mask.
-                not_masked: [ndarray] Boolean mask of stars not behind the mask.
+                (filtered_catalog_stars, not_masked): [tuple] Catalog stars not behind the mask, and the
+                    boolean mask of stars not behind the mask.
             If catalog_stars is None:
                 not_masked: [ndarray] Boolean mask of stars not behind the mask.
         """
+
         # If no mask, return all stars
         if self.mask is None or not hasattr(self.mask, 'img'):
             not_masked = np.ones(len(catalog_x), dtype=bool)
