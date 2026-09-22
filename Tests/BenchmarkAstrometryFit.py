@@ -191,6 +191,8 @@ def _duplicateKeepMaskReference(x_arr, y_arr, intens_arr, radius):
     keep = np.ones(len(x_arr), dtype=bool)
     tree = cKDTree(np.column_stack([x_arr, y_arr]))
     pairs = tree.query_pairs(radius, output_type='ndarray')
+
+    # For each duplicate pair, discard the fainter detection unless one was already dropped
     for i, j in pairs:
         if not keep[i] or not keep[j]:
             continue
@@ -305,6 +307,8 @@ def benchmarkDuplicateRemoval(img_stars, rng, repeats):
 
 
 def main():
+    """ Parse the command line arguments, build the synthetic field and run the selected benchmarks. """
+
     parser = argparse.ArgumentParser(description="Benchmark the astrometric fitting hot spots.")
     parser.add_argument("--repeats", type=int, default=3, help="Repeats per benchmark (best is reported).")
     parser.add_argument("--seed", type=int, default=12345, help="Random seed for the synthetic field.")

@@ -13,6 +13,8 @@ from RMS.Formats.Platepar import Platepar
 
 
 def _makeConfig():
+    """ Minimal config with only the field alignPlatepar reads before the input guards. """
+
     return types.SimpleNamespace(catalog_mag_limit=5.5)
 
 

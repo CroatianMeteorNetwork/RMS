@@ -1,3 +1,7 @@
+""" Tests for the KD-tree star matching in RMS.Astrometry.MatchStars. """
+
+from __future__ import print_function, division, absolute_import
+
 import pytest
 
 np = pytest.importorskip("numpy")
@@ -7,6 +11,7 @@ from RMS.Astrometry.MatchStars import matchStars
 
 def _make_catalog(positions):
     """ Helper: build cat_x_array, cat_y_array, cat_good_indices from a list of (x, y). """
+
     cat_x = np.array([p[0] for p in positions], dtype=np.float64)
     cat_y = np.array([p[1] for p in positions], dtype=np.float64)
     cat_good = np.arange(len(positions), dtype=np.uint32)
@@ -15,10 +20,12 @@ def _make_catalog(positions):
 
 def _make_stars(positions):
     """ Helper: build stars_list from a list of (x, y). stars_list columns are (y, x, ...). """
+
     return np.array([[y, x, 0.0, 0.0] for x, y in positions], dtype=np.float64)
 
 
 class TestMatchStarsBasic:
+    """ Nominal matching behaviour. """
 
     def test_exact_match(self):
         """ Stars at identical positions should match with distance 0. """
@@ -67,6 +74,7 @@ class TestMatchStarsBasic:
 
 
 class TestMatchStarsEdgeCases:
+    """ Empty inputs, catalog subsets and duplicate claims. """
 
     def test_empty_catalog(self):
         """ Empty catalog should return no matches. """

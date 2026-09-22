@@ -1,4 +1,6 @@
-"""Regression tests for the Grouping3D Cython routines."""
+""" Regression tests for the Grouping3D Cython routines. """
+
+from __future__ import print_function, division, absolute_import
 
 import pytest
 
@@ -8,6 +10,8 @@ from RMS.Routines.Grouping3Dcy import thresholdAndSubsample
 
 
 def _thresholdCount(max_value, average, stddev, k1, j1):
+    """ Run thresholdAndSubsample on a single pixel and return the number of threshold passers. """
+
     frames = np.zeros((1, 1, 1), dtype=np.uint8)
     compressed = np.array(
         [max_value, 0, average, stddev], dtype=np.uint8
@@ -37,4 +41,6 @@ def _thresholdCount(max_value, average, stddev, k1, j1):
     ],
 )
 def testThresholdAndSubsampleThresholdConversion(max_value, average, stddev, k1, j1, expected):
+    """ The float threshold is truncated in the original order and clamped to the uint8 range. """
+
     assert _thresholdCount(max_value, average, stddev, k1, j1) == expected

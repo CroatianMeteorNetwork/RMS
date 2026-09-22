@@ -1,3 +1,7 @@
+""" Tests for the star candidate display and plotting helpers in RMS.ExtractStars. """
+
+from __future__ import print_function, division, absolute_import
+
 from types import SimpleNamespace
 
 import numpy as np
@@ -6,7 +10,7 @@ import RMS.ExtractStars as ExtractStars
 
 
 def _singleCandidateImage():
-    """Return a small image with one isolated local maximum."""
+    """ Return a small image with one isolated local maximum. """
 
     img = np.full((32, 32), 10, dtype=np.float32)
     img[16, 16] = 255
@@ -15,7 +19,7 @@ def _singleCandidateImage():
 
 
 def _successfulFit(img, img_median, x_init, y_init, **kwargs):
-    """Return valid PSF-fit data for every supplied candidate."""
+    """ Return valid PSF-fit data for every supplied candidate. """
 
     count = len(x_init)
 
@@ -26,6 +30,8 @@ def _successfulFit(img, img_median, x_init, y_init, **kwargs):
 
 
 def testCandidatesAreShownBeforePsfFit(monkeypatch):
+    """ With show_candidates the raw candidates are plotted, then fitted, then plotted with the fits. """
+
     events = []
     extra_info = {}
 
@@ -55,6 +61,8 @@ def testCandidatesAreShownBeforePsfFit(monkeypatch):
 
 
 def testOverLimitCandidatesAreShownThenRejected(monkeypatch):
+    """ An over-limit candidate set is still plotted once, but PSF fitting is skipped. """
+
     candidate_counts = []
     extra_info = {}
 
@@ -77,6 +85,8 @@ def testOverLimitCandidatesAreShownThenRejected(monkeypatch):
 
 
 def testDefaultOverLimitRejectionDoesNotPlot(monkeypatch):
+    """ Without show_candidates the over-limit early rejection neither plots nor fits. """
+
     def unexpectedCall(*args, **kwargs):
         raise AssertionError('Plotting and fitting must not run after the default early rejection')
 
@@ -91,6 +101,8 @@ def testDefaultOverLimitRejectionDoesNotPlot(monkeypatch):
 
 
 def testCandidateDisplayProcessesFfFilesSequentially(monkeypatch, tmp_path):
+    """ The candidate display runs the extraction in the main process, in sorted FF order. """
+
     extraction_calls = []
 
     config = SimpleNamespace(stationID='XX0001', height=32, width=32)
@@ -118,6 +130,8 @@ def testCandidateDisplayProcessesFfFilesSequentially(monkeypatch, tmp_path):
 
 
 def testPlotStarsSupportsFfStructuresAndBitDepth(monkeypatch):
+    """ An FF structure is unwrapped and the bit depth is inferred from the integer image type. """
+
     adjust_call = {}
     img = np.zeros((8, 8), dtype=np.uint16)
     ff = SimpleNamespace(avepixel=img)
@@ -139,6 +153,8 @@ def testPlotStarsSupportsFfStructuresAndBitDepth(monkeypatch):
 
 
 def testPlotStarsDefaultsFloatingImagesToEightBits(monkeypatch):
+    """ Floating-point images have no inferable bit depth and default to 8 bits. """
+
     adjust_call = {}
     img = np.zeros((8, 8), dtype=np.float32)
 
@@ -156,6 +172,8 @@ def testPlotStarsDefaultsFloatingImagesToEightBits(monkeypatch):
 
 
 def testPlotStarsAutomaticallyAdjustsBackgroundLevels(monkeypatch):
+    """ The display levels are stretched between the 1st and 99.99th percentile of the image. """
+
     adjust_call = {}
     img = np.arange(10000, dtype=np.uint16).reshape((100, 100))
 
@@ -176,6 +194,8 @@ def testPlotStarsAutomaticallyAdjustsBackgroundLevels(monkeypatch):
 
 
 def testPlotStarsMarksFittedPositions(monkeypatch):
+    """ Raw candidates are drawn as circles and the fitted positions as a separate marker series. """
+
     plot_data = {}
     original_subplots = ExtractStars.plt.subplots
 

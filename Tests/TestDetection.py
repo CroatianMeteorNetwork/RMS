@@ -1,3 +1,7 @@
+""" Tests for the white ratio rejection warning cadence in RMS.Detection. """
+
+from __future__ import print_function, division, absolute_import
+
 from types import SimpleNamespace
 
 import pytest

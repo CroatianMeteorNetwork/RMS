@@ -1,3 +1,7 @@
+""" Tests for the angular separation functions in RMS.Math and their Cython counterpart. """
+
+from __future__ import print_function, division, absolute_import
+
 import pytest
 
 np = pytest.importorskip("numpy")
@@ -6,6 +10,8 @@ from RMS.Math import angularSeparation, angularSeparationDeg, angularSeparationV
 
 
 def test_angular_separation_vect_handles_non_unit_vectors():
+    """ The vector form normalizes its inputs, so non-unit vectors give the right angle. """
+
     vect1 = np.array([2.0, 0.0, 0.0])
     vect2 = np.array([0.0, 3.0, 0.0])
 
@@ -25,7 +31,6 @@ def test_angular_separation_coincident_directions_not_nan():
 def test_angular_separation_coincident_grid_not_nan():
     """ No coincident pair on a 1 deg grid may produce NaN (2160 of them did before the clip). """
 
-
     ra, dec = np.meshgrid(np.arange(0.0, 360.0, 1.0), np.arange(-89.0, 90.0, 1.0))
     separations = angularSeparationDeg(ra, dec, ra, dec)
 
@@ -37,7 +42,6 @@ def test_angular_separation_coincident_grid_not_nan():
 
 def test_angular_separation_antipodal_unchanged():
     """ Clipping the lower end of the cosine must not perturb the antipodal case. """
-
 
     assert angularSeparation(0.0, 0.0, np.pi, 0.0) == np.pi
     assert angularSeparationDeg(0.0, 0.0, 180.0, 0.0) == 180.0

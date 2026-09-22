@@ -81,6 +81,7 @@ class TestSatellitePositions(unittest.TestCase):
 
 
     def test_load_tles_with_time(self):
+        """ With a time of interest the cached TLE file closest to that time is used instead of downloading. """
         if not SKYFIELD_AVAILABLE:
             self.skipTest("Skyfield not installed")
             
