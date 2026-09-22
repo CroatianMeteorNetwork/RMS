@@ -29,6 +29,29 @@ pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 from RMS.Astrometry.CyFunctions import subsetCatalog
 
 
+def limitingMagnitudeExcludeMask(image_stars):
+    """ Flag the CALSTARS stars whose S/N does not follow their flux, for the limiting magnitude fit.
+
+        The S/N is capped at 99.99 in the CALSTARS files, and saturated stars (column 7, the number of
+        saturated pixels, only in newer CALSTARS files) have a clipped flux.
+
+    Arguments:
+        image_stars: [ndarray] CALSTARS rows: Y, X, IntensSum, Ampltd, FWHM, BgLvl, SNR, NSatPx. Needs at
+            least the S/N column.
+
+    Return:
+        exclude_mask: [ndarray of bool] True for the stars to leave out.
+    """
+
+    exclude_mask = image_stars[:, 6] >= 99.99
+
+    if image_stars.shape[1] > 7:
+        exclude_mask |= image_stars[:, 7] > 0
+
+    return exclude_mask
+
+
+
 def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar=None, show_graphs=False):
     """ Given the folder of the night, find the Calstars file, check the star fit and generate a report
         with the quality of the calibration. The report contains information about both the astrometry and
@@ -516,7 +539,9 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
         lm_info = None
         if image_stars.shape[1] > 6:
             lm_pred_mags = photomLine((lm_intens, lm_radius), photom_offset, platepar.vignetting_coeff)
-            lm_info = limitingMagnitude(lm_pred_mags, image_stars[:, 6], snr_targets=(5, 10))
+
+            lm_info = limitingMagnitude(lm_pred_mags, image_stars[:, 6], snr_targets=(5, 10),
+                                        exclude_mask=limitingMagnitudeExcludeMask(image_stars))
 
         ### ###
 

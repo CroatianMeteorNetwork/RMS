@@ -1316,3 +1316,24 @@ def testDistortionResetToZeroForcedCentre(plateTool, force_centre):
     assert np.all(pp.x_poly_fwd[:n_centre] == 0.123)
     assert not np.any(pp.x_poly_fwd[n_centre:])
     assert not np.any(pp.y_poly_fwd)
+
+
+###################################################################################################
+# CALIBRATION REPORT
+###################################################################################################
+
+def testCalibrationReportLMExcludesCappedAndSaturated():
+    """ The limiting magnitude fit of the calibration report leaves out the S/N-capped and saturated
+        stars, and works with CALSTARS files without the saturation column. """
+
+    from Utils.CalibrationReport import limitingMagnitudeExcludeMask
+
+    # Y, X, IntensSum, Ampltd, FWHM, BgLvl, SNR, NSatPx
+    stars = np.array([
+        [10, 10, 1000, 100, 2.5, 20, 99.99, 0],
+        [20, 20, 800, 90, 2.5, 20, 50.0, 3],
+        [30, 30, 500, 60, 2.5, 20, 30.0, 0],
+    ])
+
+    assert list(limitingMagnitudeExcludeMask(stars)) == [True, True, False]
+    assert list(limitingMagnitudeExcludeMask(stars[:, :7])) == [True, False, False]
