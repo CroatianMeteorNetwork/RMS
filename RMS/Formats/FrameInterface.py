@@ -1997,6 +1997,35 @@ class InputTypeImages(InputType):
             self.current_img_file = self.img_list[self.current_frame]
 
 
+    def _printFitsHeaderOnce(self, header, mode_label):
+        """ Print the FITS header of the first image loaded from this directory.
+
+            Loading every frame of a FITS image sequence used to dump the full header each time, which
+            flooded the console when stepping through images in SkyFit2. The header is the same for all
+            images of a sequence, so it is shown once per input directory.
+
+        Arguments:
+            header: [astropy Header] Header of the FITS file being loaded.
+            mode_label: [str] Short label of the FITS flavour detected (e.g. "FRIPON mode").
+        """
+
+        # Only the first image of the sequence is reported
+        if getattr(self, "_fits_header_printed", False):
+            return
+
+        self._fits_header_printed = True
+
+        print(mode_label)
+
+        # Print the header, one card per line
+        print("\nFITS Header:")
+        print("\n" + "="*80)
+        for key, value in header.items():
+            print(f"{key}: {value}")
+        print("="*80 + "\n")
+
+
+
     def loadFrame(self, avepixel=None, fr_no=None):
         """ Loads the current frame.
 
@@ -2080,7 +2109,7 @@ class InputTypeImages(InputType):
                 # Indicate that a FRIPON fit file is read
                 self.fripon_mode = True
 
-                print("FRIPON mode")
+                self._printFitsHeaderOnce(fits_file[0].header, "FRIPON mode")
 
 
         # Loads a non-FRIPON FITS image
@@ -2093,12 +2122,9 @@ class InputTypeImages(InputType):
                 fits_file = fits.open(f)
                 frame = fits_file[0].data
 
-                # Print nicely formatted FITS header
-                print("\nFITS Header:")
-                print("\n" + "="*80)
-                for key, value in fits_file[0].header.items():
-                    print(f"{key}: {value}")
-                print("="*80 + "\n")
+                # Show the FITS header of the first image loaded from this directory, so the
+                # calibration format is visible without flooding the output on every frame
+                self._printFitsHeaderOnce(fits_file[0].header, "FITS mode")
 
                 # If the fits image type is floating point, convert it to uint16
                 if np.issubdtype(frame.dtype, np.floating):
@@ -2116,8 +2142,6 @@ class InputTypeImages(InputType):
 
                 # # Flip image vertically
                 # frame = np.flipud(frame)
-
-                print("FITS mode")
 
         # Load a normal image
         else:

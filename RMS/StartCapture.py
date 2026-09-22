@@ -153,7 +153,10 @@ def _earlyStationLock():
     return _takeStationLock(station_id)
 
 
-# Keep a reference for the process lifetime - the kernel releases the flock on process death
+# Runs at import time, on purpose, and only under __main__ (see _earlyStationLock): the point
+# is to refuse a duplicate instance BEFORE the heavy imports below cost hundreds of MB and
+# seconds. -h/--help is let through untouched. Keep a reference for the process lifetime -
+# the kernel releases the flock on process death.
 _early_station_lock = _earlyStationLock()
 
 

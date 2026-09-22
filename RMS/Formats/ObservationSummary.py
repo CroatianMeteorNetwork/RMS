@@ -48,8 +48,7 @@ from RMS.ConfigReader import parse
 from RMS.Misc import niceFormat, isRaspberryPi, sanitise, getRMSStyleFileName, getRmsRootDir, UTCFromTimestamp
 from RMS.Formats.FFfits import filenameToDatetimeStr
 from RMS.Formats.Platepar import Platepar
-from RMS.CaptureDuration import captureDuration
-from RMS.CaptureModeSwitcher import SWITCH_HORIZON_DEG
+from RMS.CaptureDuration import captureDuration, SWITCH_HORIZON_DEG
 from RMS.Formats.FTPdetectinfo import findFTPdetectinfoFile, readFTPdetectinfo
 from RMS.Logger import getLogger
 from pathlib import Path
@@ -69,7 +68,7 @@ except ImportError:
 # Get the logger from the main module
 log = getLogger("rmslogger")
 
-DEBUG_PRINT = False
+# Set by the __main__ block: skips the camera query when the camera does not answer a ping
 RUNNING_FROM_CONSOLE = False
 
 OBSERVATION_SUMMARY_WORKING_NAME_JSON = "observation_summary_working.json"
@@ -155,8 +154,8 @@ def getObsDBConn(config, force_delete=False):
 
         if len(tables) > 0:
             return conn
-    except:
-        print(f"{OBSERVATIONS_TABLE_NAME} does not exist")
+    except Exception:
+        log.info(f"{OBSERVATIONS_TABLE_NAME} does not exist")
 
 
     sql_command = ""
@@ -346,8 +345,7 @@ def getObservationDurationContinuous(config, start_time):
         """
 
     # convert start_time to a python object
-    if DEBUG_PRINT:
-        print("Passed a start time of {}".format(start_time))
+    log.debug("Passed a start time of {}".format(start_time))
 
     # Initialize sun and observer
     o = ephem.Observer()
@@ -363,8 +361,7 @@ def getObservationDurationContinuous(config, start_time):
     advanced = 0
     try:
         while o.next_setting(s).datetime() < o.next_rising(s).datetime() and advanced < max_advance_minutes:
-            if DEBUG_PRINT:
-                print("{} is not at night time".format(start_time))
+            log.debug("{} is not at night time".format(start_time))
             start_time += datetime.timedelta(minutes=1)
             advanced += 1
             o.date = start_time
@@ -375,8 +372,7 @@ def getObservationDurationContinuous(config, start_time):
         # refined. The duration block below falls back to duration=0.
         log.warning("Polar day/night: no Sun setting/rising; cannot refine continuous-capture start time")
 
-    if DEBUG_PRINT:
-        print("Advanced time to {}".format(o.date))
+    log.debug("Advanced time to {}".format(o.date))
 
     # Compute duration
     try:
@@ -390,10 +386,9 @@ def getObservationDurationContinuous(config, start_time):
         duration_ephem = 0
         end_time_ephem = None
 
-    if DEBUG_PRINT:
-        print("start_time_ephem {}".format(start_time_ephem))
-        print("duration_ephem {:.1f} hours".format(duration_ephem/3600))
-        print("end_time_ephem {}".format(end_time_ephem))
+    log.debug("start_time_ephem {}".format(start_time_ephem))
+    log.debug("duration_ephem {:.1f} hours".format(duration_ephem/3600))
+    log.debug("end_time_ephem {}".format(end_time_ephem))
 
     return start_time_ephem, duration_ephem, end_time_ephem
 
@@ -787,10 +782,10 @@ def timestampFromNTP(addr='time.cloudflare.com'):
         data, address = client.recvfrom(1024)
         local_clock_receive_timestamp = time.time()
     except socket.timeout:
-        print("NTP request timed out")
+        log.warning("NTP request timed out")
         return None, None
     except Exception as e:
-        print("NTP request failed: {}".format(e))
+        log.warning("NTP request failed: {}".format(e))
         return None, None
     if data:
 
@@ -810,8 +805,7 @@ def timestampFromNTP(addr='time.cloudflare.com'):
         local_clock_measured_response_time = (local_clock_receive_timestamp - local_clock_transmit_timestamp)
         remote_clock_measured_processing_time = (remote_clock_time_transmit_timestamp - remote_clock_time_receive_timestamp)
 
-        if DEBUG_PRINT:
-            print("Rx Fractional {}, Tx fractional {}".format(remote_clock_time_receive_timestamp_fractional_seconds, remote_clock_time_transmit_timestamp_fractional_seconds))
+        log.debug("Rx Fractional {}, Tx fractional {}".format(remote_clock_time_receive_timestamp_fractional_seconds, remote_clock_time_transmit_timestamp_fractional_seconds))
         # Next calculation assumes that remote and local clock are running at identical rates
         estimated_network_delay = local_clock_measured_response_time - remote_clock_measured_processing_time
         if estimated_network_delay < 0:
@@ -883,8 +877,7 @@ def getEphemTimesFromCaptureDirectory(config, capture_directory):
     """
 
     capture_directory_full_path = os.path.join(config.data_dir, config.captured_dir, capture_directory)
-    if DEBUG_PRINT:
-        print("Capture directory full path: {}".format(capture_directory_full_path))
+    log.debug("Capture directory full path: {}".format(capture_directory_full_path))
     config_file_name = getattr(config, "config_file_name", None)
     if config_file_name:
         nightly_config_filename = os.path.basename(config_file_name)
@@ -897,15 +890,11 @@ def getEphemTimesFromCaptureDirectory(config, capture_directory):
         night_config_path = config_file_name or os.path.join(capture_directory_full_path, ".config")
 
     night_config = parse(night_config_path)
-    if DEBUG_PRINT:
-        print("Making a time from {}".format(capture_directory))
+    log.debug("Making a time from {}".format(capture_directory))
     capture_directory_start_time = filenameToDatetimeStr(os.path.basename(capture_directory))
-    if DEBUG_PRINT:
-        print("Capture directory start time: {}".format(capture_directory_start_time))
-        print("Type is {}".format(type(capture_directory_start_time)))
+    log.debug("Capture directory start time: {}".format(capture_directory_start_time))
     capture_directory_start_time = datetime.datetime.strptime(capture_directory_start_time, "%Y-%m-%d %H:%M:%S.%f")
-    if DEBUG_PRINT:
-        print("Capture directory start time: {}".format(capture_directory_start_time))
+    log.debug("Capture directory start time: {}".format(capture_directory_start_time))
     start_time, duration, end_time = getObservationDuration(night_config, capture_directory_start_time)
 
     return start_time, duration, end_time
@@ -1718,6 +1707,14 @@ def saveObservationSummaryDict(d, night_dir=None):
         return
 
     observation_summary_json_path = os.path.join(night_dir, getRMSStyleFileName(night_dir, OBSERVATION_SUMMARY_WORKING_NAME_JSON))
+
+    # The (empty) lock file is deliberately never removed. Unlinking it after the write is a
+    # classic flock race: a writer that opened the old inode and is blocked in flock() would
+    # acquire the lock on an unlinked file while the next writer creates a new inode and locks
+    # that instead, so the two write concurrently - the exact lost update this lock prevents.
+    # There is also no "final" write to hook (capture, the capture child and Reprocess all
+    # write). It is 0 bytes, not picked up by the archive/upload file selection, and lives in
+    # the night directory until that directory is deleted.
     lock_path = observation_summary_json_path + ".lock"
 
     lock_f = open(lock_path, "w")
@@ -1799,9 +1796,9 @@ def startObservationSummaryReport(config, night_data_dir, duration, force_delete
                         UTCFromTimestamp.utcfromtimestamp(repo.head.object.committed_date).strftime('%Y%m%d_%H%M%S'))
             addObsParam(d, "commit_hash", repo.head.object.hexsha)
         else:
-            print("RMS Git repository not found. Skipping Git-related information.")
-    except:
-        print("Error getting Git information. Skipping Git-related information.")
+            log.warning("RMS Git repository not found. Skipping Git-related information.")
+    except Exception:
+        log.warning("Error getting Git information. Skipping Git-related information.")
     
     # Get the disk usage info (only in Python 3.3+) for the data_dir disc
     if (sys.version_info.major > 2) and (sys.version_info.minor > 2):
@@ -1874,7 +1871,7 @@ def finalizeObservationSummary(config, night_data_dir, platepar=None):
     try:
         timeSyncStatus(config, d)
     except Exception as e:
-        print(repr(e))
+        log.warning("Time sync status check failed: {}".format(repr(e)))
 
 
     platepar_path = os.path.join(config.config_file_path, config.platepar_name)

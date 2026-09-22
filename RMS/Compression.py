@@ -21,7 +21,6 @@ import traceback
 import time
 import datetime
 import multiprocessing
-import ctypes
 import signal
 from math import floor
 import numpy as np
@@ -31,7 +30,7 @@ import cv2
 from RMS.VideoExtraction import Extractor
 from RMS.Formats import FFfile, FFStruct
 from RMS.Formats import FieldIntensities
-from RMS.Logger import getLogger, getLoggingQueue, initChildProcess
+from RMS.Logger import getLogger, getLoggingQueue, initChildProcess, flushChildLogging
 from RMS.Misc import UTCFromTimestamp, frameBufferShape, AtomicFlag, stableDoubleRead
 from RMS.Routines.Image import saveImage
 
@@ -260,11 +259,23 @@ class Compressor(multiprocessing.Process):
                 except (OSError, AttributeError):
                     pass
 
-            # Always join to reap zombie (returns instantly if already dead)
-            self.join()
+            # Join to reap the zombie (returns instantly if already dead). Bounded: a process
+            # stuck in uninterruptible I/O survives even SIGKILL until the I/O completes, and
+            # an unbounded join would wedge the capture shutdown on it - abandon it instead,
+            # the same way QueuedPool._shutdownPool does.
+            self.join(5)
+            if self.is_alive():
+                log.warning("Compression process survived SIGKILL (uninterruptible I/O?), "
+                            "abandoning it without joining")
+
+        elif self.pid is None:
+            # Never started - join() would assert, and there is nothing to reap
+            log.debug("Compression process was never started, nothing to reap")
 
         else:
-            # Process is not alive but may not have been joined yet - reap it
+            # Process is not alive but may not have been joined yet - reap it. The process has
+            # already exited, so this join returns as soon as the exit status is collected; the
+            # timeout is only a guard against the bookkeeping itself misbehaving.
             log.debug("Compression process not alive, joining to reap resources")
             self.join(timeout=5)
 
@@ -325,6 +336,10 @@ class Compressor(multiprocessing.Process):
                     log.debug('Compression run exit')
 
                     self.run_exited.set()
+
+                    # os._exit() skips the logging queue's feeder thread - push the buffered
+                    # records out first or the exit messages above never reach the log
+                    flushChildLogging()
                     os._exit(0)
 
                 time.sleep(0.1)
@@ -457,7 +472,10 @@ class Compressor(multiprocessing.Process):
         # Force-exit the process. The forked QueuedPool Manager proxy threads
         # hold open socket connections that survive even after dropping all
         # Python references. os._exit() is the only reliable way to terminate
-        # the process without waiting for those threads.
+        # the process without waiting for those threads. It also skips the
+        # logging queue's feeder thread, so flush the buffered records first
+        # (all FF/FR/intensity files are already closed by this point).
+        flushChildLogging()
         os._exit(0)
 
 

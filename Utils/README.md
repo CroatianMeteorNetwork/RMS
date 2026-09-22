@@ -95,7 +95,6 @@ The main pipeline modules live in the `RMS/` package and are run the same way, u
 - **`RMS.CaptureDuration`**: Prints the capture start time and duration for the night (given the station coordinates).
 - **`RMS.DeleteOldObservations`**: Frees up disk space by deleting old observation data.
 - **`RMS.MLFilter`**: Filters detections using the machine-learning meteor classifier.
-- **`RMS.ClearSkyDetector`**: Estimates which parts of the night had clear skies.
 
 Other pipeline modules (e.g. `RMS.ArchiveDetections`, `RMS.UploadManager`, `RMS.DownloadPlatepar`, `RMS.CaptureModeSwitcher`) are internal - their `__main__` blocks are hardcoded test stubs, not user CLIs. They run as part of `RMS.StartCapture`/`RMS.Reprocess`.
 

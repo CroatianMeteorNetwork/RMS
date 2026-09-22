@@ -18,7 +18,7 @@ try:
 except ImportError as e:
     print('Could not import gi: {}. Using OpenCV.'.format(e))
 
-except (ValueError, Exception) as e:
+except Exception as e:
     print('Could not import Gst: {}. Using OpenCV.'.format(e))
 
 
