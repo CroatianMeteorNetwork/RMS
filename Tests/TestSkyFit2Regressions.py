@@ -1073,3 +1073,58 @@ def testConfigMagLimitQuickAlignUsesImageTime(plateTool, monkeypatch):
     pt.testQuickAlignWithConfigMagLimit()
 
     assert calls == [(list(pt.img_handle.currentTime()), len(pt.calstars[pt.img_handle.name()]))]
+
+
+###################################################################################################
+# PHOTOMETRY
+###################################################################################################
+
+def testPhotometryExcludeListFallback():
+    """ The exclusions are relaxed step by step until at least 3 stars remain. """
+
+    # Enough stars left without the saturated and the variable ones
+    sat = [True, False, False, False, False, False]
+    var = [False, True, False, False, False, False]
+    assert SF.photometryExcludeList(sat, var) == [True, True, False, False, False, False]
+
+    # The variable star has to be used
+    sat = [True, True, False, False, False]
+    var = [False, False, True, False, False]
+    assert SF.photometryExcludeList(sat, var) == [True, True, False, False, False]
+
+    sat = [True, True, True, False]
+    assert SF.photometryExcludeList(sat, [False]*4) == [False]*4
+
+
+def testBandRatioFitWithSaturatedStars(plateTool, monkeypatch, capsys):
+    """ The band ratio fit falls back to the saturated stars like photometry() instead of reporting a
+        ratio fitted to no stars. """
+
+    import matplotlib.pyplot as plt
+
+    pt = plateTool
+    if pt.catalog_stars_bp is None:
+        pytest.skip("The example catalog has no BP/RP magnitudes")
+
+    monkeypatch.setattr(plt, "show", lambda *a, **k: None)
+
+    # Pair the brightest catalog stars in the image, all flagged saturated
+    from RMS.Astrometry.Conversions import date2JD
+
+    jd = date2JD(*pt.img_handle.currentTime())
+    x, y, _ = SF.getCatalogStarsImagePositions(pt.catalog_stars, jd, pt.platepar)
+    in_image = (x > 50) & (x < pt.platepar.X_res - 50) & (y > 50) & (y < pt.platepar.Y_res - 50)
+    idx = np.where(in_image)[0]
+    idx = idx[np.argsort(pt.catalog_stars[idx, 2])][:8]
+
+    pt.paired_stars = SF.PairedStars()
+    for i in idx:
+        ra, dec, mag = pt.catalog_stars[i][:3]
+        pt.paired_stars.addPair(x[i], y[i], 2.5, 10**(-0.4*(mag - 12.0)), SF.CatalogStar(ra, dec, mag),
+                                snr=50, saturated=True)
+
+    pt.fitBandRatio()
+
+    out = capsys.readouterr().out
+    assert "Fit stddev: inf" not in out
+    assert "Fit stddev:" in out

@@ -213,6 +213,38 @@ def computeSolarSystemMagnitude(body_name, body, sun, time):
     return float(mag)
 
 
+def photometryExcludeList(saturation_list, variable_star_list, min_stars=3):
+    """ Choose the stars to leave out of a photometry fit.
+
+        Saturated and highly variable stars are excluded, as long as at least min_stars remain. Otherwise
+        only the saturated stars are excluded, and if even that leaves too few, no star is.
+
+    Arguments:
+        saturation_list: [list] Per star, True if saturated.
+        variable_star_list: [list] Per star, True if a highly variable star.
+
+    Keyword arguments:
+        min_stars: [int] Minimum number of stars the fit needs. 3 by default.
+
+    Return:
+        exclude_list: [list] Per star, True to exclude it from the fit.
+    """
+
+    total_stars = len(saturation_list)
+
+    # Exclude both saturated and variable stars if enough stars remain
+    exclude_both = [bool(sat or var) for sat, var in zip(saturation_list, variable_star_list)]
+    if total_stars - sum(exclude_both) >= min_stars:
+        return exclude_both
+
+    # Include the variable stars, but still exclude the saturated ones
+    if total_stars - sum(bool(sat) for sat in saturation_list) >= min_stars:
+        return [bool(sat) for sat in saturation_list]
+
+    # Still not enough, include all stars so the fit works
+    return [False]*total_stars
+
+
 def updateConfigLines(lines, updates):
     """ Set the given keys in the lines of an RMS .config file, keeping everything else as it is.
 
@@ -8395,28 +8427,8 @@ class PlateTool(QtWidgets.QMainWindow):
         # Set the fit weights so that everyting with SNR > 10 is weighted the maximum value
         weights = np.clip(snr_list, 0, 10)/10.0
 
-        # We need at least 3 stars for a robust photometry fit. Preferably, saturated and highly variable
-        #   stars are excluded from the fit. First, compute the total number of stars and how many remain
-        #   if we exclude both
-        total_stars = len(saturation_list)
-        exclude_both = [sat or var for sat, var in zip(saturation_list, variable_star_list)]
-        good_stars_count = total_stars - sum(exclude_both)
-
-        # We have enough stars, exclude both saturated and variable stars
-        if good_stars_count >= 3:
-            exclude_list = exclude_both
-
-        # Not enough stars. Check if we have enough by only excluding saturated stars
-        else:
-            non_saturated_count = total_stars - sum(saturation_list)
-
-            # Include variable stars in the fit, but still exclude saturated stars
-            if non_saturated_count >= 3:
-                exclude_list = saturation_list
-
-            # Still not enough. We have to include all stars to ensure the fit works
-            else:
-                exclude_list = [False] * total_stars
+        # Exclude the saturated and highly variable stars, as far as enough stars remain
+        exclude_list = photometryExcludeList(saturation_list, variable_star_list)
 
         # Fit the photometric offset (disable vignetting fit if a flat is used)
         # The fit is going to be weighted by the signal to noise ratio to reduce the influence of
@@ -8987,7 +8999,9 @@ class PlateTool(QtWidgets.QMainWindow):
             fixed_vignetting = self.platepar.vignetting_coeff
 
         weights = np.clip(snr_list, 0, 10) / 10.0
-        exclude_list = [sat or var for sat, var in zip(saturation_list, variable_star_list)]
+
+        # Exclude the saturated and variable stars as far as enough stars remain, the same as photometry()
+        exclude_list = photometryExcludeList(saturation_list, variable_star_list)
 
         jd = date2JD(*self.img_handle.currentTime())
 
@@ -9033,6 +9047,11 @@ class PlateTool(QtWidgets.QMainWindow):
                         best_rg, best_rbp, best_rrp = rg, rbp, rrp
                 except Exception:
                     pass
+
+        # No grid point gave a usable fit, so there is no ratio to report
+        if not np.isfinite(best_stddev):
+            print("Band ratio fit failed: no band ratio gave a valid photometry fit.")
+            return
 
         # Compute the full photometry fit with the best ratio
         best_total_flux = best_rg * g_flux + best_rbp * bp_flux + best_rrp * rp_flux
@@ -9194,7 +9213,8 @@ class PlateTool(QtWidgets.QMainWindow):
             catalog_ra_bvri = [catalog_ra[j] for j in bvri_idx]
             catalog_dec_bvri = [catalog_dec[j] for j in bvri_idx]
             weights_bvri = np.array([weights[j] for j in bvri_idx])
-            exclude_list_bvri = [exclude_list[j] for j in bvri_idx]
+            exclude_list_bvri = photometryExcludeList([saturation_list[j] for j in bvri_idx],
+                                                      [variable_star_list[j] for j in bvri_idx])
 
             def bvri_objective(params):
                 """ Photometry fit stddev for the given (rB, rV, rR) fractions, rI = 1 - rB - rV - rR.
