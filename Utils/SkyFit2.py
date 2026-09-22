@@ -43,8 +43,141 @@ except ImportError:
     ASTROPY_AVAILABLE = False
 
 
+def planetPhaseGeometry(body_xyz, sun_xyz):
+    """ Compute the heliocentric distance, the observer distance and the phase angle of a solar system
+        body.
+
+    Arguments:
+        body_xyz: [ndarray] Cartesian position of the body relative to the observer (AU).
+        sun_xyz: [ndarray] Cartesian position of the Sun relative to the observer (AU), in the same frame.
+
+    Return:
+        (r, delta, alpha): [tuple]
+            r: [float] Sun-body distance (AU).
+            delta: [float] Observer-body distance (AU).
+            alpha: [float] Phase angle, Sun-body-observer (deg).
+    """
+
+    body_xyz = np.asarray(body_xyz, dtype=np.float64)
+    sun_xyz = np.asarray(sun_xyz, dtype=np.float64)
+
+    # Vectors from the body to the observer and to the Sun
+    to_observer = -body_xyz
+    to_sun = sun_xyz - body_xyz
+
+    delta = np.linalg.norm(to_observer)
+    r = np.linalg.norm(to_sun)
+
+    cos_alpha = np.dot(to_observer, to_sun)/(delta*r)
+    alpha = np.degrees(np.arccos(np.clip(cos_alpha, -1.0, 1.0)))
+
+    return r, delta, alpha
+
+
+def planetMagnitude(body_name, r, delta, alpha, saturn_ring_tilt=0.0):
+    """ Apparent V magnitude of a planet or the Moon from its distances and phase angle.
+
+        The planets follow Mallama & Hilton (2018), "Computing apparent planetary magnitudes for The
+        Astronomical Almanac", Astronomy and Computing 25, 10-24 (the secondary terms for the Mars orbital
+        longitude and the Uranus sub-latitude, below 0.1 mag, are left out). The Moon uses
+        V = -12.73 + 0.026*alpha + 4e-9*alpha^4 at the mean distance (Allen's Astrophysical Quantities),
+        which includes the opposition surge.
+
+    Arguments:
+        body_name: [str] 'moon', 'mercury', 'venus', 'mars', 'jupiter', 'saturn', 'uranus' or 'neptune'.
+        r: [float] Sun-body distance (AU).
+        delta: [float] Observer-body distance (AU).
+        alpha: [float] Phase angle (deg).
+
+    Keyword arguments:
+        saturn_ring_tilt: [float] Saturn only, the ring tilt towards the observer (deg). 0 by default.
+
+    Return:
+        mag: [float] Apparent V magnitude, None for an unknown body.
+    """
+
+    a = abs(alpha)
+
+    if body_name == 'moon':
+
+        # Scaled from the mean Earth-Moon distance (384400 km) and 1 AU from the Sun
+        mean_distance_au = 384400.0/149597870.7
+        return -12.73 + 0.026*a + 4e-9*a**4 + 5*np.log10(r*delta/mean_distance_au)
+
+    distance_term = 5*np.log10(r*delta)
+
+    if body_name == 'mercury':
+        v = -0.613 + 6.3280e-02*a - 1.6336e-03*a**2 + 3.3644e-05*a**3 - 3.4265e-07*a**4 \
+            + 1.6893e-09*a**5 - 3.0334e-12*a**6
+
+    elif body_name == 'venus':
+        if a <= 163.7:
+            v = -4.384 - 1.044e-03*a + 3.687e-04*a**2 - 2.814e-06*a**3 + 8.938e-09*a**4
+        else:
+            v = 236.05828 - 2.81914*a + 8.39034e-03*a**2
+
+    elif body_name == 'mars':
+        if a <= 50.0:
+            v = -1.601 + 2.267e-02*a - 1.302e-04*a**2
+        else:
+            v = -0.367 - 0.02573*a + 0.0003445*a**2
+
+    elif body_name == 'jupiter':
+        if a <= 12.0:
+            v = -9.395 - 3.7e-04*a + 6.16e-04*a**2
+        else:
+            x = a/180.0
+            v = -9.428 - 2.5*np.log10(1.0 - 1.507*x - 0.363*x**2 - 0.062*x**3 + 2.809*x**4 - 1.876*x**5)
+
+    elif body_name == 'saturn':
+
+        # Globe and rings, valid for the phase angles and ring tilts seen from the Earth
+        sin_tilt = np.sin(np.radians(abs(saturn_ring_tilt)))
+        v = -8.914 - 1.825*sin_tilt + 0.026*a - 0.378*sin_tilt*np.exp(-2.25*a)
+
+    elif body_name == 'uranus':
+        v = -7.110 + 6.587e-3*a + 1.045e-4*a**2
+
+    elif body_name == 'neptune':
+        v = -7.00 + 7.944e-3*a + 9.617e-5*a**2
+
+    else:
+        return None
+
+    return v + distance_term
+
+
+# Direction of Saturn's north pole (IAU, ICRS), for the ring tilt
+SATURN_POLE_RA_DEG = 40.589
+SATURN_POLE_DEC_DEG = 83.537
+
+
+def saturnRingTilt(ra_deg, dec_deg):
+    """ Ring tilt of Saturn (the latitude of the observer seen from Saturn).
+
+    Arguments:
+        ra_deg: [float] Right ascension of Saturn seen by the observer (deg).
+        dec_deg: [float] Declination of Saturn seen by the observer (deg).
+
+    Return:
+        tilt: [float] Ring tilt (deg).
+    """
+
+    ra, dec = np.radians(ra_deg), np.radians(dec_deg)
+    pra, pdec = np.radians(SATURN_POLE_RA_DEG), np.radians(SATURN_POLE_DEC_DEG)
+
+    # Saturn -> observer is the opposite of the observed direction
+    to_observer = -np.array([np.cos(dec)*np.cos(ra), np.cos(dec)*np.sin(ra), np.sin(dec)])
+    pole = np.array([np.cos(pdec)*np.cos(pra), np.cos(pdec)*np.sin(pra), np.sin(pdec)])
+
+    return np.degrees(np.arcsin(np.clip(np.dot(pole, to_observer), -1.0, 1.0)))
+
+
 def computeSolarSystemMagnitude(body_name, body, sun, time):
     """ Compute the apparent magnitude of a solar system body.
+
+        The heliocentric distance and the phase angle are computed from the positions of the body and the
+        Sun, and the magnitude from planetMagnitude.
 
     Arguments:
         body_name: [str] Name of the body ('sun', 'moon', 'jupiter', etc.).
@@ -60,73 +193,24 @@ def computeSolarSystemMagnitude(body_name, body, sun, time):
     if body_name == 'sun':
         return -26.74
 
-    # Distance from Earth in AU
-    delta = body.distance.to(u.AU).value
+    # Cartesian positions in AU. The body is topocentric, the Sun geocentric - the difference of an Earth
+    #   radius is negligible for the distances and the phase angle
+    body_xyz = body.cartesian.xyz.to(u.AU).value
+    sun_xyz = sun.cartesian.xyz.to(u.AU).value
 
-    # Moon - varies with phase
-    if body_name == 'moon':
+    r, delta, alpha = planetPhaseGeometry(body_xyz, sun_xyz)
 
-        # Compute the phase angle (Sun-Moon-Earth angle). The elongation is the angle between the Moon
-        #   and the Sun as seen from Earth, and the phase angle is approximately 180 - elongation
-        elongation = body.separation(sun).deg
-        phase_angle = 180 - elongation
+    tilt = 0.0
+    if body_name == 'saturn':
+        tilt = saturnRingTilt(body.ra.deg, body.dec.deg)
 
-        # Simplified Moon magnitude formula: the full Moon is about -12.7 and the brightness scales with
-        #   the illuminated fraction
-        phase_fraction = (1 + np.cos(np.radians(phase_angle))) / 2
-        if phase_fraction > 0.001:
-            mag = -12.7 + 2.5 * np.log10(1.0 / phase_fraction)
-        else:
-            mag = 0  # New moon, essentially not visible
-
-        return mag
-
-    # Planets - use standard formula: V = V(1,0) + 5*log10(r*delta) + phase_correction
-    #   V(1,0) values and phase coefficients from Astronomical Almanac
-
-    # Planet parameters: (V(1,0), phase_coeff1, phase_coeff2)
-    #   V(1,0) is absolute magnitude at 1 AU from Sun and Earth at 0 phase
-    planet_params = {
-        'mercury': (-0.60, 0.0380, 0.000273),
-        'venus':   (-4.47, 0.0103, 0.000057),
-        'mars':    (-1.52, 0.0160, 0.0),
-        'jupiter': (-9.40, 0.0050, 0.0),
-        'saturn':  (-8.88, 0.0440, 0.0),
-        'uranus':  (-7.19, 0.0028, 0.0),
-        'neptune': (-6.87, 0.0, 0.0),
-    }
+    mag = planetMagnitude(body_name, r, delta, alpha, saturn_ring_tilt=tilt)
 
     # Unknown body
-    if body_name not in planet_params:
+    if mag is None:
         return 0.0
 
-    v_1_0, c1, c2 = planet_params[body_name]
-
-    # Average heliocentric distances in AU
-    avg_helio_dist = {
-        'mercury': 0.387,
-        'venus':   0.723,
-        'mars':    1.524,
-        'jupiter': 5.203,
-        'saturn':  9.537,
-        'uranus':  19.19,
-        'neptune': 30.07,
-    }
-
-    r = avg_helio_dist.get(body_name, 1.0)  # Heliocentric distance in AU
-
-    # Compute phase angle (Sun-Body-Earth angle)
-    elongation = body.separation(sun).deg
-
-    # Use law of cosines: cos(phase) = (r^2 + delta^2 - 1) / (2*r*delta)
-    cos_phase = (r**2 + delta**2 - 1) / (2 * r * delta)
-    cos_phase = np.clip(cos_phase, -1, 1)
-    phase_angle = np.degrees(np.arccos(cos_phase))
-
-    # Compute magnitude: V = V(1,0) + 5*log10(r*delta) + c1*phase + c2*phase^2
-    mag = v_1_0 + 5 * np.log10(r * delta) + c1 * phase_angle + c2 * phase_angle**2
-
-    return mag
+    return float(mag)
 
 
 def updateConfigLines(lines, updates):

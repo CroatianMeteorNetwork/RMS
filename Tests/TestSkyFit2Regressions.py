@@ -1013,3 +1013,46 @@ def testAbortedTuningRestoresConfig(plateTool):
     pt.tuneStarDetection()
 
     assert {name: getattr(pt.config, name) for name in names} == before
+
+
+###################################################################################################
+# PLANET MAGNITUDES
+###################################################################################################
+
+@pytest.mark.parametrize("body_name, time_str, published_mag", [
+    ('jupiter', '2022-09-26 20:00', -2.9),     # Opposition
+    ('mars', '2020-10-13 23:00', -2.6),        # Opposition
+    ('saturn', '2022-08-14 18:00', 0.3),       # Opposition, rings open ~14 deg
+    ('venus', '2020-04-28 12:00', -4.7),       # Greatest brilliancy
+    ('venus', '2021-03-26 07:00', -3.9),       # Superior conjunction
+    ('mercury', '2021-01-24 00:00', -0.6),     # Greatest eastern elongation
+    ('moon', '2022-01-17 23:48', -12.7),       # Full Moon
+    ('moon', '2022-01-09 18:11', -10.1),       # First quarter
+    ('neptune', '2022-09-16 12:00', 7.8),      # Opposition
+])
+def testSolarSystemMagnitudes(body_name, time_str, published_mag):
+    """ The planet and Moon magnitudes agree with published values to 0.2 mag. """
+
+    if not SF.ASTROPY_AVAILABLE:
+        pytest.skip("astropy is not available")
+
+    from astropy.coordinates import get_body, get_sun, EarthLocation
+    from astropy.time import Time
+    import astropy.units as u
+
+    loc = EarthLocation(lat=45*u.deg, lon=15*u.deg, height=0*u.m)
+    t = Time(time_str)
+
+    mag = SF.computeSolarSystemMagnitude(body_name, get_body(body_name, t, loc), get_sun(t), t)
+
+    assert mag == pytest.approx(published_mag, abs=0.2)
+
+
+def testPlanetPhaseGeometry():
+    """ Distances and phase angle of a body at quadrature seen from 1 AU. """
+
+    r, delta, alpha = SF.planetPhaseGeometry([0.0, 1.0, 0.0], [1.0, 0.0, 0.0])
+
+    assert r == pytest.approx(np.sqrt(2))
+    assert delta == pytest.approx(1.0)
+    assert alpha == pytest.approx(45.0)
