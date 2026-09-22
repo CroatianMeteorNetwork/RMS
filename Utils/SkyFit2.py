@@ -1209,7 +1209,8 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
     FILE_TYPES = ["Platepar", "Config", "Mask", "Flat", "Dark"]
 
     def __init__(self, plate_tool, parent=None):
-        """
+        """ Build the File Manager dialog.
+
         Arguments:
             plate_tool: [PlateTool] The SkyFit2 GUI whose files are managed.
 
@@ -2228,6 +2229,9 @@ class QFOVinputDialog(QtWidgets.QDialog):
     lenses_vbox = None
 
     def __init__(self, *args, **kwargs):
+        """ Build the dialog which asks the user for the FOV centre, the rotation and the lens
+            template. """
+
         super(QFOVinputDialog, self).__init__(*args, **kwargs)
 
         self.setWindowTitle("Pointing information")
@@ -4085,6 +4089,7 @@ class PlateTool(QtWidgets.QMainWindow):
             return False
 
     def onRefractionChanged(self):
+        """ Parameter tab callback: apply a change of the refraction flag to the pointing and the picks. """
 
         # Update the reference apparent alt/az, as the refraction influences the pointing
         self.platepar.updateRefAltAz()
@@ -4098,6 +4103,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
     def onGridChanged(self):
+        """ Settings tab callback: show the celestial grid, the horizontal grid, or no grid at all. """
 
         if self.platepar is None:
             self.celestial_grid.hide()
@@ -4118,39 +4124,61 @@ class PlateTool(QtWidgets.QMainWindow):
             self.celestial_grid.show()
             updateAzAltGrid(self.celestial_grid, self.platepar)
 
+
     def onScaleChanged(self):
+        """ Parameter tab callback: apply a change of the plate scale. """
+
         self.platepar_modified = True
         self.updateFitResiduals()
         self.updateStars()
         self.updateLeftLabels()
 
+
     def onFitParametersChanged(self):
+        """ Parameter tab callback: apply a change of the distortion fit parameters. """
+
         self.platepar_modified = True
         self.updateDistortion()
         self.updateStars()
         self.updateLeftLabels()
 
+
     def onExtinctionChanged(self):
+        """ Parameter tab callback: apply a change of the extinction scale. """
+
         self.platepar_modified = True
         self.photometry()
         self.updateLeftLabels()
+
+        # The catalog magnitudes are extinction corrected when the apparent magnitudes are shown
         if self.apparent_mag_corr_enabled:
             self.updateStars()
+
 
     def onVignettingChanged(self):
+        """ Parameter tab callback: apply a change of the vignetting coefficient. """
+
         self.platepar_modified = True
         self.photometry()
         self.updateLeftLabels()
+
+        # The catalog magnitudes are vignetting corrected when the apparent magnitudes are shown
         if self.apparent_mag_corr_enabled:
             self.updateStars()
 
+
     def onAzAltChanged(self):
+        """ Parameter tab callback: apply a change of the reference azimuth or altitude. """
+
         self.platepar_modified = True
         self.platepar.updateRefRADec(preserve_rotation=True)
         self.updateStars()
         self.updateLeftLabels()
 
+
     def onRotChanged(self):
+        """ Parameter tab callback: apply a change of the rotation with respect to the horizon. """
+
         self.platepar_modified = True
         self.platepar.pos_angle_ref = rotationWrtHorizonToPosAngle(self.platepar,
                                                                    self.platepar.rotation_from_horiz)
@@ -10859,6 +10887,12 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
     def onMouseMoved(self, event):
+        """ Track the mouse over the image: move the cursors and the zoom window, drag mask vertices,
+            paint with the mask brush and colour photometry pixels.
+
+        Arguments:
+            event: [QPointF] Mouse position in scene coordinates.
+        """
 
         pos = event
 
@@ -10871,19 +10905,21 @@ class PlateTool(QtWidgets.QMainWindow):
             self.cursor2.setCenter(mp)
             self.mouse_x, self.mouse_y = mp.x(), mp.y()
 
-            # Handle mask vertex dragging
+            # Handle the mask vertex dragging
             if self.mask_dragging_vertex is not None:
                 self.moveMaskVertex(self.mask_dragging_vertex, mp.x() - 0.5, mp.y() - 0.5)
 
+            # Keep the brush cursor under the mouse
             if self.mask_brush_mode:
                 self.brush_cursor.setCenter(mp)
 
+            # Paint the mask while the mouse button is held down
             if self.mask_brush_painting:
                 self.brushPaintAt(mp.x() - 0.5, mp.y() - 0.5)
 
             self.zoom()
 
-            # Move zoom window to correct location
+            # Move the zoom window to the correct location
             range_ = self.img_frame.getState()['viewRange'][0]
             if mp.x() > (range_[1] - range_[0])/2 + range_[0]:
                 self.v_zoom_left = True
@@ -13334,6 +13370,14 @@ class PlateTool(QtWidgets.QMainWindow):
         """
 
         def lm_callback(lim_mag, n_catalog, n_detected, ratio):
+            """ Reload the catalog at the new limiting magnitude and redraw the catalog stars.
+
+            Arguments:
+                lim_mag: [float] New catalog limiting magnitude.
+                n_catalog: [int] Number of catalog stars at the new LM.
+                n_detected: [int] Number of detected stars.
+                ratio: [float] Ratio of the catalog to the detected star count.
+            """
 
             # Update catalog LM and reload catalog
             self.cat_lim_mag = lim_mag
@@ -13359,6 +13403,15 @@ class PlateTool(QtWidgets.QMainWindow):
         """
 
         def iteration_callback(iteration, pp_iter, outlier_mask, rmsd_arcmin):
+            """ Redraw the catalog stars and the distortion centre using the platepar of the current
+                RANSAC iteration.
+
+            Arguments:
+                iteration: [int] RANSAC iteration number.
+                pp_iter: [Platepar] Platepar of this iteration.
+                outlier_mask: [ndarray or None] Boolean mask of the pairs rejected as outliers.
+                rmsd_arcmin: [float] RMSD of this iteration in arc minutes.
+            """
 
             # pp_iter is a complete deepcopy with correct distortion_type, poly coeffs, and pointing. Swap
             #   the entire platepar pointer instead of copying attributes piecemeal (which missed
@@ -15045,17 +15098,17 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
     def _precomputeStarLabelHTML(self):
-        """Precompute HTML strings for star labels.
+        """ Precompute the HTML strings used for the star labels, so that they don't have to be built
+            again on every redraw.
 
-        This precomputes:
-        - self._star_label_html_spectral: HTML for spectral type (with color)
-        - self._star_label_html_name: HTML for star name (with SIMBAD link)
-
-        These arrays are indexed by the catalog star index.
+            Two arrays indexed by the catalog star index are filled in:
+                - self._star_label_html_spectral: HTML for the spectral type (with the colour)
+                - self._star_label_html_name: HTML for the star name (with the SIMBAD link)
         """
+
         n_stars = len(self.catalog_stars) if self.catalog_stars is not None else 0
 
-        # Initialize arrays
+        # Initialize the arrays
         self._star_label_html_spectral = [None] * n_stars
         self._star_label_html_name = [None] * n_stars
 
@@ -15111,19 +15164,19 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
     def _findPlatepar(self, dir_path=None):
-        """Search for a platepar file in the given directory.
+        """ Search for a platepar file in the given directory.
 
-        If the default platepar name exists and is the only .cal file, return its path directly.
-        If the default name is missing or multiple .cal files exist, prompt the user to pick one
-        or create a new blank platepar.
+            If the default platepar name exists and is the only .cal file, its path is returned
+            directly. If the default name is missing or several .cal files exist, the user is prompted
+            to pick one or to create a new blank platepar.
 
-        Arguments:
-            dir_path: [str] Directory to search. Defaults to self.dir_path.
+        Keyword arguments:
+            dir_path: [str] Directory to search. self.dir_path by default.
 
         Return:
-            [str or None] Path to the selected platepar file, empty string if the user chose to
-                          create a new blank platepar, or None if no UI is available yet
-                          (pre-startup fallback).
+            platepar_path: [str or None] Path to the selected platepar file, an empty string if the
+                user chose to create a new blank platepar, or None if no UI is available yet
+                (pre-startup fallback).
         """
 
         if dir_path is None:
@@ -15132,11 +15185,11 @@ class PlateTool(QtWidgets.QMainWindow):
         default_path = os.path.join(dir_path, self.config.platepar_name)
         cal_files = sorted(glob.glob(os.path.join(dir_path, '*.cal')))
 
-        # Default name exists and is the only .cal file — use it directly
+        # The default name exists and is the only .cal file, so use it directly
         if os.path.isfile(default_path) and len(cal_files) == 1:
             return default_path
 
-        # No unique default platepar — let the user pick one or create blank
+        # There is no unique default platepar, so let the user pick one or create a blank one
         if cal_files:
             items = [os.path.basename(f) for f in cal_files] \
                     + ["Browse for another platepar...", "Create new blank platepar"]
@@ -15280,6 +15333,8 @@ class PlateTool(QtWidgets.QMainWindow):
         print('Platepar written to:', self.platepar_file)
 
     def saveDefaultPlatepar(self):
+        """ Ask the user where to save the platepar which is used as the default for the station. """
+
         default_path = os.path.join(self.config.config_file_path, self.config.platepar_name)
 
         file_path, _ = QtWidgets.QFileDialog.getSaveFileName(
@@ -15291,10 +15346,17 @@ class PlateTool(QtWidgets.QMainWindow):
             print('Default platepar written to:', file_path)
 
     def showCalibrationFilesDialog(self, save_ftype=None):
-        """Open the File Manager dialog, optionally auto-triggering Save for a file type."""
+        """ Open the File Manager dialog, optionally auto-triggering the Save flow for one file type.
+
+        Keyword arguments:
+            save_ftype: [str] File type whose save flow is triggered right away. None by default, in
+                which case the dialog is just opened.
+        """
+
         dlg = CalibrationFilesDialog(self, parent=self)
+
+        # Show the dialog and immediately trigger the save flow for the given type
         if save_ftype and isinstance(save_ftype, str):
-            # Show the dialog and immediately trigger the save flow for the given type
             dlg.show()
             dlg._showSaveDialog(save_ftype)
             dlg.close()
@@ -16188,18 +16250,20 @@ class PlateTool(QtWidgets.QMainWindow):
             in_sample_rmsd: [float] The in-sample reverse-mapping RMSD (px) of the current fit, used
                 as the reference the held-out RMSD is compared against.
 
-        Returns:
-            bool: True if the fit looks like it is overfitting (held-out RMSD much worse than
-                in-sample), False otherwise -- including when there are too few stars to evaluate,
-                in which case nothing is flagged.
+        Return:
+            overfit: [bool] True if the fit looks like it is overfitting (the held-out RMSD is much
+                worse than the in-sample one), False otherwise. False is also returned when there are
+                too few stars to evaluate, in which case nothing is flagged.
         """
 
+        # Not enough pairs to compute a stable held-out RMSD
         result = self.crossValidatedRMSD()
         if result is None:
             print("  Overfitting check: not enough matched pairs for a stable held-out RMSD "
                   "(have {}).".format(len(self.paired_stars)))
             return False
 
+        # Compare the held-out RMSD to the in-sample one
         cv_rmsd, n_folds = result
         gap = cv_rmsd - in_sample_rmsd
         overfit = gap > 0.5*in_sample_rmsd + 0.05
