@@ -1042,8 +1042,9 @@ def thresholdAndCorrectGammaFF(img_handle, config, mask):
     img_thres = thresholdFF(img_handle.ff, config.k1_det, config.j1_det)
 
 
-    # Gamma correct image files (white point scaled to the image bit depth)
-    gamma_wp = 2**config.bit_depth - 1
+    # Gamma correct image files (white point scaled to the bit depth of the image data, which may be lower
+    #   than the configured one, e.g. 8-bit FF files from live capture)
+    gamma_wp = 2**Image.effectiveBitDepth(img_handle.ff.maxpixel, config.bit_depth) - 1
     maxpixel_gamma_corr = Image.gammaCorrectionImage(img_handle.ff.maxpixel, config.gamma, wp=gamma_wp,
                                                      out_type=np.float32)
     avepixel_gamma_corr = Image.gammaCorrectionImage(img_handle.ff.avepixel, config.gamma, wp=gamma_wp,
@@ -1116,9 +1117,6 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
     t1 = time()
     t_all = time()
 
-
-    # Threshold for the reported numbers of saturated pixels (98% of the dynamic range)
-    saturation_threshold_report = int(round(0.98*(2**config.bit_depth - 1)))
 
     # Set up an object for filtering centroids too close to the edge or the mask
     edge_filter = CoordinateFilter((config.height, config.width), mask, config.detection_border)
@@ -1388,11 +1386,19 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
             
             
             avepixel_img = img_handle.ff.avepixel
+
+            # Get the bit depth of the image data, which may be lower than the configured one (e.g. 8-bit FF
+            #   files from live capture), and scale the gamma white point and saturation level to it
+            bit_depth = Image.effectiveBitDepth(img_handle.ff.maxpixel, config.bit_depth)
+            gamma_wp = 2**bit_depth - 1
+
+            # Threshold for the reported numbers of saturated pixels (98% of the dynamic range)
+            saturation_threshold_report = int(round(0.98*gamma_wp))
             
             # Apply the gamma correction to the average pixel image if needed
             if config.gamma != 1.0:
                 avepixel_img = Image.gammaCorrectionImage(avepixel_img, config.gamma,
-                    wp=(2**config.bit_depth - 1), out_type=np.float32)
+                    wp=gamma_wp, out_type=np.float32)
 
             # Calculate centroids
             centroids = []
@@ -1514,7 +1520,7 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                         # Apply gamma correction
                         if config.gamma != 1.0:
                             fr_img = Image.gammaCorrectionImage(fr_img, config.gamma,
-                                wp=(2**config.bit_depth - 1), out_type=np.float32)
+                                wp=gamma_wp, out_type=np.float32)
 
                         # Subtract average
                         max_avg_corrected = Image.applyDark(fr_img, avepixel_img)

@@ -73,6 +73,25 @@ FALLBACK_API_URL = NOVA_API_URL
 DEBUG = False
 
 
+def rotationEqStandard(ra_mid, dec_mid, ra_right, dec_right):
+    """ Compute the equatorial orientation of the image from the centre and a point right of it.
+
+    Arguments:
+        ra_mid: [float] RA of the image centre (deg).
+        dec_mid: [float] Dec of the image centre (deg).
+        ra_right: [float] RA of a point slightly right of the centre (deg).
+        dec_right: [float] Dec of a point slightly right of the centre (deg).
+
+    Return:
+        [float] Equatorial orientation (deg, 0-360).
+    """
+
+    # Wrap the RA difference to [-180, 180) so a field straddling RA = 0 does not flip the angle by 180 deg
+    dra = (float(ra_mid) - float(ra_right) + 180)%360 - 180
+
+    return np.degrees(np.arctan2(np.radians(float(dec_mid) - float(dec_right)), np.radians(dra)))%360
+
+
 def printDebug(*args):
     if DEBUG:
         print(*args)
@@ -584,8 +603,7 @@ def novaAstrometryNetSolve(ff_file_path=None, img=None, x_data=None, y_data=None
     ra_right, dec_right = wcs_obj.all_pix2world(x_right, y_right, 1)
 
     # Compute the equatorial orientation
-    rot_eq_standard = np.degrees(np.arctan2(np.radians(dec_mid) - np.radians(dec_right), \
-            np.radians(ra_mid) - np.radians(ra_right)))%360
+    rot_eq_standard = rotationEqStandard(ra_mid, dec_mid, ra_right, dec_right)
 
     # Compute the scale from the server response or the WCS
     if result.get('pixscale', 0) > 0:

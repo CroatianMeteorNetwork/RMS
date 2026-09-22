@@ -398,6 +398,30 @@ def thresholdFF(ff, k1, j1, mask=None, mask_ave_bright=False):
 
 
 
+def effectiveBitDepth(img, bit_depth):
+    """ Return the bit depth that the given image data can actually have.
+
+    The configured bit depth describes the camera, but the data may be stored at a lower depth (e.g. live
+    capture always produces 8-bit FF files). Scaling thresholds, cutoffs or the gamma white point with a
+    bit depth larger than the image data type can hold would make every pixel look faint, so for integer
+    images the bit depth is capped at the number of bits of the data type. Floating-point images carry no
+    such information, so the configured value is used for them.
+
+    Arguments:
+        img: [ndarray] Image data.
+        bit_depth: [int] Configured bit depth (e.g. config.bit_depth).
+
+    Return:
+        [int] Effective bit depth of the image data.
+    """
+
+    # Cap the bit depth at the size of the integer data type
+    if np.issubdtype(img.dtype, np.integer):
+        return min(int(bit_depth), 8*img.dtype.itemsize)
+
+    return int(bit_depth)
+
+
 def gammaCorrectionScalar(intensity, gamma, bp=0, wp=255):
     """ Correct the given intensity for gamma on individual scalar values.
         

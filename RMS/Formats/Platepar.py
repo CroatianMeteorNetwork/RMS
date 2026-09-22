@@ -267,6 +267,14 @@ def _nearestCatalogStars(ra_det, dec_det, ra_cat, dec_cat, cat_tree=None):
     ra_cat = np.asarray(ra_cat, dtype=np.float64)
     dec_cat = np.asarray(dec_cat, dtype=np.float64)
 
+    nearest_indices = np.zeros(len(ra_det), dtype=np.intp)
+    nearest_sep = np.full(len(ra_det), np.nan, dtype=np.float64)
+
+    # With an empty catalog there is no nearest star, so return NaN separations for every detection
+    #   (the tree query would return an out-of-range index)
+    if len(ra_cat) == 0:
+        return nearest_indices, nearest_sep
+
     # Build the catalog tree if one was not given
     if cat_tree is None:
         cat_tree = cKDTree(_raDecToUnitVectors(ra_cat, dec_cat))
@@ -275,9 +283,6 @@ def _nearestCatalogStars(ra_det, dec_det, ra_cat, dec_cat, cat_tree=None):
     #   (argmin 0, min NaN). Reproduce that so degenerate projections are handled the same way
     det_vectors = _raDecToUnitVectors(ra_det, dec_det)
     finite = np.all(np.isfinite(det_vectors), axis=1)
-
-    nearest_indices = np.zeros(len(ra_det), dtype=np.intp)
-    nearest_sep = np.full(len(ra_det), np.nan, dtype=np.float64)
 
     if np.any(finite):
 
@@ -773,7 +778,29 @@ class Platepar(object):
         img_x, img_y, _ = img_stars.T
         img_coords = np.column_stack([img_x, img_y])
 
-        def _calcPointingNNCostPixel(params, pp_work, jd, ra_catalog, dec_catalog, img_coords, fixed_scale):
+        def _setNNPointing(pp, params, fixed_scale):
+            """ Set the pointing of the given platepar from the optimizer parameters.
+
+                The declination is stepped freely by the optimizer, so the pointing is normalized back
+                onto the sphere and the position angle is rotated by the offset of a pole crossing, which
+                keeps the projected field continuous for cameras pointing near the celestial pole.
+
+            Arguments:
+                pp: [Platepar] Platepar which is updated in place.
+                params: [list] RA_d, dec_d, pos_angle_ref and, if the scale is not fixed, F_scale.
+                fixed_scale: [bool] Keep the scale fixed.
+
+            Return:
+                None
+            """
+
+            pp.RA_d, pp.dec_d, pos_angle_offset = normalizeRaDec(params[0], params[1])
+            pp.pos_angle_ref = (params[2] + pos_angle_offset)%360
+            if not fixed_scale:
+                pp.F_scale = abs(params[3])
+
+        def _calcPointingNNCostPixel(params, pp_work, jd, ra_catalog, dec_catalog, img_coords, fixed_scale,
+                                     truncation=None):
             """ NN cost function in pixel space for the pointing fit.
 
                 Projects catalog stars to image coordinates and computes pixel-space NN distances. This is
@@ -790,15 +817,19 @@ class Platepar(object):
                 img_coords: [ndarray] (N, 2) array of detected star x, y positions.
                 fixed_scale: [bool] Keep the scale fixed.
 
+            Keyword arguments:
+                truncation: [float] If given, the NN distances are capped at this value (px) so that far
+                    (false) detections do not pull the solution. None by default (plain RMSD).
+
             Return:
-                rmsd: [float] RMSD of the NN distances (px), or 1e10 if too few catalog stars project
-                    inside the image.
+                rmsd: [float] RMSD of the (capped) NN distances (px), or 1e10 if too few catalog stars
+                    project inside the image.
             """
 
-            # Update the working platepar with the current parameters (no copy needed)
-            pp_work.RA_d, pp_work.dec_d, pp_work.pos_angle_ref = params[:3]
-            if not fixed_scale:
-                pp_work.F_scale = abs(params[3])
+            # Update the working platepar with the current parameters (no copy needed). The optimizer
+            #   steps the declination freely, so bring the pointing back onto the sphere and rotate the
+            #   position angle by the offset of a pole crossing (polar cameras)
+            _setNNPointing(pp_work, params, fixed_scale)
 
             # Project catalog stars to image coordinates
             cat_x, cat_y = raDecToXYPP(ra_catalog, dec_catalog, jd, pp_work)
@@ -820,6 +851,10 @@ class Platepar(object):
             cat_coords = np.column_stack([cat_x_valid, cat_y_valid])
             tree = cKDTree(cat_coords, balanced_tree=False, compact_nodes=False)
             nn_distances, _ = tree.query(img_coords, k=1)
+
+            # Cap the NN distances if requested
+            if truncation is not None:
+                nn_distances = np.minimum(nn_distances, truncation)
 
             # Use the RMSD (root mean square deviation) as the cost - this normalizes by the number of stars
             #   and gives interpretable units (pixels)
@@ -847,11 +882,30 @@ class Platepar(object):
             options={'maxiter': 5000, 'adaptive': True, 'initial_simplex': simplex},
         )
 
+        # Refine the pointing with a truncated cost. The plain RMSD above has a wide basin, so it recovers
+        #   large pointing errors, but every false detection pulls the solution by its full distance (a
+        #   0.2-0.5 px bias with 10-30% false detections). Capping the NN distance at the inlier threshold
+        #   stops the far detections from pulling, but the capped cost is flat far from the solution, so
+        #   it is only used as a second stage started close to the solution with a small simplex
+        inlier_threshold = 5.0  # pixels
+        simplex_refine = buildNelderMeadSimplex(res.x, res.x[1], mode="fixed", angular_step=0.1)
+        res_refine = scipy.optimize.minimize(
+            _calcPointingNNCostPixel,
+            res.x,
+            args=(pp_work, jd, ra_catalog, dec_catalog, img_coords, fixed_scale, inlier_threshold),
+            method='Nelder-Mead',
+            options={'maxiter': 5000, 'adaptive': True, 'initial_simplex': simplex_refine},
+        )
+        res.x = res_refine.x
+        res.success = res.success and res_refine.success
+
+        # Report the plain RMSD of all NN distances at the refined pointing
+        res.fun = _calcPointingNNCostPixel(res.x, pp_work, jd, ra_catalog, dec_catalog, img_coords,
+                                           fixed_scale)
+
         # Check the inlier fraction, which is more robust than the RMSD skewed by outliers. Recompute the
         #   NN distances with the fitted parameters
-        pp_work.RA_d, pp_work.dec_d, pp_work.pos_angle_ref = res.x[:3]
-        if not fixed_scale:
-            pp_work.F_scale = abs(res.x[3])
+        _setNNPointing(pp_work, res.x, fixed_scale)
         cat_x, cat_y = raDecToXYPP(ra_catalog, dec_catalog, jd, pp_work)
         valid_mask = (cat_x >= 0) & (cat_x < pp_work.X_res) & (cat_y >= 0) & (cat_y < pp_work.Y_res)
         cat_x_valid = cat_x[valid_mask]
@@ -869,7 +923,6 @@ class Platepar(object):
         nn_distances, _ = tree.query(img_coords, k=1)
 
         # Count the inliers (matches within the threshold)
-        inlier_threshold = 5.0  # pixels
         min_inlier_fraction = 0.5  # require 50% of detected stars to match
         inlier_mask = nn_distances < inlier_threshold
         n_inliers = np.sum(inlier_mask)
@@ -882,10 +935,8 @@ class Platepar(object):
         if inlier_fraction < min_inlier_fraction:
             return False, res.fun, inlier_fraction, 0.0
 
-        # Update the fitted parameters
-        self.RA_d, self.dec_d, self.pos_angle_ref = res.x[:3]
-        if not fixed_scale:
-            self.F_scale = abs(res.x[3])
+        # Update the fitted parameters (normalized the same way as in the cost function)
+        _setNNPointing(self, res.x, fixed_scale)
 
         # Update JD and Ho to match the observation time, which ensures the fitted RA_d is consistent with
         #   the new reference time
@@ -939,9 +990,23 @@ class Platepar(object):
             (img_stars_clean, matched_catalog): [tuple of ndarrays] For use_nn_cost=True, the detected
                 stars that survived the RANSAC and the catalog stars they were matched to, or None if
                 the NN fit was skipped or rejected (too few stars, no scored iteration, or an RMSD above
-                10 arcmin), in which case the platepar is left partially updated.
+                10 arcmin), in which case the platepar parameters are restored to their values at entry
+                and the star_list is emptied (no star pairs came out of the fit).
 
         """
+
+        # Snapshot the platepar state so that a rejected NN fit can restore it. The RANSAC switches the
+        #   distortion type and overwrites the pointing and distortion while it runs
+        nn_state_snapshot = copy.deepcopy(self.__dict__) if use_nn_cost else None
+
+        def _rejectNNFit():
+            """ Restore the platepar state from the entry snapshot and clear the star list. """
+
+            self.__dict__.clear()
+            self.__dict__.update(nn_state_snapshot)
+            self.star_list = []
+
+            return None
 
         def _calcImageResidualsDistortion(params, platepar, jd, catalog_stars, img_stars, dimension):
             """Calculates the differences between the stars on the image and catalog stars in image
@@ -1243,8 +1308,15 @@ class Platepar(object):
             # Fast path: query a prebuilt KD-tree of catalog unit vectors. Same nearest neighbour as the
             #   matrix below, but O(N log M) instead of O(N*M) per eval
             if cat_tree is not None:
-                chord_dist, _ = cat_tree.query(_raDecToUnitVectors(ra_det, dec_det), k=1)
-                nn_distances = 2.0*np.arcsin(np.clip(chord_dist/2.0, 0.0, 1.0))  # chord -> angle
+
+                # The tree query rejects non-finite points (degenerate projections), so only query the
+                #   finite ones - the others get the maximum separation below
+                det_vectors = _raDecToUnitVectors(ra_det, dec_det)
+                finite = np.all(np.isfinite(det_vectors), axis=1)
+                nn_distances = np.full(len(det_vectors), np.nan)
+                if np.any(finite):
+                    chord_dist, _ = cat_tree.query(det_vectors[finite], k=1)
+                    nn_distances[finite] = 2.0*np.arcsin(np.clip(chord_dist/2.0, 0.0, 1.0))  # chord -> angle
 
             # Dense path: the catalog is pre-filtered to the FOV by the caller, no need to re-filter here
             else:
@@ -1259,6 +1331,10 @@ class Platepar(object):
                 # angularSeparation broadcasts to (N, M) separation matrix
                 sep_matrix = angularSeparation(ra_det_rad, dec_det_rad, ra_cat_rad, dec_cat_rad)
                 nn_distances = np.min(sep_matrix, axis=1)  # (N,)
+
+            # Give detections with a degenerate (non-finite) sky position the maximum possible separation,
+            #   so the cost stays finite and steers the optimizer away from such parameters
+            nn_distances = np.where(np.isfinite(nn_distances), nn_distances, np.pi)
 
             total_cost = np.sum(nn_distances ** 2)
 
@@ -1291,6 +1367,20 @@ class Platepar(object):
 
         # Fit the polynomial distortion parameters if there are enough picked stars
         min_fit_stars = self.poly_length + 1
+
+        # The NN mode only exists as the RANSAC of the radial distortion fit. In any other case (a
+        #   polynomial distortion, too few stars for the distortion fit, or only the pointing requested) the
+        #   catalog stars are not matched to the image stars, so fitting them or pairing them by index would
+        #   use bogus pairs - reject the NN fit before any fitting is done
+        if use_nn_cost and (
+            (not self.distortion_type.startswith("radial"))
+            or (len(img_stars) < min_fit_stars)
+            or fit_only_pointing
+        ):
+            log.info("    -> NN fit not run ({:s}, {:d} stars, {:d} needed, fit_only_pointing={}), "
+                     "skipping it".format(self.distortion_type, len(img_stars), min_fit_stars,
+                                          fit_only_pointing))
+            return _rejectNNFit()
 
         if (len(img_stars) >= min_fit_stars) and (not fit_only_pointing):
 
@@ -1444,11 +1534,11 @@ class Platepar(object):
                     if len(img_stars) < min_stars_required:
                         log.info("    -> Not enough detected stars ({} < {}), skipping NN fit".format(
                             len(img_stars), min_stars_required))
-                        return None
+                        return _rejectNNFit()
                     if n_catalog_fov < min_stars_required:
                         log.info("    -> Not enough catalog stars in FOV ({} < {}), skipping NN fit".format(
                             n_catalog_fov, min_stars_required))
-                        return None
+                        return _rejectNNFit()
 
                     log.info("    RANSAC outlier detection: 21 iterations")
                     log.info("    Radial-weighted threshold: 1.0x at center, 2.0x at corners")
@@ -1611,6 +1701,11 @@ class Platepar(object):
                             weights = np.sqrt(intensity_clipped)
                             weights = weights / weights.sum()  # normalize to probabilities
 
+                            # Fall back to a uniform selection if the intensities cannot be used as weights
+                            #   (e.g. a median intensity <= 0, or NaN intensities)
+                            if not ((intensity_median > 0) and np.all(np.isfinite(weights))):
+                                weights = None
+
                             # Use a local seeded generator so the global NumPy RNG state is not touched
                             rng = np.random.RandomState(42 + iteration)
                             subset_indices = rng.choice(available_indices, n_subset, replace=False, p=weights)
@@ -1700,11 +1795,13 @@ class Platepar(object):
                         _, nn_seps = _nearestCatalogStars(ra_det, dec_det, ra_catalog, dec_catalog)
 
                         # Flag the stars further from their nearest catalog star than 3x the median, with
-                        #   the threshold relaxed towards the image corners
-                        median_sep = np.median(nn_seps)
+                        #   the threshold relaxed towards the image corners. Detections without a finite
+                        #   separation (degenerate position, or no catalog stars) are always outliers
+                        finite_seps = np.isfinite(nn_seps)
+                        median_sep = np.median(nn_seps[finite_seps]) if np.any(finite_seps) else np.inf
                         base_threshold = 3.0 * median_sep
                         per_star_threshold = base_threshold * radial_scale
-                        iteration_outliers = nn_seps > per_star_threshold
+                        iteration_outliers = ~(nn_seps <= per_star_threshold)
 
                         # Weighted scoring: outliers get +weight, inliers get -weight (redemption!)
                         outlier_scores[iteration_outliers] += weight
@@ -1802,14 +1899,14 @@ class Platepar(object):
                     # Safety check: no iteration produced a scored fit (e.g. every iteration bailed out early)
                     if best_res is None:
                         log.info("    -> No RANSAC iteration produced a fit, skipping final fit")
-                        return None
+                        return _rejectNNFit()
 
                     # Safety check: if the RMSD is too large, bail out
                     max_rmsd_arcmin = 10.0
                     if best_cost > max_rmsd_arcmin:
                         log.info("    -> RMSD too large ({:.2f}' > {:.0f}'), skipping final fit".format(
                             best_cost, max_rmsd_arcmin))
-                        return None
+                        return _rejectNNFit()
 
                     # Apply the best RANSAC params to the platepar
                     ra_ref, dec_ref, pos_angle_ref, F_scale = best_res.x[:4]
@@ -1835,6 +1932,11 @@ class Platepar(object):
                     catalog_stars_fov = catalog_stars[in_fov_final]
                     ra_catalog, dec_catalog, _ = catalog_stars_fov.T
 
+                    # Nothing can be matched if no catalog stars project inside the image
+                    if len(catalog_stars_fov) == 0:
+                        log.info("    -> No catalog stars in the FOV of the RANSAC fit, skipping final fit")
+                        return _rejectNNFit()
+
                     # NN matching: nearest catalog star of every detection (KD-tree, O(N log M) instead
                     #   of the dense NxM separation matrix)
                     nearest_indices, nearest_sep = _nearestCatalogStars(ra_det, dec_det, ra_catalog,
@@ -1856,6 +1958,9 @@ class Platepar(object):
                     if n_dupes > 0:
                         log.info("    Dropped {} duplicate matches (multiple detections -> one catalog "
                               "star)".format(n_dupes))
+
+                    # Detections without a finite sky position have no real nearest catalog star
+                    keep_mask &= np.isfinite(nearest_sep)
 
                     img_stars_clean = img_stars_clean[keep_mask]
                     matched_catalog = catalog_stars_fov[nearest_indices[keep_mask]]
@@ -2082,6 +2187,13 @@ class Platepar(object):
         result = {'x0': 0.0, 'y0': 0.0, 'xy': 0.0, 'a1': 0.0, 'a2': 0.0,
                   'k1': 0.0, 'k2': 0.0, 'k3': 0.0, 'k4': 0.0}
 
+        # A forced distortion centre is placed half a pixel from the image centre (same as in
+        #   CyFunctions.pyx), so store the equivalent normalized offsets - freeing the centre then keeps the
+        #   projection unchanged
+        if self.force_distortion_centre:
+            result['x0'] = 0.5/(self.X_res/2.0)
+            result['y0'] = 0.5/(self.Y_res/2.0)
+
         # Extract the coefficients based on the current flags
         idx = 0
 
@@ -2163,18 +2275,16 @@ class Platepar(object):
             result.append(coeffs_dict.get('a1', 0.0))
             result.append(coeffs_dict.get('a2', 0.0))
 
-        # Radial distortion coefficients - the number depends on the target type
-        result.append(coeffs_dict.get('k1', 0.0))
+        # Radial distortion coefficients - the number depends on the target type (the layout read by
+        #   CyFunctions.pyx: radial3-all uses k1..k2, radial4-all k1..k3, radial5-all k1..k4, and the odd
+        #   types radial3/5/7/9-odd use k1, k1..k2, k1..k3 and k1..k4)
+        n_radial_coeffs = {
+            "radial3-all": 2, "radial4-all": 3, "radial5-all": 4,
+            "radial3-odd": 1, "radial5-odd": 2, "radial7-odd": 3, "radial9-odd": 4,
+        }[target_dist_type]
 
-        if target_dist_type in ["radial5-odd", "radial7-odd", "radial9-odd",
-                                "radial4-all", "radial5-all"]:
-            result.append(coeffs_dict.get('k2', 0.0))
-
-        if target_dist_type in ["radial7-odd", "radial9-odd", "radial5-all"]:
-            result.append(coeffs_dict.get('k3', 0.0))
-
-        if target_dist_type in ["radial9-odd"]:
-            result.append(coeffs_dict.get('k4', 0.0))
+        for k_name in ['k1', 'k2', 'k3', 'k4'][:n_radial_coeffs]:
+            result.append(coeffs_dict.get(k_name, 0.0))
 
         return np.array(result)
 

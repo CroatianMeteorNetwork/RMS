@@ -474,9 +474,9 @@ def thresholdAndSubsample(np.ndarray[UINT8_TYPE_t, ndim=3] frames, \
     cdef int avg_std
 
     # Calculate the shapes of the subsamples image
-    cdef shape_z = frames.shape[0]
-    cdef shape_y = int(floor(frames.shape[1]//f))
-    cdef shape_x = int(floor(frames.shape[2]//f))
+    cdef unsigned int shape_z = frames.shape[0]
+    cdef unsigned int shape_y = int(floor(frames.shape[1]//f))
+    cdef unsigned int shape_x = int(floor(frames.shape[2]//f))
     
     # Init subsampled image arrays
     cdef np.ndarray[np.int32_t, ndim=3] count = np.zeros((shape_z, shape_y, shape_x), np.int32)
@@ -515,6 +515,11 @@ def thresholdAndSubsample(np.ndarray[UINT8_TYPE_t, ndim=3] frames, \
                 # Subsample frame in f*f squares
                 y2 = int(floor(y//f))
                 x2 = int(floor(x//f))
+
+                # Skip the partial edge block when the image size is not a multiple of f, as the count
+                #   array only covers the full blocks (writing past it would corrupt the next frame)
+                if (y2 >= shape_y) or (x2 >= shape_x):
+                    continue
                 
                 # Check if there are enough of threshold passers inside of this square
                 if count[n, y2, x2] >= min_points:

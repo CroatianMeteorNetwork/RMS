@@ -12,7 +12,8 @@ from astropy.wcs import WCS
 from RMS.ExtractStars import extractStarsAuto
 from RMS.Formats.FFfile import read as readFF
 from RMS.Formats.Platepar import Platepar
-from RMS.Astrometry.AstrometryNetNova import novaAstrometryNetSolve, PRIMARY_API_URL, FALLBACK_API_URL
+from RMS.Astrometry.AstrometryNetNova import (novaAstrometryNetSolve, rotationEqStandard, PRIMARY_API_URL,
+    FALLBACK_API_URL)
 from RMS.Astrometry.ApplyAstrometry import raDecToXYPP
 from RMS.Astrometry.CyFunctions import cyTrueRaDec2ApparentAltAz
 from RMS.Logger import getLogger
@@ -115,6 +116,22 @@ def astrometryNetSolveLocal(ff_file_path=None, img=None, mask=None, x_data=None,
         print("FOV hint: fov_w_hint={}, fov_w_range={}, estimated_fov={}".format(
             fov_w_hint, fov_w_range, estimated_fov))
 
+    # Get the full image dimensions (before any central star filtering). The given FOV range is for the
+    #   full image width, so the pixel scale hint must divide it by the full image width in pixels
+    if img is not None:
+        img_width = img.shape[1]
+        img_height = img.shape[0]
+    elif (x_center is not None) and (y_center is not None):
+        img_width = 2*x_center
+        img_height = 2*y_center
+    else:
+        img_width = np.max(x_data)
+        img_height = np.max(y_data) if y_data is not None else img_width*0.75
+
+    # Keep the full image FOV range for the pixel scale hint, the central filtering below only changes the
+    #   range used to select the index quad scales
+    fov_w_range_full = fov_w_range
+
     if estimated_fov is not None and estimated_fov > 90:
 
         # Determine the image center from the image, the given center or as a last resort the stars
@@ -164,6 +181,11 @@ def astrometryNetSolveLocal(ff_file_path=None, img=None, mask=None, x_data=None,
             # Update the FOV range to reflect the filtered central region
             filtered_fov = estimated_fov * central_fov_fraction * 2
             fov_w_range = [filtered_fov * 0.75, filtered_fov * 1.5]
+
+            # If only the FOV hint was given, derive the full image FOV range for the pixel scale hint from
+            #   it with the same margins
+            if fov_w_range_full is None:
+                fov_w_range_full = [estimated_fov * 0.75, estimated_fov * 1.5]
             print("  -> Filtering to central {:.1f} deg, Stars: {:d} -> {:d}".format(
                 filtered_fov, original_count, len(x_data)))
             print("  -> Updated FOV range for scale selection: {:.1f} - {:.1f} deg".format(
@@ -224,14 +246,7 @@ def astrometryNetSolveLocal(ff_file_path=None, img=None, mask=None, x_data=None,
 
     if fov_w_range is not None:
 
-        # Get the image dimensions to compute the aspect ratio
-        if img is not None:
-            img_width = img.shape[1]
-            img_height = img.shape[0]
-        else:
-            img_width = np.max(x_data)
-            img_height = np.max(y_data) if y_data is not None else img_width * 0.75
-
+        # Compute the aspect ratio from the full image dimensions
         aspect_ratio = img_height / img_width
 
         # Use the average FOV estimate for the width
@@ -308,9 +323,10 @@ def astrometryNetSolveLocal(ff_file_path=None, img=None, mask=None, x_data=None,
                 print("  Scale {}: {:.0f}-{:.0f} arcmin ({:.1f}-{:.1f} deg), mid={:.1f} deg".format(
                     s, lower_arcmin, upper_arcmin, lower_arcmin/60, upper_arcmin/60, mid_deg))
 
-        # Compute the pixel scale for the size hint (helps the solver converge faster)
-        lower_arcsec_per_pixel = fov_w_range[0] * 3600 / img_width
-        upper_arcsec_per_pixel = fov_w_range[1] * 3600 / img_width
+        # Compute the pixel scale for the size hint (helps the solver converge faster). Use the full image
+        #   FOV range and width, as filtering the stars to the centre does not change the pixel scale
+        lower_arcsec_per_pixel = fov_w_range_full[0] * 3600 / img_width
+        upper_arcsec_per_pixel = fov_w_range_full[1] * 3600 / img_width
 
         size_hint = astrometry.SizeHint(
             lower_arcsec_per_pixel=lower_arcsec_per_pixel,
@@ -397,8 +413,7 @@ def astrometryNetSolveLocal(ff_file_path=None, img=None, mask=None, x_data=None,
         ra_right, dec_right = wcs_obj.all_pix2world(x_right, y_right, 1)
 
         # Compute the equatorial orientation
-        rot_eq_standard = np.degrees(np.arctan2(np.radians(dec_mid) - np.radians(dec_right), \
-            np.radians(ra_mid) - np.radians(ra_right)))%360
+        rot_eq_standard = rotationEqStandard(ra_mid, dec_mid, ra_right, dec_right)
 
 
         # Compute the scale in px/deg
