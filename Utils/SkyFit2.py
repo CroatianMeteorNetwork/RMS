@@ -2418,11 +2418,15 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
             if ftype == "Platepar":
                 try:
 
-                    # Save under the name of the loaded platepar file (a platepar picked from several .cal
-                    #   files must not overwrite the default one), or the config name for a new platepar
+                    # A platepar loaded from this folder is saved back into its own file (one picked from
+                    #   several .cal files must not overwrite the default one). Anything else (a new
+                    #   platepar, or one loaded from elsewhere, e.g. a backup) is saved under the config
+                    #   name, which is the one the night processing uses
                     platepar_name = pt.config.platepar_name
-                    if getattr(pt, 'platepar_file', None):
-                        platepar_name = os.path.basename(pt.platepar_file)
+                    loaded_file = getattr(pt, 'platepar_file', None)
+                    if loaded_file and (os.path.realpath(os.path.dirname(loaded_file))
+                                        == os.path.realpath(target_dir)):
+                        platepar_name = os.path.basename(loaded_file)
 
                     dest = os.path.join(target_dir, platepar_name)
                     pt.platepar.write(dest, fmt=pt.platepar_fmt, fov=computeFOVSize(pt.platepar))

@@ -1623,3 +1623,25 @@ def testPlateparFingerprintTolerance():
     assert not SF.PlateTool._plateparFingerprintsDiffer(fp(359.9999999999999), fp(0.0))
     assert not SF.PlateTool._plateparFingerprintsDiffer(fp(120.0), fp(120.0 + 1e-13))
     assert SF.PlateTool._plateparFingerprintsDiffer(fp(120.0), fp(120.001))
+
+
+def testFileManagerSavesForeignPlateparUnderConfigName(plateTool, stationDir, tmp_path):
+    """ A platepar loaded from another folder is saved into the station under config.platepar_name. """
+
+    pt = plateTool
+    backup_dir = tmp_path / "backups"
+    backup_dir.mkdir()
+    backup_path = str(backup_dir / "foo_backup.cal")
+    shutil.copy(os.path.join(stationDir, pt.config.platepar_name), backup_path)
+
+    pt.loadPlatepar(update=True, platepar_file=backup_path)
+    pt.platepar.RA_d += 1.0
+
+    dialog = SF.CalibrationFilesDialog(pt)
+    dialog._saveFile("Platepar", [stationDir])
+
+    from RMS.Formats.Platepar import Platepar
+    saved = Platepar()
+    saved.read(os.path.join(stationDir, pt.config.platepar_name))
+    assert saved.RA_d == pytest.approx(pt.platepar.RA_d)
+    assert not os.path.exists(os.path.join(stationDir, "foo_backup.cal"))
