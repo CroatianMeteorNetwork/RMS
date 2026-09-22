@@ -44,16 +44,16 @@ except ImportError:
 
 
 def computeSolarSystemMagnitude(body_name, body, sun, time):
-    """Compute apparent magnitude of a solar system body.
+    """ Compute the apparent magnitude of a solar system body.
 
     Arguments:
-        body_name: [str] Name of the body ('sun', 'moon', 'jupiter', etc.)
-        body: [SkyCoord] Body position from get_body()
-        sun: [SkyCoord] Sun position from get_sun()
-        time: [Time] Observation time
+        body_name: [str] Name of the body ('sun', 'moon', 'jupiter', etc.).
+        body: [SkyCoord] Body position from get_body().
+        sun: [SkyCoord] Sun position from get_sun().
+        time: [Time] Observation time.
 
     Return:
-        [float] Apparent visual magnitude
+        mag: [float] Apparent visual magnitude. 0.0 for unknown bodies.
     """
 
     # Sun - essentially constant
@@ -65,25 +65,27 @@ def computeSolarSystemMagnitude(body_name, body, sun, time):
 
     # Moon - varies with phase
     if body_name == 'moon':
-        # Compute phase angle (Sun-Moon-Earth angle)
-        # Elongation is the angle between Moon and Sun as seen from Earth
+
+        # Compute the phase angle (Sun-Moon-Earth angle). The elongation is the angle between the Moon
+        #   and the Sun as seen from Earth, and the phase angle is approximately 180 - elongation
         elongation = body.separation(sun).deg
-        # Phase angle is approximately 180 - elongation for the Moon
         phase_angle = 180 - elongation
-        # Moon's magnitude formula (simplified)
-        # Full moon is about -12.7, varies with phase
+
+        # Simplified Moon magnitude formula: the full Moon is about -12.7 and the brightness scales with
+        #   the illuminated fraction
         phase_fraction = (1 + np.cos(np.radians(phase_angle))) / 2
         if phase_fraction > 0.001:
             mag = -12.7 + 2.5 * np.log10(1.0 / phase_fraction)
         else:
             mag = 0  # New moon, essentially not visible
+
         return mag
 
     # Planets - use standard formula: V = V(1,0) + 5*log10(r*delta) + phase_correction
-    # V(1,0) values and phase coefficients from Astronomical Almanac
+    #   V(1,0) values and phase coefficients from Astronomical Almanac
 
     # Planet parameters: (V(1,0), phase_coeff1, phase_coeff2)
-    # V(1,0) is absolute magnitude at 1 AU from Sun and Earth at 0 phase
+    #   V(1,0) is absolute magnitude at 1 AU from Sun and Earth at 0 phase
     planet_params = {
         'mercury': (-0.60, 0.0380, 0.000273),
         'venus':   (-4.47, 0.0103, 0.000057),
@@ -94,6 +96,7 @@ def computeSolarSystemMagnitude(body_name, body, sun, time):
         'neptune': (-6.87, 0.0, 0.0),
     }
 
+    # Unknown body
     if body_name not in planet_params:
         return 0.0
 
@@ -114,6 +117,7 @@ def computeSolarSystemMagnitude(body_name, body, sun, time):
 
     # Compute phase angle (Sun-Body-Earth angle)
     elongation = body.separation(sun).deg
+
     # Use law of cosines: cos(phase) = (r^2 + delta^2 - 1) / (2*r*delta)
     cos_phase = (r**2 + delta**2 - 1) / (2 * r * delta)
     cos_phase = np.clip(cos_phase, -1, 1)
@@ -123,6 +127,8 @@ def computeSolarSystemMagnitude(body_name, body, sun, time):
     mag = v_1_0 + 5 * np.log10(r * delta) + c1 * phase_angle + c2 * phase_angle**2
 
     return mag
+
+
 import matplotlib.gridspec as gridspec
 import matplotlib.ticker as ticker
 import scipy.optimize
@@ -199,10 +205,12 @@ from RMS.Math import angularSeparation, angularSeparationDeg, RMSD, vectNorm
 from RMS.Misc import decimalDegreesToSexHours
 from RMS.Routines.AddCelestialGrid import updateRaDecGrid, updateAzAltGrid
 from RMS.Routines.SkyFitHelp import shortcutsTopicId
-from RMS.Routines.CustomPyqtgraphClasses import ViewBox, TextItem, TextItemList, Crosshair, Plus, Cross, CursorItem, BrushCursorItem, ImageItem, RightOptionsTab, qmessagebox, PointingIndicator
+from RMS.Routines.CustomPyqtgraphClasses import ViewBox, TextItem, TextItemList, Crosshair, Plus, Cross, \
+    CursorItem, BrushCursorItem, ImageItem, RightOptionsTab, qmessagebox, PointingIndicator
 from RMS.Routines.GreatCircle import fitGreatCircle, greatCircle
 from RMS.Routines.SphericalPolygonCheck import sphericalPolygonCheck
-from RMS.Routines.Image import loadFlat, loadDark, applyFlat, applyDark, signalToNoise, gammaCorrectionImage, adjustLevels, saveImage, loadImage
+from RMS.Routines.Image import loadFlat, loadDark, applyFlat, applyDark, signalToNoise, \
+    gammaCorrectionImage, adjustLevels, saveImage, loadImage
 from RMS.Routines.MaskImage import getMaskFile, MaskStructure, compositeMaskLayers, decomposeMaskImage, \
     resampleMaskLayers, paintBrushSegment
 from RMS.Routines import RollingShutterCorrection
@@ -1192,33 +1200,45 @@ if ASTRA_IMPORTED:
 
 
 class CalibrationFilesDialog(QtWidgets.QDialog):
-    """Dialog showing calibration file state with per-file independent load/save controls.
+    """ Dialog showing the calibration file state with per-file independent load/save controls.
 
-    Each file type (Platepar, Config, Mask, Flat, Dark) has its own Load and Save buttons.
-    Load picks a single source location. Save supports writing to multiple locations at once.
+        Each file type (Platepar, Config, Mask, Flat, Dark) has its own Load and Save buttons. Load
+        picks a single source location. Save supports writing to multiple locations at once.
     """
 
     FILE_TYPES = ["Platepar", "Config", "Mask", "Flat", "Dark"]
 
     def __init__(self, plate_tool, parent=None):
+        """
+        Arguments:
+            plate_tool: [PlateTool] The SkyFit2 GUI whose files are managed.
+
+        Keyword arguments:
+            parent: [QWidget] Parent widget. None by default.
+        """
+
         super().__init__(parent)
         self.plate_tool = plate_tool
         self.setWindowTitle("SkyFit2 - File Manager")
         self.setMinimumWidth(580)
 
-        self._locations = []  # list of (label, resolved_path)
+        # List of (label, resolved_path) known locations offered in the load menus and save dialogs
+        self._locations = []
         self._buildLocationList()
+
         self._buildUI()
 
-    # --- UI builder ---
+    ### UI builder ###
 
     def _buildUI(self):
-        """Build the dialog UI."""
+        """ Build the dialog UI: the station section, one section per file type and the Close button. """
+
         layout = QtWidgets.QVBoxLayout(self)
         layout.setSpacing(4)
         layout.setContentsMargins(8, 8, 8, 8)
 
-        # --- Station section with Open Folder / Open File buttons ---
+        ### Station section with Open Folder / Open File buttons ###
+
         station_group = QtWidgets.QGroupBox("Station")
         station_vlayout = QtWidgets.QVBoxLayout(station_group)
         station_vlayout.setContentsMargins(8, 4, 8, 4)
@@ -1228,15 +1248,18 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
         folder_label.setStyleSheet("font-weight: bold;")
         station_vlayout.addWidget(folder_label)
 
+        # Current data folder
         if self.plate_tool.hasData():
             path_text = self._shortenPath(self.plate_tool.dir_path)
         else:
             path_text = "(no data loaded)"
+
         self._station_path_label = QtWidgets.QLabel(path_text)
         self._station_path_label.setStyleSheet("color: gray; font-size: 11px;")
         self._station_path_label.setWordWrap(True)
         station_vlayout.addWidget(self._station_path_label)
 
+        # Shown when the station folder name and the .config stationID disagree
         self._station_warning_label = QtWidgets.QLabel("")
         self._station_warning_label.setStyleSheet("color: #e65100; font-size: 11px;")
         self._station_warning_label.setWordWrap(True)
@@ -1257,13 +1280,15 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
 
         layout.addWidget(station_group)
 
-        # --- File sections ---
+        ### ###
+
+        # One section per file type
         self.sections = {}
         for ftype in self.FILE_TYPES:
             group = self._createFileSection(ftype)
             layout.addWidget(group)
 
-        # --- Bottom buttons ---
+        # Bottom buttons
         btn_layout = QtWidgets.QHBoxLayout()
         btn_layout.addStretch()
         close_btn = QtWidgets.QPushButton("Close")
@@ -1274,10 +1299,11 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
         # Refresh initial state
         self._refreshAll()
 
-    # --- Open folder / file methods ---
+    ### Open folder / file methods ###
 
     def _onOpenFolder(self):
-        """Prompt to select a folder, warn about unsaved changes, and reload."""
+        """ Prompt to select a data folder, warn about unsaved changes, and reload. """
+
         pt = self.plate_tool
 
         # Pick folder
@@ -1290,7 +1316,8 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
         self._openPath(dir_path)
 
     def _onOpenFile(self):
-        """Prompt to select a video file, warn about unsaved changes, and reload."""
+        """ Prompt to select a video file, warn about unsaved changes, and reload. """
+
         pt = self.plate_tool
 
         path, _ = QtWidgets.QFileDialog.getOpenFileName(
@@ -1304,7 +1331,12 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
         self._openPath(path)
 
     def _openPath(self, path):
-        """Warn about unsaved changes and load the given path via changeStation."""
+        """ Warn about unsaved changes and load the given path via PlateTool.changeStation.
+
+        Arguments:
+            path: [str] Data folder or video file to load.
+        """
+
         pt = self.plate_tool
 
         # Warn about unsaved platepar (only if data is currently loaded)
@@ -1324,19 +1356,29 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
         # Reload via changeStation
         success = pt.changeStation(path)
 
+        # The known locations depend on the loaded station, so rebuild them
         if success:
             self._buildLocationList()
             self._station_path_label.setText(self._shortenPath(pt.dir_path))
             self._refreshAll()
 
-    # --- Location helpers ---
+    ### Location helpers ###
 
     @staticmethod
     def _readStationId(directory):
-        """Read stationID from .config in directory, or None on failure."""
+        """ Read the stationID from the .config in the directory.
+
+        Arguments:
+            directory: [str] Directory to look in.
+
+        Return:
+            [str] Station ID, or None if there is no readable .config with one.
+        """
+
         config_path = os.path.join(directory, ".config")
         if not os.path.isfile(config_path):
             return None
+
         try:
             cp = configparser.ConfigParser()
             cp.read(config_path)
@@ -1345,17 +1387,18 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
             return None
 
     def _detectStationFolder(self):
-        """Detect the station folder by probing known paths for a .config with matching stationID.
+        """ Detect the station folder by probing known paths for a .config with a matching stationID.
 
-        Probes in order:
-            1. ~/source/Stations/<stationID>/
-            2. ~/source/RMS/
+            Probes in order:
+                1. ~/source/Stations/<stationID>/
+                2. ~/source/RMS/
 
-        Returns:
-            (label, path) tuple if a .config is found, or None.
-            Label is "Station" if IDs match, or "Station (ID: <actual_id>)" if mismatched
-            (only for ~/source/Stations/ — ~/source/RMS/ is silently skipped on mismatch).
+        Return:
+            [tuple] (label, path) if a .config is found, or None. The label is "Station" if the IDs
+                match, or "Station (ID: <actual_id>)" if mismatched (only for ~/source/Stations/,
+                ~/source/RMS/ is silently skipped on mismatch).
         """
+
         pt = self.plate_tool
         if not pt.hasData():
             return None
@@ -1366,8 +1409,8 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
 
         home = os.path.expanduser("~")
 
-        # 1. ~/source/Stations/<stationID>/ — show even on mismatch (directory name
-        #    implies intent, warn user if .config inside disagrees)
+        # 1. ~/source/Stations/<stationID>/ - show even on mismatch (directory name implies intent,
+        #   warn user if .config inside disagrees)
         stations_dir = os.path.join(home, "source", "Stations", current_id)
         candidate_id = self._readStationId(stations_dir)
         if candidate_id is not None:
@@ -1376,7 +1419,7 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
             else:
                 return ("Station (ID: {})".format(candidate_id), stations_dir)
 
-        # 2. ~/source/RMS/ — only offer if the ID actually matches
+        # 2. ~/source/RMS/ - only offer if the ID actually matches
         rms_dir = os.path.join(home, "source", "RMS")
         candidate_id = self._readStationId(rms_dir)
         if candidate_id == current_id:
@@ -1385,11 +1428,13 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
         return None
 
     def _buildLocationList(self):
-        """Build deduplicated list of known locations."""
+        """ Build the deduplicated list of known (label, path) locations into self._locations. """
+
         seen = set()
         entries = []
 
         def _add(label, path):
+            """ Append the location unless its real path was already added. """
             if path is None:
                 return
             resolved = os.path.realpath(path)
@@ -1399,6 +1444,7 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
 
         pt = self.plate_tool
         if pt.hasData():
+
             # 1. Data Folder (always first)
             _add("Data Folder", pt.dir_path)
 
@@ -1419,6 +1465,8 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
             # 5. Sticky custom locations from this session
             for custom_path in pt._file_manager_custom_locations:
                 _add("Custom", custom_path)
+
+        # Without data only the RMS root is known
         else:
             _add("RMS Root", getRmsRootDir())
 
@@ -1426,19 +1474,31 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
 
     @staticmethod
     def _shortenPath(path):
-        """Shorten a path for display by replacing the home directory with ~."""
+        """ Shorten a path for display by replacing the home directory with ~. """
+
         home = os.path.expanduser("~")
         if path.startswith(home):
             return "~" + path[len(home):]
+
         return path
 
     def _locationMenuLabel(self, label, path):
+        """ Menu entry text for a known location: "<label> - <shortened path>". """
         return "{} - {}".format(label, self._shortenPath(path))
 
-    # --- Section UI builder ---
+    ### Section UI builder ###
 
     def _createFileSection(self, ftype):
-        """Create a group box for a single file type with independent Load/Save controls."""
+        """ Create a group box for a single file type with independent Load/Save controls.
+
+        Arguments:
+            ftype: [str] File type name from FILE_TYPES.
+
+        Return:
+            group: [QGroupBox] The section widget. Its labels and buttons are also stored in
+                self.sections[ftype].
+        """
+
         group = QtWidgets.QGroupBox()
         vlayout = QtWidgets.QVBoxLayout(group)
         vlayout.setContentsMargins(8, 4, 8, 4)
@@ -1468,6 +1528,7 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
         load_btn.setFixedWidth(100)
         save_btn.setFixedWidth(100)
 
+        # Bind the file type into the callbacks
         load_btn.clicked.connect(lambda checked, ft=ftype: self._showLoadMenu(ft, load_btn))
         save_btn.clicked.connect(lambda checked, ft=ftype: self._showSaveDialog(ft))
 
@@ -1486,18 +1547,22 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
 
         return group
 
-    # --- Refresh state display ---
+    ### Refresh state display ###
 
     def _setStatus(self, ftype, status):
-        """Set the status label for a file type with color coding.
+        """ Set the status label for a file type with color coding.
 
-        Status values:
-            'Loaded'     - green, file is loaded and in sync with disk
-            'Unsaved'    - amber, in-memory changes need saving
-            'Not loaded' - gray, nothing present
+        Arguments:
+            ftype: [str] File type name from FILE_TYPES.
+            status: [str] One of:
+                'Loaded'     - green, file is loaded and in sync with disk
+                'Unsaved'    - amber, in-memory changes need saving
+                'Not loaded' - gray, nothing present
         """
+
         label = self.sections[ftype]['status_label']
         label.setText(status)
+
         if status == "Loaded":
             label.setStyleSheet("color: #2e7d32; font-weight: bold;")  # green
         elif status == "Unsaved":
@@ -1506,9 +1571,11 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
             label.setStyleSheet("color: gray;")
 
     def _refreshAll(self):
-        """Refresh all sections from the current state."""
+        """ Refresh the station section and all file sections from the current PlateTool state. """
+
         pt = self.plate_tool
 
+        # Station path (the label only exists once the UI is built)
         if hasattr(self, '_station_path_label'):
             if pt.hasData():
                 self._station_path_label.setText(self._shortenPath(pt.dir_path))
@@ -1532,6 +1599,7 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
                 warnings.append(
                     "Station folder has different ID: {}".format(station_label))
 
+        # Show all mismatches on one line, or hide the warning
         if warnings:
             self._station_warning_label.setText("Warning: " + "; ".join(warnings))
             self._station_warning_label.show()
@@ -1618,16 +1686,22 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
         else:
             self.sections["Dark"]["save_btn"].setToolTip("")
 
-    # --- Load: pick one location ---
+    ### Load: pick one location ###
 
     def _showLoadMenu(self, ftype, button):
-        """Show a popup menu with known locations + Browse for loading a single file."""
+        """ Show a popup menu with the known locations + Browse for loading a single file.
+
+        Arguments:
+            ftype: [str] File type name from FILE_TYPES.
+            button: [QPushButton] The Load button, the menu pops up under it.
+        """
 
         if not self.plate_tool.hasData():
             return
 
         menu = QtWidgets.QMenu(self)
 
+        # One entry per known location
         for label, path in self._locations:
             action = menu.addAction(self._locationMenuLabel(label, path))
             action.setData(path)
@@ -1636,26 +1710,40 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
         browse_action = menu.addAction("Browse...")
         browse_action.setData("__browse__")
 
+        # Pop the menu up under the button
         chosen = menu.exec_(button.mapToGlobal(button.rect().bottomLeft()))
         if chosen is None:
             return
+
+        # Browse for a location outside the known ones
         path = chosen.data()
         if path == "__browse__":
             path = self._browseForLoad(ftype)
             if not path:
                 return
+
         self._loadFile(ftype, path)
 
     def _browseForLoad(self, ftype):
-        """Open a file browser appropriate for the given file type."""
+        """ Open a file browser appropriate for the given file type.
+
+        Arguments:
+            ftype: [str] File type name from FILE_TYPES.
+
+        Return:
+            path: [str] Selected file (or directory for the config), an empty string if cancelled, or
+                None for an unknown type.
+        """
+
         start_dir = self.plate_tool.dir_path
+
         if ftype == "Platepar":
             path, _ = QtWidgets.QFileDialog.getOpenFileName(
                 self, "Load Platepar", start_dir,
                 "Platepar files (*.cal);;All files (*)")
             return path
         elif ftype == "Config":
-            # Use folder picker — _loadFile will find .config in the selected directory
+            # Use folder picker - _loadFile will find .config in the selected directory
             path = str(QtWidgets.QFileDialog.getExistingDirectory(
                 self, "Select folder containing config", start_dir,
                 QtWidgets.QFileDialog.Option.ShowDirsOnly))
@@ -1678,13 +1766,22 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
         return None
 
     def _loadFile(self, ftype, path):
-        """Load a single file type from the given path (file or directory)."""
+        """ Load a single file type from the given path and report the outcome in a message box.
+
+        Arguments:
+            ftype: [str] File type name from FILE_TYPES.
+            path: [str] File to load, or a directory in which the default file name is looked for.
+        """
+
         pt = self.plate_tool
         result = None
 
         if ftype == "Platepar":
+
+            # A directory means the default platepar name inside it
             if os.path.isdir(path):
                 path = os.path.join(path, pt.config.platepar_name)
+
             if os.path.isfile(path):
                 try:
                     # update=True only if UI is set up
@@ -1698,8 +1795,9 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
                 result = "Platepar not found: " + path
 
         elif ftype == "Config":
+
+            # Search for config files in the directory, only a unique match is loaded
             if os.path.isdir(path):
-                # Search for config files in the directory
                 config_files = [f for f in os.listdir(path)
                     if f.endswith('.config') or f.endswith('.cfg')]
                 if len(config_files) == 1:
@@ -1708,6 +1806,8 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
                     result = "Multiple config files found in: " + path
                 else:
                     result = "No config file found in: " + path
+
+            # Reload the config and the star detection overrides derived from it
             if result is None and os.path.isfile(path):
                 try:
                     pt.config = cr.parse(path)
@@ -1719,8 +1819,10 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
                 result = "Config not found: " + path
 
         elif ftype == "Mask":
+
             if os.path.isdir(path):
                 path = os.path.join(path, "mask.bmp")
+
             if os.path.isfile(path):
                 try:
                     pt.loadMaskFromFile(path)
@@ -1731,8 +1833,9 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
                 result = "Mask not found: " + path
 
         elif ftype == "Flat":
+
+            # Search for known flat file names in the directory
             if os.path.isdir(path):
-                # Search for known flat file names in the directory
                 for fname in [pt.config.flat_file, "flat.png"]:
                     fpath = os.path.join(path, fname)
                     if os.path.isfile(fpath):
@@ -1741,11 +1844,13 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
                 else:
                     result = "Flat not found in: " + path
 
-            if result is None:  # found a file
+            # Load the flat and apply it to both image views (the flat must match the image size)
+            if result is None:
                 try:
                     flat = loadFlat(*os.path.split(path), dtype=pt.img.data.dtype,
                                     byteswap=pt.img_handle.byteswap)
                     flat.flat_img = np.swapaxes(flat.flat_img, 0, 1)
+
                     if pt.img.data.shape != flat.flat_img.shape:
                         result = "Flat size mismatch: " + path
                     else:
@@ -1760,8 +1865,9 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
                     result = "Flat load failed: " + repr(e)
 
         elif ftype == "Dark":
+
+            # Search for known dark file names in the directory
             if os.path.isdir(path):
-                # Search for known dark file names in the directory
                 for fname in [pt.config.dark_file, "dark.bmp", "dark.png"]:
                     fpath = os.path.join(path, fname)
                     if os.path.isfile(fpath):
@@ -1770,11 +1876,13 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
                 else:
                     result = "Dark not found in: " + path
 
-            if result is None:  # found a file
+            # Load the dark and apply it to both image views (the dark must match the image size)
+            if result is None:
                 try:
                     dark = loadDark(*os.path.split(path), dtype=pt.img.data.dtype,
                                     byteswap=pt.img_handle.byteswap)
                     dark = dark.astype(pt.img.data.dtype).T
+
                     if pt.img.data.shape != dark.shape:
                         result = "Dark size mismatch: " + path
                     else:
@@ -1782,17 +1890,20 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
                         pt.dark_source_path = path
                         pt.img.dark = dark
                         pt.img_zoom.dark = dark
+
                         # Apply the dark to the flat if flatbiassub is set
                         if pt.flatbiassub and pt.flat_struct is not None:
                             pt.flat_struct.applyDark(dark)
                             pt.img.flat_struct = pt.flat_struct
                             pt.img_zoom.flat_struct = pt.flat_struct
+
                         pt.img.reloadImage()
                         pt.img_zoom.reloadImage()
                         result = "Dark loaded from: " + path
                 except Exception as e:
                     result = "Dark load failed: " + repr(e)
 
+        # Report the outcome, as an error if the load did not happen
         if result:
             print(result)
             is_error = "failed" in result.lower() or "not found" in result.lower()
@@ -1800,10 +1911,16 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
                          message_type="error" if is_error else "info")
             self._refreshAll()
 
-    # --- Save: pick multiple locations ---
+    ### Save: pick multiple locations ###
 
     def _showSaveDialog(self, ftype):
-        """Show a small dialog with checkboxes for multi-location save."""
+        """ Show a small dialog with checkboxes for a multi-location save, then save to the checked
+            locations.
+
+        Arguments:
+            ftype: [str] File type name from FILE_TYPES.
+        """
+
         dlg = QtWidgets.QDialog(self)
         dlg.setWindowTitle("Save {} to...".format(ftype))
         dlg.setMinimumWidth(400)
@@ -1812,6 +1929,7 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
         # Show what the save will write into the config, so nothing changes behind the user's back
         lm_checkbox = self._addConfigPreview(layout) if ftype == "Config" else None
 
+        # One checkbox per known location, the first (the data folder) checked by default
         checkboxes = []
         for i, (label, path) in enumerate(self._locations):
             cb = QtWidgets.QCheckBox(self._locationMenuLabel(label, path))
@@ -1829,6 +1947,7 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
         ok_btn = btn_box.button(QtWidgets.QDialogButtonBox.StandardButton.Ok)
 
         def updateOkButton():
+            """ Saving needs at least one location. """
             ok_btn.setEnabled(any(cb.isChecked() for cb in checkboxes))
 
         for cb in checkboxes:
@@ -1838,17 +1957,23 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
 
         # Browse button to add a custom location
         browse_btn = QtWidgets.QPushButton("Add location...")
+
         def on_browse():
+            """ Add a custom directory as a checked location (or check it, if already listed). """
+
             path = QtWidgets.QFileDialog.getExistingDirectory(
                 dlg, "Select Directory", self.plate_tool.dir_path)
             if not path:
                 return
+
             resolved = os.path.realpath(path)
+
             # If already in the list, just check it
             for cb in checkboxes:
                 if cb.property("path") == resolved:
                     cb.setChecked(True)
                     return
+
             # Add new checkbox
             cb = QtWidgets.QCheckBox("Custom - {}".format(self._shortenPath(resolved)))
             cb.setProperty("path", resolved)
@@ -1856,6 +1981,7 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
             cb.stateChanged.connect(updateOkButton)
             layout.insertWidget(len(checkboxes), cb)
             checkboxes.append(cb)
+
             # Persist for future use across dialog open/close within this session
             if resolved not in self.plate_tool._file_manager_custom_locations:
                 self.plate_tool._file_manager_custom_locations.append(resolved)
@@ -1867,6 +1993,7 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
 
         layout.addWidget(btn_box)
 
+        # Save to every checked location
         if dlg.exec() == QtWidgets.QDialog.DialogCode.Accepted:
             paths = [cb.property("path") for cb in checkboxes if cb.isChecked()]
             if paths:
@@ -1877,9 +2004,17 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
     def _addConfigPreview(self, layout):
         """ Tabulate the values a config save will write, as current -> new.
 
-        The tuned catalog limiting magnitude gets a checkbox of its own, as it is only written on
-        request. Returns that checkbox, or None if the LM was not tuned in this session.
+            The tuned catalog limiting magnitude gets a checkbox of its own, as it is only written on
+            request.
+
+        Arguments:
+            layout: [QLayout] Dialog layout the table is added to.
+
+        Return:
+            lm_checkbox: [QCheckBox] The catalog LM checkbox, or None if the LM was not tuned in this
+                session.
         """
+
         pt = self.plate_tool
 
         group = QtWidgets.QGroupBox("Values written to the config")
@@ -1887,6 +2022,7 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
         grid.setHorizontalSpacing(10)
         grid.setColumnStretch(4, 1)
 
+        # Table header
         for col, title in [(0, "Parameter"), (1, "Current"), (3, "New")]:
             header = QtWidgets.QLabel(title)
             header.setFont(self._boldFont(header))
@@ -1974,11 +2110,23 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
 
 
     def _saveFile(self, ftype, target_dirs, save_lm=False):
-        """Save a single file type to one or more target directories."""
+        """ Save a single file type to one or more target directories and report the outcome in a
+            message box.
+
+        Arguments:
+            ftype: [str] File type name from FILE_TYPES.
+            target_dirs: [list] Directories to save into.
+
+        Keyword arguments:
+            save_lm: [bool] Config only, also write the tuned catalog limiting magnitude. False by
+                default.
+        """
+
         pt = self.plate_tool
         results = []
 
         for target_dir in target_dirs:
+
             if ftype == "Platepar":
                 try:
                     dest = os.path.join(target_dir, pt.config.platepar_name)
@@ -1996,13 +2144,15 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
                     # Only write the catalog LM if it was tuned and the user kept it checked
                     catalog_lm = pt.tuned_cat_lim_mag if save_lm else None
 
+                    # Copy the config to the target, then write overrides into the copy
                     if os.path.realpath(src) != os.path.realpath(dest):
-                        # Copy the config to the target, then write overrides into the copy
                         shutil.copy2(src, dest)
                         pt._writeStarDetectionConfig(dest, catalog_mag_limit=catalog_lm)
+
+                    # Same file - write overrides in-place (backup handled by _writeStarDetectionConfig)
                     else:
-                        # Same file — write overrides in-place (backup handled by _writeStarDetectionConfig)
                         pt._writeStarDetectionConfig(dest, catalog_mag_limit=catalog_lm)
+
                     # Sync in-memory config attrs so modified state is cleared
                     pt.config.intensity_threshold = pt.override_intensity_threshold
                     pt.config.neighborhood_size = pt.override_neighborhood_size
@@ -2010,9 +2160,11 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
                     pt.config.segment_radius = pt.override_segment_radius
                     pt.config.max_feature_ratio = pt.override_max_feature_ratio
                     pt.config.roundness_threshold = pt.override_roundness_threshold
+
+                    # Match the one decimal the file holds
                     if catalog_lm is not None:
-                        # Match the one decimal the file holds
                         pt.config.catalog_mag_limit = round(catalog_lm, 1)
+
                     pt._updateConfigSaveButtonState()
                     results.append("Config saved to: " + dest)
                 except Exception as e:
@@ -2030,6 +2182,7 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
                 except Exception as e:
                     results.append("Mask save to {} failed: {}".format(target_dir, repr(e)))
 
+            # Flats and darks are copied from their source files, not regenerated
             elif ftype == "Flat":
                 if pt.flat_source_path and os.path.isfile(pt.flat_source_path):
                     try:
@@ -2058,6 +2211,7 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
                 else:
                     results.append("Dark: no source file to copy.")
 
+        # Report all outcomes in one message box
         if results:
             msg = "\n".join(results)
             print(msg)
