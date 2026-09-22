@@ -104,3 +104,92 @@ def testChildLoggingOnFullQueueDropsRecords(method):
 
     assert not killed, 'child log calls did not return on a full queue'
     assert p.exitcode == 0
+
+
+# ---------------------------------------------------------------------------
+# Item 2: exits must not hang joining the feeder of an unread logging queue
+
+_SHUTDOWN_SCRIPT = """
+import sys, time, multiprocessing
+sys.path.insert(0, {root!r})
+from RMS.Logger import LoggingManager
+
+
+def slowListener(q):
+    time.sleep(100)
+
+
+if __name__ == '__main__':
+    multiprocessing.set_start_method({method!r}, force=True)
+
+    # A manager whose listener is wedged, with a backlog larger than the pipe buffer
+    mgr = LoggingManager()
+    mgr.logging_queue = multiprocessing.Queue(30000)
+    mgr.listener_process = multiprocessing.Process(target=slowListener, args=(mgr.logging_queue,))
+    mgr.listener_process.daemon = True
+    mgr.listener_process.start()
+    mgr.is_initialized = True
+    for i in range(2000):
+        mgr.logging_queue.put_nowait('x'*200)
+
+    mgr.shutdownLogging()
+    print('shutdown returned', flush=True)
+"""
+
+
+@posix_only
+@pytest.mark.parametrize('method', _startMethods())
+def testMainExitAfterShutdownWithWedgedListener(method, tmp_path):
+    """ After shutdownLogging terminated a wedged listener the interpreter must still exit, instead
+        of joining a queue feeder blocked on the dead listener's full pipe.
+    """
+
+    import subprocess
+
+    script = tmp_path/'shutdown_exit.py'
+    script.write_text(_SHUTDOWN_SCRIPT.format(root=RMS_ROOT, method=method))
+
+    try:
+        res = subprocess.run([sys.executable, str(script)], stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT, timeout=40)
+    except subprocess.TimeoutExpired:
+        pytest.fail('interpreter exit hung after shutdownLogging')
+
+    assert b'shutdown returned' in res.stdout
+    assert res.returncode == 0
+
+
+def _childLogsIntoAbandonedQueue(q):
+    """ Child side: attach child logging to a queue nobody reads, log more than a pipe buffer holds
+        and return normally.
+    """
+
+    from RMS.Logger import initChildLogging
+
+    initChildLogging(q, None)
+    for i in range(2000):
+        logging.getLogger('rmslogger').warning('x'*200)
+
+
+@posix_only
+@pytest.mark.parametrize('method', _startMethods())
+def testChildExitWithAbandonedQueueIsBounded(method):
+    """ A child still logging into a queue whose listener is gone (abandoned by a pipeline restart)
+        must exit within the bounded flush instead of hanging in the feeder join.
+    """
+
+    ctx = multiprocessing.get_context(method)
+    q = ctx.Queue(30000)
+
+    p = ctx.Process(target=_childLogsIntoAbandonedQueue, args=(q,))
+    t_beg = time.monotonic()
+    p.start()
+    killed = _joinOrKill(p, 20)
+    elapsed = time.monotonic() - t_beg
+
+    q.cancel_join_thread()
+    q.close()
+
+    assert not killed, 'child hung at exit joining the logging queue feeder'
+    assert p.exitcode == 0
+    assert elapsed < 15

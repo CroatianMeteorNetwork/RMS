@@ -85,6 +85,9 @@ from RMS.Astrometry.CyFunctions import cyTrueRaDec2ApparentAltAz
 log = getLogger("rmslogger")
 EM_RAISE = False
 
+# Seconds EventMonitor.stop() waits for the process to finish its current check before terminating it
+EVENT_MONITOR_STOP_TIMEOUT = 120
+
 """
 
 # Reference event
@@ -2489,7 +2492,19 @@ class EventMonitor(multiprocessing.Process):
             self.db_conn.close()
         time.sleep(2)
         self.exit.set()
-        self.join()
+
+        # Bound the join: a check stuck in network or file I/O must not wedge the caller's
+        # shutdown (a wedged main process keeps the station lock and refuses every respawn)
+        self.join(EVENT_MONITOR_STOP_TIMEOUT)
+        if self.is_alive():
+            log.warning("EventMonitor did not stop within {:d} s, terminating it".format(
+                EVENT_MONITOR_STOP_TIMEOUT))
+            self.terminate()
+            self.join(5)
+            if self.is_alive():
+                log.warning("EventMonitor still alive after terminate, abandoning it")
+                return
+
         log.info("EventMonitor has stopped")
 
     def checkDBExists(self):
@@ -2552,10 +2567,11 @@ class EventMonitor(multiprocessing.Process):
         # avoiding a connection shared across the fork.
         self.db_conn = self.getConnectionToEventMonitorDB()
 
-        # Delay to allow capture to check existing folders - keep the logs tidy
+        # Delay to allow capture to check existing folders - keep the logs tidy. Wait on the exit
+        # flag so a stop request during the delay is honoured at once
 
 
-        time.sleep(60)
+        self.exit.wait(60)
         last_check_start_time = RmsDateTime.utcnow()
         while not self.exit.is_set():
             check_start_time = RmsDateTime.utcnow()
