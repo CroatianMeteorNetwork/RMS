@@ -1171,3 +1171,21 @@ def testFileManagerMaskSaveUpdatesDetectionMask(plateTool, stationDir):
     dialog._saveFile("Mask", [stationDir])
 
     assert np.array_equal(pt.mask.img, expected)
+
+
+def testArrowKeysLeftToSlidersAndCombos(plateTool):
+    """ The arrow keys are not taken from focused sliders, combo boxes and lists. """
+
+    from pyqtgraph.Qt import QtCore, QtGui
+
+    pt = plateTool
+    right = QtGui.QKeyEvent(QtCore.QEvent.Type.KeyPress, QtCore.Qt.Key.Key_Right,
+                            QtCore.Qt.KeyboardModifier.NoModifier)
+
+    sd = pt.tab.star_detection
+    combo = pt.tab.param_manager.distortion_type
+    for widget in (sd.max_stars_slider, combo, combo.view()):
+        assert pt.eventFilter(widget, right) is False
+
+    # Elsewhere they still navigate the images
+    assert pt.eventFilter(pt.tab.hist, right) is True

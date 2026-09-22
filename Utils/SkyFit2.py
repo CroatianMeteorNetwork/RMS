@@ -10948,9 +10948,12 @@ class PlateTool(QtWidgets.QMainWindow):
             elif key in (QtCore.Qt.Key.Key_Left, QtCore.Qt.Key.Key_Right, QtCore.Qt.Key.Key_Up, \
                 QtCore.Qt.Key.Key_Down):
 
-                # Don't intercept if focus is on a spinbox (arrows change values)
-                if not isinstance(obj, (QtWidgets.QSpinBox, QtWidgets.QDoubleSpinBox,
-                                       QtWidgets.QAbstractSpinBox)):
+                # Don't intercept if focus is on a widget which the arrows operate: spin boxes, sliders,
+                #   combo boxes and lists (e.g. an open combo box popup)
+                arrow_widgets = (QtWidgets.QAbstractSpinBox, QtWidgets.QAbstractSlider, QtWidgets.QComboBox,
+                                 QtWidgets.QAbstractItemView)
+                parent = obj.parent() if isinstance(obj, QtCore.QObject) else None
+                if not (isinstance(obj, arrow_widgets) or isinstance(parent, arrow_widgets)):
                     should_intercept = True
 
             # Intercept Escape key to return focus to image
