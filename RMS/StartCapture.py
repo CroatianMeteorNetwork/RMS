@@ -60,6 +60,7 @@ def _takeStationLock(station_id):
             Exits the process if the lock cannot be acquired.
     """
 
+    import errno
     import fcntl
     import tempfile
     from multiprocessing import util as mp_util
@@ -72,7 +73,20 @@ def _takeStationLock(station_id):
         # 'a+' never truncates, so on refusal the holder's recorded PID survives for
         # diagnostics; everything sits in the try so a stale lock file owned by another
         # user (sticky /tmp) refuses cleanly instead of raising a raw PermissionError
-        lock_file = open(lock_path, 'a+')
+        try:
+            lock_file = open(lock_path, 'a+')
+
+        # A stale lock file left by another user (e.g. a run under another account) cannot be
+        #   opened for writing in the sticky /tmp, or with O_CREAT at all under
+        #   fs.protected_regular. flock() works on a read-only descriptor, so take the lock
+        #   through one instead of reporting a running instance forever. The holder PID in the
+        #   file cannot be updated then
+        except (IOError, OSError) as e:
+            if e.errno not in (errno.EACCES, errno.EPERM):
+                raise
+
+            lock_file = open(lock_path, 'r')
+
         fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
 
     # Refused - report the holder's PID (if it could be read) and exit

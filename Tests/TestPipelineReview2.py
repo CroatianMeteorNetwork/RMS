@@ -812,3 +812,54 @@ def testCompressorStopSkipsSigint(monkeypatch):
 
     assert fake.terminated
     assert signals == []
+
+
+# ---------------------------------------------------------------------------
+# Item 14: a stale station lock file owned by another user
+
+@posix_only
+def testStationLockFallsBackToReadOnlyOnEacces():
+    """ If the lock file cannot be opened for appending (owned by another user), the lock is taken
+        through a read-only descriptor instead of refusing forever.
+    """
+
+    import ast
+    import errno
+    import fcntl
+    import builtins
+    import tempfile
+
+    src_path = os.path.join(RMS_ROOT, 'RMS', 'StartCapture.py')
+    with open(src_path) as f:
+        tree = ast.parse(f.read())
+
+    wanted = {'_closeStationLockInChild', '_takeStationLock'}
+    mod = ast.Module(body=[n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name in wanted],
+        type_ignores=[])
+
+    # Simulate the other user's file: opening it for appending fails with EACCES
+    def fakeOpen(path, mode='r', *args, **kwargs):
+        if ('rms_startcapture_' in str(path)) and ('a' in mode):
+            raise PermissionError(errno.EACCES, 'Permission denied', path)
+        return builtins.open(path, mode, *args, **kwargs)
+
+    ns = {'os': os, 'sys': sys, 'open': fakeOpen}
+    exec(compile(mod, 'StartCapture_lock', 'exec'), ns)
+
+    station = 'TESTEACCES1'
+    lock_path = os.path.join(tempfile.gettempdir(), 'rms_startcapture_{:s}.lock'.format(station))
+    with open(lock_path, 'w') as f:
+        f.write('12345')
+
+    try:
+        lock_file = ns['_takeStationLock'](station)
+        try:
+            # The lock is really held
+            with open(lock_path) as f2:
+                with pytest.raises((IOError, OSError)):
+                    fcntl.flock(f2, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        finally:
+            lock_file.close()
+
+    finally:
+        os.remove(lock_path)
