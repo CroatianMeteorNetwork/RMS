@@ -863,3 +863,34 @@ def testStationLockFallsBackToReadOnlyOnEacces():
 
     finally:
         os.remove(lock_path)
+
+
+# ---------------------------------------------------------------------------
+# Item 15: empty config values keep the defaults
+
+@pytest.mark.parametrize('option', ['udp_buffer_size', 'video_scale_width', 'video_scale_height',
+    'auto_reprocess_max_attempts', 'ml_model_file'])
+def testEmptyConfigValueKeepsDefault(tmp_path, option):
+    """ An empty value ("option:" with nothing after it) must not make the config unparseable. """
+
+    import re
+    import RMS.ConfigReader as cr
+
+    with open(os.path.join(RMS_ROOT, '.config')) as f:
+        text = f.read()
+
+    # Blank the option where it is set, or add it blank after the (commented) example
+    pattern = re.compile(r'^(;\s*)?{:s}\s*[:=].*$'.format(re.escape(option)), re.MULTILINE)
+    assert pattern.search(text), option
+    text = pattern.sub('{:s}:'.format(option), text, count=1)
+
+    config_path = str(tmp_path/'.config')
+    with open(config_path, 'w') as f:
+        f.write(text)
+
+    config = cr.parse(config_path)
+    default = cr.Config()
+
+    assert getattr(config, option) == getattr(default, option)
+    if option == 'ml_model_file':
+        assert config.ml_model_path == default.ml_model_path
