@@ -164,3 +164,73 @@ class TestSatellitePositions(unittest.TestCase):
             # If ISS is not visible, list is empty.
             # Let's trust the logic runs without error.
             self.assertIsInstance(tracks, list)
+
+
+    def test_load_tles_offline_falls_back_to_newest_group_cache(self):
+        """ A failed download falls back to the newest cache file of the same TLE group. """
+        if not SKYFIELD_AVAILABLE:
+            self.skipTest("Skyfield not installed")
+
+        # Old caches of the requested group and a newer one of another group
+        file_old = os.path.join(self.test_dir, "TLE_20200101_000000_active.txt")
+        file_newer = os.path.join(self.test_dir, "TLE_20200105_000000_active.txt")
+        file_other = os.path.join(self.test_dir, "TLE_20200110_000000_starlink.txt")
+        for file_path in (file_old, file_newer, file_other):
+            with open(file_path, 'w') as f:
+                f.write("DUMMY TLE\n")
+
+        # Simulate a download which writes a partial file and then fails
+        def failingDownload(url, filepath):
+            with open(filepath, 'w') as f:
+                f.write("1 25544U 98067A   19343.6")
+            raise IOError("connection reset")
+
+        with patch('urllib.request.urlretrieve', side_effect=failingDownload):
+            with patch('RMS.Routines.SatellitePositions.loadRobustTLEs') as mock_load:
+                mock_load.return_value = []
+
+                loadTLEs(self.test_dir, "active.txt", max_age_hours=24, use_daily_cache=True)
+
+                # The newest cache of the same group must be used
+                mock_load.assert_called_once_with(file_newer)
+
+        # No truncated or partial file may be left behind
+        remaining = sorted(os.listdir(self.test_dir))
+        self.assertEqual(remaining, sorted(os.path.basename(p) for p in (file_old, file_newer, file_other)))
+
+
+    def test_load_tles_offline_without_cache(self):
+        """ A failed download with no cache of the group returns an empty list and leaves no file. """
+        if not SKYFIELD_AVAILABLE:
+            self.skipTest("Skyfield not installed")
+
+        # Only a cache of another group exists
+        with open(os.path.join(self.test_dir, "TLE_20200110_000000_starlink.txt"), 'w') as f:
+            f.write("DUMMY TLE\n")
+
+        with patch('urllib.request.urlretrieve', side_effect=IOError("offline")):
+            with patch('RMS.Routines.SatellitePositions.loadRobustTLEs') as mock_load:
+                self.assertEqual(loadTLEs(self.test_dir, "active.txt", use_daily_cache=True), [])
+                mock_load.assert_not_called()
+
+        self.assertEqual(os.listdir(self.test_dir), ["TLE_20200110_000000_starlink.txt"])
+
+
+    def test_find_closest_tle_file_respects_group(self):
+        """ The closest file must be taken from the requested TLE group only. """
+
+        from RMS.Routines.SatellitePositions import findClosestTLEFile
+
+        file_active = os.path.join(self.test_dir, "TLE_20200101_000000_active.txt")
+        file_starlink = os.path.join(self.test_dir, "TLE_20200102_000000_starlink.txt")
+        for file_path in (file_active, file_starlink):
+            with open(file_path, 'w') as f:
+                f.write("DUMMY TLE\n")
+
+        target_time = datetime.datetime(2020, 1, 2, 0, 0, 0, tzinfo=datetime.timezone.utc)
+
+        self.assertEqual(findClosestTLEFile(self.test_dir, target_time, cache_file_name="active.txt"),
+                         file_active)
+
+        # Without a group name any TLE file is considered (e.g. a user supplied TLE directory)
+        self.assertEqual(findClosestTLEFile(self.test_dir, target_time), file_starlink)
