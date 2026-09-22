@@ -6,7 +6,8 @@ import numpy as np
 # Cython import
 cimport numpy as np
 
-# Initialize the NumPy C API (explicit for clarity: Cython 3 (required to build against NumPy 2) emits it itself)
+# Initialize the NumPy C API. This is explicit for clarity only, as Cython 3 (required to build against
+#   NumPy 2) emits the call itself
 np.import_array()
 cimport cython
 
@@ -98,12 +99,11 @@ cpdef double angularSeparation(double ra1, double dec1, double ra2, double dec2)
     dec2 = radians(dec2)
 
 
-    # Classical method
-    # Rounding can push the cosine slightly above 1 for (nearly) coincident directions, which
-    # would make acos return NaN, so clamp it to the closed interval [-1, 1]. The explicit
-    # comparisons are used instead of fmax(-1.0, fmin(1.0, cos_sep)) because the C fmin/fmax
-    # return the non-NaN operand, which would silently turn a NaN input into 0 or 180 deg.
-    # Mirrors the clip in RMS.Math.angularSeparation (which takes radians, not degrees).
+    # Classical method. Rounding can push the cosine slightly above 1 for (nearly) coincident directions,
+    #   which would make acos return NaN, so clamp it to the closed interval [-1, 1]. The explicit
+    #   comparisons are used instead of fmax(-1.0, fmin(1.0, cos_sep)) because the C fmin/fmax return the
+    #   non-NaN operand, which would silently turn a NaN input into 0 or 180 deg. Mirrors the clip in
+    #   RMS.Math.angularSeparation (which takes radians, not degrees)
     cos_sep = sin(dec1)*sin(dec2) + cos(dec1)*cos(dec2)*cos(ra2 - ra1)
 
     if cos_sep > 1.0:

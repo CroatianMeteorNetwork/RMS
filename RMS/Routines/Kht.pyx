@@ -1,25 +1,23 @@
 # cython: language_level=3, boundscheck=False, wraparound=False
 """ Cython wrapper around the Kernel-based Hough Transform (KHT) C++ library.
 
-Previously the KHT C++ sources were compiled into a bare shared library that was
-located at runtime by walking the file system (ConfigReader.findBinaryPath) and
-loaded via ctypes. That approach has no ABI safety net: ctypes will happily load a
-stale or wrong-version binary and only fail later with the cryptic
-"undefined symbol: kht_wrapper".
+    Previously the KHT C++ sources were compiled into a bare shared library that was located at runtime
+    by walking the file system (ConfigReader.findBinaryPath) and loaded via ctypes. That approach has no
+    ABI safety net: ctypes will happily load a stale or wrong-version binary and only fail later with the
+    cryptic "undefined symbol: kht_wrapper".
 
-Exposing KHT as a regular Cython extension module makes it behave like every other
-native module in RMS: it is imported through the normal Python import machinery,
-which matches the compiled binary to the running interpreter by its ABI tag. A stale
-or mismatched build now raises a clear ImportError (and gets rebuilt) instead of
-silently loading and crashing at call time.
+    Exposing KHT as a regular Cython extension module makes it behave like every other native module in
+    RMS: it is imported through the normal Python import machinery, which matches the compiled binary to
+    the running interpreter by its ABI tag. A stale or mismatched build now raises a clear ImportError
+    (and gets rebuilt) instead of silently loading and crashing at call time.
 """
 
 from libc.stddef cimport size_t
 
 
-# Declare the C entry point (Native/Hough/kht.cpp) and a small C shim that casts the
-# contiguous output buffer to the array-pointer type the C function expects. Doing the
-# cast in C keeps the Cython side free of the awkward `double (*)[2]` pointer type.
+# Declare the C entry point (Native/Hough/kht.cpp) and a small C shim that casts the contiguous output
+#   buffer to the array-pointer type the C function expects. Doing the cast in C keeps the Cython side
+#   free of the awkward `double (*)[2]` pointer type
 cdef extern from * nogil:
     """
     extern "C" size_t kht_wrapper(double (*)[2], unsigned char *, const size_t,
@@ -68,8 +66,8 @@ def khtLineDetection(double[:, ::1] lines_array, unsigned char[::1] binary_image
 
     cdef size_t n_lines
 
-    # The KHT computation does not touch Python objects, so release the GIL (this also
-    # matches the previous ctypes behaviour, which released the GIL during the call).
+    # The KHT computation does not touch Python objects, so release the GIL (this also matches the
+    #   previous ctypes behaviour, which released the GIL during the call)
     with nogil:
         n_lines = kht_call(&lines_array[0, 0], &binary_image[0], image_width, image_height,
                            lines_max, cluster_min_size, cluster_min_deviation, delta,
