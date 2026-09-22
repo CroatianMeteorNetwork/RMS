@@ -474,9 +474,9 @@ def thresholdAndSubsample(np.ndarray[UINT8_TYPE_t, ndim=3] frames, \
     cdef int avg_std
 
     # Calculate the shapes of the subsamples image
-    cdef shape_z = frames.shape[0]
-    cdef shape_y = int(floor(frames.shape[1]//f))
-    cdef shape_x = int(floor(frames.shape[2]//f))
+    cdef unsigned int shape_z = frames.shape[0]
+    cdef unsigned int shape_y = int(floor(frames.shape[1]//f))
+    cdef unsigned int shape_x = int(floor(frames.shape[2]//f))
     
     # Init subsampled image arrays
     cdef np.ndarray[np.int32_t, ndim=3] count = np.zeros((shape_z, shape_y, shape_x), np.int32)
