@@ -14,7 +14,29 @@ Source material: Guides/SkyFit.md, the on-image keyboard hints previously in Uti
 the GMN wiki (see WIKI_URL).
 """
 
-from __future__ import absolute_import, division, print_function
+# The MIT License
+
+# Copyright (c) 2016 Denis Vida
+
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
+from __future__ import print_function, division, absolute_import
 
 
 # Full online manual
@@ -49,6 +71,7 @@ HELP_STYLE = """
 # ---------------------------------------------------------------------------------------------- #
 
 def _mode(gui):
+    """ Current GUI mode ('skyfit' or 'manualreduction'), defaulting to 'skyfit'. """
     return getattr(gui, 'mode', 'skyfit')
 
 
@@ -57,8 +80,15 @@ def _ctrl(gui):
     return getattr(gui, 'ctrl_label', 'CTRL')
 
 
-def _input_type(gui):
-    """ Best-effort read of the current input type ('ff', 'video', 'images', 'dfn', ...). """
+def _inputType(gui):
+    """ Best-effort read of the current input type ('ff', 'video', 'images', 'dfn', ...).
+
+    Return:
+        [str] Input type, or an empty string if the image handle is not available yet.
+    """
+
+    # The image handle may live at either of two attribute paths depending on how far the GUI got
+    # in its initialisation
     for path in (lambda g: g.img.img_handle.input_type, lambda g: g.img_handle.input_type):
         try:
             return path(gui)
@@ -67,16 +97,19 @@ def _input_type(gui):
     return ''
 
 
-def _has_geopoints(gui):
+def _hasGeopoints(gui):
+    """ True if a geo points file is loaded. """
     return getattr(gui, 'geo_points_obj', None) is not None
 
 
-def _has_fr(gui):
+def _hasFr(gui):
+    """ True if FR files are in use. """
     return bool(getattr(gui, 'use_fr_files', False))
 
 
-def _is_dfn(gui):
-    return _input_type(gui) == 'dfn'
+def _isDfn(gui):
+    """ True if the loaded data is a DFN image. """
+    return _inputType(gui) == 'dfn'
 
 
 # ---------------------------------------------------------------------------------------------- #
@@ -88,8 +121,16 @@ def _key(text):
     return '<span class="key">&nbsp;{:s}&nbsp;</span>'.format(text)
 
 
-def _two_col_table(rows, term_fn):
-    """ Build a two-column table; term_fn formats the left cell of each (term, description) row. """
+def _twoColTable(rows, term_fn):
+    """ Build a two-column table.
+
+    Arguments:
+        rows: [list] (term, description) string pairs, one per table row.
+        term_fn: [callable] Formats the left cell, called with the term string.
+
+    Return:
+        html: [str] Table HTML.
+    """
     html = '<table cellspacing="0" cellpadding="0">'
     for term, desc in rows:
         html += ('<tr><td valign="top">{t}</td>'
@@ -97,14 +138,14 @@ def _two_col_table(rows, term_fn):
     return html + '</table>'
 
 
-def _shortcut_table(rows):
+def _shortcutTable(rows):
     """ Two-column table of (keys, description); keys rendered as keycaps. """
-    return _two_col_table(rows, _key)
+    return _twoColTable(rows, _key)
 
 
-def _defn_table(rows):
+def _defnTable(rows):
     """ Two-column table of (term, description); term rendered bold. """
-    return _two_col_table(rows, lambda t: '<b>{:s}</b>'.format(t))
+    return _twoColTable(rows, lambda t: '<b>{:s}</b>'.format(t))
 
 
 def _btn(text):
@@ -113,7 +154,17 @@ def _btn(text):
 
 
 def _callout(html, kind="tip"):
-    """ Render a tip/note callout box. kind: 'tip' (blue) or 'note' (amber). """
+    """ Render a tip/note callout box.
+
+    Arguments:
+        html: [str] Callout body HTML.
+
+    Keyword arguments:
+        kind: [str] 'tip' (blue) or 'note' (amber). 'tip' by default.
+
+    Return:
+        [str] Callout HTML.
+    """
     if kind == "note":
         bg, fg, label = "#fff4e5", "#9a5b00", "Note"
     else:
@@ -123,10 +174,15 @@ def _callout(html, kind="tip"):
             '</tr></table>').format(bg=bg, fg=fg, label=label, html=html)
 
 
-def _nav_links(next_pair=None, related=None):
+def _navLinks(next_pair=None, related=None):
     """ Footer with a "Next" link and/or a list of "Related" links, each on its own line.
 
-    next_pair: (topic_id, title) or None.  related: list of (topic_id, title) or None.
+    Keyword arguments:
+        next_pair: [tuple] (topic_id, title) of the next topic. None by default.
+        related: [list] (topic_id, title) tuples of related topics. None by default.
+
+    Return:
+        [str] Footer HTML, or an empty string if there are no links.
     """
     html = ""
     if next_pair:
@@ -156,12 +212,14 @@ def _page(title, body_html):
 # ---------------------------------------------------------------------------------------------- #
 
 def _always(gui):
+    """ Feature gate for topics that are always shown. """
     return True
 
 
 # ----- SkyFit topics -------------------------------------------------------------------------- #
 
-def _topic_overview(gui):
+def _topicOverview(gui):
+    """ SkyFit overview and quick start (auto and manual mode). """
     c = _ctrl(gui)
     body = (
         "<p>SkyFit calibrates an image against the star catalog so pixel positions can be turned "
@@ -204,13 +262,14 @@ def _topic_overview(gui):
         "<p>With a good platepar, switch to <b>Manual Reduction</b> (button under the image) to "
         "measure a meteor frame by frame &ndash; see <a href=\"topic:mr_overview\">Manual "
         "reduction</a> (and <a href=\"topic:mr_fireballs\">measuring fireballs</a>).</p>"
-        + _nav_links(next_pair=('astrometry', 'Calibrate astrometry'),
+        + _navLinks(next_pair=('astrometry', 'Calibrate astrometry'),
                      related=[('residuals', 'Checking the fit'), ('mr_overview', 'Manual reduction')])
     )
     return _page("Overview &amp; quick start", body)
 
 
-def _topic_levels(gui):
+def _topicLevels(gui):
+    """ Levels tab: histogram, black/white points, auto levels. """
     c = _ctrl(gui)
     body = (
         "<p class=\"lead\">The <b>Levels</b> tab controls the <b>display contrast</b> of the image. "
@@ -243,12 +302,13 @@ def _topic_levels(gui):
         "is on, the handles are locked.</p>"
         + _callout("Levels are display-only. Set them so you can comfortably see the stars you need "
                    "to pick &ndash; they have no effect on the calibration result.")
-        + _nav_links(related=[('tabs', 'Guide to the tabs')])
+        + _navLinks(related=[('tabs', 'Guide to the tabs')])
     )
     return _page("Levels (display contrast)", body)
 
 
-def _topic_inputs(gui):
+def _topicInputs(gui):
+    """ Supported data input types and what each needs. """
     body = (
         "<p class=\"lead\">SkyFit opens by asking for an input &ndash; point it at a folder or a "
         "file. Most types also need a <b>config</b> (use <b>-c .</b> to read the .config in the data "
@@ -294,12 +354,13 @@ def _topic_inputs(gui):
         "<li><b>--expratio</b> &ndash; exposure ratio for shutter-chopped long exposures.</li>"
         "<li><b>-m / --mask</b> &ndash; apply a mask.</li>"
         "</ul>"
-        + _nav_links(related=[('tabs', 'Guide to the tabs'), ('frfiles', 'FR files')])
+        + _navLinks(related=[('tabs', 'Guide to the tabs'), ('frfiles', 'FR files')])
     )
     return _page("Data input types", body)
 
 
-def _topic_tabs(gui):
+def _topicTabs(gui):
+    """ What each tab on the right-hand side does. """
     mode = _mode(gui)
     mode_name = "SkyFit" if mode == 'skyfit' else "Manual Reduction"
 
@@ -330,7 +391,7 @@ def _topic_tabs(gui):
                  "constellations, coordinate grids, distortion), image gamma, magnitude limits, "
                  "invert colours and more."))
 
-    if mode == 'manualreduction' and _is_dfn(gui):
+    if mode == 'manualreduction' and _isDfn(gui):
         rows.append(("Debruijn",
                      "Recover the time of a DFN fireball from its shutter-break sequence."))
 
@@ -352,12 +413,13 @@ def _topic_tabs(gui):
         "<p class=\"lead\">The tabs run down the right-hand edge of the window. Click a tab to open "
         "it, and click it again to collapse the panel. Tab names below link to their help pages. "
         "Which tabs appear depends on the mode (currently <b>" + mode_name + "</b>).</p>"
-        + _defn_table(linked_rows)
+        + _defnTable(linked_rows)
     )
     return _page("Guide to the tabs", body)
 
 
-def _topic_astrometry(gui):
+def _topicAstrometry(gui):
+    """ Manual star picking and the astrometric fit. """
     c = _ctrl(gui)
     body = (
         "<p>The goal is to pair at least <b>14 catalog stars</b> spread uniformly across the whole "
@@ -393,7 +455,7 @@ def _topic_astrometry(gui):
         "<b>Fit</b> button.</p>"
         "<p>Press " + _key("L") + " for the astrometry residual plot.</p>"
         + "<h3>Relevant shortcuts</h3>"
-        + _shortcut_table([
+        + _shortcutTable([
             ("LEFT CLICK", "Centroid the star under the cursor"),
             (c + " + LEFT CLICK", "Manual (forced) star position"),
             ("ENTER / SPACE", "Accept the star pair"),
@@ -404,13 +466,14 @@ def _topic_astrometry(gui):
             (c + " + Z", "Fit the plate"),
             (c + " + SHIFT + Z", "Fit with distortion params reset to 0"),
         ])
-        + _nav_links(next_pair=('photometry', 'Photometry'),
+        + _navLinks(next_pair=('photometry', 'Photometry'),
                      related=[('residuals', 'Checking the fit')])
     )
     return _page("Astrometric calibration", body)
 
 
-def _topic_photometry(gui):
+def _topicPhotometry(gui):
+    """ Photometric calibration: extinction, vignetting, gamma. """
     c = _ctrl(gui)
     body = (
         "<p class=\"lead\">Photometry converts pixel intensity into stellar magnitude, which is "
@@ -478,19 +541,20 @@ def _topic_photometry(gui):
         "<b>--peribg</b>.</li>"
         "</ol>"
         + "<h3>Relevant shortcuts</h3>"
-        + _shortcut_table([
+        + _shortcutTable([
             ("P", "Show / refresh the photometry fit"),
             ("U / J", "Image display gamma"),
             (c + " + D", "Load a dark frame"),
             (c + " + F", "Load a flat field"),
         ])
-        + _nav_links(next_pair=('residuals', 'Checking the fit'),
+        + _navLinks(next_pair=('residuals', 'Checking the fit'),
                      related=[('astrometry', 'Calibrate astrometry')])
     )
     return _page("Photometry", body)
 
 
-def _topic_residuals(gui):
+def _topicResiduals(gui):
+    """ Reading the astrometry and photometry residual plots. """
     body = (
         "<p class=\"lead\">After a fit, always check the two residual plots. Open them with the "
         "<b>Astrometry</b> and <b>Photometry</b> buttons in the Fit Parameters tab (or press "
@@ -536,18 +600,19 @@ def _topic_residuals(gui):
         "</ol>"
         "<p>The photometry fit and its plot update automatically. The astrometry residuals update "
         "after you re-fit the plate (" + _key(_ctrl(gui) + " + Z") + ").</p>"
-        + _nav_links(related=[('astrometry', 'Calibrate astrometry'), ('photometry', 'Photometry')])
+        + _navLinks(related=[('astrometry', 'Calibrate astrometry'), ('photometry', 'Photometry')])
     )
     return _page("Checking the fit (residual plots)", body)
 
 
-def _topic_calibration_files(gui):
+def _topicCalibrationFiles(gui):
+    """ Loading dark, flat and mask calibration files. """
     c = _ctrl(gui)
     body = (
         "<p>Calibration frames improve both astrometry and photometry. Load them from the File "
         "Manager / Calibration Files dialog or with shortcuts.</p>"
         + "<h3>Relevant shortcuts</h3>"
-        + _shortcut_table([
+        + _shortcutTable([
             (c + " + D", "Load a dark frame"),
             (c + " + F", "Load a flat field"),
             (c + " + A", "Auto-adjust display levels"),
@@ -563,8 +628,9 @@ def _topic_calibration_files(gui):
     return _page("Calibration files (dark / flat / mask)", body)
 
 
-def _topic_stardetect(gui):
-    params = _defn_table([
+def _topicStardetect(gui):
+    """ Star detection override tab. """
+    params = _defnTable([
         ("Intensity threshold <span class=\"tip\">(def. 18)</span>",
          "How far above the local background a pixel must rise to count as a star. <b>Lower</b> "
          "detects fainter stars but also more noise; <b>higher</b> keeps only the bright, confident "
@@ -625,7 +691,8 @@ def _topic_stardetect(gui):
     return _page("Star detection override", body)
 
 
-def _topic_mask(gui):
+def _topicMask(gui):
+    """ Mask drawing tab. """
     body = (
         "<p class=\"lead\">The mask marks parts of the image to <b>ignore</b>. Its main job is for "
         "<b>detection</b>: the star and meteor detectors skip masked pixels, so obstructions don't "
@@ -655,7 +722,8 @@ def _topic_mask(gui):
     return _page("Mask drawing", body)
 
 
-def _topic_settings(gui):
+def _topicSettings(gui):
+    """ Every option in the Settings tab. """
     mode = _mode(gui)
 
     display_rows = [
@@ -673,7 +741,7 @@ def _topic_settings(gui):
         ("Single Click Photometry", "Measure photometry with a single click while picking."),
     ]
 
-    if _has_geopoints(gui):
+    if _hasGeopoints(gui):
         display_rows.append(
             ("Geo Point Size", "Scale the geo point markers. Their base size is computed "
              "automatically from the size of the image frame, so they look the same at any screen "
@@ -704,11 +772,11 @@ def _topic_settings(gui):
     body = (
         "<p class=\"lead\">The Settings tab controls what is drawn on the image, plus a few catalog "
         "and satellite options. Toggles take effect immediately.</p>"
-        "<h3>Display overlays</h3>" + _defn_table(display_rows)
-        + "<h3>Image, catalog &amp; magnitudes</h3>" + _defn_table(catalog_rows)
+        "<h3>Display overlays</h3>" + _defnTable(display_rows)
+        + "<h3>Image, catalog &amp; magnitudes</h3>" + _defnTable(catalog_rows)
         + "<h3>Satellites</h3>"
         "<p>Turn these on here when you need them &ndash; see <a href=\"topic:sattracks\">satellite "
-        "tracks</a> for the full details.</p>" + _defn_table(sat_rows)
+        "tracks</a> for the full details.</p>" + _defnTable(sat_rows)
     )
 
     if mode == 'manualreduction':
@@ -717,10 +785,10 @@ def _topic_settings(gui):
             ("Show Great Circle Line", "Draw the great-circle path fitted through the picks."),
             ("Show Photometry Highlight", "Highlight the photometry aperture region."),
         ]
-        body += "<h3>Manual reduction display</h3>" + _defn_table(mr_rows)
+        body += "<h3>Manual reduction display</h3>" + _defnTable(mr_rows)
 
-    if _has_geopoints(gui):
-        body += ("<h3>Geo points</h3>" + _defn_table([
+    if _hasGeopoints(gui):
+        body += ("<h3>Geo points</h3>" + _defnTable([
             ("Measure ground points", "Pick ground positions instead of sky positions "
              "(see <a href=\"topic:geopoints\">geo points</a>)."),
         ]))
@@ -728,7 +796,8 @@ def _topic_settings(gui):
     return _page("Settings tab", body)
 
 
-def _topic_station(gui):
+def _topicStation(gui):
+    """ Station location, station moves and auto-refit. """
     body = (
         "<p class=\"lead\">The Station tab holds the observer's location and, optionally, "
         "terrestrial geo points.</p>"
@@ -741,14 +810,15 @@ def _topic_station(gui):
         "fine-tuning geo-point alignment. <b>Auto refit astrometry</b> re-fits the plate "
         "automatically whenever you move the station.</p>"
     )
-    if _has_geopoints(gui):
+    if _hasGeopoints(gui):
         body += _callout("Geo points are loaded. See <a href=\"topic:geopoints\">Geo points</a> for "
                          "how to calibrate pointing from terrestrial landmarks.")
-    body += _nav_links(related=[('geopoints', 'Geo points'), ('astrometry', 'Calibrate astrometry')])
+    body += _navLinks(related=[('geopoints', 'Geo points'), ('astrometry', 'Calibrate astrometry')])
     return _page("Station &amp; location", body)
 
 
-def _topic_geopoints(gui):
+def _topicGeopoints(gui):
+    """ Geo points: calibrating pointing from ground references. """
     body = (
         "<p>Geo points are <b>fixed terrestrial landmarks</b> (from a name,lat,lon,elevation file, "
         "passed with <b>-p / --geopoints</b>) projected onto the image from the observer's position. "
@@ -768,12 +838,13 @@ def _topic_geopoints(gui):
         + "<p>The Station tab also has movement buttons (to nudge the station position) and an "
         "<b>Auto refit astrometry</b> option that re-fits when the station is moved. "
         "Toggle <b>Measure ground points</b> to pick ground vs sky positions.</p>"
-        + _nav_links(related=[('station', 'Station & location'), ('astrometry', 'Calibrate astrometry')])
+        + _navLinks(related=[('station', 'Station & location'), ('astrometry', 'Calibrate astrometry')])
     )
     return _page("Geo points (ground references)", body)
 
 
-def _topic_sattracks(gui):
+def _topicSattracks(gui):
+    """ Satellite track overlay. """
     c = _ctrl(gui)
     body = (
         "<p class=\"lead\">Satellite tracks overlay the predicted paths of satellites on the image, "
@@ -819,7 +890,7 @@ def _topic_sattracks(gui):
                    "<b>not match</b> &ndash; orbits drift, so old TLEs are unreliable.", "note")
 
         + "<h3>Controls</h3>"
-        + _shortcut_table([
+        + _shortcutTable([
             (c + " + T", "Toggle satellite tracks"),
         ])
         + "<ul>"
@@ -829,12 +900,13 @@ def _topic_sattracks(gui):
         "<li><b>Redraw Satellite Tracks</b> &ndash; recompute now (after loading new TLEs).</li>"
         "<li>Command line: <b>--sattracks</b> to enable, <b>--tle_file PATH</b> for a local set.</li>"
         "</ul>"
-        + _nav_links(related=[('settings', 'Settings tab')])
+        + _navLinks(related=[('settings', 'Settings tab')])
     )
     return _page("Satellite tracks", body)
 
 
-def _topic_frfiles(gui):
+def _topicFrfiles(gui):
+    """ Working with FR (fireball) files. """
     body = (
         "<p>FR (fast-read) files hold the bright pixels of detected events. Launching with "
         "<b>-r / --fr</b> loads them alongside the FF files so you can inspect and reduce the "
@@ -844,9 +916,10 @@ def _topic_frfiles(gui):
     return _page("FR files", body)
 
 
-def _topic_shortcuts_skyfit(gui):
+def _topicShortcutsSkyfit(gui):
+    """ Full keyboard reference for SkyFit mode. """
     c = _ctrl(gui)
-    nav = _shortcut_table([
+    nav = _shortcutTable([
         (c + " + /", "Open this keyboard reference"),
         ("SHIFT + F1", "Open the help guide"),
         ("F1", "Show / hide the on-image info panel"),
@@ -855,7 +928,7 @@ def _topic_shortcuts_skyfit(gui):
         ("Scroll", "Zoom in / out"),
         ("V", "Centre on field of view"),
     ])
-    pointing = _shortcut_table([
+    pointing = _shortcutTable([
         ("A / D", "Azimuth"),
         ("S / W", "Altitude"),
         ("Q / E", "Position angle"),
@@ -867,7 +940,7 @@ def _topic_shortcuts_skyfit(gui):
         ("G / Y / B", "Equal aspect / asymmetry / dist=centre (radial only)"),
         (c + " + 1..6", "Distortion model: poly3+radial, poly3+radial3, radial3/5/7/9"),
     ])
-    display = _shortcut_table([
+    display = _shortcutTable([
         ("R / F", "Limiting magnitude"),
         ("+ / -", "Increment step"),
         ("M", "Toggle maxpixel / avepixel"),
@@ -881,7 +954,7 @@ def _topic_shortcuts_skyfit(gui):
         (c + " + T", "Toggle satellite tracks"),
         ("SHIFT + Z", "Show zoomed window"),
     ])
-    actions = _shortcut_table([
+    actions = _shortcutTable([
         (c + " + R", "Enter / exit star picking"),
         (c + " + Z", "Fit plate"),
         (c + " + SHIFT + Z", "Fit with distortion reset to 0"),
@@ -903,7 +976,8 @@ def _topic_shortcuts_skyfit(gui):
 
 # ----- Manual Reduction topics ---------------------------------------------------------------- #
 
-def _topic_mr_overview(gui):
+def _topicMrOverview(gui):
+    """ Manual reduction overview and quick start. """
     c = _ctrl(gui)
     body = (
         "<p>Manual Reduction is for measuring a meteor or fireball frame by frame: you mark its "
@@ -917,13 +991,14 @@ def _topic_mr_overview(gui):
         "<li>Press " + _key("P") + " for the <a href=\"topic:mr_lightcurve\">light curve</a>.</li>"
         "<li>Save with " + _key(c + " + S") + " (FTPdetectinfo).</li>"
         "</ol>"
-        + _nav_links(next_pair=('mr_picking', 'Pick meteor positions'),
+        + _navLinks(next_pair=('mr_picking', 'Pick meteor positions'),
                      related=[('mr_fireballs', 'Measuring fireballs'), ('mr_lightcurve', 'Light curve & saving')])
     )
     return _page("Overview &amp; quick start", body)
 
 
-def _topic_mr_picking(gui):
+def _topicMrPicking(gui):
+    """ Picking meteor positions frame by frame. """
     c = _ctrl(gui)
     body = (
         "<p class=\"lead\">Enter picking mode with " + _key(c + " + R") + ", then mark the meteor on "
@@ -963,7 +1038,7 @@ def _topic_mr_picking(gui):
         "the meteor must follow and exposes any pick that sits off the line.</p>"
 
         + "<h3>Relevant shortcuts</h3>"
-        + _shortcut_table([
+        + _shortcutTable([
             ("LEFT CLICK", "Centroid the meteor at the cursor"),
             (c + " + LEFT CLICK", "Force a pick at the exact cursor position"),
             (c + " + SCROLL", "Resize the aperture"),
@@ -977,13 +1052,14 @@ def _topic_mr_picking(gui):
             ("K", "Subtract average"),
             ("T", "Toggle refraction correction"),
         ])
-        + _nav_links(next_pair=('mr_lightcurve', 'Light curve & saving'),
+        + _navLinks(next_pair=('mr_lightcurve', 'Light curve & saving'),
                      related=[('mr_fireballs', 'Measuring fireballs'), ('mr_astra', 'ASTRA')])
     )
     return _page("Picking meteor positions", body)
 
 
-def _topic_fireballs(gui):
+def _topicFireballs(gui):
+    """ Measuring fireballs: saturation, wake, fragmentation. """
     c = _ctrl(gui)
     body = (
         "<p class=\"lead\">Fireballs are much harder to measure than ordinary meteors: they "
@@ -1012,12 +1088,13 @@ def _topic_fireballs(gui):
         + "<p>Wake and fragmentation also pull a centroid backwards or sideways, so prefer manual "
         "leading-edge picks there as well. <a href=\"topic:mr_astra\">ASTRA</a> can help refine "
         "difficult picks.</p>"
-        + _nav_links(related=[('mr_picking', 'Pick meteor positions'), ('mr_astra', 'ASTRA')])
+        + _navLinks(related=[('mr_picking', 'Pick meteor positions'), ('mr_astra', 'ASTRA')])
     )
     return _page("Measuring fireballs", body)
 
 
-def _topic_mr_lightcurve(gui):
+def _topicMrLightcurve(gui):
+    """ Light curve display and saving the reduction. """
     c = _ctrl(gui)
     body = (
         "<p>Press " + _key("P") + " to show the light curve (intensity vs frame) of your picks.</p>"
@@ -1028,7 +1105,8 @@ def _topic_mr_lightcurve(gui):
     return _page("Light curve &amp; saving", body)
 
 
-def _topic_mr_astra(gui):
+def _topicMrAstra(gui):
+    """ ASTRA automated picking. """
     c = _ctrl(gui)
     body = (
         "<p><b>ASTRA</b> (Astrometric Streak Tracking and Refinement Algorithm) automates EMCCD "
@@ -1058,13 +1136,14 @@ def _topic_mr_astra(gui):
         "(luminosity threshold as a fraction of the peak) sets the photometric mask: <b>raise</b> it "
         "to tighten the mask to only the brightest pixels, <b>lower</b> it to expand the mask to "
         "include fainter wings.</p>"
-        + _nav_links(related=[('mr_picking', 'Pick meteor positions'),
+        + _navLinks(related=[('mr_picking', 'Pick meteor positions'),
                               ('mr_fireballs', 'Measuring fireballs')])
     )
     return _page("ASTRA (automated picking)", body)
 
 
-def _topic_debruijn(gui):
+def _topicDebruijn(gui):
+    """ DFN / Debruijn timing recovery. """
     body = (
         "<p>For DFN fireball videos the timing is encoded as a de Bruijn sequence of shutter breaks. "
         "Mark 10-20 points (use ALT/Num0 + click for gaps), then open the <b>Debruijn</b> tab and "
@@ -1074,9 +1153,10 @@ def _topic_debruijn(gui):
     return _page("DFN / Debruijn timing", body)
 
 
-def _topic_shortcuts_mr(gui):
+def _topicShortcutsMr(gui):
+    """ Full keyboard reference for manual reduction mode. """
     c = _ctrl(gui)
-    nav = _shortcut_table([
+    nav = _shortcutTable([
         (c + " + /", "Open this keyboard reference"),
         ("SHIFT + F1", "Open the help guide"),
         ("F1", "Show / hide the on-image info panel"),
@@ -1086,7 +1166,7 @@ def _topic_shortcuts_mr(gui):
         (", / .", "Previous / next FR line"),
         ("Scroll", "Zoom in / out"),
     ])
-    actions = _shortcut_table([
+    actions = _shortcutTable([
         (c + " + R", "Enter / exit picking"),
         ("LEFT CLICK", "Centroid"),
         (c + " + LEFT CLICK", "Force pick"),
@@ -1118,62 +1198,89 @@ CROSS_MODE_SECTIONS = {"Calibration", "Meteor measurement"}
 
 HELP_TOPICS = [
     # SkyFit
-    ('overview',          dict(title="Overview &amp; quick start",        modes=('skyfit',),          enabled=_always,        build=_topic_overview,        section="Getting started",
-                               desc="Start here: what SkyFit does and the fastest way to calibrate.")),
-    ('inputs',            dict(title="Data input types",                  modes=('skyfit',),          enabled=_always,        build=_topic_inputs,          section="Getting started",
-                               desc="What data SkyFit can load and what each needs.")),
-    ('astrometry',        dict(title="Calibrate astrometry (pick stars)", modes=('skyfit',),          enabled=_always,        build=_topic_astrometry,      section="Calibration",
-                               desc="Pick stars and fit the plate by hand.")),
-    ('photometry',        dict(title="Photometry",                        modes=('skyfit',),          enabled=_always,        build=_topic_photometry,      section="Calibration",
-                               desc="Calibrate brightness: extinction, vignetting, gamma.")),
-    ('residuals',         dict(title="Checking the fit (residual plots)",  modes=('skyfit',),          enabled=_always,        build=_topic_residuals,       section="Calibration",
-                               desc="Read the residual plots and the values to hit.")),
-    ('calibration_files', dict(title="Calibration files (dark/flat/mask)",modes=('skyfit',),          enabled=_always,        build=_topic_calibration_files, section="Calibration",
-                               desc="Load dark, flat and mask frames.")),
-    ('station',           dict(title="Station &amp; location",            modes=('skyfit',),          enabled=_always,        build=_topic_station,         section="Calibration",
-                               desc="Observer location, station moves, auto-refit.")),
-    ('geopoints',         dict(title="Geo points (ground references)",    modes=('skyfit',),          enabled=_has_geopoints, build=_topic_geopoints,       section="Calibration",
-                               desc="Calibrate pointing from terrestrial landmarks.")),
-    ('tabs',              dict(title="Guide to the tabs",                 modes=('skyfit',),          enabled=_always,        build=_topic_tabs,            section="Tools & tabs",
-                               desc="What each tab on the right does.")),
-    ('levels',            dict(title="Levels (display contrast)",         modes=('skyfit',),          enabled=_always,        build=_topic_levels,          section="Tools & tabs",
-                               desc="The histogram, black/white points, auto levels.")),
-    ('stardetect',        dict(title="Star detection override",           modes=('skyfit',),          enabled=_always,        build=_topic_stardetect,      section="Tools & tabs",
-                               desc="Re-detect stars with tunable parameters.")),
-    ('mask',              dict(title="Mask drawing",                      modes=('skyfit',),          enabled=_always,        build=_topic_mask,            section="Tools & tabs",
-                               desc="Ignore obstructions so detection isn't fooled.")),
-    ('sattracks',         dict(title="Satellite tracks",                  modes=('skyfit',),          enabled=_always,        build=_topic_sattracks,       section="Tools & tabs",
-                               desc="Overlay predicted satellite passes (toggle in Settings).")),
-    ('frfiles',           dict(title="FR files",                          modes=('skyfit',),          enabled=_has_fr,        build=_topic_frfiles,         section="Tools & tabs",
-                               desc="Work with fast-read meteor detection files.")),
-    ('settings',          dict(title="Settings tab",                      modes=('skyfit',),          enabled=_always,        build=_topic_settings,        section="Tools & tabs",
-                               desc="Every option in the Settings tab explained.")),
-    ('shortcuts_skyfit',  dict(title="Keyboard reference",                modes=('skyfit',),          enabled=_always,        build=_topic_shortcuts_skyfit, section="Reference",
-                               desc="Every keyboard shortcut, grouped.")),
+    ('overview', dict(title="Overview &amp; quick start", modes=('skyfit',), enabled=_always,
+        build=_topicOverview, section="Getting started",
+        desc="Start here: what SkyFit does and the fastest way to calibrate.")),
+    ('inputs', dict(title="Data input types", modes=('skyfit',), enabled=_always,
+        build=_topicInputs, section="Getting started",
+        desc="What data SkyFit can load and what each needs.")),
+    ('astrometry', dict(title="Calibrate astrometry (pick stars)", modes=('skyfit',), enabled=_always,
+        build=_topicAstrometry, section="Calibration",
+        desc="Pick stars and fit the plate by hand.")),
+    ('photometry', dict(title="Photometry", modes=('skyfit',), enabled=_always,
+        build=_topicPhotometry, section="Calibration",
+        desc="Calibrate brightness: extinction, vignetting, gamma.")),
+    ('residuals', dict(title="Checking the fit (residual plots)", modes=('skyfit',), enabled=_always,
+        build=_topicResiduals, section="Calibration",
+        desc="Read the residual plots and the values to hit.")),
+    ('calibration_files', dict(title="Calibration files (dark/flat/mask)", modes=('skyfit',), enabled=_always,
+        build=_topicCalibrationFiles, section="Calibration",
+        desc="Load dark, flat and mask frames.")),
+    ('station', dict(title="Station &amp; location", modes=('skyfit',), enabled=_always,
+        build=_topicStation, section="Calibration",
+        desc="Observer location, station moves, auto-refit.")),
+    ('geopoints', dict(title="Geo points (ground references)", modes=('skyfit',), enabled=_hasGeopoints,
+        build=_topicGeopoints, section="Calibration",
+        desc="Calibrate pointing from terrestrial landmarks.")),
+    ('tabs', dict(title="Guide to the tabs", modes=('skyfit',), enabled=_always,
+        build=_topicTabs, section="Tools & tabs",
+        desc="What each tab on the right does.")),
+    ('levels', dict(title="Levels (display contrast)", modes=('skyfit',), enabled=_always,
+        build=_topicLevels, section="Tools & tabs",
+        desc="The histogram, black/white points, auto levels.")),
+    ('stardetect', dict(title="Star detection override", modes=('skyfit',), enabled=_always,
+        build=_topicStardetect, section="Tools & tabs",
+        desc="Re-detect stars with tunable parameters.")),
+    ('mask', dict(title="Mask drawing", modes=('skyfit',), enabled=_always,
+        build=_topicMask, section="Tools & tabs",
+        desc="Ignore obstructions so detection isn't fooled.")),
+    ('sattracks', dict(title="Satellite tracks", modes=('skyfit',), enabled=_always,
+        build=_topicSattracks, section="Tools & tabs",
+        desc="Overlay predicted satellite passes (toggle in Settings).")),
+    ('frfiles', dict(title="FR files", modes=('skyfit',), enabled=_hasFr,
+        build=_topicFrfiles, section="Tools & tabs",
+        desc="Work with fast-read meteor detection files.")),
+    ('settings', dict(title="Settings tab", modes=('skyfit',), enabled=_always,
+        build=_topicSettings, section="Tools & tabs",
+        desc="Every option in the Settings tab explained.")),
+    ('shortcuts_skyfit', dict(title="Keyboard reference", modes=('skyfit',), enabled=_always,
+        build=_topicShortcutsSkyfit, section="Reference",
+        desc="Every keyboard shortcut, grouped.")),
 
     # Manual Reduction
-    ('mr_overview',       dict(title="Overview &amp; quick start",        modes=('manualreduction',), enabled=_always,        build=_topic_mr_overview,     section="Getting started",
-                               desc="Start here: measure a meteor frame by frame.")),
-    ('mr_inputs',         dict(title="Data input types",                  modes=('manualreduction',), enabled=_always,        build=_topic_inputs,          section="Getting started",
-                               desc="What data SkyFit can load and what each needs.")),
-    ('mr_picking',        dict(title="Pick meteor positions",             modes=('manualreduction',), enabled=_always,        build=_topic_mr_picking,      section="Meteor measurement",
-                               desc="Mark the meteor position on each frame.")),
-    ('mr_fireballs',      dict(title="Measuring fireballs",                modes=('manualreduction',), enabled=_always,        build=_topic_fireballs,       section="Meteor measurement",
-                               desc="Saturation, wake, fragmentation: how to pick them.")),
-    ('mr_lightcurve',     dict(title="Light curve &amp; saving",          modes=('manualreduction',), enabled=_always,        build=_topic_mr_lightcurve,   section="Meteor measurement",
-                               desc="View the light curve and export results.")),
-    ('debruijn',          dict(title="DFN / Debruijn timing",             modes=('manualreduction',), enabled=_is_dfn,        build=_topic_debruijn,        section="Meteor measurement",
-                               desc="Recover DFN fireball timing.")),
-    ('mr_astra',          dict(title="ASTRA (automated picking)",         modes=('manualreduction',), enabled=_always,        build=_topic_mr_astra,        section="Meteor measurement",
-                               desc="Automate or refine picks with ASTRA.")),
-    ('mr_tabs',           dict(title="Guide to the tabs",                 modes=('manualreduction',), enabled=_always,        build=_topic_tabs,            section="Tools & tabs",
-                               desc="What each tab on the right does.")),
-    ('mr_levels',         dict(title="Levels (display contrast)",         modes=('manualreduction',), enabled=_always,        build=_topic_levels,          section="Tools & tabs",
-                               desc="The histogram, black/white points, auto levels.")),
-    ('mr_settings',       dict(title="Settings tab",                      modes=('manualreduction',), enabled=_always,        build=_topic_settings,        section="Tools & tabs",
-                               desc="Every option in the Settings tab explained.")),
-    ('shortcuts_mr',      dict(title="Keyboard reference",                modes=('manualreduction',), enabled=_always,        build=_topic_shortcuts_mr,    section="Reference",
-                               desc="Every keyboard shortcut, grouped.")),
+    ('mr_overview', dict(title="Overview &amp; quick start", modes=('manualreduction',), enabled=_always,
+        build=_topicMrOverview, section="Getting started",
+        desc="Start here: measure a meteor frame by frame.")),
+    ('mr_inputs', dict(title="Data input types", modes=('manualreduction',), enabled=_always,
+        build=_topicInputs, section="Getting started",
+        desc="What data SkyFit can load and what each needs.")),
+    ('mr_picking', dict(title="Pick meteor positions", modes=('manualreduction',), enabled=_always,
+        build=_topicMrPicking, section="Meteor measurement",
+        desc="Mark the meteor position on each frame.")),
+    ('mr_fireballs', dict(title="Measuring fireballs", modes=('manualreduction',), enabled=_always,
+        build=_topicFireballs, section="Meteor measurement",
+        desc="Saturation, wake, fragmentation: how to pick them.")),
+    ('mr_lightcurve', dict(title="Light curve &amp; saving", modes=('manualreduction',), enabled=_always,
+        build=_topicMrLightcurve, section="Meteor measurement",
+        desc="View the light curve and export results.")),
+    ('debruijn', dict(title="DFN / Debruijn timing", modes=('manualreduction',), enabled=_isDfn,
+        build=_topicDebruijn, section="Meteor measurement",
+        desc="Recover DFN fireball timing.")),
+    ('mr_astra', dict(title="ASTRA (automated picking)", modes=('manualreduction',), enabled=_always,
+        build=_topicMrAstra, section="Meteor measurement",
+        desc="Automate or refine picks with ASTRA.")),
+    ('mr_tabs', dict(title="Guide to the tabs", modes=('manualreduction',), enabled=_always,
+        build=_topicTabs, section="Tools & tabs",
+        desc="What each tab on the right does.")),
+    ('mr_levels', dict(title="Levels (display contrast)", modes=('manualreduction',), enabled=_always,
+        build=_topicLevels, section="Tools & tabs",
+        desc="The histogram, black/white points, auto levels.")),
+    ('mr_settings', dict(title="Settings tab", modes=('manualreduction',), enabled=_always,
+        build=_topicSettings, section="Tools & tabs",
+        desc="Every option in the Settings tab explained.")),
+    ('shortcuts_mr', dict(title="Keyboard reference", modes=('manualreduction',), enabled=_always,
+        build=_topicShortcutsMr, section="Reference",
+        desc="Every keyboard shortcut, grouped.")),
 ]
 
 _TOPIC_MAP = dict(HELP_TOPICS)
@@ -1184,27 +1291,51 @@ def shortcutsTopicId(gui):
     return 'shortcuts_skyfit' if _mode(gui) == 'skyfit' else 'shortcuts_mr'
 
 
-def _enabled_topics(gui, mode_filter=True):
-    """ Return (id, meta) topics whose feature gate is satisfied. If mode_filter is True, also
-        restrict to the current mode; otherwise return all enabled topics across modes. """
+def _enabledTopics(gui, mode_filter=True):
+    """ Return the topics whose feature gate is satisfied.
+
+    Arguments:
+        gui: [PlateTool] The SkyFit2 GUI, queried for mode and enabled features.
+
+    Keyword arguments:
+        mode_filter: [bool] If True, also restrict to the current mode; otherwise return all enabled
+            topics across both modes. True by default.
+
+    Return:
+        out: [list] (topic_id, meta) pairs in registry order.
+    """
+
     mode = _mode(gui)
     out = []
     for topic_id, meta in HELP_TOPICS:
+
         if mode_filter and mode not in meta['modes']:
             continue
+
+        # A failing feature gate must never take the Help tab down, so treat errors as "hidden"
         try:
             if not meta['enabled'](gui):
                 continue
         except Exception:
             continue
+
         out.append((topic_id, meta))
+
     return out
 
 
 def buildHelpHome(gui, query=None):
     """ Build the Help home page: short intro + triage links for the current mode/features.
 
-    If ``query`` is given, the topic list is filtered to titles/descriptions containing it.
+    Arguments:
+        gui: [PlateTool] The SkyFit2 GUI, queried for mode and enabled features.
+
+    Keyword arguments:
+        query: [str] If given, the topic list is filtered to titles/descriptions containing it.
+            None by default.
+
+    Return:
+        [str] Home page HTML.
     """
 
     mode = _mode(gui)
@@ -1220,12 +1351,13 @@ def buildHelpHome(gui, query=None):
                  "quick start</a>.</p>")
 
     def _row(topic_id, meta):
+        """ One home-page table row: linked title and muted description. """
         return ('<tr><td valign="top"><a href="topic:{tid}">{title}</a></td>'
                 '<td valign="top" class="desc">{desc}</td></tr>').format(
                     tid=topic_id, title=meta['title'], desc=meta.get('desc', ''))
 
-    mode_topics = _enabled_topics(gui, mode_filter=True)   # current mode only
-    all_topics = _enabled_topics(gui, mode_filter=False)   # across both modes
+    mode_topics = _enabledTopics(gui, mode_filter=True)   # current mode only
+    all_topics = _enabledTopics(gui, mode_filter=False)   # across both modes
 
     # Search: flat list of matches across both modes (de-duplicated by title), no section headers
     if query:
@@ -1281,11 +1413,21 @@ def buildHelpHome(gui, query=None):
 
 
 def buildHelpTopic(gui, topic_id):
-    """ Build the detail HTML for one topic id, or None if unknown. """
+    """ Build the detail HTML for one topic.
+
+    Arguments:
+        gui: [PlateTool] The SkyFit2 GUI, queried for mode and enabled features.
+        topic_id: [str] Topic id from HELP_TOPICS.
+
+    Return:
+        [str] Topic HTML, or None if the id is unknown.
+    """
 
     meta = _TOPIC_MAP.get(topic_id)
     if meta is None:
         return None
+
+    # Render errors are shown inside the page rather than crashing the GUI
     try:
         return meta['build'](gui)
     except Exception as e:

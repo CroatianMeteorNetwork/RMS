@@ -24,7 +24,13 @@ import sys
 
 class _CornerHelpOverlay(QtCore.QObject):
     """ Keeps a help button pinned to the top-right corner of a host widget without taking up any
-        layout space (so it never shifts the tab content down). """
+        layout space (so it never shifts the tab content down).
+
+    Arguments:
+        host: [QWidget] Widget the button floats over. Also used as the QObject parent.
+        button: [QWidget] The button to keep in the corner.
+        margin: [int] Distance from the corner in pixels.
+    """
 
     def __init__(self, host, button, margin):
         super(_CornerHelpOverlay, self).__init__(host)
@@ -33,19 +39,22 @@ class _CornerHelpOverlay(QtCore.QObject):
         self.margin = margin
 
     def reposition(self):
+        """ Move the button to the top-right corner of the host and bring it to the front. """
         self.button.move(self.host.width() - self.button.width() - self.margin, self.margin)
         self.button.raise_()
 
     def eventFilter(self, obj, event):
+        """ Re-pin the button whenever the host is resized or shown. Never consumes the event. """
         if obj is self.host and event.type() in (QtCore.QEvent.Type.Resize, QtCore.QEvent.Type.Show):
             self.reposition()
         return False
 
 
 class ScaledSizeHelper:
-    """Helper mixin for calculating sizes that scale with font/DPI settings.
+    """ Helper mixin for calculating sizes that scale with font/DPI settings.
 
-    Use this to replace hardcoded pixel values with font-relative sizes.
+        Use this to replace hardcoded pixel values with font-relative sizes. The mixing class must be
+        a QWidget (self.font() is used for the metrics).
     """
 
     # Reference character width at 96 DPI (typical default)
@@ -53,24 +62,38 @@ class ScaledSizeHelper:
     _REF_LINE_HEIGHT = 16
 
     def scaledWidth(self, chars):
-        """Calculate width in pixels for given number of characters."""
+        """ Width in pixels of the given number of average characters in the widget font.
+
+        Arguments:
+            chars: [float] Number of characters.
+
+        Return:
+            [int] Width in pixels.
+        """
         fm = QtGui.QFontMetrics(self.font())
         return int(fm.averageCharWidth() * chars)
 
     def scaledHeight(self, lines):
-        """Calculate height in pixels for given number of lines."""
+        """ Height in pixels of the given number of text lines in the widget font.
+
+        Arguments:
+            lines: [float] Number of lines.
+
+        Return:
+            [int] Height in pixels.
+        """
         fm = QtGui.QFontMetrics(self.font())
         return int(fm.height() * lines)
 
     def scaledMargins(self, chars_h=0.5, lines_v=0.25):
-        """Calculate margins scaled to font size.
+        """ Layout margins scaled to the font size.
 
-        Args:
-            chars_h: Horizontal margin in character widths
-            lines_v: Vertical margin in line heights
+        Keyword arguments:
+            chars_h: [float] Horizontal margin in character widths. 0.5 by default.
+            lines_v: [float] Vertical margin in line heights. 0.25 by default.
 
-        Returns:
-            Tuple of (left, top, right, bottom) margins in pixels
+        Return:
+            [tuple] (left, top, right, bottom) margins in pixels.
         """
         fm = QtGui.QFontMetrics(self.font())
         h_margin = int(fm.averageCharWidth() * chars_h)
@@ -78,13 +101,13 @@ class ScaledSizeHelper:
         return (h_margin, v_margin, h_margin, v_margin)
 
     def scaledSpacing(self, fraction=0.5):
-        """Calculate spacing scaled to font size.
+        """ Layout spacing scaled to the font size.
 
-        Args:
-            fraction: Spacing as fraction of line height
+        Keyword arguments:
+            fraction: [float] Spacing as a fraction of the line height. 0.5 by default.
 
-        Returns:
-            Spacing in pixels
+        Return:
+            [int] Spacing in pixels.
         """
         fm = QtGui.QFontMetrics(self.font())
         return int(fm.height() * fraction)
@@ -92,13 +115,25 @@ class ScaledSizeHelper:
     def makeHelpButton(self, topic, tooltip="Open the related help page"):
         """ Create a small circular blue "i" info button that opens a Help topic.
 
-        The widget must have a ``self.gui`` attribute exposing ``openHelpTopic(topic_id)``.
+            The widget must have a self.gui attribute exposing openHelpTopic(topic_id).
+
+        Arguments:
+            topic: [str] Help topic id (see RMS.Routines.SkyFitHelp.HELP_TOPICS).
+
+        Keyword arguments:
+            tooltip: [str] Button tooltip.
+
+        Return:
+            btn: [QToolButton] The button, not yet added to any layout.
         """
+
         btn = QtWidgets.QToolButton()
         btn.setText("i")
         btn.setToolTip(tooltip)
         btn.setCursor(QtCore.Qt.CursorShape.PointingHandCursor)
         btn.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
+
+        # Size the button with the font so it stays legible at any DPI
         d = max(self.scaledHeight(1.0), 13)
         btn.setFixedSize(d, d)
         btn.setStyleSheet(
@@ -107,29 +142,55 @@ class ScaledSizeHelper:
             "font-size: %dpx; } "
             "QToolButton:hover { background-color: #1666c1; }" % (int(d/2), max(int(d*0.62), 8))
         )
+
         btn.clicked.connect(lambda: self.gui.openHelpTopic(topic))
+
         return btn
 
     def addCornerHelpButton(self, topic, tooltip="Open the help page for this tab"):
         """ Pin a small circular "i" help button to the widget's top-right corner.
 
-        The button floats over the content (it is parented to the widget, not added to a layout),
-        so it does not take up layout space or shift the tab content down. An event filter keeps it
-        in the corner as the widget resizes.
+            The button floats over the content (it is parented to the widget, not added to a layout),
+            so it does not take up layout space or shift the tab content down. An event filter keeps
+            it in the corner as the widget resizes.
+
+        Arguments:
+            topic: [str] Help topic id (see RMS.Routines.SkyFitHelp.HELP_TOPICS).
+
+        Keyword arguments:
+            tooltip: [str] Button tooltip.
+
+        Return:
+            btn: [QToolButton] The pinned button.
         """
+
         btn = self.makeHelpButton(topic, tooltip)
         btn.setParent(self)
+
+        # Keep the button in the corner as the widget resizes
         margin = max(self.scaledSpacing(0.15), 2)
         overlay = _CornerHelpOverlay(self, btn, margin)
         self.installEventFilter(overlay)
+
         # Keep a reference so the filter isn't garbage-collected
         self._help_overlay = overlay
+
         overlay.reposition()
         btn.show()
+
         return btn
 
 
 def qmessagebox(message="", title="Error", message_type="warning"):
+    """ Show a modal message box.
+
+    Keyword arguments:
+        message: [str] Message text.
+        title: [str] Window title. "Error" by default.
+        message_type: [str] "warning", "error" or anything else for an information box. "warning" by
+            default.
+    """
+
     msg = QtWidgets.QMessageBox()
     if message_type == "warning":
         msg.setIcon(QtWidgets.QMessageBox.Icon.Warning)
@@ -347,15 +408,15 @@ class TextItemList(pg.GraphicsObject):
         """
         Remove all TextItem's in list
         """
-        # Get scene once for efficiency
+        # Get the scene once, it is the same for every item
         try:
             scene = self.parentItem().scene()
         except Exception:
             scene = None
 
-        # Remove all items (iterate in reverse to avoid O(n²) from pop(0))
+        # Remove all items, popping from the end (pop(0) would make this O(n^2))
         while self.text_list:
-            item = self.text_list.pop()  # Pop from end is O(1)
+            item = self.text_list.pop()
             if scene is not None:
                 try:
                     scene.removeItem(item)
@@ -383,16 +444,16 @@ class TextItemList(pg.GraphicsObject):
             text.setParentItem(parent)
 
     def setVisible(self, visible):
+        """ Show or hide the list and all TextItem's in it (new items inherit the visibility). """
         super().setVisible(visible)
         for text in self.text_list:
             text.setVisible(visible)
 
     def setInteractionEnabled(self, enabled):
-        """
-        Enable or disable text interaction (hyperlinks) on all TextItems in the list.
+        """ Enable or disable text interaction (hyperlinks) on all TextItems in the list.
 
         Arguments:
-            enabled [bool]: True to enable interaction, False to disable.
+            enabled: [bool] True to enable interaction, False to disable.
         """
         for text in self.text_list:
             if hasattr(text, 'setInteraction'):
@@ -452,7 +513,10 @@ class ViewBox(pg.ViewBox):
 
     def __init__(self, *args, **kwargs):
         pg.ViewBox.__init__(self, *args, **kwargs)
-        self.panning_enabled = True  # Can be disabled for mask editing etc.
+
+        # Panning can be disabled while the mouse is needed for something else (mask brush, photometry
+        #   colouring, ...)
+        self.panning_enabled = True
 
     def keyPressEvent(self, ev):
         """
@@ -468,18 +532,20 @@ class ViewBox(pg.ViewBox):
 
     def mousePressEvent(self, event):
         self.sigMousePressed.emit(event)
+
+        # Swallow the press when panning is off so pyqtgraph does not start a drag
         if self.panning_enabled:
             super().mousePressEvent(event)
         else:
-            event.accept()  
+            event.accept()
 
     def mouseDragEvent(self, ev, axis=None):
         """ Block pyqtgraph's pan/zoom drags while panning is disabled.
 
-        Gating the press alone is not enough. If panning gets disabled in the middle of a drag
-        (e.g. SHIFT is pressed to start coloring photometry after the button is already down),
-        pyqtgraph has already picked this ViewBox as the drag item and keeps sending drag events
-        here, which would pan the image while the pixels are being painted.
+            Gating the press alone is not enough. If panning gets disabled in the middle of a drag
+            (e.g. SHIFT is pressed to start coloring photometry after the button is already down),
+            pyqtgraph has already picked this ViewBox as the drag item and keeps sending drag events
+            here, which would pan the image while the pixels are being painted.
         """
 
         if not self.panning_enabled:
@@ -651,20 +717,24 @@ class ImageItem(pg.ImageItem):
             # Apply a saturation mask, if given
             if self.saturation_mask is not None:
                 
-                # Use the saturation threshold passed from SkyFit, or fallback to config/default
+                # Use the saturation threshold passed from SkyFit, or fall back to 98% of the config
+                #   bit depth, or of the image data type
                 saturation_threshold = None
-                
+
                 if self.saturation_threshold is not None:
                     saturation_threshold = self.saturation_threshold
-                elif self.img_handle is not None and hasattr(self.img_handle, 'config') and hasattr(self.img_handle.config, 'bit_depth'):
+
+                elif self.img_handle is not None and hasattr(self.img_handle, 'config') \
+                    and hasattr(self.img_handle.config, 'bit_depth'):
                     saturation_threshold = int(round(0.98*(2**self.img_handle.config.bit_depth - 1)))
+
                 else:
                     saturation_threshold = int(round(0.98*(2**(8*img.itemsize) - 1)))
 
                 saturates = img > saturation_threshold
 
                 self.saturation_mask.image[:, :] = 0
-                
+
                 # Set red colour on for saturation
                 self.saturation_mask.image[saturates, 0] = 255
                 self.saturation_mask.image[saturates, 1] = 0
@@ -767,20 +837,32 @@ class ImageItem(pg.ImageItem):
         self.img_handle.setFrame(n)
 
     def getAutolevels(self, lower=0.1, upper=99.95, ignoretopperc=10):
+        """ Compute display levels from image percentiles, ignoring the brightest pixels.
 
+        Keyword arguments:
+            lower: [float] Percentile used for the lower level. 0.1 by default.
+            upper: [float] Percentile used for the upper level. 99.95 by default.
+            ignoretopperc: [float] Percentage of the brightness range below the maximum to ignore, so
+                saturated pixels do not drive the levels. 10 by default.
+
+        Return:
+            (lower_level, upper_level): [tuple of floats]
+        """
+
+        # No image loaded yet
         if self.image is None or self.image.size == 0:
             return 0, 255
 
         # Ignore the top 10% of the image pixel brightness (from the maximum) to avoid auto leveling on
-        #  saturated pixels. Cast to a Python int: under NumPy 2 (NEP 50) the
-        # narrow array scalar no longer promotes, and 99*65535 overflows
-        # uint16 - which silently broke auto-levels on 16-bit imagery.
+        #   saturated pixels. Cast to a Python int: under NumPy 2 (NEP 50) the narrow array scalar no
+        #   longer promotes, and 99*65535 overflows uint16 - which silently broke auto-levels on 16-bit
+        #   imagery
         max_level = int(np.max(self.image))
         ignore_level = (100 - ignoretopperc)*max_level/100
-        
+
         img_filtered = self.image[self.image < ignore_level]
 
-        # Validation: If the image is saturated or flat, the filtered image might be empty
+        # If the image is saturated or flat, the filtered image might be empty
         if img_filtered.size == 0:
             return np.percentile(self.image, lower), np.percentile(self.image, upper)
 
@@ -867,16 +949,30 @@ class ImageItem(pg.ImageItem):
         self.sigLevelsChanged.emit()
 
     def setLookupTable(self, lut, update=True):
-        # The histogram pushes its gradient LUT here (None for a plain grayscale
-        #   gradient). Keep it as the base so gamma/inversion can be re-composed on top
-        #   whenever they change, then hand pyqtgraph the effective LUT.
+        """ Store the LUT pushed by the histogram as the base and apply gamma/inversion on top of it.
+
+        Arguments:
+            lut: [ndarray, callable or None] Gradient LUT from the histogram, None for a plain
+                grayscale gradient.
+
+        Keyword arguments:
+            update: [bool] Passed on to pyqtgraph, redraw the image. True by default.
+        """
+
+        # Keep the LUT as the base so gamma/inversion can be re-composed on top whenever they change,
+        #   then hand pyqtgraph the effective LUT
         self._base_lut = lut
         self._applyDisplayLut(update=update)
 
     def _applyDisplayLut(self, update=True):
-        """ Rebuild and apply the effective display LUT from the current base LUT,
-            gamma and inversion. Used instead of overriding render(), so we no longer
-            depend on pyqtgraph render internals. """
+        """ Rebuild and apply the effective display LUT from the current base LUT, gamma and inversion.
+
+            Used instead of overriding render(), so we no longer depend on pyqtgraph render internals.
+
+        Keyword arguments:
+            update: [bool] Passed on to pyqtgraph, redraw the image. True by default.
+        """
+
         base_lut = self._base_lut
 
         # The base LUT may be a callable rather than an array: pyqtgraph <= 0.11
@@ -892,14 +988,22 @@ class ImageItem(pg.ImageItem):
         super().setLookupTable(effective_lut, update=update)
 
     def _composeDisplayLut(self, base_lut):
-        """ Build the grayscale lookup table that bakes in gamma and inversion.
+        """ Build the lookup table that bakes in gamma and inversion.
 
-        The old render() applied gamma to the post-levels 8-bit luminance and forced
-        R = G = B. pyqtgraph maps levels -> LUT index, so a 256-entry grayscale ramp
-        carrying gamma/inversion reproduces gamma(rescale(value)) exactly (for 8-bit the
-        LUT index equals the rescaled value). An optional base LUT (e.g. a non-trivial
-        histogram gradient) is composed underneath.
+            The old render() applied gamma to the post-levels 8-bit luminance and forced R = G = B.
+            pyqtgraph maps levels -> LUT index, so a 256-entry grayscale ramp carrying gamma/inversion
+            reproduces gamma(rescale(value)) exactly (for 8-bit the LUT index equals the rescaled
+            value). An optional base LUT (e.g. a non-trivial histogram gradient) is composed
+            underneath.
+
+        Arguments:
+            base_lut: [ndarray or None] (N, 3) or (N, 4) base LUT, None for a grayscale ramp.
+
+        Return:
+            out: [ndarray] uint8 LUT of the same width as the base (3 or 4 columns).
         """
+
+        # Start from a plain grayscale ramp or from the given base LUT (keeping its alpha, if any)
         if base_lut is None:
             n = 256
             rgb = np.repeat(np.linspace(0, 255, n)[:, None], 3, axis=1)
@@ -1044,9 +1148,10 @@ class PointingIndicator(pg.GraphicsObject):
 
     def __init__(self, arrow_length=52):
         """
-        Arguments:
-            arrow_length: [float] Length of the zenith arrow in screen pixels.
+        Keyword arguments:
+            arrow_length: [float] Length of the zenith arrow in screen pixels. 52 by default.
         """
+
         super().__init__()
 
         # Keep the glyph a constant device-pixel size, anchored at setPos()
@@ -1079,6 +1184,18 @@ class PointingIndicator(pg.GraphicsObject):
 
 
     def setData(self, angle, east_angle, azimuth, elevation, step_px, precision, valid_zenith):
+        """ Update the pointing state and repaint. All angles are in degrees, screen frame (+x right,
+            +y up).
+
+        Arguments:
+            angle: [float] Screen direction of the zenith.
+            east_angle: [float] Screen direction of increasing azimuth (East along the horizon).
+            azimuth: [float] Apparent azimuth of the optical centre.
+            elevation: [float] Apparent elevation of the optical centre.
+            step_px: [float] One WASD pan step in screen pixels (sets the bar length).
+            precision: [int] Decimals shown in the Az/Alt readout.
+            valid_zenith: [bool] False when the centre is at/near the zenith and the direction is undefined.
+        """
 
         # Qt has to drop the old bounds from its scene index before anything boundingRect() reads
         #   (step_px, device_scale_x) changes, or the item can be left stale or clipped in the index
@@ -1123,28 +1240,32 @@ class PointingIndicator(pg.GraphicsObject):
 
 
     def boundingRect(self):
-        # Cover the arrow (plus arrowhead and text margin) and the horizontal step bar (zoom-scaled)
+        """ Square covering the arrow (plus arrowhead and text margin) and the zoom-scaled step bar. """
+
         bar_half = 0.5*self.step_px*self.device_scale_x
         reach = max(self.arrow_length + 34.0, bar_half + 24.0, 122.0)
         return QtCore.QRectF(-reach, -reach, 2*reach, 2*reach)
 
 
     def paint(self, painter, option, widget=None):
+        """ Draw the horizon/azimuth bar, the Az/Alt readout and the zenith arrow with its elevation
+            notch. Device coordinates, centred on the optical axis. """
 
         painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing, True)
 
         L = self.arrow_length
 
         # Step-size / horizon / azimuth bar: a line through the optical-axis centre, oriented along the
-        # horizon (East-West). It doubles as (a) a horizon/roll indicator, (b) a pan step-size gauge -- its
-        # length is one WASD step on screen, so it scales with the image zoom -- and (c) an azimuth compass:
-        # the middle is North, little notches mark West and East (+/- 90 deg), and a longer notch slides to
-        # the current azimuth. The compass spans +/-180 deg over the bar (the ends are South).
+        #   horizon (East-West). It doubles as (a) a horizon/roll indicator, (b) a pan step-size gauge --
+        #   its length is one WASD step on screen, so it scales with the image zoom -- and (c) an azimuth
+        #   compass: the middle is North, little notches mark West and East (+/- 90 deg), and a longer
+        #   notch slides to the current azimuth. The compass spans +/-180 deg over the bar (the ends are
+        #   South).
         # The bar's +east_angle end is the screen direction in which the azimuth increases at the optical
-        # axis (fovCentreZenithDirection), and the WASD pan (screenNudgeToAzAltDelta) moves the pointing
-        # toward the sky shown in the pressed screen direction, so panning toward the +east end of the bar
-        # increases the azimuth and slides the notch the same way. The notch jumps between the two ends
-        # when the azimuth crosses due South, which is inherent to the +/-180 deg layout.
+        #   axis (fovCentreZenithDirection), and the WASD pan (screenNudgeToAzAltDelta) moves the pointing
+        #   toward the sky shown in the pressed screen direction, so panning toward the +east end of the
+        #   bar increases the azimuth and slides the notch the same way. The notch jumps between the two
+        #   ends when the azimuth crosses due South, which is inherent to the +/-180 deg layout.
         if self.step_px > 0.5:
             half = 0.5*self.step_px*self.device_scale_x
             ea = np.radians(self.east_angle)
@@ -1154,6 +1275,7 @@ class PointingIndicator(pg.GraphicsObject):
             pen = QtGui.QPen(self.step_color, 2.0, QtCore.Qt.PenStyle.SolidLine)
             painter.setPen(pen)
             painter.drawLine(QtCore.QPointF(-half*ux, -half*uy), QtCore.QPointF(half*ux, half*uy))
+
             # End caps
             cap = 4.0
             for s in (-1.0, 1.0):
@@ -1161,8 +1283,10 @@ class PointingIndicator(pg.GraphicsObject):
                                  QtCore.QPointF(s*half*ux + cap*px_, s*half*uy + cap*py_))
 
             if self.valid_zenith:
+
                 def _notch(frac, length, pen):
-                    # Perpendicular tick at the given fraction (-1..1) along the bar from the centre (N)
+                    """ Perpendicular tick at the given fraction (-1..1) along the bar from the centre
+                        (North). """
                     f = min(max(frac, -1.0), 1.0)
                     bx, by = f*half*ux, f*half*uy
                     painter.setPen(pen)
@@ -1179,8 +1303,8 @@ class PointingIndicator(pg.GraphicsObject):
                 _notch(az_frac, 6.0, QtGui.QPen(self.notch_color, 2.2, QtCore.Qt.PenStyle.SolidLine))
 
         # Az/Alt readout, in the middle just left of the optical-axis plus (right-aligned, two lines).
-        # 'Az' = azimuth (+E of due N), 'Alt' = altitude/elevation. The decimal precision scales with the
-        # FOV (coarser for wide/all-sky, finer for narrow fields).
+        #   'Az' = azimuth (+E of due N), 'Alt' = altitude/elevation. The decimal precision scales with
+        #   the FOV (coarser for wide/all-sky, finer for narrow fields).
         dec = max(self.precision, 0)
         az_str = ("Az {:." + str(dec) + "f}°").format(self.azimuth)
         alt_str = ("Alt {:." + str(dec) + "f}°").format(self.elevation)
@@ -1189,6 +1313,7 @@ class PointingIndicator(pg.GraphicsObject):
         tx = -tw - 15.0     # right edge clears the optical-axis plus arm
         painter.setFont(self.font)
         painter.setPen(QtGui.QPen(self.text_color))
+
         # Two well-separated lines straddling the centre (Alt above, Az below)
         painter.drawText(QtCore.QRectF(tx, -30.0, tw, th),
                          QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignVCenter, alt_str)
@@ -1199,8 +1324,8 @@ class PointingIndicator(pg.GraphicsObject):
         ang = np.radians(self.angle)
         dx, dy = np.cos(ang), -np.sin(ang)
 
+        # Near the zenith the direction is undefined: draw a dashed ring instead of an arrow
         if not self.valid_zenith:
-            # Near the zenith the direction is undefined: draw a dashed ring instead of an arrow
             pen = QtGui.QPen(self.arrow_color, 1.6, QtCore.Qt.PenStyle.DashLine)
             painter.setPen(pen)
             painter.setBrush(QtCore.Qt.BrushStyle.NoBrush)
@@ -1224,8 +1349,10 @@ class PointingIndicator(pg.GraphicsObject):
 
         # Elevation notch: tick perpendicular to the shaft, sliding centre->tip with elevation 0->90 deg
         f = min(max(self.elevation/90.0, 0.0), 1.0)
+
         # Position along the shaft
         px, py = f*L*dx, f*L*dy
+
         # Perpendicular direction (screen) rotated 90 deg
         perp = ang + np.pi/2.0
         pwx, pwy = np.cos(perp), -np.sin(perp)
@@ -1265,8 +1392,8 @@ class HistogramLUTItem(pg.HistogramLUTItem):
         pg.HistogramLUTItem.__init__(self, *args, **kwargs)
 
         # pyqtgraph caps the histogram plot at 152 px wide, so on a panel wider than the axis plus
-        # that cap plus the gradient bar (~219 px) the rest of the tab was left as empty
-        # GraphicsView background. Lift the cap and let the plot use the width it is given.
+        #   that cap plus the gradient bar (~219 px) the rest of the tab was left as empty GraphicsView
+        #   background. Lift the cap and let the plot use the width it is given
         self.vb.setMaximumWidth(QtWidgets.QWIDGETSIZE_MAX)
 
         self.level_images = []
@@ -1303,9 +1430,7 @@ class HistogramLUTItem(pg.HistogramLUTItem):
         self.auto_levels = not self.auto_levels
 
     def exitAutoLevels(self):
-        """
-        Drop out of auto levels mode, keeping the auto-determined levels as the manual levels
-        """
+        """ Drop out of auto levels mode, keeping the auto-determined levels as the manual levels. """
         if self.auto_levels:
             self.auto_levels = False
             self.saved_manual_levels = self.getLevels()
@@ -1315,7 +1440,8 @@ class HistogramLUTItem(pg.HistogramLUTItem):
         pass
 
     def regionChanging(self):
-        # Doesn't update the image when moving the region, only on release
+        """ Called while the level region is being dragged. The image is deliberately not updated here,
+            only on release. """
 
         # A user drag on the region while auto levels are on drops to manual mode, keeping the
         #   auto-determined levels as the starting point
@@ -1379,7 +1505,7 @@ class RightOptionsTab(QtWidgets.QTabWidget, ScaledSizeHelper):
         self.setTabPosition(QtWidgets.QTabWidget.TabPosition.East)
 
         # Set the initial width once the tabs exist and the bar is on the East side, so the
-        # measurement in barWidth() is meaningful
+        #   measurement in barWidth() is meaningful
         self.applyTabWidth()
 
         self.tabBarClicked.connect(self.onTabBarClicked)
@@ -1396,16 +1522,18 @@ class RightOptionsTab(QtWidgets.QTabWidget, ScaledSizeHelper):
     def maximizedWidthChars(self):
         """ Maximized panel width (in characters). The Help tab gets extra width for readability;
             all other tabs use the normal width. """
+
         if 0 <= self.index < self.count() and self.widget(self.index) is self.help:
             return self.TAB_WIDTH_CHARS*self.HELP_WIDTH_MULT
+
         return self.TAB_WIDTH_CHARS
 
     def barWidth(self):
         """ Horizontal space the tab bar needs, in pixels, including the pane frame.
 
-        With TabPosition.East the bar's width is driven by the tab *height* (rotated labels: font
-        ascent/descent plus the style's tab padding), which has nothing to do with the character
-        widths the panel size is expressed in. Measure it instead of guessing.
+            With TabPosition.East the bar's width is driven by the tab *height* (rotated labels: font
+            ascent/descent plus the style's tab padding), which has nothing to do with the character
+            widths the panel size is expressed in. Measure it instead of guessing.
         """
 
         bar_width = self.tabBar().sizeHint().width()
@@ -1418,32 +1546,39 @@ class RightOptionsTab(QtWidgets.QTabWidget, ScaledSizeHelper):
     def minimizedWidth(self):
         """ Collapsed panel width, in pixels: just wide enough to show the whole tab bar.
 
-        setFixedWidth() sizes the tab bar and the page together, so a collapsed width guessed in
-        characters clipped the (vertical, East-side) tab labels on systems whose style or font
-        makes the bar wider than the guess. TAB_MINIMIZED_CHARS is only a floor guarding against
-        a bogus measurement.
+            setFixedWidth() sizes the tab bar and the page together, so a collapsed width guessed in
+            characters clipped the (vertical, East-side) tab labels on systems whose style or font
+            makes the bar wider than the guess. TAB_MINIMIZED_CHARS is only a floor guarding against
+            a bogus measurement.
         """
 
         return max(self.barWidth(), self.scaledWidth(self.TAB_MINIMIZED_CHARS))
 
     def applyTabWidth(self):
         """ Resize the panel to match the current maximized/minimized state and selected tab. """
+
+        # The tab bar eats into the fixed width, so add it on top of the requested character width -
+        #   otherwise the page is a bar's worth narrower than asked for
         if self.maximized:
-            # The tab bar eats into the fixed width, so add it on top of the requested character
-            # width - otherwise the page is a bar's worth narrower than asked for
             self.setFixedWidth(self.scaledWidth(self.maximizedWidthChars()) + self.barWidth())
+
         else:
             self.setFixedWidth(self.minimizedWidth())
 
     def onTabBarClicked(self, index):
+        """ Switch to the clicked tab, or collapse/expand the panel when the current tab is clicked
+            again. """
+
         old_index = self.index
+
+        # Clicking another tab always shows it maximized (wider for Help, normal for everything else)
         if index != self.index:
             self.index = index
             self.maximized = True
-            # Wider for Help, normal for everything else
             self.applyTabWidth()
-            # Emit signal for tab change
             self.sigTabChanged.emit(old_index, index)
+
+        # Clicking the current tab toggles the panel
         else:
             self.maximized = not self.maximized
             self.applyTabWidth()
@@ -1494,12 +1629,17 @@ class RightOptionsTab(QtWidgets.QTabWidget, ScaledSizeHelper):
 class HelpWidget(QtWidgets.QWidget, ScaledSizeHelper):
     """ Read-only Help tab with mode- and feature-aware documentation.
 
-    Uses progressive disclosure: a Home page with an intro and a triage list of links, each
-    opening a detailed topic page. Content is built in RMS.Routines.SkyFitHelp from the current
-    GUI state (mode + enabled features). Call updateHelp() to rebuild after a mode/feature change.
+        Uses progressive disclosure: a Home page with an intro and a triage list of links, each
+        opening a detailed topic page. Content is built in RMS.Routines.SkyFitHelp from the current
+        GUI state (mode + enabled features). Call updateHelp() to rebuild after a mode/feature change.
     """
 
     def __init__(self, gui):
+        """
+        Arguments:
+            gui: [PlateTool] The SkyFit2 GUI, queried for the mode and enabled features.
+        """
+
         QtWidgets.QWidget.__init__(self)
 
         self.gui = gui
@@ -1523,7 +1663,7 @@ class HelpWidget(QtWidgets.QWidget, ScaledSizeHelper):
         self.back_button.clicked.connect(self.goBack)
 
         # The keyboard reference is the most asked-for page, so it gets a button of its own that
-        # is reachable from every topic page, not just from the home list
+        #   is reachable from every topic page, not just from the home list
         self.keys_button = QtWidgets.QPushButton("Keys")
         self.keys_button.setToolTip("Keyboard shortcut reference")
         self.keys_button.clicked.connect(self.showShortcuts)
@@ -1541,7 +1681,7 @@ class HelpWidget(QtWidgets.QWidget, ScaledSizeHelper):
         layout.addWidget(self.search_box)
 
         # Read-only rich-text view. Internal "topic:" links and external http(s) links are handled
-        # manually in onAnchorClicked, so disable Qt's own link following.
+        #   manually in onAnchorClicked, so disable Qt's own link following
         self.browser = QtWidgets.QTextBrowser()
         self.browser.setOpenLinks(False)
         self.browser.setOpenExternalLinks(False)
@@ -1557,7 +1697,9 @@ class HelpWidget(QtWidgets.QWidget, ScaledSizeHelper):
 
     def showHome(self):
         """ Show the intro + triage page for the current mode/features (unfiltered). """
+
         self._history = []
+
         # Reset any active search without re-triggering a render
         if self.search_box.text():
             self.search_box.blockSignals(True)
@@ -1575,7 +1717,12 @@ class HelpWidget(QtWidgets.QWidget, ScaledSizeHelper):
 
 
     def _renderHome(self, query):
-        """ Build and display the home page, guarded so a content error can't blank the tab. """
+        """ Build and display the home page, guarded so a content error can't blank the tab.
+
+        Arguments:
+            query: [str] Search text to filter the topic list by, or None for the full list.
+        """
+
         try:
             html = buildHelpHome(self.gui, query=query)
         except Exception as e:
@@ -1590,10 +1737,16 @@ class HelpWidget(QtWidgets.QWidget, ScaledSizeHelper):
 
 
     def showTopic(self, topic_id):
-        """ Show one detailed topic page. """
+        """ Show one detailed topic page and push it on the Back history.
+
+        Arguments:
+            topic_id: [str] Topic id from RMS.Routines.SkyFitHelp.HELP_TOPICS. Unknown ids are ignored.
+        """
+
         html = buildHelpTopic(self.gui, topic_id)
         if html is None:
             return
+
         self._history.append(topic_id)
         self.browser.setHtml(html)
         self.browser.verticalScrollBar().setValue(0)
@@ -1602,8 +1755,11 @@ class HelpWidget(QtWidgets.QWidget, ScaledSizeHelper):
 
     def goBack(self):
         """ Step back to the previous topic, or Home. """
+
+        # Drop the current page, then show whatever is left on the stack
         if self._history:
             self._history.pop()
+
         if self._history:
             self.browser.setHtml(buildHelpTopic(self.gui, self._history[-1]))
             self.browser.verticalScrollBar().setValue(0)
@@ -1618,11 +1774,17 @@ class HelpWidget(QtWidgets.QWidget, ScaledSizeHelper):
 
 
     def _updateBackButton(self):
+        """ Back is only available when there is a page to go back from. """
         self.back_button.setEnabled(len(self._history) > 0)
 
 
     def onAnchorClicked(self, url):
-        """ Route internal topic links and open external links in the system browser. """
+        """ Route internal topic links and open external links in the system browser.
+
+        Arguments:
+            url: [QUrl] The clicked link, either "topic:<id>" or an http(s) address.
+        """
+
         scheme = url.scheme()
         if scheme in ("http", "https"):
             QtGui.QDesktopServices.openUrl(url)
@@ -1862,13 +2024,12 @@ class DebruijnSequenceManager(QtWidgets.QWidget, ScaledSizeHelper):
                 break
 
     def modifyRow(self, frame, value):
-        """
-        Edit or append row to table with given information.
+        """ Edit or append a row to the table with the given information.
 
-        Args:
-            frame: [int] If frame isn't in table, append new row with this value. Otherwise change
-                        the value of the row with this value.
-            value: [0 or 1]
+        Arguments:
+            frame: [int] If the frame isn't in the table, insert a new row for it (kept sorted by frame).
+                Otherwise change the value of that frame's row.
+            value: [int] 0 or 1, the sequence bit. None is ignored.
         """
 
         if value is None:
@@ -2274,8 +2435,8 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         QtWidgets.QWidget.__init__(self)
         self.gui = gui
 
-        # Stash for coefficients that get hidden when reducing coefficient count
-        # This allows restoring them when toggling flags back
+        # Stash for coefficients that get hidden when reducing the coefficient count, so they can be
+        #   restored when the flags are toggled back
         self._coeff_stash = {
             'x_fwd': {}, 'x_rev': {}, 'y_fwd': {}, 'y_rev': {}
         }
@@ -2339,8 +2500,8 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         box.addWidget(QtWidgets.QLabel("Residuals:"))
 
         # RMSD display label with color coding. Shows the simple px RMSD; the forward/reverse
-        # consistency and held-out overfitting checks run internally on every fit and turn this
-        # label red when either trips (the detailed numbers are printed to the console).
+        #   consistency and held-out overfitting checks run internally on every fit and turn this
+        #   label red when either trips (the detailed numbers are printed to the console)
         self.rmsd_label = QtWidgets.QLabel("--")
         self.rmsd_label.setStyleSheet("font-weight: bold; font-size: 12pt;")
         box.addWidget(self.rmsd_label)
@@ -2564,7 +2725,8 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         info_font.setPointSize(info_font.pointSize() + 2)
         info_font.setBold(True)
         vignetting_info.setFont(info_font)
-        vignetting_info.setStyleSheet("QToolButton { color: #0066cc; border: none; } QToolButton:hover { color: #0044aa; }")
+        vignetting_info.setStyleSheet(
+            "QToolButton { color: #0066cc; border: none; } QToolButton:hover { color: #0044aa; }")
         vignetting_info.setCursor(QtCore.Qt.CursorShape.PointingHandCursor)
         vignetting_info.clicked.connect(self.showVignettingInfo)
         hbox.addWidget(vignetting_info)
@@ -2582,7 +2744,8 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         info_font.setPointSize(info_font.pointSize() + 2)
         info_font.setBold(True)
         vignetting_fixed_info.setFont(info_font)
-        vignetting_fixed_info.setStyleSheet("QToolButton { color: #0066cc; border: none; } QToolButton:hover { color: #0044aa; }")
+        vignetting_fixed_info.setStyleSheet(
+            "QToolButton { color: #0066cc; border: none; } QToolButton:hover { color: #0044aa; }")
         vignetting_fixed_info.setCursor(QtCore.Qt.CursorShape.PointingHandCursor)
         vignetting_fixed_info.clicked.connect(self.showVignettingFixedInfo)
         hbox_fixed.addWidget(vignetting_fixed_info)
@@ -2614,11 +2777,9 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         self.sigRefractionToggled.emit()
 
     def _stashCurrentCoeffs(self):
-        """Stash current coefficient values for later restoration.
+        """ Stash the current non-zero radial coefficients so they can be restored when switching back
+            to a distortion type/flags that need them. No-op for non-radial distortion types. """
 
-        This saves non-zero coefficients to the stash so they can be restored
-        when switching back to a distortion type/flags that need them.
-        """
         pp = self.gui.platepar
 
         # Only works for radial distortion types
@@ -2631,6 +2792,7 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         y_coeffs_fwd = pp.extractRadialCoeffs(pp.y_poly_fwd)
         y_coeffs_rev = pp.extractRadialCoeffs(pp.y_poly_rev)
 
+        # Only stash non-zero values, a zero means the coefficient is unused for the current type
         if x_coeffs_fwd is not None:
             for key, val in x_coeffs_fwd.items():
                 if val != 0.0:
@@ -2646,10 +2808,9 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
                     self._coeff_stash['y_rev'][key] = val
 
     def _restoreCoeffsFromStash(self):
-        """Restore any zero coefficients from the stash.
+        """ Restore stashed coefficient values where the current values are zero and rebuild the
+            platepar polynomials. No-op for non-radial distortion types. """
 
-        This restores stashed coefficient values where current values are zero.
-        """
         pp = self.gui.platepar
 
         # Only works for radial distortion types
@@ -2663,6 +2824,7 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         y_coeffs_rev = pp.extractRadialCoeffs(pp.y_poly_rev)
 
         if x_coeffs_fwd is not None:
+
             # Restore stashed values where current value is zero
             for key, val in self._coeff_stash['x_fwd'].items():
                 if x_coeffs_fwd.get(key, 0.0) == 0.0:
@@ -2686,15 +2848,16 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
             pp.y_poly = pp.y_poly_fwd
 
     def _remapCoeffsWithStash(self, flag_name, new_value):
-        """Remap coefficients when toggling a flag, using the stash to restore hidden coefficients.
+        """ Remap coefficients when toggling a flag, using the stash to restore hidden coefficients.
 
-        This method stashes the current coefficient values before remapping, then restores
-        any values that would otherwise be zeros after toggling back.
+            Stashes the current coefficient values before remapping, then restores any values that would
+            otherwise be zeros after toggling back.
 
         Arguments:
-            flag_name: [str] The flag being changed
-            new_value: [bool] The new value for the flag
+            flag_name: [str] Name of the platepar flag being changed.
+            new_value: [bool] The new value for the flag.
         """
+
         pp = self.gui.platepar
 
         # Only works for radial distortion types
@@ -2712,14 +2875,15 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         self._restoreCoeffsFromStash()
 
     def _changeDistortionTypeWithStash(self, new_dist_type):
-        """Change distortion type while preserving coefficients via stash.
+        """ Change the distortion type while preserving coefficients via the stash.
 
-        This method stashes the current coefficient values before changing the
-        distortion type, then restores any values that would otherwise be zeros.
+            Stashes the current coefficient values before changing the distortion type, then restores
+            any values that would otherwise be zeros.
 
         Arguments:
-            new_dist_type: [str] The new distortion type (e.g., 'radial3-odd', 'radial5-odd')
+            new_dist_type: [str] The new distortion type (e.g. 'radial3-odd', 'radial5-odd').
         """
+
         pp = self.gui.platepar
 
         # Stash current coefficients before changing type (only for radial types)
@@ -2732,7 +2896,10 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         self._restoreCoeffsFromStash()
 
     def onEqualAspectToggled(self):
+        """ Apply the equal aspect checkbox to the platepar, keeping hidden coefficients recoverable. """
+
         new_value = self.eqAspect.isChecked()
+
         # Remap coefficients with stash to preserve/restore values when toggling
         self._remapCoeffsWithStash('equal_aspect', new_value)
 
@@ -2747,7 +2914,11 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         self.sigEqAspectToggled.emit()
 
     def onAsymmetryCorrToggled(self):
+        """ Apply the asymmetry correction checkbox to the platepar, keeping hidden coefficients
+            recoverable. """
+
         new_value = self.asymmetryCorr.isChecked()
+
         # Remap coefficients with stash to preserve/restore values when toggling
         self._remapCoeffsWithStash('asymmetry_corr', new_value)
 
@@ -2762,7 +2933,11 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         self.sigAsymmetryCorrToggled.emit()
 
     def onForceDistortionToggled(self):
+        """ Apply the forced distortion centre checkbox to the platepar, keeping hidden coefficients
+            recoverable. """
+
         new_value = self.fdistortion.isChecked()
+
         # Remap coefficients with stash to preserve/restore values when toggling
         self._remapCoeffsWithStash('force_distortion_centre', new_value)
 
@@ -2814,6 +2989,8 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         self.sigVignettingChanged.emit()
 
     def showVignettingInfo(self):
+        """ Pop up an explanation of the vignetting coefficient and its default values. """
+
         msg = QtWidgets.QMessageBox(self)
         msg.setIcon(QtWidgets.QMessageBox.Icon.Information)
         msg.setWindowTitle("Vignetting Coefficient")
@@ -2831,6 +3008,8 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         msg.exec()
 
     def showVignettingFixedInfo(self):
+        """ Pop up the conditions under which fitting (rather than fixing) the vignetting makes sense. """
+
         msg = QtWidgets.QMessageBox(self)
         msg.setIcon(QtWidgets.QMessageBox.Icon.Information)
         msg.setWindowTitle("Measuring Vignetting Coefficient")
@@ -2859,24 +3038,32 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
 
     def updateRMSD(self, rmsd_img, rmsd_angular, angular_error_label, fwdrev_mismatch=False,
                    overfit=False):
-        """Update the RMSD display with color coding based on pixel RMSD.
+        """ Update the RMSD display with color coding based on the pixel RMSD.
 
-        The label shows the plain RMSD (reverse residual in px and forward residual in angular
-        units). Two health checks run internally on every fit and, when either trips, override the
-        color to red so a good-looking RMSD can't hide a broken fit (the detailed numbers behind
-        both checks are printed to the console):
-            - fwdrev_mismatch: the forward and reverse distortion mappings disagree, so the catalog
-              overlay will be off even though the reverse RMSD looks fine.
-            - overfit: the held-out (cross-validated) RMSD is much worse than in-sample, i.e. the
-              model is fitting centroid noise rather than the true distortion.
+            The label shows the plain RMSD (reverse residual in px and forward residual in angular
+            units). Two health checks run internally on every fit and, when either trips, override the
+            color to red so a good-looking RMSD can't hide a broken fit (the detailed numbers behind
+            both checks are printed to the console).
 
-        Thresholds are normalized to 1280x720 resolution:
-            - < 0.2 px: Excellent (green)
-            - < 0.3 px: Good (light green)
-            - < 0.4 px: Acceptable (yellow)
-            - < 0.5 px: Marginal (orange)
-            - >= 0.5 px: Poor (red)
+            Thresholds are normalized to 1280x720 resolution:
+                - < 0.2 px: Excellent (green)
+                - < 0.3 px: Good (light green)
+                - < 0.4 px: Acceptable (yellow)
+                - < 0.5 px: Marginal (orange)
+                - >= 0.5 px: Poor (red)
+
+        Arguments:
+            rmsd_img: [float] Reverse (image plane) RMSD in pixels.
+            rmsd_angular: [float] Forward (sky) RMSD in the units of angular_error_label.
+            angular_error_label: [str] Unit label for the angular RMSD (e.g. "arcmin").
+
+        Keyword arguments:
+            fwdrev_mismatch: [bool] The forward and reverse distortion mappings disagree, so the catalog
+                overlay will be off even though the reverse RMSD looks fine. False by default.
+            overfit: [bool] The held-out (cross-validated) RMSD is much worse than in-sample, i.e. the
+                model is fitting centroid noise rather than the true distortion. False by default.
         """
+
         text = "{:.2f} px, {:.2f} {:s}".format(rmsd_img, rmsd_angular, angular_error_label)
 
         # Scale thresholds by resolution (reference: 720p)
@@ -2893,7 +3080,7 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         else:
             color = "#DC143C"  # Crimson - poor
 
-        # Internal health checks override the color to red regardless of how good the RMSD looks.
+        # Internal health checks override the color to red regardless of how good the RMSD looks
         flags = []
         if fwdrev_mismatch:
             flags.append("MAPPING MISMATCH")
@@ -2911,7 +3098,8 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         self.sigFitParametersChanged.emit()
 
     def openDistortionDialog(self):
-        """Open the distortion parameters dialog."""
+        """ Open the distortion coefficients dialog, refreshed from the current platepar. """
+
         # Update the dialog with current platepar before showing
         self.distortion_dialog.updatePlatepar(self.gui.platepar)
         self.distortion_dialog.show()
@@ -2951,8 +3139,10 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         self.alt_centre.setValue(self.gui.platepar.alt_centre)
         self.rotation_from_horiz.setValue(self.gui.platepar.rotation_from_horiz)
         self.F_scale.setValue(60/self.gui.platepar.F_scale)
+
         # Update platepar reference in distortion dialog in case a new platepar was loaded
         self.distortion_dialog.updatePlatepar(self.gui.platepar)
+
         self.distortion_type.setCurrentIndex(
             self.gui.platepar.distortion_type_list.index(self.gui.platepar.distortion_type))
         self.extinction_scale.setValue(self.gui.platepar.extinction_scale)
@@ -2982,7 +3172,12 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         self.updateRestoreDefaultsButton()
 
     def isAtDefaults(self):
-        """Check if current settings match the defaults."""
+        """ Check if the current Fit Parameters settings all match the DEFAULT_* values.
+
+        Return:
+            [bool] True if nothing was changed from the defaults.
+        """
+
         pp = self.gui.platepar
         gui = self.gui
         return (gui.fixed_scale == self.DEFAULT_FIXED_SCALE and
@@ -2996,11 +3191,10 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
                 pp.vignetting_fixed == self.DEFAULT_VIGNETTING_FIXED)
 
     def updateRestoreDefaultsButton(self):
-        """Update restore defaults button color based on current settings.
+        """ Colour the Restore Defaults button: green (and disabled) when at defaults, amber when not. """
 
-        Green when at defaults, amber when not at defaults.
-        """
         at_defaults = self.isAtDefaults()
+
         if at_defaults:
             # Green background when at defaults
             self.restore_defaults_button.setStyleSheet(
@@ -3016,12 +3210,14 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         self.restore_defaults_button.setEnabled(not at_defaults)
 
     def onFitOnlyPointingToggled(self):
+        """ Apply the "fit only pointing" checkbox and re-check which fit buttons can be enabled. """
         self.gui.fit_only_pointing = self.fit_only_pointing.isChecked()
         self.updatePairedStars(min_fit_stars=self.gui.getMinFitStars())
         self.sigFitOnlyPointingToggled.emit()
 
     def onRestoreDefaults(self):
-        """Restore all default settings for the Fit Parameters tab."""
+        """ Restore all default settings for the Fit Parameters tab, both in the GUI and the platepar. """
+
         pp = self.gui.platepar
         gui = self.gui
 
@@ -3102,53 +3298,62 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
 
 
     def setFitButtonBusy(self, busy):
-        """Set the Fit button to show busy state.
+        """ Show the Fit button in its busy state (and lock the other fit buttons) or restore it.
 
         Arguments:
             busy: [bool] If True, show busy state. If False, restore normal state.
         """
+
         if busy:
             self.fit_astrometry_button.setText("Fitting...")
             self.fit_astrometry_button.setEnabled(False)
             self.auto_fit_button.setEnabled(False)
+
             # Force visual update
             self.fit_astrometry_button.repaint()
             self.auto_fit_button.repaint()
+
         else:
             self.fit_astrometry_button.setText("Fit")
+
             # Re-enable based on paired stars count
             self.updatePairedStars(min_fit_stars=self.gui.getMinFitStars())
             self.auto_fit_button.setEnabled(True)
 
-
     def setAutoFitButtonBusy(self, busy):
-        """Set the Auto Fit button to show busy state.
+        """ Show the Auto Fit button in its busy state (and lock the other fit buttons) or restore it.
 
         Arguments:
             busy: [bool] If True, show busy state. If False, restore normal state.
         """
+
         if busy:
             self.auto_fit_button.setText("Fitting...")
             self.auto_fit_button.setEnabled(False)
             self.fit_astrometry_button.setEnabled(False)
             self.quick_align_button.setEnabled(False)
+
             # Force visual update
             self.auto_fit_button.repaint()
             self.fit_astrometry_button.repaint()
             self.quick_align_button.repaint()
+
         else:
             self.auto_fit_button.setText("Auto Fit")
             self.auto_fit_button.setEnabled(True)
             self.quick_align_button.setEnabled(True)
+
             # Re-enable fit button based on paired stars count
             self.updatePairedStars(min_fit_stars=self.gui.getMinFitStars())
 
     def setQuickAlignButtonBusy(self, busy):
-        """Set the Quick Align button to show busy state.
+        """ Show the Auto Pointing button in its busy state (and lock the other fit buttons) or restore
+            it.
 
         Arguments:
             busy: [bool] If True, show busy state. If False, restore normal state.
         """
+
         if busy:
             self.quick_align_button.setText("Aligning...")
             self.quick_align_button.setEnabled(False)
@@ -3162,6 +3367,7 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
             self.quick_align_button.setText("Auto Pointing")
             self.quick_align_button.setEnabled(True)
             self.auto_fit_button.setEnabled(True)
+
             # Re-enable fit button based on paired stars count
             self.updatePairedStars(min_fit_stars=self.gui.getMinFitStars())
 
@@ -3279,13 +3485,19 @@ class ArrayTabWidget(QtWidgets.QTabWidget, ScaledSizeHelper):
 
 
 class DistortionDialog(QtWidgets.QDialog, ScaledSizeHelper):
-    """
-    Non-modal dialog for editing lens distortion parameters.
-    Allows manual editing of polynomial coefficients with live preview.
+    """ Non-modal dialog for editing lens distortion parameters.
+
+        Allows manual editing of polynomial coefficients with live preview.
     """
     valueModified = QtCore.pyqtSignal()
 
     def __init__(self, parent, platepar):
+        """
+        Arguments:
+            parent: [QWidget] Parent widget (the SkyFit2 GUI).
+            platepar: [Platepar] Platepar whose coefficients are edited in place.
+        """
+
         super(DistortionDialog, self).__init__(parent)
         self.platepar = platepar
         self.parent_widget = parent
@@ -3329,48 +3541,59 @@ class DistortionDialog(QtWidgets.QDialog, ScaledSizeHelper):
         self.resize(self.scaledWidth(40), self.scaledHeight(30))
 
     def onValueModified(self):
-        """Forward signal when a coefficient is modified."""
+        """ Forward the signal when a coefficient is modified. """
         self.valueModified.emit()
 
     def resetToZero(self):
-        """Reset distortion coefficients, preserving center/offset terms."""
-        # Determine how many leading indices to preserve (center coefficients)
-        # For radial distortion without force_distortion_centre, indices 0 and 1 are center x and y
-        # For polynomial distortion, index 0 is the offset
-        if self.platepar.distortion_type.startswith("radial") and not self.platepar.force_distortion_centre:
+        """ Reset the distortion coefficients to zero, preserving the centre/offset terms. """
+
+        # Determine how many leading indices to preserve (center coefficients). For radial distortion
+        #   without force_distortion_centre, indices 0 and 1 are center x and y, for polynomial
+        #   distortion index 0 is the offset
+        if self.platepar.distortion_type.startswith("radial") \
+            and not self.platepar.force_distortion_centre:
             preserve_count = 2  # Preserve x_poly[0] and x_poly[1] for radial center
         else:
             preserve_count = 1  # Preserve index 0 only
 
         for var in ['x_poly_rev', 'y_poly_rev', 'x_poly_fwd', 'y_poly_fwd']:
             poly = getattr(self.platepar, var)
+
             # For y_poly in radial, all values should be zero (no center there)
             start_idx = preserve_count if var.startswith('x_') else 1
+
             for i in range(start_idx, len(poly)):
                 poly[i] = 0.0
+
         self.fit_parameters.updateValues()
         self.valueModified.emit()
 
     def updatePlatepar(self, platepar):
-        """Update the platepar reference and refresh display."""
+        """ Point the dialog at a (possibly new) platepar and refresh the display.
+
+        Arguments:
+            platepar: [Platepar] Platepar to edit.
+        """
+
         self.platepar = platepar
         self.fit_parameters.platepar = platepar
         self.fit_parameters.changeNumberShown(platepar.poly_length)
         self.fit_parameters.updateValues()
 
     def changeNumberShown(self, n):
-        """Change the number of coefficients shown."""
+        """ Change the number of coefficients shown (see ArrayTabWidget.changeNumberShown). """
         self.fit_parameters.changeNumberShown(n)
 
     def updateValues(self):
-        """Update displayed values from platepar."""
+        """ Update the displayed values from the platepar. """
         self.fit_parameters.updateValues()
 
 
 class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
-    """
-    Widget for testing and adjusting star detection parameters.
-    Allows overriding CALSTARS detection settings to find optimal parameters.
+    """ Widget for testing and adjusting star detection parameters.
+
+        Allows overriding the CALSTARS detection settings to find optimal parameters. The sliders only
+        emit signals, the detection itself is run by the GUI.
     """
     sigRedetectStars = QtCore.pyqtSignal()
     sigRedetectAllImages = QtCore.pyqtSignal()
@@ -3543,53 +3766,76 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
 
 
     def onIntensityThresholdChanged(self, value):
+        """ Show the new intensity threshold slider value and pass it on. """
         self.intensity_threshold_label.setText(str(value))
         self.sigIntensityThresholdChanged.emit(value)
 
     def onNeighborhoodSizeChanged(self, value):
+        """ Show the new neighbourhood size slider value and pass it on. """
         self.neighborhood_size_label.setText(str(value))
         self.sigNeighborhoodSizeChanged.emit(value)
 
     def onMaxStarsChanged(self, value):
+        """ Show the new maximum number of stars slider value and pass it on. """
         self.max_stars_label.setText(str(value))
         self.sigMaxStarsChanged.emit(value)
 
     def onGammaChanged(self, value):
+        """ Convert the integer gamma slider value (gamma*100) to gamma, show it and pass it on. """
         gamma = value / 100.0
         self.gamma_label.setText(f'{gamma:.2f}')
         self.sigGammaChanged.emit(gamma)
 
     def setGammaPreset(self, gamma):
-        """Set gamma to a preset value."""
+        """ Set the gamma slider to a preset value (the slider emits the change itself). """
         self.gamma_slider.setValue(int(gamma * 100))
 
     def onSegmentRadiusChanged(self, value):
+        """ Show the new segment radius slider value and pass it on. """
         self.segment_radius_label.setText(str(value))
         self.sigSegmentRadiusChanged.emit(value)
 
     def onMaxFeatureRatioChanged(self, value):
+        """ Convert the integer slider value (ratio*100) to the max feature ratio, show it and pass it
+            on. """
         ratio = value / 100.0
         self.max_feature_ratio_label.setText(f'{ratio:.2f}')
         self.sigMaxFeatureRatioChanged.emit(ratio)
 
     def onRoundnessThresholdChanged(self, value):
+        """ Convert the integer slider value (threshold*100) to the roundness threshold, show it and
+            pass it on. """
         threshold = value / 100.0
         self.roundness_threshold_label.setText(f'{threshold:.2f}')
         self.sigRoundnessThresholdChanged.emit(threshold)
 
     def onCatalogLMChanged(self):
-        """Handle catalog LM spinbox change."""
+        """ Pass on a catalog limiting magnitude edited in the spinbox. """
         self.sigCatalogLMChanged.emit(self.catalog_lm_spinbox.value())
 
     def setCatalogLM(self, value):
-        """Update the catalog LM spinbox without triggering signal."""
+        """ Update the catalog LM spinbox from the GUI without triggering the change signal.
+
+        Arguments:
+            value: [float] Catalog limiting magnitude.
+        """
         self.catalog_lm_spinbox.blockSignals(True)
         self.catalog_lm_spinbox.setValue(value)
         self.catalog_lm_spinbox.blockSignals(False)
 
     def updateStatus(self, using_override, star_count=None, candidate_count=None):
-        """Update the status label to show current detection source."""
+        """ Update the status label to show the current detection source.
+
+        Arguments:
+            using_override: [bool] True if the override detections are in use instead of CALSTARS.
+
+        Keyword arguments:
+            star_count: [int] Number of override stars, shown if given. None by default.
+            candidate_count: [int] Number of detection candidates, shown if given. None by default.
+        """
+
         pad = self.scaledSpacing(0.3)
+
         if using_override:
             if star_count is not None:
                 text = f'Using override detection ({star_count} stars'
@@ -3606,22 +3852,30 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
             self.status_label.setStyleSheet(f"color: gray; font-size: 9pt; padding: {pad}px;")
 
     def loadFromConfig(self, config):
-        """Initialize sliders from config values."""
+        """ Initialize the sliders from the config values (attributes missing from the config are
+            skipped).
+
+        Arguments:
+            config: [Config] RMS configuration.
+        """
+
         if hasattr(config, 'intensity_threshold'):
-            # Give the threshold slider a bit-depth-appropriate maximum before setting the
-            # value, otherwise a high-bit-depth config threshold is silently clamped to the
-            # pre-existing default slider max (200, an arbitrary ceiling -- the 8-bit threshold
-            # range is nominally 0-255, with realistic values in the tens) at load, and the
-            # user has no headroom to adjust up without first running auto-tune. Raw-ADU
-            # thresholds scale with bit depth (~tens at 8-bit, hundreds-to-thousands at 16-bit),
-            # so use a gentle per-2-bit doubling (8->200, 12->800, 16->3200) and ensure headroom
-            # over the configured value. Never lower the existing max, so 8-bit keeps its 200.
+
+            # Give the threshold slider a bit-depth-appropriate maximum before setting the value,
+            #   otherwise a high-bit-depth config threshold is silently clamped to the pre-existing
+            #   default slider max (200, an arbitrary ceiling -- the 8-bit threshold range is nominally
+            #   0-255, with realistic values in the tens) at load, and the user has no headroom to
+            #   adjust up without first running auto-tune. Raw-ADU thresholds scale with bit depth
+            #   (~tens at 8-bit, hundreds-to-thousands at 16-bit), so use a gentle per-2-bit doubling
+            #   (8->200, 12->800, 16->3200) and ensure headroom over the configured value. Never lower
+            #   the existing max, so 8-bit keeps its 200
             bit_depth = getattr(config, 'bit_depth', 8)
             bitdepth_default_max = 200*2**max(0, (bit_depth - 8)//2)
             thr_max = max(self.intensity_threshold_slider.maximum(), bitdepth_default_max,
                           int(config.intensity_threshold*3))
             self.intensity_threshold_slider.setMaximum(thr_max)
             self.intensity_threshold_slider.setValue(config.intensity_threshold)
+
         if hasattr(config, 'neighborhood_size'):
             self.neighborhood_size_slider.setValue(config.neighborhood_size)
         if hasattr(config, 'max_stars'):
@@ -3637,11 +3891,12 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
 
 
 class BrushCursorItem(pg.GraphicsObject):
-    """Circle outline that follows the mouse in brush mask mode.
+    """ Circle outline that follows the mouse in brush mask mode.
 
-    The radius is in image coordinates (scales with zoom) but the pen is cosmetic
-    (always 1 px on screen) so the outline stays crisp at any zoom level.
+        The radius is in image coordinates (scales with zoom) but the pen is cosmetic (a constant width
+        on screen) so the outline stays crisp at any zoom level.
     """
+
     def __init__(self):
         super().__init__()
         self._radius = 20.0
@@ -3650,27 +3905,32 @@ class BrushCursorItem(pg.GraphicsObject):
         self._pen.setWidth(2)
 
     def setRadius(self, r):
+        """ Set the brush radius in image pixels and schedule a repaint. """
         self._radius = float(r)
         self.prepareGeometryChange()
         self.update()
 
     def setCenter(self, pos):
+        """ Move the circle to the given image position. """
         self.setPos(pos)
 
     def paint(self, painter, option, widget=None):
+        """ Draw the outline circle centred on the item origin. """
         painter.setPen(self._pen)
         painter.setBrush(QtCore.Qt.BrushStyle.NoBrush)
         painter.drawEllipse(QtCore.QPointF(0, 0), self._radius, self._radius)
 
     def boundingRect(self):
+        """ Square around the circle with a small margin for the pen. """
         r = self._radius + 2
         return QtCore.QRectF(-r, -r, 2*r, 2*r)
 
 
 class MaskWidget(QtWidgets.QWidget, ScaledSizeHelper):
-    """
-    Widget for creating and editing mask polygons and brush strokes.
-    Click to add points, right-click to close polygon.
+    """ Widget for creating and editing mask polygons and brush strokes.
+
+        Click to add points, right-click to close a polygon. The widget only holds the controls and
+        emits signals, the mask itself is kept and drawn by the GUI.
     """
     sigDrawModeToggled = QtCore.pyqtSignal()
     sigClearPolygons = QtCore.pyqtSignal()
@@ -3698,8 +3958,7 @@ class MaskWidget(QtWidgets.QWidget, ScaledSizeHelper):
         # Tab help button (top-right)
         self.addCornerHelpButton('mask', "Help: drawing a mask")
 
-        # ── Header ────────────────────────────────────────────────────────────
-
+        ### Header ###
         title = QtWidgets.QLabel('Mask Editor')
         title.setStyleSheet("font-weight: bold; font-size: 11pt;")
         layout.addWidget(title)
@@ -3711,9 +3970,9 @@ class MaskWidget(QtWidgets.QWidget, ScaledSizeHelper):
 
         layout.addSpacing(self.scaledSpacing(0.6))
 
-        # ── Mode selection ────────────────────────────────────────────────────
-        # Draw Polygon and Paint Brush are mutually exclusive modes.
-        # Side-by-side layout makes the exclusivity obvious at a glance.
+        ### Mode selection ###
+        # Draw Polygon and Paint Brush are mutually exclusive modes. The side-by-side layout makes the
+        #   exclusivity obvious at a glance
 
         mode_layout = QtWidgets.QHBoxLayout()
         mode_layout.setSpacing(self.scaledSpacing(0.25))
@@ -3738,7 +3997,7 @@ class MaskWidget(QtWidgets.QWidget, ScaledSizeHelper):
 
         layout.addSpacing(self.scaledSpacing(0.4))
 
-        # ── Brush controls ────────────────────────────────────────────────────
+        ### Brush controls ###
         # These controls are greyed out when polygon mode is active.
         # Brush size is also adjustable via Shift+scroll on the image.
 
@@ -3770,7 +4029,7 @@ class MaskWidget(QtWidgets.QWidget, ScaledSizeHelper):
 
         layout.addSpacing(self.scaledSpacing(0.6))
 
-        # ── Mask operations ───────────────────────────────────────────────────
+        ### Mask operations ###
         # Invert flips the entire mask (both polygons and paint layer).
         # Clear All removes everything; Clear Brush removes only paint strokes.
 
@@ -3793,8 +4052,7 @@ class MaskWidget(QtWidgets.QWidget, ScaledSizeHelper):
 
         layout.addSpacing(self.scaledSpacing(0.6))
 
-        # ── File operations ───────────────────────────────────────────────────
-
+        ### File operations ###
         file_layout = QtWidgets.QHBoxLayout()
         file_layout.setSpacing(self.scaledSpacing(0.25))
 
@@ -3812,8 +4070,7 @@ class MaskWidget(QtWidgets.QWidget, ScaledSizeHelper):
 
         layout.addSpacing(self.scaledSpacing(0.6))
 
-        # ── Display options ───────────────────────────────────────────────────
-
+        ### Display options ###
         self.show_overlay = QtWidgets.QCheckBox('Show Mask Overlay')
         self.show_overlay.setChecked(True)
         self.show_overlay.toggled.connect(self.sigShowOverlayToggled.emit)
@@ -3836,8 +4093,9 @@ class MaskWidget(QtWidgets.QWidget, ScaledSizeHelper):
             self.undo_brush_button.setEnabled(False)
 
     def _updateInstructions(self):
-        """Update instructions text to match the currently active mode."""
+        """ Update the instructions text to match the currently active mode. """
 
+        # The buttons may not exist yet while the widget is still being built
         if hasattr(self, 'brush_button') and self.brush_button.isChecked():
             self.instructions.setText(
                 '<b>Paint Brush mode:</b><br>'
@@ -3858,8 +4116,8 @@ class MaskWidget(QtWidgets.QWidget, ScaledSizeHelper):
                 'Vertices near image border<br>'
                 'will snap to the edge.')
 
+        # No mode active, show a brief overview of the two options
         else:
-            # No mode active — show a brief overview of the two options
             self.instructions.setText(
                 'Select a mode above to start masking.<br><br>'
                 '<b>Draw Polygon</b> — click to place<br>'
@@ -3868,70 +4126,99 @@ class MaskWidget(QtWidgets.QWidget, ScaledSizeHelper):
                 '(left-click) or erase (right-click).')
 
     def onDrawToggled(self):
-        """Handle draw button toggle."""
+        """ Handle the Draw Polygon button toggle. Drawing and painting are mutually exclusive, so
+            switching drawing on also switches the brush off. """
+
         if self.draw_button.isChecked():
             self.draw_button.setText('Drawing... (Space to close)')
             self.draw_button.setStyleSheet("background-color: #FFA500;")
+
+            # Leave brush mode, and tell the GUI about it
             if self.brush_button.isChecked():
                 self.brush_button.setChecked(False)
                 self.brush_button.setText('Paint Brush')
                 self.brush_button.setStyleSheet("")
                 self.sigBrushModeToggled.emit()
+
         else:
             self.draw_button.setText('Draw Polygon')
             self.draw_button.setStyleSheet("")
+
         self._updateInstructions()
         self._setBrushSectionEnabled(self.brush_button.isChecked())
         self.sigDrawModeToggled.emit()
 
     def setDrawMode(self, enabled):
-        """Set draw mode from external call."""
+        """ Set the draw mode from the GUI (e.g. a keyboard shortcut) without emitting the toggle
+            signal.
+
+        Arguments:
+            enabled: [bool] True to enter polygon drawing mode.
+        """
+
         self.draw_button.setChecked(enabled)
+
         if enabled:
             self.draw_button.setText('Drawing... (Space to close)')
             self.draw_button.setStyleSheet("background-color: #FFA500;")
         else:
             self.draw_button.setText('Draw Polygon')
             self.draw_button.setStyleSheet("")
+
         self._updateInstructions()
         self._setBrushSectionEnabled(self.brush_button.isChecked())
 
     def onBrushToggled(self):
-        """Handle brush button toggle."""
+        """ Handle the Paint Brush button toggle. Drawing and painting are mutually exclusive, so
+            switching the brush on also switches drawing off. """
+
         if self.brush_button.isChecked():
             self.brush_button.setText('Painting...')
             self.brush_button.setStyleSheet("background-color: #00BFFF;")
+
+            # Leave draw mode, and tell the GUI about it
             if self.draw_button.isChecked():
                 self.draw_button.setChecked(False)
                 self.draw_button.setText('Draw Polygon')
                 self.draw_button.setStyleSheet("")
                 self.sigDrawModeToggled.emit()
+
         else:
             self.brush_button.setText('Paint Brush')
             self.brush_button.setStyleSheet("")
+
         self._updateInstructions()
         self._setBrushSectionEnabled(self.brush_button.isChecked())
         self.sigBrushModeToggled.emit()
 
     def setBrushMode(self, enabled):
-        """Set brush mode from external call."""
+        """ Set the brush mode from the GUI (e.g. a keyboard shortcut) without emitting the toggle
+            signal.
+
+        Arguments:
+            enabled: [bool] True to enter brush painting mode.
+        """
+
         self.brush_button.setChecked(enabled)
+
         if enabled:
             self.brush_button.setText('Painting...')
             self.brush_button.setStyleSheet("background-color: #00BFFF;")
         else:
             self.brush_button.setText('Paint Brush')
             self.brush_button.setStyleSheet("")
+
         self._updateInstructions()
         self._setBrushSectionEnabled(enabled)
 
     def _onBrushSizeChanged(self, value):
-        """Handle brush size slider change."""
+        """ Show the new brush size slider value and pass it on. """
         self.brush_size_value.setText(str(value))
         self.sigBrushSizeChanged.emit(value)
 
     def onClearAll(self):
-        """Confirm and clear all polygons."""
+        """ Ask for confirmation, then request that all polygons be cleared. """
+
         reply = QtWidgets.QMessageBox.question(self, 'Clear All',
             'Delete all mask polygons?',
             QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No,
@@ -3940,7 +4227,8 @@ class MaskWidget(QtWidgets.QWidget, ScaledSizeHelper):
             self.sigClearPolygons.emit()
 
     def onClearBrush(self):
-        """Confirm and clear all brush strokes."""
+        """ Ask for confirmation, then request that all brush strokes be cleared. """
+
         reply = QtWidgets.QMessageBox.question(self, 'Clear Brush Strokes',
             'Delete all brush strokes?',
             QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No,
@@ -3949,11 +4237,22 @@ class MaskWidget(QtWidgets.QWidget, ScaledSizeHelper):
             self.sigClearBrushStrokes.emit()
 
     def updateStatus(self, polygon_count, drawing_points=0, has_brush_strokes=False):
-        """Update the status label."""
+        """ Update the status label from the mask state and the unsaved flag.
 
+        Arguments:
+            polygon_count: [int] Number of closed polygons in the mask.
+
+        Keyword arguments:
+            drawing_points: [int] Number of vertices of the polygon being drawn, 0 if none. 0 by
+                default.
+            has_brush_strokes: [bool] True if the brush layer has any strokes. False by default.
+        """
+
+        # A polygon in progress takes precedence over the save state
         if drawing_points > 0:
             self.status_label.setText(f'Drawing: {drawing_points} points')
             self.status_label.setStyleSheet("color: orange; font-size: 9pt;")
+
         else:
             has_data = polygon_count > 0 or has_brush_strokes
 
@@ -3971,19 +4270,32 @@ class MaskWidget(QtWidgets.QWidget, ScaledSizeHelper):
                 self.status_label.setStyleSheet("color: gray; font-size: 9pt;")
 
     def setUndoEnabled(self, enabled):
-        """Enable or disable the undo brush button."""
+        """ Enable or disable the undo brush stroke button. """
         self.undo_brush_button.setEnabled(enabled)
 
     def setUnsaved(self, unsaved=True):
-        """Mark polygons as having unsaved changes."""
+        """ Mark the mask as having unsaved changes (enables the Save button).
+
+        Keyword arguments:
+            unsaved: [bool] True by default.
+        """
         self.unsaved = unsaved
         self.save_button.setEnabled(unsaved)
         self.sigUnsavedChanged.emit()
 
     def setFlatAvailable(self, available, use_by_default=True):
-        """Set whether flat.bmp is available and optionally use it by default."""
+        """ Set whether a flat is available as the mask editing background.
+
+        Arguments:
+            available: [bool] True if flat.bmp was found.
+
+        Keyword arguments:
+            use_by_default: [bool] Check the "use flat" box when the flat is available. True by default.
+        """
+
         self.flat_available = available
         self.use_flat.setEnabled(available)
+
         if available:
             self.use_flat.setText('Use Flat as Background')
             if use_by_default:
@@ -4264,12 +4576,16 @@ class SettingsWidget(QtWidgets.QWidget, ScaledSizeHelper):
         self.catalog_stars.setChecked(self.gui.catalog_stars_visible)
 
     def updateShowSpectralType(self):
+        """ Sync the checkbox with the GUI state. """
         self.show_spectral_type.setChecked(self.gui.show_spectral_type)
 
     def updateShowStarNames(self):
+        """ Sync the checkbox with the GUI state. """
         self.show_star_names.setChecked(self.gui.show_star_names)
 
     def updateGeoMarkerScale(self):
+        """ Sync the geo point marker size control with the GUI state, hiding it when there are no geo
+            points. """
 
         # The control is only relevant when geo points are loaded, which can change when a state is
         #   loaded into an already constructed GUI
@@ -4283,6 +4599,7 @@ class SettingsWidget(QtWidgets.QWidget, ScaledSizeHelper):
         self.geo_marker_spinbox.blockSignals(False)
 
     def updateShowConstellations(self):
+        """ Sync the checkbox with the GUI state. """
         self.show_constellations.setChecked(self.gui.show_constellations)
 
     def updateShowCalStars(self):
@@ -4325,6 +4642,7 @@ class SettingsWidget(QtWidgets.QWidget, ScaledSizeHelper):
         self.auto_compute_sat_tracks.setEnabled(self.gui.show_sattracks)
 
     def updateAutoComputeSatTracks(self):
+        """ Sync the checkbox with the GUI state. """
         self.auto_compute_sat_tracks.setChecked(self.gui.auto_compute_sattracks)
 
     def updateTLELabel(self, text):
@@ -4340,6 +4658,7 @@ class SettingsWidget(QtWidgets.QWidget, ScaledSizeHelper):
             self.gui.tab.star_detection.setCatalogLM(self.gui.cat_lim_mag)
 
     def updateApparentMagCorr(self):
+        """ Sync the checkbox with the GUI state. """
         self.apparent_mag_corr.setChecked(self.gui.apparent_mag_corr_enabled)
 
     def onGammaChanged(self):
@@ -4368,8 +4687,11 @@ class SettingsWidget(QtWidgets.QWidget, ScaledSizeHelper):
         self.gui.tab.star_detection.setCatalogLM(self.gui.cat_lim_mag)
 
     def populateCatalogList(self):
-        """Populate the catalog combo box with available catalogs."""
+        """ Fill the catalog combo box with the catalogs found in the catalog directory, selecting the
+            one from the config. """
+
         import os
+
         self.catalog_combo.blockSignals(True)
         self.catalog_combo.clear()
 
@@ -4395,16 +4717,20 @@ class SettingsWidget(QtWidgets.QWidget, ScaledSizeHelper):
         self.catalog_combo.blockSignals(False)
 
     def onCatalogChanged(self, catalog_name):
-        """Handle catalog selection change."""
+        """ Switch the star catalog in the config and reload the catalog stars.
+
+        Arguments:
+            catalog_name: [str] Catalog file name, or "(Config Default)" for the one from the config.
+        """
+
+        # Reset to the catalog the config was started with
         if catalog_name == "(Config Default)":
-            # Reset to config default - reload config value
             self.gui.config.star_catalog_file = self.gui._original_catalog_file
         else:
             self.gui.config.star_catalog_file = catalog_name
 
-        # Restore the config's original band ratios so the magnitude filter
-        # uses the same bands as on startup. Both GMN (.bin) and Sky2000 (.npy)
-        # catalogs handle these ratios correctly internally.
+        # Restore the config's original band ratios so the magnitude filter uses the same bands as on
+        #   startup. Both GMN (.bin) and Sky2000 (.npy) catalogs handle these ratios correctly internally
         self.gui.config.star_catalog_band_ratios = self.gui._original_band_ratios
 
         # Reload catalog stars with new catalog
@@ -4415,7 +4741,8 @@ class SettingsWidget(QtWidgets.QWidget, ScaledSizeHelper):
         self.sigCatalogChanged.emit(catalog_name)
 
     def updateCatalogSelection(self):
-        """Update the combo box to match the current catalog."""
+        """ Update the combo box to match the current catalog without triggering a reload. """
+
         self.catalog_combo.blockSignals(True)
         current_catalog = self.gui.config.star_catalog_file
         index = self.catalog_combo.findText(current_catalog)
