@@ -97,32 +97,46 @@ def read(directory, filename, array=False, full_filename=False, memmap=True):
     # file is closed. Without the copy, returning memmap-backed views keeps a file handle
     # open per FF; reading many FFs in sequence and retaining the arrays then exhausts the
     # process file descriptor limit ("too many open files"). See issue #406.
-    with fits.open(file_path, memmap=memmap) as hdulist:
+    #
+    # 16-bit FF files are stored with BZERO, which astropy cannot memory-map (ValueError), so they
+    # are read again without memmap
+    use_memmap = memmap
+    while True:
+        try:
+            with fits.open(file_path, memmap=use_memmap) as hdulist:
 
-        # Read the header
-        head = hdulist[0].header
+                # Read the header
+                head = hdulist[0].header
 
-        # Read in the data from the header
-        ff.nrows = head['NROWS']
-        ff.ncols = head['NCOLS']
-        ff.nbits = head['NBITS']
-        ff.nframes = head['NFRAMES']
-        ff.first = head['FIRST']
-        ff.camno = head['CAMNO']
-        ff.fps = head['FPS']
+                # Read in the data from the header
+                ff.nrows = head['NROWS']
+                ff.ncols = head['NCOLS']
+                ff.nbits = head['NBITS']
+                ff.nframes = head['NFRAMES']
+                ff.first = head['FIRST']
+                ff.camno = head['CAMNO']
+                ff.fps = head['FPS']
 
-        # Check for the DATE-OBS field and read datetime from filename it if it doesn't exist
-        if 'DATE-OBS' in head:
-            ff.starttime = head['DATE-OBS']
-        else:
-            ff.starttime = filenameToDatetimeStr(filename, iso8601=True)
+                # Check for the DATE-OBS field and read datetime from filename it if it doesn't exist
+                if 'DATE-OBS' in head:
+                    ff.starttime = head['DATE-OBS']
+                else:
+                    ff.starttime = filenameToDatetimeStr(filename, iso8601=True)
 
-        # Read in the image data, copying it so it remains valid (and detached from the
-        # memmap) after the file is closed
-        ff.maxpixel = hdulist[1].data.copy()
-        ff.maxframe = hdulist[2].data.copy()
-        ff.avepixel = hdulist[3].data.copy()
-        ff.stdpixel = hdulist[4].data.copy()
+                # Read in the image data, copying it so it remains valid (and detached from the
+                # memmap) after the file is closed
+                ff.maxpixel = hdulist[1].data.copy()
+                ff.maxframe = hdulist[2].data.copy()
+                ff.avepixel = hdulist[3].data.copy()
+                ff.stdpixel = hdulist[4].data.copy()
+
+            break
+
+        except ValueError:
+            if not use_memmap:
+                raise
+
+            use_memmap = False
 
     if array:
         ff.array = np.dstack([ff.maxpixel, ff.maxframe, ff.avepixel, ff.stdpixel])

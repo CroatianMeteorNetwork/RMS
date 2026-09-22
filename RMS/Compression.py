@@ -31,7 +31,8 @@ from RMS.VideoExtraction import Extractor
 from RMS.Formats import FFfile, FFStruct
 from RMS.Formats import FieldIntensities
 from RMS.Logger import getLogger, getLoggingQueue, initChildProcess, flushChildLogging
-from RMS.Misc import UTCFromTimestamp, frameBufferShape, AtomicFlag, stableDoubleRead
+from RMS.Misc import UTCFromTimestamp, frameBufferShape, AtomicFlag, stableDoubleRead, \
+    setParentDeathSignal, exitIfParentGone, startParentWatch
 from RMS.Routines.Image import saveImage
 
 # Import Cython functions
@@ -106,6 +107,9 @@ class Compressor(multiprocessing.Process):
         # Grab the logging queue on the parent side so the child can re-attach logging
         # under the 'forkserver'/'spawn' start methods (handlers are not inherited there)
         self.logging_queue = getLoggingQueue()
+
+        # PID of the logical parent, captured here because __init__ runs in the parent (see run())
+        self.parent_pid = os.getpid()
 
 
     def compress(self, frames):
@@ -233,28 +237,22 @@ class Compressor(multiprocessing.Process):
 
         log.debug('Compression joined!')
 
-        # If process didn't exit cleanly, send graceful interrupt
+        # Give a compressor that is exiting normally time to finish: run() sets run_exited and
+        # then flushes its final log records (up to 2 s) before os._exit(). No SIGINT here - the
+        # compressor ignores SIGINT (initChildProcess), so it would change nothing
         if self.is_alive():
-            log.info("Compression process still alive, sending interrupt signal...")
+            self.join(5)
+
+        # If the process still didn't exit, terminate it
+        if self.is_alive():
+            log.warning("Compression process still alive, forcing termination")
             try:
-                if self.pid:
-                    os.kill(self.pid, signal.SIGINT)
-                
-                # Wait for graceful shutdown
-                self.join(5)
-                
-                if self.is_alive():
-                    log.warning("Compression process still alive after interrupt, forcing termination")
-                    self.terminate()
-                else:
-                    log.info("Compression process exited gracefully after interrupt")
+                self.terminate()
 
             except ProcessLookupError:
                 log.info("Compression process already terminated")
             except Exception as e:
-                log.error("Error during graceful compression shutdown: {}".format(e))
-                log.info("Falling back to terminate()")
-                self.terminate()
+                log.error("Terminating the compression process failed: {}".format(e))
 
             # A bare join() would hang forever on a process that ignores SIGTERM -
             # bound the wait and escalate to SIGKILL (review finding)
@@ -305,8 +303,18 @@ class Compressor(multiprocessing.Process):
         """ Retrieve frames from list, convert, compress and save them.
         """
 
+        # Die with the parent: an orphaned compressor would keep running after StartCapture was
+        # killed, alongside the compressor of the respawned instance
+        setParentDeathSignal()
+
         # Re-establish logging and signal handling in the child (no-op under 'fork')
         initChildProcess(self.logging_queue, self.config)
+
+        # The parent may have died before the death signal was armed
+        exitIfParentGone(self.parent_pid, 'Compressor')
+
+        # Keep watching it: under forkserver the death signal does not fire (see startParentWatch)
+        startParentWatch(self.parent_pid, 'Compressor', self.exit, grace=45.0)
 
         # Rebuild numpy views over the shared frame buffers in this process. Under forkserver/spawn
         # the views cannot be inherited, so build them here from the shared multiprocessing.Array

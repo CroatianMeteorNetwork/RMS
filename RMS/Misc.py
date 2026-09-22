@@ -349,6 +349,100 @@ def setParentDeathSignal(sig=9):
         log.debug("setParentDeathSignal: unavailable (%s)", e)
 
 
+def exitIfParentGone(parent_pid, name):
+    """ Exit this child process at once if its logical parent process no longer exists.
+
+        Complements setParentDeathSignal() for the window before the death signal was armed: a
+        parent that died between the fork and the prctl() call never delivers the signal, and
+        the getppid() == 1 check there misses subreapers and the 'forkserver' start method,
+        where the OS parent is not the logical parent. Call it right after setParentDeathSignal()
+        with the PID captured in the child's __init__ (which runs in the parent).
+
+        POSIX only: on Windows signal 0 is CTRL_C_EVENT, so os.kill(pid, 0) is not a liveness
+        probe there.
+
+    Arguments:
+        parent_pid: [int] PID of the logical parent, or None to skip the check.
+        name: [str] Process name used in the log message.
+    """
+
+    # Nothing to check against
+    if (os.name != 'posix') or (parent_pid is None):
+        return
+
+    # ESRCH only: an EPERM from a live parent owned by another user must not look like a death
+    try:
+        os.kill(parent_pid, 0)
+    except ProcessLookupError:
+        log.warning("%s: parent process %d is gone, exiting orphan", name, parent_pid)
+        flushChildLogging(timeout=1.0)
+        os._exit(0)
+    except OSError:
+        pass
+
+
+def startParentWatch(parent_pid, name, exit_flag, grace=15.0, interval=1.0):
+    """ Watch the logical parent from a daemon thread and stop this child when the parent is gone.
+
+        setParentDeathSignal() only covers the 'fork' start method: under 'forkserver' (selected
+        on Python 3.14+) the OS parent is the fork server, which outlives a SIGKILLed StartCapture
+        for as long as its children run, so the death signal never fires and the orphans would
+        keep capturing next to a respawned instance. The thread probes the parent PID recorded in
+        __init__ every interval seconds (a cheap os.kill(pid, 0), off the frame hot path, and it
+        also works while the child's main thread is blocked in I/O or a long wait). When the
+        parent is gone it sets the child's exit flag, so the child shuts down through its normal
+        exit path, and if the child has not exited after the grace period, it flushes the log
+        and exits hard.
+
+        POSIX only (os.kill(pid, 0) is not a liveness probe on Windows); a no-op elsewhere.
+
+    Arguments:
+        parent_pid: [int] PID of the logical parent, or None to skip watching.
+        name: [str] Process name used in the log messages.
+        exit_flag: [AtomicFlag] The child's exit flag, set when the parent is gone.
+
+    Keyword arguments:
+        grace: [float] Seconds to wait for the normal exit before exiting hard. 15 by default.
+        interval: [float] Seconds between two parent probes. 1 by default.
+
+    Return:
+        [Thread] The watcher thread, or None if not started.
+    """
+
+    if (os.name != 'posix') or (parent_pid is None):
+        return None
+
+    def _watch():
+        """ Probe the parent until it is gone, then stop the child. """
+
+        # Wait for the parent to disappear. ESRCH only: an EPERM from a live parent owned by
+        #   another user must not look like a death
+        while True:
+            time.sleep(interval)
+            try:
+                os.kill(parent_pid, 0)
+            except ProcessLookupError:
+                break
+            except OSError:
+                pass
+
+        # Ask the child to stop through its normal exit path
+        log.warning("%s: parent process %d is gone, stopping the orphan", name, parent_pid)
+        exit_flag.set()
+
+        # Exit hard if the normal path does not finish in time (e.g. blocked in device I/O)
+        time.sleep(grace)
+        log.warning("%s: orphan still running %.0f s after the stop request, exiting", name, grace)
+        flushChildLogging(timeout=1.0)
+        os._exit(0)
+
+    watcher = threading.Thread(target=_watch, name='rms-parent-watch')
+    watcher.daemon = True
+    watcher.start()
+
+    return watcher
+
+
 def interruptibleWait(seconds):
     """ Wait for the specified number of seconds, but allow interruption by Ctrl+C.
 
@@ -424,11 +518,15 @@ def runWithTimeout(func, args=(), kwargs=None, timeout=60, on_late_completion=No
     if kwargs is None:
         kwargs = {}
 
-    # Results are shared with the worker thread through mutable containers
+    # Results are shared with the worker thread through mutable containers. The lock makes "the
+    # function completed" and "the caller gave up" mutually exclusive decisions: without it the
+    # worker could finish between the caller's check and the caller setting timed_out, so neither
+    # side ran on_late_completion while the caller reported a timeout (leaking e.g. an SSH client)
     result = [None]
     exception = [None]
     timed_out = [False]
     completed = threading.Event()
+    state_lock = threading.Lock()
 
     def target():
         """ Run the function in the worker thread and record its result or exception. """
@@ -438,10 +536,12 @@ def runWithTimeout(func, args=(), kwargs=None, timeout=60, on_late_completion=No
         except Exception as e:
             exception[0] = e
         finally:
-            completed.set()
+            with state_lock:
+                completed.set()
+                late = timed_out[0]
 
             # The caller has already given up - run the late cleanup here
-            if timed_out[0] and on_late_completion is not None:
+            if late and (on_late_completion is not None):
                 log.debug("runWithTimeout: function completed after caller timed out; running late cleanup")
                 try:
                     on_late_completion()
@@ -455,13 +555,16 @@ def runWithTimeout(func, args=(), kwargs=None, timeout=60, on_late_completion=No
     # Wait for completion or timeout
     completed.wait(timeout)
 
-    if completed.is_set():
+    with state_lock:
+
         # Function completed (possibly with exception)
-        return (True, result[0], exception[0])
-    else:
-        # Timed out — flag thread so on_late_completion fires if it finishes later
+        if completed.is_set():
+            return (True, result[0], exception[0])
+
+        # Timed out - flag the thread so on_late_completion fires if it finishes later
         timed_out[0] = True
-        return (False, None, None)
+
+    return (False, None, None)
 
 
 def mkdirP(path):
