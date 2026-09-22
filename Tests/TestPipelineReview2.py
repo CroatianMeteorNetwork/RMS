@@ -315,3 +315,45 @@ def testCaptureChildrenArmOrphanProtection(rel_path, class_name):
     run_calls = calledNames(methods['run'])
     assert 'setParentDeathSignal' in run_calls
     assert 'exitIfParentGone' in run_calls
+
+
+# ---------------------------------------------------------------------------
+# Item 4: stopCapture must not join an unkillable capture process without a bound
+
+class _UnkillableCapture(object):
+    """ Stand-in for a BufferedCapture stuck in D-state: alive through terminate and SIGKILL. """
+
+    def __init__(self):
+
+        from RMS.Misc import AtomicFlag
+
+        self.exit = AtomicFlag()
+        self.pid = 999999999
+        self.raw_frame_saver = None
+        self.dropped_frames = multiprocessing.Value('i', 7, lock=False)
+        self.join_timeouts = []
+
+    def is_alive(self):
+        return True
+
+    def terminate(self):
+        pass
+
+    def join(self, timeout=None):
+        self.join_timeouts.append(timeout)
+
+
+def testStopCaptureAbandonsUnkillableProcess(monkeypatch):
+    """ stopCapture must give up on a process that survives SIGKILL instead of joining forever. """
+
+    import RMS.BufferedCapture as bcm
+
+    # Skip the real waits and the real SIGKILL
+    monkeypatch.setattr(bcm.time, 'sleep', lambda s: None)
+    monkeypatch.setattr(bcm.os, 'kill', lambda pid, sig: None)
+
+    fake = _UnkillableCapture()
+    assert bcm.BufferedCapture.stopCapture(fake) == 7
+
+    assert fake.join_timeouts, 'stopCapture never joined'
+    assert all(t is not None for t in fake.join_timeouts), 'unbounded join: {}'.format(fake.join_timeouts)
