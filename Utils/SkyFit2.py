@@ -15288,7 +15288,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
             return os.path.join(dir_path, item)
 
-        # No .cal files at all — offer to browse or create blank
+        # No .cal files at all, so offer to browse or to create a blank one
         msg = QtWidgets.QMessageBox(self)
         msg.setWindowTitle("No platepar found")
         msg.setText("No platepar files were found in the folder.")
@@ -18762,7 +18762,7 @@ if __name__ == '__main__':
 
     elif cml_args.input_path is not None:
 
-        # CLI provided an input path — load directly
+        # The CLI provided an input path, so load it directly
         input_path = cml_args.input_path.replace('"', '')
         if os.path.isfile(input_path):
             dir_path = os.path.dirname(input_path)
@@ -18804,7 +18804,7 @@ if __name__ == '__main__':
 
     else:
 
-        # No input path — launch empty PlateTool, File Manager opens automatically
+        # No input path, so launch an empty PlateTool where the File Manager opens automatically
         plate_tool = PlateTool(beginning_time=beginning_time, fps=cml_args.fps,
             gamma=cml_args.gamma, use_fr_files=cml_args.fr, geo_points_input=cml_args.geopoints,
             nobg=cml_args.nobg, peribg=cml_args.peribg, flipud=cml_args.flipud,
