@@ -1565,18 +1565,32 @@ class RightOptionsTab(QtWidgets.QTabWidget, ScaledSizeHelper):
         else:
             self.setFixedWidth(self.minimizedWidth())
 
+    def showTab(self, index):
+        """ Open the tab at the given index, maximized, running the GUI's tab change logic (e.g. leaving
+            the Mask tab) through sigTabChanged. Unlike a click on the current tab, this never collapses
+            the panel.
+
+        Arguments:
+            index: [int] Index of the tab to open.
+        """
+
+        old_index = self.index
+
+        self.setCurrentIndex(index)
+        self.index = index
+        self.maximized = True
+        self.applyTabWidth()
+
+        if index != old_index:
+            self.sigTabChanged.emit(old_index, index)
+
     def onTabBarClicked(self, index):
         """ Switch to the clicked tab, or collapse/expand the panel when the current tab is clicked
             again. """
 
-        old_index = self.index
-
         # Clicking another tab always shows it maximized (wider for Help, normal for everything else)
         if index != self.index:
-            self.index = index
-            self.maximized = True
-            self.applyTabWidth()
-            self.sigTabChanged.emit(old_index, index)
+            self.showTab(index)
 
         # Clicking the current tab toggles the panel
         else:
@@ -1587,7 +1601,28 @@ class RightOptionsTab(QtWidgets.QTabWidget, ScaledSizeHelper):
         self.gui.view_widget.setFocus()
 
 
+    def _showWidgetAfterRebuild(self, widget):
+        """ Show the given tab page again after the tabs were rebuilt for another mode.
+
+            The tab indices change when the mode-specific tabs are removed and inserted, so the page is
+            looked up by the widget instead of reusing the old index (which would open another tab
+            without its enter/leave logic running). Falls back to the first tab if the page is gone.
+
+        Arguments:
+            widget: [QWidget] The page that was shown before the rebuild, or None.
+        """
+
+        index = self.indexOf(widget) if widget is not None else -1
+        if index < 0:
+            index = 0
+
+        self.index = index
+        self.setCurrentIndex(index)
+        self.applyTabWidth()
+
     def onSkyFit(self):
+
+        current_widget = self.widget(self.index)
 
         # Remove ManualReduction-specific tabs
         self.removeTabText('Debruijn')
@@ -1597,9 +1632,11 @@ class RightOptionsTab(QtWidgets.QTabWidget, ScaledSizeHelper):
         self.insertTab(2, self.geolocation, "Station")
         self.settings.onSkyFit()
 
-        self.setCurrentIndex(self.index)
+        self._showWidgetAfterRebuild(current_widget)
 
     def onManualReduction(self):
+
+        current_widget = self.widget(self.index)
 
         # Remove Skyfit-specific tabs
         self.removeTabText("Fit Parameters")
@@ -1610,7 +1647,7 @@ class RightOptionsTab(QtWidgets.QTabWidget, ScaledSizeHelper):
         if self.gui.img.img_handle.input_type == 'dfn':
             self.insertTab(1, self.debruijn, 'Debruijn')
 
-        self.setCurrentIndex(self.index)
+        self._showWidgetAfterRebuild(current_widget)
 
     def removeTabText(self, text):
         """
@@ -2436,10 +2473,8 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         self.gui = gui
 
         # Stash for coefficients that get hidden when reducing the coefficient count, so they can be
-        #   restored when the flags are toggled back
-        self._coeff_stash = {
-            'x_fwd': {}, 'x_rev': {}, 'y_fwd': {}, 'y_rev': {}
-        }
+        #   restored when the flags are toggled back. It belongs to one platepar object only
+        self.resetCoeffStash()
 
         full_layout = QtWidgets.QVBoxLayout()
         full_layout.setContentsMargins(*self.scaledMargins(0.5, 0.25))
@@ -2776,9 +2811,31 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         self.updateRestoreDefaultsButton()
         self.sigRefractionToggled.emit()
 
+    def resetCoeffStash(self):
+        """ Forget the stashed coefficients and tie the stash to the current platepar.
+
+            Must be done whenever another platepar is loaded, otherwise the zero coefficients of the new
+            platepar would be filled with the old platepar's values, which would then be saved.
+        """
+
+        self._coeff_stash = {
+            'x_fwd': {}, 'x_rev': {}, 'y_fwd': {}, 'y_rev': {}
+        }
+        self._coeff_stash_platepar = getattr(self.gui, 'platepar', None)
+
+
+    def _checkCoeffStashOwner(self):
+        """ Reset the stash if the GUI platepar is not the one the stash was filled from. """
+
+        if self._coeff_stash_platepar is not getattr(self.gui, 'platepar', None):
+            self.resetCoeffStash()
+
+
     def _stashCurrentCoeffs(self):
         """ Stash the current non-zero radial coefficients so they can be restored when switching back
             to a distortion type/flags that need them. No-op for non-radial distortion types. """
+
+        self._checkCoeffStashOwner()
 
         pp = self.gui.platepar
 
@@ -2792,24 +2849,51 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         y_coeffs_fwd = pp.extractRadialCoeffs(pp.y_poly_fwd)
         y_coeffs_rev = pp.extractRadialCoeffs(pp.y_poly_rev)
 
-        # Only stash non-zero values, a zero means the coefficient is unused for the current type
+        # Only stash non-zero values, a zero means the coefficient is unused for the current type. With a
+        #   forced distortion centre the centre is not a fitted value (whatever extractRadialCoeffs reports
+        #   for it), so it must not replace a stashed free centre
         if x_coeffs_fwd is not None:
-            for key, val in x_coeffs_fwd.items():
-                if val != 0.0:
-                    self._coeff_stash['x_fwd'][key] = val
-            for key, val in x_coeffs_rev.items():
-                if val != 0.0:
-                    self._coeff_stash['x_rev'][key] = val
-            for key, val in y_coeffs_fwd.items():
-                if val != 0.0:
-                    self._coeff_stash['y_fwd'][key] = val
-            for key, val in y_coeffs_rev.items():
-                if val != 0.0:
-                    self._coeff_stash['y_rev'][key] = val
+            for stash_key, coeffs in (('x_fwd', x_coeffs_fwd), ('x_rev', x_coeffs_rev),
+                                      ('y_fwd', y_coeffs_fwd), ('y_rev', y_coeffs_rev)):
+                for key, val in coeffs.items():
+                    if pp.force_distortion_centre and (key in ('x0', 'y0')):
+                        continue
+                    if val != 0.0:
+                        self._coeff_stash[stash_key][key] = val
+
+    @staticmethod
+    def _isEmptyCoeff(pp, key, val):
+        """ Check if a radial coefficient holds no fitted value and may be restored from the stash.
+
+            Zero means unused. For the distortion centre, the forced centre value (0.5/(res/2), what
+            CyFunctions uses with force_distortion_centre, and what extractRadialCoeffs may report then)
+            is not a fitted value either.
+
+        Arguments:
+            pp: [Platepar] The platepar.
+            key: [str] Logical coefficient name ('x0', 'y0', 'k1', ...).
+            val: [float] Current value.
+
+        Return:
+            [bool] True if the value can be replaced by the stashed one.
+        """
+
+        if val == 0.0:
+            return True
+
+        if key == 'x0':
+            return bool(np.isclose(val, 0.5/(pp.X_res/2.0)))
+
+        if key == 'y0':
+            return bool(np.isclose(val, 0.5/(pp.Y_res/2.0)))
+
+        return False
 
     def _restoreCoeffsFromStash(self):
         """ Restore stashed coefficient values where the current values are zero and rebuild the
             platepar polynomials. No-op for non-radial distortion types. """
+
+        self._checkCoeffStashOwner()
 
         pp = self.gui.platepar
 
@@ -2825,25 +2909,22 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
 
         if x_coeffs_fwd is not None:
 
-            # Restore stashed values where current value is zero
-            for key, val in self._coeff_stash['x_fwd'].items():
-                if x_coeffs_fwd.get(key, 0.0) == 0.0:
-                    x_coeffs_fwd[key] = val
-            for key, val in self._coeff_stash['x_rev'].items():
-                if x_coeffs_rev.get(key, 0.0) == 0.0:
-                    x_coeffs_rev[key] = val
-            for key, val in self._coeff_stash['y_fwd'].items():
-                if y_coeffs_fwd.get(key, 0.0) == 0.0:
-                    y_coeffs_fwd[key] = val
-            for key, val in self._coeff_stash['y_rev'].items():
-                if y_coeffs_rev.get(key, 0.0) == 0.0:
-                    y_coeffs_rev[key] = val
+            # Restore stashed values where the current value holds no fitted value
+            for stash_key, coeffs in (('x_fwd', x_coeffs_fwd), ('x_rev', x_coeffs_rev),
+                                      ('y_fwd', y_coeffs_fwd), ('y_rev', y_coeffs_rev)):
+                for key, val in self._coeff_stash[stash_key].items():
+                    if self._isEmptyCoeff(pp, key, coeffs.get(key, 0.0)):
+                        coeffs[key] = val
 
             # Rebuild coefficient arrays with restored values
             pp.x_poly_fwd = pp.buildRadialCoeffs(x_coeffs_fwd, pp.distortion_type)
             pp.x_poly_rev = pp.buildRadialCoeffs(x_coeffs_rev, pp.distortion_type)
             pp.y_poly_fwd = pp.buildRadialCoeffs(y_coeffs_fwd, pp.distortion_type)
             pp.y_poly_rev = pp.buildRadialCoeffs(y_coeffs_rev, pp.distortion_type)
+
+            # Never leave arrays of another length than the distortion type needs
+            pp.padDictParams()
+
             pp.x_poly = pp.x_poly_fwd
             pp.y_poly = pp.y_poly_fwd
 
@@ -2889,11 +2970,23 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         # Stash current coefficients before changing type (only for radial types)
         self._stashCurrentCoeffs()
 
+        # Switching between polynomial and radial, or between the all and the odd radial powers, makes
+        #   setDistortionType reset the parameters: the k slots then mean other powers, so the stash
+        #   must not be put back
+        old_dist_type = pp.distortion_type
+        forced_reset = (new_dist_type[:4] != old_dist_type[:4])
+        if new_dist_type.startswith("radial") and (new_dist_type[-3:] != old_dist_type[-3:]):
+            forced_reset = True
+
         # Change the distortion type
         pp.setDistortionType(new_dist_type, reset_params=False)
 
+        if forced_reset:
+            self.resetCoeffStash()
+
         # Restore any zeros from stash (only for radial types)
-        self._restoreCoeffsFromStash()
+        else:
+            self._restoreCoeffsFromStash()
 
     def onEqualAspectToggled(self):
         """ Apply the equal aspect checkbox to the platepar, keeping hidden coefficients recoverable. """
@@ -3143,8 +3236,18 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         # Update platepar reference in distortion dialog in case a new platepar was loaded
         self.distortion_dialog.updatePlatepar(self.gui.platepar)
 
+        # A different platepar was loaded, the stashed coefficients are not its own
+        self._checkCoeffStashOwner()
+
+        # Only show the platepar's distortion type. Letting the combo box fire onIndexChanged here
+        #   would apply a distortion type change (and the stash) to the platepar that was just loaded
+        self.distortion_type.blockSignals(True)
         self.distortion_type.setCurrentIndex(
             self.gui.platepar.distortion_type_list.index(self.gui.platepar.distortion_type))
+        self.distortion_type.blockSignals(False)
+        self.fit_parameters.changeNumberShown(self.gui.platepar.poly_length)
+        self.fit_parameters.updateValues()
+
         self.extinction_scale.setValue(self.gui.platepar.extinction_scale)
         
         self.vignetting_coeff.setValue(self.gui.platepar.vignetting_coeff)
@@ -3548,22 +3651,32 @@ class DistortionDialog(QtWidgets.QDialog, ScaledSizeHelper):
         """ Reset the distortion coefficients to zero, preserving the centre/offset terms. """
 
         # Determine how many leading indices to preserve (center coefficients). For radial distortion
-        #   without force_distortion_centre, indices 0 and 1 are center x and y, for polynomial
-        #   distortion index 0 is the offset
-        if self.platepar.distortion_type.startswith("radial") \
-            and not self.platepar.force_distortion_centre:
-            preserve_count = 2  # Preserve x_poly[0] and x_poly[1] for radial center
+        #   without force_distortion_centre, indices 0 and 1 are center x and y. With a forced centre
+        #   there is no centre in the array and index 0 is already a distortion term. For polynomial
+        #   distortion index 0 is the offset (in both X and Y)
+        is_radial = self.platepar.distortion_type.startswith("radial")
+        if is_radial:
+            preserve_count = 0 if self.platepar.force_distortion_centre else 2
         else:
-            preserve_count = 1  # Preserve index 0 only
+            preserve_count = 1
 
         for var in ['x_poly_rev', 'y_poly_rev', 'x_poly_fwd', 'y_poly_fwd']:
             poly = getattr(self.platepar, var)
 
             # For y_poly in radial, all values should be zero (no center there)
-            start_idx = preserve_count if var.startswith('x_') else 1
+            if var.startswith('x_'):
+                start_idx = preserve_count
+            else:
+                start_idx = 0 if is_radial else 1
 
             for i in range(start_idx, len(poly)):
                 poly[i] = 0.0
+
+        # The reset coefficients must not come back from the Fit Parameters stash on a later flag or
+        #   distortion type change
+        param_manager = getattr(getattr(self.parent_widget, 'tab', None), 'param_manager', None)
+        if param_manager is not None:
+            param_manager.resetCoeffStash()
 
         self.fit_parameters.updateValues()
         self.valueModified.emit()
@@ -3851,9 +3964,37 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
             self.status_label.setText('Using original CALSTARS')
             self.status_label.setStyleSheet(f"color: gray; font-size: 9pt; padding: {pad}px;")
 
+    def _setSliderQuietly(self, key, slider_value, label_text):
+        """ Show a value on a slider without emitting its change signal, widening the slider range if
+            the value is outside it.
+
+        Arguments:
+            key: [str] Slider key in self.sliders.
+            slider_value: [int] Slider position.
+            label_text: [str] Text of the value label.
+        """
+
+        slider = self.sliders[key]
+
+        # Never clamp a config value to the slider range, the range follows the value instead
+        if slider_value > slider.maximum():
+            slider.setMaximum(slider_value)
+        if slider_value < slider.minimum():
+            slider.setMinimum(slider_value)
+
+        slider.blockSignals(True)
+        slider.setValue(slider_value)
+        slider.blockSignals(False)
+
+        self.slider_labels[key].setText(label_text)
+
     def loadFromConfig(self, config):
         """ Initialize the sliders from the config values (attributes missing from the config are
             skipped).
+
+            Only the sliders are updated: no change signal is emitted, so the overrides keep the exact
+            config values instead of the slider's integer steps (e.g. int(0.57999*100) = 57), and loading
+            the config does not mark it as modified.
 
         Arguments:
             config: [Config] RMS configuration.
@@ -3874,20 +4015,25 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
             thr_max = max(self.intensity_threshold_slider.maximum(), bitdepth_default_max,
                           int(config.intensity_threshold*3))
             self.intensity_threshold_slider.setMaximum(thr_max)
-            self.intensity_threshold_slider.setValue(config.intensity_threshold)
+            self._setSliderQuietly('intensity_threshold', int(round(config.intensity_threshold)),
+                                   str(config.intensity_threshold))
 
         if hasattr(config, 'neighborhood_size'):
-            self.neighborhood_size_slider.setValue(config.neighborhood_size)
+            self._setSliderQuietly('neighborhood_size', int(round(config.neighborhood_size)),
+                                   str(config.neighborhood_size))
         if hasattr(config, 'max_stars'):
-            self.max_stars_slider.setValue(config.max_stars)
+            self._setSliderQuietly('max_stars', int(round(config.max_stars)), str(config.max_stars))
         if hasattr(config, 'gamma'):
-            self.gamma_slider.setValue(int(config.gamma * 100))
+            self._setSliderQuietly('gamma', int(round(config.gamma*100)), '{:.2f}'.format(config.gamma))
         if hasattr(config, 'segment_radius'):
-            self.segment_radius_slider.setValue(config.segment_radius)
+            self._setSliderQuietly('segment_radius', int(round(config.segment_radius)),
+                                   str(config.segment_radius))
         if hasattr(config, 'max_feature_ratio'):
-            self.max_feature_ratio_slider.setValue(int(config.max_feature_ratio * 100))
+            self._setSliderQuietly('max_feature_ratio', int(round(config.max_feature_ratio*100)),
+                                   '{:.2f}'.format(config.max_feature_ratio))
         if hasattr(config, 'roundness_threshold'):
-            self.roundness_threshold_slider.setValue(int(config.roundness_threshold * 100))
+            self._setSliderQuietly('roundness_threshold', int(round(config.roundness_threshold*100)),
+                                   '{:.2f}'.format(config.roundness_threshold))
 
 
 class BrushCursorItem(pg.GraphicsObject):

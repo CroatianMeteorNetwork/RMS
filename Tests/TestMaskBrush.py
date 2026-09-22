@@ -310,3 +310,55 @@ class TestMaskResizeConsistency(object):
         composite = compositeMaskLayers(scaled_polygons, None, 200, 160)
 
         assert not np.array_equal(composite, resized)
+
+
+
+class TestMaskDecompositionHolesAndGray:
+    """ The decomposition binarises like RMS and represents unmasked holes with polygons. """
+
+    def test_gray_pixels_are_unmasked(self):
+        """ RMS only masks pixels equal to 0, so gray pixels must come out unmasked. """
+
+        mask = np.full((80, 100), 255, dtype=np.uint8)
+        mask[10:30, 10:30] = 0
+        mask[50:70, 50:70] = 128
+
+        polygons, paint_layer = decomposeMaskImage(mask)
+        composite = compositeMaskLayers(polygons, paint_layer, 100, 80)
+
+        assert np.array_equal(composite, np.where(mask > 0, 255, 0).astype(np.uint8))
+
+
+    def test_all_sky_mask_hole_is_a_polygon(self):
+        """ A masked ring around an unmasked sky disc is described by the polygons, not by an erase layer
+            the size of the sky. """
+
+        mask = np.zeros((720, 1280), dtype=np.uint8)
+        cv2.circle(mask, (640, 360), 340, 255, -1)
+
+        polygons, paint_layer = decomposeMaskImage(mask)
+
+        # Exact round trip
+        assert np.array_equal(compositeMaskLayers(polygons, paint_layer, 1280, 720), mask)
+
+        # Without the paint layer (Clear Brush) the sky stays unmasked apart from boundary pixels
+        polygons_only = compositeMaskLayers(polygons, None, 1280, 720)
+        assert np.mean(polygons_only != mask) < 0.005
+        assert polygons_only[360, 640] == 255
+
+
+    def test_holes_and_islands_round_trip(self):
+        """ Several holes and a masked island inside a hole survive a round trip. """
+
+        mask = np.zeros((300, 400), dtype=np.uint8)
+        cv2.circle(mask, (200, 150), 120, 255, -1)
+        cv2.circle(mask, (200, 150), 20, 0, -1)
+        cv2.rectangle(mask, (0, 0), (60, 60), 255, -1)
+        cv2.rectangle(mask, (10, 10), (50, 50), 0, -1)
+        cv2.circle(mask, (370, 270), 15, 255, -1)
+
+        polygons, paint_layer = decomposeMaskImage(mask)
+
+        assert np.array_equal(compositeMaskLayers(polygons, paint_layer, 400, 300), mask)
+        polygons_only = compositeMaskLayers(polygons, None, 400, 300)
+        assert np.mean(polygons_only != mask) < 0.01

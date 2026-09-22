@@ -268,6 +268,35 @@ def photomLineMinimize(params, px_sum, radius, catalog_mags, fixed_vignetting, w
 
 
 
+# The S/N saved in the CALSTARS files is capped at this value
+CALSTARS_SNR_CAP = 99.99
+
+
+def limitingMagnitudeExcludeMask(snr_arr, saturated=None):
+    """ Flag the stars whose S/N does not follow their flux, for the limiting magnitude fit.
+
+        The S/N is capped at CALSTARS_SNR_CAP in the CALSTARS files, and saturated stars have a clipped
+        flux.
+
+    Arguments:
+        snr_arr: [ndarray] Signal-to-noise ratio per star.
+
+    Keyword arguments:
+        saturated: [ndarray] Per star, True (or the number of saturated pixels > 0) if saturated. None
+            (default) if unknown.
+
+    Return:
+        exclude_mask: [ndarray of bool] True for the stars to leave out of the fit.
+    """
+
+    exclude_mask = np.asarray(snr_arr, dtype=np.float64) >= CALSTARS_SNR_CAP
+
+    if saturated is not None:
+        exclude_mask |= np.asarray(saturated, dtype=np.float64) > 0
+
+    return exclude_mask
+
+
 def limitingMagnitude(mags, snr_arr, snr_targets=(5, 10), exclude_mask=None):
     """ Fit log10(S/N) = a*mag + b and return limiting magnitudes at given S/N targets.
 

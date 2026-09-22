@@ -336,12 +336,79 @@ def maskRasterResiduals(mask_img, mask_polygons):
 
 
 
+def binariseMaskImage(mask_img):
+    """ Binarise a mask image the way RMS applies it: only 0 is masked, any other value is unmasked.
+
+    Arguments:
+        mask_img: [ndarray] uint8 mask image.
+
+    Return:
+        binary: [ndarray] uint8 mask image with only 0 (masked) and 255 (unmasked).
+    """
+
+    return np.where(mask_img > 0, 255, 0).astype(np.uint8)
+
+
+
+def _simplifyContour(contour, epsilon_frac):
+    """ Simplify a contour with approxPolyDP and return its points.
+
+    Arguments:
+        contour: [ndarray] OpenCV contour.
+        epsilon_frac: [float] approxPolyDP tolerance as a fraction of the contour length.
+
+    Return:
+        points: [list] List of (x, y) float points.
+    """
+
+    epsilon = epsilon_frac*cv2.arcLength(contour, True)
+    approx = cv2.approxPolyDP(contour, epsilon, True)
+
+    return [(float(pt[0][0]), float(pt[0][1])) for pt in approx]
+
+
+
+def _spliceHole(outer, hole):
+    """ Join a hole to its outer boundary with a zero-width bridge, giving one keyhole polygon.
+
+        The bridge connects the closest pair of vertices. Both lie on masked pixels (the contours trace
+        the masked pixels on either side of the masked ring), so filling the keyhole polygon masks the
+        ring and leaves the hole unmasked.
+
+    Arguments:
+        outer: [list] (x, y) points of the outer boundary (possibly already holding spliced holes).
+        hole: [list] (x, y) points of the hole boundary.
+
+    Return:
+        polygon: [list] (x, y) points of the keyhole polygon.
+    """
+
+    outer_arr = np.array(outer)
+    hole_arr = np.array(hole)
+
+    # Closest pair of vertices
+    dist = np.hypot(outer_arr[:, None, 0] - hole_arr[None, :, 0], outer_arr[:, None, 1] - hole_arr[None, :, 1])
+    i, j = np.unravel_index(np.argmin(dist), dist.shape)
+
+    # Walk the outer boundary to vertex i, go around the hole starting and ending at vertex j, come back
+    #   to vertex i and continue along the outer boundary
+    hole_loop = list(hole[j:]) + list(hole[:j]) + [hole[j]]
+
+    return list(outer[:i + 1]) + hole_loop + list(outer[i:])
+
+
+
 def decomposeMaskImage(mask_img, epsilon_frac=0.002):
     """ Split a mask image into editable polygons plus a paint layer holding the raster residuals.
 
-        Masked regions are traced as contours and simplified with approxPolyDP. Whatever the simplified
-        polygons don't reproduce (brush strokes, boundary pixels rounded away) is captured in the paint
-        layer so the mask survives a save/load round trip without pixel loss.
+        Masked regions are traced as contours and simplified with approxPolyDP. Unmasked holes inside a
+        masked region (e.g. the sky disc of an all-sky mask, whose masked ring covers the frame edge) are
+        joined to their outer boundary as keyhole polygons, so the polygons alone describe the mask and
+        the hole is not left to a frame-sized erase layer. Whatever the simplified polygons don't
+        reproduce (brush strokes, boundary pixels rounded away) is captured in the paint layer so the
+        mask survives a save/load round trip without pixel loss.
+
+        The image is binarised the way RMS applies masks first: only 0 is masked.
 
     Arguments:
         mask_img: [ndarray] uint8 mask image, 0 = masked, 255 = unmasked.
@@ -356,16 +423,38 @@ def decomposeMaskImage(mask_img, epsilon_frac=0.002):
             paint_layer: [ndarray or None] Raster residuals, None if the polygons reproduce the image.
     """
 
-    # Trace the masked (value 0) regions
+    mask_img = binariseMaskImage(mask_img)
+
+    # Trace the masked (value 0) regions with their holes (two-level hierarchy: the outer boundaries of
+    #   the masked regions, and the boundaries of the unmasked holes in them)
     inverted = cv2.bitwise_not(mask_img)
-    contours, _ = cv2.findContours(inverted, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    contours, hierarchy = cv2.findContours(inverted, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
 
     polygons = []
-    for contour in contours:
-        epsilon = epsilon_frac*cv2.arcLength(contour, True)
-        approx = cv2.approxPolyDP(contour, epsilon, True)
-        points = [(float(pt[0][0]), float(pt[0][1])) for pt in approx]
-        if len(points) >= 3:
+    if hierarchy is not None:
+
+        hierarchy = hierarchy[0]
+
+        for idx, contour in enumerate(contours):
+
+            # Only start from the outer boundaries, holes have a parent
+            if hierarchy[idx][3] >= 0:
+                continue
+
+            points = _simplifyContour(contour, epsilon_frac)
+            if len(points) < 3:
+                continue
+
+            # Join every hole of this region into the polygon
+            child = hierarchy[idx][2]
+            while child >= 0:
+
+                hole = _simplifyContour(contours[child], epsilon_frac)
+                if len(hole) >= 3:
+                    points = _spliceHole(points, hole)
+
+                child = hierarchy[child][0]
+
             polygons.append(points)
 
     return polygons, maskRasterResiduals(mask_img, polygons)
