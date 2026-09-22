@@ -114,3 +114,27 @@ def testCoverageMatchFractionEmptyCatalog():
 
     assert n_possible == 0
     assert fraction == 0.0
+
+
+def testNeighbourPhotometryAveragingReplacesDegenerateZeroPoint():
+    """ An FF with a degenerate photometric fit (stddev 0, mag_lev 10 from the initial guess) must not
+        contribute to the neighbourhood average, but must receive it.
+    """
+
+    from types import SimpleNamespace
+
+    from RMS.Astrometry.ApplyRecalibrate import averageNeighbourPhotometry
+
+    calstars_ffs = ['FF_0', 'FF_1', 'FF_2', 'FF_3']
+    recalibrated = {
+        'FF_1': SimpleNamespace(mag_lev=11.0, mag_lev_stddev=0.1),
+        'FF_2': SimpleNamespace(mag_lev=10.0, mag_lev_stddev=0.0),
+        'FF_3': SimpleNamespace(mag_lev=11.2, mag_lev_stddev=0.1),
+    }
+
+    averageNeighbourPhotometry(recalibrated, ['FF_2'], calstars_ffs)
+
+    # The average only uses FF_1 and FF_3, and all three FFs receive it
+    for ff_name in calstars_ffs[1:]:
+        assert np.isclose(recalibrated[ff_name].mag_lev, 11.1)
+        assert recalibrated[ff_name].mag_lev_stddev > 0

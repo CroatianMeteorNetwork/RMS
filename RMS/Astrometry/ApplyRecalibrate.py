@@ -802,6 +802,103 @@ def recalibrateSelectedFF(dir_path, ff_file_names, calstars_data, config, lim_ma
     return recalibrated_platepars
 
 
+def averageNeighbourPhotometry(recalibrated_platepars, ff_names, calstars_ffs,
+                               neighbourhood_size=RECALIBRATE_NEIGHBOURHOOD_SIZE):
+    """ Average the photometric offsets of recalibrated platepars within a neighbourhood of FF files.
+
+        For every given FF, the offsets of the recalibrated FFs around it (in the CALSTARS order) are
+        averaged and the average with the combined standard deviation is written to all of them. FFs
+        without a usable photometric solution (non-finite values, or a zero standard deviation of a
+        degenerate fit) do not contribute to the average, but they receive it, so that they do not keep
+        a bad zero point.
+
+    Arguments:
+        recalibrated_platepars: [dict] FF name -> recalibrated Platepar, updated in place.
+        ff_names: [list] FF files whose neighbourhoods are averaged (e.g. the FFs with detections).
+        calstars_ffs: [list] FF names in the CALSTARS order, which defines the neighbourhoods.
+
+    Keyword arguments:
+        neighbourhood_size: [int] Number of FFs in the neighbourhood. RECALIBRATE_NEIGHBOURHOOD_SIZE by
+            default.
+
+    Return:
+        None
+    """
+
+    # Go through the list of FF files
+    for ff_name in ff_names:
+
+        # Make sure the FF was successfully recalibrated
+        if ff_name not in recalibrated_platepars:
+            continue
+
+        # Find the index of the given FF file in the list of calstars
+        ff_indx = calstars_ffs.index(ff_name)
+
+        # Collect the photometric offsets and standard deviations of the usable neighbours, and all the
+        #   neighbours which will receive the average
+        photom_offset_tmp_list = []
+        photom_offset_std_tmp_list = []
+        neighboring_ffs = []
+        for k in range(-(neighbourhood_size // 2), neighbourhood_size // 2 + 1):
+
+            k_indx = ff_indx + k
+
+            if (k_indx > 0) and (k_indx < len(calstars_ffs)):
+
+                # Get the name of the FF file
+                ff_name_tmp = calstars_ffs[k_indx]
+
+                # Check that the neighboring FF was successfully recalibrated
+                if ff_name_tmp not in recalibrated_platepars:
+                    continue
+
+                # Every recalibrated neighbour receives the average
+                neighboring_ffs.append(ff_name_tmp)
+
+                # Get the computed photometric offset and stddev
+                mag_lev_tmp = recalibrated_platepars[ff_name_tmp].mag_lev
+                mag_lev_stddev_tmp = recalibrated_platepars[ff_name_tmp].mag_lev_stddev
+
+                # Only use neighbours with a usable photometric solution for the average. Averaging in a
+                #   non-finite value would make the average non-finite and, as the average is written back
+                #   to all neighbours, the non-finite value would spread to all FF files of the night
+                #   through overlapping neighbourhoods. A zero standard deviation marks a degenerate fit
+                #   (not calibrated, e.g. the initial guess of the fit), which is skipped too
+                if not (np.isfinite(mag_lev_tmp) and np.isfinite(mag_lev_stddev_tmp)):
+                    continue
+
+                if mag_lev_stddev_tmp <= 0:
+                    continue
+
+                photom_offset_tmp_list.append(mag_lev_tmp)
+                photom_offset_std_tmp_list.append(mag_lev_stddev_tmp)
+
+        # If no neighbour had a usable photometric solution, keep the individual values as they are
+        if len(photom_offset_tmp_list) == 0:
+            log.warning('No finite photometric offsets among the neighbours of {:s}, skipping the '
+                        'photometric offset averaging!'.format(ff_name))
+            continue
+
+        # Compute the new photometric offset and improved standard deviation (assume equal sample size)
+        #   Source: https://stats.stackexchange.com/questions/55999/is-it-possible-to-find-the-combined-standard-deviation
+        photom_offset_new = np.mean(photom_offset_tmp_list)
+        photom_offset_std_new = np.sqrt(
+            np.sum(
+                [
+                    st ** 2 + (mt - photom_offset_new) ** 2
+                    for mt, st in zip(photom_offset_tmp_list, photom_offset_std_tmp_list)
+                ]
+            )
+            / len(photom_offset_tmp_list)
+        )
+
+        # Assign the new photometric offset and standard deviation to all neighbouring FFs
+        for ff_name_tmp in neighboring_ffs:
+            recalibrated_platepars[ff_name_tmp].mag_lev = photom_offset_new
+            recalibrated_platepars[ff_name_tmp].mag_lev_stddev = photom_offset_std_new
+
+
 def recalibrateIndividualFFsAndApplyAstrometry(
     dir_path, ftpdetectinfo_path, calstars_data, config, platepar, 
     generate_plot=True, load_all=False
@@ -992,76 +1089,8 @@ def recalibrateIndividualFFsAndApplyAstrometry(
 
         ### Average out photometric offsets within the given neighbourhood size ###
 
-        # Go through the list of FF files with detections
-        for meteor_entry in meteor_list:
-
-            ff_name = meteor_entry[0]
-
-            # Make sure the FF was successfully recalibrated
-            if ff_name in recalibrated_platepars:
-
-                # Find the index of the given FF file in the list of calstars
-                ff_indx = calstars_ffs.index(ff_name)
-
-                # Compute the average photometric offset and the improved standard deviation using all
-                #   neighbors
-                photom_offset_tmp_list = []
-                photom_offset_std_tmp_list = []
-                neighboring_ffs = []
-                for k in range(-(RECALIBRATE_NEIGHBOURHOOD_SIZE // 2), RECALIBRATE_NEIGHBOURHOOD_SIZE // 2 + 1):
-
-                    k_indx = ff_indx + k
-
-                    if (k_indx > 0) and (k_indx < len(calstars_ffs)):
-
-                        # Get the name of the FF file
-                        ff_name_tmp = calstars_ffs[k_indx]
-
-                        # Check that the neighboring FF was successfully recalibrated
-                        if ff_name_tmp in recalibrated_platepars:
-
-                            # Get the computed photometric offset and stddev
-                            mag_lev_tmp = recalibrated_platepars[ff_name_tmp].mag_lev
-                            mag_lev_stddev_tmp = recalibrated_platepars[ff_name_tmp].mag_lev_stddev
-
-                            # Only use neighbours with a usable photometric solution. Averaging in a
-                            #   non-finite value would make the average non-finite and, as the average is
-                            #   written back to all neighbours, the non-finite value would spread to all
-                            #   FF files of the night through overlapping neighbourhoods. A zero standard
-                            #   deviation marks a degenerate fit (not calibrated), which is skipped too
-                            if not (np.isfinite(mag_lev_tmp) and np.isfinite(mag_lev_stddev_tmp)):
-                                continue
-
-                            if mag_lev_stddev_tmp <= 0:
-                                continue
-
-                            photom_offset_tmp_list.append(mag_lev_tmp)
-                            photom_offset_std_tmp_list.append(mag_lev_stddev_tmp)
-                            neighboring_ffs.append(ff_name_tmp)
-
-                # If no neighbour had a usable photometric solution, keep the individual values as they are
-                if len(photom_offset_tmp_list) == 0:
-                    log.warning('No finite photometric offsets among the neighbours of {:s}, skipping the '
-                                'photometric offset averaging!'.format(ff_name))
-                    continue
-
-                # Compute the new photometric offset and improved standard deviation (assume equal sample size)
-                #   Source: https://stats.stackexchange.com/questions/55999/is-it-possible-to-find-the-combined-standard-deviation
-                photom_offset_new = np.mean(photom_offset_tmp_list)
-                photom_offset_std_new = np.sqrt(
-                    np.sum(
-                        [
-                            st ** 2 + (mt - photom_offset_new) ** 2
-                            for mt, st in zip(photom_offset_tmp_list, photom_offset_std_tmp_list)
-                        ]
-                    )
-                    / len(photom_offset_tmp_list)
-                )
-
-                # Assign the new photometric offset and standard deviation to all FFs used for computation
-                for ff_name_tmp in neighboring_ffs:
-                    recalibrated_platepars[ff_name_tmp].mag_lev = photom_offset_new
-                    recalibrated_platepars[ff_name_tmp].mag_lev_stddev = photom_offset_std_new
+        averageNeighbourPhotometry(recalibrated_platepars, [entry[0] for entry in meteor_list],
+                                   calstars_ffs)
 
 
         # Add the recalibrated platepars to the list of all recalibrated platepars
