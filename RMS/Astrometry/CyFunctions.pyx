@@ -1132,9 +1132,16 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
             a2 = 0.0
             index_offset += 2
 
-        # Distortion coeffs
+        # Distortion coeffs. Only read the ones present in the array - radial3-odd has k1 only, so reading
+        #   k2 unconditionally went one past the end (bounds checking is off)
+        k2 = 0.0
+        k3 = 0.0
+        k4 = 0.0
+
         k1 = x_poly_rev[5 - index_offset]
-        k2 = x_poly_rev[6 - index_offset]
+
+        if x_poly_rev.shape[0] > (6 - index_offset):
+            k2 = x_poly_rev[6 - index_offset]
 
         if x_poly_rev.shape[0] > (7 - index_offset):
             k3 = x_poly_rev[7 - index_offset]
@@ -1491,9 +1498,16 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
             index_offset += 2
 
 
-        # Distortion coeffs
+        # Distortion coeffs. Only read the ones present in the array - radial3-odd has k1 only, so reading
+        #   k2 unconditionally went one past the end (bounds checking is off)
+        k2 = 0.0
+        k3 = 0.0
+        k4 = 0.0
+
         k1 = x_poly_fwd[5 - index_offset]
-        k2 = x_poly_fwd[6 - index_offset]
+
+        if x_poly_fwd.shape[0] > (6 - index_offset):
+            k2 = x_poly_fwd[6 - index_offset]
 
         if x_poly_fwd.shape[0] > (7 - index_offset):
             k3 = x_poly_fwd[7 - index_offset]

@@ -465,3 +465,30 @@ def testNNFitHandlesZeroIntensities():
 
     assert result is not None
     assert len(result[0]) > 0.5*len(img_stars)
+
+
+@pytest.mark.parametrize("flag_state", [(True, True, False), (False, False, True)])
+def testRadial3OddMatchesRadial5OddWithZeroK2(flag_state):
+    """ radial3-odd (k1 only, the array ends there) must project exactly like radial5-odd with k2 = 0. """
+
+    projections = []
+    for dist_type in ["radial3-odd", "radial5-odd"]:
+
+        pp = _radialPlatepar(dist_type)
+        pp.force_distortion_centre, pp.equal_aspect, pp.asymmetry_corr = flag_state
+        pp.setDistortionType(dist_type, reset_params=True)
+
+        # Same k1 in both, the extra radial5-odd k2 is zero
+        coeffs = {'x0': 0.001, 'y0': -0.002, 'xy': 0.003, 'a1': 0.002, 'a2': 0.1, 'k1': 0.05}
+        pp.x_poly_fwd = pp.buildRadialCoeffs(coeffs)
+        pp.x_poly_rev = pp.buildRadialCoeffs(dict(coeffs, k1=-0.05))
+        pp.y_poly_fwd = pp.x_poly_fwd.copy()
+        pp.y_poly_rev = pp.x_poly_rev.copy()
+        pp.x_poly = pp.x_poly_fwd
+        pp.y_poly = pp.y_poly_fwd
+
+        assert len(pp.x_poly_fwd) == pp.poly_length
+        projections.append(_projection(pp))
+
+    assert np.array_equal(projections[0][0], projections[1][0])
+    assert np.array_equal(projections[0][1], projections[1][1])
