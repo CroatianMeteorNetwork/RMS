@@ -989,3 +989,39 @@ def testFFfits16BitReadWithMemmap(tmp_path):
     assert ff_read.maxpixel.dtype == np.uint16
     assert np.array_equal(ff_read.maxpixel, ff.maxpixel)
     assert np.array_equal(ff_read.stdpixel, ff.stdpixel)
+
+
+# ---------------------------------------------------------------------------
+# Item 18: FRbin write/read round trip without leaking the file handle
+
+def testFRbinWriteReadRoundTrip(tmp_path):
+    """ write() must produce a file read() parses back, and read() must close its file. """
+
+    import numpy as np
+    from RMS.Formats import FRbin
+
+    fr = FRbin.fr_struct()
+    fr.lines = 1
+    fr.frameNum = [2]
+    fr.yc = [[10, 11]]
+    fr.xc = [[20, 21]]
+    fr.t = [[5, 6]]
+    fr.size = [[2, 2]]
+    fr.frames = [[np.array([[1, 2], [3, 4]], dtype=np.uint8), np.array([[5, 6], [7, 8]], dtype=np.uint8)]]
+
+    file_name = 'FR_XX0001_20260101_000000_000_0000000.bin'
+    FRbin.write(fr, str(tmp_path), file_name)
+
+    def openFds():
+        return len(os.listdir('/proc/self/fd')) if os.path.isdir('/proc/self/fd') else 0
+
+    n_fds = openFds()
+    fr_read = FRbin.read(str(tmp_path), file_name)
+    assert openFds() == n_fds
+
+    assert fr_read.lines == 1
+    assert list(fr_read.frameNum) == [2]
+    assert fr_read.yc == [[10, 11]]
+    assert fr_read.xc == [[20, 21]]
+    assert fr_read.t == [[5, 6]]
+    assert np.array_equal(fr_read.frames[0][1], fr.frames[0][1])

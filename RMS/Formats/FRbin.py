@@ -167,35 +167,38 @@ def read(dir_path, filename):
 
     """
     if filename[:2] == "FR":
-        fid = open(os.path.join(dir_path, filename), "rb")
+        file_path = os.path.join(dir_path, filename)
     else:
-        fid = open(os.path.join(dir_path, "FR_" + filename + ".bin"), "rb")
+        file_path = os.path.join(dir_path, "FR_" + filename + ".bin")
 
     fr = fr_struct()
 
-    fr.lines = np.fromfile(fid, dtype=np.uint32, count=1)[0]
+    # Read the file, closing it even if it is truncated
+    with open(file_path, "rb") as fid:
 
-    for i in range(fr.lines):
-        frameNum = np.fromfile(fid, dtype=np.uint32, count=1)[0]
-        yc = []
-        xc = []
-        t = []
-        size = []
-        frames = []
+        fr.lines = np.fromfile(fid, dtype=np.uint32, count=1)[0]
 
-        for z in range(frameNum):
-            yc.append(int(np.fromfile(fid, dtype=np.uint32, count=1)[0]))
-            xc.append(int(np.fromfile(fid, dtype=np.uint32, count=1)[0]))
-            t.append(int(np.fromfile(fid, dtype=np.uint32, count=1)[0]))
-            size.append(int(np.fromfile(fid, dtype=np.uint32, count=1)[0]))
-            frames.append(np.reshape(np.fromfile(fid, dtype=np.uint8, count=size[-1]**2), (size[-1], size[-1])))
+        for i in range(fr.lines):
+            frameNum = np.fromfile(fid, dtype=np.uint32, count=1)[0]
+            yc = []
+            xc = []
+            t = []
+            size = []
+            frames = []
 
-        fr.frameNum.append(frameNum)
-        fr.yc.append(yc)
-        fr.xc.append(xc)
-        fr.t.append(t)
-        fr.size.append(size)
-        fr.frames.append(frames)
+            for z in range(frameNum):
+                yc.append(int(np.fromfile(fid, dtype=np.uint32, count=1)[0]))
+                xc.append(int(np.fromfile(fid, dtype=np.uint32, count=1)[0]))
+                t.append(int(np.fromfile(fid, dtype=np.uint32, count=1)[0]))
+                size.append(int(np.fromfile(fid, dtype=np.uint32, count=1)[0]))
+                frames.append(np.reshape(np.fromfile(fid, dtype=np.uint8, count=size[-1]**2), (size[-1], size[-1])))
+
+            fr.frameNum.append(frameNum)
+            fr.yc.append(yc)
+            fr.xc.append(xc)
+            fr.t.append(t)
+            fr.size.append(size)
+            fr.frames.append(frames)
 
     return fr
 
@@ -209,7 +212,7 @@ def write(fr, dir_path, filename):
     else:
         file = os.path.join(dir_path, "FR_" + filename + ".bin")
 
-    file = os.path.join()
+    # The per-line fields are lists of lists (as read() builds them), indexed [line][frame]
     with open(file, "wb") as fid:
         fid.write(struct.pack('I', fr.lines))
 
@@ -217,11 +220,11 @@ def write(fr, dir_path, filename):
             fid.write(struct.pack('I', fr.frameNum[i]))
 
             for z in range(fr.frameNum[i]):
-                fid.write(struct.pack('I', fr.yc[i, z]))
-                fid.write(struct.pack('I', fr.xc[i, z]))
-                fid.write(struct.pack('I', fr.t[i, z]))
-                fid.write(struct.pack('I', fr.size[i, z]))
-                fr.frames[i, z].tofile(fid)
+                fid.write(struct.pack('I', fr.yc[i][z]))
+                fid.write(struct.pack('I', fr.xc[i][z]))
+                fid.write(struct.pack('I', fr.t[i][z]))
+                fid.write(struct.pack('I', fr.size[i][z]))
+                np.asarray(fr.frames[i][z], dtype=np.uint8).tofile(fid)
 
 
 def writeArray(arr, dir_path, filename):
