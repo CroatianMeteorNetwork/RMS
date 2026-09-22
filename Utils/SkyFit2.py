@@ -1927,8 +1927,10 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
 
             if os.path.isfile(path):
                 try:
-                    pt.loadMaskFromFile(path)
-                    result = "Mask loaded from: " + path
+                    if pt.loadMaskFromFile(path):
+                        result = "Mask loaded from: " + path
+                    else:
+                        result = "Mask load failed: could not read " + path
                 except Exception as e:
                     result = "Mask load failed: " + repr(e)
             else:
@@ -3857,7 +3859,9 @@ class PlateTool(QtWidgets.QMainWindow):
             self.updateDistortion()
             self.tab.param_manager.updatePlatepar()
             self.initStarDetectionOverrides()
-            self.initMaskFromFile()
+
+            # Keep the mask given at startup (--mask, the RMS root mask) if the data has no mask.bmp
+            self.initMaskFromFile(fallback_mask=self.mask)
             self.updateFindBestFrameButton()
             self.changeMode(self.mode)
 
@@ -6812,11 +6816,16 @@ class PlateTool(QtWidgets.QMainWindow):
     # MASK DRAWING METHODS
     ###################################################################################################
 
-    def initMaskFromFile(self):
+    def initMaskFromFile(self, fallback_mask=None):
         """ Auto-load mask.bmp if present, else clear any mask carried over from a previous station.
 
             Must be called after the new station's image handle is in place, since the mask is rendered
             against the current image dimensions.
+
+        Keyword arguments:
+            fallback_mask: [MaskStructure] Mask to edit when the data directory has no mask.bmp, e.g. the
+                one given with --mask or found in the RMS root at startup. None by default, in which case
+                the mask is cleared.
         """
 
         # Reset ALL mask state - critical when switching stations/directories. Clearing only the paint
@@ -6833,6 +6842,11 @@ class PlateTool(QtWidgets.QMainWindow):
         mask_path = os.path.join(self.dir_path, "mask.bmp")
         if os.path.exists(mask_path):
             self.loadMaskFromFile(mask_path)
+
+        # No mask.bmp in the data directory, but a mask was given - edit that one instead of discarding it
+        elif (fallback_mask is not None) and (getattr(fallback_mask, 'img', None) is not None):
+            self.mask_source_path = None
+            self.loadMaskImage(np.array(fallback_mask.img, dtype=np.uint8))
 
         # No mask for this station - clear any leftover overlay/outlines from the previous one
         else:
@@ -7763,18 +7777,35 @@ class PlateTool(QtWidgets.QMainWindow):
 
         Arguments:
             mask_path: [str] Path to the mask image (0 = masked, 255 = unmasked).
+
+        Return:
+            [bool] True if the mask was read and loaded, False if the file is missing or unreadable (the
+                current mask is then kept).
         """
 
         if not os.path.exists(mask_path):
             print(f"Mask file not found: {mask_path}")
-            return
-
-        self.mask_source_path = mask_path
+            return False
 
         mask_img = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
         if mask_img is None:
             print(f"Failed to load mask: {mask_path}")
-            return
+            return False
+
+        # Only a mask that was actually read becomes the source of the loaded mask
+        self.mask_source_path = mask_path
+
+        self.loadMaskImage(mask_img)
+
+        return True
+
+
+    def loadMaskImage(self, mask_img):
+        """ Make the given mask image the edited mask, converting the masked regions to polygons.
+
+        Arguments:
+            mask_img: [ndarray] Grayscale mask image (0 = masked, 255 = unmasked).
+        """
 
         self.mask_current_polygon = []
 
@@ -7798,10 +7829,10 @@ class PlateTool(QtWidgets.QMainWindow):
         #   reproduce (prior brush strokes, boundary pixels rounded away) captured in the paint layer
         self.mask_polygons, paint_layer = decomposeMaskImage(mask_img)
 
-        # The undo history refers to the previous mask, so it is dropped
+        # The undo history refers to the previous mask, so it is always dropped
+        self.mask_brush_stroke_history = []
         if paint_layer is not None:
             self.mask_paint_layer = paint_layer
-            self.mask_brush_stroke_history = []
             print(f"Loaded {len(self.mask_polygons)} polygon(s) + raster residuals from mask")
 
         else:

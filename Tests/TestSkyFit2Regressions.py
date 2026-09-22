@@ -700,3 +700,64 @@ def testMaskVerticesOnlyEditedOnMaskTab(plateTool, stationDir, qapp):
     pt.tab.onTabBarClicked(mask_idx)
     pt.onMousePressed(_FakeMouseEvent(pt, vx + 3, vy + 3, right))
     assert _vertexCount(pt) == n_vertices - 1
+
+
+def testStartupMaskKeptWithoutMaskFile(qapp, stationDir, quietMessages):
+    """ A mask given at startup (--mask, RMS root) is edited instead of discarded when the data directory
+        has no mask.bmp. """
+
+    import cv2
+    from RMS.Routines.MaskImage import MaskStructure
+
+    os.remove(os.path.join(stationDir, "mask.bmp"))
+
+    mask_img = np.full((720, 1280), 255, np.uint8)
+    cv2.rectangle(mask_img, (0, 600), (1279, 719), 0, -1)
+
+    config = cr.loadConfigFromDirectory('.config', stationDir)
+    pt = SF.PlateTool(stationDir, config, mask=MaskStructure(mask_img))
+    qapp.processEvents()
+
+    try:
+        assert len(pt.mask_polygons) > 0
+        assert np.array_equal(pt.mask.img, mask_img)
+        assert np.array_equal(pt.generateMaskImage(), mask_img)
+    finally:
+        pt.close()
+        pt.deleteLater()
+
+
+def testMaskLoadClearsBrushHistory(plateTool, stationDir):
+    """ Loading a mask always drops the brush undo history of the previous mask. """
+
+    pt = plateTool
+    pt.brushStrokeBegin()
+    pt.brushPaintAt(300, 300)
+    assert pt.mask_brush_stroke_history
+
+    # A clean rectangle decomposes without raster residuals
+    import cv2
+    mask_img = np.full((720, 1280), 255, np.uint8)
+    cv2.rectangle(mask_img, (0, 600), (1279, 719), 0, -1)
+    mask_path = os.path.join(stationDir, "rect.bmp")
+    cv2.imwrite(mask_path, mask_img)
+
+    assert pt.loadMaskFromFile(mask_path)
+    assert pt.mask_paint_layer is None
+    assert pt.mask_brush_stroke_history == []
+
+
+def testUnreadableMaskNotReportedLoaded(plateTool, stationDir):
+    """ A mask file that cannot be read does not become the mask source. """
+
+    pt = plateTool
+    source_before = pt.mask_source_path
+    polygons_before = copy.deepcopy(pt.mask_polygons)
+
+    bad_path = os.path.join(stationDir, "broken.bmp")
+    with open(bad_path, 'w') as f:
+        f.write("not an image")
+
+    assert pt.loadMaskFromFile(bad_path) is False
+    assert pt.mask_source_path == source_before
+    assert pt.mask_polygons == polygons_before
