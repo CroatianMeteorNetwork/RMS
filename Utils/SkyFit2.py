@@ -199,7 +199,7 @@ from RMS.Math import angularSeparation, RMSD, vectNorm
 from RMS.Misc import decimalDegreesToSexHours
 from RMS.Routines.AddCelestialGrid import updateRaDecGrid, updateAzAltGrid
 from RMS.Routines.SkyFitHelp import shortcutsTopicId
-from RMS.Routines.CustomPyqtgraphClasses import ViewBox, TextItem, TextItemList, Crosshair, Plus, Cross, CursorItem, BrushCursorItem, ImageItem, RightOptionsTab, qmessagebox, PointingIndicator
+from RMS.Routines.CustomPyqtgraphClasses import ViewBox, TextItem, TextItemList, Crosshair, Plus, Cross, CursorItem, BrushCursorItem, ImageItem, RightOptionsTab, qmessagebox, PointingIndicator, MarkedSlider
 from RMS.Routines.GreatCircle import fitGreatCircle, greatCircle
 from RMS.Routines.SphericalPolygonCheck import sphericalPolygonCheck
 from RMS.Routines.Image import loadFlat, loadDark, applyFlat, applyDark, signalToNoise, gammaCorrectionImage, adjustLevels, saveImage, loadImage
@@ -2851,7 +2851,7 @@ class PlateTool(QtWidgets.QMainWindow):
         # Image navigation slider (like a video timeline). Added before the buttons so they stay anchored
         #   to the right edge and don't shift when the slider/label show, hide or resize. The label comes
         #   after the slider so it's not next to the mouse-over coordinates text.
-        self.image_navigation_slider = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
+        self.image_navigation_slider = MarkedSlider(QtCore.Qt.Orientation.Horizontal)
         self.image_navigation_slider.setMinimum(1)
         self.image_navigation_slider.setMaximum(1)
         self.image_navigation_slider.setValue(1)
@@ -7295,6 +7295,10 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Plot gap colors
         self.pick_marker.addPoints(pos=data2, size=10, pen=gap_color)
+
+        # Mark the picked frames on the navigation slider
+        self.image_navigation_slider.setMarks(frame for frame, pick in sorted_picks.items()
+            if pick['x_centroid'] is not None)
 
 
         # Draw zoom window picks
