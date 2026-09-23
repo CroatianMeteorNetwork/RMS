@@ -5331,18 +5331,9 @@ class PlateTool(QtWidgets.QMainWindow):
             hp_xy = HotPixels.loadHotPixelCoords(self.dir_path, self.config)
 
             if len(hp_xy):
-                radius = getattr(self.config, 'hot_pixels_radius', 2.0)
-                curated = {}
-                for ff, stars in merged.items():
-                    rows = list(stars)
-                    if not rows:
-                        continue
-                    hot = HotPixels.matchHotPixels([r[1] for r in rows], [r[0] for r in rows],
-                        hp_xy, radius)
-                    kept = [row for row, h in zip(rows, hot) if not h]
-                    if kept:
-                        curated[ff] = kept
-                merged = curated
+                curated, _ = HotPixels.filterStarList(list(merged.items()), hp_xy,
+                    getattr(self.config, 'hot_pixels_radius', 2.0))
+                merged = dict(curated)
 
         return {ff: stars for ff, stars in merged.items() if len(stars) > 0}
 

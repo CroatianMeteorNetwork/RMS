@@ -41,6 +41,7 @@ import json
 import datetime
 
 import numpy as np
+from scipy.spatial import cKDTree
 
 from RMS.Formats.FFfile import filenameToDatetime
 from RMS.Logger import getLogger
@@ -157,10 +158,20 @@ def matchHotPixels(x_arr, y_arr, hp_xy, radius):
     if len(hp_xy) == 0 or len(x_arr) == 0:
         return np.zeros(len(x_arr), dtype=bool)
 
-    dx = x_arr[:, None] - hp_xy[None, :, 0]
-    dy = y_arr[:, None] - hp_xy[None, :, 1]
+    # Nearest blacklisted pixel per detection. The tree's upper bound is strict, so query with a
+    # margin and apply the inclusive radius test on the nearest candidate
+    _, nn = cKDTree(hp_xy).query(np.column_stack([x_arr, y_arr]), k=1,
+        distance_upper_bound=radius + 1e-6)
 
-    return np.any(dx**2 + dy**2 <= radius**2, axis=1)
+    found = nn < len(hp_xy)
+    matched = np.zeros(len(x_arr), dtype=bool)
+
+    nearest = hp_xy[nn[found]]
+    dx = x_arr[found] - nearest[:, 0]
+    dy = y_arr[found] - nearest[:, 1]
+    matched[found] = dx**2 + dy**2 <= radius**2
+
+    return matched
 
 
 def _ffTime(ff_name):
@@ -420,23 +431,23 @@ def filterStarList(star_list, hp_xy, radius):
     if len(hp_xy) == 0:
         return star_list, 0
 
+    star_list = [[ff_name, list(rows)] for ff_name, rows in star_list]
+
+    # Match the whole night in one pass - per-FF calls dominate the cost on long nights
+    xs = [row[1] for _, rows in star_list for row in rows]
+    ys = [row[0] for _, rows in star_list for row in rows]
+
+    matched = matchHotPixels(xs, ys, hp_xy, radius)
+    n_removed = int(np.count_nonzero(matched))
+
     filtered = []
-    n_removed = 0
+    start = 0
 
     for ff_name, rows in star_list:
 
-        rows = list(rows)
-
-        if not rows:
-            continue
-
-        ys = [row[0] for row in rows]
-        xs = [row[1] for row in rows]
-
-        matched = matchHotPixels(xs, ys, hp_xy, radius)
-        n_removed += int(np.count_nonzero(matched))
-
-        kept_rows = [row for row, m in zip(rows, matched) if not m]
+        end = start + len(rows)
+        kept_rows = [row for row, m in zip(rows, matched[start:end]) if not m]
+        start = end
 
         if kept_rows:
             filtered.append([ff_name, kept_rows])
