@@ -143,6 +143,52 @@ def qmessagebox(message="", title="Error", message_type="warning"):
     msg.exec()
 
 
+class MarkedSlider(QtWidgets.QSlider):
+  """ A horizontal slider that draws thin red ticks on its groove, under the handle, at the marked values """
+  def __init__(self, *args):
+    super().__init__(*args)
+    self.marks = []
+
+  def setMarks(self, marks):
+    self.marks = list(marks)
+    self.update()
+
+  def paintEvent(self, event):
+    painter = QtWidgets.QStylePainter(self)
+    opt = QtWidgets.QStyleOptionSlider()
+    self.initStyleOption(opt)
+    style = self.style()
+    cc, sc = QtWidgets.QStyle.ComplexControl.CC_Slider, QtWidgets.QStyle.SubControl
+
+    # Draw the groove off-screen first to find its vertical position, which the native style doesn't report
+    dpr = self.devicePixelRatioF()
+    pixmap = QtGui.QPixmap(self.size()*dpr)
+    pixmap.setDevicePixelRatio(dpr)
+    pixmap.fill(QtCore.Qt.GlobalColor.transparent)
+    opt.subControls = sc.SC_SliderGroove
+    QtWidgets.QStylePainter(pixmap, self).drawComplexControl(cc, opt)
+    img = pixmap.toImage()
+    rows = [y for y in range(img.height()) if img.pixelColor(img.width()//2, y).alpha() > 0]
+    groove_y = (rows[0] + rows[-1] + 1)/2/dpr if rows else self.height()/2
+
+    groove = style.subControlRect(cc, opt, sc.SC_SliderGroove, self)
+    handle = QtCore.QRectF(style.subControlRect(cc, opt, sc.SC_SliderHandle, self))
+    handle_w = int(handle.width())
+    y = handle.center().y()
+
+    # Groove centred on the handle, then the ticks, then a semi-transparent handle on top
+    painter.drawPixmap(QtCore.QPointF(0, y - groove_y), pixmap)
+    painter.setPen(QtGui.QPen(QtGui.QColor(255, 0, 0), 1))
+    for mark in self.marks:
+      x = groove.x() + handle_w/2 + QtWidgets.QStyle.sliderPositionFromValue(
+        self.minimum(), self.maximum(), mark, groove.width() - handle_w)
+      painter.drawLine(QtCore.QLineF(x, y - 2, x, y + 2))
+
+    opt.subControls = sc.SC_SliderHandle
+    painter.setOpacity(0.6)
+    painter.drawComplexControl(cc, opt)
+
+
 class QHSeparationLine(QtWidgets.QFrame):
   """ A horizontal separation line """
   def __init__(self):
