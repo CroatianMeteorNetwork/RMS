@@ -76,6 +76,8 @@ cpdef double angularSeparation(double ra1, double dec1, double ra2, double dec2)
 
     Source of the equation: http://www.astronomycafe.net/qadir/q1890.html (May 1, 2016)
 
+    Note that RMS.Math.angularSeparation has the same name but takes and returns radians.
+
     @param ra1: [float] right ascension of the first stars (in degrees)
     @param dec1: [float] declination of the first star (in degrees)
     @param ra2: [float] right ascension of the decons stars (in degrees)
@@ -87,6 +89,7 @@ cpdef double angularSeparation(double ra1, double dec1, double ra2, double dec2)
     cdef double deldec2
     cdef double delra2
     cdef double sindis
+    cdef double cos_sep
 
     # Convert input coordinates to radians
     ra1 = radians(ra1)
@@ -96,7 +99,19 @@ cpdef double angularSeparation(double ra1, double dec1, double ra2, double dec2)
 
 
     # Classical method
-    return degrees(acos(sin(dec1)*sin(dec2) + cos(dec1)*cos(dec2)*cos(ra2 - ra1)))
+    # Rounding can push the cosine slightly above 1 for (nearly) coincident directions, which
+    # would make acos return NaN, so clamp it to the closed interval [-1, 1]. The explicit
+    # comparisons are used instead of fmax(-1.0, fmin(1.0, cos_sep)) because the C fmin/fmax
+    # return the non-NaN operand, which would silently turn a NaN input into 0 or 180 deg.
+    # Mirrors the clip in RMS.Math.angularSeparation (which takes radians, not degrees).
+    cos_sep = sin(dec1)*sin(dec2) + cos(dec1)*cos(dec2)*cos(ra2 - ra1)
+
+    if cos_sep > 1.0:
+        cos_sep = 1.0
+    elif cos_sep < -1.0:
+        cos_sep = -1.0
+
+    return degrees(acos(cos_sep))
 
 
     # # Compute the angular separation using the haversine formula
@@ -246,7 +261,7 @@ cpdef (double, double) equatorialCoordPrecession(double start_epoch, double fina
         (ra, dec): [tuple of floats] Precessed equatorial coordinates (radians).
     """
 
-    cdef double T, t, zeta, z, theta, A, B, C, ra_corr, dec_corr
+    cdef double T, t, zeta, z, theta, A, B, C, ra_corr, dec_corr, cos_pole_dist
 
 
     T = (start_epoch - J2000_DAYS )/36525.0
@@ -272,7 +287,15 @@ cpdef (double, double) equatorialCoordPrecession(double start_epoch, double fina
 
     # Calculate declination (apply a different equation if close to the pole, closer then 0.5 degrees)
     if (pi/2 - fabs(dec)) < radians(0.5):
-        dec_corr = sign(dec)*acos(sqrt(A**2 + B**2))
+
+        # A, B and C are components of a unit vector, so sqrt(A**2 + B**2) is in [0, 1], but
+        #   rounding can push it just above 1 and make acos return NaN
+        cos_pole_dist = sqrt(A**2 + B**2)
+
+        if cos_pole_dist > 1.0:
+            cos_pole_dist = 1.0
+
+        dec_corr = sign(dec)*acos(cos_pole_dist)
     else:
         dec_corr = asin(C)
 
