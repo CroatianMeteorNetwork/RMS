@@ -199,7 +199,7 @@ from RMS.Math import angularSeparation, RMSD, vectNorm
 from RMS.Misc import decimalDegreesToSexHours
 from RMS.Routines.AddCelestialGrid import updateRaDecGrid, updateAzAltGrid
 from RMS.Routines.SkyFitHelp import shortcutsTopicId
-from RMS.Routines.CustomPyqtgraphClasses import ViewBox, TextItem, TextItemList, Crosshair, Plus, Cross, CursorItem, BrushCursorItem, ImageItem, RightOptionsTab, qmessagebox, PointingIndicator
+from RMS.Routines.CustomPyqtgraphClasses import ViewBox, TextItem, TextItemList, Crosshair, Plus, Cross, CursorItem, BrushCursorItem, ImageItem, RightOptionsTab, qmessagebox, PointingIndicator, MarkedSlider
 from RMS.Routines.GreatCircle import fitGreatCircle, greatCircle
 from RMS.Routines.SphericalPolygonCheck import sphericalPolygonCheck
 from RMS.Routines.Image import loadFlat, loadDark, applyFlat, applyDark, signalToNoise, gammaCorrectionImage, adjustLevels, saveImage, loadImage
@@ -2843,8 +2843,33 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # bottom information
         self.status_bar = QtWidgets.QStatusBar()
-        self.status_bar.setFont(QtGui.QFont('monospace'))
+        status_font = QtGui.QFont('monospace')
+        status_font.setPointSizeF(status_font.pointSizeF() - 0.5)
+        self.status_bar.setFont(status_font)
         self.setStatusBar(self.status_bar)
+
+        # Image navigation slider (like a video timeline). Added before the buttons so they stay anchored
+        #   to the right edge and don't shift when the slider/label show, hide or resize. The label comes
+        #   after the slider so it's not next to the mouse-over coordinates text.
+        self.image_navigation_slider = MarkedSlider(QtCore.Qt.Orientation.Horizontal)
+        self.image_navigation_slider.setMinimum(1)
+        self.image_navigation_slider.setMaximum(1)
+        self.image_navigation_slider.setValue(1)
+        self.image_navigation_slider.setMinimumWidth(220)
+        self.image_navigation_slider.setMaximumWidth(330)
+        self.image_navigation_slider.setToolTip("Drag or click to navigate through images (frames in manual "
+                                                "reduction)")
+        # Shrink the handle so it fits within the status bar height without being clipped. A background is
+        #   needed or the handle renders invisible once a stylesheet is set.
+        self.image_navigation_slider.setStyleSheet(
+            "QSlider::handle:horizontal { width: 10px; height: 10px; margin: -3px 0; border-radius: 5px; "
+            "background: palette(button); border: 1px solid palette(dark); }")
+        self.image_navigation_slider.valueChanged.connect(self.jumpToImage)
+        self.status_bar.addPermanentWidget(self.image_navigation_slider)
+
+        self.image_navigation_label = QtWidgets.QLabel('Image: 1 / 1')
+        self.image_navigation_label.setMinimumWidth(80)
+        self.status_bar.addPermanentWidget(self.image_navigation_label)
 
         self.file_manager_button = QtWidgets.QPushButton('File Manager')
         self.file_manager_button.pressed.connect(self.showCalibrationFilesDialog)
@@ -2857,21 +2882,6 @@ class PlateTool(QtWidgets.QMainWindow):
         self.manualreduction_button.pressed.connect(lambda: self.changeMode('manualreduction'))
         self.status_bar.addPermanentWidget(self.skyfit_button)
         self.status_bar.addPermanentWidget(self.manualreduction_button)
-
-        # Image navigation slider (like a video timeline)
-        self.image_navigation_label = QtWidgets.QLabel('Image: 1 / 1')
-        self.image_navigation_label.setMinimumWidth(80)
-        self.status_bar.addPermanentWidget(self.image_navigation_label)
-
-        self.image_navigation_slider = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
-        self.image_navigation_slider.setMinimum(1)
-        self.image_navigation_slider.setMaximum(1)
-        self.image_navigation_slider.setValue(1)
-        self.image_navigation_slider.setMinimumWidth(200)
-        self.image_navigation_slider.setMaximumWidth(400)
-        self.image_navigation_slider.setToolTip("Drag or click to navigate through images")
-        self.image_navigation_slider.valueChanged.connect(self.jumpToImage)
-        self.status_bar.addPermanentWidget(self.image_navigation_slider)
 
         self.nextstar_button = QtWidgets.QPushButton('SkyFit')
         self.nextstar_button.pressed.connect(self.jumpNextStar)
@@ -3733,6 +3743,9 @@ class PlateTool(QtWidgets.QMainWindow):
             # Update the great circle
             self.updateGreatCircle()
 
+        # Switch the navigation slider between images and frames
+        self.updateImageNavigationDisplay()
+
 
     def changeStation(self, dir_path=None, config_override=None):
         """
@@ -4137,7 +4150,7 @@ class PlateTool(QtWidgets.QMainWindow):
             text_str += self.img_type_flag + '\n'
             text_str += "Time  = {:s}\n".format(
                 self.img_handle.currentFrameTime(dt_obj=True).strftime("%Y/%m/%d %H:%M:%S.%f")[:-3])
-            text_str += 'Frame = {:d}\n'.format(self.img.getFrame())
+            text_str += 'Frame = {:d} / {:d}\n'.format(self.img.getFrame(), self.img_handle.total_frames - 1)
             if self.img_handle.input_type == "ff":
                 if self.use_fr_files:
                     text_str += 'Line = {:d}\n'.format(self.img_handle.current_line)
@@ -7283,6 +7296,10 @@ class PlateTool(QtWidgets.QMainWindow):
         # Plot gap colors
         self.pick_marker.addPoints(pos=data2, size=10, pen=gap_color)
 
+        # Mark the picked frames on the navigation slider
+        self.image_navigation_slider.setMarks(frame for frame, pick in sorted_picks.items()
+            if pick['x_centroid'] is not None)
+
 
         # Draw zoom window picks
         self.pick_marker2.clear()
@@ -9210,11 +9227,17 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
     def jumpToImage(self, image_num):
-        """ Jump directly to a specific image number (1-indexed).
+        """ Jump directly to a specific image number (1-indexed), or to a frame in manual reduction.
 
         Arguments:
-            image_num: [int] Target image number (1-indexed, 1 to total_images)
+            image_num: [int] Target image number (1-indexed, 1 to total_images), or the frame number in
+                manual reduction.
         """
+        # In manual reduction the slider moves through the frames
+        if self.mode == 'manualreduction':
+            self.nextImg(n=image_num - self.img.getFrame())
+            return
+
         # Only works in skyfit mode with multiple images
         if self.mode != 'skyfit':
             return
@@ -9242,6 +9265,27 @@ class PlateTool(QtWidgets.QMainWindow):
         if not self.hasData():
             return
 
+        # In manual reduction the slider moves through the frames. DFN and single images only allow moving
+        #   next to the picks, so they get no slider. The frame number is already on the floating info
+        #   panel (updateLeftLabels), so the label next to the slider is not needed here.
+        if self.mode == 'manualreduction':
+
+            show = not ((self.img_handle.input_type == 'dfn')
+                or ((self.img_handle.input_type == 'images') and self.img_handle.single_image_mode))
+
+            self.image_navigation_slider.setVisible(show)
+            self.image_navigation_label.hide()
+
+            if show:
+                last_frame = self.img_handle.total_frames - 1
+
+                self.image_navigation_slider.blockSignals(True)
+                self.image_navigation_slider.setRange(0, last_frame)
+                self.image_navigation_slider.setValue(self.img.getFrame())
+                self.image_navigation_slider.blockSignals(False)
+
+            return
+
         # Only update if we have a multi-image handle with ff_list
         if not hasattr(self.img_handle, 'ff_list'):
             self.image_navigation_slider.hide()
@@ -9257,12 +9301,23 @@ class PlateTool(QtWidgets.QMainWindow):
         current_index = self.img_handle.current_ff_index
 
         self.image_navigation_slider.blockSignals(True)
-        self.image_navigation_slider.setMaximum(total_images)
+        self.image_navigation_slider.setRange(1, total_images)
         self.image_navigation_slider.setValue(current_index + 1)  # 1-indexed display
         self.image_navigation_slider.blockSignals(False)
 
         # Update label text
-        self.image_navigation_label.setText(f'Image: {current_index + 1} / {total_images}')
+        self.setNavigationLabel('Image', current_index + 1, total_images)
+
+
+    def setNavigationLabel(self, name, current, last):
+        """ Set the navigation label, keeping the width of its longest text so the slider does not move. """
+
+        label = self.image_navigation_label
+
+        label.setText(f'{name}: {last} / {last}')
+        label.setMinimumWidth(label.sizeHint().width())
+
+        label.setText(f'{name}: {current} / {last}')
 
 
     def saveState(self):
