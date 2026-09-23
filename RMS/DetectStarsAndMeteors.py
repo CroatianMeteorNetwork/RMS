@@ -34,6 +34,7 @@ from RMS.ExtractStars import extractStarsFF
 from RMS.ExtractStarsFrameInterface import extractStarsFrameInterface
 from RMS.Detection import detectMeteors
 from RMS.DetectionTools import loadImageCalibration
+from RMS import HotPixels
 from RMS.QueuedPool import QueuedPool
 from RMS.Logger import LoggingManager, getLogger
 from RMS.Misc import RmsDateTime, setMultiprocessingStartMethod
@@ -224,15 +225,34 @@ def detectStarsAndMeteors(ff_directory, ff_name, config, flat_struct=None, dark=
 
 
     # Run star extraction on FF files
-    star_list = extractStarsFF(ff_directory, ff_name, config=config, 
+    star_list = extractStarsFF(ff_directory, ff_name, config=config,
                                flat_struct=flat_struct, dark=dark, mask=mask)
 
 
-    log.info('Detected stars: ' + str(len(star_list[1])))
+    # Count the stars for the meteor-detection gate, excluding known hot pixels so a field of
+    # blacklisted pixels cannot trigger meteor detection on an otherwise starless image. The full
+    # star list is kept - the end-of-night analysis in saveDetections needs to see the hot pixels
+    # to keep the blacklist fresh, and filters them from CALSTARS there.
+    star_count = len(star_list[1])
+
+    if config.hot_pixels_filter and star_count > 0:
+
+        hp_xy = HotPixels.loadHotPixelCoords(ff_directory, config)
+
+        if len(hp_xy):
+            matched = HotPixels.matchHotPixels(star_list[1], star_list[2], hp_xy,
+                config.hot_pixels_radius)
+            star_count -= int(np.count_nonzero(matched))
+
+    if star_count != len(star_list[1]):
+        log.info('Detected stars: {:d} ({:d} after hot pixel exclusion)'.format(
+            len(star_list[1]), star_count))
+    else:
+        log.info('Detected stars: ' + str(star_count))
 
 
     # Run meteor detection if there are enough stars on the image
-    if len(star_list[1]) >= config.ff_min_stars:
+    if star_count >= config.ff_min_stars:
 
         log.info('At least ' + str(config.ff_min_stars) + ' stars, detecting meteors...')
 
@@ -322,7 +342,8 @@ def saveDetections(detection_results, ff_dir, config, output_suffix=''):
         # Construct the table of the star parameters
         # CALSTARS format: Y(0) X(1) IntensSum(2) Ampltd(3) FWHM(4) BgLvl(5) SNR(6) NSatPx(7)
         # Note: intensity=IntensSum (integrated), amplitude=Ampltd (peak)
-        star_data = zip(y2, x2, intensity, amplitude, fwhm, background, snr, saturated_count)
+        # Materialized to a list - the hot pixel filter below iterates it before writeCALSTARS does
+        star_data = list(zip(y2, x2, intensity, amplitude, fwhm, background, snr, saturated_count))
 
         # Add star info to the star list
         star_list.append([ff_name, star_data])
@@ -361,8 +382,13 @@ def saveDetections(detection_results, ff_dir, config, output_suffix=''):
     if not os.path.exists(ff_dir):
         os.makedirs(ff_dir)
 
+    # Update the hot pixel blacklist from tonight's stationary detections and remove all
+    # blacklisted pixels from the star list before it is written to CALSTARS
+    if config.hot_pixels_filter:
+        star_list = HotPixels.applyHotPixels(star_list, ff_dir, config)
+
     # Write detected stars to the CALSTARS file
-    CALSTARS.writeCALSTARS(star_list, ff_dir, calstars_name, config.stationID, config.height, 
+    CALSTARS.writeCALSTARS(star_list, ff_dir, calstars_name, config.stationID, config.height,
         config.width)
 
     # Generate FTPdetectinfo file name
