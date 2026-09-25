@@ -993,6 +993,12 @@ def gatherCameraInformation(config, attempts=6, delay=10, sock_timeout=3):
     if RUNNING_FROM_CONSOLE and not pingOnce(ip):
         return ("Unavailable", "Unavailable", "Unavailable")
 
+    # A science (OpenIPC) camera has no DVRIP service: it answers on its control server
+    # (:9600) instead. Asking it over DVRIP only retried for a minute and reported
+    # "Unavailable". Decide by which service answers; neither (e.g. rebooting) -> retry below.
+    if not _tcpPortOpen(ip, 34567, sock_timeout) and _tcpPortOpen(ip, 9600, sock_timeout):
+        return _scienceCameraInformation(ip, sock_timeout)
+
     for _ in range(attempts):
         try:
             cam = dvr.DVRIPCam(ip, timeout=sock_timeout)
@@ -1009,6 +1015,56 @@ def gatherCameraInformation(config, attempts=6, delay=10, sock_timeout=3):
         time.sleep(delay)
 
     return ("Unavailable", "Unavailable", "Unavailable")
+
+def _tcpPortOpen(ip, port, timeout=3):
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.settimeout(timeout)
+    try:
+        s.connect((ip, port))
+        return True
+    except (socket.timeout, OSError):
+        return False
+    finally:
+        s.close()
+
+
+def _scienceCameraInformation(ip, timeout=3):
+    """Camera information from a science (OpenIPC) camera's control server.
+
+    'sysinfo' on :9600 replies with one line of key=value tokens, e.g.
+        board=IPC_GK7205V200_G3S soc=gk7205v200 sensor=imx307 image=0cd7297 built=2026-09-25T18:00Z mac=...
+    Images older than the command reply with an error; they are reported as science
+    firmware of unknown version rather than "Unavailable".
+
+    Return:
+        (sensor, firmware, build_date): [tuple of strings] as gatherCameraInformation.
+    """
+
+    reply = ""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(timeout)
+        s.connect((ip, 9600))
+        s.sendall(b"sysinfo\n")
+        s.shutdown(socket.SHUT_WR)
+        chunks = []
+        while True:
+            data = s.recv(4096)
+            if not data:
+                break
+            chunks.append(data)
+        s.close()
+        reply = b"".join(chunks).decode(errors="replace")
+    except (socket.timeout, OSError):
+        pass
+
+    info = dict(tok.split("=", 1) for tok in reply.split() if "=" in tok)
+    if "board" not in info:
+        return ("Science firmware (OpenIPC)", "unknown (image predates sysinfo)", "")
+
+    sensor = "%s / %s (science firmware)" % (info["board"], info.get("sensor", "?").upper())
+    return (sensor, "science image %s" % info.get("image", "unknown"), info.get("built", ""))
+
 
 def captureDirectories(captured_dir, stationID):
     """Counts the captured directories.
