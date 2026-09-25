@@ -662,8 +662,12 @@ class ImageItem(pg.ImageItem):
                     saturation_threshold = int(round(0.98*(2**(8*img.itemsize) - 1)))
 
                 saturates = img > saturation_threshold
-
-                self.saturation_mask.image[:, :] = 0
+                # If the saturation mask is not the same shape as the image, resize it
+                if self.saturation_mask.image.shape[:2] != saturates.shape:
+                    new_mask_shape = (saturates.shape[0], saturates.shape[1], 4)
+                    self.saturation_mask.image = np.zeros(new_mask_shape, dtype=np.uint8)
+                else:
+                    self.saturation_mask.image[:, :] = 0
                 
                 # Set red colour on for saturation
                 self.saturation_mask.image[saturates, 0] = 255
