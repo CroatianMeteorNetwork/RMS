@@ -128,11 +128,10 @@ class _SlidingMin(object):
 
 
 def _rmspCapUtc(data):
-    """Parse the first checksum-valid RMSP v4/v5 provenance SEI in a raw (escaped) H.264 access
-    unit. Returns (capture_utc_s, exp_s, soc_temp_c or None, meta dict, frame_seq, version) or None.
-    v5 and v4 share the layout, but only a v5 record describes the frame it rides in: a v4 record
-    (venc InsertUserData) rides a LATER frame -- measured 2 frames = 80 ms on the Goke, and free to
-    grow under load -- so a v4 record must never time the frame carrying it. Layout matches
+    """Parse the first checksum-valid RMSP v5 provenance SEI in a raw (escaped) H.264 access
+    unit. Returns (capture_utc_s, exp_s, soc_temp_c or None, meta dict, frame_seq) or None.
+    A v5 record describes the frame it rides in (venc emits it in the frame's own access unit).
+    Earlier versions rode a LATER frame and are not accepted. Layout matches
     venc/main.c build_rmsp_payload (fields XOR-0xFF after the 'RMSP' magic).
     capture_utc = (sec+usec) - (mono_pts_us - raw_pts_us): host-clock at emit minus the
     camera-side capture->emit delay, both from the same back-to-back cal.
@@ -157,14 +156,14 @@ def _rmspCapUtc(data):
         if len(u) < 6:
             continue
         v = u[4] ^ 0xFF
-        L = {5: 61, 4: 61, 3: 59, 2: 53, 1: 49}.get(v, 49)
+        L = 61
         if len(u) < L:
             continue
         u = u[:4] + bytes(x ^ 0xFF for x in u[4:L])
         ck = 0
         for x in u[4:L - 1]:
             ck ^= x
-        if ck != u[L - 1] or v not in (4, 5):
+        if v != 5 or ck != u[L - 1]:
             continue
         sec = struct.unpack('<I', u[6:10])[0]; usec = struct.unpack('<I', u[10:14])[0]
         frame_seq = struct.unpack('<I', u[14:18])[0]
@@ -186,7 +185,7 @@ def _rmspCapUtc(data):
             'wb_b': struct.unpack('<H', u[36:38])[0]/256.0 if (fl & 0x02) else None,
             'qp': u[58] if (fl & 0x40) else None,
         }
-        return ((sec + usec/1e6) - delay/1e6, exp_us/1e6, temp, meta, frame_seq, v)
+        return ((sec + usec/1e6) - delay/1e6, exp_us/1e6, temp, meta, frame_seq)
 
 if sys.version_info[0] < 3:
     # py2
@@ -362,7 +361,6 @@ class BufferedCapture(Process):
         self._sei_blk = SEIBlockAccumulator()
         self._sei_blk_seq = 0
         self._sei_seen = False
-        self._sei_v4_warned = False
         # SEI-derived integration-start timebase: PRIMARY frame-time source when the camera
         # emits a valid RMSP SEI. Legacy GStreamer timing stays computed as the sanity
         # reference and the per-frame fallback. Raw per-frame stamps are stored lock-free in
@@ -771,19 +769,12 @@ class BufferedCapture(Process):
                         if cu[2] is not None:
                             self._soc_temp = cu[2]
                         self._sei_blk.add(cu[3])
-                        # frame TIMING only from a v5 record (it rides in its own frame); a v4
-                        # record belongs to an earlier frame -> timing stays on legacy
-                        if cu[5] != 5 and not self._sei_v4_warned:
-                            self._sei_v4_warned = True
-                            log.warning("Camera sends RMSP v%d records (they ride a LATER frame): SEI timing "
-                                        "not used, legacy timing kept -- upgrade the camera's science image "
-                                        "to RMSP v5", cu[5])
-                        if self._sei_tb is not None and cu[5] == 5:
+                        if self._sei_tb is not None:
                             self._sei_int_by_pts[pts] = self._sei_tb.feed(pts, cu[0], cu[1], cu[4])
                             if len(self._sei_int_by_pts) > 600:
                                 for _k in list(self._sei_int_by_pts)[:200]:
                                     self._sei_int_by_pts.pop(_k, None)
-                        if self._sei_by_pts is not None and cu[5] == 5:
+                        if self._sei_by_pts is not None:
                             self._sei_by_pts[pts] = cu
                             if len(self._sei_by_pts) > 600:
                                 for k in list(self._sei_by_pts)[:200]:
@@ -1718,7 +1709,6 @@ class BufferedCapture(Process):
                 self._disc_ref_long = None
                 self._disc_corr = 0.0
                 self._sei_by_pts = {} if os.environ.get('RMS_SEI_PROBE') else None
-                self._sei_v4_warned = False
                 self._sei_deltas = []
                 self._probe_n = 0
                 try:
