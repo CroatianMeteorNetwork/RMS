@@ -741,7 +741,17 @@ def waitForCameraOnline(camera_ip, timeout=240, settle=8):
     return False
 
 
-def upgradeFirmware(cam, firmware_path, skip_confirm=False, converts_to_openipc=False):
+def _is_coupler_bin(path):
+    """A Coupler (XM -> science) bin: a DVRIP zip that burns a kernel + rootfs."""
+    import zipfile
+    try:
+        names = zipfile.ZipFile(path).namelist()
+    except Exception:
+        return False
+    return "uImage.img" in names and "rootfs.img" in names
+
+
+def upgradeFirmware(cam, firmware_path, skip_confirm=False):
     """Upgrade the camera firmware via the DVRIP protocol.
 
     Args:
@@ -786,6 +796,11 @@ def upgradeFirmware(cam, firmware_path, skip_confirm=False, converts_to_openipc=
     log.info("=" * 60)
 
     # Confirmation prompt
+    if not skip_confirm and not sys.stdin.isatty():
+        # without a terminal the prompt below can never be answered (it used to sit
+        # there until killed); refuse at once instead
+        log.error("No terminal to confirm on: re-run with --yes to upgrade non-interactively.")
+        return False
     if not skip_confirm:
         log.warning("WARNING: Firmware upgrade is a potentially dangerous operation!")
         log.warning("         Do NOT disconnect power during the upgrade process.")
@@ -906,19 +921,6 @@ def upgradeFirmware(cam, firmware_path, skip_confirm=False, converts_to_openipc=
         else:
             log.warning("Transfer ended without a confirmation from the camera.")
             log.warning("That is normal if it rebooted early, but it has to be verified.")
-
-        # An XM->OpenIPC conversion reboots onto DHCP (the fresh OpenIPC image
-        # defaults to DHCP), NOT the camera's old XM IP -- so polling cam.ip here
-        # would hang until timeout and wrongly report failure. Exit cleanly with
-        # the reassignment steps instead.
-        if converts_to_openipc:
-            log.info("Converted to OpenIPC%s.", " (camera confirmed Ret 515)" if confirmed else " (transfer ended -- verify)")
-            log.info("The camera is rebooting onto DHCP, NOT its old IP %s.", cam.ip)
-            log.info("Reassign a static IP:  python -m Utils.CamManager  ->  'search'  then")
-            log.info("  'config <MAC> <IP> <MASK>'  (OpenIPC set-IP is SSH-based; gateway omitted")
-            log.info("  by default -- no default route, less attack surface).")
-            log.info("Then push 'SwitchMode init' to provision the science config.")
-            return True
 
         # Either way, the camera is the authority on whether this worked.
         log.info("Waiting for the camera to come back online...")
@@ -1203,15 +1205,16 @@ def dvripCall(cam, cmd, opts, camera_settings_path='./camera_settings.json'):
 
         firmware_path = opts[0]
         skip_confirm = '--yes' in opts or '-y' in opts
-        # The DVRIP updater takes a DVRIP-flashable .bin. Wrapping an OpenIPC .tgz into a
-        # per-unit coupler bin (MAC baked into the env) now lives with the firmware:
-        #   silicon_research/tools/openipc_flash.py wrap <tgz> <mac> <out.bin>
-        if firmware_path.lower().endswith((".tgz", ".tar.gz")):
-            log.error("%s is an OpenIPC image archive, not a DVRIP-flashable bin. Wrap it first: "
-                      "silicon_research/tools/openipc_flash.py wrap <tgz> <this camera's MAC> <out.bin>",
-                      firmware_path)
+        # RMS updates STOCK firmware only. Moving a camera to the science (OpenIPC)
+        # firmware and back is camflash's job (a separate tool: it keeps the camera's MAC
+        # and IP, gates untested paths and logs every operation), so a science image or a
+        # Coupler bin is refused here rather than half-handled.
+        if firmware_path.lower().endswith((".tgz", ".tar.gz")) or _is_coupler_bin(firmware_path):
+            log.error("%s is a science-firmware image. RMS does not convert cameras; use camflash with\n"
+                      "the science image (.tgz) -- it builds this camera's own Coupler bin:\n"
+                      "  camflash to-science %s <science.tgz> --commit", firmware_path, cam.ip)
             return
-        upgradeFirmware(cam, firmware_path, skip_confirm, converts_to_openipc=True)
+        upgradeFirmware(cam, firmware_path, skip_confirm)
         return
 
     elif cmd in ISP_COMMANDS:
@@ -1463,11 +1466,11 @@ def cameraControl(camera_ip, camera_user, camera_pwd, cmd, opts='', camera_setti
         ispCall(camera_ip, cmd, opts)
         return
 
-    # Firmware transport. The SSH flasher for OpenIPC cameras is NOT in RMS any more:
-    # it lives with the firmware it flashes (silicon_research/tools/flash_cam.sh ->
-    # tools/openipc_flash.py), because brick-capable code in a shared, branch-switched
-    # RMS checkout is how a pre-fix flasher ran against a production camera on
-    # 2026-09-19. RMS keeps the DVRIP (XM) updater below and the OpenIPC control path.
+    # Firmware transport. Flashing science (OpenIPC) cameras, and converting cameras
+    # between stock and science, is NOT in RMS: it lives in camflash, a separate tool,
+    # because brick-capable code in a shared, branch-switched RMS checkout is how a
+    # pre-fix flasher ran against a production camera on 2026-09-19. RMS keeps the
+    # DVRIP updater for stock firmware and the OpenIPC control path.
     def _firmware_transport(ip):
         import socket
         for port, name in ((34567, "xm"), (22, "openipc")):
@@ -1481,9 +1484,9 @@ def cameraControl(camera_ip, camera_user, camera_pwd, cmd, opts='', camera_setti
         log.info('Firmware transport on %s: %s', camera_ip, _firmware_transport(camera_ip))
         return
     if cmd == 'UpgradeFirmware' and _firmware_transport(camera_ip) == 'openipc':
-        log.error("%s is an OpenIPC camera (SSH, no DVRIP). RMS does not flash those. Use "
-                  "silicon_research/tools/flash_cam.sh %s <image.tgz> commit -- the only "
-                  "supported path (staged, detached, self-verifying writer).", camera_ip, camera_ip)
+        log.error("%s runs the science (OpenIPC) firmware. RMS does not flash those; use camflash:\n"
+                  "  camflash to-science %s <image.tgz> --commit   (newer science image)\n"
+                  "  camflash to-stock   %s <stock.bin> --commit   (back to stock)", camera_ip, camera_ip, camera_ip)
         return
     # XM cameras: fall through to the DVRIP upgrade path below
 
