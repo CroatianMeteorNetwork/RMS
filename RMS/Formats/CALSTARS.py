@@ -15,7 +15,17 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 
+import math
 import os
+
+
+# CALSTARS format version, written into the file header as "Version = N".
+# - Files without a Version line (implicit version 1) carry FWHM values inflated by sqrt(2):
+#   they were computed as 2.355*sqrt(sigma_x^2 + sigma_y^2), the quadrature sum of the two
+#   axis sigmas instead of their RMS mean.
+# - Version 2: the FWHM column is the standard Gaussian FWHM (2.355*sigma for a circular
+#   star). readCALSTARS() normalizes version 1 files to this convention on read.
+CALSTARS_VERSION = 2
 
 
 def writeCALSTARS(star_list, ff_directory, file_name, cam_code, nrows, ncols, chunk_frames=256):
@@ -53,6 +63,7 @@ def writeCALSTARS(star_list, ff_directory, file_name, cam_code, nrows, ncols, ch
         star_file.write("Ncols   = " + str(ncols) + "\n")
         star_file.write("Nframes = " + str(chunk_frames) + "\n")
         star_file.write("Nstars  = -1" + "\n")
+        star_file.write("Version = {:d}".format(CALSTARS_VERSION) + "\n")
 
         # Write all stars in the CALSTARS file
         for star in star_list:
@@ -105,12 +116,18 @@ def readCALSTARS(file_path, file_name, chunk_frames=256):
             Will be overwritten by a number in the CALSTARS file if present.
 
     Return:
-        star_list, chunk_frames: 
+        star_list, chunk_frames:
             - star_list [list] a list of star data, entries:
                 ff_name, star_data
                 star_data entries:
                     x, y, bg_level, level, fwhm
             - chunk_frames [int] Number of frames in the FF file or frame chunk.
+
+    Note:
+        The FWHM values are always returned in the standard convention (2.355*sigma for a
+        circular star), regardless of the file version. Version 1 files (no "Version" header
+        line) store FWHM inflated by sqrt(2) and are normalized on read; the -1.0 sentinel
+        (no FWHM available) is left untouched.
     """
 
     
@@ -126,6 +143,10 @@ def readCALSTARS(file_path, file_name, chunk_frames=256):
 
         calibrationstars_list = []
 
+        # Files without a Version header line are implicitly version 1 (FWHM inflated by
+        # sqrt(2), normalized below)
+        version = 1
+
         ff_name = ''
         star_data = []
         skip_lines = 0
@@ -139,6 +160,11 @@ def readCALSTARS(file_path, file_name, chunk_frames=256):
             # Read the number of frames if given (Nframes = ...)
             if "Nframes" in line:
                 chunk_frames = int(line.split('=')[-1])
+                continue
+
+            # Read the format version if given (Version = ...)
+            if "Version" in line:
+                version = int(line.split('=')[-1])
                 continue
 
             # Check for end of star entry
@@ -181,6 +207,12 @@ def readCALSTARS(file_path, file_name, chunk_frames=256):
             # Read FWHM if given
             if len(line) >= 5:
                 fwhm = float(line[4])
+
+                # Normalize version 1 FWHM values (quadrature sum of axis sigmas) to the
+                # standard convention, leaving the -1.0 "not available" sentinel untouched
+                if (version < 2) and (fwhm > 0):
+                    fwhm = fwhm/math.sqrt(2)
+
             else:
                 fwhm = -1.0
 

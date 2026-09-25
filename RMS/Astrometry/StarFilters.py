@@ -19,7 +19,10 @@ from RMS.Astrometry.ApplyAstrometry import extinctionCorrectionTrueToApparent, r
 
 # Default filtering parameters
 DEFAULT_PHOTOMETRIC_SIGMA = 2.5
-DEFAULT_BLEND_FWHM_MULT = 2.0  # Multiplier of FWHM for blending detection radius
+# Multiplier of FWHM for blending detection radius. The FWHM convention fix in ExtractStars
+# (RMS mean of axis sigmas instead of quadrature sum) shrank reported FWHMs by sqrt(2), so this
+# was rescaled 2.0 -> 2.8 to keep the same effective blend radius in pixels.
+DEFAULT_BLEND_FWHM_MULT = 2.8
 DEFAULT_BLEND_MAG_MARGIN = 0.3  # Margin above limiting magnitude for blend check
 
 
@@ -124,7 +127,7 @@ def filterBlendedStars(paired_stars, catalog_stars, platepar, jd, lim_mag,
 
     Keyword arguments:
         fwhm_mult: [float] Multiplier of the star's FWHM for blend detection radius.
-            Default is 2.0.
+            Default is 2.8.
         mag_margin: [float] Margin above lim_mag - only consider catalog stars
             brighter than (lim_mag + mag_margin). Default is 0.3.
         verbose: [bool] Print filtering info. Default is False.

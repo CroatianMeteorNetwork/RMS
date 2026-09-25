@@ -107,8 +107,10 @@ class FluxConfig(object):
         # Minimum number of meteors in the time bin
         self.meteors_min = 3
 
-        # Default star FWHM, it it's not available (pz)
-        self.default_fwhm = 3
+        # Default star FWHM if it's not available in CALSTARS, in the standard convention
+        # (was 3 under the old sqrt(2)-inflated FWHM convention; readCALSTARS now normalizes
+        # all files to the standard convention)
+        self.default_fwhm = 2.1
 
         # Filter out nights which have too many detections - it is assumed that the false positives are
         #   present if there are too many sporadic meteors
@@ -1895,9 +1897,19 @@ def getSensorCharacterization(dir_path, config, flux_config, meteor_data, defaul
             data = " ".join(f.readlines())
             sensor_data = json.loads(data)
 
-            # Remove the info entry
+            # Cached files without a version entry were computed under the old
+            # sqrt(2)-inflated FWHM convention - normalize them to the standard convention
+            # (readCALSTARS does the same for CALSTARS files)
+            if '-2' not in sensor_data:
+                for key in sensor_data:
+                    if key != '-1' and sensor_data[key][0] > 0:
+                        sensor_data[key][0] /= np.sqrt(2)
+
+            # Remove the info entries
             if '-1' in sensor_data:
                 del sensor_data['-1']
+            if '-2' in sensor_data:
+                del sensor_data['-2']
 
             # If file FWHM is -1 and the default FWHM is not, override it
             for key in sensor_data:
@@ -1918,9 +1930,11 @@ def getSensorCharacterization(dir_path, config, flux_config, meteor_data, defaul
         # Save to file for posterior use
         with open(sensor_characterization_path, 'w') as f:
 
-            # Add an explanation what each entry means
+            # Add an explanation what each entry means, and a format version marker
+            # (version 2 = FWHM in the standard convention; absent = sqrt(2)-inflated)
             sensor_data_save = dict(sensor_data)
             sensor_data_save['-1'] = {"FF file name": ['median star FWHM']}
+            sensor_data_save['-2'] = {"version": [2]}
 
             # Convert collection areas to JSON
             out_str = json.dumps(sensor_data_save, indent=4, sort_keys=True)
