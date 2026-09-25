@@ -2052,6 +2052,12 @@ class Platepar(object):
         # Parse JSON into an object with attributes corresponding to dict keys
         self.__dict__ = platepar_dict
 
+        # The reference hour angle is a function of the reference time only, so it is recomputed rather
+        #   than taken from the file: this way a platepar written with an older definition of the sidereal
+        #   time (e.g. without the equation of the equinoxes) keeps pointing where it was fitted
+        if 'JD' in self.__dict__:
+            self.Ho = JD2HourAngle(self.JD)
+
         # Add the version if it was not in the platepar (v1 platepars didn't have a version)
         if not 'version' in self.__dict__:
             self.version = 1
