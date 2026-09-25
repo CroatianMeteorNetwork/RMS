@@ -701,6 +701,16 @@ def _topic_settings(gui):
         ("Redraw Satellite Tracks", "Recompute and redraw the tracks now."),
     ]
 
+    wmpl_rows = [
+        ("Show WMPL Solutions", "Overlay the trajectory points of the loaded WMPL solutions, as seen from "
+         "this station. Display only &ndash; they are drawn behind all other overlays, can't be clicked "
+         "and are not saved."),
+        ("Legend", "Show the marker of each solution and the colour of each of its stations."),
+        ("Solution list", "Tick a solution to show it. Up to 5 can be loaded, each with its own marker."),
+        ("Load WMPL Report / Remove Selected", "Load the trajectory points from a WMPL report file "
+         "(*_report.txt), or remove the solution selected in the list."),
+    ]
+
     body = (
         "<p class=\"lead\">The Settings tab controls what is drawn on the image, plus a few catalog "
         "and satellite options. Toggles take effect immediately.</p>"
@@ -709,6 +719,7 @@ def _topic_settings(gui):
         + "<h3>Satellites</h3>"
         "<p>Turn these on here when you need them &ndash; see <a href=\"topic:sattracks\">satellite "
         "tracks</a> for the full details.</p>" + _defn_table(sat_rows)
+        + "<h3>WMPL solutions</h3>" + _defn_table(wmpl_rows)
     )
 
     if mode == 'manualreduction':
