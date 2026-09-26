@@ -134,7 +134,8 @@ def _rmspCapUtc(data):
     Earlier versions rode a LATER frame and are not accepted. Layout matches
     venc/main.c build_rmsp_payload (fields XOR-0xFF after the 'RMSP' magic).
     capture_utc = (sec+usec) - (mono_pts_us - raw_pts_us): host-clock at emit minus the
-    camera-side capture->emit delay, both from the same back-to-back cal.
+    camera-side capture->emit delay, both from the same back-to-back cal. The raw
+    (utc_s, mono_us, raw_pts_us) triple is returned too, for _ClockPairFilter.
     Cheap enough to run per frame: locate the magic in the escaped bytes (memchr speed) and
     de-escape only a short slice from there. The magic has no zero bytes, so the emulation-
     prevention state is known (clean) at that point; the SEI precedes slice data, so the first
@@ -185,7 +186,46 @@ def _rmspCapUtc(data):
             'wb_b': struct.unpack('<H', u[36:38])[0]/256.0 if (fl & 0x02) else None,
             'qp': u[58] if (fl & 0x40) else None,
         }
-        return ((sec + usec/1e6) - delay/1e6, exp_us/1e6, temp, meta, frame_seq)
+        return ((sec + usec/1e6) - delay/1e6, exp_us/1e6, temp, meta, frame_seq,
+                (sec + usec/1e6, mono, raw_pts))
+
+
+class _ClockPairFilter(object):
+    """Denoise the camera's UTC/MPP clock pair; never the frame's own hardware stamp.
+
+    capture_utc = utc - (mono - raw_pts) = (utc - mono) + raw_pts. raw_pts is the frame's
+    hardware PTS and carries all real per-frame timing (exposure steps, VMAX, drops); it is
+    used as is. utc - mono is only the offset between two camera clocks, read back to back
+    when the encoder thread handles the frame. It truly moves only as chrony slews the
+    clock (a few ppm), but each reading scatters ~16 us, and a preemption between the two
+    reads (single-core CV300) makes one frame's offset 3-5 ms late -- measured on US005F,
+    2026-09-26: 59 single-frame glitches/hour, each exactly a jump in utc - mono. The
+    offset used is the median of the last `n` frames' (causal: no added latency; one bad
+    pair cannot move it). A jump > reset_s clears the window: the 32-bit us MPP counter
+    wraps every ~71.6 min (offset +4294.97 s, expected), or the camera clock was stepped
+    (logged)."""
+
+    _WRAP_S = 4294.967296
+
+    def __init__(self, n=25, reset_s=1.0):
+        self._off = deque(maxlen=n)
+        self._reset_s = reset_s
+        self.steps = 0
+
+    def capture_utc(self, utc_s, mono_us, raw_pts_us):
+        delay_s = ((mono_us - raw_pts_us) & 0xffffffff)/1e6
+        off = utc_s - mono_us/1e6
+        if self._off:
+            jump = off - self._off[-1]
+            if abs(jump) > self._reset_s:
+                if abs(abs(jump) - self._WRAP_S) > self._reset_s:
+                    self.steps += 1
+                    log.info("SEI clock pair: camera clock stepped {:+.3f} s -- offset window reset"
+                             .format(jump))
+                self._off.clear()
+        self._off.append(off)
+        med = sorted(self._off)[len(self._off)//2]
+        return med + mono_us/1e6 - delay_s
 
 if sys.version_info[0] < 3:
     # py2
@@ -366,6 +406,7 @@ class BufferedCapture(Process):
         # reference and the per-frame fallback. Raw per-frame stamps are stored lock-free in
         # _sei_int_by_pts (like _arr_by_pts); the source is latched once per block.
         self._sei_tb = SEITimebase(self.config.fps)
+        self._sei_pair = _ClockPairFilter()
         self._sei_int_by_pts = {}
         self._sei_ts_active = False
         self._sei_off_samples = []
@@ -765,6 +806,7 @@ class BufferedCapture(Process):
                 if ok:
                     cu = _rmspCapUtc(bytes(mi.data)); buf.unmap(mi)
                     if cu is not None:
+                        cu = (self._sei_pair.capture_utc(*cu[5]),) + tuple(cu[1:])
                         self._sei_seen = True
                         if cu[2] is not None:
                             self._soc_temp = cu[2]
