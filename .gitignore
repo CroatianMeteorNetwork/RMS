@@ -124,3 +124,6 @@ skills-lock.json
 
 # QueuedPool backup files (written to the working directory by test/debug runs)
 rms_queue_bkup_*.pickle
+
+# operator-owned science camera settings: deployed manually, never committed
+camera_settings_openipc*.json
