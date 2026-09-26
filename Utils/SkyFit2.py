@@ -1734,6 +1734,18 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
                 try:
                     pt.config = cr.parse(path)
                     pt.initStarDetectionOverrides()
+
+                    # The platepar in memory carries the location, resolution, gamma and station
+                    # ID of the config that was active when it was loaded. Re-sync it so a fit
+                    # and save after a config switch use the new config's values.
+                    if pt.platepar is not None:
+                        if pt.syncPlateparFromConfig(pt.platepar):
+                            pt.platepar_modified = True
+                        if hasattr(pt, 'tab'):
+                            pt.updateStars()
+                            pt.tab.param_manager.updatePlatepar()
+                            pt.updateLeftLabels()
+
                     result = "Config loaded from: " + path
                 except Exception as e:
                     result = "Config load failed: " + repr(e)
@@ -5490,18 +5502,9 @@ class PlateTool(QtWidgets.QMainWindow):
             hp_xy = HotPixels.loadHotPixelCoords(self.dir_path, self.config)
 
             if len(hp_xy):
-                radius = getattr(self.config, 'hot_pixels_radius', 2.0)
-                curated = {}
-                for ff, stars in merged.items():
-                    rows = list(stars)
-                    if not rows:
-                        continue
-                    hot = HotPixels.matchHotPixels([r[1] for r in rows], [r[0] for r in rows],
-                        hp_xy, radius)
-                    kept = [row for row, h in zip(rows, hot) if not h]
-                    if kept:
-                        curated[ff] = kept
-                merged = curated
+                curated, _ = HotPixels.filterStarList(list(merged.items()), hp_xy,
+                    getattr(self.config, 'hot_pixels_radius', 2.0))
+                merged = dict(curated)
 
         return {ff: stars for ff, stars in merged.items() if len(stars) > 0}
 
@@ -15922,6 +15925,43 @@ class PlateTool(QtWidgets.QMainWindow):
         return None
 
 
+    def syncPlateparFromConfig(self, platepar):
+        """ Copy the station-specific values (location, resolution, gamma, station ID) from the
+            current config into the given platepar and recompute the derived reference values.
+
+        Arguments:
+            platepar: [Platepar] Platepar to update in place.
+
+        Return:
+            [bool] True if the location (lat, lon, elev) changed.
+        """
+
+        location_changed = (platepar.lat != self.config.latitude) \
+            or (platepar.lon != self.config.longitude) \
+            or (platepar.elev != self.config.elevation)
+
+        # Update the location from the config file
+        platepar.lat = self.config.latitude
+        platepar.lon = self.config.longitude
+        platepar.elev = self.config.elevation
+
+        platepar.X_res = self.config.width
+        platepar.Y_res = self.config.height
+
+        # Set the camera gamma from the config file
+        platepar.gamma = self.config.gamma
+
+        # Set station ID
+        platepar.station_code = self.config.stationID
+
+        # Compute the rotation w.r.t. horizon
+        platepar.rotation_from_horiz = rotationWrtHorizon(platepar)
+
+        # Update reference alt/az
+        platepar.updateRefAltAz()
+
+        return location_changed
+
     def loadPlatepar(self, update=False, platepar_file=None):
         """
         Open a file dialog and ask user to open the platepar file, changing self.platepar and self.platepar_file
@@ -15973,26 +16013,7 @@ class PlateTool(QtWidgets.QMainWindow):
             print("FOV: {:.2f} x {:.2f} deg".format(*computeFOVSize(platepar)))
 
             # Set geo location and gamma from config, if they were updated
-
-            # Update the location from the config file
-            platepar.lat = self.config.latitude
-            platepar.lon = self.config.longitude
-            platepar.elev = self.config.elevation
-
-            platepar.X_res = self.config.width
-            platepar.Y_res = self.config.height
-
-            # Set the camera gamma from the config file
-            platepar.gamma = self.config.gamma
-
-            # Set station ID
-            platepar.station_code = self.config.stationID
-
-            # Compute the rotation w.r.t. horizon
-            platepar.rotation_from_horiz = rotationWrtHorizon(platepar)
-
-            # Update reference alt/az
-            platepar.updateRefAltAz()
+            self.syncPlateparFromConfig(platepar)
 
             self.first_platepar_fit = False
 
