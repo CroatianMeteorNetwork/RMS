@@ -73,6 +73,12 @@ MAX_EXPECTED_PTS_NS = 24*60*60*1e9  # 24 hours in nanoseconds
 # +88 us on the IMX307 (VMAX/HMAX/SHS1 timing + PPS-LED cal); see reference_rmsp_provenance.
 _K_READOUT_S = 88e-6
 
+# SEI warm-up after a (re)connect: hold the first block until the SEI timebase is ready (~1 s)
+# so it starts on SEI time instead of spending 256 frames on legacy. Bounded for a slow camera;
+# a camera that shows no SEI in its first frames is released at once.
+_SEI_WARMUP_MAX_S = 3.0
+_SEI_WARMUP_NOSEI_FRAMES = 10
+
 # Wallclock RATE discipline for GStreamer frame timestamps.
 # The RTP/PTS timebase rides the camera's crystal (measured -13.2 ppm on a GK7205/IMX307
 # unit = ~475 ms over a night; chrony/NTP steer CLOCK_REALTIME, never the camera's
@@ -2560,6 +2566,9 @@ class BufferedCapture(Process):
 
         wait_for_reconnect = False
 
+        # Hold the first block after each (re)connect until the SEI timebase is ready
+        sei_warmup = True
+
         last_frame_timestamp = False
 
         # Setup additional timing variables for memory share with RawFrameSaver
@@ -2633,6 +2642,37 @@ class BufferedCapture(Process):
 
 
                 wait_for_reconnect = False
+                sei_warmup = True
+
+
+            # SEI warm-up: read and drop frames (still counted, like the cv2 warm-up skip) until the
+            # SEI timebase is ready, so the first block is latched on SEI time
+            if sei_warmup and (self.video_file is None) and (self._sei_tb is not None):
+                sei_warmup = False
+                t_warmup = time.time()
+                n_warmup = 0
+                warmup_ok = True
+                while (not self.exit.is_set()) and (not self._sei_tb.ready()):
+                    if (not self._sei_seen and n_warmup >= _SEI_WARMUP_NOSEI_FRAMES) \
+                            or ((time.time() - t_warmup) > _SEI_WARMUP_MAX_S):
+                        break
+                    warmup_ok, _, _ = self.read()
+                    if not warmup_ok:
+                        break
+                    n_warmup += 1
+                    total_frames += 1
+
+                self.heartbeat.value = time.time()
+
+                if not warmup_ok:
+                    log.info('Frame grabbing failed during SEI warm-up, video device is probably disconnected!')
+                    self.releaseResources()
+                    wait_for_reconnect = True
+                    continue
+
+                if n_warmup:
+                    log.info('SEI warm-up: dropped %d frames in %.2f s (SEI timebase ready: %s)',
+                             n_warmup, time.time() - t_warmup, self._sei_tb.ready())
 
 
             t_frame = 0
