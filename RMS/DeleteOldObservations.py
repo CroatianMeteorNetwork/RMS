@@ -873,11 +873,19 @@ def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration
 
     if config.raw_video_save:
 
-        # Prefer the ACTUAL size of recent raw video on disk -- it tracks the camera's
-        # real bitrate. The old fixed 0.25 Mbps assumption under-provisions badly on
-        # high-bitrate/VBR encoders (measured ~5-10x, up to ~200x at peak), so the disk
-        # could fill mid-night despite cleanup having run.
-        raw_video_bytes = estimateNightVideoBytes(video_dir)
+        if config.raw_video_bitrate_mbps:
+            # The operator declared the bitrate: trust it. Video already on disk says nothing
+            # about the next capture after a change of camera settings.
+            raw_video_bytes = duration*config.raw_video_bitrate_mbps*1e6/8
+            log.info("Raw video budget from raw_video_bitrate_mbps {:g}: {:.2f} GB".format(
+                config.raw_video_bitrate_mbps, raw_video_bytes/1024**3))
+
+        else:
+            # Prefer the ACTUAL size of recent raw video on disk -- it tracks the camera's
+            # real bitrate. The old fixed 0.25 Mbps assumption under-provisions badly on
+            # high-bitrate/VBR encoders (measured ~5-10x, up to ~200x at peak), so the disk
+            # could fill mid-night despite cleanup having run.
+            raw_video_bytes = estimateNightVideoBytes(video_dir)
 
         if raw_video_bytes is None:
             # No history yet: fall back to a ~0.25 Mbps @720p25 baseline, scaled by
