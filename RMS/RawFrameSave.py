@@ -28,6 +28,7 @@ import numpy as np
 
 from RMS.Logger import getLogger, getLoggingQueue, initChildProcess
 from RMS.Misc import mkdirP, setParentDeathSignal, AtomicFlag, stableDoubleRead
+from RMS.HighlightRebuild import rebuildGreen
 
 # Get the logger from the main module
 log = getLogger("rmslogger")
@@ -121,6 +122,13 @@ class RawFrameSaver(multiprocessing.Process):
             mode_str = "day" if daytime_mode else "night"
             log.info("Saving block of %d raw frames to disk (%s mode)", frame_count, mode_str)
 
+        # Daytime highlight rebuild (config.day_highlight_rebuild, off by default): frames whose
+        # green sits on a clip plateau below full scale (WB gains scaled down by podcontrol's WB
+        # rung) get green rebuilt from red/blue, so raw-saturated areas are not magenta.
+        # Counted per block and logged once.
+        rebuild = daytime_mode and getattr(self.config, 'day_highlight_rebuild', False)
+        rebuilt = []
+
         for (frame, timestamp) in frametimes:
 
             # If timestamp is 0, then we've reached the end and this is the last block 
@@ -137,6 +145,14 @@ class RawFrameSaver(multiprocessing.Process):
                 # Otherwise, take the first available channel
                 else:
                     frame = frame[:, :, 0]
+
+            if rebuild:
+                try:
+                    frame, info = rebuildGreen(frame)
+                    if info is not None:
+                        rebuilt.append(info)
+                except Exception as e:
+                    log.warning("Highlight rebuild failed, frame saved as captured: {0}".format(e))
 
             # In case the timestamp day changes mid-block
             if self.day_of_year != time.strftime("%j", time.gmtime(timestamp)):
@@ -193,6 +209,11 @@ class RawFrameSaver(multiprocessing.Process):
                 log.error("Could not save frame to disk: {0}".format(e))
 
             self.total_saved_frames += 1
+
+        if rebuilt:
+            log.info("Highlight rebuild: %d of %d frames (green plateau %d, %.1f%% clipped max, ratios %s kR %.2f kB %.2f)",
+                     len(rebuilt), frame_count, rebuilt[-1]["plateau"], 100*max(r["clipped"] for r in rebuilt),
+                     rebuilt[-1]["ratios"], rebuilt[-1]["k_r"], rebuilt[-1]["k_b"])
 
 
     def ensureViews(self):

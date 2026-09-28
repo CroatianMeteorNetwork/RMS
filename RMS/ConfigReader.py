@@ -393,6 +393,10 @@ class Config:
         # Set PNG compression for the saved frames for png file type
         self.png_compression = 3
 
+        # Rebuild the green of raw-saturated highlights in saved DAY frames (magenta under
+        # scaled-down WB gains; OpenIPC cameras with podcontrol's WB rung). See RMS.HighlightRebuild.
+        self.day_highlight_rebuild = False
+
         # Set the time interval for saving video frames (s) aligned on reference epoch (not exposed in .config)
         self.frame_save_aligned_interval = 5.0
 
@@ -1342,6 +1346,10 @@ def parseCapture(config, parser):
             config.png_compression = 3
             log.warning("The png_compression must be between 0 and 9. It has been reset to 3!")
 
+
+    # Rebuild the green of raw-saturated highlights in saved day frames
+    if parser.has_option(section, "day_highlight_rebuild"):
+        config.day_highlight_rebuild = parser.getboolean(section, "day_highlight_rebuild")
 
     # Load the interval for saving video frame
     if parser.has_option(section, "frame_save_aligned_interval"):
