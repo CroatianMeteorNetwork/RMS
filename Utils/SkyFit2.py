@@ -17389,7 +17389,11 @@ class PlateTool(QtWidgets.QMainWindow):
             else:
 
                 # Compute the random error based on the SNR
-                mag_err_random = 2.5*np.log10(1 + 1/pick['snr'])
+                try:
+                    mag_err_random = 2.5*np.log10(1 + 1/pick['snr'])
+                except Exception as e:
+                    print(e)
+                    mag_err_random = 0
 
             # Compute the magnitude errors
             mag_err_total = np.sqrt(mag_err_random**2 + self.platepar.mag_lev_stddev**2)
