@@ -397,6 +397,10 @@ class Config:
         # scaled-down WB gains; OpenIPC cameras with podcontrol's WB rung). See RMS.HighlightRebuild.
         self.day_highlight_rebuild = False
 
+        # Embed each saved frame's exposure record (RMSP SEI: capture time, exposure, gains, WB,
+        # temperature) as a JSON line in the PNG/JPEG. See RMS.FrameMetadata.
+        self.save_frame_metadata = False
+
         # Set the time interval for saving video frames (s) aligned on reference epoch (not exposed in .config)
         self.frame_save_aligned_interval = 5.0
 
@@ -1350,6 +1354,10 @@ def parseCapture(config, parser):
     # Rebuild the green of raw-saturated highlights in saved day frames
     if parser.has_option(section, "day_highlight_rebuild"):
         config.day_highlight_rebuild = parser.getboolean(section, "day_highlight_rebuild")
+
+    # Embed per-frame exposure metadata in saved frames
+    if parser.has_option(section, "save_frame_metadata"):
+        config.save_frame_metadata = parser.getboolean(section, "save_frame_metadata")
 
     # Load the interval for saving video frame
     if parser.has_option(section, "frame_save_aligned_interval"):

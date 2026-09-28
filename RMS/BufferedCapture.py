@@ -47,6 +47,7 @@ from RMS.Misc import obfuscatePassword
 from RMS.Routines.GstreamerCapture import GstVideoFile, getStructureValue
 from RMS.Formats.ObservationSummary import addObsParam, getObservationSummaryDict
 from RMS.RawFrameSave import RawFrameSaver
+from RMS.FrameMetadata import NFIELDS as FRAME_META_FIELDS, fillRow as fillFrameMetaRow
 from RMS.Misc import RmsDateTime, mkdirP, UTCFromTimestamp, frameBufferShape, runWithTimeout, AtomicFlag
 from RMS.Formats import FTfile, FTStruct
 from RMS.Logger import LoggingManager, getLogger, gstDebugLogger, getLoggingQueue, initChildProcess
@@ -414,6 +415,8 @@ class BufferedCapture(Process):
         self._sei_tb = SEITimebase(self.config.fps)
         self._sei_pair = _ClockPairFilter()
         self._sei_int_by_pts = {}
+        self._sei_meta_by_pts = {}      # pts -> parsed RMSP record, for saved-frame metadata
+        self._last_frame_meta = None    # the record of the frame read() just returned
         self._sei_ts_active = False
         self._sei_off_samples = []
         self._sei_interp_n = 0
@@ -434,6 +437,11 @@ class BufferedCapture(Process):
             self.start_raw_time2 = Value('d', 0.0, lock=False)
             self.shared_timestamps_base = Array(ctypes.c_double, self.num_raw_frames)
             self.shared_timestamps_base2 = Array(ctypes.c_double, self.num_raw_frames)
+
+            # Per-frame exposure record (RMSP SEI) of each buffered raw frame, for the
+            # metadata embedded in saved frames (RMS.FrameMetadata, config.save_frame_metadata)
+            self.shared_meta_base = Array(ctypes.c_double, self.num_raw_frames*FRAME_META_FIELDS)
+            self.shared_meta_base2 = Array(ctypes.c_double, self.num_raw_frames*FRAME_META_FIELDS)
 
         # Initialize shared counter for dropped frames
         # lock=False: the capture child is the only writer (increments), the
@@ -817,6 +825,10 @@ class BufferedCapture(Process):
                         if cu[2] is not None:
                             self._soc_temp = cu[2]
                         self._sei_blk.add(cu[3])
+                        self._sei_meta_by_pts[pts] = cu
+                        if len(self._sei_meta_by_pts) > 600:
+                            for _k in list(self._sei_meta_by_pts)[:200]:
+                                self._sei_meta_by_pts.pop(_k, None)
                         if self._sei_tb is not None:
                             self._sei_int_by_pts[pts] = self._sei_tb.feed(pts, cu[0], cu[1], cu[4])
                             if len(self._sei_int_by_pts) > 600:
@@ -1061,6 +1073,12 @@ class BufferedCapture(Process):
         # camera's integration-start (capture_utc - exp - k), used RAW; legacy stays the reference and
         # the fallback. A frame with no record is interpolated from the fit (flagged); if even that
         # is unavailable, legacy is kept.
+        # The RMSP record of this very frame (by its PTS), for the saved-frame metadata
+        try:
+            self._last_frame_meta = self._sei_meta_by_pts.pop(gst_timestamp_ns, None) if ret else None
+        except (NameError, AttributeError):
+            self._last_frame_meta = None
+
         if ret and (timestamp is not None) and (getattr(self, '_sei_tb', None) is not None):
             _legacy_ts = timestamp
             try:
@@ -2486,6 +2504,10 @@ class BufferedCapture(Process):
                 # Convert shared timestamp arrays to numpy arrays
                 self.sharedTimestamps = np.ctypeslib.as_array(self.shared_timestamps_base.get_obj())
                 self.sharedTimestamps2 = np.ctypeslib.as_array(self.shared_timestamps_base2.get_obj())
+                self.sharedMeta = np.ctypeslib.as_array(self.shared_meta_base.get_obj()).reshape(
+                    self.num_raw_frames, FRAME_META_FIELDS)
+                self.sharedMeta2 = np.ctypeslib.as_array(self.shared_meta_base2.get_obj()).reshape(
+                    self.num_raw_frames, FRAME_META_FIELDS)
 
                 # Raw frame arrays will be initialized after we know the frame shape
                 self.shared_raw_array_base = None
@@ -2809,7 +2831,8 @@ class BufferedCapture(Process):
                                 self.shared_timestamps_base, self.shared_timestamps_base2,
                                 self.daytime_mode.value,
                                 self.config,
-                                self.raw_array_shape
+                                self.raw_array_shape,
+                                metaArray1=self.shared_meta_base, metaArray2=self.shared_meta_base2
                             )
                             self.raw_frame_saver.start()
                             self.raw_frame_count = 0
@@ -2846,6 +2869,10 @@ class BufferedCapture(Process):
                         else:
                             self.shared_raw_array2[self.raw_frame_count, :, :] = frame
                             self.sharedTimestamps2[self.raw_frame_count] = frame_timestamp
+
+                    # ...and this frame's exposure record (empty row when there is none)
+                    fillFrameMetaRow((self.sharedMeta if raw_buffer_one else self.sharedMeta2)[self.raw_frame_count],
+                                     self._last_frame_meta)
 
                     self.raw_frame_count += 1
 
