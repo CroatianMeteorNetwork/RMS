@@ -459,7 +459,10 @@ def recalibrateFF(
         working_platepar.auto_recalibrated = True
         working_platepar.star_list = []
         for star_vals, ra, dec, mag in zip(image_stars, ra_catalog, dec_catalog, catalog_mags):
-            working_platepar.star_list.append([jd] + list(star_vals[:3]) + [ra, dec, mag])
+
+            # Store in the same (x, y, intensity) order as Platepar.fitAstrometry - the CALSTARS rows
+            #   are (y, x, intensity, ...)
+            working_platepar.star_list.append([jd, star_vals[1], star_vals[0], star_vals[2], ra, dec, mag])
 
         # Store the platepar to the list of recalibrated platepars
         result = working_platepar
