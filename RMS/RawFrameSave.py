@@ -29,7 +29,7 @@ import numpy as np
 from RMS.Logger import getLogger, getLoggingQueue, initChildProcess
 from RMS.Misc import mkdirP, setParentDeathSignal, AtomicFlag, stableDoubleRead
 from RMS.HighlightRebuild import rebuildGreen
-from RMS.FrameMetadata import NFIELDS as META_FIELDS, rowToDict, writeImage
+from RMS.FrameMetadata import NFIELDS as META_FIELDS, rowToDict, writeImage, greenCeiling
 
 # Get the logger from the main module
 log = getLogger("rmslogger")
@@ -166,7 +166,7 @@ class RawFrameSaver(multiprocessing.Process):
 
             if rebuild:
                 try:
-                    frame, info = rebuildGreen(frame)
+                    frame, info = rebuildGreen(frame, ceiling=greenCeiling(meta_row))
                     if info is not None:
                         rebuilt.append(info)
                         frame_info = info
@@ -227,6 +227,7 @@ class RawFrameSaver(multiprocessing.Process):
                     meta["highlight_rebuild"] = {"plateau": frame_info["plateau"],
                                                  "clipped": round(frame_info["clipped"], 4),
                                                  "ratios": frame_info["ratios"],
+                                                 "ceiling": frame_info.get("ceiling"),
                                                  "k_r": round(frame_info["k_r"], 3),
                                                  "k_b": round(frame_info["k_b"], 3)}
                 if meta:

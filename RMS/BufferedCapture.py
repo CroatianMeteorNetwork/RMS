@@ -191,6 +191,7 @@ def _rmspCapUtc(data):
             'ispdgain': struct.unpack('<I', u[30:34])[0]/1024.0 if exp_ok else None,
             'wb_r': struct.unpack('<H', u[34:36])[0]/256.0 if (fl & 0x02) else None,
             'wb_b': struct.unpack('<H', u[36:38])[0]/256.0 if (fl & 0x02) else None,
+            'wb_g': struct.unpack('<H', u[38:40])[0]/256.0 if (fl & 0x02) else None,
             'qp': u[58] if (fl & 0x40) else None,
         }
         return ((sec + usec/1e6) - delay/1e6, exp_us/1e6, temp, meta, frame_seq,

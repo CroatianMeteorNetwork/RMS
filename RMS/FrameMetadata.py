@@ -10,6 +10,9 @@ one JSON line in the saved image (config.save_frame_metadata):
     PNG:  a tEXt chunk with keyword "RMS" right after IHDR
     JPEG: a COM (comment) segment right after SOI
 
+Also: greenCeiling(row) = the 8-bit code at which green clips in the output (raw saturation x
+ISP digital gain x green WB gain), used by the highlight rebuild.
+
 The image data is unchanged; exiftool, Pillow (Image.info / .text) and ImageMagick read both.
 With it a frame converts to light on a fixed scale: linear = (v/255)^2 (pure gamma 0.5),
 light = linear / (exp_us * again * dgain * ispdgain), per channel also / its WB gain.
@@ -29,7 +32,7 @@ import numpy as np
 
 
 # Layout of one shared-memory row (float64). "valid" is 1.0 when the row holds a record.
-FIELDS = ("valid", "capture_utc", "exp_us", "again", "dgain", "ispdgain", "wb_r", "wb_b", "temp_c", "frame_seq")
+FIELDS = ("valid", "capture_utc", "exp_us", "again", "dgain", "ispdgain", "wb_r", "wb_b", "temp_c", "frame_seq", "wb_g")
 NFIELDS = len(FIELDS)
 
 
@@ -52,6 +55,8 @@ def fillRow(row, cu):
             row[i] = v if v is not None else np.nan
         row[8] = cu[2] if cu[2] is not None else np.nan
         row[9] = cu[4] if len(cu) > 4 and cu[4] is not None else np.nan
+        v = meta.get("wb_g")
+        row[10] = v if v is not None else np.nan
     except Exception:
         row[0] = 0.0
 
@@ -136,3 +141,17 @@ def readImageMeta(path):
     except Exception:
         return None
     return None
+
+
+BLC_FRACTION = (4095.0 - 240.0)/4095.0      # raw full scale left after the 240 black-level subtraction
+
+
+def greenCeiling(row):
+    """ 8-bit output code at which a raw-saturated pixel's green lands (pure gamma 0.5): the
+        clip plateau of the green channel, or None when the row lacks the gains. """
+    if row is None or not row[0] > 0:
+        return None
+    ispd, wb_g = float(row[5]), float(row[10]) if len(row) > 10 else float("nan")
+    if not (ispd == ispd and wb_g == wb_g) or wb_g <= 0:
+        return None
+    return 255.0*min(1.0, ispd*BLC_FRACTION*wb_g)**0.5
