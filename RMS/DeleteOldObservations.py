@@ -504,6 +504,7 @@ def getRawItems(dir_path, in_video_dir=False, unique=False):
     def isProcessedFrameFile(path):
         suffix = [
             '_frametimes.json',
+            '_framemeta.json',
             '_frames_timelapse.mp4',
             '_frames_timelapse.tar',
             '_frames_timelapse.tar.gz',

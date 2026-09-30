@@ -297,6 +297,8 @@ FNAME_TEMPLATE = (
 
 MP4_SUFFIX = "frames_timelapse.mp4"
 TS_JSON_SUFFIX = "frametimes.json"
+# Per-frame exposure metadata of the timelapse (see frameMetaPath). Meant to supersede frametimes.json
+FRAME_META_JSON_SUFFIX = "framemeta.json"
 TAR_SUFFIX_BZ2 = "frames_timelapse.tar.bz2"
 TAR_SUFFIX_GZ = "frames_timelapse.tar.gz"
 
@@ -718,6 +720,26 @@ def isFfmpegWorking(ffmpeg_path='ffmpeg', rms_root=getRmsRootDir()):
     return False
 
 
+def frameMetaPath(video_path):
+    """ The per-frame metadata sidecar of a frames timelapse, next to its frametimes.json.
+
+    It maps each video frame index (the same keys as frametimes.json) to the exposure record RMS
+    embedded in that saved frame (RMS.FrameMetadata, config.save_frame_metadata: capture_utc,
+    exp_us, again, dgain, ispdgain, wb_r, wb_g, wb_b, temp_c, frame_seq, and "highlight_rebuild" when the
+    highlight rebuild changed the frame), or null for a frame without one. Only written when at
+    least one frame carries a record, so stations without the metadata ship no file.
+
+    Arguments:
+        video_path: [str] Path of the timelapse .mp4.
+
+    Return:
+        [str] Path of the sidecar.
+    """
+    if MP4_SUFFIX in video_path:
+        return video_path.replace(MP4_SUFFIX, FRAME_META_JSON_SUFFIX)
+    return video_path.replace('.mp4', '_' + FRAME_META_JSON_SUFFIX)
+
+
 def generateTimelapseFromFrames(image_files,
                                 frames_root,
                                 video_path,
@@ -746,7 +768,8 @@ def generateTimelapseFromFrames(image_files,
 
     Return:
         (video_path, json_path): [tuple[str, str] | (None, None)]
-            Output paths on success, (None, None) on failure.
+            Output paths on success, (None, None) on failure. The per-frame metadata sidecar,
+            when written, is at frameMetaPath(video_path).
     """
 
     # Validate input parameters
@@ -860,6 +883,13 @@ def generateTimelapseFromFrames(image_files,
     
     # Initialize timestamp JSON data
     timestamp_data = {}
+
+    # Per-frame metadata embedded in the saved frames, read here because cleanup may delete them
+    try:
+        from RMS.FrameMetadata import readImageMeta
+    except Exception:
+        readImageMeta = None
+    frame_meta = {}
     
     # Process frames
     log.info("Processing {} frames...".format(len(image_files)))
@@ -916,6 +946,14 @@ def generateTimelapseFromFrames(image_files,
 
             # Write frame to ffmpeg
             ffmpeg_process.stdin.write(image.tobytes())
+
+            meta = None
+            if readImageMeta is not None:
+                try:
+                    meta = readImageMeta(img_path, max_bytes=65536)
+                except Exception:
+                    meta = None
+            frame_meta[str(processed_count)] = meta
             processed_count += 1
             
         except Exception as e:
@@ -935,6 +973,19 @@ def generateTimelapseFromFrames(image_files,
             json.dump(timestamp_data, f, indent=2)
     except Exception as e:
         log.warning("Warning: Error saving timestamp data: {}".format(e))
+
+    # The metadata sidecar: one compact JSON line per frame keeps it readable and diffable
+    meta_path = frameMetaPath(video_path)
+    temp_meta_path = os.path.join(output_dir, "{}_temp_framemeta.json".format(output_name))
+    n_meta = sum(1 for v in frame_meta.values() if v)
+    if n_meta:
+        try:
+            with open(temp_meta_path, 'w') as f:
+                f.write("{\n" + ",\n".join('"{}": {}'.format(k, json.dumps(frame_meta[k], separators=(",", ":")))
+                                            for k in sorted(frame_meta, key=int)) + "\n}\n")
+            log.info("Frame metadata for {:d} of {:d} frames".format(n_meta, processed_count))
+        except Exception as e:
+            log.warning("Warning: Error saving frame metadata: {}".format(e))
     
     # Finalize video
     log.info("All frames processed. Successfully processed: {}, Skipped: {}"
@@ -975,6 +1026,13 @@ def generateTimelapseFromFrames(image_files,
                     os.remove(timestamp_path)
                 os.rename(temp_timestamp_path, timestamp_path)
                 log.info("Timestamp data saved to: {}".format(timestamp_path))
+
+            # Rename the frame metadata file if it exists
+            if os.path.exists(temp_meta_path):
+                if os.path.exists(meta_path):
+                    os.remove(meta_path)
+                os.rename(temp_meta_path, meta_path)
+                log.info("Frame metadata saved to: {}".format(meta_path))
         
             # Handle cleanup based on specified mode
             if cleanup_mode == 'delete':
@@ -1043,7 +1101,7 @@ def generateTimelapseFromFrames(image_files,
     else:
         log.warning("Video creation failed or resulted in an empty file.")
         # Clean up temporary files
-        for temp_file in [temp_video_path, temp_timestamp_path]:
+        for temp_file in [temp_video_path, temp_timestamp_path, temp_meta_path]:
             if os.path.exists(temp_file):
                 try:
                     os.remove(temp_file)

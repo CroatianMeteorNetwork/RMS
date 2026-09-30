@@ -110,10 +110,15 @@ def writeImage(path, frame, params, meta):
     return True
 
 
-def readImageMeta(path):
-    """ The embedded metadata dict of a saved frame, or None. """
+def readImageMeta(path, max_bytes=None):
+    """ The embedded metadata dict of a saved frame, or None.
+
+    Keyword arguments:
+        max_bytes: [int] Read only this much of the file. writeImage puts the record right after
+            the PNG IHDR / JPEG SOI, so 64 KB always holds it; None reads the whole file.
+    """
     with open(path, "rb") as f:
-        data = f.read()
+        data = f.read() if max_bytes is None else f.read(max_bytes)
     try:
         if data[:8] == b"\x89PNG\r\n\x1a\n":
             i = 8

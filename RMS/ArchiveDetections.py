@@ -13,7 +13,7 @@ from RMS.Logger import getLogger
 from RMS.Misc import archiveDir, tarWithProgress
 from RMS.Routines import MaskImage
 from Utils.GenerateThumbnails import generateThumbnails, ThumbnailMosaic
-from Utils.GenerateTimelapse import TimelapseWriter
+from Utils.GenerateTimelapse import TimelapseWriter, frameMetaPath
 from Utils.StackFFs import stackFFs, FFStacker
 from Utils.LogArchiver import makeLogArchives
 
@@ -416,7 +416,8 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
 def archiveFrameTimelapse(frames_root,
                           video_json_pairs,
                           remove_source=False):
-    """Tar-up each (mp4, json) pair **without compression**.
+    """Tar-up each (mp4, json) pair **without compression**, plus the per-frame metadata sidecar
+    (Utils.GenerateTimelapse.frameMetaPath) when the timelapse has one.
 
     Arguments:
         frames_root: [str] Directory where the archives will be placed.
@@ -448,9 +449,13 @@ def archiveFrameTimelapse(frames_root,
         archive_path = os.path.join(frames_root, base_name)
         tmp_archive = archive_path + ".tmp"
 
-        log.info("Archiving %s and %s to %s",
-                 os.path.basename(mp4_path),
-                 os.path.basename(json_path),
+        files = [mp4_path, json_path]
+        meta_path = frameMetaPath(mp4_path)
+        if os.path.isfile(meta_path):
+            files.append(meta_path)
+
+        log.info("Archiving %s to %s",
+                 ", ".join(os.path.basename(p) for p in files),
                  os.path.basename(archive_path))
 
         try:
@@ -459,7 +464,7 @@ def archiveFrameTimelapse(frames_root,
                 tmp_archive,
                 None,                  # None = no gzip/bz2 compression for mp4
                 remove_source,
-                file_list=[mp4_path, json_path]
+                file_list=files
             )
 
             if success:
