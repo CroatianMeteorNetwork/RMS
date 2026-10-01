@@ -736,6 +736,15 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False,
         if os.path.exists(recalibrated_platepars_path):
             extra_files.append(recalibrated_platepars_path)
 
+    # Add the night's hot pixel blacklist (the audit copy written with CALSTARS) - tools opened
+    # on the archived night (SkyFit2 and its tuner) resolve the blacklist night-dir-first, and
+    # without it every hot pixel counts as a star
+    if (not nodetect):
+        hot_pixels_path = os.path.join(night_data_dir, getattr(config, 'hot_pixels_file',
+            'hotpixels.json'))
+        if os.path.exists(hot_pixels_path):
+            extra_files.append(hot_pixels_path)
+
     # Add the FOV KML files
     if len(kml_files):
         extra_files += kml_files
