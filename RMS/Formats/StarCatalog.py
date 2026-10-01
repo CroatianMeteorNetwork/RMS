@@ -2,6 +2,7 @@
 
 from __future__ import print_function, division, absolute_import
 
+import json
 import os
 import zlib
 import sys
@@ -9,10 +10,10 @@ import tempfile
 
 # Import the requests library for downloading the GMN star catalog
 try:
-    from urllib.request import urlopen  # Python 3
+    from urllib.request import urlopen, Request  # Python 3
     from urllib.error import URLError, HTTPError
 except ImportError:
-    from urllib2 import urlopen  # Python 2
+    from urllib2 import urlopen, Request  # Python 2
     from urllib2 import URLError, HTTPError
 
 import numpy as np
@@ -69,11 +70,72 @@ GMN_CATALOG_DTYPE_V2 = np.dtype([
 ])
 
 
+# Known GMN catalog layouts, keyed by their column count (v1=18, v2=20)
+GMN_CATALOG_DTYPES = {len(dt.names): dt for dt in (GMN_CATALOG_DTYPE_V1, GMN_CATALOG_DTYPE_V2)}
+
+
 def gmnCatalogDtype(num_columns):
-    """ Select the GMN catalog dtype based on the number of columns declared in the header. """
-    if num_columns >= 20:
-        return GMN_CATALOG_DTYPE_V2
-    return GMN_CATALOG_DTYPE_V1
+    """ Select the GMN catalog dtype based on the number of columns declared in the header.
+
+    Raises ValueError (one of CORRUPT_CATALOG_ERRORS) for a column count that matches no known
+    layout, so that a bad download or an unsupported build is repaired instead of misread.
+    """
+    if num_columns not in GMN_CATALOG_DTYPES:
+        raise ValueError("Unknown GMN catalog layout: {} columns (known: {})".format(
+            num_columns, sorted(GMN_CATALOG_DTYPES)))
+    return GMN_CATALOG_DTYPES[num_columns]
+
+
+# Marker introducing the JSON identity block in the GMN catalog header. It sits after the
+# column names, inside the padding that every reader skips, so it is invisible to readers
+# that predate it.
+GMN_METADATA_MAGIC = b'GMNSC-META'
+
+
+def gmnCatalogMetadata(file_path):
+    """ Read the identity block from a GMN catalog header.
+
+    Catalogs built from September 2026 on record which build they are, so a stale local copy
+    can be told from a current one. Keys: format_version (the column layout), catalog_version
+    (the data, incremented on every rebuild that changes it), build_date, n_stars, lim_mag,
+    columns and source.
+
+    Arguments:
+        file_path: [str] Path to a GMN catalog binary.
+
+    Return:
+        [dict or None] The metadata, or None for builds made before it was added, for a
+            header that does not contain it, or if the file cannot be read.
+    """
+
+    try:
+        with open(file_path, 'rb') as fid:
+            header_size = int(np.fromfile(fid, dtype=np.uint32, count=1)[0])
+
+            # Guard against a corrupt or absurd header size before allocating
+            if not (12 < header_size <= 1024*1024):
+                return None
+
+            fid.seek(0)
+            header = fid.read(header_size)
+
+    except (IOError, OSError, ValueError, IndexError):
+        return None
+
+    pos = header.find(GMN_METADATA_MAGIC)
+    if pos < 0:
+        return None
+
+    start = pos + len(GMN_METADATA_MAGIC) + 1
+    end = header.find(b'\x00', start)
+    if end < 0:
+        return None
+
+    try:
+        return json.loads(header[start:end].decode('utf-8'))
+
+    except (ValueError, UnicodeDecodeError):
+        return None
 
 
 def removeFileSilently(path):
@@ -162,10 +224,151 @@ def downloadCatalog(url, dir_path, file_name):
 CORRUPT_CATALOG_ERRORS = (zlib.error, ValueError, OSError, EOFError, IndexError)
 
 
+# Full catalogs already checked for staleness in this run. The check, and any re-download it
+# triggers, happens at most once per run.
+STALENESS_CHECKED = set()
+
+
+def gmnCatalogVersion(file_path):
+    """ Return the catalog_version recorded in a GMN catalog header, or None if there is none. """
+
+    metadata = gmnCatalogMetadata(file_path)
+    if metadata is None:
+        return None
+
+    try:
+        return int(metadata['catalog_version'])
+
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def catalogServerInfo(url):
+    """ Identify the file currently served at a URL without downloading it.
+
+    Return:
+        (server_id, size): [tuple] An identifier built from the HTTP validators (ETag,
+            Last-Modified, Content-Length) and the size in bytes, or (None, None) if the server
+            cannot be reached.
+    """
+
+    try:
+        request = Request(url)
+        request.get_method = lambda: 'HEAD'
+        headers = urlopen(request, timeout=30).info()
+
+    except Exception:
+        return None, None
+
+    size = headers.get('Content-Length')
+    server_id = "{}|{}|{}".format(headers.get('ETag'), headers.get('Last-Modified'), size)
+
+    return server_id, (int(size) if size else None)
+
+
+def obtainFullCatalog(full_path, full_url, reference_path):
+    """ Download the full catalog if it is missing or an older build than the bundled catalog.
+
+    The bundled LM+9.0 catalog and the downloadable LM+12.0 catalog are built together and share
+    a catalog_version, so the bundled copy defines the expected version. A local full catalog
+    with no version (built before versioning) or a lower version is stale; a higher one is left
+    alone. No version check is made if the bundled catalog itself carries no version.
+
+    The version check, and any download it triggers, is made at most once per run. The download
+    replaces the file atomically, so a failed one keeps the old catalog. If the downloaded file
+    is still stale, the server has not been updated yet: the file is used, and a marker records
+    which server copy was fetched, so that later runs download again only once the server copy
+    changes rather than on every start-up.
+
+    Arguments:
+        full_path: [str] Path to the local full catalog.
+        full_url: [str] URL to download the full catalog from.
+        reference_path: [str] Path to the bundled catalog that defines the expected version.
+    """
+
+    dir_path, full_name = os.path.split(full_path)
+
+    # Download the full catalog if it is not present yet
+    if not os.path.exists(full_path):
+        print("The full catalog ({}) is being downloaded from the GMN server...".format(full_name))
+        server_id, _ = catalogServerInfo(full_url)
+        downloaded = downloadCatalog(full_url, dir_path, full_name)
+
+    elif full_path in STALENESS_CHECKED:
+        return
+
+    else:
+        server_id = None
+        downloaded = False
+
+    STALENESS_CHECKED.add(full_path)
+
+    expected_version = gmnCatalogVersion(reference_path)
+    if (expected_version is None) or (not os.path.exists(full_path)):
+        return
+
+    marker_path = full_path + ".stale"
+
+    def versionStr(version):
+        return "unversioned" if version is None else "version {}".format(version)
+
+    def isCurrent(version):
+        return (version is not None) and (version >= expected_version)
+
+    local_version = gmnCatalogVersion(full_path)
+
+    # Replace an outdated local copy, unless it is what the server still has
+    if (not downloaded) and (not isCurrent(local_version)):
+
+        server_id, server_size = catalogServerInfo(full_url)
+
+        try:
+            with open(marker_path) as f:
+                marker = json.load(f)
+        except (IOError, OSError, ValueError):
+            marker = None
+
+        if isinstance(marker, dict) and (marker.get('expected_version') == expected_version) \
+                and ((server_id is None) or (server_id == marker.get('server_id'))):
+
+            print("Star catalog '{}' is outdated ({}, expected version {}), but the GMN server has "
+                  "not been updated since it was last downloaded - using it.".format(
+                      full_name, versionStr(local_version), expected_version))
+            return
+
+        size_str = "" if server_size is None else " ({:.0f} MB)".format(server_size/1024**2)
+        print("Star catalog '{}' is outdated ({}, expected version {}) - downloading the current "
+              "catalog{} once from the GMN server...".format(
+                  full_name, versionStr(local_version), expected_version, size_str))
+
+        if not downloadCatalog(full_url, dir_path, full_name):
+            print("Could not download the current star catalog - using the outdated one.")
+            return
+
+        local_version = gmnCatalogVersion(full_path)
+        if isCurrent(local_version):
+            print("Star catalog '{}' updated to version {}.".format(full_name, local_version))
+
+    if isCurrent(local_version):
+        removeFileSilently(marker_path)
+        return
+
+    print("WARNING: the star catalog on the GMN server is outdated ({}, expected version {}). "
+          "Using it; it will be downloaded again once the server copy changes.".format(
+              versionStr(local_version), expected_version))
+
+    try:
+        with open(marker_path, 'w') as f:
+            json.dump({'expected_version': expected_version, 'server_id': server_id}, f)
+    except (IOError, OSError):
+        pass
+
+
 def loadGMNCatalog(dir_path, use_full_catalog, full_name, full_url, fallback_name, load_kwargs):
     """ Load the GMN star catalog, lazily downloading and repairing the full catalog as needed.
 
-    The full (LM+12.0) catalog is downloaded only if it is missing. Integrity is checked lazily:
+    The full (LM+12.0) catalog is downloaded if it is missing, or replaced if it is an older build
+    than the bundled LM+9.0 catalog (see obtainFullCatalog). Integrity is checked lazily:
     the file is simply loaded, and only if the load fails (a truncated/corrupt file, e.g. from an
     interrupted download) is it deleted and downloaded once more. This avoids reading and
     decompressing the catalog twice on every start-up, which matters on worn SD cards. If the full
@@ -187,10 +390,8 @@ def loadGMNCatalog(dir_path, use_full_catalog, full_name, full_url, fallback_nam
 
         full_path = os.path.join(dir_path, full_name)
 
-        # Download the full catalog if it is not present yet
-        if not os.path.exists(full_path):
-            print("The full catalog ({}) is being downloaded from the GMN server...".format(full_name))
-            downloadCatalog(full_url, dir_path, full_name)
+        # Download the full catalog if it is missing or an outdated build
+        obtainFullCatalog(full_path, full_url, os.path.join(dir_path, fallback_name))
 
         # Try to load the full catalog; repair it once if the load reveals corruption
         if os.path.exists(full_path):
