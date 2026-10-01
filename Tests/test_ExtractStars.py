@@ -200,7 +200,7 @@ def test_blacklisted_hot_pixels_dropped_before_cap():
 
     hits = np.array(extra['hot_pixel_hits'])
     d = np.hypot(hits[:, None, 0] - hot[None, :, 0], hits[:, None, 1] - hot[None, :, 1])
-    assert d.min(axis=1).max() <= 1.0
+    assert d.min(axis=1).max() <= 0.1
 
     # No hot pixel reaches the star list
     x_arr, y_arr = np.array(status[0]), np.array(status[1])

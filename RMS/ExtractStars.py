@@ -229,8 +229,19 @@ def extractStars(img, img_median=None, mask=None, gamma=1.0, max_star_candidates
         is_hot = matchHotPixels(cand_yx[:, 1], cand_yx[:, 0], hot_pixels, hot_pixels_radius)
 
         if extra_info is not None:
-            extra_info['hot_pixel_hits'] = [(round(float(x), 2), round(float(y), 2))
-                for y, x in cand_yx[is_hot]]
+
+            # The candidate position is the centre of the winning 2x2 mean-filter block, i.e. a
+            # pixel corner up to 0.5 px off a single-pixel source in each axis. Report the
+            # brightest raw pixel of that block instead, which matches the PSF fit positions the
+            # blacklist entries come from
+            hot_yx = cand_yx[is_hot]
+            y0 = np.clip(np.floor(hot_yx[:, 0] - 0.5).astype(int), 0, img.shape[0] - 2)
+            x0 = np.clip(np.floor(hot_yx[:, 1] - 0.5).astype(int), 0, img.shape[1] - 2)
+            block = np.stack([img[y0, x0], img[y0, x0 + 1], img[y0 + 1, x0], img[y0 + 1, x0 + 1]])
+            brightest = np.argmax(block, axis=0)
+
+            extra_info['hot_pixel_hits'] = [(float(x + b%2), float(y + b//2))
+                for y, x, b in zip(y0, x0, brightest)]
 
         label_index = [label for label, hot in zip(label_index, is_hot) if not hot]
 
