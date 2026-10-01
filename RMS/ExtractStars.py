@@ -84,25 +84,12 @@ log = getLogger("rmslogger")
 # validation showed capping the gate at the configured value reintroduces the twilight
 # surge the moment noise exceeds it). There is no fixed-threshold path; the configured
 # value is retained in signatures for API compatibility only.
-#
-# The noise level is measured on usable pixels only: masked pixels (zeroed, plus the band
-# where the contrast window reaches into the mask) and clipped pixels (black or saturated)
-# carry no noise information, and counting them drags the median toward zero - a heavily
-# masked camera would otherwise lose its gate. The gate holds no absolute ADU number: the
-# only floor is a few quantization steps of the image actually used (1/256 ADU for the
-# 16-bit avepixel, 1 ADU for the 8-bit one), below which a measured noise level means
-# nothing. An ADU floor does not survive camera changes - a 4 ADU floor never acted on a
-# heavily noise-reduced firmware (avepixel noise ~0.5 ADU, gate ~12 ADU) but took the gate
-# over on an NR-off one with lower gain (avepixel noise ~0.1 ADU: 4 ADU = 2x the intended
-# gate, ~3x fewer stars).
 NOISE_CONTRAST_FACTOR = 3.0
-MIN_CONTRAST_FLOOR_STEPS = 2.0   # floor in quantization steps of the image - only guards a
-                                 # flat image (near-zero contrast) from opening the gate
-MIN_VALID_FRACTION = 0.05        # fewer usable pixels than this (mostly masked or clipped
-                                 # frame) - no noise measurement, star extraction is skipped
+MIN_CONTRAST_FLOOR = 4.0     # 8-bit ADU - absolute floor so a clipped/flat image
+                             # (near-zero median contrast) cannot open the gate entirely
 
 
-def adaptiveContrastThreshold(contrast, bit_depth=8, factor=None, valid=None, quant_step=None):
+def adaptiveContrastThreshold(contrast, bit_depth=8, factor=None):
     """ Noise-adaptive candidate threshold for the local-contrast statistic.
 
     Arguments:
@@ -110,13 +97,9 @@ def adaptiveContrastThreshold(contrast, bit_depth=8, factor=None, valid=None, qu
             image, in image ADU.
 
     Keyword arguments:
-        bit_depth: [int] Image bit depth, sets the default quantization step.
+        bit_depth: [int] Image bit depth, scales the absolute floor.
         factor: [float] Gate as a multiple of the contrast-field median (the sensitivity
             knob, config option star_gate_factor). None uses NOISE_CONTRAST_FACTOR.
-        valid: [ndarray of bool] Pixels to measure the noise on (see extractStars). None or
-            an all-False map uses the whole field.
-        quant_step: [float] Quantization step of the image in image ADU (1/256 of the 8-bit
-            step for the 16-bit avepixel). None uses one step of the image bit depth.
 
     Return:
         threshold: [float] Contrast threshold in image ADU.
@@ -125,22 +108,17 @@ def adaptiveContrastThreshold(contrast, bit_depth=8, factor=None, valid=None, qu
     if factor is None:
         factor = NOISE_CONTRAST_FACTOR
 
-    if quant_step is None:
-        quant_step = 2.0**(bit_depth - 8)
+    scale = 2.0**(bit_depth - 8)
+    noise_level = float(np.median(contrast))
 
-    if (valid is not None) and np.any(valid):
-        noise_level = float(np.median(contrast[valid]))
-    else:
-        noise_level = float(np.median(contrast))
-
-    return max(factor*noise_level, MIN_CONTRAST_FLOOR_STEPS*quant_step)
+    return max(factor*noise_level, MIN_CONTRAST_FLOOR*scale)
 
 
 def extractStars(img, img_median=None, mask=None, gamma=1.0, max_star_candidates=1000, border=10,
                  neighborhood_size=10, intensity_threshold=18,
                  segment_radius=4, roundness_threshold=0.5, max_feature_ratio=0.8, bit_depth=8,
                  extra_info=None, gate_factor=None, show_candidates=False,
-                 hot_pixels=None, hot_pixels_radius=2.0, quant_step=None):
+                 hot_pixels=None, hot_pixels_radius=2.0):
     """ Extracts stars on a given image by searching for local maxima and applying PSF fit for star 
         confirmation.
 
@@ -175,9 +153,6 @@ def extractStars(img, img_median=None, mask=None, gamma=1.0, max_star_candidates
             (x, y) positions are stored in extra_info['hot_pixel_hits']. None by default (no
             filtering).
         hot_pixels_radius: [float] Match radius for hot_pixels (in pixels).
-        quant_step: [float] Quantization step of img in image ADU - 1/256 of the 8-bit step when
-            img is the 16-bit avepixel scaled to 8-bit units. Sets the gate floor. None uses one
-            step of bit_depth.
 
     Return:
         x2, y2, background, intensity, fwhm: [list of ndarrays]
@@ -203,36 +178,10 @@ def extractStars(img, img_median=None, mask=None, gamma=1.0, max_star_candidates
     img_min = filters.minimum_filter(img_convolved, neighborhood_size)
     contrast = img_max - img_min
 
-    # Usable pixels for the noise measurement: inside the border, unmasked, and not clipped
-    # (black or saturated). Pixels whose contrast window reaches into the mask or the border
-    # are dropped too - the zeroed mask makes their contrast an edge, not noise
-    valid = np.ones(img.shape, dtype=bool)
-
-    if border > 0:
-        valid[:border, :] = False
-        valid[-border:, :] = False
-        valid[:, :border] = False
-        valid[:, -border:] = False
-
-    if (mask is not None) and (mask.img.shape == img.shape):
-        valid &= (mask.img > 0)
-
-    valid = filters.minimum_filter(valid.astype(np.uint8), neighborhood_size + 1).astype(bool)
-
-    saturation_level = 0.98*(2**bit_depth - 1)
-    valid &= (img > 0) & (img < saturation_level)
-
-    # A mostly masked or clipped frame leaves no noise to measure - skip it rather than
-    # guess a gate
-    if np.count_nonzero(valid) < MIN_VALID_FRACTION*valid.size:
-        log.debug('Too few usable pixels for the noise measurement ({:.1%}), skipping star '
-            'extraction'.format(np.count_nonzero(valid)/valid.size))
-        return False
-
     # Noise-adaptive gate (see adaptiveContrastThreshold): deepens on quiet images and
     # rises with the noise - there is no fixed-threshold path
     threshold = adaptiveContrastThreshold(contrast, bit_depth=bit_depth,
-        factor=gate_factor, valid=valid, quant_step=quant_step)
+        factor=gate_factor)
 
     # Report the gate actually applied - the tuner and the station logs need the ADU value,
     # which depends on the frame's own noise and cannot be recovered from the factor alone
@@ -526,10 +475,8 @@ def extractStarsFF(
     # Use the full-precision average if the FF file carries one (16-bit fixed point, 1/256 ADU
     # units), otherwise the 8-bit avepixel. The extra precision reduces the photometric scatter
     # of faint stars, whose per-pixel signal is comparable to the 1 ADU quantization step
-    quant_step = 2.0**(config.bit_depth - 8)
     if getattr(ff, 'avepixel16', None) is not None:
         avepixel = ff.avepixel16.astype(np.float32)/256.0
-        quant_step /= 256.0
     else:
         avepixel = ff.avepixel
 
@@ -573,8 +520,7 @@ def extractStarsFF(
         segment_radius=segment_radius, roundness_threshold=roundness_threshold,
         max_feature_ratio=max_feature_ratio, bit_depth=config.bit_depth,
         extra_info=extra_info, gate_factor=gate_factor, show_candidates=show_candidates,
-        hot_pixels=hot_pixels, hot_pixels_radius=getattr(config, 'hot_pixels_radius', 2.0),
-        quant_step=quant_step
+        hot_pixels=hot_pixels, hot_pixels_radius=getattr(config, 'hot_pixels_radius', 2.0)
     )
 
     # If the star extraction failed, return an empty list
@@ -663,10 +609,8 @@ def extractStarsImgHandle(img_handle,
 
         # Extract the image to work on, preferring the full-precision average if the chunk
         # carries one (16-bit fixed point, 1/256 ADU units)
-        quant_step = 2.0**(config.bit_depth - 8)
         if getattr(ff_tmp, 'avepixel16', None) is not None:
             avepixel = ff_tmp.avepixel16.astype(np.float32)/256.0
-            quant_step /= 256.0
         else:
             avepixel = ff_tmp.avepixel
 
@@ -712,8 +656,7 @@ def extractStarsImgHandle(img_handle,
             neighborhood_size=neighborhood_size, intensity_threshold=intensity_threshold,
             segment_radius=segment_radius, roundness_threshold=roundness_threshold,
             max_feature_ratio=max_feature_ratio, bit_depth=config.bit_depth,
-            hot_pixels=hot_pixels, hot_pixels_radius=getattr(config, 'hot_pixels_radius', 2.0),
-            quant_step=quant_step
+            hot_pixels=hot_pixels, hot_pixels_radius=getattr(config, 'hot_pixels_radius', 2.0)
         )
 
         # If the star extraction failed, skip this chunk

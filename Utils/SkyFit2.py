@@ -6530,10 +6530,8 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Get the average pixel image (this is the currently displayed stack), preferring the
             # full-precision average if the FF file carries one
-            quant_step = 2.0**(getattr(self.config, 'bit_depth', 8) - 8)
             if getattr(ff, 'avepixel16', None) is not None:
                 img = ff.avepixel16.astype(np.float32)/256.0
-                quant_step /= 256.0
             else:
                 img = ff.avepixel.copy().astype(np.float32)
 
@@ -6574,8 +6572,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 max_feature_ratio=self.config.max_feature_ratio,
                 bit_depth=getattr(self.config, 'bit_depth', 8),
                 extra_info=extra_info,
-                gate_factor=getattr(self.config, 'star_gate_factor', None),
-                quant_step=quant_step
+                gate_factor=getattr(self.config, 'star_gate_factor', None)
             )
 
             if status is False:
