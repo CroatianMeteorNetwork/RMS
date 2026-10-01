@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 from RMS.ExtractStars import (adaptiveContrastThreshold, extractStars,
-    NOISE_CONTRAST_FACTOR, MIN_CONTRAST_FLOOR)
+    NOISE_CONTRAST_FACTOR, MIN_CONTRAST_FLOOR_STEPS)
 
 
 def contrastField(median_value, n=10000):
@@ -20,7 +20,7 @@ def test_dark_site_gate_deepens():
     c = contrastField(2.2)
     t = adaptiveContrastThreshold(c)
     assert t < 12.0
-    assert t == pytest.approx(max(NOISE_CONTRAST_FACTOR*np.median(c), MIN_CONTRAST_FLOOR), rel=0.01)
+    assert t == pytest.approx(NOISE_CONTRAST_FACTOR*np.median(c), rel=0.01)
 
 
 def test_twilight_gate_rises_with_noise():
@@ -41,14 +41,33 @@ def test_noisy_camera_gate_scales_with_noise():
 
 
 def test_flat_image_floor():
-    # A clipped/flat image must not open the gate entirely
+    # A flat image must not open the gate entirely - the floor is a few quantization steps
     t = adaptiveContrastThreshold(np.full(1000, 0.1))
-    assert t == MIN_CONTRAST_FLOOR
+    assert t == MIN_CONTRAST_FLOOR_STEPS
 
 
 def test_bit_depth_scales_floor():
     t = adaptiveContrastThreshold(np.full(1000, 0.1), bit_depth=16)
-    assert t == MIN_CONTRAST_FLOOR*256
+    assert t == MIN_CONTRAST_FLOOR_STEPS*256
+
+
+def test_16bit_avepixel_floor_does_not_bind():
+    # NR-off science firmware, 16-bit avepixel in 8-bit units: contrast median ~0.7 ADU. The
+    # gate must follow the noise (3 x 0.7), not an ADU floor (the old 4 ADU floor took over)
+    c = contrastField(0.7)
+    t = adaptiveContrastThreshold(c, quant_step=1/256.0)
+    assert t == pytest.approx(NOISE_CONTRAST_FACTOR*np.median(c), rel=0.01)
+    assert adaptiveContrastThreshold(np.zeros(1000), quant_step=1/256.0) == \
+        pytest.approx(MIN_CONTRAST_FLOOR_STEPS/256.0)
+
+
+def test_noise_measured_on_valid_pixels_only():
+    # Zeros from masked pixels must not drag the median down
+    c = np.concatenate([np.zeros(6000), contrastField(2.0, n=4000)])
+    valid = c > 0
+    assert adaptiveContrastThreshold(c, valid=valid) == \
+        pytest.approx(NOISE_CONTRAST_FACTOR*np.median(c[valid]), rel=0.01)
+    assert adaptiveContrastThreshold(c) < adaptiveContrastThreshold(c, valid=valid)
 
 
 def synthImage(sigma, star_amps, bg=38.0, size=400, seed=7):
@@ -217,3 +236,29 @@ def test_no_blacklist_reports_no_hits():
     extra = {}
     extractStars(img, extra_info=extra, hot_pixels=np.empty((0, 2)))
     assert extra['hot_pixel_hits'] == []
+
+
+class _Mask(object):
+    def __init__(self, img):
+        self.img = img
+
+
+def test_heavily_masked_image_keeps_its_gate():
+    # 60% of the frame masked (zeroed): the gate must match the unmasked frame's, not collapse
+    img, pos = synthImage(0.6, [25.0, 6.0, 6.0, 6.0])
+    mask_img = np.full(img.shape, 255, dtype=np.uint8)
+    mask_img[:, 160:] = 0
+    masked = img.copy()
+    masked[mask_img == 0] = 0
+
+    ref, info = {}, {}
+    extractStars(img, extra_info=ref)
+    extractStars(masked, mask=_Mask(mask_img), extra_info=info)
+    assert info['gate_adu'] == pytest.approx(ref['gate_adu'], rel=0.25)
+
+
+def test_clipped_frame_skipped():
+    # A frame with no usable pixels has no noise to measure - extraction is skipped
+    img = np.zeros((200, 200), dtype=np.float32)
+    img[50:60, 50:60] = 255.0
+    assert extractStars(img) is False
