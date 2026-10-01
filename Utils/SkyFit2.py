@@ -240,11 +240,6 @@ except Exception as e:
     print(f'ASTRA import error: {e}')
 
 
-# Smallest max_stars a config save is allowed to write. Tuning for interactive work can settle on
-#   far fewer stars than the nightly processing needs.
-MIN_CONFIG_MAX_STARS = 800
-
-
 ##############################################################################################################
 # ASTRA GUI Code
 
@@ -1969,10 +1964,7 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
                 ("roundness_threshold", "{}", pt.override_roundness_threshold),
                 ("gamma", "{:.4f}", pt.override_gamma)]:
 
-            # Say so when the floor, rather than the tuning, set the value
             note = ""
-            if key == "max_stars" and pt.override_config_max_stars < MIN_CONFIG_MAX_STARS:
-                note = "raised to the minimum for processing"
 
             # Compare the strings that end up in the file, not the numbers
             old_value = getattr(pt.config, key, None)
@@ -5251,11 +5243,9 @@ class PlateTool(QtWidgets.QMainWindow):
         """Return the max_stars value that a config save writes.
 
         The session budget (override_max_stars) is a desktop compute limit and is never saved;
-        only the config budget tracks the station config, and tuning can settle it on far fewer
-        stars than the nightly processing needs, so the saved value is never allowed below
-        MIN_CONFIG_MAX_STARS.
+        only the config budget tracks the station config.
         """
-        return max(self.override_config_max_stars, MIN_CONFIG_MAX_STARS)
+        return self.override_config_max_stars
 
     def isTunedCatalogLMUnsaved(self):
         """Check if the tuner found a catalog LM that is not the one in the config.
