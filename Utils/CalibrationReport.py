@@ -112,8 +112,13 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
     night_name = os.path.split(night_dir_path.strip(os.sep))[1]
 
 
-    # Go one mag deeper than in the config
-    lim_mag = config.catalog_mag_limit + 1
+    # Go one mag deeper than in the config. The margin alone never pulls in the full GMN catalog; it does
+    #   when the night's detections show a deep station.
+    detected_intens = [np.array(star_data)[:, 2] for _, star_data in calstars_list if len(star_data)]
+    detected_lim_mag = StarCatalog.detectedStarsLimMag(
+        np.concatenate(detected_intens) if detected_intens else [], platepar.mag_lev, platepar.mag_lev_stddev)
+    lim_mag = StarCatalog.automaticCatalogLimMag(config, config.catalog_mag_limit + 1,
+                                                 detected_lim_mag=detected_lim_mag)
 
     ts = FFfile.getMiddleTimeFF(calstars_list[0][0], fps=config.fps, ret_milliseconds=True, dt_obj=True)
 

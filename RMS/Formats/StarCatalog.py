@@ -86,6 +86,80 @@ def gmnCatalogDtype(num_columns):
     return GMN_CATALOG_DTYPES[num_columns]
 
 
+# Faintest magnitude covered by the bundled GMN catalog. Fainter requests need the full
+# (LM+12.0) catalog, a ~170 MB download that takes ~500 MB of memory once loaded.
+GMN_BUNDLED_LIM_MAG = 9.0
+
+
+# Matched catalog stars reach about this far past the 95th percentile of the calibrated detection
+# magnitudes (USV001, 300 frames: at most +1.1 mag on 95% of frames in G, +1.3 in a BVRI mix). It is
+# also the margin NNalign has always added when inferring the catalog limit from the detections.
+DETECTION_DEPTH_MARGIN = 1.0
+
+
+def detectedStarsLimMag(intensities, mag_lev, mag_lev_stddev):
+    """ Catalog limiting magnitude that the detected stars themselves call for.
+
+    Arguments:
+        intensities: [array] Integrated intensities of the detected stars (e.g. from CALSTARS).
+        mag_lev: [float] Photometric zero point of the platepar.
+        mag_lev_stddev: [float] Scatter of the photometric fit.
+
+    Return:
+        [float or None] The 95th percentile of the detections' catalog magnitudes plus
+            DETECTION_DEPTH_MARGIN, or None if the photometry is not calibrated or nothing was
+            detected.
+    """
+
+    if (mag_lev == 1.0) or not (mag_lev_stddev > 0):
+        return None
+
+    intensities = np.asarray(intensities, dtype=np.float64)
+    intensities = intensities[intensities > 0]
+    if len(intensities) == 0:
+        return None
+
+    return float(np.percentile(-2.5*np.log10(intensities) + mag_lev, 95) + DETECTION_DEPTH_MARGIN)
+
+
+def automaticCatalogLimMag(config, lim_mag, detected_lim_mag=None):
+    """ Gate a catalog limiting magnitude chosen automatically (a margin added to a configured or
+    displayed limit, or the end of a search) at the bundled GMN catalog's depth, unless the
+    station is a deep one.
+
+    A station is deep when its detected stars call for a catalog deeper than the bundled one
+    (see detectedStarsLimMag), or when the catalog_mag_limit set in its config file plus the
+    usual margin is. Deep stations get the requested limit unchanged; the others never pull in
+    the full GMN catalog because of a margin alone. Limits for other catalogs, which need no
+    download, are returned unchanged.
+
+    Arguments:
+        config: [Config instance]
+        lim_mag: [float] Automatically chosen limiting magnitude.
+
+    Keyword arguments:
+        detected_lim_mag: [float or None] Output of detectedStarsLimMag for the data at hand, or
+            None if it is not available.
+
+    Return:
+        [float] The limiting magnitude to use.
+    """
+
+    if "GMN_StarCatalog".lower() not in config.star_catalog_file.lower():
+        return lim_mag
+
+    if lim_mag <= GMN_BUNDLED_LIM_MAG:
+        return lim_mag
+
+    configured_deep = (config.catalog_mag_limit_configured + DETECTION_DEPTH_MARGIN) > GMN_BUNDLED_LIM_MAG
+    detected_deep = (detected_lim_mag is not None) and (detected_lim_mag > GMN_BUNDLED_LIM_MAG)
+
+    if configured_deep or detected_deep:
+        return lim_mag
+
+    return GMN_BUNDLED_LIM_MAG
+
+
 # Marker introducing the JSON identity block in the GMN catalog header. It sits after the
 # column names, inside the padding that every reader skips, so it is invisible to readers
 # that predate it.
@@ -814,8 +888,8 @@ def readStarCatalog(dir_path, file_name, years_from_J2000=0, lim_mag=None,
         # URL to the LM+12.0 catalog
         gmn_starcat_lm12_url = "https://globalmeteornetwork.org/projects/gmn_star_catalog/GMN_StarCatalog_LM12.0.bin"
 
-        # The full (LM+12.0) catalog is only needed when stars fainter than mag 9.0 are requested
-        use_full_catalog = (lim_mag is None) or (lim_mag > 9.0)
+        # The full (LM+12.0) catalog is only needed when stars fainter than the bundled one are requested
+        use_full_catalog = (lim_mag is None) or (lim_mag > GMN_BUNDLED_LIM_MAG)
 
         # Lazily load the catalog: the full catalog is downloaded if missing, and re-downloaded
         # only if a load attempt reveals it is corrupt (e.g. an interrupted download), falling
