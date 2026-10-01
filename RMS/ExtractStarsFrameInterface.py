@@ -28,25 +28,30 @@ def extractStarsFrameInterface(img_handle, config,
         star_list: [list] List of stars detected in the image.
     """
 
-    # Extract the stars on the image handle
-    star_list = extractStarsImgHandle(img_handle, config=config,
-                                      flat_struct=flat_struct, dark=dark, mask=mask)
-
-    # Remove detections at blacklisted hot pixel positions. Only the persistent blacklist is
-    # applied - short video runs cannot support the full-night recurrence analysis the FF
-    # pipeline uses to update it
+    # Only the persistent hot pixel blacklist is applied - short video runs cannot support the
+    # full-night recurrence analysis the FF pipeline uses to update it
+    hp_xy = None
     if getattr(config, 'hot_pixels_filter', True):
 
         from RMS import HotPixels
 
         hp_xy = HotPixels.loadHotPixelCoords(img_handle.dir_path, config)
 
-        if len(hp_xy):
-            star_list, n_removed = HotPixels.filterStarList(star_list, hp_xy,
-                getattr(config, 'hot_pixels_radius', 2.0))
+    # Extract the stars on the image handle (blacklisted candidates are dropped before the
+    # candidate cap)
+    star_list = extractStarsImgHandle(img_handle, config=config,
+                                      flat_struct=flat_struct, dark=dark, mask=mask,
+                                      hot_pixels=hp_xy)
 
-            if n_removed:
-                print("Removed {:d} detections at blacklisted hot pixel positions".format(n_removed))
+    # Remove any remaining detections at blacklisted hot pixel positions (a PSF fit can land on
+    # one from a merged candidate)
+    if (hp_xy is not None) and len(hp_xy):
+
+        star_list, n_removed = HotPixels.filterStarList(star_list, hp_xy,
+            getattr(config, 'hot_pixels_radius', 2.0))
+
+        if n_removed:
+            print("Removed {:d} detections at blacklisted hot pixel positions".format(n_removed))
 
     if save_calstars:
 

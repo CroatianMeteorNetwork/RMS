@@ -162,3 +162,58 @@ def test_extra_info_reports_measured_gate():
     deep = {}
     extractStars(img, gate_factor=2.0, extra_info=deep)
     assert deep['gate_adu'] < extra['gate_adu']
+
+
+def hotPixelImage(n_hot=40, size=400, seed=3):
+    """ Synthetic avepixel with 4 stars plus n_hot single bright pixels away from the stars. """
+    img, pos = synthImage(0.6, [12.0, 12.0, 12.0, 12.0], size=size)
+    rng = np.random.default_rng(seed)
+    hot = []
+    while len(hot) < n_hot:
+        x, y = rng.integers(15, size - 15, 2)
+        if min(np.hypot(x - px, y - py) for px, py in pos) < 15:
+            continue
+        if any(np.hypot(x - hx, y - hy) < 12 for hx, hy in hot):
+            continue
+        img[y, x] = 200.0
+        hot.append((float(x), float(y)))
+    return img, pos, np.array(hot)
+
+
+def test_hot_pixels_crowd_out_stars_without_blacklist():
+    # The failure mode: bright hot pixels outrank faint stars in the candidate cap
+    img, pos, _ = hotPixelImage()
+    status = extractStars(img, max_star_candidates=10)
+    assert sum(found(status, pos)) < len(pos)
+
+
+def test_blacklisted_hot_pixels_dropped_before_cap():
+    # Blacklisted candidates are dropped before the cap: the whole budget goes to the stars,
+    # and the dropped positions are reported for the nightly blacklist analysis
+    img, pos, hot = hotPixelImage()
+    extra = {}
+    status = extractStars(img, max_star_candidates=10, extra_info=extra, hot_pixels=hot,
+        hot_pixels_radius=2.0)
+
+    assert all(found(status, pos))
+    assert len(extra['hot_pixel_hits']) == len(hot)
+
+    hits = np.array(extra['hot_pixel_hits'])
+    d = np.hypot(hits[:, None, 0] - hot[None, :, 0], hits[:, None, 1] - hot[None, :, 1])
+    assert d.min(axis=1).max() <= 1.0
+
+    # No hot pixel reaches the star list
+    x_arr, y_arr = np.array(status[0]), np.array(status[1])
+    for hx, hy in hot:
+        assert not np.any(np.hypot(x_arr - hx, y_arr - hy) <= 2.0)
+
+
+def test_no_blacklist_reports_no_hits():
+    img, _, _ = hotPixelImage(n_hot=5)
+    extra = {}
+    extractStars(img, extra_info=extra)
+    assert extra['hot_pixel_hits'] == []
+
+    extra = {}
+    extractStars(img, extra_info=extra, hot_pixels=np.empty((0, 2)))
+    assert extra['hot_pixel_hits'] == []

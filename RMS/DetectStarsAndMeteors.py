@@ -229,20 +229,28 @@ def detectStarsAndMeteors(ff_directory, ff_name, config, flat_struct=None, dark=
         byteswap=img_handle.byteswap)
 
 
-    # Run star extraction on FF files
+    # Load the hot pixel blacklist (re-read every FF, so updates apply mid-capture)
+    hp_xy = HotPixels.loadHotPixelCoords(ff_directory, config) if config.hot_pixels_filter else None
+
+    # Run star extraction on FF files. Blacklisted hot pixels are dropped before the candidate cap
+    # so they cannot crowd out the stars; their positions are kept in the diagnostics for the
+    # end-of-night blacklist update in saveDetections
+    extra_info = {}
     star_list = extractStarsFF(ff_directory, ff_name, config=config,
-                               flat_struct=flat_struct, dark=dark, mask=mask)
+                               flat_struct=flat_struct, dark=dark, mask=mask,
+                               extra_info=extra_info, hot_pixels=hp_xy)
+
+    diagnostics['hot_pixel_hits'] = extra_info.get('hot_pixel_hits', [])
 
 
     # Count the stars for the meteor-detection gate, excluding known hot pixels so a field of
-    # blacklisted pixels cannot trigger meteor detection on an otherwise starless image. The full
-    # star list is kept - the end-of-night analysis in saveDetections needs to see the hot pixels
-    # to keep the blacklist fresh, and filters them from CALSTARS there.
+    # blacklisted pixels cannot trigger meteor detection on an otherwise starless image. The
+    # extractor already dropped the blacklisted candidates; this catches a PSF fit that landed
+    # on a hot pixel from a candidate merged with it. The full star list is kept - the
+    # end-of-night analysis in saveDetections filters CALSTARS.
     star_count = len(star_list[1])
 
     if config.hot_pixels_filter and star_count > 0:
-
-        hp_xy = HotPixels.loadHotPixelCoords(ff_directory, config)
 
         if len(hp_xy):
             matched = HotPixels.matchHotPixels(star_list[1], star_list[2], hp_xy,
@@ -393,8 +401,16 @@ def saveDetections(detection_results, ff_dir, config, output_suffix=''):
     reportWhiteRatioSkips(detection_results)
 
 
+    # Candidates the extractor dropped at blacklisted hot pixel positions, as CALSTARS-style (y, x)
+    # rows - they never reach the star list, but the blacklist update must still see them
+    hot_pixel_hits = []
+
     # Save the detections to a file
-    for ff_name, star_data, meteor_data, _ in detection_results:
+    for ff_name, star_data, meteor_data, diagnostics in detection_results:
+
+        hits = diagnostics.get('hot_pixel_hits')
+        if hits:
+            hot_pixel_hits.append([ff_name, [(y, x) for x, y in hits]])
 
 
         if len(star_data) == 4:
@@ -467,7 +483,8 @@ def saveDetections(detection_results, ff_dir, config, output_suffix=''):
     # Update the hot pixel blacklist from tonight's stationary detections and remove all
     # blacklisted pixels from the star list before it is written to CALSTARS
     if config.hot_pixels_filter:
-        star_list = HotPixels.applyHotPixels(star_list, ff_dir, config)
+        star_list = HotPixels.applyHotPixels(star_list, ff_dir, config,
+            hot_pixel_hits=hot_pixel_hits)
 
     # Write detected stars to the CALSTARS file
     CALSTARS.writeCALSTARS(star_list, ff_dir, calstars_name, config.stationID, config.height,

@@ -245,6 +245,69 @@ def test_apply_hot_pixels_end_to_end(tmp_path):
     assert len(hp_xy) == 1
 
 
+def writeBlacklist(config_dir, pixels):
+    with open(os.path.join(str(config_dir), "hotpixels.json"), "w") as f:
+        json.dump({"version": 1, "updated": None, "pixels": pixels}, f)
+
+
+def test_dropped_candidates_refresh_blacklist(tmp_path):
+    # The extractor drops blacklisted candidates before they reach the star list; the nightly
+    # update must still see them (via hot_pixel_hits) or the entry would age out and come back
+    config_dir = tmp_path/"station"
+    night_dir = tmp_path/"night"
+    config_dir.mkdir()
+    night_dir.mkdir()
+
+    config = HPConfig(config_dir=str(config_dir))
+    writeBlacklist(config_dir, [{"x": 600.4, "y": 400.7, "first_seen": "2026-08-01",
+        "last_seen": "2026-08-01", "nights_seen": 3, "hits_last_night": 100}])
+
+    # Star list without the hot pixel (it never got past the extractor), hits carry it
+    star_list = makeNight(hot_pixels=[])
+    hits = [[ff_name, [(row[0], row[1]) for row in rows]]
+        for ff_name, rows in makeNight(hot_pixels=[(600.4, 400.7)])
+        for rows in [[r for r in rows if abs(r[1] - 600.4) < 5]]]
+
+    filtered = HotPixels.applyHotPixels(star_list, str(night_dir), config, hot_pixel_hits=hits)
+
+    hp_data = HotPixels.loadHotPixels(str(config_dir), config)
+    assert len(hp_data["pixels"]) == 1
+    assert hp_data["pixels"][0]["last_seen"] == "2026-08-25"
+    assert hp_data["pixels"][0]["nights_seen"] == 4
+
+    # The star list itself is unchanged - hits are analysis-only
+    assert sum(len(rows) for _, rows in filtered) == sum(len(rows) for _, rows in star_list)
+
+
+def test_wrongly_blacklisted_slow_star_not_refreshed_by_hits(tmp_path):
+    # A slow near-pole star that got blacklisted is dropped as a candidate while inside the match
+    # circle. Its hits must go through the stationarity tests - refreshing on mere presence
+    # would make the bad entry permanent
+    config_dir = tmp_path/"station"
+    night_dir = tmp_path/"night"
+    config_dir.mkdir()
+    night_dir.mkdir()
+
+    config = HPConfig(config_dir=str(config_dir))
+    writeBlacklist(config_dir, [{"x": 552.0, "y": 400.0, "first_seen": "2026-08-20",
+        "last_seen": "2026-08-20", "nights_seen": 1, "hits_last_night": 100}])
+
+    start = datetime.datetime(2026, 8, 25, 20, 30, 0)
+    star_list = makeNight(hot_pixels=[])
+    hits = []
+    for i in range(240):
+        x = 550.0 + 0.04*i
+        if (x - 552.0)**2 <= config.hot_pixels_radius**2:
+            hits.append([makeFFName(start + datetime.timedelta(minutes=i)), [(400.0, x)]])
+
+    assert len(hits) > config.hot_pixels_min_count
+
+    HotPixels.applyHotPixels(star_list, str(night_dir), config, hot_pixel_hits=hits)
+
+    hp_data = HotPixels.loadHotPixels(str(config_dir), config)
+    assert hp_data["pixels"][0]["last_seen"] == "2026-08-20"
+
+
 def test_load_missing_and_corrupt(tmp_path):
     config = HPConfig(config_dir=str(tmp_path))
 

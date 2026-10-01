@@ -23,10 +23,12 @@ at the same sub-pixel position for hours.
 
 The blacklist lives in a small JSON file (config.hot_pixels_file, resolved night-dir-first with the
 config directory as the fallback, like the mask). It is consulted live during capture so a field of
-hot pixels cannot trip the ff_min_stars meteor-detection gate on an otherwise starless image, and it
-is rebuilt every night from the full star list before the CALSTARS file is written: newly found
-stationary detections are added, entries seen again are refreshed, and entries with no detections
-for hot_pixels_max_age_days are dropped. No manual curation is needed.
+hot pixels cannot trip the ff_min_stars meteor-detection gate on an otherwise starless image, and the
+star extractor drops blacklisted candidates before its candidate cap so they cannot crowd out real
+stars. It is rebuilt every night from the full star list plus the dropped candidates before the
+CALSTARS file is written: newly found stationary detections are added, entries seen again are
+refreshed, and entries with no detections for hot_pixels_max_age_days are dropped. No manual curation
+is needed.
 
 A star very close to the celestial pole is the one celestial source that could look stationary, but
 with the default gates (recurrence at one spot in >=20% of the night's FFs over >=45 min within a
@@ -455,7 +457,27 @@ def filterStarList(star_list, hp_xy, radius):
     return filtered, n_removed
 
 
-def applyHotPixels(star_list, night_dir, config):
+def mergeDetectionLists(star_list, hot_pixel_hits):
+    """ Merge the candidates dropped at blacklisted positions into the star list, per FF.
+
+    Arguments:
+        star_list: [list] CALSTARS-style list of [ff_name, rows] pairs, rows starting with (y, x).
+        hot_pixel_hits: [list] Same structure, rows (y, x) of the dropped candidates.
+
+    Return:
+        merged: [list] Same structure, sorted by FF name. Only for the stationarity analysis - the
+            rows have mixed lengths.
+    """
+
+    merged = {}
+
+    for ff_name, rows in list(star_list) + list(hot_pixel_hits):
+        merged.setdefault(ff_name, []).extend(rows)
+
+    return sorted(merged.items())
+
+
+def applyHotPixels(star_list, night_dir, config, hot_pixel_hits=None):
     """ Nightly entry point: analyze the night, update the persistent blacklist, filter the stars.
 
     The master list in the config directory is updated and an audit copy is written into the night
@@ -468,12 +490,23 @@ def applyHotPixels(star_list, night_dir, config):
         night_dir: [str] Path to the night directory.
         config: [Config]
 
+    Keyword arguments:
+        hot_pixel_hits: [list] CALSTARS-style list of [ff_name, rows] pairs with the (y, x) positions
+            of the star candidates the extractor dropped at blacklisted positions (they never reach
+            the star list). They go through the same stationarity analysis as the stars, so an entry
+            is only refreshed while it keeps behaving like a hot pixel - a wrongly blacklisted slow
+            star still fails the quarter/drift tests and ages out. None by default.
+
     Return:
         star_list: [list] Filtered star list, safe to pass to writeCALSTARS.
     """
 
+    analysis_list = star_list
+    if hot_pixel_hits:
+        analysis_list = mergeDetectionLists(star_list, hot_pixel_hits)
+
     # Derive the night date from the earliest FF file
-    times = [t for t in (_ffTime(ff_name) for ff_name, _ in star_list) if t is not None]
+    times = [t for t in (_ffTime(ff_name) for ff_name, _ in analysis_list) if t is not None]
 
     if not times:
         return star_list
@@ -484,7 +517,7 @@ def applyHotPixels(star_list, night_dir, config):
     hp_data = loadHotPixels(night_dir, config)
 
     # Find tonight's stationary detections and merge them in
-    clusters = findStationaryDetections(star_list, config)
+    clusters = findStationaryDetections(analysis_list, config)
 
     if clusters:
         log.info("Found {:d} stationary (hot pixel) positions: {:s}".format(

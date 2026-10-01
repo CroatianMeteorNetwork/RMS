@@ -35,6 +35,7 @@ import RMS.ConfigReader as cr
 from RMS.Formats import FFfile
 from RMS.Formats import CALSTARS
 from RMS.DetectionTools import loadImageCalibration
+from RMS.HotPixels import matchHotPixels
 from RMS.Logger import getLogger
 from RMS.Math import twoDGaussian
 from RMS.Routines import MaskImage
@@ -116,7 +117,8 @@ def adaptiveContrastThreshold(contrast, bit_depth=8, factor=None):
 def extractStars(img, img_median=None, mask=None, gamma=1.0, max_star_candidates=1000, border=10,
                  neighborhood_size=10, intensity_threshold=18,
                  segment_radius=4, roundness_threshold=0.5, max_feature_ratio=0.8, bit_depth=8,
-                 extra_info=None, gate_factor=None, show_candidates=False):
+                 extra_info=None, gate_factor=None, show_candidates=False,
+                 hot_pixels=None, hot_pixels_radius=2.0):
     """ Extracts stars on a given image by searching for local maxima and applying PSF fit for star 
         confirmation.
 
@@ -146,7 +148,12 @@ def extractStars(img, img_median=None, mask=None, gamma=1.0, max_star_candidates
         bit_depth: [int] Bit depth of the image. 8 bits by default.
         show_candidates: [bool] Show the raw star candidates before PSF fitting and the successfully fitted
             stars afterwards. False by default.
-    
+        hot_pixels: [ndarray] Nx2 array of blacklisted (x, y) hot pixel positions. Candidates within
+            hot_pixels_radius of one are dropped before the candidate cap and PSF fit, and their
+            (x, y) positions are stored in extra_info['hot_pixel_hits']. None by default (no
+            filtering).
+        hot_pixels_radius: [float] Match radius for hot_pixels (in pixels).
+
     Return:
         x2, y2, background, intensity, fwhm: [list of ndarrays]
             - x2: X axis coordinates of the star
@@ -207,15 +214,36 @@ def extractStars(img, img_median=None, mask=None, gamma=1.0, max_star_candidates
     if extra_info is not None:
         extra_info['num_candidates'] = num_objects
 
-    label_index = range(1, num_objects + 1)
+    label_index = list(range(1, num_objects + 1))
+
+    # Drop candidates at blacklisted hot pixel positions before the candidate cap. Hot pixels are
+    # sharp and bright, so they outrank faint stars in the prominence ranking below and fill the
+    # budget (a camera without in-camera defect correction shows hundreds per frame) - and fitting
+    # them only to discard them later wastes the PSF budget the cap exists to bound. Their
+    # positions are returned in extra_info so the nightly blacklist analysis can still run its
+    # stationarity tests on them (refreshing an entry on mere presence would make a wrongly
+    # blacklisted slow star permanent)
+    if (hot_pixels is not None) and (num_objects > 0) and len(hot_pixels):
+
+        cand_yx = np.array(ndimage.center_of_mass(img_convolved, labeled, label_index)) + 0.5
+        is_hot = matchHotPixels(cand_yx[:, 1], cand_yx[:, 0], hot_pixels, hot_pixels_radius)
+
+        if extra_info is not None:
+            extra_info['hot_pixel_hits'] = [(round(float(x), 2), round(float(y), 2))
+                for y, x in cand_yx[is_hot]]
+
+        label_index = [label for label, hot in zip(label_index, is_hot) if not hot]
+
+    elif extra_info is not None:
+        extra_info['hot_pixel_hits'] = []
 
     # If there are too many candidates (e.g. the image is flooded with sensor noise or glare around
     # the Moon), subsample them instead of skipping the image. The PSF fit below rejects the
     # non-star candidates. This bounds the PSF fitting cost to max_star_candidates.
-    if num_objects > max_star_candidates:
+    if len(label_index) > max_star_candidates:
 
         log.warning('Too many candidate stars ({:d}/{:d}), keeping the {:d} most prominent ones'.format(
-            num_objects, max_star_candidates, max_star_candidates))
+            len(label_index), max_star_candidates, max_star_candidates))
 
         # Rank the candidates by their peak height above the local background (white top-hat,
         # i.e. the image minus its morphological opening). Unlike the raw pixel value, this is
@@ -252,7 +280,7 @@ def extractStars(img, img_median=None, mask=None, gamma=1.0, max_star_candidates
         selected.extend(leftover[:max_star_candidates - len(selected)])
 
         # Convert positional indices to labels
-        label_index = (np.array(selected) + 1).tolist()
+        label_index = [label_index[i] for i in selected]
 
     # Find centres of mass of each labeled objects
     xy = np.array(ndimage.center_of_mass(img_convolved, labeled, label_index))
@@ -374,7 +402,7 @@ def extractStarsFF(
         max_global_intensity=230,
         neighborhood_size=10, intensity_threshold=18,
         segment_radius=4, roundness_threshold=0.5, max_feature_ratio=0.8,
-        extra_info=None, show_candidates=False
+        extra_info=None, show_candidates=False, hot_pixels=None
         ):
     """ Extracts stars on a given FF bin by searching for local maxima and applying PSF fit for star 
         confirmation.
@@ -396,6 +424,8 @@ def extractStarsFF(
         mask: [ndarray] Mask image. None by default.
         show_candidates: [bool] Show the raw star candidates before PSF fitting and the successfully fitted
             stars afterwards. False by default.
+        hot_pixels: [ndarray] Nx2 array of blacklisted (x, y) hot pixel positions, dropped before the
+            candidate cap (see extractStars). None by default.
 
     Return:
         x2, y2, background, intensity, fwhm: [list of ndarrays]
@@ -478,7 +508,8 @@ def extractStarsFF(
         neighborhood_size=neighborhood_size, intensity_threshold=intensity_threshold,
         segment_radius=segment_radius, roundness_threshold=roundness_threshold,
         max_feature_ratio=max_feature_ratio, bit_depth=config.bit_depth,
-        extra_info=extra_info, gate_factor=gate_factor, show_candidates=show_candidates
+        extra_info=extra_info, gate_factor=gate_factor, show_candidates=show_candidates,
+        hot_pixels=hot_pixels, hot_pixels_radius=getattr(config, 'hot_pixels_radius', 2.0)
     )
 
     # If the star extraction failed, return an empty list
@@ -499,7 +530,8 @@ def extractStarsImgHandle(img_handle,
         border=10,
         max_global_intensity=230,
         neighborhood_size=10, intensity_threshold=18,
-        segment_radius=4, roundness_threshold=0.5, max_feature_ratio=0.8
+        segment_radius=4, roundness_threshold=0.5, max_feature_ratio=0.8,
+        hot_pixels=None
     ):
 
     """ Extracts stars on a given image handle by searching for local maxima and applying PSF fit for star 
@@ -523,6 +555,8 @@ def extractStarsImgHandle(img_handle,
         roundness_threshold: [float] Minimum ratio of 2D Gaussian sigma X and sigma Y to be taken as a stars
             (hot pixels are narrow, while stars are round).
         max_feature_ratio: [float] Maximum ratio between 2 sigma of the star and the image segment area.
+        hot_pixels: [ndarray] Nx2 array of blacklisted (x, y) hot pixel positions, dropped before the
+            candidate cap (see extractStars). None by default.
 
     Return:
         x2, y2, background, intensity, fwhm: [list of ndarrays]
@@ -610,7 +644,8 @@ def extractStarsImgHandle(img_handle,
             max_star_candidates=config.max_stars, border=border,
             neighborhood_size=neighborhood_size, intensity_threshold=intensity_threshold,
             segment_radius=segment_radius, roundness_threshold=roundness_threshold,
-            max_feature_ratio=max_feature_ratio, bit_depth=config.bit_depth
+            max_feature_ratio=max_feature_ratio, bit_depth=config.bit_depth,
+            hot_pixels=hot_pixels, hot_pixels_radius=getattr(config, 'hot_pixels_radius', 2.0)
         )
 
         # If the star extraction failed, skip this chunk
@@ -1028,6 +1063,23 @@ def plotStars(img, x2, y2, bit_depth=None, title=None, x_fitted=None, y_fitted=N
 
 
 
+def extractStarsFFHotPixels(ff_dir, ff_name, flat_struct, dark, mask, config, hot_pixels):
+    """ Pool worker for extractStarsAndSave: extractStarsFF with the hot pixel blacklist applied
+        before the candidate cap.
+
+    Return:
+        (result, hot_pixel_hits): the extractStarsFF result and the list of (x, y) positions of the
+            candidates dropped as blacklisted hot pixels (see extractStars).
+    """
+
+    extra_info = {}
+
+    result = extractStarsFF(ff_dir, ff_name, flat_struct=flat_struct, dark=dark, mask=mask,
+        config=config, extra_info=extra_info, hot_pixels=hot_pixels)
+
+    return result, extra_info.get('hot_pixel_hits', [])
+
+
 def extractStarsAndSave(config, ff_dir, show_candidates=False):
     """ Extract stars in the given folder and save the CALSTARS file. 
     
@@ -1052,6 +1104,13 @@ def extractStarsAndSave(config, ff_dir, show_candidates=False):
 
     # Load mask, dark, flat
     mask, dark, flat_struct = loadImageCalibration(ff_dir, config)
+
+    # Blacklisted hot pixels are dropped before the candidate cap; their positions are collected
+    # for the blacklist update below
+    hot_pixels = None
+    if getattr(config, 'hot_pixels_filter', True):
+        from RMS import HotPixels
+        hot_pixels = HotPixels.loadHotPixelCoords(ff_dir, config)
     
 
     extraction_list = []
@@ -1075,12 +1134,14 @@ def extractStarsAndSave(config, ff_dir, show_candidates=False):
             log.info('Extracting stars from ' + ff_name)
 
             # Run the extraction
+            extra_info = {}
             result = extractStarsFF(
                 ff_dir, ff_name, flat_struct=flat_struct, dark=dark, mask=mask,
-                config=config, show_candidates=show_candidates
+                config=config, show_candidates=show_candidates, extra_info=extra_info,
+                hot_pixels=hot_pixels
             )
 
-            results.append(result)
+            results.append((result, extra_info.get('hot_pixel_hits', [])))
 
 
     else:
@@ -1090,13 +1151,14 @@ def extractStarsAndSave(config, ff_dir, show_candidates=False):
         num_cores = min(config.num_cores, len(extraction_list))
 
         # Run the QueuedPool for detection
-        workpool = QueuedPool(extractStarsFF, cores=num_cores, backup_dir=ff_dir, input_queue_maxsize=None)
+        workpool = QueuedPool(extractStarsFFHotPixels, cores=num_cores, backup_dir=ff_dir,
+            input_queue_maxsize=None)
 
 
         # Add jobs for the pool
         for ff_name in extraction_list:
             log.info('Adding for extraction: ' + ff_name)
-            workpool.addJob([ff_dir, ff_name, flat_struct, dark, mask, config, None, None, None, None, None, None, None])
+            workpool.addJob([ff_dir, ff_name, flat_struct, dark, mask, config, hot_pixels])
 
 
         log.info('Starting pool...')
@@ -1116,7 +1178,12 @@ def extractStarsAndSave(config, ff_dir, show_candidates=False):
 
     # Get extraction results
     star_list = []
-    for result in results:
+    hot_pixel_hits = []
+    for result, hits in results:
+
+        # Candidates dropped at blacklisted hot pixel positions, as CALSTARS-style (y, x) rows
+        if hits:
+            hot_pixel_hits.append([result[0], [(y, x) for x, y in hits]])
 
         try:
             ff_name, x2, y2, amplitude, intensity, fwhm_data, background, snr, saturated_count = result
@@ -1156,7 +1223,8 @@ def extractStarsAndSave(config, ff_dir, show_candidates=False):
     # in saveDetections, so re-extraction paths (AutoPlatepar, Flux, SkyFit2) stay clean
     if getattr(config, 'hot_pixels_filter', True):
         from RMS import HotPixels
-        star_list = HotPixels.applyHotPixels(star_list, ff_dir, config)
+        star_list = HotPixels.applyHotPixels(star_list, ff_dir, config,
+            hot_pixel_hits=hot_pixel_hits)
 
     # Write detected stars to the CALSTARS file
     CALSTARS.writeCALSTARS(star_list, ff_dir, calstars_name, config.stationID, config.height, config.width)
