@@ -803,8 +803,13 @@ def recalibrateIndividualFFsAndApplyAstrometry(
 
     ### Load catalog stars ##
 
-    # Increase catalog limiting magnitude by one to get more stars for matching
-    catalog_mag_limit = config.catalog_mag_limit + 1
+    # Increase catalog limiting magnitude by one to get more stars for matching. The margin alone never
+    #   pulls in the full GMN catalog; it does when the night's detections show a deep station.
+    detected_intens = [np.array(star_data)[:, 2] for _, star_data in calstars_list if len(star_data)]
+    detected_lim_mag = StarCatalog.detectedStarsLimMag(
+        np.concatenate(detected_intens) if detected_intens else [], platepar.mag_lev, platepar.mag_lev_stddev)
+    catalog_mag_limit = StarCatalog.automaticCatalogLimMag(config, config.catalog_mag_limit + 1,
+                                                           detected_lim_mag=detected_lim_mag)
 
     ts = calstars_datetime_dict[calstars_ffs[0]]
     J2000 = datetime.datetime(2000, 1, 1, 12, 0, 0)

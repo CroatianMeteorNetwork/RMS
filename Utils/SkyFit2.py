@@ -6945,6 +6945,12 @@ class PlateTool(QtWidgets.QMainWindow):
         print("    Coarse pass (0.5 mag steps):")
         coarse_lm_values = np.arange(3.0, 10.1, 0.5)
 
+        # The search alone never pulls in the full GMN catalog, unless the detected stars show a deep
+        #   station. Checked before loading, as the guards below run after.
+        max_auto_lm = StarCatalog.automaticCatalogLimMag(self.config, 10.0,
+                                                         detected_lim_mag=self.detectedStarsLimMag())
+        coarse_lm_values = coarse_lm_values[coarse_lm_values <= max_auto_lm + 1e-6]
+
         # Guardrails so a bad/uncalibrated platepar can't drive the LM to the max chasing
         #   coincidental matches: never explore a catalog deeper than COST_CEILING cat/match per
         #   added match (spurious), nor larger than CATALOG_CAP stars (cause-agnostic bound).
@@ -7016,7 +7022,7 @@ class PlateTool(QtWidgets.QMainWindow):
         # Fine pass: 0.1 mag steps around the found LM
         print(f"    Fine pass (0.1 mag steps around {best_lm:.1f}):")
         fine_lm_values = np.arange(best_lm - 0.3, best_lm + 0.4, 0.1)
-        fine_lm_values = fine_lm_values[(fine_lm_values >= 3.0) & (fine_lm_values <= 10.0)]
+        fine_lm_values = fine_lm_values[(fine_lm_values >= 3.0) & (fine_lm_values <= max_auto_lm + 1e-6)]
 
         fine_results = []
         for test_lm in fine_lm_values:
@@ -9789,7 +9795,13 @@ class PlateTool(QtWidgets.QMainWindow):
         # Use actual current limit, not config default (user may have adjusted with +/-)
         original_mag_limit = self.cat_lim_mag
         current_mag_limit = original_mag_limit
-        mag_low, mag_high = 3.0, 12.0
+        mag_low = 3.0
+
+        # Don't search into the full GMN catalog unless the detected stars show a deep station, or the
+        #   user already went there by hand
+        mag_high = max(StarCatalog.automaticCatalogLimMag(self.config, 12.0,
+                                                          detected_lim_mag=self.detectedStarsLimMag()),
+                       original_mag_limit)
         best_mag_limit = current_mag_limit
         best_n_catalog = n_catalog
 
@@ -15721,6 +15733,19 @@ class PlateTool(QtWidgets.QMainWindow):
 
         return result.get('value')
 
+
+    def detectedStarsLimMag(self):
+        """ Catalog limiting magnitude that the night's detected stars call for, or None if it cannot
+        be told (no detections or uncalibrated photometry). See StarCatalog.detectedStarsLimMag.
+        """
+
+        intensities = [np.array(star_data)[:, 2] for star_data in getattr(self, 'calstars', {}).values()
+                       if len(star_data)]
+        if not intensities:
+            return None
+
+        return StarCatalog.detectedStarsLimMag(np.concatenate(intensities), self.platepar.mag_lev,
+                                               self.platepar.mag_lev_stddev)
 
     def loadCatalogStars(self, lim_mag):
         """ Loads stars from the BSC star catalog.

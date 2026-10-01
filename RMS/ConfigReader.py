@@ -660,6 +660,11 @@ class Config:
 
         self.catalog_mag_limit = 5.5
 
+        # The catalog_mag_limit as set in the config file. Processing may change catalog_mag_limit
+        # at run time (e.g. inferring it from the detected stars); this keeps the operator's value,
+        # which decides whether automatic code may use the full GMN catalog.
+        self.catalog_mag_limit_configured = self.catalog_mag_limit
+
         self.calstars_files_N = 400 # How many calstars FF files to evaluate
 
         self.calstars_min_stars = 500 # Minimum number of stars to use
@@ -1900,6 +1905,7 @@ def parseCalibration(config, parser):
 
     if parser.has_option(section, "catalog_mag_limit"):
         config.catalog_mag_limit = parser.getfloat(section, "catalog_mag_limit")
+        config.catalog_mag_limit_configured = config.catalog_mag_limit
 
     if parser.has_option(section, "calstars_files_N"):
         config.calstars_files_N = parser.getint(section, "calstars_files_N")

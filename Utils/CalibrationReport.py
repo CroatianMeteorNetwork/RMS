@@ -114,9 +114,13 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
 
     # Match at the config limiting magnitude, the same depth the nightly recalibration matches at, so the
     #   report reflects what the pipeline saw. The catalog is loaded one magnitude deeper only so the plot
-    #   can show a margin of fainter catalog stars below the faintest match.
+    #   can show a margin of fainter catalog stars below the faintest match; that margin alone never pulls
+    #   in the full GMN catalog, which is used only when the night's detections show a deep station.
     match_lim_mag = config.catalog_mag_limit
-    lim_mag = match_lim_mag + 1
+    detected_intens = [np.array(star_data)[:, 2] for _, star_data in calstars_list if len(star_data)]
+    detected_lim_mag = StarCatalog.detectedStarsLimMag(
+        np.concatenate(detected_intens) if detected_intens else [], platepar.mag_lev, platepar.mag_lev_stddev)
+    lim_mag = StarCatalog.automaticCatalogLimMag(config, match_lim_mag + 1, detected_lim_mag=detected_lim_mag)
 
     ts = FFfile.getMiddleTimeFF(calstars_list[0][0], fps=config.fps, ret_milliseconds=True, dt_obj=True)
 
