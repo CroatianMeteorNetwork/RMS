@@ -113,6 +113,7 @@ rms_queue_bkup_*.pickle
 
 # Large GMN catalog that's too big for GitHub
 Catalogs/GMN_StarCatalog_LM12.0.bin
+Catalogs/GMN_StarCatalog_LM12.0.bin.stale
 
 # RMS SatellitePositions.py cache
 *.bsp
