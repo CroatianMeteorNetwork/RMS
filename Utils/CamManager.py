@@ -32,7 +32,7 @@ else:
 import json
 from locale import getlocale
 from socket import socket, inet_aton, inet_ntoa, if_nameindex
-from socket import SOL_SOCKET, SO_REUSEADDR, SO_BROADCAST, IP_MULTICAST_TTL, SOCK_DGRAM, AF_INET, IPPROTO_UDP, IPPROTO_IP
+from socket import SOL_SOCKET, SO_REUSEADDR, SO_BROADCAST, IP_MULTICAST_TTL, IP_MULTICAST_IF, SOCK_DGRAM, AF_INET, IPPROTO_UDP, IPPROTO_IP
 from datetime import datetime
 import hashlib
 import argparse
@@ -455,16 +455,47 @@ def _import_onvif_cc():
         return None
 
 
+def _wsd_interface_ips(intf=None):
+    """IPv4 addresses to probe from: the given interface's, else every interface
+    that has one (loopback excluded)."""
+    if intf:
+        try:
+            return [get_ip_address(intf)]
+        except Exception:
+            return []
+    ips = []
+    if sys.platform == 'win32':
+        for adapter in ifaddr.get_adapters():
+            for ip in adapter.ips:
+                if isinstance(ip.ip, str) and not ip.ip.startswith("127."):
+                    ips.append(ip.ip)
+    else:
+        for _, name in if_nameindex():
+            try:
+                ip = get_ip_address(name)
+            except Exception:
+                continue
+            if not ip.startswith("127."):
+                ips.append(ip)
+    return list(dict.fromkeys(ips))
+
+
 def _wsd_probe(intf=None, timeout=4):
     """Send an ONVIF WS-Discovery Probe and collect responders.
 
     Returns {ip: {'xaddr','port','scopes','mac','name'}}. Multicast, so it is
     unprivileged and reaches cameras on other subnets on the same L2 segment.
+
+    The probe goes out of each interface explicitly (IP_MULTICAST_IF): binding the
+    socket alone leaves the egress to the multicast route, which on a host with a
+    second network (WiFi with the default route, the camera LAN on Ethernet) sends
+    the probe out of the wrong one, and the camera LAN never hears it. With no
+    interface given, every interface with an IPv4 address is probed.
     """
     import time as _time
     import uuid as _uuid
     import re as _re
-    from socket import timeout as _sock_timeout
+    import select as _select
 
     probe = (
         '<?xml version="1.0" encoding="UTF-8"?>'
@@ -482,59 +513,72 @@ def _wsd_probe(intf=None, timeout=4):
         '</e:Envelope>'
     ).format(_uuid.uuid4())
 
-    s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)
-    s.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
-    s.setsockopt(IPPROTO_IP, IP_MULTICAST_TTL, 2)
-    bind_ip = ""
-    if intf:
+    socks = []
+    for bind_ip in (_wsd_interface_ips(intf) or [""]):
+        s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)
+        s.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
+        s.setsockopt(IPPROTO_IP, IP_MULTICAST_TTL, 2)
         try:
-            bind_ip = get_ip_address(intf)
-        except Exception:
-            bind_ip = ""
-    try:
-        s.bind((bind_ip, 0))
-    except OSError:
-        s.bind(("", 0))
-    s.settimeout(timeout)
-    try:
-        s.sendto(probe.encode("utf-8"), WSD_MCAST)
-    except OSError as err:
-        print("WS-Discovery send failed ({}); is the interface up?".format(err))
-        s.close()
+            if bind_ip:
+                s.setsockopt(IPPROTO_IP, IP_MULTICAST_IF, inet_aton(bind_ip))
+            s.bind((bind_ip, 0))
+            s.sendto(probe.encode("utf-8"), WSD_MCAST)
+            socks.append(s)
+        except OSError as err:
+            print("WS-Discovery send from {} failed ({}); is the interface up?".format(bind_ip or "default", err))
+            s.close()
+    if not socks:
         return {}
 
     found = {}
     deadline = _time.time() + timeout + 1
-    while _time.time() < deadline:
-        try:
-            data, addr = s.recvfrom(65535)
-        except (_sock_timeout, OSError):
+    while socks:
+        left = deadline - _time.time()
+        if left <= 0:
             break
-        xml = data.decode("utf-8", "replace")
-        xaddr_m = _re.search(r"XAddrs>\s*([^<\s]+)", xml)
-        scopes_m = _re.search(r"Scopes[^>]*>([^<]*)<", xml)
-        xaddr = xaddr_m.group(1) if xaddr_m else ""
-        scopes = scopes_m.group(1) if scopes_m else ""
-        ip = addr[0]
-        port = 80
-        if xaddr:
-            pm = _re.search(r"https?://[^/:]+:(\d+)", xaddr)
-            if pm:
-                port = int(pm.group(1))
-            hm = _re.search(r"https?://([^/:]+)", xaddr)
-            if hm:
-                ip = hm.group(1)
-        mac_m = _re.search(r"/[Mm][Aa][Cc]/([0-9A-Fa-f:]{17})", scopes)
-        name_m = _re.search(r"/name/([^ ]+)", scopes)
-        found[ip] = {
-            "xaddr": xaddr,
-            "port": port,
-            "scopes": scopes,
-            "mac": mac_m.group(1).upper() if mac_m else "",
-            "name": name_m.group(1) if name_m else "ONVIF",
-        }
-    s.close()
+        try:
+            ready, _, _ = _select.select(socks, [], [], left)
+        except (OSError, ValueError):
+            break
+        if not ready:
+            break
+        for s in ready:
+            try:
+                data, addr = s.recvfrom(65535)
+            except OSError:
+                continue
+            _wsd_parse(data, addr, found)
+    for s in socks:
+        s.close()
     return found
+
+
+def _wsd_parse(data, addr, found):
+    """Add one WS-Discovery ProbeMatch to found ({ip: info})."""
+    import re as _re
+    xml = data.decode("utf-8", "replace")
+    xaddr_m = _re.search(r"XAddrs>\s*([^<\s]+)", xml)
+    scopes_m = _re.search(r"Scopes[^>]*>([^<]*)<", xml)
+    xaddr = xaddr_m.group(1) if xaddr_m else ""
+    scopes = scopes_m.group(1) if scopes_m else ""
+    ip = addr[0]
+    port = 80
+    if xaddr:
+        pm = _re.search(r"https?://[^/:]+:(\d+)", xaddr)
+        if pm:
+            port = int(pm.group(1))
+        hm = _re.search(r"https?://([^/:]+)", xaddr)
+        if hm:
+            ip = hm.group(1)
+    mac_m = _re.search(r"/[Mm][Aa][Cc]/([0-9A-Fa-f:]{17})", scopes)
+    name_m = _re.search(r"/name/([^ ]+)", scopes)
+    found[ip] = {
+        "xaddr": xaddr,
+        "port": port,
+        "scopes": scopes,
+        "mac": mac_m.group(1).upper() if mac_m else "",
+        "name": name_m.group(1) if name_m else "ONVIF",
+    }
 
 
 def SearchONVIF(intf=None):
@@ -545,12 +589,10 @@ def SearchONVIF(intf=None):
     answers with the default credentials; cameras that do not answer are still
     listed from their WS-Discovery advertisement alone.
     """
-    if not intf:
-        try:
-            intf = GetInterfaces(checkip=True)[0]
-        except Exception:
-            intf = None
-    print("Interface:", intf)
+    # Discovery is a harmless multicast probe, so with no interface set explicitly
+    # (--intf / `interface`) every interface is probed, not just the first one:
+    # that one may well be the WiFi, not the camera LAN.
+    print("Interface:", intf if intf else "all (%s)" % ", ".join(_wsd_interface_ips()))
     responders = _wsd_probe(intf=intf)
     print("WS-Discovery found %d ONVIF responder(s)" % len(responders))
 
