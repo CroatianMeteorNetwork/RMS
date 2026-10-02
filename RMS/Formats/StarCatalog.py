@@ -2,6 +2,7 @@
 
 from __future__ import print_function, division, absolute_import
 
+import hashlib
 import json
 import os
 import zlib
@@ -212,6 +213,49 @@ def gmnCatalogMetadata(file_path):
         return None
 
 
+def gmnCatalogContentValid(file_path):
+    """ Check a GMN catalog's star records against the content_md5 recorded in its header.
+
+    The records are decompressed and hashed in chunks, so memory use stays small even for the full
+    catalog. Builds that predate content_md5 cannot be checked and are accepted.
+
+    Arguments:
+        file_path: [str] Path to a GMN catalog binary.
+
+    Return:
+        [bool] False if the records do not match the recorded checksum or cannot be read.
+    """
+
+    expected = (gmnCatalogMetadata(file_path) or {}).get('content_md5')
+    if expected is None:
+        return True
+
+    try:
+        with open(file_path, 'rb') as fid:
+            header_size, num_rows, num_columns = (int(x) for x in np.fromfile(fid, dtype=np.uint32, count=3))
+            fid.seek(header_size)
+
+            # The checksum covers exactly the declared records
+            remaining = num_rows*gmnCatalogDtype(num_columns).itemsize
+
+            decompressor = zlib.decompressobj()
+            md5 = hashlib.md5()
+
+            while remaining > 0:
+                compressed = fid.read(1024*1024)
+                records = decompressor.decompress(compressed) if compressed else decompressor.flush()
+                if not records:
+                    return False
+
+                md5.update(records[:remaining])
+                remaining -= len(records[:remaining])
+
+    except (CORRUPT_CATALOG_ERRORS + (TypeError,)):
+        return False
+
+    return md5.hexdigest() == expected
+
+
 def removeFileSilently(path):
     """ Remove a file, ignoring the error if it does not exist. """
     try:
@@ -261,6 +305,12 @@ def downloadCatalog(url, dir_path, file_name):
         # If the server declared the size, make sure the whole file was received
         if (total_size > 0) and (downloaded_size != total_size):
             print("\nIncomplete download: received {} of {} bytes.".format(downloaded_size, total_size))
+            removeFileSilently(tmp_path)
+            return False
+
+        # Check the records against the header checksum before they can replace a working catalog
+        if not gmnCatalogContentValid(tmp_path):
+            print("\nDownloaded catalog failed its checksum - discarded.")
             removeFileSilently(tmp_path)
             return False
 
