@@ -9,6 +9,7 @@ from functools import partial
 from RMS.Routines.MaskImage import getMaskFile
 from RMS.ConfigReader import loadConfigFromDirectory
 from RMS.Formats import Platepar
+from RMS.SensitivityMap import SensitivityMap
 from Utils.Flux import getCollectingArea, FluxConfig
 
 
@@ -30,8 +31,9 @@ def updateCollectionAreaNight(dir_path, flux_config):
             # Check that the mask has the correct resolution
             mask.checkMask(platepar.X_res, platepar.Y_res)
 
-        # Recompute the collecting area file
-        getCollectingArea(dir_path, config, flux_config, platepar, mask, overwrite=True)
+        # Recompute the collecting area file (with the station's camera sensitivity map if it has one)
+        getCollectingArea(dir_path, config, flux_config, platepar, mask, overwrite=True,
+            sensitivity_map=SensitivityMap.load(config))
 
     except Exception as e:
         print("Error in", dir_path)

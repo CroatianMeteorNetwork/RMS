@@ -50,6 +50,7 @@ import RMS.Formats.CALSTARS as CALSTARS
 from RMS.Formats.FTPdetectinfo import findFTPdetectinfoFile, readFTPdetectinfo
 from RMS.Formats.Showers import FluxShowers, loadRadiantShowers
 from RMS.LightDomeModel import LightDomeModel, DOME_CATALOG_LIM_MAG
+from RMS.SensitivityMap import SensitivityMap
 from RMS.Math import angularSeparation, pointInsideConvexPolygonSphere
 from RMS.Routines.FOVArea import fovArea, xyHt2Geo
 from RMS.Routines.MaskImage import MaskStructure, getMaskFile
@@ -484,11 +485,17 @@ def massVerniani(mag, vel):
 
 
 
-def generateColAreaJSONFileName(station_code, side_points, ht_min, ht_max, dht, elev_limit):
-    """Generate a file name for the collection area JSON file."""
+def generateColAreaJSONFileName(station_code, side_points, ht_min, ht_max, dht, elev_limit, map_tag=None):
+    """Generate a file name for the collection area JSON file.
 
-    file_name = "flux_col_areas_{:s}_sp-{:d}_htmin-{:.1f}_htmax-{:.1f}_dht-{:.1f}_elemin-{:.1f}.json".format(
-        station_code, side_points, ht_min, ht_max, dht, elev_limit
+    Keyword arguments:
+        map_tag: [str] Identity of the per-camera sensitivity map the areas were computed with
+            (SensitivityMap.tag), so a refit or removal of the map recomputes them. None when the
+            platepar vignetting and extinction were used.
+    """
+
+    file_name = "flux_col_areas_{:s}_sp-{:d}_htmin-{:.1f}_htmax-{:.1f}_dht-{:.1f}_elemin-{:.1f}{:s}.json".format(
+        station_code, side_points, ht_min, ht_max, dht, elev_limit, "_" + map_tag if map_tag else ""
     )
 
     return file_name
@@ -2804,7 +2811,8 @@ def predictStarNumberInFOV(recalibrated_platepars, ff_limiting_magnitude, config
     return pred_star_count
 
 
-def collectingArea(platepar, mask=None, side_points=20, ht_min=60, ht_max=130, dht=2, elev_limit=10):
+def collectingArea(platepar, mask=None, side_points=20, ht_min=60, ht_max=130, dht=2, elev_limit=10,
+                   sensitivity_map=None):
     """Compute the collecting area for the range of given heights.
 
     Arguments:
@@ -2818,6 +2826,9 @@ def collectingArea(platepar, mask=None, side_points=20, ht_min=60, ht_max=130, d
         ht_max: [float] Maximum height (km).
         dht: [float] Height delta (km).
         elev_limit: [float] Limit of elevation above horizon (deg). 10 degrees by default.
+        sensitivity_map: [SensitivityMap] Measured per-camera block map of the limiting magnitude. When
+            given, each block's sensitivity is its LM loss relative to the best block (as a flux ratio)
+            instead of the platepar's vignetting and extinction loss. None by default.
 
     Return:
         col_areas_ht: [dict] A dictionary where the keys are heights of area evaluation, and values are
@@ -2915,11 +2926,21 @@ def collectingArea(platepar, mask=None, side_points=20, ht_min=60, ht_max=130, d
                 )
                 azim, elev = raDec2AltAz(ra[0], dec[0], J2000_JD.days, platepar.lat, platepar.lon)
 
-                # Compute the pixel sum back assuming no corrections
-                rev_level = 10**((mag[0] - platepar.mag_lev)/(-2.5))
+                if sensitivity_map is not None:
 
-                # Compute the sensitivity loss due to vignetting and extinction
-                sensitivity_ratio = test_px_sum/rev_level
+                    # Measured map: the block's limiting magnitude relative to the best block, as a
+                    # flux ratio. This is the loss the detector actually sees - vignetting, extinction,
+                    # the edge PSF growth and the light-pollution gradient together
+                    sensitivity_ratio = sensitivity_map.sensitivityRatio(x_mean, y_mean,
+                        platepar.X_res, platepar.Y_res)
+
+                else:
+
+                    # Compute the pixel sum back assuming no corrections
+                    rev_level = 10**((mag[0] - platepar.mag_lev)/(-2.5))
+
+                    # Compute the sensitivity loss due to vignetting and extinction
+                    sensitivity_ratio = test_px_sum/rev_level
 
                 # Compute the range correction (w.r.t 100 km) to the mean point
                 r, _, _, _ = xyHt2Geo(
@@ -3071,9 +3092,9 @@ def sensorCharacterization(config, flux_config, dir_path, meteor_data, default_f
 
 
 
-def getCollectingArea(dir_path, config, flux_config, platepar, mask, overwrite=False):
-    """ Generate collection areas and save to file, or load from file if available. 
-    
+def getCollectingArea(dir_path, config, flux_config, platepar, mask, overwrite=False, sensitivity_map=None):
+    """ Generate collection areas and save to file, or load from file if available.
+
     Arguments:
         dir_path: [str] Path to the directory where the collection areas are stored.
         config: [Config object]
@@ -3083,6 +3104,9 @@ def getCollectingArea(dir_path, config, flux_config, platepar, mask, overwrite=F
 
     Keyword arguments:
         overwrite: [bool] Whether to overwrite the existing collection areas file. False by default.
+        sensitivity_map: [SensitivityMap] Per-camera block map of the limiting magnitude, or None to use
+            the platepar's vignetting and extinction. The map's identity is part of the file name, so
+            areas computed with another map (or none) are not reused.
 
     Return:
         col_areas_ht: [dict] Collection areas per height.
@@ -3091,6 +3115,7 @@ def getCollectingArea(dir_path, config, flux_config, platepar, mask, overwrite=F
 
     col_areas_file_name = generateColAreaJSONFileName(config.stationID, flux_config.side_points, \
         flux_config.ht_min, flux_config.ht_max, flux_config.dht, flux_config.elev_limit,
+        map_tag=sensitivity_map.tag if sensitivity_map is not None else None,
     )
 
     # Check if the collection area file exists. If yes, load the data. If not, generate collection areas
@@ -3100,10 +3125,13 @@ def getCollectingArea(dir_path, config, flux_config, platepar, mask, overwrite=F
 
     else:
 
+        if sensitivity_map is not None:
+            log.info("Block sensitivity from the camera sensitivity map ({})".format(sensitivity_map.summary()))
+
         # Compute the collecting areas segments per height
         col_areas_ht = collectingArea(platepar, mask=mask, side_points=flux_config.side_points, \
             ht_min=flux_config.ht_min, ht_max=flux_config.ht_max, dht=flux_config.dht, \
-            elev_limit=flux_config.elev_limit)
+            elev_limit=flux_config.elev_limit, sensitivity_map=sensitivity_map)
 
         # Save the collection areas to file
         saveRawCollectionAreas(dir_path, col_areas_file_name, col_areas_ht)
@@ -3464,14 +3492,19 @@ def computeFluxCorrectionsOnBins(
     binduration=None,
     verbose=True,
     fixed_bins=False,
+    sensitivity_map=None,
 ):
     """
 
     Keyword arguments:
-        ref_height: [float] Manually defined reference height in km. If not given, the height model will be 
+        ref_height: [float] Manually defined reference height in km. If not given, the height model will be
             used.
         verbose: [bool] Whether to print info as function is running
         fixed_bins: [bool] Compute fixed bins.
+        sensitivity_map: [SensitivityMap] Per-camera block map of the limiting magnitude, the same one the
+            collection areas were computed with. When given, the bin's stellar LM is the map's measured
+            best-block LM moved by the bin's zero point relative to the map's reference, instead of the
+            zero-point LM model alone. None by default.
 
     """
 
@@ -3791,8 +3824,13 @@ def computeFluxCorrectionsOnBins(
 
 
 
-            # Use empirical LM calculation
-            lm_s = stellarLMModel(mag_lev_bin)
+            # Stellar LM of the bin. The zero-point model infers depth from throughput alone and cannot see
+            # the sky background; a sensitivity map supplies the measured dark-sky depth of the best block,
+            # and the zero point only moves it by the night's transparency relative to the map's reference
+            if sensitivity_map is not None:
+                lm_s = sensitivity_map.binStellarLM(mag_lev_bin, platepar, stellarLMModel)
+            else:
+                lm_s = stellarLMModel(mag_lev_bin)
 
             # Add a loss due to minimum number of frames used
             lm_s += frame_min_loss
@@ -4627,7 +4665,14 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
 
         ### COMPUTE COLLECTION AREAS ###
 
-        col_areas_ht, col_area_100km_raw = getCollectingArea(dir_path, config, flux_config, platepar, mask)
+        # A per-camera sensitivity map in the data directory supersedes the platepar's vignetting and
+        # extinction loss and the zero-point LM inference (see RMS.SensitivityMap)
+        sensitivity_map = SensitivityMap.load(config)
+        if sensitivity_map is not None:
+            log.info("Camera sensitivity map found: {}".format(sensitivity_map.summary()))
+
+        col_areas_ht, col_area_100km_raw = getCollectingArea(dir_path, config, flux_config, platepar, mask,
+            sensitivity_map=sensitivity_map)
 
         # Compute the pointing of the middle of the FOV
         _, ra_mid, dec_mid, _ = xyToRaDecPP(
@@ -4753,7 +4798,8 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
                 sensor_data,
                 confidence_interval=confidence_interval,
                 binduration=binduration,
-                verbose=verbose
+                verbose=verbose,
+                sensitivity_map=sensitivity_map,
             )
 
 
@@ -4821,7 +4867,8 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
                 sensor_data,
                 confidence_interval=confidence_interval,
                 fixed_bins=True,
-                verbose=verbose
+                verbose=verbose,
+                sensitivity_map=sensitivity_map,
             )
             
             log.info('Finished computing collecting areas for fixed bins')
@@ -5205,8 +5252,9 @@ def prepareFluxFiles(config, dir_path, ftpdetectinfo_path, mask=None, platepar=N
     getSensorCharacterization(dir_path, config, flux_config, meteor_data, \
         default_fwhm=flux_config.default_fwhm)
 
-    # Compute collecting areas
-    getCollectingArea(dir_path, config, flux_config, platepar, mask)
+    # Compute collecting areas (with the camera sensitivity map if the station has one, so the file
+    # computed here is the one computeFlux will look for)
+    getCollectingArea(dir_path, config, flux_config, platepar, mask, sensitivity_map=SensitivityMap.load(config))
 
     # Run cloud detection and store the appropriate files (don't finish if Python 2 is used,
     #   just recalibrate the platepar)

@@ -1,5 +1,4 @@
-""" Fit a per-camera image-plane sensitivity map (EXPERIMENTAL - not yet consumed by
-the pipeline).
+""" Fit a per-camera image-plane sensitivity map.
 
 The site light-dome model shares one alt-az brightness pattern across all co-located
 cameras and gives each camera a single scalar LM0. But a camera's limiting magnitude
@@ -12,9 +11,18 @@ regions onto six different sky patches.
 This tool fits a block-wise logistic detection model per camera from archived nights:
     P(detected | m, block) = 1/(1 + exp((m - LM_block)/s))
 over catalog-star hit/miss trials (same construction as FitLightDome, but per image
-block and only on fully dark, moonless frames). The map is written as JSON; intended
-consumers (once wired): the dome model as a per-camera LM offset field, and any
-predictor of per-position detectability.
+block and only on fully dark, moonless frames). Use clear nights: there is no cloud
+filter, and a cloudy frame reads as a shallow block.
+
+The map is written to <data_dir>/<stationID>_sensitivity_map.json and its presence
+activates it in the flux collection area (RMS.SensitivityMap, Utils.Flux): block
+limiting magnitudes replace the platepar's vignetting-and-extinction loss and the
+zero-point LM inference. The map also records the photometric zero point and the
+vignetting coefficient of the frames it was fitted on, so later nights can be placed
+relative to it through their own zero point. That reference is in the intensity units
+of the camera configuration at fit time, so refit the map after any firmware, gain or
+gamma change, and after a change of the star-extraction gate (the map measures what
+the extractor detects).
 
 Usage:
     python -m Utils.FitCameraSensitivityMap /path/to/station_config_dir \\
@@ -24,10 +32,10 @@ Usage:
 from __future__ import absolute_import, division, print_function
 
 import argparse
-import datetime
 import glob
 import json
 import os
+import time
 
 import numpy as np
 from scipy.optimize import minimize
@@ -68,6 +76,8 @@ def fitSensitivityMap(config, night_dirs, nbx=4, nby=3, lim_mag=TRIAL_LIM_MAG):
         mag_band_ratios=config.star_catalog_band_ratios)
 
     mags, blocks, hits = [], [], []
+    zero_points, vig_coeffs = [], []
+    nights_used = []
     w = h = None
 
     for night_dir in night_dirs:
@@ -87,6 +97,7 @@ def fitSensitivityMap(config, night_dirs, nbx=4, nby=3, lim_mag=TRIAL_LIM_MAG):
                if getattr(pp, "auto_recalibrated", False)}
         if len(pps) < 3:
             continue
+        nights_used.append(os.path.basename(night_dir))
         mask = getMaskFile(night_dir, config, file_list=file_list,
                            default_as_backup=True)
 
@@ -116,6 +127,8 @@ def fitSensitivityMap(config, night_dirs, nbx=4, nby=3, lim_mag=TRIAL_LIM_MAG):
             j = min((abs((valid[k][0] - t).total_seconds()), k) for k in cand)[1]
             pp = pps[valid[j][1]]
             w, h = pp.X_res, pp.Y_res
+            zero_points.append(float(pp.mag_lev))
+            vig_coeffs.append(float(pp.vignetting_coeff) if pp.vignetting_coeff is not None else 0.0)
 
             x, y, mag, az, alt, _ = projectCatalogStarsInFOV(pp, date, jd, catalog_stars,
                 mask=mask)
@@ -157,12 +170,18 @@ def fitSensitivityMap(config, night_dirs, nbx=4, nby=3, lim_mag=TRIAL_LIM_MAG):
     return dict(
         stationID=str(config.stationID),
         nbx=nbx, nby=nby,
+        X_res=int(w), Y_res=int(h),
         LM=[round(float(v), 3) for v in res.x[:-1]],
         s=round(float(max(res.x[-1], 0.05)), 3),
         n_trials=int(len(m)),
         trial_lim_mag=lim_mag,
-        fit_date=datetime.datetime.utcnow().strftime("%Y-%m-%d"),
-        nights=sorted(os.path.basename(d) for d in night_dirs),
+        # Photometric reference of the fitted frames: later nights are placed relative to it
+        # through their zero point, after moving it to the then-current vignetting coefficient
+        mag_lev_ref=round(float(np.median(zero_points)), 3),
+        vignetting_coeff_ref=float(np.median(vig_coeffs)),
+        fit_date=time.strftime("%Y-%m-%d", time.gmtime()),
+        # Only nights that contributed trials (a night without flux platepars is skipped)
+        nights=sorted(nights_used),
     )
 
 
@@ -181,8 +200,9 @@ if __name__ == "__main__":
 
     arch = os.path.join(os.path.expanduser(config.data_dir), "ArchivedFiles")
     dates = args.nights.split(",")
+    # Directories only: the archive also holds the night's tarballs next to the directory
     night_dirs = [d for d in sorted(glob.glob(os.path.join(arch, "*_*")))
-                  if os.path.basename(d).split("_")[1] in dates]
+                  if os.path.isdir(d) and (os.path.basename(d).split("_")[1] in dates)]
     print("{:d} night dir(s)".format(len(night_dirs)))
 
     map_dict = fitSensitivityMap(config, night_dirs, nbx=nbx, nby=nby)
