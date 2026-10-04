@@ -5387,6 +5387,11 @@ class PlateTool(QtWidgets.QMainWindow):
             self.config.max_feature_ratio = self.override_max_feature_ratio
             self.config.roundness_threshold = self.override_roundness_threshold
 
+            # Drop blacklisted hot pixels before the candidate cap, as the capture pipeline does,
+            # so they cannot crowd real stars out of the max_stars budget
+            hp_xy = self._loadHotPixelCoords() \
+                if getattr(self.config, 'hot_pixels_filter', True) else None
+
             extra_info = {}
             try:
                 star_list = extractStarsFF(
@@ -5396,7 +5401,8 @@ class PlateTool(QtWidgets.QMainWindow):
                     flat_struct=self.flat_struct if hasattr(self, 'flat_struct') else None,
                     dark=self.dark if hasattr(self, 'dark') else None,
                     mask=self.mask if hasattr(self, 'mask') else None,
-                    extra_info=extra_info
+                    extra_info=extra_info,
+                    hot_pixels=hp_xy
                 )
             finally:
                 # Restore original config values
@@ -5489,7 +5495,7 @@ class PlateTool(QtWidgets.QMainWindow):
         # here, not per frame
         if getattr(self.config, 'hot_pixels_filter', True):
 
-            hp_xy = HotPixels.loadHotPixelCoords(self.dir_path, self.config)
+            hp_xy = self._loadHotPixelCoords()
 
             if len(hp_xy):
                 curated, _ = HotPixels.filterStarList(list(merged.items()), hp_xy,
@@ -5574,6 +5580,11 @@ class PlateTool(QtWidgets.QMainWindow):
         self.config.max_feature_ratio = self.override_max_feature_ratio
         self.config.roundness_threshold = self.override_roundness_threshold
 
+        # Drop blacklisted hot pixels before the candidate cap, as the capture pipeline does.
+        # Loaded once for the whole run
+        hp_xy = self._loadHotPixelCoords() \
+            if getattr(self.config, 'hot_pixels_filter', True) else None
+
         try:
             for i, ff_name in enumerate(ff_files):
                 print(f"  Processing {i+1}/{total}: {ff_name}")
@@ -5600,7 +5611,8 @@ class PlateTool(QtWidgets.QMainWindow):
                         flat_struct=self.flat_struct if hasattr(self, 'flat_struct') else None,
                         dark=self.dark if hasattr(self, 'dark') else None,
                         mask=self.mask if hasattr(self, 'mask') else None,
-                        extra_info=extra_info
+                        extra_info=extra_info,
+                        hot_pixels=hp_xy
                     )
 
                     if star_list:
@@ -5742,7 +5754,7 @@ class PlateTool(QtWidgets.QMainWindow):
         n_hot_excluded = 0
         if getattr(self.config, 'hot_pixels_filter', True):
 
-            hp_xy = HotPixels.loadHotPixelCoords(dir_path, self.config)
+            hp_xy = self._loadHotPixelCoords(dir_path)
 
             if len(hp_xy):
                 radius = int(np.ceil(getattr(self.config, 'hot_pixels_radius', 2.0)))
@@ -6092,7 +6104,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Report the hot pixel blacklist - blacklisted detections are excluded from every
             # phase, otherwise they poison the precision estimates
-            n_hp = len(HotPixels.loadHotPixelCoords(self.dir_path, self.config)) \
+            n_hp = len(self._loadHotPixelCoords()) \
                 if getattr(self.config, 'hot_pixels_filter', True) else 0
             if n_hp:
                 print(f"  Hot pixel blacklist: {n_hp} pixels (excluded from all tuning phases)")
@@ -6356,6 +6368,39 @@ class PlateTool(QtWidgets.QMainWindow):
             self.config.max_stars = original_max_stars
 
 
+    def _loadHotPixelCoords(self, dir_path=None):
+        """ Load the hot pixel blacklist (x, y) coordinates for dir_path (the session dir by default).
+
+        The usual resolution is night dir first, config dir second. A CapturedFiles night has no
+        night copy until CALSTARS is written, and SkyFit loads the night's own .config copy, so
+        the config dir is the night dir again and the station master is never reached. Fall back
+        to ~/source/Stations/<stationID>/ then.
+        """
+
+        if dir_path is None:
+            dir_path = self.dir_path
+
+        if HotPixels.hotPixelFilePath(dir_path, self.config) is not None:
+            return HotPixels.loadHotPixelCoords(dir_path, self.config)
+
+        station_id = getattr(self.config, 'stationID', None)
+        if station_id:
+            station_dir = os.path.join(os.path.expanduser("~"), "source", "Stations", station_id)
+            station_path = os.path.join(station_dir,
+                getattr(self.config, 'hot_pixels_file', 'hotpixels.json'))
+
+            if os.path.isfile(station_path):
+
+                # Report the fallback once per session, not on every image change
+                if getattr(self, '_hot_pixels_fallback_reported', None) != station_path:
+                    print("Hot pixel blacklist: no copy in the data directory, using the station "
+                          "master {:s}".format(station_path))
+                    self._hot_pixels_fallback_reported = station_path
+
+                return HotPixels.loadHotPixelCoords(station_dir, self.config)
+
+        return HotPixels.loadHotPixelCoords(dir_path, self.config)
+
     def _hotPixelMask(self, x_arr, y_arr):
         """ Boolean mask flagging detections at blacklisted hot pixel positions (True = hot).
 
@@ -6368,7 +6413,7 @@ class PlateTool(QtWidgets.QMainWindow):
         if not getattr(self.config, 'hot_pixels_filter', True) or len(x_arr) == 0:
             return np.zeros(len(x_arr), dtype=bool)
 
-        hp_xy = HotPixels.loadHotPixelCoords(self.dir_path, self.config)
+        hp_xy = self._loadHotPixelCoords()
 
         if not len(hp_xy):
             return np.zeros(len(x_arr), dtype=bool)
