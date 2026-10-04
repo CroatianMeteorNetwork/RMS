@@ -5387,10 +5387,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self.config.max_feature_ratio = self.override_max_feature_ratio
             self.config.roundness_threshold = self.override_roundness_threshold
 
-            # Drop blacklisted hot pixels before the candidate cap, as the capture pipeline does,
-            # so they cannot crowd real stars out of the max_stars budget
-            hp_xy = self._loadHotPixelCoords() \
-                if getattr(self.config, 'hot_pixels_filter', True) else None
+            hp_xy = self._hotPixelsForExtraction()
 
             extra_info = {}
             try:
@@ -5580,10 +5577,8 @@ class PlateTool(QtWidgets.QMainWindow):
         self.config.max_feature_ratio = self.override_max_feature_ratio
         self.config.roundness_threshold = self.override_roundness_threshold
 
-        # Drop blacklisted hot pixels before the candidate cap, as the capture pipeline does.
         # Loaded once for the whole run
-        hp_xy = self._loadHotPixelCoords() \
-            if getattr(self.config, 'hot_pixels_filter', True) else None
+        hp_xy = self._hotPixelsForExtraction()
 
         try:
             for i, ff_name in enumerate(ff_files):
@@ -6401,6 +6396,18 @@ class PlateTool(QtWidgets.QMainWindow):
 
         return HotPixels.loadHotPixelCoords(dir_path, self.config)
 
+    def _hotPixelsForExtraction(self):
+        """ Blacklist coordinates to hand the star extractor (None when hot_pixels_filter is off).
+
+        Passing them to the extractor drops hot pixels before the candidate cap, as the capture
+        pipeline does, so they cannot crowd real stars out of the max_stars budget.
+        """
+
+        if not getattr(self.config, 'hot_pixels_filter', True):
+            return None
+
+        return self._loadHotPixelCoords()
+
     def _hotPixelMask(self, x_arr, y_arr):
         """ Boolean mask flagging detections at blacklisted hot pixel positions (True = hot).
 
@@ -6452,11 +6459,12 @@ class PlateTool(QtWidgets.QMainWindow):
             self.config.max_feature_ratio = self.override_max_feature_ratio
             self.config.roundness_threshold = self.override_roundness_threshold
 
-            # Run star detection at the requested gate factor
+            # Run star detection at the requested gate factor, blacklisted hot pixels dropped
+            # before the candidate cap like the capture pipeline
             star_list = extractStarsFF(
                 self.dir_path, ff_name, config=self.config,
                 flat_struct=self.flat_struct, dark=self.dark, mask=self.mask,
-                extra_info=extra_info
+                extra_info=extra_info, hot_pixels=self._hotPixelsForExtraction()
             )
 
             if not star_list or len(star_list[1]) == 0:
@@ -6470,7 +6478,8 @@ class PlateTool(QtWidgets.QMainWindow):
             fwhm_arr = np.asarray(fwhm_arr, dtype=float)
 
             # Exclude blacklisted hot pixels - they are detections but not stars, and would
-            # poison the precision estimate the sweep is built on
+            # poison the precision estimate the sweep is built on. The extractor already dropped
+            # the candidates; this catches fitted centroids that landed within the radius
             hot = self._hotPixelMask(x_arr, y_arr)
             x_arr, y_arr, fwhm_arr = x_arr[~hot], y_arr[~hot], fwhm_arr[~hot]
 
@@ -6538,7 +6547,8 @@ class PlateTool(QtWidgets.QMainWindow):
                 flat_struct=self.flat_struct if hasattr(self, 'flat_struct') else None,
                 dark=self.dark if hasattr(self, 'dark') else None,
                 mask=self.mask if hasattr(self, 'mask') else None,
-                extra_info=extra_info
+                extra_info=extra_info,
+                hot_pixels=self._hotPixelsForExtraction()
             )
 
             if not star_list or len(star_list) < 2:
@@ -6610,7 +6620,9 @@ class PlateTool(QtWidgets.QMainWindow):
                 bit_depth=getattr(self.config, 'bit_depth', 8),
                 extra_info=extra_info,
                 gate_factor=getattr(self.config, 'star_gate_factor', None),
-                quant_step=quant_step
+                quant_step=quant_step,
+                hot_pixels=self._hotPixelsForExtraction(),
+                hot_pixels_radius=getattr(self.config, 'hot_pixels_radius', 2.0)
             )
 
             if status is False:
