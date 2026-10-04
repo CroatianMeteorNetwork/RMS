@@ -31,9 +31,11 @@ def updateCollectionAreaNight(dir_path, flux_config):
             # Check that the mask has the correct resolution
             mask.checkMask(platepar.X_res, platepar.Y_res)
 
-        # Recompute the collecting area file (with the station's camera sensitivity map if it has one)
+        # Recompute the collecting area file (with the sensitivity map archived in the night
+        # directory, else the station's current one)
         getCollectingArea(dir_path, config, flux_config, platepar, mask, overwrite=True,
-            sensitivity_map=SensitivityMap.load(config))
+            sensitivity_map=SensitivityMap.load(config, dir_path=dir_path, platepar=platepar,
+                                                night_dir=dir_path))
 
     except Exception as e:
         print("Error in", dir_path)

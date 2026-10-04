@@ -4665,9 +4665,10 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
 
         ### COMPUTE COLLECTION AREAS ###
 
-        # A per-camera sensitivity map in the data directory supersedes the platepar's vignetting and
-        # extinction loss and the zero-point LM inference (see RMS.SensitivityMap)
-        sensitivity_map = SensitivityMap.load(config)
+        # A per-camera sensitivity map supersedes the platepar's vignetting and extinction loss and
+        # the zero-point LM inference (see RMS.SensitivityMap). The copy archived in the night
+        # directory is preferred: it is the map that described the camera on that night
+        sensitivity_map = SensitivityMap.load(config, dir_path=dir_path, platepar=platepar, night_dir=dir_path)
         if sensitivity_map is not None:
             log.info("Camera sensitivity map found: {}".format(sensitivity_map.summary()))
 
@@ -5252,9 +5253,32 @@ def prepareFluxFiles(config, dir_path, ftpdetectinfo_path, mask=None, platepar=N
     getSensorCharacterization(dir_path, config, flux_config, meteor_data, \
         default_fwhm=flux_config.default_fwhm)
 
-    # Compute collecting areas (with the camera sensitivity map if the station has one, so the file
-    # computed here is the one computeFlux will look for)
-    getCollectingArea(dir_path, config, flux_config, platepar, mask, sensitivity_map=SensitivityMap.load(config))
+    # Keep the camera's sensitivity map describing the camera: it refits itself from the clearest
+    # recent archived nights when the configuration or the intensity scale changed, or when it is
+    # old (Utils.FitCameraSensitivityMap.ensureSensitivityMap). Skipped on the crash-recovery
+    # path like the dome model fit. A fit is minutes of CPU, so it runs under the flux slot gate.
+    if allow_model_fit:
+        try:
+            from Utils.FitCameraSensitivityMap import ensureSensitivityMap
+            with slotGate("flux", getattr(config, "flux_stage_slots", 2)):
+                ensureSensitivityMap(config, platepar=platepar, night_dir=dir_path)
+        except Exception as e:
+            log.warning("Sensitivity map self-maintenance unavailable: {}".format(e))
+
+    # The map used tonight is archived next to the night's data, so a later flux run on this
+    # night reproduces it even after the station map has been refitted
+    sensitivity_map = SensitivityMap.load(config, platepar=platepar, night_dir=dir_path)
+    if sensitivity_map is not None:
+        log.info("Camera sensitivity map: {}".format(sensitivity_map.summary()))
+        try:
+            if sensitivity_map.source_path:
+                shutil.copy(sensitivity_map.source_path, SensitivityMap.nightCopyPath(dir_path))
+        except Exception as e:
+            log.debug("Could not archive the sensitivity map copy: {}".format(e))
+
+    # Compute collecting areas (with the map, so the file computed here is the one computeFlux
+    # will look for)
+    getCollectingArea(dir_path, config, flux_config, platepar, mask, sensitivity_map=sensitivity_map)
 
     # Run cloud detection and store the appropriate files (don't finish if Python 2 is used,
     #   just recalibrate the platepar)
