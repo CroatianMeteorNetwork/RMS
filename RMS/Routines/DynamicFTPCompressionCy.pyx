@@ -40,8 +40,9 @@ cdef class FFMimickInterface:
     cdef np.ndarray acc_lin, decode_lut
     cdef bint use_gamma
     cdef double wp
+    cdef object response
 
-    def __init__(self, nrows, ncols, dtype, gamma=1.0, bit_depth=None):
+    def __init__(self, nrows, ncols, dtype, gamma=1.0, bit_depth=None, response=None):
         """ Structure which is used to make FF file format data. It mimicks the interface of an FF structure.
 
         Arguments:
@@ -58,6 +59,9 @@ cdef class FFMimickInterface:
                 gamma decode and the fixed-point gate. If None, it is derived from dtype - but
                 note some callers only know the final dtype after the first frame, while the
                 camera bit depth is known upfront, so passing it explicitly is preferred.
+            response: [ResponseCurve] The camera's response (RMS.Routines.Response). When it is
+                the camera's own table, it replaces the power law of gamma for the decode and
+                re-encode. None or a power curve = the power law of gamma, as before.
         """
 
         # Init the empty structures
@@ -86,12 +90,18 @@ cdef class FFMimickInterface:
             self.wp = 255.0
 
         self.gamma = gamma
-        self.use_gamma = (gamma != 1.0)
+        if (response is not None) and response.isPower:
+            response = None
+        self.response = response
+        self.use_gamma = (gamma != 1.0) or (response is not None)
 
         if self.use_gamma:
 
             # Decode LUT over the full uint16 input range, and the linear-domain accumulator
-            self.decode_lut = self.wp*(np.arange(65536)/self.wp)**(1.0/gamma)
+            if response is not None:
+                self.decode_lut = self.wp*response.decode(np.arange(65536), wp=self.wp)
+            else:
+                self.decode_lut = self.wp*(np.arange(65536)/self.wp)**(1.0/gamma)
             self.acc_lin = np.zeros(shape=(nrows, ncols), dtype=FLOAT_TYPE)
 
         else:
@@ -189,7 +199,10 @@ cdef class FFMimickInterface:
                 # is monotone)
                 acc_lin = (self.acc_lin - self.decode_lut[self.maxpixel]
                     - self.decode_lut[self.minpixel])
-                enc_mean = self.wp*((acc_lin/n)/self.wp)**self.gamma
+                if self.response is not None:
+                    enc_mean = self.response.encode((acc_lin/n)/self.wp, wp=self.wp)
+                else:
+                    enc_mean = self.wp*((acc_lin/n)/self.wp)**self.gamma
 
             else:
                 enc_mean = None

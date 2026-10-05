@@ -184,6 +184,7 @@ from RMS.UploadManager import UploadManager
 from RMS.EventMonitor import EventMonitor
 from RMS.DownloadMask import downloadNewMask
 from RMS.Formats.ObservationSummary import startObservationSummaryReport
+from RMS.Routines.Response import prepareNightResponse
 from Utils.AuditConfig import compareConfigs
 
 # Flag indicating that capturing should be stopped
@@ -524,6 +525,9 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         mkdirP(night_data_dir)
         log.info('Data directory: {}'.format(night_data_dir))
 
+        # The camera's real decode table (science firmware), saved with the night
+        prepareNightResponse(config, night_data_dir, log=log)
+
     # Make a directory for the time files if configured
     if config.save_frame_times:
         mkdirP(ft_file_dir)
@@ -649,6 +653,9 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
             mkdirP(night_data_dir)
 
             log.info('New data directory: {}'.format(night_data_dir))
+
+            # The camera's real decode table (science firmware), saved with the night
+            prepareNightResponse(config, night_data_dir, log=log)
 
             # Copy the used config file to the capture directory
             if os.path.isfile(config.config_file_name):

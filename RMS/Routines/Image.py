@@ -418,12 +418,27 @@ def thresholdFF(ff, k1, j1, mask=None, mask_ave_bright=False):
 
 
 
+def _cameraTable(gamma):
+    """ The ResponseCurve when `gamma` is a camera's own table (RMS.Routines.Response), else None:
+    a float gamma, or a power-law ResponseCurve, keeps the original arithmetic exactly. """
+    from RMS.Routines.Response import ResponseCurve
+    if isinstance(gamma, ResponseCurve):
+        return None if gamma.isPower else gamma
+    return None
+
+
+def _gammaValue(gamma):
+    """ The float gamma of a float or of a power-law ResponseCurve. """
+    return getattr(gamma, "gamma", gamma)
+
+
 def gammaCorrectionScalar(intensity, gamma, bp=0, wp=255):
     """ Correct the given intensity for gamma on individual scalar values.
         
     Arguments:
         intensity: [int] Pixel intensity
-        gamma: [float] Gamma.
+        gamma: [float or ResponseCurve] Gamma, or the camera's response table
+            (RMS.Routines.Response): then the code is decoded through the camera's real curve.
 
     Keyword arguments:
         bp: [int] Black point.
@@ -436,6 +451,14 @@ def gammaCorrectionScalar(intensity, gamma, bp=0, wp=255):
     if intensity < 0:
         intensity = 0
 
+    table = _cameraTable(gamma)
+    if table is not None:
+        if intensity <= bp:
+            return bp
+        d_bp, d_wp = table.decode(bp, wp=wp), table.decode(wp, wp=wp)
+        return float(bp + (wp - bp)*(table.decode(intensity, wp=wp) - d_bp)/(d_wp - d_bp))
+
+    gamma = _gammaValue(gamma)
     x = (intensity - bp)/(wp - bp)
 
     if x > 0:
@@ -454,7 +477,8 @@ def gammaCorrectionImage(intensity, gamma, bp=0, wp=255, out_type=None):
 
     Arguments:
         intensity: [ndarray] Image array.
-        gamma: [float] Gamma.
+        gamma: [float or ResponseCurve] Gamma, or the camera's response table
+            (RMS.Routines.Response): then codes are decoded through the camera's real curve.
 
     Keyword arguments:
         bp: [int] Black point.
@@ -475,12 +499,23 @@ def gammaCorrectionImage(intensity, gamma, bp=0, wp=255, out_type=None):
     # Clip intensities < 0 to 0
     intensity[intensity < 0] = 0
 
-    # Scale the intensity to 0-1 range
-    x = (intensity - bp)/(wp - bp)
+    table = _cameraTable(gamma)
+    if table is not None:
+        # the camera's own curve: linear light relative to the black and white points
+        d_bp, d_wp = table.decode(bp, wp=wp), table.decode(wp, wp=wp)
+        out = np.zeros_like(intensity) + bp
+        sel = intensity > bp
+        out[sel] = bp + (wp - bp)*(table.decode(intensity[sel], wp=wp) - d_bp)/(d_wp - d_bp)
 
-    # Scale the gamma to the given range
-    out = np.zeros_like(intensity) + bp
-    out[x > 0] = bp + (wp - bp)*(x[x > 0]**(1.0/gamma))
+    else:
+        gamma = _gammaValue(gamma)
+
+        # Scale the intensity to 0-1 range
+        x = (intensity - bp)/(wp - bp)
+
+        # Scale the gamma to the given range
+        out = np.zeros_like(intensity) + bp
+        out[x > 0] = bp + (wp - bp)*(x[x > 0]**(1.0/gamma))
 
 
     # If the intensity was a numpy array, convert it back to the original type

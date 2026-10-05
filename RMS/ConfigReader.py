@@ -142,6 +142,10 @@ def loadConfigFromDirectory(cml_args_config, dir_path):
         print("Loading the default config!")
 
 
+    # Decode this night with the camera response saved with it (power law if none)
+    from RMS.Routines.Response import useNightResponse
+    useNightResponse(config, dir_path)
+
     return config
 
 
@@ -279,6 +283,12 @@ class Config:
 
         self.bit_depth = 8
         self.gamma = 1.0
+
+        # Camera response: 'auto' = decode with the camera's own table when it serves one (science
+        # firmware `gamma decode`, saved per night as camera_response.json), else the power law of
+        # gamma; 'off' = always the power law. config.response holds the table in use (None = power)
+        self.response_table = 'auto'
+        self.response = None
 
         self.ff_format = 'fits'
 
@@ -1178,6 +1188,9 @@ def parseCapture(config, parser):
 
     if parser.has_option(section, "gamma"):
         config.gamma = parser.getfloat(section, "gamma")
+
+    if parser.has_option(section, "response_table"):
+        config.response_table = parser.get(section, "response_table").strip().lower()
     
     if parser.has_option(section, "device"):
         config.deviceID = parser.get(section, "device")

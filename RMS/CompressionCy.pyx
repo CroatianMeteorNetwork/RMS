@@ -30,7 +30,28 @@ cdef extern from "math.h":
 @cython.cdivision(True)
 @cython.boundscheck(False)
 @cython.wraparound(False)
-def compressFrames(np.ndarray[INT8_TYPE_t, ndim=3] frames, int deinterlace_order, double gamma=1.0):
+cdef inline double encodeLUT(double v, double[:] lut):
+    """ Inverse of a strictly increasing 256-entry decode LUT (piecewise linear, so the inverse
+    is exact): linear value v -> fractional code 0..255. """
+    cdef int lo = 0, hi = 255, mid
+    if v <= lut[0]:
+        return 0.0
+    if v >= lut[255]:
+        return 255.0
+    while hi - lo > 1:
+        mid = (lo + hi) >> 1
+        if lut[mid] <= v:
+            lo = mid
+        else:
+            hi = mid
+    return lo + (v - lut[lo])/(lut[hi] - lut[lo])
+
+
+@cython.cdivision(True)
+@cython.boundscheck(False)
+@cython.wraparound(False)
+def compressFrames(np.ndarray[INT8_TYPE_t, ndim=3] frames, int deinterlace_order, double gamma=1.0,
+    response=None):
 
     # Init the output four frame temporal pixel array
     cdef np.ndarray[INT8_TYPE_t, ndim=3] ftp_array = np.empty([4, frames.shape[1], frames.shape[2]],
@@ -90,10 +111,17 @@ def compressFrames(np.ndarray[INT8_TYPE_t, ndim=3] frames, int deinterlace_order
     # gamma = 1 an exact integer path is used. Note this uses the same pure power-law convention
     # (black point 0) as the rest of RMS - a camera pedestal inside the power law makes both
     # approximations
-    cdef bint use_gamma = (gamma != 1.0)
+    #
+    # response: an RMS.Routines.Response.ResponseCurve. When it is the camera's own table (not
+    # a power law), decode and re-encode with that table instead of the power law of gamma
+    cdef bint use_table = (response is not None) and (not response.isPower)
+    cdef bint use_gamma = (gamma != 1.0) or use_table
     cdef np.ndarray[FLOAT_TYPE_t, ndim=1] decode_lut = np.empty(256, dtype=FLOAT_TYPE)
-    if use_gamma:
+    if use_table:
+        decode_lut = np.ascontiguousarray(response.decodeLUT(255), dtype=FLOAT_TYPE)
+    elif use_gamma:
         decode_lut = (255.0*(np.arange(256)/255.0)**(1.0/gamma)).astype(FLOAT_TYPE)
+    cdef double[:] decode_view = decode_lut
     
     # Populate the randomN array with 2**16 random numbers
     cdef np.ndarray[INT8_TYPE_t, ndim=1] randomN = np.empty(shape=[65536], dtype=INT8_TYPE)
@@ -220,7 +248,10 @@ def compressFrames(np.ndarray[INT8_TYPE_t, ndim=3] frames, int deinterlace_order
                     + decode_lut[min_val_4]
 
                 mean_lin = acc_lin/n_trim
-                ave16 = <unsigned int>(256.0*255.0*pow(mean_lin/255.0, gamma) + 0.5)
+                if use_table:
+                    ave16 = <unsigned int>(256.0*encodeLUT(mean_lin, decode_view) + 0.5)
+                else:
+                    ave16 = <unsigned int>(256.0*255.0*pow(mean_lin/255.0, gamma) + 0.5)
 
             else:
 

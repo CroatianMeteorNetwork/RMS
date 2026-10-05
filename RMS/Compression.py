@@ -134,9 +134,10 @@ class Compressor(multiprocessing.Process):
 
         # Run cythonized compression. The camera gamma is passed so the average is computed in
         # the linear domain (and re-encoded), removing the Jensen bias of averaging
-        # gamma-encoded samples
+        # gamma-encoded samples. With the camera's own response table (config.response) the
+        # decode/re-encode uses that table instead of the power law
         ftp_array, ave16, fieldsum = compressFrames(frames, self.config.deinterlace_order,
-            self.config.gamma)
+            self.config.gamma, response=getattr(self.config, 'response', None))
 
         return ftp_array, ave16, fieldsum
     
@@ -195,6 +196,10 @@ class Compressor(multiprocessing.Process):
 
             # Record the gamma used for the linear-domain averaging (provenance)
             ff.avegamma = self.config.gamma
+
+            # ... and which camera response table, if any (camera_response.json of the night)
+            _resp = getattr(self.config, 'response', None)
+            ff.averesp = _resp.ident() if _resp is not None else ''
 
         ff.nrows = arr.shape[1]
         ff.ncols = arr.shape[2]

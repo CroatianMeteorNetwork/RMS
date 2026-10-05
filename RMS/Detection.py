@@ -48,6 +48,7 @@ from RMS.Routines.Grouping3D import find3DLines, getAllPoints
 from RMS.Routines.CompareLines import compareLines
 from RMS.Routines import MaskImage
 from RMS.Routines import Image
+from RMS.Routines.Response import responseOf
 from RMS.Routines import RollingShutterCorrection
 from RMS.Routines.Image import thresholdFF, signalToNoise, CoordinateFilter
 
@@ -1044,11 +1045,11 @@ def thresholdAndCorrectGammaFF(img_handle, config, mask):
 
     # Gamma correct image files (white point scaled to the image bit depth)
     gamma_wp = 2**config.bit_depth - 1
-    maxpixel_gamma_corr = Image.gammaCorrectionImage(img_handle.ff.maxpixel, config.gamma, wp=gamma_wp,
+    maxpixel_gamma_corr = Image.gammaCorrectionImage(img_handle.ff.maxpixel, responseOf(config), wp=gamma_wp,
                                                      out_type=np.float32)
-    avepixel_gamma_corr = Image.gammaCorrectionImage(img_handle.ff.avepixel, config.gamma, wp=gamma_wp,
+    avepixel_gamma_corr = Image.gammaCorrectionImage(img_handle.ff.avepixel, responseOf(config), wp=gamma_wp,
                                                      out_type=np.float32)
-    stdpixel_gamma_corr = Image.gammaCorrectionImage(img_handle.ff.stdpixel, config.gamma, wp=gamma_wp,
+    stdpixel_gamma_corr = Image.gammaCorrectionImage(img_handle.ff.stdpixel, responseOf(config), wp=gamma_wp,
                                                      out_type=np.float32)
 
     # Make sure there are no zeros in standard deviation
@@ -1389,7 +1390,7 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
             
             # Apply the gamma correction to the average pixel image if needed
             if config.gamma != 1.0:
-                avepixel_img = Image.gammaCorrectionImage(avepixel_img, config.gamma,
+                avepixel_img = Image.gammaCorrectionImage(avepixel_img, responseOf(config),
                     wp=(2**config.bit_depth - 1), out_type=np.float32)
 
             # Calculate centroids
@@ -1512,7 +1513,7 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
 
                         # Apply gamma correction
                         if config.gamma != 1.0:
-                            fr_img = Image.gammaCorrectionImage(fr_img, config.gamma,
+                            fr_img = Image.gammaCorrectionImage(fr_img, responseOf(config),
                                 wp=(2**config.bit_depth - 1), out_type=np.float32)
 
                         # Subtract average

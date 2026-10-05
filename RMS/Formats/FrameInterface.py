@@ -102,6 +102,7 @@ except:
 import pyximport
 pyximport.install(setup_args={'include_dirs': [np.get_include()]})
 from RMS.Routines.DynamicFTPCompressionCy import FFMimickInterface
+from RMS.Routines.Response import responseOf
 
 
 # ConstantsO
@@ -460,7 +461,8 @@ class InputTypeFRFF(InputType):
                 target_dtype = self.getTargetDtype(ref_ff.maxpixel)
                 
                 ff = FFMimickInterface(self.nrows, self.ncols, target_dtype,
-                    gamma=self.config.gamma, bit_depth=self.config.bit_depth)
+                    gamma=self.config.gamma, bit_depth=self.config.bit_depth,
+            response=responseOf(self.config))
 
                 # Store maxpixel selections, avepixels, stdpixels
                 maxpixel_list = []
@@ -1010,7 +1012,8 @@ class InputTypeVideo(InputType):
 
         # Init making the FF structure
         ff_struct_fake = FFMimickInterface(self.nrows, self.ncols, target_dtype,
-            gamma=self.config.gamma, bit_depth=self.config.bit_depth)
+            gamma=self.config.gamma, bit_depth=self.config.bit_depth,
+            response=responseOf(self.config))
 
         # If there are no frames to read, return an empty array
         if frames_to_read == 0 or frames_to_read == -1:
@@ -1332,7 +1335,8 @@ class InputTypeUWOVid(InputType):
 
         # Init making the FF structure
         ff_struct_fake = FFMimickInterface(self.nrows, self.ncols, target_dtype,
-            gamma=self.config.gamma, bit_depth=self.config.bit_depth)
+            gamma=self.config.gamma, bit_depth=self.config.bit_depth,
+            response=responseOf(self.config))
 
         self.frame_chunk_unix_times = []
 
@@ -1927,7 +1931,8 @@ class InputTypeImages(InputType):
         # Update the FF struct's target dtype based on the first frame's bit depth
         target_dtype = self.getTargetDtype()
         ff_struct_fake = FFMimickInterface(self.nrows, self.ncols, target_dtype,
-            gamma=self.config.gamma, bit_depth=self.config.bit_depth)
+            gamma=self.config.gamma, bit_depth=self.config.bit_depth,
+            response=responseOf(self.config))
 
         self.frame_dt_list = []
 
@@ -2435,7 +2440,8 @@ class InputTypeDFN(InputType):
 
         target_dtype = self.getTargetDtype(img)
         self.ff = FFMimickInterface(self.nrows, self.ncols, target_dtype,
-            gamma=self.config.gamma, bit_depth=self.config.bit_depth)
+            gamma=self.config.gamma, bit_depth=self.config.bit_depth,
+            response=responseOf(self.config))
         self.ff.addFrame(img.astype(np.uint16))
         self.ff.finish()
 

@@ -38,6 +38,7 @@ from RMS import HotPixels
 from RMS.QueuedPool import QueuedPool
 from RMS.Logger import LoggingManager, getLogger
 from RMS.Misc import RmsDateTime, setMultiprocessingStartMethod
+from RMS.Routines.Response import useNightResponse
 
 
 # Get the logger from the main module
@@ -522,6 +523,9 @@ def detectStarsAndMeteorsDirectory(dir_path, config, output_suffix=''):
     # Get paths to every FF bin file in a directory 
     ff_dir = dir_path
     ff_dir = os.path.abspath(ff_dir)
+
+    # Decode this night with the camera response saved with it (power law if none)
+    useNightResponse(config, ff_dir)
     ff_list = [ff_name for ff_name in sorted(os.listdir(ff_dir)) if validFFName(ff_name)]
 
 

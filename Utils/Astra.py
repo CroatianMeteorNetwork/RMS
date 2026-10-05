@@ -23,6 +23,7 @@ from RMS.Formats.Platepar import Platepar
 from RMS.Formats.FrameInterface import detectInputTypeFolder, detectInputTypeFile
 from RMS.Routines.Image import signalToNoise
 from RMS.Routines import Image
+from RMS.Routines.Response import responseOf
 
 try:
     from pyswarms.single.global_best import GlobalBestPSO
@@ -217,12 +218,12 @@ class ASTRA:
             corrected_avepixel = Image.applyFlat(corrected_avepixel, self.flat_struct)
 
         if self.dark is not None or self.flat_struct is not None:
-            corrected_avepixel = Image.gammaCorrectionImage(corrected_avepixel, self.config.gamma, 
+            corrected_avepixel = Image.gammaCorrectionImage(corrected_avepixel, responseOf(self.config), 
                                                         bp=0, wp=(2**self.config.bit_depth - 1),
                                                         out_type=np.float32)
 
         else:
-            corrected_avepixel = Image.gammaCorrectionImage(avepixel_background, self.config.gamma, 
+            corrected_avepixel = Image.gammaCorrectionImage(avepixel_background, responseOf(self.config), 
                                                         bp=0, wp=(2**self.config.bit_depth - 1),
                                                         out_type=np.float32)
 
@@ -1979,11 +1980,11 @@ class ASTRA:
             corr_frame = Image.applyFlat(corr_frame, self.flat_struct)
         
         if self.dark is not None or self.flat_struct is not None:
-            corr_frame = Image.gammaCorrectionImage(corr_frame, self.config.gamma,
+            corr_frame = Image.gammaCorrectionImage(corr_frame, responseOf(self.config),
                                                     bp=0, wp=(2**self.config.bit_depth - 1),
                                                     out_type=np.float32)
         else:
-            corr_frame = Image.gammaCorrectionImage(corr_frame, self.config.gamma,
+            corr_frame = Image.gammaCorrectionImage(corr_frame, responseOf(self.config),
                                                     bp=0, wp=(2**self.config.bit_depth - 1),
                                                     out_type=np.float32)
 

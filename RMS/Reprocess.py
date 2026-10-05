@@ -57,6 +57,7 @@ from RMS.Pickling import savePickle
 from RMS.RunExternalScript import runExternalScript
 from RMS.RunFluxStage import STATE_FILE_NAME as FLUX_STATE_FILE_NAME
 from RMS.SlotGate import GATE_WORK_START_MARKER
+from RMS.Routines.Response import useNightResponse
 
 # Get the logger from the main module
 log = getLogger("rmslogger")
@@ -353,6 +354,9 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False,
     # Remove final slash in the night dir
     if night_data_dir.endswith(os.sep):
         night_data_dir = night_data_dir[:-1]
+
+    # Decode this night with the camera response saved with it (power law if none)
+    useNightResponse(config, night_data_dir)
 
     # Extract the name of the night
     night_data_dir_name = os.path.basename(os.path.abspath(night_data_dir))

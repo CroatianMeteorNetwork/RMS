@@ -211,6 +211,7 @@ def read(directory, filename, array=False, full_filename=False, memmap=True, pla
                 and (hdulist[AVEFRAC_HDU].name == 'AVEFRAC'):
             ff.avepixel16 = joinAvepixel16(ff.avepixel, hdulist[AVEFRAC_HDU].data)
             ff.avegamma = head.get('AVEGAMMA', 1.0)
+            ff.averesp = head.get('AVERESP', '')
 
         # Transitional: files from the first draft of this format stored the 8.8 fixed-point mean
         # as a uint16 AVEPIXEL plane. Derive the legacy 8-bit view from it. This path only exists
@@ -219,6 +220,7 @@ def read(directory, filename, array=False, full_filename=False, memmap=True, pla
                 and (ff.nbits <= 8):
             ff.avepixel16 = ff.avepixel
             ff.avegamma = head.get('AVEGAMMA', 1.0)
+            ff.averesp = head.get('AVERESP', '')
             ff.avepixel = splitAvepixel16(ff.avepixel16)[0]
 
     if array:
@@ -323,6 +325,8 @@ def write(ff, directory, filename):
         head['AVEFRAC'] = (8, 'sub-ADU bits of the mean in the AVEFRAC HDU')
         head['AVEGAMMA'] = (float(getattr(ff, 'avegamma', 1.0) or 1.0),
             'gamma used for linear-domain averaging')
+        if getattr(ff, 'averesp', ''):
+            head['AVERESP'] = (str(ff.averesp), 'camera response table id (camera_response.json)')
 
     # Create the primary part
     prim = fits.PrimaryHDU(header=head)

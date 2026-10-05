@@ -40,6 +40,7 @@ from RMS.Logger import getLogger
 from RMS.Math import twoDGaussian
 from RMS.Routines import MaskImage
 from RMS.Routines import Image
+from RMS.Routines.Response import responseOf
 from RMS.QueuedPool import QueuedPool
 from RMS.Misc import setMultiprocessingStartMethod
 
@@ -567,7 +568,7 @@ def extractStarsFF(
     # Find the stars in the image
     status = extractStars(
         img, img_median=img_median,
-        mask=mask, gamma=config.gamma,
+        mask=mask, gamma=responseOf(config),
         max_star_candidates=config.max_stars, border=border,
         neighborhood_size=neighborhood_size, intensity_threshold=intensity_threshold,
         segment_radius=segment_radius, roundness_threshold=roundness_threshold,
@@ -707,7 +708,7 @@ def extractStarsImgHandle(img_handle,
         # Extract stars from the average pixel image
         status = extractStars(
             img, img_median=img_median,
-            mask=mask, gamma=config.gamma,
+            mask=mask, gamma=responseOf(config),
             max_star_candidates=config.max_stars, border=border,
             neighborhood_size=neighborhood_size, intensity_threshold=intensity_threshold,
             segment_radius=segment_radius, roundness_threshold=roundness_threshold,

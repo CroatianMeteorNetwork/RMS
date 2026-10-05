@@ -210,6 +210,7 @@ from RMS.Routines.CustomPyqtgraphClasses import ViewBox, TextItem, TextItemList,
 from RMS.Routines.GreatCircle import fitGreatCircle, greatCircle
 from RMS.Routines.SphericalPolygonCheck import sphericalPolygonCheck
 from RMS.Routines.Image import loadFlat, loadDark, applyFlat, applyDark, signalToNoise, gammaCorrectionImage, adjustLevels, saveImage, loadImage
+from RMS.Routines.Response import responseOf
 from RMS.Routines.MaskImage import getMaskFile, MaskStructure
 from RMS.Routines import RollingShutterCorrection
 from RMS.Misc import maxDistBetweenPoints, getRmsRootDir
@@ -16548,7 +16549,7 @@ class PlateTool(QtWidgets.QMainWindow):
             img_crop_orig = self.img.data[x_min:x_max, y_min:y_max]
 
         # Perform gamma correction
-        img_crop = gammaCorrectionImage(img_crop_orig, self.config.gamma,
+        img_crop = gammaCorrectionImage(img_crop_orig, responseOf(self.config),
                                         bp=0, wp=(2**self.config.bit_depth - 1), out_type=np.float32)
 
 
@@ -18065,7 +18066,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Perform gamma correction on the colored part
             crop_img = gammaCorrectionImage(
-                crop_img, self.config.gamma, 
+                crop_img, responseOf(self.config), 
                 bp=0, wp=(2**self.config.bit_depth - 1), 
                 out_type=np.float32
                 )
@@ -18080,7 +18081,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Perform gamma correction on the background
             crop_bg = gammaCorrectionImage(
-                crop_bg, self.config.gamma, 
+                crop_bg, responseOf(self.config), 
                 bp=0, wp=(2**self.config.bit_depth - 1),
                 out_type=np.float32
                 )
@@ -18163,7 +18164,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
                 # Perform gamma correction on the avepixel crop
                 avepixel_crop = gammaCorrectionImage(
-                    avepixel_crop, self.config.gamma, 
+                    avepixel_crop, responseOf(self.config), 
                     bp=0, wp=(2**self.config.bit_depth - 1),
                     out_type=np.float32
                     )
