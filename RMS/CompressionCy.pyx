@@ -30,9 +30,10 @@ cdef extern from "math.h":
 @cython.cdivision(True)
 @cython.boundscheck(False)
 @cython.wraparound(False)
-cdef inline double encodeLUT(double v, double[:] lut):
+cdef inline double encodeLUT(double v, const double* lut) nogil:
     """ Inverse of a strictly increasing 256-entry decode LUT (piecewise linear, so the inverse
-    is exact): linear value v -> fractional code 0..255. """
+    is exact): linear value v -> fractional code 0..255. A raw pointer, not a memoryview: this
+    runs once per pixel per block, and a memoryview argument is reference-counted per call. """
     cdef int lo = 0, hi = 255, mid
     if v <= lut[0]:
         return 0.0
@@ -121,7 +122,7 @@ def compressFrames(np.ndarray[INT8_TYPE_t, ndim=3] frames, int deinterlace_order
         decode_lut = np.ascontiguousarray(response.decodeLUT(255), dtype=FLOAT_TYPE)
     elif use_gamma:
         decode_lut = (255.0*(np.arange(256)/255.0)**(1.0/gamma)).astype(FLOAT_TYPE)
-    cdef double[:] decode_view = decode_lut
+    cdef const double* decode_ptr = <const double*> np.PyArray_DATA(decode_lut)
     
     # Populate the randomN array with 2**16 random numbers
     cdef np.ndarray[INT8_TYPE_t, ndim=1] randomN = np.empty(shape=[65536], dtype=INT8_TYPE)
@@ -249,7 +250,7 @@ def compressFrames(np.ndarray[INT8_TYPE_t, ndim=3] frames, int deinterlace_order
 
                 mean_lin = acc_lin/n_trim
                 if use_table:
-                    ave16 = <unsigned int>(256.0*encodeLUT(mean_lin, decode_view) + 0.5)
+                    ave16 = <unsigned int>(256.0*encodeLUT(mean_lin, decode_ptr) + 0.5)
                 else:
                     ave16 = <unsigned int>(256.0*255.0*pow(mean_lin/255.0, gamma) + 0.5)
 

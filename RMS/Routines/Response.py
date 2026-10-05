@@ -26,6 +26,8 @@ import numpy as np
 
 CODES = np.arange(256, dtype=np.float64)
 
+_POWER_CACHE = {}
+
 
 class ResponseCurve(object):
     """ code (0..255 at 8 bits, scaled for other white points) -> relative linear light (0..1). """
@@ -55,12 +57,39 @@ class ResponseCurve(object):
         self.source = source
         self.gamma = gamma
         self.info = dict(info or {})
+        self._derive()
+
+
+    def _derive(self):
+        # slope of each code's segment (the last entry repeats so code 255 indexes safely): the
+        # table is on the uniform grid of codes, so decode is one index and one multiply-add
+        # per value, not a search
+        lin = self.linear
+        self._slope = np.append(np.diff(lin), lin[-1] - lin[-2])
+        self._lin_list = lin.tolist()
+        self._slope_list = self._slope.tolist()
+
+
+    def __getstate__(self):
+        # derived fields are rebuilt on unpickling, so a curve pickled by one version of this
+        # class (e.g. into a detection worker) works in another
+        return {k: v for k, v in self.__dict__.items() if not k.startswith("_")}
+
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self._derive()
 
 
     @classmethod
     def power(cls, gamma):
-        """ The classic RMS assumption: linear = (code/255)**(1/gamma). """
-        return cls((CODES/255.0)**(1.0/float(gamma)), "power", gamma=float(gamma))
+        """ The classic RMS assumption: linear = (code/255)**(1/gamma). Cached: callers ask for it
+        per image, and building a curve costs ~0.1 ms. """
+        g = float(gamma)
+        c = _POWER_CACHE.get(g)
+        if c is None:
+            c = _POWER_CACHE[g] = cls((CODES/255.0)**(1.0/g), "power", gamma=g)
+        return c
 
 
     @classmethod
@@ -94,7 +123,18 @@ class ResponseCurve(object):
         x = np.clip(np.asarray(codes, dtype=np.float64), 0, wp)*(255.0/wp)
         if self.isPower:
             return (x/255.0)**(1.0/self.gamma)
-        return np.interp(x, CODES, self.linear)
+        # linear interpolation on the uniform code grid (== np.interp(x, CODES, linear), ~5x faster)
+        i = np.minimum(x.astype(np.intp), 254)
+        return self.linear[i] + (x - i)*self._slope[i]
+
+
+    def decodeScalar(self, code, wp=255):
+        """ decode() of one number, in plain Python (no array overhead: ~1 us). """
+        x = min(max(float(code), 0.0), float(wp))*(255.0/wp)
+        if self.isPower:
+            return (x/255.0)**(1.0/self.gamma)
+        i = min(int(x), 254)
+        return self._lin_list[i] + (x - i)*self._slope_list[i]
 
 
     def encode(self, linear, wp=255):

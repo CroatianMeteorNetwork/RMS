@@ -455,8 +455,8 @@ def gammaCorrectionScalar(intensity, gamma, bp=0, wp=255):
     if table is not None:
         if intensity <= bp:
             return bp
-        d_bp, d_wp = table.decode(bp, wp=wp), table.decode(wp, wp=wp)
-        return float(bp + (wp - bp)*(table.decode(intensity, wp=wp) - d_bp)/(d_wp - d_bp))
+        d_bp, d_wp = table.decodeScalar(bp, wp=wp), table.decodeScalar(wp, wp=wp)
+        return bp + (wp - bp)*(table.decodeScalar(intensity, wp=wp) - d_bp)/(d_wp - d_bp)
 
     gamma = _gammaValue(gamma)
     x = (intensity - bp)/(wp - bp)
@@ -501,11 +501,14 @@ def gammaCorrectionImage(intensity, gamma, bp=0, wp=255, out_type=None):
 
     table = _cameraTable(gamma)
     if table is not None:
-        # the camera's own curve: linear light relative to the black and white points
-        d_bp, d_wp = table.decode(bp, wp=wp), table.decode(wp, wp=wp)
-        out = np.zeros_like(intensity) + bp
-        sel = intensity > bp
-        out[sel] = bp + (wp - bp)*(table.decode(intensity[sel], wp=wp) - d_bp)/(d_wp - d_bp)
+        # the camera's own curve: linear light relative to the black and white points. Values at
+        # or below the black point decode to d_bp, i.e. land exactly on bp, so no mask is needed
+        d_bp, d_wp = table.decodeScalar(bp, wp=wp), table.decodeScalar(wp, wp=wp)
+        data = np.ma.getdata(intensity)
+        lin = table.decode(np.maximum(data, bp), wp=wp)
+        out = (bp + ((wp - bp)/(d_wp - d_bp))*(lin - d_bp)).astype(data.dtype, copy=False)
+        if np.ma.isMaskedArray(intensity):
+            out = np.ma.masked_array(out, mask=np.ma.getmaskarray(intensity).copy())
 
     else:
         gamma = _gammaValue(gamma)
