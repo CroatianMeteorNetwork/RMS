@@ -9705,7 +9705,10 @@ class PlateTool(QtWidgets.QMainWindow):
         # Check the neighbourhood against a catalog DEEPER than the display: the detector's
         # centroids are pulled by neighbours the display catalog cannot even see (the
         # cross-frame validation uses the same +1.5 mag convention). Cached per LM.
-        deep_lm = self.cat_lim_mag + 1.5
+        # The margin alone never pulls in the full GMN catalog; it does when the night's detections show a
+        #   deep station
+        deep_lm = StarCatalog.automaticCatalogLimMag(self.config, self.cat_lim_mag + 1.5,
+                                                     detected_lim_mag=self.detectedStarsLimMag())
         cached = getattr(self, '_blend_catalog_cache', None)
         if (cached is not None) and abs(cached[0] - deep_lm) < 0.01:
             catalog_for_blend = cached[1]
@@ -14254,8 +14257,10 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Match against a catalog deeper than the display LM: the star detector reaches
         # fainter than the displayed catalog, and real stars just past the LM cutoff
-        # would otherwise recur as match failures on every frame
-        lim_mag_val = self.cat_lim_mag + 1.5
+        # would otherwise recur as match failures on every frame. The margin alone never pulls in the full
+        #   GMN catalog; it does when the night's detections show a deep station.
+        lim_mag_val = StarCatalog.automaticCatalogLimMag(self.config, self.cat_lim_mag + 1.5,
+                                                         detected_lim_mag=self.detectedStarsLimMag())
         years_from_J2000 = (self.img_handle.beginning_datetime
             - datetime.datetime(2000, 1, 1, 12, 0, 0)).days/365.25
         deep_results = StarCatalog.readStarCatalog(
