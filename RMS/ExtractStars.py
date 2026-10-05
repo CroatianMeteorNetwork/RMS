@@ -55,10 +55,12 @@ pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 try:
     from RMS.ExtractStarsCy import twoDGaussian as twoDGaussianModel
     from RMS.ExtractStarsCy import twoDGaussianResiduals
+    from RMS.ExtractStarsCy import twoDGaussianResidualsEncoded
     CYTHON_PSF = True
 except ImportError:
     twoDGaussianModel = twoDGaussian
     twoDGaussianResiduals = None
+    twoDGaussianResidualsEncoded = None
     CYTHON_PSF = False
 
 
@@ -772,6 +774,48 @@ def extractStarsImgHandle(img_handle,
 
 
 
+def psfDecodeLUT(gamma, wp):
+    """ The decode table (code -> linear, in 0..wp units) the PSF fit encodes its model through, or None
+        for a linear response.
+
+    A star is a Gaussian in LIGHT. On a non-linear camera (a gamma, or the camera's own response
+    table) the codes are not, so fitPSF fits a linear-light Gaussian passed through this table to the
+    codes. For gamma 1.0 there is nothing to encode and the original fit runs unchanged.
+
+    Arguments:
+        gamma: [float or ResponseCurve] The station's gamma, or the camera's response table.
+        wp: [int] White point (2**bit_depth - 1).
+
+    Return:
+        lut: [ndarray or None] Strictly increasing, wp + 1 entries, lut[wp] = wp.
+    """
+
+    table = Image._cameraTable(gamma)
+    if table is not None:
+        return np.ascontiguousarray(table.decodeLUT(wp), dtype=np.float64)
+
+    g = float(Image._gammaValue(gamma))
+    if g == 1.0:
+        return None
+
+    return wp*(np.arange(wp + 1, dtype=np.float64)/wp)**(1.0/g)
+
+
+def psfEncodeIndex(lut, bins_per_code=16):
+    """ The interval index the Cython encoded-Gaussian residual inverts lut with: on a uniform grid
+        of M + 1 linear values, the last code whose linear value is at or below each one.
+
+    Return:
+        (lut_index, index_scale): [ndarray int32, float] with index_scale = M/lut[-1].
+    """
+
+    m = bins_per_code*(len(lut) - 1)
+    grid = np.arange(m + 1, dtype=np.float64)*(lut[-1]/m)
+    lut_index = np.clip(np.searchsorted(lut, grid, side='right') - 1, 0, len(lut) - 2).astype(np.int32)
+
+    return lut_index, m/lut[-1]
+
+
 def fitPSF(img, img_median, x_init, y_init, gamma=1.0, segment_radius=4, roundness_threshold=0.5, 
            max_feature_ratio=0.8, bit_depth=8):
     """ Fit a 2D Gaussian to the star candidate cutout to check if it's a star.
@@ -812,6 +856,18 @@ def fitPSF(img, img_median, x_init, y_init, gamma=1.0, segment_radius=4, roundne
 
     # Threshold for the reported numbers of saturated pixels (98% of the dynamic range)
     saturation_threshold_report = int(round(0.98*(2**bit_depth - 1)))
+
+    # On a non-linear camera the Gaussian is fitted in linear light and encoded through the response
+    # (see psfDecodeLUT): the codes of a star are not a Gaussian, and fitting them as one inflated the
+    # FWHM of bright stars by up to 17% and moved their centres by ~0.1 px (US05E1, 2026-10-05).
+    # None = linear response = the original fit.
+    decode_lut = psfDecodeLUT(gamma, 2**bit_depth - 1)
+    if decode_lut is not None:
+        code_axis = np.arange(len(decode_lut), dtype=np.float64)
+        decode = lambda c: np.interp(c, code_axis, decode_lut)
+        encode = lambda v: np.interp(v, decode_lut, code_axis)
+        img_median_lin = float(decode(img_median))
+        lut_index, index_scale = psfEncodeIndex(decode_lut)
     
     
     # Go through all stars
@@ -861,9 +917,35 @@ def fitPSF(img, img_median, x_init, y_init, gamma=1.0, segment_radius=4, roundne
         amp_guess = max(float(np.max(star_seg)) - img_median, 1.0)
         initial_guess = (amp_guess,) + init_pos_sigma + (img_median,)
 
+        if decode_lut is not None:
+
+            # Linear-light Gaussian encoded through the response, fitted to the codes. The amplitude
+            # and offset are in linear units (the scale of decode_lut).
+            amp_guess_lin = max(float(decode(float(np.max(star_seg)))) - img_median_lin, 1e-3)
+            initial_guess = (amp_guess_lin,) + init_pos_sigma + (img_median_lin,)
+
+            if CYTHON_PSF:
+                popt, cov_x, infodict, mesg, ier = opt.leastsq(
+                    twoDGaussianResidualsEncoded, np.asarray(initial_guess, dtype=np.float64),
+                    args=(y_ind.astype(np.float64), x_ind.astype(np.float64), decode_lut, lut_index,
+                          index_scale, star_seg.ravel().astype(np.float64)),
+                    maxfev=200, full_output=True)
+
+                if ier not in (1, 2, 3, 4):
+                    continue
+
+            else:
+                saturation_lin = decode_lut[-1]*np.ones_like(y_ind)
+                encoded_model = lambda params, *p: encode(twoDGaussian(params, *p))
+                try:
+                    popt, pcov = opt.curve_fit(encoded_model, (y_ind, x_ind, saturation_lin),
+                        star_seg.ravel(), p0=initial_guess, maxfev=200)
+                except RuntimeError:
+                    continue
+
         # Fit the 2D Gaussian with the limited number of iterations - this reduces the processing
         # time and most of the bad star candidates take more iterations to fit
-        if CYTHON_PSF:
+        elif CYTHON_PSF:
 
             # Call leastsq directly with the C residual function. This is the same LM engine with
             # the same tolerances and iteration limit as the curve_fit call below, minus the
@@ -893,6 +975,13 @@ def fitPSF(img, img_median, x_init, y_init, gamma=1.0, segment_radius=4, roundne
 
         # Take absolute values of some parameters
         amplitude = abs(amplitude)
+
+        # Encoded fit: the background is already linear; report the amplitude in codes (peak minus
+        # background), as the code-domain fit did, so CALSTARS keeps its units
+        offset_lin = None
+        if decode_lut is not None:
+            offset_lin = max(float(offset), 0.0)
+            amplitude = float(encode(offset_lin + amplitude) - encode(offset_lin))
         sigma_x = abs(sigma_x)
         sigma_y = abs(sigma_y)
 
@@ -944,8 +1033,11 @@ def fitPSF(img, img_median, x_init, y_init, gamma=1.0, segment_radius=4, roundne
         star_seg_crop_corr = Image.gammaCorrectionImage(star_seg_crop.astype(np.float32), gamma,
                                                         wp=gamma_wp, out_type=np.float32)
 
-        # Correct the background for gamma
-        bg_corrected = Image.gammaCorrectionScalar(offset, gamma, wp=gamma_wp)
+        # Correct the background for gamma (the encoded fit's background is linear already)
+        if offset_lin is not None:
+            bg_corrected = offset_lin
+        else:
+            bg_corrected = Image.gammaCorrectionScalar(offset, gamma, wp=gamma_wp)
 
         # Subtract the background from the star segment and compute the total intensity
         intensity = np.sum(star_seg_crop_corr - bg_corrected)
