@@ -36,7 +36,8 @@ OMIT_FROM_CONFIG = {'lat',  # Deprecated DFNS Station
                     'remote_mask_dir',  # Should not be exposed
                     'platepar_template_dir',  # Should not be exposed
                     'frame_save_aligned_interval',  # Should not be exposed
-                    'log_file_log_level'  # Should not be exposed
+                    'log_file_log_level',  # Should not be exposed
+                    'quota_management_disabled'  # Legacy alias of quota_management_enabled
                     }
 
 
