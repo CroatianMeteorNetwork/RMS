@@ -275,9 +275,14 @@ def extractStars(img, img_median=None, mask=None, gamma=1.0, max_star_candidates
     # positions are returned in extra_info so the nightly blacklist analysis can still run its
     # stationarity tests on them (refreshing an entry on mere presence would make a wrongly
     # blacklisted slow star permanent)
+    com_all = None
     if (hot_pixels is not None) and (num_objects > 0) and len(hot_pixels):
 
-        cand_yx = np.array(ndimage.center_of_mass(img_convolved, labeled, label_index)) + 0.5
+        # Centres of mass of every candidate, kept so the survivors' are looked up below rather
+        # than computed in a second full-image pass (a label's centre does not depend on which
+        # other labels are requested)
+        com_all = np.array(ndimage.center_of_mass(img_convolved, labeled, label_index))
+        cand_yx = com_all + 0.5
         is_hot = matchHotPixels(cand_yx[:, 1], cand_yx[:, 0], hot_pixels, hot_pixels_radius)
 
         if extra_info is not None:
@@ -345,8 +350,12 @@ def extractStars(img, img_median=None, mask=None, gamma=1.0, max_star_candidates
         # Convert positional indices to labels
         label_index = [label_index[i] for i in selected]
 
-    # Find centres of mass of each labeled objects
-    xy = np.array(ndimage.center_of_mass(img_convolved, labeled, label_index))
+    # Find centres of mass of each labeled objects (labels are 1..num_objects, so label - 1 indexes
+    # the array computed for the hot pixel check)
+    if com_all is not None:
+        xy = com_all[np.asarray(label_index, dtype=np.intp) - 1].reshape(-1, 2)
+    else:
+        xy = np.array(ndimage.center_of_mass(img_convolved, labeled, label_index))
 
     # Remove all detection on the border
     #xy = xy[np.where((xy[:, 1] > border) & (xy[:,1] < ff.ncols - border) & (xy[:,0] > border) & (xy[:,0] < ff.nrows - border))]
