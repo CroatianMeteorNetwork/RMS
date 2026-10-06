@@ -26,6 +26,8 @@ cdef extern from "math.h":
     double sqrt(double)
     double pow(double, double)
 
+from libc.string cimport memset
+
 
 @cython.cdivision(True)
 @cython.boundscheck(False)
@@ -104,11 +106,31 @@ def compressFrames(np.ndarray[INT8_TYPE_t, ndim=3] frames, int deinterlace_order
     cdef unsigned int width = frames.shape[2]
     cdef unsigned int frames_num = frames.shape[0]
 
-    # The mean and stddev are computed on a symmetrically trimmed sample: the top 4 values are
-    # removed to suppress meteors and wakes, and the bottom 4 are removed to balance the trim -
-    # a one-sided trim biases the mean low by ~0.04 sigma for symmetric noise
+    # The mean is computed on a symmetrically trimmed sample: the top 4 values are removed to
+    # suppress meteors and wakes, and the bottom 4 are removed to balance the trim - a one-sided
+    # trim biases the mean low by ~0.04 sigma for symmetric noise
     cdef unsigned int n_trim = frames_num - 8
-    cdef unsigned int n_trim_minus_one = frames_num - 9
+
+    # The standard deviation is computed on a more heavily trimmed sample, the top 16 and bottom
+    # 16 values removed. The variance is far more sensitive to outliers than the mean: an object
+    # of +40 codes dwelling 8 frames in a pixel (a wake, a slow bright meteor, a satellite) more
+    # than doubles a 4/4-trimmed sigma, and a k*sigma threshold then rises against the object
+    # itself. With 16 trimmed at the top the estimate stays within 0.4 codes of the truth up to a
+    # 16-frame dwell (Monte Carlo, n = 256). Trimming narrows the sample, so the trimmed sample
+    # standard deviation is scaled back to the full-population sigma with the Gaussian factor
+    # below (E[s_trim]/sigma = 0.7563 for 16/16 of 256; the former 4/4 trim was 0.9108 and was
+    # never corrected, so the old plane read 9% low). The estimate's own scatter is 5.1% per pixel
+    # against 4.6% for the 4/4 trim. The extremes come from a per-pixel histogram of the 8-bit
+    # samples (one counter increment per sample, then a scan in from both ends), which is far
+    # cheaper than tracking sorted lists in the sample loop
+    cdef unsigned int n_trim_sigma = frames_num - 32
+    cdef double trim_sigma_corr = 1.3223
+    if frames_num < 64:
+        raise ValueError("compressFrames needs at least 64 frames for the trimmed statistics, got %d"
+            % frames_num)
+    cdef unsigned short hist[256]
+    cdef unsigned int sum_top16, sum_bot16, sq_top16, sq_bot16, remaining, c, v
+    cdef unsigned int acc_sigma, var_sigma
 
     cdef unsigned int fieldsum_indx
 
@@ -158,12 +180,15 @@ def compressFrames(np.ndarray[INT8_TYPE_t, ndim=3] frames, int deinterlace_order
             min_val_4 = 255
             num_equal = 0
 
+            memset(hist, 0, sizeof(hist))
+
             # Calculate mean, stddev, max_val, and max_val frame
             for n in range(frames_num):
             
                 pixel = frames[n, y, x]
                 acc += pixel
                 var += pixel**2
+                hist[pixel] += 1
 
                 # Accumulate the linear-domain (gamma-decoded) sum
                 if use_gamma:
@@ -276,22 +301,53 @@ def compressFrames(np.ndarray[INT8_TYPE_t, ndim=3] frames, int deinterlace_order
 
 
 
-            ### Calculate stddev on the symmetrically trimmed sample (encoded domain) ##
+            ### Calculate stddev on the 16/16 trimmed sample (encoded domain) ##
 
-            # Remove the top 4 and bottom 4 values
-            var -= max_val**2 + max_val_2**2 + max_val_3**2 + max_val_4**2
-            var -= min_val**2 + min_val_2**2 + min_val_3**2 + min_val_4**2
+            # Sums and sums of squares of the 16 smallest and 16 largest samples, from the
+            # histogram scanned in from both ends (exact with ties: the trimmed multiset)
+            remaining = 16
+            sum_bot16 = 0
+            sq_bot16 = 0
+            v = 0
+            while remaining > 0:
+                c = hist[v]
+                if c > remaining:
+                    c = remaining
+                sum_bot16 += c*v
+                sq_bot16 += c*v*v
+                remaining -= c
+                v += 1
+
+            remaining = 16
+            sum_top16 = 0
+            sq_top16 = 0
+            v = 255
+            while remaining > 0:
+                c = hist[v]
+                if c > remaining:
+                    c = remaining
+                sum_top16 += c*v
+                sq_top16 += c*v*v
+                remaining -= c
+                v -= 1
+
+            # Note: acc already had the top 4 and bottom 4 removed above (for the mean), so the
+            # full sum is restored before the 16/16 trim is applied
+            acc_sigma = acc + max_val + max_val_2 + max_val_3 + max_val_4 \
+                + min_val + min_val_2 + min_val_3 + min_val_4 - sum_top16 - sum_bot16
+            var_sigma = var - sq_top16 - sq_bot16
 
             # Sample variance of the remaining values. acc**2 overflows 32 bits, so compute in
             # double precision (exact: both terms are far below 2**53)
-            var_d = (var - (<double>acc)*acc/n_trim)/n_trim_minus_one
+            var_d = (var_sigma - (<double>acc_sigma)*acc_sigma/n_trim_sigma)/(n_trim_sigma - 1)
 
             # Guard against small negative values from floating point rounding
             if var_d < 0:
                 var_d = 0
 
-            # Standard deviation in 8.8 fixed point, floored at half a code (see std16_array)
-            std16 = <unsigned int>(256.0*sqrt(var_d) + 0.5)
+            # Standard deviation in 8.8 fixed point, scaled from the trimmed sample to the full
+            # population and floored at half a code (see std16_array)
+            std16 = <unsigned int>(256.0*trim_sigma_corr*sqrt(var_d) + 0.5)
             if std16 < 128:
                 std16 = 128
             std16_array[y, x] = <unsigned short>std16
