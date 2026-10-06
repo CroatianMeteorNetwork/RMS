@@ -4,7 +4,7 @@
     Usage:
         python -m RMS.MonitorProcessFrameInterface <file_type> <input_dir> \
             [--output OUTPUT_DIR] [--config CONFIG_PATH] [--platepar PLATEPAR_PATH] \
-            [--nproc N] [--chunk_frames N]
+            [--nproc N] [--chunk_frames N] [--start_time START_TIME]
 
     Example:
         python -m RMS.MonitorProcessFrameInterface vid /path/to/input \
@@ -14,6 +14,8 @@
 from __future__ import print_function, division, absolute_import
 
 import argparse
+import copy
+import datetime
 import gc
 import glob
 import os
@@ -53,6 +55,101 @@ FILE_TYPE_MAP = {
     'fitsdirs': None,
 }
 
+# Exit code of a worker process which skipped a file because it begins before the start time
+SKIP_EXIT_CODE = 3
+
+# Accepted formats of the start time given on the command line or in the multicam INI file
+START_TIME_FORMATS = ["%Y%m%d_%H%M%S", "%Y%m%d-%H%M%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S",
+                      "%Y%m%d"]
+
+
+def parseStartTime(start_time_str):
+    """ Parse the start time string into a datetime object.
+
+    Arguments:
+        start_time_str: [str] Start time in UTC, in one of the START_TIME_FORMATS formats.
+
+    Return:
+        [datetime] Parsed start time (naive, UTC).
+    """
+
+    start_time_str = start_time_str.strip()
+
+    for fmt in START_TIME_FORMATS:
+        try:
+            start_time = datetime.datetime.strptime(start_time_str, fmt)
+        except ValueError:
+            continue
+
+        # strptime accepts fields which are not zero-padded (e.g. 20260101_1020 is read as 10:02:00),
+        # so require an exact round trip
+        if start_time.strftime(fmt) == start_time_str:
+            return start_time
+
+    raise ValueError("Could not parse the start time '{}'. Accepted formats: {}".format(
+        start_time_str, ", ".join(START_TIME_FORMATS)))
+
+
+def resolveCameraStartTime(cp, section, cli_start_time=None):
+    """ Determine the start time for one camera in the multicam mode.
+
+    Precedence: the command line start time, then start_time in the camera section, then start_time in
+    the [Global] section.
+
+    Arguments:
+        cp: [ConfigParser] Parsed multicam INI file.
+        section: [str] Name of the camera section.
+
+    Keyword arguments:
+        cli_start_time: [datetime] Start time given on the command line. None by default.
+
+    Return:
+        [datetime] Start time for the camera, None if not set anywhere.
+    """
+
+    if cli_start_time is not None:
+        return cli_start_time
+
+    for sec in [section, 'Global']:
+        if cp.has_option(sec, 'start_time'):
+            try:
+                return parseStartTime(cp.get(sec, 'start_time'))
+            except ValueError as e:
+                raise ValueError("[{}] start_time: {}".format(sec, e))
+
+    return None
+
+
+def readBeginningDatetime(file_path, config, chunk_frames):
+    """ Read the time of the beginning of the recording using the frame interface, without loading the
+        whole file.
+
+    Arguments:
+        file_path: [str] Path to the input file or directory.
+        config: [Config instance] Loaded config object.
+        chunk_frames: [int] Number of frames per chunk.
+
+    Return:
+        [datetime] Time of the beginning of the recording, None if the file could not be opened.
+    """
+
+    img_handle = detectInputType(file_path, config, detection=True, preload_video=False,
+        chunk_frames=chunk_frames)
+
+    if img_handle is None:
+        return None
+
+    beginning_datetime = img_handle.beginning_datetime
+
+    # Release the open file handles
+    if getattr(img_handle, 'cap', None) is not None:
+        img_handle.cap.release()
+
+    if getattr(img_handle, 'vid_file', None) is not None:
+        img_handle.vid_file.close()
+
+    return beginning_datetime
+
 
 def matchesFileType(file_name, file_type):
     """ Check if the given file matches the specified file type.
@@ -88,7 +185,7 @@ def matchesFileType(file_name, file_type):
 
 
 def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
-                flat_path=None, dark_path=None, unique_id=None):
+                flat_path=None, dark_path=None, unique_id=None, start_time=None):
     """ Process a single file through the detection and recalibration pipeline.
 
     Arguments:
@@ -102,11 +199,13 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
         flat_path: [str] Path to a flat field file. None by default.
         dark_path: [str] Path to a dark frame file. None by default.
         unique_id: [str] Safely flattened string to uniquely identify output directories. None by default.
+        start_time: [datetime] If given, files whose recording begins before this time (UTC) are skipped
+            and the process exits with SKIP_EXIT_CODE. None by default.
 
     Return:
         [bool] True if processing succeeded, False otherwise.
     """
-    
+
     file_name = os.path.basename(file_path)
     # If a unique_id is provided, use it for the output folder structure. Otherwise use file_base.
     file_base = unique_id if unique_id else os.path.splitext(file_name)[0]
@@ -121,6 +220,18 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
     if flat_path is not None:
         config.flat_file = os.path.abspath(flat_path)
         config.use_flat = True
+
+    # Skip files which begin before the start time, before loading the whole file
+    if start_time is not None:
+        # Use a copy of the config, as opening some input types modifies it (e.g. the image size)
+        beginning_datetime = readBeginningDatetime(file_path, copy.deepcopy(config), chunk_frames)
+        if (beginning_datetime is not None) and (beginning_datetime < start_time):
+            print("Skipping {}: begins at {} UTC, before the start time {} UTC".format(
+                file_name, beginning_datetime, start_time))
+            sys.exit(SKIP_EXIT_CODE)
+
+    # Use the module logger until the per-file logger is initialized, so errors before that are logged
+    proc_log = log
 
     try:
 
@@ -234,9 +345,35 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
         return False
 
 
+def processFileWorker(*args, **kwargs):
+    """ Worker process target which runs processFile and turns its result into the process exit code, so
+        the monitor can tell failed files apart and retry them. Takes the same arguments as processFile.
+
+    Exit codes:
+        0 - processing succeeded
+        SKIP_EXIT_CODE - the file begins before the start time
+        1 - processing failed
+    """
+
+    try:
+        success = processFile(*args, **kwargs)
+
+    except SystemExit as e:
+
+        if e.code == SKIP_EXIT_CODE:
+            raise
+
+        # Some input types call sys.exit() when they can't open the file (e.g. no time in the file name),
+        # which would otherwise end the process with exit code 0
+        print("ERROR: Processing exited early with code {}".format(e.code))
+        success = False
+
+    sys.exit(0 if success else 1)
+
+
 def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_dir, nproc=2,
                      chunk_frames=128, poll_interval=2, force=False, recursive=False, flat_path=None,
-                     dark_path=None, fail_wait_time=300):
+                     dark_path=None, fail_wait_time=300, start_time=None):
     """ Monitor a directory for new files of the given type and process them.
 
     Arguments:
@@ -254,12 +391,16 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
         flat_path: [str] Path to a flat field file. None by default.
         dark_path: [str] Path to a dark frame file. None by default.
         fail_wait_time: [float] Seconds to wait before retrying a failed file. Default is 300.
+        start_time: [datetime] Only process files whose recording begins at or after this time (UTC).
+            None by default, in which case all files are processed.
     """
 
     log.info("Monitoring directory: {}".format(input_dir))
     log.info("File type: {}".format(file_type))
     log.info("Output directory: {}".format(output_dir))
     log.info("Parallel processes: {:d}".format(nproc))
+    if start_time is not None:
+        log.info("Only processing files beginning at or after: {} UTC".format(start_time))
 
     # Track files that have been processed or are being processed
     processed_files = set()
@@ -299,6 +440,9 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
                     proc.join()
                     if proc.exitcode == 0:
                         log.info("Successfully processed: {}".format(uid))
+                        processed_files.add(uid)
+                    elif proc.exitcode == SKIP_EXIT_CODE:
+                        log.info("Skipped: {} (begins before the start time)".format(uid))
                         processed_files.add(uid)
                     else:
                         if uid not in failed_files:
@@ -438,9 +582,10 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
                 log.info("Putting file {} on the processing queue...".format(file_rel_path))
 
                 proc = multiprocessing.Process(
-                    target=processFile,
+                    target=processFileWorker,
                     args=(file_path, config_path, platepar_path, output_dir, chunk_frames),
-                    kwargs={'flat_path': flat_path, 'dark_path': dark_path, 'unique_id': unique_id}
+                    kwargs={'flat_path': flat_path, 'dark_path': dark_path, 'unique_id': unique_id,
+                            'start_time': start_time}
                 )
                 proc.start()
                 active_workers[unique_id] = proc
@@ -471,12 +616,17 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
         log.info("All workers stopped.")
 
 
-def monitorMultipleCameras(multicam_ini_path):
-    """ Monitor multiple directories for multiple cameras based on an INI config file. 
-    
+def monitorMultipleCameras(multicam_ini_path, start_time=None):
+    """ Monitor multiple directories for multiple cameras based on an INI config file.
+
     Arguments:
         multicam_ini_path: Path to the INI config file.
-        
+
+    Keyword arguments:
+        start_time: [datetime] Only process files whose recording begins at or after this time (UTC).
+            Overrides start_time from the INI file for all cameras.
+            None by default, in which case all files are processed.
+
     Returns:
         None
 
@@ -501,7 +651,12 @@ def monitorMultipleCameras(multicam_ini_path):
 
         # Set to True to re-process files even if they already have a done.flag
         force = False
-        
+
+        # Optional. Only process files whose recording begins at or after this time (UTC). Files which
+        # begin earlier are skipped, even if they span this time. Can be overridden per camera, and
+        # --start_time on the command line overrides both.
+        # start_time = 20260101_220000
+
         [CA0001]
         input_dir = /path/to/CA0001/video
         output_dir = /path/to/CA0001/output
@@ -509,7 +664,8 @@ def monitorMultipleCameras(multicam_ini_path):
         platepar = /path/to/CA0001/platepar.cal
         flat = /path/to/CA0001/flat.bmp
         dark = /path/to/CA0001/dark.bmp
-        
+        # start_time = 2026-01-02 01:30:00
+
         [CA0002]
         input_dir = /path/to/CA0002/video
         output_dir = /path/to/CA0002/output
@@ -557,7 +713,14 @@ def monitorMultipleCameras(multicam_ini_path):
             'flat_path': cp.get(section, 'flat', fallback=None),
             'dark_path': cp.get(section, 'dark', fallback=None),
         }
-        
+
+        # Determine the start time for this camera (command line > camera section > [Global])
+        try:
+            cam['start_time'] = resolveCameraStartTime(cp, section, cli_start_time=start_time)
+        except ValueError as e:
+            print("ERROR: {}".format(e))
+            sys.exit(1)
+
         # Convert optional calibration paths to absolute paths if they exist
         if cam['flat_path']:
             cam['flat_path'] = os.path.abspath(cam['flat_path'])
@@ -592,6 +755,10 @@ def monitorMultipleCameras(multicam_ini_path):
 
     log = getLogger("logger")
     log.info("Started multi-camera monitoring with {:d} cameras, nproc={:d}".format(len(cameras), nproc))
+    for cam in cameras:
+        if cam['start_time'] is not None:
+            log.info("Camera {}: only processing files beginning at or after: {} UTC".format(
+                cam['id'], cam['start_time']))
 
     # Initialize state tracking dictionaries. Since files from different cameras might have the same name,
     # we track these metrics per camera using nested dictionaries or sets.
@@ -646,6 +813,12 @@ def monitorMultipleCameras(multicam_ini_path):
 
                         # Process exited normally
                         log.info("Successfully processed [{}]: {}".format(cam_id, uid))
+                        processed_files[cam_id].add(uid)
+
+                    elif proc.exitcode == SKIP_EXIT_CODE:
+
+                        # The file begins before the start time, don't queue it again
+                        log.info("Skipped [{}]: {} (begins before the start time)".format(cam_id, uid))
                         processed_files[cam_id].add(uid)
 
                     else:
@@ -852,9 +1025,10 @@ def monitorMultipleCameras(multicam_ini_path):
 
                 # Spawn the worker process
                 proc = multiprocessing.Process(
-                    target=processFile,
+                    target=processFileWorker,
                     args=(file_path, chosen_cam['config_path'], chosen_cam['platepar_path'], chosen_cam['output_dir'], chunk_frames),
-                    kwargs={'flat_path': chosen_cam['flat_path'], 'dark_path': chosen_cam['dark_path'], 'unique_id': unique_id}
+                    kwargs={'flat_path': chosen_cam['flat_path'], 'dark_path': chosen_cam['dark_path'], 'unique_id': unique_id,
+                            'start_time': chosen_cam['start_time']}
                 )
                 proc.start()
                 
@@ -979,6 +1153,7 @@ Examples:
   python -m RMS.MonitorProcessFrameInterface vid /path/to/input --output /path/to/output
   python -m RMS.MonitorProcessFrameInterface mkv /path/to/input -p ~/platepar_cmn2010.cal
   python -m RMS.MonitorProcessFrameInterface ff /path/to/input --nproc 4
+  python -m RMS.MonitorProcessFrameInterface vid /path/to/input --start_time "2026-01-01 22:00:00"
         """
     )
 
@@ -1031,15 +1206,30 @@ Examples:
         help="Path to an INI file containing multiple camera configurations. If provided, other arguments like input_dir are ignored."
     )
 
+    arg_parser.add_argument('--start_time', '-s', type=str, default=None,
+        help="Only process files whose recording begins at or after this UTC time, e.g. 20260101_220000 "
+             "or '2026-01-01 22:00:00'. Files which begin earlier are skipped, even if they span this "
+             "time. In --multicam mode, overrides start_time in the INI file."
+    )
+
     # Parse
     cml_args = arg_parser.parse_args()
+
+    # Parse the start time
+    start_time = None
+    if cml_args.start_time is not None:
+        try:
+            start_time = parseStartTime(cml_args.start_time)
+        except ValueError as e:
+            print("ERROR: {}".format(e))
+            sys.exit(1)
 
     if cml_args.multicam is not None:
         multicam_path = os.path.abspath(cml_args.multicam)
         if not os.path.isfile(multicam_path):
             print("ERROR: Multicam config file does not exist: {}".format(multicam_path))
             sys.exit(1)
-        monitorMultipleCameras(multicam_path)
+        monitorMultipleCameras(multicam_path, start_time=start_time)
         sys.exit(0)
 
     if cml_args.file_type is None or cml_args.input_dir is None:
@@ -1095,5 +1285,6 @@ Examples:
         recursive=cml_args.recursive,
         force=cml_args.force,
         flat_path=cml_args.flat,
-        dark_path=cml_args.dark
+        dark_path=cml_args.dark,
+        start_time=start_time
     )
