@@ -81,13 +81,7 @@ def detectStarsAndMeteorsFrameInterface(
     
 
     # Get the maximum number of stars on any chunks
-    try:
-        
-        max_stars = max([len(star_entry[1]) for star_entry in star_list if len(star_entry) > 1]) \
-                    if star_list else 0
-    
-    except (IndexError, TypeError, ValueError):
-        max_stars = 0
+    max_stars = max([len(star_data) for _, star_data in star_list]) if star_list else 0
 
     
     log.info('Max. detected stars on all frame chunks: {:d}'.format(max_stars))
@@ -111,47 +105,6 @@ def detectStarsAndMeteorsFrameInterface(
 
 
     return star_list, meteor_list
-
-
-def unbinStarList(star_list, config):
-    """ Rescale star positions, FWHMs and intensities extracted on binned frames back to the full image
-        size, the same way the meteor centroids are rescaled in Detection.
-
-    Arguments:
-        star_list: [list] Star list in the CALSTARS format: [[ff_name, [(Y, X, IntensSum, Ampltd, FWHM,
-            BgLvl, SNR, NSatPx), ...]], ...]
-        config: [Configuration object]
-
-    Return:
-        [list] Rescaled star list in the same format.
-    """
-
-    bin_factor = config.detection_binning_factor
-
-    if bin_factor <= 1:
-        return star_list
-
-    # The integrated intensity is reduced only when the frames were averaged during binning
-    intens_factor = bin_factor**2 if config.detection_binning_method == 'avg' else 1
-
-    star_list_unbinned = []
-    for entry in star_list:
-
-        # Keep malformed or empty entries as they are
-        if len(entry) < 2:
-            star_list_unbinned.append(entry)
-            continue
-
-        ff_name, star_data = entry
-
-        star_data_unbinned = [
-            (y*bin_factor, x*bin_factor, intens*intens_factor, ampl, fwhm*bin_factor, bg, snr, n_sat)
-            for y, x, intens, ampl, fwhm, bg, snr, n_sat in star_data
-        ]
-
-        star_list_unbinned.append([ff_name, star_data_unbinned])
-
-    return star_list_unbinned
 
 
 def saveResultsFrameInterface(star_list, meteor_list, img_handle, config, chunk_frames=128, output_suffix='', output_dir=None, write_empty=True):
@@ -191,10 +144,6 @@ def saveResultsFrameInterface(star_list, meteor_list, img_handle, config, chunk_
 
         # Generate the name for the CALSTARS file
         calstars_name = 'CALSTARS_' + prefix + suffix + '.txt'
-
-        # Stars are extracted on binned frames, rescale them to the full image size like the meteors
-        if img_handle.input_type != 'ff':
-            star_list = unbinStarList(star_list, config)
 
         # Write detected stars to the CALSTARS file. Pass the image handle's fps (measured from real
         #   per-frame timestamps when available) so the chunk timing does not depend on the config fps.
