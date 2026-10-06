@@ -13,7 +13,7 @@ is archived for upload.
 
 The report can be run from the command line:
 
-    python -m RMS.MonitorNightReport <output_dir> [--night NIGHT_NAME] [--config CONFIG_PATH] [--upload]
+    python -m RMS.MonitorNightReport <output_dir> [--night NIGHT_NAME] [--config CONFIG_PATH] [--all] [--no_archive]
 """
 
 from __future__ import print_function, division, absolute_import
@@ -247,6 +247,24 @@ def _defaultFTPdetectinfo(results_dir):
     return names[0] if names else None
 
 
+def calibrationApplied(results_dirs):
+    """ Check if the dark and the flat were applied during the processing of the files of the night.
+
+    Arguments:
+        results_dirs: [list] Results directories of the files of the night.
+
+    Return:
+        (dark_applied, flat_applied): [tuple of bool]
+    """
+
+    infos = [readDoneFlag(results_dir) for results_dir in results_dirs]
+
+    dark_applied = any(info.get('dark_applied', False) for info in infos)
+    flat_applied = any(info.get('flat_applied', False) for info in infos)
+
+    return dark_applied, flat_applied
+
+
 def mergeNightResults(night_dir, results_dirs, config):
     """ Merge the CALSTARS, FTPdetectinfo and recalibrated platepars of all files of the night into one file
         each in the night directory, and copy the platepar.
@@ -257,10 +275,11 @@ def mergeNightResults(night_dir, results_dirs, config):
         config: [Config] Configuration.
 
     Return:
-        (calstars_name, ftpdetectinfo_name, fps, ff_detected): [tuple]
+        (calstars_name, ftpdetectinfo_name, fps, chunk_frames, ff_detected): [tuple]
             - calstars_name: [str] Name of the merged CALSTARS file, None if there are no stars.
             - ftpdetectinfo_name: [str] Name of the merged FTPdetectinfo file.
             - fps: [float] Frame rate from the CALSTARS files, None if not available.
+            - chunk_frames: [int] Number of frames per chunk from the CALSTARS files, None if not available.
             - ff_detected: [list] FF names with detections which exist in the night directory.
     """
 
@@ -384,10 +403,50 @@ def mergeNightResults(night_dir, results_dirs, config):
     night_ffs = set(f for f in os.listdir(night_dir) if validFFName(f))
     ff_detected = sorted(set(entry[0] for entry in meteor_list if entry[0] in night_ffs))
 
-    return calstars_name, ftpdetectinfo_name, fps, ff_detected
+    return calstars_name, ftpdetectinfo_name, fps, chunk_frames, ff_detected
 
 
-def generateNightReport(output_dir, night_name, config, results_dirs=None, upload=False):
+def plotNightCalibrationVariation(night_dir, night_name, config, ff_frames=256):
+    """ Plot the variation of the pointing and the photometric offset through the night from the merged
+        recalibrated platepars in the night directory.
+
+    Arguments:
+        night_dir: [str] Night directory.
+        night_name: [str] Name of the night, used as the prefix of the plot names.
+        config: [Config] Configuration.
+
+    Keyword arguments:
+        ff_frames: [int] Number of frames per chunk. 256 by default.
+
+    Return:
+        [bool] True if the plots were saved.
+    """
+
+    from RMS.Astrometry.ApplyRecalibrate import plotCalibrationVariation
+    from RMS.Formats.Platepar import Platepar
+
+    platepar = Platepar()
+    platepar.read(os.path.join(night_dir, config.platepar_name))
+
+    with open(os.path.join(night_dir, config.platepars_recalibrated_name)) as f:
+        recalibrated_dicts = json.load(f)
+
+    recalibrated_platepars = {}
+    for ff_name, pp_dict in recalibrated_dicts.items():
+
+        if pp_dict is None:
+            recalibrated_platepars[ff_name] = None
+            continue
+
+        pp = Platepar()
+        pp.loadFromDict(pp_dict)
+        recalibrated_platepars[ff_name] = pp
+
+    return plotCalibrationVariation(recalibrated_platepars, platepar, config, night_dir, night_name,
+                                    ff_frames=ff_frames)
+
+
+def generateNightReport(output_dir, night_name, config, results_dirs=None, archive=True):
     """ Merge the results of a night and generate its report.
 
     Arguments:
@@ -397,7 +456,8 @@ def generateNightReport(output_dir, night_name, config, results_dirs=None, uploa
 
     Keyword arguments:
         results_dirs: [list] Results directories of the night. Found in the output directory if not given.
-        upload: [bool] Archive the night for upload. False by default.
+        archive: [bool] Archive the night into ARCHIVED_DIR_NAME/<night>, like a normal RMS night. True by
+            default. If False, only the thumbnails and the stacks are generated.
 
     Return:
         [dict] Report state: reported_at, files (reported files, only updated if all steps succeeded),
@@ -445,11 +505,15 @@ def generateNightReport(output_dir, night_name, config, results_dirs=None, uploa
 
     if merged is not None:
 
-        calstars_name, ftpdetectinfo_name, fps, ff_detected = merged
+        calstars_name, ftpdetectinfo_name, fps, chunk_frames, ff_detected = merged
 
         # Use the frame rate of the data, the chunk times are computed from it
         if fps:
             config.fps = fps
+
+        # Use the same dark and flat settings as the processing, so e.g. the photometry doesn't correct the
+        #   vignetting of flat fielded images again. The images were corrected if any file of the night was
+        config.use_dark, config.use_flat = calibrationApplied(results_dirs)
 
         # Use the mask copied to the night directory for the stacks
         config.config_file_path = night_dir
@@ -462,12 +526,18 @@ def generateNightReport(output_dir, night_name, config, results_dirs=None, uploa
         if calstars_name is not None:
             _runStep('calibration_report', lambda: generateCalibrationReport(config, night_dir))
 
+        # Plot the variation of the calibration through the night
+        if os.path.isfile(os.path.join(night_dir, config.platepars_recalibrated_name)) \
+                and os.path.isfile(os.path.join(night_dir, config.platepar_name)):
+            _runStep('calibration_variation', lambda: plotNightCalibrationVariation(night_dir, night_name, config,
+                ff_frames=(chunk_frames if chunk_frames else 256)))
+
         # Generate the timelapse first, so it can be archived
         timelapse_name = night_name + "_timelapse.mp4"
         if config.timelapse_generate_captured:
             _runStep('timelapse', lambda: generateTimelapse(night_dir, output_file=timelapse_name))
 
-        if upload:
+        if archive:
 
             archived_dir = os.path.join(output_dir, ARCHIVED_DIR_NAME, night_name)
 
@@ -512,7 +582,7 @@ def generateNightReport(output_dir, night_name, config, results_dirs=None, uploa
     return state
 
 
-def nightReportWorker(output_dir, night_name, config_path, results_dirs, upload):
+def nightReportWorker(output_dir, night_name, config_path, results_dirs, archive=True):
     """ Worker process target which generates a night report. Exits with 0 if all steps succeeded, and with 1
         otherwise.
     """
@@ -527,7 +597,7 @@ def nightReportWorker(output_dir, night_name, config_path, results_dirs, upload)
     config.data_dir, config.log_dir = orig_data_dir, orig_log_dir
 
     try:
-        state = generateNightReport(output_dir, night_name, config, results_dirs=results_dirs, upload=upload)
+        state = generateNightReport(output_dir, night_name, config, results_dirs=results_dirs, archive=archive)
 
     except Exception:
         getLogger("logger").error("".join(traceback.format_exception(*sys.exc_info())))
@@ -592,6 +662,59 @@ def deleteOldNightImages(output_dir, days, now=None):
     return cleaned
 
 
+def cleanupOldData(output_dir, config):
+    """ Delete old data from the output directory with the same mechanism as normal RMS
+        (DeleteOldObservations): old night directories in CapturedFiles and ArchivedFiles (by the number of
+        directories to keep, the quotas, and the free space needed for the next night), old archives and log
+        files. The image pairs of reported nights are also deleted after monitor_delete_images_days.
+
+    Arguments:
+        output_dir: [str] Output directory of the monitor.
+        config: [Config] Configuration of the camera.
+
+    Return:
+        [bool] True if there's enough free space for the next night.
+    """
+
+    from RMS.DeleteOldObservations import deleteOldObservations
+
+    deleteOldNightImages(output_dir, config.monitor_delete_images_days)
+
+    if not config.monitor_delete_old_data:
+        return True
+
+    # Manage the output directory like the RMS data directory
+    config.data_dir = output_dir
+    config.log_dir = 'logs'
+
+    enough_space = deleteOldObservations(output_dir, CAPTURED_DIR_NAME, ARCHIVED_DIR_NAME, config)
+
+    if not enough_space:
+        log.warning("Not enough free space in {:s} for the next night!".format(output_dir))
+
+    return enough_space
+
+
+def cleanupWorker(output_dir, config_path):
+    """ Worker process target which cleans up old data. """
+
+    config = cr.parse(config_path)
+
+    # Log into the output directory
+    orig_data_dir, orig_log_dir = config.data_dir, config.log_dir
+    config.data_dir = output_dir
+    config.log_dir = 'logs'
+    LoggingManager().initLogging(config, 'cleanup_')
+    config.data_dir, config.log_dir = orig_data_dir, orig_log_dir
+
+    try:
+        cleanupOldData(output_dir, config)
+
+    except Exception:
+        getLogger("logger").error("".join(traceback.format_exception(*sys.exc_info())))
+        sys.exit(1)
+
+
 def nightBoundsFromName(config, night_name):
     """ Return the (night_start, night_end) of the night with the given name. """
 
@@ -628,9 +751,8 @@ class NightReporter(object):
 
         self.report_mode = report_mode if report_mode is not None else self.config.monitor_report_mode
 
-        # Archive after the report if enabled, upload only if uploading is enabled as well
-        self.archive = self.config.monitor_archive_upload
-        self.upload = self.archive and self.config.upload_enabled
+        # Upload the night archives only if enabled for the monitor and uploading is enabled in general
+        self.upload = self.config.monitor_upload and self.config.upload_enabled
 
         self.quiet_s = 60*self.config.monitor_report_quiet_min
 
@@ -645,7 +767,11 @@ class NightReporter(object):
 
         self.upload_manager = None
 
+        # Old data cleanup process, which runs at startup, after every report and periodically
+        self.cleanup_proc = None
+        self.cleanup_due = False
         self.last_cleanup = None
+        self.cleanup_interval_h = 12
 
         # Scan the output directory for nights to report at most this often (seconds)
         self.scan_interval = 30
@@ -748,6 +874,15 @@ class NightReporter(object):
         return now >= night_end
 
 
+    def _startCleanup(self):
+
+        import multiprocessing
+
+        self.cleanup_proc = multiprocessing.Process(target=cleanupWorker,
+            args=(self.output_dir, self.config_path))
+        self.cleanup_proc.start()
+
+
     def _startReport(self, night_name, results_dirs):
 
         import multiprocessing
@@ -755,7 +890,7 @@ class NightReporter(object):
         log.info(self._log("Starting the report of night {:s}".format(night_name)))
 
         proc = multiprocessing.Process(target=nightReportWorker,
-            args=(self.output_dir, night_name, self.config_path, results_dirs, self.archive))
+            args=(self.output_dir, night_name, self.config_path, results_dirs))
         proc.start()
 
         self.active = (proc, night_name, results_dirs)
@@ -834,13 +969,25 @@ class NightReporter(object):
 
             self._finishReport(now)
 
-        # Delete the images of old nights at most once per hour
-        if (self.last_cleanup is None) or ((now - self.last_cleanup).total_seconds() > 3600):
+            # Clean up old data after every report
+            self.cleanup_due = True
+
+        # Check the running cleanup. Reports and cleanups don't run at the same time
+        if self.cleanup_proc is not None:
+            if self.cleanup_proc.is_alive():
+                return
+
+            self.cleanup_proc.join()
+            self.cleanup_proc = None
+
+        # Clean up old data at startup, after every report, and periodically
+        if self.cleanup_due or (self.last_cleanup is None) \
+                or ((now - self.last_cleanup).total_seconds() > 3600*self.cleanup_interval_h):
+
+            self.cleanup_due = False
             self.last_cleanup = now
-            try:
-                deleteOldNightImages(self.output_dir, self.config.monitor_delete_images_days, now=now)
-            except Exception as e:
-                log.warning(self._log("Deleting old night images failed: {:s}".format(repr(e))))
+            self._startCleanup()
+            return
 
         trigger = os.path.exists(os.path.join(self.output_dir, REPORT_TRIGGER_FILE_NAME))
 
@@ -872,7 +1019,16 @@ class NightReporter(object):
 
 
     def stop(self, timeout=300):
-        """ Wait for the running report and stop the upload manager. """
+        """ Wait for the running report and cleanup, and stop the upload manager. """
+
+        if self.cleanup_proc is not None:
+            self.cleanup_proc.join(timeout=timeout)
+
+            if self.cleanup_proc.is_alive():
+                log.warning(self._log("Cleanup did not finish in time, terminating"))
+                self.cleanup_proc.terminate()
+
+            self.cleanup_proc = None
 
         if self.active is not None:
             proc, night_name, _ = self.active
@@ -907,8 +1063,9 @@ if __name__ == "__main__":
     arg_parser.add_argument('--config', '-c', type=str, default=None,
         help="Path to the config file. By default, the config copied to the results of the night is used.")
 
-    arg_parser.add_argument('--upload', '-u', action='store_true',
-        help="Archive the night for upload (the archives are not uploaded by this script).")
+    arg_parser.add_argument('--no_archive', action='store_true',
+        help="Don't archive the night into ArchivedFiles, only generate the reports in CapturedFiles. The "
+             "archives are never uploaded by this script.")
 
     arg_parser.add_argument('--all', '-a', action='store_true',
         help="Report all nights, also the ones without new data.")
@@ -951,7 +1108,7 @@ if __name__ == "__main__":
         config = cr.parse(os.path.abspath(config_path))
 
         state = generateNightReport(output_dir, night_name, config, results_dirs=nights[night_name],
-                                    upload=cml_args.upload)
+                                    archive=(not cml_args.no_archive))
 
         print("Night {:s}: ok steps: {:s}, failed steps: {:s}".format(night_name,
             ", ".join(state['ok_steps']), ", ".join(state['failed_steps']) or "none"))

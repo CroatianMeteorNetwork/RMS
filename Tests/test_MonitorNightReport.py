@@ -330,7 +330,8 @@ def test_scan_and_merge_night(tmp_path):
     assert list(nights) == [NIGHT]
     assert nights[NIGHT] == sorted(r[0] for r in results)
 
-    calstars_name, ftp_name, fps, ff_detected = mnr.mergeNightResults(night_dir, nights[NIGHT], config)
+    calstars_name, ftp_name, fps, chunk_frames, ff_detected = mnr.mergeNightResults(night_dir, nights[NIGHT],
+                                                                                    config)
 
     # One CALSTARS with all chunks, named by the image pairs in the night directory
     calstars_files = [f for f in os.listdir(night_dir) if f.startswith('CALSTARS')]
@@ -384,7 +385,7 @@ def test_generate_night_report(tmp_path):
     for i in range(2):
         _makeResults(output_dir, night_dir, config, i, n_chunks=3)
 
-    state = mnr.generateNightReport(output_dir, NIGHT, config)
+    state = mnr.generateNightReport(output_dir, NIGHT, config, archive=False)
 
     assert 'merge' in state['ok_steps']
     assert 'thumbnails_and_stacks' in state['ok_steps']
@@ -587,7 +588,7 @@ def test_failed_report_stays_pending(tmp_path, monkeypatch):
 
     monkeypatch.setattr(RMS.ArchiveDetections, 'generateThumbsAndStacks', _fail)
 
-    state = mnr.generateNightReport(output_dir, NIGHT, config)
+    state = mnr.generateNightReport(output_dir, NIGHT, config, archive=False)
 
     assert state['failed_steps'] == ['thumbnails_and_stacks']
     assert state['attempted_files'] == ['input_0']
@@ -639,3 +640,160 @@ def test_stop_finishes_completed_report(night_setup, monkeypatch):
     reporter.stop()
 
     assert finished == [night]
+
+
+### Archive and cleanup ###
+
+def test_night_is_archived_by_default(tmp_path):
+
+    config = _config()
+    config.timelapse_generate_captured = False
+    config.thumb_bin = 1
+    config.upload_split = False
+
+    output_dir = str(tmp_path)
+    night_dir = mnr.nightDirPath(output_dir, NIGHT)
+    os.makedirs(night_dir)
+    _makeResults(output_dir, night_dir, config, 0, n_chunks=3)
+
+    state = mnr.generateNightReport(output_dir, NIGHT, config)
+
+    assert 'archive' in state['ok_steps']
+
+    archived_dir = os.path.join(output_dir, mnr.ARCHIVED_DIR_NAME)
+    assert os.path.isdir(os.path.join(archived_dir, NIGHT))
+    assert os.path.isfile(os.path.join(archived_dir, NIGHT + '_detected.tar.bz2'))
+    assert state['upload_files'] == [os.path.join(archived_dir, NIGHT + '_detected.tar.bz2')]
+
+
+@pytest.mark.parametrize('enabled', [True, False])
+def test_cleanup_uses_rms_data_management(tmp_path, monkeypatch, enabled):
+
+    import RMS.DeleteOldObservations
+
+    calls = []
+
+    def _deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration=None):
+        calls.append((data_dir, captured_dir, archived_dir, config.data_dir, config.log_dir))
+        return True
+
+    monkeypatch.setattr(RMS.DeleteOldObservations, 'deleteOldObservations', _deleteOldObservations)
+
+    config = _config()
+    config.monitor_delete_old_data = enabled
+
+    assert mnr.cleanupOldData(str(tmp_path), config)
+
+    if enabled:
+        assert calls == [(str(tmp_path), 'CapturedFiles', 'ArchivedFiles', str(tmp_path), 'logs')]
+    else:
+        assert calls == []
+
+
+def test_cleanup_scheduling(night_setup, monkeypatch):
+
+    output_dir, config_path, night, night_end, _, results = night_setup
+
+    reporter = mnr.NightReporter(output_dir, config_path, report_mode='idle')
+
+    class _Process(object):
+        def __init__(self, alive):
+            self.alive = alive
+            self.exitcode = 0
+        def is_alive(self):
+            return self.alive
+        def join(self, timeout=None):
+            pass
+
+    started = []
+
+    def _startCleanup():
+        started.append('cleanup')
+        reporter.cleanup_proc = _Process(alive=True)
+
+    def _startReport(night_name, results_dirs):
+        started.append('report')
+        reporter.active = (_Process(alive=True), night_name, results_dirs)
+
+    monkeypatch.setattr(reporter, '_startCleanup', _startCleanup)
+    monkeypatch.setattr(reporter, '_startReport', _startReport)
+
+    now = night_end + datetime.timedelta(hours=1)
+
+    # A cleanup runs at startup, and no report is started while it runs
+    reporter.poll(True, now=now)
+    reporter.poll(True, now=now)
+    assert started == ['cleanup']
+
+    # After the cleanup the due report runs
+    reporter.cleanup_proc.alive = False
+    reporter.poll(True, now=now)
+    assert started == ['cleanup', 'report']
+
+    # After the report finishes, another cleanup runs
+    reporter.active[0].alive = False
+    monkeypatch.setattr(reporter, '_finishReport', lambda now: None)
+    reporter.poll(True, now=now)
+    assert started == ['cleanup', 'report', 'cleanup']
+
+
+def test_saved_pairs_are_dark_and_flat_corrected(tmp_path):
+
+    from RMS.Routines.Image import FlatStruct
+
+    handle = _FakeHandle()
+
+    # The chunk has 1500 counts in the max pixel and 1000 in the average pixel image
+    dark = np.full((48, 64), 100, dtype=np.uint16)
+
+    # Flat with the right side half as bright as the left side (vignetting)
+    flat_img = np.full((48, 64), 200.0)
+    flat_img[:, 32:] = 100.0
+    flat_struct = FlatStruct(flat_img)
+
+    saver = ChunkImageSaver(str(tmp_path), _config(), 'input.mkv', dark=dark, flat_struct=flat_struct)
+    name = saver(handle, _FakeFF(128))
+
+    ff = FFfile.read(str(tmp_path), name)
+
+    # Dark subtracted, then flat applied: flat_avg*(img - dark)/flat
+    flat_avg = flat_struct.flat_avg
+    assert ff.avepixel[0, 0] == pytest.approx(flat_avg*900/flat_struct.flat_img[0, 0], abs=1)
+    assert ff.avepixel[0, 63] == pytest.approx(flat_avg*900/flat_struct.flat_img[0, 63], abs=1)
+    assert ff.maxpixel[0, 63] == pytest.approx(flat_avg*1400/flat_struct.flat_img[0, 63], abs=1)
+
+    # The vignetted side is brightened relative to the other side
+    assert ff.avepixel[0, 63] == pytest.approx(2*ff.avepixel[0, 0], abs=2)
+
+    # The images are marked as corrected, so detection doesn't correct them again
+    assert ff.dark_applied and ff.flat_applied and ff.calibrated
+
+
+def test_uncorrected_pairs_are_not_marked_calibrated(tmp_path):
+
+    saver = ChunkImageSaver(str(tmp_path), _config(), 'input.mkv')
+    name = saver(_FakeHandle(), _FakeFF(128))
+
+    ff = FFfile.read(str(tmp_path), name)
+
+    assert not (ff.dark_applied or ff.flat_applied or ff.calibrated)
+    assert ff.avepixel[0, 0] == 1000
+
+
+def test_report_uses_calibration_of_processing(tmp_path):
+
+    dirs = []
+    for i, (dark, flat) in enumerate([(False, True), (False, False)]):
+        d = tmp_path/'r{:d}'.format(i)
+        d.mkdir()
+        mnr.writeDoneFlag(str(d), {'night': NIGHT, 'dark_applied': dark, 'flat_applied': flat})
+        dirs.append(str(d))
+
+    assert mnr.calibrationApplied(dirs) == (False, True)
+    assert mnr.calibrationApplied(dirs[1:]) == (False, False)
+
+    # Older results without the info
+    old = tmp_path/'old'
+    old.mkdir()
+    (old/'done.flag').write_text('')
+    assert mnr.calibrationApplied([str(old)]) == (False, False)

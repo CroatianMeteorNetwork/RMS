@@ -165,7 +165,8 @@ def readPair(directory, name, full_filename=False, verbose=True):
 
     Return:
         [FFStruct] FF structure, or None if the max pixel image could not be read. The std pixel and max frame
-            images are not stored, so they are filled with zeros.
+            images are not stored, so they are filled with zeros. If the images were corrected with a dark or a
+            flat before saving, dark_applied/flat_applied and calibrated are set, so they are not corrected again.
     """
 
     if full_filename:
@@ -226,5 +227,10 @@ def readPair(directory, name, full_filename=False, verbose=True):
 
     if 'begin_utc' in meta:
         ff.starttime = meta['begin_utc']
+
+    # Mark images which were already corrected with a dark and/or a flat, so they are not corrected twice
+    ff.dark_applied = (meta.get('dark_applied', 'False') == 'True')
+    ff.flat_applied = (meta.get('flat_applied', 'False') == 'True')
+    ff.calibrated = ff.dark_applied or ff.flat_applied
 
     return ff

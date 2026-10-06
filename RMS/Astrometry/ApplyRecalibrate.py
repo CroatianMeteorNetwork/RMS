@@ -941,6 +941,167 @@ def writeMeteorECSV(dir_path, station_id, ff_name, platepar, meteor_picks, fps, 
     return ecsv_path
 
 
+def plotCalibrationVariation(recalibrated_platepars, platepar, config, dir_path, plot_name, ff_frames=256):
+    """ Plot the variation of the pointing (FOV centre drift and rotation) and of the photometric offset of
+        the recalibrated platepars with respect to the reference platepar.
+
+    Arguments:
+        recalibrated_platepars: [dict] Recalibrated platepars (Platepar instances or None), keyed by the FF
+            name.
+        platepar: [Platepar instance] Reference platepar.
+        config: [Config instance]
+        dir_path: [str] Directory where the plots are saved.
+        plot_name: [str] Prefix of the plot names, the plots are saved as <plot_name>_calibration_variation.png
+            and <plot_name>_photometry_variation.png.
+
+    Keyword arguments:
+        ff_frames: [int] Number of frames in the FF files or frame chunks. 256 by default.
+
+    Return:
+        [bool] True if the plots were saved, False if there were less than 2 recalibrated platepars.
+    """
+
+    recalibrated_platepars_all = recalibrated_platepars
+
+
+    dt_list = []
+    ang_dists = []
+    rot_angles = []
+    hour_list = []
+    photom_offset_list = []
+    photom_offset_std_list = []
+
+    # If the length of the recalibrated platepars is less than 2, skip the plot generation
+    if len(recalibrated_platepars_all) < 2:
+
+        log.info('Less than 2 FF files were recalibrated, skipping the plot generation...')
+
+        return False
+    
+
+    first_dt = np.min([FFfile.filenameToDatetime(ff_name) for ff_name in recalibrated_platepars_all])
+
+    for ff_name in recalibrated_platepars_all:
+
+        pp_temp = recalibrated_platepars_all[ff_name]
+
+        # If the fitting failed, skip the platepar
+        if pp_temp is None:
+            continue
+
+        # Add the datetime of the FF file to the list
+        ff_dt = FFfile.filenameToDatetime(ff_name)
+        dt_list.append(ff_dt)
+
+        # Compute the angular separation from the reference platepar by projecting
+        # both FOV centres at the FF file's observation time. This correctly handles
+        # platepars with different JD reference epochs.
+        ff_time = FFfile.getMiddleTimeFF(ff_name, config.fps, ret_milliseconds=True, ff_frames=ff_frames)
+        _, ref_ra, ref_dec, _ = xyToRaDecPP(
+            [ff_time], [platepar.X_res / 2], [platepar.Y_res / 2], [1], platepar,
+            extinction_correction=False)
+        _, temp_ra, temp_dec, _ = xyToRaDecPP(
+            [ff_time], [pp_temp.X_res / 2], [pp_temp.Y_res / 2], [1], pp_temp,
+            extinction_correction=False)
+        ang_dist = np.degrees(
+            angularSeparation(
+                np.radians(ref_ra[0]),
+                np.radians(ref_dec[0]),
+                np.radians(temp_ra[0]),
+                np.radians(temp_dec[0]),
+            )
+        )
+        ang_dists.append(ang_dist*60)
+
+        # Compute rotation difference
+        rot_diff = (platepar.rotationWrtHorizon() - pp_temp.rotationWrtHorizon() + 180)%360 - 180
+        rot_angles.append(rot_diff*60)
+
+        # Compute the hour of the FF used for recalibration
+        hour_list.append((ff_dt - first_dt).total_seconds()/3600)
+
+        # Add the photometric offset to the list
+        photom_offset_list.append(pp_temp.mag_lev)
+        photom_offset_std_list.append(pp_temp.mag_lev_stddev)
+
+
+    ### Plot difference from reference platepar in angular distance from (0, 0) vs rotation ###
+
+    plt.figure(figsize=(6, 5))
+
+    plt.scatter(0, 0, marker='o', edgecolor='k', label='Reference platepar', s=100, c='none', zorder=3)
+
+    plt.scatter(ang_dists, rot_angles, c=hour_list, zorder=3)
+    plt.colorbar(label="Hours from first FF file")
+
+    plt.xlabel("Angular distance from reference (arcmin)")
+    plt.ylabel("Rotation from reference (arcmin)")
+
+    plt.title("FOV centre drift starting at {:s}".format(first_dt.strftime("%Y/%m/%d %H:%M:%S")))
+
+    plt.grid()
+    plt.legend()
+
+    # Scale the aspect ratio so X and Y units are the same but the plot is not too narrow
+    plt.axis('scaled')
+
+    # Make the plot square by adjusting the limits to the maximum
+    min_lim = min(plt.xlim()[0], plt.ylim()[0])
+    max_lim = max(plt.xlim()[1], plt.ylim()[1])
+    abs_lim = max_lim - min_lim
+    plt.xlim(-0.1*abs_lim, 0.9*abs_lim)
+    plt.ylim(min_lim, max_lim)
+
+
+    plt.tight_layout()
+
+    plt.savefig(os.path.join(dir_path, plot_name + '_calibration_variation.png'), dpi=150)
+
+    # plt.show()
+
+    plt.clf()
+    plt.close()
+
+    ### ###
+
+    ### Plot the photometric offset variation ###
+
+    plt.figure()
+
+    plt.errorbar(
+        dt_list,
+        photom_offset_list,
+        yerr=photom_offset_std_list,
+        fmt="o",
+        ecolor='lightgray',
+        elinewidth=2,
+        capsize=0,
+        ms=2,
+    )
+
+    # Format datetimes
+    plt.gca().xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
+
+    # rotate and align the tick labels so they look better
+    plt.gcf().autofmt_xdate()
+
+    plt.xlabel("UTC time")
+    plt.ylabel("Photometric offset")
+
+    plt.title("Photometric offset variation")
+
+    plt.grid()
+
+    plt.tight_layout()
+
+    plt.savefig(os.path.join(dir_path, plot_name + '_photometry_variation.png'), dpi=150)
+
+    plt.clf()
+    plt.close()
+
+    return True
+
+
 def ftpMatchTimes(meteor_list, meteor_fps_list, calstars_datetime_dict, default_fps):
     """ Compute the times of the FF files in FTPdetectinfo which are used to find the closest CALSTARS entry
         (compared to the middle times of the CALSTARS entries).
@@ -1366,145 +1527,13 @@ def recalibrateIndividualFFsAndApplyAstrometry(
 
     ### GENERATE PLOTS ###
 
-    dt_list = []
-    ang_dists = []
-    rot_angles = []
-    hour_list = []
-    photom_offset_list = []
-    photom_offset_std_list = []
-
-    # If the length of the recalibrated platepars is less than 2, skip the plot generation
-    if len(recalibrated_platepars_all) < 2:
-
-        log.info('Less than 2 FF files were recalibrated, skipping the plot generation...')
-
-        return recalibrated_platepars_all, ftpdetectinfo_file_list
-    
-
-    first_dt = np.min([FFfile.filenameToDatetime(ff_name) for ff_name in recalibrated_platepars_all])
-
-    for ff_name in recalibrated_platepars_all:
-
-        pp_temp = recalibrated_platepars_all[ff_name]
-
-        # If the fitting failed, skip the platepar
-        if pp_temp is None:
-            continue
-
-        # Add the datetime of the FF file to the list
-        ff_dt = FFfile.filenameToDatetime(ff_name)
-        dt_list.append(ff_dt)
-
-        # Compute the angular separation from the reference platepar by projecting
-        # both FOV centres at the FF file's observation time. This correctly handles
-        # platepars with different JD reference epochs.
-        ff_time = FFfile.getMiddleTimeFF(ff_name, config.fps, ret_milliseconds=True)
-        _, ref_ra, ref_dec, _ = xyToRaDecPP(
-            [ff_time], [platepar.X_res / 2], [platepar.Y_res / 2], [1], platepar,
-            extinction_correction=False)
-        _, temp_ra, temp_dec, _ = xyToRaDecPP(
-            [ff_time], [pp_temp.X_res / 2], [pp_temp.Y_res / 2], [1], pp_temp,
-            extinction_correction=False)
-        ang_dist = np.degrees(
-            angularSeparation(
-                np.radians(ref_ra[0]),
-                np.radians(ref_dec[0]),
-                np.radians(temp_ra[0]),
-                np.radians(temp_dec[0]),
-            )
-        )
-        ang_dists.append(ang_dist*60)
-
-        # Compute rotation difference
-        rot_diff = (platepar.rotationWrtHorizon() - pp_temp.rotationWrtHorizon() + 180)%360 - 180
-        rot_angles.append(rot_diff*60)
-
-        # Compute the hour of the FF used for recalibration
-        hour_list.append((ff_dt - first_dt).total_seconds()/3600)
-
-        # Add the photometric offset to the list
-        photom_offset_list.append(pp_temp.mag_lev)
-        photom_offset_std_list.append(pp_temp.mag_lev_stddev)
-
-
     if generate_plot:
 
         # Generate the name the plots
         plot_name = os.path.basename(ftpdetectinfo_path).replace('FTPdetectinfo_', '').replace('.txt', '')
 
-        ### Plot difference from reference platepar in angular distance from (0, 0) vs rotation ###
-
-        plt.figure(figsize=(6, 5))
-
-        plt.scatter(0, 0, marker='o', edgecolor='k', label='Reference platepar', s=100, c='none', zorder=3)
-
-        plt.scatter(ang_dists, rot_angles, c=hour_list, zorder=3)
-        plt.colorbar(label="Hours from first FF file")
-
-        plt.xlabel("Angular distance from reference (arcmin)")
-        plt.ylabel("Rotation from reference (arcmin)")
-
-        plt.title("FOV centre drift starting at {:s}".format(first_dt.strftime("%Y/%m/%d %H:%M:%S")))
-
-        plt.grid()
-        plt.legend()
-
-        # Scale the aspect ratio so X and Y units are the same but the plot is not too narrow
-        plt.axis('scaled')
-
-        # Make the plot square by adjusting the limits to the maximum
-        min_lim = min(plt.xlim()[0], plt.ylim()[0])
-        max_lim = max(plt.xlim()[1], plt.ylim()[1])
-        abs_lim = max_lim - min_lim
-        plt.xlim(-0.1*abs_lim, 0.9*abs_lim)
-        plt.ylim(min_lim, max_lim)
-
-
-        plt.tight_layout()
-
-        plt.savefig(os.path.join(dir_path, plot_name + '_calibration_variation.png'), dpi=150)
-
-        # plt.show()
-
-        plt.clf()
-        plt.close()
-
-        ### ###
-
-        ### Plot the photometric offset variation ###
-
-        plt.figure()
-
-        plt.errorbar(
-            dt_list,
-            photom_offset_list,
-            yerr=photom_offset_std_list,
-            fmt="o",
-            ecolor='lightgray',
-            elinewidth=2,
-            capsize=0,
-            ms=2,
-        )
-
-        # Format datetimes
-        plt.gca().xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
-
-        # rotate and align the tick labels so they look better
-        plt.gcf().autofmt_xdate()
-
-        plt.xlabel("UTC time")
-        plt.ylabel("Photometric offset")
-
-        plt.title("Photometric offset variation")
-
-        plt.grid()
-
-        plt.tight_layout()
-
-        plt.savefig(os.path.join(dir_path, plot_name + '_photometry_variation.png'), dpi=150)
-
-        plt.clf()
-        plt.close()
+        plotCalibrationVariation(recalibrated_platepars_all, platepar, config, dir_path, plot_name,
+                                 ff_frames=calstars_ff_frames)
 
     ### ###
 

@@ -886,11 +886,16 @@ class Config:
         # Minutes without new processed files before a night report is generated
         self.monitor_report_quiet_min = 15.0
 
-        # Archive the night and upload it after the report (also requires upload_enabled)
-        self.monitor_archive_upload = False
+        # Upload the night archive after the report (also requires upload_enabled)
+        self.monitor_upload = False
 
         # Delete the image pairs of reported nights after this many days (0 keeps them)
         self.monitor_delete_images_days = 0
+
+        # Delete old data from the output directory like normal RMS does in the data directory (old night
+        #   directories, archives and logs, by capt_dirs_to_keep, arch_dirs_to_keep, the quotas, and the free
+        #   space needed for the next night)
+        self.monitor_delete_old_data = True
 
 
         #### Shower association
@@ -2225,11 +2230,14 @@ def parseMonitorProcessing(config, parser):
     if parser.has_option(section, "monitor_report_quiet_min"):
         config.monitor_report_quiet_min = parser.getfloat(section, "monitor_report_quiet_min")
 
-    if parser.has_option(section, "monitor_archive_upload"):
-        config.monitor_archive_upload = parser.getboolean(section, "monitor_archive_upload")
+    if parser.has_option(section, "monitor_upload"):
+        config.monitor_upload = parser.getboolean(section, "monitor_upload")
 
     if parser.has_option(section, "monitor_delete_images_days"):
         config.monitor_delete_images_days = parser.getfloat(section, "monitor_delete_images_days")
+
+    if parser.has_option(section, "monitor_delete_old_data"):
+        config.monitor_delete_old_data = parser.getboolean(section, "monitor_delete_old_data")
 
 
 def parseColors(config, parser):

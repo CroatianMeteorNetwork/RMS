@@ -29,7 +29,34 @@ pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 from RMS.Astrometry.CyFunctions import subsetCatalog
 
 
-def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar=None, show_graphs=False):
+def zscaleLimits(img):
+    """ Compute the display levels of the image with the zscale algorithm (as in SkyFit2).
+
+    Arguments:
+        img: [ndarray] Image.
+
+    Return:
+        (vmin, vmax): [tuple of float] Display levels.
+    """
+
+    try:
+        from astropy.visualization import ZScaleInterval
+
+        interval = ZScaleInterval(n_samples=2000, contrast=0.15, max_iterations=5)
+        vmin, vmax = interval.get_limits(img)
+
+        if vmax > vmin:
+            return float(vmin), float(vmax)
+
+    except Exception:
+        pass
+
+    # Fall back to percentiles if astropy is not available or zscale fails
+    return float(np.percentile(img, 1.0)), float(np.percentile(img, 99.99))
+
+
+def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar=None, show_graphs=False,
+                              min_size=1000):
     """ Given the folder of the night, find the Calstars file, check the star fit and generate a report
         with the quality of the calibration. The report contains information about both the astrometry and
         the photometry calibration. Graphs will be saved in the given directory of the night.
@@ -41,6 +68,8 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
         match_radius: [float] Match radius for star matching between image and catalog stars (px).
         platepar: [Platepar instance] Use this platepar instead of finding one in the folder.
         show_graphs: [bool] Show the graphs on the screen. False by default.
+        min_size: [int] Minimum size of the longest side of the astrometry report image (px). Smaller images
+            are upscaled. 1000 by default.
     Return:
         None
     """
@@ -266,14 +295,26 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
     ff = readFF(night_dir_path, ff_name)
     img_h, img_w = ff.avepixel.shape
 
+    # Upscale small images so the longest side of the report is at least min_size pixels. The figure is made
+    #   larger, so the image is upscaled while the text and the markers keep their size in pixels (one pixel
+    #   is added as the tight bounding box can round the size down)
+    scale = max(1.0, (min_size + 1)/max(img_h, img_w))
+
     dpi = 200
-    plt.figure(figsize=(ff.avepixel.shape[1]/dpi, ff.avepixel.shape[0]/dpi), dpi=dpi)
+    plt.figure(figsize=(scale*img_w/dpi, scale*img_h/dpi), dpi=dpi)
 
     # Take the average pixel
     img = ff.avepixel
 
-    # Slightly adjust the levels
-    img = Image.adjustLevels(img, np.percentile(img, 1.0), 1.3, np.percentile(img, 99.99))
+    # Slightly adjust the levels of 8-bit images
+    if img.dtype == np.uint8:
+        img = Image.adjustLevels(img, np.percentile(img, 1.0), 1.3, np.percentile(img, 99.99))
+
+    # Images with a higher bit depth have a large dynamic range and most of the image would be dark, so use the
+    #   zscale levels (as in SkyFit2), which show the background and faint stars
+    else:
+        vmin, vmax = zscaleLimits(img)
+        img = Image.adjustLevels(img, vmin, 1.0, vmax)
 
     plt.imshow(img, cmap='gray', interpolation='nearest')
 

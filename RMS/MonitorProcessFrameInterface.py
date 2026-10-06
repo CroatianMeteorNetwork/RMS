@@ -37,6 +37,7 @@ import RMS.ConfigReader as cr
 from RMS.Formats.FrameInterface import detectInputType, getCacheID
 from RMS.Formats.FFfile import validFFName, constructFFName
 from RMS.Formats import FFpng
+from RMS.Routines import Image
 from RMS.MonitorNightReport import nightInfo, nightDirPath, writeDoneFlag, NightReporter
 from RMS.DetectStarsAndMeteors import (
     detectStarsAndMeteorsFrameInterface,
@@ -200,13 +201,19 @@ class ChunkImageSaver(object):
         night_dir: [str] Directory where the image pairs are saved.
         config: [Config] Configuration.
         source_file: [str] Name of the input file.
+
+    Keyword arguments:
+        dark: [ndarray] Dark frame which is subtracted from the images before saving. None by default.
+        flat_struct: [Flat struct] Flat field which is applied to the images before saving. None by default.
     """
 
-    def __init__(self, night_dir, config, source_file):
+    def __init__(self, night_dir, config, source_file, dark=None, flat_struct=None):
 
         self.night_dir = night_dir
         self.config = config
         self.source_file = source_file
+        self.dark = dark
+        self.flat_struct = flat_struct
 
         # List of (first_frame, nframes, ff_name) of the saved chunks
         self.chunk_images = []
@@ -228,6 +235,17 @@ class ChunkImageSaver(object):
             # The images of non-FF inputs are binned for detection
             binning = self.config.detection_binning_factor if img_handle.input_type != 'ff' else 1
 
+            # Apply the dark and the flat, like for the star extraction (the cached chunk is not modified)
+            maxpixel, avepixel = ff.maxpixel, ff.avepixel
+
+            if self.dark is not None:
+                maxpixel = Image.applyDark(maxpixel, self.dark)
+                avepixel = Image.applyDark(avepixel, self.dark)
+
+            if self.flat_struct is not None:
+                maxpixel = Image.applyFlat(maxpixel, self.flat_struct)
+                avepixel = Image.applyFlat(avepixel, self.flat_struct)
+
             meta = {
                 'nframes': ff.nframes,
                 'fps': img_handle.fps,
@@ -236,9 +254,11 @@ class ChunkImageSaver(object):
                 'station': self.config.stationID,
                 'begin_utc': begin_time,
                 'source_file': self.source_file,
+                'dark_applied': self.dark is not None,
+                'flat_applied': self.flat_struct is not None,
             }
 
-            FFpng.writePair(self.night_dir, ff_name, ff.maxpixel, ff.avepixel, meta=meta)
+            FFpng.writePair(self.night_dir, ff_name, maxpixel, avepixel, meta=meta)
 
         except Exception as e:
             log.warning("Saving the images of the chunk at frame {:d} failed: {:s}".format(first_frame,
@@ -325,13 +345,17 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
     # Load the config file
     config = cr.parse(config_path)
 
-    # Override dark/flat paths in config if explicitly given
+    # The dark and the flat are applied only if they are explicitly given to the monitor, regardless of the
+    #   use_dark and use_flat options in the config file. The config flags are set accordingly, so the whole
+    #   processing chain (star extraction, detection, saved images, recalibration and photometry) agrees on
+    #   whether the data is corrected, and nothing is corrected twice
+    config.use_dark = dark_path is not None
     if dark_path is not None:
         config.dark_file = os.path.abspath(dark_path)
-        config.use_dark = True
+
+    config.use_flat = flat_path is not None
     if flat_path is not None:
         config.flat_file = os.path.abspath(flat_path)
-        config.use_flat = True
 
     # Skip files which begin before the start time, before loading the whole file
     if start_time is not None:
@@ -409,7 +433,7 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
             night_dir = nightDirPath(output_dir, night_name)
             os.makedirs(night_dir, exist_ok=True)
 
-            image_saver = ChunkImageSaver(night_dir, config, file_name)
+            image_saver = ChunkImageSaver(night_dir, config, file_name, dark=dark, flat_struct=flat_struct)
 
         # Run star extraction and meteor detection
         star_list, meteor_list = detectStarsAndMeteorsFrameInterface(
@@ -457,7 +481,8 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
             # Run recalibration with load_all=True
             applyRecalibrate(
                 ftpdetectinfo_path, config,
-                generate_plot=True,
+                # The calibration variation plots are made for the whole night in the night report
+                generate_plot=False,
                 load_all=True,
                 generate_ufoorbit=False,
             )
@@ -476,6 +501,8 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
             'end': end_time,
             'input_dir': os.path.dirname(os.path.abspath(file_path)),
             'source_file': file_name,
+            'dark_applied': dark is not None,
+            'flat_applied': flat_struct is not None,
         })
 
         proc_log.info("Done processing: {} -> {}".format(file_name, results_dir))
@@ -1376,11 +1403,13 @@ Examples:
     )
 
     arg_parser.add_argument('--flat', type=str, default=None,
-        help="Path to a flat field image file."
+        help="Path to a flat field image file. The flat is applied only if given (use_flat in the config file "
+             "is ignored)."
     )
 
     arg_parser.add_argument('--dark', type=str, default=None,
-        help="Path to a dark frame image file."
+        help="Path to a dark frame (or bias) image file. The dark is applied only if given (use_dark in the "
+             "config file is ignored)."
     )
 
     arg_parser.add_argument('--multicam', '-m', type=str, default=None,

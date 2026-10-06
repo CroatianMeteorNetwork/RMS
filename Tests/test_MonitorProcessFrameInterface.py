@@ -264,3 +264,41 @@ def test_failed_worker_process_exit_code(config_path, tmp_path):
     proc.join(timeout=120)
 
     assert proc.exitcode not in (0, mon.SKIP_EXIT_CODE, None)
+
+
+### Dark and flat ###
+
+@pytest.mark.parametrize('dark_path, flat_path', [(None, None), ('bias.png', None), (None, 'flat.png'),
+                                                  ('bias.png', 'flat.png')])
+def test_dark_and_flat_applied_only_if_given(config_path, tmp_path, monkeypatch, dark_path, flat_path):
+
+    import RMS.ConfigReader as cr
+
+    # The config file enables both, but only what is given to the monitor is applied
+    config = cr.parse(config_path)
+    config.use_dark = True
+    config.use_flat = True
+    monkeypatch.setattr(cr, 'parse', lambda path: config)
+
+    seen = {}
+
+    def _fakeDetect(file_path, config, **kwargs):
+        seen['use_dark'] = config.use_dark
+        seen['use_flat'] = config.use_flat
+        seen['dark_file'] = config.dark_file
+        seen['flat_file'] = config.flat_file
+        return None
+
+    monkeypatch.setattr(mon, 'detectInputType', _fakeDetect)
+
+    mon.processFile(str(tmp_path/'dummy.vid'), config_path, None, str(tmp_path), 128,
+                    dark_path=dark_path, flat_path=flat_path)
+
+    assert seen['use_dark'] == (dark_path is not None)
+    assert seen['use_flat'] == (flat_path is not None)
+
+    if dark_path is not None:
+        assert seen['dark_file'] == os.path.abspath(dark_path)
+
+    if flat_path is not None:
+        assert seen['flat_file'] == os.path.abspath(flat_path)
