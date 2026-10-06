@@ -315,7 +315,9 @@ try:
         for i in range(height):
             for j in range(width):
 
-                threshold = int(k1*stdpixel[i, j] + j1)
+                # Float threshold: with the full-precision stdpixel the threshold is fractional. For
+                # an integer image the comparison is identical to the old truncated form
+                threshold = k1*stdpixel[i, j] + j1
 
                 img_thresh[i, j] = img_avg_sub[i, j] > threshold
 
@@ -413,7 +415,10 @@ def thresholdFF(ff, k1, j1, mask=None, mask_ave_bright=False):
         [ndarray] thresholded 2D image
     """
 
-    return thresholdImg(ff.maxpixel, ff.avepixel, ff.stdpixel, k1, j1, ff=True, mask=mask, \
+    # The full-precision stdpixel16 when the FF carries one (fractional codes), else the 8-bit plane
+    from RMS.Formats.FFStruct import stdpixelFloat
+
+    return thresholdImg(ff.maxpixel, ff.avepixel, stdpixelFloat(ff), k1, j1, ff=True, mask=mask, \
         mask_ave_bright=mask_ave_bright)
 
 

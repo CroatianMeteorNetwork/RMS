@@ -115,6 +115,53 @@ def joinAvepixel16(avepixel, averesid):
     return np.clip(avepixel16, 0, 65535).astype(np.uint16)
 
 
+# Floor of the 8.8 fixed-point standard deviation: half a code. The legacy 8-bit STDPIXEL plane was
+# always floored at 1 (a divide-by-zero guard), and (std16 + 128) >> 8 reproduces that floor exactly
+# when std16 >= 128. The floor also makes the split below invertible: once the 8-bit plane reads 1,
+# a fractional byte alone could not tell a 0.2 code sigma from a 1.2 code one
+STD16_FLOOR = 128
+
+
+def splitStdpixel16(stdpixel16):
+    """ Split the 8.8 fixed-point standard deviation into the two planes stored in the FF file,
+        mirroring splitAvepixel16.
+
+    Arguments:
+        stdpixel16: [2D ndarray uint16] Standard deviation in units of 1/256 code.
+
+    Return:
+        (stdpixel, stdresid):
+            - stdpixel: [2D ndarray uint8] The legacy plane: sigma rounded to whole codes, >= 1.
+            - stdresid: [2D ndarray uint8] Low byte of stdpixel16 (two's complement of the residual
+                stdpixel16 - 256*stdpixel).
+    """
+
+    stdpixel16 = np.maximum(np.asarray(stdpixel16).astype(np.uint32), STD16_FLOOR)
+
+    stdpixel = np.clip((stdpixel16 + 128) >> 8, 1, 255).astype(np.uint8)
+    stdresid = (stdpixel16 & 0xFF).astype(np.uint8)
+
+    return stdpixel, stdresid
+
+
+def joinStdpixel16(stdpixel, stdresid):
+    """ Reassemble the 8.8 fixed-point standard deviation from the planes stored in the FF file,
+        the exact inverse of splitStdpixel16.
+
+    Arguments:
+        stdpixel: [2D ndarray uint8] Standard deviation rounded to whole codes.
+        stdresid: [2D ndarray uint8] Two's complement byte of the sub-code residual.
+
+    Return:
+        [2D ndarray uint16] Standard deviation in units of 1/256 code.
+    """
+
+    stdpixel16 = (np.asarray(stdpixel).astype(np.int32) << 8) \
+        + np.asarray(stdresid).astype(np.uint8).view(np.int8).astype(np.int32)
+
+    return np.clip(stdpixel16, 0, 65535).astype(np.uint16)
+
+
 
 def read(directory, filename, array=False, full_filename=False, memmap=True, planes=None):
     """ Read a FF structure from a FITS file. 
@@ -223,6 +270,16 @@ def read(directory, filename, array=False, full_filename=False, memmap=True, pla
             ff.averesp = head.get('AVERESP', '')
             ff.avepixel = splitAvepixel16(ff.avepixel16)[0]
 
+        # Full-precision standard deviation, stored like the average: the STDPIXEL plane is the
+        # legacy 8-bit value and an optional STDFRAC HDU carries the fractional byte of the 8.8
+        # fixed-point sigma. Located by name, as its index depends on whether AVEFRAC is present.
+        # Readers that only know the four legacy planes never see it
+        if head.get('STDFRAC', 0) and (ff.stdpixel is not None):
+            for hdu in hdulist[len(FF_PLANES) + 1:]:
+                if hdu.name == 'STDFRAC':
+                    ff.stdpixel16 = joinStdpixel16(ff.stdpixel, hdu.data)
+                    break
+
     if array:
         ff.array = np.dstack([ff.maxpixel, ff.maxframe, ff.avepixel, ff.stdpixel])
 
@@ -328,6 +385,15 @@ def write(ff, directory, filename):
         if getattr(ff, 'averesp', ''):
             head['AVERESP'] = (str(ff.averesp), 'camera response table id (camera_response.json)')
 
+    # Full-precision standard deviation, the same way: STDPIXEL stays the legacy 8-bit plane
+    # (derived from stdpixel16, so the two always agree) and the fractional byte goes into a
+    # STDFRAC HDU appended after the legacy planes (and after AVEFRAC when present)
+    stdpixel = ff.stdpixel
+    stdresid = None
+    if getattr(ff, 'stdpixel16', None) is not None:
+        stdpixel, stdresid = splitStdpixel16(ff.stdpixel16)
+        head['STDFRAC'] = (8, 'fractional bits of stdpixel in the STDFRAC HDU')
+
     # Create the primary part
     prim = fits.PrimaryHDU(header=head)
 
@@ -336,10 +402,13 @@ def write(ff, directory, filename):
         fits.ImageHDU(ff.maxpixel, name='MAXPIXEL'),
         fits.ImageHDU(ff.maxframe, name='MAXFRAME'),
         fits.ImageHDU(avepixel, name='AVEPIXEL'),
-        fits.ImageHDU(ff.stdpixel, name='STDPIXEL')])
+        fits.ImageHDU(stdpixel, name='STDPIXEL')])
 
     if averesid is not None:
         hdulist.append(fits.ImageHDU(averesid, name='AVEFRAC'))
+
+    if stdresid is not None:
+        hdulist.append(fits.ImageHDU(stdresid, name='STDFRAC'))
 
     # Save the FITS
     hdulist.writeto(file_path, overwrite=True)

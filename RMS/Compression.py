@@ -125,9 +125,10 @@ class Compressor(multiprocessing.Process):
             frames: [3D ndarray] grayscale frames stored as 3d numpy array
 
         Return:
-            (ftp_array, ave16, fieldsum):
+            (ftp_array, ave16, std16, fieldsum):
                 - ftp_array: [3D ndarray] in format: (N, y, x) where N is a member of [0, 1, 2, 3]
                 - ave16: [2D ndarray] average pixel image in 8.8 fixed point (uint16, 1/256 ADU units)
+                - std16: [2D ndarray] standard deviation in 8.8 fixed point (uint16, 1/256 code units)
                 - fieldsum: [ndarray] sums of intensities per every field
 
         """
@@ -136,10 +137,10 @@ class Compressor(multiprocessing.Process):
         # the linear domain (and re-encoded), removing the Jensen bias of averaging
         # gamma-encoded samples. With the camera's own response table (config.response) the
         # decode/re-encode uses that table instead of the power law
-        ftp_array, ave16, fieldsum = compressFrames(frames, self.config.deinterlace_order,
+        ftp_array, ave16, std16, fieldsum = compressFrames(frames, self.config.deinterlace_order,
             self.config.gamma, response=getattr(self.config, 'response', None))
 
-        return ftp_array, ave16, fieldsum
+        return ftp_array, ave16, std16, fieldsum
     
 
 
@@ -155,7 +156,7 @@ class Compressor(multiprocessing.Process):
         return None
 
 
-    def saveFF(self, arr, startTime, N, ave16=None, soc_temp=None, sei_meta=None):
+    def saveFF(self, arr, startTime, N, ave16=None, soc_temp=None, sei_meta=None, std16=None):
         """ Write metadata and data array to FF file and return filenames for FF and FS files
 
         Arguments:
@@ -170,6 +171,8 @@ class Compressor(multiprocessing.Process):
                 the optional SOCTEMP header card when known.
             sei_meta: [dict] per-block photometric provenance from the camera SEI (see
                 RMS.SEIBlockMeta), or None. Written as the optional EXPTIME/gain/QP/WB cards.
+            std16: [2D ndarray] standard deviation in 8.8 fixed point (uint16). Its fractional byte
+                is written to the FF file as an extra plane if ff_stdpixel16 is enabled in the config.
         """
         
         # Generate the name for the file
@@ -200,6 +203,11 @@ class Compressor(multiprocessing.Process):
             # ... and which camera response table, if any (camera_response.json of the night)
             _resp = getattr(self.config, 'response', None)
             ff.averesp = _resp.ident() if _resp is not None else ''
+
+        # Likewise the full-precision standard deviation: its fractional byte goes into a STDFRAC
+        # plane and the legacy 8-bit STDPIXEL plane is derived from it (FITS only)
+        if (std16 is not None) and self.config.ff_stdpixel16:
+            ff.stdpixel16 = std16
 
         ff.nrows = arr.shape[1]
         ff.ncols = arr.shape[2]
@@ -503,7 +511,7 @@ class Compressor(multiprocessing.Process):
             
             
             # Run the compression
-            compressed, ave16, field_intensities = self.compress(frames)
+            compressed, ave16, std16, field_intensities = self.compress(frames)
 
 
             # Snapshot the raw block for the extractor BEFORE releasing the capture handshake:
@@ -565,12 +573,13 @@ class Compressor(multiprocessing.Process):
             # Cut out the compressed frames to the proper size
             compressed = compressed[:, :self.config.height, :self.config.width]
             ave16 = ave16[:self.config.height, :self.config.width]
+            std16 = std16[:self.config.height, :self.config.width]
 
             log.info("Compression time: {:.3f} s".format(time.time() - t))
             t = time.time()
 
             # Save the compressed image
-            filename_millis, filename_micros = self.saveFF(compressed, startTime, n*256, ave16=ave16,
+            filename_millis, filename_micros = self.saveFF(compressed, startTime, n*256, ave16=ave16, std16=std16,
                                                            soc_temp=socTemp, sei_meta=seiMeta)
             n += 1
             

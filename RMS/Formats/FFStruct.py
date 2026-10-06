@@ -2,8 +2,24 @@
 
 from __future__ import print_function, division, absolute_import
 
+import numpy as np
+
+
 # Image planes stored in an FF file, in file order
 FF_PLANES = ('maxpixel', 'maxframe', 'avepixel', 'stdpixel')
+
+
+def stdpixelFloat(ff):
+    """ The per-pixel standard deviation in codes as float32: the full-precision stdpixel16 plane
+        when the FF carries one, otherwise the legacy 8-bit plane (integer codes, floored at 1).
+        Every consumer of the noise (thresholding, centroid weights, SNR) should go through this.
+    """
+
+    stdpixel16 = getattr(ff, 'stdpixel16', None)
+    if stdpixel16 is not None:
+        return np.asarray(stdpixel16).astype(np.float32)/np.float32(256.0)
+
+    return ff.stdpixel
 
 
 def selectPlanes(planes, array):
@@ -66,6 +82,12 @@ class FFStruct:
         # ADU, (avepixel16 + 128) >> 8; FITS files store avepixel as the legacy plane and the
         # sub-ADU residual in an extra AVEFRAC HDU that older readers never look at
         self.avepixel16 = None
+
+        # Standard deviation at full precision, 8.8 fixed point (uint16, units of 1/256 code),
+        # floored at half a code. None if the file only carries the 8-bit stdpixel, which is its
+        # rounding (stdpixel16 + 128) >> 8; FITS files store the fractional byte in an extra STDFRAC
+        # HDU that older readers never look at
+        self.stdpixel16 = None
 
         # Camera gamma used to average avepixel16 in the linear domain (the stored plane is
         # re-encoded, i.e. stays in the gamma-encoded domain). 1.0 means encoded-domain averaging

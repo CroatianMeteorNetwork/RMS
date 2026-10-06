@@ -300,6 +300,9 @@ class Config:
 
         # Also store the sub-ADU bits of the average frame, in an extra FITS plane
         self.ff_avepixel16 = True
+
+        # Also store the fractional bits of the standard deviation frame, in an extra FITS plane
+        self.ff_stdpixel16 = True
         
         self.fov_w = 64.0
         self.fov_h = 35.0
@@ -1307,6 +1310,9 @@ def parseCapture(config, parser):
 
     if parser.has_option(section, "ff_avepixel16"):
         config.ff_avepixel16 = parser.getboolean(section, "ff_avepixel16")
+
+    if parser.has_option(section, "ff_stdpixel16"):
+        config.ff_stdpixel16 = parser.getboolean(section, "ff_stdpixel16")
 
     if parser.has_option(section, "fov_w"):
         config.fov_w = parser.getfloat(section, "fov_w")

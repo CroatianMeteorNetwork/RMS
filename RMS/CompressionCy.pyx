@@ -65,6 +65,14 @@ def compressFrames(np.ndarray[INT8_TYPE_t, ndim=3] frames, int deinterlace_order
     cdef np.ndarray[INT16_TYPE_t, ndim=2] ave16_array = np.empty([frames.shape[1], frames.shape[2]],
         dtype=INT16_TYPE)
 
+    # Full-precision standard deviation in 8.8 fixed point (units of 1/256 code). The 8-bit plane
+    # rounds a ~2.4 code night-sky sigma to 2 or 3 (a 20% error that differs from pixel to pixel);
+    # this plane keeps the fraction. Floored at half a code (128): the 8-bit plane derived from it,
+    # (std16 + 128) >> 8, is then never 0 - the same floor the 8-bit plane always had - and the
+    # split into the 8-bit plane plus a fractional byte (FFfits) inverts exactly
+    cdef np.ndarray[INT16_TYPE_t, ndim=2] std16_array = np.empty([frames.shape[1], frames.shape[2]],
+        dtype=INT16_TYPE)
+
 
     # Array for field/frame intensity sums. If the video is interlaced, then there with will twice the number 
     # of fields as there are frames
@@ -90,7 +98,7 @@ def compressFrames(np.ndarray[INT8_TYPE_t, ndim=3] frames, int deinterlace_order
 
     cdef unsigned int min_val, min_val_2, min_val_3, min_val_4
 
-    cdef unsigned int x, y, acc, ave16
+    cdef unsigned int x, y, acc, ave16, std16
     cdef double var_d, acc_lin, mean_lin
     cdef unsigned int height = frames.shape[1]
     cdef unsigned int width = frames.shape[2]
@@ -282,12 +290,16 @@ def compressFrames(np.ndarray[INT8_TYPE_t, ndim=3] frames, int deinterlace_order
             if var_d < 0:
                 var_d = 0
 
-            # Compute the standard deviation, rounded
-            var = <unsigned int>(sqrt(var_d) + 0.5)
+            # Standard deviation in 8.8 fixed point, floored at half a code (see std16_array)
+            std16 = <unsigned int>(256.0*sqrt(var_d) + 0.5)
+            if std16 < 128:
+                std16 = 128
+            std16_array[y, x] = <unsigned short>std16
 
-            # Make sure that the stddev is not 0, to prevent divide by zero afterwards
-            if var == 0:
-                var = 1
+            # 8-bit standard deviation, rounded off the fixed-point value - the same derivation the
+            # FF writer uses, so the two planes always agree. The floor above keeps it >= 1, which
+            # prevents a divide by zero afterwards (as the old explicit floor did)
+            var = (std16 + 128) >> 8
 
             ###
             
@@ -299,4 +311,4 @@ def compressFrames(np.ndarray[INT8_TYPE_t, ndim=3] frames, int deinterlace_order
             ftp_array[3, y, x] = var
 
 
-    return ftp_array, ave16_array, fieldsum[:frames_num*deinterlace_multiplier]
+    return ftp_array, ave16_array, std16_array, fieldsum[:frames_num*deinterlace_multiplier]

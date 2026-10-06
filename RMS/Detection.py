@@ -38,6 +38,7 @@ from RMS.DetectionTools import getThresholdedStripe3DPoints, loadImageCalibratio
 from RMS.Formats.AsgardEv import writeEv
 from RMS.Formats.AST import xyToRaDecAST
 from RMS.Formats import FFfile
+from RMS.Formats.FFStruct import stdpixelFloat
 from RMS.Formats import FTPdetectinfo
 from RMS.Formats.FrameInterface import detectInputType
 from RMS.Formats.AST import loadAST
@@ -413,7 +414,7 @@ def checkWhiteRatio(img_thres, ff, max_white_ratio, diagnostics=None):
             if 'maxpixel_excess_median' not in diagnostics:
                 excess = ff.maxpixel.astype(np.float64) - ff.avepixel.astype(np.float64)
                 diagnostics['maxpixel_excess_median'] = float(np.median(excess))
-                diagnostics['stdpixel_median'] = float(np.median(ff.stdpixel))
+                diagnostics['stdpixel_median'] = float(np.median(stdpixelFloat(ff)))
 
     return passed
 
@@ -1065,7 +1066,7 @@ def thresholdAndCorrectGammaFF(img_handle, config, mask):
     # linear span of avepixel +/- stdpixel, scaled back to one sigma where the span is clipped at
     # black or white. For gamma 1.0 this is exactly stdpixel
     avepixel_f = img_handle.ff.avepixel.astype(np.float32)
-    stdpixel_f = img_handle.ff.stdpixel.astype(np.float32)
+    stdpixel_f = np.asarray(stdpixelFloat(img_handle.ff), dtype=np.float32)
     span_hi = np.minimum(avepixel_f + stdpixel_f, gamma_wp)
     span_lo = np.maximum(avepixel_f - stdpixel_f, 0)
     span_codes = np.maximum(span_hi - span_lo, 1)

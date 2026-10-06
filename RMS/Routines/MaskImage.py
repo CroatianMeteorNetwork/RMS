@@ -234,6 +234,11 @@ def applyMask(input_image, mask, ff_flag=False, image=False):
         input_image.stdpixel = maskImage(input_image.stdpixel, mask, image=image)
         #input_image.maxframe = maskImage(input_image.maxframe, mask)
 
+        # The full-precision standard deviation, when the FF carries one, is masked the same way so
+        # the thresholding sees one consistent noise plane
+        if getattr(input_image, 'stdpixel16', None) is not None:
+            input_image.stdpixel16 = maskImage(input_image.stdpixel16, mask, image=image)
+
         return input_image
 
     # Apply the mask to a regular image array
