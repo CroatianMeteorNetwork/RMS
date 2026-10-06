@@ -28,6 +28,7 @@ import sys
 import traceback
 
 import ephem
+import numpy as np
 
 import RMS.ConfigReader as cr
 from RMS.CaptureDuration import CAPTURE_HORIZON_DEG
@@ -59,6 +60,9 @@ REPORT_STATE_FILE_NAME = '.report_state.json'
 
 # Paths of the archives to upload, written by the report to the night directory
 REPORT_RESULT_FILE_NAME = 'report_result.json'
+
+# Directory in the night directory with the ECSV files of the detections
+ECSV_DIR_NAME = 'ECSV'
 
 # Time format used in the JSON files
 JSON_TIME_FORMAT = "%Y-%m-%dT%H:%M:%S.%f"
@@ -116,6 +120,13 @@ def nightInfo(config, dt):
     night_name = "{:s}_{:s}_000000".format(station_code, night_start.strftime("%Y%m%d_%H%M%S"))
 
     return night_name, night_start, night_end
+
+
+def latestPlateparPath(output_dir, config):
+    """ Path of the platepar refined at the end of the latest reported night, which is used for the following
+        data. It has its own name, so the platepar given to the monitor is never overwritten.
+    """
+    return os.path.join(output_dir, 'latest_' + config.platepar_name)
 
 
 def nightDirPath(output_dir, night_name):
@@ -406,6 +417,135 @@ def mergeNightResults(night_dir, results_dirs, config):
     return calstars_name, ftpdetectinfo_name, fps, chunk_frames, ff_detected
 
 
+def plateparResidual(platepar):
+    """ Median distance (px) between the image positions of the stars the platepar was fitted on and their
+        catalog positions projected with the platepar.
+
+    Arguments:
+        platepar: [Platepar instance] Recalibrated platepar (ApplyRecalibrate) with a star list. Its entries
+            are [jd, y, x, intensity, ra, dec, mag], as the image coordinates come from CALSTARS (Y X).
+
+    Return:
+        [float] Median residual in pixels, inf if there are no stars.
+    """
+
+    from RMS.Astrometry.ApplyAstrometry import raDecToXYPP
+
+    star_list = np.array(platepar.star_list if platepar.star_list else [], dtype=np.float64)
+
+    if len(star_list) == 0:
+        return np.inf
+
+    jd, y, x, ra, dec = star_list[:, 0], star_list[:, 1], star_list[:, 2], star_list[:, 4], star_list[:, 5]
+
+    x_cat, y_cat = raDecToXYPP(ra, dec, np.mean(jd), platepar)
+
+    return float(np.median(np.hypot(x - x_cat, y - y_cat)))
+
+
+def selectBestNightPlatepar(night_dir, config, output_dir=None):
+    """ Select the most confident platepar of the night from the recalibrated platepars: the successfully
+        recalibrated one with the most matched stars, and the lowest residual among those. If output_dir is
+        given and monitor_update_platepar is set, it is saved for the following data (latestPlateparPath).
+
+    Arguments:
+        night_dir: [str] Night directory with the merged recalibrated platepars.
+        config: [Config] Configuration.
+
+    Keyword arguments:
+        output_dir: [str] Output directory of the monitor. None by default.
+
+    Return:
+        (ff_name, platepar, n_stars, residual): [tuple] The selected platepar, None for all if there is no
+            successfully recalibrated platepar.
+    """
+
+    from RMS.Formats.Platepar import Platepar
+
+    with open(os.path.join(night_dir, config.platepars_recalibrated_name)) as f:
+        recalibrated_dicts = json.load(f)
+
+    candidates = []
+    for ff_name, pp_dict in recalibrated_dicts.items():
+
+        if (pp_dict is None) or (not pp_dict.get('auto_recalibrated', False)):
+            continue
+
+        platepar = Platepar()
+        platepar.loadFromDict(pp_dict, use_flat=config.use_flat)
+
+        n_stars = len(platepar.star_list) if platepar.star_list else 0
+        if n_stars == 0:
+            continue
+
+        candidates.append((n_stars, -plateparResidual(platepar), ff_name, platepar))
+
+    if not candidates:
+        log.info("No successfully recalibrated platepar in the night, keeping the old platepar")
+        return None, None, None, None
+
+    # Most matched stars first, then the lowest residual
+    n_stars, neg_residual, ff_name, platepar = max(candidates, key=lambda c: (c[0], c[1]))
+    residual = -neg_residual
+
+    log.info("Best platepar of the night: {:s}, {:d} stars, median residual {:.3f} px".format(ff_name, n_stars,
+        residual))
+
+    if (output_dir is not None) and config.monitor_update_platepar:
+        latest_path = latestPlateparPath(output_dir, config)
+        platepar.write(latest_path)
+        log.info("Best platepar saved for the following data: {:s}".format(latest_path))
+
+    return ff_name, platepar, n_stars, residual
+
+
+def writeObservationSummary(night_dir, night_name, config, frames_per_file, n_detections,
+                            photometry_good=None):
+    """ Write the observation summary of the night (observation_summary.txt and .json), as at the end of a
+        normal RMS night. The parameters which RMS records at the start of the capture are filled in from the
+        night, as there is no live capture (e.g. the camera is not queried).
+
+    Arguments:
+        night_dir: [str] Night directory.
+        night_name: [str] Name of the night.
+        config: [Config] Configuration, with data_dir set to the output directory of the monitor.
+        frames_per_file: [int] Number of frames per FF-equivalent image pair.
+        n_detections: [int] Number of detections in the night.
+
+    Keyword arguments:
+        photometry_good: [bool] Result of the platepar refinement, None if it wasn't run.
+
+    Return:
+        [tuple] Paths of the text and the JSON summary.
+    """
+
+    import platform
+
+    from RMS.Formats import ObservationSummary as obs
+
+    # Start a new summary for every night
+    db_path = os.path.join(config.data_dir, "observation.db")
+    if os.path.exists(db_path):
+        os.remove(db_path)
+
+    night_start, night_end = nightBoundsFromName(config, night_name)
+
+    conn = obs.getObsDBConn(config)
+    obs.addObsParam(conn, "start_time", night_start.replace(tzinfo=datetime.timezone.utc))
+    obs.addObsParam(conn, "duration_from_start_of_observation", round((night_end - night_start).total_seconds()))
+    obs.addObsParam(conn, "stationID", config.stationID)
+    obs.addObsParam(conn, "hardware_version", platform.machine())
+    obs.addObsParam(conn, "camera_information", "Processed from recorded data")
+    obs.addObsParam(conn, "detections_after_ml", n_detections)
+
+    if photometry_good is not None:
+        obs.addObsParam(conn, "photometry_good", str(bool(photometry_good)))
+
+    conn.close()
+
+    return obs.finalizeObservationSummary(config, night_dir, frames_per_file=frames_per_file)
+
+
 def plotNightCalibrationVariation(night_dir, night_name, config, ff_frames=256):
     """ Plot the variation of the pointing and the photometric offset through the night from the merged
         recalibrated platepars in the night directory.
@@ -523,6 +663,16 @@ def generateNightReport(output_dir, night_name, config, results_dirs=None, archi
         for stack_path in glob.glob(os.path.join(night_dir, night_name + '_stack_*_meteors.*')):
             os.remove(stack_path)
 
+        platepar_available = os.path.isfile(os.path.join(night_dir, config.platepar_name))
+
+        # Select the most confident recalibrated platepar of the night and keep it for the following data
+        fit_status = None
+        if os.path.isfile(os.path.join(night_dir, config.platepars_recalibrated_name)):
+            best = _runStep('platepar_selection', lambda: selectBestNightPlatepar(night_dir, config,
+                                                                                 output_dir=output_dir))
+            if best is not None:
+                fit_status = best[0] is not None
+
         if calstars_name is not None:
             _runStep('calibration_report', lambda: generateCalibrationReport(config, night_dir))
 
@@ -531,6 +681,66 @@ def generateNightReport(output_dir, night_name, config, results_dirs=None, archi
                 and os.path.isfile(os.path.join(night_dir, config.platepar_name)):
             _runStep('calibration_variation', lambda: plotNightCalibrationVariation(night_dir, night_name, config,
                 ff_frames=(chunk_frames if chunk_frames else 256)))
+
+        ### Additional night products (off by default) ###
+
+        ftpdetectinfo_path = os.path.join(night_dir, ftpdetectinfo_name)
+        product_files = []
+
+        mask = None
+        if os.path.isfile(os.path.join(night_dir, config.mask_file)):
+            from RMS.Routines.MaskImage import loadMask
+            mask = loadMask(os.path.join(night_dir, config.mask_file))
+
+        def _loadPlatepar():
+            from RMS.Formats.Platepar import Platepar
+            platepar = Platepar()
+            platepar.read(os.path.join(night_dir, config.platepar_name), use_flat=config.use_flat)
+            return platepar
+
+        if config.monitor_shower_association:
+            from Utils.ShowerAssociation import showerAssociation
+            _runStep('shower_association', lambda: showerAssociation(config, [ftpdetectinfo_path],
+                save_plot=True, plot_activity=True, color_map=config.shower_color_map,
+                sporadic_color=config.sporadic_color))
+
+        if config.monitor_fov_kml and platepar_available:
+            from Utils.FOVKML import fovKML
+
+            def _fovKML():
+                platepar = _loadPlatepar()
+                return [fovKML(night_dir, platepar, mask=mask, plot_station=False, area_ht=area_ht)
+                        for area_ht in [100000, 70000, 25000]]
+
+            kml_files = _runStep('fov_kml', _fovKML)
+            if kml_files:
+                product_files += [f for f in kml_files if f]
+
+        if config.monitor_flux and platepar_available:
+            from Utils.Flux import prepareFluxFiles
+            _runStep('flux', lambda: prepareFluxFiles(config, night_dir, ftpdetectinfo_path, mask=mask,
+                                                      platepar=_loadPlatepar()))
+
+            for file_name in sorted(os.listdir(night_dir)):
+                if ("flux" in file_name) and (file_name.endswith(".json") or file_name.endswith(".ecsv")):
+                    product_files.append(os.path.join(night_dir, file_name))
+
+        if config.monitor_observation_summary:
+            n_detections = len(set((entry[0], entry[1]) for entry in
+                                   FTPdetectinfo.readFTPdetectinfo(night_dir, ftpdetectinfo_name,
+                                                                   ret_input_format=True)[2]))
+            summary_files = _runStep('observation_summary', lambda: writeObservationSummary(night_dir,
+                night_name, config, chunk_frames if chunk_frames else 256, n_detections,
+                photometry_good=fit_status))
+            if summary_files:
+                product_files += [f for f in summary_files if f and f.endswith('.json')]
+
+        # ECSV files of the detections
+        ecsv_dir = os.path.join(night_dir, ECSV_DIR_NAME)
+        if os.path.isdir(ecsv_dir):
+            product_files += sorted(glob.glob(os.path.join(ecsv_dir, '*.ecsv')))
+
+        ### ###
 
         # Generate the timelapse first, so it can be archived
         timelapse_name = night_name + "_timelapse.mp4"
@@ -547,6 +757,7 @@ def generateNightReport(output_dir, night_name, config, results_dirs=None, archi
             extra_names += [os.path.basename(f) for f in glob.glob(os.path.join(night_dir, '*.config'))]
             extra_files = [os.path.join(night_dir, name) for name in extra_names
                            if os.path.isfile(os.path.join(night_dir, name))]
+            extra_files += [path for path in product_files if os.path.isfile(path)]
 
             # Archiving also generates the thumbnails and the stacks
             archives = _runStep('archive', lambda: archiveDetections(night_dir, archived_dir, ff_detected,

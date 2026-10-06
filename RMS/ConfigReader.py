@@ -897,6 +897,19 @@ class Config:
         #   space needed for the next night)
         self.monitor_delete_old_data = True
 
+        # Save the most confident recalibrated platepar of the night (most matched stars, lowest residual) and
+        #   use it for the following data
+        self.monitor_update_platepar = True
+
+        # Save every calibrated detection as an ECSV file (in the ECSV directory of the night)
+        self.monitor_save_ecsv = False
+
+        # Additional night products
+        self.monitor_shower_association = False
+        self.monitor_fov_kml = False
+        self.monitor_flux = False
+        self.monitor_observation_summary = False
+
 
         #### Shower association
 
@@ -2238,6 +2251,11 @@ def parseMonitorProcessing(config, parser):
 
     if parser.has_option(section, "monitor_delete_old_data"):
         config.monitor_delete_old_data = parser.getboolean(section, "monitor_delete_old_data")
+
+    for option in ["monitor_update_platepar", "monitor_save_ecsv", "monitor_shower_association",
+                   "monitor_fov_kml", "monitor_flux", "monitor_observation_summary"]:
+        if parser.has_option(section, option):
+            setattr(config, option, parser.getboolean(section, option))
 
 
 def parseColors(config, parser):

@@ -13,6 +13,7 @@ import os
 import shutil
 import sys
 
+import numpy as np
 import pytest
 
 import RMS.MonitorProcessFrameInterface as mon
@@ -302,3 +303,47 @@ def test_dark_and_flat_applied_only_if_given(config_path, tmp_path, monkeypatch,
 
     if flat_path is not None:
         assert seen['flat_file'] == os.path.abspath(flat_path)
+
+
+def test_processFile_uses_latest_platepar(config_path, tmp_path, monkeypatch):
+
+    import RMS.ConfigReader as cr
+    from RMS.MonitorNightReport import latestPlateparPath
+
+    config = cr.parse(config_path)
+    monkeypatch.setattr(cr, 'parse', lambda path: config)
+
+    output_dir = tmp_path/'out'
+    output_dir.mkdir()
+
+    given = tmp_path/'given.cal'
+    given.write_text('given')
+    latest = latestPlateparPath(str(output_dir), config)
+    with open(latest, 'w') as f:
+        f.write('latest')
+
+    copied = {}
+
+    def _fakeSaveResults(*args, **kwargs):
+        raise RuntimeError("stop after the platepar copy")
+
+    # Return a minimal handle so processFile gets to the platepar copy
+    class _Handle(object):
+        beginning_datetime = datetime.datetime(2025, 12, 25, 3, 0, 0)
+        dir_path = str(tmp_path)
+        byteswap = False
+        class ff(object):
+            dtype = np.uint8
+
+    monkeypatch.setattr(mon, 'detectInputType', lambda *args, **kwargs: _Handle())
+    monkeypatch.setattr(mon, 'loadImageCalibration', lambda *args, **kwargs: (None, None, None))
+    monkeypatch.setattr(mon, 'detectStarsAndMeteorsFrameInterface', _fakeSaveResults)
+
+    for update, expected in [(True, 'latest'), (False, 'given')]:
+        config.monitor_update_platepar = update
+        mon.processFile(str(tmp_path/'dummy.vid'), config_path, str(given), str(output_dir), 128)
+
+        results_platepar = os.path.join(str(output_dir), '2025', '202512', '20251225', 'dummy',
+                                        config.platepar_name)
+        with open(results_platepar) as f:
+            assert f.read() == expected

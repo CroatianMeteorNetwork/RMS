@@ -797,3 +797,128 @@ def test_report_uses_calibration_of_processing(tmp_path):
     old.mkdir()
     (old/'done.flag').write_text('')
     assert mnr.calibrationApplied([str(old)]) == (False, False)
+
+
+### Platepar refinement and additional products ###
+
+def test_latest_platepar_never_overwrites_the_given_one(tmp_path):
+
+    config = _config()
+    path = mnr.latestPlateparPath(str(tmp_path), config)
+
+    assert os.path.dirname(path) == str(tmp_path)
+    assert os.path.basename(path) == 'latest_' + config.platepar_name
+
+
+def _recalibratedPlatepar(n_stars, tag=0, auto_recalibrated=True):
+    """ Recalibrated platepar as stored in the JSON file. The tag is stored as the star intensity, so the
+        platepar can be identified.
+    """
+    from RMS.Formats.Platepar import Platepar
+    pp = Platepar()
+    pp.auto_recalibrated = auto_recalibrated
+    pp.star_list = [[2461034.8, 10.0 + i, 20.0, tag, 170.0, 50.0, 8.0] for i in range(n_stars)]
+    return json.loads(pp.jsonStr())
+
+
+@pytest.mark.parametrize('update', [True, False])
+def test_select_best_night_platepar(tmp_path, monkeypatch, update):
+
+    config = _config()
+    config.monitor_update_platepar = update
+
+    output_dir = str(tmp_path)
+    night_dir = mnr.nightDirPath(output_dir, NIGHT)
+    os.makedirs(night_dir)
+
+    recalibrated = {
+        'FF_a': _recalibratedPlatepar(150, tag=1),
+        'FF_b': _recalibratedPlatepar(197, tag=2),
+        'FF_c': _recalibratedPlatepar(197, tag=3),
+        # Most stars, but not recalibrated successfully
+        'FF_d': _recalibratedPlatepar(250, tag=4, auto_recalibrated=False),
+        'FF_e': None,
+    }
+    with open(os.path.join(night_dir, config.platepars_recalibrated_name), 'w') as f:
+        json.dump(recalibrated, f)
+
+    # FF_c fits better than FF_b, which has the same number of stars, and FF_a fits best but has fewer stars
+    residuals = {1: 0.03, 2: 0.05, 3: 0.04, 4: 0.01}
+    monkeypatch.setattr(mnr, 'plateparResidual', lambda pp: residuals[pp.star_list[0][3]])
+
+    ff_name, platepar, n_stars, residual = mnr.selectBestNightPlatepar(night_dir, config, output_dir=output_dir)
+
+    assert (ff_name, n_stars, residual) == ('FF_c', 197, 0.04)
+    assert os.path.isfile(mnr.latestPlateparPath(output_dir, config)) == update
+
+
+def test_select_best_night_platepar_none_recalibrated(tmp_path):
+
+    config = _config()
+
+    with open(os.path.join(str(tmp_path), config.platepars_recalibrated_name), 'w') as f:
+        json.dump({'FF_a': _recalibratedPlatepar(100, auto_recalibrated=False)}, f)
+
+    assert mnr.selectBestNightPlatepar(str(tmp_path), config, output_dir=str(tmp_path)) \
+        == (None, None, None, None)
+    assert not os.path.exists(mnr.latestPlateparPath(str(tmp_path), config))
+
+
+def test_observation_summary_counts_image_pairs(tmp_path):
+
+    from RMS.Formats.ObservationSummary import nightSummaryData
+
+    config = _config()
+    config.fps = 25.0
+
+    # Three consecutive 128-frame chunks (5.12 s each)
+    for i in range(3):
+        name = FFfile.constructFFName('XX0001', BEG_TIME + datetime.timedelta(seconds=5.12*i), frame=128*i,
+                                      suffix=FFpng.PAIR_MAX_SUFFIX)
+        FFpng.writePair(str(tmp_path), name, np.zeros((4, 4), np.uint8), np.zeros((4, 4), np.uint8))
+
+    result = nightSummaryData(config, str(tmp_path), frames_per_file=128)
+    capture_duration, fits_count, total_expected = result[0], result[4], result[11]
+
+    assert fits_count == 3
+    assert capture_duration == pytest.approx(3*5.12, abs=0.01)
+    assert total_expected == 3
+
+
+def test_additional_products_are_off_by_default():
+
+    config = cr.Config()
+
+    assert config.monitor_update_platepar
+    assert not config.monitor_save_ecsv
+    assert not config.monitor_shower_association
+    assert not config.monitor_fov_kml
+    assert not config.monitor_flux
+    assert not config.monitor_observation_summary
+
+
+def test_report_runs_only_enabled_products(tmp_path, monkeypatch):
+
+    import Utils.ShowerAssociation
+
+    config = _config()
+    config.timelapse_generate_captured = False
+    config.monitor_shower_association = True
+
+    calls = []
+    monkeypatch.setattr(Utils.ShowerAssociation, 'showerAssociation',
+                        lambda config, ftp_list, **kwargs: calls.append(ftp_list))
+
+    output_dir = str(tmp_path)
+    night_dir = mnr.nightDirPath(output_dir, NIGHT)
+    os.makedirs(night_dir)
+    _makeResults(output_dir, night_dir, config, 0)
+
+    state = mnr.generateNightReport(output_dir, NIGHT, config, archive=False)
+
+    assert 'shower_association' in state['ok_steps']
+    assert calls == [[os.path.join(night_dir, 'FTPdetectinfo_{:s}.txt'.format(NIGHT))]]
+
+    # The other products are off
+    for step in ['fov_kml', 'flux', 'observation_summary']:
+        assert step not in state['ok_steps'] + state['failed_steps']

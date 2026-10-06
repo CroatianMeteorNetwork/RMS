@@ -693,7 +693,7 @@ def captureDirectories(captured_dir, stationID):
 
     return capture_directories
 
-def nightSummaryData(config, night_data_dir):
+def nightSummaryData(config, night_data_dir, frames_per_file=256):
     """ Calculate the summary data for the night.
 
     This is based on work by others and translated from the original source code.
@@ -702,6 +702,9 @@ def nightSummaryData(config, night_data_dir):
         config: [config] RMS config instance.
         night_data_dir: [path] the directory of captured files.
 
+
+    Keyword arguments:
+        frames_per_file: [int] Number of frames in one FF file (or FF-equivalent image pair). 256 by default.
 
     Return:
         capture_duration_from_fits: [int] the duration from the start of first fits to the end of the last.
@@ -720,8 +723,11 @@ def nightSummaryData(config, night_data_dir):
                                                 ephemeris computed duration
     """
 
-    duration_one_fits_file = 256/config.fps
-    fits_files_list = glob.glob(os.path.join(night_data_dir, "*.fits"))
+    duration_one_fits_file = frames_per_file/config.fps
+
+    # Count the FF files, including FF-equivalent image pairs (counted once, by the max pixel image)
+    fits_files_list = glob.glob(os.path.join(night_data_dir, "*.fits")) \
+        + glob.glob(os.path.join(night_data_dir, "FF*_maxpixel.png"))
     fits_files_list.sort()
     fits_count = len(fits_files_list)
     if fits_count < 1:
@@ -1215,7 +1221,7 @@ def startObservationSummaryReport(config, duration, force_delete=False):
 
     return "Opening a new observations summary"
 
-def finalizeObservationSummary(config, night_data_dir, platepar=None):
+def finalizeObservationSummary(config, night_data_dir, platepar=None, frames_per_file=256):
 
     """ Enters the parameters known at the end of observation into the database.
 
@@ -1225,6 +1231,7 @@ def finalizeObservationSummary(config, night_data_dir, platepar=None):
 
     Keyword arguments:
         platepar: [object] optional, default None.
+        frames_per_file: [int] Number of frames in one FF file (or FF-equivalent image pair). 256 by default.
 
     Return:
         [str] filename of text file.
@@ -1237,7 +1244,8 @@ def finalizeObservationSummary(config, night_data_dir, platepar=None):
     fits_file_shortfall, fits_file_shortfall_ephemeris, \
     fits_file_shortfall_as_time, fits_file_shortfall_as_time_ephemeris, \
     time_first_fits_file, time_last_fits_file, \
-    total_expected_fits, total_expected_fits_ephemeris = nightSummaryData(config, night_data_dir)
+    total_expected_fits, total_expected_fits_ephemeris = nightSummaryData(config, night_data_dir,
+                                                                          frames_per_file=frames_per_file)
 
     obs_db_conn = getObsDBConn(config)
 

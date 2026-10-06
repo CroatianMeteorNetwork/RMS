@@ -38,7 +38,8 @@ from RMS.Formats.FrameInterface import detectInputType, getCacheID
 from RMS.Formats.FFfile import validFFName, constructFFName
 from RMS.Formats import FFpng
 from RMS.Routines import Image
-from RMS.MonitorNightReport import nightInfo, nightDirPath, writeDoneFlag, NightReporter
+from RMS.MonitorNightReport import nightInfo, nightDirPath, writeDoneFlag, NightReporter, latestPlateparPath, \
+    ECSV_DIR_NAME
 from RMS.DetectStarsAndMeteors import (
     detectStarsAndMeteorsFrameInterface,
     saveResultsFrameInterface,
@@ -409,10 +410,15 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
 
         proc_log.info("Processing file: {}".format(file_path))
 
+        # Use the best platepar of the latest reported night, if available
+        latest_platepar_path = latestPlateparPath(output_dir, config)
+        if config.monitor_update_platepar and os.path.isfile(latest_platepar_path):
+            platepar_path = latest_platepar_path
+            proc_log.info("Using the best platepar of a previous night: {}".format(platepar_path))
+
         # Copy the platepar into the results directory so ApplyRecalibrate can find it
         results_platepar_path = os.path.join(results_dir, config.platepar_name)
-        if not os.path.exists(results_platepar_path):
-            shutil.copy2(platepar_path, results_platepar_path)
+        shutil.copy2(platepar_path, results_platepar_path)
 
         # Copy the config file into the results directory
         results_config_path = os.path.join(results_dir, os.path.basename(config_path))
@@ -479,12 +485,18 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
             proc_log.info("Running ApplyRecalibrate on: {}".format(ftpdetectinfo_path))
 
             # Run recalibration with load_all=True
+            # Save every calibrated detection as an ECSV file in the ECSV directory of the night
+            ecsv_out = None
+            if config.monitor_save_ecsv:
+                ecsv_out = os.path.join(nightDirPath(output_dir, night_name), ECSV_DIR_NAME)
+
             applyRecalibrate(
                 ftpdetectinfo_path, config,
                 # The calibration variation plots are made for the whole night in the night report
                 generate_plot=False,
                 load_all=True,
                 generate_ufoorbit=False,
+                ecsv_out=ecsv_out,
             )
 
             proc_log.info("Recalibration complete for: {}".format(file_name))
