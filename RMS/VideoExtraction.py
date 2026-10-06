@@ -222,6 +222,32 @@ class Extractor(Process):
     
 
 
+    def lineAngularVelocity(self, line):
+        """ Angular velocity of a 3D line found by Grouping3D on the subsampled event points.
+
+        Arguments:
+            line: [list] A line as returned by Grouping3D.find3DLines: its first two entries are the
+                (x, y, frame) end points, in subsampled (config.f) pixel units.
+
+        Return:
+            [float] Angular velocity in deg/s (inf if the two points share a frame).
+        """
+
+        x1, y1, z1 = line[0]
+        x2, y2, z2 = line[1]
+
+        if z2 == z1:
+            return float('inf')
+
+        # Subsampled blocks -> pixels per frame -> pixels per second
+        px_per_s = np.hypot(float(x2) - x1, float(y2) - y1)*self.config.f/abs(float(z2) - z1)*self.config.fps
+
+        # Mean plate scale in deg/px, as the faint meteor detection does (Detection.checkAngularVelocity3D)
+        scale = (self.config.fov_h/float(self.config.height) + self.config.fov_w/float(self.config.width))/2.0
+
+        return px_per_s*scale
+
+
     def save(self, clips):
         """ Save extracted clips to FR*.bin file.
 
@@ -328,6 +354,27 @@ class Extractor(Process):
         if line_list is None:
             log.debug("[" + self.filename + "] no lines found, not extracting anything")
             return
+
+        # Angular velocity gate: the fireball path has no notion of speed, so aircraft and slow
+        # satellites (0.3-2 deg/s) are extracted as fireball clips by the hundreds per night.
+        # Meteors are faster. Disabled when fireball_ang_vel_min is 0
+        ang_vel_min = getattr(self.config, 'fireball_ang_vel_min', 0.0)
+        if ang_vel_min > 0:
+
+            kept = []
+            for line in line_list:
+                ang_vel = self.lineAngularVelocity(line)
+                if ang_vel >= ang_vel_min:
+                    kept.append(line)
+                else:
+                    log.debug("[" + self.filename + "] line rejected, angular velocity {:.2f} deg/s < {:.2f}".format(
+                        ang_vel, ang_vel_min))
+
+            line_list = kept
+
+            if not line_list:
+                log.debug("[" + self.filename + "] no lines left after the angular velocity gate")
+                return
         
         t = time.time()
 

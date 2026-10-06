@@ -789,6 +789,33 @@ def filterCentroids(centroids, centroid_max_deviation, max_distance):
     return best_chain
 
 
+def trackSNR(intensities, snrs):
+    """ Signal to noise ratio of a whole track from its per-frame intensities and SNRs.
+
+    Arguments:
+        intensities: [ndarray] Per-frame background-subtracted intensities (linear light).
+        snrs: [ndarray] Per-frame SNRs of those intensities (same noise model as signalToNoise).
+
+    Return:
+        [float] sum(intensity)/sqrt(sum(noise**2)) over the frames with a positive intensity and SNR,
+            where noise = intensity/snr. 0 if no frame qualifies.
+    """
+
+    intensities = np.asarray(intensities, dtype=np.float64)
+    snrs = np.asarray(snrs, dtype=np.float64)
+
+    valid = (intensities > 0) & (snrs > 0)
+    if not np.any(valid):
+        return 0.0
+
+    noise_sq = np.sum((intensities[valid]/snrs[valid])**2)
+    if noise_sq <= 0:
+        return 0.0
+
+    return float(np.sum(intensities[valid])/np.sqrt(noise_sq))
+
+
+
 def checkAngularVelocity3D(detected_line, config, correct_binning=False):
     """ Check the angular velocity of the detection, and reject those too slow or too fast to be meteors. 
         The minimum ang. velocity is 0.5 deg/s, while maximum is 35 deg/s (Peter Gural, private comm.).
@@ -1645,6 +1672,20 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                 logDebug('Rejected due to too low max patch intensity:', np.max(centroids[:, 4]), ' < ', \
                     min_patch_intensity)
                 continue
+
+
+            # Statistical acceptance: the signal to noise of the whole track. The per-frame intensities
+            # (linear light, background subtracted) are summed and divided by the noise of that sum,
+            # recovered from the per-frame SNR (noise_i = intensity_i/snr_i, from the per-pixel
+            # standard deviation). Unlike the geometric minimums above this does not depend on the
+            # per-pixel threshold, so the candidate gate (k1, j1) can sit low while the detection
+            # depth is set here, in noise units. Disabled when track_snr_min is 0
+            track_snr_min = getattr(config, 'track_snr_min', 0.0)
+            if track_snr_min > 0:
+                track_snr = trackSNR(centroids[:, 4], centroids[:, 6])
+                if track_snr < track_snr_min:
+                    logDebug('Rejected due to the track SNR: {:.1f} < {:.1f}'.format(track_snr, track_snr_min))
+                    continue
 
 
             # Check the detection if it has the proper angular velocity

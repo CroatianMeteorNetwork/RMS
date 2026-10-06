@@ -520,6 +520,9 @@ class Config:
         
         # params for Extractor.findPoints()
         self.white_avg_level = 220     # ignore images which have the average frame above this level
+
+        # Minimum angular velocity (deg/s) of a 3D line for fireball extraction; 0 = disabled
+        self.fireball_ang_vel_min = 0.0
         self.min_level = 40            # ignore pixel if below this level
         self.min_pixels = 8            # minimum number of pixels required to add event point
         self.k1 = 4                    # k1 factor for thresholding
@@ -591,6 +594,10 @@ class Config:
 
         # By default the peak of the meteor should be at least 16x brighter than the background. This is the multiplier that scales this number (1.0 = 16x).
         self.min_patch_intensity_multiplier = 0.0
+
+        # Minimum signal to noise ratio of a whole track (sum of per-frame intensities over the noise of
+        # that sum), a statistical acceptance test independent of the per-pixel threshold. 0 = disabled
+        self.track_snr_min = 0.0
 
         # Filtering by machine learning
         self.ml_filter = 0.5
@@ -1576,6 +1583,9 @@ def parseFireballDetection(config, parser):
 
     if parser.has_option(section, "white_avg_level"):
         config.white_avg_level = parser.getint(section, "white_avg_level")
+
+    if parser.has_option(section, "fireball_ang_vel_min"):
+        config.fireball_ang_vel_min = parser.getfloat(section, "fireball_ang_vel_min")
     
     if parser.has_option(section, "minimal_level"):
         config.min_level = parser.getint(section, "minimal_level")
@@ -1782,6 +1792,9 @@ def parseMeteorDetection(config, parser):
 
     if parser.has_option(section, "min_patch_intensity_multiplier"):
         config.min_patch_intensity_multiplier = parser.getfloat(section, "min_patch_intensity_multiplier")
+
+    if parser.has_option(section, "track_snr_min"):
+        config.track_snr_min = parser.getfloat(section, "track_snr_min")
 
     if parser.has_option(section, "ml_model_file"):
         config.ml_model_file = parser.get(section, "ml_model_file")
