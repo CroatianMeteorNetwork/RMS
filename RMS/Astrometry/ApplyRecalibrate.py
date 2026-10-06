@@ -941,16 +941,15 @@ def writeMeteorECSV(dir_path, station_id, ff_name, platepar, meteor_picks, fps, 
     return ecsv_path
 
 
-def ftpMatchTimes(meteor_list, meteor_fps_list, calstars_datetime_dict, default_fps):
+def ftpMatchTimes(meteor_list, meteor_fps_list, calstars_datetime_dict):
     """ Compute the times of the FF files in FTPdetectinfo which are used to find the closest CALSTARS entry
         (compared to the middle times of the CALSTARS entries).
 
     Arguments:
         meteor_list: [list] Meteors in the writeFTPdetectinfo input format: [ff_name, meteor_No, rho, phi,
             meteor_meas], where every measurement begins with the frame number.
-        meteor_fps_list: [list] Frame rate of every meteor (None to use the default).
+        meteor_fps_list: [list] Frame rate of every meteor.
         calstars_datetime_dict: [dict] Middle times of the CALSTARS entries, keyed by the FF name.
-        default_fps: [float] Frame rate used for meteors without their own.
 
     Return:
         [OrderedDict] {ff_name: datetime}
@@ -973,9 +972,8 @@ def ftpMatchTimes(meteor_list, meteor_fps_list, calstars_datetime_dict, default_
         #   pick, which is closest to the middle of the CALSTARS chunk that contains it
         else:
             first_frame = meteor_entry[4][0][0]
-            fps = meteor_fps if meteor_fps else default_fps
             ftp_ff_datetime_dict[ff_name] = FFfile.filenameToDatetime(ff_name) \
-                + datetime.timedelta(seconds=first_frame/fps)
+                + datetime.timedelta(seconds=first_frame/meteor_fps)
 
     return ftp_ff_datetime_dict
 
@@ -1149,7 +1147,7 @@ def recalibrateIndividualFFsAndApplyAstrometry(
     
         # Create a dictionary mapping FF file names in FTPdetectinfo to the times which are compared to the
         #   middle times of the CALSTARS entries
-        ftp_ff_datetime_dict = ftpMatchTimes(meteor_list, meteor_fps_list, calstars_datetime_dict, config.fps)
+        ftp_ff_datetime_dict = ftpMatchTimes(meteor_list, meteor_fps_list, calstars_datetime_dict)
 
 
         # Go through every FF file entry listed in the FTPdetectinfo and identify three FF entries in the 
