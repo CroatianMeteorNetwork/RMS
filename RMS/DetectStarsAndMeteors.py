@@ -73,10 +73,6 @@ def detectStarsAndMeteorsFrameInterface(
 
     log.info('Running detection on file: ' + img_handle.file_name)
     
-    # Load mask, dark, flat
-    mask, dark, flat_struct = loadImageCalibration(img_handle.dir_path, config, dtype=img_handle.ff.dtype, 
-                                                  byteswap=img_handle.byteswap)
-    
     # Run star extraction on the image handle
     star_list = extractStarsFrameInterface(img_handle, config, chunk_frames=chunk_frames, 
         flat_struct=flat_struct, dark=dark, mask=mask, save_calstars=False, chunk_callback=chunk_callback)
@@ -113,17 +109,18 @@ def chunkForFrame(chunk_images, frame):
     """ Find the saved chunk which contains the given frame.
 
     Arguments:
-        chunk_images: [list] List of (first_frame, nframes, ff_name) of the saved chunks.
+        chunk_images: [list] List of (first_frame, nframes, ff_name) of the saved chunks, sorted by the first
+            frame.
         frame: [float] Frame number.
 
     Return:
-        [str] FF name of the chunk which contains the frame. If no chunk contains it, the name of the last chunk
-            which starts before the frame, or None if there is no such chunk.
+        [str] FF name of the chunk which contains the frame. If no chunk contains it, the name of the last
+            chunk which starts before the frame, or None if there is no such chunk.
     """
 
     preceding = None
 
-    for first_frame, nframes, ff_name in sorted(chunk_images, key=lambda x: x[0]):
+    for first_frame, nframes, ff_name in chunk_images:
 
         if first_frame > frame:
             break
@@ -203,16 +200,11 @@ def saveResultsFrameInterface(star_list, meteor_list, img_handle, config, chunk_
 
             rho, theta, centroids = meteor
 
-            # Get the time of the first frame in the detection
-            first_pick_time = img_handle.currentFrameTime(frame_no=int(centroids[0][0]), dt_obj=True)
-
             # Measured fps to write for this meteor (None -> use the config fps)
             meteor_fps = None
 
             # Find the saved chunk image which contains the first pick
-            chunk_name = None
-            if (img_handle.input_type != 'ff') and chunk_images:
-                chunk_name = chunkForFrame(chunk_images, centroids[0][0])
+            chunk_name = chunkForFrame(chunk_images, centroids[0][0]) if chunk_images else None
 
             # Construct FF file name if it's not available
             if img_handle.input_type == 'ff':
@@ -238,6 +230,7 @@ def saveResultsFrameInterface(star_list, meteor_list, img_handle, config, chunk_
             # For non-FF inputs, construct the FF name from the station ID and the first pick time
             # To keep an accurate time, reset the frames so that the first pick is at frame 0
             else:
+                first_pick_time = img_handle.currentFrameTime(frame_no=int(centroids[0][0]), dt_obj=True)
                 ff_file_name = constructFFName(config.stationID, first_pick_time)
 
                 # Reset the frame numbers so that the first pick is at frame 0 

@@ -2222,6 +2222,10 @@ def parseTimelapse(config, parser):
         config.timelapse_generate_from_frames = parser.getboolean(section, "timelapse_generate_from_frames")
 
 
+# When the monitor generates the night reports, see monitor_report_mode
+MONITOR_REPORT_MODES = ('sunrise', 'idle', 'external', 'none')
+
+
 def parseMonitorProcessing(config, parser):
     section = "MonitorProcessing"
 
@@ -2234,7 +2238,7 @@ def parseMonitorProcessing(config, parser):
     if parser.has_option(section, "monitor_report_mode"):
         report_mode = parser.get(section, "monitor_report_mode").strip().lower()
 
-        if report_mode in ('sunrise', 'idle', 'external', 'none'):
+        if report_mode in MONITOR_REPORT_MODES:
             config.monitor_report_mode = report_mode
         else:
             print("Unknown monitor_report_mode '{:s}', using '{:s}'".format(report_mode,
@@ -2252,10 +2256,23 @@ def parseMonitorProcessing(config, parser):
     if parser.has_option(section, "monitor_delete_old_data"):
         config.monitor_delete_old_data = parser.getboolean(section, "monitor_delete_old_data")
 
-    for option in ["monitor_update_platepar", "monitor_save_ecsv", "monitor_shower_association",
-                   "monitor_fov_kml", "monitor_flux", "monitor_observation_summary"]:
-        if parser.has_option(section, option):
-            setattr(config, option, parser.getboolean(section, option))
+    if parser.has_option(section, "monitor_update_platepar"):
+        config.monitor_update_platepar = parser.getboolean(section, "monitor_update_platepar")
+
+    if parser.has_option(section, "monitor_save_ecsv"):
+        config.monitor_save_ecsv = parser.getboolean(section, "monitor_save_ecsv")
+
+    if parser.has_option(section, "monitor_shower_association"):
+        config.monitor_shower_association = parser.getboolean(section, "monitor_shower_association")
+
+    if parser.has_option(section, "monitor_fov_kml"):
+        config.monitor_fov_kml = parser.getboolean(section, "monitor_fov_kml")
+
+    if parser.has_option(section, "monitor_flux"):
+        config.monitor_flux = parser.getboolean(section, "monitor_flux")
+
+    if parser.has_option(section, "monitor_observation_summary"):
+        config.monitor_observation_summary = parser.getboolean(section, "monitor_observation_summary")
 
 
 def parseColors(config, parser):

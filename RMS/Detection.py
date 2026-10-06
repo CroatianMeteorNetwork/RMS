@@ -4448,7 +4448,8 @@ if __name__ == "__main__":
                 #   copy so the original frames are preserved for the ASGARD loop below.
                 centroids = centroids.copy()
                 for entry in centroids:
-                    entry[0] = (subframePickTime(img_handle, entry[0], fps_meas) - ref_time).total_seconds()*fps_meas
+                    entry[0] = (subframePickTime(img_handle, entry[0], fps_meas) - ref_time).total_seconds()\
+                        *fps_meas
 
                 meteor_fps = fps_meas
 

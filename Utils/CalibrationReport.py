@@ -9,6 +9,7 @@ import datetime
 
 import numpy as np
 import matplotlib.pyplot as plt
+from astropy.visualization import ZScaleInterval
 
 from RMS.Astrometry.ApplyAstrometry import computeFOVSize, xyToRaDecPP, raDecToXYPP, \
     photometryFitRobust, correctVignetting, photomLine, rotationWrtHorizon, \
@@ -29,34 +30,8 @@ pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 from RMS.Astrometry.CyFunctions import subsetCatalog
 
 
-def zscaleLimits(img):
-    """ Compute the display levels of the image with the zscale algorithm (as in SkyFit2).
-
-    Arguments:
-        img: [ndarray] Image.
-
-    Return:
-        (vmin, vmax): [tuple of float] Display levels.
-    """
-
-    try:
-        from astropy.visualization import ZScaleInterval
-
-        interval = ZScaleInterval(n_samples=2000, contrast=0.15, max_iterations=5)
-        vmin, vmax = interval.get_limits(img)
-
-        if vmax > vmin:
-            return float(vmin), float(vmax)
-
-    except Exception:
-        pass
-
-    # Fall back to percentiles if astropy is not available or zscale fails
-    return float(np.percentile(img, 1.0)), float(np.percentile(img, 99.99))
-
-
 def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar=None, show_graphs=False,
-                              min_size=1000):
+                              min_size=0):
     """ Given the folder of the night, find the Calstars file, check the star fit and generate a report
         with the quality of the calibration. The report contains information about both the astrometry and
         the photometry calibration. Graphs will be saved in the given directory of the night.
@@ -69,7 +44,7 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
         platepar: [Platepar instance] Use this platepar instead of finding one in the folder.
         show_graphs: [bool] Show the graphs on the screen. False by default.
         min_size: [int] Minimum size of the longest side of the astrometry report image (px). Smaller images
-            are upscaled. 1000 by default.
+            are upscaled. 0 by default (no upscaling).
     Return:
         None
     """
@@ -310,10 +285,10 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
     if img.dtype == np.uint8:
         img = Image.adjustLevels(img, np.percentile(img, 1.0), 1.3, np.percentile(img, 99.99))
 
-    # Images with a higher bit depth have a large dynamic range and most of the image would be dark, so use the
-    #   zscale levels (as in SkyFit2), which show the background and faint stars
+    # Images with a higher bit depth have a large dynamic range and most of the image would be dark, so use
+    #   the zscale levels (as in SkyFit2), which show the background and faint stars
     else:
-        vmin, vmax = zscaleLimits(img)
+        vmin, vmax = ZScaleInterval(n_samples=2000, contrast=0.15, max_iterations=5).get_limits(img)
         img = Image.adjustLevels(img, vmin, 1.0, vmax)
 
     plt.imshow(img, cmap='gray', interpolation='nearest')

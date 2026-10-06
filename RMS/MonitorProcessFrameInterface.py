@@ -38,13 +38,13 @@ from RMS.Formats.FrameInterface import detectInputType, getCacheID
 from RMS.Formats.FFfile import validFFName, constructFFName
 from RMS.Formats import FFpng
 from RMS.Routines import Image
-from RMS.MonitorNightReport import nightInfo, nightDirPath, writeDoneFlag, NightReporter, latestPlateparPath, \
-    ECSV_DIR_NAME
+from RMS.MonitorNightReport import ECSV_DIR_NAME, latestPlateparPath, nightDirPath, nightInfo, \
+    NightReporter, ReportLock, writeDoneFlag
 from RMS.DetectStarsAndMeteors import (
     detectStarsAndMeteorsFrameInterface,
     saveResultsFrameInterface,
 )
-from RMS.DetectionTools import loadImageCalibration
+from RMS.DetectionTools import binImageCalibration, findMaskPath, loadImageCalibration
 from RMS.Astrometry.ApplyRecalibrate import applyRecalibrate
 from RMS.Logger import LoggingManager, getLogger
 
@@ -64,6 +64,9 @@ FILE_TYPE_MAP = {
     'wmv': ['.wmv'],
     'fitsdirs': None,
 }
+
+# Directories of the monitor output which are not searched for input files
+MONITOR_OUTPUT_DIRS = {'CapturedFiles', 'ArchivedFiles', 'logs'}
 
 # Exit code of a worker process which skipped a file because it begins before the start time
 SKIP_EXIT_CODE = 3
@@ -161,6 +164,22 @@ def readBeginningDatetime(file_path, config, chunk_frames):
     return beginning_datetime
 
 
+def walkInput(top_dir):
+    """ Walk the directory tree like os.walk, without descending into the night, archive and log directories
+        of the monitor, which are in the input directory if it is also the output directory (the default).
+
+    Arguments:
+        top_dir: [str] Directory to walk.
+
+    Return:
+        Yields (root, dirs, files) like os.walk.
+    """
+
+    for root, dirs, files in os.walk(top_dir):
+        dirs[:] = [d for d in dirs if d not in MONITOR_OUTPUT_DIRS]
+        yield root, dirs, files
+
+
 def matchesFileType(file_name, file_type):
     """ Check if the given file matches the specified file type.
 
@@ -196,7 +215,8 @@ def matchesFileType(file_name, file_type):
 
 class ChunkImageSaver(object):
     """ Saves the max pixel and average pixel images of every star extraction chunk as an FF-equivalent image
-        pair, and keeps the list of saved chunks. Used as the chunk callback of the star extraction.
+        pair, corrected with the dark and the flat, and keeps the list of saved chunks. Used as the chunk
+        callback of the star extraction.
 
     Arguments:
         night_dir: [str] Directory where the image pairs are saved.
@@ -204,8 +224,8 @@ class ChunkImageSaver(object):
         source_file: [str] Name of the input file.
 
     Keyword arguments:
-        dark: [ndarray] Dark frame which is subtracted from the images before saving. None by default.
-        flat_struct: [Flat struct] Flat field which is applied to the images before saving. None by default.
+        dark: [ndarray] Dark frame at the full image size. None by default.
+        flat_struct: [Flat struct] Flat field at the full image size. None by default.
     """
 
     def __init__(self, night_dir, config, source_file, dark=None, flat_struct=None):
@@ -213,57 +233,58 @@ class ChunkImageSaver(object):
         self.night_dir = night_dir
         self.config = config
         self.source_file = source_file
-        self.dark = dark
-        self.flat_struct = flat_struct
+
+        # The chunks are binned for detection, so bin copies of the dark and the flat to match them
+        self.dark, self.flat_struct = dark, flat_struct
+        if config.detection_binning_factor > 1:
+            _, self.dark, self.flat_struct = binImageCalibration(config, None, dark,
+                                                                 copy.deepcopy(flat_struct))
 
         # List of (first_frame, nframes, ff_name) of the saved chunks
         self.chunk_images = []
 
 
     def savePair(self, img_handle, ff, first_frame):
-        """ Save the images of a chunk which begins at the given frame.
+        """ Save the images of a chunk.
+
+        Arguments:
+            img_handle: [FrameInterface instance] Image handle.
+            ff: [FFMimickInterface instance] Uncalibrated chunk.
+            first_frame: [int] First frame of the chunk.
 
         Return:
-            [str] FF name of the saved pair, None if it couldn't be saved.
+            [str] FF name of the saved pair.
         """
 
-        try:
-            begin_time = img_handle.currentFrameTime(frame_no=first_frame, dt_obj=True)
+        begin_time = img_handle.currentFrameTime(frame_no=first_frame, dt_obj=True)
 
-            ff_name = FFpng.pairNames(constructFFName(self.config.stationID, begin_time, frame=first_frame, ext=None))[0]
+        ff_name = FFpng.pairNames(constructFFName(self.config.stationID, begin_time, frame=first_frame,
+                                                  ext=None))[0]
 
-            # The images of non-FF inputs are binned for detection
-            binning = self.config.detection_binning_factor if img_handle.input_type != 'ff' else 1
+        # Apply the dark and the flat, like for the star extraction (the cached chunk is not modified)
+        maxpixel, avepixel = ff.maxpixel, ff.avepixel
 
-            # Apply the dark and the flat, like for the star extraction (the cached chunk is not modified)
-            maxpixel, avepixel = ff.maxpixel, ff.avepixel
+        if self.dark is not None:
+            maxpixel = Image.applyDark(maxpixel, self.dark)
+            avepixel = Image.applyDark(avepixel, self.dark)
 
-            if self.dark is not None:
-                maxpixel = Image.applyDark(maxpixel, self.dark)
-                avepixel = Image.applyDark(avepixel, self.dark)
+        if self.flat_struct is not None:
+            maxpixel = Image.applyFlat(maxpixel, self.flat_struct)
+            avepixel = Image.applyFlat(avepixel, self.flat_struct)
 
-            if self.flat_struct is not None:
-                maxpixel = Image.applyFlat(maxpixel, self.flat_struct)
-                avepixel = Image.applyFlat(avepixel, self.flat_struct)
+        meta = {
+            'nframes': ff.nframes,
+            'fps': img_handle.fps,
+            'first_frame': first_frame,
+            'binning': self.config.detection_binning_factor,
+            'station': self.config.stationID,
+            'begin_utc': begin_time,
+            'source_file': self.source_file,
+            'dark_applied': self.dark is not None,
+            'flat_applied': self.flat_struct is not None,
+        }
 
-            meta = {
-                'nframes': ff.nframes,
-                'fps': img_handle.fps,
-                'first_frame': first_frame,
-                'binning': binning,
-                'station': self.config.stationID,
-                'begin_utc': begin_time,
-                'source_file': self.source_file,
-                'dark_applied': self.dark is not None,
-                'flat_applied': self.flat_struct is not None,
-            }
-
-            FFpng.writePair(self.night_dir, ff_name, maxpixel, avepixel, meta=meta)
-
-        except Exception as e:
-            log.warning("Saving the images of the chunk at frame {:d} failed: {:s}".format(first_frame,
-                repr(e)))
-            return None
+        FFpng.writePair(self.night_dir, ff_name, maxpixel, avepixel, meta=meta)
 
         self.chunk_images.append((first_frame, ff.nframes, ff_name))
 
@@ -273,23 +294,15 @@ class ChunkImageSaver(object):
     def __call__(self, img_handle, ff):
         """ Chunk callback of the star extraction, called with the uncalibrated chunk. """
 
-        # Only handles which read the data in chunks are supported
-        if not (hasattr(img_handle, 'current_frame_chunk') and hasattr(img_handle, 'chunk_frames')):
-            return None
-
-        first_frame = img_handle.current_frame_chunk*img_handle.chunk_frames
-
-        return self.savePair(img_handle, ff, first_frame)
+        return self.savePair(img_handle, ff, img_handle.current_frame_chunk*img_handle.chunk_frames)
 
 
-    def saveTrailing(self, img_handle, min_frames=2):
-        """ Save the frames after the last full chunk, which are not used for star extraction.
+    def saveTrailing(self, img_handle):
+        """ Save the frames after the last full chunk, which are not used for star extraction, if there are at
+            least half a chunk of them. Meteors in shorter remainders are assigned to the last full chunk.
 
         Arguments:
             img_handle: [FrameInterface instance] Image handle.
-
-        Keyword arguments:
-            min_frames: [int] Minimum number of remaining frames to save them. 2 by default.
 
         Return:
             [str] FF name of the saved pair, None if nothing was saved.
@@ -298,18 +311,15 @@ class ChunkImageSaver(object):
         first_frame = img_handle.total_fr_chunks*img_handle.chunk_frames
         n_frames = img_handle.total_frames - first_frame
 
-        if n_frames < min_frames:
+        if n_frames < img_handle.chunk_frames//2:
             return None
 
         # Remove the chunk from the cache, as meteor detection may have cached a calibrated chunk with the
         #   same frames
-        cache = getattr(img_handle, 'cache', None)
-        if cache is not None:
-            cache.pop(getCacheID(first_frame, n_frames), None)
+        img_handle.cache.pop(getCacheID(first_frame, n_frames), None)
 
         ff = img_handle.loadChunk(first_frame=first_frame, read_nframes=n_frames)
-
-        if (ff is None) or (not getattr(ff, 'successful', True)):
+        if not ff.successful:
             return None
 
         return self.savePair(img_handle, ff, first_frame)
@@ -409,9 +419,11 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
 
         proc_log.info("Processing file: {}".format(file_path))
 
-        # Use the best platepar of the latest reported night, if available
+        # Use the best platepar of the latest reported night, unless the given platepar is newer (e.g. it was
+        #   fitted again manually)
         latest_platepar_path = latestPlateparPath(output_dir, config)
-        if config.monitor_update_platepar and os.path.isfile(latest_platepar_path):
+        if config.monitor_update_platepar and os.path.isfile(latest_platepar_path) \
+                and (os.path.getmtime(latest_platepar_path) > os.path.getmtime(platepar_path)):
             platepar_path = latest_platepar_path
             proc_log.info("Using the best platepar of a previous night: {}".format(platepar_path))
 
@@ -429,15 +441,24 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
             img_handle.dir_path, config, dtype=img_handle.ff.dtype, byteswap=img_handle.byteswap
         )
 
+        # The mask which was found, it is copied to the night directory for the night report
+        mask_path = findMaskPath(img_handle.dir_path, config)
+
+        # The given dark and flat have to be applied
+        if config.use_dark and (dark is None):
+            raise IOError("The dark could not be loaded: {}".format(config.dark_file))
+
+        if config.use_flat and (flat_struct is None):
+            raise IOError("The flat could not be loaded: {}".format(config.flat_file))
+
         # Determine the night the file belongs to. The chunk images are saved to the night directory
         night_name, _, _ = nightInfo(config, dt)
+        night_dir = nightDirPath(output_dir, night_name, config)
+        os.makedirs(night_dir, exist_ok=True)
 
         # FF inputs are not saved again, they already are FF files
         image_saver = None
         if config.monitor_save_images and (img_handle.input_type != 'ff'):
-            night_dir = nightDirPath(output_dir, night_name)
-            os.makedirs(night_dir, exist_ok=True)
-
             image_saver = ChunkImageSaver(night_dir, config, file_name, dark=dark, flat_struct=flat_struct)
 
         # Run star extraction and meteor detection
@@ -460,12 +481,6 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
             chunk_images=(image_saver.chunk_images if image_saver is not None else None)
         )
 
-        # Time of the last frame
-        try:
-            end_time = img_handle.currentFrameTime(frame_no=img_handle.total_frames - 1, dt_obj=True)
-        except Exception:
-            end_time = None
-
         proc_log.info("Detection results saved to: {}".format(results_dir))
 
         # Release the video handle if applicable
@@ -483,12 +498,13 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
 
             proc_log.info("Running ApplyRecalibrate on: {}".format(ftpdetectinfo_path))
 
-            # Run recalibration with load_all=True
             # Save every calibrated detection as an ECSV file in the ECSV directory of the night
             ecsv_out = None
             if config.monitor_save_ecsv:
-                ecsv_out = os.path.join(nightDirPath(output_dir, night_name), ECSV_DIR_NAME)
+                ecsv_out = os.path.join(night_dir, ECSV_DIR_NAME)
+                os.makedirs(ecsv_out, exist_ok=True)
 
+            # Run recalibration with load_all=True
             applyRecalibrate(
                 ftpdetectinfo_path, config,
                 # The calibration variation plots are made for the whole night in the night report
@@ -507,11 +523,7 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
         # Create the done.flag file, with the info needed for the night report
         writeDoneFlag(results_dir, {
             'night': night_name,
-            'n_images': len(image_saver.chunk_images) if image_saver is not None else 0,
-            'begin': dt,
-            'end': end_time,
-            'input_dir': os.path.dirname(os.path.abspath(file_path)),
-            'source_file': file_name,
+            'mask_path': mask_path,
             'dark_applied': dark is not None,
             'flat_applied': flat_struct is not None,
         })
@@ -592,7 +604,7 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
 
     # Scan the output directory for previously completed results (done.flag)
     if not force:
-        for root, dirs, files in os.walk(output_dir):
+        for root, dirs, files in walkInput(output_dir):
             if 'done.flag' in files:
                 # The parent dir name is the file base name
                 completed_base = os.path.basename(root)
@@ -627,6 +639,7 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
                     if proc.exitcode == 0:
                         log.info("Successfully processed: {}".format(uid))
                         processed_files.add(uid)
+                        reporter.resultsChanged()
                     elif proc.exitcode == SKIP_EXIT_CODE:
                         log.info("Skipped: {} (begins before the start time)".format(uid))
                         processed_files.add(uid)
@@ -655,7 +668,7 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
             candidate_paths = []
             try:
                 if recursive:
-                    for root, dirs, files in os.walk(input_dir):
+                    for root, dirs, files in walkInput(input_dir):
                         if file_type == 'fitsdirs':
                             for d in dirs:
                                 candidate_paths.append(os.path.join(root, d))
@@ -666,8 +679,10 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
                     candidate_paths = [os.path.join(input_dir, f) for f in os.listdir(input_dir)]
             except OSError:
                 log.error("Cannot read directory: {}".format(input_dir))
-                time.sleep(poll_interval)
-                continue
+
+            # Forget the files which disappeared while waiting for them to be written
+            stability_tracker = {path: trk for path, trk in stability_tracker.items()
+                                 if path in candidate_paths}
 
             # 2. Identify which paths are "Stable"
             stable_files = []
@@ -959,12 +974,13 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None)
             log.info("Camera {}: only processing files beginning at or after: {} UTC".format(
                 cam['id'], cam['start_time']))
 
-    # Schedule the night reports of every camera
+    # Schedule the night reports of every camera, only one camera reports at a time
+    report_lock = ReportLock()
     reporters = {}
     for cam in cameras:
         reporters[cam['id']] = NightReporter(cam['output_dir'], cam['config_path'], report_mode=report_mode,
-                                             fail_wait_time=fail_wait_time,
-                                             log_prefix="[{:s}] ".format(cam['id']))
+                                             fail_wait_time=fail_wait_time, camera_id=cam['id'],
+                                             report_lock=report_lock)
         log.info("Camera {}: night report mode: {}".format(cam['id'], reporters[cam['id']].report_mode))
 
     # Initialize state tracking dictionaries. Since files from different cameras might have the same name,
@@ -989,7 +1005,7 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None)
     # (indicated by the presence of a 'done.flag'). We do this to avoid reprocessing old files.
     if not force:
         for cam in cameras:
-            for root, dirs, files in os.walk(cam['output_dir']):
+            for root, dirs, files in walkInput(cam['output_dir']):
                 if 'done.flag' in files:
                     # The parent directory name is typically the original base filename
                     completed_base = os.path.basename(root)
@@ -1021,6 +1037,7 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None)
                         # Process exited normally
                         log.info("Successfully processed [{}]: {}".format(cam_id, uid))
                         processed_files[cam_id].add(uid)
+                        reporters[cam_id].resultsChanged()
 
                     elif proc.exitcode == SKIP_EXIT_CODE:
 
@@ -1072,7 +1089,7 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None)
                 # Fetch all paths from the input directory
                 try:
                     if recursive:
-                        for root, dirs, files in os.walk(cam['input_dir']):
+                        for root, dirs, files in walkInput(cam['input_dir']):
                             if file_type == 'fitsdirs':
                                 for d in dirs:
                                     candidate_paths.append(os.path.join(root, d))
@@ -1085,6 +1102,10 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None)
                 except OSError:
                     log.error("Cannot read directory for camera {}: {}".format(cam_id, cam['input_dir']))
                     continue
+
+                # Forget the files which disappeared while waiting for them to be written
+                stability_tracker[cam_id] = {path: trk for path, trk in stability_tracker[cam_id].items()
+                                             if path in candidate_paths}
 
                 cam_stable = []
                 for file_path in candidate_paths:
@@ -1414,8 +1435,8 @@ Examples:
     )
 
     arg_parser.add_argument('--flat', type=str, default=None,
-        help="Path to a flat field image file. The flat is applied only if given (use_flat in the config file "
-             "is ignored)."
+        help="Path to a flat field image file. The flat is applied only if given (use_flat in the config "
+             "file is ignored)."
     )
 
     arg_parser.add_argument('--dark', type=str, default=None,
@@ -1434,11 +1455,11 @@ Examples:
     )
 
     arg_parser.add_argument('--report_mode', type=str, default=None,
-        choices=['sunrise', 'idle', 'external', 'none'],
-        help="When to generate the night reports: 'sunrise' (after the night is over and all its data is "
-             "processed), 'idle' (whenever all data is processed), 'external' (only when the file "
-             ".report_now is created in the output directory), or 'none'. Overrides monitor_report_mode "
-             "in the config file."
+        choices=cr.MONITOR_REPORT_MODES,
+        help="When to generate the night reports: 'sunrise' (after the night is over and no new data came in "
+             "for monitor_report_quiet_min), 'idle' (whenever all data is processed), 'external' (only when "
+             "the file .report_now is created in the output directory), or 'none'. Overrides "
+             "monitor_report_mode in the config file."
     )
 
     # Parse

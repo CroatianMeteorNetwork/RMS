@@ -142,9 +142,9 @@ def extractDateFromLogName(config, log_name):
     log_name_fields = log_name.upper().split("_")
     stationID_upper = config.stationID.upper()
 
-    # The log time follows the station ID (log_<STATION>_<YYYYMMDD>_<HHMMSS>). The name may contain the station
-    #   ID more than once if a prefix is used (e.g. a file name), so take the last occurrence which is followed
-    #   by a valid time
+    # The log time follows the station ID (log_<STATION>_<YYYYMMDD>_<HHMMSS>). The name may contain the
+    #   station ID more than once if a prefix is used (e.g. a file name), so take the last occurrence which is
+    #   followed by a valid time
     station_indices = [i for i, field in enumerate(log_name_fields) if field == stationID_upper]
 
     for index_station in reversed(station_indices):

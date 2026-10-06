@@ -442,9 +442,9 @@ def extractStarsImgHandle(img_handle,
         roundness_threshold: [float] Minimum ratio of 2D Gaussian sigma X and sigma Y to be taken as a stars
             (hot pixels are narrow, while stars are round).
         max_feature_ratio: [float] Maximum ratio between 2 sigma of the star and the image segment area.
-        chunk_callback: [callable] Called as chunk_callback(img_handle, ff) after every chunk is loaded, before
-            any calibration is applied. If it returns a name, that name is used as the FF name of the chunk.
-            None by default.
+        chunk_callback: [callable] Called as chunk_callback(img_handle, ff) after every chunk is loaded,
+            before any calibration is applied. If it returns a name, that name is used as the FF name of the
+            chunk. None by default.
 
     Return:
         star_list: [list] Stars of every chunk in the CALSTARS format: [[ff_name, [(Y, X, IntensSum, Ampltd,

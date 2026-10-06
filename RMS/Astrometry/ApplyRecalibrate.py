@@ -951,8 +951,8 @@ def plotCalibrationVariation(recalibrated_platepars, platepar, config, dir_path,
         platepar: [Platepar instance] Reference platepar.
         config: [Config instance]
         dir_path: [str] Directory where the plots are saved.
-        plot_name: [str] Prefix of the plot names, the plots are saved as <plot_name>_calibration_variation.png
-            and <plot_name>_photometry_variation.png.
+        plot_name: [str] Prefix of the plot names, the plots are saved as
+            <plot_name>_calibration_variation.png and <plot_name>_photometry_variation.png.
 
     Keyword arguments:
         ff_frames: [int] Number of frames in the FF files or frame chunks. 256 by default.

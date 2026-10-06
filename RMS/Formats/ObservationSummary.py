@@ -48,6 +48,7 @@ import ephem
 
 from RMS.ConfigReader import parse
 from RMS.Misc import niceFormat, isRaspberryPi, sanitise, getRMSStyleFileName, getRmsRootDir, UTCFromTimestamp
+from RMS.Formats import FFpng
 from RMS.Formats.FFfits import filenameToDatetimeStr
 from RMS.Formats.Platepar import Platepar
 from RMS.CaptureDuration import captureDuration
@@ -727,7 +728,7 @@ def nightSummaryData(config, night_data_dir, frames_per_file=256):
 
     # Count the FF files, including FF-equivalent image pairs (counted once, by the max pixel image)
     fits_files_list = glob.glob(os.path.join(night_data_dir, "*.fits")) \
-        + glob.glob(os.path.join(night_data_dir, "FF*_maxpixel.png"))
+        + glob.glob(os.path.join(night_data_dir, "FF*" + FFpng.PAIR_MAX_SUFFIX))
     fits_files_list.sort()
     fits_count = len(fits_files_list)
     if fits_count < 1:

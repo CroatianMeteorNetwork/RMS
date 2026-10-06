@@ -1139,13 +1139,14 @@ def deleteOldDirs(data_dir, config):
     return
 
 
-def deleteOldLogfiles(data_dir, config, days_to_keep=None):
+def deleteOldLogfiles(data_dir, config, days_to_keep=None, pattern='log*.log*'):
     """ Deletes old observation directories to free up space for new ones.
 
     Arguments:
         data_dir: [str] Path to the RMS data directory which contains the Captured and Archived directories
         config: [Configuration object]
         days_to_keep: [int] number of days to retain, default None means read from config file
+        pattern: [str] glob pattern of the log file names, 'log*.log*' (the RMS log files) by default
     """
     log_dir = os.path.join(data_dir, config.log_dir)
     
@@ -1156,7 +1157,7 @@ def deleteOldLogfiles(data_dir, config, days_to_keep=None):
     date_to_purge_to = timestamp(date_to_purge_to)
 
     # Only going to purge RMS log files
-    flist = glob.glob1(log_dir, 'log*.log*')
+    flist = glob.glob1(log_dir, pattern)
 
     for fl in flist:
 
