@@ -616,6 +616,35 @@ def applyBrightnessAndContrast(img, brightness, contrast):
 
 
 
+def to8bitDisplay(img, low_percentile=0.5, high_percentile=99.9):
+    """ Convert an image to 8 bits for display by stretching it between the given percentiles. 8-bit images
+        are returned unchanged.
+
+    Arguments:
+        img: [ndarray] Input image.
+
+    Keyword arguments:
+        low_percentile: [float] Percentile mapped to 0. 0.5 by default.
+        high_percentile: [float] Percentile mapped to 255. 99.9 by default.
+
+    Return:
+        [ndarray] 8-bit image.
+    """
+
+    if img.dtype == np.uint8:
+        return img
+
+    low, high = np.percentile(img, [low_percentile, high_percentile])
+
+    # Avoid division by zero on flat images
+    if high <= low:
+        high = low + 1
+
+    img_scaled = (img.astype(np.float32) - low)/(high - low)*255
+
+    return np.clip(img_scaled, 0, 255).astype(np.uint8)
+
+
 def adjustLevels(img_array, minv, gamma, maxv, nbits=None, scaleto8bits=False):
     """ Adjusts levels on image with given parameters.
 
