@@ -1931,7 +1931,7 @@ class DebruijnSequenceManager(QtWidgets.QWidget, ScaledSizeHelper):
             self.gui.updatePicks()
 
 
-# Marker colors of the fragment IDs 1-10. Fragment 1 is the main fragment, drawn in the existing pick color
+# Marker colors of the fragment IDs 1-9. Fragment 1 is the main fragment, drawn in the existing pick color
 FRAGMENT_COLORS = [
     (255, 0, 0),      # Red
     (0, 255, 255),    # Cyan
@@ -1942,7 +1942,6 @@ FRAGMENT_COLORS = [
     (170, 90, 255),   # Purple
     (255, 255, 255),  # White
     (255, 160, 200),  # Pink
-    (128, 255, 192),  # Mint
 ]
 
 

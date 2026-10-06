@@ -1039,7 +1039,7 @@ def _topic_mr_annotations(gui):
         "not used, picking works as before and every pick is saved as the main fragment.</p>"
         "<ul>"
         "<li><b>Fragment</b> &ndash; the normal picks are fragment <b>1</b> (main fragment). While "
-        "fragment 2-10 is selected, left click picks the point of that fragment on each frame and "
+        "fragment 2-9 is selected, left click picks the point of that fragment on each frame and "
         "right click removes it; the main picks are not changed. Select 1 again to pick the main "
         "fragment. Each fragment has its own colour, and other fragments are drawn "
         "with smaller markers.</li>"
@@ -1052,6 +1052,8 @@ def _topic_mr_annotations(gui):
         "with dotted lines.</li>"
         "<li>The image info panel (" + _key("F1") + ") shows the selected fragment when it is not the main "
         "one, and the annotations of the main fragment pick on the current frame.</li>"
+        "<li>Shortcuts: " + _key("1") + "-" + _key("9") + " select the fragment, " + _key("B") + " toggles "
+        "Flare and " + _key("X") + " toggles Use in main trajectory.</li>"
         "</ul>"
         "<h3>ECSV columns</h3>"
         "<p>Written only if the tab is used, with one row per frame as in the GDEF standard.</p>"
@@ -1147,6 +1149,9 @@ def _topic_shortcuts_mr(gui):
         (c + " + W", "Save current frame"),
         (c + " + S", "Save FTPdetectinfo"),
         (c + " + K", "Open ASTRA GUI"),
+        ("1 - 9", "Select the fragment to pick (1 = main fragment)"),
+        ("B", "Toggle Flare of the main fragment pick"),
+        ("X", "Toggle Use in main trajectory of the main fragment pick"),
     ])
     body = "<h3>Navigation</h3>" + nav + "<h3>Picking &amp; files</h3>" + actions
     return _page("Keyboard reference - Manual Reduction", body)

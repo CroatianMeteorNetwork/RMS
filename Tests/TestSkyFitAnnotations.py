@@ -168,23 +168,23 @@ def test_fragment_columns(tmp_path):
     assert column(columns, rows, 'datetime1')[1] == column(columns, rows, 'datetime')[1]
 
 
-def test_fragment_ids_1_to_10(tmp_path):
-    """ All ten fragments can be stored on a single frame, and each one has its own color. """
+def test_fragment_ids_1_to_9(tmp_path):
+    """ All nine fragments can be stored on a single frame, and each one has its own color. """
 
     reduction = Reduction(tmp_path)
     reduction.addPick(20, 120.0, 200.0)
-    for fragment_id in range(2, 11):
+    for fragment_id in range(2, 10):
         reduction.addFragmentPoint(20, fragment_id, 120.0 + fragment_id, 200.0)
 
     _, meta, columns, rows = saveAndRead(reduction)
 
-    assert "# - {no_frags: 10}" in meta
-    assert [float(column(columns, rows, 'x_image' + str(k))[0]) for k in range(1, 10)] \
-        == [120.0 + fragment_id for fragment_id in range(2, 11)]
+    assert "# - {no_frags: 9}" in meta
+    assert [float(column(columns, rows, 'x_image' + str(k))[0]) for k in range(1, 9)] \
+        == [120.0 + fragment_id for fragment_id in range(2, 10)]
 
-    assert len(FRAGMENT_COLORS) == 10
+    assert len(FRAGMENT_COLORS) == 9
     assert FRAGMENT_COLORS[0] == (255, 0, 0)
-    assert len(set(FRAGMENT_COLORS)) == 10
+    assert len(set(FRAGMENT_COLORS)) == 9
 
 
 def test_no_duplicate_fragment_point(tmp_path):
@@ -306,9 +306,9 @@ def widget(qapp):
 def test_widget_main_fragment(widget):
     """ The main fragment pick can be flagged as a flare and excluded from the trajectory. """
 
-    assert widget.fragment.count() == 10
+    assert widget.fragment.count() == 9
     assert widget.fragment.itemText(0) == '1 — Main fragment'
-    assert widget.fragment.itemText(9) == '10 — Fragment 10'
+    assert widget.fragment.itemText(8) == '9 — Fragment 9'
 
     assert widget.trajectory_use.isEnabled() and widget.trajectory_use.isChecked()
     assert not widget.flare.isChecked()

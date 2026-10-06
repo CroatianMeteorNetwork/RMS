@@ -236,6 +236,11 @@ except Exception as e:
 #   far fewer stars than the nightly processing needs.
 MIN_CONFIG_MAX_STARS = 800
 
+# Keys which select the fragment to pick in manual reduction (1 is the main fragment)
+FRAGMENT_KEYS = [QtCore.Qt.Key.Key_1, QtCore.Qt.Key.Key_2, QtCore.Qt.Key.Key_3, QtCore.Qt.Key.Key_4,
+                 QtCore.Qt.Key.Key_5, QtCore.Qt.Key.Key_6, QtCore.Qt.Key.Key_7, QtCore.Qt.Key.Key_8,
+                 QtCore.Qt.Key.Key_9]
+
 
 ##############################################################################################################
 # ASTRA GUI Code
@@ -11284,6 +11289,17 @@ class PlateTool(QtWidgets.QMainWindow):
                     print('Current line: {}'.format(self.img.img_handle.current_line))
                     self.img.nextLine()
 
+            # Select the fragment to pick
+            elif event.key() in FRAGMENT_KEYS:
+                self.tab.annotations.fragment.setCurrentIndex(FRAGMENT_KEYS.index(event.key()))
+
+            # Toggle the flare and the main trajectory use of the main fragment pick on this frame
+            elif (event.key() == QtCore.Qt.Key.Key_B) and self.tab.annotations.flare.isEnabled():
+                self.tab.annotations.flare.click()
+
+            elif (event.key() == QtCore.Qt.Key.Key_X) and self.tab.annotations.trajectory_use.isEnabled():
+                self.tab.annotations.trajectory_use.click()
+
             # Launch ASTRA GUI
             elif (event.key() == QtCore.Qt.Key.Key_K) and (modifiers == QtCore.Qt.KeyboardModifier.ControlModifier):
                 
@@ -14999,7 +15015,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         Arguments:
             frame: [int] Frame to add/modify the point to.
-            fragment_id: [int] Fragment ID, 2-10 (1 is the main fragment in self.pick_list).
+            fragment_id: [int] Fragment ID, 2-9 (1 is the main fragment in self.pick_list).
             x_centroid: [float] x coordinate of the point.
             y_centroid: [float] y coordinate of the point.
 
