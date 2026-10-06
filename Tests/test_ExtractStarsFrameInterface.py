@@ -226,3 +226,65 @@ def test_unbinStarList_no_binning(config):
     config.detection_binning_factor = 1
 
     assert unbinStarList(_starList(), config) == _starList()
+
+
+### Matching meteors to CALSTARS chunks in recalibration ###
+
+def _closestChunk(meteor_list, fps_list, chunk_names, chunk_frames, fps):
+
+    from RMS.Astrometry.ApplyRecalibrate import ftpMatchTimes
+    from RMS.Formats import FFfile
+
+    calstars_datetime_dict = {name: FFfile.getMiddleTimeFF(name, fps, dt_obj=True, ff_frames=chunk_frames)
+                              for name in chunk_names}
+
+    ftp_times = ftpMatchTimes(meteor_list, fps_list, calstars_datetime_dict, fps)
+
+    return {ff_name: min(calstars_datetime_dict,
+                         key=lambda x: abs((t - calstars_datetime_dict[x]).total_seconds()))
+            for ff_name, t in ftp_times.items()}
+
+
+def _chunkNames(n, chunk_frames, fps):
+    from RMS.Formats import FFfile
+    return [FFfile.constructFFName('XX0001', BEG_TIME + datetime.timedelta(seconds=i*chunk_frames/fps))
+            for i in range(n)]
+
+
+@pytest.mark.parametrize('seconds_into_chunk', [0.1, 1.0, 2.5, 3.9])
+def test_first_pick_name_matched_to_containing_chunk(seconds_into_chunk):
+
+    from RMS.Formats import FFfile
+
+    # 128-frame chunks at 32 fps are 4 s long; the meteor begins in chunk 1
+    fps = 32.0
+    chunk_names = _chunkNames(4, 128, fps)
+
+    pick_time = BEG_TIME + datetime.timedelta(seconds=4 + seconds_into_chunk)
+    ff_name = FFfile.constructFFName('XX0001', pick_time)
+    meteor_list = [[ff_name, 1, 0, 0, [[0.0, 10, 20], [1.0, 11, 21]]]]
+
+    assert _closestChunk(meteor_list, [fps], chunk_names, 128, fps)[ff_name] == chunk_names[1]
+
+
+def test_name_in_calstars_matched_to_itself():
+
+    # A meteor late in an FF (frame 250 of 256) is still matched to its own FF
+    fps = 25.0
+    chunk_names = _chunkNames(3, 256, fps)
+    meteor_list = [[chunk_names[1], 1, 0, 0, [[250.0, 10, 20]]]]
+
+    assert _closestChunk(meteor_list, [None], chunk_names, 256, fps)[chunk_names[1]] == chunk_names[1]
+
+
+def test_first_frame_offset_is_used():
+
+    from RMS.Formats import FFfile
+
+    # The name is the start of chunk 0, but the meteor begins at frame 200 (in chunk 1)
+    fps = 32.0
+    chunk_names = _chunkNames(3, 128, fps)
+    ff_name = FFfile.constructFFName('XX0001', BEG_TIME + datetime.timedelta(seconds=0.5))
+    meteor_list = [[ff_name, 1, 0, 0, [[184.0, 10, 20]]]]
+
+    assert _closestChunk(meteor_list, [fps], chunk_names, 128, fps)[ff_name] == chunk_names[1]

@@ -941,6 +941,45 @@ def writeMeteorECSV(dir_path, station_id, ff_name, platepar, meteor_picks, fps, 
     return ecsv_path
 
 
+def ftpMatchTimes(meteor_list, meteor_fps_list, calstars_datetime_dict, default_fps):
+    """ Compute the times of the FF files in FTPdetectinfo which are used to find the closest CALSTARS entry
+        (compared to the middle times of the CALSTARS entries).
+
+    Arguments:
+        meteor_list: [list] Meteors in the writeFTPdetectinfo input format: [ff_name, meteor_No, rho, phi,
+            meteor_meas], where every measurement begins with the frame number.
+        meteor_fps_list: [list] Frame rate of every meteor (None to use the default).
+        calstars_datetime_dict: [dict] Middle times of the CALSTARS entries, keyed by the FF name.
+        default_fps: [float] Frame rate used for meteors without their own.
+
+    Return:
+        [OrderedDict] {ff_name: datetime}
+    """
+
+    ftp_ff_datetime_dict = OrderedDict()
+
+    for meteor_entry, meteor_fps in zip(meteor_list, meteor_fps_list):
+
+        ff_name = meteor_entry[0]
+
+        if ff_name in ftp_ff_datetime_dict:
+            continue
+
+        # If the FF file is also in CALSTARS, use the same time so it's matched to itself
+        if ff_name in calstars_datetime_dict:
+            ftp_ff_datetime_dict[ff_name] = calstars_datetime_dict[ff_name]
+
+        # Otherwise (e.g. the name is the time of the first pick for non-FF inputs), use the time of the first
+        #   pick, which is closest to the middle of the CALSTARS chunk that contains it
+        else:
+            first_frame = meteor_entry[4][0][0]
+            fps = meteor_fps if meteor_fps else default_fps
+            ftp_ff_datetime_dict[ff_name] = FFfile.filenameToDatetime(ff_name) \
+                + datetime.timedelta(seconds=first_frame/fps)
+
+    return ftp_ff_datetime_dict
+
+
 def recalibrateIndividualFFsAndApplyAstrometry(
     dir_path, ftpdetectinfo_path, calstars_data, config, platepar,
     generate_plot=True, load_all=False, debug=False, ecsv_out=False, calstars_fps=None
@@ -1108,15 +1147,9 @@ def recalibrateIndividualFFsAndApplyAstrometry(
             continue
 
     
-        # Create a dictionary mapping FF file names in FTPdetectinfo to datetime objects
-        ftp_ff_datetime_dict = OrderedDict()
-        for meteor_entry in meteor_list:
-            ff_name = meteor_entry[0]
-
-            # Use the same number of frames per FF as in CALSTARS, otherwise the middle times of chunks
-            #   shorter than 256 frames are shifted and the closest CALSTARS entry is ambiguous
-            ftp_ff_datetime_dict[ff_name] = FFfile.getMiddleTimeFF(ff_name, config.fps, dt_obj=True,
-                                                                   ff_frames=calstars_ff_frames)
+        # Create a dictionary mapping FF file names in FTPdetectinfo to the times which are compared to the
+        #   middle times of the CALSTARS entries
+        ftp_ff_datetime_dict = ftpMatchTimes(meteor_list, meteor_fps_list, calstars_datetime_dict, config.fps)
 
 
         # Go through every FF file entry listed in the FTPdetectinfo and identify three FF entries in the 
