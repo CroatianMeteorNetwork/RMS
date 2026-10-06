@@ -69,9 +69,9 @@ def selectFiles(config, dir_path, ff_detected):
 
 
         # Take all PNG, JPG, BMP images, except the FF image pairs, which are selected like FF files below
-        if ('.png' in file_name) or ('.jpg' in file_name) or ('.bmp' in file_name):
-            if not (FFpng.isPairMaxName(file_name) or FFpng.isPairAveName(file_name)):
-                selected_list.append(file_name)
+        if (('.png' in file_name) or ('.jpg' in file_name) or ('.bmp' in file_name)) \
+                and not FFpng.isPairName(file_name):
+            selected_list.append(file_name)
 
 
         # Take all field sum files
@@ -104,23 +104,15 @@ def selectFiles(config, dir_path, ff_detected):
             if ff_match is not None:
                 selected_list.append(ff_match)
 
-                # Add the average pixel image of FF image pairs
-                if FFpng.isPairMaxName(ff_match):
-                    ave_name = FFpng.pairNames(ff_match)[1]
-                    if os.path.isfile(os.path.join(dir_path, ave_name)):
-                        selected_list.append(ave_name)
-
 
         # Add FF file which contain detections to the list
         if upload_ffs and (ff_detected is not None) and (file_name in ff_detected):
             selected_list.append(file_name)
 
-            # Add the average pixel image of FF image pairs
-            if FFpng.isPairMaxName(file_name):
-                ave_name = FFpng.pairNames(file_name)[1]
-                if os.path.isfile(os.path.join(dir_path, ave_name)):
-                    selected_list.append(ave_name)
 
+    # Add the average pixel images of the selected FF image pairs
+    selected_list += [FFpng.pairNames(file_name)[1] for file_name in selected_list
+                      if FFpng.isPairMaxName(file_name)]
 
     # Take only the unique elements in the list, sorted by name
     selected_list = sorted(list(set(selected_list)))
@@ -183,9 +175,6 @@ def generateThumbsAndStacks(captured_path, config, ff_detected, detected_list=No
         detected_list = ff_detected
 
     generated_files = []
-
-    # Initialize the mask, so the detected stack works even if loading the mask fails
-    mask = None
 
     log.info('Generating thumbnails...')
 
@@ -326,7 +315,7 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
 
         # Create the imgdata set which is the union of the sets of FF files and FR files
         imgdata_set = (set([item for item in file_list if item.startswith("FF") and item.endswith(".fits")]) |
-                       set([item for item in file_list if FFpng.isPairMaxName(item) or FFpng.isPairAveName(item)]) |
+                       set([item for item in file_list if FFpng.isPairName(item)]) |
                        set([item for item in file_list if item.startswith("FR") and item.endswith(".bin")]))
 
         # Create the metadata set which is all the files from _detected excluding the files in imgdata_set,

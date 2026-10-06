@@ -85,8 +85,8 @@ def read(directory, filename, fmt=None, array=False, full_filename=False, verbos
         filename: [str] Name of FF file (either with FF and extension or without)
 
     Keyword arguments:
-        fmt: [str] Format for reading the file. It should either be 'bin' or 'fits'. If it is not given,
-            the format will be guessed.
+        fmt: [str] Format for reading the file: 'bin', 'fits' or 'png' (a single image or an FFpng image
+            pair). If it is not given, the format will be guessed from the extension.
         array: [ndarray] True in order to populate structure's array element (default is False)
         full_filename: [bool] True if full file name is given explicitly, a name which may differ from the
             usual FF*.fits format. False by default.
@@ -401,7 +401,7 @@ def getMiddleTimeFF(ff_name, fps, ret_milliseconds=True, ff_frames=256, dt_obj=F
             return (year, month, day, hour, minute, second, microsecond)
 
 
-def constructFFName(station_code, beg_dt, ext='fits', frame=0, suffix=None):
+def constructFFName(station_code, beg_dt, ext='fits', frame=0):
     """ Construct a name for an FF file using the station code and the given datetime.
 
     Arguments:
@@ -409,10 +409,9 @@ def constructFFName(station_code, beg_dt, ext='fits', frame=0, suffix=None):
         beg_dt: [datetime] Time of the first frame.
 
     Keyword arguments:
-        ext: [str] File extension. 'fits' by default.
+        ext: [str] File extension. 'fits' by default. If None, the name has no extension (e.g. the base name
+            of an FFpng image pair).
         frame: [int] Frame number written in the name. 0 by default.
-        suffix: [str] If given, it replaces the extension, e.g. '_maxpixel.png' for image pairs. None by
-            default.
 
     Return:
         [str] FF file name.
@@ -429,9 +428,7 @@ def constructFFName(station_code, beg_dt, ext='fits', frame=0, suffix=None):
     ff_name_ftp = "FF_{:s}_".format(station_code) + beg_dt.strftime("%Y%m%d_%H%M%S_") \
                 + "{:03d}".format(int(beg_dt.microsecond//1000)) + "_{:07d}".format(int(frame))
 
-    if suffix is not None:
-        ff_name_ftp += suffix
-    else:
+    if ext is not None:
         ff_name_ftp += "." + ext
     
     return ff_name_ftp

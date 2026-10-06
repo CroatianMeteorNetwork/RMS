@@ -182,8 +182,7 @@ def test_chunk_image_saver(tmp_path):
 
     assert [c[:2] for c in saver.chunk_images] == [(0, 128), (128, 128), (256, 44)]
     assert names == [c[2] for c in saver.chunk_images]
-    assert names[1] == FFfile.constructFFName('XX0001', handle.currentFrameTime(128), frame=128,
-                                              suffix=FFpng.PAIR_MAX_SUFFIX)
+    assert names[1] == FFpng.pairNames(FFfile.constructFFName('XX0001', handle.currentFrameTime(128), frame=128, ext=None))[0]
 
     ff = FFfile.read(str(tmp_path), names[2])
     assert ff.nframes == 44 and ff.first == 256
@@ -232,10 +231,8 @@ def test_meteor_times_round_trip_through_chunk_names(tmp_path):
 
     config = _config()
     handle = _FakeHandle(fps=25.0)
-    chunk_images = [(0, 128, FFfile.constructFFName('XX0001', handle.currentFrameTime(0), frame=0,
-                                                    suffix=FFpng.PAIR_MAX_SUFFIX)),
-                    (128, 128, FFfile.constructFFName('XX0001', handle.currentFrameTime(128), frame=128,
-                                                      suffix=FFpng.PAIR_MAX_SUFFIX))]
+    chunk_images = [(0, 128, FFpng.pairNames(FFfile.constructFFName('XX0001', handle.currentFrameTime(0), frame=0, ext=None))[0]),
+                    (128, 128, FFpng.pairNames(FFfile.constructFFName('XX0001', handle.currentFrameTime(128), frame=128, ext=None))[0])]
 
     # Two meteors in the second chunk (one with a rolling shutter fraction), one in the first
     meteors = [_meteor([130.0, 131.5, 133.0]), _meteor([140.0, 141.0]), _meteor([5.0, 6.0, 7.0])]
@@ -873,8 +870,7 @@ def test_observation_summary_counts_image_pairs(tmp_path):
 
     # Three consecutive 128-frame chunks (5.12 s each)
     for i in range(3):
-        name = FFfile.constructFFName('XX0001', BEG_TIME + datetime.timedelta(seconds=5.12*i), frame=128*i,
-                                      suffix=FFpng.PAIR_MAX_SUFFIX)
+        name = FFpng.pairNames(FFfile.constructFFName('XX0001', BEG_TIME + datetime.timedelta(seconds=5.12*i), frame=128*i, ext=None))[0]
         FFpng.writePair(str(tmp_path), name, np.zeros((4, 4), np.uint8), np.zeros((4, 4), np.uint8))
 
     result = nightSummaryData(config, str(tmp_path), frames_per_file=128)

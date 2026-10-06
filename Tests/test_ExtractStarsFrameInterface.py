@@ -1,6 +1,6 @@
 """
-Tests for star extraction on frame interface inputs (RMS.ExtractStars.extractStarsImgHandle) and saving of its
-results (RMS.DetectStarsAndMeteors).
+Tests for star extraction on frame interface inputs (RMS.ExtractStars.extractStarsImgHandle) and for matching
+meteors to the star extraction chunks during recalibration (RMS.Astrometry.ApplyRecalibrate.ftpMatchTimes).
 
 A fake image handle with chunks of known content is used, so every chunk can be identified by its pixel
 values.
@@ -13,7 +13,8 @@ import pytest
 
 import RMS.ConfigReader as cr
 import RMS.ExtractStars as es
-from RMS.DetectStarsAndMeteors import unbinStarList
+from RMS.Astrometry.ApplyRecalibrate import ftpMatchTimes
+from RMS.Formats import FFfile
 
 
 BEG_TIME = datetime.datetime(2025, 12, 25, 10, 0, 0)
@@ -28,8 +29,10 @@ class _FakeFF(object):
 class _FakeHandle(object):
     """ Image handle mimicking the video handles: chunks of chunk_frames frames. The left half of each chunk
         image is the given chunk level and the right half is one count brighter, so the median rounds down to
-        the chunk level and masking one half changes the image.
+        the chunk level and masking the left half raises it by one.
     """
+
+    input_type = 'video'
 
     def __init__(self, chunk_levels, chunk_frames=128, fps=100.0):
 
@@ -70,7 +73,18 @@ class _FakeHandle(object):
         return BEG_TIME + datetime.timedelta(seconds=frame_no/self.fps)
 
     def currentTime(self, dt_obj=False, beginning=False):
-        return self.currentFrameTime(frame_no=self.current_frame_chunk*self.chunk_frames)
+
+        # Like the real handles, the chunk time computed through a float can be a microsecond early
+        return self.currentFrameTime(frame_no=self.current_frame_chunk*self.chunk_frames) \
+            - datetime.timedelta(microseconds=1)
+
+
+class _Mask(object):
+    """ Mask structure which masks out the left half of the image. """
+
+    def __init__(self, shape=(64, 64)):
+        self.img = np.ones(shape, dtype=np.uint8)
+        self.img[:, :shape[1]//2] = 0
 
 
 @pytest.fixture
@@ -86,17 +100,15 @@ def config():
 
 @pytest.fixture
 def fake_extract(monkeypatch):
-    """ Replace the star extraction with a stub which returns one star whose amplitude is the chunk level, and
-        fails for chunk levels listed in fail_levels.
+    """ Replace the star extraction with a stub which returns one star (x=10, y=20, intensity 1000, FWHM 2.5)
+        whose amplitude is the median of the image, and fails for medians listed in fail_levels.
     """
 
-    calls = {'levels': [], 'fail_levels': set()}
+    calls = {'fail_levels': set()}
 
     def _extractStars(img, **kwargs):
 
         level = int(np.median(img))
-        calls['levels'].append(level)
-
         if level in calls['fail_levels']:
             return False
 
@@ -109,9 +121,11 @@ def fake_extract(monkeypatch):
 
 
 def _starLevels(star_list):
-    """ Return the chunk level (stored as the amplitude) of every entry in the star list. """
+    """ Return the image median (stored as the amplitude) of every entry in the star list. """
     return [int(entry[1][0][3]) for entry in star_list]
 
+
+### Chunk loop ###
 
 def test_all_chunks_processed_in_order(config, fake_extract):
 
@@ -144,12 +158,11 @@ def test_bright_chunk_is_skipped_not_fatal(config, fake_extract):
     assert _starLevels(star_list) == [10, 30, 40]
 
 
-def test_all_chunks_failing_returns_error_return(config, fake_extract):
+def test_no_stars_returns_empty_list(config, fake_extract):
 
     handle = _FakeHandle([200, 200])
-    star_list = es.extractStarsImgHandle(handle, config=config)
 
-    assert star_list == [[], [], [], [], [], [], [], [], []]
+    assert es.extractStarsImgHandle(handle, config=config) == []
 
 
 def test_handle_reset_to_first_chunk(config, fake_extract):
@@ -168,16 +181,12 @@ def test_handle_reset_to_first_chunk(config, fake_extract):
 def test_masking_does_not_modify_cached_chunk(config, fake_extract):
 
     handle = _FakeHandle([10, 20])
+    star_list = es.extractStarsImgHandle(handle, mask=_Mask(), config=config)
 
-    # Mask out the left half of the image
-    mask = np.ones((64, 64), dtype=np.uint8)
-    mask[:, :32] = 0
+    # The mask was applied (the masked left half is set to the mean of the right half)...
+    assert _starLevels(star_list) == [11, 21]
 
-    class _Mask(object):
-        img = mask
-
-    es.extractStarsImgHandle(handle, mask=_Mask(), config=config)
-
+    # ... but not to the cached chunks
     for chunk in range(len(handle.chunk_levels)):
         assert np.array_equal(handle.cache[chunk].avepixel, handle.chunkImage(chunk))
 
@@ -187,58 +196,52 @@ def test_ff_names_use_chunk_start_time(config, fake_extract):
     handle = _FakeHandle([10, 20, 30], chunk_frames=128, fps=100.0)
     star_list = es.extractStarsImgHandle(handle, config=config)
 
-    names = [entry[0] for entry in star_list]
-
-    # Chunks start at 0, 1.28 and 2.56 s
-    assert names == [
+    # Chunks start at 0, 1.28 and 2.56 s, without the microsecond error of the float chunk time
+    assert [entry[0] for entry in star_list] == [
         'FF_XX0001_20251225_100000_000_0000000.fits',
         'FF_XX0001_20251225_100001_280_0000000.fits',
         'FF_XX0001_20251225_100002_560_0000000.fits',
     ]
 
 
-### Star unbinning ###
-
-def _starList():
-    return [['FF_a.fits', [(10.0, 20.0, 1000, 50, 2.0, 7, 9.0, 0)]], [[]]]
-
+### Binning ###
 
 @pytest.mark.parametrize('method, intens_factor', [('avg', 4), ('sum', 1)])
-def test_unbinStarList(config, method, intens_factor):
+def test_binned_stars_are_rescaled(config, fake_extract, method, intens_factor):
 
     config.detection_binning_factor = 2
     config.detection_binning_method = method
 
-    star_list = unbinStarList(_starList(), config)
+    star_list = es.extractStarsImgHandle(_FakeHandle([10]), config=config)
 
     y, x, intens, ampl, fwhm, bg, snr, n_sat = star_list[0][1][0]
 
-    assert (y, x, fwhm) == (20.0, 40.0, 4.0)
+    assert (y, x, fwhm) == (40.0, 20.0, 5.0)
     assert intens == 1000*intens_factor
-    assert (ampl, bg, snr, n_sat) == (50, 7, 9.0, 0)
-
-    # Malformed entries are kept unchanged
-    assert star_list[1] == [[]]
+    assert (ampl, bg, snr, n_sat) == (10, 5, 8.0, 0)
 
 
-def test_unbinStarList_no_binning(config):
+def test_calibration_is_binned_for_binned_frames(config, fake_extract):
 
-    config.detection_binning_factor = 1
+    config.detection_binning_factor = 2
 
-    assert unbinStarList(_starList(), config) == _starList()
+    # The mask has the full image size, the chunks are binned
+    mask = _Mask(shape=(128, 128))
+    star_list = es.extractStarsImgHandle(_FakeHandle([10]), mask=mask, config=config)
+
+    # The binned mask was applied, and the original mask is unchanged
+    assert _starLevels(star_list) == [11]
+    assert mask.img.shape == (128, 128)
 
 
 ### Matching meteors to CALSTARS chunks in recalibration ###
 
 def _closestChunk(meteor_list, fps_list, chunk_names, chunk_frames, fps):
 
-    from RMS.Astrometry.ApplyRecalibrate import ftpMatchTimes
-    from RMS.Formats import FFfile
-
     calstars_datetime_dict = {name: FFfile.getMiddleTimeFF(name, fps, dt_obj=True, ff_frames=chunk_frames)
                               for name in chunk_names}
 
-    ftp_times = ftpMatchTimes(meteor_list, fps_list, calstars_datetime_dict, fps)
+    ftp_times = ftpMatchTimes(meteor_list, fps_list, calstars_datetime_dict)
 
     return {ff_name: min(calstars_datetime_dict,
                          key=lambda x: abs((t - calstars_datetime_dict[x]).total_seconds()))
@@ -246,15 +249,12 @@ def _closestChunk(meteor_list, fps_list, chunk_names, chunk_frames, fps):
 
 
 def _chunkNames(n, chunk_frames, fps):
-    from RMS.Formats import FFfile
     return [FFfile.constructFFName('XX0001', BEG_TIME + datetime.timedelta(seconds=i*chunk_frames/fps))
             for i in range(n)]
 
 
 @pytest.mark.parametrize('seconds_into_chunk', [0.1, 1.0, 2.5, 3.9])
 def test_first_pick_name_matched_to_containing_chunk(seconds_into_chunk):
-
-    from RMS.Formats import FFfile
 
     # 128-frame chunks at 32 fps are 4 s long; the meteor begins in chunk 1
     fps = 32.0
@@ -274,14 +274,12 @@ def test_name_in_calstars_matched_to_itself():
     chunk_names = _chunkNames(3, 256, fps)
     meteor_list = [[chunk_names[1], 1, 0, 0, [[250.0, 10, 20]]]]
 
-    assert _closestChunk(meteor_list, [None], chunk_names, 256, fps)[chunk_names[1]] == chunk_names[1]
+    assert _closestChunk(meteor_list, [fps], chunk_names, 256, fps)[chunk_names[1]] == chunk_names[1]
 
 
 def test_first_frame_offset_is_used():
 
-    from RMS.Formats import FFfile
-
-    # The name is the start of chunk 0, but the meteor begins at frame 200 (in chunk 1)
+    # The name is 0.5 s into chunk 0, but the meteor begins 184 frames (5.75 s) later, in chunk 1
     fps = 32.0
     chunk_names = _chunkNames(3, 128, fps)
     ff_name = FFfile.constructFFName('XX0001', BEG_TIME + datetime.timedelta(seconds=0.5))

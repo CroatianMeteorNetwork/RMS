@@ -17,6 +17,7 @@
 
 from __future__ import print_function, division, absolute_import
 
+import copy
 import time
 import sys
 import os
@@ -34,7 +35,7 @@ from scipy.spatial import cKDTree
 import RMS.ConfigReader as cr
 from RMS.Formats import FFfile
 from RMS.Formats import CALSTARS
-from RMS.DetectionTools import loadImageCalibration
+from RMS.DetectionTools import loadImageCalibration, binImageCalibration
 from RMS.Logger import getLogger
 from RMS.Math import twoDGaussian
 from RMS.Routines import MaskImage
@@ -402,8 +403,8 @@ def chunkStartTime(img_handle):
     """
 
     # Read the time of the first frame of the chunk directly where possible, as the chunk time computed by
-    # currentTime goes through a float and can be off by a microsecond (which changes the FF name)
-    if hasattr(img_handle, 'current_frame_chunk') and hasattr(img_handle, 'chunk_frames'):
+    #   currentTime goes through a float and can be off by a microsecond (which changes the FF name)
+    if hasattr(img_handle, 'chunk_frames'):
         first_frame = img_handle.current_frame_chunk*img_handle.chunk_frames
         return img_handle.currentFrameTime(frame_no=first_frame, dt_obj=True)
 
@@ -446,16 +447,9 @@ def extractStarsImgHandle(img_handle,
             None by default.
 
     Return:
-        x2, y2, background, intensity, fwhm: [list of ndarrays]
-            - x2: X axis coordinates of the star
-            - y2: Y axis coordinates of the star
-            - background: background intensity
-            - intensity: intensity of the star
-            - Gaussian Full width at half maximum (FWHM) of fitted stars
+        star_list: [list] Stars of every chunk in the CALSTARS format: [[ff_name, [(Y, X, IntensSum, Ampltd,
+            FWHM, BgLvl, SNR, NSatPx), ...]], ...]. Empty if no stars were found.
     """
-
-    # This will be returned if there was an error
-    error_return = [[], [], [], [], [], [], [], [], []]
 
     # Load parameters from config if given
     if config is not None:
@@ -471,7 +465,18 @@ def extractStarsImgHandle(img_handle,
     star_list = []
 
 
-    # Set the reference frame and the chunk to 0 (setFrame doesn't reset the chunk counter for all handles)
+    # Frame interface inputs are binned for detection, so bin copies of the calibration images to match them
+    #   (the originals are also used by the meteor detection, which bins them itself)
+    bin_factor = 1
+    if (img_handle.input_type != 'ff') and (config.detection_binning_factor > 1):
+        bin_factor = config.detection_binning_factor
+        mask, dark, flat_struct = binImageCalibration(config, copy.deepcopy(mask), dark,
+                                                      copy.deepcopy(flat_struct))
+
+    # The integrated intensity of stars on averaged binned images is reduced by the number of binned pixels
+    intens_factor = bin_factor**2 if config.detection_binning_method == 'avg' else 1
+
+    # Start from the first chunk
     img_handle.setFrame(0)
     if hasattr(img_handle, 'current_frame_chunk'):
         img_handle.current_frame_chunk = 0
@@ -562,6 +567,11 @@ def extractStarsImgHandle(img_handle,
             )
 
 
+        # Rescale the stars extracted on binned images to the full image size, as the meteor centroids
+        y_arr, x_arr = np.array(y_arr)*bin_factor, np.array(x_arr)*bin_factor
+        fwhm = np.array(fwhm)*bin_factor
+        intensity = np.array(intensity)*intens_factor
+
         # CALSTARS format: Y(0) X(1) IntensSum(2) Ampltd(3) FWHM(4) BgLvl(5) SNR(6) NSatPx(7)
         # Note: intensity=IntensSum (integrated), amplitude=Ampltd (peak)
         star_list.append(
@@ -569,14 +579,8 @@ def extractStarsImgHandle(img_handle,
              )
 
 
-    # Reset the handle to the first chunk
-    img_handle.setFrame(0)
-    if hasattr(img_handle, 'current_frame_chunk'):
-        img_handle.current_frame_chunk = 0
-
-    # If the star list is empty, return the error return
-    if not star_list:
-        return error_return
+    # Go back to the first chunk (the chunk counter wraps around)
+    img_handle.nextChunk()
 
     return star_list
 

@@ -230,8 +230,7 @@ class ChunkImageSaver(object):
         try:
             begin_time = img_handle.currentFrameTime(frame_no=first_frame, dt_obj=True)
 
-            ff_name = constructFFName(self.config.stationID, begin_time, frame=first_frame,
-                                      suffix=FFpng.PAIR_MAX_SUFFIX)
+            ff_name = FFpng.pairNames(constructFFName(self.config.stationID, begin_time, frame=first_frame, ext=None))[0]
 
             # The images of non-FF inputs are binned for detection
             binning = self.config.detection_binning_factor if img_handle.input_type != 'ff' else 1

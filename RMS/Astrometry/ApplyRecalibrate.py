@@ -961,9 +961,6 @@ def plotCalibrationVariation(recalibrated_platepars, platepar, config, dir_path,
         [bool] True if the plots were saved, False if there were less than 2 recalibrated platepars.
     """
 
-    recalibrated_platepars_all = recalibrated_platepars
-
-
     dt_list = []
     ang_dists = []
     rot_angles = []
@@ -972,18 +969,18 @@ def plotCalibrationVariation(recalibrated_platepars, platepar, config, dir_path,
     photom_offset_std_list = []
 
     # If the length of the recalibrated platepars is less than 2, skip the plot generation
-    if len(recalibrated_platepars_all) < 2:
+    if len(recalibrated_platepars) < 2:
 
         log.info('Less than 2 FF files were recalibrated, skipping the plot generation...')
 
         return False
     
 
-    first_dt = np.min([FFfile.filenameToDatetime(ff_name) for ff_name in recalibrated_platepars_all])
+    first_dt = np.min([FFfile.filenameToDatetime(ff_name) for ff_name in recalibrated_platepars])
 
-    for ff_name in recalibrated_platepars_all:
+    for ff_name in recalibrated_platepars:
 
-        pp_temp = recalibrated_platepars_all[ff_name]
+        pp_temp = recalibrated_platepars[ff_name]
 
         # If the fitting failed, skip the platepar
         if pp_temp is None:
@@ -1102,16 +1099,15 @@ def plotCalibrationVariation(recalibrated_platepars, platepar, config, dir_path,
     return True
 
 
-def ftpMatchTimes(meteor_list, meteor_fps_list, calstars_datetime_dict, default_fps):
+def ftpMatchTimes(meteor_list, meteor_fps_list, calstars_datetime_dict):
     """ Compute the times of the FF files in FTPdetectinfo which are used to find the closest CALSTARS entry
         (compared to the middle times of the CALSTARS entries).
 
     Arguments:
         meteor_list: [list] Meteors in the writeFTPdetectinfo input format: [ff_name, meteor_No, rho, phi,
             meteor_meas], where every measurement begins with the frame number.
-        meteor_fps_list: [list] Frame rate of every meteor (None to use the default).
+        meteor_fps_list: [list] Frame rate of every meteor.
         calstars_datetime_dict: [dict] Middle times of the CALSTARS entries, keyed by the FF name.
-        default_fps: [float] Frame rate used for meteors without their own.
 
     Return:
         [OrderedDict] {ff_name: datetime}
@@ -1134,9 +1130,8 @@ def ftpMatchTimes(meteor_list, meteor_fps_list, calstars_datetime_dict, default_
         #   pick, which is closest to the middle of the CALSTARS chunk that contains it
         else:
             first_frame = meteor_entry[4][0][0]
-            fps = meteor_fps if meteor_fps else default_fps
             ftp_ff_datetime_dict[ff_name] = FFfile.filenameToDatetime(ff_name) \
-                + datetime.timedelta(seconds=first_frame/fps)
+                + datetime.timedelta(seconds=first_frame/meteor_fps)
 
     return ftp_ff_datetime_dict
 
@@ -1310,7 +1305,7 @@ def recalibrateIndividualFFsAndApplyAstrometry(
     
         # Create a dictionary mapping FF file names in FTPdetectinfo to the times which are compared to the
         #   middle times of the CALSTARS entries
-        ftp_ff_datetime_dict = ftpMatchTimes(meteor_list, meteor_fps_list, calstars_datetime_dict, config.fps)
+        ftp_ff_datetime_dict = ftpMatchTimes(meteor_list, meteor_fps_list, calstars_datetime_dict)
 
 
         # Go through every FF file entry listed in the FTPdetectinfo and identify three FF entries in the 
