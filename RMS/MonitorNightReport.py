@@ -586,6 +586,27 @@ def plotNightCalibrationVariation(night_dir, night_name, config, ff_frames=256):
                                     ff_frames=ff_frames)
 
 
+def scaledThumbStack(thumb_stack, chunk_frames, ff_frames=256):
+    """ Scale the number of images stacked in one thumbnail from FF files to frame chunks of a different
+        length, so a thumbnail covers the same number of frames.
+
+    Arguments:
+        thumb_stack: [int] Number of FF files stacked in one thumbnail (config.thumb_stack).
+        chunk_frames: [int] Number of frames per chunk, None if unknown.
+
+    Keyword arguments:
+        ff_frames: [int] Number of frames in an FF file. 256 by default.
+
+    Return:
+        [int] Number of chunks stacked in one thumbnail, at least 1.
+    """
+
+    if not chunk_frames:
+        return thumb_stack
+
+    return max(1, int(round(thumb_stack*ff_frames/chunk_frames)))
+
+
 def generateNightReport(output_dir, night_name, config, results_dirs=None, archive=True):
     """ Merge the results of a night and generate its report.
 
@@ -650,6 +671,10 @@ def generateNightReport(output_dir, night_name, config, results_dirs=None, archi
         # Use the frame rate of the data, the chunk times are computed from it
         if fps:
             config.fps = fps
+
+        # The thumbnail stacking is set up for FF files with 256 frames. Scale it to the chunk length, so every
+        #   thumbnail covers the same number of frames as with normal FF files
+        config.thumb_stack = scaledThumbStack(config.thumb_stack, chunk_frames)
 
         # Use the same dark and flat settings as the processing, so e.g. the photometry doesn't correct the
         #   vignetting of flat fielded images again. The images were corrected if any file of the night was

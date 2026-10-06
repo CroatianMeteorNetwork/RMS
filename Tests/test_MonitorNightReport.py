@@ -922,3 +922,32 @@ def test_report_runs_only_enabled_products(tmp_path, monkeypatch):
     # The other products are off
     for step in ['fov_kml', 'flux', 'observation_summary']:
         assert step not in state['ok_steps'] + state['failed_steps']
+
+
+@pytest.mark.parametrize('thumb_stack, chunk_frames, expected', [(5, 128, 10), (5, 256, 5), (5, 512, 2),
+                                                                   (1, 1024, 1), (5, None, 5), (3, 100, 8)])
+def test_scaled_thumb_stack(thumb_stack, chunk_frames, expected):
+    assert mnr.scaledThumbStack(thumb_stack, chunk_frames) == expected
+
+
+def test_report_scales_thumbnail_stacking(tmp_path, monkeypatch):
+
+    import RMS.ArchiveDetections
+
+    config = _config()
+    config.timelapse_generate_captured = False
+    config.thumb_stack = 5
+
+    stacks = []
+    monkeypatch.setattr(RMS.ArchiveDetections, 'generateThumbsAndStacks',
+                        lambda night_dir, config, ff_detected: stacks.append(config.thumb_stack))
+
+    output_dir = str(tmp_path)
+    night_dir = mnr.nightDirPath(output_dir, NIGHT)
+    os.makedirs(night_dir)
+    _makeResults(output_dir, night_dir, config, 0)
+
+    mnr.generateNightReport(output_dir, NIGHT, config, archive=False)
+
+    # The chunks have 128 frames, so twice as many are stacked as with 256-frame FF files
+    assert stacks == [10]
