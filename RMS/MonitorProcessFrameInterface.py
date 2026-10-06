@@ -14,6 +14,7 @@
 from __future__ import print_function, division, absolute_import
 
 import argparse
+import copy
 import datetime
 import gc
 import glob
@@ -76,12 +77,47 @@ def parseStartTime(start_time_str):
 
     for fmt in START_TIME_FORMATS:
         try:
-            return datetime.datetime.strptime(start_time_str, fmt)
+            start_time = datetime.datetime.strptime(start_time_str, fmt)
         except ValueError:
-            pass
+            continue
+
+        # strptime accepts fields which are not zero-padded (e.g. 20260101_1020 is read as 10:02:00),
+        # so require an exact round trip
+        if start_time.strftime(fmt) == start_time_str:
+            return start_time
 
     raise ValueError("Could not parse the start time '{}'. Accepted formats: {}".format(
         start_time_str, ", ".join(START_TIME_FORMATS)))
+
+
+def resolveCameraStartTime(cp, section, cli_start_time=None):
+    """ Determine the start time for one camera in the multicam mode.
+
+    Precedence: the command line start time, then start_time in the camera section, then start_time in
+    the [Global] section.
+
+    Arguments:
+        cp: [ConfigParser] Parsed multicam INI file.
+        section: [str] Name of the camera section.
+
+    Keyword arguments:
+        cli_start_time: [datetime] Start time given on the command line. None by default.
+
+    Return:
+        [datetime] Start time for the camera, None if not set anywhere.
+    """
+
+    if cli_start_time is not None:
+        return cli_start_time
+
+    for sec in [section, 'Global']:
+        if cp.has_option(sec, 'start_time'):
+            try:
+                return parseStartTime(cp.get(sec, 'start_time'))
+            except ValueError as e:
+                raise ValueError("[{}] start_time: {}".format(sec, e))
+
+    return None
 
 
 def readBeginningDatetime(file_path, config, chunk_frames):
@@ -187,7 +223,8 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
 
     # Skip files which begin before the start time, before loading the whole file
     if start_time is not None:
-        beginning_datetime = readBeginningDatetime(file_path, config, chunk_frames)
+        # Use a copy of the config, as opening some input types modifies it (e.g. the image size)
+        beginning_datetime = readBeginningDatetime(file_path, copy.deepcopy(config), chunk_frames)
         if (beginning_datetime is not None) and (beginning_datetime < start_time):
             print("Skipping {}: begins at {} UTC, before the start time {} UTC".format(
                 file_name, beginning_datetime, start_time))
@@ -558,7 +595,7 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None):
 
     Keyword arguments:
         start_time: [datetime] Only process files whose recording begins at or after this time (UTC).
-            Used for cameras which don't have start_time set in their section or in [Global].
+            Overrides start_time from the INI file for all cameras.
             None by default, in which case all files are processed.
 
     Returns:
@@ -587,8 +624,9 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None):
         force = False
 
         # Optional. Only process files whose recording begins at or after this time (UTC). Files which
-        # begin earlier are skipped, even if they span this time. Can be overridden per camera.
-        start_time = 20260101_220000
+        # begin earlier are skipped, even if they span this time. Can be overridden per camera, and
+        # --start_time on the command line overrides both.
+        # start_time = 20260101_220000
 
         [CA0001]
         input_dir = /path/to/CA0001/video
@@ -597,7 +635,7 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None):
         platepar = /path/to/CA0001/platepar.cal
         flat = /path/to/CA0001/flat.bmp
         dark = /path/to/CA0001/dark.bmp
-        start_time = 2026-01-02 01:30:00
+        # start_time = 2026-01-02 01:30:00
 
         [CA0002]
         input_dir = /path/to/CA0002/video
@@ -630,18 +668,6 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None):
     force = cp.getboolean('Global', 'force', fallback=False)
     fail_wait_time = cp.getfloat('Global', 'fail_wait_time', fallback=300.0)
 
-    # Parse an INI start time string, exit on a bad format
-    def _parseIniStartTime(start_time_str, section):
-        try:
-            return parseStartTime(start_time_str)
-        except ValueError as e:
-            print("ERROR: [{}] start_time: {}".format(section, e))
-            sys.exit(1)
-
-    # The global start time from the INI file takes precedence over the one from the command line
-    if cp.has_option('Global', 'start_time'):
-        start_time = _parseIniStartTime(cp.get('Global', 'start_time'), 'Global')
-
     # Parse individual camera sections. Each section other than 'Global' defines a single camera.
     cameras = []
     for section in cp.sections():
@@ -657,12 +683,14 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None):
             'platepar_path': os.path.abspath(cp.get(section, 'platepar')),
             'flat_path': cp.get(section, 'flat', fallback=None),
             'dark_path': cp.get(section, 'dark', fallback=None),
-            'start_time': start_time,
         }
 
-        # A per-camera start time overrides the global one
-        if cp.has_option(section, 'start_time'):
-            cam['start_time'] = _parseIniStartTime(cp.get(section, 'start_time'), section)
+        # Determine the start time for this camera (command line > camera section > [Global])
+        try:
+            cam['start_time'] = resolveCameraStartTime(cp, section, cli_start_time=start_time)
+        except ValueError as e:
+            print("ERROR: {}".format(e))
+            sys.exit(1)
 
         # Convert optional calibration paths to absolute paths if they exist
         if cam['flat_path']:
@@ -1152,7 +1180,7 @@ Examples:
     arg_parser.add_argument('--start_time', '-s', type=str, default=None,
         help="Only process files whose recording begins at or after this UTC time, e.g. 20260101_220000 "
              "or '2026-01-01 22:00:00'. Files which begin earlier are skipped, even if they span this "
-             "time. In --multicam mode, start_time in the INI file takes precedence."
+             "time. In --multicam mode, overrides start_time in the INI file."
     )
 
     # Parse
