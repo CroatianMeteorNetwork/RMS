@@ -330,6 +330,11 @@ def _topic_tabs(gui):
                  "constellations, coordinate grids, distortion), image gamma, magnitude limits, "
                  "invert colours and more."))
 
+    if mode == 'manualreduction':
+        rows.append(("Annotations",
+                     "Mark picks as flares or exclude them from the main trajectory, and add the "
+                     "points of other fragments seen on the same frame."))
+
     if mode == 'manualreduction' and _is_dfn(gui):
         rows.append(("Debruijn",
                      "Recover the time of a DFN fireball from its shutter-break sequence."))
@@ -340,7 +345,7 @@ def _topic_tabs(gui):
     tab_topics = {
         "Levels": "levels", "Fit Parameters": "astrometry", "Station": "station",
         "Star Detection": "stardetect", "Mask": "mask", "Settings": "settings",
-        "Debruijn": "debruijn",
+        "Debruijn": "debruijn", "Annotations": "mr_annotations",
     }
     linked_rows = []
     for name, desc in rows:
@@ -1028,6 +1033,44 @@ def _topic_mr_lightcurve(gui):
     return _page("Light curve &amp; saving", body)
 
 
+def _topic_mr_annotations(gui):
+    body = (
+        "<p class=\"lead\">The <b>Annotations</b> tab adds optional information to the picks. If it is "
+        "not used, picking works as before and every pick is saved as the main fragment.</p>"
+        "<ul>"
+        "<li><b>Fragment</b> &ndash; the normal picks are fragment <b>1</b> (main fragment). While "
+        "fragment 2-10 is selected, left click picks the point of that fragment on each frame and "
+        "right click removes it; the main picks are not changed. Select 1 again to pick the main "
+        "fragment. Each fragment has its own colour, and other fragments are drawn "
+        "with smaller markers.</li>"
+        "<li><b>Flare</b> &ndash; marks the main fragment pick on this frame as a flare.</li>"
+        "<li><b>Use in main trajectory</b> &ndash; untick to keep a main fragment pick (e.g. a "
+        "saturated flare) but flag it to be left out of the trajectory solution. Such picks are also "
+        "left out of the great-circle fit.</li>"
+        "<li>Both options only apply to the main fragment, and are disabled while another fragment "
+        "is selected. Flares are drawn with thicker lines, and picks not used in the main trajectory "
+        "with dotted lines.</li>"
+        "</ul>"
+        "<h3>ECSV columns</h3>"
+        "<p>Written only if the tab is used, with one row per frame as in the GDEF standard.</p>"
+        + _defn_table([
+            ("frame_number", "Frame number of the row in the source video or FF file."),
+            ("flare", "True if the main fragment pick was marked as a flare."),
+            ("trajectory_use", "True if the main fragment pick is meant for the main trajectory solution."),
+            ("datetime1, ra1, dec1, azimuth1, altitude1, x_image1, y_image1",
+             "Time and position of fragment 2 (the suffix is the fragment number minus one, the main "
+             "fragment uses the columns without a suffix). Empty on the frames where the fragment was "
+             "not picked. The fragments are observational labels, not a physical fragmentation model "
+             "(e.g. MetSim)."),
+        ])
+        + _callout("FTPdetectinfo files only contain the main fragment picks, without annotations.",
+                   kind="note")
+        + _nav_links(related=[('mr_picking', 'Pick meteor positions'),
+                              ('mr_fireballs', 'Measuring fireballs')])
+    )
+    return _page("Annotations: fragments &amp; flares", body)
+
+
 def _topic_mr_astra(gui):
     c = _ctrl(gui)
     body = (
@@ -1160,6 +1203,8 @@ HELP_TOPICS = [
                                desc="Mark the meteor position on each frame.")),
     ('mr_fireballs',      dict(title="Measuring fireballs",                modes=('manualreduction',), enabled=_always,        build=_topic_fireballs,       section="Meteor measurement",
                                desc="Saturation, wake, fragmentation: how to pick them.")),
+    ('mr_annotations',    dict(title="Annotations: fragments &amp; flares", modes=('manualreduction',), enabled=_always,      build=_topic_mr_annotations,  section="Meteor measurement",
+                               desc="Flag flares and add the points of other fragments.")),
     ('mr_lightcurve',     dict(title="Light curve &amp; saving",          modes=('manualreduction',), enabled=_always,        build=_topic_mr_lightcurve,   section="Meteor measurement",
                                desc="View the light curve and export results.")),
     ('debruijn',          dict(title="DFN / Debruijn timing",             modes=('manualreduction',), enabled=_is_dfn,        build=_topic_debruijn,        section="Meteor measurement",
