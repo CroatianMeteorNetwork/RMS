@@ -1050,6 +1050,8 @@ def _topic_mr_annotations(gui):
         "<li>Both options only apply to the main fragment, and are disabled while another fragment "
         "is selected. Flares are drawn with thicker lines, and picks not used in the main trajectory "
         "with dotted lines.</li>"
+        "<li>The image info panel (" + _key("F1") + ") shows the selected fragment when it is not the main "
+        "one, and the annotations of the main fragment pick on the current frame.</li>"
         "</ul>"
         "<h3>ECSV columns</h3>"
         "<p>Written only if the tab is used, with one row per frame as in the GDEF standard.</p>"

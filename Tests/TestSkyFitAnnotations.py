@@ -289,6 +289,9 @@ class Gui(object):
     def updateGreatCircle(self):
         self.refits += 1
 
+    def updateLeftLabels(self):
+        pass
+
 
 @pytest.fixture(scope='module')
 def qapp():

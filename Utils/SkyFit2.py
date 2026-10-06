@@ -4145,6 +4145,21 @@ class PlateTool(QtWidgets.QMainWindow):
             text_str += "Time  = {:s}\n".format(
                 self.img_handle.currentFrameTime(dt_obj=True).strftime("%Y/%m/%d %H:%M:%S.%f")[:-3])
             text_str += 'Frame = {:d}\n'.format(self.img.getFrame())
+
+            # Show the fragment being picked if it is not the main one, or the annotations of the main
+            #   fragment pick on this frame
+            if hasattr(self, 'tab'):
+                fragment_id = self.tab.annotations.fragment.currentIndex() + 1
+                pick = self.tab.annotations.currentPick()
+                notes = []
+                if (fragment_id == 1) and (pick is not None):
+                    notes += ['flare'] if pick.get('flare', False) else []
+                    notes += ['not used'] if not pick.get('trajectory_use', True) else []
+
+                if (fragment_id > 1) or notes:
+                    text_str += 'Fragment = {:d}{:s}\n'.format(fragment_id,
+                                                               ' ({:s})'.format(', '.join(notes)) if notes else '')
+
             if self.img_handle.input_type == "ff":
                 if self.use_fr_files:
                     text_str += 'Line = {:d}\n'.format(self.img_handle.current_line)
@@ -10294,6 +10309,7 @@ class PlateTool(QtWidgets.QMainWindow):
                                      snr=self.snr_centroid, saturated=self.saturated_centroid)
 
                     self.updatePicks()
+                    self.updateLeftLabels()
 
                     # Add photometry coloring if single-click photometry is turned on
                     if self.single_click_photometry:
@@ -10319,6 +10335,7 @@ class PlateTool(QtWidgets.QMainWindow):
                         self.removeCentroid(self.img.getFrame())
 
                     self.updatePicks()
+                    self.updateLeftLabels()
                 elif self.cursor.mode == 2:
                     self.changePhotometry(self.img.getFrame(), self.photometryColoring(),
                                           add_photometry=False)

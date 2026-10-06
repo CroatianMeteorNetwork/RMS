@@ -1979,7 +1979,7 @@ class AnnotationsWidget(QtWidgets.QWidget, ScaledSizeHelper):
             name = 'Main fragment' if fragment_id == 1 else 'Fragment {:d}'.format(fragment_id)
             self.fragment.addItem(QtGui.QIcon(dot), '{:d} — {:s}'.format(fragment_id, name))
 
-        self.fragment.currentIndexChanged.connect(self.updateAnnotations)
+        self.fragment.currentIndexChanged.connect(self.onFragmentChanged)
         layout.addWidget(self.fragment)
 
         self.flare = QtWidgets.QCheckBox('Flare')
@@ -2020,6 +2020,12 @@ class AnnotationsWidget(QtWidgets.QWidget, ScaledSizeHelper):
         self.trajectory_use.setEnabled(main and (pick is not None))
         self.trajectory_use.setChecked(main and ((pick is None) or pick.get('trajectory_use', True)))
 
+    def onFragmentChanged(self):
+        """ Show the annotations of the selected fragment, and the fragment in the image info panel. """
+
+        self.updateAnnotations()
+        self.gui.updateLeftLabels()
+
     def onAnnotationChanged(self):
         """ Store the checkbox states in the main fragment pick on the current frame. """
 
@@ -2034,6 +2040,7 @@ class AnnotationsWidget(QtWidgets.QWidget, ScaledSizeHelper):
         #   used in the main trajectory
         self.gui.updatePicks()
         self.gui.updateGreatCircle()
+        self.gui.updateLeftLabels()
 
 
 class GeolocationWidget(QtWidgets.QWidget, ScaledSizeHelper):
