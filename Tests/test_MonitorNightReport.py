@@ -554,3 +554,88 @@ def test_finished_report_uploads_archives(night_setup, monkeypatch):
     assert ('add', ['/archives/night_detected.tar.bz2']) in calls
     assert calls[-1] == ('stop',)
     assert night not in reporter.failed
+
+
+### Review fixes ###
+
+def test_chunk_saver_ignores_handles_without_chunks(tmp_path):
+
+    class _FFHandle(object):
+        input_type = 'ff'
+
+    saver = ChunkImageSaver(str(tmp_path), _config(), 'FF_input.fits')
+
+    assert saver(_FFHandle(), _FakeFF(256)) is None
+    assert saver.chunk_images == []
+    assert os.listdir(str(tmp_path)) == []
+
+
+def test_failed_report_stays_pending(tmp_path, monkeypatch):
+
+    import RMS.ArchiveDetections
+
+    config = _config()
+    config.timelapse_generate_captured = False
+
+    output_dir = str(tmp_path)
+    night_dir = mnr.nightDirPath(output_dir, NIGHT)
+    os.makedirs(night_dir)
+    _makeResults(output_dir, night_dir, config, 0)
+
+    def _fail(*args, **kwargs):
+        raise RuntimeError("stack failed")
+
+    monkeypatch.setattr(RMS.ArchiveDetections, 'generateThumbsAndStacks', _fail)
+
+    state = mnr.generateNightReport(output_dir, NIGHT, config)
+
+    assert state['failed_steps'] == ['thumbnails_and_stacks']
+    assert state['attempted_files'] == ['input_0']
+    assert state['files'] == []
+
+    # The night is still pending, so the report is retried
+    assert mnr.unreportedResults(night_dir, mnr.scanNights(output_dir)[NIGHT])
+
+
+def test_cleanup_keeps_images_of_nights_with_late_files(tmp_path):
+
+    output_dir = str(tmp_path)
+    night_dir = mnr.nightDirPath(output_dir, NIGHT)
+    os.makedirs(night_dir)
+
+    FFpng.writePair(night_dir, 'FF_XX0001_20251225_030000_000_0000000_maxpixel.png',
+                    np.zeros((4, 4), np.uint8), np.zeros((4, 4), np.uint8))
+
+    reported_at = datetime.datetime(2025, 12, 25, 12, 0, 0)
+    with open(os.path.join(night_dir, mnr.REPORT_STATE_FILE_NAME), 'w') as f:
+        json.dump({'reported_at': reported_at.strftime(mnr.JSON_TIME_FORMAT), 'failed_steps': [],
+                   'files': ['f1']}, f)
+
+    # A late file for the night, which is not reported yet
+    _touchResults(output_dir, NIGHT, 'f1', _ts(reported_at))
+    _touchResults(output_dir, NIGHT, 'f2', _ts(reported_at + datetime.timedelta(days=5)))
+
+    assert mnr.deleteOldNightImages(output_dir, 2, now=reported_at + datetime.timedelta(days=5)) == []
+    assert len(os.listdir(night_dir)) == 3
+
+
+def test_stop_finishes_completed_report(night_setup, monkeypatch):
+
+    output_dir, config_path, night, _, _, results = night_setup
+
+    reporter = mnr.NightReporter(output_dir, config_path, report_mode='idle')
+
+    finished = []
+    monkeypatch.setattr(reporter, '_finishReport', lambda now: finished.append(reporter.active[1]))
+
+    class _FinishedProcess(object):
+        exitcode = 0
+        def join(self, timeout=None):
+            pass
+        def is_alive(self):
+            return False
+
+    reporter.active = (_FinishedProcess(), night, results)
+    reporter.stop()
+
+    assert finished == [night]

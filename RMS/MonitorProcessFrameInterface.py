@@ -253,6 +253,10 @@ class ChunkImageSaver(object):
     def __call__(self, img_handle, ff):
         """ Chunk callback of the star extraction, called with the uncalibrated chunk. """
 
+        # Only handles which read the data in chunks are supported
+        if not (hasattr(img_handle, 'current_frame_chunk') and hasattr(img_handle, 'chunk_frames')):
+            return None
+
         first_frame = img_handle.current_frame_chunk*img_handle.chunk_frames
 
         return self.savePair(img_handle, ff, first_frame)
@@ -399,8 +403,9 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
         # Determine the night the file belongs to. The chunk images are saved to the night directory
         night_name, _, _ = nightInfo(config, dt)
 
+        # FF inputs are not saved again, they already are FF files
         image_saver = None
-        if config.monitor_save_images:
+        if config.monitor_save_images and (img_handle.input_type != 'ff'):
             night_dir = nightDirPath(output_dir, night_name)
             os.makedirs(night_dir, exist_ok=True)
 

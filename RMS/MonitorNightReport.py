@@ -400,7 +400,8 @@ def generateNightReport(output_dir, night_name, config, results_dirs=None, uploa
         upload: [bool] Archive the night for upload. False by default.
 
     Return:
-        [dict] Report state: reported_at, files, ok_steps, failed_steps, upload_files.
+        [dict] Report state: reported_at, files (reported files, only updated if all steps succeeded),
+            attempted_files, ok_steps, failed_steps, upload_files.
     """
 
     # Import the report tools here, they are not needed for processing
@@ -486,9 +487,17 @@ def generateNightReport(output_dir, night_name, config, results_dirs=None, uploa
         else:
             _runStep('thumbnails_and_stacks', lambda: generateThumbsAndStacks(night_dir, config, ff_detected))
 
+    # Mark the files as reported only if all steps succeeded, so a failed report is retried
+    attempted_files = [os.path.basename(d) for d in results_dirs]
+    if failed_steps:
+        reported_files = readReportState(night_dir).get('files', [])
+    else:
+        reported_files = attempted_files
+
     state = {
         'reported_at': RmsDateTime.utcnow().strftime(JSON_TIME_FORMAT),
-        'files': [os.path.basename(d) for d in results_dirs],
+        'files': reported_files,
+        'attempted_files': attempted_files,
         'ok_steps': ok_steps,
         'failed_steps': failed_steps,
         'upload_files': upload_files,
@@ -551,6 +560,8 @@ def deleteOldNightImages(output_dir, days, now=None):
     if not os.path.isdir(captured_dir):
         return []
 
+    nights = scanNights(output_dir)
+
     cleaned = []
     for night_name in sorted(os.listdir(captured_dir)):
 
@@ -558,6 +569,10 @@ def deleteOldNightImages(output_dir, days, now=None):
         state = readReportState(night_dir)
 
         if (not state.get('reported_at')) or state.get('failed_steps'):
+            continue
+
+        # Keep the images of nights with files which were not reported yet (e.g. files which came in late)
+        if unreportedResults(night_dir, nights.get(night_name, [])):
             continue
 
         reported_at = datetime.datetime.strptime(state['reported_at'], JSON_TIME_FORMAT)
@@ -867,8 +882,11 @@ class NightReporter(object):
                 log.warning(self._log("Report of night {:s} did not finish in time, terminating".format(
                     night_name)))
                 proc.terminate()
+                self.active = None
 
-            self.active = None
+            # Finish the report which completed (e.g. hand its archives over for upload)
+            else:
+                self._finishReport(RmsDateTime.utcnow())
 
         if self.upload_manager is not None:
             self.upload_manager.stop()
