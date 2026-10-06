@@ -37,6 +37,10 @@ RATIO_HI = 0.85          # G/min(R,B) (linear) above this is natural colour: unt
 RATIO_LO = 0.60          # ... below this, fully rebuilt; linear ramp in between
 MIN_PIXELS = 200         # candidate pixels needed before the frame is touched
 
+# G8 below this limit (indexed by min(R8, B8)) is a candidate: bright enough, and G/min < RATIO_HI in
+# linear light. A lookup table, so the full-frame test needs no float arithmetic.
+_CAND_LIMIT = np.where(np.arange(256) >= MIN_CODE, np.ceil(np.sqrt(RATIO_HI)*np.arange(256)), 0).astype(np.uint8)
+
 
 def rebuildGreen(bgr, ceiling=None):
     """ Rebuild green where a bright pixel is magenta (green far below both red and blue).
@@ -63,12 +67,12 @@ def rebuildGreen(bgr, ceiling=None):
 
     # Cheap test in 8 bit first: G/min < RATIO_HI in linear light is G8 < sqrt(RATIO_HI)*min8
     mn8 = np.minimum(R8, B8)
-    cand = (mn8 >= MIN_CODE) & (G8 < np.sqrt(RATIO_HI)*mn8)
+    cand = G8 < _CAND_LIMIT[mn8]
     if np.count_nonzero(cand) < MIN_PIXELS:
         return bgr, None
 
-    ys, xs = np.nonzero(cand)
-    y0, y1, x0, x1 = ys.min(), ys.max() + 1, xs.min(), xs.max() + 1      # work on the bounding box only
+    rows, cols = np.flatnonzero(cand.any(axis=1)), np.flatnonzero(cand.any(axis=0))
+    y0, y1, x0, x1 = rows[0], rows[-1] + 1, cols[0], cols[-1] + 1      # work on the bounding box only
 
     sub = bgr[y0:y1, x0:x1]
     lin = (sub.astype(np.float32)/255.0)**2
