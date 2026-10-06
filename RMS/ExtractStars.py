@@ -391,6 +391,25 @@ def extractStarsFF(
     return ff_name, x_arr, y_arr, amplitude, intensity, fwhm, background, snr, saturated_count
 
 
+def chunkStartTime(img_handle):
+    """ Return the time of the first frame of the current chunk of the image handle.
+
+    Arguments:
+        img_handle: [FrameInterface instance] Image data handle.
+
+    Return:
+        [datetime] Time of the first frame of the current chunk.
+    """
+
+    # Read the time of the first frame of the chunk directly where possible, as the chunk time computed by
+    # currentTime goes through a float and can be off by a microsecond (which changes the FF name)
+    if hasattr(img_handle, 'current_frame_chunk') and hasattr(img_handle, 'chunk_frames'):
+        first_frame = img_handle.current_frame_chunk*img_handle.chunk_frames
+        return img_handle.currentFrameTime(frame_no=first_frame, dt_obj=True)
+
+    return img_handle.currentTime(dt_obj=True, beginning=True)
+
+
 def extractStarsImgHandle(img_handle,
         flat_struct=None, dark=None, mask=None,
         config=None, 
@@ -449,19 +468,26 @@ def extractStarsImgHandle(img_handle,
     star_list = []
 
 
-    # Set the reference frame to 0
+    # Set the reference frame and the chunk to 0 (setFrame doesn't reset the chunk counter for all handles)
     img_handle.setFrame(0)
+    if hasattr(img_handle, 'current_frame_chunk'):
+        img_handle.current_frame_chunk = 0
 
     # Go through all the chunks in the image handle
     for chunk_no in range(img_handle.total_fr_chunks):
+
+        # Advance to the next chunk at the top of the loop, so skipped chunks can never be loaded twice
+        if chunk_no > 0:
+            img_handle.nextChunk()
 
         print("Processing chunk {:d}/{:d}".format(chunk_no+1, img_handle.total_fr_chunks))
 
         # Load one video frame chunk
         ff_tmp = img_handle.loadChunk()
 
-        # Extract the image to work on
-        avepixel = ff_tmp.avepixel
+        # Extract the image to work on. Copy it, as masking modifies the image in place and the chunk may be
+        # cached by the image handle
+        avepixel = np.copy(ff_tmp.avepixel)
 
 
         # Apply the dark frame
@@ -486,7 +512,7 @@ def extractStarsImgHandle(img_handle,
         # Check if the image is too bright and skip the image (scale the cutoff to the image bit depth)
         if img_median > max_global_intensity*(2**(config.bit_depth - 8)):
             print("    Image too bright, skipping chunk.")
-            return error_return
+            continue
 
         # Get the image data from the average pixel image
         img = avepixel.astype(np.float32)
@@ -510,9 +536,7 @@ def extractStarsImgHandle(img_handle,
 
 
         # Construct an FF name from the chunk time
-        ff_name = FFfile.constructFFName(
-            config.stationID, img_handle.currentTime(dt_obj=True, beginning=True)
-            )
+        ff_name = FFfile.constructFFName(config.stationID, chunkStartTime(img_handle))
 
         # Print the results
         print()
@@ -533,9 +557,11 @@ def extractStarsImgHandle(img_handle,
             [ff_name, list(zip(y_arr, x_arr, intensity, amplitude, fwhm, background, snr, saturated_count))]
              )
 
-        # Go to the next chunk
-        img_handle.nextChunk()
-    
+
+    # Reset the handle to the first chunk
+    img_handle.setFrame(0)
+    if hasattr(img_handle, 'current_frame_chunk'):
+        img_handle.current_frame_chunk = 0
 
     # If the star list is empty, return the error return
     if not star_list:

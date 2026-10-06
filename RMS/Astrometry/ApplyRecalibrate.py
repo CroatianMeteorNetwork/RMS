@@ -1112,7 +1112,11 @@ def recalibrateIndividualFFsAndApplyAstrometry(
         ftp_ff_datetime_dict = OrderedDict()
         for meteor_entry in meteor_list:
             ff_name = meteor_entry[0]
-            ftp_ff_datetime_dict[ff_name] = FFfile.getMiddleTimeFF(ff_name, config.fps, dt_obj=True)
+
+            # Use the same number of frames per FF as in CALSTARS, otherwise the middle times of chunks
+            #   shorter than 256 frames are shifted and the closest CALSTARS entry is ambiguous
+            ftp_ff_datetime_dict[ff_name] = FFfile.getMiddleTimeFF(ff_name, config.fps, dt_obj=True,
+                                                                   ff_frames=calstars_ff_frames)
 
 
         # Go through every FF file entry listed in the FTPdetectinfo and identify three FF entries in the 
