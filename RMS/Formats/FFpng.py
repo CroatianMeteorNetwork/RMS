@@ -41,6 +41,11 @@ def isPairAveName(file_name):
     return file_name.startswith('FF') and file_name.endswith(PAIR_AVE_SUFFIX)
 
 
+def isPairName(file_name):
+    """ Check if the given file name is either image of an image pair. """
+    return isPairMaxName(file_name) or isPairAveName(file_name)
+
+
 def pairNames(name):
     """ Return the names of both files of an image pair.
 
@@ -59,18 +64,13 @@ def pairNames(name):
     return name + PAIR_MAX_SUFFIX, name + PAIR_AVE_SUFFIX
 
 
-def _writePNG(file_path, img, pnginfo=None):
-    """ Write a grayscale 8 or 16-bit image to a PNG file atomically. """
+def _writePNG(file_path, img, pnginfo):
+    """ Write an 8 or 16-bit grayscale image to a PNG file. A temporary file is renamed at the end, so a
+        reader never sees a partially written image.
+    """
 
-    if img.dtype != np.uint8:
-        img = np.clip(img, 0, 65535).astype(np.uint16)
-
-    # PIL picks the mode from the dtype: 'L' for 8-bit and 'I;16' for 16-bit images
-    pil_img = PILImage.fromarray(np.ascontiguousarray(img))
-
-    # Write to a temporary file first, so a reader never sees a partially written image
     tmp_path = file_path + '.tmp'
-    pil_img.save(tmp_path, format='PNG', pnginfo=pnginfo)
+    PILImage.fromarray(img).save(tmp_path, format='PNG', pnginfo=pnginfo)
     os.replace(tmp_path, file_path)
 
 
@@ -79,9 +79,9 @@ def writePair(directory, name, maxpixel, avepixel, meta=None):
 
     Arguments:
         directory: [str] Directory where the files will be written.
-        name: [str] Canonical FF name of the pair (the max pixel file name).
-        maxpixel: [ndarray] Max pixel image, 8 or 16-bit.
-        avepixel: [ndarray] Average pixel image, 8 or 16-bit.
+        name: [str] Name of the pair, either file name or the common base name.
+        maxpixel: [ndarray] Max pixel image, uint8 or uint16.
+        avepixel: [ndarray] Average pixel image, uint8 or uint16.
 
     Keyword arguments:
         meta: [dict] Metadata stored in the PNG text chunks of both files, e.g. nframes, fps, first_frame,
@@ -91,26 +91,20 @@ def writePair(directory, name, maxpixel, avepixel, meta=None):
         (max_path, ave_path): [tuple of str] Paths of the written files.
     """
 
-    max_name, ave_name = pairNames(name)
-
-    # Store the metadata as text
     pnginfo = PngInfo()
     if meta is not None:
         for key, value in meta.items():
-
-            if value is None:
-                continue
 
             if isinstance(value, datetime.datetime):
                 value = value.strftime(BEGIN_TIME_FORMAT)
 
             pnginfo.add_text(str(key), str(value))
 
-    max_path = os.path.join(directory, max_name)
-    ave_path = os.path.join(directory, ave_name)
+    max_path, ave_path = [os.path.join(directory, file_name) for file_name in pairNames(name)]
 
-    _writePNG(ave_path, avepixel, pnginfo=pnginfo)
-    _writePNG(max_path, maxpixel, pnginfo=pnginfo)
+    # Write the average pixel image first, so the canonical max pixel file never exists without it
+    _writePNG(ave_path, avepixel, pnginfo)
+    _writePNG(max_path, maxpixel, pnginfo)
 
     return max_path, ave_path
 
@@ -122,34 +116,12 @@ def readMeta(file_path):
         file_path: [str] Path to the PNG file.
 
     Return:
-        [dict] Metadata as strings, empty if none is stored.
+        [dict] Metadata as strings.
     """
 
-    try:
-        with PILImage.open(file_path) as img:
-            return dict(getattr(img, 'text', {}))
-
-    except (IOError, OSError, ValueError):
-        return {}
-
-
-def _readImage(file_path):
-    """ Read a grayscale image with its native bit depth. """
-
-    img = cv2.imread(file_path, cv2.IMREAD_UNCHANGED)
-
-    if img is None:
-        return None
-
-    if img.ndim == 3:
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-
-    return img
-
-
-def _upscale(img, factor):
-    """ Upscale the image by repeating pixels. """
-    return np.repeat(np.repeat(img, factor, axis=0), factor, axis=1)
+    # The text chunks are written before the image data, so they are read without decoding the image
+    with PILImage.open(file_path) as img:
+        return dict(img.info)
 
 
 def readPair(directory, name, full_filename=False, verbose=True):
@@ -175,56 +147,40 @@ def readPair(directory, name, full_filename=False, verbose=True):
     max_path = os.path.join(directory, max_name)
     ave_path = os.path.join(directory, ave_name)
 
-    maxpixel = _readImage(max_path)
+    maxpixel = cv2.imread(max_path, cv2.IMREAD_ANYDEPTH)
     if maxpixel is None:
         return None
 
-    avepixel = _readImage(ave_path) if os.path.isfile(ave_path) else None
-    if (avepixel is None) or (avepixel.shape != maxpixel.shape):
-        if verbose:
-            print("Average pixel image {:s} is missing or invalid, using the max pixel image!".format(ave_name))
-        avepixel = np.copy(maxpixel)
+    if os.path.isfile(ave_path):
+        avepixel = cv2.imread(ave_path, cv2.IMREAD_ANYDEPTH)
 
-    avepixel = avepixel.astype(maxpixel.dtype)
+    else:
+        if verbose:
+            print("Average pixel image {:s} is missing, using the max pixel image!".format(ave_name))
+        avepixel = np.copy(maxpixel)
 
     meta = readMeta(max_path)
 
     # Upscale binned images to the full image size, so they agree with the star and meteor coordinates
-    try:
-        binning = int(meta.get('binning', 1))
-    except ValueError:
-        binning = 1
-
+    binning = int(meta.get('binning', 1))
     if binning > 1:
-        maxpixel = _upscale(maxpixel, binning)
-        avepixel = _upscale(avepixel, binning)
+        maxpixel = np.repeat(np.repeat(maxpixel, binning, axis=0), binning, axis=1)
+        avepixel = np.repeat(np.repeat(avepixel, binning, axis=0), binning, axis=1)
 
 
     ff = FFStruct()
     ff.nrows, ff.ncols = maxpixel.shape
     ff.nbits = 8*maxpixel.itemsize
+    ff.nframes = int(meta.get('nframes', -1))
+    ff.fps = float(meta.get('fps', -1))
+    ff.first = int(meta.get('first_frame', 0))
+
+    if 'begin_utc' in meta:
+        ff.starttime = meta['begin_utc']
 
     ff.maxpixel = maxpixel
     ff.avepixel = avepixel
     ff.stdpixel = np.zeros_like(maxpixel)
     ff.maxframe = np.zeros(maxpixel.shape, dtype=np.uint8)
-
-    try:
-        ff.nframes = int(meta.get('nframes', -1))
-    except ValueError:
-        ff.nframes = -1
-
-    try:
-        ff.fps = float(meta.get('fps', -1))
-    except ValueError:
-        ff.fps = -1
-
-    try:
-        ff.first = int(meta.get('first_frame', 0))
-    except ValueError:
-        ff.first = 0
-
-    if 'begin_utc' in meta:
-        ff.starttime = meta['begin_utc']
 
     return ff

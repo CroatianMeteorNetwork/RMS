@@ -616,16 +616,67 @@ def applyBrightnessAndContrast(img, brightness, contrast):
 
 
 
-def to8bitDisplay(img, low_percentile=0.5, high_percentile=99.9):
-    """ Convert an image to 8 bits for display by stretching it between the given percentiles. 8-bit images
-        are returned unchanged.
+def displayLevels(images, low_percentile=0.5, high_percentile=99.9):
+    """ Compute display levels common to a series of images, as the median of their percentiles. Using the
+        same levels for every image avoids the flickering of individually stretched images (e.g. in a
+        timelapse) and keeps the changes of the sky brightness visible.
+
+    Arguments:
+        images: [list of ndarray] Images, e.g. a sample of the images in the series.
+
+    Keyword arguments:
+        low_percentile: [float] Percentile mapped to 0. 0.5 by default.
+        high_percentile: [float] Percentile mapped to 255. 99.9 by default.
+
+    Return:
+        (low, high): [tuple of float] Display levels.
+    """
+
+    levels = [np.percentile(img, [low_percentile, high_percentile]) for img in images]
+
+    return tuple(np.median(levels, axis=0))
+
+
+def ffDisplayLevels(dir_path, ff_list, n_samples=20):
+    """ Compute display levels common to the max pixel images of the given FF files with more than 8 bits,
+        from a sample of evenly spaced FF files (see displayLevels).
+
+    Arguments:
+        dir_path: [str] Directory with the FF files.
+        ff_list: [list] Names of the FF files.
+
+    Keyword arguments:
+        n_samples: [int] Number of sampled FF files. 20 by default.
+
+    Return:
+        [tuple] (low, high) display levels, None for 8-bit images or if no FF file could be read.
+    """
+
+    # Imported here to avoid a circular import
+    from RMS.Formats.FFfile import read as readFF
+
+    if not ff_list:
+        return None
+
+    ff_sample = [readFF(dir_path, ff_name) for ff_name in ff_list[::max(1, len(ff_list)//n_samples)]]
+    images = [ff.maxpixel for ff in ff_sample if ff is not None]
+
+    if (not images) or (images[0].dtype == np.uint8):
+        return None
+
+    return displayLevels(images)
+
+
+def to8bitDisplay(img, levels=None):
+    """ Convert an image to 8 bits for display by stretching it between the given levels. 8-bit images are
+        returned unchanged.
 
     Arguments:
         img: [ndarray] Input image.
 
     Keyword arguments:
-        low_percentile: [float] Percentile mapped to 0. 0.5 by default.
-        high_percentile: [float] Percentile mapped to 255. 99.9 by default.
+        levels: [tuple] (low, high) levels mapped to 0 and 255, see displayLevels. If None, the levels are
+            computed from the image itself.
 
     Return:
         [ndarray] 8-bit image.
@@ -634,7 +685,10 @@ def to8bitDisplay(img, low_percentile=0.5, high_percentile=99.9):
     if img.dtype == np.uint8:
         return img
 
-    low, high = np.percentile(img, [low_percentile, high_percentile])
+    if levels is None:
+        levels = displayLevels([img])
+
+    low, high = levels
 
     # Avoid division by zero on flat images
     if high <= low:

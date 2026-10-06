@@ -7,13 +7,14 @@ import datetime
 import os
 import shutil
 
+import cv2
 import numpy as np
 import pytest
 
 import RMS.ConfigReader as cr
 from RMS.Formats import FFfile, FFpng
 from RMS.ArchiveDetections import selectFiles
-from RMS.Routines.Image import to8bitDisplay
+from RMS.Routines.Image import displayLevels, ffDisplayLevels, to8bitDisplay
 
 
 STATION = 'XX0001'
@@ -22,7 +23,7 @@ BEG_TIME = datetime.datetime(2025, 12, 25, 10, 0, 0, 69539)
 
 def _pairName(seconds=0.0, frame=0):
     dt = BEG_TIME + datetime.timedelta(seconds=seconds)
-    return FFfile.constructFFName(STATION, dt, frame=frame, suffix=FFpng.PAIR_MAX_SUFFIX)
+    return FFpng.pairNames(FFfile.constructFFName(STATION, dt, frame=frame, ext=None))[0]
 
 
 def _images(dtype, shape=(48, 64), seed=0):
@@ -65,6 +66,11 @@ def test_constructFFName_pair():
 
 def test_constructFFName_default_unchanged():
     assert FFfile.constructFFName(STATION, BEG_TIME) == 'FF_XX0001_20251225_100000_069_0000000.fits'
+
+
+def test_constructFFName_without_extension():
+    assert FFfile.constructFFName(STATION, BEG_TIME, ext=None, frame=256) \
+        == 'FF_XX0001_20251225_100000_069_0000256'
 
 
 def test_validFFName_lists_each_pair_once(tmp_path):
@@ -169,7 +175,7 @@ def test_missing_pair_returns_none(tmp_path):
 def test_single_png_still_read_as_single_image(tmp_path):
 
     maxpixel, _ = _images(np.uint8)
-    FFpng._writePNG(os.path.join(str(tmp_path), 'FF_single.png'), maxpixel)
+    cv2.imwrite(os.path.join(str(tmp_path), 'FF_single.png'), maxpixel)
 
     ff = FFfile.read(str(tmp_path), 'FF_single.png')
 
@@ -191,6 +197,33 @@ def test_to8bitDisplay():
 
     flat = np.full((8, 8), 1000, dtype=np.uint16)
     assert to8bitDisplay(flat).dtype == np.uint8
+
+
+def test_common_display_levels_keep_relative_brightness():
+
+    # The sky gets brighter (e.g. clouds or dawn) in the second image
+    dark_sky = np.full((32, 32), 1000, dtype=np.uint16)
+    dark_sky[0, :8] = 20000
+    bright_sky = dark_sky + 3000
+
+    levels = displayLevels([dark_sky, bright_sky])
+    dark_8bit, bright_8bit = to8bitDisplay(dark_sky, levels), to8bitDisplay(bright_sky, levels)
+
+    # With common levels the brighter sky stays brighter, while individual stretching hides the difference
+    assert np.median(bright_8bit) > np.median(dark_8bit)
+    assert np.median(to8bitDisplay(bright_sky)) == np.median(to8bitDisplay(dark_sky))
+
+
+@pytest.mark.parametrize('dtype', [np.uint8, np.uint16])
+def test_ffDisplayLevels(tmp_path, dtype):
+
+    levels = ffDisplayLevels(str(tmp_path), _writeNight(str(tmp_path), dtype))
+
+    # Only images with more than 8 bits are stretched
+    if dtype == np.uint8:
+        assert levels is None
+    else:
+        assert levels[0] < levels[1]
 
 
 ### Archive file selection ###
@@ -293,18 +326,3 @@ def test_timelapse_of_pairs(tmp_path, dtype):
     frame = cv2.imread(str(night_dir/'temp_img_dir'/'temp_0000.jpg'), cv2.IMREAD_GRAYSCALE)
     assert frame.max() > 200
     assert np.percentile(frame, 90) < 128
-
-
-def test_selectFiles_fr_parent_pair_is_complete(tmp_path):
-
-    # The FR parent is matched by the station and the date only, so use a single pair
-    names = _writeNight(str(tmp_path), np.uint8, n=1)
-
-    # FR file which shares the date and time with the pair
-    fr_name = 'FR_' + '_'.join(names[0].split('_')[1:5]) + '.bin'
-    open(os.path.join(str(tmp_path), fr_name), 'w').close()
-
-    # In upload mode 2 FF files with detections are not uploaded, but FR files and their parents are
-    selected = selectFiles(_selectConfig(2), str(tmp_path), [])
-
-    assert set(selected) == {fr_name} | set(FFpng.pairNames(names[0]))

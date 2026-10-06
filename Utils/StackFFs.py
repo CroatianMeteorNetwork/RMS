@@ -55,17 +55,17 @@ def stackFFs(dir_path, file_format, deinterlace=False, subavg=False, filter_brig
 
         # Try finding the default flat
         if flat_path is None:
-            flat_path = dir_path
+            flat_dir = dir_path
             flat_file = 'flat.bmp'
 
         else:
-            flat_path, flat_file = os.path.split(flat_path)
+            flat_dir, flat_file = os.path.split(flat_path)
 
-        flat_full_path = os.path.join(flat_path, flat_file)
+        flat_full_path = os.path.join(flat_dir, flat_file)
         if os.path.isfile(flat_full_path):
 
             # Load the flat
-            flat = loadFlat(flat_path, flat_file)
+            flat = loadFlat(flat_dir, flat_file)
 
             log.debug('Loaded flat: {}'.format(flat_full_path))
 
