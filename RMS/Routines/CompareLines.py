@@ -25,25 +25,42 @@ def frechetDist(P,Q):
 
         return math.sqrt((pt2[0] - pt1[0])**2 + (pt2[1] - pt1[1])**2)
 
-    def calcFrechet(ca, i, j, P, Q):
-        if ca[i, j] > -1:
-            return ca[i,j]
-        elif i == 0 and j == 0:
-            ca[i, j] = eucDist(P[0], Q[0])
-        elif i > 0 and j == 0:
-            ca[i, j] = max(calcFrechet(ca, i-1, 0, P, Q), eucDist(P[i], Q[0]))
-        elif i == 0 and j > 0:
-            ca[i, j] = max(calcFrechet(ca, 0, j-1, P, Q), eucDist(P[0], Q[j]))
-        elif i > 0 and j > 0:
-            ca[i, j] = max(min(calcFrechet(ca, i-1, j, P, Q), calcFrechet(ca, i-1, j-1, P, Q), 
-                calcFrechet(ca, i, j-1, P, Q)), eucDist(P[i], Q[j]))
-        else:
-            ca[i, j] = float("inf")
-        return ca[i, j]
+    # Iterative dynamic programme over the coupling table, row by row with one row of lookback.
+    # Same recurrence (and the same floating point results) as the memoised recursion it replaces,
+    # which spent its time in ~260 Python calls per table: on an FF with many KHT lines the line
+    # merging made 4000+ comparisons and cost seconds
+    n = len(P)
+    m = len(Q)
 
-    ca = -np.ones((len(P), len(Q)))
+    px = [float(p[0]) for p in P]
+    py = [float(p[1]) for p in P]
+    qx = [float(q[0]) for q in Q]
+    qy = [float(q[1]) for q in Q]
 
-    return calcFrechet(ca, len(P)-1, len(Q)-1, P, Q)
+    prev = None
+    for i in range(n):
+
+        cur = [0.0]*m
+
+        for j in range(m):
+
+            d = math.sqrt((qx[j] - px[i])**2 + (qy[j] - py[i])**2)
+
+            if i == 0 and j == 0:
+                cur[j] = d
+
+            elif i == 0:
+                cur[j] = max(cur[j - 1], d)
+
+            elif j == 0:
+                cur[j] = max(prev[0], d)
+
+            else:
+                cur[j] = max(min(prev[j], prev[j - 1], cur[j - 1]), d)
+
+        prev = cur
+
+    return prev[m - 1]
 
 
 def samplePolarLine(rho, theta, img_h, img_w, nsamples=10):
