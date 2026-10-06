@@ -104,6 +104,12 @@ def selectFiles(config, dir_path, ff_detected):
             if ff_match is not None:
                 selected_list.append(ff_match)
 
+                # Add the average pixel image of FF image pairs
+                if FFpng.isPairMaxName(ff_match):
+                    ave_name = FFpng.pairNames(ff_match)[1]
+                    if os.path.isfile(os.path.join(dir_path, ave_name)):
+                        selected_list.append(ave_name)
+
 
         # Add FF file which contain detections to the list
         if upload_ffs and (ff_detected is not None) and (file_name in ff_detected):

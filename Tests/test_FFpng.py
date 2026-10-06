@@ -293,3 +293,18 @@ def test_timelapse_of_pairs(tmp_path, dtype):
     frame = cv2.imread(str(night_dir/'temp_img_dir'/'temp_0000.jpg'), cv2.IMREAD_GRAYSCALE)
     assert frame.max() > 200
     assert np.percentile(frame, 90) < 128
+
+
+def test_selectFiles_fr_parent_pair_is_complete(tmp_path):
+
+    # The FR parent is matched by the station and the date only, so use a single pair
+    names = _writeNight(str(tmp_path), np.uint8, n=1)
+
+    # FR file which shares the date and time with the pair
+    fr_name = 'FR_' + '_'.join(names[0].split('_')[1:5]) + '.bin'
+    open(os.path.join(str(tmp_path), fr_name), 'w').close()
+
+    # In upload mode 2 FF files with detections are not uploaded, but FR files and their parents are
+    selected = selectFiles(_selectConfig(2), str(tmp_path), [])
+
+    assert set(selected) == {fr_name} | set(FFpng.pairNames(names[0]))
