@@ -236,10 +236,10 @@ except Exception as e:
 #   far fewer stars than the nightly processing needs.
 MIN_CONFIG_MAX_STARS = 800
 
-# Keys which select the fragment to pick in manual reduction (1 is the main fragment)
-FRAGMENT_KEYS = [QtCore.Qt.Key.Key_1, QtCore.Qt.Key.Key_2, QtCore.Qt.Key.Key_3, QtCore.Qt.Key.Key_4,
-                 QtCore.Qt.Key.Key_5, QtCore.Qt.Key.Key_6, QtCore.Qt.Key.Key_7, QtCore.Qt.Key.Key_8,
-                 QtCore.Qt.Key.Key_9]
+# Keys which select the fragment to pick in manual reduction (0 is the main fragment)
+FRAGMENT_KEYS = [QtCore.Qt.Key.Key_0, QtCore.Qt.Key.Key_1, QtCore.Qt.Key.Key_2, QtCore.Qt.Key.Key_3,
+                 QtCore.Qt.Key.Key_4, QtCore.Qt.Key.Key_5, QtCore.Qt.Key.Key_6, QtCore.Qt.Key.Key_7,
+                 QtCore.Qt.Key.Key_8]
 
 
 ##############################################################################################################
@@ -2453,7 +2453,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.paired_stars = PairedStars()
         self.residuals = None
 
-        # Manual reduction points of additional fragments (fragment ID > 1), as {frame: {fragment_id: pick}}
+        # Manual reduction points of additional fragments (fragment ID > 0), as {frame: {fragment_id: pick}}
         self.fragment_picks = {}
 
         # Autopan coordinates
@@ -4153,14 +4153,14 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Show the fragment being picked, and the annotations of the main fragment pick on this frame
             if hasattr(self, 'tab'):
-                fragment_id = self.tab.annotations.fragment.currentIndex() + 1
+                fragment_id = self.tab.annotations.fragment.currentIndex()
                 pick = self.tab.annotations.currentPick()
                 notes = []
-                if (fragment_id == 1) and (pick is not None):
+                if (fragment_id == 0) and (pick is not None):
                     notes += ['flare'] if pick.get('flare', False) else []
                     notes += ['not used'] if not pick.get('trajectory_use', True) else []
 
-                text_str += 'Fragment = {:s}{:s}\n'.format('Main' if fragment_id == 1 else str(fragment_id),
+                text_str += 'Fragment = {:s}{:s}\n'.format('Main' if fragment_id == 0 else str(fragment_id),
                                                            ' ({:s})'.format(', '.join(notes)) if notes else '')
 
             if self.img_handle.input_type == "ff":
@@ -7348,7 +7348,7 @@ class PlateTool(QtWidgets.QMainWindow):
             for fragment_id, pick in fragments.items():
                 spots.append({'pos': (pick['x_centroid'] + 0.5, pick['y_centroid'] + 0.5),
                               'size': 20 if (self.img.getFrame() == frame) else 8,
-                              'pen': fragment_pens[fragment_id - 1]})
+                              'pen': fragment_pens[fragment_id]})
 
         self.pick_marker.addPoints(spots)
         self.pick_marker2.addPoints(spots)
@@ -10301,8 +10301,8 @@ class PlateTool(QtWidgets.QMainWindow):
                         mode = 0
 
                     # Pick the point of an additional fragment instead of the main pick, if one is selected
-                    fragment_id = self.tab.annotations.fragment.currentIndex() + 1
-                    if fragment_id > 1:
+                    fragment_id = self.tab.annotations.fragment.currentIndex()
+                    if fragment_id > 0:
                         self.addFragmentPoint(self.img.getFrame(), fragment_id, self.x_centroid, self.y_centroid,
                                               snr=self.snr_centroid, saturated=self.saturated_centroid)
                         self.updatePicks()
@@ -10331,8 +10331,8 @@ class PlateTool(QtWidgets.QMainWindow):
                 if self.cursor.mode == 0:
 
                     # Remove the point of the selected additional fragment, or the main pick
-                    fragment_id = self.tab.annotations.fragment.currentIndex() + 1
-                    if fragment_id > 1:
+                    fragment_id = self.tab.annotations.fragment.currentIndex()
+                    if fragment_id > 0:
                         self.removeFragmentPoint(self.img.getFrame(), fragment_id)
                     else:
                         self.removeCentroid(self.img.getFrame())
@@ -11287,7 +11287,8 @@ class PlateTool(QtWidgets.QMainWindow):
                     print('Current line: {}'.format(self.img.img_handle.current_line))
                     self.img.nextLine()
 
-            # Select the fragment to pick
+            # Select the fragment to pick. Holding Num0 to mark a DFN gap also selects the main fragment, which
+            #   the gaps belong to
             elif event.key() in FRAGMENT_KEYS:
                 self.tab.annotations.fragment.setCurrentIndex(FRAGMENT_KEYS.index(event.key()))
 
@@ -11931,8 +11932,8 @@ class PlateTool(QtWidgets.QMainWindow):
                         traj_ind = column_names.index('trajectory_use') if 'trajectory_use' in column_names \
                                                                                         else None
 
-                        # Columns of additional fragments (the fragment ID k + 1 has the suffix k)
-                        frag_inds = [(k + 1, column_names.index('x_image' + str(k)),
+                        # Columns of additional fragments, with the fragment ID as their suffix
+                        frag_inds = [(k, column_names.index('x_image' + str(k)),
                                       column_names.index('y_image' + str(k)))
                                      for k in range(1, len(FRAGMENT_COLORS)) if ('x_image' + str(k)) in column_names]
 
@@ -15013,7 +15014,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         Arguments:
             frame: [int] Frame to add/modify the point to.
-            fragment_id: [int] Fragment ID, 2-9 (1 is the main fragment in self.pick_list).
+            fragment_id: [int] Fragment ID, 1-8 (0 is the main fragment in self.pick_list).
             x_centroid: [float] x coordinate of the point.
             y_centroid: [float] y coordinate of the point.
 
@@ -17523,12 +17524,12 @@ class PlateTool(QtWidgets.QMainWindow):
         else:
             n_stars = 0
 
-        # Main fragment picks (fragment ID 1) and the points of additional fragments. Following the GDEF
-        #   standard, fragment ID k is written to the columns with the suffix k - 1 (e.g. ra1, dec1, ...)
-        observations = [(frame, 1, pick) for frame, pick in self.pick_list.items()]
+        # Main fragment picks (fragment ID 0) and the points of additional fragments. Following the GDEF
+        #   standard, fragment k is written to the columns with the suffix k (e.g. ra1, dec1, ...)
+        observations = [(frame, 0, pick) for frame, pick in self.pick_list.items()]
         observations += [(frame, fragment_id, pick) for frame, fragments in self.fragment_picks.items()
                          for fragment_id, pick in fragments.items()]
-        fragment_ids = sorted(set(obs[1] for obs in observations if obs[1] > 1))
+        fragment_ids = sorted(set(obs[1] for obs in observations if obs[1] > 0))
 
         # The annotation columns are only written if the annotations are used
         annotated = bool(fragment_ids) or any(pick.get('flare', False) or not pick.get('trajectory_use', True)
@@ -17548,7 +17549,7 @@ class PlateTool(QtWidgets.QMainWindow):
             'isodate_start_obs': str(dt_ref.strftime(isodate_format_entry)), # The date and time of the start of the video or exposure
             'astrometry_number_stars' : n_stars,                      # The number of stars identified and used in the astrometric calibration
             'mag_label': 'mag_data',                                  # The label of the Magnitude column in the Point Observation data
-            'no_frags': max(fragment_ids, default=1),                 # The number of meteoroid fragments described in this data
+            'no_frags': max(fragment_ids, default=0) + 1,             # The number of meteoroid fragments described in this data
             'obs_az': azim,                                           # The azimuth of the centre of the field of view in decimal degrees. North = 0, increasing to the East
             'obs_ev': elev,                                           # The elevation of the centre of the field of view in decimal degrees. Horizon =0, Zenith = 90
             'obs_rot': rotationWrtHorizon(self.platepar),             # Rotation of the field of view from horizontal, decimal degrees. Clockwise is positive
@@ -17584,7 +17585,7 @@ class PlateTool(QtWidgets.QMainWindow):
             extra_columns += [('frame_number', '', 'int64'), ('flare', '', 'bool'), ('trajectory_use', '', 'bool')]
 
         for fragment_id in fragment_ids:
-            extra_columns += [(name + str(fragment_id - 1), unit, datatype) for name, unit, datatype in [
+            extra_columns += [(name + str(fragment_id), unit, datatype) for name, unit, datatype in [
                 ('datetime', '', 'string'), ('ra', 'deg', 'float64'), ('dec', 'deg', 'float64'),
                 ('azimuth', '', 'float64'), ('altitude', '', 'float64'), ('x_image', 'pix', 'float64'),
                 ('y_image', 'pix', 'float64')]]
@@ -17706,7 +17707,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 "{:9.3f}".format(pick['x_centroid']), "{:9.3f}".format(pick['y_centroid'])
                 ]
 
-            if fragment_id == 1:
+            if fragment_id == 0:
                 entry += [
                     "{:10d}".format(int(pick['intensity_sum'])),
                     "{:10d}".format(int(pick['background_intensity'])),
@@ -17723,7 +17724,7 @@ class PlateTool(QtWidgets.QMainWindow):
         # Write one row per frame, leaving empty the columns of the fragments not picked on that frame
         for frame, entries in sorted(rows.items()):
 
-            main_entry = entries.get(1, [''] * 16)
+            main_entry = entries.get(0, [''] * 16)
             entry = main_entry[:14]
 
             if annotated:

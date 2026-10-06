@@ -1038,10 +1038,10 @@ def _topic_mr_annotations(gui):
         "<p class=\"lead\">The <b>Annotations</b> tab adds optional information to the picks. If it is "
         "not used, picking works as before and every pick is saved as the main fragment.</p>"
         "<ul>"
-        "<li><b>Fragment</b> &ndash; the normal picks are fragment <b>1</b> (main fragment). While "
-        "fragment 2-9 is selected, left click picks the point of that fragment on each frame and "
-        "right click removes it; the main picks are not changed. Select 1 again to pick the main "
-        "fragment. Each fragment has its own colour, and other fragments are drawn "
+        "<li><b>Fragment</b> &ndash; the normal picks are fragment <b>0</b> (main fragment), as in "
+        "the GFE standard. While fragment 1-8 is selected, left click picks the point of that fragment "
+        "on each frame and right click removes it; the main picks are not changed. Select 0 again to "
+        "pick the main fragment. Each fragment has its own colour, and other fragments are drawn "
         "with smaller markers.</li>"
         "<li><b>Flare</b> &ndash; marks the main fragment pick on this frame as a flare.</li>"
         "<li><b>Use in main trajectory</b> &ndash; untick to keep a main fragment pick (e.g. a "
@@ -1052,7 +1052,7 @@ def _topic_mr_annotations(gui):
         "with dotted lines.</li>"
         "<li>The image info panel (" + _key("F1") + ") shows the selected fragment, and the annotations of "
         "the main fragment pick on the current frame.</li>"
-        "<li>Shortcuts: " + _key("1") + "-" + _key("9") + " select the fragment, " + _key("B") + " toggles "
+        "<li>Shortcuts: " + _key("0") + "-" + _key("8") + " select the fragment, " + _key("B") + " toggles "
         "Flare and " + _key("X") + " toggles Use in main trajectory.</li>"
         "</ul>"
         "<h3>ECSV columns</h3>"
@@ -1062,9 +1062,8 @@ def _topic_mr_annotations(gui):
             ("flare", "True if the main fragment pick was marked as a flare."),
             ("trajectory_use", "True if the main fragment pick is meant for the main trajectory solution."),
             ("datetime1, ra1, dec1, azimuth1, altitude1, x_image1, y_image1",
-             "Time and position of fragment 2 (the suffix is the fragment number minus one, the main "
-             "fragment uses the columns without a suffix). Empty on the frames where the fragment was "
-             "not picked. The fragments are observational labels, not a physical fragmentation model "
+             "Time and position of fragment 1, and so on for the others (the main fragment, 0, uses the "
+             "columns without a suffix). Empty on the frames where the fragment was not picked. The fragments are observational labels, not a physical fragmentation model "
              "(e.g. MetSim)."),
         ])
         + _callout("FTPdetectinfo files only contain the main fragment picks, without annotations.",
@@ -1149,7 +1148,7 @@ def _topic_shortcuts_mr(gui):
         (c + " + W", "Save current frame"),
         (c + " + S", "Save FTPdetectinfo"),
         (c + " + K", "Open ASTRA GUI"),
-        ("1 - 9", "Select the fragment to pick (1 = main fragment)"),
+        ("0 - 8", "Select the fragment to pick (0 = main fragment)"),
         ("B", "Toggle Flare of the main fragment pick"),
         ("X", "Toggle Use in main trajectory of the main fragment pick"),
     ])

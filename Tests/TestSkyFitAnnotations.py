@@ -142,12 +142,12 @@ def test_fragment_columns(tmp_path):
     reduction.addPick(10, 110.0, 200.0)
     reduction.addPick(11, 111.0, 200.0)
     reduction.addPick(12, 112.0, 200.0)
-    reduction.addFragmentPoint(11, 2, 111.0, 210.0)
-    reduction.addFragmentPoint(12, 2, 112.0, 210.0)
-    reduction.addFragmentPoint(12, 3, 112.0, 220.0)
+    reduction.addFragmentPoint(11, 1, 111.0, 210.0)
+    reduction.addFragmentPoint(12, 1, 112.0, 210.0)
+    reduction.addFragmentPoint(12, 2, 112.0, 220.0)
 
-    # Fragment 2 is still visible after the main fragment
-    reduction.addFragmentPoint(13, 2, 113.0, 210.0)
+    # Fragment 1 is still visible after the main fragment
+    reduction.addFragmentPoint(13, 1, 113.0, 210.0)
 
     _, meta, columns, rows = saveAndRead(reduction)
 
@@ -161,26 +161,27 @@ def test_fragment_columns(tmp_path):
     assert column(columns, rows, 'x_image1') == ['', '111.000', '112.000', '113.000']
     assert column(columns, rows, 'y_image2') == ['', '', '220.000', '']
 
-    # The main fragment columns are empty on the frame where only fragment 2 was picked
+    # The main fragment columns are empty on the frame where only fragment 1 was picked
     assert set(rows[3][:len(LEGACY_COLUMNS)] + [rows[3][columns.index('flare')]]) == {''}
 
     # With a global shutter, a fragment point has the time of its frame
     assert column(columns, rows, 'datetime1')[1] == column(columns, rows, 'datetime')[1]
 
 
-def test_fragment_ids_1_to_9(tmp_path):
-    """ All nine fragments can be stored on a single frame, and each one has its own color. """
+def test_fragment_ids_0_to_8(tmp_path):
+    """ The main fragment (0) and the 8 others can be stored on a single frame, and each one has its own 
+        color. As in the GFE standard, fragment k is written to the columns with the suffix k. """
 
     reduction = Reduction(tmp_path)
     reduction.addPick(20, 120.0, 200.0)
-    for fragment_id in range(2, 10):
+    for fragment_id in range(1, 9):
         reduction.addFragmentPoint(20, fragment_id, 120.0 + fragment_id, 200.0)
 
     _, meta, columns, rows = saveAndRead(reduction)
 
     assert "# - {no_frags: 9}" in meta
     assert [float(column(columns, rows, 'x_image' + str(k))[0]) for k in range(1, 9)] \
-        == [120.0 + fragment_id for fragment_id in range(2, 10)]
+        == [120.0 + fragment_id for fragment_id in range(1, 9)]
 
     assert len(FRAGMENT_COLORS) == 9
     assert FRAGMENT_COLORS[0] == (255, 0, 0)
@@ -193,16 +194,16 @@ def test_no_duplicate_fragment_point(tmp_path):
     reduction = Reduction(tmp_path)
     reduction.addPick(10, 110.0, 200.0)
 
-    reduction.addFragmentPoint(10, 2, 110.0, 210.0)
-    reduction.addFragmentPoint(10, 2, 115.0, 215.0)
+    reduction.addFragmentPoint(10, 1, 110.0, 210.0)
+    reduction.addFragmentPoint(10, 1, 115.0, 215.0)
 
-    assert list(reduction.fragment_picks[10].keys()) == [2]
-    assert reduction.fragment_picks[10][2]['x_centroid'] == 115.0
+    assert list(reduction.fragment_picks[10].keys()) == [1]
+    assert reduction.fragment_picks[10][1]['x_centroid'] == 115.0
 
     # The main pick on that frame is not changed
     assert reduction.pick_list[10]['x_centroid'] == 110.0
 
-    reduction.removeFragmentPoint(10, 2)
+    reduction.removeFragmentPoint(10, 1)
     assert reduction.fragment_picks == {}
 
 
@@ -213,9 +214,9 @@ def test_round_trip(tmp_path):
     reduction.addPick(10, 110.0, 200.0)
     reduction.addPick(11, 111.0, 200.0, flare=True, trajectory_use=False)
     reduction.addPick(12, 112.0, 200.0)
-    reduction.addFragmentPoint(11, 2, 111.0, 210.0)
-    reduction.addFragmentPoint(11, 4, 111.0, 230.0)
-    reduction.addFragmentPoint(13, 2, 113.0, 210.0)
+    reduction.addFragmentPoint(11, 1, 111.0, 210.0)
+    reduction.addFragmentPoint(11, 3, 111.0, 230.0)
+    reduction.addFragmentPoint(13, 1, 113.0, 210.0)
     file_path, _, _, _ = saveAndRead(reduction)
 
     loaded = Reduction(tmp_path)
@@ -227,9 +228,9 @@ def test_round_trip(tmp_path):
         == [(False, True), (True, False), (False, True)]
 
     assert {frame: sorted(fragments) for frame, fragments in loaded.fragment_picks.items()} \
-        == {11: [2, 4], 13: [2]}
-    assert loaded.fragment_picks[11][4]['y_centroid'] == pytest.approx(230.0)
-    assert loaded.fragment_picks[13][2]['x_centroid'] == pytest.approx(113.0)
+        == {11: [1, 3], 13: [1]}
+    assert loaded.fragment_picks[11][3]['y_centroid'] == pytest.approx(230.0)
+    assert loaded.fragment_picks[13][1]['x_centroid'] == pytest.approx(113.0)
 
 
 def test_load_legacy_ecsv(tmp_path):
@@ -242,7 +243,7 @@ def test_load_legacy_ecsv(tmp_path):
     assert columns == LEGACY_COLUMNS
 
     loaded = Reduction(tmp_path)
-    loaded.fragment_picks = {11: {2: {'x_centroid': 1.0, 'y_centroid': 1.0}}}
+    loaded.fragment_picks = {11: {1: {'x_centroid': 1.0, 'y_centroid': 1.0}}}
     pick_list = loaded.loadECSV(file_path)
 
     assert sorted(pick_list.keys()) == [10, 11, 12]
@@ -259,8 +260,8 @@ def test_valid_ecsv(tmp_path):
 
     reduction = Reduction(tmp_path)
     reduction.addPick(10, 110.0, 200.0, flare=True)
-    reduction.addFragmentPoint(10, 2, 110.0, 210.0)
-    reduction.addFragmentPoint(11, 2, 111.0, 210.0)
+    reduction.addFragmentPoint(10, 1, 110.0, 210.0)
+    reduction.addFragmentPoint(11, 1, 111.0, 210.0)
     file_path, _, _, _ = saveAndRead(reduction)
 
     table = table_module.Table.read(file_path, format='ascii.ecsv')
@@ -307,8 +308,8 @@ def test_widget_main_fragment(widget):
     """ The main fragment pick can be flagged as a flare and excluded from the trajectory. """
 
     assert widget.fragment.count() == 9
-    assert widget.fragment.itemText(0) == '1 — Main fragment'
-    assert widget.fragment.itemText(8) == '9 — Fragment 9'
+    assert widget.fragment.itemText(0) == '0 — Main'
+    assert widget.fragment.itemText(8) == '8 — Fragment 8'
 
     assert widget.trajectory_use.isEnabled() and widget.trajectory_use.isChecked()
     assert not widget.flare.isChecked()
@@ -337,17 +338,17 @@ def test_widget_secondary_fragment(widget):
 
     assert not widget.flare.isEnabled()
 
-    # Also when a point of fragment 2 exists on this frame
-    widget.gui.fragment_picks = {10: {2: {'x_centroid': 1.0, 'y_centroid': 1.0, 'flare': False}}}
+    # Also when a point of fragment 1 exists on this frame
+    widget.gui.fragment_picks = {10: {1: {'x_centroid': 1.0, 'y_centroid': 1.0, 'flare': False}}}
     widget.updateAnnotations()
     assert not widget.flare.isEnabled() and not widget.flare.isChecked()
     assert not widget.trajectory_use.isEnabled()
 
     widget.onAnnotationChanged()
-    assert widget.gui.fragment_picks[10][2] == {'x_centroid': 1.0, 'y_centroid': 1.0, 'flare': False}
+    assert widget.gui.fragment_picks[10][1] == {'x_centroid': 1.0, 'y_centroid': 1.0, 'flare': False}
     assert 'flare' not in widget.gui.pick_list[10]
 
-    # On the next frame there is no point of fragment 2 yet, and the fragment stays selected
+    # On the next frame there is no point of fragment 1 yet, and the fragment stays selected
     widget.gui.frame = 11
     widget.updateAnnotations()
     assert widget.fragment.currentIndex() == 1

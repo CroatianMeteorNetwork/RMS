@@ -1931,7 +1931,7 @@ class DebruijnSequenceManager(QtWidgets.QWidget, ScaledSizeHelper):
             self.gui.updatePicks()
 
 
-# Marker colors of the fragment IDs 1-9. Fragment 1 is the main fragment, drawn in the existing pick color
+# Marker colors of the fragment IDs 0-8. Fragment 0 is the main fragment, drawn in the existing pick color
 FRAGMENT_COLORS = [
     (255, 0, 0),      # Red
     (0, 255, 255),    # Cyan
@@ -1947,7 +1947,7 @@ FRAGMENT_COLORS = [
 
 class AnnotationsWidget(QtWidgets.QWidget, ScaledSizeHelper):
     """ Manual reduction tab for annotating the picks on the current frame. The normal picks are the main
-        fragment (1). While another fragment is selected, picking adds and removes the points of that
+        fragment (0). While another fragment is selected, picking adds and removes the points of that
         fragment instead, next to the main picks.
     """
 
@@ -1964,7 +1964,7 @@ class AnnotationsWidget(QtWidgets.QWidget, ScaledSizeHelper):
 
         layout.addWidget(QtWidgets.QLabel('Fragment'))
         self.fragment = QtWidgets.QComboBox()
-        for fragment_id, color in enumerate(FRAGMENT_COLORS, 1):
+        for fragment_id, color in enumerate(FRAGMENT_COLORS):
 
             # Show the marker color of the fragment as a dot next to its name
             dot = QtGui.QPixmap(12, 12)
@@ -1975,7 +1975,7 @@ class AnnotationsWidget(QtWidgets.QWidget, ScaledSizeHelper):
             painter.drawEllipse(1, 1, 10, 10)
             painter.end()
 
-            name = 'Main fragment' if fragment_id == 1 else 'Fragment {:d}'.format(fragment_id)
+            name = 'Main' if fragment_id == 0 else 'Fragment {:d}'.format(fragment_id)
             self.fragment.addItem(QtGui.QIcon(dot), '{:d} — {:s}'.format(fragment_id, name))
 
         self.fragment.currentIndexChanged.connect(self.onFragmentChanged)
@@ -1995,9 +1995,9 @@ class AnnotationsWidget(QtWidgets.QWidget, ScaledSizeHelper):
         """ Return the pick of the selected fragment on the current frame, or None if there is none. """
 
         frame = self.gui.img.getFrame()
-        fragment_id = self.fragment.currentIndex() + 1
+        fragment_id = self.fragment.currentIndex()
 
-        if fragment_id == 1:
+        if fragment_id == 0:
             pick = self.gui.pick_list.get(frame)
             if pick and (pick['x_centroid'] is not None):
                 return pick
