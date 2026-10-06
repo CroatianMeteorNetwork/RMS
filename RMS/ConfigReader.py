@@ -872,6 +872,27 @@ class Config:
         self.timelapse_generate_from_frames = True
 
 
+        ##### Monitor processing (RMS.MonitorProcessFrameInterface)
+
+        # Save the max pixel and average pixel images of every star extraction chunk as FF-equivalent PNG
+        #   image pairs, which are needed for the night reports
+        self.monitor_save_images = True
+
+        # When to generate the night report: 'sunrise' (after the end of the night once all its data is
+        #   processed), 'idle' (whenever all data is processed), 'external' (only on a trigger file or from
+        #   the command line), or 'none'
+        self.monitor_report_mode = 'sunrise'
+
+        # Minutes without new processed files before a night report is generated
+        self.monitor_report_quiet_min = 15.0
+
+        # Archive the night and upload it after the report (also requires upload_enabled)
+        self.monitor_archive_upload = False
+
+        # Delete the image pairs of reported nights after this many days (0 keeps them)
+        self.monitor_delete_images_days = 0
+
+
         #### Shower association
 
         # Path to the shower file
@@ -1031,6 +1052,7 @@ def parseConfigFile(config, parser):
     parseStack(config, parser)
     parseTimelapse(config, parser)
     parseColors(config, parser)
+    parseMonitorProcessing(config, parser)
 
 
 def parseDFNStation(config, parser):
@@ -2180,6 +2202,34 @@ def parseTimelapse(config, parser):
 
     if parser.has_option(section, "timelapse_generate_from_frames"):
         config.timelapse_generate_from_frames = parser.getboolean(section, "timelapse_generate_from_frames")
+
+
+def parseMonitorProcessing(config, parser):
+    section = "MonitorProcessing"
+
+    if not parser.has_section(section):
+        return
+
+    if parser.has_option(section, "monitor_save_images"):
+        config.monitor_save_images = parser.getboolean(section, "monitor_save_images")
+
+    if parser.has_option(section, "monitor_report_mode"):
+        report_mode = parser.get(section, "monitor_report_mode").strip().lower()
+
+        if report_mode in ('sunrise', 'idle', 'external', 'none'):
+            config.monitor_report_mode = report_mode
+        else:
+            print("Unknown monitor_report_mode '{:s}', using '{:s}'".format(report_mode,
+                config.monitor_report_mode))
+
+    if parser.has_option(section, "monitor_report_quiet_min"):
+        config.monitor_report_quiet_min = parser.getfloat(section, "monitor_report_quiet_min")
+
+    if parser.has_option(section, "monitor_archive_upload"):
+        config.monitor_archive_upload = parser.getboolean(section, "monitor_archive_upload")
+
+    if parser.has_option(section, "monitor_delete_images_days"):
+        config.monitor_delete_images_days = parser.getfloat(section, "monitor_delete_images_days")
 
 
 def parseColors(config, parser):

@@ -28,11 +28,11 @@ import numpy as np
 import RMS.ConfigReader as cr
 from RMS.Formats import FTPdetectinfo
 from RMS.Formats import CALSTARS
-from RMS.Formats.FFfile import validFFName, constructFFName
+from RMS.Formats.FFfile import validFFName, constructFFName, filenameToDatetime
 from RMS.Formats.FrameInterface import detectInputType, detectInputTypeFile, checkIfVideoFile
 from RMS.ExtractStars import extractStarsFF
 from RMS.ExtractStarsFrameInterface import extractStarsFrameInterface
-from RMS.Detection import detectMeteors
+from RMS.Detection import detectMeteors, subframePickTime
 from RMS.DetectionTools import loadImageCalibration
 from RMS.QueuedPool import QueuedPool
 from RMS.Logger import LoggingManager, getLogger
@@ -46,7 +46,7 @@ log = getLogger("rmslogger")
 
 def detectStarsAndMeteorsFrameInterface(
         img_handle, config, 
-        flat_struct=None, dark=None, mask=None, chunk_frames=128
+        flat_struct=None, dark=None, mask=None, chunk_frames=128, chunk_callback=None
         ):
     """ Extract stars and detect meteors on the given image handle. This is most useful for videos and 
         directories with images.
@@ -60,6 +60,8 @@ def detectStarsAndMeteorsFrameInterface(
         dark: [ndarray]
         mask: [MaskStruct]
         chunk_frames: [int] Number of frames to stacked image on which the stars will be extracted.
+        chunk_callback: [callable] Called for every star extraction chunk, see
+            ExtractStars.extractStarsImgHandle. None by default.
 
     Return:
         [img_handle, star_list, meteor_list]:
@@ -77,7 +79,7 @@ def detectStarsAndMeteorsFrameInterface(
     
     # Run star extraction on the image handle
     star_list = extractStarsFrameInterface(img_handle, config, chunk_frames=chunk_frames, 
-        flat_struct=flat_struct, dark=dark, mask=mask, save_calstars=False)
+        flat_struct=flat_struct, dark=dark, mask=mask, save_calstars=False, chunk_callback=chunk_callback)
     
 
     # Get the maximum number of stars on any chunks
@@ -154,7 +156,34 @@ def unbinStarList(star_list, config):
     return star_list_unbinned
 
 
-def saveResultsFrameInterface(star_list, meteor_list, img_handle, config, chunk_frames=128, output_suffix='', output_dir=None, write_empty=True):
+def chunkForFrame(chunk_images, frame):
+    """ Find the saved chunk which contains the given frame.
+
+    Arguments:
+        chunk_images: [list] List of (first_frame, nframes, ff_name) of the saved chunks.
+        frame: [float] Frame number.
+
+    Return:
+        [str] FF name of the chunk which contains the frame. If no chunk contains it, the name of the last chunk
+            which starts before the frame, or None if there is no such chunk.
+    """
+
+    preceding = None
+
+    for first_frame, nframes, ff_name in sorted(chunk_images, key=lambda x: x[0]):
+
+        if first_frame > frame:
+            break
+
+        if frame < first_frame + nframes:
+            return ff_name
+
+        preceding = ff_name
+
+    return preceding
+
+
+def saveResultsFrameInterface(star_list, meteor_list, img_handle, config, chunk_frames=128, output_suffix='', output_dir=None, write_empty=True, chunk_images=None):
     """ Save detection results to CALSTARS and FTPdetectinfo files.
     
     Arguments:
@@ -166,6 +195,9 @@ def saveResultsFrameInterface(star_list, meteor_list, img_handle, config, chunk_
     Keyword arguments:
         chunk_frames: [int] Number of frames to stacked image on which the stars will be extracted.
         output_suffix: [str] Suffix to add to the output files.
+        chunk_images: [list] List of (first_frame, nframes, ff_name) of chunks saved as FF image pairs. If
+            given, every meteor is assigned to the chunk which contains its first pick, and its frames are
+            given relative to the beginning of the chunk. None by default.
 
     Return:
         [output_dir, calstars_name, ftpdetectinfo_name]: The output directory and file names
@@ -213,7 +245,10 @@ def saveResultsFrameInterface(star_list, meteor_list, img_handle, config, chunk_
         ftpdetectinfo_name = 'FTPdetectinfo_' + prefix + suffix + '.txt'
 
         results_list = []
-        meteor_No = 1
+
+        # Meteors are numbered per FF name, as several meteors can be in the same chunk
+        meteor_counts = {}
+
         for meteor in meteor_list:
 
             rho, theta, centroids = meteor
@@ -221,9 +256,34 @@ def saveResultsFrameInterface(star_list, meteor_list, img_handle, config, chunk_
             # Get the time of the first frame in the detection
             first_pick_time = img_handle.currentFrameTime(frame_no=int(centroids[0][0]), dt_obj=True)
 
+            # Measured fps to write for this meteor (None -> use the config fps)
+            meteor_fps = None
+
+            # Find the saved chunk image which contains the first pick
+            chunk_name = None
+            if (img_handle.input_type != 'ff') and chunk_images:
+                chunk_name = chunkForFrame(chunk_images, centroids[0][0])
+
             # Construct FF file name if it's not available
             if img_handle.input_type == 'ff':
                 ff_file_name = img_handle.name()
+
+            # Assign the meteor to the saved chunk. The frames are computed from the real frame times
+            #   relative to the time in the chunk name, using the measured fps (rounded to the precision
+            #   stored in the FTPdetectinfo file), so the time of every pick is recovered exactly as
+            #   name time + frame/fps
+            elif chunk_name is not None:
+
+                fps_meas = round(img_handle.fps, 2)
+                ref_time = filenameToDatetime(chunk_name)
+
+                centroids = np.array(centroids, dtype=np.float64)
+                for entry in centroids:
+                    entry[0] = (subframePickTime(img_handle, entry[0], fps_meas) - ref_time).total_seconds()\
+                        *fps_meas
+
+                ff_file_name = chunk_name
+                meteor_fps = fps_meas
 
             # For non-FF inputs, construct the FF name from the station ID and the first pick time
             # To keep an accurate time, reset the frames so that the first pick is at frame 0
@@ -235,8 +295,14 @@ def saveResultsFrameInterface(star_list, meteor_list, img_handle, config, chunk_
                 #   fractional part of the frame number
                 centroids[:,0] -= int(centroids[0,0])
 
+            meteor_counts[ff_file_name] = meteor_counts.get(ff_file_name, 0) + 1
+            meteor_No = meteor_counts[ff_file_name]
+
             # Append to the results list
-            results_list.append([ff_file_name, meteor_No, rho, theta, centroids])
+            if meteor_fps is not None:
+                results_list.append([ff_file_name, meteor_No, rho, theta, centroids, meteor_fps])
+            else:
+                results_list.append([ff_file_name, meteor_No, rho, theta, centroids])
 
         # Write FTPdetectinfo file
         FTPdetectinfo.writeFTPdetectinfo(results_list, output_dir, ftpdetectinfo_name,
