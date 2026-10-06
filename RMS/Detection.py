@@ -1037,7 +1037,16 @@ def preprocessFF(img_handle, mask, flat_struct, dark):
 
 
 def thresholdAndCorrectGammaFF(img_handle, config, mask):
-    """ Prepare the FF for centroid extraction by performing gamma correction. """
+    """ Prepare the FF for centroid extraction by performing gamma correction.
+
+    Return:
+        img_thres: [ndarray] Thresholded image (0/1).
+        max_avg_corrected: [ndarray float32] maxpixel - avepixel in linear light.
+        flattened_weights: [ndarray float32] max_avg_corrected over the linear-light noise, i.e. the
+            per-pixel signal to noise of the maxpixel excess, used as centroid weights.
+        min_patch_intensity: [float] Minimum peak intensity for a detection (linear light).
+        stdpixel_lin: [ndarray float32] stdpixel converted to linear light at each pixel's own level.
+    """
 
     # Threshold the FF
     img_thres = thresholdFF(img_handle.ff, config.k1_det, config.j1_det)
@@ -1049,22 +1058,35 @@ def thresholdAndCorrectGammaFF(img_handle, config, mask):
                                                      out_type=np.float32)
     avepixel_gamma_corr = Image.gammaCorrectionImage(img_handle.ff.avepixel, responseOf(config), wp=gamma_wp,
                                                      out_type=np.float32)
-    stdpixel_gamma_corr = Image.gammaCorrectionImage(img_handle.ff.stdpixel, responseOf(config), wp=gamma_wp,
-                                                     out_type=np.float32)
 
-    # Make sure there are no zeros in standard deviation
-    stdpixel_gamma_corr[stdpixel_gamma_corr == 0] = 1
+    # stdpixel is a noise AMPLITUDE in the encoded (code) domain, not an intensity, so it cannot be
+    # gamma corrected like the planes above (decoding a 2 code sigma as if it were a 2 code intensity
+    # gave 0.016 on a gamma 0.5 camera). Convert it to linear light at each pixel's own level: the
+    # linear span of avepixel +/- stdpixel, scaled back to one sigma where the span is clipped at
+    # black or white. For gamma 1.0 this is exactly stdpixel
+    avepixel_f = img_handle.ff.avepixel.astype(np.float32)
+    stdpixel_f = img_handle.ff.stdpixel.astype(np.float32)
+    span_hi = np.minimum(avepixel_f + stdpixel_f, gamma_wp)
+    span_lo = np.maximum(avepixel_f - stdpixel_f, 0)
+    span_codes = np.maximum(span_hi - span_lo, 1)
+    stdpixel_lin = (Image.gammaCorrectionImage(span_hi, responseOf(config), wp=gamma_wp, out_type=np.float32)
+        - Image.gammaCorrectionImage(span_lo, responseOf(config), wp=gamma_wp, out_type=np.float32)) \
+        *stdpixel_f/span_codes
 
-    # Calculate weights for centroiding (apply gamma correction on both images)
+    # Make sure there are no zeros in standard deviation (only possible on a flat response segment)
+    stdpixel_lin[stdpixel_lin <= 0] = np.float32(1e-6)
+
+    # Calculate weights for centroiding: the maxpixel excess over the average in units of the
+    # linear-light noise (both in the same domain)
     max_avg_corrected = maxpixel_gamma_corr - avepixel_gamma_corr
-    flattened_weights = (max_avg_corrected).astype(np.float32)/stdpixel_gamma_corr
+    flattened_weights = (max_avg_corrected).astype(np.float32)/stdpixel_lin
 
 
     # At the end, a check that the detection has a surface brightness above the background will be performed.
     # The assumption here is that the peak of the meteor should have the intensity which is at least
     # that of a patch of 4x4 pixels that are of the mean background brightness
     min_patch_intensity = 4*4*(np.mean(maxpixel_gamma_corr - avepixel_gamma_corr) \
-        + config.k1_det*np.mean(stdpixel_gamma_corr) + config.j1)
+        + config.k1_det*np.mean(stdpixel_lin) + config.j1)
 
     # Apply a special minimum path intensity multiplier
     min_patch_intensity *= config.min_patch_intensity_multiplier
@@ -1074,7 +1096,7 @@ def thresholdAndCorrectGammaFF(img_handle, config, mask):
         min_patch_intensity *= config.detection_binning_factor**2
 
 
-    return img_thres, max_avg_corrected, flattened_weights, min_patch_intensity
+    return img_thres, max_avg_corrected, flattened_weights, min_patch_intensity, stdpixel_lin
 
 
 
@@ -1292,7 +1314,7 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
         if img_handle.input_type == 'ff':
 
             img_thres, max_avg_corrected, flattened_weights, \
-                min_patch_intensity = thresholdAndCorrectGammaFF(img_handle, config, mask)
+                min_patch_intensity, stdpixel_lin = thresholdAndCorrectGammaFF(img_handle, config, mask)
 
 
         # Go through all detected and filtered lines and compute centroids
@@ -1345,7 +1367,7 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                 img_handle = preprocessFF(img_handle, mask, flat_struct, dark)
 
                 img_thres, max_avg_corrected, flattened_weights, \
-                    min_patch_intensity = thresholdAndCorrectGammaFF(img_handle, config, mask)
+                    min_patch_intensity, stdpixel_lin = thresholdAndCorrectGammaFF(img_handle, config, mask)
 
                 logDebug('Centroiding frames {:d} - {:d} and time:'.format(frame_min, frame_max, img_handle.name()))
                 
@@ -1524,8 +1546,12 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                         # If the FF file is used, set the sequence number to the current frame number
                         seq_num = i
 
-                        # Extract the raw frame if FF file is used, used for saturation check
-                        fr_img_raw = img_thres
+                        # For FF input the saturation check runs on the maxpixel: the stripe pixels of
+                        # this frame are the ones whose maximum fell in it, so their maxpixel IS their
+                        # value in this frame. (This used to be the thresholded 0/1 image, which can
+                        # never reach the saturation threshold, so FF detections never reported
+                        # saturated pixels.)
+                        fr_img_raw = img_handle.ff.maxpixel
 
 
                     # Calculate intensity as the sum of threshold passer pixels on the stripe
@@ -1548,8 +1574,9 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                         # Count the number of threshold passer pixels in the stripe
                         source_px_count = np.sum(intensity_values > 0)
 
-                        # Compute the standard deviation of the background
-                        background_std = np.mean(img_handle.ff.stdpixel[half_frame_pixels_stripe[:,1],
+                        # Compute the standard deviation of the background in linear light, the same
+                        # units as the intensity (stdpixel itself is in codes)
+                        background_std = np.mean(stdpixel_lin[half_frame_pixels_stripe[:,1],
                             half_frame_pixels_stripe[:,0]])
 
                         # Compute the SNR
