@@ -1,14 +1,17 @@
 """
-Tests for the --start_time option of RMS.MonitorProcessFrameInterface.
+Tests for RMS.MonitorProcessFrameInterface.
 
 Covers parsing of the start time, the skip gate in processFile, isolation of the config used for reading
-the beginning time, and the start time precedence in the multicam mode.
+the beginning time, the start time precedence in the multicam mode, and the worker exit codes which the
+monitor uses to tell successful, skipped and failed files apart.
 """
 
 import configparser
 import datetime
+import multiprocessing
 import os
 import shutil
+import sys
 
 import pytest
 
@@ -179,3 +182,85 @@ def test_resolveCameraStartTime_invalid_names_section():
     cp = _multicamParser(cam_start='foo')
     with pytest.raises(ValueError, match=r'\[CAM1\]'):
         mon.resolveCameraStartTime(cp, 'CAM1')
+
+
+### Worker exit codes ###
+
+def _runWorker(monkeypatch, fake_process_file):
+
+    monkeypatch.setattr(mon, 'processFile', fake_process_file)
+
+    with pytest.raises(SystemExit) as exc_info:
+        mon.processFileWorker('dummy.vid', 'dummy.config', None, 'out', 128)
+
+    return exc_info.value.code
+
+
+def test_processFileWorker_success_exits_0(monkeypatch):
+    assert _runWorker(monkeypatch, lambda *args, **kwargs: True) == 0
+
+
+def test_processFileWorker_failure_exits_nonzero(monkeypatch):
+    assert _runWorker(monkeypatch, lambda *args, **kwargs: False) == 1
+
+
+def test_processFileWorker_keeps_skip_exit_code(monkeypatch):
+
+    def _skip(*args, **kwargs):
+        sys.exit(mon.SKIP_EXIT_CODE)
+
+    assert _runWorker(monkeypatch, _skip) == mon.SKIP_EXIT_CODE
+
+
+@pytest.mark.parametrize('exit_arg', [(), (0,)])
+def test_processFileWorker_early_sys_exit_is_failure(monkeypatch, exit_arg):
+    """ Some input types call sys.exit() when they can't open a file, which must count as a failure. """
+
+    def _exit(*args, **kwargs):
+        sys.exit(*exit_arg)
+
+    assert _runWorker(monkeypatch, _exit) == 1
+
+
+def test_processFileWorker_passes_arguments(monkeypatch):
+
+    received = {}
+
+    def _record(*args, **kwargs):
+        received['args'] = args
+        received['kwargs'] = kwargs
+        return True
+
+    monkeypatch.setattr(mon, 'processFile', _record)
+
+    with pytest.raises(SystemExit):
+        mon.processFileWorker('a.vid', 'b.config', 'c.cal', 'out', 64, unique_id='a', start_time=START_TIME)
+
+    assert received['args'] == ('a.vid', 'b.config', 'c.cal', 'out', 64)
+    assert received['kwargs'] == {'unique_id': 'a', 'start_time': START_TIME}
+
+
+def test_processFile_error_before_logger_init_returns_false(config_path, tmp_path, monkeypatch):
+    """ An exception before the per-file logger is set up must be logged and reported as a failure. """
+
+    def _raise(*args, **kwargs):
+        raise IOError("corrupt file")
+
+    monkeypatch.setattr(mon, 'detectInputType', _raise)
+
+    assert mon.processFile(str(tmp_path/'dummy.vid'), config_path, None, str(tmp_path), 128) is False
+
+
+def test_failed_worker_process_exit_code(config_path, tmp_path):
+    """ End to end: a worker process for a file which can't be opened exits with a non-zero code. """
+
+    # Not a valid video, so the frame interface can't open it
+    bad_file = tmp_path/'20251225_102000.mkv'
+    bad_file.write_bytes(b'not a video')
+
+    proc = multiprocessing.Process(target=mon.processFileWorker,
+        args=(str(bad_file), config_path, None, str(tmp_path/'out'), 128))
+    proc.start()
+    proc.join(timeout=120)
+
+    assert proc.exitcode not in (0, mon.SKIP_EXIT_CODE, None)

@@ -230,6 +230,9 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
                 file_name, beginning_datetime, start_time))
             sys.exit(SKIP_EXIT_CODE)
 
+    # Use the module logger until the per-file logger is initialized, so errors before that are logged
+    proc_log = log
+
     try:
 
         # Open the file as an image handle first to get the timestamp
@@ -340,6 +343,32 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
         proc_log.error(traceback.format_exc())
         proc_log.error("Error processing {}: {}".format(file_name, str(e)))
         return False
+
+
+def processFileWorker(*args, **kwargs):
+    """ Worker process target which runs processFile and turns its result into the process exit code, so
+        the monitor can tell failed files apart and retry them. Takes the same arguments as processFile.
+
+    Exit codes:
+        0 - processing succeeded
+        SKIP_EXIT_CODE - the file begins before the start time
+        1 - processing failed
+    """
+
+    try:
+        success = processFile(*args, **kwargs)
+
+    except SystemExit as e:
+
+        if e.code == SKIP_EXIT_CODE:
+            raise
+
+        # Some input types call sys.exit() when they can't open the file (e.g. no time in the file name),
+        # which would otherwise end the process with exit code 0
+        print("ERROR: Processing exited early with code {}".format(e.code))
+        success = False
+
+    sys.exit(0 if success else 1)
 
 
 def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_dir, nproc=2,
@@ -553,7 +582,7 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
                 log.info("Putting file {} on the processing queue...".format(file_rel_path))
 
                 proc = multiprocessing.Process(
-                    target=processFile,
+                    target=processFileWorker,
                     args=(file_path, config_path, platepar_path, output_dir, chunk_frames),
                     kwargs={'flat_path': flat_path, 'dark_path': dark_path, 'unique_id': unique_id,
                             'start_time': start_time}
@@ -996,7 +1025,7 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None):
 
                 # Spawn the worker process
                 proc = multiprocessing.Process(
-                    target=processFile,
+                    target=processFileWorker,
                     args=(file_path, chosen_cam['config_path'], chosen_cam['platepar_path'], chosen_cam['output_dir'], chunk_frames),
                     kwargs={'flat_path': chosen_cam['flat_path'], 'dark_path': chosen_cam['dark_path'], 'unique_id': unique_id,
                             'start_time': chosen_cam['start_time']}
