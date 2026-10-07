@@ -963,3 +963,24 @@ def test_damaged_state_file_is_moved_aside(tmp_path):
 
     mnr.updateReportState(str(tmp_path), NIGHT, files=['a'])
     assert mnr.readReportStates(str(tmp_path))['nights'][NIGHT]['files'] == ['a']
+
+
+def test_new_results_are_scanned_at_most_every_minute(scheduling, monkeypatch):
+
+    reporter = _reporter(scheduling, 'idle')
+    now = scheduling.night_end + datetime.timedelta(hours=1)
+
+    scans = []
+    scan_nights = mnr.scanNights
+    monkeypatch.setattr(mnr, 'scanNights', lambda *args: scans.append(1) or scan_nights(*args))
+
+    reporter.poll(False, now)
+    assert len(scans) == 1
+
+    # New results are scanned after the rescan interval, and no report starts before they are scanned
+    reporter.resultsChanged()
+    reporter.poll(True, now + datetime.timedelta(seconds=30))
+    assert (len(scans) == 1) and (reporter.active is None)
+
+    reporter.poll(True, now + datetime.timedelta(seconds=61))
+    assert (len(scans) == 2) and (reporter.active is not None)

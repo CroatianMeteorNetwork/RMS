@@ -1217,14 +1217,17 @@ class NightReporter(object):
         self.triggered = set()
 
         # Nights with unreported files, {night_name: results}, and the report states. The output directory is
-        #   scanned again when new results are added (resultsChanged), after every report, and periodically
+        #   scanned again after every report, when new results were added (resultsChanged, at most every
+        #   rescan_interval, as the scan takes long with months of results), and periodically
         self.pending = None
         self.states = None
+        self.results_changed = False
+        self.last_scan = None
+        self.scan_interval = 600
+        self.rescan_interval = 60
 
         # Old nights which are not reported because their directory was deleted
         self.ignored_nights = set()
-        self.last_scan = None
-        self.scan_interval = 600
 
         # Cleanup of old data, at startup, after every report, and periodically
         self.cleanup_proc = None
@@ -1249,7 +1252,7 @@ class NightReporter(object):
     def resultsChanged(self):
         """ Tell the reporter that a file was processed, so the output directory is scanned again. """
 
-        self.pending = None
+        self.results_changed = True
 
 
     def _lastResultAge(self, results, now):
@@ -1447,7 +1450,11 @@ class NightReporter(object):
             self.pending = None
 
         # Find the nights with unreported files
-        if (self.pending is None) or ((now - self.last_scan).total_seconds() > self.scan_interval):
+        scan_age = (now - self.last_scan).total_seconds() if (self.last_scan is not None) else None
+        if (self.pending is None) or (scan_age > self.scan_interval) \
+                or (self.results_changed and (scan_age > self.rescan_interval)):
+
+            self.results_changed = False
 
             self.states = readReportStates(self.output_dir)
             self.pending = {}
@@ -1479,8 +1486,9 @@ class NightReporter(object):
         self.triggered = set(night_name for night_name in self.triggered if (night_name in self.pending)
                              and not self._gaveUp(night_name, self.pending[night_name]))
 
-        # Report the oldest due night, if no other camera is reporting
-        if self.report_lock.owner is not None:
+        # Report the oldest due night, if no other camera is reporting. Wait for the scan of new results, so
+        #   the report includes them
+        if (self.report_lock.owner is not None) or self.results_changed:
             return
 
         for night_name in sorted(self.pending):
