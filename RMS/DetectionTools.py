@@ -185,9 +185,13 @@ def binImageCalibration(config, mask, dark, flat_struct):
     if mask is not None:
         mask.img = Image.binImage(mask.img, config.detection_binning_factor, 'avg')
 
-    # Bin the dark
+    # Bin the dark like the frames, so with the 'sum' method the summed dark is subtracted from the summed
+    #   frames (in 16 bits, which the summed frames use as well)
     if dark is not None:
-        dark = Image.binImage(dark, config.detection_binning_factor, 'avg')
+        if config.detection_binning_method == 'sum':
+            dark = Image.binImage(dark.astype(np.uint16), config.detection_binning_factor, 'sum')
+        else:
+            dark = Image.binImage(dark, config.detection_binning_factor, 'avg')
 
     # Bin the flat
     if flat_struct is not None:

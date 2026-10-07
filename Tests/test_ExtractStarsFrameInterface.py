@@ -13,6 +13,7 @@ import pytest
 
 import RMS.ConfigReader as cr
 import RMS.ExtractStars as es
+from RMS.DetectionTools import binImageCalibration
 from RMS.Routines.Image import binImage
 from RMS.Astrometry.ApplyRecalibrate import ftpMatchTimes
 from RMS.Formats import FFfile
@@ -207,8 +208,8 @@ def test_ff_names_use_chunk_start_time(config, fake_extract):
 
 ### Binning ###
 
-@pytest.mark.parametrize('method, intens_factor', [('avg', 4), ('sum', 1)])
-def test_binned_stars_are_rescaled(config, fake_extract, method, intens_factor):
+@pytest.mark.parametrize('method, intens_factor, level_factor', [('avg', 4, 1), ('sum', 1, 4)])
+def test_binned_stars_are_rescaled(config, fake_extract, method, intens_factor, level_factor):
 
     config.detection_binning_factor = 2
     config.detection_binning_method = method
@@ -220,7 +221,9 @@ def test_binned_stars_are_rescaled(config, fake_extract, method, intens_factor):
     # The centre of the binned pixel i is at 2*i + 0.5 on the full size image
     assert (y, x, fwhm) == (40.5, 20.5, 5.0)
     assert intens == 1000*intens_factor
-    assert (ampl, bg, snr, n_sat) == (10, 5, 8.0, 0)
+
+    # The peak and background levels of summed pixels are scaled to the full size pixels
+    assert (ampl, bg, snr, n_sat) == (10/level_factor, 5/level_factor, 8.0, 0)
 
 
 class _BinnedStarHandle(_FakeHandle):
@@ -228,7 +231,7 @@ class _BinnedStarHandle(_FakeHandle):
         frames for detection.
     """
 
-    def __init__(self, stars, bin_factor, shape=(256, 384), sigma=2.5):
+    def __init__(self, stars, bin_factor, shape=(256, 384), sigma=2.5, method='avg'):
 
         super(_BinnedStarHandle, self).__init__([0])
 
@@ -238,22 +241,26 @@ class _BinnedStarHandle(_FakeHandle):
         for x0, y0 in stars:
             img += 200*np.exp(-((xx - x0)**2 + (yy - y0)**2)/(2*sigma**2))
 
-        self.img_binned = binImage(np.clip(np.round(img), 0, 255).astype(np.uint16), bin_factor, 'avg')
+        self.img_binned = binImage(np.clip(np.round(img), 0, 255).astype(np.uint16), bin_factor, method)
 
     def chunkImage(self, chunk):
         return self.img_binned
 
 
+@pytest.mark.parametrize('method', ['avg', 'sum'])
 @pytest.mark.parametrize('bin_factor', [2, 4])
-def test_binned_star_positions_match_full_size(config, bin_factor):
+def test_binned_star_positions_match_full_size(config, bin_factor, method):
 
     config.detection_binning_factor = bin_factor
-    config.detection_binning_method = 'avg'
+    config.detection_binning_method = method
 
     # Stars at the full image size, at different subpixel positions
     stars = [(100.0, 60.0), (300.3, 200.7), (222.0, 150.5), (160.6, 120.2)]
 
-    star_list = es.extractStarsImgHandle(_BinnedStarHandle(stars, bin_factor), config=config)
+    # The summed 4x4 background (16 x 20) is above the bright chunk limit of 8-bit data, unless the limit is
+    #   scaled to the summed levels
+    star_list = es.extractStarsImgHandle(_BinnedStarHandle(stars, bin_factor, method=method), config=config)
+    assert star_list
 
     extracted = [(x, y) for y, x in (entry[:2] for entry in star_list[0][1])]
     assert len(extracted) == len(stars)
@@ -262,6 +269,23 @@ def test_binned_star_positions_match_full_size(config, bin_factor):
     for x0, y0 in stars:
         dist = min(np.hypot(x - x0, y - y0) for x, y in extracted)
         assert dist < 0.1
+
+    # The background level is the one of the full size pixels (20) for both binning methods
+    backgrounds = [entry[5] for entry in star_list[0][1]]
+    assert all(abs(bg - 20) < 3 for bg in backgrounds)
+
+
+def test_summed_binning_sums_the_dark(config):
+
+    config.detection_binning_factor = 2
+    config.detection_binning_method = 'sum'
+
+    dark = np.full((4, 4), 100, dtype=np.uint8)
+    _, dark_binned, _ = binImageCalibration(config, None, dark, None)
+
+    # The dark is summed like the frames, in 16 bits
+    assert dark_binned.dtype == np.uint16
+    assert np.all(dark_binned == 400)
 
 
 def test_calibration_is_binned_for_binned_frames(config, fake_extract):
