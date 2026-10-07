@@ -93,6 +93,9 @@ ESSENTIAL_STEPS = {'merge', 'archive', 'thumbnails_and_stacks'}
 
 
 # Merged results of a night
+# A night report warns if fewer than this share of the chunks could be recalibrated
+RECALIBRATION_WARNING_SHARE = 0.5
+
 MergedNight = collections.namedtuple('MergedNight', ['calstars_name', 'ftpdetectinfo_name', 'fps',
     'chunk_frames', 'ff_detected', 'n_meteors', 'recalibrated'])
 
@@ -105,8 +108,8 @@ def nightInfo(config, dt):
 
     A night spans from one local solar noon to the next, so a time always belongs to exactly one night,
     including at dusk and in polar regions. The night is named after the sunset at the capture horizon
-    following the noon, and ends at the following sunrise. If the Sun doesn't set or rise (polar day or
-    night), the night is named after the noon and ends 24 hours later.
+    following the noon, and ends at the following sunrise, at the latest at the next noon. If the Sun doesn't
+    set before the next noon (polar day or night), the night is named after the noon.
 
     Arguments:
         config: [Config] Configuration with the station coordinates.
@@ -133,6 +136,8 @@ def nightInfo(config, dt):
     o.date = noon
     o.horizon = CAPTURE_HORIZON_DEG
 
+    next_noon = noon + datetime.timedelta(days=1)
+
     try:
         night_start = o.next_setting(sun).datetime()
 
@@ -141,7 +146,15 @@ def nightInfo(config, dt):
 
     except (ephem.NeverUpError, ephem.AlwaysUpError):
         night_start = noon
-        night_end = noon + datetime.timedelta(days=1)
+        night_end = next_noon
+
+    # Close to the polar day or night, the next sunset can be after the next noon, and the next sunrise days
+    #   later. The night still ends at the next noon, and is named after the noon if the Sun doesn't set
+    #   before
+    if night_start >= next_noon:
+        night_start = noon
+
+    night_end = min(night_end, next_noon)
 
     night_name = "{:s}_{:s}_000000".format(config.stationID, night_start.strftime("%Y%m%d_%H%M%S"))
 
@@ -537,7 +550,9 @@ def isPending(output_dir, config, states, night_name, results):
         [bool]
     """
 
-    if states['nights'].get(night_name, {}).get('deleted'):
+    # Deleted nights and nights whose images were deleted are not reported again
+    night_state = states['nights'].get(night_name, {})
+    if night_state.get('deleted') or night_state.get('images_deleted'):
         return False
 
     return bool(unreportedResults(output_dir, states, night_name, results)) \
@@ -956,6 +971,7 @@ def generateNightReport(output_dir, night_name, config, results=None, archive=Tr
     merged = _runStep('merge', lambda: mergeNightResults(night_dir, output_dir, results, config))
 
     upload_files = []
+    recalibration = None
     if merged is not None:
 
         ### Configuration of the night ###
@@ -985,6 +1001,16 @@ def generateNightReport(output_dir, night_name, config, results=None, archive=Tr
 
         ### ###
 
+
+        # The share of the chunks which could be recalibrated. A low share means that the platepar doesn't fit
+        #   the data (e.g. the platepar of another camera, or the camera moved), which no step fails on
+        n_recalibrated = sum(1 for pp_dict in merged.recalibrated.values()
+                             if (pp_dict is not None) and pp_dict.get('auto_recalibrated'))
+        recalibration = {'recalibrated': n_recalibrated, 'chunks': len(merged.recalibrated)}
+        if merged.recalibrated and (n_recalibrated < RECALIBRATION_WARNING_SHARE*len(merged.recalibrated)):
+            log.warning("Only {:d} of {:d} chunks of night {:s} could be recalibrated. Check the platepar "
+                        "and the pointing of the camera.".format(n_recalibrated, len(merged.recalibrated),
+                                                             night_name))
 
         # Save the most confident platepar of the night and carry it forward to the following data
         best_platepar = None
@@ -1078,14 +1104,18 @@ def generateNightReport(output_dir, night_name, config, results=None, archive=Tr
     # Mark the files as reported only if all essential steps succeeded, otherwise the report is retried
     night_state = {
         'reported_at': RmsDateTime.utcnow().strftime(JSON_TIME_FORMAT),
+        'recalibration': recalibration,
         'ok_steps': ok_steps,
         'failed_steps': failed_steps,
         'upload_files': upload_files,
     }
 
-    if not (ESSENTIAL_STEPS & set(failed_steps)):
+    # A report without the archive (e.g. a test from the command line) doesn't count as reported, so the
+    #   monitor still archives the night
+    if archive and not (ESSENTIAL_STEPS & set(failed_steps)):
         night_state['files'] = sorted(results)
         night_state['files_time'] = files_time.strftime(JSON_TIME_FORMAT)
+        night_state['succeeded_at'] = night_state['reported_at']
 
     updateReportState(output_dir, night_name, **night_state)
 
@@ -1140,6 +1170,10 @@ def deleteOldNightImages(output_dir, config, states, nights, now=None):
         if pair_files:
             log.info("Deleted {:d} image files of night {:s}".format(len(pair_files), night_name))
             cleaned.append(night_name)
+
+            # The night is not reported again, as a report without the images would replace its products
+            #   and archive with nearly empty ones
+            updateReportState(output_dir, night_name, images_deleted=True)
 
     return cleaned
 
@@ -1208,8 +1242,8 @@ def pruneResults(output_dir, config, nights):
 
 def freeSpace(output_dir, config, needed_bytes, protected_nights=()):
     """ Delete the oldest nights (the night directory and its archives) until the output directory has the
-        given free space. The latest night is never deleted. If other data takes the disk (e.g. the recordings
-        on a shared disk), only the older nights of the monitor are deleted.
+        given free space. The latest night is never deleted. If deleting the old nights can't free enough
+        space, because other data takes the disk (e.g. the recordings on a shared disk), nothing is deleted.
 
     Arguments:
         output_dir: [str] Output directory of the monitor.
@@ -1224,41 +1258,50 @@ def freeSpace(output_dir, config, needed_bytes, protected_nights=()):
         [bool] True if there is enough free space.
     """
 
+    if availableSpace(output_dir) >= needed_bytes:
+        return True
+
     captured_path = os.path.join(output_dir, config.captured_dir)
     archived_path = os.path.join(output_dir, config.archived_dir)
 
     night_names = sorted(set(getNightDirs(captured_path, config.stationID))
                          | set(getNightDirs(archived_path, config.stationID)))
 
+    # The data of the nights which can be deleted: the night directory, the archive directory and archives
+    archived_files = os.listdir(archived_path) if os.path.isdir(archived_path) else []
+    night_paths = collections.OrderedDict()
     for night_name in night_names[:-1]:
+        if night_name not in protected_nights:
+            night_paths[night_name] = [os.path.join(captured_path, night_name)] \
+                + [os.path.join(archived_path, file_name) for file_name in archived_files
+                   if file_name.startswith(night_name)]
+
+    def _size(path):
+        return directorySize(path) if os.path.isdir(path) else os.path.getsize(path)
+
+    deletable_bytes = sum(_size(path) for paths in night_paths.values() for path in paths
+                          if os.path.exists(path))
+
+    if availableSpace(output_dir) + deletable_bytes < needed_bytes:
+        log.warning("{:.1f} GB are needed in {:s} for the next night, but only {:.1f} GB are free and the "
+                    "old nights of the monitor take {:.1f} GB, so the rest of the disk is used by other "
+                    "data. No nights are deleted.".format(needed_bytes/1024**3, output_dir,
+                                                 availableSpace(output_dir)/1024**3, deletable_bytes/1024**3))
+        return False
+
+    for night_name, paths in night_paths.items():
 
         if availableSpace(output_dir) >= needed_bytes:
             return True
 
-        if night_name in protected_nights:
-            continue
-
         log.info("Deleting night {:s} to free space for the next night".format(night_name))
-        shutil.rmtree(os.path.join(captured_path, night_name), ignore_errors=True)
+        for path in paths:
+            if os.path.isdir(path):
+                shutil.rmtree(path, ignore_errors=True)
+            elif os.path.exists(path):
+                os.remove(path)
 
-        # The archive directory and the archives of the night
-        if os.path.isdir(archived_path):
-            for file_name in os.listdir(archived_path):
-                if file_name.startswith(night_name):
-                    path = os.path.join(archived_path, file_name)
-                    if os.path.isdir(path):
-                        shutil.rmtree(path, ignore_errors=True)
-                    else:
-                        os.remove(path)
-
-    if availableSpace(output_dir) >= needed_bytes:
-        return True
-
-    log.warning("{:.1f} GB are needed in {:s} for the next night, but only {:.1f} GB are free after deleting "
-                "the old nights, the rest of the disk is used by other data".format(needed_bytes/1024**3,
-                    output_dir, availableSpace(output_dir)/1024**3))
-
-    return False
+    return availableSpace(output_dir) >= needed_bytes
 
 
 def cleanupOldData(output_dir, config, protected_nights=()):
@@ -1576,9 +1619,12 @@ class NightReporter(object):
         partial_time = partialReportTime(self.config, night_name)
         if (partial_time is not None) and (partial_time <= now < partial_time + datetime.timedelta(days=1)):
 
-            reported_at = self.states['nights'].get(night_name, {}).get('reported_at')
-            if (reported_at is None) or (datetime.datetime.strptime(reported_at, JSON_TIME_FORMAT)
-                                         < partial_time):
+            # Only a successful report counts, so a failed partial report is made again after the wait
+            night_state = self.states['nights'].get(night_name, {})
+            succeeded_at = night_state.get('succeeded_at', night_state.get('reported_at')
+                                           if 'files' in night_state else None)
+            if (succeeded_at is None) or (datetime.datetime.strptime(succeeded_at, JSON_TIME_FORMAT)
+                                          < partial_time):
                 return 'partial'
 
         # Wait until no new results of the night came in for a while
@@ -1747,6 +1793,9 @@ class NightReporter(object):
         if trigger:
             os.remove(trigger_path)
             self.pending = None
+
+            # The operator asks for the reports, so nights which failed are tried again right away
+            self.failed = {}
 
         # Find the nights with unreported files
         scan_age = (now - self.last_scan).total_seconds() if (self.last_scan is not None) else None

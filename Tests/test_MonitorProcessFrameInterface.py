@@ -121,6 +121,11 @@ def test_processFile_skips_files_of_nights_past_the_cutoff(config_path, tmp_path
     assert mnr.readDoneFlag(results_dir) == {'night': night_name, 'skipped': True}
     assert mnr.scanNights(output_dir, config) == {}
 
+    # A file with results (processed again with --force) is processed, its results are not marked skipped
+    mnr.writeDoneFlag(results_dir, {'night': night_name})
+    assert mon.processFile(str(tmp_path/'dummy.vid'), config_path, None, output_dir, 128) is False
+    assert mnr.readDoneFlag(results_dir) == {'night': night_name}
+
 
 @pytest.mark.parametrize('offset_s', [0, 60])
 def test_processFile_processes_file_beginning_at_or_after_start_time(config_path, tmp_path, monkeypatch,
@@ -723,7 +728,13 @@ def test_meteor_names_unchanged_without_chunk_images(tmp_path, config):
     entry = FTPdetectinfo.readFTPdetectinfo(str(tmp_path), ftp_name)[0]
 
     assert entry[0] == FFfile.constructFFName('XX0001', handle.currentFrameTime(130))
-    assert entry[11][0][1] == 0
+
+    # The frames are relative to the time in the name (rounded down to the millisecond) at the measured
+    #   frame rate, so the time of every pick is name time + frame/fps
+    name_time = FFfile.filenameToDatetime(entry[0])
+    for frame, pick_frame in zip([row[1] for row in entry[11]], [130, 131]):
+        pick_time = name_time + datetime.timedelta(seconds=frame/25.0)
+        assert abs((pick_time - handle.currentFrameTime(pick_frame)).total_seconds()) < 0.001
 
 
 ### Worker lifetime ###
@@ -768,6 +779,46 @@ def test_worker_ends_when_the_monitor_is_killed(start_method):
 
 
 ### Failed files ###
+
+def test_killed_workers_are_given_up_later(tmp_path):
+
+    output_dir = str(tmp_path)
+    failed_files, _ = mon.loadFailedFiles(output_dir)
+
+    # A worker killed from outside (e.g. out of memory) is retried until it was killed MAX_KILLS times
+    for _ in range(mon.MAX_KILLS - 1):
+        assert not mon.recordFailure(output_dir, failed_files, 'big', -9, 300, killed=True)
+    assert mon.recordFailure(output_dir, failed_files, 'big', -9, 300, killed=True)
+    assert mon.loadFailedFiles(output_dir)[1] == {'big'}
+
+
+def test_killed_from_outside():
+
+    class _Proc(object):
+        exitcode = -9
+
+    proc = _Proc()
+    assert mon.killedFromOutside(proc)
+
+    # A worker stopped by the monitor (time limit) counts as a normal failure
+    proc.stopped_by_monitor = True
+    assert not mon.killedFromOutside(proc)
+
+    proc = _Proc()
+    proc.exitcode = 1
+    assert not mon.killedFromOutside(proc)
+
+
+def test_calibration_size_is_checked():
+
+    class _Handle(object):
+        nrows, ncols = 540, 960
+
+    # Detection binning by 2: the handle has the binned size, the calibration images the full size
+    assert mon.calibrationMatchesFrames(np.zeros((1080, 1920)), _Handle(), 2)
+    assert not mon.calibrationMatchesFrames(np.zeros((512, 512)), _Handle(), 2)
+    assert mon.calibrationMatchesFrames(None, _Handle(), 2)
+
 
 def test_failed_files_are_given_up_and_remembered(tmp_path):
 

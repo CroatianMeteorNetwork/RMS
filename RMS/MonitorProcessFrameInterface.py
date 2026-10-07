@@ -42,8 +42,8 @@ from RMS.Formats.FFfile import validFFName, constructFFName
 from RMS.Formats import FFpng
 from RMS.Routines import Image
 from RMS.MonitorNightReport import exitWithMonitor, latestPlateparPath, lockOutputDir, lockOwner, \
-    MONITOR_LOCK_FILE_NAME, nightDirPath, nightInfo, NightReporter, readStateFile, ReportLock, stopProcess, \
-    writeDoneFlag
+    MONITOR_LOCK_FILE_NAME, nightDirPath, nightInfo, NightReporter, readDoneFlag, readStateFile, ReportLock, \
+    stopProcess, writeDoneFlag
 from RMS.DetectStarsAndMeteors import (
     detectStarsAndMeteorsFrameInterface,
     saveResultsFrameInterface,
@@ -87,10 +87,13 @@ WORKER_TIMEOUT = 3600
 SHUTDOWN_TIMEOUT = 30
 
 # Record of the input files which failed, kept in the output directory: {unique_id: {'count': int,
-#   'last_fail_time': float}}. A file is retried once after fail_wait_time, and after MAX_FAILURES failures it
-#   is skipped, also after a restart, unless the monitor is started with --retry_failed
+#   'kills': int, 'last_fail_time': float}}. A file is retried once after fail_wait_time, and after
+#   MAX_FAILURES failures it is skipped, also after a restart, unless the monitor is started with
+#   --retry_failed. A worker killed from outside (e.g. by the system when the memory runs out) doesn't count
+#   as a failure of the file, it is retried until it was killed MAX_KILLS times
 FAILED_FILES_NAME = '.failed_files.json'
 MAX_FAILURES = 2
+MAX_KILLS = 5
 
 # Accepted formats of the start time given on the command line or in the multicam INI file
 START_TIME_FORMATS = ["%Y%m%d_%H%M%S", "%Y%m%d-%H%M%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S",
@@ -229,6 +232,37 @@ def walkInput(top_dir, output_dir, config):
 
         dirs[:] = [d for d in dirs if os.path.realpath(os.path.join(root, d)) not in output_dirs]
         yield root, dirs, files
+
+
+# Input directories which can't be read: {dir_path: monotonic time of the last error message}
+_UNREADABLE_DIRS = {}
+
+# Seconds between the error messages about an input directory which still can't be read
+UNREADABLE_LOG_INTERVAL = 3600
+
+
+def logReadable(dir_path, readable, log_prefix=''):
+    """ Log that the input directory can't be read, but only once per UNREADABLE_LOG_INTERVAL while it lasts
+        (e.g. an unmounted disk), as the directory is read every few seconds. Log when it can be read again.
+
+    Arguments:
+        dir_path: [str] Input directory.
+        readable: [bool] True if it could be read.
+
+    Keyword arguments:
+        log_prefix: [str] Prefix of the log messages, e.g. the camera ID. Empty by default.
+    """
+
+    if readable:
+        if _UNREADABLE_DIRS.pop(dir_path, None) is not None:
+            log.info("{}The input directory {} can be read again".format(log_prefix, dir_path))
+        return
+
+    last = _UNREADABLE_DIRS.get(dir_path)
+    if (last is None) or (time.monotonic() - last >= UNREADABLE_LOG_INTERVAL):
+        log.error("{}Cannot read the input directory {} (repeated every {:.0f} min while it lasts)".format(
+            log_prefix, dir_path, UNREADABLE_LOG_INTERVAL/60))
+        _UNREADABLE_DIRS[dir_path] = time.monotonic()
 
 
 def uniqueId(file_rel_path):
@@ -399,6 +433,38 @@ class ChunkImageSaver(object):
 
 
 
+def calibrationMatchesFrames(img, img_handle, binning_factor):
+    """ Check if a calibration image (dark, flat) has the size of the frames. The frame size of the image
+        handle is binned with detection binning, the calibration images have the full resolution.
+
+    Arguments:
+        img: [ndarray] Calibration image, None if not used.
+        img_handle: [FrameInterface] Image handle of the input file.
+        binning_factor: [int] Detection binning factor.
+
+    Return:
+        [bool] True if the size matches, or if it can't be checked.
+    """
+
+    if (img is None) or (getattr(img_handle, 'nrows', None) is None):
+        return True
+
+    binned_shape = (img.shape[0]//binning_factor, img.shape[1]//binning_factor)
+
+    return binned_shape == (img_handle.nrows, img_handle.ncols)
+
+
+def hasResults(results_dir):
+    """ Check if the results directory has the results of a processed file: a done flag which doesn't mark
+        the file as skipped.
+    """
+
+    if not os.path.isfile(os.path.join(results_dir, 'done.flag')):
+        return False
+
+    return not readDoneFlag(results_dir).get('skipped')
+
+
 def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
                 flat_path=None, dark_path=None, unique_id=None, start_time=None, mask_path=None):
     """ Process a single file through the detection and recalibration pipeline.
@@ -469,11 +535,12 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
             night_name, _, night_end = nightInfo(config, beginning_datetime)
             cutoff = night_end + datetime.timedelta(hours=config.monitor_night_cutoff_hours)
 
-            # Mark the file as done, so it is not processed again after a restart
-            if RmsDateTime.utcnow() > cutoff:
+            # Mark the file as done, so it is not processed again after a restart. A file which already has
+            #   results (processed again with --force or --retry_failed) is processed, so its results are kept
+            results_dir = resultsDirPath(output_dir, beginning_datetime, file_base)
+            if (RmsDateTime.utcnow() > cutoff) and (not hasResults(results_dir)):
                 print("Skipping {}: the processing of night {} was cut off at {} UTC".format(file_name,
                     night_name, cutoff))
-                results_dir = resultsDirPath(output_dir, beginning_datetime, file_base)
                 os.makedirs(results_dir, exist_ok=True)
                 writeDoneFlag(results_dir, {'night': night_name, 'skipped': True})
                 sys.exit(SKIP_EXIT_CODE)
@@ -489,8 +556,7 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
         )
 
         if img_handle is None:
-            print("ERROR: Could not open file: {}".format(file_path))
-            return False
+            raise IOError("Could not open file: {}".format(file_path))
 
         # Create the results directory, sorted by the date of the first frame
         results_dir = resultsDirPath(output_dir, img_handle.beginning_datetime, file_base)
@@ -544,6 +610,15 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
 
         if config.use_flat and (flat_struct is None):
             raise IOError("The flat could not be loaded: {}".format(config.flat_file))
+
+        # The dark and the flat are silently not applied if their size doesn't match the frames, so a wrong
+        #   file fails the processing instead of the data being marked as corrected
+        flat_img = getattr(flat_struct, 'flat_img', None)
+        for name, img in [('dark', dark), ('flat', flat_img)]:
+            if not calibrationMatchesFrames(img, img_handle, config.detection_binning_factor):
+                raise ValueError("The {:s} is {:d}x{:d} px, but the frames are {:d}x{:d} px".format(name,
+                    img.shape[1], img.shape[0], img_handle.ncols*config.detection_binning_factor,
+                    img_handle.nrows*config.detection_binning_factor))
 
         # Determine the night the file belongs to. The chunk images are saved to the night directory
         night_name, _, _ = nightInfo(config, img_handle.beginning_datetime)
@@ -631,6 +706,15 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
         return True
 
     except Exception as e:
+
+        # A file which is still being written can fail to open or to read (e.g. an MP4 file without its index
+        #   yet), which is not a failure of the file
+        final_state = fileState(file_path)
+        if (final_state is not None) and (final_state != file_state):
+            proc_log.warning("{} failed while it was still being written ({}), it will be processed "
+                             "again".format(file_name, repr(e)))
+            sys.exit(CHANGED_EXIT_CODE)
+
         proc_log.error(traceback.format_exc())
         proc_log.error("Error processing {}: {}".format(file_name, str(e)))
         return False
@@ -760,7 +844,8 @@ def loadFailedFiles(output_dir, retry_failed=False):
     else:
         failed_files = readStateFile(os.path.join(output_dir, FAILED_FILES_NAME), failed_files)
 
-    given_up = set(uid for uid, fail in failed_files.items() if fail['count'] >= MAX_FAILURES)
+    given_up = set(uid for uid, fail in failed_files.items()
+                   if (fail.get('count', 0) >= MAX_FAILURES) or (fail.get('kills', 0) >= MAX_KILLS))
 
     return failed_files, given_up
 
@@ -784,7 +869,7 @@ def saveFailedFiles(output_dir, failed_files):
         log.error("Could not save the record of the failed files: {:s}".format(repr(e)))
 
 
-def recordFailure(output_dir, failed_files, unique_id, exitcode, fail_wait_time, log_prefix=''):
+def recordFailure(output_dir, failed_files, unique_id, exitcode, fail_wait_time, log_prefix='', killed=False):
     """ Record a failure of a file, and save the record.
 
     Arguments:
@@ -796,16 +881,35 @@ def recordFailure(output_dir, failed_files, unique_id, exitcode, fail_wait_time,
 
     Keyword arguments:
         log_prefix: [str] Prefix of the log messages, e.g. the camera ID. Empty by default.
+        killed: [bool] The worker was killed from outside the monitor (e.g. by the system when the memory ran
+            out), which is counted separately (MAX_KILLS). False by default.
 
     Return:
-        [bool] True if the file failed MAX_FAILURES times and is not retried anymore.
+        [bool] True if the file failed MAX_FAILURES times (or was killed MAX_KILLS times) and is not retried
+            anymore.
     """
 
     fail = failed_files.setdefault(unique_id, {'count': 0})
-    fail['count'] += 1
     fail['last_fail_time'] = time.time()
 
+    if killed:
+        fail['kills'] = fail.get('kills', 0) + 1
+    else:
+        fail['count'] = fail.get('count', 0) + 1
+
     saveFailedFiles(output_dir, failed_files)
+
+    if killed:
+        message = "{}The worker processing {} was killed (signal {:d}), most likely by the system because " \
+            "the memory ran out. Check that --nproc workers fit into the RAM."
+        message = message.format(log_prefix, unique_id, -exitcode)
+        if fail['kills'] >= MAX_KILLS:
+            log.error(message + " Killed {:d} times, giving up. It is not processed again unless the monitor "
+                      "is started with --retry_failed.".format(fail['kills']))
+            return True
+
+        log.warning(message + " Retrying in {:.1f} mins...".format(fail_wait_time/60.0))
+        return False
 
     if fail['count'] >= MAX_FAILURES:
         log.error("{}Processing failed for: {} (exit code {:d}) {:d} times, giving up. It is not processed "
@@ -925,6 +1029,15 @@ def startWorker(file_path, args, kwargs):
     return proc
 
 
+def killedFromOutside(proc):
+    """ Check if a finished worker was killed by a signal which didn't come from the monitor (e.g. the system
+        killed it when the memory ran out).
+    """
+
+    return (proc.exitcode is not None) and (proc.exitcode < 0) and (not getattr(proc, 'stopped_by_monitor',
+                                                                                  False))
+
+
 def stopStuckWorker(proc, unique_id, worker_timeout):
     """ Stop a worker process which runs longer than the time limit, e.g. one stuck in the video decoder. The
         stopped worker has a negative exit code, so its file is handled as failed and retried.
@@ -942,6 +1055,8 @@ def stopStuckWorker(proc, unique_id, worker_timeout):
     log.error("Processing {} did not finish in {:.1f} min, stopping the worker...".format(unique_id,
         worker_timeout/60))
 
+    # A worker stopped by the monitor counts as a failure of its file, unlike one killed from outside
+    proc.stopped_by_monitor = True
     stopWorker(proc)
 
 
@@ -1084,7 +1199,8 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
                     elif proc.exitcode == CHANGED_EXIT_CODE:
                         log.warning("{} was still being written while it was processed, processing it "
                                     "again".format(uid))
-                    elif recordFailure(output_dir, failed_files, uid, proc.exitcode, fail_wait_time):
+                    elif recordFailure(output_dir, failed_files, uid, proc.exitcode, fail_wait_time,
+                                       killed=killedFromOutside(proc)):
                         processed_files.add(uid)
 
                     finished.append(uid)
@@ -1105,8 +1221,9 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
                                 candidate_paths.append(os.path.join(root, f))
                 else:
                     candidate_paths = [os.path.join(input_dir, f) for f in os.listdir(input_dir)]
+                logReadable(input_dir, True)
             except OSError:
-                log.error("Cannot read directory: {}".format(input_dir))
+                logReadable(input_dir, False)
 
             # Forget the files which disappeared while waiting for them to be written
             stability_tracker = {path: trk for path, trk in stability_tracker.items()
@@ -1575,7 +1692,8 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None,
 
                     # Process failed, it is retried once after fail_wait_time and then given up
                     elif recordFailure(cam_output_dirs[cam_id], failed_files[cam_id], uid, proc.exitcode,
-                                       fail_wait_time, log_prefix="[{}] ".format(cam_id)):
+                                       fail_wait_time, log_prefix="[{}] ".format(cam_id),
+                                       killed=killedFromOutside(proc)):
                         processed_files[cam_id].add(uid)
                                     
                     finished.append((cam_id, uid))
@@ -1603,10 +1721,12 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None,
                                 for f in files:
                                     candidate_paths.append(os.path.join(root, f))
                     else:
-                        candidate_paths = [os.path.join(cam['input_dir'], f) for f in os.listdir(cam['input_dir'])]
-                
+                        candidate_paths = [os.path.join(cam['input_dir'], f)
+                                           for f in os.listdir(cam['input_dir'])]
+                    logReadable(cam['input_dir'], True, log_prefix="[{}] ".format(cam_id))
+
                 except OSError:
-                    log.error("Cannot read directory for camera {}: {}".format(cam_id, cam['input_dir']))
+                    logReadable(cam['input_dir'], False, log_prefix="[{}] ".format(cam_id))
                     continue
 
                 # Forget the files which disappeared while waiting for them to be written

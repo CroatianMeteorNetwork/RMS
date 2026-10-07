@@ -212,7 +212,7 @@ def test_reprocessed_file_makes_the_night_pending(tmp_path):
     done_flag = os.path.join(output_dir, results_dir, mnr.DONE_FLAG_NAME)
     os.utime(done_flag, (time.time() - 60, time.time() - 60))
 
-    mnr.generateNightReport(output_dir, NIGHT, config, archive=False)
+    mnr.generateNightReport(output_dir, NIGHT, config, archive=True)
     states = mnr.readReportStates(output_dir)
     assert not mnr.isPending(output_dir, config, states, NIGHT, mnr.scanNights(output_dir, config)[NIGHT])
 
@@ -450,10 +450,14 @@ def test_failed_optional_product_still_reports_the_night(tmp_path, monkeypatch):
     output_dir = str(tmp_path)
     results_dir = _makeResults(output_dir, config, 'file1')
 
-    night_state = mnr.generateNightReport(output_dir, NIGHT, config, archive=False)
+    night_state = mnr.generateNightReport(output_dir, NIGHT, config, archive=True)
 
     assert 'shower_association' in night_state['failed_steps']
     assert night_state['files'] == [results_dir]
+
+    # A report without the archive (e.g. from the command line) doesn't mark the night as reported
+    mnr.updateReportState(output_dir, NIGHT, files=[])
+    assert mnr.generateNightReport(output_dir, NIGHT, config, archive=False)['files'] == []
 
 
 def test_failed_essential_step_keeps_the_night_pending(tmp_path, monkeypatch):
@@ -617,9 +621,14 @@ def test_cleanup_frees_the_space_of_the_largest_recent_night(tmp_path, monkeypat
     assert sorted(os.listdir(captured_dir)) == nights[1:]
     assert os.listdir(archived_dir) == []
 
-    # If other data takes the disk, the older nights are deleted, but never the latest one
+    # If other data takes the disk, so deleting the old nights wouldn't free enough space, nothing is deleted
+    config.extra_space_gb = 1
     monkeypatch.setattr(mnr, 'availableSpace', lambda path: 100)
     assert not mnr.cleanupOldData(output_dir, config)
+    assert sorted(os.listdir(captured_dir)) == nights[1:]
+
+    # Otherwise the old nights are deleted, but never the latest one
+    assert not mnr.freeSpace(output_dir, config, 3000)
     assert os.listdir(captured_dir) == [nights[-1]]
 
 
@@ -631,6 +640,8 @@ def test_free_space_keeps_protected_nights(tmp_path, monkeypatch):
     nights = ['XX0001_2025122{:d}_222000_000000'.format(i) for i in range(4)]
     for night_name in nights:
         os.makedirs(os.path.join(captured_dir, night_name))
+        with open(os.path.join(captured_dir, night_name, 'FF_pair.png'), 'wb') as f:
+            f.write(b'0'*1000)
 
     # The night being reported is not deleted, also when the space is needed
     monkeypatch.setattr(mnr, 'availableSpace', lambda path: 0)
@@ -675,6 +686,11 @@ def test_delete_old_night_images(tmp_path):
     mnr.updateReportState(output_dir, NIGHT, files=[results_dir, late_dir])
     assert _deleteImages(3) == [NIGHT]
     assert not [f for f in os.listdir(night_dir) if FFpng.isPairName(f)]
+
+    # The night is not reported again, a report without the images would replace its products
+    _makeResults(output_dir, config, 'file3', start_s=1200)
+    assert not mnr.isPending(output_dir, config, mnr.readReportStates(output_dir), NIGHT,
+                             mnr.scanNights(output_dir, config)[NIGHT])
 
 
 ### Scheduling ###
@@ -794,14 +810,19 @@ def test_partial_report_while_the_night_is_processed(scheduling):
     assert _isDue(partial_time - datetime.timedelta(minutes=1)) is None
     assert _isDue(partial_time + datetime.timedelta(minutes=1)) == 'partial'
 
-    # Only once per night: not after a report which was made after the partial report time
-    mnr.updateReportState(scheduling.output_dir, night, reported_at=(partial_time + datetime.timedelta(
-        minutes=5)).strftime(mnr.JSON_TIME_FORMAT))
+    # A failed report doesn't count, the partial report is made again (after the wait for failed reports)
+    report_time = (partial_time + datetime.timedelta(minutes=5)).strftime(mnr.JSON_TIME_FORMAT)
+    mnr.updateReportState(scheduling.output_dir, night, reported_at=report_time)
+    reporter.states = mnr.readReportStates(scheduling.output_dir)
+    assert _isDue(partial_time + datetime.timedelta(minutes=10)) == 'partial'
+
+    # Only once per night: not after a successful report which was made after the partial report time
+    mnr.updateReportState(scheduling.output_dir, night, files=[], succeeded_at=report_time)
     reporter.states = mnr.readReportStates(scheduling.output_dir)
     assert _isDue(partial_time + datetime.timedelta(minutes=10)) is None
 
     # Not for old nights, e.g. a backlog after a downtime, which get only the normal report
-    mnr.updateReportState(scheduling.output_dir, night, reported_at=None)
+    mnr.updateReportState(scheduling.output_dir, night, reported_at=None, succeeded_at=None)
     reporter.states = mnr.readReportStates(scheduling.output_dir)
     assert _isDue(partial_time + datetime.timedelta(days=2)) is None
 

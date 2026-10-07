@@ -210,33 +210,28 @@ def saveResultsFrameInterface(star_list, meteor_list, img_handle, config, chunk_
             if img_handle.input_type == 'ff':
                 ff_file_name = img_handle.name()
 
-            # Assign the meteor to the saved chunk. The frames are computed from the real frame times
-            #   relative to the time in the chunk name, using the measured fps (rounded to the precision
-            #   stored in the FTPdetectinfo file), so the time of every pick is recovered exactly as
-            #   name time + frame/fps
-            elif chunk_name is not None:
+            # Non-FF inputs: assign the meteor to the saved chunk, or name it after the time of the first pick
+            #   if the chunk images are not saved. The frames are computed from the real frame times relative
+            #   to the time in the name, using the measured fps (rounded to the precision stored in the
+            #   FTPdetectinfo file), so the time of every pick is recovered exactly as name time + frame/fps,
+            #   also if the frame rate differs from the config or frames were dropped
+            else:
+
+                if chunk_name is not None:
+                    ff_file_name = chunk_name
+                else:
+                    first_pick_time = img_handle.currentFrameTime(frame_no=int(centroids[0][0]), dt_obj=True)
+                    ff_file_name = constructFFName(config.stationID, first_pick_time)
 
                 fps_meas = round(img_handle.fps, 2)
-                ref_time = filenameToDatetime(chunk_name)
+                ref_time = filenameToDatetime(ff_file_name)
 
                 centroids = np.array(centroids, dtype=np.float64)
                 for entry in centroids:
                     entry[0] = (subframePickTime(img_handle, entry[0], fps_meas) - ref_time).total_seconds()\
                         *fps_meas
 
-                ff_file_name = chunk_name
                 meteor_fps = fps_meas
-
-            # For non-FF inputs, construct the FF name from the station ID and the first pick time
-            # To keep an accurate time, reset the frames so that the first pick is at frame 0
-            else:
-                first_pick_time = img_handle.currentFrameTime(frame_no=int(centroids[0][0]), dt_obj=True)
-                ff_file_name = constructFFName(config.stationID, first_pick_time)
-
-                # Reset the frame numbers so that the first pick is at frame 0 
-                # frame[i] - int(frame[0]) to preserve the rolling shutter correction encoded as the 
-                #   fractional part of the frame number
-                centroids[:,0] -= int(centroids[0,0])
 
             meteor_counts[ff_file_name] = meteor_counts.get(ff_file_name, 0) + 1
             meteor_No = meteor_counts[ff_file_name]
