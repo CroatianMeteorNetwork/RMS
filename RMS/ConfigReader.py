@@ -298,10 +298,11 @@ class Config:
 
         self.ff_format = 'fits'
 
-        # Also store the sub-ADU bits of the average frame, in an extra FITS plane
+        # Also store the sub-ADU residual of the average frame, in an extra FITS plane (AVERESID)
         self.ff_avepixel16 = True
 
-        # Also store the fractional bits of the standard deviation frame, in an extra FITS plane
+        # Also store the sub-code residual of the standard deviation frame, in an extra FITS
+        # plane (STDRESID)
         self.ff_stdpixel16 = True
         
         self.fov_w = 64.0
