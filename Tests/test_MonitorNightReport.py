@@ -1028,3 +1028,24 @@ def test_stopProcess_kills_a_process_which_ignores_sigterm():
     t0 = time.time()
     assert mnr.stopProcess(proc, "Test", timeout=1)
     assert (not proc.is_alive()) and (time.time() - t0 < 5)
+
+
+def test_results_of_deleted_nights_are_pruned(tmp_path):
+
+    config = _config()
+    output_dir = str(tmp_path)
+
+    results_dir = _makeResults(output_dir, config, 'file1')
+    nights = mnr.scanNights(output_dir, config)
+
+    # Nothing is pruned while the night directory exists
+    assert mnr.pruneResults(output_dir, config, nights) == 0
+
+    # Once the cleanup deleted the night, only the done flag is kept, so the file stays processed, and the
+    #   report state of the night is forgotten
+    mnr.updateReportState(output_dir, NIGHT, files=[results_dir])
+    shutil.rmtree(mnr.nightDirPath(output_dir, NIGHT, config))
+    assert mnr.pruneResults(output_dir, config, nights) == 1
+    assert os.listdir(os.path.join(output_dir, results_dir)) == [mnr.DONE_FLAG_NAME]
+    assert mnr.readReportStates(output_dir)['nights'] == {}
+    assert mnr.pruneResults(output_dir, config, nights) == 0

@@ -1033,6 +1033,58 @@ def directorySize(dir_path):
                for root, _, files in os.walk(dir_path) for file_name in files)
 
 
+def pruneResults(output_dir, config, nights):
+    """ Delete the results and the report states of the nights whose directory was deleted, except the done
+        flags, which mark the input files as processed. Such nights are not reported again (see
+        NightReporter), so their results (CALSTARS, FTPdetectinfo, recalibrated platepars, config copies)
+        and report states are not needed anymore.
+
+    Arguments:
+        output_dir: [str] Output directory of the monitor.
+        config: [Config] Configuration.
+        nights: [dict] {night_name: {results_dir: info}}, see scanNights.
+
+    Return:
+        [int] Number of pruned results directories.
+    """
+
+    n_pruned = 0
+    for night_name, results in nights.items():
+
+        if os.path.isdir(nightDirPath(output_dir, night_name, config)):
+            continue
+
+        for results_dir in results:
+            results_path = os.path.join(output_dir, results_dir)
+
+            file_names = [file_name for file_name in os.listdir(results_path) if file_name != DONE_FLAG_NAME]
+            for file_name in file_names:
+                path = os.path.join(results_path, file_name)
+                if os.path.isdir(path):
+                    shutil.rmtree(path, ignore_errors=True)
+                else:
+                    os.remove(path)
+
+            n_pruned += bool(file_names)
+
+    if n_pruned:
+        log.info("Deleted the results of {:d} processed files of deleted nights, keeping their done "
+                 "flags".format(n_pruned))
+
+    # Forget the report states of the deleted nights, which are not reported again, so the state file doesn't
+    #   grow. The cleanup never runs at the same time as a report, which also writes the states
+    states = readReportStates(output_dir)
+    deleted = [night_name for night_name in states['nights']
+               if not os.path.isdir(nightDirPath(output_dir, night_name, config))]
+    if deleted:
+        for night_name in deleted:
+            del states['nights'][night_name]
+
+        _writeJSON(os.path.join(output_dir, REPORT_STATE_FILE_NAME), states)
+
+    return n_pruned
+
+
 def freeSpace(output_dir, config, needed_bytes):
     """ Delete the oldest nights (the night directory and its archives) until the output directory has the
         given free space. The latest night is never deleted. If other data takes the disk (e.g. the recordings
@@ -1133,6 +1185,8 @@ def cleanupOldData(output_dir, config):
                             for night_dir in night_dirs[-3:])
 
     enough_space = freeSpace(output_dir, config, needed_bytes)
+
+    pruneResults(output_dir, config, nights)
 
     # Delete the old logs of the monitor processes, which have a prefix
     deleteOldLogfiles(output_dir, config, pattern='*log_*.log*')
