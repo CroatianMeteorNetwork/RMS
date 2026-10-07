@@ -628,6 +628,26 @@ def processFileWorker(*args, **kwargs):
     sys.exit(0 if success else 1)
 
 
+def missingCameraFiles(config_path, platepar_path, dark_path=None, flat_path=None):
+    """ Return the files given for a camera which don't exist. They are checked at the start, as with a wrong
+        path every file would fail and be given up.
+
+    Arguments:
+        config_path: [str] Path to the config file.
+        platepar_path: [str] Path to the platepar file.
+
+    Keyword arguments:
+        dark_path: [str] Path to the dark frame, None if not given.
+        flat_path: [str] Path to the flat field, None if not given.
+
+    Return:
+        [list] Paths which don't exist.
+    """
+
+    return [path for path in (config_path, platepar_path, dark_path, flat_path)
+            if (path is not None) and (not os.path.isfile(path))]
+
+
 def loadFailedFiles(output_dir, retry_failed=False):
     """ Load the record of the failed files from the output directory.
 
@@ -878,6 +898,11 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
     log.info("Parallel processes: {:d}".format(nproc))
     if start_time is not None:
         log.info("Only processing files beginning at or after: {} UTC".format(start_time))
+
+    missing = missingCameraFiles(config_path, platepar_path, dark_path, flat_path)
+    if missing:
+        log.error("The given files don't exist: {}".format(", ".join(missing)))
+        sys.exit(1)
 
     # Only one monitor can work on the output directory
     output_lock = lockOutputDir(output_dir)
@@ -1254,6 +1279,14 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None,
     if not cameras:
         print("ERROR: No cameras defined in config.")
         sys.exit(1)
+
+    # The files of every camera have to exist
+    for cam in cameras:
+        missing = missingCameraFiles(cam['config_path'], cam['platepar_path'], cam['dark_path'],
+                                     cam['flat_path'])
+        if missing:
+            print("ERROR: Camera {}: the given files don't exist: {}".format(cam['id'], ", ".join(missing)))
+            sys.exit(1)
 
     # Every camera needs its own output directory
     output_dirs = [os.path.realpath(cam['output_dir']) for cam in cameras]

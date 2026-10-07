@@ -753,3 +753,13 @@ def test_processFileWorker_keeps_changed_exit_code(monkeypatch):
         sys.exit(mon.CHANGED_EXIT_CODE)
 
     assert _runWorker(monkeypatch, _changed) == mon.CHANGED_EXIT_CODE
+
+
+def test_missing_camera_files_are_found(tmp_path):
+
+    config_path = str(tmp_path/'a.config')
+    open(config_path, 'w').close()
+
+    assert mon.missingCameraFiles(config_path, config_path) == []
+    assert mon.missingCameraFiles(config_path, str(tmp_path/'pp.cal'), dark_path=str(tmp_path/'dark.png')) == \
+        [str(tmp_path/'pp.cal'), str(tmp_path/'dark.png')]
