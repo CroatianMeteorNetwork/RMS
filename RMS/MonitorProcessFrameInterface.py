@@ -1750,8 +1750,9 @@ Examples:
     )
 
     arg_parser.add_argument('file_type', type=str, nargs='?', default=None,
-        help="File type to monitor for. Supported: vid, ff, mkv, mp4, avi, mov, wmv. "
-             "Any other value will be treated as a file extension."
+        help="File type to monitor for. Supported: vid, ff, mkv, mp4, avi, mov, wmv, and fitsdirs "
+             "(directories of FITS frames). Any other value will be treated as a file extension. See "
+             "Guides/MonitorProcessing.md."
     )
 
     arg_parser.add_argument('input_dir', type=str, nargs='?', default=None,
