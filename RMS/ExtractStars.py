@@ -473,8 +473,13 @@ def extractStarsImgHandle(img_handle,
         mask, dark, flat_struct = binImageCalibration(config, copy.deepcopy(mask), dark,
                                                       copy.deepcopy(flat_struct))
 
-    # The integrated intensity of stars on averaged binned images is reduced by the number of binned pixels
+    # The integrated intensity of stars on averaged binned images is reduced by the number of binned pixels,
+    #   the pixel levels of summed binned images are increased by it
     intens_factor = bin_factor**2 if config.detection_binning_method == 'avg' else 1
+    level_factor = bin_factor**2 if config.detection_binning_method == 'sum' else 1
+
+    # Summed binned images have more bits than the data (e.g. 4 more for 4x4), which sets the saturation level
+    bit_depth = config.bit_depth + int(round(np.log2(level_factor)))
 
     # Start from the first chunk
     img_handle.setFrame(0)
@@ -519,11 +524,15 @@ def extractStarsImgHandle(img_handle,
         # Calculate image mean and stddev
         img_median = np.median(avepixel)
 
-        if debug:
-            log.debug(f"[extractStarsImgHandle] Image median brightness: {img_median:.2f} (max allowed: {max_global_intensity*(2**(config.bit_depth - 8))})")
+        # The limit of the median brightness, scaled to the bit depth and to summed binned pixels
+        max_median = max_global_intensity*(2**(config.bit_depth - 8))*level_factor
 
-        # Check if the image is too bright and skip the image (scale the cutoff to the image bit depth)
-        if img_median > max_global_intensity*(2**(config.bit_depth - 8)):
+        if debug:
+            log.debug(f"[extractStarsImgHandle] Image median brightness: {img_median:.2f} (max allowed: "
+                      f"{max_median})")
+
+        # Check if the image is too bright and skip the image
+        if img_median > max_median:
             print("    Image too bright, skipping chunk.")
             continue
 
@@ -537,7 +546,7 @@ def extractStarsImgHandle(img_handle,
             max_star_candidates=config.max_stars, border=border,
             neighborhood_size=neighborhood_size, intensity_threshold=intensity_threshold, 
             segment_radius=segment_radius, roundness_threshold=roundness_threshold, 
-            max_feature_ratio=max_feature_ratio, bit_depth=config.bit_depth, debug=debug
+            max_feature_ratio=max_feature_ratio, bit_depth=bit_depth, debug=debug
         )
 
         # If the star extraction failed, return an empty list
@@ -560,10 +569,18 @@ def extractStarsImgHandle(img_handle,
                                                                                    'N/A')))
 
 
-        # Rescale the stars extracted on binned images to the full image size, as the meteor centroids
-        y_arr, x_arr = np.array(y_arr)*bin_factor, np.array(x_arr)*bin_factor
+        # Rescale the stars extracted on binned images to the full image size, as the meteor centroids.
+        #   Pixel centres are at integer coordinates, so the binned pixel i covers the full size pixels
+        #   bin_factor*i to bin_factor*i + bin_factor - 1 and its centre is offset by (bin_factor - 1)/2
+        bin_offset = (bin_factor - 1)/2.0
+        y_arr = np.array(y_arr)*bin_factor + bin_offset
+        x_arr = np.array(x_arr)*bin_factor + bin_offset
         fwhm = np.array(fwhm)*bin_factor
         intensity = np.array(intensity)*intens_factor
+
+        # The peak and background levels of the full size pixels
+        amplitude = np.array(amplitude)/level_factor
+        background = np.array(background)/level_factor
 
         # CALSTARS format: Y(0) X(1) IntensSum(2) Ampltd(3) FWHM(4) BgLvl(5) SNR(6) NSatPx(7)
         # Note: intensity=IntensSum (integrated), amplitude=Ampltd (peak)
