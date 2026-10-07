@@ -66,6 +66,24 @@ def getCenteredGrid(img_h, img_w):
     return _stripe_grid_cache[cache_key]
 
 
+def findMaskPath(dir_path, config):
+    """ Find the mask file, first in the given directory, then in the directory of the config file.
+
+    Arguments:
+        dir_path: [str] Path to the directory with calibration.
+        config: [ConfigStruct]
+
+    Return:
+        [str] Path to the mask file, None if it wasn't found.
+    """
+
+    for mask_dir in [dir_path, config.config_file_path]:
+        if os.path.exists(os.path.join(mask_dir, config.mask_file)):
+            return os.path.join(mask_dir, config.mask_file)
+
+    return None
+
+
 def loadImageCalibration(dir_path, config, dtype=None, byteswap=False):
     """ Load the mask, dark and flat. 
     
@@ -83,16 +101,8 @@ def loadImageCalibration(dir_path, config, dtype=None, byteswap=False):
         mask, dark, flat_struct: [tuple of ndarrays]
     """
 
-    mask_path = None
     mask = None
-
-    # Try loading the mask from CaptureFiles directory
-    if os.path.exists(os.path.join(dir_path, config.mask_file)):
-        mask_path = os.path.join(dir_path, config.mask_file)
-
-    # Try loading the default mask
-    elif os.path.exists(os.path.join(config.config_file_path, config.mask_file)):
-        mask_path = os.path.join(config.config_file_path, config.mask_file)
+    mask_path = findMaskPath(dir_path, config)
 
     # Load the mask if given
     if mask_path:

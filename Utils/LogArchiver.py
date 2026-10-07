@@ -142,16 +142,24 @@ def extractDateFromLogName(config, log_name):
     log_name_fields = log_name.upper().split("_")
     stationID_upper = config.stationID.upper()
 
-    if stationID_upper in log_name_fields:
-        index_date = log_name_fields.index(stationID_upper) + 1
+    # The log time follows the station ID (log_<STATION>_<YYYYMMDD>_<HHMMSS>). The name may contain the
+    #   station ID more than once if a prefix is used (e.g. a file name), so take the last occurrence which is
+    #   followed by a valid time
+    station_indices = [i for i, field in enumerate(log_name_fields) if field == stationID_upper]
+
+    for index_station in reversed(station_indices):
+        index_date = index_station + 1
         index_time = index_date + 1
 
+        if len(log_name_fields) <= index_time:
+            continue
+
+        dtstr = f'{log_name_fields[index_date][0:8]}_{log_name_fields[index_time][0:6]}'
+
         try:
-            if len(log_name_fields) > index_time:
-                dtstr = f'{log_name_fields[index_date][0:8]}_{log_name_fields[index_time][0:6]}'
-                return datetime.datetime.strptime(dtstr, '%Y%m%d_%H%M%S').isoformat()
-        except Exception as e:
-            log.error("".join(traceback.format_exception(*sys.exc_info())))
+            return datetime.datetime.strptime(dtstr, '%Y%m%d_%H%M%S').isoformat()
+        except ValueError:
+            continue
 
     return ISO_DATE_2000
 

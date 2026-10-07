@@ -741,7 +741,7 @@ def deleteFiles(dir_path, config, delete_all=False):
 
 
 
-def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration=None):
+def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration=None, needed_bytes=None):
     """ Deletes old observation directories to free up space for new ones.
 
     Arguments:
@@ -753,6 +753,8 @@ def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration
     Keyword arguments:
         duration: [float] Duration of next video capturing in seconds. If None (by default), duration will
             be calculated for the next night.
+        needed_bytes: [float] Disk space needed for the next night in bytes, used instead of the estimate
+            from the capture settings. None by default.
 
     Return:
         [bool]: True if there's enough space for the next night's data, False if not.
@@ -855,6 +857,9 @@ def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration
         next_night_bytes += 3*(1024**3)
 
     ######
+
+    if needed_bytes is not None:
+        next_night_bytes = needed_bytes
 
     log.info("Need {:.2f} GB for next night".format(next_night_bytes/1024/1024/1024))
 
@@ -1139,13 +1144,14 @@ def deleteOldDirs(data_dir, config):
     return
 
 
-def deleteOldLogfiles(data_dir, config, days_to_keep=None):
+def deleteOldLogfiles(data_dir, config, days_to_keep=None, pattern='log*.log*'):
     """ Deletes old observation directories to free up space for new ones.
 
     Arguments:
         data_dir: [str] Path to the RMS data directory which contains the Captured and Archived directories
         config: [Configuration object]
         days_to_keep: [int] number of days to retain, default None means read from config file
+        pattern: [str] glob pattern of the log file names, 'log*.log*' (the RMS log files) by default
     """
     log_dir = os.path.join(data_dir, config.log_dir)
     
@@ -1156,7 +1162,7 @@ def deleteOldLogfiles(data_dir, config, days_to_keep=None):
     date_to_purge_to = timestamp(date_to_purge_to)
 
     # Only going to purge RMS log files
-    flist = glob.glob1(log_dir, 'log*.log*')
+    flist = glob.glob1(log_dir, pattern)
 
     for fl in flist:
 

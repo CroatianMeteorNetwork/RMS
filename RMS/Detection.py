@@ -2778,6 +2778,26 @@ def thresholdAndCorrectGammaFF(img_handle, config, mask, mask_ave_bright=True):
 
 
 
+def subframePickTime(img_handle, frame, fps):
+    """ Return the sub-frame accurate time of a (possibly fractional) frame number. The integer part selects
+        the frame whose time is read from the image handle; the fractional part (rolling shutter /
+        deinterlace) is added as a sub-frame offset using the given fps.
+
+    Arguments:
+        img_handle: [FrameInterface instance] Image data handle.
+        frame: [float] Frame number.
+        fps: [float] Frames per second used for the fractional part.
+
+    Return:
+        [datetime] Time of the frame.
+    """
+
+    frame_int = int(frame)
+    frac = frame - frame_int
+
+    return img_handle.currentFrameTime(frame_no=frame_int, dt_obj=True) + datetime.timedelta(seconds=frac/fps)
+
+
 def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, asgard=False, debug=False, \
     frame_range=None):
     """ Detect meteors on the given image. Here are the steps in the detection:
@@ -4371,15 +4391,6 @@ if __name__ == "__main__":
         # Suppress numpy scientific notation printing
         np.set_printoptions(suppress=True)
 
-        # Helper: full sub-frame-accurate time of a (possibly fractional) frame number. The integer part
-        #   selects the frame whose real timestamp is read; the fractional part (rolling shutter /
-        #   deinterlace) is added as a sub-frame offset using the given fps.
-        def subframePickTime(frame, fps_val):
-            frame_int = int(frame)
-            frac = frame - frame_int
-            return img_handle.currentFrameTime(frame_no=frame_int, dt_obj=True) \
-                + datetime.timedelta(seconds=frac/fps_val)
-
         meteor_No = 1
         for meteor in meteor_detections:
 
@@ -4424,7 +4435,7 @@ if __name__ == "__main__":
                 fps_meas = round(img_handle.fps, 2)
 
                 # Full sub-frame-accurate time of the first pick
-                ref_time_full = subframePickTime(centroids[0][0], fps_meas)
+                ref_time_full = subframePickTime(img_handle, centroids[0][0], fps_meas)
 
                 # Construct the FF file name from the first pick time (millisecond precision)
                 ff_file_name = FFfile.constructFFName(config.stationID, ref_time_full)
@@ -4437,7 +4448,8 @@ if __name__ == "__main__":
                 #   copy so the original frames are preserved for the ASGARD loop below.
                 centroids = centroids.copy()
                 for entry in centroids:
-                    entry[0] = (subframePickTime(entry[0], fps_meas) - ref_time).total_seconds()*fps_meas
+                    entry[0] = (subframePickTime(img_handle, entry[0], fps_meas) - ref_time).total_seconds()\
+                        *fps_meas
 
                 meteor_fps = fps_meas
 

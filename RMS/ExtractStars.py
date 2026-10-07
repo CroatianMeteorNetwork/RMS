@@ -418,7 +418,7 @@ def extractStarsImgHandle(img_handle,
         max_global_intensity=150, 
         neighborhood_size=10, intensity_threshold=18, 
         segment_radius=4, roundness_threshold=0.5, max_feature_ratio=0.8,
-        debug=False
+        debug=False, chunk_callback=None
     ):
 
     """ Extracts stars on a given image handle by searching for local maxima and applying PSF fit for star 
@@ -442,6 +442,9 @@ def extractStarsImgHandle(img_handle,
         roundness_threshold: [float] Minimum ratio of 2D Gaussian sigma X and sigma Y to be taken as a stars
             (hot pixels are narrow, while stars are round).
         max_feature_ratio: [float] Maximum ratio between 2 sigma of the star and the image segment area.
+        chunk_callback: [callable] Called as chunk_callback(img_handle, ff) after every chunk is loaded,
+            before any calibration is applied. If it returns a name, that name is used as the FF name of the
+            chunk. None by default.
 
     Return:
         star_list: [list] Stars of every chunk in the CALSTARS format: [[ff_name, [(Y, X, IntensSum, Ampltd,
@@ -489,6 +492,11 @@ def extractStarsImgHandle(img_handle,
 
         # Load one video frame chunk
         ff_tmp = img_handle.loadChunk()
+
+        # Pass the uncalibrated chunk to the callback (e.g. to save its images)
+        chunk_name = None
+        if chunk_callback is not None:
+            chunk_name = chunk_callback(img_handle, ff_tmp)
 
         # Extract the image to work on. Copy it, as masking modifies the image in place and the chunk may be
         # cached by the image handle
@@ -540,8 +548,11 @@ def extractStarsImgHandle(img_handle,
         x_arr, y_arr, amplitude, intensity, fwhm, background, snr, saturated_count = status
 
 
-        # Construct an FF name from the chunk time
-        ff_name = FFfile.constructFFName(config.stationID, chunkStartTime(img_handle))
+        # Use the name given by the callback, otherwise construct an FF name from the chunk time
+        if chunk_name is not None:
+            ff_name = chunk_name
+        else:
+            ff_name = FFfile.constructFFName(config.stationID, chunkStartTime(img_handle))
 
         # Print the results
         print()
