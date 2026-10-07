@@ -31,7 +31,9 @@ from RMS.Formats.FFStruct import FFStruct
 
 
 def referencePlanes(frames, gamma=1.0):
-    """ Exact numpy reference of the compressor's trimmed average and standard deviation. """
+    """ Exact numpy reference of the compressor's trimmed average and standard deviation: the mean
+        on the 4/4 trimmed sample, the sigma on the 16/16 trimmed sample scaled to the population.
+    """
 
     frames_sorted = np.sort(frames.astype(np.uint64), axis=0)
 
@@ -58,15 +60,21 @@ def referencePlanes(frames, gamma=1.0):
     # The 8-bit mean derived from the fixed-point mean by rounding
     ave8 = (ave16.astype(np.uint32) + 128) >> 8
 
-    # Sample variance (encoded domain) and rounded standard deviation, matching the
-    # compressor's double math
-    sq_sum = (trimmed**2).sum(axis=0).astype(np.float64)
-    var = (sq_sum - acc.astype(np.float64)**2/n)/(n - 1)
+    # Sample variance (encoded domain) of the 16/16 trimmed sample, matching the compressor's
+    # double math, scaled to the population sigma in 8.8 fixed point and floored at half a code
+    trimmed_sigma = frames_sorted[16:-16]
+    n_sigma = trimmed_sigma.shape[0]
+    acc_sigma = trimmed_sigma.sum(axis=0).astype(np.float64)
+    sq_sum = (trimmed_sigma**2).sum(axis=0).astype(np.float64)
+    var = (sq_sum - acc_sigma*acc_sigma/n_sigma)/(n_sigma - 1)
     var = np.clip(var, 0, None)
-    std = np.floor(np.sqrt(var) + 0.5)
-    std[std < 1] = 1
+    std16 = np.floor(256.0*1.3223*np.sqrt(var) + 0.5)
+    std16 = np.maximum(std16, 128).astype(np.uint16)
 
-    return ave8.astype(np.uint8), ave16, std.astype(np.uint8)
+    # The 8-bit sigma derived from the fixed-point sigma by rounding
+    std8 = (std16.astype(np.uint32) + 128) >> 8
+
+    return ave8.astype(np.uint8), ave16, std8.astype(np.uint8), std16
 
 
 def makeFF(ave16=None, dtype=np.uint8):
@@ -93,7 +101,7 @@ def makeFF(ave16=None, dtype=np.uint8):
 
 
 def testCompressorConsistency():
-    """ All planes match the numpy reference: rounded means and the correct sample std. """
+    """ All planes match the numpy reference: rounded means and the trimmed, scaled sigma. """
 
     rng = np.random.default_rng(7)
 
@@ -107,13 +115,15 @@ def testCompressorConsistency():
 
     for frames in test_stacks:
 
-        ftp, ave16, _ = compressFrames(frames, -1)
-        ref8, ref16, ref_std = referencePlanes(frames)
+        ftp, ave16, std16, _ = compressFrames(frames, -1)
+        ref8, ref16, ref_std, ref_std16 = referencePlanes(frames)
 
         assert np.array_equal(ave16, ref16)
         assert np.array_equal(ftp[2], ref8)
         assert np.array_equal((ave16 + 128) >> 8, ftp[2].astype(np.uint16))
         assert np.array_equal(ftp[3], ref_std)
+        assert np.array_equal(std16, ref_std16)
+        assert np.array_equal((std16 + 128) >> 8, ftp[3].astype(np.uint16))
 
 
 def testCompressorGammaPath():
@@ -131,8 +141,8 @@ def testCompressorGammaPath():
     for gamma in [0.6, 0.45, 0.9]:
         for frames in test_stacks:
 
-            ftp, ave16, _ = compressFrames(frames, -1, gamma)
-            ref8, ref16, ref_std = referencePlanes(frames, gamma=gamma)
+            ftp, ave16, std16, _ = compressFrames(frames, -1, gamma)
+            ref8, ref16, ref_std, ref_std16 = referencePlanes(frames, gamma=gamma)
 
             # The float accumulation order differs between the Cython loop and the numpy
             # reference, so allow a 1 LSB (1/256 ADU) tolerance on the fixed-point mean
@@ -143,6 +153,7 @@ def testCompressorGammaPath():
             assert np.array_equal((ave16.astype(np.uint32) + 128) >> 8,
                 ftp[2].astype(np.uint32))
             assert np.array_equal(ftp[3], ref_std)
+            assert np.array_equal(std16, ref_std16)
 
             # The gamma path must reduce to the identity at the extremes
             if frames.min() == frames.max():
@@ -449,7 +460,7 @@ def testExtractStarsPrecisePath():
         (sky + star_img)[None, :, :] + rng.normal(0, sigma_noise, (256, height, width))),
         0, 255).astype(np.uint8)
 
-    ftp, ave16, _ = compressFrames(frames, -1)
+    ftp, ave16, _, _ = compressFrames(frames, -1)
 
     config = cr.Config()
     config.width, config.height = width, height
