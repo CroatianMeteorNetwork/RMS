@@ -363,6 +363,7 @@ def process_file(config_path, tmp_path, monkeypatch):
 
     def _detect(img_handle, config, **kwargs):
         seen['config'] = config
+        seen['chunk_callback'] = kwargs.get('chunk_callback')
         raise RuntimeError("stop after the setup")
 
     monkeypatch.setattr(mon, 'detectStarsAndMeteorsFrameInterface', _detect)
@@ -376,6 +377,19 @@ def process_file(config_path, tmp_path, monkeypatch):
                                str(tmp_path/'out'), 128, **kwargs)
 
     return _run, config, seen
+
+
+@pytest.mark.parametrize('input_type, saved', [('video', True), ('ff', False)])
+def test_chunk_images_are_saved_only_for_non_ff_inputs(process_file, monkeypatch, input_type, saved):
+
+    run, config, seen = process_file
+    config.monitor_save_images = True
+
+    # FF inputs already are FF files, and their handles have no frame chunks
+    monkeypatch.setattr(_ProcessHandle, 'input_type', input_type)
+    run()
+
+    assert isinstance(seen['chunk_callback'], mon.ChunkImageSaver) == saved
 
 
 @pytest.mark.parametrize('dark_given, flat_given', [(False, False), (True, False), (False, True),
