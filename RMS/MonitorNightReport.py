@@ -1194,8 +1194,9 @@ def cleanupOldData(output_dir, config):
 
     # Delete by the numbers of directories to keep and the quotas. The space is freed below, as the RMS
     #   estimate of the space needed for the next night comes from the capture settings, which don't describe
-    #   the data of the monitor, and its deletion loop can delete the latest night
-    deleteOldObservations(output_dir, config.captured_dir, config.archived_dir, config, needed_bytes=0)
+    #   the data of the monitor, and its deletion loop can delete the latest night. It runs while the free
+    #   space is not larger than the needed space, so -1 disables it also on a completely full disk
+    deleteOldObservations(output_dir, config.captured_dir, config.archived_dir, config, needed_bytes=-1)
 
     # The space needed for the next night is the size of the largest of the last nights
     night_dirs = getNightDirs(captured_path, config.stationID)
@@ -1521,8 +1522,10 @@ class NightReporter(object):
     def _finishReport(self, now):
         """ Record the result of the finished report and hand its archives over for upload. """
 
+        # The wait is bounded, as a stopped report may be stuck in an uninterruptible call. Such a report
+        #   counts as failed (no exit code)
         proc, night_name, results = self.active
-        proc.join()
+        proc.join(10)
 
         self.active = None
         self.report_lock.owner = None
@@ -1577,7 +1580,7 @@ class NightReporter(object):
                 if not self._overTime(self.cleanup_proc, CLEANUP_TIMEOUT, "Cleanup"):
                     return
 
-            self.cleanup_proc.join()
+            self.cleanup_proc.join(10)
             self.cleanup_proc = None
 
         if self.cleanup_due or ((now - self.last_cleanup).total_seconds() > self.cleanup_interval):
@@ -1707,22 +1710,41 @@ if __name__ == "__main__":
               "data instead.".format(lockOwner(output_dir), output_dir, REPORT_TRIGGER_FILE_NAME))
         sys.exit(1)
 
-    # The layout of the output directory only depends on the config, so any config of the camera can be used
-    config = cr.parse(os.path.abspath(cml_args.config)) if cml_args.config else cr.Config()
-    nights = scanNights(output_dir, config)
+    given_config = cr.parse(os.path.abspath(cml_args.config)) if cml_args.config else None
+    nights = scanNights(output_dir, given_config if (given_config is not None) else cr.Config())
     states = readReportStates(output_dir)
+
+    def _nightConfig(night_name):
+        """ The given config, otherwise the config copied to the results of the night. None if the results
+            were pruned (the night was deleted by the cleanup).
+        """
+
+        if given_config is not None:
+            return given_config
+
+        for results_dir in sorted(nights[night_name]):
+            config_paths = sorted(glob.glob(os.path.join(output_dir, results_dir, '*.config')))
+            if config_paths:
+                return cr.parse(config_paths[0])
+
+        return None
+
+    # The night directories are checked with the config of each night, as it defines their location
+    night_configs = {night_name: _nightConfig(night_name) for night_name in nights}
+    nights = {night_name: results for night_name, results in nights.items()
+              if night_configs[night_name] is not None}
 
     if cml_args.night is not None:
         night_names = [cml_args.night] if cml_args.night in nights else []
 
     # Nights whose directory was deleted by the cleanup are not reported
     elif cml_args.all:
-        night_names = sorted(night_name for night_name in nights
-                             if os.path.isdir(nightDirPath(output_dir, night_name, config)))
+        night_names = sorted(night_name for night_name in nights if os.path.isdir(
+            nightDirPath(output_dir, night_name, night_configs[night_name])))
 
     else:
         night_names = sorted(night_name for night_name, results in nights.items()
-                             if isPending(output_dir, config, states, night_name, results))
+                             if isPending(output_dir, night_configs[night_name], states, night_name, results))
 
     if not night_names:
         print("No nights to report.")
@@ -1731,10 +1753,7 @@ if __name__ == "__main__":
     exit_code = 0
     for night_name in night_names:
 
-        # Use the given config, otherwise the config copied to the results of the night
-        if not cml_args.config:
-            first_results = os.path.join(output_dir, sorted(nights[night_name])[0])
-            config = cr.parse(sorted(glob.glob(os.path.join(first_results, '*.config')))[0])
+        config = night_configs[night_name]
 
         _initWorkerLogging(config, output_dir, 'report_{:s}_'.format(night_name))
 
