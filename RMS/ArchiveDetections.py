@@ -7,6 +7,7 @@ import traceback
 
 
 
+from RMS.Formats import FFpng
 from RMS.Formats.FFfile import validFFName
 from RMS.Logger import getLogger
 from RMS.Misc import archiveDir, tarWithProgress
@@ -67,8 +68,9 @@ def selectFiles(config, dir_path, ff_detected):
             selected_list.append(file_name)
 
 
-        # Take all PNG, JPG, BMP images
-        if ('.png' in file_name) or ('.jpg' in file_name) or ('.bmp' in file_name):
+        # Take all PNG, JPG, BMP images, except the FF image pairs, which are selected like FF files below
+        if (('.png' in file_name) or ('.jpg' in file_name) or ('.bmp' in file_name)) \
+                and not FFpng.isPairName(file_name):
             selected_list.append(file_name)
 
 
@@ -107,6 +109,10 @@ def selectFiles(config, dir_path, ff_detected):
         if upload_ffs and (ff_detected is not None) and (file_name in ff_detected):
             selected_list.append(file_name)
 
+
+    # Add the average pixel images of the selected FF image pairs
+    selected_list += [FFpng.pairNames(file_name)[1] for file_name in selected_list
+                      if FFpng.isPairMaxName(file_name)]
 
     # Take only the unique elements in the list, sorted by name
     selected_list = sorted(list(set(selected_list)))
@@ -148,34 +154,27 @@ def archiveFieldsums(dir_path):
 
 
 
-def archiveDetections(captured_path, archived_path, ff_detected, config, extra_files=None):
-    """ Create thumbnails and compress all files with detections and the accompanying files
-        in one archive, suffix _detected
-
-        or
-
-        only the fr*.bin, ff*.fits and extra_files in one archive, suffix _imgdata,
-        and everything apart from fr*.bin and ff*.fits in another archive, suffix _metadata
+def generateThumbsAndStacks(captured_path, config, ff_detected, detected_list=None):
+    """ Generate the captured and detected thumbnail mosaics, and the stacks of all captured images and of
+        all detections.
 
     Arguments:
         captured_path: [str] Path where the captured files are located.
-        archived_path: [str] Path where the detected files will be archived to.
-        ff_detected: [str] A list of FF files with detections.
         config: [conf object] Configuration.
+        ff_detected: [list] A list of FF files with detections.
 
     Keyword arguments:
-        extra_files: [list] A list of extra files (with full paths) which will be saved to the night
-            archive.
+        detected_list: [list] A list of files from which the FF files are taken for the detected thumbnails.
+            ff_detected is used if not given.
 
     Return:
-        archive_name: [str] Name of the archive where the files were compressed to.
-        imgdata_archive_name: [str] Name of the archive where the images were compressed to.
-        metadata_archive_name: [str] Name of the archive where the metadata was compressed to.
-
+        generated_files: [list] Names of the generated image files in the captured directory.
     """
 
-    # Get the list of files to archive
-    file_list = selectFiles(config, captured_path, ff_detected)
+    if detected_list is None:
+        detected_list = ff_detected
+
+    generated_files = []
 
     log.info('Generating thumbnails...')
 
@@ -186,11 +185,11 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
 
         # Generate detected thumbnails
         detected_mosaic_file = generateThumbnails(captured_path, config, 'DETECTED', \
-            file_list=sorted(file_list), no_stack=True)
+            file_list=sorted(detected_list), no_stack=True)
 
-        # Add the detected mosaic file to the selected list
-        file_list.append(captured_mosaic_file)
-        file_list.append(detected_mosaic_file)
+        # Add the mosaic files to the list of generated files
+        generated_files.append(captured_mosaic_file)
+        generated_files.append(detected_mosaic_file)
 
     except Exception as e:
         log.error('Generating thumbnails failed with error:' + repr(e))
@@ -221,8 +220,8 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
             # Extract the name of the stack image
             stack_file = os.path.basename(captured_stack_path)
             
-            # Add the stack path to the list of files to put in the archive
-            file_list.append(stack_file)
+            # Add the stack to the list of generated files
+            generated_files.append(stack_file)
 
         else:
             log.info("Captured stack could not be saved!")
@@ -247,8 +246,8 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
             # Extract the name of the stack image
             stack_file = os.path.basename(detected_stack_path)
             
-            # Add the stack path to the list of files to put in the archive
-            file_list.append(stack_file)
+            # Add the stack to the list of generated files
+            generated_files.append(stack_file)
 
         else:
             log.info("Detected stack could not be saved!")
@@ -257,6 +256,41 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
     except Exception as e:
         log.error('Generating stack failed with error:' + repr(e))
         log.error("".join(traceback.format_exception(*sys.exc_info())))
+
+    return generated_files
+
+
+def archiveDetections(captured_path, archived_path, ff_detected, config, extra_files=None):
+    """ Create thumbnails and compress all files with detections and the accompanying files
+        in one archive, suffix _detected
+
+        or
+
+        only the fr*.bin, ff*.fits and extra_files in one archive, suffix _imgdata,
+        and everything apart from fr*.bin and ff*.fits in another archive, suffix _metadata
+
+    Arguments:
+        captured_path: [str] Path where the captured files are located.
+        archived_path: [str] Path where the detected files will be archived to.
+        ff_detected: [str] A list of FF files with detections.
+        config: [conf object] Configuration.
+
+    Keyword arguments:
+        extra_files: [list] A list of extra files (with full paths) which will be saved to the night
+            archive.
+
+    Return:
+        archive_name: [str] Name of the archive where the files were compressed to.
+        imgdata_archive_name: [str] Name of the archive where the images were compressed to.
+        metadata_archive_name: [str] Name of the archive where the metadata was compressed to.
+
+    """
+
+    # Get the list of files to archive
+    file_list = selectFiles(config, captured_path, ff_detected)
+
+    # Generate the thumbnails and the stacks and add them to the archive
+    file_list += generateThumbsAndStacks(captured_path, config, ff_detected, detected_list=file_list)
 
     log.info("Generating an archive file of most recent logs...")
 
@@ -281,6 +315,7 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
 
         # Create the imgdata set which is the union of the sets of FF files and FR files
         imgdata_set = (set([item for item in file_list if item.startswith("FF") and item.endswith(".fits")]) |
+                       set([item for item in file_list if FFpng.isPairName(item)]) |
                        set([item for item in file_list if item.startswith("FR") and item.endswith(".bin")]))
 
         # Create the metadata set which is all the files from _detected excluding the files in imgdata_set,
