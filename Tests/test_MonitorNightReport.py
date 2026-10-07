@@ -1030,8 +1030,8 @@ def test_process_which_fails_to_start_is_tried_again(scheduling, monkeypatch):
     reporter.poll(True, now=now)
     assert reporter.cleanup_proc is None
 
+    # The cleanup stays due until it was started
     reporter.start_retry_time = 0
-    reporter.cleanup_due = True
     reporter.poll(True, now=now)
     assert reporter.cleanup_proc is not None
 

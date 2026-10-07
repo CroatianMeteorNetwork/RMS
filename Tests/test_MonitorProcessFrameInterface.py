@@ -479,9 +479,14 @@ def test_walkInput_skips_monitor_output(tmp_path):
 
 def test_unique_ids_keep_files_in_subdirectories_apart():
 
+    # Files in the input directory keep their name
     assert mon.uniqueId('22-00-00.mkv') == '22-00-00'
-    assert mon.uniqueId(os.path.join('2026-10-07', '22-00-00.mkv')) == '2026-10-07_22-00-00'
-    assert mon.uniqueId(os.path.join('2026-10-08', '22-00-00.mkv')) == '2026-10-08_22-00-00'
+
+    paths = [os.path.join('2026-10-07', '22-00-00.mkv'), os.path.join('2026-10-08', '22-00-00.mkv'),
+             '2026-10-07_22-00-00.mkv', os.path.join('a', 'b_c.mkv'), os.path.join('a_b', 'c.mkv')]
+    ids = [mon.uniqueId(path) for path in paths]
+    assert len(set(ids)) == len(ids)
+    assert ids[0].startswith('22-00-00_')
 
 
 def test_output_dir_inside_another_monitor_output_is_found(tmp_path):

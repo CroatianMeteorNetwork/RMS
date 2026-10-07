@@ -50,9 +50,10 @@ Things to know about the input:
   complete when its size and time didn't change for 5 s. If the recording pauses longer in the middle of a
   file, the worker notices at the end that the file changed and the file is processed again in full, but a
   recording program which appends to an old file later (e.g. hours later) is not supported.
-- **File names must be unique.** A file is identified by its path in the input directory without the
-  extension (e.g. `2026-10-07/22-00-00.mkv` becomes `2026-10-07_22-00-00`), which also names its results
-  directory. Don't reuse a name for a new recording in the same directory.
+- **File names must be unique.** A file is identified by its name without the extension, which also names
+  its results directory. Files in subdirectories (`--recursive`) also get a short hash of the subdirectory
+  (e.g. `2026-10-07/22-00-00.mkv` becomes `22-00-00_<hash>`), so the same name in different subdirectories
+  is fine. Don't reuse a name for a new recording in the same directory.
 - **Workers need a lot of memory.** MKV/MP4/AVI files are read completely into memory, and the meteor
   detection works on all frames of the file at once: a worker processing a 30 s 1080p MKV peaks at about
   7 GB. `.vid` files and FITS directories are read as needed; a 10-minute 512x512 16-bit `.vid` file needs

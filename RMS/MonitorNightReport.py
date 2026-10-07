@@ -1726,9 +1726,12 @@ class NightReporter(object):
         # Start the cleanup when it's due, also while a report runs
         if (self.cleanup_proc is None) and (time.monotonic() >= self.start_retry_time) \
                 and (self.cleanup_due or ((now - self.last_cleanup).total_seconds() > self.cleanup_interval)):
-            self.cleanup_due = False
-            self.last_cleanup = now
+
+            # The cleanup stays due until it was started
             self._startCleanup()
+            if self.cleanup_proc is not None:
+                self.cleanup_due = False
+                self.last_cleanup = now
 
         # One report at a time, and no report starts while the cleanup runs, as it may delete its night
         if (self.active is not None) or (self.cleanup_proc is not None) \

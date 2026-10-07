@@ -24,6 +24,7 @@ import copy
 import datetime
 import gc
 import glob
+import hashlib
 import json
 import os
 import shutil
@@ -231,10 +232,10 @@ def walkInput(top_dir, output_dir, config):
 
 
 def uniqueId(file_rel_path):
-    """ Return the ID of an input file, which names its results directory: its path relative to the input
-        directory without the extension, with the directories joined by underscores. Files directly in the
-        input directory are identified by their name, files in subdirectories (--recursive) also by the
-        subdirectory, so e.g. HH-MM-SS.mkv files in dated directories are kept apart.
+    """ Return the ID of an input file, which names its results directory. Files directly in the input
+        directory are identified by their name without the extension. Files in subdirectories (--recursive)
+        also get a short hash of the subdirectory, so files with the same name in different subdirectories
+        (e.g. HH-MM-SS.mkv in dated directories) are kept apart.
 
     Arguments:
         file_rel_path: [str] Path of the file relative to the input directory.
@@ -243,7 +244,13 @@ def uniqueId(file_rel_path):
         [str] Unique ID.
     """
 
-    return os.path.splitext(file_rel_path)[0].replace(os.sep, '_')
+    sub_dir, file_name = os.path.split(os.path.normpath(file_rel_path))
+    file_base = os.path.splitext(file_name)[0]
+
+    if not sub_dir:
+        return file_base
+
+    return "{:s}_{:s}".format(file_base, hashlib.sha1(sub_dir.encode('utf-8')).hexdigest()[:10])
 
 
 def matchesFileType(file_name, file_type):
