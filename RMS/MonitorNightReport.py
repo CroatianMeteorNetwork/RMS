@@ -275,6 +275,10 @@ def _writeJSON(file_path, data):
     with open(tmp_path, 'w') as f:
         json.dump(data, f, indent=4, sort_keys=True)
 
+        # Make sure the data is on the disk before the rename, so a power loss doesn't leave a broken file
+        f.flush()
+        os.fsync(f.fileno())
+
     os.replace(tmp_path, file_path)
 
 
@@ -1216,6 +1220,9 @@ class NightReporter(object):
         #   scanned again when new results are added (resultsChanged), after every report, and periodically
         self.pending = None
         self.states = None
+
+        # Old nights which are not reported because their directory was deleted
+        self.ignored_nights = set()
         self.last_scan = None
         self.scan_interval = 600
 
@@ -1443,9 +1450,24 @@ class NightReporter(object):
         if (self.pending is None) or ((now - self.last_scan).total_seconds() > self.scan_interval):
 
             self.states = readReportStates(self.output_dir)
-            self.pending = {night_name: results
-                            for night_name, results in scanNights(self.output_dir, self.config).items()
-                            if unreportedResults(self.states, night_name, results)}
+            self.pending = {}
+            for night_name, results in scanNights(self.output_dir, self.config).items():
+
+                if not unreportedResults(self.states, night_name, results):
+                    continue
+
+                # Nights whose directory was deleted by the cleanup are not reported again (e.g. a late file
+                #   of an old night, or a lost report state), as their archives would have no images. They
+                #   can still be reported from the command line
+                if not os.path.isdir(nightDirPath(self.output_dir, night_name, self.config)):
+                    if night_name not in self.ignored_nights:
+                        log.warning(self.log_prefix + "Night {:s} has unreported files, but its directory "
+                                    "was deleted by the cleanup, so it is not reported".format(night_name))
+                        self.ignored_nights.add(night_name)
+                    continue
+
+                self.pending[night_name] = results
+
             self.last_scan = now
 
         if trigger:

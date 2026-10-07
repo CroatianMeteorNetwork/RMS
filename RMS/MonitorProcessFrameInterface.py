@@ -645,6 +645,8 @@ def saveFailedFiles(output_dir, failed_files):
 
     with open(failed_files_path + '.tmp', 'w') as f:
         json.dump(failed_files, f, indent=4, sort_keys=True)
+        f.flush()
+        os.fsync(f.fileno())
 
     os.replace(failed_files_path + '.tmp', failed_files_path)
 

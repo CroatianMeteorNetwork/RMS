@@ -666,6 +666,9 @@ def scheduling(tmp_path, monkeypatch):
     os.makedirs(results_path)
     mnr.writeDoneFlag(results_path, {'night': night_name})
 
+    # The worker creates the night directory
+    os.makedirs(mnr.nightDirPath(output_dir, night_name, config))
+
     last_result = night_end - datetime.timedelta(minutes=30)
     epoch = (last_result - datetime.datetime(1970, 1, 1)).total_seconds()
     os.utime(os.path.join(results_path, 'done.flag'), (epoch, epoch))
@@ -820,6 +823,20 @@ def test_report_start_and_finish(scheduling):
     assert reporter.active is None
     assert reporter.report_lock.owner is None
     assert reporter.pending is None
+
+
+def test_night_deleted_by_the_cleanup_is_not_reported_again(scheduling):
+
+    reporter = _reporter(scheduling, 'idle')
+    night, _ = _nightAndResults(scheduling)
+    now = scheduling.night_end + datetime.timedelta(hours=1)
+
+    # E.g. the report state was lost, or a late file of an old night came in
+    shutil.rmtree(mnr.nightDirPath(scheduling.output_dir, night, reporter.config))
+
+    reporter.poll(True, now)
+    assert reporter.pending == {} and reporter.active is None
+    assert reporter.ignored_nights == {night}
 
 
 def test_stuck_report_is_stopped(scheduling):
