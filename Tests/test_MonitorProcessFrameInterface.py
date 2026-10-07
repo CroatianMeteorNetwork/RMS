@@ -695,3 +695,28 @@ def test_worker_ends_when_the_monitor_is_killed(start_method):
         time.sleep(0.1)
 
     assert time.time() - t0 < 5
+
+
+### Failed files ###
+
+def test_failed_files_are_given_up_and_remembered(tmp_path):
+
+    output_dir = str(tmp_path)
+    failed_files, given_up = mon.loadFailedFiles(output_dir)
+    assert (failed_files, given_up) == ({}, set())
+
+    # The first failure is retried, the second one gives the file up
+    assert not mon.recordFailure(output_dir, failed_files, 'bad', 1, 300)
+    assert mon.loadFailedFiles(output_dir)[1] == set()
+
+    assert mon.recordFailure(output_dir, failed_files, 'bad', 1, 300)
+    mon.recordFailure(output_dir, failed_files, 'other', 1, 300)
+
+    # After a restart, the given up file is still skipped and the other one keeps its failure count
+    failed_files, given_up = mon.loadFailedFiles(output_dir)
+    assert given_up == {'bad'}
+    assert failed_files['other']['count'] == 1
+
+    # Retrying the failed files clears the record
+    assert mon.loadFailedFiles(output_dir, retry_failed=True) == ({}, set())
+    assert mon.loadFailedFiles(output_dir) == ({}, set())

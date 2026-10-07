@@ -24,6 +24,7 @@ import copy
 import datetime
 import gc
 import glob
+import json
 import os
 import shutil
 import sys
@@ -80,6 +81,12 @@ WORKER_TIMEOUT = 3600
 # Seconds the night report, cleanup and upload are given to finish when the monitor is stopped, before they
 #   are terminated (an unfinished report is made again after a restart)
 SHUTDOWN_TIMEOUT = 30
+
+# Record of the input files which failed, kept in the output directory: {unique_id: {'count': int,
+#   'last_fail_time': float}}. A file is retried once after fail_wait_time, and after MAX_FAILURES failures it
+#   is skipped, also after a restart, unless the monitor is started with --retry_failed
+FAILED_FILES_NAME = '.failed_files.json'
+MAX_FAILURES = 2
 
 # Accepted formats of the start time given on the command line or in the multicam INI file
 START_TIME_FORMATS = ["%Y%m%d_%H%M%S", "%Y%m%d-%H%M%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S",
@@ -602,6 +609,82 @@ def processFileWorker(*args, **kwargs):
     sys.exit(0 if success else 1)
 
 
+def loadFailedFiles(output_dir, retry_failed=False):
+    """ Load the record of the failed files from the output directory.
+
+    Arguments:
+        output_dir: [str] Output directory of the monitor.
+
+    Keyword arguments:
+        retry_failed: [bool] Clear the record, so all failed files are processed again. False by default.
+
+    Return:
+        (failed_files, given_up): [tuple]
+            - failed_files: [dict] {unique_id: {'count': int, 'last_fail_time': float}}
+            - given_up: [set] Unique IDs of the files which failed MAX_FAILURES times.
+    """
+
+    failed_files_path = os.path.join(output_dir, FAILED_FILES_NAME)
+
+    failed_files = {}
+    if retry_failed:
+        saveFailedFiles(output_dir, failed_files)
+
+    elif os.path.isfile(failed_files_path):
+        with open(failed_files_path) as f:
+            failed_files = json.load(f)
+
+    given_up = set(uid for uid, fail in failed_files.items() if fail['count'] >= MAX_FAILURES)
+
+    return failed_files, given_up
+
+
+def saveFailedFiles(output_dir, failed_files):
+    """ Save the record of the failed files into the output directory (see loadFailedFiles). """
+
+    failed_files_path = os.path.join(output_dir, FAILED_FILES_NAME)
+
+    with open(failed_files_path + '.tmp', 'w') as f:
+        json.dump(failed_files, f, indent=4, sort_keys=True)
+
+    os.replace(failed_files_path + '.tmp', failed_files_path)
+
+
+def recordFailure(output_dir, failed_files, unique_id, exitcode, fail_wait_time, log_prefix=''):
+    """ Record a failure of a file, and save the record.
+
+    Arguments:
+        output_dir: [str] Output directory of the monitor.
+        failed_files: [dict] Record of the failed files, see loadFailedFiles. It is updated.
+        unique_id: [str] Unique ID of the file.
+        exitcode: [int] Exit code of the worker.
+        fail_wait_time: [float] Seconds before the file is retried.
+
+    Keyword arguments:
+        log_prefix: [str] Prefix of the log messages, e.g. the camera ID. Empty by default.
+
+    Return:
+        [bool] True if the file failed MAX_FAILURES times and is not retried anymore.
+    """
+
+    fail = failed_files.setdefault(unique_id, {'count': 0})
+    fail['count'] += 1
+    fail['last_fail_time'] = time.time()
+
+    saveFailedFiles(output_dir, failed_files)
+
+    if fail['count'] >= MAX_FAILURES:
+        log.error("{}Processing failed for: {} (exit code {:d}) {:d} times, giving up. It is not processed "
+                  "again unless the monitor is started with --retry_failed.".format(log_prefix, unique_id,
+                                                                                    exitcode, fail['count']))
+        return True
+
+    log.warning("{}Processing failed for: {} (exit code {:d}), will retry in {:.1f} mins...".format(
+        log_prefix, unique_id, exitcode, fail_wait_time/60.0))
+
+    return False
+
+
 def stopOnSigterm(signum, frame):
     """ Signal handler which stops the monitor on SIGTERM (e.g. from systemd) like Ctrl+C does, so the workers
         and the night report are stopped cleanly instead of being left running.
@@ -642,7 +725,7 @@ def stopWorker(proc):
 def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_dir, nproc=2,
                      chunk_frames=128, poll_interval=2, force=False, recursive=False, flat_path=None,
                      dark_path=None, fail_wait_time=300, start_time=None, report_mode=None,
-                     worker_timeout=WORKER_TIMEOUT):
+                     worker_timeout=WORKER_TIMEOUT, retry_failed=False):
     """ Monitor a directory for new files of the given type and process them.
 
     Arguments:
@@ -666,6 +749,7 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
             config value is used if None.
         worker_timeout: [float] Seconds after which a worker which is still processing a file is stopped
             and the file is retried. 0 disables the limit. WORKER_TIMEOUT by default.
+        retry_failed: [bool] Process the files which failed in previous runs again. False by default.
     """
 
     log.info("Monitoring directory: {}".format(input_dir))
@@ -677,9 +761,13 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
 
     # Track files that have been processed or are being processed
     processed_files = set()
-    
-    # Track failed files: {unique_id: {'count': int, 'last_fail_time': float}}
-    failed_files = {}
+
+    # Failed files, also from previous runs. Files which failed too often are not processed again
+    failed_files, given_up = loadFailedFiles(output_dir, retry_failed=(retry_failed or force))
+    if given_up:
+        log.info("Skipping {:d} file(s) which failed in previous runs (use --retry_failed to process them "
+                 "again): {}".format(len(given_up), ", ".join(sorted(given_up))))
+        processed_files |= given_up
 
     # Scan the output directory for previously completed results (done.flag)
     if not force:
@@ -720,25 +808,17 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
                         log.info("Successfully processed: {}".format(uid))
                         processed_files.add(uid)
                         reporter.resultsChanged()
+
+                        # Forget an earlier failure of the file
+                        if failed_files.pop(uid, None) is not None:
+                            saveFailedFiles(output_dir, failed_files)
+
                     elif proc.exitcode == SKIP_EXIT_CODE:
                         log.info("Skipped: {} (begins before the start time or after the cutoff of its "
                                  "night)".format(uid))
                         processed_files.add(uid)
-                    else:
-                        if uid not in failed_files:
-                            failed_files[uid] = {'count': 1, 'last_fail_time': time.time()}
-                            log.warning("Processing failed for: {} (exit code {:d}), will retry in {:.1f} mins...".format(
-                                uid, proc.exitcode, fail_wait_time/60.0))
-                        else:
-                            failed_files[uid]['count'] += 1
-                            if failed_files[uid]['count'] >= 2:
-                                log.error("Processing failed for: {} (exit code {:d}) twice, giving up.".format(
-                                    uid, proc.exitcode))
-                                processed_files.add(uid)
-                            else:
-                                failed_files[uid]['last_fail_time'] = time.time()
-                                log.warning("Processing failed for: {} (exit code {:d}), will retry in {:.1f} mins...".format(
-                                    uid, proc.exitcode, fail_wait_time/60.0))
+                    elif recordFailure(output_dir, failed_files, uid, proc.exitcode, fail_wait_time):
+                        processed_files.add(uid)
 
                     finished.append(uid)
 
@@ -910,7 +990,7 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
         log.info("All workers stopped.")
 
 
-def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None):
+def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None, retry_failed=False):
     """ Monitor multiple directories for multiple cameras based on an INI config file.
 
     Arguments:
@@ -922,6 +1002,8 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None)
             None by default, in which case all files are processed.
         report_mode: [str] When to generate the night reports ('sunrise', 'idle', 'external', 'none'), for
             all cameras. The value from each camera's config is used if None.
+        retry_failed: [bool] Process the files which failed in previous runs again, for all cameras. False by
+            default, in which case retry_failed from the INI file is used.
 
     Returns:
         None
@@ -947,6 +1029,9 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None)
 
         # Set to True to re-process files even if they already have a done.flag
         force = False
+
+        # Set to True to process the files which failed in previous runs again (they are skipped otherwise)
+        retry_failed = False
 
         # Seconds after which a worker which is still processing a file (e.g. stuck in the video decoder) is
         # stopped and the file is retried. 0 disables the limit.
@@ -996,6 +1081,7 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None)
     poll_interval = cp.getfloat('Global', 'poll_interval', fallback=2.0)
     force = cp.getboolean('Global', 'force', fallback=False)
     fail_wait_time = cp.getfloat('Global', 'fail_wait_time', fallback=300.0)
+    retry_failed = retry_failed or cp.getboolean('Global', 'retry_failed', fallback=False)
     worker_timeout = cp.getfloat('Global', 'worker_timeout', fallback=WORKER_TIMEOUT)
 
     # Parse individual camera sections. Each section other than 'Global' defines a single camera.
@@ -1073,7 +1159,19 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None)
     # Initialize state tracking dictionaries. Since files from different cameras might have the same name,
     # we track these metrics per camera using nested dictionaries or sets.
     processed_files = {cam['id']: set() for cam in cameras}
-    failed_files = {cam['id']: {} for cam in cameras}
+    cam_output_dirs = {cam['id']: cam['output_dir'] for cam in cameras}
+
+    # Failed files of every camera, also from previous runs. Files which failed too often are not processed
+    #   again
+    failed_files = {}
+    for cam in cameras:
+        failed_files[cam['id']], given_up = loadFailedFiles(cam['output_dir'],
+                                                             retry_failed=(retry_failed or force))
+        if given_up:
+            log.info("Camera {}: skipping {:d} file(s) which failed in previous runs (use --retry_failed to "
+                     "process them again): {}".format(cam['id'], len(given_up), ", ".join(sorted(given_up))))
+            processed_files[cam['id']] |= given_up
+
     stability_tracker = {cam['id']: {} for cam in cameras}
     
     # Files are considered "stable" (i.e., finished writing to disk) if their size/mtime hasn't 
@@ -1127,6 +1225,10 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None)
                         processed_files[cam_id].add(uid)
                         reporters[cam_id].resultsChanged()
 
+                        # Forget an earlier failure of the file
+                        if failed_files[cam_id].pop(uid, None) is not None:
+                            saveFailedFiles(cam_output_dirs[cam_id], failed_files[cam_id])
+
                     elif proc.exitcode == SKIP_EXIT_CODE:
 
                         # The file begins before the start time, don't queue it again
@@ -1134,33 +1236,10 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None)
                                  "night)".format(cam_id, uid))
                         processed_files[cam_id].add(uid)
 
-                    else:
-
-                        # Process failed. We implement a retry mechanism.
-                        cam_fails = failed_files[cam_id]
-                        if uid not in cam_fails:
-                            # First failure: log warning and set up for a retry
-                            cam_fails[uid] = {'count': 1, 'last_fail_time': time.time()}
-                            log.warning("Processing failed for [{}] {} (exit code {:d}), retry in {:.1f} mins...".format(
-                                cam_id, uid, proc.exitcode, fail_wait_time/60.0))
-
-                        else:
-
-                            cam_fails[uid]['count'] += 1
-
-                            if cam_fails[uid]['count'] >= 2:
-
-                                # Failed twice: give up and mark as "processed" to prevent infinite loops
-                                log.error("Processing failed for [{}] {} (exit code {:d}) twice, giving up.".format(
-                                    cam_id, uid, proc.exitcode))
-                                processed_files[cam_id].add(uid)
-
-                            else:
-
-                                # Subsequent failure tracking (should not occur with current max of 2 retries)
-                                cam_fails[uid]['last_fail_time'] = time.time()
-                                log.warning("Processing failed for [{}] {} (exit code {:d}), retry in {:.1f} mins...".format(
-                                    cam_id, uid, proc.exitcode, fail_wait_time/60.0))
+                    # Process failed, it is retried once after fail_wait_time and then given up
+                    elif recordFailure(cam_output_dirs[cam_id], failed_files[cam_id], uid, proc.exitcode,
+                                       fail_wait_time, log_prefix="[{}] ".format(cam_id)):
+                        processed_files[cam_id].add(uid)
                                     
                     finished.append(uid)
 
@@ -1550,6 +1629,11 @@ Examples:
              "mode, worker_timeout in the [Global] section of the INI file is used.".format(WORKER_TIMEOUT)
     )
 
+    arg_parser.add_argument('--retry_failed', action='store_true',
+        help="Process the files which failed twice in previous runs again. They are skipped by default "
+             "(recorded in " + FAILED_FILES_NAME + " in the output directory)."
+    )
+
     # Parse
     cml_args = arg_parser.parse_args()
 
@@ -1569,7 +1653,8 @@ Examples:
         if not os.path.isfile(multicam_path):
             print("ERROR: Multicam config file does not exist: {}".format(multicam_path))
             sys.exit(1)
-        monitorMultipleCameras(multicam_path, start_time=start_time, report_mode=cml_args.report_mode)
+        monitorMultipleCameras(multicam_path, start_time=start_time, report_mode=cml_args.report_mode,
+                               retry_failed=cml_args.retry_failed)
         sys.exit(0)
 
     if cml_args.file_type is None or cml_args.input_dir is None:
@@ -1628,5 +1713,6 @@ Examples:
         dark_path=cml_args.dark,
         start_time=start_time,
         report_mode=cml_args.report_mode,
-        worker_timeout=cml_args.worker_timeout
+        worker_timeout=cml_args.worker_timeout,
+        retry_failed=cml_args.retry_failed
     )
