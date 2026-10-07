@@ -272,6 +272,33 @@ def _writeJSON(file_path, data):
     os.replace(tmp_path, file_path)
 
 
+def readStateFile(file_path, default):
+    """ Read a JSON state file of the monitor. A damaged file (e.g. after a disk error) is moved aside to
+        <name>.corrupt, and the monitor starts over with the default instead of failing at every start.
+
+    Arguments:
+        file_path: [str] Path of the state file.
+        default: [object] State returned if the file doesn't exist or is damaged.
+
+    Return:
+        [object] The state.
+    """
+
+    if not os.path.isfile(file_path):
+        return default
+
+    try:
+        with open(file_path) as f:
+            return json.load(f)
+
+    except ValueError:
+        log.warning("The state file {:s} is damaged, it was moved to {:s}.corrupt and the monitor starts "
+                    "over".format(file_path, file_path))
+        os.replace(file_path, file_path + '.corrupt')
+
+        return default
+
+
 def writeDoneFlag(results_dir, info):
     """ Mark a results directory as processed. The flag contains the given info as JSON.
 
@@ -347,12 +374,9 @@ def readReportStates(output_dir):
             'latest_platepar_night': night_name}
     """
 
-    state_path = os.path.join(output_dir, REPORT_STATE_FILE_NAME)
-    if not os.path.isfile(state_path):
-        return {'nights': {}, 'latest_platepar_night': None}
-
-    with open(state_path) as f:
-        return json.load(f)
+    # A damaged state makes all nights be reported again
+    return readStateFile(os.path.join(output_dir, REPORT_STATE_FILE_NAME),
+                         {'nights': {}, 'latest_platepar_night': None})
 
 
 def updateReportState(output_dir, night_name=None, latest_platepar_night=None, **night_state):

@@ -41,7 +41,7 @@ from RMS.Formats.FFfile import validFFName, constructFFName
 from RMS.Formats import FFpng
 from RMS.Routines import Image
 from RMS.MonitorNightReport import exitWithMonitor, latestPlateparPath, lockOutputDir, lockOwner, \
-    nightDirPath, nightInfo, NightReporter, ReportLock, writeDoneFlag
+    nightDirPath, nightInfo, NightReporter, readStateFile, ReportLock, writeDoneFlag
 from RMS.DetectStarsAndMeteors import (
     detectStarsAndMeteorsFrameInterface,
     saveResultsFrameInterface,
@@ -625,15 +625,13 @@ def loadFailedFiles(output_dir, retry_failed=False):
             - given_up: [set] Unique IDs of the files which failed MAX_FAILURES times.
     """
 
-    failed_files_path = os.path.join(output_dir, FAILED_FILES_NAME)
-
     failed_files = {}
     if retry_failed:
         saveFailedFiles(output_dir, failed_files)
 
-    elif os.path.isfile(failed_files_path):
-        with open(failed_files_path) as f:
-            failed_files = json.load(f)
+    # A damaged record makes the failed files be retried
+    else:
+        failed_files = readStateFile(os.path.join(output_dir, FAILED_FILES_NAME), failed_files)
 
     given_up = set(uid for uid, fail in failed_files.items() if fail['count'] >= MAX_FAILURES)
 

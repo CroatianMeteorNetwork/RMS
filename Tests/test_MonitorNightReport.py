@@ -905,3 +905,17 @@ def test_only_one_process_locks_the_output_dir(tmp_path):
     proc.kill()
     proc.join()
     assert mnr.lockOutputDir(output_dir) is not None
+
+
+def test_damaged_state_file_is_moved_aside(tmp_path):
+
+    state_path = os.path.join(str(tmp_path), mnr.REPORT_STATE_FILE_NAME)
+    with open(state_path, 'w') as f:
+        f.write('{"nights": {"XX')
+
+    # The monitor starts over instead of failing
+    assert mnr.readReportStates(str(tmp_path)) == {'nights': {}, 'latest_platepar_night': None}
+    assert os.path.isfile(state_path + '.corrupt') and not os.path.exists(state_path)
+
+    mnr.updateReportState(str(tmp_path), NIGHT, files=['a'])
+    assert mnr.readReportStates(str(tmp_path))['nights'][NIGHT]['files'] == ['a']
