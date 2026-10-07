@@ -318,7 +318,7 @@ def test_stuck_worker_is_stopped():
 
     proc = multiprocessing.Process(target=time.sleep, args=(60,))
     proc.start()
-    proc.start_time = time.time()
+    proc.start_time = time.monotonic()
 
     mon.stopStuckWorker(proc, 'file', 0)
     mon.stopStuckWorker(proc, 'file', 100)
@@ -744,3 +744,27 @@ def test_processing_pauses_while_the_output_disk_is_full(monkeypatch, tmp_path):
     # Space again: resumed
     monkeypatch.setattr(mon, 'availableSpace', lambda path: 10*1024**3)
     assert guard.ok() and not guard.paused
+
+
+def test_file_written_while_processed_is_processed_again(tmp_path):
+
+    file_path = str(tmp_path/'file.mkv')
+    with open(file_path, 'wb') as f:
+        f.write(b'0'*100)
+
+    class _Proc(object):
+        pass
+
+    proc = _Proc()
+    proc.file_path = file_path
+    proc.file_state = mon.fileState(file_path)
+    assert not mon.changedWhileProcessed(proc)
+
+    # The recording continued after the worker started
+    with open(file_path, 'ab') as f:
+        f.write(b'0'*100)
+    assert mon.changedWhileProcessed(proc)
+
+    # A file deleted meanwhile (e.g. by the recorder) is not processed again
+    os.remove(file_path)
+    assert not mon.changedWhileProcessed(proc)

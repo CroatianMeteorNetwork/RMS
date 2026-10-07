@@ -747,17 +747,70 @@ def stopOnSigterm(signum, frame):
     raise KeyboardInterrupt
 
 
+def fileState(file_path):
+    """ Size and modification time of a file, None if it doesn't exist. """
+
+    try:
+        stat = os.stat(file_path)
+        return (stat.st_size, stat.st_mtime)
+
+    except OSError:
+        return None
+
+
+def startWorker(file_path, args, kwargs):
+    """ Start a worker process which processes the given file (processFileWorker).
+
+    Arguments:
+        file_path: [str] Path of the input file.
+        args: [tuple] Positional arguments of processFile.
+        kwargs: [dict] Keyword arguments of processFile.
+
+    Return:
+        [multiprocessing.Process] The started worker, with the time it was started (time.monotonic) in
+            start_time, and the file path and state (fileState) in file_path and file_state. None if the
+            process could not be started (e.g. out of memory), the file is then tried again later.
+    """
+
+    proc = multiprocessing.Process(target=processFileWorker, args=args, kwargs=kwargs)
+
+    try:
+        proc.start()
+
+    except OSError as e:
+        log.error("Could not start a worker for {:s}: {:s}".format(file_path, repr(e)))
+        return None
+
+    proc.start_time = time.monotonic()
+    proc.file_path = file_path
+    proc.file_state = fileState(file_path)
+
+    return proc
+
+
+def changedWhileProcessed(proc):
+    """ Check if the file of the finished worker changed while it was processed, which means that it was still
+        being written (e.g. the recording paused for a few seconds), so only a part of it was processed. A
+        file which was deleted meanwhile doesn't count as changed.
+    """
+
+    file_state = fileState(proc.file_path)
+
+    return (file_state is not None) and (file_state != proc.file_state)
+
+
 def stopStuckWorker(proc, unique_id, worker_timeout):
     """ Stop a worker process which runs longer than the time limit, e.g. one stuck in the video decoder. The
         stopped worker has a negative exit code, so its file is handled as failed and retried.
 
     Arguments:
-        proc: [multiprocessing.Process] Worker process, with the time it was started in proc.start_time.
+        proc: [multiprocessing.Process] Worker process started by startWorker.
         unique_id: [str] ID of the processed file.
         worker_timeout: [float] Time limit in seconds, no limit if 0.
     """
 
-    if (worker_timeout <= 0) or (time.time() - proc.start_time < worker_timeout) or (not proc.is_alive()):
+    if (worker_timeout <= 0) or (time.monotonic() - proc.start_time < worker_timeout) \
+            or (not proc.is_alive()):
         return
 
     log.error("Processing {} did not finish in {:.1f} min, stopping the worker...".format(unique_id,
@@ -869,9 +922,15 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
                 if not proc.is_alive():
                     proc.join()
                     if proc.exitcode == 0:
-                        log.info("Successfully processed: {}".format(uid))
-                        processed_files.add(uid)
                         reporter.resultsChanged()
+
+                        # A file which was still being written is processed again in full
+                        if changedWhileProcessed(proc):
+                            log.warning("{} was still being written while it was processed, processing it "
+                                        "again".format(uid))
+                        else:
+                            log.info("Successfully processed: {}".format(uid))
+                            processed_files.add(uid)
 
                         # Forget an earlier failure of the file
                         if failed_files.pop(uid, None) is not None:
@@ -939,8 +998,7 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
                 unique_id = os.path.splitext(file_name)[0]
 
                 # Skip already processed or currently processing files
-                is_processed = unique_id in processed_files or any(pb.endswith(unique_id) for pb in processed_files)
-                if is_processed or unique_id in active_workers:
+                if (unique_id in processed_files) or (unique_id in active_workers):
                     continue
 
                 # Skip files that failed recently (wait fail_wait_time)
@@ -1009,14 +1067,13 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
 
                 log.info("Putting file {} on the processing queue...".format(file_rel_path))
 
-                proc = multiprocessing.Process(
-                    target=processFileWorker,
-                    args=(file_path, config_path, platepar_path, output_dir, chunk_frames),
-                    kwargs={'flat_path': flat_path, 'dark_path': dark_path, 'unique_id': unique_id,
-                            'start_time': start_time}
-                )
-                proc.start()
-                proc.start_time = time.time()
+                proc = startWorker(file_path,
+                    (file_path, config_path, platepar_path, output_dir, chunk_frames),
+                    {'flat_path': flat_path, 'dark_path': dark_path, 'unique_id': unique_id,
+                     'start_time': start_time})
+                if proc is None:
+                    break
+
                 active_workers[unique_id] = proc
                 new_files_queued = True
 
@@ -1259,7 +1316,7 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None,
     stable_max_age = 30
 
     # Dictionary to keep track of currently active processing jobs
-    # Format: { unique_id : (multiprocessing.Process, camera_id) }
+    # Format: { (camera_id, unique_id) : multiprocessing.Process }
     active_workers = {} 
     
     # Counter for how many processes each camera is currently running (used for load balancing)
@@ -1289,7 +1346,7 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None,
             # 1. Clean up finished workers and log their completion status
             finished = []
 
-            for uid, (proc, cam_id) in active_workers.items():
+            for (cam_id, uid), proc in active_workers.items():
                 stopStuckWorker(proc, uid, worker_timeout)
                 if not proc.is_alive():
                     proc.join()
@@ -1298,11 +1355,15 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None,
                     active_count_per_cam[cam_id] -= 1
                     
                     if proc.exitcode == 0:
-
-                        # Process exited normally
-                        log.info("Successfully processed [{}]: {}".format(cam_id, uid))
-                        processed_files[cam_id].add(uid)
                         reporters[cam_id].resultsChanged()
+
+                        # A file which was still being written is processed again in full
+                        if changedWhileProcessed(proc):
+                            log.warning("[{}] {} was still being written while it was processed, processing "
+                                        "it again".format(cam_id, uid))
+                        else:
+                            log.info("Successfully processed [{}]: {}".format(cam_id, uid))
+                            processed_files[cam_id].add(uid)
 
                         # Forget an earlier failure of the file
                         if failed_files[cam_id].pop(uid, None) is not None:
@@ -1320,11 +1381,11 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None,
                                        fail_wait_time, log_prefix="[{}] ".format(cam_id)):
                         processed_files[cam_id].add(uid)
                                     
-                    finished.append(uid)
+                    finished.append((cam_id, uid))
 
             # Remove finished processes from our tracking dictionary
-            for uid in finished:
-                del active_workers[uid]
+            for key in finished:
+                del active_workers[key]
 
             # 2. Collect all new, stable files ready to be processed for each camera
             stable_per_cam = {}
@@ -1383,8 +1444,8 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None,
                     unique_id = os.path.splitext(file_name)[0]
 
                     # Ignore files we've already processed or are currently working on
-                    is_processed = unique_id in processed_files[cam_id] or any(pb.endswith(unique_id) for pb in processed_files[cam_id])
-                    if is_processed or unique_id in active_workers:
+                    # Workers are tracked per camera, as cameras can have files of the same name
+                    if (unique_id in processed_files[cam_id]) or ((cam_id, unique_id) in active_workers):
                         continue
                     
                     # If the file recently failed, wait before retrying it
@@ -1499,17 +1560,16 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None,
                     cam_id, file_rel_path, active_count_per_cam[cam_id]))
 
                 # Spawn the worker process
-                proc = multiprocessing.Process(
-                    target=processFileWorker,
-                    args=(file_path, chosen_cam['config_path'], chosen_cam['platepar_path'], chosen_cam['output_dir'], chunk_frames),
-                    kwargs={'flat_path': chosen_cam['flat_path'], 'dark_path': chosen_cam['dark_path'], 'unique_id': unique_id,
-                            'start_time': chosen_cam['start_time']}
-                )
-                proc.start()
-                proc.start_time = time.time()
-                
+                proc = startWorker(file_path,
+                    (file_path, chosen_cam['config_path'], chosen_cam['platepar_path'],
+                     chosen_cam['output_dir'], chunk_frames),
+                    {'flat_path': chosen_cam['flat_path'], 'dark_path': chosen_cam['dark_path'],
+                     'unique_id': unique_id, 'start_time': chosen_cam['start_time']})
+                if proc is None:
+                    break
+
                 # Update load balancing metrics and tracking dictionaries
-                active_workers[unique_id] = (proc, cam_id)
+                active_workers[(cam_id, unique_id)] = proc
                 active_count_per_cam[cam_id] += 1
                 new_files_queued = True
                 last_assigned_idx = chosen_idx
@@ -1542,8 +1602,9 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None,
         #   restart
         if active_workers:
             log.info("Stopping {:d} worker(s), their files will be processed again after a restart: "
-                     "{}".format(len(active_workers), ", ".join(sorted(active_workers))))
-            for proc, cam_id in active_workers.values():
+                     "{}".format(len(active_workers), ", ".join("[{}] {}".format(*key)
+                                                                for key in sorted(active_workers))))
+            for proc in active_workers.values():
                 stopWorker(proc)
 
         for reporter in reporters.values():
