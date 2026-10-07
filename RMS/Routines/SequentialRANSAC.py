@@ -144,6 +144,9 @@ def findLines(img, max_lines, min_pixels, distance_thresh, min_line_length, max_
     points = np.column_stack((x_idxs, y_idxs)).astype(np.float32)
 
     found_lines = []
+
+    # Random point sampling with a fixed seed, so the same image always gives the same lines
+    rng = np.random.RandomState(0)
     
     log.debug(f"RANSAC: Starting with {len(points)} points.")
 
@@ -176,7 +179,7 @@ def findLines(img, max_lines, min_pixels, distance_thresh, min_line_length, max_
             # Try up to 50 times to find a pair with good separation
             valid_pair = False
             for _ in range(50):
-                idx = np.random.choice(len(points), 2, replace=False)
+                idx = rng.choice(len(points), 2, replace=False)
                 p1, p2 = points[idx]
 
                 # Check distance squared
