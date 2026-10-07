@@ -1446,8 +1446,9 @@ class NightReporter(object):
             else:
                 self._finishReport(RmsDateTime.utcnow())
 
+        # The upload queue is kept on disk, so an interrupted upload continues after a restart
         if self.upload_manager is not None:
-            self.upload_manager.stop()
+            self.upload_manager.stop(timeout=timeout)
             self.upload_manager = None
 
 
