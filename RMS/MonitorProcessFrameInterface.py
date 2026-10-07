@@ -269,10 +269,15 @@ def logReadable(dir_path, readable, log_prefix=''):
 
 def inputExtension(file_type):
     """ Return the extension of the input files of the given type, None if they don't have a single one
-        (FF files, FITS directories).
+        (FF files, FITS directories). Types which are not in FILE_TYPE_MAP are the extension itself, as in
+        matchesFileType.
     """
 
-    extensions = FILE_TYPE_MAP.get(file_type.lower())
+    file_type = file_type.lower()
+    if file_type not in FILE_TYPE_MAP:
+        return '.' + file_type
+
+    extensions = FILE_TYPE_MAP[file_type]
 
     return extensions[0] if extensions else None
 
@@ -1169,7 +1174,7 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
         # Schedules the night reports
         reporter = NightReporter(output_dir, config_path, report_mode=report_mode,
                                  fail_wait_time=fail_wait_time, input_dir=input_dir,
-                                 input_ext=inputExtension(file_type))
+                                 input_ext=inputExtension(file_type), recursive=recursive)
         log.info("Night report mode: {:s}".format(reporter.report_mode))
 
         # Pauses the processing while the output disk is full
@@ -1619,7 +1624,7 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None,
                                                  report_mode=report_mode, fail_wait_time=fail_wait_time,
                                                  camera_id=cam['id'], report_lock=report_lock,
                                                  input_dir=cam['input_dir'],
-                                                 input_ext=inputExtension(file_type))
+                                                 input_ext=inputExtension(file_type), recursive=recursive)
             log.info("Camera {}: night report mode: {}".format(cam['id'], reporters[cam['id']].report_mode))
 
         # The mask of every camera

@@ -707,6 +707,32 @@ def test_done_flags_of_older_versions_are_deleted_with_their_input(tmp_path):
     assert os.listdir(output_dir) == []
 
 
+def test_done_flags_of_older_versions_find_inputs_in_subdirectories_and_any_case(tmp_path):
+
+    config = _config()
+    output_dir = str(tmp_path/'out')
+    input_dir = tmp_path/'in'
+    (input_dir/'2026-08-08').mkdir(parents=True)
+
+    def _oldResults(name):
+        results_path = os.path.join(output_dir, '2026', '202608', '20260808', name)
+        os.makedirs(results_path)
+        open(os.path.join(results_path, mnr.DONE_FLAG_NAME), 'w').close()
+        return results_path
+
+    # An input file with an upper case extension, and one in a subdirectory (--recursive)
+    upper = _oldResults('21-00-00')
+    (input_dir/'21-00-00.MKV').write_text('')
+    nested = _oldResults('22-00-00')
+    (input_dir/'2026-08-08'/'22-00-00.mkv').write_text('')
+
+    # Both are found, only the results of the file in the subdirectory are deleted if not recursive
+    assert mnr.deleteDoneFlags(output_dir, config, input_dir=str(input_dir), input_ext='.mkv',
+                               recursive=True) == 0
+    assert mnr.deleteDoneFlags(output_dir, config, input_dir=str(input_dir), input_ext='.mkv') == 1
+    assert os.path.exists(upper) and not os.path.exists(nested)
+
+
 def test_free_space_keeps_protected_nights(tmp_path, monkeypatch):
 
     config = _config()
