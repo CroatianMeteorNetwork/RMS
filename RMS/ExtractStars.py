@@ -554,17 +554,10 @@ def extractStarsImgHandle(img_handle,
         else:
             ff_name = FFfile.constructFFName(config.stationID, chunkStartTime(img_handle))
 
-        # Print the results
-        print()
-        print("FF name:", ff_name)
-        print("Num frames:", getattr(img_handle, 'chunk_frames', 'N/A'))
-        print("Number of stars:", len(x_arr))
-        for x, y, a, i, f, bg, s, satcnt in zip(x_arr, y_arr, amplitude, intensity, fwhm, background, snr, saturated_count):
-            print("{:7.2f} {:7.2f} {:9d} {:6d} {:5.2f} {:6d} {:5.2f} {:6d}".format(
-                round(y, 2), round(x, 2), 
-                int(a), int(i), f, int(bg), s, int(satcnt)
-                )
-            )
+        # One line per chunk. The stars are not printed, as the continuous processing of video files would
+        #   write tens of thousands of lines per file into the system log
+        print("{:s}: {:d} stars in {} frames".format(ff_name, len(x_arr), getattr(img_handle, 'chunk_frames',
+                                                                                   'N/A')))
 
 
         # Rescale the stars extracted on binned images to the full image size, as the meteor centroids

@@ -47,16 +47,21 @@ Video file names have to contain the time of the first frame, in UTC, either as 
 Things to know about the input:
 
 - **One recording per file, written once.** The monitor processes each file once. A file is considered
-  complete when its size and time didn't change for 5 s. If the recording pauses longer in the middle of a
-  file, the worker notices at the end that the file changed and the file is processed again in full, but a
-  recording program which appends to an old file later (e.g. hours later) is not supported.
-- **File names must be unique.** A file is identified by its name without the extension. With `--recursive`,
-  files in different subdirectories with the same name (e.g. `HH-MM-SS.mkv` in dated directories) are
-  treated as the same file, so use unique names.
-- **Video files are loaded into memory.** MKV/MP4/AVI files are read completely into memory by the worker,
-  about `width x height x frames` bytes (1.5 GB for 30 s of 1080p at 25 fps). Keep video files short (a few
-  minutes at most) and size `--nproc` to the RAM. `.vid` files and FITS directories are read as needed, so a
-  10-minute `.vid` file of several GB is fine.
+  complete when its size and time didn't change for 5 s, or right away if it was last modified more than
+  30 s ago (so the clocks of the recording and the processing machine should agree, e.g. on a network
+  share). If the recording pauses longer in the middle of a file, the worker notices that the file changed
+  and the file is processed again in full, also if the incomplete file couldn't be read. A recording program
+  which appends to an old file later (e.g. hours later) is not supported. Renaming a file after it was
+  processed makes it a new file, which is processed again.
+- **File names must be unique.** A file is identified by its name without the extension, which also names
+  its results directory. Files in subdirectories (`--recursive`) also get a short hash of the subdirectory
+  (e.g. `2026-10-07/22-00-00.mkv` becomes `22-00-00_<hash>`), so the same name in different subdirectories
+  is fine. Don't reuse a name for a new recording in the same directory.
+- **Workers need a lot of memory.** MKV/MP4/AVI files are read completely into memory, and the meteor
+  detection works on all frames of the file at once: a worker processing a 30 s 1080p MKV peaks at about
+  7 GB. `.vid` files and FITS directories are read as needed; a 10-minute 512x512 16-bit `.vid` file needs
+  about 2 GB. Keep video files short (a few minutes at most) and set `--nproc` to the free RAM divided by
+  the peak of one worker. A worker killed by the system for lack of memory counts as a failure of the file.
 - **Video decoding.** For video files the decoder is set by `media_backend` and `gst_decoder` in the config.
   `nvh264dec` uses the GPU; if it can't be used, the monitor falls back to the software decoder
   automatically.
@@ -79,8 +84,9 @@ You need:
   needs to be roughly right, as every chunk is recalibrated. Without `--platepar`, the monitor looks for
   the file named by `platepar_name` in the config (`platepar_cmn2010.cal` by default) in the input
   directory.
-- **A mask** (optional), the file named by `mask` in the config (`mask.bmp` by default), in the input
-  directory or next to the config file.
+- **A mask** (optional), given with `--mask` (or `mask` in the multicam file). If it's not given, the file
+  named by `mask` in the config (`mask.bmp` by default) is used from the input directory; if it's not there,
+  each file uses the mask next to it or next to the config file, if there is one.
 - **A dark (bias) and a flat** (optional). They are applied only if given with `--dark`/`--flat` (or `dark`
   and `flat` in the multicam file); `use_dark`/`use_flat` in the config are ignored. With detection binning
   the dark, flat and mask are binned automatically. The dark and flat are applied once, to the frames, and
@@ -94,7 +100,9 @@ All given files are checked when the monitor starts, and it refuses to start if 
   input files.
 - **Output directory** (`-o`): where the results go. It defaults to the input directory, but use a separate
   directory, ideally on its own disk or partition, so the cleanup of the monitor's data (see
-  [Disk space](#disk-space-and-cleanup)) can't be confused by the recordings.
+  [Disk space](#disk-space-and-cleanup)) can't be confused by the recordings. Output directories can't be
+  nested: the monitor refuses to start in a directory inside the output directory of another monitor (one
+  with a `.monitor.lock` file), and the cameras of a multicam file need separate, non-nested directories.
 
 ### Starting the monitor
 
@@ -113,6 +121,7 @@ Command line options:
 | `-c`, `--config` | `.config` in the input dir | camera config |
 | `-p`, `--platepar` | `platepar_name` in the input dir | platepar |
 | `--dark`, `--flat` | none | dark (bias) and flat, applied only if given |
+| `--mask` | `mask` in the input dir | mask |
 | `-n`, `--nproc` | 2 | parallel worker processes |
 | `--chunk_frames` | 128 | frames per star extraction chunk (and per saved image pair) |
 | `-r`, `--recursive` | off | also watch subdirectories |
@@ -160,6 +169,7 @@ config = /data/cam1/cam1.config
 platepar = /data/cam1/platepar_cmn2010.cal
 dark = /data/cam1/bias.png
 flat = /data/cam1/flat.png
+mask = /data/cam1/mask.bmp
 
 [CAM2]
 input_dir = /data/cam2/recordings
@@ -169,7 +179,9 @@ platepar = /data/cam2/platepar_cmn2010.cal
 ```
 
 Every camera needs its own output directory. The night reports of the cameras are made one at a time.
-Cameras with different file types need separate monitor processes.
+Cameras with different file types need separate monitor processes. With `--multicam`, the other command line
+options except `--start_time`, `--report_mode` and `--retry_failed` are ignored; they are set in the
+`[Global]` section.
 
 ### Running as a service
 
@@ -179,14 +191,17 @@ Run the monitor as a systemd service, so it starts with the machine and is resta
 # /etc/systemd/system/rms-monitor.service
 [Unit]
 Description=RMS monitor processing
+Wants=network-online.target
 After=network-online.target local-fs.target
 
 [Service]
 User=rms
 WorkingDirectory=/home/rms/source/RMS
-ExecStart=/home/rms/vRMS/bin/python -m RMS.MonitorProcessFrameInterface vid /data/recordings -o /data/monitor --nproc 4 --dark /data/cal/bias.png --flat /data/cal/flat.png
+ExecStart=/home/rms/vRMS/bin/python -m RMS.MonitorProcessFrameInterface vid /data/recordings -o /data/monitor -c /data/cal/camera.config -p /data/cal/platepar_cmn2010.cal --nproc 4 --dark /data/cal/bias.png --flat /data/cal/flat.png
 Restart=on-failure
 RestartSec=30
+# Stop only the main process, which stops its workers and gives a running report time to finish
+KillMode=mixed
 TimeoutStopSec=120
 
 [Install]
@@ -205,7 +220,8 @@ Stopping the monitor (`systemctl stop`, `kill`, Ctrl+C) is safe at any time:
   after the restart.
 - A running night report gets 30 s to finish, otherwise it is stopped and made again after the restart.
 - The upload queue is kept on disk, an interrupted upload continues after the restart.
-- If the monitor itself is killed (`kill -9`, out of memory), its workers notice it within 2 s and end too.
+- If the monitor itself is killed (`kill -9`, out of memory), its workers, the report, the cleanup and the
+  upload process notice it within 2 s and end too (the upload process after the upload in progress).
 
 
 ## Settings
@@ -330,7 +346,12 @@ Every chunk is recalibrated on its stars, starting from the platepar. With `moni
 best recalibrated platepar of each reported night (the most matched stars, then the lowest residual) is saved
 as `OUTPUT/latest_<platepar name>` and used for the following files, so slow drifts of the pointing are
 followed. The platepar you gave is never overwritten, and if it is newer than the latest one (e.g. you fitted
-it again in SkyFit2), it is used instead.
+it again in SkyFit2), it is used instead. "Newer" is the modification time of the file, so `touch` a platepar
+copied with `cp -p`, `rsync` or `scp`, which keep the old time.
+
+If fewer than half of the chunks of a night could be recalibrated, the report logs a warning ("Only N of M
+chunks ... could be recalibrated"): the platepar doesn't fit the data, e.g. the platepar of another camera or
+a camera which moved. `.night_reports.json` records the numbers for every night (`recalibration`).
 
 
 ## Failed files
@@ -342,8 +363,15 @@ it again in SkyFit2), it is used instead.
   `--retry_failed`.
 - A worker which takes longer than `--worker_timeout` (1 hour) is stopped, and the file counts as failed. If
   your files take longer than that (very long recordings, slow machine), raise it.
-- If the output disk is full, the monitor pauses the processing (it doesn't start new files) and runs the
-  cleanup, instead of letting every file fail. It continues when there is space again.
+- A worker killed from outside the monitor, usually by the system when the memory runs out, doesn't count as a
+  failure: the file is retried, and given up only after it was killed 5 times. Repeated "was killed" warnings
+  mean that `--nproc` is too high for the RAM.
+- A dark or flat whose size doesn't match the frames fails the file ("The dark is ... px, but the frames are
+  ... px"), as it would otherwise silently not be applied.
+- `--force` also forgets the failed files.
+- If the free space on the output disk falls below `extra_space_gb`, the monitor pauses the processing (it
+  doesn't start new files) and runs the cleanup, instead of letting every file fail. It continues when there
+  is space again.
 
 
 ## Overflow: when processing can't keep up
@@ -357,23 +385,32 @@ after sunrise, and the night is reported when it's done. Two settings help when 
 - `monitor_night_cutoff_hours` skips the files of a night which were not processed within that many hours
   after sunrise, so a slow night never delays the next one. The files which are being processed at the cutoff
   are finished, and the night is reported with what was processed. Skipped files get a `done.flag` with
-  `"skipped": true` in their results directory; delete that directory to process the file later.
+  `"skipped": true` in their results directory; delete that directory to process the file later. Note that
+  a downtime longer than the cutoff skips the whole backlog of the nights before it.
 
 
 ## Disk space and cleanup
 
 With `monitor_delete_old_data` (on by default), the monitor manages its output directory like RMS manages
-its data directory, at startup, after every report and every 12 hours:
+its data directory, at startup, after every report, every 12 hours, and when the disk is full. The cleanup
+runs independently of the reports, also while a report runs (the night being reported is kept), so the free
+space is kept up during long reports:
 
 - Old night directories and archives are deleted by `capt_dirs_to_keep`, `arch_dirs_to_keep`,
   `bz2_files_to_keep` and the quotas, and old logs by `logdays_to_keep`. Nights which were not reported yet
-  are kept.
+  are kept, unless the quotas need the space.
 - If the free space is less than the size of the largest of the last three nights plus `extra_space_gb`,
-  whole old nights are deleted, oldest first, but never the latest night. If other data fills the disk, the
-  monitor logs it instead of deleting everything.
+  whole old nights are deleted, oldest first, but never the latest night. If deleting the old nights couldn't
+  free enough space because other data fills the disk, nothing is deleted and a warning is logged.
 - The results of the files of deleted nights are reduced to their `done.flag`, which keeps marking the files
-  as processed, and the nights are not reported again.
+  as processed, and the nights are not reported again (also not if a late file of the night arrives). Once
+  the recording itself was deleted (by the recording software), its results directory with the `done.flag`
+  is deleted too, also for files skipped by the cutoff, so the output directory doesn't keep growing. If
+  the input directory can't be found (e.g. an unmounted disk), nothing is deleted.
 - `monitor_delete_images_days` deletes the image pairs of reported nights earlier, keeping the products.
+  These nights are not reported again either, as a report without the images would replace the products.
+- The cleanup uses the RMS data management, which also deletes old `VideoFiles`, `FramesFiles` and
+  `TimeFiles` directories in the output directory, so don't put the recordings there.
 
 As a rough guide for the space: image pairs of 1080p 8-bit video take about 1 GB per hour of recording,
 512x512 16-bit `.vid` data about 0.6 GB per hour.
@@ -386,14 +423,19 @@ OUTPUT/
     CapturedFiles/<night>/          image pairs, merged results and products of each night
     ArchivedFiles/<night>/          archive of each night, plus the .tar.bz2 files
     YYYY/YYYYMM/YYYYMMDD/<file>/    results of every input file, with its done.flag
-    logs/                           monitor_log_* (main process), monitor_<file>_log_* (one per file),
-                                    report_<night>_log_*, cleanup_log_*
+    logs/                           monitor_log_* (main process), monitor_multicam_log_* (multicam),
+                                    monitor_<file>_log_* (one per file), report_<night>_log_*, cleanup_log_*
     latest_<platepar name>          best platepar of the latest reported night
+    observation.db                  observation summary database (monitor_observation_summary)
+    FILES_TO_UPLOAD.inf             upload queue (monitor_upload)
     .night_reports.json             which files of every night were reported, and how
     .failed_files.json              failed and given up files
     .monitor.lock                   lock of the running monitor
     .report_now                     create it to request the reports
 ```
+
+The night directory also gets `<night>_logs.tar.bz2` with the logs of the night, and a results directory
+keeps a backup of an FTPdetectinfo file which is written again (when a file is processed again).
 
 A damaged state file (e.g. after a disk error) is moved aside to `<name>.corrupt`, and the monitor starts
 over: the nights are reported again and the failed files are retried.
@@ -401,13 +443,24 @@ over: the nights are reported again and the failed files are retried.
 ### Checking on the monitor
 
 - `journalctl -u rms-monitor -f` or the latest `logs/monitor_log_*` shows the files being queued, processed,
-  failed and the reports. The log of a single file is in `logs/monitor_<file>_log_*`.
+  failed and the reports. The log of a single file is in `logs/monitor_<file>_log_*`; errors before the file
+  could be opened (e.g. an empty file) are only in the main log.
+- After the first nights, check that `latest_<platepar name>` exists and that the reports don't warn about
+  the recalibration.
+- The monitor reads its config at the start; restart it after changing the config.
 - "Processing failed ... giving up" means a file was given up, see [Failed files](#failed-files).
 - "pausing the processing until there is space" means the output disk is full.
 - "was still being written while it was processed" means the recording paused in the middle of a file, and the
   file is processed again; harmless if rare.
 - `.night_reports.json` shows when each night was reported, why (`partial`, `sunrise`, `idle`, `trigger`), and
-  which steps failed.
+  which steps failed. The trigger file also retries nights whose report failed.
+
+
+## Upgrading from the old monitor
+
+Results of the old monitor have an empty `done.flag`. They count as processed, so their files are not
+processed again, but they don't belong to a night and get no night reports. Start the new monitor with a new
+output directory; to get reports for old data, process it with `--force` into a new output directory.
 
 
 ## What the monitor does not do

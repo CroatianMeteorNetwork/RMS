@@ -118,8 +118,14 @@ def test_processFile_skips_files_of_nights_past_the_cutoff(config_path, tmp_path
     # The file is marked as done, so it is not opened again after a restart, but it is not a result of the
     #   night
     results_dir = mon.resultsDirPath(output_dir, beginning, 'dummy')
-    assert mnr.readDoneFlag(results_dir) == {'night': night_name, 'skipped': True}
+    assert mnr.readDoneFlag(results_dir) == {'night': night_name, 'skipped': True,
+                                             'input_file': str(tmp_path/'dummy.vid')}
     assert mnr.scanNights(output_dir, config) == {}
+
+    # A file with results (processed again with --force) is processed, its results are not marked skipped
+    mnr.writeDoneFlag(results_dir, {'night': night_name})
+    assert mon.processFile(str(tmp_path/'dummy.vid'), config_path, None, output_dir, 128) is False
+    assert mnr.readDoneFlag(results_dir) == {'night': night_name}
 
 
 @pytest.mark.parametrize('offset_s', [0, 60])
@@ -477,6 +483,54 @@ def test_walkInput_skips_monitor_output(tmp_path):
     assert _walked(input_dir, str(tmp_path/'output')) == sorted(all_dirs)
 
 
+def test_unique_ids_keep_files_in_subdirectories_apart():
+
+    # Files in the input directory keep their name
+    assert mon.uniqueId('22-00-00.mkv') == '22-00-00'
+
+    paths = [os.path.join('2026-10-07', '22-00-00.mkv'), os.path.join('2026-10-08', '22-00-00.mkv'),
+             '2026-10-07_22-00-00.mkv', os.path.join('a', 'b_c.mkv'), os.path.join('a_b', 'c.mkv')]
+    ids = [mon.uniqueId(path) for path in paths]
+    assert len(set(ids)) == len(ids)
+    assert ids[0].startswith('22-00-00_')
+
+
+def test_output_dir_inside_another_monitor_output_is_found(tmp_path):
+
+    outer = tmp_path/'outer'
+    (outer/'inner').mkdir(parents=True)
+    assert mon.enclosingMonitorOutput(str(outer/'inner')) is None
+
+    (outer/mon.MONITOR_LOCK_FILE_NAME).write_text('1\n')
+    assert mon.enclosingMonitorOutput(str(outer/'inner')) == os.path.realpath(str(outer))
+    assert mon.enclosingMonitorOutput(str(outer)) is None
+
+
+def test_walkInput_skips_other_monitor_outputs(tmp_path):
+
+    config = cr.Config()
+    (tmp_path/'videos'/'other'/'2025').mkdir(parents=True)
+    (tmp_path/'videos'/'other'/mon.MONITOR_LOCK_FILE_NAME).write_text('1\n')
+
+    input_dir = str(tmp_path/'videos')
+    walked = [os.path.relpath(root, input_dir) for root, _, _ in mon.walkInput(input_dir, input_dir, config)]
+    assert walked == ['.']
+
+
+def test_mask_is_found_in_the_input_dir(tmp_path):
+
+    config = cr.Config()
+    input_dir = str(tmp_path)
+
+    assert mon.findInputMask(input_dir, config) is None
+
+    open(os.path.join(input_dir, config.mask_file), 'w').close()
+    assert mon.findInputMask(input_dir, config) == os.path.join(input_dir, config.mask_file)
+
+    # A given mask is used instead
+    assert mon.findInputMask(input_dir, config, 'other.bmp') == os.path.abspath('other.bmp')
+
+
 ### Saving the chunk images ###
 
 class _FakeFF(object):
@@ -601,6 +655,20 @@ def test_saver_bins_the_calibration_for_binned_chunks(tmp_path, config):
     assert flat_struct.flat_img.shape == (96, 128)
 
 
+def test_saver_scales_summed_binning_to_the_data_levels(tmp_path, config):
+
+    # 8-bit data summed over 2x2 pixels: the 1500 and 1000 counts of the chunk are 4 times the levels
+    config.detection_binning_factor = 2
+    config.detection_binning_method = 'sum'
+    config.bit_depth = 8
+
+    saver = mon.ChunkImageSaver(str(tmp_path), config, 'input.mkv')
+    ff = FFfile.read(str(tmp_path), saver(_ChunkHandle(), _FakeFF(128)))
+
+    assert ff.maxpixel.dtype == np.uint8
+    assert (int(np.max(ff.maxpixel)), int(np.max(ff.avepixel))) == (255, 250)
+
+
 ### Assigning meteors to the chunk images ###
 
 def _meteor(frames):
@@ -675,7 +743,13 @@ def test_meteor_names_unchanged_without_chunk_images(tmp_path, config):
     entry = FTPdetectinfo.readFTPdetectinfo(str(tmp_path), ftp_name)[0]
 
     assert entry[0] == FFfile.constructFFName('XX0001', handle.currentFrameTime(130))
-    assert entry[11][0][1] == 0
+
+    # The frames are relative to the time in the name (rounded down to the millisecond) at the measured
+    #   frame rate, so the time of every pick is name time + frame/fps
+    name_time = FFfile.filenameToDatetime(entry[0])
+    for frame, pick_frame in zip([row[1] for row in entry[11]], [130, 131]):
+        pick_time = name_time + datetime.timedelta(seconds=frame/25.0)
+        assert abs((pick_time - handle.currentFrameTime(pick_frame)).total_seconds()) < 0.001
 
 
 ### Worker lifetime ###
@@ -720,6 +794,46 @@ def test_worker_ends_when_the_monitor_is_killed(start_method):
 
 
 ### Failed files ###
+
+def test_killed_workers_are_given_up_later(tmp_path):
+
+    output_dir = str(tmp_path)
+    failed_files, _ = mon.loadFailedFiles(output_dir)
+
+    # A worker killed from outside (e.g. out of memory) is retried until it was killed MAX_KILLS times
+    for _ in range(mon.MAX_KILLS - 1):
+        assert not mon.recordFailure(output_dir, failed_files, 'big', -9, 300, killed=True)
+    assert mon.recordFailure(output_dir, failed_files, 'big', -9, 300, killed=True)
+    assert mon.loadFailedFiles(output_dir)[1] == {'big'}
+
+
+def test_killed_from_outside():
+
+    class _Proc(object):
+        exitcode = -9
+
+    proc = _Proc()
+    assert mon.killedFromOutside(proc)
+
+    # A worker stopped by the monitor (time limit) counts as a normal failure
+    proc.stopped_by_monitor = True
+    assert not mon.killedFromOutside(proc)
+
+    proc = _Proc()
+    proc.exitcode = 1
+    assert not mon.killedFromOutside(proc)
+
+
+def test_calibration_size_is_checked():
+
+    class _Handle(object):
+        nrows, ncols = 540, 960
+
+    # Detection binning by 2: the handle has the binned size, the calibration images the full size
+    assert mon.calibrationMatchesFrames(np.zeros((1080, 1920)), _Handle(), 2)
+    assert not mon.calibrationMatchesFrames(np.zeros((512, 512)), _Handle(), 2)
+    assert mon.calibrationMatchesFrames(None, _Handle(), 2)
+
 
 def test_failed_files_are_given_up_and_remembered(tmp_path):
 

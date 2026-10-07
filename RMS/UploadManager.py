@@ -4,6 +4,8 @@ import logging
 import os
 import ctypes
 import multiprocessing
+import signal
+import threading
 import time
 from queue import Empty
 from multiprocessing import Manager
@@ -528,10 +530,17 @@ def formatSize(size_bytes):
         return "{:.2f} GB".format(size_bytes/(1024*1024*1024))
 
 class UploadManager(multiprocessing.Process):
-    def __init__(self, config):
+    def __init__(self, config, watch_parent=False):
         """ Uploads all processed data which has not yet been uploaded to the server. The files will be tried 
             to be uploaded every 15 minutes, until successful. 
-        
+
+        Arguments:
+            config: [Config] Configuration.
+
+        Keyword arguments:
+            watch_parent: [bool] Stop the upload manager (after the upload in progress) when the process which
+                created it is gone, e.g. killed, so it doesn't keep running next to a restarted one. False by
+                default.
         """
 
 
@@ -539,8 +548,13 @@ class UploadManager(multiprocessing.Process):
 
         self.config = config
 
+        # The process which created the upload manager, watched if requested
+        self.parent_pid = os.getpid() if watch_parent else None
+        self.parent_gone = multiprocessing.Event()
+
         # These will be defined in .run()
         self._mgr = Manager()
+        self._mgr_pid = self._mgr._process.pid
         self.file_queue      = self._mgr.Queue()
         self.file_queue_lock = self._mgr.Lock()
 
@@ -853,8 +867,35 @@ class UploadManager(multiprocessing.Process):
 
 
 
+    def watchParent(self, interval=2.0):
+        """ Stop the upload manager when the process which created it is gone. Runs in a thread of the upload
+            manager process.
+        """
+
+        # With the fork start method this process is orphaned when the parent dies, with other start methods
+        #   (e.g. forkserver) the parent process doesn't exist anymore
+        ppid = os.getppid()
+
+        while not self.exit.is_set():
+            time.sleep(interval)
+
+            try:
+                os.kill(self.parent_pid, 0)
+                if os.getppid() == ppid:
+                    continue
+            except OSError:
+                pass
+
+            log.info("The process which started the upload manager is gone, stopping the upload manager")
+            self.parent_gone.set()
+            self.exit.set()
+
+
     def run(self):
         """ Try uploading the files every 15 minutes. """
+
+        if self.parent_pid is not None:
+            threading.Thread(target=self.watchParent, daemon=True).start()
 
         # Load the file queue from disk
         self.loadQueue()
@@ -887,6 +928,25 @@ class UploadManager(multiprocessing.Process):
             self.uploadData()
 
             time.sleep(0.1)
+
+        # The server process of the shared queue is a child of the parent, which can't stop it anymore
+        if self.parent_gone.is_set():
+            try:
+                os.kill(self._mgr_pid, signal.SIGTERM)
+            except OSError:
+                pass
+
+
+    def __getstate__(self):
+        """ The manager of the shared queue can't be pickled (e.g. to start the process with the spawn or
+            forkserver start method), and is only needed by the parent, which shuts it down. Its queue and lock
+            proxies are pickled.
+        """
+
+        state = self.__dict__.copy()
+        state.pop('_mgr', None)
+
+        return state
 
 
 

@@ -212,7 +212,7 @@ def test_reprocessed_file_makes_the_night_pending(tmp_path):
     done_flag = os.path.join(output_dir, results_dir, mnr.DONE_FLAG_NAME)
     os.utime(done_flag, (time.time() - 60, time.time() - 60))
 
-    mnr.generateNightReport(output_dir, NIGHT, config, archive=False)
+    mnr.generateNightReport(output_dir, NIGHT, config, archive=True)
     states = mnr.readReportStates(output_dir)
     assert not mnr.isPending(output_dir, config, states, NIGHT, mnr.scanNights(output_dir, config)[NIGHT])
 
@@ -450,10 +450,14 @@ def test_failed_optional_product_still_reports_the_night(tmp_path, monkeypatch):
     output_dir = str(tmp_path)
     results_dir = _makeResults(output_dir, config, 'file1')
 
-    night_state = mnr.generateNightReport(output_dir, NIGHT, config, archive=False)
+    night_state = mnr.generateNightReport(output_dir, NIGHT, config, archive=True)
 
     assert 'shower_association' in night_state['failed_steps']
     assert night_state['files'] == [results_dir]
+
+    # A report without the archive (e.g. from the command line) doesn't mark the night as reported
+    mnr.updateReportState(output_dir, NIGHT, files=[])
+    assert mnr.generateNightReport(output_dir, NIGHT, config, archive=False)['files'] == []
 
 
 def test_failed_essential_step_keeps_the_night_pending(tmp_path, monkeypatch):
@@ -617,10 +621,75 @@ def test_cleanup_frees_the_space_of_the_largest_recent_night(tmp_path, monkeypat
     assert sorted(os.listdir(captured_dir)) == nights[1:]
     assert os.listdir(archived_dir) == []
 
-    # If other data takes the disk, the older nights are deleted, but never the latest one
+    # If other data takes the disk, so deleting the old nights wouldn't free enough space, nothing is deleted
+    config.extra_space_gb = 1
     monkeypatch.setattr(mnr, 'availableSpace', lambda path: 100)
     assert not mnr.cleanupOldData(output_dir, config)
+    assert sorted(os.listdir(captured_dir)) == nights[1:]
+
+    # Otherwise the old nights are deleted, but never the latest one
+    assert not mnr.freeSpace(output_dir, config, 3000)
     assert os.listdir(captured_dir) == [nights[-1]]
+
+
+def test_done_flags_of_deleted_inputs_are_deleted(tmp_path):
+
+    config = _config()
+    output_dir = str(tmp_path/'out')
+    input_dir = tmp_path/'in'
+    input_dir.mkdir()
+    night_dir = mnr.nightDirPath(output_dir, NIGHT, config)
+    os.makedirs(night_dir)
+
+    def _results(name, **info):
+        results_path = os.path.join(output_dir, '2025', '202512', '20251225', name)
+        os.makedirs(results_path)
+        info.setdefault('input_file', str(input_dir/(name + '.vid')))
+        mnr.writeDoneFlag(results_path, dict(night=NIGHT, **info))
+        return results_path
+
+    kept_input = _results('kept_input')
+    (input_dir/'kept_input.vid').write_text('')
+    gone_input = _results('gone_input')
+    no_input_dir = _results('no_input_dir', input_file=str(tmp_path/'unmounted'/'x.vid'))
+    old_flag = _results('old_flag', input_file=None)
+    skipped = _results('skipped', skipped=True)
+
+    # While the night exists, only the done flag of a skipped file whose input is gone is deleted
+    assert mnr.deleteDoneFlags(output_dir, config) == 1
+    assert not os.path.exists(skipped)
+
+    # Once the night was deleted, the done flags of the deleted inputs are not needed anymore. Inputs which
+    #   still exist, inputs on a directory which can't be found and old done flags without the input are kept
+    shutil.rmtree(night_dir)
+    assert mnr.deleteDoneFlags(output_dir, config) == 1
+    assert not os.path.exists(gone_input)
+    assert all(os.path.exists(path) for path in [kept_input, no_input_dir, old_flag])
+
+    # Empty date directories are deleted too
+    for path in [kept_input, no_input_dir, old_flag]:
+        shutil.rmtree(path)
+    (input_dir/'kept_input.vid').unlink()
+    _results('last')
+    assert mnr.deleteDoneFlags(output_dir, config) == 1
+    assert os.listdir(output_dir) == [config.captured_dir]
+
+
+def test_free_space_keeps_protected_nights(tmp_path, monkeypatch):
+
+    config = _config()
+    output_dir = str(tmp_path)
+    captured_dir = os.path.join(output_dir, config.captured_dir)
+    nights = ['XX0001_2025122{:d}_222000_000000'.format(i) for i in range(4)]
+    for night_name in nights:
+        os.makedirs(os.path.join(captured_dir, night_name))
+        with open(os.path.join(captured_dir, night_name, 'FF_pair.png'), 'wb') as f:
+            f.write(b'0'*1000)
+
+    # The night being reported is not deleted, also when the space is needed
+    monkeypatch.setattr(mnr, 'availableSpace', lambda path: 0)
+    assert not mnr.freeSpace(output_dir, config, 1, protected_nights=[nights[1]])
+    assert sorted(os.listdir(captured_dir)) == [nights[1], nights[-1]]
 
 
 def test_delete_old_night_images(tmp_path):
@@ -660,6 +729,11 @@ def test_delete_old_night_images(tmp_path):
     mnr.updateReportState(output_dir, NIGHT, files=[results_dir, late_dir])
     assert _deleteImages(3) == [NIGHT]
     assert not [f for f in os.listdir(night_dir) if FFpng.isPairName(f)]
+
+    # The night is not reported again, a report without the images would replace its products
+    _makeResults(output_dir, config, 'file3', start_s=1200)
+    assert not mnr.isPending(output_dir, config, mnr.readReportStates(output_dir), NIGHT,
+                             mnr.scanNights(output_dir, config)[NIGHT])
 
 
 ### Scheduling ###
@@ -779,14 +853,19 @@ def test_partial_report_while_the_night_is_processed(scheduling):
     assert _isDue(partial_time - datetime.timedelta(minutes=1)) is None
     assert _isDue(partial_time + datetime.timedelta(minutes=1)) == 'partial'
 
-    # Only once per night: not after a report which was made after the partial report time
-    mnr.updateReportState(scheduling.output_dir, night, reported_at=(partial_time + datetime.timedelta(
-        minutes=5)).strftime(mnr.JSON_TIME_FORMAT))
+    # A failed report doesn't count, the partial report is made again (after the wait for failed reports)
+    report_time = (partial_time + datetime.timedelta(minutes=5)).strftime(mnr.JSON_TIME_FORMAT)
+    mnr.updateReportState(scheduling.output_dir, night, reported_at=report_time)
+    reporter.states = mnr.readReportStates(scheduling.output_dir)
+    assert _isDue(partial_time + datetime.timedelta(minutes=10)) == 'partial'
+
+    # Only once per night: not after a successful report which was made after the partial report time
+    mnr.updateReportState(scheduling.output_dir, night, files=[], succeeded_at=report_time)
     reporter.states = mnr.readReportStates(scheduling.output_dir)
     assert _isDue(partial_time + datetime.timedelta(minutes=10)) is None
 
     # Not for old nights, e.g. a backlog after a downtime, which get only the normal report
-    mnr.updateReportState(scheduling.output_dir, night, reported_at=None)
+    mnr.updateReportState(scheduling.output_dir, night, reported_at=None, succeeded_at=None)
     reporter.states = mnr.readReportStates(scheduling.output_dir)
     assert _isDue(partial_time + datetime.timedelta(days=2)) is None
 
@@ -973,6 +1052,89 @@ def test_cleanup_runs_at_startup_and_after_reports(scheduling):
     assert (reporter.active is None) and (reporter.cleanup_proc is not None)
 
 
+def test_cleanup_runs_while_a_report_runs(scheduling):
+
+    reporter = _reporter(scheduling, 'idle')
+    night, _ = _nightAndResults(scheduling)
+    now = scheduling.night_end + datetime.timedelta(days=1)
+
+    reporter.poll(True, now=now)
+    assert reporter.active is not None
+
+    # A cleanup requested during the report (e.g. the disk is full) starts right away, and keeps the night of
+    #   the report
+    reporter.cleanup_due = True
+    reporter.poll(True, now=now)
+    assert (reporter.active is not None) and (reporter.cleanup_proc is not None)
+    assert reporter.cleanup_proc.args[2] == [night]
+
+    # No report starts while the cleanup runs
+    reporter.active[0].alive = False
+    reporter.poll(True, now=now)
+    assert reporter.active is None
+    reporter.poll(True, now=now)
+    assert reporter.active is None
+
+
+def test_process_which_fails_to_start_is_tried_again(scheduling, monkeypatch):
+
+    reporter = mnr.NightReporter(scheduling.output_dir, scheduling.config_path, report_mode='idle')
+    now = scheduling.night_end + datetime.timedelta(days=1)
+
+    def _failingStart(self):
+        raise OSError(12, "Cannot allocate memory")
+
+    # The cleanup can't be started (e.g. no memory for the fork). The reporter keeps working
+    monkeypatch.setattr(_Process, 'start', _failingStart)
+    reporter.poll(True, now=now)
+    assert (reporter.cleanup_proc is None) and (reporter.active is None)
+
+    # It is tried again after a minute
+    monkeypatch.setattr(_Process, 'start', lambda self: None)
+    reporter.poll(True, now=now)
+    assert reporter.cleanup_proc is None
+
+    # The cleanup stays due until it was started
+    reporter.start_retry_time = 0
+    reporter.poll(True, now=now)
+    assert reporter.cleanup_proc is not None
+
+
+def test_scan_reads_only_changed_results(tmp_path, monkeypatch):
+
+    config = _config()
+    output_dir = str(tmp_path)
+    results_dirs = [_makeResults(output_dir, config, name) for name in ['file1', 'file2']]
+
+    reads = []
+    read_done_flag = mnr.readDoneFlag
+    monkeypatch.setattr(mnr, 'readDoneFlag', lambda path: reads.append(path) or read_done_flag(path))
+
+    cache = {}
+    assert sorted(mnr.scanNights(output_dir, config, cache=cache)[NIGHT]) == sorted(results_dirs)
+    assert len(reads) == 2
+
+    # Nothing changed
+    del reads[:]
+    assert sorted(mnr.scanNights(output_dir, config, cache=cache)[NIGHT]) == sorted(results_dirs)
+    assert reads == []
+
+    # A file processed again: its done flag is written again
+    results_path = os.path.join(output_dir, results_dirs[0])
+    mnr.writeDoneFlag(results_path, {'night': NIGHT, 'again': True})
+    os.utime(results_path, ns=(0, os.stat(results_path).st_mtime_ns + 10**9))
+    nights = mnr.scanNights(output_dir, config, cache=cache)
+    assert len(reads) == 1
+    assert nights[NIGHT][results_dirs[0]]['again']
+
+    # The output directory of another monitor inside this one is not scanned
+    nested = os.path.join(output_dir, 'other')
+    os.makedirs(nested)
+    open(os.path.join(nested, mnr.MONITOR_LOCK_FILE_NAME), 'w').close()
+    _makeResults(nested, config, 'file3')
+    assert sorted(mnr.scanNights(output_dir, config, cache=cache)[NIGHT]) == sorted(results_dirs)
+
+
 ### Output directory lock ###
 
 def _holdLock(output_dir, locked, release):
@@ -1023,7 +1185,7 @@ def test_new_results_are_scanned_at_most_every_minute(scheduling, monkeypatch):
 
     scans = []
     scan_nights = mnr.scanNights
-    monkeypatch.setattr(mnr, 'scanNights', lambda *args: scans.append(1) or scan_nights(*args))
+    monkeypatch.setattr(mnr, 'scanNights', lambda *args, **kwargs: scans.append(1) or scan_nights(*args, **kwargs))
 
     reporter.poll(False, now)
     assert len(scans) == 1
@@ -1068,14 +1230,21 @@ def test_results_of_deleted_nights_are_pruned(tmp_path):
     assert mnr.pruneResults(output_dir, config, nights) == 0
 
     # Once the cleanup deleted the night, only the done flag is kept, so the file stays processed, and the
-    #   report state of the night is forgotten
+    #   report state of the night is reduced to a mark
     mnr.updateReportState(output_dir, NIGHT, files=[results_dir])
     shutil.rmtree(mnr.nightDirPath(output_dir, NIGHT, config))
     assert mnr.pruneResults(output_dir, config, nights) == 1
     assert os.listdir(os.path.join(output_dir, results_dir)) == [mnr.DONE_FLAG_NAME]
-    assert mnr.readReportStates(output_dir)['nights'] == {}
+    assert mnr.readReportStates(output_dir)['nights'] == {NIGHT: {'deleted': True}}
 
     # The pruned night is not pending, so it doesn't keep the following nights from being deleted
     assert not mnr.isPending(output_dir, config, mnr.readReportStates(output_dir), NIGHT,
                              mnr.scanNights(output_dir, config)[NIGHT])
     assert mnr.pruneResults(output_dir, config, nights) == 0
+
+    # A late file of the deleted night creates its directory again, the night is still not reported (its
+    #   archive would replace the full one with a single file)
+    late_dir = _makeResults(output_dir, config, 'file2', start_s=600)
+    assert not mnr.isPending(output_dir, config, mnr.readReportStates(output_dir), NIGHT,
+                             mnr.scanNights(output_dir, config)[NIGHT])
+    assert late_dir in mnr.scanNights(output_dir, config)[NIGHT]
