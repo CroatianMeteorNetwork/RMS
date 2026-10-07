@@ -720,3 +720,27 @@ def test_failed_files_are_given_up_and_remembered(tmp_path):
     # Retrying the failed files clears the record
     assert mon.loadFailedFiles(output_dir, retry_failed=True) == ({}, set())
     assert mon.loadFailedFiles(output_dir) == ({}, set())
+
+
+def test_processing_pauses_while_the_output_disk_is_full(monkeypatch, tmp_path):
+
+    class _Reporter(object):
+        cleanup_due = False
+
+        class config(object):
+            extra_space_gb = 5
+
+    reporter = _Reporter()
+    guard = mon.FreeSpaceGuard(str(tmp_path), reporter)
+
+    # Full disk: paused, and a cleanup is requested once, not on every check
+    monkeypatch.setattr(mon, 'availableSpace', lambda path: 1*1024**3)
+    assert not guard.ok()
+    assert reporter.cleanup_due
+    reporter.cleanup_due = False
+    assert not guard.ok()
+    assert not reporter.cleanup_due
+
+    # Space again: resumed
+    monkeypatch.setattr(mon, 'availableSpace', lambda path: 10*1024**3)
+    assert guard.ok() and not guard.paused

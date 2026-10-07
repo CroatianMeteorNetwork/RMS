@@ -46,6 +46,7 @@ from RMS.DetectStarsAndMeteors import (
     detectStarsAndMeteorsFrameInterface,
     saveResultsFrameInterface,
 )
+from RMS.DeleteOldObservations import availableSpace
 from RMS.DetectionTools import binImageCalibration, findMaskPath, loadImageCalibration
 from RMS.Astrometry.ApplyRecalibrate import applyRecalibrate
 from RMS.Logger import LoggingManager, getLogger
@@ -685,6 +686,61 @@ def recordFailure(output_dir, failed_files, unique_id, exitcode, fail_wait_time,
     return False
 
 
+class FreeSpaceGuard(object):
+    """ Pauses the processing while the disk of the output directory is almost full (less than extra_space_gb
+        free), so the files don't fail because their results can't be written, which would give them up. The
+        cleanup of old data is requested to free space, and the processing continues once there is space.
+
+    Arguments:
+        output_dir: [str] Output directory of the camera.
+        reporter: [NightReporter] Night reporter of the camera, with its config, which runs the cleanup.
+
+    Keyword arguments:
+        log_prefix: [str] Prefix of the log messages, e.g. the camera ID. Empty by default.
+    """
+
+    # Seconds between the cleanup requests while the processing is paused
+    CLEANUP_REQUEST_INTERVAL = 1800
+
+    def __init__(self, output_dir, reporter, log_prefix=''):
+
+        self.output_dir = output_dir
+        self.reporter = reporter
+        self.log_prefix = log_prefix
+
+        self.paused = False
+        self.last_cleanup_request = None
+
+
+    def ok(self):
+        """ Check the free space. Return True if new files can be processed. """
+
+        free_gb = availableSpace(self.output_dir)/1024**3
+
+        if free_gb >= self.reporter.config.extra_space_gb:
+
+            if self.paused:
+                log.info("{}{:.1f} GB free in {} again, resuming the processing".format(self.log_prefix,
+                    free_gb, self.output_dir))
+            self.paused = False
+
+            return True
+
+        if not self.paused:
+            log.error("{}Only {:.1f} GB free in {} (extra_space_gb: {:.1f}), pausing the processing until "
+                      "there is space".format(self.log_prefix, free_gb, self.output_dir,
+                                              self.reporter.config.extra_space_gb))
+        self.paused = True
+
+        # Ask for a cleanup of old data
+        if (self.last_cleanup_request is None) \
+                or (time.time() - self.last_cleanup_request > self.CLEANUP_REQUEST_INTERVAL):
+            self.reporter.cleanup_due = True
+            self.last_cleanup_request = time.time()
+
+        return False
+
+
 def stopOnSigterm(signum, frame):
     """ Signal handler which stops the monitor on SIGTERM (e.g. from systemd) like Ctrl+C does, so the workers
         and the night report are stopped cleanly instead of being left running.
@@ -801,6 +857,9 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
     # Schedules the night reports
     reporter = NightReporter(output_dir, config_path, report_mode=report_mode, fail_wait_time=fail_wait_time)
     log.info("Night report mode: {:s}".format(reporter.report_mode))
+
+    # Pauses the processing while the output disk is full
+    space_guard = FreeSpaceGuard(output_dir, reporter)
 
     try:
         while True:
@@ -939,10 +998,12 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
 
             stable_files.sort(key=getSortTime)
 
-            # 4. Start processes for the oldest stable files until nproc is full
+            # 4. Start processes for the oldest stable files until nproc is full, unless the output disk is
+            #   full
             new_files_queued = False
+            space_ok = space_guard.ok() if stable_files else True
             for file_path, mtime, unique_id, file_rel_path in stable_files:
-                if len(active_workers) >= nproc:
+                if (len(active_workers) >= nproc) or (not space_ok):
                     break
 
                 if file_path in stability_tracker:
@@ -1172,6 +1233,10 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None,
                                              report_lock=report_lock)
         log.info("Camera {}: night report mode: {}".format(cam['id'], reporters[cam['id']].report_mode))
 
+    # Pause the processing of a camera while its output disk is full
+    space_guards = {cam['id']: FreeSpaceGuard(cam['output_dir'], reporters[cam['id']],
+                                              log_prefix="[{}] ".format(cam['id'])) for cam in cameras}
+
     # Initialize state tracking dictionaries. Since files from different cameras might have the same name,
     # we track these metrics per camera using nested dictionaries or sets.
     processed_files = {cam['id']: set() for cam in cameras}
@@ -1392,7 +1457,7 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None,
                     return mtime
 
                 cam_stable.sort(key=getSortTime)
-                if cam_stable:
+                if cam_stable and space_guards[cam_id].ok():
                     stable_per_cam[cam_id] = cam_stable
 
             # 3. Load Balancing Assignment

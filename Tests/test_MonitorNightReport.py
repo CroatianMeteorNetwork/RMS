@@ -828,7 +828,7 @@ def test_report_finished_during_shutdown_is_uploaded(scheduling):
             added.append(file_list)
         def delayNextUpload(self, delay=0):
             pass
-        def stop(self):
+        def stop(self, timeout=None):
             pass
 
     reporter.upload_manager = _UploadManager()
