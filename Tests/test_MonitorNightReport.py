@@ -638,6 +638,12 @@ class _Process(object):
     def join(self, timeout=None):
         pass
 
+    def terminate(self):
+        self.alive = False
+        self.exitcode = -15
+
+    kill = terminate
+
 
 Scheduling = collections.namedtuple('Scheduling', ['output_dir', 'config_path', 'night_end', 'last_result',
                                                    'results'])
@@ -814,6 +820,27 @@ def test_report_start_and_finish(scheduling):
     assert reporter.active is None
     assert reporter.report_lock.owner is None
     assert reporter.pending is None
+
+
+def test_stuck_report_is_stopped(scheduling):
+
+    reporter = _reporter(scheduling, 'idle')
+    night, results = _nightAndResults(scheduling)
+    now = scheduling.night_end + datetime.timedelta(hours=1)
+
+    reporter._startReport(night, results, 'sunrise')
+    proc = reporter.active[0]
+
+    # Within the time limit the report keeps running
+    reporter.poll(True, now)
+    assert reporter.active is not None
+
+    # Over the time limit it is stopped, counted as failed, and the reporter is free again
+    proc.start_time -= mnr.REPORT_TIMEOUT + 1
+    reporter.poll(True, now)
+    assert reporter.active is None and (not proc.alive)
+    assert reporter.failed[night]['count'] == 1
+    assert reporter.report_lock.owner is None
 
 
 def test_report_finished_during_shutdown_is_uploaded(scheduling):

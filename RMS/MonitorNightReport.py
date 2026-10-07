@@ -81,6 +81,11 @@ ECSV_DIR_NAME = 'ECSV'
 # Time format used in the JSON files
 JSON_TIME_FORMAT = "%Y-%m-%dT%H:%M:%S.%f"
 
+# Time limits (seconds) of a night report and of the cleanup, after which they are stopped (e.g. stuck on a
+#   file system or in an external program), so they don't block the following reports and cleanups
+REPORT_TIMEOUT = 4*3600
+CLEANUP_TIMEOUT = 3600
+
 # Report steps which decide if a night is reported. Failed optional products are only logged, as in a normal
 #   RMS night, so they don't block the night from being reported and uploaded
 ESSENTIAL_STEPS = {'merge', 'archive', 'thumbnails_and_stacks'}
@@ -1310,12 +1315,30 @@ class NightReporter(object):
         return None
 
 
+    def _overTime(self, proc, timeout, name):
+        """ Stop the process if it runs longer than the timeout (seconds). Return True if it was stopped. """
+
+        if time.monotonic() - proc.start_time < timeout:
+            return False
+
+        log.error(self.log_prefix + "{:s} did not finish in {:.1f} h, stopping it".format(name, timeout/3600))
+
+        proc.terminate()
+        proc.join(10)
+        if proc.is_alive():
+            proc.kill()
+            proc.join()
+
+        return True
+
+
     def _startCleanup(self):
         """ Start the cleanup of old data in a separate process. """
 
         self.cleanup_proc = multiprocessing.Process(target=cleanupWorker,
                                                     args=(self.output_dir, self.config_path))
         self.cleanup_proc.start()
+        self.cleanup_proc.start_time = time.monotonic()
 
 
     def _startReport(self, night_name, results, reason):
@@ -1331,6 +1354,7 @@ class NightReporter(object):
         proc = multiprocessing.Process(target=nightReportWorker,
                                        args=(self.output_dir, night_name, self.config_path, results))
         proc.start()
+        proc.start_time = time.monotonic()
 
         self.active = (proc, night_name, results)
         self.report_lock.owner = self
@@ -1379,10 +1403,13 @@ class NightReporter(object):
         if now is None:
             now = RmsDateTime.utcnow()
 
-        # Check the running report, and clean up after it
+        # Check the running report, and clean up after it. A report which takes too long is stopped and
+        #   counts as failed
         if self.active is not None:
             if self.active[0].is_alive():
-                return
+                if not self._overTime(self.active[0], REPORT_TIMEOUT, "Report of night {:s}".format(
+                        self.active[1])):
+                    return
 
             self._finishReport(now)
             self.cleanup_due = True
@@ -1390,7 +1417,8 @@ class NightReporter(object):
         # Reports and cleanups don't run at the same time
         if self.cleanup_proc is not None:
             if self.cleanup_proc.is_alive():
-                return
+                if not self._overTime(self.cleanup_proc, CLEANUP_TIMEOUT, "Cleanup"):
+                    return
 
             self.cleanup_proc.join()
             self.cleanup_proc = None
