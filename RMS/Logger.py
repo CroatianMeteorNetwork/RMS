@@ -409,12 +409,15 @@ class LoggingManager:
             for handler in main_logger.handlers[:]:
                 main_logger.removeHandler(handler)
 
-            # Spawn the listener process
+            # Spawn the listener process. It is a direct child of this process, except with the forkserver start
+            #   method (the platform default is the first start method if none was set)
+            start_method = multiprocessing.get_start_method(allow_none=True) \
+                or multiprocessing.get_all_start_methods()[0]
             self.logging_queue = multiprocessing.Queue(-1)
             self.listener_process = multiprocessing.Process(
                 target=_listener_process,
                 args=(self.logging_queue, config, log_file_prefix, safedir, console_level, file_level,
-                      os.getpid())
+                      os.getpid(), start_method != 'forkserver')
             )
             self.listener_process.daemon = True
             self.listener_process.start()
@@ -559,10 +562,11 @@ def _processAlive(pid):
 
 
 def _listener_process(queue, config, log_file_prefix, safedir, console_level=logging.INFO, file_level=logging.DEBUG,
-                      parent_pid=None):
+                      parent_pid=None, direct_child=True):
     """ Target function for the logging listener process.
     Ignores SIGINT and processes messages in strict FIFO order. The listener also stops when the process which
     logs through it (parent_pid) is gone without stopping it, e.g. when it was killed, so it doesn't stay behind.
+    direct_child tells if the listener is a child of that process.
     """
     import signal
     signal.signal(signal.SIGINT, signal.SIG_IGN)
@@ -574,13 +578,17 @@ def _listener_process(queue, config, log_file_prefix, safedir, console_level=log
     main_logger = logging.getLogger()
     handlers = tuple(main_logger.handlers)  # stable snapshot
 
-    # The logging process is gone when the listener is orphaned (it is the parent of the listener with the fork
-    #   start method, where it stays a zombie until reaped), or when it doesn't exist anymore (other start
-    #   methods, e.g. forkserver, where the listener is a child of the fork server)
-    listener_ppid = os.getppid()
-
+    # The logging process is gone when the listener is orphaned if it is its child (a dead parent stays a
+    #   zombie until it is reaped, so its PID still exists), otherwise (e.g. forkserver, where the listener is
+    #   a child of the fork server) when its PID doesn't exist anymore
     def _parentGone():
-        return (parent_pid is not None) and ((os.getppid() != listener_ppid) or (not _processAlive(parent_pid)))
+        if parent_pid is None:
+            return False
+
+        if direct_child:
+            return os.getppid() != parent_pid
+
+        return not _processAlive(parent_pid)
 
     # Single consumer: preserves FIFO order
     while True:
