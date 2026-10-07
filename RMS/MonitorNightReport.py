@@ -164,7 +164,8 @@ def nightBoundsFromName(config, night_name):
 def lockOutputDir(output_dir):
     """ Lock the output directory, so a second monitor (e.g. started by mistake) or a command line report
         can't work on it at the same time. The lock is released when the process ends, also if it is killed,
-        so it never goes stale.
+        so it never goes stale. It is a POSIX record lock, which belongs to this process only, so child
+        processes which outlive it (e.g. the upload manager) don't keep the directory locked.
 
     Arguments:
         output_dir: [str] Output directory of the monitor.
@@ -181,7 +182,7 @@ def lockOutputDir(output_dir):
         return lock_file
 
     try:
-        fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        fcntl.lockf(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
 
     except (IOError, OSError):
         lock_file.close()
