@@ -227,8 +227,15 @@ def test_merge_night(tmp_path):
     output_dir = str(tmp_path)
 
     # Two files with slightly different frame rates
-    _makeResults(output_dir, config, 'file1', fps=32.0, meteor_fps=32.13)
-    _makeResults(output_dir, config, 'file2', fps=32.0, meteor_fps=32.11, start_s=600)
+    results_dirs = [_makeResults(output_dir, config, 'file1', fps=32.0, meteor_fps=32.13),
+                    _makeResults(output_dir, config, 'file2', fps=32.0, meteor_fps=32.11, start_s=600)]
+
+    # ECSV files of detections which begin in the same second, in one file and in both files
+    ecsv_name = '2025-12-25T20_00_00_RMS_XX0001'
+    for results_dir, file_names in zip(results_dirs, [(ecsv_name, ecsv_name + '_2'), (ecsv_name,)]):
+        for file_name in file_names:
+            with open(os.path.join(output_dir, results_dir, file_name + '.ecsv'), 'w') as f:
+                f.write(results_dir + file_name)
 
     night_dir = mnr.nightDirPath(output_dir, NIGHT, config)
     results = mnr.scanNights(output_dir, config)[NIGHT]
@@ -249,6 +256,12 @@ def test_merge_night(tmp_path):
     assert merged.n_meteors == 2
     assert merged.ff_detected == sorted(entry[0] for entry in entries)
 
+    # All ECSV files are collected under unique names
+    ecsv_dir = os.path.join(night_dir, mnr.ECSV_DIR_NAME)
+    assert sorted(os.listdir(ecsv_dir)) == [ecsv_name + suffix + '.ecsv' for suffix in ('', '_2', '_3')]
+    with open(os.path.join(ecsv_dir, ecsv_name + '_3.ecsv')) as f:
+        assert f.read() == results_dirs[1] + ecsv_name
+
     # Recalibrated platepars of both files, and the platepar and the config are copied
     assert len(merged.recalibrated) == 4
     assert os.path.isfile(os.path.join(night_dir, config.platepar_name))
@@ -257,6 +270,32 @@ def test_merge_night(tmp_path):
     # Merging again doesn't duplicate the merged files
     mnr.mergeNightResults(night_dir, output_dir, results, config)
     assert len([f for f in os.listdir(night_dir) if f.startswith('FTPdetectinfo')]) == 1
+    assert len(os.listdir(ecsv_dir)) == 3
+
+
+def test_detected_images_cover_the_meteor_tracks():
+
+    # Images every 5.12 s (128 frames at 25 fps) of two files, the second one starting after a gap
+    image_names = [_pairName(seconds, frame) for seconds, frame in ((0, 0), (5.12, 128), (10.24, 256),
+                                                                    (60, 0), (65.12, 128))]
+    meas = lambda frames: [[frame, 10.0, 20.0] for frame in frames]
+
+    meteor_list = [
+        # Within one image
+        [image_names[0], 1, 0, 0, meas([3, 4, 5]), 25.0],
+        # Starting in the second image and ending in the third one
+        [image_names[1], 1, 0, 0, meas([120, 150, 200]), 25.0],
+        # Ending in the frames after the last chunk of the first file, which belong to its last image
+        [image_names[2], 1, 0, 0, meas([100, 200]), 25.0],
+        # No image of the meteor
+        [_pairName(30, 0), 1, 0, 0, meas([3, 4]), 25.0],
+        ]
+
+    assert mnr.detectedImageNames(meteor_list, image_names[::-1]) == image_names[:3]
+
+    # A track over both images of the second file
+    meteor_list = [[image_names[3], 1, 0, 0, meas([10, 200, 300]), 25.0]]
+    assert mnr.detectedImageNames(meteor_list, image_names) == image_names[3:]
 
 
 ### Best platepar of the night ###

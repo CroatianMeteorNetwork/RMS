@@ -22,6 +22,7 @@ The report can be run from the command line:
 from __future__ import print_function, division, absolute_import
 
 import argparse
+import bisect
 import collections
 import copy
 import datetime
@@ -316,9 +317,47 @@ def unreportedResults(states, night_name, results):
 
 ### Night products ###
 
+def detectedImageNames(meteor_list, image_names):
+    """ Return the names of all images which cover the duration of the detected meteors. A meteor longer than
+        one chunk is spread over several images, so all images from the one with the first pick (the FF name
+        of the meteor) to the one with the last pick are returned.
+
+    Arguments:
+        meteor_list: [list] Meteors as [ff_name, meteor_No, rho, phi, meteor_meas, meteor_fps], where the
+            first element of every measurement is the frame relative to the beginning of the FF file.
+        image_names: [list] FF names of the images in the night directory.
+
+    Return:
+        [list] Sorted FF names of the images covering the meteors.
+    """
+
+    # Every image covers the time from its beginning to the beginning of the next image
+    image_names = sorted(image_names, key=filenameToDatetime)
+    image_times = [filenameToDatetime(file_name) for file_name in image_names]
+    image_index = {file_name: i for i, file_name in enumerate(image_names)}
+
+    detected = set()
+    for ff_name, _, _, _, meteor_meas, meteor_fps in meteor_list:
+
+        if ff_name not in image_index:
+            continue
+
+        first = image_index[ff_name]
+
+        # Find the image with the last pick
+        last_frame = max(line[0] for line in meteor_meas)
+        last_time = image_times[first] + datetime.timedelta(seconds=last_frame/meteor_fps)
+        last = max(first, bisect.bisect_right(image_times, last_time) - 1)
+
+        detected.update(image_names[first:last + 1])
+
+    return sorted(detected)
+
+
 def mergeNightResults(night_dir, output_dir, results, config):
     """ Merge the CALSTARS, FTPdetectinfo and recalibrated platepars of all files of the night into one file
-        each in the night directory, and copy the platepar, the config and the mask there.
+        each in the night directory, collect the ECSV files into its ECSV directory, and copy the platepar,
+        the config and the mask there.
 
     Arguments:
         night_dir: [str] Night directory.
@@ -399,6 +438,29 @@ def mergeNightResults(night_dir, output_dir, results, config):
         _writeJSON(os.path.join(night_dir, config.platepars_recalibrated_name), recalibrated)
 
 
+    ### Collect the ECSV files ###
+
+    # Detections of different files which begin in the same second have ECSV files of the same name, so the
+    #   names are made unique when they are collected into the night directory
+    ecsv_dir = os.path.join(night_dir, ECSV_DIR_NAME)
+    if os.path.isdir(ecsv_dir):
+        shutil.rmtree(ecsv_dir)
+
+    for results_path in results_paths:
+        for ecsv_path in sorted(glob.glob(os.path.join(results_path, '*.ecsv'))):
+
+            os.makedirs(ecsv_dir, exist_ok=True)
+
+            base_name, ext = os.path.splitext(os.path.basename(ecsv_path))
+            file_name = base_name + ext
+            collision = 1
+            while os.path.isfile(os.path.join(ecsv_dir, file_name)):
+                collision += 1
+                file_name = '{:s}_{:d}{:s}'.format(base_name, collision, ext)
+
+            shutil.copy2(ecsv_path, os.path.join(ecsv_dir, file_name))
+
+
     ### Copy the platepar, the config and the mask ###
 
     first_results = results_paths[0]
@@ -413,9 +475,9 @@ def mergeNightResults(night_dir, output_dir, results, config):
         shutil.copy2(mask_path, os.path.join(night_dir, config.mask_file))
 
 
-    # FF names with detections which have images in the night directory
-    night_ffs = set(file_name for file_name in os.listdir(night_dir) if validFFName(file_name))
-    ff_detected = sorted(set(entry[0] for entry in meteor_list) & night_ffs)
+    # Images in the night directory which cover the detections
+    night_ffs = [file_name for file_name in os.listdir(night_dir) if validFFName(file_name)]
+    ff_detected = detectedImageNames(meteor_list, night_ffs)
 
     return MergedNight(calstars_name, ftpdetectinfo_name, fps, chunk_frames, ff_detected, len(meteor_list),
                        recalibrated)

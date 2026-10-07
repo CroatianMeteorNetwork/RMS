@@ -38,8 +38,8 @@ from RMS.Formats.FrameInterface import detectInputType, getCacheID
 from RMS.Formats.FFfile import validFFName, constructFFName
 from RMS.Formats import FFpng
 from RMS.Routines import Image
-from RMS.MonitorNightReport import ECSV_DIR_NAME, latestPlateparPath, nightDirPath, nightInfo, \
-    NightReporter, ReportLock, writeDoneFlag
+from RMS.MonitorNightReport import latestPlateparPath, nightDirPath, nightInfo, NightReporter, ReportLock, \
+    writeDoneFlag
 from RMS.DetectStarsAndMeteors import (
     detectStarsAndMeteorsFrameInterface,
     saveResultsFrameInterface,
@@ -70,6 +70,9 @@ MONITOR_OUTPUT_DIRS = {'CapturedFiles', 'ArchivedFiles', 'logs'}
 
 # Exit code of a worker process which skipped a file because it begins before the start time
 SKIP_EXIT_CODE = 3
+
+# Default time limit (seconds) for processing one file, after which the worker is stopped and the file retried
+WORKER_TIMEOUT = 3600
 
 # Accepted formats of the start time given on the command line or in the multicam INI file
 START_TIME_FORMATS = ["%Y%m%d_%H%M%S", "%Y%m%d-%H%M%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S",
@@ -498,20 +501,15 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
 
             proc_log.info("Running ApplyRecalibrate on: {}".format(ftpdetectinfo_path))
 
-            # Save every calibrated detection as an ECSV file in the ECSV directory of the night
-            ecsv_out = None
-            if config.monitor_save_ecsv:
-                ecsv_out = os.path.join(night_dir, ECSV_DIR_NAME)
-                os.makedirs(ecsv_out, exist_ok=True)
-
-            # Run recalibration with load_all=True
+            # Run recalibration with load_all=True. The ECSV files of the detections are saved to the results
+            #   directory and collected into the night directory by the night report
             applyRecalibrate(
                 ftpdetectinfo_path, config,
                 # The calibration variation plots are made for the whole night in the night report
                 generate_plot=False,
                 load_all=True,
                 generate_ufoorbit=False,
-                ecsv_out=ecsv_out,
+                ecsv_out=config.monitor_save_ecsv,
             )
 
             proc_log.info("Recalibration complete for: {}".format(file_name))
@@ -563,9 +561,33 @@ def processFileWorker(*args, **kwargs):
     sys.exit(0 if success else 1)
 
 
+def stopStuckWorker(proc, unique_id, worker_timeout):
+    """ Stop a worker process which runs longer than the time limit, e.g. one stuck in the video decoder. The
+        stopped worker has a negative exit code, so its file is handled as failed and retried.
+
+    Arguments:
+        proc: [multiprocessing.Process] Worker process, with the time it was started in proc.start_time.
+        unique_id: [str] ID of the processed file.
+        worker_timeout: [float] Time limit in seconds, no limit if 0.
+    """
+
+    if (worker_timeout <= 0) or (time.time() - proc.start_time < worker_timeout) or (not proc.is_alive()):
+        return
+
+    log.error("Processing {} did not finish in {:.1f} min, stopping the worker...".format(unique_id,
+        worker_timeout/60))
+
+    proc.terminate()
+    proc.join(10)
+    if proc.is_alive():
+        proc.kill()
+        proc.join()
+
+
 def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_dir, nproc=2,
                      chunk_frames=128, poll_interval=2, force=False, recursive=False, flat_path=None,
-                     dark_path=None, fail_wait_time=300, start_time=None, report_mode=None):
+                     dark_path=None, fail_wait_time=300, start_time=None, report_mode=None,
+                     worker_timeout=WORKER_TIMEOUT):
     """ Monitor a directory for new files of the given type and process them.
 
     Arguments:
@@ -587,6 +609,8 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
             None by default, in which case all files are processed.
         report_mode: [str] When to generate the night reports ('sunrise', 'idle', 'external', 'none'). The
             config value is used if None.
+        worker_timeout: [float] Seconds after which a worker which is still processing a file is stopped
+            and the file is retried. 0 disables the limit. WORKER_TIMEOUT by default.
     """
 
     log.info("Monitoring directory: {}".format(input_dir))
@@ -634,6 +658,7 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
             # Clean up finished workers
             finished = []
             for uid, proc in active_workers.items():
+                stopStuckWorker(proc, uid, worker_timeout)
                 if not proc.is_alive():
                     proc.join()
                     if proc.exitcode == 0:
@@ -789,6 +814,7 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
                             'start_time': start_time}
                 )
                 proc.start()
+                proc.start_time = time.time()
                 active_workers[unique_id] = proc
                 new_files_queued = True
 
@@ -866,6 +892,10 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None)
         # Set to True to re-process files even if they already have a done.flag
         force = False
 
+        # Seconds after which a worker which is still processing a file (e.g. stuck in the video decoder) is
+        # stopped and the file is retried. 0 disables the limit.
+        worker_timeout = 3600
+
         # Optional. Only process files whose recording begins at or after this time (UTC). Files which
         # begin earlier are skipped, even if they span this time. Can be overridden per camera, and
         # --start_time on the command line overrides both.
@@ -910,6 +940,7 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None)
     poll_interval = cp.getfloat('Global', 'poll_interval', fallback=2.0)
     force = cp.getboolean('Global', 'force', fallback=False)
     fail_wait_time = cp.getfloat('Global', 'fail_wait_time', fallback=300.0)
+    worker_timeout = cp.getfloat('Global', 'worker_timeout', fallback=WORKER_TIMEOUT)
 
     # Parse individual camera sections. Each section other than 'Global' defines a single camera.
     cameras = []
@@ -1026,6 +1057,7 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None)
             finished = []
 
             for uid, (proc, cam_id) in active_workers.items():
+                stopStuckWorker(proc, uid, worker_timeout)
                 if not proc.is_alive():
                     proc.join()
                     
@@ -1259,6 +1291,7 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None)
                             'start_time': chosen_cam['start_time']}
                 )
                 proc.start()
+                proc.start_time = time.time()
                 
                 # Update load balancing metrics and tracking dictionaries
                 active_workers[unique_id] = (proc, cam_id)
@@ -1462,6 +1495,12 @@ Examples:
              "monitor_report_mode in the config file."
     )
 
+    arg_parser.add_argument('--worker_timeout', type=float, default=WORKER_TIMEOUT,
+        help="Seconds after which a worker which is still processing a file (e.g. stuck in the video "
+             "decoder) is stopped and the file is retried. 0 disables the limit. Default: {:d}. In --multicam "
+             "mode, worker_timeout in the [Global] section of the INI file is used.".format(WORKER_TIMEOUT)
+    )
+
     # Parse
     cml_args = arg_parser.parse_args()
 
@@ -1537,5 +1576,6 @@ Examples:
         flat_path=cml_args.flat,
         dark_path=cml_args.dark,
         start_time=start_time,
-        report_mode=cml_args.report_mode
+        report_mode=cml_args.report_mode,
+        worker_timeout=cml_args.worker_timeout
     )

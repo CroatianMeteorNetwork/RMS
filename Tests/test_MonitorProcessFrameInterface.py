@@ -13,6 +13,7 @@ import multiprocessing
 import os
 import shutil
 import sys
+import time
 
 import numpy as np
 import pytest
@@ -267,6 +268,24 @@ def test_failed_worker_process_exit_code(config_path, tmp_path):
     proc.join(timeout=120)
 
     assert proc.exitcode not in (0, mon.SKIP_EXIT_CODE, None)
+
+
+def test_stuck_worker_is_stopped():
+    """ A worker which runs longer than the time limit is stopped with a failure exit code, so its file is
+        retried. Workers within the limit, or without a limit, keep running.
+    """
+
+    proc = multiprocessing.Process(target=time.sleep, args=(60,))
+    proc.start()
+    proc.start_time = time.time()
+
+    mon.stopStuckWorker(proc, 'file', 0)
+    mon.stopStuckWorker(proc, 'file', 100)
+    assert proc.is_alive()
+
+    proc.start_time -= 101
+    mon.stopStuckWorker(proc, 'file', 100)
+    assert (not proc.is_alive()) and (proc.exitcode < 0)
 
 
 ### Processing a file ###
