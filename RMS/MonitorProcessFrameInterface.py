@@ -639,16 +639,22 @@ def loadFailedFiles(output_dir, retry_failed=False):
 
 
 def saveFailedFiles(output_dir, failed_files):
-    """ Save the record of the failed files into the output directory (see loadFailedFiles). """
+    """ Save the record of the failed files into the output directory (see loadFailedFiles). If it can't be
+        written (e.g. the disk is full), the error is logged and the record is saved with the next change.
+    """
 
     failed_files_path = os.path.join(output_dir, FAILED_FILES_NAME)
 
-    with open(failed_files_path + '.tmp', 'w') as f:
-        json.dump(failed_files, f, indent=4, sort_keys=True)
-        f.flush()
-        os.fsync(f.fileno())
+    try:
+        with open(failed_files_path + '.tmp', 'w') as f:
+            json.dump(failed_files, f, indent=4, sort_keys=True)
+            f.flush()
+            os.fsync(f.fileno())
 
-    os.replace(failed_files_path + '.tmp', failed_files_path)
+        os.replace(failed_files_path + '.tmp', failed_files_path)
+
+    except OSError as e:
+        log.error("Could not save the record of the failed files: {:s}".format(repr(e)))
 
 
 def recordFailure(output_dir, failed_files, unique_id, exitcode, fail_wait_time, log_prefix=''):
@@ -715,7 +721,11 @@ class FreeSpaceGuard(object):
     def ok(self):
         """ Check the free space. Return True if new files can be processed. """
 
-        free_gb = availableSpace(self.output_dir)/1024**3
+        # The output directory may be gone, e.g. if its disk was unmounted
+        try:
+            free_gb = availableSpace(self.output_dir)/1024**3
+        except OSError:
+            free_gb = 0
 
         if free_gb >= self.reporter.config.extra_space_gb:
 
