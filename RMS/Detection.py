@@ -366,6 +366,50 @@ def merge3DLines(line_list, vect_angle_thresh, last_count=0):
 
 
 
+# Windows with more threshold passers than this skip the isolated-pixel count of the early-out and go
+# straight to the morphology: with that many passers a line is likely anyway, and the count would cost
+# more than it saves
+EARLY_OUT_MAX_PASSERS = 5000
+
+
+def countNonIsolated(xs, ys, nrows, ncols):
+    """ Number of threshold passers that survive MorphCy.clean, counted on the passer list instead of
+        the image: a passer is kept if it has at least one bright 8-neighbour. clean never visits row
+        0 or column 0, so passers there are kept regardless. This is exact for clean (a pixel with a
+        neighbour also keeps that neighbour, so there is no cascade), and it is what the 3D stage sees
+        of a window, since it cleans the window image before taking its points.
+
+    Arguments:
+        xs, ys: [ndarray int] Passer coordinates.
+        nrows, ncols: [int] Image size.
+
+    Return:
+        [int] Number of passers kept by clean.
+    """
+
+    if len(xs) == 0:
+        return 0
+
+    xs = np.asarray(xs, dtype=np.int64)
+    ys = np.asarray(ys, dtype=np.int64)
+    keys = np.sort(ys*ncols + xs)
+
+    has_neighbour = np.zeros(len(xs), dtype=bool)
+    for dy in (-1, 0, 1):
+        for dx in (-1, 0, 1):
+            if dy == 0 and dx == 0:
+                continue
+            ny = ys + dy
+            nx = xs + dx
+            inside = (ny >= 0) & (ny < nrows) & (nx >= 0) & (nx < ncols)
+            nk = ny[inside]*ncols + nx[inside]
+            found = keys[np.minimum(np.searchsorted(keys, nk), len(keys) - 1)] == nk
+            has_neighbour[np.flatnonzero(inside)[found]] = True
+
+    return int(np.count_nonzero(has_neighbour | (ys == 0) | (xs == 0)))
+
+
+
 def checkWhiteRatio(img_thres, ff, max_white_ratio, diagnostics=None):
     """ Checks if there are too many threshold passers on an image.
 
@@ -470,10 +514,11 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
         if not checkWhiteRatio(img_thres, img_handle.ff, max_white_ratio, diagnostics=diagnostics):
             return line_results
 
-        # Frames of the threshold passers, for the per-window passer counts below (the passers are
-        # few, so this is far cheaper than building each window's image first)
+        # Coordinates and frames of the threshold passers, for the per-window passer counts below
+        # (the passers are few, so this is far cheaper than building each window's image first)
         if min_points > 0:
-            passer_frames = img_handle.ff.maxframe[img_thres > 0]
+            passer_ys, passer_xs = np.nonzero(img_thres)
+            passer_frames = img_handle.ff.maxframe[passer_ys, passer_xs]
 
 
     # Subdivide the image by time into overlapping parts (decreases noise when searching for meteors)
@@ -486,14 +531,22 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
         # If an FF file is used
         if img_handle.input_type == 'ff':
 
-            # Skip the window if it cannot hold a detectable line (see min_points)
-            if (min_points > 0) and (np.count_nonzero((passer_frames >= frame_min) \
-                    & (passer_frames <= frame_max)) < min_points):
+            # Skip the window if it cannot hold a detectable line (see min_points): fewer passers than
+            # that, or fewer surviving the lonely-pixel removal the 3D stage applies - isolated noise
+            # passers are what a threshold near the noise lets through, and they never reach it
+            if min_points > 0:
 
-                if diagnostics is not None:
-                    diagnostics['windows_skipped'] = diagnostics.get('windows_skipped', 0) + 1
+                in_window = (passer_frames >= frame_min) & (passer_frames <= frame_max)
+                n_window = np.count_nonzero(in_window)
 
-                continue
+                if (n_window < min_points) or ((n_window <= EARLY_OUT_MAX_PASSERS) \
+                        and (countNonIsolated(passer_xs[in_window], passer_ys[in_window],
+                            img_handle.ff.nrows, img_handle.ff.ncols) < min_points)):
+
+                    if diagnostics is not None:
+                        diagnostics['windows_skipped'] = diagnostics.get('windows_skipped', 0) + 1
+
+                    continue
             
             # Select the time range of the thresholded image
             img = FFfile.selectFFFrames(img_thres, img_handle.ff, frame_min, frame_max)
@@ -527,13 +580,18 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
             if not checkWhiteRatio(img, img_handle.ff, max_white_ratio, diagnostics=diagnostics):
                 continue
 
-            # Skip the window if it cannot hold a detectable line (see min_points)
-            if (min_points > 0) and (np.count_nonzero(img) < min_points):
+            # Skip the window if it cannot hold a detectable line (see min_points and the FF path)
+            if min_points > 0:
 
-                if diagnostics is not None:
-                    diagnostics['windows_skipped'] = diagnostics.get('windows_skipped', 0) + 1
+                w_ys, w_xs = np.nonzero(img)
 
-                continue
+                if (len(w_xs) < min_points) or ((len(w_xs) <= EARLY_OUT_MAX_PASSERS) \
+                        and (countNonIsolated(w_xs, w_ys, img.shape[0], img.shape[1]) < min_points)):
+
+                    if diagnostics is not None:
+                        diagnostics['windows_skipped'] = diagnostics.get('windows_skipped', 0) + 1
+
+                    continue
 
 
         if debug:
