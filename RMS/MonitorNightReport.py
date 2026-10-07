@@ -380,7 +380,7 @@ def readReportStates(output_dir):
         output_dir: [str] Output directory of the monitor.
 
     Return:
-        [dict] {'nights': {night_name: {files, reported_at, failed_steps, upload_files}},
+        [dict] {'nights': {night_name: {files, files_time, reported_at, failed_steps, upload_files}},
             'latest_platepar_night': night_name}
     """
 
@@ -413,10 +413,28 @@ def updateReportState(output_dir, night_name=None, latest_platepar_night=None, *
     _writeJSON(os.path.join(output_dir, REPORT_STATE_FILE_NAME), states)
 
 
-def unreportedResults(states, night_name, results):
-    """ Return the results of the night which were not included in its last successful report.
+def doneTime(output_dir, results_dir):
+    """ Return the time (UTC) when the processing of a file was finished, from the time of its done flag.
 
     Arguments:
+        output_dir: [str] Output directory of the monitor.
+        results_dir: [str] Results directory, relative to the output directory.
+
+    Return:
+        [datetime] Naive UTC time.
+    """
+
+    mtime = os.path.getmtime(os.path.join(output_dir, results_dir, DONE_FLAG_NAME))
+
+    return datetime.datetime.fromtimestamp(mtime, tz=datetime.timezone.utc).replace(tzinfo=None)
+
+
+def unreportedResults(output_dir, states, night_name, results):
+    """ Return the results of the night which were not included in its last successful report, or which were
+        finished again after that report started (e.g. the file was processed again with --force).
+
+    Arguments:
+        output_dir: [str] Output directory of the monitor.
         states: [dict] Report states, see readReportStates.
         night_name: [str] Name of the night.
         results: [dict] {results_dir: info} of the night, see scanNights.
@@ -425,9 +443,16 @@ def unreportedResults(states, night_name, results):
         [list] Unreported results directories.
     """
 
-    reported = set(states['nights'].get(night_name, {}).get('files', []))
+    night_state = states['nights'].get(night_name, {})
+    reported = set(night_state.get('files', []))
 
-    return [results_dir for results_dir in results if results_dir not in reported]
+    # Time when the last successful report took its results. Older states only have the end of the report
+    files_time = night_state.get('files_time', night_state.get('reported_at'))
+    if files_time is not None:
+        files_time = datetime.datetime.strptime(files_time, JSON_TIME_FORMAT)
+
+    return [results_dir for results_dir in results if (results_dir not in reported)
+            or ((files_time is not None) and (doneTime(output_dir, results_dir) > files_time))]
 
 
 def isPending(output_dir, config, states, night_name, results):
@@ -446,7 +471,7 @@ def isPending(output_dir, config, states, night_name, results):
         [bool]
     """
 
-    return bool(unreportedResults(states, night_name, results)) \
+    return bool(unreportedResults(output_dir, states, night_name, results)) \
         and os.path.isdir(nightDirPath(output_dir, night_name, config))
 
 
@@ -829,6 +854,9 @@ def generateNightReport(output_dir, night_name, config, results=None, archive=Tr
     from Utils.CalibrationReport import generateCalibrationReport
     from Utils.GenerateTimelapse import generateTimelapse
 
+    # Results finished after this time are reported again, see unreportedResults
+    files_time = RmsDateTime.utcnow()
+
     if results is None:
         results = scanNights(output_dir, config).get(night_name, {})
 
@@ -988,6 +1016,7 @@ def generateNightReport(output_dir, night_name, config, results=None, archive=Tr
 
     if not (ESSENTIAL_STEPS & set(failed_steps)):
         night_state['files'] = sorted(results)
+        night_state['files_time'] = files_time.strftime(JSON_TIME_FORMAT)
 
     updateReportState(output_dir, night_name, **night_state)
 
@@ -1028,7 +1057,7 @@ def deleteOldNightImages(output_dir, config, states, nights, now=None):
 
         night_dir = nightDirPath(output_dir, night_name, config)
         if (not os.path.isdir(night_dir)) or ('files' not in night_state) \
-                or unreportedResults(states, night_name, nights.get(night_name, {})):
+                or unreportedResults(output_dir, states, night_name, nights.get(night_name, {})):
             continue
 
         reported_at = datetime.datetime.strptime(night_state['reported_at'], JSON_TIME_FORMAT)
@@ -1411,10 +1440,7 @@ class NightReporter(object):
     def _lastResultAge(self, results, now):
         """ Seconds since the latest result of the night was finished. """
 
-        last = max(os.path.getmtime(os.path.join(self.output_dir, results_dir, DONE_FLAG_NAME))
-                   for results_dir in results)
-
-        last = datetime.datetime.fromtimestamp(last, tz=datetime.timezone.utc).replace(tzinfo=None)
+        last = max(doneTime(self.output_dir, results_dir) for results_dir in results)
 
         return (now - last).total_seconds()
 

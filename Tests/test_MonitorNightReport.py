@@ -193,14 +193,33 @@ def test_report_state(tmp_path):
     results = {'2025/a': {}, '2025/b': {}}
 
     states = mnr.readReportStates(output_dir)
-    assert mnr.unreportedResults(states, NIGHT, results) == ['2025/a', '2025/b']
+    assert mnr.unreportedResults(output_dir, states, NIGHT, results) == ['2025/a', '2025/b']
 
     mnr.updateReportState(output_dir, NIGHT, files=['2025/a'], failed_steps=[])
     mnr.updateReportState(output_dir, latest_platepar_night=NIGHT)
 
     states = mnr.readReportStates(output_dir)
-    assert mnr.unreportedResults(states, NIGHT, results) == ['2025/b']
+    assert mnr.unreportedResults(output_dir, states, NIGHT, results) == ['2025/b']
     assert states['latest_platepar_night'] == NIGHT
+
+
+def test_reprocessed_file_makes_the_night_pending(tmp_path):
+
+    config = _config()
+    output_dir = str(tmp_path)
+
+    results_dir = _makeResults(output_dir, config, 'file1')
+    done_flag = os.path.join(output_dir, results_dir, mnr.DONE_FLAG_NAME)
+    os.utime(done_flag, (time.time() - 60, time.time() - 60))
+
+    mnr.generateNightReport(output_dir, NIGHT, config, archive=False)
+    states = mnr.readReportStates(output_dir)
+    assert not mnr.isPending(output_dir, config, states, NIGHT, mnr.scanNights(output_dir, config)[NIGHT])
+
+    # The file is processed again (e.g. with --force) into the same results directory
+    os.utime(done_flag, None)
+
+    assert mnr.isPending(output_dir, config, states, NIGHT, mnr.scanNights(output_dir, config)[NIGHT])
 
 
 def test_deleted_night_dir_does_not_make_the_night_pending(tmp_path):
@@ -217,7 +236,7 @@ def test_deleted_night_dir_does_not_make_the_night_pending(tmp_path):
     states = mnr.readReportStates(output_dir)
     nights = mnr.scanNights(output_dir, config)
 
-    assert mnr.unreportedResults(states, NIGHT, nights[NIGHT]) == []
+    assert mnr.unreportedResults(output_dir, states, NIGHT, nights[NIGHT]) == []
 
 
 ### Merging the results of a night ###
@@ -456,7 +475,7 @@ def test_failed_essential_step_keeps_the_night_pending(tmp_path, monkeypatch):
     assert 'files' not in night_state
 
     states = mnr.readReportStates(output_dir)
-    assert mnr.unreportedResults(states, NIGHT, mnr.scanNights(output_dir, config)[NIGHT])
+    assert mnr.unreportedResults(output_dir, states, NIGHT, mnr.scanNights(output_dir, config)[NIGHT])
 
 
 def test_report_runs_only_enabled_products(tmp_path, monkeypatch):
@@ -617,6 +636,13 @@ def test_delete_old_night_images(tmp_path):
     mnr.updateReportState(output_dir, NIGHT, files=[results_dir],
                           reported_at=reported_at.strftime(mnr.JSON_TIME_FORMAT))
 
+    def _finishedBeforeReport(results_dir):
+        finished = reported_at - datetime.timedelta(hours=1)
+        finished = finished.replace(tzinfo=datetime.timezone.utc).timestamp()
+        os.utime(os.path.join(output_dir, results_dir, mnr.DONE_FLAG_NAME), (finished, finished))
+
+    _finishedBeforeReport(results_dir)
+
     def _deleteImages(days_later):
         return mnr.deleteOldNightImages(output_dir, config, mnr.readReportStates(output_dir),
                                         mnr.scanNights(output_dir, config),
@@ -627,6 +653,7 @@ def test_delete_old_night_images(tmp_path):
 
     # A late file of the night was not reported yet
     late_dir = _makeResults(output_dir, config, 'file2', start_s=600)
+    _finishedBeforeReport(late_dir)
     assert _deleteImages(3) == []
 
     # Once everything is reported, only the image pairs are deleted

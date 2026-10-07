@@ -18,6 +18,7 @@ import time
 import numpy as np
 import pytest
 
+import RMS.ConfigReader as cr
 import RMS.MonitorProcessFrameInterface as mon
 from RMS.Formats import FFfile, FFpng, FTPdetectinfo
 
@@ -85,7 +86,6 @@ def test_processFile_skips_file_beginning_before_start_time(config_path, tmp_pat
 def test_processFile_skips_files_of_nights_past_the_cutoff(config_path, tmp_path, monkeypatch,
                                                            hours_after_cutoff, skipped):
 
-    import RMS.ConfigReader as cr
     import RMS.MonitorNightReport as mnr
 
     config = cr.parse(config_path)
@@ -351,7 +351,6 @@ def process_file(config_path, tmp_path, monkeypatch):
         recorded config.
     """
 
-    import RMS.ConfigReader as cr
 
     config = cr.parse(config_path)
     config.monitor_save_images = False
@@ -459,13 +458,16 @@ def test_processFile_uses_latest_platepar_unless_given_is_newer(process_file, tm
 
 def test_walkInput_skips_monitor_output(tmp_path):
 
-    for dir_name in ['2025', 'CapturedFiles', 'ArchivedFiles', 'logs']:
+    config = cr.Config()
+    config.captured_dir = 'Nights'
+    for dir_name in ['2025', 'Nights', config.archived_dir, 'logs', 'CapturedFiles']:
         (tmp_path/'videos'/dir_name).mkdir(parents=True)
 
     input_dir = str(tmp_path/'videos')
-    walked = [os.path.relpath(root, input_dir) for root, _, _ in mon.walkInput(input_dir)]
+    walked = [os.path.relpath(root, input_dir) for root, _, _ in mon.walkInput(input_dir, config)]
 
-    assert sorted(walked) == ['.', '2025']
+    # The night directory comes from the config, a directory named like the default one is input
+    assert sorted(walked) == ['.', '2025', 'CapturedFiles']
 
 
 ### Saving the chunk images ###
@@ -503,7 +505,6 @@ class _ChunkHandle(object):
 
 @pytest.fixture
 def config():
-    import RMS.ConfigReader as cr
     config = cr.parse(REPO_CONFIG)
     config.stationID = 'XX0001'
     return config
