@@ -852,7 +852,6 @@ def test_night_deleted_by_the_cleanup_is_not_reported_again(scheduling):
 
     reporter.poll(True, now)
     assert reporter.pending == {} and reporter.active is None
-    assert reporter.ignored_nights == {night}
 
 
 def test_stuck_report_is_stopped(scheduling):
@@ -1048,4 +1047,8 @@ def test_results_of_deleted_nights_are_pruned(tmp_path):
     assert mnr.pruneResults(output_dir, config, nights) == 1
     assert os.listdir(os.path.join(output_dir, results_dir)) == [mnr.DONE_FLAG_NAME]
     assert mnr.readReportStates(output_dir)['nights'] == {}
+
+    # The pruned night is not pending, so it doesn't keep the following nights from being deleted
+    assert not mnr.isPending(output_dir, config, mnr.readReportStates(output_dir), NIGHT,
+                             mnr.scanNights(output_dir, config)[NIGHT])
     assert mnr.pruneResults(output_dir, config, nights) == 0

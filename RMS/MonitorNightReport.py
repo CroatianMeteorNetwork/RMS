@@ -430,6 +430,26 @@ def unreportedResults(states, night_name, results):
     return [results_dir for results_dir in results if results_dir not in reported]
 
 
+def isPending(output_dir, config, states, night_name, results):
+    """ Check if the night has to be reported: it has unreported files, and its directory was not deleted by
+        the cleanup (old nights are not reported again, as their archives would have no images, and their
+        results are pruned).
+
+    Arguments:
+        output_dir: [str] Output directory of the monitor.
+        config: [Config] Configuration.
+        states: [dict] Report states, see readReportStates.
+        night_name: [str] Name of the night.
+        results: [dict] {results_dir: info} of the night, see scanNights.
+
+    Return:
+        [bool]
+    """
+
+    return bool(unreportedResults(states, night_name, results)) \
+        and os.path.isdir(nightDirPath(output_dir, night_name, config))
+
+
 
 ### Night products ###
 
@@ -1163,7 +1183,7 @@ def cleanupOldData(output_dir, config):
 
     # Keep the night directories back to the oldest night with unreported files
     pending = [night_name for night_name, results in nights.items()
-               if unreportedResults(states, night_name, results)]
+               if isPending(output_dir, config, states, night_name, results)]
 
     captured_path = os.path.join(output_dir, config.captured_dir)
     night_dirs = getNightDirs(captured_path, config.stationID)
@@ -1360,9 +1380,6 @@ class NightReporter(object):
         self.last_scan = None
         self.scan_interval = 600
         self.rescan_interval = 60
-
-        # Old nights which are not reported because their directory was deleted
-        self.ignored_nights = set()
 
         # Cleanup of old data, at startup, after every report, and periodically
         self.cleanup_proc = None
@@ -1587,24 +1604,9 @@ class NightReporter(object):
             self.results_changed = False
 
             self.states = readReportStates(self.output_dir)
-            self.pending = {}
-            for night_name, results in scanNights(self.output_dir, self.config).items():
-
-                if not unreportedResults(self.states, night_name, results):
-                    continue
-
-                # Nights whose directory was deleted by the cleanup are not reported again (e.g. a late file
-                #   of an old night, or a lost report state), as their archives would have no images. They
-                #   can still be reported from the command line
-                if not os.path.isdir(nightDirPath(self.output_dir, night_name, self.config)):
-                    if night_name not in self.ignored_nights:
-                        log.warning(self.log_prefix + "Night {:s} has unreported files, but its directory "
-                                    "was deleted by the cleanup, so it is not reported".format(night_name))
-                        self.ignored_nights.add(night_name)
-                    continue
-
-                self.pending[night_name] = results
-
+            self.pending = {night_name: results
+                            for night_name, results in scanNights(self.output_dir, self.config).items()
+                            if isPending(self.output_dir, self.config, self.states, night_name, results)}
             self.last_scan = now
 
         if trigger:
@@ -1713,12 +1715,14 @@ if __name__ == "__main__":
     if cml_args.night is not None:
         night_names = [cml_args.night] if cml_args.night in nights else []
 
+    # Nights whose directory was deleted by the cleanup are not reported
     elif cml_args.all:
-        night_names = sorted(nights)
+        night_names = sorted(night_name for night_name in nights
+                             if os.path.isdir(nightDirPath(output_dir, night_name, config)))
 
     else:
         night_names = sorted(night_name for night_name, results in nights.items()
-                             if unreportedResults(states, night_name, results))
+                             if isPending(output_dir, config, states, night_name, results))
 
     if not night_names:
         print("No nights to report.")
