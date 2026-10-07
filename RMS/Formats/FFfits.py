@@ -72,8 +72,21 @@ def filenameToDatetimeStr(file_name, iso8601=False):
 
 
 
-# Index of the optional HDU carrying the sub-ADU residual of the average (after the four legacy planes)
-AVEFRAC_HDU = 5
+# Names of the optional HDUs carrying the signed sub-ADU residuals of the 8.8 fixed-point average and
+# standard deviation, appended after the four legacy planes. The first name is the one written; the
+# others are older names still accepted on read (alpha2 test-station files called them *FRAC)
+AVERESID_NAMES = ('AVERESID', 'AVEFRAC')
+STDRESID_NAMES = ('STDRESID', 'STDFRAC')
+
+
+def findExtraHDU(hdulist, names):
+    """ Return the data of the first HDU after the four legacy planes whose name is in names, or None. """
+
+    for hdu in hdulist[len(FF_PLANES) + 1:]:
+        if hdu.name in names:
+            return hdu.data
+
+    return None
 
 
 def splitAvepixel16(avepixel16):
@@ -250,13 +263,13 @@ def read(directory, filename, array=False, full_filename=False, memmap=True, pla
                 setattr(ff, plane, hdulist[hdu_index].data.copy())
 
         # Full-precision average. The AVEPIXEL plane is the legacy 8-bit average (rounded), and
-        # the optional fifth HDU carries the sub-ADU residual of the 8.8 fixed-point mean, so
-        # avepixel16 = 256*avepixel + residual. Readers that only know the four legacy planes
+        # the optional AVERESID HDU carries the signed sub-ADU residual of the 8.8 fixed-point mean,
+        # so avepixel16 = 256*avepixel + residual. Readers that only know the four legacy planes
         # never see the extra HDU
         avefrac = head.get('AVEFRAC', 0)
-        if avefrac and (ff.avepixel is not None) and (len(hdulist) > AVEFRAC_HDU) \
-                and (hdulist[AVEFRAC_HDU].name == 'AVEFRAC'):
-            ff.avepixel16 = joinAvepixel16(ff.avepixel, hdulist[AVEFRAC_HDU].data)
+        averesid = findExtraHDU(hdulist, AVERESID_NAMES) if avefrac else None
+        if (ff.avepixel is not None) and (averesid is not None):
+            ff.avepixel16 = joinAvepixel16(ff.avepixel, averesid)
             ff.avegamma = head.get('AVEGAMMA', 1.0)
             ff.averesp = head.get('AVERESP', '')
 
@@ -271,14 +284,11 @@ def read(directory, filename, array=False, full_filename=False, memmap=True, pla
             ff.avepixel = splitAvepixel16(ff.avepixel16)[0]
 
         # Full-precision standard deviation, stored like the average: the STDPIXEL plane is the
-        # legacy 8-bit value and an optional STDFRAC HDU carries the fractional byte of the 8.8
-        # fixed-point sigma. Located by name, as its index depends on whether AVEFRAC is present.
-        # Readers that only know the four legacy planes never see it
-        if head.get('STDFRAC', 0) and (ff.stdpixel is not None):
-            for hdu in hdulist[len(FF_PLANES) + 1:]:
-                if hdu.name == 'STDFRAC':
-                    ff.stdpixel16 = joinStdpixel16(ff.stdpixel, hdu.data)
-                    break
+        # legacy 8-bit value and an optional STDRESID HDU carries the signed sub-code residual of
+        # the 8.8 fixed-point sigma. Readers that only know the four legacy planes never see it
+        stdresid = findExtraHDU(hdulist, STDRESID_NAMES) if head.get('STDFRAC', 0) else None
+        if (ff.stdpixel is not None) and (stdresid is not None):
+            ff.stdpixel16 = joinStdpixel16(ff.stdpixel, stdresid)
 
     if array:
         ff.array = np.dstack([ff.maxpixel, ff.maxframe, ff.avepixel, ff.stdpixel])
@@ -379,20 +389,20 @@ def write(ff, directory, filename):
     averesid = None
     if getattr(ff, 'avepixel16', None) is not None:
         avepixel, averesid = splitAvepixel16(ff.avepixel16)
-        head['AVEFRAC'] = (8, 'sub-ADU bits of the mean in the AVEFRAC HDU')
+        head['AVEFRAC'] = (8, 'fractional bits of the mean, residual in AVERESID')
         head['AVEGAMMA'] = (float(getattr(ff, 'avegamma', 1.0) or 1.0),
             'gamma used for linear-domain averaging')
         if getattr(ff, 'averesp', ''):
             head['AVERESP'] = (str(ff.averesp), 'camera response table id (camera_response.json)')
 
     # Full-precision standard deviation, the same way: STDPIXEL stays the legacy 8-bit plane
-    # (derived from stdpixel16, so the two always agree) and the fractional byte goes into a
-    # STDFRAC HDU appended after the legacy planes (and after AVEFRAC when present)
+    # (derived from stdpixel16, so the two always agree) and the signed residual goes into a
+    # STDRESID HDU appended after the legacy planes (and after AVERESID when present)
     stdpixel = ff.stdpixel
     stdresid = None
     if getattr(ff, 'stdpixel16', None) is not None:
         stdpixel, stdresid = splitStdpixel16(ff.stdpixel16)
-        head['STDFRAC'] = (8, 'fractional bits of stdpixel in the STDFRAC HDU')
+        head['STDFRAC'] = (8, 'fractional bits of stdpixel, residual in STDRESID')
 
     # Create the primary part
     prim = fits.PrimaryHDU(header=head)
@@ -405,10 +415,10 @@ def write(ff, directory, filename):
         fits.ImageHDU(stdpixel, name='STDPIXEL')])
 
     if averesid is not None:
-        hdulist.append(fits.ImageHDU(averesid, name='AVEFRAC'))
+        hdulist.append(fits.ImageHDU(averesid, name=AVERESID_NAMES[0]))
 
     if stdresid is not None:
-        hdulist.append(fits.ImageHDU(stdresid, name='STDFRAC'))
+        hdulist.append(fits.ImageHDU(stdresid, name=STDRESID_NAMES[0]))
 
     # Save the FITS
     hdulist.writeto(file_path, overwrite=True)

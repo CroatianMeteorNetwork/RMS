@@ -204,7 +204,7 @@ class Compressor(multiprocessing.Process):
             _resp = getattr(self.config, 'response', None)
             ff.averesp = _resp.ident() if _resp is not None else ''
 
-        # Likewise the full-precision standard deviation: its fractional byte goes into a STDFRAC
+        # Likewise the full-precision standard deviation: its signed residual goes into a STDRESID
         # plane and the legacy 8-bit STDPIXEL plane is derived from it (FITS only)
         if (std16 is not None) and self.config.ff_stdpixel16:
             ff.stdpixel16 = std16

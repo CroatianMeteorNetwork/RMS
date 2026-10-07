@@ -210,7 +210,7 @@ def testFitsRoundTrip():
 
         with fits.open(file_path) as hdulist:
             assert len(hdulist) == 6
-            assert hdulist[5].name == 'AVEFRAC'
+            assert hdulist[5].name == 'AVERESID'
             assert hdulist[5].data.dtype == np.uint8
             assert hdulist[0].header['AVEFRAC'] == 8
 
@@ -223,6 +223,54 @@ def testFitsRoundTrip():
         ff_read_arr = FFfile.read(tmp_dir, 'FF_XX0001_roundtrip.fits', array=True,
             full_filename=True)
         assert ff_read_arr.array.dtype == np.uint8
+
+    finally:
+        shutil.rmtree(tmp_dir)
+
+
+def testResidualHDUNames():
+    """ Both residual HDUs are written as AVERESID/STDRESID, and files from alpha2 test stations
+        that named them AVEFRAC/STDFRAC still read back to the same full-precision planes.
+    """
+
+    tmp_dir = tempfile.mkdtemp()
+
+    try:
+        rng = np.random.default_rng(5)
+        ave16 = rng.integers(0, 65281, (32, 48)).astype(np.uint16)
+        std16 = rng.integers(128, 20*256, (32, 48)).astype(np.uint16)
+
+        ff = makeFF(ave16=ave16)
+        ff.stdpixel16 = std16
+
+        file_path = os.path.join(tmp_dir, 'FF_XX0001_resid.fits')
+        FFfits.write(ff, tmp_dir, 'FF_XX0001_resid.fits')
+
+        with fits.open(file_path) as hdulist:
+            assert [hdu.name for hdu in hdulist[5:]] == ['AVERESID', 'STDRESID']
+            assert hdulist[0].header['AVEFRAC'] == 8
+            assert hdulist[0].header['STDFRAC'] == 8
+
+        # Rewrite the same file with the old HDU names
+        old_path = os.path.join(tmp_dir, 'FF_XX0001_frac.fits')
+        with fits.open(file_path) as hdulist:
+            hdulist[5].name = 'AVEFRAC'
+            hdulist[6].name = 'STDFRAC'
+            hdulist.writeto(old_path)
+
+        for name in ('FF_XX0001_resid.fits', 'FF_XX0001_frac.fits'):
+            ff_read = FFfits.read(tmp_dir, name, full_filename=True)
+            assert np.array_equal(ff_read.avepixel16, ave16)
+            assert np.array_equal(ff_read.stdpixel16, std16)
+            assert np.array_equal(ff_read.avepixel, (ave16.astype(np.uint32) + 128) >> 8)
+
+        # Without AVERESID the standard deviation is still found by name, at index 5
+        ff = makeFF(ave16=None)
+        ff.stdpixel16 = std16
+        FFfits.write(ff, tmp_dir, 'FF_XX0001_std.fits')
+        ff_read = FFfits.read(tmp_dir, 'FF_XX0001_std.fits', full_filename=True)
+        assert ff_read.avepixel16 is None
+        assert np.array_equal(ff_read.stdpixel16, std16)
 
     finally:
         shutil.rmtree(tmp_dir)
@@ -538,6 +586,9 @@ if __name__ == '__main__':
 
     testFitsRoundTrip()
     print('testFitsRoundTrip OK')
+
+    testResidualHDUNames()
+    print('testResidualHDUNames OK')
 
     testLegacyFileUnchanged()
     print('testLegacyFileUnchanged OK')

@@ -80,12 +80,12 @@ class FFStruct:
         # Average pixel image at full precision, in 8.8 fixed point (uint16, units of 1/256 ADU).
         # None if the FF file only carries the 8-bit average. avepixel is its rounding to whole
         # ADU, (avepixel16 + 128) >> 8; FITS files store avepixel as the legacy plane and the
-        # sub-ADU residual in an extra AVEFRAC HDU that older readers never look at
+        # sub-ADU residual in an extra AVERESID HDU that older readers never look at
         self.avepixel16 = None
 
         # Standard deviation at full precision, 8.8 fixed point (uint16, units of 1/256 code),
         # floored at half a code. None if the file only carries the 8-bit stdpixel, which is its
-        # rounding (stdpixel16 + 128) >> 8; FITS files store the fractional byte in an extra STDFRAC
+        # rounding (stdpixel16 + 128) >> 8; FITS files store the sub-code residual in an extra STDRESID
         # HDU that older readers never look at
         self.stdpixel16 = None
 
