@@ -568,33 +568,40 @@ def test_cleanup_keeps_unreported_nights(tmp_path, monkeypatch):
     assert calls == []
 
 
-def test_cleanup_needs_the_space_of_the_largest_recent_night(tmp_path, monkeypatch):
+def test_cleanup_frees_the_space_of_the_largest_recent_night(tmp_path, monkeypatch):
 
     config = _config()
+    config.extra_space_gb = 0
     output_dir = str(tmp_path)
 
-    # Four nights of different sizes, only the last three are considered
+    # Four nights of different sizes, the oldest one also has an archive
     captured_dir = os.path.join(output_dir, config.captured_dir)
-    for i, size in enumerate([5000, 1000, 3000, 2000]):
-        night_dir = os.path.join(captured_dir, 'XX0001_2025122{:d}_222000_000000'.format(i))
-        os.makedirs(night_dir)
-        with open(os.path.join(night_dir, 'FF_pair.png'), 'wb') as f:
+    archived_dir = os.path.join(output_dir, config.archived_dir)
+    nights = ['XX0001_2025122{:d}_222000_000000'.format(i) for i in range(4)]
+    for night_name, size in zip(nights, [5000, 1000, 3000, 2000]):
+        os.makedirs(os.path.join(captured_dir, night_name))
+        with open(os.path.join(captured_dir, night_name, 'FF_pair.png'), 'wb') as f:
             f.write(b'0'*size)
+    os.makedirs(os.path.join(archived_dir, nights[0]))
+    open(os.path.join(archived_dir, nights[0] + '_imgdata.tar.bz2'), 'w').close()
 
-    needed = []
-    monkeypatch.setattr(mnr, 'deleteOldObservations', lambda *args, **kwargs: needed.append(
-        kwargs['needed_bytes']) or True)
+    monkeypatch.setattr(mnr, 'deleteOldObservations', lambda *args, **kwargs: True)
 
-    monkeypatch.setattr(mnr, 'availableSpace', lambda path: 10*1024**4)
-    mnr.cleanupOldData(output_dir, config)
-    assert needed == [config.extra_space_gb*1024**3 + 3000]
+    # The free space grows with the deleted nights
+    def _availableSpace(free_base):
+        return lambda path: free_base + sum(size for night_name, size in zip(nights, [5000, 1000, 3000, 2000])
+                                            if not os.path.isdir(os.path.join(captured_dir, night_name)))
 
-    # If other data takes the disk, only the space which deleting the older nights frees is asked for, never
-    #   the latest night
+    # The largest of the last three nights (3000) is needed, deleting the oldest night frees enough
+    monkeypatch.setattr(mnr, 'availableSpace', _availableSpace(100))
+    assert mnr.cleanupOldData(output_dir, config)
+    assert sorted(os.listdir(captured_dir)) == nights[1:]
+    assert os.listdir(archived_dir) == []
+
+    # If other data takes the disk, the older nights are deleted, but never the latest one
     monkeypatch.setattr(mnr, 'availableSpace', lambda path: 100)
-    needed.clear()
-    mnr.cleanupOldData(output_dir, config)
-    assert needed == [pytest.approx(100 + 0.9*(5000 + 1000 + 3000))]
+    assert not mnr.cleanupOldData(output_dir, config)
+    assert os.listdir(captured_dir) == [nights[-1]]
 
 
 def test_delete_old_night_images(tmp_path):

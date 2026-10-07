@@ -1033,6 +1033,54 @@ def directorySize(dir_path):
                for root, _, files in os.walk(dir_path) for file_name in files)
 
 
+def freeSpace(output_dir, config, needed_bytes):
+    """ Delete the oldest nights (the night directory and its archives) until the output directory has the
+        given free space. The latest night is never deleted. If other data takes the disk (e.g. the recordings
+        on a shared disk), only the older nights of the monitor are deleted.
+
+    Arguments:
+        output_dir: [str] Output directory of the monitor.
+        config: [Config] Configuration.
+        needed_bytes: [float] Free space needed, in bytes.
+
+    Return:
+        [bool] True if there is enough free space.
+    """
+
+    captured_path = os.path.join(output_dir, config.captured_dir)
+    archived_path = os.path.join(output_dir, config.archived_dir)
+
+    night_names = sorted(set(getNightDirs(captured_path, config.stationID))
+                         | set(getNightDirs(archived_path, config.stationID)))
+
+    for night_name in night_names[:-1]:
+
+        if availableSpace(output_dir) >= needed_bytes:
+            return True
+
+        log.info("Deleting night {:s} to free space for the next night".format(night_name))
+        shutil.rmtree(os.path.join(captured_path, night_name), ignore_errors=True)
+
+        # The archive directory and the archives of the night
+        if os.path.isdir(archived_path):
+            for file_name in os.listdir(archived_path):
+                if file_name.startswith(night_name):
+                    path = os.path.join(archived_path, file_name)
+                    if os.path.isdir(path):
+                        shutil.rmtree(path, ignore_errors=True)
+                    else:
+                        os.remove(path)
+
+    if availableSpace(output_dir) >= needed_bytes:
+        return True
+
+    log.warning("{:.1f} GB are needed in {:s} for the next night, but only {:.1f} GB are free after deleting "
+                "the old nights, the rest of the disk is used by other data".format(needed_bytes/1024**3,
+                    output_dir, availableSpace(output_dir)/1024**3))
+
+    return False
+
+
 def cleanupOldData(output_dir, config):
     """ Delete old data from the output directory with the data management of normal RMS
         (DeleteOldObservations): old night directories in CapturedFiles and ArchivedFiles (by the number of
@@ -1072,34 +1120,19 @@ def cleanupOldData(output_dir, config):
         config.capt_dirs_to_keep = max(config.capt_dirs_to_keep,
                                        len([d for d in night_dirs if d >= min(pending)]))
 
-    # The space needed for the next night is the size of the largest of the last nights, as the capture
-    #   settings in the config (e.g. raw video saving) don't describe the data of the monitor
-    night_sizes = {night_dir: directorySize(os.path.join(captured_path, night_dir))
-                   for night_dir in night_dirs}
+    # Delete by the numbers of directories to keep and the quotas. The space is freed below, as the RMS
+    #   estimate of the space needed for the next night comes from the capture settings, which don't describe
+    #   the data of the monitor, and its deletion loop can delete the latest night
+    deleteOldObservations(output_dir, config.captured_dir, config.archived_dir, config, needed_bytes=0)
+
+    # The space needed for the next night is the size of the largest of the last nights
+    night_dirs = getNightDirs(captured_path, config.stationID)
     needed_bytes = config.extra_space_gb*1024**3
     if night_dirs:
-        needed_bytes += max(night_sizes[night_dir] for night_dir in night_dirs[-3:])
+        needed_bytes += max(directorySize(os.path.join(captured_path, night_dir))
+                            for night_dir in night_dirs[-3:])
 
-        # Only ask for the space which deleting the older nights can free, never the latest (current) night.
-        #   If other data takes the disk (e.g. the recordings on a shared disk), deleting everything wouldn't
-        #   help. A margin is left, as the free space doesn't grow exactly by the size of the deleted files
-        archived_path = os.path.join(output_dir, config.archived_dir)
-        deletable = sum(night_sizes[night_dir] for night_dir in night_dirs[:-1])
-        if os.path.isdir(archived_path):
-            for file_name in os.listdir(archived_path):
-                if not file_name.startswith(night_dirs[-1]):
-                    path = os.path.join(archived_path, file_name)
-                    deletable += directorySize(path) if os.path.isdir(path) else os.path.getsize(path)
-
-        freeable = availableSpace(output_dir) + 0.9*deletable
-        if needed_bytes > freeable:
-            log.warning("{:.1f} GB are needed for the next night, but deleting the old nights in {:s} can "
-                        "only free up to {:.1f} GB, the rest of the disk is used by other data".format(
-                            needed_bytes/1024**3, output_dir, freeable/1024**3))
-            needed_bytes = freeable
-
-    enough_space = deleteOldObservations(output_dir, config.captured_dir, config.archived_dir, config,
-                                         needed_bytes=needed_bytes)
+    enough_space = freeSpace(output_dir, config, needed_bytes)
 
     # Delete the old logs of the monitor processes, which have a prefix
     deleteOldLogfiles(output_dir, config, pattern='*log_*.log*')
