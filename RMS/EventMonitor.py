@@ -2439,6 +2439,19 @@ class EventMonitor(multiprocessing.Process):
 
         return None
 
+    def __getstate__(self):
+        """ The database connections can't be pickled (e.g. to start the process with the spawn or forkserver
+            start method), and must not be shared with another process anyway. The process opens its own.
+        """
+
+        state = self.__dict__.copy()
+        for name in ['db_conn', 'conn']:
+            if name in state:
+                state[name] = None
+
+        return state
+
+
     def start(self):
         """ Starts the EventMonitor """
 
@@ -2511,6 +2524,9 @@ class EventMonitor(multiprocessing.Process):
         No further randomisation is applied, as this is a congestion, not contention problem.
 
         """
+
+        # Open the database connection of this process, the connection of the parent is not shared
+        self.db_conn = self.getConnectionToEventMonitorDB()
 
         # Delay to allow capture to check existing folders - keep the logs tidy
 

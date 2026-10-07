@@ -554,6 +554,7 @@ class UploadManager(multiprocessing.Process):
 
         # These will be defined in .run()
         self._mgr = Manager()
+        self._mgr_pid = self._mgr._process.pid
         self.file_queue      = self._mgr.Queue()
         self.file_queue_lock = self._mgr.Lock()
 
@@ -931,9 +932,21 @@ class UploadManager(multiprocessing.Process):
         # The server process of the shared queue is a child of the parent, which can't stop it anymore
         if self.parent_gone.is_set():
             try:
-                os.kill(self._mgr._process.pid, signal.SIGTERM)
-            except (AttributeError, OSError):
+                os.kill(self._mgr_pid, signal.SIGTERM)
+            except OSError:
                 pass
+
+
+    def __getstate__(self):
+        """ The manager of the shared queue can't be pickled (e.g. to start the process with the spawn or
+            forkserver start method), and is only needed by the parent, which shuts it down. Its queue and lock
+            proxies are pickled.
+        """
+
+        state = self.__dict__.copy()
+        state.pop('_mgr', None)
+
+        return state
 
 
 
