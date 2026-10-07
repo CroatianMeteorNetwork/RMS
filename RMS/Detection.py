@@ -3068,8 +3068,10 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                 maxpix_elements = img_handle.ff.maxpixel[ys,xs].astype(np.float64)
                 weights = maxpix_elements/np.sum(maxpix_elements)
 
-                # Random sample the point, sampling is weighted by pixel intensity
-                indices = np.random.choice(len(zs), config.max_points_det, replace=False, p=weights)
+                # Random sample the point, sampling is weighted by pixel intensity. The fixed seed makes the
+                #   detection reproducible
+                indices = np.random.RandomState(0).choice(len(zs), config.max_points_det, replace=False,
+                                                          p=weights)
                 ys = ys[indices]
                 xs = xs[indices]
                 zs = zs[indices]

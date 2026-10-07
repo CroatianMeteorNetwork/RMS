@@ -6,7 +6,6 @@ import time
 cimport numpy as np
 cimport cython
 from libc.math cimport fabsf, fmaxf
-from libc.stdlib cimport rand
 
 # Define numpy types
 INT16_TYPE = np.uint16
@@ -30,6 +29,9 @@ cdef class FFMimickInterface:
     # Public so consumers (e.g. SkyFit photometry) can read the reservoir size that bounds
     # how many frames actually contribute to the avepixel median.
     cdef public int res_size
+
+    # State of the random number generator of the reservoir sampling
+    cdef unsigned long long rng_state
     
     # Public output arrays (matching your original interface types)
     cdef public np.ndarray maxpixel, avepixel, stdpixel
@@ -62,9 +64,25 @@ cdef class FFMimickInterface:
         self.res_size = res_size
         self.sample_buf = np.zeros((self.res_size, nrows, ncols), dtype=np.uint16)
 
+        # The reservoir sampling uses its own generator with a fixed seed, so the same frames always give the
+        #   same background. The libc rand() state is shared by the whole process, including other libraries
+        self.rng_state = 0x2545F4914F6CDD1D
+
+
+    cdef unsigned long long nextRandom(self):
+        """ Return the next 31-bit random number of a 64-bit linear congruential generator (Knuth's MMIX
+            constants), using the high bits, which are the most random.
+        """
+
+        self.rng_state = self.rng_state*6364136223846793005ULL + 1442695040888963407ULL
+
+        return self.rng_state >> 33
+
 
     cpdef addFrame(self, np.ndarray[INT16_TYPE_t, ndim=2] frame):
         """ Add raw frame and update sampling buffer for robust background estimation. """
+
+        cdef unsigned long long j
         
         # Initialize maxpixel on the first frame
         if self.nframes == 0:
@@ -82,8 +100,9 @@ cdef class FFMimickInterface:
         else:
             # Randomly replace an existing frame in the buffer with probability res_size/n_total
             # This is the Reservoir Sampling algorithm (Algorithm R)
-            if (rand()%(self.nframes + 1)) < self.res_size:
-                self.sample_buf[rand() % self.res_size, :, :] = frame
+            j = self.nextRandom()%(self.nframes + 1)
+            if j < self.res_size:
+                self.sample_buf[j, :, :] = frame
         
         self.nframes += 1
 
