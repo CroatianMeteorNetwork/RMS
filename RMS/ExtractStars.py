@@ -37,9 +37,9 @@ from RMS.Formats import FFfile
 from RMS.Formats import CALSTARS
 from RMS.DetectionTools import loadImageCalibration, binImageCalibration
 from RMS.Logger import getLogger
-from RMS.Math import twoDGaussian
 from RMS.Routines import MaskImage
 from RMS.Routines import Image
+from RMS.Routines.PSFFitCy import twoDGaussianResidual
 from RMS.QueuedPool import QueuedPool
 
 # Morphology - Cython init
@@ -670,15 +670,18 @@ def fitPSF(img, img_median, x_init, y_init, gamma=1.0, segment_radius=4, roundne
         # Extract an image segment around each star
         star_seg = img[y_min:y_max, x_min:x_max]
 
-        # Create x and y indices
-        y_ind, x_ind = np.indices(star_seg.shape, dtype=np.int32)
-
-        # Estimate saturation level from image type
-        saturation = (2**bit_depth - 1)*np.ones_like(y_ind)
-
         # Skip empty segments (can happen at the very edge of the image)
         if star_seg.size == 0:
             continue
+
+        # Pixel coordinates of the segment (first along the rows) and the pixel values, flattened
+        y_ind, x_ind = np.indices(star_seg.shape, dtype=np.float64)
+        y_ind = y_ind.ravel()
+        x_ind = x_ind.ravel()
+        seg_values = star_seg.astype(np.float64).ravel()
+
+        # Estimate saturation level from image type
+        saturation = float(2**bit_depth - 1)
 
         # Seed the amplitude from this segment's peak so the fit converges regardless of bit
         # depth. A fixed amplitude guess (e.g. 30, an 8-bit value) starts ~1000x too low on
@@ -686,17 +689,15 @@ def fitPSF(img, img_median, x_init, y_init, gamma=1.0, segment_radius=4, roundne
         amp_guess = max(float(np.max(star_seg)) - img_median, 1.0)
         initial_guess = (amp_guess,) + init_pos_sigma + (img_median,)
 
-        # Fit a PSF to the star
-        try:
-            # Fit the 2D Gaussian with the limited number of iterations - this reduces the processing time
-            # and most of the bad star candidates take more iterations to fit
-            popt, pcov = opt.curve_fit(twoDGaussian, (y_ind, x_ind, saturation), star_seg.ravel(), \
-                p0=initial_guess, maxfev=200)
-            # print(popt)
-        except RuntimeError:
-            # print('Fitting failed!')
+        # Fit a PSF to the star with the limited number of function evaluations - this reduces the
+        #   processing time and most of the bad star candidates take more evaluations to fit. This is the
+        #   least squares fit of scipy's curve_fit (MINPACK through leastsq), with the model evaluated in
+        #   compiled code, which is several times faster
+        popt, ier = opt.leastsq(twoDGaussianResidual, np.array(initial_guess, dtype=np.float64),
+                                args=(y_ind, x_ind, saturation, seg_values), maxfev=200)
 
-            # Skip stars that can't be fitted in 200 iterations
+        # Skip stars that can't be fitted in 200 evaluations
+        if ier not in (1, 2, 3, 4):
             continue
 
         # Unpack fitted gaussian parameters
