@@ -549,7 +549,8 @@ def test_cleanup_keeps_unreported_nights(tmp_path, monkeypatch):
 
     calls = []
 
-    def _deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration=None):
+    def _deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration=None,
+                               needed_bytes=None):
         calls.append((data_dir, captured_dir, archived_dir, config.capt_dirs_to_keep, config.log_dir))
         return True
 
@@ -564,6 +565,27 @@ def test_cleanup_keeps_unreported_nights(tmp_path, monkeypatch):
     calls.clear()
     mnr.cleanupOldData(output_dir, config)
     assert calls == []
+
+
+def test_cleanup_needs_the_space_of_the_largest_recent_night(tmp_path, monkeypatch):
+
+    config = _config()
+    output_dir = str(tmp_path)
+
+    # Four nights of different sizes, only the last three are considered
+    captured_dir = os.path.join(output_dir, config.captured_dir)
+    for i, size in enumerate([5000, 1000, 3000, 2000]):
+        night_dir = os.path.join(captured_dir, 'XX0001_2025122{:d}_222000_000000'.format(i))
+        os.makedirs(night_dir)
+        with open(os.path.join(night_dir, 'FF_pair.png'), 'wb') as f:
+            f.write(b'0'*size)
+
+    needed = []
+    monkeypatch.setattr(mnr, 'deleteOldObservations', lambda *args, **kwargs: needed.append(
+        kwargs['needed_bytes']) or True)
+
+    mnr.cleanupOldData(output_dir, config)
+    assert needed == [config.extra_space_gb*1024**3 + 3000]
 
 
 def test_delete_old_night_images(tmp_path):
@@ -670,6 +692,53 @@ def test_sunrise_mode_reports_after_the_night_without_waiting_for_idle(schedulin
     assert reporter.isDue(night, results, False, scheduling.night_end + datetime.timedelta(minutes=1))
 
 
+def test_partialReportTime():
+
+    config = _config()
+    assert mnr.partialReportTime(config, NIGHT) is None
+
+    night_start, night_end = mnr.nightBoundsFromName(config, NIGHT)
+
+    # The first given time of day after the beginning of the night, in the morning or still in the evening
+    for report_time in [night_end + datetime.timedelta(hours=2),
+                        night_start + datetime.timedelta(minutes=30)]:
+        config.monitor_partial_report_time = report_time.strftime("%H:%M")
+        assert mnr.partialReportTime(config, NIGHT) == report_time.replace(second=0, microsecond=0)
+
+
+def test_partial_report_while_the_night_is_processed(scheduling):
+
+    reporter = _reporter(scheduling, 'sunrise')
+    night, results = _nightAndResults(scheduling)
+
+    # The partial report time is before the end of the night, and files are still being processed
+    partial_time = (scheduling.night_end - datetime.timedelta(hours=2)).replace(second=0, microsecond=0)
+    reporter.config.monitor_partial_report_time = partial_time.strftime("%H:%M")
+    reporter.states = mnr.readReportStates(scheduling.output_dir)
+
+    def _isDue(now):
+
+        # The latest result was just finished
+        epoch = (now - datetime.timedelta(minutes=1) - datetime.datetime(1970, 1, 1)).total_seconds()
+        os.utime(os.path.join(scheduling.output_dir, '2025', 'r1', 'done.flag'), (epoch, epoch))
+
+        return reporter.isDue(night, results, False, now)
+
+    assert _isDue(partial_time - datetime.timedelta(minutes=1)) is None
+    assert _isDue(partial_time + datetime.timedelta(minutes=1)) == 'partial'
+
+    # Only once per night: not after a report which was made after the partial report time
+    mnr.updateReportState(scheduling.output_dir, night, reported_at=(partial_time + datetime.timedelta(
+        minutes=5)).strftime(mnr.JSON_TIME_FORMAT))
+    reporter.states = mnr.readReportStates(scheduling.output_dir)
+    assert _isDue(partial_time + datetime.timedelta(minutes=10)) is None
+
+    # Not for old nights, e.g. a backlog after a downtime, which get only the normal report
+    mnr.updateReportState(scheduling.output_dir, night, reported_at=None)
+    reporter.states = mnr.readReportStates(scheduling.output_dir)
+    assert _isDue(partial_time + datetime.timedelta(days=2)) is None
+
+
 def test_idle_mode_waits_for_idle_and_quiet_time(scheduling):
 
     reporter = _reporter(scheduling, 'idle')
@@ -734,7 +803,7 @@ def test_report_start_and_finish(scheduling):
     # The archives of a previous report are not uploaded again if this report fails
     mnr.updateReportState(scheduling.output_dir, night, upload_files=['/old_archive.tar.bz2'])
 
-    reporter._startReport(night, results)
+    reporter._startReport(night, results, 'sunrise')
     assert mnr.readReportStates(scheduling.output_dir)['nights'][night]['upload_files'] == []
     assert reporter.report_lock.owner is reporter
 
@@ -763,7 +832,7 @@ def test_report_finished_during_shutdown_is_uploaded(scheduling):
             pass
 
     reporter.upload_manager = _UploadManager()
-    reporter._startReport(night, results)
+    reporter._startReport(night, results, 'sunrise')
     mnr.updateReportState(scheduling.output_dir, night, upload_files=['/archive_detected.tar.bz2'])
 
     # The report finishes while the monitor is stopping

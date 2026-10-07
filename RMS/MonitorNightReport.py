@@ -32,6 +32,7 @@ import multiprocessing
 import os
 import platform
 import shutil
+import signal
 import sys
 import traceback
 
@@ -150,6 +151,32 @@ def nightBoundsFromName(config, night_name):
     return night_start, night_end
 
 
+def partialReportTime(config, night_name):
+    """ Time of the partial report of the night, the first monitor_partial_report_time after the beginning
+        of the night.
+
+    Arguments:
+        config: [Config] Configuration.
+        night_name: [str] Name of the night.
+
+    Return:
+        [datetime] Time of the partial report (UTC), None if partial reports are disabled.
+    """
+
+    if not config.monitor_partial_report_time:
+        return None
+
+    night_start, _ = nightBoundsFromName(config, night_name)
+
+    report_time = datetime.datetime.strptime(config.monitor_partial_report_time, "%H:%M")
+    partial_time = night_start.replace(hour=report_time.hour, minute=report_time.minute, second=0,
+                                       microsecond=0)
+    if partial_time <= night_start:
+        partial_time += datetime.timedelta(days=1)
+
+    return partial_time
+
+
 def nightDirPath(output_dir, night_name, config):
     """ Path of the night directory with the image pairs and the merged results.
 
@@ -198,7 +225,8 @@ def writeDoneFlag(results_dir, info):
 
     Arguments:
         results_dir: [str] Results directory of an input file.
-        info: [dict] Info about the processed file: night, mask_path, dark_applied, flat_applied.
+        info: [dict] Info about the processed file: night, mask_path, dark_applied, flat_applied. A file which
+            was skipped by the cutoff of its night has only night and skipped.
     """
 
     _writeJSON(os.path.join(results_dir, DONE_FLAG_NAME), info)
@@ -231,7 +259,8 @@ def scanNights(output_dir, config):
 
     Return:
         [dict] {night_name: {results_dir: info}}, where results_dir is relative to the output directory and
-            info is the content of its done flag. Results from before the night reports are not included.
+            info is the content of its done flag. Results from before the night reports and files skipped by
+            the cutoff of their night are not included.
     """
 
     nights = {}
@@ -244,8 +273,9 @@ def scanNights(output_dir, config):
 
         if DONE_FLAG_NAME in files:
 
+            # Files skipped by the cutoff of their night have no results
             info = readDoneFlag(root)
-            if 'night' in info:
+            if ('night' in info) and (not info.get('skipped')):
                 nights.setdefault(info['night'], {})[os.path.relpath(root, output_dir)] = info
 
             # Results directories don't contain other results
@@ -910,6 +940,13 @@ def deleteOldNightImages(output_dir, config, states, nights, now=None):
     return cleaned
 
 
+def directorySize(dir_path):
+    """ Total size of the files in a directory tree, in bytes. """
+
+    return sum(os.path.getsize(os.path.join(root, file_name))
+               for root, _, files in os.walk(dir_path) for file_name in files)
+
+
 def cleanupOldData(output_dir, config):
     """ Delete old data from the output directory with the data management of normal RMS
         (DeleteOldObservations): old night directories in CapturedFiles and ArchivedFiles (by the number of
@@ -942,12 +979,22 @@ def cleanupOldData(output_dir, config):
     pending = [night_name for night_name, results in nights.items()
                if unreportedResults(states, night_name, results)]
 
+    captured_path = os.path.join(output_dir, config.captured_dir)
+    night_dirs = getNightDirs(captured_path, config.stationID)
+
     if pending and (config.capt_dirs_to_keep > 0):
-        night_dirs = getNightDirs(os.path.join(output_dir, config.captured_dir), config.stationID)
         config.capt_dirs_to_keep = max(config.capt_dirs_to_keep,
                                        len([d for d in night_dirs if d >= min(pending)]))
 
-    enough_space = deleteOldObservations(output_dir, config.captured_dir, config.archived_dir, config)
+    # The space needed for the next night is the size of the largest of the last nights, as the capture
+    #   settings in the config (e.g. raw video saving) don't describe the data of the monitor
+    needed_bytes = config.extra_space_gb*1024**3
+    if night_dirs:
+        needed_bytes += max(directorySize(os.path.join(captured_path, night_dir))
+                            for night_dir in night_dirs[-3:])
+
+    enough_space = deleteOldObservations(output_dir, config.captured_dir, config.archived_dir, config,
+                                         needed_bytes=needed_bytes)
 
     # Delete the old logs of the monitor processes, which have a prefix
     deleteOldLogfiles(output_dir, config, pattern='*log_*.log*')
@@ -962,7 +1009,11 @@ def cleanupOldData(output_dir, config):
 ### Worker processes ###
 
 def _initWorkerLogging(config, output_dir, prefix):
-    """ Log into the logs directory of the output directory. """
+    """ Log into the logs directory of the output directory, and let SIGTERM end the worker right away (the
+        monitor stops its workers with SIGTERM).
+    """
+
+    signal.signal(signal.SIGTERM, signal.SIG_DFL)
 
     config.data_dir = output_dir
     config.log_dir = 'logs'
@@ -1044,9 +1095,10 @@ class NightReporter(object):
         # Nights requested by the trigger file
         self.triggered = set()
 
-        # Nights with unreported files, {night_name: results}. The output directory is scanned again when new
-        #   results are added (resultsChanged), after every report, and periodically
+        # Nights with unreported files, {night_name: results}, and the report states. The output directory is
+        #   scanned again when new results are added (resultsChanged), after every report, and periodically
         self.pending = None
+        self.states = None
         self.last_scan = None
         self.scan_interval = 600
 
@@ -1105,7 +1157,7 @@ class NightReporter(object):
             now: [datetime] Current time (UTC).
 
         Return:
-            [bool] True if the report should be started.
+            [str] Why the report is due ('trigger', 'partial', 'idle' or 'sunrise'), None if it isn't due.
         """
 
         # Wait before retrying a failed report, and give up after the second failure until new files arrive
@@ -1115,22 +1167,35 @@ class NightReporter(object):
                 return False
 
         if night_name in self.triggered:
-            return True
+            return 'trigger'
 
         if self.report_mode not in ('sunrise', 'idle'):
-            return False
+            return None
+
+        # Make the partial report at its time with the data processed until then, once per night. It is not
+        #   made for old nights, e.g. when a backlog is processed after a downtime
+        partial_time = partialReportTime(self.config, night_name)
+        if (partial_time is not None) and (partial_time <= now < partial_time + datetime.timedelta(days=1)):
+
+            reported_at = self.states['nights'].get(night_name, {}).get('reported_at')
+            if (reported_at is None) or (datetime.datetime.strptime(reported_at, JSON_TIME_FORMAT)
+                                         < partial_time):
+                return 'partial'
 
         # Wait until no new results of the night came in for a while
         if self._lastResultAge(results, now) < self.quiet_s:
-            return False
+            return None
 
         # In the idle mode, report once all data is processed
         if self.report_mode == 'idle':
-            return idle
+            return 'idle' if idle else None
 
         # In the sunrise mode, report once the night is over. The camera doesn't have to be idle, as it may be
         #   processing the following night already
-        return now >= nightBoundsFromName(self.config, night_name)[1]
+        if now >= nightBoundsFromName(self.config, night_name)[1]:
+            return 'sunrise'
+
+        return None
 
 
     def _startCleanup(self):
@@ -1141,13 +1206,15 @@ class NightReporter(object):
         self.cleanup_proc.start()
 
 
-    def _startReport(self, night_name, results):
+    def _startReport(self, night_name, results, reason):
         """ Start the report of the night in a separate process. """
 
-        log.info(self.log_prefix + "Starting the report of night {:s}".format(night_name))
+        log.info(self.log_prefix + "Starting the {:s} report of night {:s} ({:d} files)".format(
+            reason, night_name, len(results)))
 
-        # Clear the archives of a previous report, so they are not uploaded again if this report fails
-        updateReportState(self.output_dir, night_name, upload_files=[])
+        # Clear the archives of a previous report, so they are not uploaded again if this report fails, and
+        #   record why the report was made
+        updateReportState(self.output_dir, night_name, upload_files=[], trigger=reason)
 
         proc = multiprocessing.Process(target=nightReportWorker,
                                        args=(self.output_dir, night_name, self.config_path, results))
@@ -1235,10 +1302,10 @@ class NightReporter(object):
         # Find the nights with unreported files
         if (self.pending is None) or ((now - self.last_scan).total_seconds() > self.scan_interval):
 
-            states = readReportStates(self.output_dir)
+            self.states = readReportStates(self.output_dir)
             self.pending = {night_name: results
                             for night_name, results in scanNights(self.output_dir, self.config).items()
-                            if unreportedResults(states, night_name, results)}
+                            if unreportedResults(self.states, night_name, results)}
             self.last_scan = now
 
         if trigger:
@@ -1255,8 +1322,9 @@ class NightReporter(object):
             return
 
         for night_name in sorted(self.pending):
-            if self.isDue(night_name, self.pending[night_name], idle, now):
-                self._startReport(night_name, self.pending[night_name])
+            reason = self.isDue(night_name, self.pending[night_name], idle, now)
+            if reason:
+                self._startReport(night_name, self.pending[night_name], reason)
                 break
 
 

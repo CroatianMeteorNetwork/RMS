@@ -32,6 +32,7 @@ import logging
 import traceback
 import multiprocessing
 import configparser
+import signal
 
 import RMS.ConfigReader as cr
 from RMS.Formats.FrameInterface import detectInputType, getCacheID
@@ -47,6 +48,7 @@ from RMS.DetectStarsAndMeteors import (
 from RMS.DetectionTools import binImageCalibration, findMaskPath, loadImageCalibration
 from RMS.Astrometry.ApplyRecalibrate import applyRecalibrate
 from RMS.Logger import LoggingManager, getLogger
+from RMS.Misc import RmsDateTime
 
 
 # Get the logger from the main module
@@ -68,11 +70,16 @@ FILE_TYPE_MAP = {
 # Directories of the monitor output which are not searched for input files
 MONITOR_OUTPUT_DIRS = {'CapturedFiles', 'ArchivedFiles', 'logs'}
 
-# Exit code of a worker process which skipped a file because it begins before the start time
+# Exit code of a worker process which skipped a file because it begins before the start time, or because the
+#   processing of its night was cut off (monitor_night_cutoff_hours)
 SKIP_EXIT_CODE = 3
 
 # Default time limit (seconds) for processing one file, after which the worker is stopped and the file retried
 WORKER_TIMEOUT = 3600
+
+# Seconds the night report, cleanup and upload are given to finish when the monitor is stopped, before they
+#   are terminated (an unfinished report is made again after a restart)
+SHUTDOWN_TIMEOUT = 30
 
 # Accepted formats of the start time given on the command line or in the multicam INI file
 START_TIME_FORMATS = ["%Y%m%d_%H%M%S", "%Y%m%d-%H%M%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S",
@@ -165,6 +172,24 @@ def readBeginningDatetime(file_path, config, chunk_frames):
         img_handle.vid_file.close()
 
     return beginning_datetime
+
+
+def resultsDirPath(output_dir, beginning_datetime, file_base):
+    """ Path of the results directory of an input file, output_dir/YYYY/YYYYMM/YYYYMMDD/<file_base>/.
+
+    Arguments:
+        output_dir: [str] Output directory of the monitor.
+        beginning_datetime: [datetime] Beginning of the recording (UTC).
+        file_base: [str] Unique name of the input file.
+
+    Return:
+        [str] Path of the results directory.
+    """
+
+    dt = beginning_datetime
+
+    return os.path.join(output_dir, "{:04d}".format(dt.year), "{:04d}{:02d}".format(dt.year, dt.month),
+                        "{:04d}{:02d}{:02d}".format(dt.year, dt.month, dt.day), file_base)
 
 
 def walkInput(top_dir):
@@ -345,7 +370,8 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
         dark_path: [str] Path to a dark frame file. None by default.
         unique_id: [str] Safely flattened string to uniquely identify output directories. None by default.
         start_time: [datetime] If given, files whose recording begins before this time (UTC) are skipped
-            and the process exits with SKIP_EXIT_CODE. None by default.
+            and the process exits with SKIP_EXIT_CODE. None by default. Files of nights past the cutoff
+            (monitor_night_cutoff_hours) are skipped the same way, and marked as done.
 
     Return:
         [bool] True if processing succeeded, False otherwise.
@@ -370,14 +396,32 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
     if flat_path is not None:
         config.flat_file = os.path.abspath(flat_path)
 
-    # Skip files which begin before the start time, before loading the whole file
-    if start_time is not None:
+    # Skip files which begin before the start time or whose night is past its cutoff, before loading the
+    #   whole file
+    if (start_time is not None) or (config.monitor_night_cutoff_hours > 0):
+
         # Use a copy of the config, as opening some input types modifies it (e.g. the image size)
         beginning_datetime = readBeginningDatetime(file_path, copy.deepcopy(config), chunk_frames)
-        if (beginning_datetime is not None) and (beginning_datetime < start_time):
+
+        if (start_time is not None) and (beginning_datetime is not None) \
+                and (beginning_datetime < start_time):
             print("Skipping {}: begins at {} UTC, before the start time {} UTC".format(
                 file_name, beginning_datetime, start_time))
             sys.exit(SKIP_EXIT_CODE)
+
+        if (config.monitor_night_cutoff_hours > 0) and (beginning_datetime is not None):
+
+            night_name, _, night_end = nightInfo(config, beginning_datetime)
+            cutoff = night_end + datetime.timedelta(hours=config.monitor_night_cutoff_hours)
+
+            # Mark the file as done, so it is not processed again after a restart
+            if RmsDateTime.utcnow() > cutoff:
+                print("Skipping {}: the processing of night {} was cut off at {} UTC".format(file_name,
+                    night_name, cutoff))
+                results_dir = resultsDirPath(output_dir, beginning_datetime, file_base)
+                os.makedirs(results_dir, exist_ok=True)
+                writeDoneFlag(results_dir, {'night': night_name, 'skipped': True})
+                sys.exit(SKIP_EXIT_CODE)
 
     # Use the module logger until the per-file logger is initialized, so errors before that are logged
     proc_log = log
@@ -393,16 +437,8 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
             print("ERROR: Could not open file: {}".format(file_path))
             return False
 
-        # Get the first frame time to build the date-sorted directory structure
-        dt = img_handle.beginning_datetime
-        date_path = os.path.join(
-            "{:04d}".format(dt.year),
-            "{:04d}{:02d}".format(dt.year, dt.month),
-            "{:04d}{:02d}{:02d}".format(dt.year, dt.month, dt.day),
-        )
-
-        # Create a results directory: output_dir/YYYY/YYYYMM/YYYYMMDD/<file_base>/
-        results_dir = os.path.join(output_dir, date_path, file_base)
+        # Create the results directory, sorted by the date of the first frame
+        results_dir = resultsDirPath(output_dir, img_handle.beginning_datetime, file_base)
         os.makedirs(results_dir, exist_ok=True)
 
         # Initialize the logger for this process
@@ -455,7 +491,7 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
             raise IOError("The flat could not be loaded: {}".format(config.flat_file))
 
         # Determine the night the file belongs to. The chunk images are saved to the night directory
-        night_name, _, _ = nightInfo(config, dt)
+        night_name, _, _ = nightInfo(config, img_handle.beginning_datetime)
         night_dir = nightDirPath(output_dir, night_name, config)
         os.makedirs(night_dir, exist_ok=True)
 
@@ -541,9 +577,12 @@ def processFileWorker(*args, **kwargs):
 
     Exit codes:
         0 - processing succeeded
-        SKIP_EXIT_CODE - the file begins before the start time
+        SKIP_EXIT_CODE - the file begins before the start time, or its night is past the cutoff
         1 - processing failed
     """
+
+    # The monitor stops the worker with SIGTERM, which ends it right away
+    signal.signal(signal.SIGTERM, signal.SIG_DFL)
 
     try:
         success = processFile(*args, **kwargs)
@@ -561,6 +600,14 @@ def processFileWorker(*args, **kwargs):
     sys.exit(0 if success else 1)
 
 
+def stopOnSigterm(signum, frame):
+    """ Signal handler which stops the monitor on SIGTERM (e.g. from systemd) like Ctrl+C does, so the workers
+        and the night report are stopped cleanly instead of being left running.
+    """
+
+    raise KeyboardInterrupt
+
+
 def stopStuckWorker(proc, unique_id, worker_timeout):
     """ Stop a worker process which runs longer than the time limit, e.g. one stuck in the video decoder. The
         stopped worker has a negative exit code, so its file is handled as failed and retried.
@@ -576,6 +623,12 @@ def stopStuckWorker(proc, unique_id, worker_timeout):
 
     log.error("Processing {} did not finish in {:.1f} min, stopping the worker...".format(unique_id,
         worker_timeout/60))
+
+    stopWorker(proc)
+
+
+def stopWorker(proc):
+    """ Stop a worker process, killing it if it doesn't end after SIGTERM. """
 
     proc.terminate()
     proc.join(10)
@@ -666,7 +719,8 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
                         processed_files.add(uid)
                         reporter.resultsChanged()
                     elif proc.exitcode == SKIP_EXIT_CODE:
-                        log.info("Skipped: {} (begins before the start time)".format(uid))
+                        log.info("Skipped: {} (begins before the start time or after the cutoff of its "
+                                 "night)".format(uid))
                         processed_files.add(uid)
                     else:
                         if uid not in failed_files:
@@ -840,16 +894,16 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
         log.info("Monitoring stopped by user.")
 
     finally:
-        # Wait for any remaining workers
-        if active_workers:
-            log.info("Waiting for {:d} remaining task(s) to finish...".format(len(active_workers)))
-            for fname, proc in active_workers.items():
-                proc.join(timeout=300)
-                if proc.is_alive():
-                    log.warning("Worker for {} did not finish in time, terminating.".format(fname))
-                    proc.terminate()
 
-        reporter.stop()
+        # Stop the workers right away. Their files have no done flag, so they are processed again after a
+        #   restart
+        if active_workers:
+            log.info("Stopping {:d} worker(s), their files will be processed again after a restart: "
+                     "{}".format(len(active_workers), ", ".join(sorted(active_workers))))
+            for proc in active_workers.values():
+                stopWorker(proc)
+
+        reporter.stop(timeout=SHUTDOWN_TIMEOUT)
 
         log.info("All workers stopped.")
 
@@ -1074,7 +1128,8 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None)
                     elif proc.exitcode == SKIP_EXIT_CODE:
 
                         # The file begins before the start time, don't queue it again
-                        log.info("Skipped [{}]: {} (begins before the start time)".format(cam_id, uid))
+                        log.info("Skipped [{}]: {} (begins before the start time or after the cutoff of its "
+                                 "night)".format(cam_id, uid))
                         processed_files[cam_id].add(uid)
 
                     else:
@@ -1323,24 +1378,16 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None)
 
     finally:
 
-        # Gracefully handle active workers during script termination
+        # Stop the workers right away. Their files have no done flag, so they are processed again after a
+        #   restart
         if active_workers:
-
-            log.info("Waiting for {:d} remaining task(s) to finish...".format(len(active_workers)))
-
-            for fname, (proc, cam_id) in active_workers.items():
-                
-                # Allow processes up to 300 seconds to finish what they were doing
-                proc.join(timeout=300)
-
-                if proc.is_alive():
-
-                    # Terminate processes that refuse to close or get stuck
-                    log.warning("Worker for [{}] {} did not finish in time, terminating.".format(cam_id, fname))
-                    proc.terminate()
+            log.info("Stopping {:d} worker(s), their files will be processed again after a restart: "
+                     "{}".format(len(active_workers), ", ".join(sorted(active_workers))))
+            for proc, cam_id in active_workers.values():
+                stopWorker(proc)
 
         for reporter in reporters.values():
-            reporter.stop()
+            reporter.stop(timeout=SHUTDOWN_TIMEOUT)
 
         log.info("All workers stopped.")
 
@@ -1503,6 +1550,8 @@ Examples:
 
     # Parse
     cml_args = arg_parser.parse_args()
+
+    signal.signal(signal.SIGTERM, stopOnSigterm)
 
     # Parse the start time
     start_time = None

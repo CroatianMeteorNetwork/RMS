@@ -16,6 +16,7 @@
 
 from __future__ import absolute_import, division, print_function
 
+import datetime
 import math
 import os
 import sys
@@ -885,6 +886,14 @@ class Config:
 
         # Minutes without new processed files before a night report is generated
         self.monitor_report_quiet_min = 15.0
+
+        # Time of day (UTC, HH:MM) of a partial report of the night, made with the data processed until then
+        #   if the processing of the night is not finished yet. Empty disables it
+        self.monitor_partial_report_time = ''
+
+        # Hours after the end of the night (sunrise) after which its files which were not processed yet are
+        #   skipped, so the processing doesn't overflow into the following night. 0 disables it
+        self.monitor_night_cutoff_hours = 0.0
 
         # Upload the night archive after the report (also requires upload_enabled)
         self.monitor_upload = False
@@ -2246,6 +2255,21 @@ def parseMonitorProcessing(config, parser):
 
     if parser.has_option(section, "monitor_report_quiet_min"):
         config.monitor_report_quiet_min = parser.getfloat(section, "monitor_report_quiet_min")
+
+    if parser.has_option(section, "monitor_partial_report_time"):
+        partial_time = parser.get(section, "monitor_partial_report_time").strip()
+
+        try:
+            if partial_time:
+                datetime.datetime.strptime(partial_time, "%H:%M")
+            config.monitor_partial_report_time = partial_time
+
+        except ValueError:
+            print("Invalid monitor_partial_report_time '{:s}' (HH:MM expected), partial reports are "
+                  "disabled".format(partial_time))
+
+    if parser.has_option(section, "monitor_night_cutoff_hours"):
+        config.monitor_night_cutoff_hours = parser.getfloat(section, "monitor_night_cutoff_hours")
 
     if parser.has_option(section, "monitor_upload"):
         config.monitor_upload = parser.getboolean(section, "monitor_upload")

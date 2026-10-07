@@ -741,7 +741,7 @@ def deleteFiles(dir_path, config, delete_all=False):
 
 
 
-def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration=None):
+def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration=None, needed_bytes=None):
     """ Deletes old observation directories to free up space for new ones.
 
     Arguments:
@@ -753,6 +753,8 @@ def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration
     Keyword arguments:
         duration: [float] Duration of next video capturing in seconds. If None (by default), duration will
             be calculated for the next night.
+        needed_bytes: [float] Disk space needed for the next night in bytes, used instead of the estimate
+            from the capture settings. None by default.
 
     Return:
         [bool]: True if there's enough space for the next night's data, False if not.
@@ -855,6 +857,9 @@ def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration
         next_night_bytes += 3*(1024**3)
 
     ######
+
+    if needed_bytes is not None:
+        next_night_bytes = needed_bytes
 
     log.info("Need {:.2f} GB for next night".format(next_night_bytes/1024/1024/1024))
 

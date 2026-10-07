@@ -81,6 +81,47 @@ def test_processFile_skips_file_beginning_before_start_time(config_path, tmp_pat
     assert exc_info.value.code == mon.SKIP_EXIT_CODE
 
 
+@pytest.mark.parametrize('hours_after_cutoff, skipped', [(-1, False), (1, True)])
+def test_processFile_skips_files_of_nights_past_the_cutoff(config_path, tmp_path, monkeypatch,
+                                                           hours_after_cutoff, skipped):
+
+    import RMS.ConfigReader as cr
+    import RMS.MonitorNightReport as mnr
+
+    config = cr.parse(config_path)
+    config.monitor_night_cutoff_hours = 6
+    monkeypatch.setattr(cr, 'parse', lambda path: config)
+
+    beginning = datetime.datetime(2025, 12, 25, 3, 0, 0)
+    night_name, _, night_end = mnr.nightInfo(config, beginning)
+    now = night_end + datetime.timedelta(hours=6 + hours_after_cutoff)
+
+    monkeypatch.setattr(mon, 'readBeginningDatetime', lambda *args, **kwargs: beginning)
+    monkeypatch.setattr(mon.RmsDateTime, 'utcnow', staticmethod(lambda: now))
+
+    # Files which are not skipped are opened for processing
+    def _open(*args, **kwargs):
+        raise IOError("opened")
+
+    monkeypatch.setattr(mon, 'detectInputType', _open)
+
+    output_dir = str(tmp_path/'out')
+    if not skipped:
+        assert mon.processFile(str(tmp_path/'dummy.vid'), config_path, None, output_dir, 128) is False
+        return
+
+    with pytest.raises(SystemExit) as exc_info:
+        mon.processFile(str(tmp_path/'dummy.vid'), config_path, None, output_dir, 128)
+
+    assert exc_info.value.code == mon.SKIP_EXIT_CODE
+
+    # The file is marked as done, so it is not opened again after a restart, but it is not a result of the
+    #   night
+    results_dir = mon.resultsDirPath(output_dir, beginning, 'dummy')
+    assert mnr.readDoneFlag(results_dir) == {'night': night_name, 'skipped': True}
+    assert mnr.scanNights(output_dir, config) == {}
+
+
 @pytest.mark.parametrize('offset_s', [0, 60])
 def test_processFile_processes_file_beginning_at_or_after_start_time(config_path, tmp_path, monkeypatch,
                                                                      offset_s):
