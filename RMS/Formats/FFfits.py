@@ -79,6 +79,25 @@ AVERESID_NAMES = ('AVERESID', 'AVEFRAC')
 STDRESID_NAMES = ('STDRESID', 'STDFRAC')
 
 
+# Planes stored RICE_1 tile-compressed when the FF file is written with compression. Measured on
+# 720p night FFs: MAXPIXEL, AVEPIXEL and STDPIXEL compress to 0.28-0.43 of their size; MAXFRAME
+# (a random frame index wherever nothing moved) and the two residual planes (noise below one code)
+# do not compress at all - RICE grows them by 2% and costs as much time as on the others - so they
+# stay plain image HDUs
+COMPRESSED_PLANES = ('MAXPIXEL', 'AVEPIXEL', 'STDPIXEL')
+
+
+def imageHDU(data, name, compress=False):
+    """ Make the image HDU of one FF plane, RICE_1 tile-compressed (lossless) when compress is set
+        and the plane is one that compresses (COMPRESSED_PLANES).
+    """
+
+    if compress and (name in COMPRESSED_PLANES):
+        return fits.CompImageHDU(data, name=name, compression_type='RICE_1')
+
+    return fits.ImageHDU(data, name=name)
+
+
 def findExtraHDU(hdulist, names):
     """ Return the data of the first HDU after the four legacy planes whose name is in names, or None. """
 
@@ -300,13 +319,19 @@ def read(directory, filename, array=False, full_filename=False, memmap=True, pla
 
 
 
-def write(ff, directory, filename):
+def write(ff, directory, filename, compress=False):
     """ Write a FF structure to a FITS file in specified directory.
     
     Arguments:
         ff: [ff bin struct] FF bin file loaded in the FF structure
         directory: [str] path to the directory where the file will be written
         filename: [str] name of the file which will be written
+
+    Keyword arguments:
+        compress: [bool] Store the planes that compress (COMPRESSED_PLANES) as RICE_1 tile-
+            compressed HDUs (lossless). The planes keep their names and order, and astropy
+            decompresses them transparently on read, so older RMS readers are unaffected, but
+            FITS software without tile-compression support cannot open the file
     
     Return:
         None
@@ -409,16 +434,16 @@ def write(ff, directory, filename):
 
     # Combine everything into into FITS
     hdulist = fits.HDUList([prim,
-        fits.ImageHDU(ff.maxpixel, name='MAXPIXEL'),
-        fits.ImageHDU(ff.maxframe, name='MAXFRAME'),
-        fits.ImageHDU(avepixel, name='AVEPIXEL'),
-        fits.ImageHDU(stdpixel, name='STDPIXEL')])
+        imageHDU(ff.maxpixel, 'MAXPIXEL', compress),
+        imageHDU(ff.maxframe, 'MAXFRAME', compress),
+        imageHDU(avepixel, 'AVEPIXEL', compress),
+        imageHDU(stdpixel, 'STDPIXEL', compress)])
 
     if averesid is not None:
-        hdulist.append(fits.ImageHDU(averesid, name=AVERESID_NAMES[0]))
+        hdulist.append(imageHDU(averesid, AVERESID_NAMES[0], compress))
 
     if stdresid is not None:
-        hdulist.append(fits.ImageHDU(stdresid, name=STDRESID_NAMES[0]))
+        hdulist.append(imageHDU(stdresid, STDRESID_NAMES[0], compress))
 
     # Save the FITS
     hdulist.writeto(file_path, overwrite=True)

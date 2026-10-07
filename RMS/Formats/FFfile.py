@@ -173,7 +173,7 @@ def read(directory, filename, fmt=None, array=False, full_filename=False, verbos
 
 
 
-def write(ff, directory, filename, fmt=None):
+def write(ff, directory, filename, fmt=None, compress=False):
     """ Write a FF structure to a FITS file in specified directory.
     
     Arguments:
@@ -184,6 +184,7 @@ def write(ff, directory, filename, fmt=None):
     Keyword arguments:
         fmt: [str] Format for writing the file. It should either be 'bin' or 'fits'. If it is not given,
             the format will be guessed. By default, the format will be 'fits'.
+        compress: [bool] RICE_1-compress the FITS planes that compress (lossless). FITS only.
     
     Return:
         None
@@ -214,7 +215,7 @@ def write(ff, directory, filename, fmt=None):
 
     # RMS fits format
     elif fmt == 'fits':
-        writeFFfits(ff, directory, filename)
+        writeFFfits(ff, directory, filename, compress=compress)
 
 
 def reconstructFrame(ff, frame_no, avepixel=False):
