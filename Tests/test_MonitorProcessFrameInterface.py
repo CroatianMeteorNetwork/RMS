@@ -654,3 +654,44 @@ def test_meteor_names_unchanged_without_chunk_images(tmp_path, config):
 
     assert entry[0] == FFfile.constructFFName('XX0001', handle.currentFrameTime(130))
     assert entry[11][0][1] == 0
+
+
+### Worker lifetime ###
+
+def _workerWithMonitorWatch(pid_queue):
+    mon.exitWithMonitor(interval=0.2)
+    pid_queue.put(os.getpid())
+    time.sleep(60)
+
+
+def _monitorWithWorker(pid_queue):
+    worker = multiprocessing.Process(target=_workerWithMonitorWatch, args=(pid_queue,))
+    worker.start()
+    time.sleep(60)
+
+
+@pytest.mark.parametrize('start_method', ['fork', 'forkserver'])
+def test_worker_ends_when_the_monitor_is_killed(start_method):
+
+    ctx = multiprocessing.get_context(start_method)
+    pid_queue = ctx.Queue()
+
+    monitor = ctx.Process(target=_monitorWithWorker, args=(pid_queue,))
+    monitor.start()
+    worker_pid = pid_queue.get(timeout=60)
+
+    monitor.kill()
+    monitor.join()
+
+    t0 = time.time()
+    while time.time() - t0 < 10:
+        try:
+            os.kill(worker_pid, 0)
+            with open('/proc/{:d}/stat'.format(worker_pid)) as f:
+                if f.read().split()[2] == 'Z':
+                    break
+        except (OSError, IOError):
+            break
+        time.sleep(0.1)
+
+    assert time.time() - t0 < 5

@@ -34,6 +34,8 @@ import platform
 import shutil
 import signal
 import sys
+import threading
+import time
 import traceback
 
 import ephem
@@ -1008,12 +1010,47 @@ def cleanupOldData(output_dir, config):
 
 ### Worker processes ###
 
+def exitWithMonitor(interval=2.0):
+    """ End this worker process when the monitor process which started it is gone, e.g. when it was killed,
+        so the worker doesn't keep running next to a restarted monitor. Call it at the start of the worker.
+
+    Keyword arguments:
+        interval: [float] Seconds between the checks. 2 by default.
+    """
+
+    # Nothing to watch outside of a worker process (e.g. a report from the command line)
+    parent = multiprocessing.parent_process()
+    if parent is None:
+        return
+
+    monitor_pid = parent.pid
+
+    # With the fork start method the worker is orphaned when the monitor dies, with other start methods (e.g.
+    #   forkserver) the monitor process doesn't exist anymore
+    ppid = os.getppid()
+
+    def _watch():
+        while True:
+            time.sleep(interval)
+            try:
+                os.kill(monitor_pid, 0)
+                if os.getppid() == ppid:
+                    continue
+            except OSError:
+                pass
+
+            os._exit(1)
+
+    threading.Thread(target=_watch, daemon=True).start()
+
+
 def _initWorkerLogging(config, output_dir, prefix):
-    """ Log into the logs directory of the output directory, and let SIGTERM end the worker right away (the
-        monitor stops its workers with SIGTERM).
+    """ Log into the logs directory of the output directory, let SIGTERM end the worker right away (the
+        monitor stops its workers with SIGTERM), and end it if the monitor is gone.
     """
 
     signal.signal(signal.SIGTERM, signal.SIG_DFL)
+    exitWithMonitor()
 
     config.data_dir = output_dir
     config.log_dir = 'logs'

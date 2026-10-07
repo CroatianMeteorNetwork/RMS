@@ -39,8 +39,8 @@ from RMS.Formats.FrameInterface import detectInputType, getCacheID
 from RMS.Formats.FFfile import validFFName, constructFFName
 from RMS.Formats import FFpng
 from RMS.Routines import Image
-from RMS.MonitorNightReport import latestPlateparPath, nightDirPath, nightInfo, NightReporter, ReportLock, \
-    writeDoneFlag
+from RMS.MonitorNightReport import exitWithMonitor, latestPlateparPath, nightDirPath, nightInfo, NightReporter, \
+    ReportLock, writeDoneFlag
 from RMS.DetectStarsAndMeteors import (
     detectStarsAndMeteorsFrameInterface,
     saveResultsFrameInterface,
@@ -581,8 +581,10 @@ def processFileWorker(*args, **kwargs):
         1 - processing failed
     """
 
-    # The monitor stops the worker with SIGTERM, which ends it right away
+    # The monitor stops the worker with SIGTERM, which ends it right away, and the worker ends if the monitor is
+    #   gone
     signal.signal(signal.SIGTERM, signal.SIG_DFL)
+    exitWithMonitor()
 
     try:
         success = processFile(*args, **kwargs)
