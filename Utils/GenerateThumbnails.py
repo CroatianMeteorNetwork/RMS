@@ -37,6 +37,7 @@ except ImportError:
 
 import RMS.ConfigReader as cr
 import RMS.Formats.FFfile as FFfile
+from RMS.Routines.Image import ffDisplayLevels, to8bitDisplay
 
 
 def stackIfLighter(arr1, arr2):
@@ -99,6 +100,9 @@ def generateThumbnails(dir_path, config, mosaic_type, file_list=None, no_stack=F
     timestamps = []
     stacked_imgs = []
 
+    # Use the same display levels for all images with more than 8 bits, so the thumbnails are comparable
+    display_levels = ffDisplayLevels(dir_path, ff_list)
+
 
     thumb_stack = config.thumb_stack
     
@@ -126,7 +130,8 @@ def generateThumbnails(dir_path, config, mosaic_type, file_list=None, no_stack=F
                 if ff is None:
                     continue
 
-                img = ff.maxpixel
+                # Convert images with more than 8 bits to 8 bits, as the thumbnails are 8-bit
+                img = to8bitDisplay(ff.maxpixel, levels=display_levels)
 
                 # Resize the image
                 img = cv2.resize(img, (bin_w, bin_h))

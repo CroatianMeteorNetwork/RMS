@@ -20,6 +20,7 @@ from PIL import ImageFont
 
 from RMS.Formats.FFfile import read as readFF
 from RMS.Formats.FFfile import validFFName, filenameToDatetime
+from RMS.Routines.Image import ffDisplayLevels, to8bitDisplay
 from RMS.Misc import mkdirP, RmsDateTime, tarWithProgress, getRmsRootDir
 from RMS.Logger import getLogger
 
@@ -105,6 +106,9 @@ def generateTimelapse(dir_path, keep_images=False, fps=None, output_file=None, h
 
     ff_list = [ff_name for ff_name in sorted(os.listdir(dir_path)) if validFFName(ff_name)]
 
+    # Use the same display levels for all frames with more than 8 bits, so the timelapse doesn't flicker
+    display_levels = ffDisplayLevels(dir_path, ff_list)
+
     for file_name in ff_list:
 
         # Read the FF file
@@ -132,7 +136,8 @@ def generateTimelapse(dir_path, keep_images=False, fps=None, output_file=None, h
         # Make a filename for the image, continuous count %04d
         img_file_name = 'temp_{:04d}.jpg'.format(c)
 
-        img = ff.maxpixel
+        # Convert images with more than 8 bits to 8 bits, as the timelapse frames are 8-bit JPEGs
+        img = to8bitDisplay(ff.maxpixel, levels=display_levels)
 
         # Draw text to image
         font = cv2.FONT_HERSHEY_SIMPLEX

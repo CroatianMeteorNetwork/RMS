@@ -55,17 +55,17 @@ def stackFFs(dir_path, file_format, deinterlace=False, subavg=False, filter_brig
 
         # Try finding the default flat
         if flat_path is None:
-            flat_path = dir_path
+            flat_dir = dir_path
             flat_file = 'flat.bmp'
 
         else:
-            flat_path, flat_file = os.path.split(flat_path)
+            flat_dir, flat_file = os.path.split(flat_path)
 
-        flat_full_path = os.path.join(flat_path, flat_file)
+        flat_full_path = os.path.join(flat_dir, flat_file)
         if os.path.isfile(flat_full_path):
 
             # Load the flat
-            flat = loadFlat(flat_path, flat_file)
+            flat = loadFlat(flat_dir, flat_file)
 
             log.debug('Loaded flat: {}'.format(flat_full_path))
 
@@ -120,9 +120,11 @@ def stackFFs(dir_path, file_format, deinterlace=False, subavg=False, filter_brig
                 # Compute top detection pixels
                 top_brightness = np.percentile(img, 99.9)
 
-                # Reject all images where the median brightness is high
+                # Reject all images where the median brightness is high (the threshold is given for 8-bit
+                #   images, scale it to the image bit depth)
                 # Preserve images with very bright detections
-                if (median > 10) and (top_brightness < (2**(8*img.itemsize) - 10)):
+                median_threshold = 10*2**(8*img.itemsize - 8)
+                if (median > median_threshold) and (top_brightness < (2**(8*img.itemsize) - 10)):
                     if print_progress:
                         log.info('Skipping: {} median: {} top brightness {}'.format(ff_name, median, top_brightness))
                     continue
@@ -153,7 +155,8 @@ def stackFFs(dir_path, file_format, deinterlace=False, subavg=False, filter_brig
     # If the number of stacked image is less than 20% of the given images, stack without filtering
     if filter_bright and (n_stacked < 0.2*total_ff_files):
         return stackFFs(dir_path, file_format, deinterlace=deinterlace, subavg=subavg, 
-            filter_bright=False, flat_path=flat_path, file_list=file_list)
+            filter_bright=False, flat_path=flat_path, file_list=file_list, mask=mask,
+            captured_stack=captured_stack, print_progress=print_progress)
 
     # If no images were stacked, do nothing
     if n_stacked == 0:
@@ -176,7 +179,9 @@ def stackFFs(dir_path, file_format, deinterlace=False, subavg=False, filter_brig
         log.info('Saving stack to: {}'.format(stack_path))
 
     # Stretch the levels
-    merge_img = adjustLevels(merge_img, np.percentile(merge_img, 0.5), 1.3, np.percentile(merge_img, 99.9))
+    # Images with more than 8 bits are scaled to 8 bits, as the stack is saved as an 8-bit image
+    merge_img = adjustLevels(merge_img, np.percentile(merge_img, 0.5), 1.3, np.percentile(merge_img, 99.9),
+        scaleto8bits=(merge_img.dtype != np.uint8))
 
 
     # Apply the mask, if given

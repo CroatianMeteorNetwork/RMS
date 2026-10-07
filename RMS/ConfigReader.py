@@ -16,6 +16,7 @@
 
 from __future__ import absolute_import, division, print_function
 
+import datetime
 import math
 import os
 import sys
@@ -872,6 +873,53 @@ class Config:
         self.timelapse_generate_from_frames = True
 
 
+        ##### Monitor processing (RMS.MonitorProcessFrameInterface)
+
+        # Save the max pixel and average pixel images of every star extraction chunk as FF-equivalent PNG
+        #   image pairs, which are needed for the night reports
+        self.monitor_save_images = True
+
+        # When to generate the night report: 'sunrise' (after the end of the night once all its data is
+        #   processed), 'idle' (whenever all data is processed), 'external' (only on a trigger file or from
+        #   the command line), or 'none'
+        self.monitor_report_mode = 'sunrise'
+
+        # Minutes without new processed files before a night report is generated
+        self.monitor_report_quiet_min = 15.0
+
+        # Time of day (UTC, HH:MM) of a partial report of the night, made with the data processed until then
+        #   if the processing of the night is not finished yet. Empty disables it
+        self.monitor_partial_report_time = ''
+
+        # Hours after the end of the night (sunrise) after which its files which were not processed yet are
+        #   skipped, so the processing doesn't overflow into the following night. 0 disables it
+        self.monitor_night_cutoff_hours = 0.0
+
+        # Upload the night archive after the report (also requires upload_enabled)
+        self.monitor_upload = False
+
+        # Delete the image pairs of reported nights after this many days (0 keeps them)
+        self.monitor_delete_images_days = 0
+
+        # Delete old data from the output directory like normal RMS does in the data directory (old night
+        #   directories, archives and logs, by capt_dirs_to_keep, arch_dirs_to_keep, the quotas, and the free
+        #   space needed for the next night)
+        self.monitor_delete_old_data = True
+
+        # Save the most confident recalibrated platepar of the night (most matched stars, lowest residual) and
+        #   use it for the following data
+        self.monitor_update_platepar = True
+
+        # Save every calibrated detection as an ECSV file (in the ECSV directory of the night)
+        self.monitor_save_ecsv = False
+
+        # Additional night products
+        self.monitor_shower_association = False
+        self.monitor_fov_kml = False
+        self.monitor_flux = False
+        self.monitor_observation_summary = False
+
+
         #### Shower association
 
         # Path to the shower file
@@ -1031,6 +1079,7 @@ def parseConfigFile(config, parser):
     parseStack(config, parser)
     parseTimelapse(config, parser)
     parseColors(config, parser)
+    parseMonitorProcessing(config, parser)
 
 
 def parseDFNStation(config, parser):
@@ -2180,6 +2229,74 @@ def parseTimelapse(config, parser):
 
     if parser.has_option(section, "timelapse_generate_from_frames"):
         config.timelapse_generate_from_frames = parser.getboolean(section, "timelapse_generate_from_frames")
+
+
+# When the monitor generates the night reports, see monitor_report_mode
+MONITOR_REPORT_MODES = ('sunrise', 'idle', 'external', 'none')
+
+
+def parseMonitorProcessing(config, parser):
+    section = "MonitorProcessing"
+
+    if not parser.has_section(section):
+        return
+
+    if parser.has_option(section, "monitor_save_images"):
+        config.monitor_save_images = parser.getboolean(section, "monitor_save_images")
+
+    if parser.has_option(section, "monitor_report_mode"):
+        report_mode = parser.get(section, "monitor_report_mode").strip().lower()
+
+        if report_mode in MONITOR_REPORT_MODES:
+            config.monitor_report_mode = report_mode
+        else:
+            print("Unknown monitor_report_mode '{:s}', using '{:s}'".format(report_mode,
+                config.monitor_report_mode))
+
+    if parser.has_option(section, "monitor_report_quiet_min"):
+        config.monitor_report_quiet_min = parser.getfloat(section, "monitor_report_quiet_min")
+
+    if parser.has_option(section, "monitor_partial_report_time"):
+        partial_time = parser.get(section, "monitor_partial_report_time").strip()
+
+        try:
+            if partial_time:
+                datetime.datetime.strptime(partial_time, "%H:%M")
+            config.monitor_partial_report_time = partial_time
+
+        except ValueError:
+            print("Invalid monitor_partial_report_time '{:s}' (HH:MM expected), partial reports are "
+                  "disabled".format(partial_time))
+
+    if parser.has_option(section, "monitor_night_cutoff_hours"):
+        config.monitor_night_cutoff_hours = parser.getfloat(section, "monitor_night_cutoff_hours")
+
+    if parser.has_option(section, "monitor_upload"):
+        config.monitor_upload = parser.getboolean(section, "monitor_upload")
+
+    if parser.has_option(section, "monitor_delete_images_days"):
+        config.monitor_delete_images_days = parser.getfloat(section, "monitor_delete_images_days")
+
+    if parser.has_option(section, "monitor_delete_old_data"):
+        config.monitor_delete_old_data = parser.getboolean(section, "monitor_delete_old_data")
+
+    if parser.has_option(section, "monitor_update_platepar"):
+        config.monitor_update_platepar = parser.getboolean(section, "monitor_update_platepar")
+
+    if parser.has_option(section, "monitor_save_ecsv"):
+        config.monitor_save_ecsv = parser.getboolean(section, "monitor_save_ecsv")
+
+    if parser.has_option(section, "monitor_shower_association"):
+        config.monitor_shower_association = parser.getboolean(section, "monitor_shower_association")
+
+    if parser.has_option(section, "monitor_fov_kml"):
+        config.monitor_fov_kml = parser.getboolean(section, "monitor_fov_kml")
+
+    if parser.has_option(section, "monitor_flux"):
+        config.monitor_flux = parser.getboolean(section, "monitor_flux")
+
+    if parser.has_option(section, "monitor_observation_summary"):
+        config.monitor_observation_summary = parser.getboolean(section, "monitor_observation_summary")
 
 
 def parseColors(config, parser):

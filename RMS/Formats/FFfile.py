@@ -14,6 +14,7 @@ from RMS.Formats.FFbin import write as writeFFbin
 from RMS.Formats.FFfits import read as readFFfits
 from RMS.Formats.FFfits import write as writeFFfits
 from RMS.Formats.FFStruct import FFStruct
+from RMS.Formats import FFpng
 from RMS.Decorators import memoizeSingle
 
 
@@ -84,8 +85,8 @@ def read(directory, filename, fmt=None, array=False, full_filename=False, verbos
         filename: [str] Name of FF file (either with FF and extension or without)
 
     Keyword arguments:
-        fmt: [str] Format for reading the file. It should either be 'bin' or 'fits'. If it is not given,
-            the format will be guessed.
+        fmt: [str] Format for reading the file: 'bin', 'fits' or 'png' (a single image or an FFpng image
+            pair). If it is not given, the format will be guessed from the extension.
         array: [ndarray] True in order to populate structure's array element (default is False)
         full_filename: [bool] True if full file name is given explicitly, a name which may differ from the
             usual FF*.fits format. False by default.
@@ -154,8 +155,13 @@ def read(directory, filename, fmt=None, array=False, full_filename=False, verbos
 
     elif fmt == 'png':
 
-        # Read the file as PNG
-        ff = readFFpng(directory, filename, full_filename=full_filename)
+        # Read a max pixel/average pixel image pair
+        if FFpng.isPairMaxName(os.path.basename(filename)):
+            ff = FFpng.readPair(directory, filename, full_filename=full_filename, verbose=verbose)
+
+        # Read a single PNG image
+        else:
+            ff = readFFpng(directory, filename, full_filename=full_filename)
 
     else:
         ff = None
@@ -395,8 +401,21 @@ def getMiddleTimeFF(ff_name, fps, ret_milliseconds=True, ff_frames=256, dt_obj=F
             return (year, month, day, hour, minute, second, microsecond)
 
 
-def constructFFName(station_code, beg_dt, ext='fits'):
-    """ Construct a name for an FF file using the station code and the given datetime. """
+def constructFFName(station_code, beg_dt, ext='fits', frame=0):
+    """ Construct a name for an FF file using the station code and the given datetime.
+
+    Arguments:
+        station_code: [str] Station code.
+        beg_dt: [datetime] Time of the first frame.
+
+    Keyword arguments:
+        ext: [str] File extension. 'fits' by default. If None, the name has no extension (e.g. the base name
+            of an FFpng image pair).
+        frame: [int] Frame number written in the name. 0 by default.
+
+    Return:
+        [str] FF file name.
+    """
 
     # Remove all underscores from the station code
     station_code = station_code.replace("_", "")
@@ -407,7 +426,10 @@ def constructFFName(station_code, beg_dt, ext='fits'):
 
     # Construct a fake FF file name
     ff_name_ftp = "FF_{:s}_".format(station_code) + beg_dt.strftime("%Y%m%d_%H%M%S_") \
-                + "{:03d}".format(int(beg_dt.microsecond//1000)) + "_0000000." + ext
+                + "{:03d}".format(int(beg_dt.microsecond//1000)) + "_{:07d}".format(int(frame))
+
+    if ext is not None:
+        ff_name_ftp += "." + ext
     
     return ff_name_ftp
 
@@ -431,6 +453,11 @@ def validFFName(ff_file, fmt=None):
 
         else:
             fmt = 'fits'
+
+    # Only the max pixel image of an image pair is listed as the FF file, the average pixel image is its
+    #   companion
+    if FFpng.isPairAveName(ff_file):
+        return False
 
     # Make sure the file starts with FF
     if ff_file.startswith('FF'):
