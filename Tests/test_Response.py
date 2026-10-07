@@ -60,8 +60,8 @@ def testPowerCurveIsTheOldArithmetic():
 
 def testPowerCurveCompressorsUnchanged():
     f = frames()
-    _, a, _ = compressFrames(f, -1, 0.5)
-    _, b, _ = compressFrames(f, -1, 0.5, response=ResponseCurve.power(0.5))
+    _, a, _, _ = compressFrames(f, -1, 0.5)
+    _, b, _, _ = compressFrames(f, -1, 0.5, response=ResponseCurve.power(0.5))
     assert np.array_equal(a, b)
 
     def mimick(**kw):
@@ -108,7 +108,7 @@ def testTableCompressorsMatchReference():
     s = np.sort(f.astype(np.float64), axis=0)
     lin = 255*t.decode(s)
 
-    _, a16, _ = compressFrames(f, -1, 0.5, response=t)
+    _, a16, _, _ = compressFrames(f, -1, 0.5, response=t)
     ref = np.floor(256*t.encode(lin[4:-4].mean(axis=0)/255) + 0.5)
     assert np.array_equal(a16, ref)
 
