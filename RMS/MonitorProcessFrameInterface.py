@@ -41,7 +41,8 @@ from RMS.Formats.FFfile import validFFName, constructFFName
 from RMS.Formats import FFpng
 from RMS.Routines import Image
 from RMS.MonitorNightReport import exitWithMonitor, latestPlateparPath, lockOutputDir, lockOwner, \
-    nightDirPath, nightInfo, NightReporter, readStateFile, ReportLock, stopProcess, writeDoneFlag
+    MONITOR_LOCK_FILE_NAME, nightDirPath, nightInfo, NightReporter, readStateFile, ReportLock, stopProcess, \
+    writeDoneFlag
 from RMS.DetectStarsAndMeteors import (
     detectStarsAndMeteorsFrameInterface,
     saveResultsFrameInterface,
@@ -219,8 +220,30 @@ def walkInput(top_dir, output_dir, config):
                    for dir_name in (config.captured_dir, config.archived_dir, 'logs')}
 
     for root, dirs, files in os.walk(top_dir):
+
+        # Don't descend into the output directory of another monitor
+        if (root != top_dir) and (MONITOR_LOCK_FILE_NAME in files):
+            dirs[:] = []
+            continue
+
         dirs[:] = [d for d in dirs if os.path.realpath(os.path.join(root, d)) not in output_dirs]
         yield root, dirs, files
+
+
+def uniqueId(file_rel_path):
+    """ Return the ID of an input file, which names its results directory: its path relative to the input
+        directory without the extension, with the directories joined by underscores. Files directly in the
+        input directory are identified by their name, files in subdirectories (--recursive) also by the
+        subdirectory, so e.g. HH-MM-SS.mkv files in dated directories are kept apart.
+
+    Arguments:
+        file_rel_path: [str] Path of the file relative to the input directory.
+
+    Return:
+        [str] Unique ID.
+    """
+
+    return os.path.splitext(file_rel_path)[0].replace(os.sep, '_')
 
 
 def matchesFileType(file_name, file_type):
@@ -370,7 +393,7 @@ class ChunkImageSaver(object):
 
 
 def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
-                flat_path=None, dark_path=None, unique_id=None, start_time=None):
+                flat_path=None, dark_path=None, unique_id=None, start_time=None, mask_path=None):
     """ Process a single file through the detection and recalibration pipeline.
 
     Arguments:
@@ -387,6 +410,8 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
         start_time: [datetime] If given, files whose recording begins before this time (UTC) are skipped
             and the process exits with SKIP_EXIT_CODE. None by default. Files of nights past the cutoff
             (monitor_night_cutoff_hours) are skipped the same way, and marked as done.
+        mask_path: [str] Path to the mask. None by default, in which case the mask named in the config next
+            to the file or next to the config file is used, if there is one.
 
     Return:
         [bool] True if processing succeeded, False otherwise.
@@ -413,6 +438,11 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
     config.use_flat = flat_path is not None
     if flat_path is not None:
         config.flat_file = os.path.abspath(flat_path)
+
+    # A given mask is used wherever the file is (the mask is looked up by its name, and an absolute path
+    #   stays absolute when joined to a directory)
+    if mask_path is not None:
+        config.mask_file = os.path.abspath(mask_path)
 
     # Skip files which begin before the start time or whose night is past its cutoff, before loading the
     #   whole file
@@ -631,7 +661,7 @@ def processFileWorker(*args, **kwargs):
     sys.exit(0 if success else 1)
 
 
-def missingCameraFiles(config_path, platepar_path, dark_path=None, flat_path=None):
+def missingCameraFiles(config_path, platepar_path, dark_path=None, flat_path=None, mask_path=None):
     """ Return the files given for a camera which don't exist. They are checked at the start, as with a wrong
         path every file would fail and be given up.
 
@@ -642,13 +672,62 @@ def missingCameraFiles(config_path, platepar_path, dark_path=None, flat_path=Non
     Keyword arguments:
         dark_path: [str] Path to the dark frame, None if not given.
         flat_path: [str] Path to the flat field, None if not given.
+        mask_path: [str] Path to the mask, None if not given.
 
     Return:
         [list] Paths which don't exist.
     """
 
-    return [path for path in (config_path, platepar_path, dark_path, flat_path)
+    return [path for path in (config_path, platepar_path, dark_path, flat_path, mask_path)
             if (path is not None) and (not os.path.isfile(path))]
+
+
+def findInputMask(input_dir, config, mask_path=None):
+    """ Return the mask of the camera: the given one, otherwise the mask file named in the config
+        (mask_file) in the input directory. If neither, None is returned, and each file uses the mask next to
+        it or next to the config file, if there is one.
+
+    Arguments:
+        input_dir: [str] Input directory of the camera.
+        config: [Config] Configuration of the camera.
+
+    Keyword arguments:
+        mask_path: [str] Path to the mask given to the monitor. None by default.
+
+    Return:
+        [str] Absolute path to the mask, or None.
+    """
+
+    if mask_path is not None:
+        return os.path.abspath(mask_path)
+
+    input_mask_path = os.path.join(input_dir, config.mask_file)
+    if os.path.isfile(input_mask_path):
+        return os.path.abspath(input_mask_path)
+
+    return None
+
+
+def enclosingMonitorOutput(output_dir):
+    """ Return the output directory of another monitor which contains the given output directory, found by its
+        lock file. The scans of that monitor would take the results in this one as its own.
+
+    Arguments:
+        output_dir: [str] Output directory.
+
+    Return:
+        [str] The enclosing output directory, None if there is none.
+    """
+
+    parent = os.path.dirname(os.path.realpath(output_dir))
+    while True:
+        if os.path.isfile(os.path.join(parent, MONITOR_LOCK_FILE_NAME)):
+            return parent
+
+        if os.path.dirname(parent) == parent:
+            return None
+
+        parent = os.path.dirname(parent)
 
 
 def loadFailedFiles(output_dir, retry_failed=False):
@@ -868,7 +947,7 @@ def stopWorker(proc):
 def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_dir, nproc=2,
                      chunk_frames=128, poll_interval=2, force=False, recursive=False, flat_path=None,
                      dark_path=None, fail_wait_time=300, start_time=None, report_mode=None,
-                     worker_timeout=WORKER_TIMEOUT, retry_failed=False):
+                     worker_timeout=WORKER_TIMEOUT, retry_failed=False, mask_path=None):
     """ Monitor a directory for new files of the given type and process them.
 
     Arguments:
@@ -893,6 +972,8 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
         worker_timeout: [float] Seconds after which a worker which is still processing a file is stopped
             and the file is retried. 0 disables the limit. WORKER_TIMEOUT by default.
         retry_failed: [bool] Process the files which failed in previous runs again. False by default.
+        mask_path: [str] Path to the mask. None by default, in which case the mask named in the config is
+            looked up in the input directory, then next to each file and next to the config file.
     """
 
     log.info("Monitoring directory: {}".format(input_dir))
@@ -902,9 +983,17 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
     if start_time is not None:
         log.info("Only processing files beginning at or after: {} UTC".format(start_time))
 
-    missing = missingCameraFiles(config_path, platepar_path, dark_path, flat_path)
+    missing = missingCameraFiles(config_path, platepar_path, dark_path, flat_path, mask_path)
     if missing:
         log.error("The given files don't exist: {}".format(", ".join(missing)))
+        sys.exit(1)
+
+    # Output directories of monitors can't be nested
+    enclosing = enclosingMonitorOutput(output_dir)
+    if enclosing is not None:
+        log.error("The output directory {} is inside the output directory of another monitor, {} (it has a "
+                  "{} file). Use a separate directory, or delete the lock file if {} is no longer used by a "
+                  "monitor.".format(output_dir, enclosing, MONITOR_LOCK_FILE_NAME, enclosing))
         sys.exit(1)
 
     # Only one monitor can work on the output directory
@@ -924,36 +1013,46 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
                  "again): {}".format(len(given_up), ", ".join(sorted(given_up))))
         processed_files |= given_up
 
-    # Schedules the night reports
-    reporter = NightReporter(output_dir, config_path, report_mode=report_mode, fail_wait_time=fail_wait_time)
-    log.info("Night report mode: {:s}".format(reporter.report_mode))
-
-    # Pauses the processing while the output disk is full
-    space_guard = FreeSpaceGuard(output_dir, reporter)
-
-    # Scan the output directory for previously completed results (done.flag)
-    if not force:
-        for root, dirs, files in walkInput(output_dir, output_dir, reporter.config):
-            if 'done.flag' in files:
-                # The parent dir name is the file base name
-                completed_base = os.path.basename(root)
-                processed_files.add(completed_base)
-
-        if processed_files:
-            log.info("Found {:d} previously processed file(s), skipping.".format(
-                len(processed_files)))
+    # The reporter (and its upload manager) is created in the try block, so it's stopped if the startup
+    #   fails or is interrupted, as the monitor would otherwise not exit
+    reporter = None
 
     # Active worker processes: {unique_id: Process}
     active_workers = {}
 
-    stability_tracker = {}
-    stable_wait_time = 5
-    stable_max_age = 30
-
-    # Flag to avoid repeating the "waiting for data" message
-    waiting_for_data = False
-
     try:
+
+        # Schedules the night reports
+        reporter = NightReporter(output_dir, config_path, report_mode=report_mode,
+                                 fail_wait_time=fail_wait_time)
+        log.info("Night report mode: {:s}".format(reporter.report_mode))
+
+        # Pauses the processing while the output disk is full
+        space_guard = FreeSpaceGuard(output_dir, reporter)
+
+        mask_path = findInputMask(input_dir, reporter.config, mask_path)
+        if mask_path is not None:
+            log.info("Using mask: {}".format(mask_path))
+
+        # Scan the output directory for previously completed results (done.flag)
+        if not force:
+            for root, dirs, files in walkInput(output_dir, output_dir, reporter.config):
+                if 'done.flag' in files:
+                    # The parent dir name is the file base name
+                    completed_base = os.path.basename(root)
+                    processed_files.add(completed_base)
+
+            if processed_files:
+                log.info("Found {:d} previously processed file(s), skipping.".format(
+                    len(processed_files)))
+
+        stability_tracker = {}
+        stable_wait_time = 5
+        stable_max_age = 30
+
+        # Flag to avoid repeating the "waiting for data" message
+        waiting_for_data = False
+
         while True:
 
             # Clean up finished workers
@@ -1032,8 +1131,7 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
                     if os.path.isdir(file_path):
                         continue
 
-                # Generate a unique ID based on the path name.
-                unique_id = os.path.splitext(file_name)[0]
+                unique_id = uniqueId(file_rel_path)
 
                 # Skip already processed or currently processing files
                 if (unique_id in processed_files) or (unique_id in active_workers):
@@ -1100,6 +1198,11 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
                 if (len(active_workers) >= nproc) or (not space_ok):
                     break
 
+                # Two files with the same ID (e.g. the same name with another extension) are never processed
+                #   at the same time
+                if unique_id in active_workers:
+                    continue
+
                 if file_path in stability_tracker:
                     del stability_tracker[file_path]
 
@@ -1108,7 +1211,7 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
                 proc = startWorker(file_path,
                     (file_path, config_path, platepar_path, output_dir, chunk_frames),
                     {'flat_path': flat_path, 'dark_path': dark_path, 'unique_id': unique_id,
-                     'start_time': start_time})
+                     'start_time': start_time, 'mask_path': mask_path})
                 if proc is None:
                     break
 
@@ -1146,7 +1249,8 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
             for proc in active_workers.values():
                 stopWorker(proc)
 
-        reporter.stop(timeout=SHUTDOWN_TIMEOUT)
+        if reporter is not None:
+            reporter.stop(timeout=SHUTDOWN_TIMEOUT)
 
         log.info("All workers stopped.")
 
@@ -1260,6 +1364,7 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None,
             'platepar_path': os.path.abspath(cp.get(section, 'platepar')),
             'flat_path': cp.get(section, 'flat', fallback=None),
             'dark_path': cp.get(section, 'dark', fallback=None),
+            'mask_path': cp.get(section, 'mask', fallback=None),
         }
 
         # Determine the start time for this camera (command line > camera section > [Global])
@@ -1274,6 +1379,8 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None,
             cam['flat_path'] = os.path.abspath(cam['flat_path'])
         if cam['dark_path']:
             cam['dark_path'] = os.path.abspath(cam['dark_path'])
+        if cam['mask_path']:
+            cam['mask_path'] = os.path.abspath(cam['mask_path'])
         
         # Ensure the output directory for this camera exists before we start dumping data there
         os.makedirs(cam['output_dir'], exist_ok=True)
@@ -1286,17 +1393,33 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None,
     # The files of every camera have to exist
     for cam in cameras:
         missing = missingCameraFiles(cam['config_path'], cam['platepar_path'], cam['dark_path'],
-                                     cam['flat_path'])
+                                     cam['flat_path'], cam['mask_path'])
         if missing:
             print("ERROR: Camera {}: the given files don't exist: {}".format(cam['id'], ", ".join(missing)))
             sys.exit(1)
 
-    # Every camera needs its own output directory
+    # Every camera needs its own output directory, and they can't be nested
     output_dirs = [os.path.realpath(cam['output_dir']) for cam in cameras]
     if len(set(output_dirs)) < len(output_dirs):
         print("ERROR: Cameras in the multicam config share an output directory: {}".format(", ".join(
             sorted(set(path for path in output_dirs if output_dirs.count(path) > 1)))))
         sys.exit(1)
+
+    for path in output_dirs:
+        for other in output_dirs:
+            if (path != other) and other.startswith(path + os.sep):
+                print("ERROR: The output directory {} of a camera is inside the output directory {} of "
+                      "another camera, use separate directories".format(other, path))
+                sys.exit(1)
+
+    for cam in cameras:
+        enclosing = enclosingMonitorOutput(cam['output_dir'])
+        if enclosing is not None:
+            print("ERROR: Camera {}: the output directory {} is inside the output directory of another "
+                  "monitor, {} (it has a {} file). Use a separate directory, or delete the lock file if {} "
+                  "is no longer used by a monitor.".format(cam['id'], cam['output_dir'], enclosing,
+                                                        MONITOR_LOCK_FILE_NAME, enclosing))
+            sys.exit(1)
 
     # To initialize the global logger, we need a directory. We will use the output directory 
     # of the first camera in the list as the primary logging location, or the current directory if missing.
@@ -1335,65 +1458,77 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None,
     # Schedule the night reports of every camera, only one camera reports at a time
     report_lock = ReportLock()
     reporters = {}
-    for cam in cameras:
-        reporters[cam['id']] = NightReporter(cam['output_dir'], cam['config_path'], report_mode=report_mode,
-                                             fail_wait_time=fail_wait_time, camera_id=cam['id'],
-                                             report_lock=report_lock)
-        log.info("Camera {}: night report mode: {}".format(cam['id'], reporters[cam['id']].report_mode))
-
-    # Pause the processing of a camera while its output disk is full
-    space_guards = {cam['id']: FreeSpaceGuard(cam['output_dir'], reporters[cam['id']],
-                                              log_prefix="[{}] ".format(cam['id'])) for cam in cameras}
-
-    # Initialize state tracking dictionaries. Since files from different cameras might have the same name,
-    # we track these metrics per camera using nested dictionaries or sets.
-    processed_files = {cam['id']: set() for cam in cameras}
-    cam_output_dirs = {cam['id']: cam['output_dir'] for cam in cameras}
-
-    # Failed files of every camera, also from previous runs. Files which failed too often are not processed
-    #   again
-    failed_files = {}
-    for cam in cameras:
-        failed_files[cam['id']], given_up = loadFailedFiles(cam['output_dir'],
-                                                             retry_failed=(retry_failed or force))
-        if given_up:
-            log.info("Camera {}: skipping {:d} file(s) which failed in previous runs (use --retry_failed to "
-                     "process them again): {}".format(cam['id'], len(given_up), ", ".join(sorted(given_up))))
-            processed_files[cam['id']] |= given_up
-
-    stability_tracker = {cam['id']: {} for cam in cameras}
-    
-    # Files are considered "stable" (i.e., finished writing to disk) if their size/mtime hasn't 
-    # changed for `stable_wait_time` seconds, or if they are older than `stable_max_age` seconds.
-    stable_wait_time = 5
-    stable_max_age = 30
 
     # Dictionary to keep track of currently active processing jobs
     # Format: { (camera_id, unique_id) : multiprocessing.Process }
-    active_workers = {} 
-    
-    # Counter for how many processes each camera is currently running (used for load balancing)
-    active_count_per_cam = {cam['id']: 0 for cam in cameras}
+    active_workers = {}
 
-    # Pre-scan the output directories for files that have already been processed 
-    # (indicated by the presence of a 'done.flag'). We do this to avoid reprocessing old files.
-    if not force:
-        for cam in cameras:
-            for root, dirs, files in walkInput(cam['output_dir'], cam['output_dir'],
-                                               reporters[cam['id']].config):
-                if 'done.flag' in files:
-                    # The parent directory name is typically the original base filename
-                    completed_base = os.path.basename(root)
-                    processed_files[cam['id']].add(completed_base)
-            
-            if processed_files[cam['id']]:
-                log.info("Camera {}: Found {:d} previously processed file(s).".format(
-                    cam['id'], len(processed_files[cam['id']])))
-
-    # Keep track of the last camera that received a process slot to facilitate round-robin tiebreaking
-    last_assigned_idx = 0
-
+    # The reporters (and their upload managers) are created in the try block, so they're stopped if the
+    #   startup fails or is interrupted, as the monitor would otherwise not exit
     try:
+
+        for cam in cameras:
+            reporters[cam['id']] = NightReporter(cam['output_dir'], cam['config_path'],
+                                                 report_mode=report_mode, fail_wait_time=fail_wait_time,
+                                                 camera_id=cam['id'], report_lock=report_lock)
+            log.info("Camera {}: night report mode: {}".format(cam['id'], reporters[cam['id']].report_mode))
+
+        # The mask of every camera
+        for cam in cameras:
+            cam['mask_path'] = findInputMask(cam['input_dir'], reporters[cam['id']].config, cam['mask_path'])
+            if cam['mask_path'] is not None:
+                log.info("Camera {}: using mask: {}".format(cam['id'], cam['mask_path']))
+
+        # Pause the processing of a camera while its output disk is full
+        space_guards = {cam['id']: FreeSpaceGuard(cam['output_dir'], reporters[cam['id']],
+                                                  log_prefix="[{}] ".format(cam['id'])) for cam in cameras}
+
+        # Initialize state tracking dictionaries. Since files from different cameras might have the same name,
+        # we track these metrics per camera using nested dictionaries or sets.
+        processed_files = {cam['id']: set() for cam in cameras}
+        cam_output_dirs = {cam['id']: cam['output_dir'] for cam in cameras}
+
+        # Failed files of every camera, also from previous runs. Files which failed too often are not
+        #   processed again
+        failed_files = {}
+        for cam in cameras:
+            failed_files[cam['id']], given_up = loadFailedFiles(cam['output_dir'],
+                                                                 retry_failed=(retry_failed or force))
+            if given_up:
+                log.info("Camera {}: skipping {:d} file(s) which failed in previous runs (use --retry_failed "
+                         "to process them again): {}".format(cam['id'], len(given_up),
+                                                             ", ".join(sorted(given_up))))
+                processed_files[cam['id']] |= given_up
+
+        stability_tracker = {cam['id']: {} for cam in cameras}
+    
+        # Files are considered "stable" (i.e., finished writing to disk) if their size/mtime hasn't 
+        # changed for `stable_wait_time` seconds, or if they are older than `stable_max_age` seconds.
+        stable_wait_time = 5
+        stable_max_age = 30
+
+    
+        # Counter for how many processes each camera is currently running (used for load balancing)
+        active_count_per_cam = {cam['id']: 0 for cam in cameras}
+
+        # Pre-scan the output directories for files that have already been processed 
+        # (indicated by the presence of a 'done.flag'). We do this to avoid reprocessing old files.
+        if not force:
+            for cam in cameras:
+                for root, dirs, files in walkInput(cam['output_dir'], cam['output_dir'],
+                                                   reporters[cam['id']].config):
+                    if 'done.flag' in files:
+                        # The parent directory name is typically the original base filename
+                        completed_base = os.path.basename(root)
+                        processed_files[cam['id']].add(completed_base)
+            
+                if processed_files[cam['id']]:
+                    log.info("Camera {}: Found {:d} previously processed file(s).".format(
+                        cam['id'], len(processed_files[cam['id']])))
+
+        # Keep track of the last camera that received a process slot to facilitate round-robin tiebreaking
+        last_assigned_idx = 0
+
         # Main monitoring loop
         while True:
 
@@ -1497,7 +1632,7 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None,
                             continue
                     
                     # Generate a unique ID based on the path name.
-                    unique_id = os.path.splitext(file_name)[0]
+                    unique_id = uniqueId(file_rel_path)
 
                     # Ignore files we've already processed or are currently working on
                     # Workers are tracked per camera, as cameras can have files of the same name
@@ -1608,6 +1743,11 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None,
                 file_info = stable_per_cam[cam_id].pop(0)
                 file_path, mtime, unique_id, file_rel_path = file_info
 
+                # Two files with the same ID (e.g. the same name with another extension) are never processed
+                #   at the same time
+                if (cam_id, unique_id) in active_workers:
+                    continue
+
                 # Stop tracking stability for this file since it's about to be processed
                 if file_path in stability_tracker[cam_id]:
                     del stability_tracker[cam_id][file_path]
@@ -1620,7 +1760,8 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None,
                     (file_path, chosen_cam['config_path'], chosen_cam['platepar_path'],
                      chosen_cam['output_dir'], chunk_frames),
                     {'flat_path': chosen_cam['flat_path'], 'dark_path': chosen_cam['dark_path'],
-                     'unique_id': unique_id, 'start_time': chosen_cam['start_time']})
+                     'unique_id': unique_id, 'start_time': chosen_cam['start_time'],
+                     'mask_path': chosen_cam['mask_path']})
                 if proc is None:
                     break
 
@@ -1802,6 +1943,11 @@ Examples:
              "config file is ignored)."
     )
 
+    arg_parser.add_argument('--mask', type=str, default=None,
+        help="Path to the mask image. If not given, the mask named in the config (mask_file) is used from "
+             "the input directory, or next to each file or the config file."
+    )
+
     arg_parser.add_argument('--multicam', '-m', type=str, default=None,
         help="Path to an INI file containing multiple camera configurations. If provided, other arguments like input_dir are ignored."
     )
@@ -1908,6 +2054,7 @@ Examples:
         force=cml_args.force,
         flat_path=cml_args.flat,
         dark_path=cml_args.dark,
+        mask_path=cml_args.mask,
         start_time=start_time,
         report_mode=cml_args.report_mode,
         worker_timeout=cml_args.worker_timeout,

@@ -50,13 +50,14 @@ Things to know about the input:
   complete when its size and time didn't change for 5 s. If the recording pauses longer in the middle of a
   file, the worker notices at the end that the file changed and the file is processed again in full, but a
   recording program which appends to an old file later (e.g. hours later) is not supported.
-- **File names must be unique.** A file is identified by its name without the extension. With `--recursive`,
-  files in different subdirectories with the same name (e.g. `HH-MM-SS.mkv` in dated directories) are
-  treated as the same file, so use unique names.
-- **Video files are loaded into memory.** MKV/MP4/AVI files are read completely into memory by the worker,
-  about `width x height x frames` bytes (1.5 GB for 30 s of 1080p at 25 fps). Keep video files short (a few
-  minutes at most) and size `--nproc` to the RAM. `.vid` files and FITS directories are read as needed, so a
-  10-minute `.vid` file of several GB is fine.
+- **File names must be unique.** A file is identified by its path in the input directory without the
+  extension (e.g. `2026-10-07/22-00-00.mkv` becomes `2026-10-07_22-00-00`), which also names its results
+  directory. Don't reuse a name for a new recording in the same directory.
+- **Workers need a lot of memory.** MKV/MP4/AVI files are read completely into memory, and the meteor
+  detection works on all frames of the file at once: a worker processing a 30 s 1080p MKV peaks at about
+  7 GB. `.vid` files and FITS directories are read as needed; a 10-minute 512x512 16-bit `.vid` file needs
+  about 2 GB. Keep video files short (a few minutes at most) and set `--nproc` to the free RAM divided by
+  the peak of one worker. A worker killed by the system for lack of memory counts as a failure of the file.
 - **Video decoding.** For video files the decoder is set by `media_backend` and `gst_decoder` in the config.
   `nvh264dec` uses the GPU; if it can't be used, the monitor falls back to the software decoder
   automatically.
@@ -79,8 +80,9 @@ You need:
   needs to be roughly right, as every chunk is recalibrated. Without `--platepar`, the monitor looks for
   the file named by `platepar_name` in the config (`platepar_cmn2010.cal` by default) in the input
   directory.
-- **A mask** (optional), the file named by `mask` in the config (`mask.bmp` by default), in the input
-  directory or next to the config file.
+- **A mask** (optional), given with `--mask` (or `mask` in the multicam file). If it's not given, the file
+  named by `mask` in the config (`mask.bmp` by default) is used from the input directory; if it's not there,
+  each file uses the mask next to it or next to the config file, if there is one.
 - **A dark (bias) and a flat** (optional). They are applied only if given with `--dark`/`--flat` (or `dark`
   and `flat` in the multicam file); `use_dark`/`use_flat` in the config are ignored. With detection binning
   the dark, flat and mask are binned automatically. The dark and flat are applied once, to the frames, and
@@ -94,7 +96,9 @@ All given files are checked when the monitor starts, and it refuses to start if 
   input files.
 - **Output directory** (`-o`): where the results go. It defaults to the input directory, but use a separate
   directory, ideally on its own disk or partition, so the cleanup of the monitor's data (see
-  [Disk space](#disk-space-and-cleanup)) can't be confused by the recordings.
+  [Disk space](#disk-space-and-cleanup)) can't be confused by the recordings. Output directories can't be
+  nested: the monitor refuses to start in a directory inside the output directory of another monitor (one
+  with a `.monitor.lock` file), and the cameras of a multicam file need separate, non-nested directories.
 
 ### Starting the monitor
 
@@ -113,6 +117,7 @@ Command line options:
 | `-c`, `--config` | `.config` in the input dir | camera config |
 | `-p`, `--platepar` | `platepar_name` in the input dir | platepar |
 | `--dark`, `--flat` | none | dark (bias) and flat, applied only if given |
+| `--mask` | `mask` in the input dir | mask |
 | `-n`, `--nproc` | 2 | parallel worker processes |
 | `--chunk_frames` | 128 | frames per star extraction chunk (and per saved image pair) |
 | `-r`, `--recursive` | off | also watch subdirectories |
@@ -160,6 +165,7 @@ config = /data/cam1/cam1.config
 platepar = /data/cam1/platepar_cmn2010.cal
 dark = /data/cam1/bias.png
 flat = /data/cam1/flat.png
+mask = /data/cam1/mask.bmp
 
 [CAM2]
 input_dir = /data/cam2/recordings
@@ -363,7 +369,9 @@ after sunrise, and the night is reported when it's done. Two settings help when 
 ## Disk space and cleanup
 
 With `monitor_delete_old_data` (on by default), the monitor manages its output directory like RMS manages
-its data directory, at startup, after every report and every 12 hours:
+its data directory, at startup, after every report, every 12 hours, and when the disk is full. The cleanup
+runs independently of the reports, also while a report runs (the night being reported is kept), so the free
+space is kept up during long reports:
 
 - Old night directories and archives are deleted by `capt_dirs_to_keep`, `arch_dirs_to_keep`,
   `bz2_files_to_keep` and the quotas, and old logs by `logdays_to_keep`. Nights which were not reported yet

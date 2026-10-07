@@ -477,6 +477,49 @@ def test_walkInput_skips_monitor_output(tmp_path):
     assert _walked(input_dir, str(tmp_path/'output')) == sorted(all_dirs)
 
 
+def test_unique_ids_keep_files_in_subdirectories_apart():
+
+    assert mon.uniqueId('22-00-00.mkv') == '22-00-00'
+    assert mon.uniqueId(os.path.join('2026-10-07', '22-00-00.mkv')) == '2026-10-07_22-00-00'
+    assert mon.uniqueId(os.path.join('2026-10-08', '22-00-00.mkv')) == '2026-10-08_22-00-00'
+
+
+def test_output_dir_inside_another_monitor_output_is_found(tmp_path):
+
+    outer = tmp_path/'outer'
+    (outer/'inner').mkdir(parents=True)
+    assert mon.enclosingMonitorOutput(str(outer/'inner')) is None
+
+    (outer/mon.MONITOR_LOCK_FILE_NAME).write_text('1\n')
+    assert mon.enclosingMonitorOutput(str(outer/'inner')) == os.path.realpath(str(outer))
+    assert mon.enclosingMonitorOutput(str(outer)) is None
+
+
+def test_walkInput_skips_other_monitor_outputs(tmp_path):
+
+    config = cr.Config()
+    (tmp_path/'videos'/'other'/'2025').mkdir(parents=True)
+    (tmp_path/'videos'/'other'/mon.MONITOR_LOCK_FILE_NAME).write_text('1\n')
+
+    input_dir = str(tmp_path/'videos')
+    walked = [os.path.relpath(root, input_dir) for root, _, _ in mon.walkInput(input_dir, input_dir, config)]
+    assert walked == ['.']
+
+
+def test_mask_is_found_in_the_input_dir(tmp_path):
+
+    config = cr.Config()
+    input_dir = str(tmp_path)
+
+    assert mon.findInputMask(input_dir, config) is None
+
+    open(os.path.join(input_dir, config.mask_file), 'w').close()
+    assert mon.findInputMask(input_dir, config) == os.path.join(input_dir, config.mask_file)
+
+    # A given mask is used instead
+    assert mon.findInputMask(input_dir, config, 'other.bmp') == os.path.abspath('other.bmp')
+
+
 ### Saving the chunk images ###
 
 class _FakeFF(object):
