@@ -9,6 +9,7 @@ import datetime
 import json
 import os
 import shutil
+import time
 
 import numpy as np
 import pytest
@@ -880,8 +881,17 @@ def test_report_finished_during_shutdown_is_uploaded(scheduling):
             added.append(file_list)
         def delayNextUpload(self, delay=0):
             pass
-        def stop(self, timeout=None):
+
+        class exit(object):
+            @staticmethod
+            def set():
+                pass
+
+        def join(self, timeout=None):
             pass
+
+        def is_alive(self):
+            return False
 
     reporter.upload_manager = _UploadManager()
     reporter._startReport(night, results, 'sunrise')
@@ -992,3 +1002,22 @@ def test_new_results_are_scanned_at_most_every_minute(scheduling, monkeypatch):
 
     reporter.poll(True, now + datetime.timedelta(seconds=61))
     assert (len(scans) == 2) and (reporter.active is not None)
+
+
+def _ignoreSigterm():
+    import signal
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    time.sleep(60)
+
+
+def test_stopProcess_kills_a_process_which_ignores_sigterm():
+
+    import multiprocessing
+
+    proc = multiprocessing.Process(target=_ignoreSigterm)
+    proc.start()
+    time.sleep(0.5)
+
+    t0 = time.time()
+    assert mnr.stopProcess(proc, "Test", timeout=1)
+    assert (not proc.is_alive()) and (time.time() - t0 < 5)

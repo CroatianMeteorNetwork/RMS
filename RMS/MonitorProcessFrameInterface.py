@@ -41,7 +41,7 @@ from RMS.Formats.FFfile import validFFName, constructFFName
 from RMS.Formats import FFpng
 from RMS.Routines import Image
 from RMS.MonitorNightReport import exitWithMonitor, latestPlateparPath, lockOutputDir, lockOwner, \
-    nightDirPath, nightInfo, NightReporter, readStateFile, ReportLock, writeDoneFlag
+    nightDirPath, nightInfo, NightReporter, readStateFile, ReportLock, stopProcess, writeDoneFlag
 from RMS.DetectStarsAndMeteors import (
     detectStarsAndMeteorsFrameInterface,
     saveResultsFrameInterface,
@@ -839,11 +839,7 @@ def stopStuckWorker(proc, unique_id, worker_timeout):
 def stopWorker(proc):
     """ Stop a worker process, killing it if it doesn't end after SIGTERM. """
 
-    proc.terminate()
-    proc.join(10)
-    if proc.is_alive():
-        proc.kill()
-        proc.join()
+    stopProcess(proc, "Worker")
 
 
 def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_dir, nproc=2,
@@ -1257,6 +1253,13 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None,
 
     if not cameras:
         print("ERROR: No cameras defined in config.")
+        sys.exit(1)
+
+    # Every camera needs its own output directory
+    output_dirs = [os.path.realpath(cam['output_dir']) for cam in cameras]
+    if len(set(output_dirs)) < len(output_dirs):
+        print("ERROR: Cameras in the multicam config share an output directory: {}".format(", ".join(
+            sorted(set(path for path in output_dirs if output_dirs.count(path) > 1)))))
         sys.exit(1)
 
     # To initialize the global logger, we need a directory. We will use the output directory 

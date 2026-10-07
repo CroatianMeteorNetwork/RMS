@@ -1113,6 +1113,35 @@ def cleanupOldData(output_dir, config):
 
 ### Worker processes ###
 
+def stopProcess(proc, name, timeout=10):
+    """ Stop a process with SIGTERM, and with SIGKILL if it doesn't end. The waits are bounded, so a process
+        stuck in an uninterruptible call (e.g. on a hung file system) can't block the caller.
+
+    Arguments:
+        proc: [multiprocessing.Process] The process.
+        name: [str] Name of the process for the log.
+
+    Keyword arguments:
+        timeout: [float] Seconds to wait after each signal. 10 by default.
+
+    Return:
+        [bool] True if the process ended.
+    """
+
+    proc.terminate()
+    proc.join(timeout)
+
+    if proc.is_alive():
+        proc.kill()
+        proc.join(timeout)
+
+    if proc.is_alive():
+        log.error("{:s} (PID {}) could not be stopped, it is left behind".format(name, proc.pid))
+        return False
+
+    return True
+
+
 def exitWithMonitor(interval=2.0):
     """ End this worker process when the monitor process which started it is gone, e.g. when it was killed,
         so the worker doesn't keep running next to a restarted monitor. Call it at the start of the worker.
@@ -1351,12 +1380,7 @@ class NightReporter(object):
             return False
 
         log.error(self.log_prefix + "{:s} did not finish in {:.1f} h, stopping it".format(name, timeout/3600))
-
-        proc.terminate()
-        proc.join(10)
-        if proc.is_alive():
-            proc.kill()
-            proc.join()
+        stopProcess(proc, self.log_prefix + name)
 
         return True
 
@@ -1548,9 +1572,15 @@ class NightReporter(object):
             else:
                 self._finishReport(RmsDateTime.utcnow())
 
-        # The upload queue is kept on disk, so an interrupted upload continues after a restart
+        # The upload queue is kept on disk, so an interrupted upload continues after a restart. The upload
+        #   manager is stopped here instead of with its stop method, whose final wait is not bounded
         if self.upload_manager is not None:
-            self.upload_manager.stop(timeout=timeout)
+            self.upload_manager.exit.set()
+            self.upload_manager.join(timeout)
+            if self.upload_manager.is_alive():
+                log.warning(self.log_prefix + "The upload manager did not stop in time, terminating it")
+                stopProcess(self.upload_manager, self.log_prefix + "Upload manager")
+
             self.upload_manager = None
 
 
