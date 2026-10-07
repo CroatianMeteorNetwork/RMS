@@ -49,7 +49,7 @@ except ImportError:
 import RMS.ConfigReader as cr
 from RMS.Astrometry.ApplyAstrometry import raDecToXYPP
 from RMS.CaptureDuration import CAPTURE_HORIZON_DEG
-from RMS.DeleteOldObservations import deleteOldLogfiles, deleteOldObservations, getNightDirs
+from RMS.DeleteOldObservations import availableSpace, deleteOldLogfiles, deleteOldObservations, getNightDirs
 from RMS.Formats import CALSTARS
 from RMS.Formats import FFpng
 from RMS.Formats import FTPdetectinfo
@@ -1074,10 +1074,29 @@ def cleanupOldData(output_dir, config):
 
     # The space needed for the next night is the size of the largest of the last nights, as the capture
     #   settings in the config (e.g. raw video saving) don't describe the data of the monitor
+    night_sizes = {night_dir: directorySize(os.path.join(captured_path, night_dir))
+                   for night_dir in night_dirs}
     needed_bytes = config.extra_space_gb*1024**3
     if night_dirs:
-        needed_bytes += max(directorySize(os.path.join(captured_path, night_dir))
-                            for night_dir in night_dirs[-3:])
+        needed_bytes += max(night_sizes[night_dir] for night_dir in night_dirs[-3:])
+
+        # Only ask for the space which deleting the older nights can free, never the latest (current) night.
+        #   If other data takes the disk (e.g. the recordings on a shared disk), deleting everything wouldn't
+        #   help. A margin is left, as the free space doesn't grow exactly by the size of the deleted files
+        archived_path = os.path.join(output_dir, config.archived_dir)
+        deletable = sum(night_sizes[night_dir] for night_dir in night_dirs[:-1])
+        if os.path.isdir(archived_path):
+            for file_name in os.listdir(archived_path):
+                if not file_name.startswith(night_dirs[-1]):
+                    path = os.path.join(archived_path, file_name)
+                    deletable += directorySize(path) if os.path.isdir(path) else os.path.getsize(path)
+
+        freeable = availableSpace(output_dir) + 0.9*deletable
+        if needed_bytes > freeable:
+            log.warning("{:.1f} GB are needed for the next night, but deleting the old nights in {:s} can "
+                        "only free up to {:.1f} GB, the rest of the disk is used by other data".format(
+                            needed_bytes/1024**3, output_dir, freeable/1024**3))
+            needed_bytes = freeable
 
     enough_space = deleteOldObservations(output_dir, config.captured_dir, config.archived_dir, config,
                                          needed_bytes=needed_bytes)

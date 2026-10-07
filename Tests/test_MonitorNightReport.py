@@ -584,8 +584,16 @@ def test_cleanup_needs_the_space_of_the_largest_recent_night(tmp_path, monkeypat
     monkeypatch.setattr(mnr, 'deleteOldObservations', lambda *args, **kwargs: needed.append(
         kwargs['needed_bytes']) or True)
 
+    monkeypatch.setattr(mnr, 'availableSpace', lambda path: 10*1024**4)
     mnr.cleanupOldData(output_dir, config)
     assert needed == [config.extra_space_gb*1024**3 + 3000]
+
+    # If other data takes the disk, only the space which deleting the older nights frees is asked for, never
+    #   the latest night
+    monkeypatch.setattr(mnr, 'availableSpace', lambda path: 100)
+    needed.clear()
+    mnr.cleanupOldData(output_dir, config)
+    assert needed == [pytest.approx(100 + 0.9*(5000 + 1000 + 3000))]
 
 
 def test_delete_old_night_images(tmp_path):
