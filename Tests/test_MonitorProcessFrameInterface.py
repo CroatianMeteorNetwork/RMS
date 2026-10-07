@@ -460,14 +460,21 @@ def test_walkInput_skips_monitor_output(tmp_path):
 
     config = cr.Config()
     config.captured_dir = 'Nights'
-    for dir_name in ['2025', 'Nights', config.archived_dir, 'logs', 'CapturedFiles']:
+    for dir_name in ['2025', 'Nights', config.archived_dir, 'logs', 'CapturedFiles', 'cam/Nights']:
         (tmp_path/'videos'/dir_name).mkdir(parents=True)
 
-    input_dir = str(tmp_path/'videos')
-    walked = [os.path.relpath(root, input_dir) for root, _, _ in mon.walkInput(input_dir, config)]
+    def _walked(input_dir, output_dir):
+        return sorted(os.path.relpath(root, input_dir)
+                      for root, _, _ in mon.walkInput(input_dir, output_dir, config))
 
-    # The night directory comes from the config, a directory named like the default one is input
-    assert sorted(walked) == ['.', '2025', 'CapturedFiles']
+    # The output is in the input directory: its night directory comes from the config, and only the
+    #   directories of the output are skipped
+    input_dir = str(tmp_path/'videos')
+    assert _walked(input_dir, input_dir) == ['.', '2025', 'CapturedFiles', 'cam', 'cam/Nights']
+
+    # A separate output directory: nothing in the input is skipped
+    all_dirs = ['.', '2025', 'Nights', config.archived_dir, 'logs', 'CapturedFiles', 'cam', 'cam/Nights']
+    assert _walked(input_dir, str(tmp_path/'output')) == sorted(all_dirs)
 
 
 ### Saving the chunk images ###

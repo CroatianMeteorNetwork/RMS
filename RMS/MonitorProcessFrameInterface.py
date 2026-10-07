@@ -201,22 +201,25 @@ def resultsDirPath(output_dir, beginning_datetime, file_base):
                         "{:04d}{:02d}{:02d}".format(dt.year, dt.month, dt.day), file_base)
 
 
-def walkInput(top_dir, config):
+def walkInput(top_dir, output_dir, config):
     """ Walk the directory tree like os.walk, without descending into the night, archive and log directories
         of the monitor, which are in the input directory if it is also the output directory (the default).
+        Other directories with the same names are walked.
 
     Arguments:
         top_dir: [str] Directory to walk.
+        output_dir: [str] Output directory of the monitor.
         config: [Config] Configuration of the camera, which names the night and archive directories.
 
     Return:
         Yields (root, dirs, files) like os.walk.
     """
 
-    output_dirs = {config.captured_dir, config.archived_dir, 'logs'}
+    output_dirs = {os.path.realpath(os.path.join(output_dir, dir_name))
+                   for dir_name in (config.captured_dir, config.archived_dir, 'logs')}
 
     for root, dirs, files in os.walk(top_dir):
-        dirs[:] = [d for d in dirs if d not in output_dirs]
+        dirs[:] = [d for d in dirs if os.path.realpath(os.path.join(root, d)) not in output_dirs]
         yield root, dirs, files
 
 
@@ -930,7 +933,7 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
 
     # Scan the output directory for previously completed results (done.flag)
     if not force:
-        for root, dirs, files in walkInput(output_dir, reporter.config):
+        for root, dirs, files in walkInput(output_dir, output_dir, reporter.config):
             if 'done.flag' in files:
                 # The parent dir name is the file base name
                 completed_base = os.path.basename(root)
@@ -987,7 +990,7 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
             candidate_paths = []
             try:
                 if recursive:
-                    for root, dirs, files in walkInput(input_dir, reporter.config):
+                    for root, dirs, files in walkInput(input_dir, output_dir, reporter.config):
                         if file_type == 'fitsdirs':
                             for d in dirs:
                                 candidate_paths.append(os.path.join(root, d))
@@ -1376,7 +1379,8 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None,
     # (indicated by the presence of a 'done.flag'). We do this to avoid reprocessing old files.
     if not force:
         for cam in cameras:
-            for root, dirs, files in walkInput(cam['output_dir'], reporters[cam['id']].config):
+            for root, dirs, files in walkInput(cam['output_dir'], cam['output_dir'],
+                                               reporters[cam['id']].config):
                 if 'done.flag' in files:
                     # The parent directory name is typically the original base filename
                     completed_base = os.path.basename(root)
@@ -1448,7 +1452,8 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None,
                 # Fetch all paths from the input directory
                 try:
                     if recursive:
-                        for root, dirs, files in walkInput(cam['input_dir'], reporters[cam['id']].config):
+                        for root, dirs, files in walkInput(cam['input_dir'], cam['output_dir'],
+                                                         reporters[cam['id']].config):
                             if file_type == 'fitsdirs':
                                 for d in dirs:
                                     candidate_paths.append(os.path.join(root, d))
