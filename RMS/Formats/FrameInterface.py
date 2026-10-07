@@ -134,6 +134,26 @@ def computeFramesToRead(read_nframes, total_frames, chunk_frames, first_frame):
     return int(frames_to_read)
 
 
+def estimateFPS(unix_times):
+    """ Estimate the frame rate from the times of consecutive frames. N frames span N - 1 frame intervals.
+
+    Arguments:
+        unix_times: [list] Unix times (in seconds) of consecutive frames.
+
+    Return:
+        fps: [float] Frames per second. None if there are fewer than two frames or they span no time.
+    """
+
+    if len(unix_times) < 2:
+        return None
+
+    duration = unix_times[-1] - unix_times[0]
+    if duration <= 0:
+        return None
+
+    return (len(unix_times) - 1)/duration
+
+
 class InputType(object):
     def __init__(self):
         """ Template class for all input types. """
@@ -1311,8 +1331,11 @@ class InputTypeUWOVid(InputType):
         # Do the initial load
         self.loadChunk()
 
-        # Estimate the FPS
-        self.fps = 1/((self.frame_chunk_unix_times[-1] - self.frame_chunk_unix_times[0])/self.current_fr_chunk_size)
+        # Estimate the FPS from the frame times, use the one from the config file if it cannot be estimated
+        self.fps = estimateFPS(self.frame_chunk_unix_times)
+        if self.fps is None:
+            self.fps = self.config.fps
+            print('Using FPS from config file: ', self.fps)
 
     def nextChunk(self):
         """ Go to the next frame chunk. """
@@ -1884,7 +1907,10 @@ class InputTypeImages(InputType):
             # Convert datetimes to Unix times
             unix_times = [datetime2UnixTime(dt) for dt in self.frame_dt_list]
 
-            fps = 1/((unix_times[-1] - unix_times[0])/self.current_fr_chunk_size)
+            # Keep the given FPS if it cannot be estimated from the frame times
+            fps_est = estimateFPS(unix_times)
+            if fps_est is not None:
+                fps = fps_est
 
 
         # If FPS is not given, use one from the config file

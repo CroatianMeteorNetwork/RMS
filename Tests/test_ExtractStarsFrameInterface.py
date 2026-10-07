@@ -13,6 +13,7 @@ import pytest
 
 import RMS.ConfigReader as cr
 import RMS.ExtractStars as es
+from RMS.Routines.Image import binImage
 from RMS.Astrometry.ApplyRecalibrate import ftpMatchTimes
 from RMS.Formats import FFfile
 
@@ -216,9 +217,51 @@ def test_binned_stars_are_rescaled(config, fake_extract, method, intens_factor):
 
     y, x, intens, ampl, fwhm, bg, snr, n_sat = star_list[0][1][0]
 
-    assert (y, x, fwhm) == (40.0, 20.0, 5.0)
+    # The centre of the binned pixel i is at 2*i + 0.5 on the full size image
+    assert (y, x, fwhm) == (40.5, 20.5, 5.0)
     assert intens == 1000*intens_factor
     assert (ampl, bg, snr, n_sat) == (10, 5, 8.0, 0)
+
+
+class _BinnedStarHandle(_FakeHandle):
+    """ Image handle which returns a binned frame with synthetic Gaussian stars, as the video handles bin the
+        frames for detection.
+    """
+
+    def __init__(self, stars, bin_factor, shape=(256, 384), sigma=2.5):
+
+        super(_BinnedStarHandle, self).__init__([0])
+
+        # Render the stars at the full image size (pixel centres are at integer coordinates)
+        yy, xx = np.mgrid[0:shape[0], 0:shape[1]]
+        img = np.full(shape, 20.0)
+        for x0, y0 in stars:
+            img += 200*np.exp(-((xx - x0)**2 + (yy - y0)**2)/(2*sigma**2))
+
+        self.img_binned = binImage(np.clip(np.round(img), 0, 255).astype(np.uint16), bin_factor, 'avg')
+
+    def chunkImage(self, chunk):
+        return self.img_binned
+
+
+@pytest.mark.parametrize('bin_factor', [2, 4])
+def test_binned_star_positions_match_full_size(config, bin_factor):
+
+    config.detection_binning_factor = bin_factor
+    config.detection_binning_method = 'avg'
+
+    # Stars at the full image size, at different subpixel positions
+    stars = [(100.0, 60.0), (300.3, 200.7), (222.0, 150.5), (160.6, 120.2)]
+
+    star_list = es.extractStarsImgHandle(_BinnedStarHandle(stars, bin_factor), config=config)
+
+    extracted = [(x, y) for y, x in (entry[:2] for entry in star_list[0][1])]
+    assert len(extracted) == len(stars)
+
+    # Every star is unbinned to its full size position
+    for x0, y0 in stars:
+        dist = min(np.hypot(x - x0, y - y0) for x, y in extracted)
+        assert dist < 0.1
 
 
 def test_calibration_is_binned_for_binned_frames(config, fake_extract):

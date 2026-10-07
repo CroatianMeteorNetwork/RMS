@@ -4005,10 +4005,13 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                             log.debug('Centroid crop diagnostic failed on frame {:.3f}: {}'.format(
                                 frame_no, repr(e)))
 
-                    # Rescale the centroid position and intensity back to the pre-binned size
+                    # Rescale the centroid position and intensity back to the pre-binned size. Pixel centres
+                    #   are at integer coordinates, so the centre of the binned pixel i is at
+                    #   bin_factor*i + (bin_factor - 1)/2 on the full size image
                     if (img_handle.input_type != 'ff') and (config.detection_binning_factor > 1):
-                        x_centroid *= config.detection_binning_factor
-                        y_centroid *= config.detection_binning_factor
+                        bin_factor = config.detection_binning_factor
+                        x_centroid = x_centroid*bin_factor + (bin_factor - 1)/2.0
+                        y_centroid = y_centroid*bin_factor + (bin_factor - 1)/2.0
 
                         # Rescale the intensity only if the binning method was 'average'
                         if config.detection_binning_method == 'avg':

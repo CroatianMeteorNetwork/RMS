@@ -567,8 +567,12 @@ def extractStarsImgHandle(img_handle,
             )
 
 
-        # Rescale the stars extracted on binned images to the full image size, as the meteor centroids
-        y_arr, x_arr = np.array(y_arr)*bin_factor, np.array(x_arr)*bin_factor
+        # Rescale the stars extracted on binned images to the full image size, as the meteor centroids.
+        #   Pixel centres are at integer coordinates, so the binned pixel i covers the full size pixels
+        #   bin_factor*i to bin_factor*i + bin_factor - 1 and its centre is offset by (bin_factor - 1)/2
+        bin_offset = (bin_factor - 1)/2.0
+        y_arr = np.array(y_arr)*bin_factor + bin_offset
+        x_arr = np.array(x_arr)*bin_factor + bin_offset
         fwhm = np.array(fwhm)*bin_factor
         intensity = np.array(intensity)*intens_factor
 
