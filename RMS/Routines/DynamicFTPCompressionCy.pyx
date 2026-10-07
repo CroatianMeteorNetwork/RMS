@@ -15,6 +15,62 @@ INT64_TYPE = np.uint64
 ctypedef np.uint64_t INT64_TYPE_t
 
 
+
+# Image rows per block in sampleMedianMAD
+MEDIAN_BLOCK_ROWS = 8
+
+
+def sampleMedianMAD(samples, block_rows=MEDIAN_BLOCK_ROWS):
+    """ Compute the median and the median absolute deviation (MAD) of every pixel over the sampled frames.
+
+    The samples of a pixel are one frame apart in memory, so taking the median along the first axis reads
+    memory with a large power of two stride (e.g. 512 KB for 512x512 16-bit frames), which is very slow on
+    some CPUs (more than 10 times slower on an AMD Ryzen 3950X than on a recent Intel CPU). The frames are
+    therefore processed in blocks of image rows: the rows of a block are copied into a buffer whose row
+    length is not a power of two, and the buffer is transposed so that the samples of every pixel are
+    contiguous. The results are identical to np.median along the first axis.
+
+    Arguments:
+        samples: [ndarray] Sampled frames, shape (n_samples, height, width).
+
+    Keyword arguments:
+        block_rows: [int] Image rows per block. MEDIAN_BLOCK_ROWS by default.
+
+    Return:
+        (median, mad): [tuple of ndarrays] float32 images of the median and of the median absolute deviation.
+    """
+
+    n_samples, height, width = samples.shape
+
+    median = np.empty((height, width), dtype=np.float32)
+    mad = np.empty((height, width), dtype=np.float32)
+
+    # Pad the buffer rows, so their length is not a power of two
+    row_len = block_rows*width + 16
+    if (row_len & (row_len - 1)) == 0:
+        row_len += 16
+
+    buf = np.empty((n_samples, row_len), dtype=samples.dtype)
+
+    for row in range(0, height, block_rows):
+
+        rows = min(block_rows, height - row)
+        n_pix = rows*width
+
+        # Samples of every pixel of the block in a contiguous row
+        buf[:, :n_pix] = samples[:, row:row + rows, :].reshape(n_samples, n_pix)
+        block = np.ascontiguousarray(buf[:, :n_pix].T)
+
+        # Compute the median in float32 for the precision of the MAD
+        block_median = np.median(block, axis=1).astype(np.float32)
+        block_mad = np.median(np.abs(block.astype(np.float32) - block_median[:, None]), axis=1)
+
+        median[row:row + rows] = block_median.reshape(rows, width)
+        mad[row:row + rows] = block_mad.reshape(rows, width)
+
+    return median, mad
+
+
 @cython.boundscheck(False)
 @cython.wraparound(False)
 @cython.cdivision(True)
@@ -118,20 +174,10 @@ cdef class FFMimickInterface:
         # Number of samples actually in the buffer
         cdef int n_samples = min(self.nframes, self.res_size)
         
-        # Use NumPy's optimized median along the temporal axis (axis 0)
-        # Slicing the buffer to only include valid samples
-        cdef np.ndarray valid_samples = self.sample_buf[:n_samples]
-        
-        # 1. Calculate Median (avepixel)
-        # We compute this in float32 for precision during MAD calculation
-        cdef np.ndarray median_float = np.median(valid_samples, axis=0).astype(np.float32)
-        
-        # 2. Calculate Median Absolute Deviation (MAD)
-        # MAD = median(|x - median|)
+        # Median (avepixel) and median absolute deviation of every pixel over the valid samples
+        median_float, mad = sampleMedianMAD(self.sample_buf[:n_samples])
+
         # The factor 1.4826 converts MAD to an unbiased estimate of Standard Deviation for normal distribution
-        cdef np.ndarray abs_diff = np.abs(valid_samples.astype(np.float32) - median_float)
-        cdef np.ndarray mad = np.median(abs_diff, axis=0)
-        
         cdef np.ndarray std_float = mad * 1.4826
 
         # Safety for zero noise (Standard Deviation must be at least 1 for thresholding)
