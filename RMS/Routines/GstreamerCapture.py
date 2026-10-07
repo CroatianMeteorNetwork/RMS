@@ -268,7 +268,7 @@ class GstVideoFile():
                 pipeline_str = (
                     "filesrc location={} ! matroskademux name=d "
                     "d.video_0 ! h264parse ! tee name=t "
-                    "t. ! queue ! avdec_h264 ! videoconvert ! video/x-raw,format={} ! appsink emit-signals=True max-buffers=100 drop=False sync=0 name=appsink "
+                    "t. ! queue ! avdec_h264 thread-type=slice ! videoconvert ! video/x-raw,format={} ! appsink emit-signals=True max-buffers=100 drop=False sync=0 name=appsink "
                     "t. ! queue ! splitmuxsink  name=splitmuxsink0 async-finalize=true max-size-time={} muxer-factory=matroskamux"
                     "".format(self.file_path, self.video_format, int(self.segment_duration_sec*1e9))
                 )
@@ -291,6 +291,10 @@ class GstVideoFile():
         sys.stdout.flush()
  
         self.pipeline = Gst.parse_launch(pipeline_str)
+
+        # Configure the decoders which decodebin adds
+        self.pipeline.connect("deep-element-added", self.configureDecoder)
+
         if self.segment_writer is not None:
             splitmuxsink = self.pipeline.get_by_name("splitmuxsink0")
             splitmuxsink.connect("format-location", self.segment_writer.moveSegment)
@@ -302,13 +306,53 @@ class GstVideoFile():
 
 
 
+    def configureDecoder(self, pipeline, sub_bin, element):
+        """ Use slice threading in the libav video decoders (e.g. avdec_h264 picked by decodebin). With frame
+            threading, the decoder can deadlock when it is drained at the end of the file while the appsink
+            is full: the last frames are never output, and stopping the pipeline blocks forever.
+        """
+
+        factory = element.get_factory()
+        if (factory is not None) and factory.get_name().startswith('avdec_') \
+                and (element.find_property('thread-type') is not None):
+
+            Gst.util_set_object_arg(element, 'thread-type', 'slice')
+
+
+    def pullFirstSample(self, timeout=10.0):
+        """ Pull the first sample from the appsink. Starting the decoder can take a few seconds (e.g. creating
+            the CUDA context of a hardware decoder on a busy machine), so the wait is long, but it ends early
+            if the pipeline reports an error.
+
+        Keyword arguments:
+            timeout: [float] Maximum waiting time in seconds. 10 s by default.
+
+        Return:
+            [Gst.Sample] The first sample, or None if the pipeline failed or timed out.
+        """
+
+        bus = self.pipeline.get_bus()
+
+        t_end = time.time() + timeout
+        while time.time() < t_end:
+
+            sample = self.device.emit("try-pull-sample", 100*Gst.MSECOND)
+            if sample:
+                return sample
+
+            if bus.pop_filtered(Gst.MessageType.ERROR) is not None:
+                return None
+
+        return None
+
+
     def initStream(self):
         """ Initialize the video stream. """
         
         self.device = self.createGSTDevice()
 
-        # Attempt to get a sample and determine the frame shape (use timed try-pull to avoid blocking)
-        sample = self.device.emit("try-pull-sample", 500 * Gst.MSECOND)
+        # Get the first sample to determine the frame shape
+        sample = self.pullFirstSample()
 
         # If no sample was obtained, check if we can fall back to decodebin
         if not sample:
@@ -330,7 +374,7 @@ class GstVideoFile():
                 # Retry with decodebin
                 self.decoder = 'decodebin'
                 self.device = self.createGSTDevice()
-                sample = self.device.emit("try-pull-sample", 500 * Gst.MSECOND)
+                sample = self.pullFirstSample()
 
             if not sample:
                 raise ValueError("Could not obtain sample.")
