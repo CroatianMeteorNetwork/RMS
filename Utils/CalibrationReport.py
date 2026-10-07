@@ -296,7 +296,8 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
     legend_handles = []
 
 
-    # Plot detected stars
+    # Plot detected stars (there may be none, e.g. on a cloudy night)
+    square_patch = None
     for img_star in star_dict[max_jd]:
 
         y, x = img_star[:2]
@@ -307,7 +308,8 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
 
         plt.gca().add_artist(square_patch)
 
-    legend_handles.append(square_patch)
+    if square_patch is not None:
+        legend_handles.append(square_patch)
 
 
 
