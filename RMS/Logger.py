@@ -8,10 +8,16 @@ import errno
 import logging
 import logging.handlers
 import multiprocessing
+import multiprocessing.util
 import datetime
 import threading
 import atexit
 import time
+
+try:
+    from queue import Empty
+except ImportError:
+    from Queue import Empty
 
 
 try:
@@ -407,7 +413,8 @@ class LoggingManager:
             self.logging_queue = multiprocessing.Queue(-1)
             self.listener_process = multiprocessing.Process(
                 target=_listener_process,
-                args=(self.logging_queue, config, log_file_prefix, safedir, console_level, file_level)
+                args=(self.logging_queue, config, log_file_prefix, safedir, console_level, file_level,
+                      os.getpid())
             )
             self.listener_process.daemon = True
             self.listener_process.start()
@@ -430,8 +437,11 @@ class LoggingManager:
             self.is_initialized = True
             main_logger.debug("initLogging completed; queue listener started.")
 
-            # Register the instance's shutdown method for clean exit
+            # Register the instance's shutdown method for clean exit. Child processes of multiprocessing don't
+            #   run the atexit handlers, but they run its finalizers before their daemonic children (the
+            #   listener) are terminated, so the queued records are still written
             atexit.register(self.shutdownLogging)
+            multiprocessing.util.Finalize(None, self.shutdownLogging, exitpriority=10)
 
     def shutdownLogging(self):
         """
@@ -536,9 +546,23 @@ def _listener_configurer(config, log_file_prefix, safedir, console_level=logging
     root_logger.debug("Log listener configured. Current file: %s", full_path)
 
 
-def _listener_process(queue, config, log_file_prefix, safedir, console_level=logging.INFO, file_level=logging.DEBUG):
+def _processAlive(pid):
+    """ Check if the process with the given PID exists. """
+
+    try:
+        os.kill(pid, 0)
+
+    except OSError as e:
+        return e.errno != errno.ESRCH
+
+    return True
+
+
+def _listener_process(queue, config, log_file_prefix, safedir, console_level=logging.INFO, file_level=logging.DEBUG,
+                      parent_pid=None):
     """ Target function for the logging listener process.
-    Ignores SIGINT and processes messages in strict FIFO order.
+    Ignores SIGINT and processes messages in strict FIFO order. The listener also stops when the process which
+    logs through it (parent_pid) is gone without stopping it, e.g. when it was killed, so it doesn't stay behind.
     """
     import signal
     signal.signal(signal.SIGINT, signal.SIG_IGN)
@@ -550,10 +574,26 @@ def _listener_process(queue, config, log_file_prefix, safedir, console_level=log
     main_logger = logging.getLogger()
     handlers = tuple(main_logger.handlers)  # stable snapshot
 
+    # The logging process is gone when the listener is orphaned (it is the parent of the listener with the fork
+    #   start method, where it stays a zombie until reaped), or when it doesn't exist anymore (other start
+    #   methods, e.g. forkserver, where the listener is a child of the fork server)
+    listener_ppid = os.getppid()
+
+    def _parentGone():
+        return (parent_pid is not None) and ((os.getppid() != listener_ppid) or (not _processAlive(parent_pid)))
+
     # Single consumer: preserves FIFO order
     while True:
         try:
-            record = queue.get()
+            # Check that the logging process still exists while waiting. The records it left in the queue are
+            #   still written
+            try:
+                record = queue.get(timeout=1.0)
+            except Empty:
+                if _parentGone():
+                    break
+                continue
+
             if record is None:       # shutdown sentinel
                 break
             # Process record through each handler that accepts its level
