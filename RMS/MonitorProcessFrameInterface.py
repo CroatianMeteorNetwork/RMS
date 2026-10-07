@@ -76,6 +76,10 @@ MONITOR_OUTPUT_DIRS = {'CapturedFiles', 'ArchivedFiles', 'logs'}
 #   processing of its night was cut off (monitor_night_cutoff_hours)
 SKIP_EXIT_CODE = 3
 
+# Exit code of a worker whose file changed while it was processed (the recording was still being written), so
+#   the file is processed again
+CHANGED_EXIT_CODE = 4
+
 # Default time limit (seconds) for processing one file, after which the worker is stopped and the file retried
 WORKER_TIMEOUT = 3600
 
@@ -389,6 +393,9 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
     # If a unique_id is provided, use it for the output folder structure. Otherwise use file_base.
     file_base = unique_id if unique_id else os.path.splitext(file_name)[0]
 
+    # Size and time of the file, to check at the end that it was not written meanwhile
+    file_state = fileState(file_path)
+
     # Load the config file
     config = cr.parse(config_path)
 
@@ -562,6 +569,16 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
             proc_log.info("No FTPdetectinfo file found, skipping recalibration for: {}".format(
                 file_name))
 
+        # A file which changed while it was processed was still being written (e.g. the recording paused for a
+        #   while in the middle of the file), so only a part of it was processed. It gets no done flag, so the
+        #   partial results are never taken as final, and it is processed again. A file deleted meanwhile
+        #   (e.g. by the recorder) is done
+        final_state = fileState(file_path)
+        if (final_state is not None) and (final_state != file_state):
+            proc_log.warning("{} changed while it was processed (it was still being written), it will be "
+                             "processed again".format(file_name))
+            sys.exit(CHANGED_EXIT_CODE)
+
         # Create the done.flag file, with the info needed for the night report
         writeDoneFlag(results_dir, {
             'night': night_name,
@@ -586,6 +603,7 @@ def processFileWorker(*args, **kwargs):
     Exit codes:
         0 - processing succeeded
         SKIP_EXIT_CODE - the file begins before the start time, or its night is past the cutoff
+        CHANGED_EXIT_CODE - the file changed while it was processed, it has to be processed again
         1 - processing failed
     """
 
@@ -599,7 +617,7 @@ def processFileWorker(*args, **kwargs):
 
     except SystemExit as e:
 
-        if e.code == SKIP_EXIT_CODE:
+        if e.code in (SKIP_EXIT_CODE, CHANGED_EXIT_CODE):
             raise
 
         # Some input types call sys.exit() when they can't open the file (e.g. no time in the file name),
@@ -780,8 +798,8 @@ def startWorker(file_path, args, kwargs):
 
     Return:
         [multiprocessing.Process] The started worker, with the time it was started (time.monotonic) in
-            start_time, and the file path and state (fileState) in file_path and file_state. None if the
-            process could not be started (e.g. out of memory), the file is then tried again later.
+            start_time. None if the process could not be started (e.g. out of memory), the file is then tried
+            again later.
     """
 
     proc = multiprocessing.Process(target=processFileWorker, args=args, kwargs=kwargs)
@@ -794,21 +812,8 @@ def startWorker(file_path, args, kwargs):
         return None
 
     proc.start_time = time.monotonic()
-    proc.file_path = file_path
-    proc.file_state = fileState(file_path)
 
     return proc
-
-
-def changedWhileProcessed(proc):
-    """ Check if the file of the finished worker changed while it was processed, which means that it was still
-        being written (e.g. the recording paused for a few seconds), so only a part of it was processed. A
-        file which was deleted meanwhile doesn't count as changed.
-    """
-
-    file_state = fileState(proc.file_path)
-
-    return (file_state is not None) and (file_state != proc.file_state)
 
 
 def stopStuckWorker(proc, unique_id, worker_timeout):
@@ -934,15 +939,9 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
                 if not proc.is_alive():
                     proc.join()
                     if proc.exitcode == 0:
+                        log.info("Successfully processed: {}".format(uid))
+                        processed_files.add(uid)
                         reporter.resultsChanged()
-
-                        # A file which was still being written is processed again in full
-                        if changedWhileProcessed(proc):
-                            log.warning("{} was still being written while it was processed, processing it "
-                                        "again".format(uid))
-                        else:
-                            log.info("Successfully processed: {}".format(uid))
-                            processed_files.add(uid)
 
                         # Forget an earlier failure of the file
                         if failed_files.pop(uid, None) is not None:
@@ -952,6 +951,9 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
                         log.info("Skipped: {} (begins before the start time or after the cutoff of its "
                                  "night)".format(uid))
                         processed_files.add(uid)
+                    elif proc.exitcode == CHANGED_EXIT_CODE:
+                        log.warning("{} was still being written while it was processed, processing it "
+                                    "again".format(uid))
                     elif recordFailure(output_dir, failed_files, uid, proc.exitcode, fail_wait_time):
                         processed_files.add(uid)
 
@@ -1367,15 +1369,11 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None,
                     active_count_per_cam[cam_id] -= 1
                     
                     if proc.exitcode == 0:
-                        reporters[cam_id].resultsChanged()
 
-                        # A file which was still being written is processed again in full
-                        if changedWhileProcessed(proc):
-                            log.warning("[{}] {} was still being written while it was processed, processing "
-                                        "it again".format(cam_id, uid))
-                        else:
-                            log.info("Successfully processed [{}]: {}".format(cam_id, uid))
-                            processed_files[cam_id].add(uid)
+                        # Process exited normally
+                        log.info("Successfully processed [{}]: {}".format(cam_id, uid))
+                        processed_files[cam_id].add(uid)
+                        reporters[cam_id].resultsChanged()
 
                         # Forget an earlier failure of the file
                         if failed_files[cam_id].pop(uid, None) is not None:
@@ -1387,6 +1385,11 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None,
                         log.info("Skipped [{}]: {} (begins before the start time or after the cutoff of its "
                                  "night)".format(cam_id, uid))
                         processed_files[cam_id].add(uid)
+
+                    # The file was still being written, it is processed again
+                    elif proc.exitcode == CHANGED_EXIT_CODE:
+                        log.warning("[{}] {} was still being written while it was processed, processing it "
+                                    "again".format(cam_id, uid))
 
                     # Process failed, it is retried once after fail_wait_time and then given up
                     elif recordFailure(cam_output_dirs[cam_id], failed_files[cam_id], uid, proc.exitcode,

@@ -746,25 +746,10 @@ def test_processing_pauses_while_the_output_disk_is_full(monkeypatch, tmp_path):
     assert guard.ok() and not guard.paused
 
 
-def test_file_written_while_processed_is_processed_again(tmp_path):
+def test_processFileWorker_keeps_changed_exit_code(monkeypatch):
 
-    file_path = str(tmp_path/'file.mkv')
-    with open(file_path, 'wb') as f:
-        f.write(b'0'*100)
+    # A file which was still being written is processed again, not counted as failed
+    def _changed(*args, **kwargs):
+        sys.exit(mon.CHANGED_EXIT_CODE)
 
-    class _Proc(object):
-        pass
-
-    proc = _Proc()
-    proc.file_path = file_path
-    proc.file_state = mon.fileState(file_path)
-    assert not mon.changedWhileProcessed(proc)
-
-    # The recording continued after the worker started
-    with open(file_path, 'ab') as f:
-        f.write(b'0'*100)
-    assert mon.changedWhileProcessed(proc)
-
-    # A file deleted meanwhile (e.g. by the recorder) is not processed again
-    os.remove(file_path)
-    assert not mon.changedWhileProcessed(proc)
+    assert _runWorker(monkeypatch, _changed) == mon.CHANGED_EXIT_CODE
