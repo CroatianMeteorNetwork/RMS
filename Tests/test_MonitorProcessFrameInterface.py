@@ -118,7 +118,8 @@ def test_processFile_skips_files_of_nights_past_the_cutoff(config_path, tmp_path
     # The file is marked as done, so it is not opened again after a restart, but it is not a result of the
     #   night
     results_dir = mon.resultsDirPath(output_dir, beginning, 'dummy')
-    assert mnr.readDoneFlag(results_dir) == {'night': night_name, 'skipped': True}
+    assert mnr.readDoneFlag(results_dir) == {'night': night_name, 'skipped': True,
+                                             'input_file': str(tmp_path/'dummy.vid')}
     assert mnr.scanNights(output_dir, config) == {}
 
     # A file with results (processed again with --force) is processed, its results are not marked skipped

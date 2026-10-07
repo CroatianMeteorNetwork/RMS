@@ -542,7 +542,8 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
                 print("Skipping {}: the processing of night {} was cut off at {} UTC".format(file_name,
                     night_name, cutoff))
                 os.makedirs(results_dir, exist_ok=True)
-                writeDoneFlag(results_dir, {'night': night_name, 'skipped': True})
+                writeDoneFlag(results_dir, {'night': night_name, 'skipped': True,
+                                            'input_file': os.path.abspath(file_path)})
                 sys.exit(SKIP_EXIT_CODE)
 
     # Use the module logger until the per-file logger is initialized, so errors before that are logged
@@ -697,6 +698,7 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
         # Create the done.flag file, with the info needed for the night report
         writeDoneFlag(results_dir, {
             'night': night_name,
+            'input_file': os.path.abspath(file_path),
             'mask_path': mask_path,
             'dark_applied': dark is not None,
             'flat_applied': flat_struct is not None,

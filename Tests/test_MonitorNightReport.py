@@ -632,6 +632,49 @@ def test_cleanup_frees_the_space_of_the_largest_recent_night(tmp_path, monkeypat
     assert os.listdir(captured_dir) == [nights[-1]]
 
 
+def test_done_flags_of_deleted_inputs_are_deleted(tmp_path):
+
+    config = _config()
+    output_dir = str(tmp_path/'out')
+    input_dir = tmp_path/'in'
+    input_dir.mkdir()
+    night_dir = mnr.nightDirPath(output_dir, NIGHT, config)
+    os.makedirs(night_dir)
+
+    def _results(name, **info):
+        results_path = os.path.join(output_dir, '2025', '202512', '20251225', name)
+        os.makedirs(results_path)
+        info.setdefault('input_file', str(input_dir/(name + '.vid')))
+        mnr.writeDoneFlag(results_path, dict(night=NIGHT, **info))
+        return results_path
+
+    kept_input = _results('kept_input')
+    (input_dir/'kept_input.vid').write_text('')
+    gone_input = _results('gone_input')
+    no_input_dir = _results('no_input_dir', input_file=str(tmp_path/'unmounted'/'x.vid'))
+    old_flag = _results('old_flag', input_file=None)
+    skipped = _results('skipped', skipped=True)
+
+    # While the night exists, only the done flag of a skipped file whose input is gone is deleted
+    assert mnr.deleteDoneFlags(output_dir, config) == 1
+    assert not os.path.exists(skipped)
+
+    # Once the night was deleted, the done flags of the deleted inputs are not needed anymore. Inputs which
+    #   still exist, inputs on a directory which can't be found and old done flags without the input are kept
+    shutil.rmtree(night_dir)
+    assert mnr.deleteDoneFlags(output_dir, config) == 1
+    assert not os.path.exists(gone_input)
+    assert all(os.path.exists(path) for path in [kept_input, no_input_dir, old_flag])
+
+    # Empty date directories are deleted too
+    for path in [kept_input, no_input_dir, old_flag]:
+        shutil.rmtree(path)
+    (input_dir/'kept_input.vid').unlink()
+    _results('last')
+    assert mnr.deleteDoneFlags(output_dir, config) == 1
+    assert os.listdir(output_dir) == [config.captured_dir]
+
+
 def test_free_space_keeps_protected_nights(tmp_path, monkeypatch):
 
     config = _config()

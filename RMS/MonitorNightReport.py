@@ -1240,6 +1240,65 @@ def pruneResults(output_dir, config, nights):
     return n_pruned
 
 
+def deleteDoneFlags(output_dir, config):
+    """ Delete the results directories (with their done flags) of input files which were deleted, once their
+        night was deleted or the file was skipped by the night cutoff. The done flag only keeps a file from
+        being processed again, which is not needed anymore when the file is gone. Done flags which don't name
+        their input file (from older versions) and files whose input directory can't be found (e.g. an
+        unmounted disk) are kept.
+
+    Arguments:
+        output_dir: [str] Output directory of the monitor.
+        config: [Config] Configuration.
+
+    Return:
+        [int] Number of deleted results directories.
+    """
+
+    n_deleted = 0
+    for root, dirs, files in os.walk(output_dir):
+
+        # Don't descend into the night, archive and log directories
+        if root == output_dir:
+            dirs[:] = [d for d in dirs if d not in (config.captured_dir, config.archived_dir, 'logs')]
+
+        # Don't descend into the output directory of another monitor
+        if (root != output_dir) and (MONITOR_LOCK_FILE_NAME in files):
+            dirs[:] = []
+            continue
+
+        if DONE_FLAG_NAME not in files:
+            continue
+
+        # Results directories don't contain other results
+        dirs[:] = []
+
+        info = readDoneFlag(root)
+        input_file = info.get('input_file')
+        if (input_file is None) or ('night' not in info):
+            continue
+
+        if not (info.get('skipped') or (not os.path.isdir(nightDirPath(output_dir, info['night'], config)))):
+            continue
+
+        if os.path.exists(input_file) or (not os.path.isdir(os.path.dirname(input_file))):
+            continue
+
+        shutil.rmtree(root, ignore_errors=True)
+        n_deleted += 1
+
+        # Delete the date directories which are now empty
+        parent = os.path.dirname(root)
+        while (parent != output_dir) and os.path.isdir(parent) and (not os.listdir(parent)):
+            os.rmdir(parent)
+            parent = os.path.dirname(parent)
+
+    if n_deleted:
+        log.info("Deleted the done flags of {:d} input files which were deleted".format(n_deleted))
+
+    return n_deleted
+
+
 def freeSpace(output_dir, config, needed_bytes, protected_nights=()):
     """ Delete the oldest nights (the night directory and its archives) until the output directory has the
         given free space. The latest night is never deleted. If deleting the old nights can't free enough
@@ -1363,6 +1422,7 @@ def cleanupOldData(output_dir, config, protected_nights=()):
     enough_space = freeSpace(output_dir, config, needed_bytes, protected_nights=protected_nights)
 
     pruneResults(output_dir, config, nights)
+    deleteDoneFlags(output_dir, config)
 
     # Delete the old logs of the monitor processes, which have a prefix
     deleteOldLogfiles(output_dir, config, pattern='*log_*.log*')
@@ -1563,7 +1623,8 @@ class NightReporter(object):
             upload_config = copy.deepcopy(self.config)
             upload_config.data_dir = output_dir
 
-            self.upload_manager = UploadManager(upload_config)
+            # The upload manager stops itself if the monitor is gone (e.g. killed), like the other processes
+            self.upload_manager = UploadManager(upload_config, watch_parent=True)
             self.upload_manager.start()
 
 

@@ -220,8 +220,8 @@ Stopping the monitor (`systemctl stop`, `kill`, Ctrl+C) is safe at any time:
   after the restart.
 - A running night report gets 30 s to finish, otherwise it is stopped and made again after the restart.
 - The upload queue is kept on disk, an interrupted upload continues after the restart.
-- If the monitor itself is killed (`kill -9`, out of memory), its workers notice it within 2 s and end too.
-  The upload process doesn't; with uploading on, stop it by hand before starting the monitor again.
+- If the monitor itself is killed (`kill -9`, out of memory), its workers, the report, the cleanup and the
+  upload process notice it within 2 s and end too (the upload process after the upload in progress).
 
 
 ## Settings
@@ -403,7 +403,10 @@ space is kept up during long reports:
   whole old nights are deleted, oldest first, but never the latest night. If deleting the old nights couldn't
   free enough space because other data fills the disk, nothing is deleted and a warning is logged.
 - The results of the files of deleted nights are reduced to their `done.flag`, which keeps marking the files
-  as processed, and the nights are not reported again (also not if a late file of the night arrives).
+  as processed, and the nights are not reported again (also not if a late file of the night arrives). Once
+  the recording itself was deleted (by the recording software), its results directory with the `done.flag`
+  is deleted too, also for files skipped by the cutoff, so the output directory doesn't keep growing. If
+  the input directory can't be found (e.g. an unmounted disk), nothing is deleted.
 - `monitor_delete_images_days` deletes the image pairs of reported nights earlier, keeping the products.
   These nights are not reported again either, as a report without the images would replace the products.
 - The cleanup uses the RMS data management, which also deletes old `VideoFiles`, `FramesFiles` and
