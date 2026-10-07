@@ -405,8 +405,9 @@ space is kept up during long reports:
 - The results of the files of deleted nights are reduced to their `done.flag`, which keeps marking the files
   as processed, and the nights are not reported again (also not if a late file of the night arrives). Once
   the recording itself was deleted (by the recording software), its results directory with the `done.flag`
-  is deleted too, also for files skipped by the cutoff, so the output directory doesn't keep growing. If
-  the input directory can't be found (e.g. an unmounted disk), nothing is deleted.
+  is deleted too, also for files skipped by the cutoff, so the output directory doesn't keep growing. The
+  results of older monitor versions (empty `done.flag`) are deleted the same way once their recording is
+  gone. If the input directory can't be found (e.g. an unmounted disk), nothing is deleted.
 - `monitor_delete_images_days` deletes the image pairs of reported nights earlier, keeping the products.
   These nights are not reported again either, as a report without the images would replace the products.
 - The cleanup uses the RMS data management, which also deletes old `VideoFiles`, `FramesFiles` and

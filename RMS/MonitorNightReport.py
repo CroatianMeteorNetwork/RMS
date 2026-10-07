@@ -1240,16 +1240,26 @@ def pruneResults(output_dir, config, nights):
     return n_pruned
 
 
-def deleteDoneFlags(output_dir, config):
+def deleteDoneFlags(output_dir, config, input_dir=None, input_ext=None):
     """ Delete the results directories (with their done flags) of input files which were deleted, once their
         night was deleted or the file was skipped by the night cutoff. The done flag only keeps a file from
-        being processed again, which is not needed anymore when the file is gone. Done flags which don't name
-        their input file (from older versions) and files whose input directory can't be found (e.g. an
-        unmounted disk) are kept.
+        being processed again, which is not needed anymore when the file is gone. Files whose input directory
+        can't be found (e.g. an unmounted disk) are kept.
+
+    Done flags of older versions don't name their input file. They are empty and have no night, so their
+    results are not in any night report. If the input directory and the extension of the files are given,
+    the input file is the results directory name (the file name without the extension) in the input
+    directory, and the results are deleted once that file is gone.
 
     Arguments:
         output_dir: [str] Output directory of the monitor.
         config: [Config] Configuration.
+
+    Keyword arguments:
+        input_dir: [str] Input directory of the monitor, for the done flags of older versions. None by
+            default, in which case they are kept.
+        input_ext: [str] Extension of the input files (e.g. '.vid'), for the done flags of older versions.
+            None by default, in which case they are kept.
 
     Return:
         [int] Number of deleted results directories.
@@ -1275,10 +1285,17 @@ def deleteDoneFlags(output_dir, config):
 
         info = readDoneFlag(root)
         input_file = info.get('input_file')
-        if (input_file is None) or ('night' not in info):
-            continue
 
-        if not (info.get('skipped') or (not os.path.isdir(nightDirPath(output_dir, info['night'], config)))):
+        # The input file of a done flag of an older version
+        if input_file is None:
+            if (input_dir is None) or (input_ext is None):
+                continue
+
+            input_file = os.path.join(input_dir, os.path.basename(root) + input_ext)
+
+        # The results of a night are needed for its report until the night is deleted
+        if ('night' in info) and (not info.get('skipped')) \
+                and os.path.isdir(nightDirPath(output_dir, info['night'], config)):
             continue
 
         if os.path.exists(input_file) or (not os.path.isdir(os.path.dirname(input_file))):
@@ -1363,7 +1380,7 @@ def freeSpace(output_dir, config, needed_bytes, protected_nights=()):
     return availableSpace(output_dir) >= needed_bytes
 
 
-def cleanupOldData(output_dir, config, protected_nights=()):
+def cleanupOldData(output_dir, config, protected_nights=(), input_dir=None, input_ext=None):
     """ Delete old data from the output directory with the data management of normal RMS
         (DeleteOldObservations): old night directories in CapturedFiles and ArchivedFiles (by the number of
         directories to keep, the quotas, and the free space needed for the next night), old archives and log
@@ -1377,6 +1394,8 @@ def cleanupOldData(output_dir, config, protected_nights=()):
     Keyword arguments:
         protected_nights: [list] Nights which are not deleted, e.g. the night being reported. Empty by
             default.
+        input_dir: [str] Input directory of the monitor, see deleteDoneFlags. None by default.
+        input_ext: [str] Extension of the input files, see deleteDoneFlags. None by default.
 
     Return:
         [bool] True if there's enough free space for the next night.
@@ -1422,7 +1441,7 @@ def cleanupOldData(output_dir, config, protected_nights=()):
     enough_space = freeSpace(output_dir, config, needed_bytes, protected_nights=protected_nights)
 
     pruneResults(output_dir, config, nights)
-    deleteDoneFlags(output_dir, config)
+    deleteDoneFlags(output_dir, config, input_dir=input_dir, input_ext=input_ext)
 
     # Delete the old logs of the monitor processes, which have a prefix
     deleteOldLogfiles(output_dir, config, pattern='*log_*.log*')
@@ -1528,7 +1547,7 @@ def nightReportWorker(output_dir, night_name, config_path, results):
     sys.exit(1 if (ESSENTIAL_STEPS & set(night_state['failed_steps'])) else 0)
 
 
-def cleanupWorker(output_dir, config_path, protected_nights=()):
+def cleanupWorker(output_dir, config_path, protected_nights=(), input_dir=None, input_ext=None):
     """ Worker process target which deletes old data, except the given nights (e.g. the night being
         reported).
     """
@@ -1536,7 +1555,8 @@ def cleanupWorker(output_dir, config_path, protected_nights=()):
     config = cr.parse(config_path)
     _initWorkerLogging(config, output_dir, 'cleanup_')
 
-    cleanupOldData(output_dir, config, protected_nights=protected_nights)
+    cleanupOldData(output_dir, config, protected_nights=protected_nights, input_dir=input_dir,
+                   input_ext=input_ext)
 
 
 
@@ -1564,13 +1584,21 @@ class NightReporter(object):
         fail_wait_time: [float] Seconds to wait before retrying a failed report. 300 by default.
         camera_id: [str] Camera ID used in the log messages. None by default.
         report_lock: [ReportLock] Lock shared with the reporters of other cameras. None by default.
+        input_dir: [str] Input directory of the camera, for the cleanup of the done flags of older versions.
+            None by default.
+        input_ext: [str] Extension of the input files (e.g. '.vid'), see input_dir. None by default.
     """
 
     def __init__(self, output_dir, config_path, report_mode=None, fail_wait_time=300, camera_id=None,
-                 report_lock=None):
+                 report_lock=None, input_dir=None, input_ext=None):
 
         self.output_dir = output_dir
         self.config_path = config_path
+
+        # The input directory and the extension of the input files, for the cleanup of the done flags of older
+        #   versions (see deleteDoneFlags)
+        self.input_dir = input_dir
+        self.input_ext = input_ext
         self.config = cr.parse(config_path)
         self.fail_wait_time = fail_wait_time
         self.report_lock = report_lock if report_lock is not None else ReportLock()
@@ -1742,7 +1770,7 @@ class NightReporter(object):
 
         protected_nights = [self.active[1]] if (self.active is not None) else []
 
-        args = (self.output_dir, self.config_path, protected_nights)
+        args = (self.output_dir, self.config_path, protected_nights, self.input_dir, self.input_ext)
         self.cleanup_proc = self._startProcess(cleanupWorker, args, "Cleanup")
 
 

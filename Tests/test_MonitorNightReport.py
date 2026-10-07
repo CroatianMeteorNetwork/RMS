@@ -675,6 +675,38 @@ def test_done_flags_of_deleted_inputs_are_deleted(tmp_path):
     assert os.listdir(output_dir) == [config.captured_dir]
 
 
+def test_done_flags_of_older_versions_are_deleted_with_their_input(tmp_path):
+
+    config = _config()
+    output_dir = str(tmp_path/'out')
+    input_dir = tmp_path/'in'
+    input_dir.mkdir()
+
+    # Results of an older version: an empty done flag, named after the input file without the extension
+    def _oldResults(name):
+        results_path = os.path.join(output_dir, '2026', '202608', '20260808', name)
+        os.makedirs(results_path)
+        open(os.path.join(results_path, mnr.DONE_FLAG_NAME), 'w').close()
+        return results_path
+
+    kept = _oldResults('dump_kept_02F')
+    (input_dir/'dump_kept_02F.vid').write_text('')
+    gone = _oldResults('dump_gone_02F')
+
+    # Without the input directory they are kept
+    assert mnr.deleteDoneFlags(output_dir, config) == 0
+
+    # The results of the input files which are gone are deleted, with the empty date directories
+    assert mnr.deleteDoneFlags(output_dir, config, input_dir=str(input_dir), input_ext='.vid') == 1
+    assert os.path.exists(kept) and not os.path.exists(gone)
+
+    # Nothing is deleted if the input directory can't be found (e.g. an unmounted disk)
+    os.remove(str(input_dir/'dump_kept_02F.vid'))
+    assert mnr.deleteDoneFlags(output_dir, config, input_dir=str(tmp_path/'unmounted'), input_ext='.vid') == 0
+    assert mnr.deleteDoneFlags(output_dir, config, input_dir=str(input_dir), input_ext='.vid') == 1
+    assert os.listdir(output_dir) == []
+
+
 def test_free_space_keeps_protected_nights(tmp_path, monkeypatch):
 
     config = _config()
