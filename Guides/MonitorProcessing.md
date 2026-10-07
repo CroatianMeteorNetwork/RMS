@@ -283,7 +283,8 @@ On top of that:
   ```
   touch /data/monitor/.report_now
   ```
-- **Late files**: a file which arrives after its night was reported makes the night be reported again.
+- **Late files**: a file which arrives after its night was reported, or a file processed again (e.g. with
+  `--force`), makes the night be reported again.
 - **Retries**: a failed report is tried once more after 5 minutes (`fail_wait_time`). A report which takes
   longer than 4 hours is stopped and counts as failed.
 
