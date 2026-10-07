@@ -46,7 +46,11 @@ def sampleMedianMAD(samples, block_rows=MEDIAN_BLOCK_ROWS):
     mad = np.empty((height, width), dtype=np.float32)
 
     # Pad the buffer rows, so their length is not a power of two
-    buf = np.empty((n_samples, block_rows*width + 16), dtype=samples.dtype)
+    row_len = block_rows*width + 16
+    if (row_len & (row_len - 1)) == 0:
+        row_len += 16
+
+    buf = np.empty((n_samples, row_len), dtype=samples.dtype)
 
     for row in range(0, height, block_rows):
 

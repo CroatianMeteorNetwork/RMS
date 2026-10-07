@@ -13,7 +13,7 @@ def _reference(samples):
 
 
 @pytest.mark.parametrize('n_samples', [1, 2, 63, 64])
-@pytest.mark.parametrize('shape', [(512, 512), (13, 37)])
+@pytest.mark.parametrize('shape', [(512, 512), (13, 37), (20, 254)])
 @pytest.mark.parametrize('dtype', [np.uint8, np.uint16])
 def test_blocked_median_and_mad_are_identical_to_numpy(n_samples, shape, dtype):
 
