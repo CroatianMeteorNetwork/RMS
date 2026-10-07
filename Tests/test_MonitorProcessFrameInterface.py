@@ -655,6 +655,20 @@ def test_saver_bins_the_calibration_for_binned_chunks(tmp_path, config):
     assert flat_struct.flat_img.shape == (96, 128)
 
 
+def test_saver_scales_summed_binning_to_the_data_levels(tmp_path, config):
+
+    # 8-bit data summed over 2x2 pixels: the 1500 and 1000 counts of the chunk are 4 times the levels
+    config.detection_binning_factor = 2
+    config.detection_binning_method = 'sum'
+    config.bit_depth = 8
+
+    saver = mon.ChunkImageSaver(str(tmp_path), config, 'input.mkv')
+    ff = FFfile.read(str(tmp_path), saver(_ChunkHandle(), _FakeFF(128)))
+
+    assert ff.maxpixel.dtype == np.uint8
+    assert (int(np.max(ff.maxpixel)), int(np.max(ff.avepixel))) == (255, 250)
+
+
 ### Assigning meteors to the chunk images ###
 
 def _meteor(frames):

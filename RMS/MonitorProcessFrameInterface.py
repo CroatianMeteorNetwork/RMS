@@ -36,6 +36,8 @@ import multiprocessing
 import configparser
 import signal
 
+import numpy as np
+
 import RMS.ConfigReader as cr
 from RMS.Formats.FrameInterface import detectInputType, getCacheID
 from RMS.Formats.FFfile import validFFName, constructFFName
@@ -378,6 +380,14 @@ class ChunkImageSaver(object):
         if self.flat_struct is not None:
             maxpixel = Image.applyFlat(maxpixel, self.flat_struct)
             avepixel = Image.applyFlat(avepixel, self.flat_struct)
+
+        # Summed binned pixels are scaled to the levels of the full size pixels, like averaged ones, so the
+        #   images have the levels and the bit depth of the data
+        if (self.config.detection_binning_factor > 1) and (self.config.detection_binning_method == 'sum'):
+            n_binned = self.config.detection_binning_factor**2
+            dtype = np.uint8 if self.config.bit_depth <= 8 else maxpixel.dtype
+            maxpixel, avepixel = [np.clip(np.round(img.astype(np.float64)/n_binned), 0,
+                                          np.iinfo(dtype).max).astype(dtype) for img in (maxpixel, avepixel)]
 
         meta = {
             'nframes': ff.nframes,
