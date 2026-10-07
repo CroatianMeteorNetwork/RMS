@@ -40,8 +40,8 @@ from RMS.Formats.FrameInterface import detectInputType, getCacheID
 from RMS.Formats.FFfile import validFFName, constructFFName
 from RMS.Formats import FFpng
 from RMS.Routines import Image
-from RMS.MonitorNightReport import exitWithMonitor, latestPlateparPath, nightDirPath, nightInfo, NightReporter, \
-    ReportLock, writeDoneFlag
+from RMS.MonitorNightReport import exitWithMonitor, latestPlateparPath, lockOutputDir, lockOwner, \
+    nightDirPath, nightInfo, NightReporter, ReportLock, writeDoneFlag
 from RMS.DetectStarsAndMeteors import (
     detectStarsAndMeteorsFrameInterface,
     saveResultsFrameInterface,
@@ -759,6 +759,13 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
     if start_time is not None:
         log.info("Only processing files beginning at or after: {} UTC".format(start_time))
 
+    # Only one monitor can work on the output directory
+    output_lock = lockOutputDir(output_dir)
+    if output_lock is None:
+        log.error("Another monitor (PID {:s}) is already working on {:s}, exiting.".format(
+            lockOwner(output_dir), output_dir))
+        sys.exit(1)
+
     # Track files that have been processed or are being processed
     processed_files = set()
 
@@ -1146,6 +1153,15 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None,
         if cam['start_time'] is not None:
             log.info("Camera {}: only processing files beginning at or after: {} UTC".format(
                 cam['id'], cam['start_time']))
+
+    # Only one monitor can work on an output directory, which also catches cameras sharing one
+    output_locks = []
+    for cam in cameras:
+        output_locks.append(lockOutputDir(cam['output_dir']))
+        if output_locks[-1] is None:
+            log.error("Camera {}: another monitor (PID {:s}) is already working on {:s}, exiting.".format(
+                cam['id'], lockOwner(cam['output_dir']), cam['output_dir']))
+            sys.exit(1)
 
     # Schedule the night reports of every camera, only one camera reports at a time
     report_lock = ReportLock()

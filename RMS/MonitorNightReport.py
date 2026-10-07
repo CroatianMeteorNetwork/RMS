@@ -41,6 +41,11 @@ import traceback
 import ephem
 import numpy as np
 
+try:
+    import fcntl
+except ImportError:
+    fcntl = None
+
 import RMS.ConfigReader as cr
 from RMS.Astrometry.ApplyAstrometry import raDecToXYPP
 from RMS.CaptureDuration import CAPTURE_HORIZON_DEG
@@ -63,6 +68,9 @@ DONE_FLAG_NAME = 'done.flag'
 
 # Report state of all nights, kept in the output directory
 REPORT_STATE_FILE_NAME = '.night_reports.json'
+
+# Lock file which lets only one monitor (or command line report) work on an output directory at a time
+MONITOR_LOCK_FILE_NAME = '.monitor.lock'
 
 # Creating this file in the output directory triggers the reports of all nights with new data
 REPORT_TRIGGER_FILE_NAME = '.report_now'
@@ -151,6 +159,48 @@ def nightBoundsFromName(config, night_name):
     _, night_start, night_end = nightInfo(config, night_start + datetime.timedelta(minutes=1))
 
     return night_start, night_end
+
+
+def lockOutputDir(output_dir):
+    """ Lock the output directory, so a second monitor (e.g. started by mistake) or a command line report
+        can't work on it at the same time. The lock is released when the process ends, also if it is killed,
+        so it never goes stale.
+
+    Arguments:
+        output_dir: [str] Output directory of the monitor.
+
+    Return:
+        [file] The open lock file, which has to stay open while the directory is used. None if the directory
+            is locked by another process.
+    """
+
+    lock_file = open(os.path.join(output_dir, MONITOR_LOCK_FILE_NAME), 'a+')
+
+    # Locking is not available on all platforms
+    if fcntl is None:
+        return lock_file
+
+    try:
+        fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+    except (IOError, OSError):
+        lock_file.close()
+        return None
+
+    # Note the PID of the lock owner, for the error message of the next one
+    lock_file.seek(0)
+    lock_file.truncate()
+    lock_file.write("{:d}\n".format(os.getpid()))
+    lock_file.flush()
+
+    return lock_file
+
+
+def lockOwner(output_dir):
+    """ Return the PID of the process which locked the output directory, as noted in the lock file. """
+
+    with open(os.path.join(output_dir, MONITOR_LOCK_FILE_NAME)) as f:
+        return f.read().strip()
 
 
 def partialReportTime(config, night_name):
@@ -1427,6 +1477,13 @@ if __name__ == "__main__":
     cml_args = arg_parser.parse_args()
 
     output_dir = os.path.abspath(cml_args.output_dir)
+
+    # Don't report next to a running monitor
+    output_lock = lockOutputDir(output_dir)
+    if output_lock is None:
+        print("A monitor (PID {:s}) is using {:s}, create the {:s} file in it to report the nights with new "
+              "data instead.".format(lockOwner(output_dir), output_dir, REPORT_TRIGGER_FILE_NAME))
+        sys.exit(1)
 
     # The layout of the output directory only depends on the config, so any config of the camera can be used
     config = cr.parse(os.path.abspath(cml_args.config)) if cml_args.config else cr.Config()

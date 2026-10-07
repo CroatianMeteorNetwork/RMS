@@ -876,3 +876,32 @@ def test_cleanup_runs_at_startup_and_after_reports(scheduling):
     reporter.active[0].alive = False
     reporter.poll(True, now=now)
     assert (reporter.active is None) and (reporter.cleanup_proc is not None)
+
+
+### Output directory lock ###
+
+def _holdLock(output_dir, locked, release):
+    lock = mnr.lockOutputDir(output_dir)
+    locked.set()
+    release.wait(30)
+
+
+def test_only_one_process_locks_the_output_dir(tmp_path):
+
+    import multiprocessing
+
+    output_dir = str(tmp_path)
+    locked, release = multiprocessing.Event(), multiprocessing.Event()
+
+    proc = multiprocessing.Process(target=_holdLock, args=(output_dir, locked, release))
+    proc.start()
+    assert locked.wait(30)
+
+    # Locked by the other process, whose PID is noted
+    assert mnr.lockOutputDir(output_dir) is None
+    assert mnr.lockOwner(output_dir) == str(proc.pid)
+
+    # The lock is released when the process ends, also if it is killed
+    proc.kill()
+    proc.join()
+    assert mnr.lockOutputDir(output_dir) is not None
