@@ -483,6 +483,18 @@ def test_walkInput_skips_monitor_output(tmp_path):
     assert _walked(input_dir, str(tmp_path/'output')) == sorted(all_dirs)
 
 
+def test_input_extension():
+
+    assert mon.inputExtension('vid') == '.vid'
+    assert mon.inputExtension('MKV') == '.mkv'
+    assert mon.inputExtension('ff') is None
+    assert mon.inputExtension('fitsdirs') is None
+
+    # Other types are the extension itself, as in matchesFileType
+    assert mon.inputExtension('H264') == '.h264'
+    assert mon.matchesFileType('a.h264', 'H264')
+
+
 def test_unique_ids_keep_files_in_subdirectories_apart():
 
     # Files in the input directory keep their name

@@ -267,6 +267,21 @@ def logReadable(dir_path, readable, log_prefix=''):
         _UNREADABLE_DIRS[dir_path] = time.monotonic()
 
 
+def inputExtension(file_type):
+    """ Return the extension of the input files of the given type, None if they don't have a single one
+        (FF files, FITS directories). Types which are not in FILE_TYPE_MAP are the extension itself, as in
+        matchesFileType.
+    """
+
+    file_type = file_type.lower()
+    if file_type not in FILE_TYPE_MAP:
+        return '.' + file_type
+
+    extensions = FILE_TYPE_MAP[file_type]
+
+    return extensions[0] if extensions else None
+
+
 def uniqueId(file_rel_path):
     """ Return the ID of an input file, which names its results directory. Files directly in the input
         directory are identified by their name without the extension. Files in subdirectories (--recursive)
@@ -1158,7 +1173,8 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
 
         # Schedules the night reports
         reporter = NightReporter(output_dir, config_path, report_mode=report_mode,
-                                 fail_wait_time=fail_wait_time)
+                                 fail_wait_time=fail_wait_time, input_dir=input_dir,
+                                 input_ext=inputExtension(file_type), recursive=recursive)
         log.info("Night report mode: {:s}".format(reporter.report_mode))
 
         # Pauses the processing while the output disk is full
@@ -1606,7 +1622,9 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None,
         for cam in cameras:
             reporters[cam['id']] = NightReporter(cam['output_dir'], cam['config_path'],
                                                  report_mode=report_mode, fail_wait_time=fail_wait_time,
-                                                 camera_id=cam['id'], report_lock=report_lock)
+                                                 camera_id=cam['id'], report_lock=report_lock,
+                                                 input_dir=cam['input_dir'],
+                                                 input_ext=inputExtension(file_type), recursive=recursive)
             log.info("Camera {}: night report mode: {}".format(cam['id'], reporters[cam['id']].report_mode))
 
         # The mask of every camera
