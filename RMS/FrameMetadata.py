@@ -37,7 +37,7 @@ NFIELDS = len(FIELDS)
 
 
 def fillRow(row, cu):
-    """ Fill a shared row from a parsed RMSP record (BufferedCapture._rmspCapUtc tuple:
+    """ Fill a shared row from a parsed RMSP record (RMS.RMSPSei.rmspCapUtc tuple:
         capture_utc, exp_s, temp_c, meta dict, frame_seq, ...), or mark it empty.
     """
     row[:] = np.nan

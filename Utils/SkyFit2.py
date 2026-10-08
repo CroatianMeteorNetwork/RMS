@@ -16787,8 +16787,8 @@ class PlateTool(QtWidgets.QMainWindow):
             if self.platepar is not None:
 
                 # Compute time data
-                time_data = [jd2Date(datetime2JD(self.img_handle.beginning_datetime \
-                    + datetime.timedelta(seconds=frame/self.img_handle.fps))) for frame in frames]
+                time_data = [jd2Date(datetime2JD(self.img_handle.currentFrameTime(frame_no=frame, dt_obj=True)))
+                    for frame in frames]
 
                 # Compute measured RA/Dec from image coordinates
                 _, ra_data, dec_data, _ = xyToRaDecPP(time_data, x_data, \

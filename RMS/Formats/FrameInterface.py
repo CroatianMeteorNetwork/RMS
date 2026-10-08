@@ -31,6 +31,7 @@ from RMS.Formats.Vid import VidStruct
 from RMS.GeoidHeightEGM96 import wgs84toMSLHeight
 from RMS.Routines import Image
 from RMS.Routines.GstreamerCapture import GstVideoFile
+from RMS.RMSPSei import readVideoFrameTimes
 from RMS.Logger import getLogger
 
 # Get the logger from the main module
@@ -851,7 +852,21 @@ class InputTypeVideo(InputType):
         # Remove the file extension
         file_name_noext = ".".join(self.file_name.split('.')[:-1])
 
+        # Per-frame RMSP SEI times (OpenIPC science cameras): every frame's own start of integration,
+        # as capture timed it, used instead of beginning + frame/fps. A given beginning time keeps
+        # the nominal timing
+        self.frame_times_rel = None
         if beginning_time is None:
+            sei = readVideoFrameTimes(self.file_path)
+            if sei is not None:
+                int_start = sei['int_start']
+                self.beginning_datetime = datetime.datetime(1970, 1, 1) \
+                    + datetime.timedelta(seconds=int_start[0])
+                self.frame_times_rel = int_start - int_start[0]
+                print('Per-frame SEI timestamps: {:d} frames ({:d} interpolated), first frame {:s} UTC'.format(
+                    len(int_start), sei['n_interp'], str(self.beginning_datetime)))
+
+        if (beginning_time is None) and (self.frame_times_rel is None):
 
             time_formats_to_try = ["%Y%m%d_%H%M%S.%f", "%Y%m%d_%H%M%S", "%Y%m%d-%H%M%S.%f", "%Y%m%d-%H%M%S"]
             self.beginning_datetime = None
@@ -878,7 +893,7 @@ class InputTypeVideo(InputType):
 
                     sys.exit()
 
-        else:
+        elif beginning_time is not None:
             self.beginning_datetime = beginning_time
 
         self.detection = detection
@@ -906,6 +921,11 @@ class InputTypeVideo(InputType):
 
         # Get the total time number of video frames in the file
         self.total_frames = int(self.cap.get(7))
+
+        # The container's frame count can be an estimate (mkv has none, 1 short); the SEI pass counted
+        # the pictures in the stream
+        if self.frame_times_rel is not None:
+            self.total_frames = len(self.frame_times_rel)
 
         # Get the image size
         self.nrows = int(self.cap.get(4))
@@ -1097,7 +1117,8 @@ class InputTypeVideo(InputType):
             middle_frame = self.current_fr_chunk_size/2
 
         # Compute number of seconds since the beginning of the video file to the mean time of the frame chunk
-        seconds_since_beginning = (self.current_frame_chunk*self.chunk_frames + middle_frame)/self.fps
+        seconds_since_beginning = self.secondsSinceBeginning(self.current_frame_chunk*self.chunk_frames
+                                                             + middle_frame)
 
         # Compute the absolute time
         dt = self.beginning_datetime + datetime.timedelta(seconds=seconds_since_beginning)
@@ -1153,14 +1174,33 @@ class InputTypeVideo(InputType):
             frame_no = self.current_frame
 
         # Compute the datetime of the current frame
-        dt = self.beginning_datetime + datetime.timedelta(seconds=frame_no/self.fps)
+        dt = self.beginning_datetime + datetime.timedelta(seconds=self.secondsSinceBeginning(frame_no))
 
         if dt_obj:
             return dt
 
         else:
             return dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second, dt.microsecond/1000
-        
+
+    def secondsSinceBeginning(self, frame_no):
+        """ Time of a (fractional) frame index since the beginning of the video [s]: the per-frame SEI
+            time when the video carries it (interpolated between frames, extended at the nominal
+            FPS past the last one), otherwise frame_no/fps.
+        """
+
+        rel = self.frame_times_rel
+
+        if rel is None:
+            return frame_no/self.fps
+
+        last = len(rel) - 1
+        if frame_no > last:
+            return float(rel[last]) + (frame_no - last)/self.fps
+        if frame_no < 0:
+            return frame_no/self.fps
+
+        return float(np.interp(frame_no, np.arange(len(rel)), rel))
+
     def loadFullVideo(self):
         """ Load the full video in memory. """
 

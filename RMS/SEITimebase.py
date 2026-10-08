@@ -20,9 +20,10 @@ import time
 import threading
 from collections import deque
 
-# integration start = capture_utc - K_READOUT - exp. Kept equal to BufferedCapture._K_READOUT_S
-# (row-0 readout offset k, measured once by PPS-LED calibration).
-K_READOUT_S = 88e-6
+# integration start = capture_utc - K_READOUT - exp (row-0 readout offset k, measured once by
+# PPS-LED calibration)
+from RMS.RMSPSei import K_READOUT_S
+
 
 _RESID_ANOMALY_S = 300e-6     # a raw stamp this far off the local trend = step / slew / bad parse.
                              # HEALTH METRIC ONLY -- counted in health(), never forces a stand-down
