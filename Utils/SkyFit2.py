@@ -10786,6 +10786,13 @@ class PlateTool(QtWidgets.QMainWindow):
         if not hasattr(self, "mask_brush_max_undo"):
             self.mask_brush_max_undo = 50
 
+        # saveState drops the error overlay's Qt pixmap and item; rebuild them on the next draw
+        if not hasattr(self, "error_overlay_item"):
+            self.error_overlay_item = None
+        if not hasattr(self, "error_overlay_pixmap"):
+            self.error_overlay_pixmap = None
+            self.error_overlay_pixmap_threshold = None
+
         # If setupUI hasn't already been called, call it
         if not hasattr(self, 'central'):
 
@@ -19499,8 +19506,9 @@ class PlateTool(QtWidgets.QMainWindow):
             else:
                 img_h = self.img.data.shape[1]
 
-            # Compute the corrected frame time
-            frame_no = RollingShutterCorrection.correctRollingShutterTemporal(frame, pick['y_centroid'], img_h, fps=fps, scan_rate=scan_rate)
+            # Compute the corrected frame time. The centroid is float32, which NumPy 2 keeps through the
+            #   sum: cast it so the frame time stays a float64 that timedelta accepts
+            frame_no = RollingShutterCorrection.correctRollingShutterTemporal(frame, float(pick['y_centroid']), img_h, fps=fps, scan_rate=scan_rate)
 
         # If global shutter, do no correction
         else:
