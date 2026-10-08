@@ -3,6 +3,7 @@
 from __future__ import print_function, division, absolute_import
 
 from time import time
+import collections
 import os
 
 import numpy as np
@@ -471,6 +472,148 @@ else:
 
 
 
+def getSegmentStripeIndices(config, rho, theta, img_h, img_w, line_start=None, line_end=None,
+    stripe_width_factor=1.0):
+    """ Get indices of the stripe around a line, limited to the extent of the line segment (with a margin of
+        one stripe width at both ends) if the segment end points are given.
+
+    Arguments:
+        config: [Config] Configuration object.
+        rho: [float] Line distance from the center in HT space (pixels).
+        theta: [float] Angle in degrees in HT space.
+        img_h: [int] Image height in pixels.
+        img_w: [int] Image width in pixels.
+
+    Keyword arguments:
+        line_start: [tuple] (x, y) Start point of the line segment. None by default.
+        line_end: [tuple] (x, y) End point of the line segment. None by default.
+        stripe_width_factor: [float] Multiplier of the stripe width from the config. 1.0 by default.
+
+    Return:
+        (indicesy, indicesx): [tuple] y and x indices of the stripe pixels.
+    """
+
+    inds_y, inds_x = getStripeIndices(rho, theta, stripe_width_factor*config.stripe_width, img_h, img_w)
+
+    if (line_start is None) or (line_end is None):
+        return inds_y, inds_x
+
+    p1 = np.array(line_start, dtype=np.float64)
+    line_vec = np.array(line_end, dtype=np.float64) - p1
+    line_len_sq = np.dot(line_vec, line_vec)
+
+    if line_len_sq <= 0:
+        return inds_y, inds_x
+
+    # Position of the stripe pixels along the segment, 0 at the start and 1 at the end
+    t = ((inds_x - p1[0])*line_vec[0] + (inds_y - p1[1])*line_vec[1])/line_len_sq
+
+    # Allow a margin of one stripe width at both ends
+    margin_rel = config.stripe_width/np.sqrt(line_len_sq)
+    mask_extent = (t >= -margin_rel) & (t <= 1.0 + margin_rel)
+
+    return inds_y[mask_extent], inds_x[mask_extent]
+
+
+# Threshold passers of one time window of the line search: image coordinates, the frame in which every pixel
+#   peaked, and the thresholded image (packed to bits)
+WindowPoints = collections.namedtuple('WindowPoints', ['frame_min', 'frame_max', 'xs', 'ys', 'zs', 'thresh',
+    'shape'])
+
+
+def windowPoints(ff, img_thresh, frame_min, frame_max):
+    """ Get the threshold passers of a time window with the frame in which they peaked, as the points of an FF
+        file are taken (lonely pixels are removed).
+
+    Arguments:
+        ff: [FFMimickInterface] The frame chunk of the window, which has the maxframe.
+        img_thresh: [ndarray] The thresholded maxpixel of the window.
+        frame_min: [int] The first frame of the window.
+        frame_max: [int] The last frame of the window.
+
+    Return:
+        [WindowPoints] Points of the window.
+    """
+
+    ys, xs = np.nonzero(morph.clean(img_thresh.copy()))
+    zs = frame_min + ff.maxframe[ys, xs].astype(np.int64)
+
+    return WindowPoints(frame_min, frame_max, xs, ys, zs, np.packbits(img_thresh > 0), img_thresh.shape)
+
+
+def windowThresholdConnected(window_points, frame, x1, y1, x2, y2):
+    """ Fraction of the segment between two points which passes the threshold, in the time window centred
+        closest to the given frame. A segment inside one extended object is lit along its whole length, a
+        segment between two separate objects is not.
+
+    Arguments:
+        window_points: [list] WindowPoints of all time windows.
+        frame: [float] Frame of the points.
+        x1, y1, x2, y2: [float] The segment end points (image coordinates).
+
+    Return:
+        [float] Fraction of the segment above the threshold, None if no window has the frame.
+    """
+
+    windows = [wp for wp in window_points if wp.frame_min <= frame <= wp.frame_max]
+    if not windows:
+        return None
+
+    wp = min(windows, key=lambda wp: abs((wp.frame_min + wp.frame_max)/2.0 - frame))
+    h, w = wp.shape
+    img = np.unpackbits(wp.thresh)[:h*w].reshape(h, w)
+
+    n = max(2, int(np.ceil(2*np.hypot(x2 - x1, y2 - y1))) + 1)
+    xs = np.clip(np.round(np.linspace(x1, x2, n)).astype(int), 0, w - 1)
+    ys = np.clip(np.round(np.linspace(y1, y2, n)).astype(int), 0, h - 1)
+
+    return np.mean(img[ys, xs] > 0)
+
+
+def getWindowStripePoints(config, window_points, frame_min, frame_max, rho, theta, img_h, img_w,
+    line_start=None, line_end=None):
+    """ Get the (x, y, frame) points in the stripe around a line from the threshold passers of the time
+        windows, in the given frame range. Used instead of thresholding every frame again.
+
+    Arguments:
+        config: [Config] Configuration object.
+        window_points: [list] WindowPoints of all time windows.
+        frame_min: [int] First frame of the range.
+        frame_max: [int] Last frame of the range.
+        rho: [float] Line distance from the center in HT space (pixels).
+        theta: [float] Angle in degrees in HT space.
+        img_h: [int] Image height in pixels.
+        img_w: [int] Image width in pixels.
+
+    Keyword arguments:
+        line_start: [tuple] (x, y) Start point of the line segment. None by default.
+        line_end: [tuple] (x, y) End point of the line segment. None by default.
+
+    Return:
+        xs, ys, zs: [tuple of ndarrays] Coordinates and frames of the points.
+    """
+
+    stripe = np.zeros((img_h, img_w), dtype=bool)
+    stripe[getSegmentStripeIndices(config, rho, theta, img_h, img_w, line_start, line_end)] = True
+
+    points = []
+    for wp in window_points:
+
+        if (wp.frame_max < frame_min) or (wp.frame_min > frame_max):
+            continue
+
+        sel = stripe[wp.ys, wp.xs] & (wp.zs >= frame_min) & (wp.zs <= frame_max)
+        points.append(np.column_stack([wp.xs[sel], wp.ys[sel], wp.zs[sel]]))
+
+    if not points:
+        return tuple(np.array([], dtype=np.int64) for _ in range(3))
+
+    # The windows overlap, the same pixel and frame are taken once
+    points = np.unique(np.concatenate(points).astype(np.int64), axis=0)
+
+    return points[:, 0], points[:, 1], points[:, 2]
+
+
 def getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, theta, mask, flat_struct, \
     dark, stripe_width_factor=1.0, centroiding=False, point1=None, point2=None, debug=False, \
     line_start=None, line_end=None):
@@ -508,39 +651,9 @@ def getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, 
 
     t_stripe = time()
 
-    # Get indices of stripe pixels around the line of the meteor (this is quite fast)
-    stripe_indices = getStripeIndices(rho, theta, stripe_width_factor*config.stripe_width, img_h, img_w)
-    
-    # Filter indices by line extent if provided
-    if (line_start is not None) and (line_end is not None):
-        inds_y, inds_x = stripe_indices
-        
-        # Vector of the line segment
-        p1 = np.array(line_start)
-        p2 = np.array(line_end)
-        line_vec = p2 - p1
-        line_len_sq = np.dot(line_vec, line_vec)
-        
-        if line_len_sq > 0:
-            # Vector from start point to all stripe points
-            # Stack x and y coordinates
-            # inds_x and inds_y are 1D arrays
-            points = np.column_stack((inds_x, inds_y))
-            points_vec = points - p1
-            
-            # Project points onto the line vector
-            # t = (p - p1) . (p2 - p1)/|p2 - p1|^2
-            t = np.dot(points_vec, line_vec)/line_len_sq
-            
-            # Filter points within [0, 1] with some margin (e.g., half the stripe width in relative terms? or just px)
-            # Use pixel margin for safety
-            margin_px = config.stripe_width  # Allow 1 stripe width margin at ends
-            margin_rel = margin_px/np.sqrt(line_len_sq)
-            
-            mask_extent = (t >= -margin_rel) & (t <= 1.0 + margin_rel)
-            
-            # Apply mask
-            stripe_indices = (inds_y[mask_extent], inds_x[mask_extent])
+    # Get indices of stripe pixels around the line of the meteor, within the extent of the line segment
+    stripe_indices = getSegmentStripeIndices(config, rho, theta, img_h, img_w, line_start, line_end,
+        stripe_width_factor=stripe_width_factor)
 
     if debug: 
         strip_indices_time = time() - t_stripe

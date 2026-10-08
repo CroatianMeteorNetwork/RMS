@@ -39,7 +39,7 @@ from mpl_toolkits.mplot3d import Axes3D
 from RMS.Astrometry.Conversions import jd2Date, raDec2AltAz
 import RMS.ConfigReader as cr
 from RMS.DetectionTools import getThresholdedStripe3DPoints, loadImageCalibration, binImageCalibration, \
-    dilateCoordinates
+    dilateCoordinates, windowPoints, getWindowStripePoints, windowThresholdConnected
 from RMS.Formats.AsgardEv import writeEv
 from RMS.Formats.AST import xyToRaDecAST
 from RMS.Formats import FFfile
@@ -1518,7 +1518,7 @@ def mergeRansacLines(line_list, img_w, img_h, angle_thresh=15.0, dist_thresh_fac
 
 
 
-def merge3DLines(line_list, img_w, img_h, dist_thresh_factor=2.0, last_count=0):
+def merge3DLines(line_list, img_w, img_h, dist_thresh_factor=2.0, last_count=0, dist_thresh=None):
     """ Merge essentially duplicate 3D lines that overlap in time by verifying their kinematics.
     
     Arguments:
@@ -1530,6 +1530,8 @@ def merge3DLines(line_list, img_w, img_h, dist_thresh_factor=2.0, last_count=0):
         dist_thresh_factor: [float] Maximum physical gap limit based on image diagonal, 
             allows joining of closely parallel tracks.
         last_count: [int] Used for recursion, default is 0 and it should be left as is!
+        dist_thresh: [float] Maximum distance between the lines (px) at the beginning and the end of their
+            common frames, instead of the one given by dist_thresh_factor. None by default.
     
     Return:
         final_list: [list] A list of merged lines.
@@ -1541,6 +1543,8 @@ def merge3DLines(line_list, img_w, img_h, dist_thresh_factor=2.0, last_count=0):
 
     diag = (img_w**2 + img_h**2)**0.5
     spatial_dist_thresh = dist_thresh_factor * diag / 100.0
+    if dist_thresh is not None:
+        spatial_dist_thresh = dist_thresh
 
     final_list = []
     paired_indices = set()
@@ -1578,7 +1582,11 @@ def merge3DLines(line_list, img_w, img_h, dist_thresh_factor=2.0, last_count=0):
             overlap_fmin = max(L1_fmin, L2_fmin)
             overlap_fmax = min(L1_fmax, L2_fmax)
 
-            if overlap_fmax >= overlap_fmin:
+            # The lines of the same object overlap for most of their time, a line which only touches the
+            #   end of another one is another object (or a part of it which doesn't follow the line)
+            min_overlap = 0.5*min(L1_fmax - L1_fmin, L2_fmax - L2_fmin)
+
+            if overlap_fmax - overlap_fmin >= min_overlap:
                 # They overlap in time. Check spatial distance during this overlapping window.
                 pos1_start = get_pos(L1, overlap_fmin)
                 pos2_start = get_pos(L2, overlap_fmin)
@@ -1615,7 +1623,8 @@ def merge3DLines(line_list, img_w, img_h, dist_thresh_factor=2.0, last_count=0):
 
     # Use recursion until the number of lines stabilizes
     if len(final_list) != last_count:
-        final_list = merge3DLines(final_list, img_w, img_h, dist_thresh_factor, len(final_list))
+        final_list = merge3DLines(final_list, img_w, img_h, dist_thresh_factor, len(final_list),
+            dist_thresh=dist_thresh)
 
     return final_list
 
@@ -1648,7 +1657,8 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
     mask=None, flat_struct=None, dark=None, debug=False, kht_cluster_min_size=9, kht_cluster_min_deviation=2, \
     kht_delta=0.1, kht_kernel_min_height=0.004, kht_n_sigmas=1, kht_morph_ops=[1, 2, 3, 4, 1], \
     line_finder_algorithm='kht', ransac_max_lines=10, ransac_min_pixels=10, ransac_distance_thresh=2.0, \
-    ransac_min_line_length=20.0, ransac_max_gap=20.0, frame_range=None, border=5, config=None):
+    ransac_min_line_length=20.0, ransac_max_gap=20.0, frame_range=None, border=5, config=None,
+    window_points=None):
     """ Get (rho, phi) pairs for each meteor present on the image using KHT.
         
     Arguments:
@@ -1684,6 +1694,9 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
             If given, only frame chunks overlapping this range will be processed. The end frame will be 
             padded up to the next time_window_size boundary.
         border: [int] Number of pixels to mask out from the border of the image.
+        window_points: [list] If a list is given and the input is not an FF file, the threshold passers of
+            every time window are appended to it as WindowPoints, with the frame in which each pixel peaked.
+            They are used to search for lines in 3D without reading the frames again.
 
     Return:
         [list] A list of all found lines. Each entry is [rho, theta, frame_min, frame_max] for KHT,
@@ -1788,6 +1801,10 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
             # Check if there are too many threshold passers, if so report that no lines were found
             if not checkWhiteRatio(img_thresh, img_handle.ff, max_white_ratio):
                 continue
+
+            # Keep the threshold passers with the frame in which they peaked, as the points of an FF file
+            if window_points is not None:
+                window_points.append(windowPoints(img_handle.ff, img_thresh, frame_min, frame_max))
 
 
         if debug:
@@ -2798,6 +2815,280 @@ def subframePickTime(img_handle, frame, fps):
     return img_handle.currentFrameTime(frame_no=frame_int, dt_obj=True) + datetime.timedelta(seconds=frac/fps)
 
 
+def stitchedLineDeviation(line, pieces):
+    """ Largest distance of the end points of the stitched pieces from the stitched line, at the same frames.
+
+    Arguments:
+        line: [list] Stitched 3D line, [(x1, y1, f1), (x2, y2, f2), ...].
+        pieces: [list] The stitched 3D lines, in the same format.
+
+    Return:
+        [float] The largest distance (px).
+    """
+
+    (x1, y1, f1), (x2, y2, f2) = line[0], line[1]
+    if f2 == f1:
+        return 0.0
+
+    dev = 0.0
+    for piece in pieces:
+        for x, y, f in piece[:2]:
+            t = (f - f1)/(f2 - f1)
+            dev = max(dev, np.hypot(x - (x1 + t*(x2 - x1)), y - (y1 + t*(y2 - y1))))
+
+    return dev
+
+
+def extendPieces(pieces):
+    """ Extend the pieces of a stitched track in time to the middle of the gaps between them, along their own
+        motion, so the whole track is centroided.
+
+    Arguments:
+        pieces: [list] 3D lines [(x1, y1, f1), (x2, y2, f2), points, quality, f_first, f_last], sorted in
+            time.
+
+    Return:
+        [list] The extended pieces.
+    """
+
+    def pointAt(piece, frame):
+        (x1, y1, f1), (x2, y2, f2) = piece[0], piece[1]
+        t = (frame - f1)/(f2 - f1) if f2 != f1 else 0.0
+        return (x1 + t*(x2 - x1), y1 + t*(y2 - y1), frame)
+
+    extended = []
+    for i, piece in enumerate(pieces):
+
+        f_first, f_last = piece[0][2], piece[1][2]
+        if (i > 0) and (pieces[i - 1][1][2] < f_first):
+            f_first = (pieces[i - 1][1][2] + f_first)/2.0
+        if (i < len(pieces) - 1) and (pieces[i + 1][0][2] > f_last):
+            f_last = (pieces[i + 1][0][2] + f_last)/2.0
+
+        extended.append([pointAt(piece, f_first), pointAt(piece, f_last), piece[2], piece[3],
+                         int(round(f_first)), int(round(f_last))])
+
+    return extended
+
+
+def joinContinuousDetections(meteor_detections, max_gap_frames, max_gap_spatial, max_dist, img_h, img_w,
+    x_col=1, fit_length=20.0, bin_factor=1):
+    """ Join the detections of the pieces of one track: a detection which begins where another one ends
+        (within max_gap_frames, or within max_gap_spatial px of motion for slow objects), at the position
+        extrapolated from the end of the other one, and moving in the same direction with a similar speed.
+
+    Arguments:
+        meteor_detections: [list] Detections as [rho, theta, centroids], centroids are rows of
+            [frame, ..., x, y, ...].
+        max_gap_frames: [float] Maximum number of frames between the detections.
+        max_gap_spatial: [float] Maximum motion between the detections (px), for longer gaps in frames.
+        max_dist: [float] Maximum distance of the beginning of a detection from the extrapolated end of the
+            other one (px).
+        img_h: [int] Image height, for the polar line coordinates.
+        img_w: [int] Image width, for the polar line coordinates.
+
+    Keyword arguments:
+        x_col: [int] Column of x in the centroids, y is in the next column. 1 by default.
+        fit_length: [float] The motion at the ends is estimated from the centroids within this distance of the
+            end (px), at least 10 centroids. 20 by default.
+        bin_factor: [int] Binning factor of the detection. The centroids are in the unbinned image, while
+            max_gap_spatial, max_dist, fit_length and the image size are in the binned image, as the polar
+            line coordinates of the detections. 1 by default.
+
+    Return:
+        [list] Detections, with the joined ones as one.
+    """
+
+    def endCentroids(cent, last):
+        """ The centroids at the beginning or the end, within fit_length px of it (at least 10). """
+        cent = cent[np.argsort(cent[:, 0])]
+        if last:
+            cent = cent[::-1]
+        dist = np.hypot(cent[:, x_col] - cent[0, x_col], cent[:, x_col + 1] - cent[0, x_col + 1])
+        n = max(10, int(np.searchsorted(np.maximum.accumulate(dist), fit_length)))
+        return cent[:n]
+
+    def motion(cent):
+        """ Linear fits of x and y vs frame. """
+        fr = cent[:, 0]
+        if np.ptp(fr) == 0:
+            return None
+        px = np.polyfit(fr, cent[:, x_col], 1)
+        py = np.polyfit(fr, cent[:, x_col + 1], 1)
+        return px, py
+
+    # Distances in the unbinned image of the centroids
+    max_gap_spatial = max_gap_spatial*bin_factor
+    max_dist = max_dist*bin_factor
+    fit_length = fit_length*bin_factor
+
+    detections = sorted(meteor_detections, key=lambda det: np.min(np.asarray(det[2])[:, 0]))
+
+    joined = True
+    while joined:
+        joined = False
+
+        for i in range(len(detections)):
+            cent_a = np.asarray(detections[i][2])
+            motion_a = motion(endCentroids(cent_a, True))
+            if motion_a is None:
+                continue
+
+            for j in range(len(detections)):
+                if j == i:
+                    continue
+
+                cent_b = np.asarray(detections[j][2])
+                gap = np.min(cent_b[:, 0]) - np.max(cent_a[:, 0])
+
+                # B has to begin after A (they may overlap) and end after it
+                if (np.min(cent_b[:, 0]) <= np.min(cent_a[:, 0])) \
+                        or (np.max(cent_b[:, 0]) <= np.max(cent_a[:, 0])):
+                    continue
+
+                # The gap has to be short in frames, or in the motion of a slow object
+                speed_a = np.hypot(motion_a[0][0], motion_a[1][0])
+                if (gap > max_gap_frames) and (gap*speed_a > max_gap_spatial):
+                    continue
+
+                start_b = endCentroids(cent_b, False)
+                motion_b = motion(start_b)
+                if motion_b is None:
+                    continue
+
+                # If they overlap in time, B follows A in the shared frames. Otherwise the beginning of B is
+                #   on the extrapolated motion of A
+                _, idx_a, idx_b = np.intersect1d(cent_a[:, 0], cent_b[:, 0], return_indices=True)
+                if len(idx_a):
+                    dist = np.median(np.hypot(cent_a[idx_a, x_col] - cent_b[idx_b, x_col],
+                                              cent_a[idx_a, x_col + 1] - cent_b[idx_b, x_col + 1]))
+                else:
+                    pred_x = np.polyval(motion_a[0], start_b[:, 0])
+                    pred_y = np.polyval(motion_a[1], start_b[:, 0])
+                    dist = np.median(np.hypot(start_b[:, x_col] - pred_x, start_b[:, x_col + 1] - pred_y))
+
+                if dist > max_dist:
+                    continue
+
+                # Same direction and similar speed
+                vel_a = np.array([motion_a[0][0], motion_a[1][0]])
+                vel_b = np.array([motion_b[0][0], motion_b[1][0]])
+                speed_a, speed_b = np.linalg.norm(vel_a), np.linalg.norm(vel_b)
+                if (speed_a == 0) or (speed_b == 0):
+                    continue
+                if np.degrees(np.arccos(np.clip(np.dot(vel_a, vel_b)/(speed_a*speed_b), -1, 1))) > 10:
+                    continue
+                if not (2/3.0 < speed_b/speed_a < 1.5):
+                    continue
+
+                # Join, the frames of B after the end of A are added
+                cent = np.vstack([cent_a, cent_b[cent_b[:, 0] > np.max(cent_a[:, 0])]])
+                # The polar line in the binned image, as for the other detections
+                (xa, ya), (xb, yb) = (cent[[0, -1], x_col:x_col + 2] - (bin_factor - 1)/2.0)/bin_factor
+                rho, theta = getPolarLine(xa, img_h - ya, xb, img_h - yb, img_h, img_w)
+                logDebug('Joined the detections of frames {:.0f}-{:.0f} and {:.0f}-{:.0f}'.format(
+                    cent_a[0, 0], cent_a[-1, 0], cent_b[0, 0], cent_b[-1, 0]))
+
+                detections[i] = [rho, theta, cent]
+                del detections[j]
+                joined = True
+                break
+
+            if joined:
+                break
+
+    return detections
+
+
+def removeDuplicateDetections(meteor_detections, max_dist, max_along_dist, x_col=1, connected=None,
+    max_connected_dist=None):
+    """ Remove the detections which follow the same object as a longer detection. At least half of their
+        frames are shared with it, and in the shared frames the centroids are closer than max_dist across the
+        direction of motion and closer than max_along_dist along it (median). The centroids of an extended
+        object (e.g. a bright one) can be shifted along its track when it is found around more than one line,
+        and across it by up to its width: such detections are duplicates if the image is above the threshold
+        all the way between them.
+
+    Arguments:
+        meteor_detections: [list] Detections as [rho, theta, centroids], centroids are rows of
+            [frame, ..., x, y, ...].
+        max_dist: [float] Maximum median distance of the centroids across the direction of motion (px).
+        max_along_dist: [float] Maximum median distance of the centroids along the direction of motion (px).
+
+    Keyword arguments:
+        x_col: [int] Column of x in the centroids, y is in the next column. 1 by default.
+        connected: [function] connected(frame, x1, y1, x2, y2) gives the fraction of the segment between two
+            points which is above the threshold (None if unknown). None by default, in which case only
+            max_dist is used.
+        max_connected_dist: [float] Maximum median distance across the direction of motion of the centroids of
+            the same extended object (px). None by default.
+
+    Return:
+        [list] Detections without duplicates, in the original order.
+    """
+
+    def sameExtendedObject(cent, cent_kept, idx, idx_kept):
+        """ The image is above the threshold between the centroids in most of the sampled shared frames. """
+        samples = np.unique(np.linspace(0, len(idx) - 1, 5).astype(int))
+        lit = []
+        for k in samples:
+            frac = connected(cent[idx[k], 0], cent[idx[k], x_col], cent[idx[k], x_col + 1],
+                             cent_kept[idx_kept[k], x_col], cent_kept[idx_kept[k], x_col + 1])
+            if frac is not None:
+                lit.append(frac >= 0.9)
+        return (len(lit) > 0) and (np.mean(lit) >= 0.8)
+
+    # Longest first, so a duplicate is removed in favour of the longer detection
+    order = sorted(range(len(meteor_detections)), key=lambda i: -len(meteor_detections[i][2]))
+
+    kept = []
+    for i in order:
+
+        cent = np.asarray(meteor_detections[i][2])
+        duplicate = False
+
+        for j in kept:
+
+            cent_kept = np.asarray(meteor_detections[j][2])
+            _, idx, idx_kept = np.intersect1d(cent[:, 0], cent_kept[:, 0], return_indices=True)
+            if len(idx) < 0.5*len(cent):
+                continue
+
+            diff_x = cent[idx, x_col] - cent_kept[idx_kept, x_col]
+            diff_y = cent[idx, x_col + 1] - cent_kept[idx_kept, x_col + 1]
+
+            # Direction of motion of the longer detection
+            direction = np.zeros(2)
+            if np.ptp(cent_kept[:, 0]) > 0:
+                direction = np.array([np.polyfit(cent_kept[:, 0], cent_kept[:, x_col + k], 1)[0]
+                                      for k in (0, 1)])
+            speed = np.linalg.norm(direction)
+
+            if speed > 0:
+                direction /= speed
+                along = np.median(np.abs(diff_x*direction[0] + diff_y*direction[1]))
+                across = np.median(np.abs(diff_x*direction[1] - diff_y*direction[0]))
+            else:
+                along, across = 0.0, np.median(np.hypot(diff_x, diff_y))
+
+            if along < max_along_dist:
+                if across < max_dist:
+                    duplicate = True
+                elif (connected is not None) and (max_connected_dist is not None) \
+                        and (across < max_connected_dist):
+                    duplicate = sameExtendedObject(cent, cent_kept, idx, idx_kept)
+
+            if duplicate:
+                break
+
+        if duplicate:
+            logDebug('Removed a duplicate detection of {:d} centroids'.format(len(cent)))
+        else:
+            kept.append(i)
+
+    return [meteor_detections[i] for i in sorted(kept)]
+
+
 def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, asgard=False, debug=False, \
     frame_range=None):
     """ Detect meteors on the given image. Here are the steps in the detection:
@@ -2862,6 +3153,10 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
         img_handle = preprocessFF(img_handle, mask, flat_struct, dark)
 
 
+    # Threshold passers of the line search windows, for the search of lines in 3D (not used for FF files,
+    #   which have their own maxframe)
+    window_points = [] if img_handle.input_type != 'ff' else None
+
     # Get lines on the image
     line_list = getLines(img_handle, config.k1_det, config.j1_det, config.time_slide, config.time_window_size, 
         config.max_lines_det, config.max_white_ratio, config.kht_lib_path, mask=mask, \
@@ -2872,7 +3167,7 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
         ransac_max_lines=config.ransac_max_lines, ransac_min_pixels=config.ransac_min_pixels, \
         ransac_distance_thresh=config.ransac_distance_thresh, ransac_min_line_length=config.ransac_min_line_length, \
         ransac_max_gap=config.ransac_max_gap, frame_range=frame_range, border=config.detection_border, \
-        config=config)
+        config=config, window_points=window_points)
 
     # logDebug('List of lines:', line_list)
 
@@ -3039,59 +3334,26 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
             logDebug("{:7.2f}, {:6.2f}, {:9g}, {:9g}".format(rho, theta, frame_min, frame_max))
 
 
-            # If FF files are not used as input, reconstruct it
-            if img_handle.input_type != 'ff':
-
-                # Compute the FF for this chunk
-                t1 = time()
-                img_handle.loadChunk(first_frame=frame_min, read_nframes=(frame_max - frame_min + 1))
-
-                logDebug('Time to load chunk of {:g} frames: {:.2f} s'.format(frame_max - frame_min + 1, time() - t1))
-
-                # Apply mask and flat to FF
-                img_handle = preprocessFF(img_handle, mask, flat_struct, dark)
-
-                # ### PLOT CHUNK
-                # img = img_handle.ff.maxpixel - img_handle.ff.avepixel
-
-                # # Auto adjust levels
-                # min_lvl = np.percentile(img[2:], 1)
-                # max_lvl = np.percentile(img[2:], 99.0)
-
-                # # Adjust levels
-                # img = Image.adjustLevels(img, min_lvl, 1.0, max_lvl)
-
-                # # Show the image chunk, average subtracted
-                # plt.imshow(img, cmap='gray')
-                # plt.show()
-                # ### ###
-
-                logDebug('Checking temporal propagation at frames {:g} - {:g} and time: {:s}'.format(
-                    frame_min, frame_max, img_handle.name())
-                    )
-                
-
-            # Extract (x, y, frame) of thresholded frames, i.e. pixel and frame locations of threshold passers
+            # Extract (x, y, frame) of threshold passers in the stripe around the line. For frame-based input,
+            #   these are the threshold passers of the line search windows, with the frame in which each pixel
+            #   peaked (as for FF files), so the frames don't have to be read and thresholded again
             t1 = time()
-            xs, ys, zs, ws = getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, theta, \
-                mask, flat_struct, dark, debug=debug, line_start=line_start, line_end=line_end)
-            
+            if window_points is not None:
+
+                xs, ys, zs = getWindowStripePoints(config, window_points, frame_min, frame_max, rho, theta,
+                    img_handle.ff.nrows, img_handle.ff.ncols, line_start=line_start, line_end=line_end)
+
+            else:
+
+                xs, ys, zs, _ = getThresholdedStripe3DPoints(config, img_handle, frame_min, frame_max, rho, \
+                    theta, mask, flat_struct, dark, debug=debug, line_start=line_start, line_end=line_end)
+
             logDebug('Time for thresholding and stripe extraction: {:.3f}'.format(time() - t1))
 
-            # # Plot the extracted point cloud in 3D
-            # show3DCloud(img_handle.ff, xs, ys, zs, None, None, config)
-
-            # Limit the number of points to search if too large
+            # Limit the number of points to search if too large. The fixed seed makes the detection
+            #   reproducible
             if len(zs) > config.max_points_det:
-
-                # Extract weights of each point
-                maxpix_elements = img_handle.ff.maxpixel[ys,xs].astype(np.float64)
-                weights = maxpix_elements/np.sum(maxpix_elements)
-
-                # Random sample the point, sampling is weighted by pixel intensity. The fixed seed makes the
-                #   detection reproducible
-                indices = np.random.RandomState(0).choice(len(zs), config.max_points_det, replace=False,
-                                                          p=weights)
+                indices = np.random.RandomState(0).choice(len(zs), config.max_points_det, replace=False)
                 ys = ys[indices]
                 xs = xs[indices]
                 zs = zs[indices]
@@ -3185,15 +3447,31 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                     show3DCloud(img_handle.ff, xs, ys, zs, detected_line, stripe_points, config,
                         all_detected_lines=all_detected_lines)
 
-                # Add the line to the results list
-                filtered_lines.append(detected_line)
+                # A long track which is not straight (e.g. across a wide field lens, or accelerating) is not
+                #   followed by one line. It is centroided piece by piece, and the pieces are joined
+                #   afterwards
+                pieces = detected_line[6]
+                if (len(pieces) > 1) \
+                        and (stitchedLineDeviation(detected_line, pieces) > config.ransac3d_distance_thresh):
+
+                    logDebug('The track is not straight, centroiding its {:d} pieces'.format(len(pieces)))
+                    for piece in extendPieces(pieces):
+                        if checkAngularVelocity3D(piece, config,
+                                correct_binning=(img_handle.input_type != 'ff'))[1]:
+                            filtered_lines.append(piece)
+
+                else:
+                    filtered_lines.append(detected_line[:6])
 
             else:
                 logDebug('No temporal propagation found!')
 
 
         # Merge similar lines in 3D
-        filtered_lines = merge3DLines(filtered_lines, img_handle.ff.ncols, img_handle.ff.nrows)
+        # Merge the duplicates of the same object, found around different 2D lines. Only lines closer than the
+        #   3D inlier distance are the same object, a wider limit merges separate objects moving side by side
+        filtered_lines = merge3DLines(filtered_lines, img_handle.ff.ncols, img_handle.ff.nrows,
+            dist_thresh=config.ransac3d_distance_thresh)
 
         # logDebug('after filtering:')
         # logDebug(filtered_lines)
@@ -3358,8 +3636,12 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
             # If other input types are given, load the frames and preprocess them
             if img_handle.input_type != 'ff':
                 
-                # Compute the FF for this chunk
-                img_handle.loadChunk(first_frame=frame_min, read_nframes=(frame_max - frame_min + 1))
+                # Compute the FF for this chunk. The background and its noise are estimated from at least half
+                #   a time window around a short detection, as a few tens of frames give a noisy threshold
+                n_bg = max(frame_max - frame_min + 1, config.time_window_size//2)
+                first_bg = int(max(0, min((frame_min + frame_max)//2 - n_bg//2,
+                                          img_handle.total_frames - n_bg)))
+                img_handle.loadChunk(first_frame=first_bg, read_nframes=n_bg)
 
                 # Preprocess image for this chunk
                 img_handle = preprocessFF(img_handle, mask, flat_struct, dark)
@@ -4110,6 +4392,29 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                 fig.tight_layout()
                 plt.show()
 
+
+    # The same object can be detected around different lines (e.g. both edges of a wide track). For
+    #   frame-based input, the thresholded images of the time windows tell whether two detections are inside
+    #   one extended object (the centroids are scaled to the unbinned image, the windows are binned)
+    # The centroids are in the unbinned image, the distances of the detection in the binned image
+    bin_factor = config.detection_binning_factor if (img_handle.input_type != 'ff') else 1
+
+    connected = None
+    if window_points:
+        def toBinned(coord):
+            return (coord - (bin_factor - 1)/2.0)/bin_factor
+        def connected(frame, x1, y1, x2, y2):
+            return windowThresholdConnected(window_points, frame, toBinned(x1), toBinned(y1), toBinned(x2),
+                toBinned(y2))
+
+    meteor_detections = removeDuplicateDetections(meteor_detections,
+        bin_factor*config.ransac3d_distance_thresh, bin_factor*config.stripe_width, x_col=(2 if asgard else 1), connected=connected,
+        max_connected_dist=bin_factor*config.stripe_width/2.0)
+
+    # Join the pieces of tracks which were centroided piece by piece
+    meteor_detections = joinContinuousDetections(meteor_detections, config.ransac3d_max_gap_frame,
+        config.ransac3d_max_gap_spatial, config.ransac3d_stitch_dist_thresh, img_handle.ff.nrows,
+        img_handle.ff.ncols, x_col=(2 if asgard else 1), bin_factor=bin_factor)
 
     # Once detection is done on this data, clear the cache for the thresholding function
     Image.thresholdImgMemoCache.clearCache()

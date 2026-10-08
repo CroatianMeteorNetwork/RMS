@@ -124,6 +124,9 @@ def findLines3D(points, max_lines, min_points, dist_thresh, max_gap_frame, max_g
     # Internal mask: True means the point is still available to be matched
     available_mask = np.ones(len(points), dtype=bool)
 
+    # Random point sampling with a fixed seed, so the same points always give the same lines
+    rng = np.random.RandomState(0)
+
     consecutive_failures = 0
     MAX_FAILURES = 10
 
@@ -143,7 +146,7 @@ def findLines3D(points, max_lines, min_points, dist_thresh, max_gap_frame, max_g
                 break
                 
             # Randomly sample 2 points, prefer those further apart in time for stability
-            p1_idx = np.random.choice(len(pts_pool))
+            p1_idx = rng.choice(len(pts_pool))
             p1 = pts_pool[p1_idx]
             
             # Use distances in frame dimension to weight second point selection
@@ -151,7 +154,7 @@ def findLines3D(points, max_lines, min_points, dist_thresh, max_gap_frame, max_g
             if np.sum(dt) == 0:
                 continue
             probs = dt / np.sum(dt)
-            p2_idx = np.random.choice(len(pts_pool), p=probs)
+            p2_idx = rng.choice(len(pts_pool), p=probs)
             p2 = pts_pool[p2_idx]
             
             # Need strict difference in frames to define temporal direction
@@ -216,6 +219,11 @@ def findLines3D(points, max_lines, min_points, dist_thresh, max_gap_frame, max_g
                 frame_span = np.max(frames_in_seg) - np.min(frames_in_seg)
                 
                 if frame_span < min_frames:
+                    continue
+
+                # The points have to be spread over the frames, not a cluster in a few frames with a stray
+                #   point extending the span
+                if len(np.unique(np.round(frames_in_seg))) < min_frames/2.0:
                     continue
                     
                 # Calculate a combined score of points and frame span
@@ -433,22 +441,90 @@ def fit3DLine(points, weights=None):
     return mean, direction
 
 
+def selectSeedLine(found_lines, ref_line, max_angle=10.0, max_dist=10.0, dist_margin=2.0):
+    """ Select the 3D line which belongs to the 2D line it was searched around: of the 3D lines which are
+        parallel to the 2D line and lie along it, the longest in time of those closest to the 2D line. Other
+        objects crossing the stripe, or moving next to the object, are not selected.
+
+    Arguments:
+        found_lines: [list] Lines found by findLines3D in the format of find3DLines.
+        ref_line: [tuple] (x1, y1, x2, y2) of the 2D line segment.
+
+    Keyword arguments:
+        max_angle: [float] Maximum angle between the 3D line projected to the image and the 2D line (deg).
+        max_dist: [float] Maximum distance of the 3D line end points from the 2D line (px).
+        dist_margin: [float] Lines up to this much farther from the 2D line than the closest one are
+            considered to be on it (px).
+
+    Return:
+        [list] The selected line, or None if no line is along the 2D line.
+    """
+
+    x1, y1, x2, y2 = ref_line
+    ref_start = np.array([x1, y1], dtype=np.float64)
+    ref_dir = np.array([x2 - x1, y2 - y1], dtype=np.float64)
+    ref_len = np.linalg.norm(ref_dir)
+    if ref_len == 0:
+        return None
+    ref_dir /= ref_len
+
+    candidates = []
+    for line in found_lines:
+
+        start = np.array(line[0][:2], dtype=np.float64)
+        end = np.array(line[1][:2], dtype=np.float64)
+
+        # Direction in the image (a nearly stationary line has no direction to compare)
+        vec = end - start
+        length = np.linalg.norm(vec)
+        if length > 1.0:
+            cos_angle = min(1.0, abs(np.dot(vec, ref_dir))/length)
+            if np.degrees(np.arccos(cos_angle)) > max_angle:
+                continue
+
+        # Distance of the end points from the 2D line
+        dists = [abs(ref_dir[0]*(pt[1] - ref_start[1]) - ref_dir[1]*(pt[0] - ref_start[0]))
+                 for pt in (start, end)]
+        if max(dists) > max_dist:
+            continue
+
+        candidates.append((np.mean(dists), line[5] - line[4], line))
+
+    if not candidates:
+        return None
+
+    dist_min = min(cand[0] for cand in candidates)
+
+    along = [cand for cand in candidates if cand[0] <= dist_min + dist_margin]
+
+    return max(along, key=lambda cand: cand[1])[2]
+
+
 def stitch3DLines(found_lines, ref_line, ref_has_frames=True, vect_angle_thresh=10.0, dist_thresh=2.0, 
                   frame_scale=None, debug=False):
     """
     Selects the best matching line (seed) and then 'stitches' other segments iteratively 
     using a model that is re-fit after each merge for better robustness on long tracks.
+
+    Return:
+        [list] [start, end, points, quality, first frame, last frame, pieces] of the stitched line, where
+            pieces are the stitched segments sorted in time. None if there are no lines.
     """
     if not found_lines:
         return None
 
-    # Step 1: Find the seed line
-    seed_line = selectClosestLine(found_lines, ref_line, ref_has_frames=ref_has_frames, debug=debug)
+    # Step 1: Find the seed line. With a 2D reference line, take the line along it, otherwise (or if there is
+    #   none along it) the closest one
+    seed_line = None
+    if not ref_has_frames:
+        seed_line = selectSeedLine(found_lines, ref_line)
+    if seed_line is None:
+        seed_line = selectClosestLine(found_lines, ref_line, ref_has_frames=ref_has_frames, debug=debug)
     if seed_line is None:
         return None
 
     if len(found_lines) == 1:
-        return seed_line
+        return list(seed_line) + [[seed_line]]
 
     # Estimate frame scaling if not provided
     if frame_scale is None:
@@ -562,7 +638,11 @@ def stitch3DLines(found_lines, ref_line, ref_has_frames=True, vect_angle_thresh=
         new_start = (final_mean[0], final_mean[1], f_min)
         new_end = (final_mean[0], final_mean[1], f_max)
 
-    return [new_start, new_end, total_pts, avg_quality, int(round(f_min)), int(round(f_max))]
+    # The stitched segments are returned too (sorted in time), so the track can be followed piece by piece
+    #   where it is not straight
+    pieces = sorted(stitched, key=lambda l: l[4])
+
+    return [new_start, new_end, total_pts, avg_quality, int(round(f_min)), int(round(f_max)), pieces]
 
 
 def find3DLines(stripe_points, current_time, config, fireball_detection=False):
