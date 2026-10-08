@@ -15,7 +15,11 @@ This guide assumes you know the monitor (see [MonitorProcessing.md](MonitorProce
 1. **Background.** The per-pixel median and noise of every block of 256 frames, smoothed over the neighbouring
    blocks and interpolated in time. The brightness of the stars changes with the transparency of the sky (by
    several times within a minute in thin clouds), so the best fitting scale of the star template is
-   subtracted from every frame. Bright stars, the mask and the image border are masked.
+   subtracted from every frame. Bright stars, the mask and the image border are masked. On some sensors, a
+   very bright moving object leaves a faint trail along its whole column and along its row. The trails move
+   with the object, so they would be found as objects themselves (one bright object made over a hundred false
+   detections): in every frame, the rows and columns of the sources brighter than `mf_trail_level` (25 times
+   the noise) are left out of the search, except at the source itself.
 2. **Search.** The frames are binned 2x2, smoothed with the point spread function (PSF), and summed along a
    grid of velocities over runs of 8 and 16 frames (all speeds up to `mf_ang_vel_max`), and of 32 frames (slow
    objects). Peaks above `mf_threshold` are the hits. Pixels above the threshold in a large part of the whole
@@ -114,6 +118,7 @@ All settings are in the `[MatchedFilter]` section, see the comments in `.config`
 | `mf_max_pos_error` | 0.5 | Largest position error of a measurement (px) |
 | `mf_max_measure_frames` | 8 | Most frames combined into one position |
 | `mf_smooth_frames` | 64 | Positions combined along the track over +- this many frames, 0 disables it |
+| `mf_trail_level` | 25 | Rows and columns of sources brighter than this in a frame (in the noise of a pixel) are left out of the search, 0 disables it |
 | `mf_gpu` | auto | Use the GPU: auto, on, off |
 | `mf_threads` | 0 | CPU threads, 0 = all cores |
 

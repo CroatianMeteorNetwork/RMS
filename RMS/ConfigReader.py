@@ -988,6 +988,11 @@ class Config:
         # The normalized frames are clipped to +/- this before the search (single frame outliers)
         self.mf_clip = 4.0
 
+        # Moving sources brighter than this in a frame (in the noise of one pixel) leave faint trails along their
+        #   row and column on some sensors; these rows and columns are left out of the search in that frame. 0
+        #   disables it
+        self.mf_trail_level = 25.0
+
         # Pixels above the threshold in more than this fraction of all runs of the input are masked as static
         self.mf_persistence = 0.2
 
@@ -2347,7 +2352,7 @@ def parseMatchedFilter(config, parser):
             setattr(config, name, parser.getint(section, name))
 
     for name in ("mf_threshold", "mf_ang_vel_min", "mf_ang_vel_max", "mf_psf_sigma", "mf_max_pos_error",
-                 "mf_min_sample_snr", "mf_star_threshold", "mf_persistence", "mf_clip", "mf_min_displacement",
+                 "mf_min_sample_snr", "mf_star_threshold", "mf_persistence", "mf_clip", "mf_trail_level", "mf_min_displacement",
                  "mf_sigma_scale", "mf_track_significance"):
         if parser.has_option(section, name):
             setattr(config, name, parser.getfloat(section, name))

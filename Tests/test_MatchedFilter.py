@@ -87,6 +87,12 @@ class _SynthHandle(object):
                 x1, y1 = obj['pos'](f - 0.5)
                 renderObject(img, x, y, obj['snr']*NOISE, vx=x2 - x1, vy=y2 - y1)
 
+                # Trails of a bright source along its whole column, and along its row on one side
+                if obj.get('trail'):
+                    xi, yi = int(round(x)), int(round(y))
+                    img[:, xi] += obj['trail']*NOISE
+                    img[yi, :max(xi - 3, 0)] += 2*obj['trail']*NOISE
+
         if self.clip is not None:
             img = np.minimum(img, self.clip)
 
@@ -620,3 +626,22 @@ def test_slow_object_photometry_uses_background_without_it(config, monkeypatch, 
         assert abs(ratio - 1) < 0.1
     else:
         assert ratio < 0.85
+
+
+@pytest.mark.parametrize('trail_level', [25.0, 0.0])
+def test_trails_of_bright_object_removed(config, trail_level):
+    """ A very bright object which leaves faint trails along its column and its row: the trails move with it
+        and make tracks along them, unless they are removed from the search.
+    """
+
+    obj = linearObject(400.0, 110, 50, -0.6, 0.1, 100, 260)
+    obj['trail'] = 1.0
+    config.mf_trail_level = trail_level
+    _, detections = runDetector(_SynthHandle([obj], n_stars=4), config)
+
+    if trail_level > 0:
+        assert len(detections) == 1
+        assert np.median(truthError(detections[0][2], obj)) < 0.3
+    else:
+        assert len(detections) > 1
+

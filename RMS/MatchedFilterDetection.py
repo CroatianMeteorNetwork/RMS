@@ -82,6 +82,11 @@ SLOW_SPEED = 0.1
 STAR_TEMPLATE_LEVEL = 0.3
 MIN_STAR_TEMPLATE_PX = 100
 
+# Trails of bright moving sources (see removeTrails): half width of the removed rows and columns beyond the
+#   source (the trails are up to a few pixels off the source), and the margin kept around the source (px)
+TRAIL_WIDTH = 4
+TRAIL_KEEP = 6
+
 
 # A hit: position and time of the middle of a run of frames, velocity (px/frame, unbinned), significance,
 #   and the length of the run
@@ -114,6 +119,7 @@ class MatchedFilterOptions(object):
         self.star_threshold = config.mf_star_threshold
         self.persistence = config.mf_persistence
         self.clip = config.mf_clip
+        self.trail_level = config.mf_trail_level
         self.min_displacement = config.mf_min_displacement
         self.min_frames = config.mf_min_frames
         self.sigma_scale = config.mf_sigma_scale
@@ -430,6 +436,45 @@ class MatchedFilterDetector(object):
         return static
 
 
+    def removeTrails(self, frame, static):
+        """ Remove the trails of very bright moving sources from a normalized frame, in place. On some sensors
+            a bright source leaves a faint trail along its whole column and along its row, at a fraction of a
+            percent of its peak. They move with the source, so the search finds tracks along them: the rows
+            and columns of every source above trail_level are set to the background in the frame, except at
+            the source itself.
+
+        Arguments:
+            frame: [ndarray] Normalized frame, modified in place.
+            static: [ndarray] Mask of static sources (True = masked).
+        """
+
+        if self.opts.trail_level <= 0:
+            return
+
+        bright = frame > self.opts.trail_level
+        if not bright.any():
+            return
+        bright &= ~static
+        if not bright.any():
+            return
+
+        # The source itself, with the wings of its PSF, is kept
+        labels, _ = ndimage.label(bright)
+        boxes = ndimage.find_objects(labels)
+        kept = []
+        for sl in boxes:
+            ys = slice(max(sl[0].start - TRAIL_KEEP, 0), sl[0].stop + TRAIL_KEEP)
+            xs = slice(max(sl[1].start - TRAIL_KEEP, 0), sl[1].stop + TRAIL_KEEP)
+            kept.append((ys, xs, frame[ys, xs].copy()))
+
+        for sl in boxes:
+            frame[max(sl[0].start - TRAIL_WIDTH, 0):sl[0].stop + TRAIL_WIDTH, :] = 0
+            frame[:, max(sl[1].start - TRAIL_WIDTH, 0):sl[1].stop + TRAIL_WIDTH] = 0
+
+        for ys, xs, patch in kept:
+            frame[ys, xs] = patch
+
+
     ### Search ###
 
     def searchBlock(self, z, static, block_first, stackers):
@@ -451,6 +496,7 @@ class MatchedFilterDetector(object):
         sigma_b = self.psf_sigma/b
         zb = np.empty((len(z), z.shape[1]//b, z.shape[2]//b), dtype=np.float32)
         for i in range(len(z)):
+            self.removeTrails(z[i], static)
             binned = binFrames(np.clip(z[i:i + 1], -self.opts.clip, self.opts.clip), b)[0]
             zb[i] = cv2.GaussianBlur(binned.astype(np.float32), (0, 0), sigma_b)
 
