@@ -681,7 +681,7 @@ class Config:
         self.ransac3d_min_frames = 4.0
 
         # Number of random line hypotheses tested per 3D RANSAC search pass.
-        self.ransac3d_iterations = 10
+        self.ransac3d_iterations = 100
 
         # Maximum distance used when stitching nearby 3D line fragments with
         # similar directions into one candidate detection.

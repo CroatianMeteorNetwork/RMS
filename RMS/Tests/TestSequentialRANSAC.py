@@ -227,60 +227,31 @@ class TestSequentialRANSAC(unittest.TestCase):
         self.plot_results(lines, "test_line_extent")
 
     def test_blob_vs_outlier(self):
-        # Create a dense blob that should dominate the fit
-        # Blob centered at (50, 50), radius 3
-        # 40-50 pixels
-        blob_center = (50, 50)
+        # A dense horizontal bar with a blob on it, and two outlier pixels beyond its end, 5 px off the axis.
+        #   A line through the bar and the outliers is longer than the bar, but has fewer points than the bar
+        #   alone, so the line has to stay on the bar and not be pulled towards the outliers
         for y in range(47, 54):
             for x in range(47, 54):
-                if (x-50)**2 + (y-50)**2 <= 9:
+                if (x - 50)**2 + (y - 50)**2 <= 9:
                     self.img[y, x] = 255
 
-        # Create a small outlier "tail" that pulls the naive fit
-        # Gap of 10px, then 2 pixels
-        # Placed such that it extends the length but is slightly off-center
-        # Blob is at 50,50. Outlier at 70, 52.
-        # Line from 50,50 to 70,52 has angle ~5.7 degrees.
-        # But if we just fit the blob, angle should be 0 (or undefined/isotropic).
-        # Wait, a circular blob has no preferred direction.
-        # Let's make the blob slightly elliptical along X axis to give it a preferred direction (0 deg).
-        for x in range(45, 56): # Length 11
-             self.img[50, x] = 255
-             self.img[49, x] = 255
-             self.img[51, x] = 255
+        # Bar 3 px thick along y = 50, 20 px long
+        for x in range(40, 61):
+            self.img[49:52, x] = 255
 
-        # Now we have a thick horizontal line segment.
-        # Add outlier at (70, 55). 
-        # Ideal line is horizontal (theta=0/180 -> normal theta=90/270).
-        # Outlier at (70, 55) (5px off axis) would pull the line if unweighted.
-
+        # Outliers 10 px beyond the end of the bar
         self.img[55, 70] = 255
         self.img[55, 71] = 255
 
-        # Standard unweighted fit might traverse from blob center to outlier.
-        # Weighted fit should stick to the blob (horizontal).
-
-        lines = SequentialRANSAC.findLines(self.img, max_lines=1, min_pixels=10, 
+        lines = SequentialRANSAC.findLines(self.img, max_lines=1, min_pixels=10,
                                            distance_thresh=5.0, min_line_length=10, max_gap=20)
 
         self.assertEqual(len(lines), 1)
         rho, theta, _, _, _, _ = lines[0]
 
-        # Check angle. Horizontal line -> normal is 0 or 180 (for x=0 line) or 90/270 (for y=0 line).
-        # Line y=50. Normal is vertical. Theta should be 90 or 270.
-
-        # Check if theta is close to 90 or 270
-        diff1 = abs(theta - 90)
-        diff2 = abs(theta - 270)
-        best_diff = min(diff1, diff2)
-
-        # If outlier pulled it, angle would be arctan(5/20) ~ 14 deg.
-        # So theta would be 90 - 14 = 76.
-
-        print(f"Blob test: Theta={theta:.2f}")
-
-        # With density weighting, it should be very close to 90.
-        self.assertLess(best_diff, 5, "Line was pulled by outlier!")
+        # The line y = 50 has the normal along the y axis, theta 90 or 270
+        best_diff = min(abs(theta - 90), abs(theta - 270))
+        self.assertLess(best_diff, 2, "Line was pulled by outlier!")
 
         self.plot_results(lines, "test_blob_vs_outlier")
 

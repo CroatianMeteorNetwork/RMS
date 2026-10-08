@@ -4,8 +4,6 @@ Optimized for speed and robustness on sparse, intermittent data.
 """
 
 import numpy as np
-import math
-import random
 import logging
 log = logging.getLogger("logger")
 
@@ -117,10 +115,63 @@ def fitLine(x, y, img_w, img_h, weights=None):
     return rho, np.degrees(theta)
 
 
-def findLines(img, max_lines, min_pixels, distance_thresh, min_line_length, max_gap, max_iterations=1000, debug=False):
+def _lineDistances(points, cx, cy, rho, theta_deg):
+    """ Perpendicular distances of points from a line, and their positions along it (center-based coords).
+
+    Arguments:
+        points: [ndarray] Nx2 array of (x, y) image coordinates.
+        cx, cy: [float] Image center.
+        rho, theta_deg: [float] Line parameters.
+
+    Return:
+        dists, t: [tuple of ndarrays] Distances from the line and positions along it.
     """
-    Find lines in the image using Sequential RANSAC with gap bridging.
-    
+
+    theta = np.radians(theta_deg)
+    ct, st = np.cos(theta), np.sin(theta)
+    x_c = points[:, 0] - cx
+    y_c = points[:, 1] - cy
+
+    return np.abs(x_c*ct + y_c*st - rho), -x_c*st + y_c*ct
+
+
+def _bestSegment(points, cx, cy, rho, theta_deg, distance_thresh, max_gap):
+    """ Split the inliers of a line at gaps larger than max_gap and return the segment with the most points.
+
+    Arguments:
+        points: [ndarray] Nx2 array of (x, y) image coordinates.
+        cx, cy: [float] Image center.
+        rho, theta_deg: [float] Line parameters.
+        distance_thresh: [float] Maximum distance of an inlier from the line (px).
+        max_gap: [float] Maximum gap along the line within a segment (px).
+
+    Return:
+        [ndarray] Indices of the points of the segment, sorted along the line (empty if there are no inliers).
+    """
+
+    dists, t = _lineDistances(points, cx, cy, rho, theta_deg)
+    inliers = np.where(dists < distance_thresh)[0]
+    if len(inliers) == 0:
+        return inliers
+
+    inliers = inliers[np.argsort(t[inliers])]
+    splits = np.where(np.diff(t[inliers]) > max_gap)[0] + 1
+    segments = np.split(inliers, splits)
+
+    return max(segments, key=len)
+
+
+def findLines(img, max_lines, min_pixels, distance_thresh, min_line_length, max_gap, max_iterations=1000,
+    debug=False):
+    """ Find line segments in the image using Sequential RANSAC with gap bridging.
+
+    A line is hypothesized through two points, the second one drawn from the neighbourhood of the first one,
+    so that both are likely on the same track even when most points are noise. The inliers of the line are
+    split at gaps and the segment with the most points is scored. The best segment is refined by fitting the
+    line to its points and taking the inliers of the fitted line again, and its points are removed before
+    searching for the next line. Scoring the number of points (not the segment length) keeps sparse noise
+    points which happen to extend the segment from deciding the line.
+
     Arguments:
         img: [ndarray] 2D numpy array (uint8), image where >0 are points.
         max_lines: [int] Maximum number of lines to find.
@@ -128,224 +179,118 @@ def findLines(img, max_lines, min_pixels, distance_thresh, min_line_length, max_
         distance_thresh: [float] Maximum distance (px) from line to be an inlier.
         min_line_length: [float] Minimum length of a line segment.
         max_gap: [float] Maximum gap size allowed within a line segment.
+
+    Keyword arguments:
         max_iterations: [int] Maximum RANSAC iterations per line search.
         debug: [bool] If True, print debug information.
 
     Return:
         lines: [list] List of (rho, theta, x_start, y_start, x_end, y_end) tuples.
     """
-    
+
     h, w = img.shape
     cx = w/2.0
     cy = h/2.0
-    
+
     # Extract points (image coordinates, top-left origin)
     y_idxs, x_idxs = np.nonzero(img)
-    points = np.column_stack((x_idxs, y_idxs)).astype(np.float32)
-
-    found_lines = []
+    points = np.column_stack((x_idxs, y_idxs)).astype(np.float64)
 
     # Random point sampling with a fixed seed, so the same image always gives the same lines
     rng = np.random.RandomState(0)
-    
-    log.debug(f"RANSAC: Starting with {len(points)} points.")
 
-    # Safety counter to prevent infinite loops if we can't find a valid line
+    # The second point is drawn within this distance of the first one, far enough from it to define the
+    #   direction well
+    sample_radius = max(3*max_gap, 2*min_line_length)
+    min_sample_dist_sq = max(3.0, 0.25*min_line_length)**2
+
+    log.debug("RANSAC: Starting with {:d} points.".format(len(points)))
+
+    found_lines = []
+
+    # Stop after this many searches in a row without a line, and after a bounded number of searches in total
+    #   (segments too short to be a line are removed and searched again)
     consecutive_failures = 0
     MAX_FAILURES = 10
+    searches = 0
 
-    # Dynamic minimum sampling distance: max(3.0, 25% of min_line_length)
-    min_sample_dist_sq = max(3.0, min_line_length*0.25)**2
+    while (len(points) >= min_pixels) and (len(found_lines) < max_lines) \
+            and (consecutive_failures < MAX_FAILURES) and (searches < 4*max_lines):
 
-    while len(points) >= min_pixels and len(found_lines) < max_lines:
-        
-        if consecutive_failures >= MAX_FAILURES:
-            log.debug("RANSAC: Stopping due to not finding any more lines.")
-            break
+        searches += 1
 
-        best_model = None       # (rho, theta)
-        best_score = 0.0        # Length of the best segment
-        best_segment_mask = None # Boolean mask of points belonging to the best segment
+        best_segment = None
+        best_model = None
 
-        # --- RANSAC Iterations ---
-        valid_pair_failures = 0
-        min_pixels_failures = 0
+        for _ in range(max_iterations):
 
-        for i in range(max_iterations):
-            # 1. Sample
-            if len(points) < 2: break
-
-            # 1. Sample 2 random points
-            # Try up to 50 times to find a pair with good separation
-            valid_pair = False
-            for _ in range(50):
-                idx = rng.choice(len(points), 2, replace=False)
-                p1, p2 = points[idx]
-
-                # Check distance squared
-                dist_sq = (p1[0] - p2[0])**2 + (p1[1] - p2[1])**2
-
-                if dist_sq > min_sample_dist_sq:
-                    valid_pair = True
-                    break
-                    
-            if not valid_pair:
-                valid_pair_failures += 1
+            # Sample a point and a second one from its neighbourhood
+            p1 = points[rng.randint(len(points))]
+            near = np.where((np.abs(points[:, 0] - p1[0]) < sample_radius)
+                            & (np.abs(points[:, 1] - p1[1]) < sample_radius))[0]
+            p2 = points[near[rng.randint(len(near))]]
+            if (p1[0] - p2[0])**2 + (p1[1] - p2[1])**2 <= min_sample_dist_sq:
                 continue
 
-            # 2. Model (center-based coordinates)
             rho, theta_deg = getPolarLine(p1[0], p1[1], p2[0], p2[1], w, h)
-            theta_rad = np.radians(theta_deg)
-            ct, st = np.cos(theta_rad), np.sin(theta_rad)
+            segment = _bestSegment(points, cx, cy, rho, theta_deg, distance_thresh, max_gap)
 
-            # 3. Distance Check (Vectorized) — center points first
-            # dist = |x_c*cos + y_c*sin - rho|
-            pts_cx = points[:, 0] - cx
-            pts_cy = points[:, 1] - cy
-            dists = np.abs(pts_cx*ct + pts_cy*st - rho)
-            
-            # Fast filter: check total inlier count first
-            inlier_mask = dists < distance_thresh
-            if np.sum(inlier_mask) < min_pixels:
-                min_pixels_failures += 1
-                continue
+            if (len(segment) >= min_pixels) \
+                    and ((best_segment is None) or (len(segment) > len(best_segment))):
+                best_segment = segment
+                best_model = (rho, theta_deg)
 
-            # 4. Connectivity Check (Segments)
-            # Project inliers onto the line: t = -x_c*sin + y_c*cos
-            inlier_pts = points[inlier_mask]
-            inlier_cx = inlier_pts[:, 0] - cx
-            inlier_cy = inlier_pts[:, 1] - cy
-            t_vals = -inlier_cx*st + inlier_cy*ct
-            
-            # Sort t_vals to find gaps
-            sort_idx = np.argsort(t_vals)
-            t_sorted = t_vals[sort_idx]
-            
-            # Calculate gaps
-            gaps = np.diff(t_sorted)
-            # Find indices where gaps exceed max_gap
-            split_indices = np.where(gaps > max_gap)[0] + 1
-            
-            # Split into segments based on gaps
-            # We need the sizes of segments to find the best one
-            if len(split_indices) == 0:
-                # No gaps, one big segment
-                length = t_sorted[-1] - t_sorted[0]
-                if length > best_score:
-                    best_score = length
-                    best_model = (rho, theta_deg)
-                    best_segment_mask = inlier_mask
-            else:
-                # Check each sub-segment
-                segment_starts = np.insert(split_indices, 0, 0)
-                segment_ends = np.append(split_indices, len(t_sorted))
-                
-                for k in range(len(segment_starts)):
-                    start = segment_starts[k]
-                    end = segment_ends[k]
-                    seg_len_pts = end - start
-                    
-                    if seg_len_pts < min_pixels: continue
-                    
-                    # Length in pixels
-                    length = t_sorted[end-1] - t_sorted[start]
-                    
-                    if length > best_score:
-                        best_score = length
-                        best_model = (rho, theta_deg)
-                        
-                        # We need to construct the mask for JUST this segment
-                        # Recover original indices for this segment
-                        # inlier_mask -> True indices
-                        flat_indices = np.where(inlier_mask)[0]
-                        # sort_idx maps sorted t -> inlier_pts
-                        segment_local_indices = sort_idx[start:end]
-                        # map back to global points
-                        segment_global_indices = flat_indices[segment_local_indices]
-                        
-                        # Create a specific mask for this segment
-                        new_mask = np.zeros(len(points), dtype=bool)
-                        new_mask[segment_global_indices] = True
-                        best_segment_mask = new_mask
-
-        # --- End RANSAC Loop ---
-        log.debug(f"  RANSAC Iteration stats: valid_pair_fails={valid_pair_failures}, <min_pixels_fails={min_pixels_failures}, best_score={best_score:.1f}")
-
-        if best_model is not None and best_score > min_line_length:
-            consecutive_failures = 0
-            
-            # Refine the model using Weighted PCA on the best segment
-            segment_pts = points[best_segment_mask]
-            
-            # Calculate weights based on distance to the initial model (center-based)
-            rho_init, theta_init_deg = best_model
-            theta_rad = np.radians(theta_init_deg)
-            seg_cx = segment_pts[:,0] - cx
-            seg_cy = segment_pts[:,1] - cy
-            dists = np.abs(seg_cx*np.cos(theta_rad) + seg_cy*np.sin(theta_rad) - rho_init)
-            
-            # Linear weight decay
-            weights = np.maximum(0, 1.0 - (dists/distance_thresh))
-            
-            # Refit (center-based)
-            rho_ref, theta_ref_deg = fitLine(segment_pts[:, 0], segment_pts[:, 1], w, h, weights=weights)
-            theta_ref_rad = np.radians(theta_ref_deg)
-            
-            # Recalculate extent on refined model (center-based)
-            seg_cx = segment_pts[:, 0] - cx
-            seg_cy = segment_pts[:, 1] - cy
-            t_vals = -seg_cx*np.sin(theta_ref_rad) + seg_cy*np.cos(theta_ref_rad)
-            t_min, t_max = np.min(t_vals), np.max(t_vals)
-            
-            # Calculate endpoints in center-based coords, then convert to image coords
-            # Point on line closest to center: (rho*cos, rho*sin)
-            # Direction along line: (-sin, cos)
-            xc_line = rho_ref*np.cos(theta_ref_rad)
-            yc_line = rho_ref*np.sin(theta_ref_rad)
-            
-            # Endpoints in center-based coords
-            x_start_c = xc_line - t_min*np.sin(theta_ref_rad)
-            y_start_c = yc_line + t_min*np.cos(theta_ref_rad)
-            x_end_c = xc_line - t_max*np.sin(theta_ref_rad)
-            y_end_c = yc_line + t_max*np.cos(theta_ref_rad)
-            
-            # Convert to image (top-left) coords for output
-            x_start = x_start_c + cx
-            y_start = y_start_c + cy
-            x_end = x_end_c + cx
-            y_end = y_end_c + cy
-            
-            found_lines.append((rho_ref, theta_ref_deg, x_start, y_start, x_end, y_end))
-            
-            log.debug(f"  Found Line: rho={rho_ref:.1f}, theta={theta_ref_deg:.1f}, len={best_score:.1f}")
-
-            # --- Removal Step ---
-            # Remove points that are "covered" by this segment.
-            # Criteria: Close to infinite line AND within the t-range of the segment.
-            
-            # 1. Distance to refined line (center-based)
-            all_cx = points[:, 0] - cx
-            all_cy = points[:, 1] - cy
-            all_dists = np.abs(all_cx*np.cos(theta_ref_rad) + all_cy*np.sin(theta_ref_rad) - rho_ref)
-            
-            # 2. Projection onto refined line (center-based)
-            all_t = -all_cx*np.sin(theta_ref_rad) + all_cy*np.cos(theta_ref_rad)
-            
-            # 3. Buffer logic
-            t_buffer = max_gap*0.5 
-            
-            # Mask of points to remove
-            to_remove = (all_dists < distance_thresh*1.5) & \
-                        (all_t >= t_min - t_buffer) & \
-                        (all_t <= t_max + t_buffer)
-            
-            points = points[~to_remove]
-            
-            log.debug(f"  Removed {np.sum(to_remove)} points. Remaining: {len(points)}")
-                
-        else:
+        if best_segment is None:
             consecutive_failures += 1
-            log.debug(f"  Failed to find line (Attempt {consecutive_failures}/{MAX_FAILURES})")
+            log.debug("  Failed to find line (Attempt {:d}/{:d})".format(consecutive_failures, MAX_FAILURES))
+            continue
+
+        # Refine: fit the line to the points of the segment (weighted by their distance from the current line)
+        #   and take the segment of the fitted line, until it settles
+        rho, theta_deg = best_model
+        for _ in range(3):
+
+            dists, _ = _lineDistances(points[best_segment], cx, cy, rho, theta_deg)
+            weights = np.maximum(0, 1.0 - dists/distance_thresh)
+            rho_ref, theta_ref = fitLine(points[best_segment, 0], points[best_segment, 1], w, h,
+                weights=weights)
+
+            segment = _bestSegment(points, cx, cy, rho_ref, theta_ref, distance_thresh, max_gap)
+            if len(segment) < min_pixels:
+                break
+
+            rho, theta_deg, best_segment = rho_ref, theta_ref, segment
+
+        # Extent of the segment along the line
+        _, t = _lineDistances(points[best_segment], cx, cy, rho, theta_deg)
+        t_min, t_max = np.min(t), np.max(t)
+
+        # Remove the points covered by the segment: close to the line and within its extent
+        all_dists, all_t = _lineDistances(points, cx, cy, rho, theta_deg)
+        to_remove = (all_dists < 1.5*distance_thresh) & (all_t >= t_min - max_gap/2.0) \
+            & (all_t <= t_max + max_gap/2.0)
+        to_remove[best_segment] = True
+        points = points[~to_remove]
+
+        # A dense cluster which is too short is not a line, it is removed and the search continues
+        if (t_max - t_min) <= min_line_length:
+            log.debug("  Segment too short: {:.1f} px, removed {:d} points".format(t_max - t_min,
+                np.sum(to_remove)))
+            continue
+
+        consecutive_failures = 0
+
+        # End points in image coordinates. The point on the line closest to the center is (rho*cos, rho*sin),
+        #   the direction along the line is (-sin, cos)
+        theta = np.radians(theta_deg)
+        x_line = rho*np.cos(theta) + cx
+        y_line = rho*np.sin(theta) + cy
+        found_lines.append((rho, theta_deg,
+                            x_line - t_min*np.sin(theta), y_line + t_min*np.cos(theta),
+                            x_line - t_max*np.sin(theta), y_line + t_max*np.cos(theta)))
+
+        log.debug("  Found Line: rho={:.1f}, theta={:.1f}, len={:.1f}, {:d} points, {:d} remaining".format(
+            rho, theta_deg, t_max - t_min, len(best_segment), len(points)))
 
     # Final Merge Pass
     if len(found_lines) > 1:

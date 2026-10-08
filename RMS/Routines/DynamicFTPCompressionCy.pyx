@@ -16,6 +16,23 @@ ctypedef np.uint64_t INT64_TYPE_t
 
 
 
+@cython.boundscheck(False)
+@cython.wraparound(False)
+cdef void updateMaxFrame(INT16_TYPE_t[:, ::1] maxpixel, np.uint32_t[:, ::1] maxframe, INT16_TYPE_t[:, :] frame,
+        np.uint32_t frame_index):
+    """ Update the maximum of every pixel with the frame, and the index of the frame where it is brighter. """
+
+    cdef Py_ssize_t i, j
+    cdef INT16_TYPE_t value
+
+    for i in range(frame.shape[0]):
+        for j in range(frame.shape[1]):
+            value = frame[i, j]
+            if value > maxpixel[i, j]:
+                maxpixel[i, j] = value
+                maxframe[i, j] = frame_index
+
+
 # Image rows per block in sampleMedianMAD
 MEDIAN_BLOCK_ROWS = 8
 
@@ -92,6 +109,9 @@ cdef class FFMimickInterface:
     # Public output arrays (matching your original interface types)
     cdef public np.ndarray maxpixel, avepixel, stdpixel
 
+    # Index of the frame in which every pixel was at its maximum (counted from the first added frame)
+    cdef public np.ndarray maxframe
+
     def __init__(self, nrows, ncols, dtype, res_size=64):
         """ Structure which is used to make FF file format data. It mimicks the interface of an FF structure. 
     
@@ -114,6 +134,7 @@ cdef class FFMimickInterface:
         self.maxpixel = np.zeros((nrows, ncols), dtype=np.uint16)
         self.avepixel = np.zeros((nrows, ncols), dtype=np.uint16)
         self.stdpixel = np.zeros((nrows, ncols), dtype=np.uint16)
+        self.maxframe = np.zeros((nrows, ncols), dtype=np.uint32)
 
         # Internal buffer for the Reservoir Sampling (increase for better background estimation, 
         # e.g. 256, but comes with a significant performance hit - approx 4x)
@@ -144,9 +165,8 @@ cdef class FFMimickInterface:
         if self.nframes == 0:
             self.maxpixel[:, :] = frame
         else:
-            # Update maxpixel (Standard, always applied)
-            # Use NumPy maximum for speed
-            self.maxpixel[...] = np.maximum(self.maxpixel, frame)
+            # Update the maxpixel, and the maxframe where the pixel is brighter than in all previous frames
+            updateMaxFrame(self.maxpixel, self.maxframe, frame, self.nframes)
         
         # Reservoir sampling to fill/update the buffer
         # This ensuring the buffer always contains a representative sample of all frames
