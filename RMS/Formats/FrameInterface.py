@@ -135,7 +135,9 @@ def computeFramesToRead(read_nframes, total_frames, chunk_frames, first_frame):
 
 
 def estimateFPS(unix_times):
-    """ Estimate the frame rate from the times of consecutive frames. N frames span N - 1 frame intervals.
+    """ Estimate the frame rate from the times of consecutive frames: the inverse of the median interval
+        between them. A single gap or jump of the time stamps (e.g. a dropped frame or a clock step at the
+        beginning of a file) would change the rate computed from the whole time span, but not the median.
 
     Arguments:
         unix_times: [list] Unix times (in seconds) of consecutive frames.
@@ -147,11 +149,11 @@ def estimateFPS(unix_times):
     if len(unix_times) < 2:
         return None
 
-    duration = unix_times[-1] - unix_times[0]
-    if duration <= 0:
+    interval = np.median(np.diff(np.asarray(unix_times, dtype=np.float64)))
+    if interval <= 0:
         return None
 
-    return (len(unix_times) - 1)/duration
+    return 1.0/interval
 
 
 class InputType(object):

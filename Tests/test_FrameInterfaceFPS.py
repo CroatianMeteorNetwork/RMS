@@ -63,6 +63,14 @@ def test_estimate_fps_counts_intervals():
     assert estimateFPS([k/32.0 for k in range(10)]) == pytest.approx(32.0)
 
 
+def test_estimate_fps_ignores_time_jump():
+
+    # A jump of 1 s in the time stamps after the third frame (seen at the beginning of a .vid file)
+    unix_times = [k/32.0 for k in range(128)]
+    unix_times = unix_times[:3] + [t + 1.0 for t in unix_times[3:]]
+    assert estimateFPS(unix_times) == pytest.approx(32.0)
+
+
 @pytest.mark.parametrize('unix_times', [[], [100.0], [100.0, 100.0]])
 def test_estimate_fps_undefined(unix_times):
     assert estimateFPS(unix_times) is None
