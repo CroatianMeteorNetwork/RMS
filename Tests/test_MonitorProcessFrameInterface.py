@@ -1064,3 +1064,58 @@ def test_missing_camera_files_are_found(tmp_path):
     assert mon.missingCameraFiles(config_path, config_path) == []
     assert mon.missingCameraFiles(config_path, str(tmp_path/'pp.cal'), dark_path=str(tmp_path/'dark.png')) == \
         [str(tmp_path/'pp.cal'), str(tmp_path/'dark.png')]
+
+
+
+def test_matched_filter_replaces_detection(config_path, tmp_path, monkeypatch):
+    """ With mf_replace_detection, the normal detection is not run, the stars are extracted, and the
+        detections of the matched filter are the results of the file. """
+
+    import RMS.MatchedFilterDetection as mfd
+
+    config = cr.parse(config_path)
+    config.monitor_save_images = False
+    config.mf_enable = True
+    config.mf_replace_detection = True
+    monkeypatch.setattr(cr, 'parse', lambda path: config)
+    monkeypatch.setattr(mon, 'detectInputType', lambda *args, **kwargs: _ProcessHandle(str(tmp_path)))
+    monkeypatch.setattr(mon, 'loadImageCalibration', lambda *args, **kwargs: (None, None, None))
+
+    calls = {}
+
+    def _normal(*args, **kwargs):
+        calls['normal'] = True
+        return [], []
+
+    def _stars(*args, **kwargs):
+        calls['stars'] = True
+        return [['FF_XX0001_20251225_030000_000_0000000.fits', [(10.0, 20.0, 100, 50, 2.0, 7, 9.0, 0)]]]
+
+    detections = [[1.0, 2.0, np.array([[1.0, 10.0, 20.0, 100, 50, 5.0, 0]])]]
+
+    def _mf(img_handle, config, **kwargs):
+        calls['mf'] = True
+        return detections, None
+
+    def _save(star_list, meteor_list, img_handle, config, **kwargs):
+        calls['saved'] = (star_list, meteor_list, kwargs.get('output_suffix', ''))
+
+    monkeypatch.setattr(mon, 'detectStarsAndMeteorsFrameInterface', _normal)
+    monkeypatch.setattr(mon, 'extractStarsFrameInterface', _stars)
+    monkeypatch.setattr(mfd, 'detectMatchedFilter', _mf)
+    monkeypatch.setattr(mon, 'saveResultsFrameInterface', _save)
+
+    given_platepar = tmp_path/'given.cal'
+    given_platepar.write_text('given')
+
+    assert mon.processFile(str(tmp_path/'dummy.vid'), config_path, str(given_platepar), str(tmp_path/'out'), 128)
+
+    assert 'normal' not in calls
+    assert calls['stars'] and calls['mf']
+    star_list, meteor_list, suffix = calls['saved']
+    assert meteor_list is detections and len(star_list) == 1 and suffix == ''
+
+    # The summary of the matched filter is saved with the results, and there is no separate directory
+    results_dir = os.path.join(str(tmp_path/'out'), '2025', '202512', '20251225', 'dummy')
+    assert os.path.isfile(os.path.join(results_dir, mfd.DONE_NAME))
+    assert not os.path.isdir(os.path.join(results_dir, mfd.MATCHED_FILTER_DIR))

@@ -45,7 +45,7 @@ class _SynthHandle(object):
     byteswap = False
 
     def __init__(self, objects, total_frames=512, fps=25.0, seed=1, n_stars=12, n_faint_stars=0,
-                 star_gain=None):
+                 star_gain=None, clip=None):
 
         self.objects = objects
         self.total_frames = total_frames
@@ -58,6 +58,9 @@ class _SynthHandle(object):
 
         # Brightness of the stars in every frame relative to the average (e.g. the transparency of the sky)
         self.star_gain = star_gain
+
+        # Saturation level of the frames (pixel values are clipped there), None for no saturation
+        self.clip = clip
 
         rng = np.random.default_rng(seed + 1000)
         self.stars = np.zeros((SIZE, SIZE))
@@ -83,6 +86,9 @@ class _SynthHandle(object):
                 x2, y2 = obj['pos'](f + 0.5)
                 x1, y1 = obj['pos'](f - 0.5)
                 renderObject(img, x, y, obj['snr']*NOISE, vx=x2 - x1, vy=y2 - y1)
+
+        if self.clip is not None:
+            img = np.minimum(img, self.clip)
 
         return img.astype(np.float32)
 
@@ -223,7 +229,8 @@ def test_moving_psf_fit_unbiased_with_realistic_errors(vx, vy):
             renderObject(frames[k], xt + vx*dt[k], yt + vy*dt[k], 2.0, vx=vx, vy=vy)
 
         # Predicted 0.7 px off the truth
-        res = fitMovingPSF(frames.astype(np.float32), xt + 0.5, yt - 0.5, dt, vx, vy, PSF_SIGMA, radius)
+        res = fitMovingPSF(frames.astype(np.float32), np.zeros(frames.shape, np.uint8), xt + 0.5, yt - 0.5, dt, vx, vy,
+                           PSF_SIGMA, radius)
         if res[9] and np.isfinite(res[0]):
             errs.append((res[0] - xt, res[1] - yt))
             sig.append((res[4], res[5]))
@@ -548,3 +555,68 @@ def test_binned_frames_speed_limits_and_intensity(config, method, factor):
     assert len(detections) == len(detections1) == 1
     ratio = np.median(detections[0][2][:, 3])/np.median(detections1[0][2][:, 3])
     assert np.isclose(ratio, factor, rtol=0.1)
+
+
+
+### Photometry and saturation ###
+
+@pytest.mark.parametrize('snr, vx', [(3.0, 0.3), (12.0, 0.8), (12.0, 1.8)])
+def test_intensity_is_the_flux_per_frame(config, snr, vx):
+    """ The intensity of a measurement is the background-subtracted sum of the pixels of the object in a frame,
+        as for the normal detection: the flux of the PSF (peak*2*pi*sigma^2), within a few percent.
+    """
+
+    obj = linearObject(snr, 20, 60, vx, 0.1, 60, 60 + int(80/vx))
+    config.mf_smooth_frames = 0
+    _, detections = runDetector(_SynthHandle([obj], n_stars=4), config)
+
+    assert len(detections) == 1
+    flux = snr*NOISE*2*np.pi*PSF_SIGMA**2
+    intensity = np.median(detections[0][2][:, 3])
+    assert abs(intensity/flux - 1) < (0.06 if snr > 5 else 0.15)
+
+
+def test_saturated_object_flagged_and_measured(config):
+    """ An object whose core is clipped by saturation: the measurements are flagged, and leaving the clipped
+        pixels out of the fit keeps the positions accurate.
+    """
+
+    obj = linearObject(60.0, 20, 60, 0.6, 0.2, 60, 200)
+    clip = SKY + 25*NOISE
+    config.mf_saturation_level = clip - 1
+    config.mf_smooth_frames = 0
+    _, detections = runDetector(_SynthHandle([obj], n_stars=4, clip=clip), config)
+
+    assert len(detections) == 1
+    cent = detections[0][2]
+    assert np.median(cent[:, 6]) >= 1
+    assert np.sqrt(np.mean(truthError(cent, obj)**2)) < 0.15
+
+    # Without a saturation level, nothing is flagged
+    config.mf_saturation_level = 0
+    _, detections = runDetector(_SynthHandle([obj], n_stars=4, clip=clip), config)
+    assert np.all(detections[0][2][:, 6] == 0)
+
+
+
+@pytest.mark.parametrize('mask_slow', [True, False])
+def test_slow_object_photometry_uses_background_without_it(config, monkeypatch, mask_slow):
+    """ A slow object stays on the same pixels for a large part of the frames of the background, which then
+        contains part of it; the background is estimated again without it, so its intensity is the flux.
+    """
+
+    if not mask_slow:
+        monkeypatch.setattr(mfd, 'SLOW_SPEED', 0.0)
+
+    # 1536 frames: the object stays on its pixels for a tenth of them (in a 10-minute file, under 2%)
+    obj = linearObject(6.0, 30, 60, 0.03, 0.015, 0, 1536)
+    config.mf_smooth_frames = 0
+    _, detections = runDetector(_SynthHandle([obj], n_stars=4, total_frames=1536), config)
+
+    assert len(detections) == 1
+    flux = 6.0*NOISE*2*np.pi*PSF_SIGMA**2
+    ratio = np.median(detections[0][2][:, 3])/flux
+    if mask_slow:
+        assert abs(ratio - 1) < 0.1
+    else:
+        assert ratio < 0.85

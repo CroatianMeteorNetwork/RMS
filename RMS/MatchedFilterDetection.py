@@ -53,7 +53,8 @@ from RMS.Logger import getLogger
 from RMS.Routines import Image
 from RMS.Routines import MaskImage
 from RMS.Routines.DynamicFTPCompressionCy import sampleMedianMAD
-from RMS.Routines.MatchedFilterKernels import VelocityStacker, fitMovingPSF, forcedTrackSignal, CUDA_AVAILABLE
+from RMS.Routines.MatchedFilterKernels import (VelocityStacker, fitMovingPSF, forcedTrackSignal, streakAperture,
+                                               CUDA_AVAILABLE)
 from RMS.Detection import getPolarLine, removeDuplicateDetections, joinContinuousDetections
 
 
@@ -72,6 +73,9 @@ DONE_NAME = 'matched_filter_done.json'
 
 # Extensions of the input files found in directories
 INPUT_EXTENSIONS = ('.vid', '.mkv', '.mp4', '.avi', '.mov')
+
+# Tracks slower than this (px per frame) are measured again on a background estimated without them
+SLOW_SPEED = 0.1
 
 # Pixels of the star template: stars above this level in the median of the frames, in the noise of one frame,
 #   and the smallest number of such pixels for the correction of the transparency
@@ -117,6 +121,10 @@ class MatchedFilterOptions(object):
         self.edge_margin = max(config.detection_border, config.mf_edge_margin)
         self.gpu = config.mf_gpu
         self.smooth_frames = config.mf_smooth_frames
+
+        # Saturation level of the raw frames (ADU), 98% of the range of the bit depth if not given
+        self.saturation_level = config.mf_saturation_level if config.mf_saturation_level > 0 \
+            else int(round(0.98*(2**config.bit_depth - 1)))
         self.threads = config.mf_threads
 
         # Speed limits in px per frame of the (binned) frames, from the angular velocity limits
@@ -270,18 +278,25 @@ class MatchedFilterDetector(object):
 
     ### Frames ###
 
-    def readFrames(self, first, n, step=1):
-        """ Read n frames from the first one, every step-th, with the dark and the flat applied, as float32. """
+    def readFrames(self, first, n, step=1, saturation=False):
+        """ Read n frames from the first one, every step-th, with the dark and the flat applied, as float32. With
+            saturation, also the mask of the saturated pixels of the raw frames (uint8). """
 
         frames = np.empty((n, self.height, self.width), dtype=np.float32)
+        saturated = np.zeros((n, self.height, self.width), dtype=np.uint8) if saturation else None
         for i in range(n):
             self.img_handle.setFrame(first + i*step)
             frame = self.img_handle.loadFrame()
+            if saturation:
+                saturated[i] = frame >= self.opts.saturation_level
             if self.dark is not None:
                 frame = Image.applyDark(frame, self.dark)
             if self.flat_struct is not None:
                 frame = Image.applyFlat(frame, self.flat_struct)
             frames[i] = frame
+
+        if saturation:
+            return frames, saturated
 
         return frames
 
@@ -833,8 +848,99 @@ class MatchedFilterDetector(object):
 
         states = [TrackMeasurement(tr, self.opts, self.psf_sigma) for tr in tracks]
         self.measurePass(states)
+        cents = [st.centroids() for st in states]
 
-        return self.verify([cent for cent in (st.centroids() for st in states) if cent is not None])
+        # A slow object stays on the same pixels for a good part of the frames from which the background is
+        #   estimated, so the background contains part of it: the background is estimated again without the
+        #   pixels of the slow objects, and they are measured again
+        slow = [i for i, cent in enumerate(cents) if (cent is not None) and (trackSpeed(cent) < SLOW_SPEED)]
+        if slow:
+            t1 = time()
+            self.maskObjects([cents[i] for i in slow])
+            again = [TrackMeasurement(tracks[i], self.opts, self.psf_sigma) for i in slow]
+            self.measurePass(again)
+            for i, st in zip(slow, again):
+                cent = st.centroids()
+                if cent is not None:
+                    cents[i] = cent
+            self.timing['slow_background'] += time() - t1
+
+        return self.verify([cent for cent in cents if cent is not None])
+
+
+    def maskObjects(self, cents, step=4):
+        """ Estimate the background again in the region of the given tracks, without the pixels within a few
+            PSF sigmas of the objects at the times of the sampled frames. The background of every block is the
+            median of the samples of the block and its neighbours (as in backgroundPass), and only the region
+            around the tracks is replaced.
+
+        Arguments:
+            cents: [list] Centroid arrays of the tracks (rows [frame, x, y, ...]).
+
+        Keyword arguments:
+            step: [int] Every step-th frame is sampled. 4 by default.
+        """
+
+        radius = 4*self.psf_sigma + 1
+        n_blocks = len(self.block_starts)
+        samples = {}
+
+        def blockSamples(j):
+            if j not in samples:
+                first, last = self.block_starts[j], self.block_ends[j]
+                fr = np.arange(first, last, step)
+                samples[j] = (fr, self.readFrames(first, len(fr), step=step))
+            return samples[j]
+
+        for k in range(n_blocks):
+
+            near = range(max(k - 1, 0), min(k + 2, n_blocks))
+            lo, hi = self.block_starts[near[0]], self.block_ends[near[-1]]
+
+            # Positions of the tracks during the frames of the neighbouring blocks
+            tracks = [c for c in cents if (c[-1, 0] >= lo) and (c[0, 0] < hi)]
+            if not tracks:
+                continue
+
+            pos = []
+            for c in tracks:
+                sel = (c[:, 0] >= lo - 64) & (c[:, 0] < hi + 64)
+                if sel.sum() == 0:
+                    continue
+                pos.append(c[sel, 1:3])
+            if not pos:
+                continue
+            pos = np.vstack(pos)
+            x0 = int(max(np.floor(pos[:, 0].min() - radius - 2), 0))
+            x1 = int(min(np.ceil(pos[:, 0].max() + radius + 3), self.width))
+            y0 = int(max(np.floor(pos[:, 1].min() - radius - 2), 0))
+            y1 = int(min(np.ceil(pos[:, 1].max() + radius + 3), self.height))
+            if (x1 <= x0) or (y1 <= y0):
+                continue
+
+            # Samples of the region, masked where an object is at the time of the sample
+            yy, xx = np.mgrid[y0:y1, x0:x1]
+            crops = []
+            for j in near:
+                fr, frames = blockSamples(j)
+                for f, img in zip(fr, frames):
+                    crop = img[y0:y1, x0:x1].astype(np.float64)
+                    for c in tracks:
+                        if c[0, 0] - 8 <= f <= c[-1, 0] + 8:
+                            px, py = np.interp(f, c[:, 0], c[:, 1]), np.interp(f, c[:, 0], c[:, 2])
+                            crop[(xx - px)**2 + (yy - py)**2 <= radius**2] = np.nan
+                    crops.append(crop)
+
+            with np.errstate(all='ignore'):
+                masked = np.nanmedian(np.array(crops), axis=0)
+            bg = self.backgrounds[k]
+            region = bg.median[y0:y1, x0:x1]
+            bg.median[y0:y1, x0:x1] = np.where(np.isfinite(masked), masked, region).astype(np.float32)
+
+            # Drop the samples which are not needed any more
+            for j in list(samples):
+                if j < k - 1:
+                    del samples[j]
 
 
     def measurePass(self, states):
@@ -847,13 +953,13 @@ class MatchedFilterDetector(object):
                 continue
 
             t1 = time()
-            frames = self.readFrames(first, last - first)
+            frames, saturated = self.readFrames(first, last - first, saturation=True)
             self.timing['read'] += time() - t1
             bg = self.backgrounds[k]
             z = self.normalize(frames, k)
 
             for st in active:
-                st.measureBlock(z, first, last, bg, self.static_masks[k])
+                st.measureBlock(z, first, last, bg, self.static_masks[k], saturated)
 
 
     def verify(self, measured):
@@ -1001,6 +1107,13 @@ def smoothTrack(cent, frames, segment=512):
 
 
 
+def trackSpeed(cent):
+    """ Mean speed of a track (px per frame). """
+
+    return math.hypot(cent[-1, 1] - cent[0, 1], cent[-1, 2] - cent[0, 2])/max(cent[-1, 0] - cent[0, 0], 1.0)
+
+
+
 def smoothPositions(cent, half_window, reject=5.0):
     """ Positions of a track combined over the neighbouring measurements: a fit of x(t) and y(t) to the
         measurements within +-half_window frames of every measurement, weighted by their signal-to-noise ratio,
@@ -1088,7 +1201,8 @@ class TrackMeasurement(object):
         # Lines fitted through the hits, per 16 frames (see predict)
         self.line_cache = {}
 
-        # Accepted measurements: [frame, x, y, sigma_x, sigma_y, amp, sigma_amp, flux, background, n_frames]
+        # Accepted measurements: [frame, x, y, sigma_x, sigma_y, amp, sigma_amp, intensity, background, n_frames,
+        #   saturated pixel count]
         self.meas = []
         self.status = []
 
@@ -1164,11 +1278,13 @@ class TrackMeasurement(object):
         return px, py
 
 
-    def fitRun(self, z, first, f0, n):
+    def fitRun(self, z, first, f0, n, saturated=None):
         """ Fit the moving PSF to frames f0 .. f0 + n - 1 (absolute) of the block starting at first. The fit uses
             a patch around the predicted position, so a fit which moved away from the prediction is repeated
             around the fitted position: the patch cut at the prediction would pull it back (the prediction of a
             fast object is less accurate along its motion).
+
+        The saturated pixels (mask of the block, optional) are left out of the fit.
 
         Return:
             (mid, x, y, vx, vy, res): middle frame, predicted position and velocity, and the fit (see
@@ -1180,12 +1296,14 @@ class TrackMeasurement(object):
         dt = np.arange(n) - (n - 1)/2.0
         radius = int(math.ceil(3*self.psf_sigma + 0.5*math.hypot(vx, vy) + 1))
         frames = z[f0 - first:f0 - first + n]
-        res = fitMovingPSF(frames, x, y, dt, vx, vy, self.psf_sigma, radius)
+        skip = saturated[f0 - first:f0 - first + n] if saturated is not None \
+            else np.zeros(frames.shape, dtype=np.uint8)
+        res = fitMovingPSF(frames, skip, x, y, dt, vx, vy, self.psf_sigma, radius)
 
         for _ in range(2):
             if not np.isfinite(res[0]) or (math.hypot(res[0] - x, res[1] - y) <= 0.5):
                 break
-            again = fitMovingPSF(frames, res[0], res[1], dt, vx, vy, self.psf_sigma, radius)
+            again = fitMovingPSF(frames, skip, res[0], res[1], dt, vx, vy, self.psf_sigma, radius)
             if not np.isfinite(again[0]):
                 break
             moved = math.hypot(again[0] - res[0], again[1] - res[1])
@@ -1196,9 +1314,14 @@ class TrackMeasurement(object):
         return mid, x, y, vx, vy, res
 
 
-    def measureBlock(self, z, first, last, bg, static=None):
+    def measureBlock(self, z, first, last, bg, static=None, saturated=None):
         """ Measure the runs of frames of the track in a block of normalized frames. Measurements on masked
-            static sources (bright stars) are not accepted, the fit can be pulled to the star.
+            static sources (bright stars) are not accepted, the fit can be pulled to the star. The saturated
+            pixels (mask of the raw frames of the block) are left out of the fit and counted.
+
+        The intensity of a measurement is the background-subtracted sum of the pixels within 3 PSF sigmas of the
+        segment the object moved along during a frame, averaged over the frames of the measurement (the same
+        scale as the intensities of the normal detection, which sums the pixels of the object in a frame).
         """
 
         # Choose the number of frames per measurement on a few fits of 8 frames: the smallest power of two
@@ -1209,7 +1332,7 @@ class TrackMeasurement(object):
             lo = max(first, int(math.floor(self.hits[0, 0] - run/2.0)))
             hi = min(last, int(math.ceil(self.hits[-1, 0] + run/2.0)) + 1)
             for f0 in range(lo + (-lo) % 8, hi - 7, 8):
-                mid, x, y, vx, vy, res = self.fitRun(z, first, f0, 8)
+                mid, x, y, vx, vy, res = self.fitRun(z, first, f0, 8, saturated)
                 ok = np.isfinite(res[0]) and (res[2] > self.opts.min_sample_snr*res[6])
                 ok = ok and (math.hypot(res[0] - x, res[1] - y) <= 1.5 + 4*math.hypot(vx, vy))
                 if ok:
@@ -1238,7 +1361,7 @@ class TrackMeasurement(object):
         start += (-start) % n
         for f0 in range(start, min(last, self.last + 1) - n + 1, n):
 
-            mid, x, y, vx, vy, res = self.fitRun(z, first, f0, n)
+            mid, x, y, vx, vy, res = self.fitRun(z, first, f0, n, saturated)
             ok = np.isfinite(res[0]) and (res[2] > 0) and (res[2] >= self.opts.min_sample_snr*res[6])
             gate = 1.5 + 0.5*math.hypot(vx, vy)*n
             ok = ok and (math.hypot(res[0] - x, res[1] - y) <= gate)
@@ -1252,12 +1375,17 @@ class TrackMeasurement(object):
             if not ok:
                 continue
 
-            noise = float(bg.noise[yi, xi])
-            flux = res[2]*2*math.pi*self.psf_sigma**2*noise
+            # Photometry: sum of the pixels along the motion in every frame of the measurement
+            dt = np.arange(n) - (n - 1)/2.0
+            sat = saturated[f0 - first:f0 - first + n] if saturated is not None \
+                else np.zeros((n,) + z.shape[1:], dtype=np.uint8)
+            sums, n_sat = streakAperture(z[f0 - first:f0 - first + n], sat, bg.noise, res[0] + vx*dt,
+                                         res[1] + vy*dt, vx, vy, 3.0*self.psf_sigma)
+
             # The uncertainties of the fit are scaled to the actual errors on real noise
             sc = self.opts.sigma_scale
-            self.meas.append([mid, res[0], res[1], sc*res[4], sc*res[5], res[2], sc*res[6], flux,
-                              float(bg.median[yi, xi]), n])
+            self.meas.append([mid, res[0], res[1], sc*res[4], sc*res[5], res[2], sc*res[6], float(np.mean(sums)),
+                              float(bg.median[yi, xi]), n, int(np.max(n_sat))])
 
 
     def centroids(self):
@@ -1328,7 +1456,7 @@ class TrackMeasurement(object):
             return None
 
         snr = np.minimum(m[:, 5]/np.maximum(m[:, 6], 1e-6), 99.99)
-        cent = np.column_stack([m[:, 0], m[:, 1], m[:, 2], m[:, 7], m[:, 8], snr, np.zeros(len(m))])
+        cent = np.column_stack([m[:, 0], m[:, 1], m[:, 2], m[:, 7], m[:, 8], snr, m[:, 10]])
 
         return cent
 

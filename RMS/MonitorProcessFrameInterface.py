@@ -47,6 +47,7 @@ from RMS.Routines import Image
 from RMS.MonitorNightReport import exitWithMonitor, latestPlateparPath, lockOutputDir, lockOwner, \
     MONITOR_LOCK_FILE_NAME, nightDirPath, nightInfo, NightReporter, readDoneFlag, readStateFile, ReportLock, \
     stopProcess, writeDoneFlag
+from RMS.ExtractStarsFrameInterface import extractStarsFrameInterface
 from RMS.DetectStarsAndMeteors import (
     detectStarsAndMeteorsFrameInterface,
     saveResultsFrameInterface,
@@ -758,11 +759,32 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
         if config.monitor_save_images and (img_handle.input_type != 'ff'):
             image_saver = ChunkImageSaver(night_dir, config, file_name, dark=dark, flat_struct=flat_struct)
 
-        # Run star extraction and meteor detection
-        star_list, meteor_list = detectStarsAndMeteorsFrameInterface(
-            img_handle, config, flat_struct=flat_struct, dark=dark, mask=mask,
-            chunk_frames=chunk_frames, chunk_callback=image_saver
-        )
+        # The matched filter replaces the normal detection: its detections are the results of the file
+        mf_only = config.mf_enable and config.mf_replace_detection and (img_handle.input_type != 'ff')
+
+        if mf_only:
+
+            from RMS.MatchedFilterDetection import detectMatchedFilter, saveSummary
+
+            # Star extraction (and the image pairs), then the matched filter instead of the normal detection
+            star_list = extractStarsFrameInterface(img_handle, config, chunk_frames=chunk_frames,
+                flat_struct=flat_struct, dark=dark, mask=mask, save_calstars=False, chunk_callback=image_saver)
+
+            mf_t0 = time.time()
+            meteor_list, mf_detector = detectMatchedFilter(img_handle, config, mask=mask, dark=dark,
+                                                           flat_struct=flat_struct, return_detector=True)
+            saveSummary(results_dir, mf_detector, input_file=os.path.abspath(file_path),
+                        detections=len(meteor_list), processing_time_s=round(time.time() - mf_t0, 1))
+            proc_log.info("Matched filter (replacing the normal detection): {:d} detections".format(
+                len(meteor_list)))
+
+        else:
+
+            # Run star extraction and meteor detection
+            star_list, meteor_list = detectStarsAndMeteorsFrameInterface(
+                img_handle, config, flat_struct=flat_struct, dark=dark, mask=mask,
+                chunk_frames=chunk_frames, chunk_callback=image_saver
+            )
 
         # Save the images of the frames after the last full chunk
         if image_saver is not None:
@@ -783,7 +805,7 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
         # Optional detection of faint moving objects with the matched filter, saved apart from the normal
         #   results. It needs the frames, so FF files are skipped. A failure doesn't fail the file, the normal
         #   results are complete
-        if config.mf_enable and (img_handle.input_type != 'ff'):
+        if config.mf_enable and (img_handle.input_type != 'ff') and not mf_only:
             try:
                 from RMS.MatchedFilterDetection import (MATCHED_FILTER_DIR, detectMatchedFilter,
                                                         saveMatchedFilterResults, saveSummary)

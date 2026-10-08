@@ -169,7 +169,8 @@ class VelocityStacker(object):
 
 
 @numba.njit(cache=True)
-def _movingPSFModel(params, frames, x_pred, y_pred, dt, vx, vy, sigma, n_sub, radius, jac, residuals, compute):
+def _movingPSFModel(params, frames, skip, x_pred, y_pred, dt, vx, vy, sigma, n_sub, radius, jac, residuals,
+                    compute):
     """ Residuals (data - model) and Jacobian of a moving Gaussian PSF over the patches of the frames.
         Returns the number of pixels used. See fitMovingPSF for the arguments. """
 
@@ -194,7 +195,7 @@ def _movingPSFModel(params, frames, x_pred, y_pred, dt, vx, vy, sigma, n_sub, ra
             if (iy < 0) or (iy >= height):
                 continue
             for ix in range(x0, x0 + size):
-                if (ix < 0) or (ix >= width):
+                if (ix < 0) or (ix >= width) or (skip[k, iy, ix] != 0):
                     continue
 
                 # The streak is the mean of n_sub Gaussians along the motion during the frame
@@ -226,7 +227,7 @@ def _movingPSFModel(params, frames, x_pred, y_pred, dt, vx, vy, sigma, n_sub, ra
 
 
 @numba.njit(cache=True)
-def fitMovingPSF(frames, x_pred, y_pred, dt, vx, vy, sigma, radius, max_iter=20):
+def fitMovingPSF(frames, skip, x_pred, y_pred, dt, vx, vy, sigma, radius, max_iter=20):
     """ Fit a moving Gaussian PSF jointly to patches of a run of frames.
 
     The object is modelled in frame k at (x_mid, y_mid) + v*dt[k], smeared along the motion during the frame,
@@ -236,6 +237,7 @@ def fitMovingPSF(frames, x_pred, y_pred, dt, vx, vy, sigma, radius, max_iter=20)
 
     Arguments:
         frames: [ndarray] float32 frames normalized to unit noise, shape (n_frames, height, width).
+        skip: [ndarray] uint8 mask of the pixels left out of the fit (e.g. saturated), same shape as frames.
         x_pred, y_pred: [float] Predicted position at the middle time (px).
         dt: [ndarray] Time of every frame relative to the middle time (frames).
         vx, vy: [float] Velocity (px per frame).
@@ -259,7 +261,7 @@ def fitMovingPSF(frames, x_pred, y_pred, dt, vx, vy, sigma, radius, max_iter=20)
     dummy_jac = np.empty((1, 4))
     dummy_res = np.empty(1)
     params = np.array([x_pred, y_pred, 0.0, 0.0])
-    n_pix = _movingPSFModel(params, frames, x_pred, y_pred, dt, vx, vy, sigma, n_sub, radius, dummy_jac,
+    n_pix = _movingPSFModel(params, frames, skip, x_pred, y_pred, dt, vx, vy, sigma, n_sub, radius, dummy_jac,
                             dummy_res, False)
     if n_pix < 10:
         return result
@@ -268,7 +270,7 @@ def fitMovingPSF(frames, x_pred, y_pred, dt, vx, vy, sigma, radius, max_iter=20)
     res = np.empty(n_pix)
 
     # Initial amplitude and background from the data
-    _movingPSFModel(params, frames, x_pred, y_pred, dt, vx, vy, sigma, n_sub, radius, jac, res, True)
+    _movingPSFModel(params, frames, skip, x_pred, y_pred, dt, vx, vy, sigma, n_sub, radius, jac, res, True)
     bg0 = np.median(res)
     params[3] = bg0
     num = 0.0
@@ -278,7 +280,7 @@ def fitMovingPSF(frames, x_pred, y_pred, dt, vx, vy, sigma, radius, max_iter=20)
         den += jac[i, 2]*jac[i, 2]
     params[2] = max(num/den, 0.1) if den > 0 else 1.0
 
-    _movingPSFModel(params, frames, x_pred, y_pred, dt, vx, vy, sigma, n_sub, radius, jac, res, True)
+    _movingPSFModel(params, frames, skip, x_pred, y_pred, dt, vx, vy, sigma, n_sub, radius, jac, res, True)
     cost = np.sum(res*res)
     lam = 1e-3
     converged = False
@@ -305,7 +307,7 @@ def fitMovingPSF(frames, x_pred, y_pred, dt, vx, vy, sigma, radius, max_iter=20)
 
         new_jac = np.empty((n_pix, 4))
         new_res = np.empty(n_pix)
-        _movingPSFModel(new_params, frames, x_pred, y_pred, dt, vx, vy, sigma, n_sub, radius, new_jac, new_res,
+        _movingPSFModel(new_params, frames, skip, x_pred, y_pred, dt, vx, vy, sigma, n_sub, radius, new_jac, new_res,
                         True)
         new_cost = np.sum(new_res*new_res)
 
@@ -385,3 +387,54 @@ def forcedTrackSignal(frames, xs, ys, sigma, radius, excluded):
                 sum_gg += g*g
 
     return sum_gz, sum_gg
+
+
+
+@numba.njit(cache=True)
+def streakAperture(frames, saturated, noise, xs, ys, vx, vy, radius):
+    """ Photometry of a moving object: in every frame, the sum of the background-subtracted pixels within radius
+        of the segment the object moved along during the frame, and the number of saturated pixels there.
+
+    Arguments:
+        frames: [ndarray] float32 frames normalized to unit noise (background subtracted), (n_frames, height, width).
+        saturated: [ndarray] uint8 mask of the saturated pixels in the raw frames, same shape.
+        noise: [ndarray] float32 noise image (ADU), to convert the normalized frames back to ADU.
+        xs, ys: [ndarray] Position of the object in the middle of every frame (px).
+        vx, vy: [float] Velocity (px per frame).
+        radius: [float] Radius of the aperture around the segment (px).
+
+    Return:
+        (sums, n_saturated): [tuple of ndarrays] Sum in ADU and saturated pixel count per frame.
+    """
+
+    n_frames, height, width = frames.shape
+    sums = np.zeros(n_frames)
+    n_sat = np.zeros(n_frames, dtype=np.int64)
+    seg2 = vx*vx + vy*vy
+    reach = radius + 0.5*math.sqrt(seg2)
+
+    for k in range(n_frames):
+        ax = xs[k] - 0.5*vx
+        ay = ys[k] - 0.5*vy
+        for iy in range(int(math.floor(ys[k] - reach)), int(math.ceil(ys[k] + reach)) + 1):
+            if (iy < 0) or (iy >= height):
+                continue
+            for ix in range(int(math.floor(xs[k] - reach)), int(math.ceil(xs[k] + reach)) + 1):
+                if (ix < 0) or (ix >= width):
+                    continue
+
+                # Distance of the pixel from the segment
+                t = 0.0
+                if seg2 > 0:
+                    t = ((ix - ax)*vx + (iy - ay)*vy)/seg2
+                    t = min(max(t, 0.0), 1.0)
+                dx = ix - (ax + t*vx)
+                dy = iy - (ay + t*vy)
+                if dx*dx + dy*dy > radius*radius:
+                    continue
+
+                sums[k] += frames[k, iy, ix]*noise[iy, ix]
+                if saturated[k, iy, ix] != 0:
+                    n_sat[k] += 1
+
+    return sums, n_sat
