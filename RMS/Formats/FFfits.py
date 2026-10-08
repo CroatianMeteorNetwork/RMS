@@ -414,7 +414,7 @@ def write(ff, directory, filename, compress=False):
     averesid = None
     if getattr(ff, 'avepixel16', None) is not None:
         avepixel, averesid = splitAvepixel16(ff.avepixel16)
-        head['AVEFRAC'] = (8, 'fractional bits of the mean, residual in AVERESID')
+        head['AVEFRAC'] = (8, 'fraction bits of the mean (AVERESID HDU)')
         head['AVEGAMMA'] = (float(getattr(ff, 'avegamma', 1.0) or 1.0),
             'gamma used for linear-domain averaging')
         if getattr(ff, 'averesp', ''):
@@ -427,7 +427,7 @@ def write(ff, directory, filename, compress=False):
     stdresid = None
     if getattr(ff, 'stdpixel16', None) is not None:
         stdpixel, stdresid = splitStdpixel16(ff.stdpixel16)
-        head['STDFRAC'] = (8, 'fractional bits of stdpixel, residual in STDRESID')
+        head['STDFRAC'] = (8, 'fraction bits of stdpixel (STDRESID HDU)')
 
     # Create the primary part
     prim = fits.PrimaryHDU(header=head)

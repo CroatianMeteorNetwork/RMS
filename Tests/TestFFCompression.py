@@ -10,6 +10,7 @@ from __future__ import print_function, division, absolute_import
 import os
 import shutil
 import tempfile
+import warnings
 
 import numpy as np
 from astropy.io import fits
@@ -94,6 +95,32 @@ def testCompressedRoundTrip():
         shutil.rmtree(tmp_dir)
 
 
+def testHeaderFitsWithoutTruncation():
+    """ Every header card the writer emits fits in 80 characters: astropy otherwise truncates the
+        comment and logs a VerifyWarning per card for every FF written.
+    """
+
+    tmp_dir = tempfile.mkdtemp()
+
+    try:
+        ff = makeFF()
+        ff.avegamma = 0.6
+        ff.averesp = '0123456789abcdef'
+        for attr, value in [('soctemp', 40.0), ('exptime', 0.04), ('expmin', 0.04), ('expmax', 0.04),
+                ('again', 1.0), ('dgain', 1.0), ('ispdgain', 1.0), ('seistabl', True), ('qpmean', 20.0),
+                ('qpmax', 30), ('wbr', 1.0), ('wbb', 1.0), ('seinfrm', 256), ('timesrc', 'sei'),
+                ('timeoffs', 1.0), ('timeinterp', 0)]:
+            setattr(ff, attr, value)
+
+        for compress in (False, True):
+            with warnings.catch_warnings():
+                warnings.simplefilter('error')
+                FFfits.write(ff, tmp_dir, 'FF_XX0001_header.fits', compress=compress)
+
+    finally:
+        shutil.rmtree(tmp_dir)
+
+
 def testCompressedNative16Bit():
     """ RICE_1 on a native 16-bit camera FF (uint16 planes, BZERO-scaled) is lossless. """
 
@@ -159,6 +186,9 @@ if __name__ == '__main__':
 
     testCompressedRoundTrip()
     print('testCompressedRoundTrip OK')
+
+    testHeaderFitsWithoutTruncation()
+    print('testHeaderFitsWithoutTruncation OK')
 
     testCompressedNative16Bit()
     print('testCompressedNative16Bit OK')
