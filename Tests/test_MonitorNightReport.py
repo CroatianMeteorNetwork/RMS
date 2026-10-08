@@ -293,6 +293,49 @@ def test_merge_night(tmp_path):
     assert len(os.listdir(ecsv_dir)) == 3
 
 
+def test_matched_filter_results_are_merged_apart(tmp_path):
+
+    from RMS.MatchedFilterDetection import MATCHED_FILTER_DIR
+
+    config = _config()
+    config.mf_enable = True
+    output_dir = str(tmp_path)
+
+    # Results of two files, each with two detections of the matched filter in its own directory
+    results_dirs = [_makeResults(output_dir, config, 'file1'), _makeResults(output_dir, config, 'file2',
+                                                                            start_s=600)]
+    for results_dir in results_dirs:
+        results_path = os.path.join(output_dir, results_dir)
+        mf_path = os.path.join(results_path, MATCHED_FILTER_DIR)
+        os.makedirs(mf_path)
+        ftp_name = [f for f in os.listdir(results_path) if f.startswith('FTPdetectinfo_')][0]
+        meteors = [[e[0], 1, e[9], e[10], [line[1:] for line in e[11]], e[4]]
+                   for e in FTPdetectinfo.readFTPdetectinfo(results_path, ftp_name)]
+        meteors += [[m[0], 2] + m[2:] for m in meteors]
+        FTPdetectinfo.writeFTPdetectinfo(meteors, mf_path, ftp_name.replace('.txt', '_mf.txt'), mf_path,
+            'XX0001', 25.0, celestial_coords_given=True)
+
+        # The backup which the recalibration leaves is not merged
+        FTPdetectinfo.writeFTPdetectinfo(meteors, mf_path, ftp_name.replace('.txt', '_mf_backup_1.txt'), mf_path,
+            'XX0001', 25.0, celestial_coords_given=True)
+
+    night_state = mnr.generateNightReport(output_dir, NIGHT, config, archive=True)
+    assert 'matched_filter_merge' in night_state['ok_steps']
+
+    # The normal results only have the normal detections
+    night_dir = mnr.nightDirPath(output_dir, NIGHT, config)
+    ftp_names = [f for f in os.listdir(night_dir) if f.startswith('FTPdetectinfo')]
+    assert len(ftp_names) == 1
+    assert len(FTPdetectinfo.readFTPdetectinfo(night_dir, ftp_names[0])) == 2
+
+    # The detections of the matched filter are merged into their own directory
+    mf_night = os.path.join(night_dir, MATCHED_FILTER_DIR)
+    assert os.listdir(mf_night) == ['FTPdetectinfo_{:s}_mf.txt'.format(NIGHT)]
+    entries = FTPdetectinfo.readFTPdetectinfo(mf_night, os.listdir(mf_night)[0])
+    assert len(entries) == 4
+    assert entries[0][11][0][4:6] == [170.03, 50.0]
+
+
 def test_detected_images_cover_the_meteor_tracks():
 
     # Images every 5.12 s (128 frames at 25 fps) of two files, the second one starting after a gap

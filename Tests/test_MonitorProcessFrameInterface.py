@@ -463,6 +463,55 @@ def test_processFile_uses_latest_platepar_unless_given_is_newer(process_file, tm
     assert _usedPlatepar() == 'given'
 
 
+@pytest.mark.parametrize('mf_enable, mf_fails', [(False, False), (True, False), (True, True)])
+def test_matched_filter_pass(config_path, tmp_path, monkeypatch, mf_enable, mf_fails):
+    """ The matched filter runs after the normal detection when it is enabled, saves its results into their
+        own directory, and its failure doesn't fail the file.
+    """
+
+    import RMS.MatchedFilterDetection as mfd
+
+    config = cr.parse(config_path)
+    config.monitor_save_images = False
+    config.mf_enable = mf_enable
+    monkeypatch.setattr(cr, 'parse', lambda path: config)
+    monkeypatch.setattr(mon, 'detectInputType', lambda *args, **kwargs: _ProcessHandle(str(tmp_path)))
+    monkeypatch.setattr(mon, 'loadImageCalibration', lambda *args, **kwargs: (None, None, None))
+    monkeypatch.setattr(mon, 'detectStarsAndMeteorsFrameInterface', lambda *args, **kwargs: ([], []))
+    monkeypatch.setattr(mon, 'saveResultsFrameInterface', lambda *args, **kwargs: None)
+
+    calls = []
+
+    def _detect(img_handle, config, **kwargs):
+        calls.append('detect')
+        if mf_fails:
+            raise RuntimeError("matched filter failure")
+        return [], None
+
+    def _save(detections, star_list, img_handle, config, output_dir, **kwargs):
+        calls.append(output_dir)
+        return os.path.join(output_dir, 'FTPdetectinfo_mf.txt')
+
+    monkeypatch.setattr(mfd, 'detectMatchedFilter', _detect)
+    monkeypatch.setattr(mfd, 'saveMatchedFilterResults', _save)
+
+    given_platepar = tmp_path/'given.cal'
+    given_platepar.write_text('given')
+    output_dir = tmp_path/'out'
+
+    assert mon.processFile(str(tmp_path/'dummy.vid'), config_path, str(given_platepar), str(output_dir), 128)
+
+    results_dir = os.path.join(str(output_dir), '2025', '202512', '20251225', 'dummy')
+    assert mon.hasResults(results_dir)
+
+    if not mf_enable:
+        assert calls == []
+    elif mf_fails:
+        assert calls == ['detect']
+    else:
+        assert calls == ['detect', os.path.join(results_dir, mfd.MATCHED_FILTER_DIR)]
+
+
 def test_walkInput_skips_monitor_output(tmp_path):
 
     config = cr.Config()

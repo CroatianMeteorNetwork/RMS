@@ -924,6 +924,84 @@ class Config:
         self.monitor_staging_dir = ''
 
 
+        #### Matched-filter detection of faint moving objects (RMS.MatchedFilterDetection)
+
+        # Run the matched-filter detection on every file in the monitor, after the normal detection
+        self.mf_enable = False
+
+        # Number of frames processed together (background, masks and search)
+        self.mf_block_frames = 256
+
+        # Detection threshold of the velocity search (sigma of the best velocity)
+        self.mf_threshold = 5.0
+
+        # Frames summed in the runs which are searched for the full range of speeds (longer runs find fainter
+        #   fast objects, at a higher cost), and in a run for slow objects (0 disables)
+        self.mf_run_frames = [8, 16]
+        self.mf_slow_run_frames = 32
+
+        # Search the full range of speeds (otherwise only slow objects are searched)
+        self.mf_velocity_search = True
+
+        # Speed range of the detected objects (deg/s)
+        self.mf_ang_vel_min = 0.01
+        self.mf_ang_vel_max = 2.0
+
+        # Minimum number of linked runs of a track
+        self.mf_min_hits = 3
+
+        # Minimum motion of a detection over its duration, in PSF widths (FWHM)
+        self.mf_min_displacement = 3.0
+
+        # Minimum duration of a detection (frames)
+        self.mf_min_frames = 20
+
+        # PSF sigma (px), 0 estimates it from the stars
+        self.mf_psf_sigma = 0.0
+
+        # Largest position error of a measurement (px). The measurements combine as few frames as possible
+        #   (up to mf_max_measure_frames) to keep the position error below it
+        self.mf_max_pos_error = 0.5
+        self.mf_max_measure_frames = 8
+
+        # Minimum signal-to-noise ratio of the fitted amplitude of a measurement
+        self.mf_min_sample_snr = 3.0
+
+        # The position uncertainties of the fit are multiplied by this, to match the errors measured on objects
+        #   added to real frames (the noise is not exactly Gaussian, and stars are not perfectly removed)
+        self.mf_sigma_scale = 1.3
+
+        # Minimum number of measurements of a detection
+        self.mf_min_centroids = 6
+
+        # Minimum combined significance of a detection: the PSF-weighted signal summed along its track over all
+        #   frames, minus the same at times when the object is elsewhere (sigma)
+        self.mf_track_significance = 12.0
+
+        # Stars brighter than this in the median of the frames (in the noise of the sky in one frame) are masked
+        self.mf_star_threshold = 3.0
+
+        # The normalized frames are clipped to +/- this before the search (single frame outliers)
+        self.mf_clip = 4.0
+
+        # Pixels above the threshold in more than this fraction of all runs of the input are masked as static
+        self.mf_persistence = 0.2
+
+        # Margin from the image edge (px)
+        self.mf_edge_margin = 8
+
+        # Use the GPU for the search: auto (if CUDA is available), on, off
+        self.mf_gpu = 'auto'
+
+        # The positions of the measurements are combined over the measurements within +-this many frames (a
+        #   local quadratic fit of the track), which reduces their errors 2 to 5 times; 0 disables it
+        self.mf_smooth_frames = 64
+
+        # Number of CPU threads of the matched filter (0 = all cores). With several monitor workers, all cores
+        #   divided by the number of workers avoids oversubscribing the CPU
+        self.mf_threads = 0
+
+
         #### Shower association
 
         # Path to the shower file
@@ -1084,6 +1162,7 @@ def parseConfigFile(config, parser):
     parseTimelapse(config, parser)
     parseColors(config, parser)
     parseMonitorProcessing(config, parser)
+    parseMatchedFilter(config, parser)
 
 
 def parseDFNStation(config, parser):
@@ -2237,6 +2316,39 @@ def parseTimelapse(config, parser):
 
 # When the monitor generates the night reports, see monitor_report_mode
 MONITOR_REPORT_MODES = ('sunrise', 'idle', 'external', 'none')
+
+
+def parseMatchedFilter(config, parser):
+    section = "MatchedFilter"
+
+    if not parser.has_section(section):
+        return
+
+    for name in ("mf_enable", "mf_velocity_search"):
+        if parser.has_option(section, name):
+            setattr(config, name, parser.getboolean(section, name))
+
+    if parser.has_option(section, "mf_run_frames"):
+        config.mf_run_frames = [int(v) for v in parser.get(section, "mf_run_frames").split(",") if v.strip()]
+
+    for name in ("mf_block_frames", "mf_slow_run_frames", "mf_min_hits",
+                 "mf_max_measure_frames", "mf_min_centroids", "mf_edge_margin", "mf_min_frames", "mf_threads",
+                 "mf_smooth_frames"):
+        if parser.has_option(section, name):
+            setattr(config, name, parser.getint(section, name))
+
+    for name in ("mf_threshold", "mf_ang_vel_min", "mf_ang_vel_max", "mf_psf_sigma", "mf_max_pos_error",
+                 "mf_min_sample_snr", "mf_star_threshold", "mf_persistence", "mf_clip", "mf_min_displacement",
+                 "mf_sigma_scale", "mf_track_significance"):
+        if parser.has_option(section, name):
+            setattr(config, name, parser.getfloat(section, name))
+
+    if parser.has_option(section, "mf_gpu"):
+        gpu = parser.get(section, "mf_gpu").strip().lower()
+        if gpu in ("auto", "on", "off"):
+            config.mf_gpu = gpu
+        else:
+            print("Unknown mf_gpu '{:s}', using '{:s}'".format(gpu, config.mf_gpu))
 
 
 def parseMonitorProcessing(config, parser):

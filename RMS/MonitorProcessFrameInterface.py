@@ -780,6 +780,32 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
 
         proc_log.info("Detection results saved to: {}".format(results_dir))
 
+        # Optional detection of faint moving objects with the matched filter, saved apart from the normal
+        #   results. It needs the frames, so FF files are skipped. A failure doesn't fail the file, the normal
+        #   results are complete
+        if config.mf_enable and (img_handle.input_type != 'ff'):
+            try:
+                from RMS.MatchedFilterDetection import (MATCHED_FILTER_DIR, detectMatchedFilter,
+                                                        saveMatchedFilterResults, saveSummary)
+
+                mf_t0 = time.time()
+                mf_dir = os.path.join(results_dir, MATCHED_FILTER_DIR)
+                mf_detections, mf_detector = detectMatchedFilter(img_handle, config, mask=mask, dark=dark,
+                                                                 flat_struct=flat_struct, return_detector=True)
+                mf_ftp_path = saveMatchedFilterResults(
+                    mf_detections, star_list, img_handle, config, mf_dir,
+                    platepar_path=results_platepar_path, chunk_frames=chunk_frames,
+                    chunk_images=(image_saver.chunk_images if image_saver is not None else None),
+                    ecsv_out=config.monitor_save_ecsv)
+                saveSummary(mf_dir, mf_detector, input_file=os.path.abspath(file_path),
+                            ftpdetectinfo=os.path.basename(mf_ftp_path), detections=len(mf_detections),
+                            processing_time_s=round(time.time() - mf_t0, 1))
+                proc_log.info("Matched filter: {:d} detections saved to: {}".format(len(mf_detections),
+                                                                                    mf_ftp_path))
+
+            except Exception:
+                proc_log.error("The matched-filter detection failed:\n" + traceback.format_exc())
+
         # Release the video handle if applicable
         if hasattr(img_handle, 'cap') and img_handle.cap is not None:
             img_handle.cap.release()
