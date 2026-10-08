@@ -2872,7 +2872,7 @@ def extendPieces(pieces):
 
 
 def joinContinuousDetections(meteor_detections, max_gap_frames, max_gap_spatial, max_dist, img_h, img_w,
-    x_col=1, fit_length=20.0):
+    x_col=1, fit_length=20.0, bin_factor=1):
     """ Join the detections of the pieces of one track: a detection which begins where another one ends
         (within max_gap_frames, or within max_gap_spatial px of motion for slow objects), at the position
         extrapolated from the end of the other one, and moving in the same direction with a similar speed.
@@ -2891,6 +2891,9 @@ def joinContinuousDetections(meteor_detections, max_gap_frames, max_gap_spatial,
         x_col: [int] Column of x in the centroids, y is in the next column. 1 by default.
         fit_length: [float] The motion at the ends is estimated from the centroids within this distance of the
             end (px), at least 10 centroids. 20 by default.
+        bin_factor: [int] Binning factor of the detection. The centroids are in the unbinned image, while
+            max_gap_spatial, max_dist, fit_length and the image size are in the binned image, as the polar
+            line coordinates of the detections. 1 by default.
 
     Return:
         [list] Detections, with the joined ones as one.
@@ -2913,6 +2916,11 @@ def joinContinuousDetections(meteor_detections, max_gap_frames, max_gap_spatial,
         px = np.polyfit(fr, cent[:, x_col], 1)
         py = np.polyfit(fr, cent[:, x_col + 1], 1)
         return px, py
+
+    # Distances in the unbinned image of the centroids
+    max_gap_spatial = max_gap_spatial*bin_factor
+    max_dist = max_dist*bin_factor
+    fit_length = fit_length*bin_factor
 
     detections = sorted(meteor_detections, key=lambda det: np.min(np.asarray(det[2])[:, 0]))
 
@@ -2975,7 +2983,8 @@ def joinContinuousDetections(meteor_detections, max_gap_frames, max_gap_spatial,
 
                 # Join, the frames of B after the end of A are added
                 cent = np.vstack([cent_a, cent_b[cent_b[:, 0] > np.max(cent_a[:, 0])]])
-                (xa, ya), (xb, yb) = cent[0, x_col:x_col + 2], cent[-1, x_col:x_col + 2]
+                # The polar line in the binned image, as for the other detections
+                (xa, ya), (xb, yb) = (cent[[0, -1], x_col:x_col + 2] - (bin_factor - 1)/2.0)/bin_factor
                 rho, theta = getPolarLine(xa, img_h - ya, xb, img_h - yb, img_h, img_w)
                 logDebug('Joined the detections of frames {:.0f}-{:.0f} and {:.0f}-{:.0f}'.format(
                     cent_a[0, 0], cent_a[-1, 0], cent_b[0, 0], cent_b[-1, 0]))
@@ -4387,24 +4396,25 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
     # The same object can be detected around different lines (e.g. both edges of a wide track). For
     #   frame-based input, the thresholded images of the time windows tell whether two detections are inside
     #   one extended object (the centroids are scaled to the unbinned image, the windows are binned)
+    # The centroids are in the unbinned image, the distances of the detection in the binned image
+    bin_factor = config.detection_binning_factor if (img_handle.input_type != 'ff') else 1
+
     connected = None
     if window_points:
-        bin_factor = config.detection_binning_factor
         def toBinned(coord):
             return (coord - (bin_factor - 1)/2.0)/bin_factor
         def connected(frame, x1, y1, x2, y2):
             return windowThresholdConnected(window_points, frame, toBinned(x1), toBinned(y1), toBinned(x2),
                 toBinned(y2))
 
-    meteor_detections = removeDuplicateDetections(meteor_detections, config.ransac3d_distance_thresh,
-        config.stripe_width, x_col=(2 if asgard else 1), connected=connected,
-        max_connected_dist=config.stripe_width/2.0)
+    meteor_detections = removeDuplicateDetections(meteor_detections,
+        bin_factor*config.ransac3d_distance_thresh, bin_factor*config.stripe_width, x_col=(2 if asgard else 1), connected=connected,
+        max_connected_dist=bin_factor*config.stripe_width/2.0)
 
     # Join the pieces of tracks which were centroided piece by piece
     meteor_detections = joinContinuousDetections(meteor_detections, config.ransac3d_max_gap_frame,
         config.ransac3d_max_gap_spatial, config.ransac3d_stitch_dist_thresh, img_handle.ff.nrows,
-        img_handle.ff.ncols,
-        x_col=(2 if asgard else 1))
+        img_handle.ff.ncols, x_col=(2 if asgard else 1), bin_factor=bin_factor)
 
     # Once detection is done on this data, clear the cache for the thresholding function
     Image.thresholdImgMemoCache.clearCache()

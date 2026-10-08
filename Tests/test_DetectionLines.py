@@ -284,3 +284,24 @@ def test_extended_object_duplicates_are_removed():
 
     # Without the thresholded images, the edges are kept
     assert len(removeDuplicateDetections([edge_low, centre, edge_high, side], 4.0, 20.0)) == 4
+
+
+def test_pieces_of_a_binned_track_are_joined():
+
+    # The pieces of a slow track, with the centroids in the image binned 2x2 or scaled to the unbinned image
+    #   (the distances and the image size stay in the binned image)
+    def detection(f0, f1, bin_factor):
+        fr = np.arange(f0, f1, dtype=np.float64)
+        x, y = 100 + 0.1*fr, 200 + 0.05*fr
+        return [0.0, 0.0, np.column_stack([fr, bin_factor*x + (bin_factor - 1)/2.0,
+                                           bin_factor*y + (bin_factor - 1)/2.0, np.ones(len(fr))])]
+
+    binned = joinContinuousDetections([detection(650, 1000, 2), detection(0, 400, 2)], 50, 50, 4.0, 512, 512,
+        bin_factor=2)
+    unbinned = joinContinuousDetections([detection(650, 1000, 1), detection(0, 400, 1)], 50, 50, 4.0, 512,
+        512)
+
+    assert len(binned) == len(unbinned) == 1
+
+    # The polar line is in the binned image, the same as without binning
+    assert np.allclose(binned[0][:2], unbinned[0][:2])
