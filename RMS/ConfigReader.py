@@ -919,6 +919,10 @@ class Config:
         self.monitor_flux = False
         self.monitor_observation_summary = False
 
+        # Local directory to which every input file is copied before it is processed, for inputs on a slow
+        #   network. Empty disables it
+        self.monitor_staging_dir = ''
+
 
         #### Shower association
 
@@ -2297,6 +2301,10 @@ def parseMonitorProcessing(config, parser):
 
     if parser.has_option(section, "monitor_observation_summary"):
         config.monitor_observation_summary = parser.getboolean(section, "monitor_observation_summary")
+
+    if parser.has_option(section, "monitor_staging_dir"):
+        staging_dir = parser.get(section, "monitor_staging_dir").strip()
+        config.monitor_staging_dir = os.path.expanduser(staging_dir) if staging_dir else ''
 
 
 def parseColors(config, parser):
