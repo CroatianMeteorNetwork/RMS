@@ -512,3 +512,39 @@ def test_process_files_resumes_and_continues_after_failure(config, tmp_path, mon
     calls.clear()
     assert mfd.processFiles(files, config, out) == [files[1]]
     assert calls == ['bad.vid']
+
+
+def test_output_names_unique_for_same_file_names(tmp_path):
+
+    files = [str(tmp_path/'cam1'/'a.vid'), str(tmp_path/'cam2'/'a.vid'), str(tmp_path/'cam1'/'b.vid')]
+    names = mfd.outputNames(files)
+
+    assert names[2] == 'b'
+    assert len(set(names)) == 3 and all(n.startswith('a_') for n in names[:2])
+    assert mfd.outputNames(files) == names
+
+
+@pytest.mark.parametrize('method, factor', [('avg', 4), ('sum', 1)])
+def test_binned_frames_speed_limits_and_intensity(config, method, factor):
+    """ With 2x2 detection binning the speed limits are in binned pixels, and the intensity is scaled to the
+        unbinned image only for averaged bins.
+    """
+
+    config.detection_binning_factor = 2
+    config.detection_binning_method = method
+
+    opts = mfd.MatchedFilterOptions(config, det_bin=2)
+    unbinned = mfd.MatchedFilterOptions(config)
+    assert np.isclose(opts.speed_max, unbinned.speed_max/2)
+    assert np.isclose(opts.speed_min, unbinned.speed_min/2)
+
+    obj = linearObject(12.0, 20, 100, 0.8, -0.3, 100, 220)
+    det = MatchedFilterDetector(_SynthHandle([obj]), config)
+    detections = det.run()
+    config.detection_binning_factor = 1
+    det1 = MatchedFilterDetector(_SynthHandle([obj]), config)
+    detections1 = det1.run()
+
+    assert len(detections) == len(detections1) == 1
+    ratio = np.median(detections[0][2][:, 3])/np.median(detections1[0][2][:, 3])
+    assert np.isclose(ratio, factor, rtol=0.1)

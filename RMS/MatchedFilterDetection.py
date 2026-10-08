@@ -85,11 +85,15 @@ Hit = collections.namedtuple('Hit', ['frame', 'x', 'y', 'vx', 'vy', 'z', 'run'])
 
 
 class MatchedFilterOptions(object):
-    def __init__(self, config):
+    def __init__(self, config, det_bin=1):
         """ Options of the matched-filter detection, from the config.
 
         Arguments:
             config: [Config] Configuration object.
+
+        Keyword arguments:
+            det_bin: [int] Binning of the frames (detection binning), the pixel limits are in binned pixels. 1 by
+                default.
         """
 
         self.block_frames = config.mf_block_frames
@@ -115,8 +119,8 @@ class MatchedFilterOptions(object):
         self.smooth_frames = config.mf_smooth_frames
         self.threads = config.mf_threads
 
-        # Speed limits in px per frame (unbinned), from the angular velocity limits
-        scale = (config.fov_h/float(config.height) + config.fov_w/float(config.width))/2.0
+        # Speed limits in px per frame of the (binned) frames, from the angular velocity limits
+        scale = det_bin*(config.fov_h/float(config.height) + config.fov_w/float(config.width))/2.0
         self.speed_min = config.mf_ang_vel_min/scale/config.fps
         self.speed_max = config.mf_ang_vel_max/scale/config.fps
 
@@ -243,13 +247,13 @@ class MatchedFilterDetector(object):
         self.mask = mask
         self.dark = dark
         self.flat_struct = flat_struct
-        self.opts = MatchedFilterOptions(config)
 
         self.height, self.width = img_handle.nrows, img_handle.ncols
         self.total_frames = img_handle.total_frames
 
         # Detection binning of the frame handle, the results are scaled to the unbinned image
         self.det_bin = config.detection_binning_factor if img_handle.input_type != 'ff' else 1
+        self.opts = MatchedFilterOptions(config, det_bin=self.det_bin)
 
         # The search is done on frames binned 2x2
         self.search_bin = 2
@@ -767,10 +771,12 @@ class MatchedFilterDetector(object):
                     or (np.hypot(*(cent[-1, 1:3] - cent[0, 1:3])) < self.minDisplacement()):
                 continue
 
-            # Unbinned coordinates
+            # Unbinned coordinates, and the intensity of the unbinned image (averaged bins hold the mean of the
+            #   pixels, summed bins already their sum)
             if self.det_bin > 1:
                 cent[:, 1:3] = cent[:, 1:3]*self.det_bin + (self.det_bin - 1)/2.0
-                cent[:, 3] *= self.det_bin**2
+                if self.config.detection_binning_method == 'avg':
+                    cent[:, 3] *= self.det_bin**2
 
             (xa, ya), (xb, yb) = cent[0, 1:3], cent[-1, 1:3]
             h = self.height*self.det_bin
@@ -1587,9 +1593,9 @@ def processFiles(files, config, output_dir, force=False, **kwargs):
 
     out_dirs = []
     failed = []
-    for path in files:
+    for path, name in zip(files, outputNames(files)):
 
-        out = os.path.join(output_dir, os.path.splitext(os.path.basename(path))[0])
+        out = os.path.join(output_dir, name)
         out_dirs.append(out)
         if os.path.isfile(os.path.join(out, DONE_NAME)) and not force:
             log.info('Matched filter: already processed, skipped: {:s}'.format(path))
@@ -1614,6 +1620,28 @@ def processFiles(files, config, output_dir, force=False, **kwargs):
         log.error('Matched filter: {:d} files failed: {:s}'.format(len(failed), ', '.join(failed)))
 
     return failed
+
+
+
+def outputNames(files):
+    """ Names of the output directories of the input files: the file names without the extension, and for files
+        with the same name in different directories, the name followed by a short hash of the full path, so every
+        file has its own directory and keeps it from run to run.
+
+    Arguments:
+        files: [list] Input files.
+
+    Return:
+        [list] Directory names.
+    """
+
+    import hashlib
+
+    stems = [os.path.splitext(os.path.basename(path))[0] for path in files]
+    counts = collections.Counter(stems)
+
+    return [stem if counts[stem] == 1 else '{:s}_{:s}'.format(stem,
+            hashlib.sha1(os.path.abspath(path).encode('utf-8')).hexdigest()[:8]) for stem, path in zip(stems, files)]
 
 
 
