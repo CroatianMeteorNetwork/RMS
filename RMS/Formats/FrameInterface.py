@@ -2673,10 +2673,23 @@ def detectInputTypeFolder(input_dir, config, beginning_time=None, fps=None, skip
             img_handle.ncols = config.width
             img_handle.nrows = config.height
 
-    elif any([any(file.lower().endswith(x) for x in img_types) for file in os.listdir(input_dir)]) and \
-            config.width != 4912 and config.width != 7360:
-        img_handle = InputTypeImages(input_dir, config, beginning_time=beginning_time, fps=fps,
-                                     detection=detection, flipud=flipud, chunk_frames=chunk_frames)
+    else:
+
+        # The station's calibration images (mask, flat, dark) are not an image sequence
+        calib_files = [str(getattr(config, attr, '')).lower() for attr in ('mask_file', 'flat_file', 'dark_file')]
+        img_files = [file for file in os.listdir(input_dir)
+                     if any(file.lower().endswith(x) for x in img_types) and (file.lower() not in calib_files)]
+        video_files = [file for file in os.listdir(input_dir) if checkIfVideoFile(file)]
+
+        if img_files and config.width != 4912 and config.width != 7360:
+            img_handle = InputTypeImages(input_dir, config, beginning_time=beginning_time, fps=fps,
+                                         detection=detection, flipud=flipud, chunk_frames=chunk_frames)
+
+        # A folder holding a single video (e.g. a saved mkv segment next to the station's config files)
+        elif len(video_files) == 1:
+            img_handle = InputTypeVideo(os.path.join(input_dir, video_files[0]), config,
+                                        beginning_time=beginning_time, detection=detection, flipud=flipud,
+                                        chunk_frames=chunk_frames)
 
     return img_handle
 
