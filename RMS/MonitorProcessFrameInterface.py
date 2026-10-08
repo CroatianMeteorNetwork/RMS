@@ -459,8 +459,9 @@ class ChunkImageSaver(object):
 
 
 
-# Name prefix of the local copies of the input files in the staging directory, with the PID of the worker
-STAGED_FILE_PREFIX = 'rms_monitor_{:d}_'
+# Directory of the local copies of the input files of a worker in the staging directory, with its PID. The
+#   copies keep the name of the input file, as video files are timed by their names
+STAGED_DIR_NAME = 'rms_monitor_{:d}'
 
 # Free space which is left in the staging directory when a file is copied there, in bytes
 STAGING_FREE_MARGIN = 1024**3
@@ -468,8 +469,9 @@ STAGING_FREE_MARGIN = 1024**3
 
 def stageInputFile(file_path, staging_dir):
     """ Copy an input file into the local staging directory (monitor_staging_dir), so it is read only once
-        over the network: the processing reads every file twice. FF files and directories (FITS directories)
-        are processed where they are, as are files for which there is not enough space.
+        over the network: the processing reads every file twice. The copy is in a directory of the worker
+        and keeps the file name. FF files and directories (FITS directories) are processed where they are, as
+        are files for which there is not enough space or which can't be copied.
 
     Arguments:
         file_path: [str] Path to the input file.
@@ -492,9 +494,20 @@ def stageInputFile(file_path, staging_dir):
                                                        file_size/1024**3))
         return file_path
 
-    staged_path = os.path.join(staging_dir, STAGED_FILE_PREFIX.format(os.getpid())
-                               + os.path.basename(file_path))
-    shutil.copyfile(file_path, staged_path)
+    worker_dir = os.path.join(staging_dir, STAGED_DIR_NAME.format(os.getpid()))
+    staged_path = os.path.join(worker_dir, os.path.basename(file_path))
+
+    # Several workers can copy at the same time, so the space can still run out. The file is then processed
+    #   where it is, instead of failing
+    try:
+        os.makedirs(worker_dir, exist_ok=True)
+        shutil.copyfile(file_path, staged_path)
+
+    except OSError as e:
+        log.warning("{} could not be copied to the staging directory ({}), processing it where it "
+                    "is".format(file_path, repr(e)))
+        shutil.rmtree(worker_dir, ignore_errors=True)
+        return file_path
 
     return staged_path
 
@@ -516,7 +529,7 @@ def removeStagedFiles(staging_dir, pid=None):
 
     for file_name in os.listdir(staging_dir):
 
-        match = re.match(r'rms_monitor_(\d+)_', file_name)
+        match = re.match(r'rms_monitor_(\d+)$', file_name)
         if match is None:
             continue
 
@@ -525,18 +538,17 @@ def removeStagedFiles(staging_dir, pid=None):
             if file_pid != pid:
                 continue
 
-        # Keep the copies of running workers
+        # Keep the copies of running workers (also of other users, which can't be signalled)
         else:
             try:
                 os.kill(file_pid, 0)
                 continue
-            except OSError:
+            except ProcessLookupError:
                 pass
+            except OSError:
+                continue
 
-        try:
-            os.remove(os.path.join(staging_dir, file_name))
-        except OSError:
-            pass
+        shutil.rmtree(os.path.join(staging_dir, file_name), ignore_errors=True)
 
 
 def calibrationMatchesFrames(img, img_handle, binning_factor):
@@ -840,10 +852,7 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
 
         # Delete the local copy (a worker which is killed leaves it behind, the monitor deletes it then)
         if processing_path != file_path:
-            try:
-                os.remove(processing_path)
-            except OSError:
-                pass
+            shutil.rmtree(os.path.dirname(processing_path), ignore_errors=True)
 
 
 def processFileWorker(*args, **kwargs):
@@ -1508,6 +1517,10 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
                 stopWorker(proc)
 
         if reporter is not None:
+
+            # The stopped workers don't delete their local copies
+            removeStagedFiles(reporter.config.monitor_staging_dir)
+
             reporter.stop(timeout=SHUTDOWN_TIMEOUT)
 
         log.info("All workers stopped.")
@@ -2075,6 +2088,10 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None,
                 stopWorker(proc)
 
         for reporter in reporters.values():
+
+            # The stopped workers don't delete their local copies
+            removeStagedFiles(reporter.config.monitor_staging_dir)
+
             reporter.stop(timeout=SHUTDOWN_TIMEOUT)
 
         log.info("All workers stopped.")
