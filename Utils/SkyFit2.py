@@ -4318,8 +4318,11 @@ class PlateTool(QtWidgets.QMainWindow):
             text_str = "Station: {:s} \n".format(self.platepar.station_code)
             text_str += self.img_handle.name() + '\n\n'
             text_str += self.img_type_flag + '\n'
-            text_str += "Time  = {:s}\n".format(
-                self.img_handle.currentFrameTime(dt_obj=True).strftime("%Y/%m/%d %H:%M:%S.%f")[:-3])
+            # Tag a time that comes from the camera's per-frame SEI record rather than start + frame/fps
+            sei_time = getattr(self.img_handle, 'frame_times_rel', None) is not None
+            text_str += "Time  = {:s}{:s}\n".format(
+                self.img_handle.currentFrameTime(dt_obj=True).strftime("%Y/%m/%d %H:%M:%S.%f")[:-3],
+                " (SEI)" if sei_time else "")
             text_str += 'Frame = {:d} / {:d}\n'.format(self.img.getFrame(), self.img_handle.total_frames - 1)
             if self.img_handle.input_type == "ff":
                 if self.use_fr_files:
