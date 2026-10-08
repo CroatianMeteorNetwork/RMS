@@ -27,6 +27,7 @@ import glob
 import hashlib
 import json
 import os
+import re
 import shutil
 import sys
 import time
@@ -458,6 +459,98 @@ class ChunkImageSaver(object):
 
 
 
+# Directory of the local copies of the input files of a worker in the staging directory, with its PID. The
+#   copies keep the name of the input file, as video files are timed by their names
+STAGED_DIR_NAME = 'rms_monitor_{:d}'
+
+# Free space which is left in the staging directory when a file is copied there, in bytes
+STAGING_FREE_MARGIN = 1024**3
+
+
+def stageInputFile(file_path, staging_dir):
+    """ Copy an input file into the local staging directory (monitor_staging_dir), so it is read only once
+        over the network: the processing reads every file twice. The copy is in a directory of the worker
+        and keeps the file name. FF files and directories (FITS directories) are processed where they are, as
+        are files for which there is not enough space or which can't be copied.
+
+    Arguments:
+        file_path: [str] Path to the input file.
+        staging_dir: [str] Staging directory, empty or None if staging is disabled.
+
+    Return:
+        [str] Path to the local copy, or file_path if it is processed where it is.
+    """
+
+    if (not staging_dir) or (not os.path.isfile(file_path)) or validFFName(os.path.basename(file_path)):
+        return file_path
+
+    os.makedirs(staging_dir, exist_ok=True)
+
+    file_size = os.path.getsize(file_path)
+    free_space = shutil.disk_usage(staging_dir).free
+    if free_space < file_size + STAGING_FREE_MARGIN:
+        log.warning("Not enough space in the staging directory {} ({:.1f} GB free) for {} ({:.1f} GB), "
+                    "processing it where it is".format(staging_dir, free_space/1024**3, file_path,
+                                                       file_size/1024**3))
+        return file_path
+
+    worker_dir = os.path.join(staging_dir, STAGED_DIR_NAME.format(os.getpid()))
+    staged_path = os.path.join(worker_dir, os.path.basename(file_path))
+
+    # Several workers can copy at the same time, so the space can still run out. The file is then processed
+    #   where it is, instead of failing
+    try:
+        os.makedirs(worker_dir, exist_ok=True)
+        shutil.copyfile(file_path, staged_path)
+
+    except OSError as e:
+        log.warning("{} could not be copied to the staging directory ({}), processing it where it "
+                    "is".format(file_path, repr(e)))
+        shutil.rmtree(worker_dir, ignore_errors=True)
+        return file_path
+
+    return staged_path
+
+
+def removeStagedFiles(staging_dir, pid=None):
+    """ Delete the local copies of the input files in the staging directory: those of the given worker (e.g.
+        when it ended), or, without a PID, those of the workers which are not running anymore (e.g. left
+        behind by a monitor which was killed).
+
+    Arguments:
+        staging_dir: [str] Staging directory, empty or None if staging is disabled.
+
+    Keyword arguments:
+        pid: [int] PID of the worker whose copies are deleted. None by default.
+    """
+
+    if (not staging_dir) or (not os.path.isdir(staging_dir)):
+        return
+
+    for file_name in os.listdir(staging_dir):
+
+        match = re.match(r'rms_monitor_(\d+)$', file_name)
+        if match is None:
+            continue
+
+        file_pid = int(match.group(1))
+        if pid is not None:
+            if file_pid != pid:
+                continue
+
+        # Keep the copies of running workers (also of other users, which can't be signalled)
+        else:
+            try:
+                os.kill(file_pid, 0)
+                continue
+            except ProcessLookupError:
+                pass
+            except OSError:
+                continue
+
+        shutil.rmtree(os.path.join(staging_dir, file_name), ignore_errors=True)
+
+
 def calibrationMatchesFrames(img, img_handle, binning_factor):
     """ Check if a calibration image (dark, flat) has the size of the frames. The frame size of the image
         handle is binned with detection binning, the calibration images have the full resolution.
@@ -574,11 +667,16 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
     # Use the module logger until the per-file logger is initialized, so errors before that are logged
     proc_log = log
 
+    # The file which is read, a local copy of it with monitor_staging_dir
+    processing_path = file_path
+
     try:
+
+        processing_path = stageInputFile(file_path, config.monitor_staging_dir)
 
         # Open the file as an image handle first to get the timestamp
         img_handle = detectInputType(
-            file_path, config, detection=True, preload_video=True, chunk_frames=chunk_frames
+            processing_path, config, detection=True, preload_video=True, chunk_frames=chunk_frames
         )
 
         if img_handle is None:
@@ -604,6 +702,8 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
         config.log_dir = orig_log_dir
 
         proc_log.info("Processing file: {}".format(file_path))
+        if processing_path != file_path:
+            proc_log.info("Processing the local copy: {}".format(processing_path))
 
         # Use the best platepar of the latest reported night, unless the given platepar is newer (e.g. it was
         #   fitted again manually)
@@ -622,13 +722,15 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
         if not os.path.exists(results_config_path):
             shutil.copy2(config_path, results_config_path)
 
-        # Load calibration files (mask, dark, flat) from the input directory
+        # Load calibration files (mask, dark, flat) from the input directory (not the staging directory)
+        calibration_dir = img_handle.dir_path if (processing_path == file_path) \
+            else os.path.dirname(os.path.abspath(file_path))
         mask, dark, flat_struct = loadImageCalibration(
-            img_handle.dir_path, config, dtype=img_handle.ff.dtype, byteswap=img_handle.byteswap
+            calibration_dir, config, dtype=img_handle.ff.dtype, byteswap=img_handle.byteswap
         )
 
         # The mask which was found, it is copied to the night directory for the night report
-        mask_path = findMaskPath(img_handle.dir_path, config)
+        mask_path = findMaskPath(calibration_dir, config)
 
         # The given dark and flat have to be applied
         if config.use_dark and (dark is None):
@@ -745,6 +847,12 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
         proc_log.error(traceback.format_exc())
         proc_log.error("Error processing {}: {}".format(file_name, str(e)))
         return False
+
+    finally:
+
+        # Delete the local copy (a worker which is killed leaves it behind, the monitor deletes it then)
+        if processing_path != file_path:
+            shutil.rmtree(os.path.dirname(processing_path), ignore_errors=True)
 
 
 def processFileWorker(*args, **kwargs):
@@ -1180,6 +1288,9 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
         # Pauses the processing while the output disk is full
         space_guard = FreeSpaceGuard(output_dir, reporter)
 
+        # Delete the local copies of input files left behind by workers which were killed
+        removeStagedFiles(reporter.config.monitor_staging_dir)
+
         mask_path = findInputMask(input_dir, reporter.config, mask_path)
         if mask_path is not None:
             log.info("Using mask: {}".format(mask_path))
@@ -1211,6 +1322,10 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
                 stopStuckWorker(proc, uid, worker_timeout)
                 if not proc.is_alive():
                     proc.join()
+
+                    # Delete the local copy of a worker which was killed
+                    removeStagedFiles(reporter.config.monitor_staging_dir, pid=proc.pid)
+
                     if proc.exitcode == 0:
                         log.info("Successfully processed: {}".format(uid))
                         processed_files.add(uid)
@@ -1402,6 +1517,10 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
                 stopWorker(proc)
 
         if reporter is not None:
+
+            # The stopped workers don't delete their local copies
+            removeStagedFiles(reporter.config.monitor_staging_dir)
+
             reporter.stop(timeout=SHUTDOWN_TIMEOUT)
 
         log.info("All workers stopped.")
@@ -1633,6 +1752,10 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None,
             if cam['mask_path'] is not None:
                 log.info("Camera {}: using mask: {}".format(cam['id'], cam['mask_path']))
 
+        # Delete the local copies of input files left behind by workers which were killed
+        for cam in cameras:
+            removeStagedFiles(reporters[cam['id']].config.monitor_staging_dir)
+
         # Pause the processing of a camera while its output disk is full
         space_guards = {cam['id']: FreeSpaceGuard(cam['output_dir'], reporters[cam['id']],
                                                   log_prefix="[{}] ".format(cam['id'])) for cam in cameras}
@@ -1693,7 +1816,10 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None,
                 stopStuckWorker(proc, uid, worker_timeout)
                 if not proc.is_alive():
                     proc.join()
-                    
+
+                    # Delete the local copy of a worker which was killed
+                    removeStagedFiles(reporters[cam_id].config.monitor_staging_dir, pid=proc.pid)
+
                     # A worker has finished, so we free up a slot for this camera
                     active_count_per_cam[cam_id] -= 1
                     
@@ -1962,6 +2088,10 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None,
                 stopWorker(proc)
 
         for reporter in reporters.values():
+
+            # The stopped workers don't delete their local copies
+            removeStagedFiles(reporter.config.monitor_staging_dir)
+
             reporter.stop(timeout=SHUTDOWN_TIMEOUT)
 
         log.info("All workers stopped.")

@@ -7,6 +7,7 @@ uses to tell successful, skipped and failed files apart, the setup of processFil
 saving the star extraction chunks as image pairs, and assigning meteors to them.
 """
 
+import collections
 import configparser
 import datetime
 import multiprocessing
@@ -481,6 +482,109 @@ def test_walkInput_skips_monitor_output(tmp_path):
     # A separate output directory: nothing in the input is skipped
     all_dirs = ['.', '2025', 'Nights', config.archived_dir, 'logs', 'CapturedFiles', 'cam', 'cam/Nights']
     assert _walked(input_dir, str(tmp_path/'output')) == sorted(all_dirs)
+
+
+def test_input_file_is_staged_locally(tmp_path, monkeypatch):
+
+    input_dir = tmp_path/'nfs'
+    input_dir.mkdir()
+    staging_dir = str(tmp_path/'staging')
+
+    # Video files are timed by their names, which the copy keeps
+    for name in ['dump_6AC5999C_02F.vid', 'CAWE01_20261008_010203_123456_video.mkv', '20261008_010203.mp4']:
+        file_path = str(input_dir/name)
+        with open(file_path, 'wb') as f:
+            f.write(b'0'*1000)
+
+        # Disabled: the file is processed where it is
+        assert mon.stageInputFile(file_path, '') == file_path
+
+        # Enabled: a copy with the same name, in a directory of the worker
+        staged = mon.stageInputFile(file_path, staging_dir)
+        assert staged == os.path.join(staging_dir, mon.STAGED_DIR_NAME.format(os.getpid()), name)
+        assert open(staged, 'rb').read() == open(file_path, 'rb').read()
+
+    # FF files and directories are processed where they are
+    ff_path = str(input_dir/'FF_XX0001_20251225_031500_123_0000000.fits')
+    open(ff_path, 'w').close()
+    assert mon.stageInputFile(ff_path, staging_dir) == ff_path
+    assert mon.stageInputFile(str(input_dir), staging_dir) == str(input_dir)
+
+    # A copy which fails (e.g. the disk filled up meanwhile) is processed where it is, nothing is left behind
+    def _fail(src, dst):
+        open(dst, 'w').close()
+        raise OSError(28, "No space left on device")
+
+    shutil.rmtree(staging_dir)
+    monkeypatch.setattr(mon.shutil, 'copyfile', _fail)
+    assert mon.stageInputFile(file_path, staging_dir) == file_path
+    assert os.listdir(staging_dir) == []
+
+
+def test_input_file_is_not_staged_without_space(tmp_path, monkeypatch):
+
+    file_path = str(tmp_path/'dump_6AC5999C_02F.vid')
+    with open(file_path, 'wb') as f:
+        f.write(b'0'*1000)
+
+    monkeypatch.setattr(mon.shutil, 'disk_usage', lambda path: collections.namedtuple('usage', 'free')(10))
+    assert mon.stageInputFile(file_path, str(tmp_path/'staging')) == file_path
+
+
+def test_staged_copies_are_removed(tmp_path):
+
+    staging_dir = tmp_path
+    dead_pid = 2**22 + 12345
+    names = [mon.STAGED_DIR_NAME.format(os.getpid()), mon.STAGED_DIR_NAME.format(dead_pid),
+             mon.STAGED_DIR_NAME.format(1)]
+    for name in names:
+        (staging_dir/name).mkdir()
+        (staging_dir/name/'a.vid').write_text('0')
+    (staging_dir/'other.txt').write_text('0')
+
+    # Without a PID, the copies of workers which are not running are removed; the copies of running processes
+    #   of other users (PID 1, which can't be signalled) and other files are kept
+    mon.removeStagedFiles(str(staging_dir))
+    assert sorted(os.listdir(str(staging_dir))) == sorted([names[0], names[2], 'other.txt'])
+
+    # The copies of a given worker
+    mon.removeStagedFiles(str(staging_dir), pid=os.getpid())
+    assert sorted(os.listdir(str(staging_dir))) == sorted([names[2], 'other.txt'])
+
+    # Disabled staging
+    mon.removeStagedFiles('')
+
+
+def test_processFile_reads_the_staged_copy_and_deletes_it(config_path, tmp_path, monkeypatch):
+
+    config = cr.parse(config_path)
+    config.monitor_staging_dir = str(tmp_path/'staging')
+    monkeypatch.setattr(cr, 'parse', lambda path: config)
+
+    input_dir = tmp_path/'nfs'
+    input_dir.mkdir()
+    file_path = str(input_dir/'dump_6AC5999C_02F.vid')
+    with open(file_path, 'wb') as f:
+        f.write(b'0'*1000)
+
+    # Record which file is opened, and the staging directory content at that time
+    opened = []
+    def _open(path, *args, **kwargs):
+        opened.append((path, os.listdir(config.monitor_staging_dir)))
+        raise IOError("stop")
+
+    monkeypatch.setattr(mon, 'detectInputType', _open)
+
+    assert mon.processFile(file_path, config_path, None, str(tmp_path/'out'), 128) is False
+
+    path, staged = opened[0]
+    assert path == os.path.join(config.monitor_staging_dir, mon.STAGED_DIR_NAME.format(os.getpid()),
+                                'dump_6AC5999C_02F.vid')
+    assert staged == [mon.STAGED_DIR_NAME.format(os.getpid())]
+
+    # The copy is deleted, the input file is kept
+    assert os.listdir(config.monitor_staging_dir) == []
+    assert os.path.isfile(file_path)
 
 
 def test_input_extension():

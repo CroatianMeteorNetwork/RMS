@@ -245,6 +245,7 @@ monitor_shower_association: false
 monitor_fov_kml: false
 monitor_flux: false
 monitor_observation_summary: false
+monitor_staging_dir:
 ```
 
 | Option | What it does |
@@ -260,6 +261,7 @@ monitor_observation_summary: false
 | `monitor_update_platepar` | Carry the best platepar of each night forward to the following data, see [Platepar](#platepar). |
 | `monitor_save_ecsv` | Save every calibrated detection as an ECSV file; the night report collects them into the `ECSV` directory of the night. |
 | `monitor_shower_association`, `monitor_fov_kml`, `monitor_flux`, `monitor_observation_summary` | Additional night products: single station shower association, FOV KML files (25, 70 and 100 km), flux, and the observation summary. |
+| `monitor_staging_dir` | Local directory to which every input file is copied before it is processed. Only for input files on a relatively slow network share, see [Input files on a slow network](#input-files-on-a-slow-network). Empty (the default): the files are processed where they are. |
 
 The usual RMS options for the night products also apply, e.g. `timelapse_generate_captured`, `thumb_stack`,
 `upload_mode`, `capt_dirs_to_keep`, `arch_dirs_to_keep`, `bz2_files_to_keep`, `logdays_to_keep` and
@@ -387,6 +389,27 @@ after sunrise, and the night is reported when it's done. Two settings help when 
   are finished, and the night is reported with what was processed. Skipped files get a `done.flag` with
   `"skipped": true` in their results directory; delete that directory to process the file later. Note that
   a downtime longer than the cutoff skips the whole backlog of the nights before it.
+
+### Input files on a slow network
+
+The processing reads every input file twice, once for the star extraction and once for the meteor detection.
+If the files are on a network share, the network can become the limit instead of the CPU: a 10-minute 512x512
+16-bit `.vid` file is about 10 GB, so on a 1 Gb Ethernet link (about 90 MB/s) reading it twice takes almost
+4 minutes, and more workers don't make the processing faster. Signs of this are a network link near its
+maximum while the CPU is mostly idle, and workers which take much longer each when more of them run.
+
+In that case, set `monitor_staging_dir` to a directory on a local disk. Every worker then copies its file
+there, processes the local copy and deletes it, so each file is read over the network only once. Keep in mind:
+
+- Only turn it on when the input files are on a relatively slow network. For files on a local disk it only
+  adds a copy of every file.
+- The directory needs free space for one input file per worker (`--nproc`) plus 1 GB; if there isn't enough,
+  the file is processed where it is and a warning is logged. Use a disk other than the output disk if possible.
+- Results, file names and `done.flag` are the same as without it; the copy is only read. The check whether a
+  file is still being written and the mask lookup use the original file.
+- FF files and FITS directories are always processed where they are.
+- The copies of workers which are stopped or killed are deleted when the monitor notices that the worker ended,
+  and at the next start of the monitor.
 
 
 ## Disk space and cleanup
