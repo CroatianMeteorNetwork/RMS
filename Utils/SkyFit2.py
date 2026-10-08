@@ -19326,6 +19326,10 @@ class PlateTool(QtWidgets.QMainWindow):
         if [key for key, val in self.pick_list.items() if (val['x_centroid'] is not None)] == []:
             return False
 
+        # Compute the intensity sum done on the current frame (it is otherwise only computed when leaving
+        #   the frame, and the ECSV is saved before the FTPdetectinfo)
+        self.computeIntensitySum()
+
         isodate_format_file = "%Y-%m-%dT%H_%M_%S"
         isodate_format_entry = "%Y-%m-%dT%H:%M:%S.%f"
 
