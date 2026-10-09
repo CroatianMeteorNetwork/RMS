@@ -64,9 +64,13 @@ class _SynthHandle(object):
 
         rng = np.random.default_rng(seed + 1000)
         self.stars = np.zeros((SIZE, SIZE))
+
+        # Positions and fluxes of the bright stars (x, y, flux)
+        self.star_list = []
         for _ in range(n_stars):
-            renderObject(self.stars, rng.uniform(10, SIZE - 10), rng.uniform(10, SIZE - 10),
-                         rng.uniform(5, 50)*NOISE)
+            x, y, peak = rng.uniform(10, SIZE - 10), rng.uniform(10, SIZE - 10), rng.uniform(5, 50)*NOISE
+            renderObject(self.stars, x, y, peak)
+            self.star_list.append((x, y, peak*2*np.pi*PSF_SIGMA**2))
         for _ in range(n_faint_stars):
             renderObject(self.stars, rng.uniform(5, SIZE - 5), rng.uniform(5, SIZE - 5),
                          rng.uniform(0.5, 2)*NOISE)
@@ -85,7 +89,21 @@ class _SynthHandle(object):
                 x, y = obj['pos'](f)
                 x2, y2 = obj['pos'](f + 0.5)
                 x1, y1 = obj['pos'](f - 0.5)
-                renderObject(img, x, y, obj['snr']*NOISE, vx=x2 - x1, vy=y2 - y1)
+
+                # The brightness can change with time (e.g. flashes)
+                snr = obj['snr'](f) if callable(obj['snr']) else obj['snr']
+                renderObject(img, x, y, snr*NOISE, vx=x2 - x1, vy=y2 - y1)
+
+                # Charge spilled along the row and the column of a very bright object: the given fraction of
+                #   its flux spread over +-10 px
+                if obj.get('spill'):
+                    xi, yi = int(round(x)), int(round(y))
+                    flux = snr*NOISE*2*np.pi*PSF_SIGMA**2*obj['spill']
+                    for d in list(range(-10, -3)) + list(range(4, 11)):
+                        if 0 <= xi + d < SIZE:
+                            img[yi, xi + d] += flux/28
+                        if 0 <= yi + d < SIZE:
+                            img[yi + d, xi] += flux/28
 
                 # Trails of a bright source along its whole column, and along its row on one side
                 if obj.get('trail'):
@@ -298,7 +316,8 @@ def runDetector(handle, config):
 
 def test_detects_faint_object_below_single_frame_limit(config):
     """ An object with a peak SNR of 1.5 per frame (far below the normal detection) moving at 0.3 px/frame is
-        found and measured to about half a pixel, with several frames per measurement.
+        found and measured to about half a pixel. Its positions are measured on several frames together, but
+        there is a row for every frame (with the intensity of that frame).
     """
 
     obj = linearObject(1.5, 25, 30, 0.3, 0.12, 40, 470)
@@ -310,9 +329,9 @@ def test_detects_faint_object_below_single_frame_limit(config):
     err = truthError(cent, obj)
     assert np.sqrt(np.mean(err**2)) < 0.6
 
-    # Most of the track is measured, with several frames per measurement
+    # Most of the track is measured, every frame
     assert cent[-1, 0] - cent[0, 0] > 0.7*(obj['f1'] - obj['f0'])
-    assert np.median(np.diff(cent[:, 0])) >= 4
+    assert np.all(np.diff(cent[:, 0]) >= 1) and (np.median(np.diff(cent[:, 0])) == 1)
 
 
 def test_bright_object_measured_every_frame(config):
@@ -644,4 +663,174 @@ def test_trails_of_bright_object_removed(config, trail_level):
         assert np.median(truthError(detections[0][2], obj)) < 0.3
     else:
         assert len(detections) > 1
+
+
+### Light curves, bright objects, photometric scale ###
+
+def test_flashes_kept_in_light_curve(config):
+    """ An object below the single-frame limit which flashes for one frame every 24 frames (like a rotating
+        object with flat facets): it is found, and the light curve has the flashes at their full brightness
+        (the positions of faint objects are measured on several frames, but the intensity of every frame is
+        kept).
+    """
+
+    flash_snr, base_snr = 40.0, 1.5
+    flashes = set(range(110, 460, 24))
+    snr = lambda f: flash_snr if int(f) in flashes else base_snr
+    obj = linearObject(1.0, 25, 30, 0.25, 0.1, 100, 460)
+    obj['snr'] = snr
+    _, detections = runDetector(_SynthHandle([obj]), config)
+
+    assert len(detections) == 1
+    cent = detections[0][2]
+    flux = lambda s: s*NOISE*2*np.pi*PSF_SIGMA**2
+    at_flash = np.isin(np.round(cent[:, 0]).astype(int), list(flashes))
+    assert at_flash.sum() >= 0.8*len(flashes)
+    assert abs(np.median(cent[at_flash, 3])/flux(flash_snr) - 1) < 0.15
+    assert abs(np.median(cent[~at_flash, 3])/flux(base_snr) - 1) < 0.3
+
+
+def test_spilled_charge_flagged_and_counted(config):
+    """ A very bright object whose charge spills along its row and column (without saturated pixels): the
+        measurements are flagged as saturated and the intensity includes the spilled charge.
+    """
+
+    obj = linearObject(400.0, 30, 64, 0.5, 0.05, 100, 200)
+    obj['spill'] = 1.0
+    config.mf_smooth_frames = 0
+
+    # No pixel reaches the saturation level
+    config.mf_saturation_level = 10**6
+    _, detections = runDetector(_SynthHandle([obj], n_stars=4), config)
+
+    assert len(detections) == 1
+    cent = detections[0][2]
+    total = 400.0*NOISE*2*np.pi*PSF_SIGMA**2*2.0
+    assert np.median(cent[:, 6]) >= 1
+    assert abs(np.median(cent[:, 3])/total - 1) < 0.1
+
+    # A bright object without spill is not flagged
+    obj['spill'] = 0.0
+    _, detections = runDetector(_SynthHandle([obj], n_stars=4), config)
+    assert np.all(detections[0][2][:, 6] == 0)
+
+
+def test_intensities_on_the_scale_of_the_stars(config):
+    """ The intensities are scaled to the intensities of the stars of the calibration: here the stars are
+        listed 10% brighter than their flux, so the intensity of the object is 10% above its flux.
+    """
+
+    obj = linearObject(8.0, 20, 40, 0.4, 0.1, 100, 300)
+    handle = _SynthHandle([obj], n_stars=30)
+    stars = [(y, x, 1.1*flux, 0, 2.0, SKY, 50.0, 0) for x, y, flux in handle.star_list]
+    star_list = [['FF_XX0001_20261008_030000_000_0000000.fits', stars],
+                 ['FF_XX0001_20261008_030010_000_0000256.fits', stars]]
+    config.mf_smooth_frames = 0
+
+    detections, detector = mfd.detectMatchedFilter(handle, config, star_list=star_list, return_detector=True)
+    plain = mfd.detectMatchedFilter(_SynthHandle([obj], n_stars=30), config)
+
+    assert len(detections) == len(plain) == 1
+    ratio = np.median(detections[0][2][:, 3])/np.median(plain[0][2][:, 3])
+    assert abs(detector.aperture_correction/1.1 - 1) < 0.05
+    assert abs(ratio/detector.aperture_correction - 1) < 0.01
+    assert detector.summary()['aperture_correction'] == detector.aperture_correction
+
+
+### Robustness ###
+
+def test_strong_trail_is_not_restored(config):
+    """ The trails of a very bright object which are themselves above trail_level are removed as well (only
+        the object itself is kept).
+    """
+
+    obj = linearObject(4000.0, 100, 50, -0.6, 0.1, 100, 260)
+    obj['trail'] = 30.0
+    _, detections = runDetector(_SynthHandle([obj], n_stars=4), config)
+
+    assert len(detections) == 1
+
+
+def test_no_edge_margin(config):
+    """ With no edge margin, the image is not masked. """
+
+    config.mf_edge_margin = 0
+    config.detection_border = 0
+    obj = linearObject(2.5, 25, 30, 0.3, 0.12, 40, 470)
+    _, detections = runDetector(_SynthHandle([obj]), config)
+
+    assert len(detections) == 1
+
+
+def test_too_few_frames(config):
+
+    _, detections = runDetector(_SynthHandle([], total_frames=4), config)
+    assert detections == []
+
+
+def test_calibration_of_the_caller_not_binned(config):
+    """ With detection binning, the caller's mask is not binned again (the normal detection may have binned it
+        already in place).
+    """
+
+    from RMS.Routines.MaskImage import MaskStructure
+
+    config.detection_binning_factor = 2
+    mask = MaskStructure(np.full((SIZE, SIZE), 255, dtype=np.uint8))
+
+    class _Binned(_SynthHandle):
+        def loadFrame(self, avepixel=False):
+            img = super(_Binned, self).loadFrame()
+            return img.reshape(SIZE//2, 2, SIZE//2, 2).mean(axis=(1, 3)).astype(np.float32)
+
+    handle = _Binned([linearObject(4.0, 20, 30, 0.4, 0.1, 50, 300)])
+    handle.nrows = handle.ncols = SIZE//2
+    mfd.detectMatchedFilter(handle, config, mask=mask)
+    assert mask.img.shape == (SIZE, SIZE)
+
+
+def test_slow_object_kept_after_background_without_it(config):
+    """ A slow object is measured again on a background estimated without it; the star template and the masks
+        made with it in the background must be updated too, or its own path is left out of the verification.
+    """
+
+    for snr in (6.0, 10.0):
+        obj = linearObject(snr, 30, 60, 0.012, 0.006, 0, 2048)
+        _, detections = runDetector(_SynthHandle([obj], n_stars=4, total_frames=2048), config)
+        assert len(detections) == 1, snr
+
+
+def test_smoothing_keeps_faint_measurements():
+    """ Measurements of a track whose brightness changes: the faint ones scatter more, in proportion to their
+        errors, and are not outliers.
+    """
+
+    rng = np.random.default_rng(3)
+    t = np.arange(400, dtype=float)
+    snr = np.where(t < 340, 20.0, 3.0)
+    err = 0.5/snr
+    cent = np.column_stack([t, 10 + 0.1*t + rng.normal(0, err), 20 + 0.05*t + rng.normal(0, err),
+                            np.ones_like(t), np.ones_like(t), snr])
+    _, keep = smoothPositions(cent, 64)
+
+    assert keep[t >= 340].mean() > 0.95
+
+
+def test_merge_tracks_through_a_bridge(config):
+    """ Pieces of one track: A and C are too far apart to be merged directly, B fills the gap; and a sparse
+        track of 32-frame runs which overlaps a track of 8-frame runs in its gap.
+    """
+
+    det = MatchedFilterDetector(_SynthHandle([]), config)
+    row = lambda f, run: [f, 20 + 0.1*f, 30 + 0.05*f, 6.0, 0.1, 0.05, run]
+
+    a = np.array([row(f, 8) for f in np.arange(3.5, 400, 8)])
+    b = np.array([row(f, 8) for f in np.arange(403.5, 460, 8)])
+    c = np.array([row(f, 8) for f in np.arange(600 + 3.5, 1000, 8)])
+    b2 = np.array([row(f, 8) for f in np.arange(459.5, 600, 8)])
+    assert len(det.mergeTracks([a, c, b, b2])) == 1
+
+    sparse = np.array([row(f, 32) for f in (15.5, 47.5, 175.5, 207.5)])
+    dense = np.array([row(f, 8) for f in np.arange(59.5, 164, 8)])
+    assert len(det.mergeTracks([sparse, dense])) == 1
 

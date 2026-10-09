@@ -77,6 +77,31 @@ INPUT_EXTENSIONS = ('.vid', '.mkv', '.mp4', '.avi', '.mov')
 # Tracks slower than this (px per frame) are measured again on a background estimated without them
 SLOW_SPEED = 0.1
 
+# Very bright objects spill their charge along their row and column before the pixels reach the saturation
+#   level: in a frame where the sum within SPILL_RADIUS (px) of the object is more than SPILL_RATIO times the sum
+#   within the normal aperture, the measurement counts as saturated and the wider sum is its intensity. Only
+#   checked when the normal sum is above SPILL_MIN_SNR times its noise
+SPILL_RADIUS = 12.0
+SPILL_RATIO = 1.3
+SPILL_MIN_SNR = 100.0
+
+# Search of very slow objects (see slowSearch): the medians of the blocks are compared with the medians of the
+#   blocks SLOW_REF_BLOCKS (and one more) before and after, shifted by the motion of the stars; candidates above
+#   SLOW_THRESHOLD (sigma) in at least SLOW_MIN_BLOCKS consecutive blocks are linked, up to SLOW_MAX_SPEED (px per
+#   frame, faster objects are found by the search), and moving at least SLOW_MIN_RELATIVE_SPEED (px per frame)
+#   relative to the stars
+SLOW_REF_BLOCKS = 3
+SLOW_THRESHOLD = 8.0
+SLOW_MIN_BLOCKS = 3
+SLOW_MAX_SPEED = 0.06
+SLOW_MIN_RELATIVE_SPEED = 0.004
+
+# Smallest fraction of the samples of a pixel left after masking the slow objects (see maskObjects)
+MIN_MASKED_FRACTION = 0.3
+
+# Smallest number of stars for the aperture correction of the intensities (see apertureCorrection)
+MIN_APERTURE_STARS = 20
+
 # Pixels of the star template: stars above this level in the median of the frames, in the noise of one frame,
 #   and the smallest number of such pixels for the correction of the transparency
 STAR_TEMPLATE_LEVEL = 0.3
@@ -94,7 +119,7 @@ Hit = collections.namedtuple('Hit', ['frame', 'x', 'y', 'vx', 'vy', 'z', 'run'])
 
 
 class MatchedFilterOptions(object):
-    def __init__(self, config, det_bin=1):
+    def __init__(self, config, det_bin=1, fps=None, size=None):
         """ Options of the matched-filter detection, from the config.
 
         Arguments:
@@ -102,6 +127,9 @@ class MatchedFilterOptions(object):
 
         Keyword arguments:
             det_bin: [int] Binning of the frames (detection binning), the pixel limits are in binned pixels. 1 by
+                default.
+            fps: [float] Frame rate of the input (e.g. measured from the frame times). config.fps by default.
+            size: [tuple] (height, width) of the unbinned frames of the input. The size in the config by
                 default.
         """
 
@@ -134,11 +162,23 @@ class MatchedFilterOptions(object):
         self.threads = config.mf_threads
 
         # Speed limits in px per frame of the (binned) frames, from the angular velocity limits
-        scale = det_bin*(config.fov_h/float(config.height) + config.fov_w/float(config.width))/2.0
-        self.speed_min = config.mf_ang_vel_min/scale/config.fps
-        self.speed_max = config.mf_ang_vel_max/scale/config.fps
+        fps = fps if fps else config.fps
+        height, width = size if size else (config.height, config.width)
+        scale = det_bin*(config.fov_h/float(height) + config.fov_w/float(width))/2.0
+        self.speed_min = config.mf_ang_vel_min/scale/fps
+        self.speed_max = config.mf_ang_vel_max/scale/fps
 
-        self.use_gpu = (self.gpu == 'on') or ((self.gpu == 'auto') and CUDA_AVAILABLE)
+        # The runs of frames don't straddle the blocks, so a block holds a whole number of the longest runs and
+        #   of the measurements
+        unit = int(np.lcm.reduce([int(v) for v in self.run_frames + [self.slow_run_frames, 1]]))
+        unit = int(np.lcm(unit, 2**int(math.floor(math.log2(max(self.max_measure_frames, 1))))))
+        if self.block_frames % unit:
+            fixed = max(unit, int(round(self.block_frames/float(unit)))*unit)
+            log.warning('Matched filter: mf_block_frames {:d} is not a multiple of {:d}, {:d} used'.format(
+                self.block_frames, unit, fixed))
+            self.block_frames = fixed
+
+        self.use_gpu = (self.gpu in ('on', 'auto')) and CUDA_AVAILABLE
         if (self.gpu == 'on') and not CUDA_AVAILABLE:
             log.warning('Matched filter: the GPU was requested, but CUDA is not available, using the CPU')
 
@@ -169,41 +209,62 @@ def velocityGrid(speed_max, run_frames, bin_factor):
     return vel[np.argsort(np.hypot(vel[:, 0], vel[:, 1]), kind='stable')]
 
 
-def estimatePSFSigma(frames, noise, n_stars=40):
-    """ Estimate the PSF sigma from the brightest isolated stars of the mean of a few frames.
+def estimatePSFSigma(image, noise, n_stars=40, min_snr=20.0):
+    """ Estimate the PSF sigma from bright isolated stars: a circular Gaussian with a constant is fitted to every
+        star, and the median of their sigmas is taken.
 
     Arguments:
-        frames: [ndarray] Background subtracted frames, shape (n, height, width).
-        noise: [ndarray] Noise image of one frame.
+        image: [ndarray] Image of the stars with the sky subtracted (e.g. the mean of a block of frames minus
+            the sky level).
+        noise: [ndarray] Noise of the image (same units), per pixel or a scalar.
 
     Keyword arguments:
         n_stars: [int] Number of stars to use. 40 by default.
+        min_snr: [float] Smallest peak signal-to-noise ratio of a star. 20 by default.
 
     Return:
-        [float] PSF sigma (px), or None if no star was found.
+        [float] PSF sigma (px), or None if fewer than 5 stars were measured.
     """
 
-    img = np.mean(frames, axis=0)/(noise/math.sqrt(len(frames)))
-    smooth = cv2.GaussianBlur(img.astype(np.float32), (0, 0), 1.0)
-    local_max = (smooth == cv2.dilate(smooth, np.ones((9, 9), np.uint8))) & (smooth > 20)
-    local_max[:10] = local_max[-10:] = False
-    local_max[:, :10] = local_max[:, -10:] = False
+    from scipy.optimize import least_squares
+
+    snr = image/noise
+    smooth = cv2.GaussianBlur(snr.astype(np.float32), (0, 0), 1.0)
+    r = 6
+    local_max = (smooth == cv2.dilate(smooth, np.ones((2*r + 1, 2*r + 1), np.uint8))) & (smooth > min_snr)
+    local_max[:2*r] = local_max[-2*r:] = False
+    local_max[:, :2*r] = local_max[:, -2*r:] = False
     ys, xs = np.nonzero(local_max)
+
+    # The brightest stars may be saturated, so the stars are taken in order of brightness after the first few
     order = np.argsort(smooth[ys, xs])[::-1]
+    order = order[min(5, len(order)//4):]
+
+    yy, xx = np.mgrid[-r:r + 1, -r:r + 1]
+
+    def residual(p, patch):
+        amp, cx, cy, sigma, const = p
+        return (amp*np.exp(-0.5*((xx - cx)**2 + (yy - cy)**2)/sigma**2) + const - patch).ravel()
 
     sigmas = []
-    r = 4
-    yy, xx = np.mgrid[-r:r + 1, -r:r + 1]
-    for i in order[:3*n_stars]:
-        patch = img[ys[i] - r:ys[i] + r + 1, xs[i] - r:xs[i] + r + 1]
-        w = np.clip(patch - np.median(img[ys[i] - 2*r:ys[i] + 2*r + 1, xs[i] - 2*r:xs[i] + 2*r + 1]), 0, None)
-        if w.sum() <= 0:
+    for i in order:
+        y, x = ys[i], xs[i]
+
+        # Isolated: no other star brighter than a tenth of this one within 2r
+        near = smooth[y - 2*r:y + 2*r + 1, x - 2*r:x + 2*r + 1].copy()
+        near[r:3*r + 1, r:3*r + 1] = -np.inf
+        if near.max() > 0.1*smooth[y, x]:
             continue
-        cx = (w*xx).sum()/w.sum()
-        cy = (w*yy).sum()/w.sum()
-        var = (w*((xx - cx)**2 + (yy - cy)**2)).sum()/w.sum()/2.0
-        if var > 0:
-            sigmas.append(math.sqrt(var))
+
+        patch = image[y - r:y + r + 1, x - r:x + r + 1].astype(np.float64)
+        p0 = [patch.max(), 0.0, 0.0, 1.0, 0.0]
+        try:
+            fit = least_squares(residual, p0, args=(patch,), bounds=([0, -2, -2, 0.3, -np.inf],
+                                                                     [np.inf, 2, 2, 5.0, np.inf]))
+        except Exception:
+            continue
+        if fit.success:
+            sigmas.append(abs(fit.x[3]))
         if len(sigmas) >= n_stars:
             break
 
@@ -234,6 +295,12 @@ class BlockBackground(object):
         self.median = median
         self.noise = noise
         self.n_samples = n_samples
+
+        # Mean of all frames of the block (for the photometry of the stars, see apertureCorrection)
+        self.mean = None
+
+        # Median of the samples of this block alone (median is smoothed over the neighbouring blocks)
+        self.raw_median = None
         self.stars = None
         self.star_idx = None
         self.sky = None
@@ -267,13 +334,24 @@ class MatchedFilterDetector(object):
 
         # Detection binning of the frame handle, the results are scaled to the unbinned image
         self.det_bin = config.detection_binning_factor if img_handle.input_type != 'ff' else 1
-        self.opts = MatchedFilterOptions(config, det_bin=self.det_bin)
+        fps = img_handle.fps if getattr(img_handle, 'fps', None) else config.fps
+        self.opts = MatchedFilterOptions(config, det_bin=self.det_bin, fps=fps,
+                                         size=(self.height*self.det_bin, self.width*self.det_bin))
 
         # The search is done on frames binned 2x2
         self.search_bin = 2
 
+        # Saturation level of the (binned) frames: a summed bin of saturated pixels holds det_bin^2 times the
+        #   level; an averaged bin is flagged only when all its pixels are saturated
+        self.saturation_level = self.opts.saturation_level
+        if (self.det_bin > 1) and (config.detection_binning_method != 'avg'):
+            self.saturation_level *= self.det_bin**2
+
         self.backgrounds = {}
         self.static_masks = {}
+
+        # Factor of the intensities from the stars (see apertureCorrection), None if not applied
+        self.aperture_correction = None
         self.psf_sigma = self.opts.psf_sigma if self.opts.psf_sigma > 0 else None
 
         self.timing = collections.defaultdict(float)
@@ -294,7 +372,7 @@ class MatchedFilterDetector(object):
             self.img_handle.setFrame(first + i*step)
             frame = self.img_handle.loadFrame()
             if saturation:
-                saturated[i] = frame >= self.opts.saturation_level
+                saturated[i] = frame >= self.saturation_level
             if self.dark is not None:
                 frame = Image.applyDark(frame, self.dark)
             if self.flat_struct is not None:
@@ -340,22 +418,34 @@ class MatchedFilterDetector(object):
             median = np.mean([bg.median for bg in near], axis=0).astype(np.float32)
             noise = raw[k].noise
             bg = BlockBackground(median, noise, sum(bg.n_samples for bg in near))
-
-            # Local sky level and its noise (the noise at a star is mostly the noise of the star itself), and
-            #   the brightness of the stars relative to the noise of the sky in one frame
-            bg.sky = self.skyLevel(median)
-            bg.sky_noise = np.maximum(self.skyLevel(noise), 1.0)
-            stars = median - bg.sky
-            level = cv2.GaussianBlur(stars/bg.sky_noise, (0, 0), 1.0)
-            bg.star_level = level
-
-            # Template of the stars, for the changes of their brightness with the transparency of the sky
-            star_px = cv2.dilate((level > STAR_TEMPLATE_LEVEL).astype(np.uint8), np.ones((3, 3), np.uint8)) > 0
-            star_px &= stars > 0
-            bg.star_idx = np.flatnonzero(star_px)
-            bg.stars = np.where(star_px, stars, 0).astype(np.float32)
-
+            bg.raw_median = raw[k].median
+            self.starTemplate(bg)
             self.backgrounds[k] = bg
+
+
+    def starTemplate(self, bg):
+        """ Set the local sky level and its noise, the brightness of the stars relative to the noise of the sky,
+            and the template of the stars of a block background, from its median.
+        """
+
+        # Local sky level and its noise (the noise at a star is mostly the noise of the star itself), and the
+        #   brightness of the stars relative to the noise of the sky in one frame
+        bg.sky = self.skyLevel(bg.median)
+        bg.sky_noise = np.maximum(self.skyLevel(bg.noise), 1.0)
+        stars = bg.median - bg.sky
+        level = cv2.GaussianBlur(stars/bg.sky_noise, (0, 0), 1.0)
+        bg.star_level = level
+
+        # Template of the stars, for the changes of their brightness with the transparency of the sky
+        star_px = cv2.dilate((level > STAR_TEMPLATE_LEVEL).astype(np.uint8), np.ones((3, 3), np.uint8)) > 0
+        star_px &= stars > 0
+
+        # The bright stars are masked anyway and would dominate the fit of the scale; they may also be saturated
+        #   and then don't follow the transparency
+        bright = cv2.dilate((level > self.opts.star_threshold).astype(np.uint8), np.ones((3, 3), np.uint8)) > 0
+        star_px &= ~bright
+        bg.star_idx = np.flatnonzero(star_px)
+        bg.stars = np.where(star_px, stars, 0).astype(np.float32)
 
 
     @staticmethod
@@ -430,8 +520,9 @@ class MatchedFilterDetector(object):
             static |= self.mask.img == 0
 
         m = self.opts.edge_margin
-        static[:m] = static[-m:] = True
-        static[:, :m] = static[:, -m:] = True
+        if m > 0:
+            static[:m] = static[-m:] = True
+            static[:, :m] = static[:, -m:] = True
 
         return static
 
@@ -458,9 +549,26 @@ class MatchedFilterDetector(object):
         if not bright.any():
             return
 
-        # The source itself, with the wings of its PSF, is kept
-        labels, _ = ndimage.label(bright)
+        # The sources, brightest first. A component in the rows or columns of a brighter source is a part of its
+        #   trail (the trail of a very bright source can itself be above the level), not a source
+        labels, n = ndimage.label(bright)
+        peaks = ndimage.maximum(frame, labels, index=np.arange(1, n + 1))
         boxes = ndimage.find_objects(labels)
+        sources = []
+        for i in np.argsort(peaks)[::-1]:
+            sl = boxes[i]
+            in_trail = False
+            for s0 in sources:
+                rows = (sl[0].start < s0[0].stop + TRAIL_WIDTH) and (sl[0].stop > s0[0].start - TRAIL_WIDTH)
+                cols = (sl[1].start < s0[1].stop + TRAIL_WIDTH) and (sl[1].stop > s0[1].start - TRAIL_WIDTH)
+                if rows or cols:
+                    in_trail = True
+                    break
+            if not in_trail:
+                sources.append(sl)
+
+        # The source itself, with the wings of its PSF, is kept
+        boxes = sources
         kept = []
         for sl in boxes:
             ys = slice(max(sl[0].start - TRAIL_KEEP, 0), sl[0].stop + TRAIL_KEEP)
@@ -497,6 +605,9 @@ class MatchedFilterDetector(object):
         zb = np.empty((len(z), z.shape[1]//b, z.shape[2]//b), dtype=np.float32)
         for i in range(len(z)):
             self.removeTrails(z[i], static)
+
+            # The masked pixels don't take part in the stacks of their neighbours either
+            z[i][static] = 0
             binned = binFrames(np.clip(z[i:i + 1], -self.opts.clip, self.opts.clip), b)[0]
             zb[i] = cv2.GaussianBlur(binned.astype(np.float32), (0, 0), sigma_b)
 
@@ -513,7 +624,16 @@ class MatchedFilterDetector(object):
             for r0 in range(0, len(zb) - run_frames + 1, run_frames):
 
                 t1 = time()
-                stack_max, vel_idx = stacker.stackMax(zb[r0:r0 + run_frames])
+                try:
+                    stack_max, vel_idx = stacker.stackMax(zb[r0:r0 + run_frames])
+                except Exception:
+                    if not stacker.use_gpu:
+                        raise
+                    # E.g. out of GPU memory with several workers: continue on the CPU
+                    log.error('Matched filter: the GPU failed, continuing on the CPU:\n' + traceback.format_exc())
+                    stacker.use_gpu = False
+                    self.opts.use_gpu = False
+                    stack_max, vel_idx = stacker.stackMax(zb[r0:r0 + run_frames])
                 self.timing['stack'] += time() - t1
 
                 # Normalize by the distribution of the maximum over the velocities in the unmasked image
@@ -584,11 +704,17 @@ class MatchedFilterDetector(object):
 
             bg = self.backgrounds[k]
             if self.psf_sigma is None:
-                sigma = estimatePSFSigma(frames[:8] - bg.median, bg.noise)
-                self.psf_sigma = sigma if sigma is not None else 1.0
+                # The stars of the mean of the block, against the noise of the sky in the mean
+                sigma = estimatePSFSigma(frames.mean(axis=0) - bg.sky, bg.sky_noise/math.sqrt(len(frames)))
+                if sigma is None:
+                    sigma = 1.0
+                    log.warning('Matched filter: the PSF sigma could not be measured on the stars, 1.0 px '
+                                'assumed (set mf_psf_sigma)')
+                self.psf_sigma = sigma
                 log.info('Matched filter: PSF sigma {:.2f} px'.format(self.psf_sigma))
 
             t1 = time()
+            bg.mean = frames.mean(axis=0)
             static = self.staticMask(bg)
             self.static_masks[k] = static
             z = self.normalize(frames, k)
@@ -630,6 +756,176 @@ class MatchedFilterDetector(object):
                 kept.append(h)
 
         return kept
+
+
+    ### Search of very slow objects ###
+
+    def starDrift(self, step=SLOW_REF_BLOCKS):
+        """ Motion of the stars across the image (px per frame), e.g. the diurnal motion for a fixed camera,
+            from the shift between the medians of blocks step apart. Zero if there are too few blocks.
+        """
+
+        n = len(self.block_starts)
+        if n <= step:
+            return 0.0, 0.0
+
+        window = cv2.createHanningWindow((self.width, self.height), cv2.CV_32F)
+        shifts = []
+        for k in range(0, n - step, max(1, (n - step)//8)):
+            a, b = self.backgrounds[k], self.backgrounds[k + step]
+            img_a = np.clip(a.raw_median - a.sky, 0, None).astype(np.float32)
+            img_b = np.clip(b.raw_median - b.sky, 0, None).astype(np.float32)
+            (dx, dy), response = cv2.phaseCorrelate(img_a, img_b, window)
+            dt = self.block_starts[k + step] - self.block_starts[k]
+            if response > 0.05:
+                shifts.append((dx/dt, dy/dt))
+
+        if not shifts:
+            return 0.0, 0.0
+
+        return tuple(np.median(np.array(shifts), axis=0))
+
+
+    def drift(self):
+        """ The motion of the stars (px per frame), measured once. """
+
+        if getattr(self, '_drift', None) is None:
+            self._drift = self.starDrift()
+
+        return self._drift
+
+
+    def referenceBackground(self, k):
+        """ Background of the block k without the objects which are part of its median: the median of the medians
+            of the blocks SLOW_REF_BLOCKS (and one more) before and after it, shifted by the motion of the stars,
+            and the same of their noise. A slow object is elsewhere in those blocks, while the stars are aligned.
+
+        Return:
+            (median, noise): [tuple of ndarrays] or (None, None) if there are fewer than two such blocks.
+        """
+
+        n = len(self.block_starts)
+        refs = [j for j in (k - SLOW_REF_BLOCKS - 1, k - SLOW_REF_BLOCKS, k + SLOW_REF_BLOCKS,
+                            k + SLOW_REF_BLOCKS + 1) if (0 <= j < n) and (self.backgrounds[j].raw_median is not None)]
+        if len(refs) < 2:
+            return None, None
+
+        drift = np.array(self.drift())
+        mid = (self.block_starts[k] + self.block_ends[k] - 1)/2.0
+        medians, noises = [], []
+        for j in refs:
+            mid_j = (self.block_starts[j] + self.block_ends[j] - 1)/2.0
+            dx, dy = drift*(mid - mid_j)
+            M = np.float32([[1, 0, dx], [0, 1, dy]])
+            for src, out in ((self.backgrounds[j].raw_median, medians), (self.backgrounds[j].noise, noises)):
+                out.append(cv2.warpAffine(src, M, (self.width, self.height), flags=cv2.INTER_CUBIC,
+                                          borderMode=cv2.BORDER_REPLICATE))
+
+        return np.median(np.array(medians), axis=0), np.median(np.array(noises), axis=0)
+
+
+    def slowSearch(self):
+        """ Search of objects too slow and too bright for the search of runs of frames. Such an object stays on
+            the same pixels for more than half of a block, so it is part of the median of the block (the
+            background) and masked as a star. The stars move together (e.g. with the diurnal motion), so the
+            median of a block is compared with the medians of blocks a few blocks before and after it, shifted
+            by the motion of the stars: the stars cancel, and an object which moves relative to them stands out.
+            Its positions in consecutive blocks are linked into a track.
+
+        Return:
+            [list] Tracks as arrays of hits, rows [frame, x, y, z, vx, vy, run].
+        """
+
+        n = len(self.block_starts)
+        if (n < 2*SLOW_REF_BLOCKS) or (self.backgrounds[0].raw_median is None):
+            return []
+
+        sigma = self.psf_sigma
+        m = self.opts.edge_margin + int(math.ceil(3*sigma))
+        drift = np.array(self.drift())
+
+        # Candidates in every block: (frame, x, y, significance)
+        cands = []
+        for k in range(n):
+            bg = self.backgrounds[k]
+            mid = (self.block_starts[k] + self.block_ends[k] - 1)/2.0
+            ref, _ = self.referenceBackground(k)
+            if ref is None:
+                continue
+
+            # The difference against its noise (robust, over the whole image), smoothed with the PSF
+            diff = cv2.GaussianBlur((bg.raw_median - ref).astype(np.float32), (0, 0), sigma)
+            noise = 1.4826*np.median(np.abs(diff - np.median(diff))) + 1e-6
+            z = diff/noise
+
+            # A residual of a star is small compared with the star itself
+            star = cv2.GaussianBlur((ref - bg.sky).astype(np.float32), (0, 0), sigma)/noise
+
+            peaks = (z == cv2.dilate(z, np.ones((5, 5), np.uint8))) & (z > SLOW_THRESHOLD) & (z > 0.5*star)
+            if self.mask is not None:
+                peaks &= self.mask.img > 0
+            peaks[:m] = peaks[-m:] = False
+            peaks[:, :m] = peaks[:, -m:] = False
+            for y, x in zip(*np.nonzero(peaks)):
+                cands.append((mid, float(x), float(y), float(z[y, x]), k))
+
+        if not cands:
+            return []
+
+        # Link the candidates of consecutive blocks: an object moves less than the slow limit per frame, and
+        #   relative to the stars (a star residual moves with the stars)
+        cands = np.array(cands)
+        block_len = float(self.opts.block_frames)
+        reach = SLOW_MAX_SPEED*block_len + 2*sigma
+        used = np.zeros(len(cands), dtype=bool)
+        tracks = []
+        for i in np.argsort(-cands[:, 3]):
+            if used[i]:
+                continue
+            chain = [i]
+            used[i] = True
+            for direction in (1, -1):
+                while True:
+                    cur = chain[-1] if direction == 1 else chain[0]
+                    k_next = cands[cur, 4] + direction
+                    if len(chain) >= 2:
+                        pts = cands[sorted(chain, key=lambda j: cands[j, 0])]
+                        vx = np.polyfit(pts[:, 0], pts[:, 1], 1)[0]
+                        vy = np.polyfit(pts[:, 0], pts[:, 2], 1)[0]
+                        tol = 2*sigma + 1
+                    else:
+                        vx = vy = 0.0
+                        tol = reach
+                    best, best_d = None, None
+                    for j in np.nonzero((cands[:, 4] == k_next) & ~used)[0]:
+                        dt = cands[j, 0] - cands[cur, 0]
+                        d = math.hypot(cands[j, 1] - cands[cur, 1] - vx*dt, cands[j, 2] - cands[cur, 2] - vy*dt)
+                        if (d <= tol) and ((best_d is None) or (d < best_d)):
+                            best, best_d = j, d
+                    if best is None:
+                        break
+                    used[best] = True
+                    if direction == 1:
+                        chain.append(best)
+                    else:
+                        chain.insert(0, best)
+
+            if len(chain) < SLOW_MIN_BLOCKS:
+                continue
+
+            pts = cands[sorted(chain, key=lambda j: cands[j, 0])]
+            vx = np.polyfit(pts[:, 0], pts[:, 1], 1)[0]
+            vy = np.polyfit(pts[:, 0], pts[:, 2], 1)[0]
+
+            # Moving with the stars: a residual of a star
+            if math.hypot(vx - drift[0], vy - drift[1]) < SLOW_MIN_RELATIVE_SPEED:
+                continue
+
+            run = self.opts.block_frames//2
+            tracks.append(np.column_stack([pts[:, 0], pts[:, 1], pts[:, 2], pts[:, 3], np.full(len(pts), vx),
+                                           np.full(len(pts), vy), np.full(len(pts), run)]))
+
+        return tracks
 
 
     ### Linking ###
@@ -727,6 +1023,20 @@ class MatchedFilterDetector(object):
         """
 
         tol = 2.0*self.search_bin
+
+        # A merged track can now overlap or continue a track kept before, so the merging is repeated
+        while True:
+            merged = self._mergeOnce(tracks, tol)
+            if len(merged) == len(tracks):
+                break
+            tracks = merged
+
+        return sorted(merged, key=lambda t: t[0, 0])
+
+
+    def _mergeOnce(self, tracks, tol):
+        """ One pass of mergeTracks. """
+
         tracks = sorted(tracks, key=lambda t: -len(t))
 
         merged = []
@@ -738,7 +1048,8 @@ class MatchedFilterDetector(object):
                 # Overlap in time: compare the positions at the frames of the shorter track
                 lo, hi = max(tr[0, 0], m[0, 0]), min(tr[-1, 0], m[-1, 0])
                 if hi >= lo:
-                    fr = tr[(tr[:, 0] >= lo) & (tr[:, 0] <= hi), 0]
+                    fr = np.concatenate([tr[:, 0], m[:, 0]])
+                    fr = fr[(fr >= lo) & (fr <= hi)]
                     if len(fr):
                         dx = np.interp(fr, m[:, 0], m[:, 1]) - np.interp(fr, tr[:, 0], tr[:, 1])
                         dy = np.interp(fr, m[:, 0], m[:, 2]) - np.interp(fr, tr[:, 0], tr[:, 2])
@@ -766,7 +1077,7 @@ class MatchedFilterDetector(object):
             if not joined:
                 merged.append(tr)
 
-        return sorted(merged, key=lambda t: t[0, 0])
+        return merged
 
 
     @staticmethod
@@ -808,11 +1119,32 @@ class MatchedFilterDetector(object):
         """
 
         t0 = time()
+        if self.total_frames < max(self.opts.run_frames):
+            log.warning('Matched filter: only {:d} frames, nothing to search'.format(self.total_frames))
+            self.timing['total'] = time() - t0
+            return []
+
         hits = self.search()
         linked = self.linkHits(hits)
+
+        # Bright objects too slow for the search (they are part of the background of a block)
+        t1 = time()
+        slow_tracks = self.slowSearch()
+        if slow_tracks:
+            linked = self.mergeTracks(linked + slow_tracks)
+        self.timing['slow_search'] = time() - t1
+
         tracks = [tr for tr in linked if self.acceptTrack(tr)]
         self._debug = (hits, linked)
-        log.info('Matched filter: {:d} hits, {:d} candidate tracks'.format(len(hits), len(tracks)))
+        log.info('Matched filter: {:d} hits, {:d} candidate tracks ({:d} from the search of slow objects)'.format(
+            len(hits), len(tracks), len(slow_tracks)))
+
+        # The background of the slow objects is estimated without them before they are measured, or they would
+        #   be measured on a background which contains them (and on pixels masked as stars)
+        if slow_tracks:
+            t1 = time()
+            self.maskObjects([tr[:, :3] for tr in slow_tracks])
+            self.timing['slow_background'] += time() - t1
 
         t1 = time()
         measured = self.measure(tracks)
@@ -832,6 +1164,9 @@ class MatchedFilterDetector(object):
                     or (np.hypot(*(cent[-1, 1:3] - cent[0, 1:3])) < self.minDisplacement()):
                 continue
 
+            # One row per frame: the intensity of every frame, at the position on the track
+            cent = perFrameRows(cent, self.opts.max_measure_frames)
+
             # Unbinned coordinates, and the intensity of the unbinned image (averaged bins hold the mean of the
             #   pixels, summed bins already their sum)
             if self.det_bin > 1:
@@ -839,22 +1174,22 @@ class MatchedFilterDetector(object):
                 if self.config.detection_binning_method == 'avg':
                     cent[:, 3] *= self.det_bin**2
 
-            (xa, ya), (xb, yb) = cent[0, 1:3], cent[-1, 1:3]
-            h = self.height*self.det_bin
-            w = self.width*self.det_bin
-            rho, theta = getPolarLine(xa, h - ya, xb, h - yb, h, w)
+            # The polar line in the binned image, as for the normal detections
+            (xa, ya), (xb, yb) = (cent[[0, -1], 1:3] - (self.det_bin - 1)/2.0)/self.det_bin
+            rho, theta = getPolarLine(xa, self.height - ya, xb, self.height - yb, self.height, self.width)
             detections.append([rho, theta, cent])
 
         # Join the pieces of tracks (a faint object can be lost for a while, e.g. behind stars) and remove the
         #   duplicates. A slow object can be lost for many seconds while moving only a few PSF widths, so pieces
         #   are joined across any gap in which the object moved less than 15 PSF widths, if the second piece
         #   begins within 2 PSF widths of the extrapolated end of the first one
-        fwhm = 2.355*self.psf_sigma*self.det_bin
-        h = self.height*self.det_bin
-        w = self.width*self.det_bin
+        # The distances of the joining are in the binned image (as is the image size), the ones of the duplicates
+        #   in the unbinned image of the centroids
+        fwhm = 2.355*self.psf_sigma
         max_gap = 4*max(self.opts.run_frames + [self.opts.slow_run_frames])
-        detections = joinContinuousDetections(detections, max_gap, 15*fwhm, 2*fwhm, h, w)
-        detections = removeDuplicateDetections(detections, fwhm, 3*fwhm)
+        detections = joinContinuousDetections(detections, max_gap, 15*fwhm, 2*fwhm, self.height, self.width,
+                                              bin_factor=self.det_bin)
+        detections = removeDuplicateDetections(detections, fwhm*self.det_bin, 3*fwhm*self.det_bin)
 
         self.timing['total'] = time() - t0
         log.info('Matched filter: {:d} detections in {:.1f} s ({:s})'.format(len(detections),
@@ -864,10 +1199,79 @@ class MatchedFilterDetector(object):
         return detections
 
 
+    def apertureCorrection(self, star_list):
+        """ Factor which puts the intensities of the detections on the scale of the intensities of the stars
+            (CALSTARS), from which the magnitudes are calibrated. The stars are measured with the aperture of
+            the detections (within 3 PSF sigmas) on the mean of the block of frames, minus the sky in an
+            annulus around them, and
+            the factor is the median ratio of their CALSTARS intensities to these sums. The two differ by up to
+            ~15%, depending on how far the wings of the PSF reach beyond the aperture.
+
+        Arguments:
+            star_list: [list] Stars of the chunks, [ff_name, [(y, x, intensity, amplitude, fwhm, background, snr,
+                saturated pixels), ...]] in the unbinned image, as from extractStarsFrameInterface.
+
+        Return:
+            (factor, n_stars): [tuple] The factor (None if there are fewer than MIN_APERTURE_STARS stars) and the
+                number of stars it was measured on.
+        """
+
+        from RMS.Formats.FFfile import filenameToDatetime
+
+        b = self.det_bin
+        scale = b*b if (b > 1) and (self.config.detection_binning_method == 'avg') else 1.0
+        radius = 3.0*self.psf_sigma
+
+        # The sky around a star: the median of an annulus beyond the aperture
+        r_in, r_out = radius + 3.0, radius + 7.0
+        r = int(math.ceil(r_out))
+        yy, xx = np.mgrid[-r:r + 1, -r:r + 1]
+        t_begin = self.img_handle.beginning_datetime
+        starts = np.array(self.block_starts)
+        m = self.opts.edge_margin + r + 1
+
+        ratios = []
+        for entry in star_list:
+            ff_name, stars = entry[0], entry[1]
+            try:
+                dt = (filenameToDatetime(ff_name) - t_begin.replace(tzinfo=None)).total_seconds()
+            except Exception:
+                continue
+            k = int(np.clip(np.searchsorted(starts, dt*self.img_handle.fps, side='right') - 1, 0, len(starts) - 1))
+            bg = self.backgrounds.get(k)
+            if bg is None:
+                continue
+
+            # The intensity of an object in a frame is on average the mean of its flux, and the stars of the
+            #   calibration are measured on the average of their frames, so the mean of the block is used
+            image = bg.mean if bg.mean is not None else bg.median
+
+            for star in stars:
+                y, x, intensity, saturated = star[0], star[1], star[2], star[7]
+                if (intensity <= 0) or (saturated > 0):
+                    continue
+                xb, yb = (x - (b - 1)/2.0)/b, (y - (b - 1)/2.0)/b
+                if not ((m <= xb < self.width - m) and (m <= yb < self.height - m)):
+                    continue
+                xi, yi = int(round(xb)), int(round(yb))
+                patch = image[yi - r:yi + r + 1, xi - r:xi + r + 1]
+                d2 = (xx + xi - xb)**2 + (yy + yi - yb)**2
+                sky = np.median(patch[(d2 > r_in**2) & (d2 <= r_out**2)])
+                total = float(np.sum(patch[d2 <= radius**2] - sky))
+                if total > 0:
+                    ratios.append(intensity/(total*scale))
+
+        if len(ratios) < MIN_APERTURE_STARS:
+            return None, len(ratios)
+
+        return float(np.median(ratios)), len(ratios)
+
+
     def summary(self):
         """ Summary of the last run, for the logs and the done file of the input. """
 
         return {
+            'aperture_correction': self.aperture_correction,
             'total_frames': int(self.total_frames),
             'psf_sigma': self.psf_sigma,
             'gpu': bool(self.opts.use_gpu),
@@ -915,8 +1319,8 @@ class MatchedFilterDetector(object):
 
 
     def maskObjects(self, cents, step=4):
-        """ Estimate the background again in the region of the given tracks, without the pixels within a few
-            PSF sigmas of the objects at the times of the sampled frames. The background of every block is the
+        """ Estimate the background (median and noise) again in the region of the given tracks, without the
+            pixels within a few PSF sigmas of the objects at the times of the sampled frames. The background of every block is the
             median of the samples of the block and its neighbours (as in backgroundPass), and only the region
             around the tracks is replaced.
 
@@ -930,6 +1334,8 @@ class MatchedFilterDetector(object):
         radius = 4*self.psf_sigma + 1
         n_blocks = len(self.block_starts)
         samples = {}
+        touched = set()
+        references = {}
 
         def blockSamples(j):
             if j not in samples:
@@ -975,14 +1381,41 @@ class MatchedFilterDetector(object):
                                 crop[(xx - px)**2 + (yy - py)**2 <= radius**2] = np.nan
                         crops.append(crop)
 
-                masked = nanMedian(np.array(crops))
+                crops = np.array(crops)
+                masked = nanMedian(crops)
+
+                # The noise too: the pixels which the object crosses during the block vary between the sky and the
+                #   object, and their noise would weigh down the object itself in the fits
+                mad = 1.4826*nanMedian(np.abs(crops - masked))
+
+                # A very slow object covers some pixels in most of the samples of three blocks: there, the
+                #   background of blocks further away, aligned on the stars, is used
+                few = np.isfinite(crops).sum(axis=0) < MIN_MASKED_FRACTION*len(crops)
+                if few.any():
+                    if k not in references:
+                        references[k] = self.referenceBackground(k)
+                    ref_median, ref_noise = references[k]
+                    if ref_median is not None:
+                        masked = np.where(few, ref_median[y0:y1, x0:x1], masked)
+                        mad = np.where(few, ref_noise[y0:y1, x0:x1], mad)
+
                 region = bg.median[y0:y1, x0:x1]
                 bg.median[y0:y1, x0:x1] = np.where(np.isfinite(masked), masked, region).astype(np.float32)
+                region = bg.noise[y0:y1, x0:x1]
+                bg.noise[y0:y1, x0:x1] = np.where(np.isfinite(mad), np.maximum(mad, 1.0), region).astype(np.float32)
+                touched.add(k)
 
             # Drop the samples which are not needed any more
             for j in list(samples):
                 if j < k - 1:
                     del samples[j]
+
+        # The star template and the static mask were made from the medians with the objects in them: a slow
+        #   object would be partly in the template (subtracted from the frames), and its path masked as a star
+        #   in the verification
+        for k in touched:
+            self.starTemplate(self.backgrounds[k])
+            self.static_masks[k] = self.staticMask(self.backgrounds[k])
 
 
     def measurePass(self, states):
@@ -1156,6 +1589,46 @@ def blockIndices(frames, starts):
     return out
 
 
+def perFrameRows(cent, max_frames):
+    """ Rows of every frame of a track from its measurements: the measurements of faint objects combine several
+        frames, but the intensity of each frame is kept, so the light curve has the full time resolution (e.g.
+        short flashes are not averaged out). The positions of the frames are interpolated along the track
+        through the (smoothed) positions of the measurements, and extrapolated with the motion at its ends.
+
+    Arguments:
+        cent: [ndarray] Measurements, rows [frame, x, y, intensity, background, snr, saturated, n_frames,
+            intensities of the frames (max_frames columns), saturated pixel counts (max_frames columns)], sorted
+            by frame. The frame of a measurement is the middle of its frames.
+        max_frames: [int] Largest number of frames of a measurement.
+
+    Return:
+        [ndarray] Rows [frame, x, y, intensity, background, snr, saturated], one per frame. The signal-to-noise
+            ratio of a frame is the one of its measurement divided by the square root of its number of frames.
+    """
+
+    t, x, y = cent[:, 0], cent[:, 1], cent[:, 2]
+    if len(cent) >= 2:
+        vx_lo, vy_lo = (x[1] - x[0])/(t[1] - t[0]), (y[1] - y[0])/(t[1] - t[0])
+        vx_hi, vy_hi = (x[-1] - x[-2])/(t[-1] - t[-2]), (y[-1] - y[-2])/(t[-1] - t[-2])
+    else:
+        vx_lo = vy_lo = vx_hi = vy_hi = 0.0
+
+    rows = []
+    for row in cent:
+        n = int(round(row[7]))
+        for k in range(n):
+            f = row[0] - (n - 1)/2.0 + k
+            if f < t[0]:
+                xf, yf = x[0] + vx_lo*(f - t[0]), y[0] + vy_lo*(f - t[0])
+            elif f > t[-1]:
+                xf, yf = x[-1] + vx_hi*(f - t[-1]), y[-1] + vy_hi*(f - t[-1])
+            else:
+                xf, yf = np.interp(f, t, x), np.interp(f, t, y)
+            rows.append([f, xf, yf, row[8 + k], row[4], row[5]/math.sqrt(n), row[8 + max_frames + k]])
+
+    return np.array(rows)
+
+
 def smoothTrack(cent, frames, segment=512):
     """ Smooth positions of a track at the given frames: a quadratic fit of the measurements in every segment
         of the track (lines for short segments). The model is stiff, so it cannot follow the noise.
@@ -1207,8 +1680,8 @@ def smoothPositions(cent, half_window, reject=5.0):
     """ Positions of a track combined over the neighbouring measurements: a fit of x(t) and y(t) to the
         measurements within +-half_window frames of every measurement, weighted by their signal-to-noise ratio,
         evaluated at the measurement (quadratic, as short fast tracks across a distorted field are curved over
-        the whole window). Measurements further from the smoothed track than reject times its scatter are
-        outliers: they are removed and the rest is smoothed again.
+        the whole window). Measurements further from the smoothed track than reject times its scatter (both in
+        units of the position errors) are outliers: they are removed and the rest is smoothed again.
 
         On objects added to real frames, this reduces the position errors 2 to 5 times (64 frames) without a
         bias on tracks curved like the tracks across a distorted field, as the motion over a few seconds is
@@ -1252,7 +1725,9 @@ def smoothPositions(cent, half_window, reject=5.0):
 
     xy = _smooth(keep)
     for _ in range(2):
-        d = np.hypot(cent[:, 1] - xy[:, 0], cent[:, 2] - xy[:, 1])
+        # Distances in units of the position errors of the measurements (which scale as 1/snr), so the faint
+        #   measurements of a track whose brightness changes are not taken for outliers
+        d = np.hypot(cent[:, 1] - xy[:, 0], cent[:, 2] - xy[:, 1])*w
         scale = 1.4826*np.median(d[keep]) + 1e-3
         new_keep = d <= reject*scale
         if (new_keep == keep).all() or (new_keep.sum() < 4):
@@ -1437,7 +1912,7 @@ class TrackMeasurement(object):
             # The position error scales as 1/sqrt(n) with the number of frames
             sigma8 = self.opts.sigma_scale*np.median(self.probe) if self.probe else 1e3
             n = 1
-            while (n < self.opts.max_measure_frames) and (sigma8*math.sqrt(8.0/n) > self.opts.max_pos_error):
+            while (2*n <= self.opts.max_measure_frames) and (sigma8*math.sqrt(8.0/n) > self.opts.max_pos_error):
                 n *= 2
             self.n_frames = n
 
@@ -1468,20 +1943,37 @@ class TrackMeasurement(object):
             dt = np.arange(n) - (n - 1)/2.0
             sat = saturated[f0 - first:f0 - first + n] if saturated is not None \
                 else np.zeros((n,) + z.shape[1:], dtype=np.uint8)
-            sums, n_sat = streakAperture(z[f0 - first:f0 - first + n], sat, bg.noise, res[0] + vx*dt,
-                                         res[1] + vy*dt, vx, vy, 3.0*self.psf_sigma)
+            frames = z[f0 - first:f0 - first + n]
+            radius = 3.0*self.psf_sigma
+            sums, n_sat = streakAperture(frames, sat, bg.noise, res[0] + vx*dt, res[1] + vy*dt, vx, vy, radius)
+
+            # Charge spilled by a very bright object: the wider sum is its intensity, and it counts as saturated
+            core_noise = float(bg.noise[yi, xi])*math.sqrt(math.pi)*radius
+            if np.max(sums) > SPILL_MIN_SNR*core_noise:
+                wide, wide_sat = streakAperture(frames, sat, bg.noise, res[0] + vx*dt, res[1] + vy*dt, vx, vy,
+                                                SPILL_RADIUS)
+                spill = (sums > SPILL_MIN_SNR*core_noise) & (wide > SPILL_RATIO*sums)
+                sums = np.where(spill, wide, sums)
+                n_sat = np.where(spill, np.maximum(wide_sat, 1), n_sat)
+
+            # The photometry of every frame is kept (padded to the largest number of frames per measurement)
+            pad = self.opts.max_measure_frames - n
+            sums_pad = list(sums) + [0.0]*pad
+            sat_pad = list(n_sat) + [0]*pad
 
             # The uncertainties of the fit are scaled to the actual errors on real noise
             sc = self.opts.sigma_scale
             self.meas.append([mid, res[0], res[1], sc*res[4], sc*res[5], res[2], sc*res[6], float(np.mean(sums)),
-                              float(bg.median[yi, xi]), n, int(np.max(n_sat))])
+                              float(bg.median[yi, xi]), n, int(np.max(n_sat))] + sums_pad + sat_pad)
 
 
     def centroids(self):
         """ The accepted measurements of the track as centroid rows, or None if the track is rejected.
 
         Return:
-            [ndarray] Rows [frame, x, y, intensity, background, snr, saturated].
+            [ndarray] Rows [frame, x, y, intensity, background, snr, saturated, n_frames, the intensities of the
+                frames of the measurement (max_measure_frames columns), their saturated pixel counts
+                (max_measure_frames columns)], see perFrameRows.
         """
 
         if len(self.meas) < self.opts.min_centroids:
@@ -1528,7 +2020,9 @@ class TrackMeasurement(object):
                 return None
             resid = np.zeros(len(m))
             for i in range(len(m)):
-                near = np.argsort(np.abs(m[:, 0] - m[i, 0]))[:15]
+                # The measurements nearest in time (m is sorted by time)
+                lo = min(max(i - 7, 0), max(len(m) - 15, 0))
+                near = np.arange(lo, min(lo + 15, len(m)))
                 near = near[near != i]
                 deg = 2 if len(near) >= 8 else 1
                 t0 = m[i, 0]
@@ -1545,13 +2039,14 @@ class TrackMeasurement(object):
             return None
 
         snr = np.minimum(m[:, 5]/np.maximum(m[:, 6], 1e-6), 99.99)
-        cent = np.column_stack([m[:, 0], m[:, 1], m[:, 2], m[:, 7], m[:, 8], snr, m[:, 10]])
+        cent = np.column_stack([m[:, 0], m[:, 1], m[:, 2], m[:, 7], m[:, 8], snr, m[:, 10], m[:, 9], m[:, 11:]])
 
         return cent
 
 
 
-def detectMatchedFilter(img_handle, config, mask=None, dark=None, flat_struct=None, return_detector=False):
+def detectMatchedFilter(img_handle, config, mask=None, dark=None, flat_struct=None, star_list=None,
+                        return_detector=False):
     """ Run the matched-filter detection on an image handle.
 
     Arguments:
@@ -1562,6 +2057,9 @@ def detectMatchedFilter(img_handle, config, mask=None, dark=None, flat_struct=No
         mask: [MaskStruct] Mask, not binned. None by default.
         dark: [ndarray] Dark frame, not binned. None by default.
         flat_struct: [FlatStruct] Flat field, not binned. None by default.
+        star_list: [list] Stars extracted from the input (see extractStarsFrameInterface). With enough stars,
+            the intensities are put on the scale of the star intensities (see apertureCorrection). None by
+            default.
         return_detector: [bool] Also return the detector (for its summary). False by default.
 
     Return:
@@ -1576,8 +2074,12 @@ def detectMatchedFilter(img_handle, config, mask=None, dark=None, flat_struct=No
         log.warning('Matched filter: FF files have no frames to search, skipped')
         return ([], None) if return_detector else []
 
+    # The calibration is binned in place, and the caller's objects may already be binned for the normal
+    #   detection, so copies are binned
     if config.detection_binning_factor > 1:
-        mask, dark, flat_struct = binImageCalibration(config, mask, dark, flat_struct)
+        import copy
+        mask, dark, flat_struct = binImageCalibration(config, copy.deepcopy(mask), copy.deepcopy(dark),
+                                                      copy.deepcopy(flat_struct))
 
     # Limit the threads of the compiled code, e.g. when several files are processed in parallel
     if config.mf_threads > 0:
@@ -1586,6 +2088,19 @@ def detectMatchedFilter(img_handle, config, mask=None, dark=None, flat_struct=No
 
     detector = MatchedFilterDetector(img_handle, config, mask=mask, dark=dark, flat_struct=flat_struct)
     detections = detector.run()
+
+    # The intensities on the scale of the stars of the photometric calibration
+    if star_list and detections:
+        factor, n_stars = detector.apertureCorrection(star_list)
+        if (factor is not None) and (0.5 <= factor <= 2.0):
+            for det in detections:
+                det[2][:, 3] *= factor
+            detector.aperture_correction = round(factor, 4)
+            log.info('Matched filter: intensities scaled by {:.3f} to the scale of the stars ({:d} stars)'.format(
+                factor, n_stars))
+        else:
+            log.warning('Matched filter: no aperture correction of the intensities ({:d} stars, factor {})'.format(
+                n_stars, factor))
 
     return (detections, detector) if return_detector else detections
 
@@ -1678,7 +2193,8 @@ def mergeFTPdetectinfo(dirs, out_dir, ftp_name, config):
     found = False
     for mf_dir in dirs:
 
-        if not os.path.isdir(mf_dir):
+        # Only finished results (a failed or interrupted file has no done file)
+        if not os.path.isfile(os.path.join(mf_dir, DONE_NAME)):
             continue
 
         # The recalibration keeps a backup of the uncalibrated file, which is not merged
@@ -1740,6 +2256,8 @@ def processFile(file_path, config, output_dir, platepar_path=None, dark_path=Non
         config.mask_file = os.path.abspath(mask_path)
 
     img_handle = detectInputType(file_path, config, detection=True, preload_video=True)
+    if img_handle.input_type == 'ff':
+        raise ValueError('FF files have no frames to search: {:s}'.format(file_path))
     mask, dark, flat_struct = loadImageCalibration(os.path.dirname(os.path.abspath(file_path)), config,
         dtype=img_handle.ff.dtype, byteswap=img_handle.byteswap)
 
@@ -1749,10 +2267,11 @@ def processFile(file_path, config, output_dir, platepar_path=None, dark_path=Non
                                                save_calstars=False)
 
     detections, detector = detectMatchedFilter(img_handle, config, mask=mask, dark=dark, flat_struct=flat_struct,
-                                               return_detector=True)
+                                               star_list=star_list, return_detector=True)
 
     ftp_path = saveMatchedFilterResults(detections, star_list, img_handle, config, output_dir,
-                                        platepar_path=platepar_path)
+                                        platepar_path=platepar_path,
+                                        chunk_frames=getattr(img_handle, 'chunk_frames', 128))
 
     return saveSummary(output_dir, detector, input_file=os.path.abspath(file_path),
                        ftpdetectinfo=os.path.basename(ftp_path), detections=len(detections),
@@ -1777,7 +2296,7 @@ def saveSummary(output_dir, detector, **extra):
 
     summary = detector.summary() if detector is not None else {}
     summary.update(extra)
-    summary['processed_at'] = datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')
+    summary['processed_at'] = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
 
     os.makedirs(output_dir, exist_ok=True)
     with open(os.path.join(output_dir, DONE_NAME), 'w') as f:
@@ -1924,7 +2443,12 @@ if __name__ == "__main__":
     config.log_dir = 'logs'
     LoggingManager().initLogging(config, 'matched_filter_')
 
-    failed = processFiles(findInputFiles(args.input), config, output_dir, platepar_path=args.platepar,
+    files = findInputFiles(args.input)
+    if not files:
+        log.error('Matched filter: no input files found in {:s}'.format(', '.join(args.input)))
+        sys.exit(1)
+
+    failed = processFiles(files, config, output_dir, platepar_path=args.platepar,
                           dark_path=args.dark, flat_path=args.flat, mask_path=args.mask,
                           extract_stars=not args.no_stars, force=args.force)
     sys.exit(1 if failed else 0)

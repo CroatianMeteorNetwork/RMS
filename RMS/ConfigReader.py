@@ -2343,7 +2343,11 @@ def parseMatchedFilter(config, parser):
             setattr(config, name, parser.getboolean(section, name))
 
     if parser.has_option(section, "mf_run_frames"):
-        config.mf_run_frames = [int(v) for v in parser.get(section, "mf_run_frames").split(",") if v.strip()]
+        run_frames = [int(v) for v in parser.get(section, "mf_run_frames").split(",") if v.strip()]
+        if run_frames and all(v > 0 for v in run_frames):
+            config.mf_run_frames = run_frames
+        else:
+            print("Invalid mf_run_frames, using {:s}".format(str(config.mf_run_frames)))
 
     for name in ("mf_block_frames", "mf_slow_run_frames", "mf_min_hits",
                  "mf_max_measure_frames", "mf_min_centroids", "mf_edge_margin", "mf_min_frames", "mf_threads",

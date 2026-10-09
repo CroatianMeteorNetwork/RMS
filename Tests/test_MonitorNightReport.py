@@ -295,7 +295,7 @@ def test_merge_night(tmp_path):
 
 def test_matched_filter_results_are_merged_apart(tmp_path):
 
-    from RMS.MatchedFilterDetection import MATCHED_FILTER_DIR
+    from RMS.MatchedFilterDetection import MATCHED_FILTER_DIR, DONE_NAME
 
     config = _config()
     config.mf_enable = True
@@ -319,16 +319,30 @@ def test_matched_filter_results_are_merged_apart(tmp_path):
         FTPdetectinfo.writeFTPdetectinfo(meteors, mf_path, ftp_name.replace('.txt', '_mf_backup_1.txt'), mf_path,
             'XX0001', 25.0, celestial_coords_given=True)
 
+        # Finished results have a done file
+        with open(os.path.join(mf_path, DONE_NAME), 'w') as f:
+            f.write('{}')
+
+    # Results of a third file whose matched filter didn't finish (no done file) are not merged
+    unfinished = _makeResults(output_dir, config, 'file3', start_s=1200)
+    unfinished_path = os.path.join(output_dir, unfinished)
+    os.makedirs(os.path.join(unfinished_path, MATCHED_FILTER_DIR))
+    ftp_name = [f for f in os.listdir(unfinished_path) if f.startswith('FTPdetectinfo_')][0]
+    meteors = [[e[0], 1, e[9], e[10], [line[1:] for line in e[11]], e[4]]
+               for e in FTPdetectinfo.readFTPdetectinfo(unfinished_path, ftp_name)]
+    FTPdetectinfo.writeFTPdetectinfo(meteors, os.path.join(unfinished_path, MATCHED_FILTER_DIR),
+        ftp_name.replace('.txt', '_mf.txt'), unfinished_path, 'XX0001', 25.0, celestial_coords_given=True)
+
     night_state = mnr.generateNightReport(output_dir, NIGHT, config, archive=True)
     assert 'matched_filter_merge' in night_state['ok_steps']
 
-    # The normal results only have the normal detections
+    # The normal results only have the normal detections (of the three files)
     night_dir = mnr.nightDirPath(output_dir, NIGHT, config)
     ftp_names = [f for f in os.listdir(night_dir) if f.startswith('FTPdetectinfo')]
     assert len(ftp_names) == 1
-    assert len(FTPdetectinfo.readFTPdetectinfo(night_dir, ftp_names[0])) == 2
+    assert len(FTPdetectinfo.readFTPdetectinfo(night_dir, ftp_names[0])) == 3
 
-    # The detections of the matched filter are merged into their own directory
+    # The finished detections of the matched filter are merged into their own directory
     mf_night = os.path.join(night_dir, MATCHED_FILTER_DIR)
     assert os.listdir(mf_night) == ['FTPdetectinfo_{:s}_mf.txt'.format(NIGHT)]
     entries = FTPdetectinfo.readFTPdetectinfo(mf_night, os.listdir(mf_night)[0])

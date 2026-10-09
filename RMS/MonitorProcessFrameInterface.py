@@ -764,17 +764,29 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
 
         if mf_only:
 
-            from RMS.MatchedFilterDetection import detectMatchedFilter, saveSummary
+            from RMS.MatchedFilterDetection import MATCHED_FILTER_DIR, detectMatchedFilter, saveSummary
+
+            # Results of an earlier processing with the separate matched-filter pass would be merged again
+            shutil.rmtree(os.path.join(results_dir, MATCHED_FILTER_DIR), ignore_errors=True)
 
             # Star extraction (and the image pairs), then the matched filter instead of the normal detection
             star_list = extractStarsFrameInterface(img_handle, config, chunk_frames=chunk_frames,
                 flat_struct=flat_struct, dark=dark, mask=mask, save_calstars=False, chunk_callback=image_saver)
 
+            # Like the normal detection, nothing is detected without enough stars (clouds, twilight)
+            max_stars = max([len(entry[1]) for entry in star_list] + [0])
             mf_t0 = time.time()
-            meteor_list, mf_detector = detectMatchedFilter(img_handle, config, mask=mask, dark=dark,
-                                                           flat_struct=flat_struct, return_detector=True)
+            if max_stars >= config.ff_min_stars:
+                meteor_list, mf_detector = detectMatchedFilter(img_handle, config, mask=mask, dark=dark,
+                                                               flat_struct=flat_struct, star_list=star_list,
+                                                               return_detector=True)
+            else:
+                proc_log.info("Not enough stars for the matched filter: {:d} < {:d}".format(max_stars,
+                                                                                          config.ff_min_stars))
+                meteor_list, mf_detector = [], None
             saveSummary(results_dir, mf_detector, input_file=os.path.abspath(file_path),
-                        detections=len(meteor_list), processing_time_s=round(time.time() - mf_t0, 1))
+                        detections=len(meteor_list), max_stars=max_stars,
+                        processing_time_s=round(time.time() - mf_t0, 1))
             proc_log.info("Matched filter (replacing the normal detection): {:d} detections".format(
                 len(meteor_list)))
 
@@ -804,8 +816,21 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
 
         # Optional detection of faint moving objects with the matched filter, saved apart from the normal
         #   results. It needs the frames, so FF files are skipped. A failure doesn't fail the file, the normal
-        #   results are complete
-        if config.mf_enable and (img_handle.input_type != 'ff') and not mf_only:
+        #   results are complete. The results of an earlier processing of the file are not kept (if this pass
+        #   fails or is skipped, there are no matched-filter results rather than old ones)
+        mf_pass = config.mf_enable and (img_handle.input_type != 'ff') and (not mf_only)
+        if mf_pass:
+            from RMS.MatchedFilterDetection import MATCHED_FILTER_DIR
+            shutil.rmtree(os.path.join(results_dir, MATCHED_FILTER_DIR), ignore_errors=True)
+
+            # Like the normal detection, it needs enough stars (not in clouds or twilight)
+            max_stars = max([len(entry[1]) for entry in (star_list or [])] + [0])
+            if max_stars < config.ff_min_stars:
+                proc_log.info("Not enough stars for the matched filter: {:d} < {:d}".format(max_stars,
+                                                                                          config.ff_min_stars))
+                mf_pass = False
+
+        if mf_pass:
             try:
                 from RMS.MatchedFilterDetection import (MATCHED_FILTER_DIR, detectMatchedFilter,
                                                         saveMatchedFilterResults, saveSummary)
@@ -813,7 +838,8 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
                 mf_t0 = time.time()
                 mf_dir = os.path.join(results_dir, MATCHED_FILTER_DIR)
                 mf_detections, mf_detector = detectMatchedFilter(img_handle, config, mask=mask, dark=dark,
-                                                                 flat_struct=flat_struct, return_detector=True)
+                                                                 flat_struct=flat_struct, star_list=star_list,
+                                                                 return_detector=True)
                 mf_ftp_path = saveMatchedFilterResults(
                     mf_detections, star_list, img_handle, config, mf_dir,
                     platepar_path=results_platepar_path, chunk_frames=chunk_frames,
