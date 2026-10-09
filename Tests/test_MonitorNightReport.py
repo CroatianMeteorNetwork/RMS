@@ -19,6 +19,7 @@ import RMS.MonitorNightReport as mnr
 from RMS.Astrometry.ApplyAstrometry import raDecToXYPP, xyToRaDecPP
 from RMS.Formats import CALSTARS, FFfile, FFpng, FTPdetectinfo
 from RMS.Formats.Platepar import Platepar
+from RMS.MatchedFilterDetection import MATCHED_FILTER_DIR, DONE_NAME
 
 
 REPO_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -294,8 +295,10 @@ def test_merge_night(tmp_path):
 
 
 def test_matched_filter_results_are_merged_apart(tmp_path):
-
-    from RMS.MatchedFilterDetection import MATCHED_FILTER_DIR, DONE_NAME
+    """ The night report merges the finished results of the matched filter of every file into their own
+        file in the matched-filter directory of the night, and the normal merged results only have the normal
+        detections.
+    """
 
     config = _config()
     config.mf_enable = True
@@ -305,6 +308,8 @@ def test_matched_filter_results_are_merged_apart(tmp_path):
     results_dirs = [_makeResults(output_dir, config, 'file1'), _makeResults(output_dir, config, 'file2',
                                                                             start_s=600)]
     for results_dir in results_dirs:
+        # The detections of the matched filter are made from the normal detection of the file (number 1) and
+        #   a copy of it (number 2), converted from the format of the reader to the format of the writer
         results_path = os.path.join(output_dir, results_dir)
         mf_path = os.path.join(results_path, MATCHED_FILTER_DIR)
         os.makedirs(mf_path)
@@ -333,6 +338,7 @@ def test_matched_filter_results_are_merged_apart(tmp_path):
     FTPdetectinfo.writeFTPdetectinfo(meteors, os.path.join(unfinished_path, MATCHED_FILTER_DIR),
         ftp_name.replace('.txt', '_mf.txt'), unfinished_path, 'XX0001', 25.0, celestial_coords_given=True)
 
+    # The merging of the matched filter is a step of the report, and it succeeded
     night_state = mnr.generateNightReport(output_dir, NIGHT, config, archive=True)
     assert 'matched_filter_merge' in night_state['ok_steps']
 
@@ -345,6 +351,7 @@ def test_matched_filter_results_are_merged_apart(tmp_path):
     # The finished detections of the matched filter are merged into their own directory
     mf_night = os.path.join(night_dir, MATCHED_FILTER_DIR)
     assert os.listdir(mf_night) == ['FTPdetectinfo_{:s}_mf.txt'.format(NIGHT)]
+    # Two detections of each of the two finished files, with the coordinates of the original detections
     entries = FTPdetectinfo.readFTPdetectinfo(mf_night, os.listdir(mf_night)[0])
     assert len(entries) == 4
     assert entries[0][11][0][4:6] == [170.03, 50.0]

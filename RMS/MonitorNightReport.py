@@ -973,6 +973,10 @@ def generateNightReport(output_dir, night_name, config, results=None, archive=Tr
     # The detections of the matched filter are merged into their own file in a subdirectory of the night, so
     #   they are kept apart from the normal detections in the rest of the report
     if config.mf_enable:
+
+        # Imported only when used, not at the top of the module: importing the kernels of the matched filter
+        #   checks for a CUDA GPU, which initializes CUDA, and the monitor which imports this module forks its
+        #   workers after it (a CUDA context can't be used in forked processes)
         from RMS.MatchedFilterDetection import mergeNightMatchedFilter
         _runStep('matched_filter_merge', lambda: mergeNightMatchedFilter(night_dir,
             [os.path.join(output_dir, results_dir) for results_dir in sorted(results)], config))
