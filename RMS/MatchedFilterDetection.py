@@ -103,6 +103,9 @@ SHADOW_RADIUS = 20.0
 SHADOW_STRENGTH = 3.0
 SHADOW_OVERLAP = 0.8
 
+# Smallest sigma of the smoothing of the frames in the search (px), see searchSigma
+SEARCH_MIN_SIGMA = 1.0
+
 # Hits stronger than LINK_STRONG times the threshold are linked by their positions only: such a hit can come
 #   from a single bright frame of its run (e.g. a flash), whose velocity is not known (see linkHits)
 LINK_STRONG = 3.0
@@ -665,7 +668,7 @@ class MatchedFilterDetector(object):
         # Single frame outliers (scintillating stars, cosmic rays) are clipped, a faint object is never that
         #   bright in one frame, and a bright one is detected anyway
         b = self.search_bin
-        sigma_b = self.psf_sigma/b
+        sigma_b = self.searchSigma()/b
         zb = np.empty((len(z), z.shape[1]//b, z.shape[2]//b), dtype=np.float32)
         for i in range(len(z)):
             self.removeTrails(z[i], static)
@@ -1244,7 +1247,16 @@ class MatchedFilterDetector(object):
     def minDisplacement(self):
         """ Smallest motion of a detection (px). """
 
-        return self.opts.min_displacement*2.355*self.psf_sigma
+        return self.opts.min_displacement*2.355*self.searchSigma()
+
+
+    def searchSigma(self):
+        """ Sigma of the smoothing of the search (px): the PSF sigma, but at least SEARCH_MIN_SIGMA. A narrower
+            smoothing of the binned frames leaves many more noise peaks (and candidate tracks) for little gain,
+            as the binning smooths too.
+        """
+
+        return max(self.psf_sigma, SEARCH_MIN_SIGMA)
 
 
     ### Measurement ###
