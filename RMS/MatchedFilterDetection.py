@@ -96,6 +96,16 @@ SHADOW_RADIUS = 20.0
 SHADOW_STRENGTH = 3.0
 SHADOW_OVERLAP = 0.8
 
+# Shape of the detections (see extentConcentration): the frames are stacked along the track (every EXTENT_STEP-th
+#   frame) within EXTENT_RADIUS px, and a detection whose concentration is below MIN_CONCENTRATION is extended
+#   (e.g. a cloud), not a point source. Only detections below EXTENT_MAX_SIGNIFICANCE are tested. On recorded data,
+#   objects are at 0.87-1 (very bright ones down to 0.6), structures of thin drifting clouds at 0.2-0.7
+EXTENT_RADIUS = 9
+EXTENT_RING = (4.0, 7.0)
+EXTENT_STEP = 2
+MIN_CONCENTRATION = 0.8
+EXTENT_MAX_SIGNIFICANCE = 200.0
+
 # Smallest sigma of the smoothing of the frames in the search (px), see searchSigma
 SEARCH_MIN_SIGMA = 1.0
 
@@ -1634,7 +1644,8 @@ class MatchedFilterDetector(object):
             checks.append({'on': (frames, xs, ys), 'off': (off_f, off_x, off_y), 'reord': reord,
                            'on_sum': [0.0, 0.0], 'off_sum': [0.0, 0.0], 'reord_sum': [0.0, 0.0],
                            'phot': np.zeros(n), 'phot_sat': np.zeros(n, dtype=np.int64),
-                           'phot_noise': np.zeros(n)})
+                           'phot_noise': np.zeros(n),
+                           'stack': np.zeros((2*EXTENT_RADIUS + 1, 2*EXTENT_RADIUS + 1)), 'stack_n': 0})
 
         # The positions of every test in each block of frames
         starts = np.array(self.block_starts)
@@ -1685,6 +1696,13 @@ class MatchedFilterDetector(object):
                     yi = np.clip(np.round(y).astype(int), 0, noise.shape[0] - 1)
                     c['phot_noise'][sel] = noise[yi, xi]*math.sqrt(math.pi)*radius_phot
 
+                    # The frames stacked along the track, for the shape of the object (see extent)
+                    for f, xf, yf in zip(fr[::EXTENT_STEP], x[::EXTENT_STEP], y[::EXTENT_STEP]):
+                        r = EXTENT_RADIUS
+                        if (r <= xf < z.shape[2] - r - 1) and (r <= yf < z.shape[1] - r - 1):
+                            c['stack'] += cv2.getRectSubPix(z[f - first], (2*r + 1, 2*r + 1), (float(xf), float(yf)))
+                            c['stack_n'] += 1
+
         kept = []
         for cent, c in zip(measured, checks):
 
@@ -1700,7 +1718,16 @@ class MatchedFilterDetector(object):
                 tests.append((on_gz - gz*on_gg/gg)/math.sqrt(on_gg*(1 + on_gg/gg)))
             significance = min(tests)
 
-            self.significances.append((cent[0, 0], cent[-1, 0], significance) + tuple(tests))
+            # A point source: the light of the frames stacked along the track is concentrated at the centre.
+            #   Structures of thin clouds drifting across the field move too, but are extended
+            #   (a very bright object is spread by its own trails and spilled charge, so it is not tested)
+            concentration = extentConcentration(c['stack']/max(c['stack_n'], 1), self.psf_sigma)
+            if (concentration < MIN_CONCENTRATION) and (significance < EXTENT_MAX_SIGNIFICANCE):
+                log.info('Matched filter: track {:.0f}-{:.0f} (significance {:.1f}) is extended (concentration '
+                         '{:.2f}), rejected'.format(cent[0, 0], cent[-1, 0], significance, concentration))
+                significance = min(significance, 0.0)
+
+            self.significances.append((cent[0, 0], cent[-1, 0], significance) + tuple(tests) + (concentration,))
             log.debug('Matched filter: track {:.0f}-{:.0f} significance {:.1f} (off time {:.1f}, reordered '
                       '{:.1f})'.format(cent[0, 0], cent[-1, 0], significance, *tests))
             if significance >= self.opts.track_significance:
@@ -1753,6 +1780,30 @@ def blockIndices(frames, starts):
         out[int(k)] = order[lo:hi]
 
     return out
+
+
+def extentConcentration(stack, psf_sigma):
+    """ How much of the light of an object is at its centre: the mean of the stack along its track within
+        1.5 PSF sigmas of the centre, minus the mean in a ring EXTENT_RING px from it, over the mean at the
+        centre. About 1 for a point source, near 0 for an extended structure (e.g. a cloud).
+
+    Arguments:
+        stack: [ndarray] Mean of the normalized frames along the track, centred on the object.
+        psf_sigma: [float] PSF sigma (px).
+
+    Return:
+        [float] Concentration (1 if the centre is not above the ring, as the shape is then not measurable).
+    """
+
+    r = (stack.shape[0] - 1)//2
+    yy, xx = np.mgrid[-r:r + 1, -r:r + 1]
+    d = np.hypot(xx, yy)
+    core = np.mean(stack[d <= max(1.5*psf_sigma, 1.0)])
+    ring = np.mean(stack[(d >= EXTENT_RING[0]) & (d <= EXTENT_RING[1])])
+    if core <= 0:
+        return 1.0
+
+    return float((core - ring)/core)
 
 
 def framePhotometry(frames, saturated, noise, xs, ys, vx, vy, radius):
