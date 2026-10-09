@@ -146,19 +146,22 @@ def _bestSegment(points, cx, cy, rho, theta_deg, distance_thresh, max_gap):
         max_gap: [float] Maximum gap along the line within a segment (px).
 
     Return:
-        [ndarray] Indices of the points of the segment, sorted along the line (empty if there are no inliers).
+        (segment, score): [tuple] Indices of the points of the segment, sorted along the line (empty if there
+            are no inliers), and its score: the sum of the weights 1 - d/distance_thresh of its points, where d
+            is their distance from the line.
     """
 
     dists, t = _lineDistances(points, cx, cy, rho, theta_deg)
     inliers = np.where(dists < distance_thresh)[0]
     if len(inliers) == 0:
-        return inliers
+        return inliers, 0.0
 
     inliers = inliers[np.argsort(t[inliers])]
     splits = np.where(np.diff(t[inliers]) > max_gap)[0] + 1
     segments = np.split(inliers, splits)
+    segment = max(segments, key=len)
 
-    return max(segments, key=len)
+    return segment, float(np.sum(1.0 - dists[segment]/distance_thresh))
 
 
 def findLines(img, max_lines, min_pixels, distance_thresh, min_line_length, max_gap, max_iterations=1000,
@@ -169,8 +172,11 @@ def findLines(img, max_lines, min_pixels, distance_thresh, min_line_length, max_
     so that both are likely on the same track even when most points are noise. The inliers of the line are
     split at gaps and the segment with the most points is scored. The best segment is refined by fitting the
     line to its points and taking the inliers of the fitted line again, and its points are removed before
-    searching for the next line. Scoring the number of points (not the segment length) keeps sparse noise
-    points which happen to extend the segment from deciding the line.
+    searching for the next line. Scoring the points (not the segment length) keeps sparse noise points which
+    happen to extend the segment from deciding the line. Every point counts by how close it is to the line
+    (1 - d/distance_thresh): with a plain count of the inliers, a line tilted so that a few outliers are just
+    within the distance, while the points of the track are still inliers, would win over the line along the
+    track.
 
     Arguments:
         img: [ndarray] 2D numpy array (uint8), image where >0 are points.
@@ -220,6 +226,7 @@ def findLines(img, max_lines, min_pixels, distance_thresh, min_line_length, max_
         searches += 1
 
         best_segment = None
+        best_score = 0.0
         best_model = None
 
         for _ in range(max_iterations):
@@ -233,11 +240,11 @@ def findLines(img, max_lines, min_pixels, distance_thresh, min_line_length, max_
                 continue
 
             rho, theta_deg = getPolarLine(p1[0], p1[1], p2[0], p2[1], w, h)
-            segment = _bestSegment(points, cx, cy, rho, theta_deg, distance_thresh, max_gap)
+            segment, score = _bestSegment(points, cx, cy, rho, theta_deg, distance_thresh, max_gap)
 
-            if (len(segment) >= min_pixels) \
-                    and ((best_segment is None) or (len(segment) > len(best_segment))):
+            if (len(segment) >= min_pixels) and ((best_segment is None) or (score > best_score)):
                 best_segment = segment
+                best_score = score
                 best_model = (rho, theta_deg)
 
         if best_segment is None:
@@ -255,7 +262,7 @@ def findLines(img, max_lines, min_pixels, distance_thresh, min_line_length, max_
             rho_ref, theta_ref = fitLine(points[best_segment, 0], points[best_segment, 1], w, h,
                 weights=weights)
 
-            segment = _bestSegment(points, cx, cy, rho_ref, theta_ref, distance_thresh, max_gap)
+            segment, _ = _bestSegment(points, cx, cy, rho_ref, theta_ref, distance_thresh, max_gap)
             if len(segment) < min_pixels:
                 break
 

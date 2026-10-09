@@ -249,9 +249,11 @@ class TestSequentialRANSAC(unittest.TestCase):
         self.assertEqual(len(lines), 1)
         rho, theta, _, _, _, _ = lines[0]
 
-        # The line y = 50 has the normal along the y axis, theta 90 or 270
+        # The line y = 50 has the normal along the y axis, theta 90 or 270. The outliers are at the distance
+        #   threshold of this line, so a line tilted by ~1 deg takes them in while keeping all points of the bar:
+        #   the line along the bar only wins if the points count by how close they are to the line
         best_diff = min(abs(theta - 90), abs(theta - 270))
-        self.assertLess(best_diff, 2, "Line was pulled by outlier!")
+        self.assertLess(best_diff, 0.5, "Line was pulled by outlier!")
 
         self.plot_results(lines, "test_blob_vs_outlier")
 
