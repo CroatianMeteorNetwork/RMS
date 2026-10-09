@@ -71,6 +71,21 @@ def test_estimate_fps_ignores_time_jump():
     assert estimateFPS(unix_times) == pytest.approx(32.0)
 
 
+@pytest.mark.parametrize('true_fps, step', [(30.0, 0.001), (32.0, 0.01), (25.0, 0.001)])
+def test_estimate_fps_rounded_time_stamps(true_fps, step):
+
+    # Time stamps rounded to more than the precision of the frame interval
+    unix_times = [round(k/true_fps/step)*step for k in range(256)]
+    assert estimateFPS(unix_times) == pytest.approx(true_fps, rel=2e-3)
+
+
+def test_estimate_fps_repeated_time_stamps():
+
+    # Every time stamp repeated for two frames: the rate from the whole span
+    unix_times = [(k//2)*2/25.0 for k in range(100)]
+    assert estimateFPS(unix_times) == pytest.approx(25.0, rel=0.05)
+
+
 @pytest.mark.parametrize('unix_times', [[], [100.0], [100.0, 100.0]])
 def test_estimate_fps_undefined(unix_times):
     assert estimateFPS(unix_times) is None
