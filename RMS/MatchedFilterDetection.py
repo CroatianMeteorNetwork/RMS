@@ -1049,14 +1049,19 @@ class MatchedFilterDetector(object):
                         else:
                             vx, vy = arr[cur, 4], arr[cur, 5]
 
-                        # Up to 3 runs, or up to link_max_gap frames (e.g. between the flashes of a flashing
-                        #   object, which are the only frames above the threshold)
+                        # Up to 3 runs, or between strong hits up to link_max_gap frames (e.g. between the
+                        #   flashes of a flashing object, which are the only frames above the threshold)
                         best, best_z = None, 0
                         max_gap = max(3, int(self.opts.link_max_gap//run_frames))
                         for gap in range(1, max_gap + 1):
                             t = round(arr[cur, 0] + direction*gap*run_frames, 1)
                             for j in by_frame.get(t, []):
                                 if used[j]:
+                                    continue
+
+                                # Longer gaps only between strong hits (flashes), so a track doesn't continue
+                                #   into the noise beyond its ends
+                                if (gap > 3) and ((arr[j, 3] < strong) or (arr[cur, 3] < strong)):
                                     continue
                                 dt = arr[j, 0] - arr[cur, 0]
                                 dist = math.hypot(arr[j, 1] - (arr[cur, 1] + vx*dt),
