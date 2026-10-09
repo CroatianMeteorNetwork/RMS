@@ -108,7 +108,9 @@ class FluxConfig(object):
         self.meteors_min = 3
 
         # Default star FWHM, it it's not available (pz)
-        self.default_fwhm = 3
+        # FWHM of the stars (px) for old data without FWHM in the CALSTARS files (3 px in the definition of the
+        #   FWHM of older CALSTARS files, which was larger by sqrt(2))
+        self.default_fwhm = 2.1
 
         # Filter out nights which have too many detections - it is assumed that the false positives are
         #   present if there are too many sporadic meteors
