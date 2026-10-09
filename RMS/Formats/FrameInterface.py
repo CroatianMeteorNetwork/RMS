@@ -28,6 +28,7 @@ from RMS.Formats.FFfile import validFFName, filenameToDatetime
 from RMS.Formats.FFfile import getMiddleTimeFF, selectFFFrames
 from RMS.Formats.FRbin import read as readFR, validFRName
 from RMS.Formats.Vid import readFrame as readVidFrame
+from RMS.Formats.Vid import readFrameFromBuffer as readVidFrameFromBuffer
 from RMS.Formats.Vid import VidStruct
 from RMS.GeoidHeightEGM96 import wgs84toMSLHeight
 from RMS.Routines import Image
@@ -1257,7 +1258,7 @@ class InputTypeVideo(InputType):
 
 
 class InputTypeUWOVid(InputType):
-    def __init__(self, file_path, config, detection=False, chunk_frames=128, flipud=False):
+    def __init__(self, file_path, config, detection=False, chunk_frames=128, flipud=False, preload_video=False):
         """ Input file type handle for UWO .vid files.
         
         Arguments:
@@ -1268,6 +1269,10 @@ class InputTypeUWOVid(InputType):
             detection: [bool] Indicates that the input is used for detection. False by default. This will
                 control whether the binning is applied or not.
             chunk_frames: [int] Number of frames to be used for averaging and maxpixels. 128 by default.
+            preload_video: [bool] If True, the whole file is read into memory once, if it is not larger than
+                config.vid_preload_max_mb, and the frames are read from memory. The processing reads the frames
+                several times (e.g. the star extraction and the detection), and this reads the file only once.
+                False by default.
 
         """
         self.input_type = 'vid'
@@ -1317,6 +1322,19 @@ class InputTypeUWOVid(InputType):
 
         # Get the total time number of video frames in the file
         self.total_frames = os.path.getsize(self.vid_path)//self.vidinfo.seqlen
+
+        # Read the whole file into memory if it is not too large, then the frames are read from there
+        self.vid_data = None
+        if preload_video:
+
+            file_size_mb = os.path.getsize(self.vid_path)/1024/1024
+            if file_size_mb <= config.vid_preload_max_mb:
+                print("Loading the vid file into memory ({:.0f} MB)...".format(file_size_mb))
+                self.vid_data = np.fromfile(self.vid_path, dtype=np.uint8)
+
+            else:
+                print("The vid file is not loaded into memory: {:.0f} MB is more than vid_preload_max_mb "
+                      "({:.0f} MB)".format(file_size_mb, config.vid_preload_max_mb))
 
         # Get the image size
         self.nrows = self.vidinfo.ht
@@ -1401,8 +1419,9 @@ class InputTypeUWOVid(InputType):
             frame, self.frame_chunk_unix_times, self.current_fr_chunk_size = self.cache[cache_id]
             return frame
 
-        # Set the vid file pointer to the right byte
-        self.vid_file.seek(first_frame*self.vidinfo.seqlen)
+        # Set the vid file pointer to the right byte (if the frames are not read from memory)
+        if self.vid_data is None:
+            self.vid_file.seek(first_frame*self.vidinfo.seqlen)
 
         # Determine target dtype (assume uint16 if not yet initialized, then update)
         target_dtype = self.getTargetDtype()
@@ -1416,7 +1435,7 @@ class InputTypeUWOVid(InputType):
         for i in range(frames_to_read):
 
             try:
-                frame = readVidFrame(self.vid, self.vid_file)
+                frame = self.readVidFrame(first_frame + i, sequential=True)
             except:
                 frame = None
 
@@ -1509,14 +1528,37 @@ class InputTypeUWOVid(InputType):
 
             return unixTime2Date(mean_ts, mean_tu, dt_obj=dt_obj)
 
+    def readVidFrame(self, frame_no, sequential=False, metadata_only=False):
+        """ Read a frame of the file (not binned or flipped), from memory if the file was preloaded, and save
+            its header to self.vid.
+
+        Arguments:
+            frame_no: [int] Frame number.
+
+        Keyword arguments:
+            sequential: [bool] The frame follows the one read last, so the file is not positioned again (the
+                frames of a chunk are read in a row). False by default.
+            metadata_only: [bool] Only read the header. False by default.
+
+        Return:
+            [ndarray] The frame, None at the end of the file (or with metadata_only).
+        """
+
+        if self.vid_data is not None:
+            return readVidFrameFromBuffer(self.vid, self.vid_data, frame_no*self.vidinfo.seqlen,
+                                          metadata_only=metadata_only)
+
+        if not sequential:
+            self.vid_file.seek(frame_no*self.vidinfo.seqlen)
+
+        return readVidFrame(self.vid, self.vid_file, metadata_only=metadata_only)
+
+
     def loadFrame(self, avepixel=False):
         """ Load the current frame. """
 
-        # Set the vid file pointer to the right byte
-        self.vid_file.seek(self.current_frame*self.vidinfo.seqlen)
-
         # Load a frame
-        frame = readVidFrame(self.vid, self.vid_file)
+        frame = self.readVidFrame(self.current_frame)
 
         # Bin the frame
         if self.detection and (self.config.detection_binning_factor > 1):
@@ -1567,11 +1609,8 @@ class InputTypeUWOVid(InputType):
 
             else:
 
-                # Set the vid file to the right frame
-                self.vid_file.seek(frame_no*self.vidinfo.seqlen)
-
-                # Read the vid file metadata
-                readVidFrame(self.vid, self.vid_file)
+                # Read the vid file metadata of the frame
+                self.readVidFrame(frame_no)
 
                 # Store the current time to the dictionary
                 unix_time_lst = (self.vid.ts, self.vid.tu)
@@ -1579,7 +1618,8 @@ class InputTypeUWOVid(InputType):
                     self.utime_frame_dict[frame_no] = unix_time_lst
 
                 # Revert the vid file pointer to the current frame in the image handle
-                self.vid_file.seek((self.current_frame + 1)*self.vidinfo.seqlen)
+                if self.vid_data is None:
+                    self.vid_file.seek((self.current_frame + 1)*self.vidinfo.seqlen)
 
                 dt = unixTime2Date(*unix_time_lst, dt_obj=True)
 
@@ -2680,7 +2720,8 @@ def detectInputType(input_path, config, beginning_time=None, fps=None, skip_ff_d
         detection: [bool] Indicates that the input is used for detection. False by default. This will
                 control whether the binning is applied or not. No effect on FF image handle.
         use_fr_files: [bool] Include FR files together with FF files. False by default, only used in SkyFit.
-        preload_video: [bool] Preload the video file. False by default. This is only used for video files.
+        preload_video: [bool] Preload the video file. False by default. This is only used for video files and
+            .vid files (only if not larger than config.vid_preload_max_mb).
             Uses a lot of memory, so only use for small videos.
         flipud: [bool] Flip the image vertically. False by default.
         chunk_frames: [int] Number of frames to read in a chunk. None by default, in which case the defaults
@@ -2808,7 +2849,8 @@ def detectInputTypeFile(input_file, config, beginning_time=None, fps=None, detec
             the config file.
         detection: [bool] Indicates that the input is used for detection. False by default. This will
                 control whether the binning is applied or not. No effect on FF image handle.
-        preload_video: [bool] Preload the video file. False by default. This is only used for video files.
+        preload_video: [bool] Preload the video file. False by default. This is only used for video files and
+            .vid files (only if not larger than config.vid_preload_max_mb).
         flipud: [bool] Flip the image vertically. False by default.
         chunk_frames: [int] Number of frames to read in a chunk. None by default, in which case the defaults
             will be used specified for each input type.
@@ -2838,8 +2880,8 @@ def detectInputTypeFile(input_file, config, beginning_time=None, fps=None, detec
     elif file_name.endswith('.vid'):
 
         # Init the image handle for UWO-type .vid files
-        img_handle = InputTypeUWOVid(input_file, config, detection=detection, flipud=flipud, 
-                                     chunk_frames=chunk_frames)
+        img_handle = InputTypeUWOVid(input_file, config, detection=detection, flipud=flipud,
+                                     chunk_frames=chunk_frames, preload_video=preload_video)
 
     elif config.width == 4912 or config.width == 7360:
         img_handle = InputTypeDFN(input_file, config, beginning_time=beginning_time, fps=fps)

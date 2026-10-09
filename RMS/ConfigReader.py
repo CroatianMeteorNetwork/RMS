@@ -595,6 +595,10 @@ class Config:
         # Background estimation parameters
         self.background_reservoir_size = 64
 
+        # Largest .vid file (MB) which is read into memory once when the input is preloaded (the processing reads
+        #   the frames several times); larger files are read from the disk every time
+        self.vid_preload_max_mb = 2048
+
         # KHT Line finding parameters
         # Minimum number of pixels required to form a valid cluster
         self.kht_cluster_min_size = 9
@@ -1929,6 +1933,10 @@ def parseMeteorDetection(config, parser):
     # Load the background reservoir size
     if parser.has_option(section, "background_reservoir_size"):
         config.background_reservoir_size = parser.getint(section, "background_reservoir_size")
+
+    # Largest .vid file read into memory when the input is preloaded
+    if parser.has_option(section, "vid_preload_max_mb"):
+        config.vid_preload_max_mb = parser.getfloat(section, "vid_preload_max_mb")
 
     if parser.has_option(section, "kht_n_sigmas"):
         config.kht_n_sigmas = parser.getfloat(section, "kht_n_sigmas")

@@ -150,6 +150,60 @@ def readFrame(st, fid, metadata_only=False):
 
 
 
+# Layout of the header of a frame: (field, dtype, byte offset), as read by readFrame
+VID_HEADER_FIELDS = [('magic', np.uint32, 0), ('seqlen', np.uint32, 4), ('headlen', np.uint32, 8),
+                     ('flags', np.uint32, 12), ('seq', np.uint32, 16), ('ts', np.int32, 20), ('tu', np.int32, 24),
+                     ('station_id', np.int16, 28), ('wid', np.int16, 30), ('ht', np.int16, 32),
+                     ('depth', np.int16, 34), ('hx', np.uint16, 36), ('hy', np.uint16, 38),
+                     ('str_num', np.uint16, 40), ('reserved0', np.uint16, 42), ('exposure', np.uint32, 44),
+                     ('reserved2', np.uint32, 48)]
+VID_TEXT_OFFSET = 52
+VID_TEXT_LENGTH = 64
+
+
+def readFrameFromBuffer(st, buf, offset, metadata_only=False):
+    """ Read the frame which begins at the given byte offset of a vid file loaded into memory, the same way as
+        readFrame reads it from the file: save its header to the given structure and return the image data.
+
+    Arguments:
+        st: [Vid structure]
+        buf: [ndarray] uint8 array with the contents of the vid file.
+        offset: [int] Byte offset of the beginning of the frame.
+
+    Keyword arguments:
+        metadata_only: [bool] Only read the metadata, but not the whole frame. False by default
+
+    Return:
+        [ndarray] The image (a copy), None if the frame is beyond the end of the data or incomplete (or only
+            the metadata was read).
+    """
+
+    # The end of the data, or a header which is not complete
+    if offset + VID_TEXT_OFFSET + VID_TEXT_LENGTH > len(buf):
+        return None
+
+    # The header fields, at their fixed byte offsets (in the byte order of the machine, as np.fromfile reads)
+    for name, dtype, pos in VID_HEADER_FIELDS:
+        setattr(st, name, int(np.frombuffer(buf, dtype=dtype, count=1, offset=offset + pos)[0]))
+
+    text = buf[offset + VID_TEXT_OFFSET:offset + VID_TEXT_OFFSET + VID_TEXT_LENGTH]
+    st.text = text.tobytes().decode("ascii").replace('\0', '')
+
+    if metadata_only:
+        return None
+
+    # The whole frame (an incomplete last frame is not read)
+    if offset + st.seqlen > len(buf):
+        return None
+
+    fr = np.frombuffer(buf, dtype=np.uint16, count=st.seqlen//2, offset=offset).copy()
+
+    # Set the values of the first row to 0 (the header is stored there), as readFrame does
+    fr[:st.ht] = 0
+
+    return fr.reshape(st.ht, st.wid)
+
+
 def readVid(dir_path, file_name):
     """ Read in a *.vid file. 
     

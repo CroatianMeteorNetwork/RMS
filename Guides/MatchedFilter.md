@@ -146,6 +146,12 @@ The CPU search is limited by memory access, so more than about 8 threads per wor
 workers, set `mf_threads` to the number of CPU cores divided by the number of workers. Memory: about 2 GB per
 worker in addition to the normal processing.
 
+The matched filter reads the frames of a file several times (the star extraction, the background, the search,
+the measurement and the verification), about five times in all. On slow storage (e.g. spinning disks shared by
+several workers) reading takes most of the time. A `.vid` file which is not larger than `vid_preload_max_mb`
+(`[MeteorDetection]`, 2048 MB by default, about 2 minutes of 512x512 frames) is read into memory once and all
+steps read the frames from there; this needs memory for the whole file in every worker.
+
 
 ## Tests
 
