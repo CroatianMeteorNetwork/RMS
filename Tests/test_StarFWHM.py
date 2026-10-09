@@ -3,6 +3,7 @@ Tests of the FWHM of the stars: the star extractor gives the FWHM of a round sta
 files keep it, including older files written with the FWHM larger by sqrt(2).
 """
 
+import json
 import math
 
 import numpy as np
@@ -10,6 +11,7 @@ import pytest
 
 from RMS.ExtractStars import extractStars
 from RMS.Formats import CALSTARS
+from Utils.Flux import getSensorCharacterization
 
 
 def _starImage(sigma, size=200, n=5, peak=150.0, sky=20.0, seed=1):
@@ -72,3 +74,22 @@ def test_older_calstars_fwhm_is_converted(tmp_path):
     stars = star_list[0][1]
     assert stars[0][4] == pytest.approx(2.83/math.sqrt(2))
     assert stars[1][4] == -1.0
+
+
+def test_flux_sensor_cache_of_older_definition_is_converted(tmp_path):
+    """ The FWHM of a sensor characterization cache of the flux saved before the definition of the FWHM was stored
+        is converted like the FWHM of older CALSTARS files, and a cache of the new definition is read as is.
+    """
+
+    ff_name = 'FF_XX0001_20260101_000000_000_0000000.fits'
+
+    # A cache of the older definition (no definition stored)
+    path = tmp_path/'flux_sensor_characterization.json'
+    path.write_text(json.dumps({ff_name: [2.83], '-1': {"FF file name": ['median star FWHM']}}))
+    sensor_data = getSensorCharacterization(str(tmp_path), None, None, None)
+    assert sensor_data[ff_name][0] == pytest.approx(2.83/math.sqrt(2))
+
+    # A cache of the new definition
+    path.write_text(json.dumps({ff_name: [2.0], 'fwhm_definition': CALSTARS.FWHM_DEFINITION}))
+    sensor_data = getSensorCharacterization(str(tmp_path), None, None, None)
+    assert sensor_data[ff_name][0] == pytest.approx(2.0)
