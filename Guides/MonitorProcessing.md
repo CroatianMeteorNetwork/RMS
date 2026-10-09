@@ -480,6 +480,14 @@ over: the nights are reported again and the failed files are retried.
   which steps failed. The trigger file also retries nights whose report failed.
 
 
+## Faint objects: the matched filter
+
+With `mf_enable: true` in the `[MatchedFilter]` section, every file also goes through the matched-filter
+detection after the normal detection, which finds moving objects too faint to be seen in single frames. Its
+results are kept in a `matched_filter` directory next to the normal results and in the night directory. See
+[MatchedFilter.md](MatchedFilter.md).
+
+
 ## Upgrading from the old monitor
 
 Results of the old monitor have an empty `done.flag`. They count as processed, so their files are not

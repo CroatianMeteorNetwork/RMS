@@ -47,6 +47,7 @@ from RMS.Routines import Image
 from RMS.MonitorNightReport import exitWithMonitor, latestPlateparPath, lockOutputDir, lockOwner, \
     MONITOR_LOCK_FILE_NAME, nightDirPath, nightInfo, NightReporter, readDoneFlag, readStateFile, ReportLock, \
     stopProcess, writeDoneFlag
+from RMS.ExtractStarsFrameInterface import extractStarsFrameInterface
 from RMS.DetectStarsAndMeteors import (
     detectStarsAndMeteorsFrameInterface,
     saveResultsFrameInterface,
@@ -758,11 +759,53 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
         if config.monitor_save_images and (img_handle.input_type != 'ff'):
             image_saver = ChunkImageSaver(night_dir, config, file_name, dark=dark, flat_struct=flat_struct)
 
-        # Run star extraction and meteor detection
-        star_list, meteor_list = detectStarsAndMeteorsFrameInterface(
-            img_handle, config, flat_struct=flat_struct, dark=dark, mask=mask,
-            chunk_frames=chunk_frames, chunk_callback=image_saver
-        )
+        # The matched filter replaces the normal detection: its detections are the results of the file. It
+        #   needs the frames, so FF files always use the normal detection
+        mf_only = config.mf_enable and config.mf_replace_detection and (img_handle.input_type != 'ff')
+
+        if mf_only:
+
+            # The matched filter is imported here, in the worker, and not at the top of the module: importing its
+            #   kernels checks for a CUDA GPU, which initializes CUDA. Imported at the top, CUDA would be
+            #   initialized in the main monitor process, and a CUDA context can't be used in the processes forked
+            #   from it (the workers)
+            from RMS.MatchedFilterDetection import MATCHED_FILTER_DIR, detectMatchedFilter, saveSummary
+
+            # Results of an earlier processing with the separate matched-filter pass would be merged again
+            shutil.rmtree(os.path.join(results_dir, MATCHED_FILTER_DIR), ignore_errors=True)
+
+            # Star extraction (and the image pairs), then the matched filter instead of the normal detection
+            star_list = extractStarsFrameInterface(img_handle, config, chunk_frames=chunk_frames,
+                flat_struct=flat_struct, dark=dark, mask=mask, save_calstars=False, chunk_callback=image_saver)
+
+            # Like the normal detection, nothing is detected without enough stars (clouds, twilight). The number
+            #   of stars is the largest number in a chunk of frames
+            max_stars = max([len(entry[1]) for entry in star_list] + [0])
+            mf_t0 = time.time()
+            if max_stars >= config.ff_min_stars:
+                meteor_list, mf_detector = detectMatchedFilter(img_handle, config, mask=mask, dark=dark,
+                                                               flat_struct=flat_struct, star_list=star_list,
+                                                               return_detector=True)
+            else:
+                proc_log.info("Not enough stars for the matched filter: {:d} < {:d}".format(max_stars,
+                                                                                          config.ff_min_stars))
+                meteor_list, mf_detector = [], None
+
+            # The summary of the matched filter is saved as its done file in the results directory. The
+            #   detections themselves are saved below with the stars, as the results of the normal detection
+            saveSummary(results_dir, mf_detector, input_file=os.path.abspath(file_path),
+                        detections=len(meteor_list), max_stars=max_stars,
+                        processing_time_s=round(time.time() - mf_t0, 1))
+            proc_log.info("Matched filter (replacing the normal detection): {:d} detections".format(
+                len(meteor_list)))
+
+        else:
+
+            # Run star extraction and meteor detection
+            star_list, meteor_list = detectStarsAndMeteorsFrameInterface(
+                img_handle, config, flat_struct=flat_struct, dark=dark, mask=mask,
+                chunk_frames=chunk_frames, chunk_callback=image_saver
+            )
 
         # Save the images of the frames after the last full chunk
         if image_saver is not None:
@@ -779,6 +822,54 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
         )
 
         proc_log.info("Detection results saved to: {}".format(results_dir))
+
+        # Optional detection of faint moving objects with the matched filter, saved apart from the normal
+        #   results. It needs the frames, so FF files are skipped. A failure doesn't fail the file, the normal
+        #   results are complete. The results of an earlier processing of the file are not kept (if this pass
+        #   fails or is skipped, there are no matched-filter results rather than old ones)
+        mf_pass = config.mf_enable and (img_handle.input_type != 'ff') and (not mf_only)
+        if mf_pass:
+
+            # Imported only when used (see above), and the old results removed
+            from RMS.MatchedFilterDetection import MATCHED_FILTER_DIR
+            shutil.rmtree(os.path.join(results_dir, MATCHED_FILTER_DIR), ignore_errors=True)
+
+            # Like the normal detection, it needs enough stars (not in clouds or twilight)
+            max_stars = max([len(entry[1]) for entry in (star_list or [])] + [0])
+            if max_stars < config.ff_min_stars:
+                proc_log.info("Not enough stars for the matched filter: {:d} < {:d}".format(max_stars,
+                                                                                          config.ff_min_stars))
+                mf_pass = False
+
+        if mf_pass:
+            try:
+                from RMS.MatchedFilterDetection import (MATCHED_FILTER_DIR, detectMatchedFilter,
+                                                        saveMatchedFilterResults, saveSummary)
+
+                # Detect on the same frames and calibration as the normal detection, and use its stars for the
+                #   aperture correction of the intensities
+                mf_t0 = time.time()
+                mf_dir = os.path.join(results_dir, MATCHED_FILTER_DIR)
+                mf_detections, mf_detector = detectMatchedFilter(img_handle, config, mask=mask, dark=dark,
+                                                                 flat_struct=flat_struct, star_list=star_list,
+                                                                 return_detector=True)
+                # Save the FTPdetectinfo and CALSTARS of the matched filter in its subdirectory, assigned to the
+                #   same chunk images as the normal detections, and recalibrate them with the platepar of the
+                #   results
+                mf_ftp_path = saveMatchedFilterResults(
+                    mf_detections, star_list, img_handle, config, mf_dir,
+                    platepar_path=results_platepar_path, chunk_frames=chunk_frames,
+                    chunk_images=(image_saver.chunk_images if image_saver is not None else None),
+                    ecsv_out=config.monitor_save_ecsv)
+                # The done file is written last: the night report only merges the results which have one
+                saveSummary(mf_dir, mf_detector, input_file=os.path.abspath(file_path),
+                            ftpdetectinfo=os.path.basename(mf_ftp_path), detections=len(mf_detections),
+                            processing_time_s=round(time.time() - mf_t0, 1))
+                proc_log.info("Matched filter: {:d} detections saved to: {}".format(len(mf_detections),
+                                                                                    mf_ftp_path))
+
+            except Exception:
+                proc_log.error("The matched-filter detection failed:\n" + traceback.format_exc())
 
         # Release the video handle if applicable
         if hasattr(img_handle, 'cap') and img_handle.cap is not None:

@@ -493,11 +493,13 @@ def getSegmentStripeIndices(config, rho, theta, img_h, img_w, line_start=None, l
         (indicesy, indicesx): [tuple] y and x indices of the stripe pixels.
     """
 
+    # The stripe around the whole line, across the image
     inds_y, inds_x = getStripeIndices(rho, theta, stripe_width_factor*config.stripe_width, img_h, img_w)
 
     if (line_start is None) or (line_end is None):
         return inds_y, inds_x
 
+    # The vector of the segment and its squared length
     p1 = np.array(line_start, dtype=np.float64)
     line_vec = np.array(line_end, dtype=np.float64) - p1
     line_len_sq = np.dot(line_vec, line_vec)
@@ -505,7 +507,8 @@ def getSegmentStripeIndices(config, rho, theta, img_h, img_w, line_start=None, l
     if line_len_sq <= 0:
         return inds_y, inds_x
 
-    # Position of the stripe pixels along the segment, 0 at the start and 1 at the end
+    # Position of the stripe pixels along the segment, 0 at the start and 1 at the end: the projection of the
+    #   vector from the start to the pixel on the segment, t = (p - p1).(p2 - p1)/|p2 - p1|^2
     t = ((inds_x - p1[0])*line_vec[0] + (inds_y - p1[1])*line_vec[1])/line_len_sq
 
     # Allow a margin of one stripe width at both ends
@@ -535,9 +538,13 @@ def windowPoints(ff, img_thresh, frame_min, frame_max):
         [WindowPoints] Points of the window.
     """
 
+    # The threshold passers without the lonely pixels (morph.clean works in place, so on a copy)
     ys, xs = np.nonzero(morph.clean(img_thresh.copy()))
+
+    # The frame of every point is the frame of its maximum in the window
     zs = frame_min + ff.maxframe[ys, xs].astype(np.int64)
 
+    # The thresholded image is kept packed to bits (8 times smaller), it is only read along short segments
     return WindowPoints(frame_min, frame_max, xs, ys, zs, np.packbits(img_thresh > 0), img_thresh.shape)
 
 
@@ -555,14 +562,18 @@ def windowThresholdConnected(window_points, frame, x1, y1, x2, y2):
         [float] Fraction of the segment above the threshold, None if no window has the frame.
     """
 
+    # The windows which contain the frame, and of them the one whose centre is closest to it
     windows = [wp for wp in window_points if wp.frame_min <= frame <= wp.frame_max]
     if not windows:
         return None
 
     wp = min(windows, key=lambda wp: abs((wp.frame_min + wp.frame_max)/2.0 - frame))
+
+    # Unpack the thresholded image of the window (packbits pads the bits to a whole number of bytes)
     h, w = wp.shape
     img = np.unpackbits(wp.thresh)[:h*w].reshape(h, w)
 
+    # Sample the segment every half pixel, at the nearest pixels
     n = max(2, int(np.ceil(2*np.hypot(x2 - x1, y2 - y1))) + 1)
     xs = np.clip(np.round(np.linspace(x1, x2, n)).astype(int), 0, w - 1)
     ys = np.clip(np.round(np.linspace(y1, y2, n)).astype(int), 0, h - 1)
@@ -593,15 +604,18 @@ def getWindowStripePoints(config, window_points, frame_min, frame_max, rho, thet
         xs, ys, zs: [tuple of ndarrays] Coordinates and frames of the points.
     """
 
+    # The pixels of the stripe around the line segment as an image, to look up the points
     stripe = np.zeros((img_h, img_w), dtype=bool)
     stripe[getSegmentStripeIndices(config, rho, theta, img_h, img_w, line_start, line_end)] = True
 
     points = []
     for wp in window_points:
 
+        # Skip the windows outside the frame range
         if (wp.frame_max < frame_min) or (wp.frame_min > frame_max):
             continue
 
+        # The points of the window in the stripe and in the frame range
         sel = stripe[wp.ys, wp.xs] & (wp.zs >= frame_min) & (wp.zs <= frame_max)
         points.append(np.column_stack([wp.xs[sel], wp.ys[sel], wp.zs[sel]]))
 

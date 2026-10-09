@@ -20,6 +20,7 @@ import numpy as np
 import pytest
 
 import RMS.ConfigReader as cr
+import RMS.MatchedFilterDetection as mfd
 import RMS.MonitorProcessFrameInterface as mon
 from RMS.Formats import FFfile, FFpng, FTPdetectinfo
 
@@ -461,6 +462,64 @@ def test_processFile_uses_latest_platepar_unless_given_is_newer(process_file, tm
     os.utime(latest_path, (0, 0))
     os.utime(str(tmp_path/'given.cal'), None)
     assert _usedPlatepar() == 'given'
+
+
+@pytest.mark.parametrize('mf_enable, mf_fails', [(False, False), (True, False), (True, True)])
+def test_matched_filter_pass(config_path, tmp_path, monkeypatch, mf_enable, mf_fails):
+    """ The matched filter runs after the normal detection when it is enabled, saves its results into their
+        own directory, and its failure doesn't fail the file.
+    """
+
+    # The config of the test (with or without the matched filter), a synthetic input and no calibration
+    config = cr.parse(config_path)
+    config.monitor_save_images = False
+    config.mf_enable = mf_enable
+    monkeypatch.setattr(cr, 'parse', lambda path: config)
+    monkeypatch.setattr(mon, 'detectInputType', lambda *args, **kwargs: _ProcessHandle(str(tmp_path)))
+    monkeypatch.setattr(mon, 'loadImageCalibration', lambda *args, **kwargs: (None, None, None))
+
+    # The normal detection is replaced by one which returns enough stars for the detection (the matched filter
+    #   is skipped without them, like the normal detection) and no detections, and its results are not saved for the detection (the matched filter is skipped without them, like the normal detection)
+    stars = [['FF_XX0001_20260101_000000_000_0000000.fits', [(10.0, 10.0, 100.0)]*config.ff_min_stars]]
+    monkeypatch.setattr(mon, 'detectStarsAndMeteorsFrameInterface', lambda *args, **kwargs: (stars, []))
+    monkeypatch.setattr(mon, 'saveResultsFrameInterface', lambda *args, **kwargs: None)
+
+    # The matched filter is replaced by functions which record their calls (and the output directory of the
+    #   results), and the detection fails if requested. The monitor imports them from the module when it runs
+    #   them, so they are replaced in the module
+    calls = []
+
+    def _detect(img_handle, config, **kwargs):
+        calls.append('detect')
+        if mf_fails:
+            raise RuntimeError("matched filter failure")
+        return [], None
+
+    def _save(detections, star_list, img_handle, config, output_dir, **kwargs):
+        calls.append(output_dir)
+        return os.path.join(output_dir, 'FTPdetectinfo_mf.txt')
+
+    monkeypatch.setattr(mfd, 'detectMatchedFilter', _detect)
+    monkeypatch.setattr(mfd, 'saveMatchedFilterResults', _save)
+
+    given_platepar = tmp_path/'given.cal'
+    given_platepar.write_text('given')
+    output_dir = tmp_path/'out'
+
+    # The file is processed successfully in every case, with the normal results
+    assert mon.processFile(str(tmp_path/'dummy.vid'), config_path, str(given_platepar), str(output_dir), 128)
+
+    results_dir = os.path.join(str(output_dir), '2025', '202512', '20251225', 'dummy')
+    assert mon.hasResults(results_dir)
+
+    # Disabled: not run. Failed: nothing saved. Otherwise: saved into the matched-filter directory of the
+    #   results
+    if not mf_enable:
+        assert calls == []
+    elif mf_fails:
+        assert calls == ['detect']
+    else:
+        assert calls == ['detect', os.path.join(results_dir, mfd.MATCHED_FILTER_DIR)]
 
 
 def test_walkInput_skips_monitor_output(tmp_path):
@@ -1015,3 +1074,76 @@ def test_missing_camera_files_are_found(tmp_path):
     assert mon.missingCameraFiles(config_path, config_path) == []
     assert mon.missingCameraFiles(config_path, str(tmp_path/'pp.cal'), dark_path=str(tmp_path/'dark.png')) == \
         [str(tmp_path/'pp.cal'), str(tmp_path/'dark.png')]
+
+
+
+@pytest.mark.parametrize('enough_stars', [True, False])
+def test_matched_filter_replaces_detection(config_path, tmp_path, monkeypatch, enough_stars):
+    """ With mf_replace_detection, the normal detection is not run, the stars are extracted, and the
+        detections of the matched filter are the results of the file. Without enough stars (clouds), nothing is
+        detected, as in the normal detection. Results of an earlier separate matched-filter pass are removed.
+    """
+
+    # The config of the test with the matched filter replacing the normal detection, a synthetic input and no
+    #   calibration
+    config = cr.parse(config_path)
+    config.monitor_save_images = False
+    config.mf_enable = True
+    config.mf_replace_detection = True
+    monkeypatch.setattr(cr, 'parse', lambda path: config)
+    monkeypatch.setattr(mon, 'detectInputType', lambda *args, **kwargs: _ProcessHandle(str(tmp_path)))
+    monkeypatch.setattr(mon, 'loadImageCalibration', lambda *args, **kwargs: (None, None, None))
+
+    # The normal detection, the star extraction, the matched filter and the saving of the results are replaced
+    #   by functions which record their calls. The star extraction gives enough stars, or one star too few
+    calls = {}
+
+    def _normal(*args, **kwargs):
+        calls['normal'] = True
+        return [], []
+
+    def _stars(*args, **kwargs):
+        calls['stars'] = True
+        n_stars = config.ff_min_stars if enough_stars else config.ff_min_stars - 1
+        return [['FF_XX0001_20251225_030000_000_0000000.fits', [(10.0, 20.0, 100, 50, 2.0, 7, 9.0, 0)]*n_stars]]
+
+    # One detection of the matched filter: [rho, theta, centroids]
+    detections = [[1.0, 2.0, np.array([[1.0, 10.0, 20.0, 100, 50, 5.0, 0]])]]
+
+    def _mf(img_handle, config, **kwargs):
+        calls['mf'] = True
+        return detections, None
+
+    def _save(star_list, meteor_list, img_handle, config, **kwargs):
+        calls['saved'] = (star_list, meteor_list, kwargs.get('output_suffix', ''))
+
+    monkeypatch.setattr(mon, 'detectStarsAndMeteorsFrameInterface', _normal)
+    monkeypatch.setattr(mon, 'extractStarsFrameInterface', _stars)
+    monkeypatch.setattr(mfd, 'detectMatchedFilter', _mf)
+    monkeypatch.setattr(mon, 'saveResultsFrameInterface', _save)
+
+    given_platepar = tmp_path/'given.cal'
+    given_platepar.write_text('given')
+
+    # Results of an earlier processing with the separate matched-filter pass
+    results_dir = os.path.join(str(tmp_path/'out'), '2025', '202512', '20251225', 'dummy')
+    os.makedirs(os.path.join(results_dir, mfd.MATCHED_FILTER_DIR))
+
+    assert mon.processFile(str(tmp_path/'dummy.vid'), config_path, str(given_platepar), str(tmp_path/'out'), 128)
+
+    # The normal detection is not run, the stars are extracted, and the matched filter runs only with enough
+    #   stars
+    assert 'normal' not in calls
+    assert calls['stars'] and (calls.get('mf', False) == enough_stars)
+
+    # The results of the file (no suffix) are the stars and the detections of the matched filter
+    star_list, meteor_list, suffix = calls['saved']
+    assert len(star_list) == 1 and suffix == ''
+    if enough_stars:
+        assert meteor_list is detections
+    else:
+        assert meteor_list == []
+
+    # The summary of the matched filter is saved with the results, and there is no separate directory
+    assert os.path.isfile(os.path.join(results_dir, mfd.DONE_NAME))
+    assert not os.path.isdir(os.path.join(results_dir, mfd.MATCHED_FILTER_DIR))
