@@ -108,6 +108,8 @@ class FluxConfig(object):
         self.meteors_min = 3
 
         # Default star FWHM, it it's not available (pz)
+        # FWHM of the stars (px) for old data without FWHM in the CALSTARS files (3 px in the definition of the
+        #   FWHM of older CALSTARS files, which was larger by sqrt(2))
         self.default_fwhm = 2.1
 
         # Filter out nights which have too many detections - it is assumed that the false positives are
@@ -1899,6 +1901,15 @@ def getSensorCharacterization(dir_path, config, flux_config, meteor_data, defaul
             if '-1' in sensor_data:
                 del sensor_data['-1']
 
+            # The FWHM of files saved before the definition of the FWHM was stored is the FWHM of older CALSTARS
+            #   files, larger by sqrt(2) (see CALSTARS.writeCALSTARS): it is converted, so the flux doesn't
+            #   depend on whether this file existed
+            fwhm_definition = sensor_data.pop('fwhm_definition', None)
+            if fwhm_definition is None:
+                for key in sensor_data:
+                    if sensor_data[key][0] > 0:
+                        sensor_data[key][0] /= np.sqrt(2)
+
             # If file FWHM is -1 and the default FWHM is not, override it
             for key in sensor_data:
                 fwhm = sensor_data[key][0]
@@ -1921,6 +1932,9 @@ def getSensorCharacterization(dir_path, config, flux_config, meteor_data, defaul
             # Add an explanation what each entry means
             sensor_data_save = dict(sensor_data)
             sensor_data_save['-1'] = {"FF file name": ['median star FWHM']}
+
+            # The definition of the FWHM, so files of an older definition can be told apart
+            sensor_data_save['fwhm_definition'] = "2.355*sqrt((sigma_x^2 + sigma_y^2)/2)"
 
             # Convert collection areas to JSON
             out_str = json.dumps(sensor_data_save, indent=4, sort_keys=True)

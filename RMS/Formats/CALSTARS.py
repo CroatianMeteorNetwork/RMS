@@ -16,6 +16,7 @@
 
 
 import os
+import math
 
 from RMS.Formats.FFfile import validFFName
 
@@ -59,6 +60,10 @@ def writeCALSTARS(star_list, ff_directory, file_name, cam_code, nrows, ncols, ch
         star_file.write("Nrows   = " + str(nrows) + "\n")
         star_file.write("Ncols   = " + str(ncols) + "\n")
         star_file.write("Nframes = " + str(chunk_frames) + "\n")
+        # The definition of the FWHM column: 2.355 times the mean (quadratic) sigma of the two axes of the
+        #   fitted Gaussian. Older files, without this line, have 2.355*sqrt(sigma_x^2 + sigma_y^2), larger by
+        #   sqrt(2) for a round star
+        star_file.write("FWHM    = 2.355*sqrt((sigma_x^2 + sigma_y^2)/2)\n")
         if fps is not None:
             star_file.write("FPS     = {:.6f}\n".format(fps))
         star_file.write("Nstars  = -1" + "\n")
@@ -156,7 +161,12 @@ def readCALSTARS(file_path, file_name, chunk_frames=256, return_fps=False):
 
         # Read Nframes and FPS from the header. These set the chunk timing, reconstructed downstream as
         #   "FF header time + Nframes/(2*FPS)", so a wrong frame count or fps shifts the assigned star time.
+        #   The FWHM of older files, without the line of its definition (see writeCALSTARS), is larger by
+        #   sqrt(2), and it is divided by sqrt(2) so all files give the same quantity
+        fwhm_factor = 1.0/math.sqrt(2)
         for line in all_lines[:body_start]:
+            if line.startswith("FWHM"):
+                fwhm_factor = 1.0
             if "Nframes" in line:
                 try:
                     chunk_frames = int(line.split('=')[-1])
@@ -212,9 +222,11 @@ def readCALSTARS(file_path, file_name, chunk_frames=256, return_fps=False):
             # Read the star data
             y, x, level, amplitude = float(line[0]), float(line[1]), int(line[2]), int(line[3])
 
-            # Read FWHM if given
+            # Read FWHM if given (-1 if it was not measured)
             if len(line) >= 5:
                 fwhm = float(line[4])
+                if fwhm > 0:
+                    fwhm *= fwhm_factor
             else:
                 fwhm = -1.0
 
