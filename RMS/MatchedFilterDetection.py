@@ -882,6 +882,14 @@ class MatchedFilterDetector(object):
         self.persistence_counts = {}
         self.persistence_runs = {}
 
+        # The PSF sigma is measured on the stars of the first block in which enough isolated stars are visible (the
+        #   first blocks can be clouded), unless it is given. Until then 1 px is used: the smoothing of the search
+        #   is at least 1 px (see searchSigma), so the search is the same as with the measured sigma if the PSF
+        #   is narrower
+        psf_measured = self.psf_sigma is not None
+        if not psf_measured:
+            self.psf_sigma = 1.0
+
         # The search, block by block: read the frames, normalize them, and search them
         hits = []
         for k, (first, last) in enumerate(zip(self.block_starts, self.block_ends)):
@@ -890,17 +898,14 @@ class MatchedFilterDetector(object):
             frames = self.readFrames(first, last - first)
             self.timing['read'] += time() - t1
 
-            # Measure the PSF sigma on the stars of the first block, unless it is given
+            # Measure the PSF sigma on the stars of the mean of the block, against the noise of the sky in the mean
             bg = self.backgrounds[k]
-            if self.psf_sigma is None:
-                # The stars of the mean of the block, against the noise of the sky in the mean
+            if not psf_measured:
                 sigma = estimatePSFSigma(frames.mean(axis=0) - bg.sky, bg.sky_noise/math.sqrt(len(frames)))
-                if sigma is None:
-                    sigma = 1.0
-                    log.warning('Matched filter: the PSF sigma could not be measured on the stars, 1.0 px '
-                                'assumed (set mf_psf_sigma)')
-                self.psf_sigma = sigma
-                log.info('Matched filter: PSF sigma {:.2f} px'.format(self.psf_sigma))
+                if sigma is not None:
+                    self.psf_sigma = sigma
+                    psf_measured = True
+                    log.info('Matched filter: PSF sigma {:.2f} px (block {:d})'.format(self.psf_sigma, k))
 
             # The mean of the block (for the photometry of the stars), the static mask, and the frames normalized to
             #   unit noise (in place, the raw frames are not needed any more)
@@ -915,6 +920,10 @@ class MatchedFilterDetector(object):
             t1 = time()
             hits += self.searchBlock(z, static, first, stackers)
             self.timing['search'] += time() - t1
+
+        if not psf_measured:
+            log.warning('Matched filter: the PSF sigma could not be measured on the stars, 1.0 px assumed (set '
+                        'mf_psf_sigma)')
 
         return self.removePersistent(hits)
 
