@@ -1001,3 +1001,38 @@ def test_flashes_without_light_between_are_linked(config):
     assert len(detections) == 1
     cent = detections[0][2]
     assert np.median(truthError(cent[np.isin(np.round(cent[:, 0]).astype(int), list(flashes))], obj)) < 0.3
+
+
+@pytest.mark.parametrize('measurable_from_block', [1, None])
+def test_psf_measured_on_a_later_block(config, monkeypatch, measurable_from_block):
+    """ The PSF sigma is measured on the first block in which it can be measured (e.g. the first blocks are
+        clouded), and 1 px is used if it can't be measured on any block.
+    """
+
+    # The PSF is measured, not given
+    config.mf_psf_sigma = 0
+
+    # The measurement fails on the blocks before measurable_from_block, and gives 0.8 px from it on
+    calls = []
+
+    def _estimate(image, noise, **kwargs):
+        calls.append(len(calls))
+        if (measurable_from_block is None) or (len(calls) - 1 < measurable_from_block):
+            return None
+        return 0.8
+
+    monkeypatch.setattr(mfd, 'estimatePSFSigma', _estimate)
+
+    obj = linearObject(3.0, 25, 30, 0.3, 0.12, 40, 470)
+    det, detections = runDetector(_SynthHandle([obj]), config)
+
+    # Measured on the second block and not again; or tried on every block and 1 px used
+    if measurable_from_block is None:
+        assert len(calls) == len(det.block_starts)
+        assert det.psf_sigma == 1.0
+    else:
+        assert len(calls) == measurable_from_block + 1
+        assert det.psf_sigma == 0.8
+
+    # The object is detected either way
+    assert len(detections) == 1
