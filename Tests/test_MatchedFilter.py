@@ -1071,3 +1071,58 @@ def test_psf_measured_on_a_later_block(config, monkeypatch, measurable_from_bloc
 
     # The object is detected either way
     assert len(detections) == 1
+
+
+def test_search_tiers(config):
+    """ The speeds are searched in tiers of binning: a tier with the bin B covers the speeds up to tier_speed*B
+        px per frame, and the last tier (at most max_bin) covers the speeds up to the largest one. Without tiers,
+        or when the largest speed is in the first tier, all speeds are searched on the bins of the search.
+    """
+
+    det = MatchedFilterDetector(_SynthHandle([], total_frames=64), config)
+
+    # The largest speed of the config fixture is 2 px/frame: one tier
+    assert det.searchTiers() == [(2, 0.0, det.opts.speed_max)]
+
+    # Up to 14 px/frame with tiers every 2 binned px per frame: 2x2 up to 4 px/frame, 4x4 up to 8, 8x8 the rest
+    det.opts.speed_max = 14.0
+    assert det.searchTiers() == [(2, 0.0, 4.0), (4, 4.0, 8.0), (8, 8.0, 14.0)]
+
+    # At most 4x4 bins: the second tier covers the rest
+    det.opts.max_bin = 4
+    assert det.searchTiers() == [(2, 0.0, 4.0), (4, 4.0, 14.0)]
+
+    # No tiers
+    det.opts.tier_speed = 0
+    assert det.searchTiers() == [(2, 0.0, 14.0)]
+
+    # The velocity grid of a faster tier starts one grid step below its smallest speed, so the tiers overlap
+    vel = velocityGrid(8.0, 8, 4, speed_min=4.0)
+    speed = np.hypot(vel[:, 0], vel[:, 1])
+    assert speed.min() >= 4.0/4 - 1.0/7 - 1e-9 and speed.min() < 4.0/4
+    assert speed.max() <= 8.0/4 + 1.0/7 + 1e-9
+
+
+def test_fast_object_found_on_coarse_tier(config):
+    """ A fast object, long in every frame (3 px/frame, smeared during the frame), is found by a coarse tier of
+        the search (4x4 bins) and measured accurately, without false detections.
+    """
+
+    # 0.04 deg/px at 25 FPS: 6 deg/s is 6 px/frame, searched on 2x2 bins up to 2 px/frame and on 4x4 bins above
+    #   (tiers every binned px per frame, at most 4x4 bins: the synthetic frames are small)
+    config.mf_ang_vel_max = 6.0
+    config.mf_tier_speed = 1.0
+    config.mf_max_bin = 4
+
+    # A bright object crossing the image diagonally in 40 frames
+    obj = linearObject(12.0, 12, 14, 2.4, 1.8, 100, 140)
+    det, detections = runDetector(_SynthHandle([obj], total_frames=256), config)
+
+    assert [t[0] for t in det.searchTiers()] == [2, 4]
+    assert len(detections) == 1
+    assert np.sqrt(np.mean(truthError(detections[0][2], obj)**2)) < 0.3
+
+    # The object is faster than the first tier: without the coarse tier (speeds up to 2 px/frame), it is not found
+    config.mf_ang_vel_max = 2.0
+    _, detections = runDetector(_SynthHandle([obj], total_frames=256), config)
+    assert len(detections) == 0

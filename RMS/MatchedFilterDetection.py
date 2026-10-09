@@ -173,7 +173,7 @@ TRAIL_KEEP = 6
 
 # A hit: position and time of the middle of a run of frames, velocity (px/frame, unbinned), significance,
 #   and the length of the run
-Hit = collections.namedtuple('Hit', ['frame', 'x', 'y', 'vx', 'vy', 'z', 'run'])
+Hit = collections.namedtuple('Hit', ['frame', 'x', 'y', 'vx', 'vy', 'z', 'run', 'bin'], defaults=(2,))
 
 
 class MatchedFilterOptions(object):
@@ -215,6 +215,8 @@ class MatchedFilterOptions(object):
         self.smooth_frames = config.mf_smooth_frames
         self.max_tracks = config.mf_max_tracks
         self.link_max_gap = config.mf_link_max_gap
+        self.tier_speed = config.mf_tier_speed
+        self.max_bin = config.mf_max_bin
 
         # Saturation level of the raw frames (ADU), 98% of the range of the bit depth if not given
         self.saturation_level = config.mf_saturation_level if config.mf_saturation_level > 0 \
@@ -248,7 +250,7 @@ class MatchedFilterOptions(object):
 
 
 
-def velocityGrid(speed_max, run_frames, bin_factor):
+def velocityGrid(speed_max, run_frames, bin_factor, speed_min=0.0):
     """ Velocities to search, in px per frame of the binned image. The spacing makes the largest position
         error of an object in a run half a binned pixel.
 
@@ -261,6 +263,11 @@ def velocityGrid(speed_max, run_frames, bin_factor):
         speed_max: [float] Largest speed (px/frame, unbinned).
         run_frames: [int] Number of frames in a run.
         bin_factor: [int] Binning of the searched image.
+
+    Keyword arguments:
+        speed_min: [float] Smallest speed (px/frame, unbinned), for the faster tiers of the search (see
+            MatchedFilterDetector.searchTiers). The grid starts one step below it, so the tiers overlap. 0 by
+            default.
 
     Return:
         [ndarray] Velocities (vx, vy) of shape (n_vel, 2), binned px per frame.
@@ -275,6 +282,8 @@ def velocityGrid(speed_max, run_frames, bin_factor):
     grid = np.arange(-np.ceil(v_max/step), np.ceil(v_max/step) + 1)*step
     vx, vy = np.meshgrid(grid, grid)
     keep = vx**2 + vy**2 <= v_max**2
+    if speed_min > 0:
+        keep &= vx**2 + vy**2 >= max(speed_min/bin_factor - step, 0)**2
     vel = np.column_stack([vx[keep], vy[keep]])
 
     # Sorted by speed: for a slow object many velocities give nearly the same sum, and the first (slowest) of
@@ -763,7 +772,7 @@ class MatchedFilterDetector(object):
             z: [ndarray] Frames normalized to unit noise, (n, height, width).
             static: [ndarray] Mask of static sources (True = masked).
             block_first: [int] Index of the first frame of the block.
-            stackers: [list] (run_frames, VelocityStacker) to run.
+            stackers: [list] (run_frames, bin, VelocityStacker) to run.
 
         Return:
             [list] Hits.
@@ -777,31 +786,39 @@ class MatchedFilterDetector(object):
         #   smoothed with the PSF. Binning and smoothing make the frames a matched filter of the PSF: the sum of the
         #   pixels weighted by the PSF is the best estimate of the amplitude of a point source, and the stack of
         #   such frames along the right velocity is the best estimate of the amplitude of the moving object
-        b = self.search_bin
-        sigma_b = self.searchSigma()/b
-        zb = np.empty((len(z), z.shape[1]//b, z.shape[2]//b), dtype=np.float32)
+        #   The frames are binned for every bin of the tiers of the search (see searchTiers), and smoothed with the
+        #   PSF in binned pixels
+        bins = sorted(set(stacker_bin for _, stacker_bin, _ in stackers))
+        zbs = {b: np.empty((len(z), z.shape[1]//b, z.shape[2]//b), dtype=np.float32) for b in bins}
         for i in range(len(z)):
             self.removeTrails(z[i], static)
 
             # The masked pixels don't take part in the stacks of their neighbours either
             z[i][static] = 0
-            binned = binFrames(np.clip(z[i:i + 1], -self.opts.clip, self.opts.clip), b)[0]
-            zb[i] = cv2.GaussianBlur(binned.astype(np.float32), (0, 0), sigma_b)
+            clipped = np.clip(z[i:i + 1], -self.opts.clip, self.opts.clip)
+            for b in bins:
+                binned = binFrames(clipped, b)[0]
+                zbs[b][i] = cv2.GaussianBlur(binned.astype(np.float32), (0, 0), self.searchSigma()/b)
 
         # The static mask binned the same way, grown by a binned pixel (a bin is masked if any of its pixels is)
-        static_b = binFrames(static[None].astype(np.float32), b)[0] > 0
-        static_b = cv2.dilate(static_b.astype(np.uint8), np.ones((3, 3), np.uint8)) > 0
+        statics_b = {}
+        for b in bins:
+            static_b = binFrames(static[None].astype(np.float32), b)[0] > 0
+            statics_b[b] = cv2.dilate(static_b.astype(np.uint8), np.ones((3, 3), np.uint8)) > 0
 
         ### ###
 
         hits = []
-        for run_frames, stacker in stackers:
+        for run_frames, b, stacker in stackers:
+            zb = zbs[b]
+            static_b = statics_b[b]
 
-            # Counts of the runs in which every pixel is above the threshold, for every run length (see
+            # Counts of the runs in which every pixel is above the threshold, for every run length and bin (see
             #   removePersistent)
-            if run_frames not in self.persistence_counts:
-                self.persistence_counts[run_frames] = np.zeros(static_b.shape, dtype=np.int32)
-                self.persistence_runs[run_frames] = 0
+            key = (run_frames, b)
+            if key not in self.persistence_counts:
+                self.persistence_counts[key] = np.zeros(static_b.shape, dtype=np.int32)
+                self.persistence_runs[key] = 0
 
             # Consecutive runs of run_frames frames of the block
             for r0 in range(0, len(zb) - run_frames + 1, run_frames):
@@ -833,8 +850,8 @@ class MatchedFilterDetector(object):
 
                 # Pixels above the threshold, counted for the persistence
                 above = zmax > self.opts.threshold
-                self.persistence_counts[run_frames] += above
-                self.persistence_runs[run_frames] += 1
+                self.persistence_counts[key] += above
+                self.persistence_runs[key] += 1
 
                 # The hits are the local maxima (the largest value within 5x5 binned pixels) above the threshold.
                 #   A hit is at the middle time of the run, at the centre of its binned pixel in unbinned
@@ -844,9 +861,45 @@ class MatchedFilterDetector(object):
                 for yb, xb in zip(*np.nonzero(peaks)):
                     vxb, vyb = stacker.velocities[vel_idx[yb, xb]]
                     hits.append(Hit(block_first + r0 + (run_frames - 1)/2.0, (xb + 0.5)*b - 0.5,
-                                    (yb + 0.5)*b - 0.5, vxb*b, vyb*b, float(zmax[yb, xb]), run_frames))
+                                    (yb + 0.5)*b - 0.5, vxb*b, vyb*b, float(zmax[yb, xb]), run_frames, b))
 
         return hits
+
+
+    def searchTiers(self):
+        """ The tiers of the velocity search: the speeds are searched on frames binned more the faster they are.
+            The number of velocities of a tier grows with the square of its largest speed in binned px per frame,
+            and the work with the number of binned pixels too, so the fast speeds would cost most of the search
+            on finely binned frames. A fast object moves several pixels during a frame and is long in every frame
+            anyway, so coarser bins lose little of its signal, and fast objects are searched less deep (a
+            coarser bin adds the noise of more pixels to a point source: about 0.4 mag for 4x4 instead of 2x2
+            bins with a PSF sigma of 0.75 px).
+
+        A tier with the bin B covers the speeds up to tier_speed*B px per frame (unbinned), i.e. tier_speed binned
+        px per frame, and the next tier doubles the bin, up to max_bin, which covers the speeds up to the
+        largest one. With tier_speed 0, all speeds are searched on the bins of the search.
+
+        Return:
+            [list] Tiers (bin, smallest speed, largest speed), the speeds in unbinned px per frame.
+        """
+
+        b = self.search_bin
+        if not self.opts.velocity_search:
+            return [(b, 0.0, 0.0)]
+        if self.opts.tier_speed <= 0:
+            return [(b, 0.0, self.opts.speed_max)]
+
+        tiers = []
+        speed_lo = 0.0
+        tier_bin = b
+        while True:
+            speed_hi = self.opts.tier_speed*tier_bin
+            if (speed_hi >= self.opts.speed_max) or (2*tier_bin > self.opts.max_bin):
+                tiers.append((tier_bin, speed_lo, self.opts.speed_max))
+                return tiers
+            tiers.append((tier_bin, speed_lo, speed_hi))
+            speed_lo = speed_hi
+            tier_bin *= 2
 
 
     def search(self):
@@ -860,21 +913,23 @@ class MatchedFilterDetector(object):
         b = self.search_bin
 
         # The stackers of the runs: the short runs (8 and 16 frames) search all velocities up to the largest
-        #   speed; the long run (32 frames) only the small velocities, at most 4 binned px over the run, where its
-        #   longer integration gains the most (a slow object stays within the PSF for many frames)
+        #   speed, in tiers of binning (see searchTiers); the long run (32 frames) only the small velocities, at
+        #   most 4 binned px over the run, where its longer integration gains the most (a slow object stays within
+        #   the PSF for many frames)
         stackers = []
-        speed_max_b = self.opts.speed_max if self.opts.velocity_search else 0.0
         for run_frames in self.opts.run_frames:
-            stackers.append((run_frames, VelocityStacker(velocityGrid(speed_max_b, run_frames, b), run_frames,
-                                                         use_gpu=self.opts.use_gpu)))
+            for tier_bin, speed_lo, speed_hi in self.searchTiers():
+                stackers.append((run_frames, tier_bin, VelocityStacker(
+                    velocityGrid(speed_hi, run_frames, tier_bin, speed_min=speed_lo), run_frames,
+                    use_gpu=self.opts.use_gpu)))
         if self.opts.slow_run_frames > max(self.opts.run_frames):
             slow_speed = min(4.0/self.opts.slow_run_frames*b, self.opts.speed_max)
-            stackers.append((self.opts.slow_run_frames, VelocityStacker(
+            stackers.append((self.opts.slow_run_frames, b, VelocityStacker(
                 velocityGrid(slow_speed, self.opts.slow_run_frames, b), self.opts.slow_run_frames,
                 use_gpu=self.opts.use_gpu)))
-        for run_frames, st in stackers:
-            log.info('Matched filter: {:d} velocities for runs of {:d} frames{:s}'.format(len(st.velocities),
-                run_frames, ' (GPU)' if st.use_gpu else ''))
+        for run_frames, tier_bin, st in stackers:
+            log.info('Matched filter: {:d} velocities for runs of {:d} frames, {:d}x{:d} binned{:s}'.format(
+                len(st.velocities), run_frames, tier_bin, tier_bin, ' (GPU)' if st.use_gpu else ''))
 
         # Blocks of frames, the last one may be shorter
         starts = list(range(0, self.total_frames, n_block))
@@ -950,19 +1005,19 @@ class MatchedFilterDetector(object):
             [list] Hits at pixels which are not persistent.
         """
 
-        # The persistent pixels of every run length: above the threshold in more than the fraction persistence of
-        #   all runs (and in at least 2 runs), grown by a binned pixel
-        b = self.search_bin
+        # The persistent pixels of every run length and bin: above the threshold in more than the fraction
+        #   persistence of all runs (and in at least 2 runs), grown by a binned pixel
         persistent = {}
-        for run_frames, counts in self.persistence_counts.items():
-            limit = max(2, self.opts.persistence*self.persistence_runs[run_frames])
-            persistent[run_frames] = cv2.dilate((counts > limit).astype(np.uint8), np.ones((3, 3), np.uint8)) > 0
+        for key, counts in self.persistence_counts.items():
+            limit = max(2, self.opts.persistence*self.persistence_runs[key])
+            persistent[key] = cv2.dilate((counts > limit).astype(np.uint8), np.ones((3, 3), np.uint8)) > 0
 
         # Keep the hits whose binned pixel (the inverse of the conversion to unbinned coordinates in searchBlock)
-        #   is not persistent in the runs of their length
+        #   is not persistent in the runs of their length and bin
         kept = []
         for h in hits:
-            mask = persistent[h.run]
+            b = h.bin
+            mask = persistent[(h.run, b)]
             xb = int(round((h.x + 0.5)/b - 0.5))
             yb = int(round((h.y + 0.5)/b - 0.5))
             if not mask[yb, xb]:
@@ -1179,12 +1234,13 @@ class MatchedFilterDetector(object):
             if math.hypot(vx - drift[0], vy - drift[1]) < SLOW_MIN_RELATIVE_SPEED:
                 continue
 
-            # The chain as a track of hits (rows [frame, x, y, z, vx, vy, run]), with half a block as the length
-            #   of its run, so the measurement extends half a block beyond its first and last hit (see
+            # The chain as a track of hits (rows [frame, x, y, z, vx, vy, run, bin]), with half a block as the
+            #   length of its run, so the measurement extends half a block beyond its first and last hit (see
             #   TrackMeasurement)
             run = self.opts.block_frames//2
             tracks.append(np.column_stack([pts[:, 0], pts[:, 1], pts[:, 2], pts[:, 3], np.full(len(pts), vx),
-                                           np.full(len(pts), vy), np.full(len(pts), run)]))
+                                           np.full(len(pts), vy), np.full(len(pts), run),
+                                           np.full(len(pts), self.search_bin)]))
 
         ### ###
 
@@ -1201,23 +1257,22 @@ class MatchedFilterDetector(object):
             hits: [list] Hits of all runs.
 
         Return:
-            [list] Tracks, each an array of hits as rows [frame, x, y, z, vx, vy, run].
+            [list] Tracks, each an array of hits as rows [frame, x, y, z, vx, vy, run, bin].
         """
 
-        b = self.search_bin
         tracks = []
 
-        # The hits of every run length are linked separately (their runs are consecutive in time); the tracks of
-        #   the different run lengths are merged at the end
-        for run_frames in sorted(set(h.run for h in hits)):
+        # The hits of every run length and bin are linked separately (their runs are consecutive in time); the
+        #   tracks of the different run lengths and bins are merged at the end
+        for run_frames, b in sorted(set((h.run, h.bin) for h in hits)):
 
-            group = [h for h in hits if h.run == run_frames]
+            group = [h for h in hits if (h.run == run_frames) and (h.bin == b)]
             if not group:
                 continue
 
-            # The hits as rows [frame, x, y, z, vx, vy, run], and the hits of every run by its middle frame, for a
-            #   quick lookup of the hits of the next run
-            arr = np.array([[h.frame, h.x, h.y, h.z, h.vx, h.vy, h.run] for h in group])
+            # The hits as rows [frame, x, y, z, vx, vy, run, bin], and the hits of every run by its middle frame,
+            #   for a quick lookup of the hits of the next run
+            arr = np.array([[h.frame, h.x, h.y, h.z, h.vx, h.vy, h.run, h.bin] for h in group])
             by_frame = collections.defaultdict(list)
             for i, f in enumerate(arr[:, 0]):
                 by_frame[round(f, 1)].append(i)
@@ -1353,8 +1408,8 @@ class MatchedFilterDetector(object):
         """
 
         # Two tracks are the same object if their positions are within 2 binned pixels (the position uncertainty
-        #   of the hits)
-        tol = 2.0*self.search_bin
+        #   of the hits), of the coarser bin of the two (see _mergeOnce)
+        tol = 2.0
 
         # A merged track can now overlap or continue a track kept before, so the merging is repeated
         while True:
@@ -1366,7 +1421,7 @@ class MatchedFilterDetector(object):
         return sorted(merged, key=lambda t: t[0, 0])
 
 
-    def _mergeOnce(self, tracks, tol):
+    def _mergeOnce(self, tracks, tol_bins):
         """ One pass of mergeTracks. Every track is compared with the tracks kept so far (longest first) and
             merged into the first one it matches, or kept as a new track.
         """
@@ -1378,6 +1433,10 @@ class MatchedFilterDetector(object):
 
             joined = False
             for k, m in enumerate(merged):
+
+                # The tolerance in binned pixels of the coarser of the two tracks (the bin is the last column of the
+                #   hits, the bin of the search for tracks without it)
+                tol = tol_bins*max(self.trackBin(tr), self.trackBin(m))
 
                 # Overlap in time: compare the positions at the frames of both tracks within the overlap,
                 #   interpolated linearly between the hits; the same object if the median distance is within tol
@@ -1420,6 +1479,12 @@ class MatchedFilterDetector(object):
                 merged.append(tr)
 
         return merged
+
+
+    def trackBin(self, track):
+        """ The bin of the search of the hits of a track (the coarsest one, after merging). """
+
+        return float(np.max(track[:, 7])) if track.shape[1] > 7 else float(self.search_bin)
 
 
     @staticmethod

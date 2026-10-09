@@ -26,6 +26,11 @@ This guide assumes you know the monitor (see [MonitorProcessing.md](MonitorProce
 2. **Search.** The frames are clipped to +-`mf_clip` (10) times the noise (single-pixel outliers), binned 2x2,
    smoothed with the PSF (at least 1 px), and summed along a grid of motions over runs of 8 and 16 frames (all
    motions up to `mf_ang_vel_max`) and of 32 frames (small motions). Peaks above `mf_threshold` are the hits.
+   - Fast objects are searched on coarser bins: the speeds up to `mf_tier_speed` binned px per frame on 2x2 bins,
+     faster ones on 4x4 bins, and so on up to `mf_max_bin`. The number of velocities grows with the square of the
+     speed in binned pixels, so on large frames (e.g. 1920x1080) the fast speeds would otherwise cost most of the
+     search. A fast object is long in every frame anyway and is searched less deep (about 0.4 mag per doubling of
+     the bin for a sharp PSF).
    Pixels above the threshold in a large part of the whole input are flickering or variable sources and are
    removed.
    - A bright object which stays on the same pixels for most of a block is part of the background of the
@@ -186,6 +191,7 @@ All settings are in the `[MatchedFilter]` section, see the comments in `.config`
 | `mf_smooth_frames` | 64 | Positions combined along the track over +- this many frames, 0 disables it |
 | `mf_clip` | 10 | The normalized frames are clipped to +- this before the search |
 | `mf_link_max_gap` | 96 | Largest gap (frames) between strong hits of a track, e.g. between flashes |
+| `mf_tier_speed`, `mf_max_bin` | 2.0, 8 | Tiers of the search: faster speeds on coarser bins (see Search), 0 disables them |
 | `mf_trail_level` | 25 | Rows and columns of sources brighter than this in a frame (in the noise of a pixel) are left out of the search, 0 disables it |
 | `mf_max_tracks` | 300 | Most candidate tracks measured per file (the strongest), bounds the time in bad conditions |
 | `mf_psf_sigma` | 0 | PSF sigma (px), 0 measures it on the stars |
