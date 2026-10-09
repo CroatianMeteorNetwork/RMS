@@ -380,6 +380,10 @@ class MatchedFilterDetector(object):
 
         # Number of the weakest candidate tracks which were not measured (see mf_max_tracks)
         self.tracks_dropped = 0
+
+        # Photometry of every frame of the verified tracks: id(centroids) -> (frames, intensities, saturated
+        #   pixel counts, noise of the intensities)
+        self.photometry = {}
         self.psf_sigma = self.opts.psf_sigma if self.opts.psf_sigma > 0 else None
 
         self.timing = collections.defaultdict(float)
@@ -1270,6 +1274,7 @@ class MatchedFilterDetector(object):
 
         detections = []
         for cent in measured:
+            phot = self.photometry.get(id(cent))
 
             # The positions of the measurements combined over the neighbouring measurements
             if self.opts.smooth_frames > 0:
@@ -1283,7 +1288,7 @@ class MatchedFilterDetector(object):
                 continue
 
             # One row per frame: the intensity of every frame, at the position on the track
-            cent = perFrameRows(cent, self.opts.max_measure_frames)
+            cent = perFrameRows(cent, self.opts.max_measure_frames, phot)
 
             # Unbinned coordinates, and the intensity of the unbinned image (averaged bins hold the mean of the
             #   pixels, summed bins already their sum)
@@ -1605,7 +1610,9 @@ class MatchedFilterDetector(object):
                      np.concatenate([ys[o] for o in orders]))
 
             checks.append({'on': (frames, xs, ys), 'off': (off_f, off_x, off_y), 'reord': reord,
-                           'on_sum': [0.0, 0.0], 'off_sum': [0.0, 0.0], 'reord_sum': [0.0, 0.0]})
+                           'on_sum': [0.0, 0.0], 'off_sum': [0.0, 0.0], 'reord_sum': [0.0, 0.0],
+                           'phot': np.zeros(n), 'phot_sat': np.zeros(n, dtype=np.int64),
+                           'phot_noise': np.zeros(n)})
 
         # The positions of every test in each block of frames
         starts = np.array(self.block_starts)
@@ -1621,9 +1628,10 @@ class MatchedFilterDetector(object):
                 continue
 
             t1 = time()
-            frames = self.readFrames(first, last - first)
+            frames, saturated = self.readFrames(first, last - first, saturation=True)
             self.timing['read'] += time() - t1
             z = self.normalize(frames, k)
+            noise = self.backgrounds[k].noise
 
             # The pixels of the stars are left out: the stars which are too faint to be masked still vary
             #   (scintillation), and a slow track over a few of them would collect their residuals
@@ -1638,6 +1646,22 @@ class MatchedFilterDetector(object):
                                                      excluded)
                         c[key + '_sum'][0] += sgz
                         c[key + '_sum'][1] += sgg
+
+                # The intensity of every frame along the track, whether its position was measured or not (e.g.
+                #   between the flashes of a flashing object), so the light curve has all frames
+                sel = c['on_idx'].get(k)
+                if sel is not None:
+                    fr, x, y = c['on'][0][sel], c['on'][1][sel], c['on'][2][sel]
+                    vx = float(np.median(np.gradient(c['on'][1])[sel])) if len(c['on'][1]) > 1 else 0.0
+                    vy = float(np.median(np.gradient(c['on'][2])[sel])) if len(c['on'][2]) > 1 else 0.0
+                    radius_phot = 3.0*self.psf_sigma
+                    sums, n_sat = framePhotometry(z[fr - first], saturated[fr - first], noise, x, y, vx, vy,
+                                                  radius_phot)
+                    c['phot'][sel] = sums
+                    c['phot_sat'][sel] = n_sat
+                    xi = np.clip(np.round(x).astype(int), 0, noise.shape[1] - 1)
+                    yi = np.clip(np.round(y).astype(int), 0, noise.shape[0] - 1)
+                    c['phot_noise'][sel] = noise[yi, xi]*math.sqrt(math.pi)*radius_phot
 
         kept = []
         for cent, c in zip(measured, checks):
@@ -1659,6 +1683,7 @@ class MatchedFilterDetector(object):
                       '{:.1f})'.format(cent[0, 0], cent[-1, 0], significance, *tests))
             if significance >= self.opts.track_significance:
                 kept.append(cent)
+                self.photometry[id(cent)] = (c['on'][0], c['phot'], c['phot_sat'], c['phot_noise'])
 
         return kept
 
@@ -1708,7 +1733,38 @@ def blockIndices(frames, starts):
     return out
 
 
-def perFrameRows(cent, max_frames):
+def framePhotometry(frames, saturated, noise, xs, ys, vx, vy, radius):
+    """ Photometry of a moving object in a few frames: the sum within radius of the segment it moved along in
+        every frame, and its saturated pixels. A very bright object spills its charge along its row and column
+        before its pixels saturate: in a frame where the sum within SPILL_RADIUS is more than SPILL_RATIO times
+        the normal sum, the wider sum is the intensity and the frame counts as saturated.
+
+    Arguments:
+        frames: [ndarray] Normalized frames (n, height, width).
+        saturated: [ndarray] uint8 mask of the saturated pixels of the frames.
+        noise: [ndarray] Noise image (ADU) of the normalization.
+        xs, ys: [ndarray] Positions of the object in the middle of the frames.
+        vx, vy: [float] Velocity (px per frame).
+        radius: [float] Radius of the aperture (px).
+
+    Return:
+        (sums, n_saturated): [tuple of ndarrays] Intensity (ADU) and saturated pixel count per frame.
+    """
+
+    sums, n_sat = streakAperture(frames, saturated, noise, xs, ys, vx, vy, radius)
+    xi = int(min(max(round(float(np.median(xs))), 0), noise.shape[1] - 1))
+    yi = int(min(max(round(float(np.median(ys))), 0), noise.shape[0] - 1))
+    core_noise = float(noise[yi, xi])*math.sqrt(math.pi)*radius
+    if np.max(sums) > SPILL_MIN_SNR*core_noise:
+        wide, wide_sat = streakAperture(frames, saturated, noise, xs, ys, vx, vy, SPILL_RADIUS)
+        spill = (sums > SPILL_MIN_SNR*core_noise) & (wide > SPILL_RATIO*sums)
+        sums = np.where(spill, wide, sums)
+        n_sat = np.where(spill, np.maximum(wide_sat, 1), n_sat)
+
+    return sums, n_sat
+
+
+def perFrameRows(cent, max_frames, phot=None):
     """ Rows of every frame of a track from its measurements: the measurements of faint objects combine several
         frames, but the intensity of each frame is kept, so the light curve has the full time resolution (e.g.
         short flashes are not averaged out). The positions of the frames are interpolated along the track
@@ -1720,9 +1776,15 @@ def perFrameRows(cent, max_frames):
             by frame. The frame of a measurement is the middle of its frames.
         max_frames: [int] Largest number of frames of a measurement.
 
+    Keyword arguments:
+        phot: [tuple] (frames, intensities, saturated pixel counts, noise of the intensities) of every frame of
+            the track (see verify). With it, there is a row for every one of these frames (also the frames whose
+            position was not measured), with this photometry. None by default.
+
     Return:
-        [ndarray] Rows [frame, x, y, intensity, background, snr, saturated], one per frame. The signal-to-noise
-            ratio of a frame is the one of its measurement divided by the square root of its number of frames.
+        [ndarray] Rows [frame, x, y, intensity, background, snr, saturated], one per frame. Without phot, the
+            signal-to-noise ratio of a frame is the one of its measurement divided by the square root of its
+            number of frames.
     """
 
     t, x, y = cent[:, 0], cent[:, 1], cent[:, 2]
@@ -1731,6 +1793,21 @@ def perFrameRows(cent, max_frames):
         vx_hi, vy_hi = (x[-1] - x[-2])/(t[-1] - t[-2]), (y[-1] - y[-2])/(t[-1] - t[-2])
     else:
         vx_lo = vy_lo = vx_hi = vy_hi = 0.0
+
+    def position(f):
+        if f < t[0]:
+            return x[0] + vx_lo*(f - t[0]), y[0] + vy_lo*(f - t[0])
+        if f > t[-1]:
+            return x[-1] + vx_hi*(f - t[-1]), y[-1] + vy_hi*(f - t[-1])
+        return np.interp(f, t, x), np.interp(f, t, y)
+
+    if phot is not None:
+        frames, sums, n_sat, noise = phot
+        rows = []
+        for f, s, ns, nz in zip(frames, sums, n_sat, noise):
+            xf, yf = position(f)
+            rows.append([f, xf, yf, s, np.interp(f, t, cent[:, 4]), s/max(nz, 1e-6), ns])
+        return np.array(rows)
 
     rows = []
     for row in cent:
@@ -2062,18 +2139,8 @@ class TrackMeasurement(object):
             dt = np.arange(n) - (n - 1)/2.0
             sat = saturated[f0 - first:f0 - first + n] if saturated is not None \
                 else np.zeros((n,) + z.shape[1:], dtype=np.uint8)
-            frames = z[f0 - first:f0 - first + n]
-            radius = 3.0*self.psf_sigma
-            sums, n_sat = streakAperture(frames, sat, bg.noise, res[0] + vx*dt, res[1] + vy*dt, vx, vy, radius)
-
-            # Charge spilled by a very bright object: the wider sum is its intensity, and it counts as saturated
-            core_noise = float(bg.noise[yi, xi])*math.sqrt(math.pi)*radius
-            if np.max(sums) > SPILL_MIN_SNR*core_noise:
-                wide, wide_sat = streakAperture(frames, sat, bg.noise, res[0] + vx*dt, res[1] + vy*dt, vx, vy,
-                                                SPILL_RADIUS)
-                spill = (sums > SPILL_MIN_SNR*core_noise) & (wide > SPILL_RATIO*sums)
-                sums = np.where(spill, wide, sums)
-                n_sat = np.where(spill, np.maximum(wide_sat, 1), n_sat)
+            sums, n_sat = framePhotometry(z[f0 - first:f0 - first + n], sat, bg.noise, res[0] + vx*dt,
+                                          res[1] + vy*dt, vx, vy, 3.0*self.psf_sigma)
 
             # The photometry of every frame is kept (padded to the largest number of frames per measurement)
             pad = self.opts.max_measure_frames - n
