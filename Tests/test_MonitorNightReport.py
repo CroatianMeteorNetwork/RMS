@@ -49,10 +49,12 @@ def _pairName(seconds, frame):
                                                   frame=frame, ext=None))[0]
 
 
-def _makeResults(output_dir, config, name, n_chunks=2, fps=25.0, meteor_fps=25.0, start_s=0):
+def _makeResults(output_dir, config, name, n_chunks=2, fps=25.0, meteor_fps=25.0, start_s=0,
+                 pick_frames=(3.0, 4.0)):
     """ Write the results of one processed input file and its chunk images, like processFile does: CALSTARS
-        with one star per chunk, an FTPdetectinfo with one calibrated meteor, recalibrated platepars and the
-        done flag. Return the results directory relative to the output directory.
+        with one star per chunk, an FTPdetectinfo with one calibrated meteor (with picks at pick_frames,
+        relative to the first chunk), recalibrated platepars and the done flag. Return the results directory
+        relative to the output directory.
     """
 
     night_dir = mnr.nightDirPath(output_dir, NIGHT, config)
@@ -74,7 +76,7 @@ def _makeResults(output_dir, config, name, n_chunks=2, fps=25.0, meteor_fps=25.0
                            chunk_frames=128, fps=fps)
 
     # Calibrated picks: frame, x, y, ra, dec, azim, elev, intensity, mag, background, snr, saturated
-    picks = [[f, 10.0 + f, 20.0, 170.0 + f/100, 50.0, 60.0, 70.0, 1000, 2.5, 50, 8.0, 0] for f in (3.0, 4.0)]
+    picks = [[f, 10.0 + f, 20.0, 170.0 + f/100, 50.0, 60.0, 70.0, 1000, 2.5, 50, 8.0, 0] for f in pick_frames]
     FTPdetectinfo.writeFTPdetectinfo([[chunk_names[0], 1, 10.0, 45.0, picks, meteor_fps]], results_path,
         'FTPdetectinfo_{:s}.txt'.format(name), results_path, 'XX0001', fps, calibration='Calibrated',
         celestial_coords_given=True)
@@ -499,6 +501,25 @@ def test_generate_night_report(tmp_path):
     assert 'stale.txt' not in os.listdir(archived_dir)
 
 
+def test_detected_stack_named_with_the_number_of_meteors(tmp_path):
+    """ A meteor longer than a chunk is on several chunk images, which are all stacked, but the stack is
+        named with the number of meteors and not with the number of images.
+    """
+
+    config = _config()
+    output_dir = str(tmp_path)
+
+    # One meteor from the first to the third chunk of 128 frames
+    _makeResults(output_dir, config, 'file1', n_chunks=3, pick_frames=(3.0, 200.0, 300.0))
+
+    night_state = mnr.generateNightReport(output_dir, NIGHT, config)
+    assert 'archive' in night_state['ok_steps']
+
+    night_files = os.listdir(mnr.nightDirPath(output_dir, NIGHT, config))
+    assert NIGHT + '_stack_1_meteors.jpg' in night_files
+    assert not any(f.startswith(NIGHT + '_stack_3_') for f in night_files)
+
+
 def test_failed_optional_product_still_reports_the_night(tmp_path, monkeypatch):
 
     import Utils.ShowerAssociation
@@ -581,7 +602,7 @@ def test_report_scales_thumbnail_stacking(tmp_path, monkeypatch):
 
     stacks = []
     monkeypatch.setattr(RMS.ArchiveDetections, 'generateThumbsAndStacks',
-                        lambda night_dir, config, ff_detected: stacks.append(config.thumb_stack))
+                        lambda night_dir, config, ff_detected, **kwargs: stacks.append(config.thumb_stack))
 
     config = _config()
     config.thumb_stack = 5

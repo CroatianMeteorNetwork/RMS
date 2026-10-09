@@ -21,7 +21,7 @@ log = getLogger("rmslogger")
 
 
 def stackFFs(dir_path, file_format, deinterlace=False, subavg=False, filter_bright=False, flat_path=None,
-    file_list=None, mask=None, captured_stack=False, print_progress=True):
+    file_list=None, mask=None, captured_stack=False, print_progress=True, n_meteors=None):
     """ Stack FF files in the given folder. 
 
     Arguments:
@@ -42,6 +42,9 @@ def stackFFs(dir_path, file_format, deinterlace=False, subavg=False, filter_brig
         captured_stack: [bool] True if all files are used and "_captured_stack" will be used in the file name.
             False by default.
         print_progress: [bool] Allow print calls to show files being stacked. True by default
+        n_meteors: [int] Number of meteors for the file name of the stack, if it is not the number of stacked
+            images (e.g. a meteor is spread over several images). None by default, in which case the number of
+            stacked images is used.
 
     Return:
         stack_path, merge_img:
@@ -156,7 +159,7 @@ def stackFFs(dir_path, file_format, deinterlace=False, subavg=False, filter_brig
     if filter_bright and (n_stacked < 0.2*total_ff_files):
         return stackFFs(dir_path, file_format, deinterlace=deinterlace, subavg=subavg, 
             filter_bright=False, flat_path=flat_path, file_list=file_list, mask=mask,
-            captured_stack=captured_stack, print_progress=print_progress)
+            captured_stack=captured_stack, print_progress=print_progress, n_meteors=n_meteors)
 
     # If no images were stacked, do nothing
     if n_stacked == 0:
@@ -170,7 +173,7 @@ def stackFFs(dir_path, file_format, deinterlace=False, subavg=False, filter_brig
     if captured_stack:
         filename_suffix = "_captured_stack."
     else:
-        filename_suffix = "_stack_{:d}_meteors.".format(n_stacked)
+        filename_suffix = "_stack_{:d}_meteors.".format(n_stacked if n_meteors is None else n_meteors)
 
 
     stack_path = os.path.join(dir_path, night_dir + filename_suffix + file_format)

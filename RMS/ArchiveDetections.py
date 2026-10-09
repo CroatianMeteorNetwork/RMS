@@ -154,7 +154,7 @@ def archiveFieldsums(dir_path):
 
 
 
-def generateThumbsAndStacks(captured_path, config, ff_detected, detected_list=None):
+def generateThumbsAndStacks(captured_path, config, ff_detected, detected_list=None, n_meteors=None):
     """ Generate the captured and detected thumbnail mosaics, and the stacks of all captured images and of
         all detections.
 
@@ -166,6 +166,9 @@ def generateThumbsAndStacks(captured_path, config, ff_detected, detected_list=No
     Keyword arguments:
         detected_list: [list] A list of files from which the FF files are taken for the detected thumbnails.
             ff_detected is used if not given.
+        n_meteors: [int] Number of meteors, if it is not the number of FF files with detections (e.g. a meteor
+            is spread over several images). Used in the log and in the file name of the stack. None by
+            default.
 
     Return:
         generated_files: [list] Names of the generated image files in the captured directory.
@@ -231,13 +234,16 @@ def generateThumbsAndStacks(captured_path, config, ff_detected, detected_list=No
         log.error("".join(traceback.format_exception(*sys.exc_info())))
 
 
-    log.info('Generating a stack of {:d} detections...'.format(len(ff_detected)))
+    if n_meteors is None:
+        log.info('Generating a stack of {:d} detections...'.format(len(ff_detected)))
+    else:
+        log.info('Generating a stack of {:d} detections ({:d} images)...'.format(n_meteors, len(ff_detected)))
 
     try:
 
         # Make a co-added image of all detections. Filter out possible clouds
         detected_stack_path, _ = stackFFs(captured_path, 'jpg', deinterlace=(config.deinterlace_order > 0), 
-            subavg=True, filter_bright=True, file_list=sorted(ff_detected), mask=mask)
+            subavg=True, filter_bright=True, file_list=sorted(ff_detected), mask=mask, n_meteors=n_meteors)
 
         if detected_stack_path is not None:
 
@@ -260,7 +266,7 @@ def generateThumbsAndStacks(captured_path, config, ff_detected, detected_list=No
     return generated_files
 
 
-def archiveDetections(captured_path, archived_path, ff_detected, config, extra_files=None):
+def archiveDetections(captured_path, archived_path, ff_detected, config, extra_files=None, n_meteors=None):
     """ Create thumbnails and compress all files with detections and the accompanying files
         in one archive, suffix _detected
 
@@ -278,6 +284,8 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
     Keyword arguments:
         extra_files: [list] A list of extra files (with full paths) which will be saved to the night
             archive.
+        n_meteors: [int] Number of meteors, if it is not the number of FF files with detections (see
+            generateThumbsAndStacks). None by default.
 
     Return:
         archive_name: [str] Name of the archive where the files were compressed to.
@@ -290,7 +298,8 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
     file_list = selectFiles(config, captured_path, ff_detected)
 
     # Generate the thumbnails and the stacks and add them to the archive
-    file_list += generateThumbsAndStacks(captured_path, config, ff_detected, detected_list=file_list)
+    file_list += generateThumbsAndStacks(captured_path, config, ff_detected, detected_list=file_list,
+        n_meteors=n_meteors)
 
     log.info("Generating an archive file of most recent logs...")
 
