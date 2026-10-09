@@ -17,6 +17,7 @@ from Utils.Flux import getSensorCharacterization
 def _starImage(sigma, size=200, n=5, peak=150.0, sky=20.0, seed=1):
     """ An 8-bit image with round Gaussian stars of the given sigma on a noisy sky. """
 
+    # The sky with a noise of 1 ADU, and the stars on a diagonal, at subpixel positions
     rng = np.random.default_rng(seed)
     img = sky + rng.normal(0, 1.0, (size, size))
     yy, xx = np.mgrid[0:size, 0:size]
@@ -29,15 +30,23 @@ def _starImage(sigma, size=200, n=5, peak=150.0, sky=20.0, seed=1):
 
 @pytest.mark.parametrize('sigma', [1.2, 2.0])
 def test_extracted_fwhm_is_the_fwhm_of_a_round_star(sigma):
+    """ The FWHM given by the star extractor for round stars is 2.355 sigma (and not sqrt(2) times more, as
+        with the sum of the variances of the two axes).
+    """
 
     x, y, amplitude, intensity, fwhm, background, snr, n_sat = extractStars(_starImage(sigma), segment_radius=8)
 
+    # Most stars are found, and their median FWHM is within 10% of the true one
     assert len(fwhm) >= 3
     assert np.median(fwhm) == pytest.approx(2.355*sigma, rel=0.1)
 
 
 def test_calstars_fwhm_round_trip(tmp_path):
+    """ A CALSTARS file written now has the definition of the FWHM in its header, so its FWHM is read as it was
+        written.
+    """
 
+    # One star: (y, x, intensity, amplitude, fwhm, background, snr, saturated pixels)
     stars = [['FF_XX0001_20260101_000000_000_0000000.fits', [(10.0, 20.0, 1000, 100, 2.5, 30, 10.0, 0)]]]
     CALSTARS.writeCALSTARS(stars, str(tmp_path), 'CALSTARS_test.txt', 'XX0001', 100, 100)
 
@@ -50,6 +59,7 @@ def test_older_calstars_fwhm_is_converted(tmp_path):
         it was not measured.
     """
 
+    # A CALSTARS file as written before the definition of the FWHM was added to the header, with two stars
     lines = ["==========================================================================",
              "RMS star extractor",
              "Cal time = FF header time plus Nframes/(2*FPS) seconds",
@@ -70,6 +80,7 @@ def test_older_calstars_fwhm_is_converted(tmp_path):
              "##########################################################################"]
     (tmp_path/'CALSTARS_old.txt').write_text('\n'.join(lines) + '\n')
 
+    # The measured FWHM is divided by sqrt(2), the -1 is kept
     star_list, _ = CALSTARS.readCALSTARS(str(tmp_path), 'CALSTARS_old.txt')
     stars = star_list[0][1]
     assert stars[0][4] == pytest.approx(2.83/math.sqrt(2))
