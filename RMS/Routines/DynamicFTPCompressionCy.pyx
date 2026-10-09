@@ -36,6 +36,109 @@ cdef void updateMaxFrame(INT16_TYPE_t[:, ::1] maxpixel, np.uint32_t[:, ::1] maxf
 # Image rows per block in sampleMedianMAD
 MEDIAN_BLOCK_ROWS = 8
 
+# Sample types of sampleMedianMAD: the raw frames of the FF files, and the calibrated frames of the matched filter
+ctypedef fused sample_t:
+    np.uint16_t
+    np.float32_t
+
+
+@cython.boundscheck(False)
+@cython.wraparound(False)
+@cython.cdivision(True)
+cdef double selectKth(double *a, Py_ssize_t n, Py_ssize_t k) nogil:
+    """ The k-th smallest of the n values (0-based), by quickselect (Hoare partitioning), in place. On return,
+        the values before position k are not larger than it.
+    """
+
+    cdef Py_ssize_t lo = 0, hi = n - 1, i, j
+    cdef double pivot, tmp
+
+    while hi > lo:
+
+        # Partition the range around the middle value: the values up to j are not larger than the pivot, the
+        #   values from i on are not smaller, and the ones between are equal to it
+        pivot = a[(lo + hi)//2]
+        i = lo
+        j = hi
+        while i <= j:
+            while a[i] < pivot:
+                i += 1
+            while a[j] > pivot:
+                j -= 1
+            if i <= j:
+                tmp = a[i]
+                a[i] = a[j]
+                a[j] = tmp
+                i += 1
+                j -= 1
+
+        # Continue in the part which contains position k, or stop if it is equal to the pivot
+        if k <= j:
+            hi = j
+        elif k >= i:
+            lo = i
+        else:
+            break
+
+    return a[k]
+
+
+@cython.boundscheck(False)
+@cython.wraparound(False)
+@cython.cdivision(True)
+cdef double medianInPlace(double *a, Py_ssize_t n) nogil:
+    """ The median of the n values, as np.median computes it: the middle value, or the mean of the two middle
+        values for an even n. The values are reordered.
+    """
+
+    cdef Py_ssize_t k = n//2, i
+    cdef double upper = selectKth(a, n, k), lower
+
+    if n % 2 == 1:
+        return upper
+
+    # For an even n, the other middle value is the largest of the values before position k
+    lower = a[0]
+    for i in range(1, k):
+        if a[i] > lower:
+            lower = a[i]
+
+    return 0.5*(lower + upper)
+
+
+@cython.boundscheck(False)
+@cython.wraparound(False)
+def blockMedianMAD(sample_t[:, ::1] block, float[::1] median, float[::1] mad):
+    """ The median and the median absolute deviation of every pixel of a block, the samples of every pixel
+        contiguous (a row of the block). The results are identical to np.median: the median is computed from the
+        values (as float64), and the MAD from the absolute deviations of the samples (as float32) from the median
+        (as float32), as np.median(np.abs(samples.astype(np.float32) - median), axis=1) computes it.
+
+    Arguments:
+        block: [ndarray] Samples, shape (n_pixels, n_samples).
+        median: [ndarray] float32 output, the median of every pixel.
+        mad: [ndarray] float32 output, the MAD of every pixel.
+    """
+
+    cdef Py_ssize_t n_pix = block.shape[0], n = block.shape[1], p, s
+    cdef double[::1] buf = np.empty(max(n, 1), dtype=np.float64)
+    cdef double *b = &buf[0]
+    cdef float med
+
+    with nogil:
+        for p in range(n_pix):
+
+            # The median of the samples of the pixel
+            for s in range(n):
+                b[s] = <double>block[p, s]
+            med = <float>medianInPlace(b, n)
+            median[p] = med
+
+            # The median of the absolute deviations from the median, in float32
+            for s in range(n):
+                b[s] = <double>fabsf(<float>block[p, s] - med)
+            mad[p] = <float>medianInPlace(b, n)
+
 
 def sampleMedianMAD(samples, block_rows=MEDIAN_BLOCK_ROWS):
     """ Compute the median and the median absolute deviation (MAD) of every pixel over the sampled frames.
@@ -78,9 +181,15 @@ def sampleMedianMAD(samples, block_rows=MEDIAN_BLOCK_ROWS):
         buf[:, :n_pix] = samples[:, row:row + rows, :].reshape(n_samples, n_pix)
         block = np.ascontiguousarray(buf[:, :n_pix].T)
 
-        # Compute the median in float32 for the precision of the MAD
-        block_median = np.median(block, axis=1).astype(np.float32)
-        block_mad = np.median(np.abs(block.astype(np.float32) - block_median[:, None]), axis=1)
+        # The median and the MAD of every pixel of the block (compiled, for the raw and the calibrated frames;
+        #   np.median for other types)
+        if block.dtype in (np.uint16, np.float32):
+            block_median = np.empty(n_pix, dtype=np.float32)
+            block_mad = np.empty(n_pix, dtype=np.float32)
+            blockMedianMAD(block, block_median, block_mad)
+        else:
+            block_median = np.median(block, axis=1).astype(np.float32)
+            block_mad = np.median(np.abs(block.astype(np.float32) - block_median[:, None]), axis=1)
 
         median[row:row + rows] = block_median.reshape(rows, width)
         mad[row:row + rows] = block_mad.reshape(rows, width)

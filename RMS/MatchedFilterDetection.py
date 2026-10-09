@@ -57,6 +57,7 @@ import cv2
 import numba
 from scipy import ndimage
 from scipy.optimize import least_squares
+from scipy.spatial import cKDTree
 
 import RMS.ConfigReader as cr
 from RMS.Astrometry.ApplyRecalibrate import applyRecalibrate
@@ -713,9 +714,12 @@ class MatchedFilterDetector(object):
             return
 
         # The sources, brightest first. A component in the rows or columns of a brighter source is a part of its
-        #   trail (the trail of a very bright source can itself be above the level), not a source
+        #   trail (the trail of a very bright source can itself be above the level), not a source. The peak of
+        #   every source is the largest value of its pixels (computed from the bright pixels only: ndimage.maximum
+        #   sorts the whole frame, which is slow for large frames)
         labels, n = ndimage.label(bright)
-        peaks = ndimage.maximum(frame, labels, index=np.arange(1, n + 1))
+        peaks = np.full(n, -np.inf)
+        np.maximum.at(peaks, labels[bright] - 1, frame[bright])
         boxes = ndimage.find_objects(labels)
         sources = []
         for i in np.argsort(peaks)[::-1]:
@@ -1217,6 +1221,19 @@ class MatchedFilterDetector(object):
             for i, f in enumerate(arr[:, 0]):
                 by_frame[round(f, 1)].append(i)
 
+            # A spatial index of the hits of every run, so only the hits near a predicted position are tested
+            #   (large frames have many hits per run)
+            by_frame = {t: np.array(idx) for t, idx in by_frame.items()}
+            trees = {t: cKDTree(arr[idx, 1:3]) for t, idx in by_frame.items()}
+
+            def nearHits(t, x, y, radius):
+                """ Indices of the hits of the run at the middle frame t within radius of (x, y), in increasing
+                    order (the order in which they would be tested one by one). """
+
+                if t not in trees:
+                    return []
+                return sorted(by_frame[t][trees[t].query_ball_point((x, y), radius + 1e-6)])
+
             # Velocity grid step (px/frame, unbinned), the uncertainty of the velocity of a hit, which sets the
             #   tolerances of the linking
             step = b/max(run_frames - 1.0, 1.0)
@@ -1256,8 +1273,24 @@ class MatchedFilterDetector(object):
                         best, best_z = None, 0
                         max_gap = max(3, int(self.opts.link_max_gap//run_frames))
                         for gap in range(1, max_gap + 1):
+
+                            # Gaps longer than 3 runs are only allowed from a strong hit (see below)
+                            if (gap > 3) and (arr[cur, 3] < strong):
+                                break
+
                             t = round(arr[cur, 0] + direction*gap*run_frames, 1)
-                            for j in by_frame.get(t, []):
+
+                            # The hits which can pass the tests below: within the reach of the motion of the chain
+                            #   around the predicted position, and for a single strong hit, also within the reach of
+                            #   the largest speed around its position
+                            dt_run = direction*gap*run_frames
+                            near = nearHits(t, arr[cur, 1] + vx*dt_run, arr[cur, 2] + vy*dt_run,
+                                            1.5*b + 1.5*step*abs(dt_run))
+                            if (len(chain) == 1) and strong_chain:
+                                near = sorted(set(near) | set(nearHits(t, arr[cur, 1], arr[cur, 2],
+                                    self.opts.speed_max*abs(dt_run) + 1.5*b)))
+
+                            for j in near:
                                 if used[j]:
                                     continue
 
@@ -1985,7 +2018,7 @@ class MatchedFilterDetector(object):
                     fr, x, y = c[key]
                     sel = c[key + '_idx'].get(k)
                     if sel is not None:
-                        sgz, sgg = forcedTrackSignal(z[fr[sel] - first], x[sel], y[sel], self.psf_sigma, radius,
+                        sgz, sgg = forcedTrackSignal(z, fr[sel] - first, x[sel], y[sel], self.psf_sigma, radius,
                                                      excluded)
                         c[key + '_sum'][0] += sgz
                         c[key + '_sum'][1] += sgg
@@ -2003,7 +2036,7 @@ class MatchedFilterDetector(object):
 
                     # The sum within 3 PSF sigmas of the segment, and the number of saturated pixels
                     radius_phot = 3.0*self.psf_sigma
-                    sums, n_sat = framePhotometry(z[fr - first], saturated[fr - first], noise, x, y, vx, vy,
+                    sums, n_sat = framePhotometry(z, saturated, fr - first, noise, x, y, vx, vy,
                                                   radius_phot)
                     c['phot'][sel] = sums
                     c['phot_sat'][sel] = n_sat
@@ -2174,15 +2207,16 @@ def extentConcentration(stack, psf_sigma):
     return float((core - ring)/core)
 
 
-def framePhotometry(frames, saturated, noise, xs, ys, vx, vy, radius):
+def framePhotometry(frames, saturated, frame_idx, noise, xs, ys, vx, vy, radius):
     """ Photometry of a moving object in a few frames: the sum within radius of the segment it moved along in
         every frame, and its saturated pixels. A very bright object spills its charge along its row and column
         before its pixels saturate: in a frame where the sum within SPILL_RADIUS is more than SPILL_RATIO times
         the normal sum, the wider sum is the intensity and the frame counts as saturated.
 
     Arguments:
-        frames: [ndarray] Normalized frames (n, height, width).
+        frames: [ndarray] Normalized frames (n, height, width), e.g. a block.
         saturated: [ndarray] uint8 mask of the saturated pixels of the frames.
+        frame_idx: [ndarray] Indices of the frames of the object in frames (the frames are not copied).
         noise: [ndarray] Noise image (ADU) of the normalization.
         xs, ys: [ndarray] Positions of the object in the middle of the frames.
         vx, vy: [float] Velocity (px per frame).
@@ -2193,7 +2227,7 @@ def framePhotometry(frames, saturated, noise, xs, ys, vx, vy, radius):
     """
 
     # The sums within the aperture along the segment of every frame (see streakAperture)
-    sums, n_sat = streakAperture(frames, saturated, noise, xs, ys, vx, vy, radius)
+    sums, n_sat = streakAperture(frames, saturated, frame_idx, noise, xs, ys, vx, vy, radius)
 
     # The noise of the sum, at the middle of the positions: the noise of a pixel times the square root of the
     #   number of pixels in the aperture
@@ -2204,7 +2238,7 @@ def framePhotometry(frames, saturated, noise, xs, ys, vx, vy, radius):
     # The spilled charge is only looked for in the frames of very bright objects (the wide aperture adds a lot of
     #   noise to faint ones)
     if np.max(sums) > SPILL_MIN_SNR*core_noise:
-        wide, wide_sat = streakAperture(frames, saturated, noise, xs, ys, vx, vy, SPILL_RADIUS)
+        wide, wide_sat = streakAperture(frames, saturated, frame_idx, noise, xs, ys, vx, vy, SPILL_RADIUS)
         spill = (sums > SPILL_MIN_SNR*core_noise) & (wide > SPILL_RATIO*sums)
         sums = np.where(spill, wide, sums)
         n_sat = np.where(spill, np.maximum(wide_sat, 1), n_sat)
@@ -2663,8 +2697,8 @@ class TrackMeasurement(object):
             dt = np.arange(n) - (n - 1)/2.0
             sat = saturated[f0 - first:f0 - first + n] if saturated is not None \
                 else np.zeros((n,) + z.shape[1:], dtype=np.uint8)
-            sums, n_sat = framePhotometry(z[f0 - first:f0 - first + n], sat, bg.noise, res[0] + vx*dt,
-                                          res[1] + vy*dt, vx, vy, 3.0*self.psf_sigma)
+            sums, n_sat = framePhotometry(z[f0 - first:f0 - first + n], sat, np.arange(n), bg.noise,
+                                          res[0] + vx*dt, res[1] + vy*dt, vx, vy, 3.0*self.psf_sigma)
 
             # The photometry of every frame is kept (padded to the largest number of frames per measurement)
             pad = self.opts.max_measure_frames - n

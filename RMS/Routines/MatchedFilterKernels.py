@@ -487,7 +487,7 @@ def fitMovingPSF(frames, skip, x_pred, y_pred, dt, vx, vy, sigma, radius, max_it
 
 
 @numba.njit(cache=True)
-def forcedTrackSignal(frames, xs, ys, sigma, radius, excluded):
+def forcedTrackSignal(frames, frame_idx, xs, ys, sigma, radius, excluded):
     """ PSF-weighted sums along a fixed track, for the combined significance of a detection. For every frame,
         the sum of the PSF-weighted data and the sum of the squared weights at the given position.
 
@@ -498,8 +498,9 @@ def forcedTrackSignal(frames, xs, ys, sigma, radius, excluded):
     MatchedFilterDetector.verify).
 
     Arguments:
-        frames: [ndarray] float32 frames normalized to unit noise, shape (n_frames, height, width).
-        xs, ys: [ndarray] Position of the object in every frame (px).
+        frames: [ndarray] float32 frames normalized to unit noise, shape (n, height, width), e.g. a block.
+        frame_idx: [ndarray] Indices of the frames of the track in frames (the frames are not copied).
+        xs, ys: [ndarray] Position of the object in every frame of frame_idx (px).
         sigma: [float] PSF sigma (px).
         radius: [int] Half size of the patch (px).
         excluded: [ndarray] uint8 image, pixels which are not 0 are left out of the sums (e.g. stars).
@@ -508,12 +509,14 @@ def forcedTrackSignal(frames, xs, ys, sigma, radius, excluded):
         (sum_gz, sum_gg): [tuple of float] Sums over all frames.
     """
 
-    n_frames, height, width = frames.shape
+    n_frames = len(frame_idx)
+    height, width = frames.shape[1], frames.shape[2]
     inv_s2 = 1.0/(sigma*sigma)
     sum_gz = 0.0
     sum_gg = 0.0
 
     for k in range(n_frames):
+        f = frame_idx[k]
 
         # The patch of (2*radius + 1) px around the position in this frame
         x0 = int(math.floor(xs[k] + 0.5))
@@ -529,7 +532,7 @@ def forcedTrackSignal(frames, xs, ys, sigma, radius, excluded):
                 dx = ix - xs[k]
                 dy = iy - ys[k]
                 g = math.exp(-0.5*(dx*dx + dy*dy)*inv_s2)
-                sum_gz += g*frames[k, iy, ix]
+                sum_gz += g*frames[f, iy, ix]
                 sum_gg += g*g
 
     return sum_gz, sum_gg
@@ -537,7 +540,7 @@ def forcedTrackSignal(frames, xs, ys, sigma, radius, excluded):
 
 
 @numba.njit(cache=True)
-def streakAperture(frames, saturated, noise, xs, ys, vx, vy, radius):
+def streakAperture(frames, saturated, frame_idx, noise, xs, ys, vx, vy, radius):
     """ Photometry of a moving object: in every frame, the sum of the background-subtracted pixels within radius
         of the segment the object moved along during the frame, and the number of saturated pixels there.
 
@@ -546,10 +549,12 @@ def streakAperture(frames, saturated, noise, xs, ys, vx, vy, radius):
     aperture would cut off the ends of the streak.
 
     Arguments:
-        frames: [ndarray] float32 frames normalized to unit noise (background subtracted), (n_frames, height, width).
+        frames: [ndarray] float32 frames normalized to unit noise (background subtracted), (n, height, width),
+            e.g. a block.
         saturated: [ndarray] uint8 mask of the saturated pixels in the raw frames, same shape.
+        frame_idx: [ndarray] Indices of the frames of the object in frames (the frames are not copied).
         noise: [ndarray] float32 noise image (ADU), to convert the normalized frames back to ADU.
-        xs, ys: [ndarray] Position of the object in the middle of every frame (px).
+        xs, ys: [ndarray] Position of the object in the middle of every frame of frame_idx (px).
         vx, vy: [float] Velocity (px per frame).
         radius: [float] Radius of the aperture around the segment (px).
 
@@ -557,7 +562,8 @@ def streakAperture(frames, saturated, noise, xs, ys, vx, vy, radius):
         (sums, n_saturated): [tuple of ndarrays] Sum in ADU and saturated pixel count per frame.
     """
 
-    n_frames, height, width = frames.shape
+    n_frames = len(frame_idx)
+    height, width = frames.shape[1], frames.shape[2]
     sums = np.zeros(n_frames)
     n_sat = np.zeros(n_frames, dtype=np.int64)
 
@@ -567,6 +573,7 @@ def streakAperture(frames, saturated, noise, xs, ys, vx, vy, radius):
     reach = radius + 0.5*math.sqrt(seg2)
 
     for k in range(n_frames):
+        f = frame_idx[k]
 
         # The beginning of the segment: the position half a frame before the middle of the frame
         ax = xs[k] - 0.5*vx
@@ -592,8 +599,8 @@ def streakAperture(frames, saturated, noise, xs, ys, vx, vy, radius):
                     continue
 
                 # The normalized pixel times the noise is the background-subtracted pixel in ADU
-                sums[k] += frames[k, iy, ix]*noise[iy, ix]
-                if saturated[k, iy, ix] != 0:
+                sums[k] += frames[f, iy, ix]*noise[iy, ix]
+                if saturated[f, iy, ix] != 0:
                     n_sat[k] += 1
 
     return sums, n_sat
