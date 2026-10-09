@@ -948,40 +948,36 @@ class MatchedFilterDetector(object):
             if not tracks:
                 continue
 
-            pos = []
+            # A region around every track, and in it the samples masked where any of the tracks is at the time
+            #   of the sample
+            bg = self.backgrounds[k]
             for c in tracks:
                 sel = (c[:, 0] >= lo - 64) & (c[:, 0] < hi + 64)
                 if sel.sum() == 0:
                     continue
-                pos.append(c[sel, 1:3])
-            if not pos:
-                continue
-            pos = np.vstack(pos)
-            x0 = int(max(np.floor(pos[:, 0].min() - radius - 2), 0))
-            x1 = int(min(np.ceil(pos[:, 0].max() + radius + 3), self.width))
-            y0 = int(max(np.floor(pos[:, 1].min() - radius - 2), 0))
-            y1 = int(min(np.ceil(pos[:, 1].max() + radius + 3), self.height))
-            if (x1 <= x0) or (y1 <= y0):
-                continue
+                pos = c[sel, 1:3]
+                x0 = int(max(np.floor(pos[:, 0].min() - radius - 2), 0))
+                x1 = int(min(np.ceil(pos[:, 0].max() + radius + 3), self.width))
+                y0 = int(max(np.floor(pos[:, 1].min() - radius - 2), 0))
+                y1 = int(min(np.ceil(pos[:, 1].max() + radius + 3), self.height))
+                if (x1 <= x0) or (y1 <= y0):
+                    continue
 
-            # Samples of the region, masked where an object is at the time of the sample
-            yy, xx = np.mgrid[y0:y1, x0:x1]
-            crops = []
-            for j in near:
-                fr, frames = blockSamples(j)
-                for f, img in zip(fr, frames):
-                    crop = img[y0:y1, x0:x1].astype(np.float64)
-                    for c in tracks:
-                        if c[0, 0] - 8 <= f <= c[-1, 0] + 8:
-                            px, py = np.interp(f, c[:, 0], c[:, 1]), np.interp(f, c[:, 0], c[:, 2])
-                            crop[(xx - px)**2 + (yy - py)**2 <= radius**2] = np.nan
-                    crops.append(crop)
+                yy, xx = np.mgrid[y0:y1, x0:x1]
+                crops = []
+                for j in near:
+                    fr, frames = blockSamples(j)
+                    for f, img in zip(fr, frames):
+                        crop = img[y0:y1, x0:x1].astype(np.float64)
+                        for t in tracks:
+                            if t[0, 0] - 8 <= f <= t[-1, 0] + 8:
+                                px, py = np.interp(f, t[:, 0], t[:, 1]), np.interp(f, t[:, 0], t[:, 2])
+                                crop[(xx - px)**2 + (yy - py)**2 <= radius**2] = np.nan
+                        crops.append(crop)
 
-            with np.errstate(all='ignore'):
-                masked = np.nanmedian(np.array(crops), axis=0)
-            bg = self.backgrounds[k]
-            region = bg.median[y0:y1, x0:x1]
-            bg.median[y0:y1, x0:x1] = np.where(np.isfinite(masked), masked, region).astype(np.float32)
+                masked = nanMedian(np.array(crops))
+                region = bg.median[y0:y1, x0:x1]
+                bg.median[y0:y1, x0:x1] = np.where(np.isfinite(masked), masked, region).astype(np.float32)
 
             # Drop the samples which are not needed any more
             for j in list(samples):
@@ -1059,13 +1055,16 @@ class MatchedFilterDetector(object):
             checks.append({'on': (frames, xs, ys), 'off': (off_f, off_x, off_y), 'reord': reord,
                            'on_sum': [0.0, 0.0], 'off_sum': [0.0, 0.0], 'reord_sum': [0.0, 0.0]})
 
+        # The positions of every test in each block of frames
+        starts = np.array(self.block_starts)
+        for c in checks:
+            for key in ('on', 'off', 'reord'):
+                c[key + '_idx'] = blockIndices(c[key][0], starts)
+
         radius = int(math.ceil(2.5*self.psf_sigma))
         for k, (first, last) in enumerate(zip(self.block_starts, self.block_ends)):
 
-            def inBlock(fr):
-                return (fr >= first) & (fr < last)
-
-            active = [c for c in checks if inBlock(c['on'][0]).any() or inBlock(c['off'][0]).any()]
+            active = [c for c in checks if (k in c['on_idx']) or (k in c['off_idx'])]
             if not active:
                 continue
 
@@ -1081,8 +1080,8 @@ class MatchedFilterDetector(object):
             for c in active:
                 for key in ('on', 'off', 'reord'):
                     fr, x, y = c[key]
-                    sel = inBlock(fr)
-                    if sel.any():
+                    sel = c[key + '_idx'].get(k)
+                    if sel is not None:
                         sgz, sgg = forcedTrackSignal(z[fr[sel] - first], x[sel], y[sel], self.psf_sigma, radius,
                                                      excluded)
                         c[key + '_sum'][0] += sgz
@@ -1111,6 +1110,50 @@ class MatchedFilterDetector(object):
 
         return kept
 
+
+
+def nanMedian(stack):
+    """ Median along the first axis, ignoring NaNs (NaN where all values are NaN). The same as np.nanmedian,
+        which is many times slower on large arrays.
+
+    Arguments:
+        stack: [ndarray] Values, (n, ...).
+
+    Return:
+        [ndarray] Median, stack.shape[1:].
+    """
+
+    srt = np.sort(stack, axis=0)
+    n = np.isfinite(stack).sum(axis=0)
+    lo = np.take_along_axis(srt, np.maximum((n - 1)//2, 0)[None], axis=0)[0]
+    hi = np.take_along_axis(srt, np.maximum(n//2, 0)[None], axis=0)[0]
+    med = (lo + hi)/2
+
+    return np.where(n > 0, med, np.nan)
+
+
+def blockIndices(frames, starts):
+    """ Indices of the frames in every block of frames.
+
+    Arguments:
+        frames: [ndarray] Frame numbers.
+        starts: [ndarray] First frames of the blocks, sorted.
+
+    Return:
+        [dict] Block index -> indices of its frames, in their order in frames.
+    """
+
+    blocks = np.searchsorted(starts, frames, side='right') - 1
+    order = np.argsort(blocks, kind='stable')
+    sorted_blocks = blocks[order]
+    out = {}
+    for k in np.unique(sorted_blocks):
+        if k < 0:
+            continue
+        lo, hi = np.searchsorted(sorted_blocks, [k, k + 1])
+        out[int(k)] = order[lo:hi]
+
+    return out
 
 
 def smoothTrack(cent, frames, segment=512):
