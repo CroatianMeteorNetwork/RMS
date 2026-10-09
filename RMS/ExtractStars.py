@@ -195,10 +195,11 @@ def extractStars(img, img_median=None, mask=None, gamma=1.0, max_star_candidates
     # plotStars(ff, x_arr, y_arr)
     
 
-    # Compute FWHM from one dimensional sigma
+    # The FWHM of a round star with the mean (quadratic) sigma of the two axes. (The square root of the sum of
+    #   the squares, without the factor of 2, gave a FWHM larger by sqrt(2), see CALSTARS.writeCALSTARS)
     sigma_x_fitted = np.array(sigma_x_fitted)
     sigma_y_fitted = np.array(sigma_y_fitted)
-    sigma_fitted = np.sqrt(sigma_x_fitted**2 + sigma_y_fitted**2)
+    sigma_fitted = np.sqrt((sigma_x_fitted**2 + sigma_y_fitted**2)/2.0)
     fwhm = 2.355*sigma_fitted
 
     if debug:
