@@ -1006,6 +1006,10 @@ class Config:
         #   local quadratic fit of the track), which reduces their errors 2 to 5 times; 0 disables it
         self.mf_smooth_frames = 64
 
+        # Largest number of candidate tracks measured per file (the strongest ones), which bounds the processing
+        #   time in bad conditions (e.g. thin clouds, very bright stars)
+        self.mf_max_tracks = 300
+
         # Saturation level of the raw frames (ADU): the saturated pixels are left out of the position fits and
         #   counted in the saturation column of the detections. 0 uses 98% of the range of the bit depth (some
         #   cameras saturate well below it)
@@ -2351,7 +2355,7 @@ def parseMatchedFilter(config, parser):
 
     for name in ("mf_block_frames", "mf_slow_run_frames", "mf_min_hits",
                  "mf_max_measure_frames", "mf_min_centroids", "mf_edge_margin", "mf_min_frames", "mf_threads",
-                 "mf_smooth_frames", "mf_saturation_level"):
+                 "mf_smooth_frames", "mf_saturation_level", "mf_max_tracks"):
         if parser.has_option(section, name):
             setattr(config, name, parser.getint(section, name))
 

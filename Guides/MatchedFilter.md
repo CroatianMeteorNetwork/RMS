@@ -19,13 +19,22 @@ This guide assumes you know the monitor (see [MonitorProcessing.md](MonitorProce
    very bright moving object leaves a faint trail along its whole column and along its row. The trails move
    with the object, so they would be found as objects themselves (one bright object made over a hundred false
    detections): in every frame, the rows and columns of the sources brighter than `mf_trail_level` (25 times
-   the noise) are left out of the search, except at the source itself.
+   the noise) are left out of the search, except at the source itself. The trails of very bright stars, and
+   columns or rows brighter than their neighbours, flicker with the scintillation all along their length, so
+   they are masked too. The PSF sigma is measured on the stars of the first block (`mf_psf_sigma` sets it).
 2. **Search.** The frames are binned 2x2, smoothed with the point spread function (PSF), and summed along a
    grid of velocities over runs of 8 and 16 frames (all speeds up to `mf_ang_vel_max`), and of 32 frames (slow
    objects). Peaks above `mf_threshold` are the hits. Pixels above the threshold in a large part of the whole
-   input are flickering or variable sources and are removed.
+   input are flickering or variable sources and are removed. A bright object slower than about 0.02 px per
+   frame stays on the same pixels for most of a block, so it is part of the background there and masked as a
+   star. For these, the median of every block is compared with the medians of blocks a few blocks away,
+   shifted by the motion of the stars (e.g. the diurnal motion of a fixed camera): the stars cancel, and an
+   object which moves relative to them is linked from block to block. Its background is estimated again without
+   it before it is measured.
 3. **Linking.** The hits of consecutive runs are linked into tracks, predicting the next hit from the velocity
-   of each hit.
+   of each hit. Tracks which only follow a much stronger one (the wings and trails of a bright object) are
+   dropped, and at most `mf_max_tracks` (300) tracks are measured, the strongest ones, so a file in bad
+   conditions (e.g. thin clouds, a very bright star) can't take much longer than usual.
 4. **Measurement.** A moving PSF is fitted jointly to short runs of frames of every track. Each track uses as
    few frames per position as keep the position error below `mf_max_pos_error` (0.5 px): every frame for
    bright objects, up to `mf_max_measure_frames` (8) at the faint limit. Tracks are followed with a local
@@ -34,6 +43,16 @@ This guide assumes you know the monitor (see [MonitorProcessing.md](MonitorProce
    errors 2 to 5 times (positions of nearby measurements are then correlated; 0 disables it). On objects added
    to real frames, the errors are 0.1-0.2 px from 1.5 times the noise per frame and 0.03-0.1 px for bright
    objects.
+
+   **Photometry.** The intensity of every frame is the sum of the pixels within 3 PSF sigmas of the segment
+   the object moved along during the frame, and the detection has a row for every frame (the positions of
+   faint objects, measured on several frames together, are interpolated along the track), so the light curve
+   keeps short flashes. The intensities are put on the scale of the stars of the photometric calibration: the
+   stars are measured with the same aperture, and the median ratio to their CALSTARS intensities is applied
+   (the factor is in the done file). Saturated pixels (`mf_saturation_level`) are left out of the fits and
+   counted. A very bright object spills its charge along its row and column before its pixels saturate: where
+   the sum within 12 px is more than 1.3 times the normal sum, the wider sum is the intensity and the frame
+   counts as saturated.
 5. **Verification.** The signal along a smooth track through the measurements, minus the signal at the same
    positions at times when the object is elsewhere, and leaving out the pixels on stars, has to be at least
    `mf_track_significance` (12) times its noise. This rejects tracks made of noise, and slow tracks along the
@@ -52,7 +71,8 @@ mf_enable: true
 ```
 
 After the normal detection of a file, the worker runs the matched filter on the same frames and writes its
-results to a `matched_filter` directory in the results directory of the file:
+results to a `matched_filter` directory in the results directory of the file (like the normal detection, it
+is skipped when the file has fewer than `ff_min_stars` stars):
 
 - `FTPdetectinfo_<...>_mf.txt`, recalibrated with the platepar (RA/Dec and magnitudes),
 - `CALSTARS_<...>_mf.txt`, the platepar and the recalibrated platepars,
@@ -62,6 +82,15 @@ The night report merges the detections of all files into
 `<night directory>/matched_filter/FTPdetectinfo_<night>_mf.txt`. The rest of the report (stacks, archive,
 upload) only uses the normal detections. A failure of the matched filter is logged and doesn't fail the
 file.
+
+### In the monitor, instead of the normal detection
+
+With `mf_replace_detection: true` (and `mf_enable: true`), the normal detection is not run: the stars are
+extracted, and the detections of the matched filter are the results of the file (its FTPdetectinfo, CALSTARS,
+recalibration, night report, archive and upload), with the done file `matched_filter_done.json` in the results
+directory and no `matched_filter` directory. Objects faster than `mf_ang_vel_max` are then not detected.
+
+### Processing time
 
 The matched filter roughly doubles the processing time of a file without a GPU (see below), so check that the
 monitor still keeps up. With several workers, set `mf_threads` to the number of CPU cores divided by the
@@ -111,6 +140,7 @@ All settings are in the `[MatchedFilter]` section, see the comments in `.config`
 | Setting | Default | Meaning |
 |---|---|---|
 | `mf_enable` | false | Run in the monitor after the normal detection |
+| `mf_replace_detection` | false | With mf_enable, the matched filter replaces the normal detection in the monitor |
 | `mf_ang_vel_min`, `mf_ang_vel_max` | 0.01, 2.0 | Speed range of the objects (deg/s). The search cost grows with the square of the largest speed |
 | `mf_threshold` | 5.0 | Threshold of the search (sigma of the best velocity) |
 | `mf_track_significance` | 12.0 | Minimum significance of a detection |
@@ -119,6 +149,9 @@ All settings are in the `[MatchedFilter]` section, see the comments in `.config`
 | `mf_max_measure_frames` | 8 | Most frames combined into one position |
 | `mf_smooth_frames` | 64 | Positions combined along the track over +- this many frames, 0 disables it |
 | `mf_trail_level` | 25 | Rows and columns of sources brighter than this in a frame (in the noise of a pixel) are left out of the search, 0 disables it |
+| `mf_max_tracks` | 300 | Most candidate tracks measured per file (the strongest), bounds the time in bad conditions |
+| `mf_psf_sigma` | 0 | PSF sigma (px), 0 measures it on the stars |
+| `mf_saturation_level` | 0 | Saturation level of the raw frames (ADU), 0 = 98% of the bit range |
 | `mf_gpu` | auto | Use the GPU: auto, on, off |
 | `mf_threads` | 0 | CPU threads, 0 = all cores |
 

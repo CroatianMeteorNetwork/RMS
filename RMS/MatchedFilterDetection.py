@@ -85,6 +85,24 @@ SPILL_RADIUS = 12.0
 SPILL_RATIO = 1.3
 SPILL_MIN_SNR = 100.0
 
+# Very bright stars (above STATIC_TRAIL_LEVEL in the median, in the noise of the sky in one frame, at least
+#   STATIC_TRAIL_MIN_AREA pixels) have trails along their row and column: the rows and columns within
+#   STATIC_TRAIL_WIDTH px are masked (see staticMask)
+STATIC_TRAIL_LEVEL = 100.0
+STATIC_TRAIL_MIN_AREA = 4
+STATIC_TRAIL_WIDTH = 3
+
+# Columns and rows of the median brighter than their neighbours by more than BRIGHT_LINE_LEVEL (in the noise of the
+#   sky in one frame, and 10 times the scatter of the columns or rows) are masked (see staticMask)
+BRIGHT_LINE_LEVEL = 0.2
+
+# A track which stays within SHADOW_RADIUS (px) of a track at least SHADOW_STRENGTH times stronger (the sum of
+#   the significances of the hits over the square root of their number), for at least SHADOW_OVERLAP of its hits,
+#   moving the same way, is not measured (see removeShadows)
+SHADOW_RADIUS = 20.0
+SHADOW_STRENGTH = 3.0
+SHADOW_OVERLAP = 0.8
+
 # Search of very slow objects (see slowSearch): the medians of the blocks are compared with the medians of the
 #   blocks SLOW_REF_BLOCKS (and one more) before and after, shifted by the motion of the stars; candidates above
 #   SLOW_THRESHOLD (sigma) in at least SLOW_MIN_BLOCKS consecutive blocks are linked, up to SLOW_MAX_SPEED (px per
@@ -155,6 +173,7 @@ class MatchedFilterOptions(object):
         self.edge_margin = max(config.detection_border, config.mf_edge_margin)
         self.gpu = config.mf_gpu
         self.smooth_frames = config.mf_smooth_frames
+        self.max_tracks = config.mf_max_tracks
 
         # Saturation level of the raw frames (ADU), 98% of the range of the bit depth if not given
         self.saturation_level = config.mf_saturation_level if config.mf_saturation_level > 0 \
@@ -210,8 +229,9 @@ def velocityGrid(speed_max, run_frames, bin_factor):
 
 
 def estimatePSFSigma(image, noise, n_stars=40, min_snr=20.0):
-    """ Estimate the PSF sigma from bright isolated stars: a circular Gaussian with a constant is fitted to every
-        star, and the median of their sigmas is taken.
+    """ Estimate the PSF sigma from bright isolated stars: a circular Gaussian is fitted to every star, after
+        subtracting the sky of an annulus around it, and the median of their sigmas is taken. (A constant fitted
+        with the Gaussian would take up the wings of the PSF, and the sigma would be too small.)
 
     Arguments:
         image: [ndarray] Image of the stars with the sky subtracted (e.g. the mean of a block of frames minus
@@ -231,6 +251,7 @@ def estimatePSFSigma(image, noise, n_stars=40, min_snr=20.0):
     snr = image/noise
     smooth = cv2.GaussianBlur(snr.astype(np.float32), (0, 0), 1.0)
     r = 6
+    r_sky = 9
     local_max = (smooth == cv2.dilate(smooth, np.ones((2*r + 1, 2*r + 1), np.uint8))) & (smooth > min_snr)
     local_max[:2*r] = local_max[-2*r:] = False
     local_max[:, :2*r] = local_max[:, -2*r:] = False
@@ -241,10 +262,12 @@ def estimatePSFSigma(image, noise, n_stars=40, min_snr=20.0):
     order = order[min(5, len(order)//4):]
 
     yy, xx = np.mgrid[-r:r + 1, -r:r + 1]
+    ys_sky, xs_sky = np.mgrid[-r_sky:r_sky + 1, -r_sky:r_sky + 1]
+    annulus = (xs_sky**2 + ys_sky**2 > (r + 1)**2) & (xs_sky**2 + ys_sky**2 <= r_sky**2)
 
     def residual(p, patch):
-        amp, cx, cy, sigma, const = p
-        return (amp*np.exp(-0.5*((xx - cx)**2 + (yy - cy)**2)/sigma**2) + const - patch).ravel()
+        amp, cx, cy, sigma = p
+        return (amp*np.exp(-0.5*((xx - cx)**2 + (yy - cy)**2)/sigma**2) - patch).ravel()
 
     sigmas = []
     for i in order:
@@ -256,11 +279,13 @@ def estimatePSFSigma(image, noise, n_stars=40, min_snr=20.0):
         if near.max() > 0.1*smooth[y, x]:
             continue
 
-        patch = image[y - r:y + r + 1, x - r:x + r + 1].astype(np.float64)
-        p0 = [patch.max(), 0.0, 0.0, 1.0, 0.0]
+        if not ((r_sky <= y < image.shape[0] - r_sky) and (r_sky <= x < image.shape[1] - r_sky)):
+            continue
+        sky = np.median(image[y - r_sky:y + r_sky + 1, x - r_sky:x + r_sky + 1][annulus])
+        patch = image[y - r:y + r + 1, x - r:x + r + 1].astype(np.float64) - sky
+        p0 = [patch.max(), 0.0, 0.0, 1.0]
         try:
-            fit = least_squares(residual, p0, args=(patch,), bounds=([0, -2, -2, 0.3, -np.inf],
-                                                                     [np.inf, 2, 2, 5.0, np.inf]))
+            fit = least_squares(residual, p0, args=(patch,), bounds=([0, -2, -2, 0.3], [np.inf, 2, 2, 5.0]))
         except Exception:
             continue
         if fit.success:
@@ -352,6 +377,9 @@ class MatchedFilterDetector(object):
 
         # Factor of the intensities from the stars (see apertureCorrection), None if not applied
         self.aperture_correction = None
+
+        # Number of the weakest candidate tracks which were not measured (see mf_max_tracks)
+        self.tracks_dropped = 0
         self.psf_sigma = self.opts.psf_sigma if self.opts.psf_sigma > 0 else None
 
         self.timing = collections.defaultdict(float)
@@ -515,6 +543,33 @@ class MatchedFilterDetector(object):
         # Brightness of the static sources relative to the noise of the sky in one frame
         level = background.star_level
         static = cv2.dilate((level > self.opts.star_threshold).astype(np.uint8), np.ones((3, 3), np.uint8)) > 0
+
+        # The trails of very bright stars along their row and column (see removeTrails) flicker with the
+        #   scintillation of the star, all along the row and column at once, which the stacks along those
+        #   directions add up: their rows and columns are masked. A hot pixel (a single pixel) has no trails
+        labels, n = ndimage.label(level > STATIC_TRAIL_LEVEL)
+        if n:
+            sizes = ndimage.sum(np.ones(level.shape), labels, index=np.arange(1, n + 1))
+            for sl, size in zip(ndimage.find_objects(labels), sizes):
+                if size < STATIC_TRAIL_MIN_AREA:
+                    continue
+                static[max(sl[0].start - STATIC_TRAIL_WIDTH, 0):sl[0].stop + STATIC_TRAIL_WIDTH, :] = True
+                static[:, max(sl[1].start - STATIC_TRAIL_WIDTH, 0):sl[1].stop + STATIC_TRAIL_WIDTH] = True
+
+        # Columns and rows brighter than their neighbours (the trails of bright stars, also of stars outside the
+        #   image, and bad columns) flicker as a whole in the same way
+        sky_rel = (background.median - background.sky)/background.sky_noise
+        m = max(self.opts.edge_margin, 1)
+        for axis in (0, 1):
+            profile = np.median(sky_rel[m:-m, :] if axis == 0 else sky_rel[:, m:-m], axis=axis)
+            excess = profile - ndimage.median_filter(profile, size=15, mode='nearest')
+            scatter = 1.4826*np.median(np.abs(excess))
+            bright = excess > max(BRIGHT_LINE_LEVEL, 10*scatter)
+            bright = ndimage.binary_dilation(bright, iterations=1)
+            if axis == 0:
+                static[:, bright] = True
+            else:
+                static[bright, :] = True
 
         if self.mask is not None:
             static |= self.mask.img == 0
@@ -1088,6 +1143,58 @@ class MatchedFilterDetector(object):
         return u[np.argsort(u[:, 0], kind='stable')]
 
 
+    def removeShadows(self, tracks):
+        """ Remove the tracks which follow a much stronger track at a small distance: the hits around a very
+            bright object (its wings, trails, and the noise it adds) link into many tracks of their own, which
+            would each be measured (on the bright object) before the duplicates are removed.
+
+        Arguments:
+            tracks: [list] Tracks as arrays of hits, rows [frame, x, y, z, vx, vy, run].
+
+        Return:
+            [list] The tracks without the shadows.
+        """
+
+        if len(tracks) < 2:
+            return tracks
+
+        strength = np.array([np.sum(tr[:, 3])/math.sqrt(len(tr)) for tr in tracks])
+        vel = []
+        for tr in tracks:
+            if np.ptp(tr[:, 0]) > 0:
+                vel.append((np.polyfit(tr[:, 0], tr[:, 1], 1)[0], np.polyfit(tr[:, 0], tr[:, 2], 1)[0]))
+            else:
+                vel.append((np.median(tr[:, 4]), np.median(tr[:, 5])))
+        vel = np.array(vel)
+
+        kept = []
+        for i in np.argsort(-strength):
+            tr = tracks[i]
+            shadow = False
+            for j in kept:
+                ref = tracks[j]
+                if strength[j] < SHADOW_STRENGTH*strength[i]:
+                    continue
+                inside = (tr[:, 0] >= ref[0, 0]) & (tr[:, 0] <= ref[-1, 0])
+                if inside.mean() < SHADOW_OVERLAP:
+                    continue
+                f = tr[inside, 0]
+                dist = np.hypot(np.interp(f, ref[:, 0], ref[:, 1]) - tr[inside, 1],
+                                np.interp(f, ref[:, 0], ref[:, 2]) - tr[inside, 2])
+                speed = math.hypot(*vel[j])
+                if (np.median(dist) <= SHADOW_RADIUS) and \
+                        (math.hypot(*(vel[i] - vel[j])) <= 0.2*speed + 2*self.opts.speed_min):
+                    shadow = True
+                    break
+            if not shadow:
+                kept.append(i)
+
+        if len(kept) < len(tracks):
+            log.info('Matched filter: {:d} tracks following stronger ones removed'.format(len(tracks) - len(kept)))
+
+        return [tracks[i] for i in sorted(kept)]
+
+
     def acceptTrack(self, track):
         """ A track is kept if its speed is in the range and it moves by more than a few PSF widths (the
             residuals of variable stars are stationary). """
@@ -1134,7 +1241,18 @@ class MatchedFilterDetector(object):
             linked = self.mergeTracks(linked + slow_tracks)
         self.timing['slow_search'] = time() - t1
 
-        tracks = [tr for tr in linked if self.acceptTrack(tr)]
+        tracks = self.removeShadows([tr for tr in linked if self.acceptTrack(tr)])
+
+        # The time of the measurement grows with the number of tracks, which can be large in bad conditions
+        #   (e.g. thin clouds, a very bright star): the strongest tracks are kept, so a file can't take much
+        #   longer than usual
+        if len(tracks) > self.opts.max_tracks:
+            strength = np.array([np.sum(tr[:, 3])/math.sqrt(len(tr)) for tr in tracks])
+            keep = np.sort(np.argsort(-strength)[:self.opts.max_tracks])
+            self.tracks_dropped = len(tracks) - len(keep)
+            log.warning('Matched filter: {:d} candidate tracks, only the {:d} strongest are measured'.format(
+                len(tracks), self.opts.max_tracks))
+            tracks = [tracks[i] for i in keep]
         self._debug = (hits, linked)
         log.info('Matched filter: {:d} hits, {:d} candidate tracks ({:d} from the search of slow objects)'.format(
             len(hits), len(tracks), len(slow_tracks)))
@@ -1272,6 +1390,7 @@ class MatchedFilterDetector(object):
 
         return {
             'aperture_correction': self.aperture_correction,
+            'tracks_dropped': int(self.tracks_dropped),
             'total_frames': int(self.total_frames),
             'psf_sigma': self.psf_sigma,
             'gpu': bool(self.opts.use_gpu),
