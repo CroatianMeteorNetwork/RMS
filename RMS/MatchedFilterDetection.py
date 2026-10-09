@@ -97,14 +97,22 @@ SHADOW_STRENGTH = 3.0
 SHADOW_OVERLAP = 0.8
 
 # Shape of the detections (see extentConcentration): the frames are stacked along the track (every EXTENT_STEP-th
-#   frame) within EXTENT_RADIUS px, and a detection whose concentration is below MIN_CONCENTRATION is extended
-#   (e.g. a cloud), not a point source. Only detections below EXTENT_MAX_SIGNIFICANCE are tested. On recorded data,
-#   objects are at 0.87-1 (very bright ones down to 0.6), structures of thin drifting clouds at 0.2-0.7
+#   frame) within EXTENT_RADIUS px, and the concentration of the light at the centre tells a point source from an
+#   extended structure (e.g. a cloud). Only detections below EXTENT_MAX_SIGNIFICANCE are tested. On recorded data,
+#   objects are at 0.87-1 (a few faint ones and very bright ones down to 0.6), structures of thin drifting clouds
+#   at 0.2-0.7
 EXTENT_RADIUS = 9
 EXTENT_RING = (4.0, 7.0)
 EXTENT_STEP = 2
 MIN_CONCENTRATION = 0.8
 EXTENT_MAX_SIGNIFICANCE = 200.0
+
+# Below MIN_CONCENTRATION_ALONE a detection is extended in any case; between it and MIN_CONCENTRATION, only if at
+#   least COMOVING_MIN other candidate tracks at the same time move with it (within COMOVING_TOLERANCE of its
+#   speed), as the structures of a drifting cloud do
+MIN_CONCENTRATION_ALONE = 0.6
+COMOVING_MIN = 1
+COMOVING_TOLERANCE = 0.15
 
 # Smallest sigma of the smoothing of the frames in the search (px), see searchSigma
 SEARCH_MIN_SIGMA = 1.0
@@ -1703,7 +1711,8 @@ class MatchedFilterDetector(object):
                             c['stack'] += cv2.getRectSubPix(z[f - first], (2*r + 1, 2*r + 1), (float(xf), float(yf)))
                             c['stack_n'] += 1
 
-        kept = []
+        # Significance, shape and motion of every track
+        results = []
         for cent, c in zip(measured, checks):
 
             on_gz, on_gg = c['on_sum']
@@ -1716,16 +1725,36 @@ class MatchedFilterDetector(object):
             for key in ('off_sum', 'reord_sum'):
                 gz, gg = c[key]
                 tests.append((on_gz - gz*on_gg/gg)/math.sqrt(on_gg*(1 + on_gg/gg)))
-            significance = min(tests)
+
+            fr, xs, ys = c['on']
+            span = max(fr[-1] - fr[0], 1)
+            velocity = np.array([(xs[-1] - xs[0])/span, (ys[-1] - ys[0])/span])
+            concentration = extentConcentration(c['stack']/max(c['stack_n'], 1), self.psf_sigma)
+            results.append((cent, c, min(tests), tests, concentration, velocity))
+
+        kept = []
+        for i, (cent, c, significance, tests, concentration, velocity) in enumerate(results):
 
             # A point source: the light of the frames stacked along the track is concentrated at the centre.
-            #   Structures of thin clouds drifting across the field move too, but are extended
-            #   (a very bright object is spread by its own trails and spilled charge, so it is not tested)
-            concentration = extentConcentration(c['stack']/max(c['stack_n'], 1), self.psf_sigma)
-            if (concentration < MIN_CONCENTRATION) and (significance < EXTENT_MAX_SIGNIFICANCE):
-                log.info('Matched filter: track {:.0f}-{:.0f} (significance {:.1f}) is extended (concentration '
-                         '{:.2f}), rejected'.format(cent[0, 0], cent[-1, 0], significance, concentration))
-                significance = min(significance, 0.0)
+            #   Structures of thin clouds drifting across the field are extended, and several of them move
+            #   together with the clouds. A very bright object is spread by its own trails and spilled charge, so
+            #   it is not tested
+            if significance < EXTENT_MAX_SIGNIFICANCE:
+                together = 0
+                for j, other in enumerate(results):
+                    if (j == i) or (other[0][-1, 0] < cent[0, 0]) or (other[0][0, 0] > cent[-1, 0]):
+                        continue
+                    if np.hypot(*(other[5] - velocity)) <= max(COMOVING_TOLERANCE*np.hypot(*velocity),
+                                                                 self.opts.speed_min):
+                        together += 1
+                extended = (concentration < MIN_CONCENTRATION_ALONE) or \
+                    ((concentration < MIN_CONCENTRATION) and (together >= COMOVING_MIN))
+                if extended:
+                    log.info('Matched filter: track {:.0f}-{:.0f} (significance {:.1f}) is extended (concentration '
+                             '{:.2f}, {:d} tracks moving with it), rejected'.format(cent[0, 0], cent[-1, 0],
+                                                                                   significance, concentration,
+                                                                                   together))
+                    significance = min(significance, 0.0)
 
             self.significances.append((cent[0, 0], cent[-1, 0], significance) + tuple(tests) + (concentration,))
             log.debug('Matched filter: track {:.0f}-{:.0f} significance {:.1f} (off time {:.1f}, reordered '
