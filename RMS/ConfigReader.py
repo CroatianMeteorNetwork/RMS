@@ -986,7 +986,7 @@ class Config:
         self.mf_star_threshold = 3.0
 
         # The normalized frames are clipped to +/- this before the search (single frame outliers)
-        self.mf_clip = 4.0
+        self.mf_clip = 10.0
 
         # Moving sources brighter than this in a frame (in the noise of one pixel) leave faint trails along their
         #   row and column on some sensors; these rows and columns are left out of the search in that frame. 0

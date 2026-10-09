@@ -668,8 +668,8 @@ def test_trails_of_bright_object_removed(config, trail_level):
 ### Light curves, bright objects, photometric scale ###
 
 def test_flashes_kept_in_light_curve(config):
-    """ An object below the single-frame limit which flashes for one frame every 24 frames (like a rotating
-        object with flat facets): it is found, and the light curve has the flashes at their full brightness
+    """ An object below the single-frame limit which flashes for one frame every 24 frames: it is found, and
+        the light curve has the flashes at their full brightness
         (the positions of faint objects are measured on several frames, but the intensity of every frame is
         kept).
     """
