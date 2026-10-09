@@ -1100,16 +1100,17 @@ def generateNightReport(output_dir, night_name, config, results=None, archive=Tr
             if os.path.isdir(ecsv_dir):
                 extra_files += sorted(glob.glob(os.path.join(ecsv_dir, '*.ecsv')))
 
-            # Archiving also generates the thumbnails and the stacks
+            # Archiving also generates the thumbnails and the stacks. A meteor longer than a chunk is on
+            #   several images, so the stack is named with the number of meteors, not of images
             archives = _runStep('archive', lambda: archiveDetections(night_dir, archived_dir,
-                merged.ff_detected, config, extra_files=extra_files))
+                merged.ff_detected, config, extra_files=extra_files, n_meteors=merged.n_meteors))
 
             if archives is not None:
                 upload_files = [os.path.abspath(path) for path in archives if path is not None]
 
         else:
             _runStep('thumbnails_and_stacks', lambda: generateThumbsAndStacks(night_dir, config,
-                                                                              merged.ff_detected))
+                merged.ff_detected, n_meteors=merged.n_meteors))
 
 
     # Mark the files as reported only if all essential steps succeeded, otherwise the report is retried
