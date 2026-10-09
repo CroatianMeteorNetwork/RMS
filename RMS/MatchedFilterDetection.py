@@ -85,13 +85,6 @@ SPILL_RADIUS = 12.0
 SPILL_RATIO = 1.3
 SPILL_MIN_SNR = 100.0
 
-# Very bright stars (above STATIC_TRAIL_LEVEL in the median, in the noise of the sky in one frame, at least
-#   STATIC_TRAIL_MIN_AREA pixels) have trails along their row and column: the rows and columns within
-#   STATIC_TRAIL_WIDTH px are masked (see staticMask)
-STATIC_TRAIL_LEVEL = 100.0
-STATIC_TRAIL_MIN_AREA = 4
-STATIC_TRAIL_WIDTH = 3
-
 # Columns and rows of the median brighter than their neighbours by more than BRIGHT_LINE_LEVEL (in the noise of the
 #   sky in one frame, and 10 times the scatter of the columns or rows) are masked (see staticMask)
 BRIGHT_LINE_LEVEL = 0.2
@@ -556,20 +549,9 @@ class MatchedFilterDetector(object):
         level = background.star_level
         static = cv2.dilate((level > self.opts.star_threshold).astype(np.uint8), np.ones((3, 3), np.uint8)) > 0
 
-        # The trails of very bright stars along their row and column (see removeTrails) flicker with the
-        #   scintillation of the star, all along the row and column at once, which the stacks along those
-        #   directions add up: their rows and columns are masked. A hot pixel (a single pixel) has no trails
-        labels, n = ndimage.label(level > STATIC_TRAIL_LEVEL)
-        if n:
-            sizes = ndimage.sum(np.ones(level.shape), labels, index=np.arange(1, n + 1))
-            for sl, size in zip(ndimage.find_objects(labels), sizes):
-                if size < STATIC_TRAIL_MIN_AREA:
-                    continue
-                static[max(sl[0].start - STATIC_TRAIL_WIDTH, 0):sl[0].stop + STATIC_TRAIL_WIDTH, :] = True
-                static[:, max(sl[1].start - STATIC_TRAIL_WIDTH, 0):sl[1].stop + STATIC_TRAIL_WIDTH] = True
-
-        # Columns and rows brighter than their neighbours (the trails of bright stars, also of stars outside the
-        #   image, and bad columns) flicker as a whole in the same way
+        # Columns and rows brighter than their neighbours (the trails of very bright stars along their row and
+        #   column, also of stars outside the image, and bad columns) flicker as a whole with the scintillation,
+        #   which the stacks along them add up
         sky_rel = (background.median - background.sky)/background.sky_noise
         m = max(self.opts.edge_margin, 1)
         for axis in (0, 1):
