@@ -103,6 +103,10 @@ SHADOW_RADIUS = 20.0
 SHADOW_STRENGTH = 3.0
 SHADOW_OVERLAP = 0.8
 
+# Hits stronger than LINK_STRONG times the threshold are linked by their positions only: such a hit can come
+#   from a single bright frame of its run (e.g. a flash), whose velocity is not known (see linkHits)
+LINK_STRONG = 3.0
+
 # Search of very slow objects (see slowSearch): the medians of the blocks are compared with the medians of the
 #   blocks SLOW_REF_BLOCKS (and one more) before and after, shifted by the motion of the stars; candidates above
 #   SLOW_THRESHOLD (sigma) in at least SLOW_MIN_BLOCKS consecutive blocks are linked, up to SLOW_MAX_SPEED (px per
@@ -174,6 +178,7 @@ class MatchedFilterOptions(object):
         self.gpu = config.mf_gpu
         self.smooth_frames = config.mf_smooth_frames
         self.max_tracks = config.mf_max_tracks
+        self.link_max_gap = config.mf_link_max_gap
 
         # Saturation level of the raw frames (ADU), 98% of the range of the bit depth if not given
         self.saturation_level = config.mf_saturation_level if config.mf_saturation_level > 0 \
@@ -1016,6 +1021,9 @@ class MatchedFilterDetector(object):
 
             # Velocity grid step (px/frame) and the tolerances of the linking
             step = b/max(run_frames - 1.0, 1.0)
+
+            # Hits this strong are judged by their positions only (see below)
+            strong = LINK_STRONG*self.opts.threshold
             used = np.zeros(len(arr), dtype=bool)
 
             for i in np.argsort(-arr[:, 3]):
@@ -1029,17 +1037,23 @@ class MatchedFilterDetector(object):
                 for direction in (1, -1):
                     while True:
 
-                        # Motion of the chain: a line fit of its hits, or the velocity of the hit
+                        # Motion of the chain: a line fit of its hits, or the velocity of the hit. A strong hit
+                        #   can come from a single bright frame of the run (a flash), whose velocity is not known,
+                        #   but its position is: two strong hits give the motion
                         cur = chain[-1] if direction == 1 else chain[0]
-                        if len(chain) >= 3:
+                        strong_chain = all(arr[j, 3] >= strong for j in chain)
+                        if (len(chain) >= 3) or ((len(chain) == 2) and strong_chain):
                             pts = arr[sorted(chain, key=lambda j: arr[j, 0])]
                             vx = np.polyfit(pts[:, 0], pts[:, 1], 1)[0]
                             vy = np.polyfit(pts[:, 0], pts[:, 2], 1)[0]
                         else:
                             vx, vy = arr[cur, 4], arr[cur, 5]
 
+                        # Up to 3 runs, or up to link_max_gap frames (e.g. between the flashes of a flashing
+                        #   object, which are the only frames above the threshold)
                         best, best_z = None, 0
-                        for gap in (1, 2, 3):
+                        max_gap = max(3, int(self.opts.link_max_gap//run_frames))
+                        for gap in range(1, max_gap + 1):
                             t = round(arr[cur, 0] + direction*gap*run_frames, 1)
                             for j in by_frame.get(t, []):
                                 if used[j]:
@@ -1048,8 +1062,17 @@ class MatchedFilterDetector(object):
                                 dist = math.hypot(arr[j, 1] - (arr[cur, 1] + vx*dt),
                                                   arr[j, 2] - (arr[cur, 2] + vy*dt))
                                 dv = math.hypot(arr[j, 4] - vx, arr[j, 5] - vy)
-                                # The velocity of a hit is known to about a PSF width over the run
-                                if (dist <= 1.5*b + 1.5*step*abs(dt)) and (dv <= 3*step) and (arr[j, 3] > best_z):
+
+                                # The velocity of a hit is known to about a PSF width over the run, except for
+                                #   strong hits (see above). A single strong hit can be followed by another
+                                #   strong hit anywhere within the reach of the largest speed
+                                if (len(chain) == 1) and strong_chain and (arr[j, 3] >= strong):
+                                    ok = math.hypot(arr[j, 1] - arr[cur, 1], arr[j, 2] - arr[cur, 2]) \
+                                        <= self.opts.speed_max*abs(dt) + 1.5*b
+                                else:
+                                    ok = (dist <= 1.5*b + 1.5*step*abs(dt)) and ((dv <= 3*step) or
+                                                                                 (arr[j, 3] >= strong))
+                                if ok and (arr[j, 3] > best_z):
                                     best, best_z = j, arr[j, 3]
                             if best is not None:
                                 break

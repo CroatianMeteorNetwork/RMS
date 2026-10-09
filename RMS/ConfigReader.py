@@ -1010,6 +1010,9 @@ class Config:
         #   time in bad conditions (e.g. thin clouds, very bright stars)
         self.mf_max_tracks = 300
 
+        # Largest gap (frames) between the hits of a track, e.g. between the flashes of a flashing object
+        self.mf_link_max_gap = 96
+
         # Saturation level of the raw frames (ADU): the saturated pixels are left out of the position fits and
         #   counted in the saturation column of the detections. 0 uses 98% of the range of the bit depth (some
         #   cameras saturate well below it)
@@ -2355,7 +2358,7 @@ def parseMatchedFilter(config, parser):
 
     for name in ("mf_block_frames", "mf_slow_run_frames", "mf_min_hits",
                  "mf_max_measure_frames", "mf_min_centroids", "mf_edge_margin", "mf_min_frames", "mf_threads",
-                 "mf_smooth_frames", "mf_saturation_level", "mf_max_tracks"):
+                 "mf_smooth_frames", "mf_saturation_level", "mf_max_tracks", "mf_link_max_gap"):
         if parser.has_option(section, name):
             setattr(config, name, parser.getint(section, name))
 

@@ -834,3 +834,21 @@ def test_merge_tracks_through_a_bridge(config):
     dense = np.array([row(f, 8) for f in np.arange(59.5, 164, 8)])
     assert len(det.mergeTracks([sparse, dense])) == 1
 
+
+
+def test_flashes_without_light_between_are_linked(config):
+    """ An object seen only in its flashes (2 frames every 16 frames): the hits of the runs with a flash have a
+        poorly known velocity, so they are linked by their positions. The flashes count fully in the search only
+        with a higher clipping level of the frames.
+    """
+
+    flashes = {f for f in range(100, 320) if (f - 100) % 16 < 2}
+    obj = linearObject(1.0, 15, 20, 0.4, 0.3, 100, 320)
+    obj['snr'] = lambda f: 60.0 if int(f) in flashes else 0.0
+    config.mf_clip = 10.0
+    config.mf_saturation_level = 10**6
+    _, detections = runDetector(_SynthHandle([obj], n_stars=4), config)
+
+    assert len(detections) == 1
+    cent = detections[0][2]
+    assert np.median(truthError(cent[np.isin(np.round(cent[:, 0]).astype(int), list(flashes))], obj)) < 0.3
