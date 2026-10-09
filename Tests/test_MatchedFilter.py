@@ -603,13 +603,16 @@ def test_summary_lists_tracks_with_significance(config):
 def test_find_input_files(tmp_path):
     """ The video files are found in directories and their subdirectories (the extension in any case), other
         files are ignored, and a file given both directly and in its directory is listed once. A directory of
-        FITS frames is one input.
+        FITS frames is one input, but not a directory of FF files or of .fit frames.
     """
 
+    # A directory of FITS frames, a directory of the FF files of the normal processing, and FRIPON .fit frames
     (tmp_path/'night'/'sub').mkdir(parents=True)
-    (tmp_path/'night'/'20260424_054022').mkdir()
+    for name in ('20260424_054022', 'XX0001_20260424_010000_000000', 'fripon'):
+        (tmp_path/'night'/name).mkdir()
     for name in ('a.vid', 'sub/b.vid', 'sub/c.MKV', 'notes.txt', '20260424_054022/f1.fits',
-                 '20260424_054022/f2.fits'):
+                 '20260424_054022/f2.fits', 'XX0001_20260424_010000_000000/FF_XX0001_20260424_010000_000_0000000.fits',
+                 'fripon/f1.fit'):
         (tmp_path/'night'/name).write_text('x')
 
     files = mfd.findInputFiles([str(tmp_path/'night'), str(tmp_path/'night'/'a.vid')])

@@ -64,7 +64,7 @@ from RMS.DetectionTools import binImageCalibration, loadImageCalibration
 from RMS.DetectStarsAndMeteors import saveResultsFrameInterface
 from RMS.ExtractStarsFrameInterface import extractStarsFrameInterface
 from RMS.Formats import FTPdetectinfo
-from RMS.Formats.FFfile import filenameToDatetime
+from RMS.Formats.FFfile import filenameToDatetime, validFFName
 from RMS.Formats.FrameInterface import detectInputType
 from RMS.Logger import getLogger, LoggingManager
 from RMS.Routines import Image
@@ -91,8 +91,9 @@ DONE_NAME = 'matched_filter_done.json'
 # Extensions of the input files found in directories
 INPUT_EXTENSIONS = ('.vid', '.mkv', '.mp4', '.avi', '.mov')
 
-# Directories of FITS frames (one frame per file) are inputs too
-FITS_EXTENSIONS = ('.fits', '.fit')
+# Directories of FITS frames (one frame per file) are inputs too, as for the fitsdirs input of the monitor (the
+#   .fit files of FRIPON cameras are read with headers which other cameras don't have)
+FITS_EXTENSIONS = ('.fits',)
 
 # Tracks slower than this (px per frame) are measured again on a background estimated without them
 SLOW_SPEED = 0.1
@@ -3123,7 +3124,8 @@ def findInputFiles(paths):
         paths: [list] Files and directories.
 
     Return:
-        [list] Files (and directories of FITS frames), sorted, without duplicates.
+        [list] Files (and directories of FITS frames), sorted, without duplicates. The FF files of the normal
+            processing are FITS files too, but not frames: their directories are not inputs.
     """
 
     files = []
@@ -3133,7 +3135,7 @@ def findInputFiles(paths):
         if os.path.isdir(path):
             for root, _, names in os.walk(path):
                 files += [os.path.join(root, name) for name in names if name.lower().endswith(INPUT_EXTENSIONS)]
-                if any(name.lower().endswith(FITS_EXTENSIONS) for name in names):
+                if any(name.lower().endswith(FITS_EXTENSIONS) and not validFFName(name) for name in names):
                     files.append(root)
         else:
             files.append(path)
