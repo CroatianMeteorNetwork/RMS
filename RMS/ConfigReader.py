@@ -595,6 +595,10 @@ class Config:
         # Background estimation parameters
         self.background_reservoir_size = 64
 
+        # Number of threads of the median and the noise of the background of every frame chunk (0 for all CPU
+        #   cores), e.g. when there are more CPU cores than cameras
+        self.median_threads = 1
+
         # KHT Line finding parameters
         # Minimum number of pixels required to form a valid cluster
         self.kht_cluster_min_size = 9
@@ -1929,6 +1933,10 @@ def parseMeteorDetection(config, parser):
     # Load the background reservoir size
     if parser.has_option(section, "background_reservoir_size"):
         config.background_reservoir_size = parser.getint(section, "background_reservoir_size")
+
+    # Number of threads of the background of the frame chunks
+    if parser.has_option(section, "median_threads"):
+        config.median_threads = parser.getint(section, "median_threads")
 
     if parser.has_option(section, "kht_n_sigmas"):
         config.kht_n_sigmas = parser.getfloat(section, "kht_n_sigmas")

@@ -502,7 +502,8 @@ class MatchedFilterDetector(object):
             the mask) doesn't divide by zero.
         """
 
-        median, mad = sampleMedianMAD(samples)
+        # In parallel over the threads of the matched filter (mf_threads, 0 for all CPU cores)
+        median, mad = sampleMedianMAD(samples, threads=self.config.mf_threads)
         noise = np.maximum(1.4826*mad, 1.0).astype(np.float32)
 
         return BlockBackground(median.astype(np.float32), noise, len(samples))

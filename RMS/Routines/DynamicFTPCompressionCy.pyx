@@ -1,6 +1,9 @@
 
-import numpy as np
+import os
 import time
+import concurrent.futures
+
+import numpy as np
 
 # Cython import
 cimport numpy as np
@@ -140,30 +143,12 @@ def blockMedianMAD(sample_t[:, ::1] block, float[::1] median, float[::1] mad):
             mad[p] = <float>medianInPlace(b, n)
 
 
-def sampleMedianMAD(samples, block_rows=MEDIAN_BLOCK_ROWS):
-    """ Compute the median and the median absolute deviation (MAD) of every pixel over the sampled frames.
-
-    The samples of a pixel are one frame apart in memory, so taking the median along the first axis reads
-    memory with a large power of two stride (e.g. 512 KB for 512x512 16-bit frames), which is very slow on
-    some CPUs (more than 10 times slower on an AMD Ryzen 3950X than on a recent Intel CPU). The frames are
-    therefore processed in blocks of image rows: the rows of a block are copied into a buffer whose row
-    length is not a power of two, and the buffer is transposed so that the samples of every pixel are
-    contiguous. The results are identical to np.median along the first axis.
-
-    Arguments:
-        samples: [ndarray] Sampled frames, shape (n_samples, height, width).
-
-    Keyword arguments:
-        block_rows: [int] Image rows per block. MEDIAN_BLOCK_ROWS by default.
-
-    Return:
-        (median, mad): [tuple of ndarrays] float32 images of the median and of the median absolute deviation.
+def medianMADRows(samples, row_first, row_last, block_rows, median, mad):
+    """ The median and the MAD of every pixel of the image rows row_first to row_last - 1 (see sampleMedianMAD),
+        written to the given output images.
     """
 
     n_samples, height, width = samples.shape
-
-    median = np.empty((height, width), dtype=np.float32)
-    mad = np.empty((height, width), dtype=np.float32)
 
     # Pad the buffer rows, so their length is not a power of two
     row_len = block_rows*width + 16
@@ -172,9 +157,9 @@ def sampleMedianMAD(samples, block_rows=MEDIAN_BLOCK_ROWS):
 
     buf = np.empty((n_samples, row_len), dtype=samples.dtype)
 
-    for row in range(0, height, block_rows):
+    for row in range(row_first, row_last, block_rows):
 
-        rows = min(block_rows, height - row)
+        rows = min(block_rows, row_last - row)
         n_pix = rows*width
 
         # Samples of every pixel of the block in a contiguous row
@@ -194,6 +179,55 @@ def sampleMedianMAD(samples, block_rows=MEDIAN_BLOCK_ROWS):
         median[row:row + rows] = block_median.reshape(rows, width)
         mad[row:row + rows] = block_mad.reshape(rows, width)
 
+
+def sampleMedianMAD(samples, block_rows=MEDIAN_BLOCK_ROWS, threads=1):
+    """ Compute the median and the median absolute deviation (MAD) of every pixel over the sampled frames.
+
+    The samples of a pixel are one frame apart in memory, so taking the median along the first axis reads
+    memory with a large power of two stride (e.g. 512 KB for 512x512 16-bit frames), which is very slow on
+    some CPUs (more than 10 times slower on an AMD Ryzen 3950X than on a recent Intel CPU). The frames are
+    therefore processed in blocks of image rows: the rows of a block are copied into a buffer whose row
+    length is not a power of two, and the buffer is transposed so that the samples of every pixel are
+    contiguous. The results are identical to np.median along the first axis.
+
+    With several threads, every thread computes a range of image rows. The compiled part releases the GIL, so
+    the threads run in parallel, and the results are the same as with one thread.
+
+    Arguments:
+        samples: [ndarray] Sampled frames, shape (n_samples, height, width).
+
+    Keyword arguments:
+        block_rows: [int] Image rows per block. MEDIAN_BLOCK_ROWS by default.
+        threads: [int] Number of threads, 0 for all CPU cores. 1 by default.
+
+    Return:
+        (median, mad): [tuple of ndarrays] float32 images of the median and of the median absolute deviation.
+    """
+
+    n_samples, height, width = samples.shape
+
+    median = np.empty((height, width), dtype=np.float32)
+    mad = np.empty((height, width), dtype=np.float32)
+
+    # At most one thread per block of rows
+    if threads <= 0:
+        threads = os.cpu_count() or 1
+    n_blocks = (height + block_rows - 1)//block_rows
+    threads = max(1, min(threads, n_blocks))
+
+    if threads == 1:
+        medianMADRows(samples, 0, height, block_rows, median, mad)
+        return median, mad
+
+    # Split the rows into one range per thread, at the boundaries of the blocks of rows
+    bounds = [block_rows*((n_blocks*i)//threads) for i in range(threads + 1)]
+    bounds[-1] = height
+    with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as pool:
+        jobs = [pool.submit(medianMADRows, samples, bounds[i], bounds[i + 1], block_rows, median, mad)
+                for i in range(threads) if bounds[i + 1] > bounds[i]]
+        for job in jobs:
+            job.result()
+
     return median, mad
 
 
@@ -212,6 +246,9 @@ cdef class FFMimickInterface:
     # how many frames actually contribute to the avepixel median.
     cdef public int res_size
 
+    # Number of threads of the median and the MAD of the samples (0 for all CPU cores)
+    cdef public int median_threads
+
     # State of the random number generator of the reservoir sampling
     cdef unsigned long long rng_state
     
@@ -221,7 +258,7 @@ cdef class FFMimickInterface:
     # Index of the frame in which every pixel was at its maximum (counted from the first added frame)
     cdef public np.ndarray maxframe
 
-    def __init__(self, nrows, ncols, dtype, res_size=64):
+    def __init__(self, nrows, ncols, dtype, res_size=64, median_threads=1):
         """ Structure which is used to make FF file format data. It mimicks the interface of an FF structure. 
     
         Arguments:
@@ -231,6 +268,8 @@ cdef class FFMimickInterface:
             res_size: [int] Number of frames in the reservoir sampling buffer used for background estimation.
                 Default is 64. Higher values (e.g. 256) provide better precision but significantly increase
                 memory and CPU time.
+            median_threads: [int] Number of threads of the median and the MAD of the samples (see
+                sampleMedianMAD), 0 for all CPU cores. 1 by default.
         """
         self.nrows = nrows
         self.ncols = ncols
@@ -249,6 +288,7 @@ cdef class FFMimickInterface:
         # e.g. 256, but comes with a significant performance hit - approx 4x)
         self.res_size = res_size
         self.sample_buf = np.zeros((self.res_size, nrows, ncols), dtype=np.uint16)
+        self.median_threads = median_threads
 
         # The reservoir sampling uses its own generator with a fixed seed, so the same frames always give the
         #   same background. The libc rand() state is shared by the whole process, including other libraries
@@ -304,7 +344,7 @@ cdef class FFMimickInterface:
         cdef int n_samples = min(self.nframes, self.res_size)
         
         # Median (avepixel) and median absolute deviation of every pixel over the valid samples
-        median_float, mad = sampleMedianMAD(self.sample_buf[:n_samples])
+        median_float, mad = sampleMedianMAD(self.sample_buf[:n_samples], threads=self.median_threads)
 
         # The factor 1.4826 converts MAD to an unbiased estimate of Standard Deviation for normal distribution
         cdef np.ndarray std_float = mad * 1.4826
