@@ -1,13 +1,16 @@
 """
 Tests for estimating the frame rate from the frame times in RMS.Formats.FrameInterface, on synthetic UWO .vid
-files.
+files and directories of FITS frames.
 """
+
+import datetime
 
 import numpy as np
 import pytest
+from astropy.io import fits
 
 import RMS.ConfigReader as cr
-from RMS.Formats.FrameInterface import estimateFPS, InputTypeUWOVid
+from RMS.Formats.FrameInterface import estimateFPS, InputTypeImages, InputTypeUWOVid
 
 
 # Beginning Unix time of the synthetic videos
@@ -110,5 +113,49 @@ def test_vid_single_frame_uses_config_fps(tmp_path, config):
 
     handle = InputTypeUWOVid(vid_path, config)
     handle.vid_file.close()
+
+    assert handle.fps == config.fps
+
+
+
+def _writeFits(dir_path, frame_times, wid=64, ht=32):
+    """ Write a directory of synthetic FITS frames (one frame per file) taken at the given times, with the time of
+        every frame in DATE-OBS.
+
+    Arguments:
+        dir_path: [pathlib.Path] Directory of the frames (created).
+        frame_times: [list] Times of frames in seconds since BEG_UNIX_TIME.
+
+    Keyword arguments:
+        wid: [int] Image width in pixels.
+        ht: [int] Image height in pixels.
+    """
+
+    dir_path.mkdir()
+    begin = datetime.datetime(1970, 1, 1) + datetime.timedelta(seconds=BEG_UNIX_TIME)
+    for i, t in enumerate(frame_times):
+        hdu = fits.PrimaryHDU(np.zeros((ht, wid), dtype=np.uint16))
+        hdu.header['DATE-OBS'] = (begin + datetime.timedelta(seconds=t)).isoformat() + '+00:00'
+        hdu.writeto(str(dir_path/'XX0001_{:04d}.fits'.format(i)))
+
+
+def test_fits_fps_estimate(tmp_path, config):
+    """ The frame rate of a directory of FITS frames is measured from their times, not taken from the config
+        (25 FPS here).
+    """
+
+    true_fps = 14.9993
+    _writeFits(tmp_path/'frames', [k/true_fps for k in range(40)])
+
+    handle = InputTypeImages(str(tmp_path/'frames'), config)
+
+    assert handle.fps == pytest.approx(true_fps, rel=1e-4)
+
+
+def test_fits_single_frame_uses_config_fps(tmp_path, config):
+
+    _writeFits(tmp_path/'frames', [0.0])
+
+    handle = InputTypeImages(str(tmp_path/'frames'), config)
 
     assert handle.fps == config.fps

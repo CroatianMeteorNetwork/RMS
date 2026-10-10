@@ -640,8 +640,8 @@ def test_fits_directory_input(config, tmp_path):
         hdu.header['DATE-OBS'] = handle.currentFrameTime(f).isoformat()
         hdu.writeto(str(fits_dir/'XX0001_{:04d}.fits'.format(f)))
 
-    # The frame rate of FITS frames is taken from the config
-    config.fps = handle.fps
+    # The frame rate of FITS frames is measured from their times, also with a wrong frame rate in the config
+    config.fps = 2*handle.fps
     summary = mfd.processFile(str(fits_dir), config, str(tmp_path/'out'), extract_stars=False)
 
     assert summary['detections'] == 1

@@ -1915,8 +1915,9 @@ class InputTypeImages(InputType):
 
         ### SET THE FPS ###
 
-        # Estimate the FPS if UWO pngs are given
-        if self.uwo_png_mode and not self.single_image_mode:
+        # Estimate the FPS from the frame times if UWO pngs or FITS frames (with the time of every frame in
+        #   DATE-OBS) are given, as the FPS in the config may not be the one of the camera
+        if (self.uwo_png_mode or (self.fits_mode and not self.fripon_mode)) and not self.single_image_mode:
 
             # Convert datetimes to Unix times
             unix_times = [datetime2UnixTime(dt) for dt in self.frame_dt_list]
