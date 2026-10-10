@@ -406,6 +406,12 @@ def test_stationary_cloud_found_with_reference(tmp_path):
     assert not sky_map.isClear(np.array([150.0]), np.array([300.0]), np.array([5*CHUNK_FRAMES]))[0]
     assert sky_map.isClear(np.array([450.0]), np.array([60.0]), np.array([5*CHUNK_FRAMES]))[0]
 
+    # A dimming of 0.2 mag (just above the limit) with a single earlier input: the input itself doesn't enter the
+    #   references of the stars which have an earlier one
+    cloud = (150, 300, 80, tuple(range(N_CHUNKS)), 0.2)
+    sky_map = _skyMap(cloud=cloud, begin=later, reference=SkyReference(str(tmp_path), 'XX0001'))
+    assert not sky_map.isClear(np.array([150.0]), np.array([300.0]), np.array([5*CHUNK_FRAMES]))[0]
+
 
 def test_missing_reliable_stars_are_clouded(monkeypatch, tmp_path):
     """ Where the stars which are reliably seen on clear sky are missing (an opaque cloud), the sky is clouded. """

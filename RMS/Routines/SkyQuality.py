@@ -5,9 +5,10 @@ The stars of every chunk are matched to the star catalog, and the difference bet
 every matched star (with a fixed zero point) and its catalog magnitude is its photometric residual. On clear sky the
 residual of a star is nearly the same in every chunk, but it differs from star to star by about 0.1 mag (the errors
 of the catalog magnitudes and the colours of the stars). The reference of every star (SkyReference) is the median
-over the inputs of the camera of its residual on clear sky in an input (a low quantile of its residuals there),
-relative to the zero point of the input (the median of these residuals over its stars), so the transparency of the
-inputs doesn't enter the reference. Clouds dim the stars behind them, so a cloud shows up as a region of stars
+over the other inputs of the camera of its residual on clear sky in an input (a low quantile of its residuals
+there), relative to the zero point of the input (the median of these residuals over its stars), so the transparency
+of the inputs doesn't enter the reference. The input itself is used only for the stars without other inputs, so a
+cloud during the whole input doesn't enter the references of the stars behind it. Clouds dim the stars behind them, so a cloud shows up as a region of stars
 fainter than their references, and an opaque cloud as a region where stars which are reliably seen on clear sky are
 missing.
 
@@ -731,12 +732,13 @@ class SkyQualityMap(object):
         """ The reference residual of every star of this input (relative to the zero point of an input), whether it
             is reliably seen on clear sky and how often, and the zero point of clear sky.
 
-        The residual of a star in this input is the STAR_QUANTILE quantile of its residuals in the usable chunks
-        (with at least MIN_STAR_OBS of them), relative to the zero point of this input (the median of these over
-        the stars). Its reference is the median of this one and the ones of the other inputs in the reference. A
+        The residual of a star in an input is the STAR_QUANTILE quantile of its residuals in the usable chunks
+        (with at least MIN_STAR_OBS of them), relative to the zero point of the input (the median of these over
+        the stars). Its reference is the median of its residuals in the other inputs in the reference, or, without
+        them, its residual in this input (which a cloud during the whole input would bias towards the cloud). A
         star is reliable if it is seen in at least RELIABLE_FRACTION of the chunks in which it is in the image, in
-        the median of the inputs. The zero point of clear sky is the STAR_QUANTILE quantile of the zero points of
-        the inputs.
+        the median of the other inputs (or in this one, without them). The zero point of clear sky is the
+        STAR_QUANTILE quantile of the zero points of the other inputs (or the one of this input, without them).
 
         Arguments:
             usable: [ndarray] Boolean, the usable chunks.
@@ -746,28 +748,29 @@ class SkyQualityMap(object):
                 if not known), their seen fractions (NaN if not known), and the zero point of clear sky.
         """
 
-        keys, values, rates = self.inputVisits(usable)
-        zero_point = np.nanmedian(values) if np.isfinite(values).any() else np.nan
-        values = values - zero_point
+        # The visits of this input
+        keys, residuals, seen = self.inputVisits(usable)
+        zero_point = np.nanmedian(residuals) if np.isfinite(residuals).any() else np.nan
+        residuals = residuals - zero_point
+        zero_points = np.array([zero_point])
 
-        # With the visits of the other inputs, the earlier processing of this one left out
-        zero_points = [zero_point]
+        # The medians over the visits of the other inputs (the earlier processing of this one left out), where
+        #   there are any
         if (self.reference is not None) and len(keys):
             t = unixTime(self.begin_time)
             ref_values, ref_rates = self.reference.lookup(keys, exclude_time=t)
-            values = np.c_[ref_values, values]
-            rates = np.c_[ref_rates, rates]
-            zero_points = np.r_[self.reference.zeroPoints(exclude_time=t), zero_point]
-        else:
-            values, rates = values[:, None], rates[:, None]
+            with np.errstate(all='ignore'), warnings.catch_warnings():
+                warnings.simplefilter('ignore', category=RuntimeWarning)
+                ref_residuals = np.nanmedian(ref_values, axis=1)
+                ref_seen = np.nanmedian(ref_rates, axis=1)
+            residuals = np.where(np.isfinite(ref_residuals), ref_residuals, residuals)
+            seen = np.where(np.isfinite(ref_seen), ref_seen, seen)
 
-        # The medians over the visits (NaN for the stars without any)
-        with np.errstate(all='ignore'), warnings.catch_warnings():
-            warnings.simplefilter('ignore', category=RuntimeWarning)
-            residuals = np.nanmedian(values, axis=1) if len(keys) else np.zeros(0)
-            seen = np.nanmedian(rates, axis=1) if len(keys) else np.zeros(0)
+            ref_zero_points = self.reference.zeroPoints(exclude_time=t)
+            if np.isfinite(ref_zero_points).any():
+                zero_points = ref_zero_points
 
-        zero_points = np.asarray(zero_points)[np.isfinite(zero_points)]
+        zero_points = zero_points[np.isfinite(zero_points)]
         clear_zero_point = np.percentile(zero_points, STAR_QUANTILE) if len(zero_points) else np.nan
 
         return keys, residuals, seen, clear_zero_point
