@@ -666,6 +666,27 @@ class MatchedFilterDetector(object):
         return z
 
 
+    def blockMask(self, k, background):
+        """ The mask of a block of frames: its static sources (see staticMask) and its clouded regions (in any
+            chunk of frames overlapping the block, see RMS.Routines.SkyQuality), which are not searched or
+            measured.
+
+        Arguments:
+            k: [int] Index of the block.
+            background: [BlockBackground] Background of the block.
+
+        Return:
+            [ndarray] Boolean mask of the binned image, True for the masked pixels.
+        """
+
+        mask = self.staticMask(background)
+        if self.sky_map is not None:
+            mask |= self.sky_map.cloudMask(self.block_starts[k], self.block_ends[k] - 1, self.height, self.width,
+                                           bin_factor=self.det_bin)
+
+        return mask
+
+
     def staticMask(self, background):
         """ Mask of the bright static sources in the median of the frames (stars whose fluctuations are well
             above the noise), of the user mask, and of the image border. True means masked. Fainter stars
@@ -1007,12 +1028,7 @@ class MatchedFilterDetector(object):
             #   unit noise (in place, the raw frames are not needed any more)
             t1 = time()
             bg.mean = frames.mean(axis=0)
-            static = self.staticMask(bg)
-
-            # The clouded regions of the block (in any chunk of frames overlapping it) are not searched
-            if self.sky_map is not None:
-                static = static | self.sky_map.cloudMask(self.block_starts[k], self.block_ends[k] - 1, self.height,
-                                                         self.width, bin_factor=self.det_bin)
+            static = self.blockMask(k, bg)
             self.static_masks[k] = static
             z = self.normalize(frames, k)
             del frames
@@ -2084,7 +2100,7 @@ class MatchedFilterDetector(object):
         #   in the verification
         for k in touched:
             self.starTemplate(self.backgrounds[k])
-            self.static_masks[k] = self.staticMask(self.backgrounds[k])
+            self.static_masks[k] = self.blockMask(k, self.backgrounds[k])
 
 
     def measurePass(self, states):
