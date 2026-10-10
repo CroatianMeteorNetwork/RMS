@@ -84,7 +84,9 @@ def starKeys(ra, dec):
 
 
 class CalibrationError(Exception):
-    """ The platepar could not be fitted to the stars, so the sky quality is not known. """
+    """ The sky quality is not known: the platepar could not be fitted to the stars, there is no star catalog, or
+        no star has a reference.
+    """
     pass
 
 
@@ -523,12 +525,14 @@ class SkyQualityMap(object):
         if pp is None:
             raise CalibrationError('the platepar could not be recalibrated on the stars of the input')
 
-        # Only the catalog stars near the field are projected for every chunk (the margin covers the motion of
-        #   the sky within the input)
-        jd_mid = datetime2JD(filenameToDatetime(star_list[len(star_list)//2][0]))
-        x, y = raDecToXYPP(catalog[:, 0], catalog[:, 1], jd_mid, pp)
+        # Only the catalog stars near the field are projected for every chunk: the stars near the image at any
+        #   of up to 21 times spread over the input, with a margin which covers the motion of the sky between them
         margin = 0.3*max(self.width, self.height)
-        near = (x > -margin) & (x < self.width + margin) & (y > -margin) & (y < self.height + margin)
+        near = np.zeros(len(catalog), dtype=bool)
+        step = max(len(star_list)//20, 1)
+        for entry in star_list[::step] + [star_list[-1]]:
+            x, y = raDecToXYPP(catalog[:, 0], catalog[:, 1], datetime2JD(filenameToDatetime(entry[0])), pp)
+            near |= (x > -margin) & (x < self.width + margin) & (y > -margin) & (y < self.height + margin)
         catalog = catalog[near]
         if len(catalog) < 2:
             raise CalibrationError('no catalog stars in the field')
@@ -602,6 +606,11 @@ class SkyQualityMap(object):
         #   point of the chunk)
         self.star_keys, star_ref, star_seen, clear_zero_point = self.starReferences(usable)
         reliable = star_seen >= RELIABLE_FRACTION
+
+        # Without the reference of any star (a short input, with fewer than MIN_STAR_OBS chunks, and no reference
+        #   of the camera yet) the sky quality is not known, rather than clouded everywhere
+        if not np.isfinite(star_ref).any():
+            raise CalibrationError('no star has a reference (too few chunks and no reference of the camera)')
         excess = []
         for m in self.matched:
             ref = np.full(len(m), np.nan)

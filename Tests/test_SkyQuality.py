@@ -31,7 +31,7 @@ def _chunkName(i, begin=BEGIN):
 
 
 def _skyMap(n_stars=500, cloud=None, opaque=None, few_stars_chunk=None, seed=0, skipped=(), total_frames=None,
-            begin=BEGIN, reference=None):
+            begin=BEGIN, reference=None, n_chunks=N_CHUNKS):
     """ Sky quality of synthetic chunks with uniformly distributed matched stars with residuals of 0.05 mag.
 
     Keyword arguments:
@@ -44,6 +44,7 @@ def _skyMap(n_stars=500, cloud=None, opaque=None, few_stars_chunk=None, seed=0, 
         total_frames: [int] Number of frames of the input.
         begin: [datetime] Beginning of the input.
         reference: [SkyReference] Clear-sky reference of the camera.
+        n_chunks: [int] Number of chunks.
     """
 
     rng = np.random.default_rng(seed)
@@ -60,7 +61,7 @@ def _skyMap(n_stars=500, cloud=None, opaque=None, few_stars_chunk=None, seed=0, 
     field_x, field_y = field.uniform(0, WIDTH, n_stars), field.uniform(0, HEIGHT, n_stars)
 
     star_list, matched = [], []
-    for i in range(N_CHUNKS):
+    for i in range(n_chunks):
 
         found = rng.random(n_stars) > 0.1
         if i == few_stars_chunk:
@@ -308,7 +309,7 @@ def test_calibration_matching_few_stars_is_not_trusted(monkeypatch, offset, trus
     platepar.X_res, platepar.Y_res = WIDTH, HEIGHT
 
     stars = [(yy, xx, 1000.0, 100.0, 2.0, 500.0, 20.0, 0) for xx, yy in zip(x, y)]
-    star_list = [[_chunkName(i), stars] for i in range(4)]
+    star_list = [[_chunkName(i), stars] for i in range(6)]
 
     if trusted:
         sky_map = SkyQualityMap(star_list, platepar, config, BEGIN, FPS, CHUNK_FRAMES)
@@ -463,3 +464,61 @@ def test_saturated_reliable_stars_are_seen(monkeypatch, tmp_path):
                             reference=SkyReference(str(tmp_path), 'XX0001'))
     assert sky_map.reliable_seen[7] == pytest.approx(1.0, abs=0.05)
     assert sky_map.isClear(np.array([300.0]), np.array([200.0]), np.array([7*CHUNK_FRAMES + 10]))[0]
+
+
+
+def test_short_input(tmp_path):
+    """ An input with fewer chunks than needed for the reference of its stars: without a reference of the camera the
+        sky quality is not known (not clouded everywhere), with one it is.
+    """
+
+    with pytest.raises(CalibrationError):
+        _skyMap(n_chunks=3)
+
+    reference = SkyReference(str(tmp_path), 'XX0001')
+    _skyMap(reference=reference).updateReference()
+    later = BEGIN + datetime.timedelta(minutes=10)
+    sky_map = _skyMap(n_chunks=3, begin=later, cloud=(150, 300, 80, (0, 1, 2), 0.5),
+                      reference=SkyReference(str(tmp_path), 'XX0001'))
+    assert not sky_map.isClear(np.array([150.0]), np.array([300.0]), np.array([CHUNK_FRAMES]))[0]
+    assert sky_map.isClear(np.array([450.0]), np.array([60.0]), np.array([CHUNK_FRAMES]))[0]
+
+
+def test_stars_entering_during_the_input(monkeypatch):
+    """ With the sky moving across the image during the input (twice the image width), the stars which are in the
+        image only at its beginning or its end are matched too.
+    """
+
+    import RMS.Routines.SkyQuality as sq
+
+    rng = np.random.default_rng(4)
+    n = 1500
+    ra, dec = rng.uniform(-WIDTH, 2*WIDTH, n), rng.uniform(20, HEIGHT - 20, n)
+    catalog = np.c_[ra, dec, np.full(n, 8.0)]
+    _patchCalibration(monkeypatch, catalog, 0.0)
+
+    # The sky moves by 2*WIDTH px over the input, so a star at ra is at x = ra - shift(t)
+    duration = N_CHUNKS*CHUNK_FRAMES/FPS
+    jd0 = sq.datetime2JD(BEGIN)
+
+    def project(r, d, jd, pp):
+        return r - 2*WIDTH*(jd - jd0)*86400/duration + WIDTH/2, d
+
+    monkeypatch.setattr(sq, 'raDecToXYPP', project)
+
+    config = cr.Config()
+    config.ff_min_stars = 50
+    platepar = Platepar()
+    platepar.X_res, platepar.Y_res = WIDTH, HEIGHT
+
+    star_list = []
+    for i in range(N_CHUNKS):
+        t = BEGIN + datetime.timedelta(seconds=i*CHUNK_FRAMES/FPS)
+        x, y = project(ra, dec, sq.datetime2JD(t) + CHUNK_FRAMES/(2*FPS)/86400, None)
+        inside = (x > 15) & (x < WIDTH - 15)
+        star_list.append([_chunkName(i), [(yy, xx, 1000.0, 100.0, 2.0, 500.0, 20.0, 0)
+                                          for xx, yy in zip(x[inside], y[inside])]])
+
+    sky_map = SkyQualityMap(star_list, platepar, config, BEGIN, FPS, CHUNK_FRAMES)
+    assert sky_map.n_matched[0] > 0.8*len(star_list[0][1])
+    assert sky_map.n_matched[-1] > 0.8*len(star_list[-1][1])
