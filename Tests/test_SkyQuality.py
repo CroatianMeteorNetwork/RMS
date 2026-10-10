@@ -11,7 +11,7 @@ import pytest
 
 import RMS.ConfigReader as cr
 from RMS.Formats.Platepar import Platepar
-from RMS.Routines.SkyQuality import SkyQualityMap, filterClouded
+from RMS.Routines.SkyQuality import CalibrationError, SkyQualityMap, filterClouded
 
 
 # Size of the image, frames per second and frames per chunk of the synthetic inputs
@@ -29,7 +29,7 @@ def _chunkName(i):
     return 'FF_XX0001_{:s}_{:03d}_0000000.fits'.format(t.strftime('%Y%m%d_%H%M%S'), t.microsecond//1000)
 
 
-def _skyMap(n_stars=500, cloud=None, opaque=None, few_stars_chunk=None, seed=0):
+def _skyMap(n_stars=500, cloud=None, opaque=None, few_stars_chunk=None, seed=0, skipped=(), total_frames=None):
     """ Sky quality of synthetic chunks with uniformly distributed matched stars with residuals of 0.05 mag.
 
     Keyword arguments:
@@ -38,6 +38,8 @@ def _skyMap(n_stars=500, cloud=None, opaque=None, few_stars_chunk=None, seed=0):
             the given chunks.
         opaque: [tuple] (x, y, radius, chunks): no stars in the circle in the given chunks.
         few_stars_chunk: [int] A chunk with only 20 stars.
+        skipped: [tuple] Chunks left out of the star list (e.g. skipped by the star extraction).
+        total_frames: [int] Number of frames of the input.
     """
 
     rng = np.random.default_rng(seed)
@@ -70,10 +72,13 @@ def _skyMap(n_stars=500, cloud=None, opaque=None, few_stars_chunk=None, seed=0):
 
         # The stars as from the star extraction, (y, x, intensity, amplitude, fwhm, background, snr, saturated)
         stars = [(yy, xx, 1000.0, 100.0, 2.0, 500.0, 20.0, 0) for xx, yy in zip(x[keep], y[keep])]
+        if i in skipped:
+            continue
         star_list.append([_chunkName(i), stars])
         matched.append(np.c_[x[keep], y[keep], res[keep]])
 
-    return SkyQualityMap(star_list, platepar, config, BEGIN, FPS, CHUNK_FRAMES, matched=matched)
+    return SkyQualityMap(star_list, platepar, config, BEGIN, FPS, CHUNK_FRAMES, matched=matched,
+                         total_frames=total_frames)
 
 
 def test_clear_sky_is_clear():
@@ -170,3 +175,36 @@ def test_frames_outside_the_chunks(frame):
 
     sky_map = _skyMap()
     assert sky_map.isClear(np.array([200.0]), np.array([200.0]), np.array([frame]))[0]
+
+
+def test_missing_chunks_are_clouded():
+    """ Chunks missing from the star list (at the beginning, in the middle and at the end of the input) are
+        clouded, and the frames of the chunks present are clear.
+    """
+
+    sky_map = _skyMap(skipped=(0, 5, 11), total_frames=N_CHUNKS*CHUNK_FRAMES)
+    assert len(sky_map.chunk_first) == N_CHUNKS
+
+    x, y = np.array([200.0]), np.array([200.0])
+    for chunk in (0, 5, 11):
+        assert not sky_map.isClear(x, y, np.array([chunk*CHUNK_FRAMES + 60]))[0]
+    assert sky_map.isClear(x, y, np.array([8*CHUNK_FRAMES + 60]))[0]
+
+    # Without the number of frames, the frames after the last chunk belong to it
+    sky_map = _skyMap(skipped=(11,))
+    assert len(sky_map.chunk_first) == N_CHUNKS - 1
+
+
+def test_no_catalog_is_unknown(tmp_path):
+    """ Without the star catalog the sky quality is not known (CalibrationError), rather than clouded. """
+
+    config = cr.Config()
+    config.star_catalog_path = str(tmp_path)
+    config.star_catalog_file = 'missing_catalog.bin'
+
+    platepar = Platepar()
+    platepar.X_res, platepar.Y_res = WIDTH, HEIGHT
+
+    stars = [(100.0, 100.0, 1000.0, 100.0, 2.0, 500.0, 20.0, 0)]*200
+    with pytest.raises(CalibrationError):
+        SkyQualityMap([[_chunkName(i), stars] for i in range(3)], platepar, config, BEGIN, FPS, CHUNK_FRAMES)

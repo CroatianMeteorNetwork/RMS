@@ -42,7 +42,8 @@ class CalibrationError(Exception):
 
 class SkyQualityMap(object):
     def __init__(self, star_list, platepar, config, begin_time, fps, chunk_frames, n_neighbours=10,
-                 max_offset=0.15, max_radius_ratio=2.0, grid_cells=32, match_radius=1.0, matched=None):
+                 max_offset=0.15, max_radius_ratio=2.0, grid_cells=32, match_radius=1.0, matched=None,
+                 total_frames=None):
         """ Local sky quality of the chunks of frames of one input.
 
         Arguments:
@@ -63,6 +64,8 @@ class SkyQualityMap(object):
             match_radius: [float] Largest distance between a star and its catalog star (px). 1.0 by default.
             matched: [list] The matched stars of the chunks (see matchStars), instead of matching them. None by
                 default.
+            total_frames: [int] Number of frames of the input, for the chunks missing at its end. None by
+                default (the frames after the last chunk belong to it).
         """
 
         self.config = config
@@ -96,10 +99,52 @@ class SkyQualityMap(object):
         # The matched stars of every chunk, as rows [x, y, residual]
         self.n_stars = np.array([len(entry[1]) for entry in star_list])
         self.matched = self.matchStars(star_list, platepar) if matched is None else [matched[i] for i in order]
+
+        # Chunks without stars (e.g. skipped by the star extraction, or failed) are clouded: empty chunks are put
+        #   in the gaps of the chunks, and before the first and after the last one
+        self.addMissingChunks(total_frames)
         self.n_matched = np.array([len(m) for m in self.matched])
 
         # Which grid points of which chunks are clear
         self.clear = self.computeClear()
+
+
+    def addMissingChunks(self, total_frames):
+        """ Add empty chunks (no stars, so clouded) where chunks are missing: in the gaps between the chunks,
+            before the first chunk, and after the last one up to total_frames.
+
+        Arguments:
+            total_frames: [int] Number of frames of the input, or None.
+        """
+
+        cf = self.chunk_frames
+        if len(self.chunk_first) == 0:
+            return
+
+        # The first frames of the chunks, with the missing ones (a chunk is missing where the next one begins
+        #   more than half a chunk after the expected frame)
+        firsts = list(np.arange(self.chunk_first[0] - cf, -cf/2.0, -cf)[::-1].astype(int))
+        for k, f0 in enumerate(self.chunk_first):
+            if k > 0:
+                expected = self.chunk_first[k - 1] + cf
+                while expected <= f0 - cf/2.0:
+                    firsts.append(int(expected))
+                    expected += cf
+            firsts.append(int(f0))
+        if total_frames is not None:
+            expected = self.chunk_first[-1] + cf
+            while expected <= total_frames - cf/2.0:
+                firsts.append(int(expected))
+                expected += cf
+
+        if len(firsts) == len(self.chunk_first):
+            return
+
+        # The stars of the existing chunks, none for the added ones
+        existing = dict(zip(self.chunk_first.tolist(), range(len(self.chunk_first))))
+        self.matched = [self.matched[existing[f]] if f in existing else np.zeros((0, 3)) for f in firsts]
+        self.n_stars = np.array([self.n_stars[existing[f]] if f in existing else 0 for f in firsts])
+        self.chunk_first = np.array(firsts)
 
 
     def matchStars(self, star_list, platepar):
@@ -131,8 +176,7 @@ class SkyQualityMap(object):
                                               lim_mag=self.config.catalog_mag_limit + 1,
                                               mag_band_ratios=self.config.star_catalog_band_ratios)
         if not catalog:
-            log.warning('Sky quality: the star catalog could not be loaded')
-            return matched
+            raise CalibrationError('the star catalog could not be loaded')
         catalog = catalog[0]
 
         # Recalibrate the platepar on the chunk with the most stars (or the next ones, if it fails). The pointing
@@ -159,11 +203,13 @@ class SkyQualityMap(object):
         margin = 0.3*max(self.width, self.height)
         near = (x > -margin) & (x < self.width + margin) & (y > -margin) & (y < self.height + margin)
         catalog = catalog[near]
+        if len(catalog) < 2:
+            raise CalibrationError('no catalog stars in the field')
 
         for i, (ff_name, stars) in enumerate(star_list):
 
             stars = np.array(stars, dtype=np.float64)
-            if (len(stars) == 0) or (len(catalog) < 2):
+            if len(stars) == 0:
                 continue
 
             # The catalog at the time of the chunk (the middle of it)

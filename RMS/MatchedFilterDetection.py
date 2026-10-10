@@ -72,7 +72,7 @@ from RMS.Logger import getLogger, LoggingManager
 from RMS.Routines import Image
 from RMS.Routines import MaskImage
 from RMS.Routines.DynamicFTPCompressionCy import sampleMedianMAD
-from RMS.Routines.SkyQuality import CalibrationError, SkyQualityMap, filterClouded
+from RMS.Routines.SkyQuality import CalibrationError, SkyQualityMap
 from RMS.Routines.MatchedFilterKernels import (VelocityStacker, fitMovingPSF, forcedTrackSignal, streakAperture,
                                                CUDA_AVAILABLE)
 from RMS.Detection import getPolarLine, removeDuplicateDetections, joinContinuousDetections
@@ -470,7 +470,7 @@ class MatchedFilterDetector(object):
         #   everywhere
         self.sky_map = None
 
-        # Measurements and detections removed on clouded sky (see detectMatchedFilter)
+        # Frames of the detections and detections removed on clouded sky (see run)
         self.cloud_rows_removed = 0
         self.cloud_detections_removed = 0
 
@@ -1770,6 +1770,16 @@ class MatchedFilterDetector(object):
                 cent = cent[keep]
                 cent[:, 1:3] = xy
 
+            # Only the measurements on clear sky are kept, as on clouded sky neither their positions nor their
+            #   magnitudes can be trusted, and the track needs enough of them (in unbinned coordinates)
+            if self.sky_map is not None:
+                xy = cent[:, 1:3]*self.det_bin + (self.det_bin - 1)/2.0
+                clear = self.sky_map.isClear(xy[:, 0], xy[:, 1], cent[:, 0])
+                if clear.sum() < self.opts.min_centroids:
+                    self.cloud_detections_removed += 1
+                    continue
+                cent = cent[clear]
+
             # Only tracks which last and move long enough are kept
             if (cent[-1, 0] - cent[0, 0] < self.opts.min_frames) \
                     or (np.hypot(*(cent[-1, 1:3] - cent[0, 1:3])) < self.minDisplacement()):
@@ -1777,6 +1787,15 @@ class MatchedFilterDetector(object):
 
             # One row per frame: the intensity of every frame, at the position on the track
             cent = perFrameRows(cent, self.opts.max_measure_frames, phot)
+
+            # The frames on clouded sky (between and beyond the measurements) are left out too
+            if self.sky_map is not None:
+                xy = cent[:, 1:3]*self.det_bin + (self.det_bin - 1)/2.0
+                clear = self.sky_map.isClear(xy[:, 0], xy[:, 1], cent[:, 0])
+                self.cloud_rows_removed += int((~clear).sum())
+                cent = cent[clear]
+                if len(cent) < 2:
+                    continue
 
             # Unbinned coordinates, and the intensity of the unbinned image (averaged bins hold the mean of the
             #   pixels, summed bins already their sum)
@@ -1901,7 +1920,7 @@ class MatchedFilterDetector(object):
             'aperture_correction': self.aperture_correction,
             'clear_sky_fraction': (round(float(np.mean(self.sky_map.clear)), 3) if self.sky_map is not None
                                    else None),
-            'cloud_measurements_removed': int(self.cloud_rows_removed),
+            'cloud_frames_removed': int(self.cloud_rows_removed),
             'cloud_detections_removed': int(self.cloud_detections_removed),
             'tracks_dropped': int(self.tracks_dropped),
             'total_frames': int(self.total_frames),
@@ -2996,7 +3015,8 @@ def skyQuality(img_handle, config, star_list, platepar):
     t0 = time()
     try:
         sky_map = SkyQualityMap(star_list, platepar, config, img_handle.beginning_datetime.replace(tzinfo=None),
-                                img_handle.fps, None, max_offset=config.mf_cloud_max_offset)
+                                img_handle.fps, None, max_offset=config.mf_cloud_max_offset,
+                                total_frames=img_handle.total_frames)
     except CalibrationError as e:
         log.warning('Matched filter: no sky quality ({:s}), the clouded sky is not excluded'.format(str(e)))
         return None
@@ -3059,14 +3079,10 @@ def detectMatchedFilter(img_handle, config, mask=None, dark=None, flat_struct=No
     detector.sky_map = skyQuality(img_handle, config, star_list, platepar)
     detections = detector.run()
 
-    # Only the measurements on clear sky are kept: on clouded sky, neither the positions nor the magnitudes can be
-    #   trusted. A detection left with too few measurements is removed
+    # The measurements on clouded sky were removed in the run
     if detector.sky_map is not None:
-        n_detections = len(detections)
-        detections, detector.cloud_rows_removed, detector.cloud_detections_removed = filterClouded(
-            detections, detector.sky_map, detector.opts.min_centroids)
-        log.info('Matched filter: {:d} measurements on clouded sky removed, {:d} of {:d} detections removed'.format(
-            detector.cloud_rows_removed, detector.cloud_detections_removed, n_detections))
+        log.info('Matched filter: {:d} detections and {:d} frames of detections on clouded sky removed'.format(
+            detector.cloud_detections_removed, detector.cloud_rows_removed))
 
     # The intensities on the scale of the stars of the photometric calibration. A factor far from 1 means the
     #   stars were not measured properly (e.g. clouds), and the intensities are then left as they are
