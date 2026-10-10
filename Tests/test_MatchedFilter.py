@@ -22,6 +22,7 @@ import datetime
 
 import numpy as np
 import pytest
+from astropy.io import fits
 
 import RMS.ConfigReader as cr
 from RMS.Formats import FTPdetectinfo
@@ -601,16 +602,50 @@ def test_summary_lists_tracks_with_significance(config):
 
 def test_find_input_files(tmp_path):
     """ The video files are found in directories and their subdirectories (the extension in any case), other
-        files are ignored, and a file given both directly and in its directory is listed once.
+        files are ignored, and a file given both directly and in its directory is listed once. A directory of
+        FITS frames is one input, but not a directory of FF files or of .fit frames.
     """
 
+    # A directory of FITS frames, a directory of the FF files of the normal processing, and FRIPON .fit frames
     (tmp_path/'night'/'sub').mkdir(parents=True)
-    for name in ('a.vid', 'sub/b.vid', 'sub/c.MKV', 'notes.txt'):
+    for name in ('20260424_054022', 'XX0001_20260424_010000_000000', 'fripon'):
+        (tmp_path/'night'/name).mkdir()
+    for name in ('a.vid', 'sub/b.vid', 'sub/c.MKV', 'notes.txt', '20260424_054022/f1.fits',
+                 '20260424_054022/f2.fits', 'XX0001_20260424_010000_000000/FF_XX0001_20260424_010000_000_0000000.fits',
+                 'fripon/f1.fit'):
         (tmp_path/'night'/name).write_text('x')
 
     files = mfd.findInputFiles([str(tmp_path/'night'), str(tmp_path/'night'/'a.vid')])
 
-    assert [os.path.basename(f) for f in files] == ['a.vid', 'b.vid', 'c.MKV']
+    assert [os.path.basename(f) for f in files] == ['20260424_054022', 'a.vid', 'b.vid', 'c.MKV']
+
+    # A directory of FITS frames given directly
+    assert mfd.findInputFiles([str(tmp_path/'night'/'20260424_054022')]) == [str(tmp_path/'night'/'20260424_054022')]
+
+
+def test_fits_directory_input(config, tmp_path):
+    """ A directory of FITS frames (one frame per file, with the time of the frame in DATE-OBS) is processed
+        like a video file: the object in it is detected and saved.
+    """
+
+    # The synthetic frames saved as 16-bit FITS files, as the cameras which save FITS frames do
+    obj = linearObject(3.0, 25, 30, 0.3, 0.12, 40, 470)
+    handle = _SynthHandle([obj])
+    fits_dir = tmp_path/'20261008_030000'
+    fits_dir.mkdir()
+    for f in range(handle.total_frames):
+        handle.setFrame(f)
+        frame = np.clip(np.round(handle.loadFrame()), 0, 65535).astype(np.uint16)
+        hdu = fits.PrimaryHDU(frame)
+        hdu.header['DATE-OBS'] = handle.currentFrameTime(f).isoformat()
+        hdu.writeto(str(fits_dir/'XX0001_{:04d}.fits'.format(f)))
+
+    # The frame rate of FITS frames is taken from the config
+    config.fps = handle.fps
+    summary = mfd.processFile(str(fits_dir), config, str(tmp_path/'out'), extract_stars=False)
+
+    assert summary['detections'] == 1
+    assert os.path.isfile(str(tmp_path/'out'/summary['ftpdetectinfo']))
 
 
 def test_process_files_resumes_and_continues_after_failure(config, tmp_path, monkeypatch):

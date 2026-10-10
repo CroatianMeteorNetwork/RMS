@@ -119,6 +119,8 @@ python -m RMS.MatchedFilterDetection /path/to/night/ -c .config -p platepar_cmn2
     --dark bias.png --flat flat.png -o /path/to/output
 ```
 
+The inputs are video files (e.g. `.vid`, `.mkv`) and directories of FITS frames (one frame per file, with the
+time of the frame in `DATE-OBS`; the frame rate is taken from the config), each directory being one input.
 Every input file gets a directory in the output directory with the same files as above. Files which already
 have a `matched_filter_done.json` are skipped, so an interrupted run can simply be started again (`--force`
 processes them again). A file which fails is logged and the others are processed; the exit code is 1 if any

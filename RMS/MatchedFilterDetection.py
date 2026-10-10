@@ -64,7 +64,7 @@ from RMS.DetectionTools import binImageCalibration, loadImageCalibration
 from RMS.DetectStarsAndMeteors import saveResultsFrameInterface
 from RMS.ExtractStarsFrameInterface import extractStarsFrameInterface
 from RMS.Formats import FTPdetectinfo
-from RMS.Formats.FFfile import filenameToDatetime
+from RMS.Formats.FFfile import filenameToDatetime, validFFName
 from RMS.Formats.FrameInterface import detectInputType
 from RMS.Logger import getLogger, LoggingManager
 from RMS.Routines import Image
@@ -90,6 +90,10 @@ DONE_NAME = 'matched_filter_done.json'
 
 # Extensions of the input files found in directories
 INPUT_EXTENSIONS = ('.vid', '.mkv', '.mp4', '.avi', '.mov')
+
+# Directories of FITS frames (one frame per file) are inputs too, as for the fitsdirs input of the monitor (the
+#   .fit files of FRIPON cameras are read with headers which other cameras don't have)
+FITS_EXTENSIONS = ('.fits',)
 
 # Tracks slower than this (px per frame) are measured again on a background estimated without them
 SLOW_SPEED = 0.1
@@ -2952,7 +2956,7 @@ def processFile(file_path, config, output_dir, platepar_path=None, dark_path=Non
         the CALSTARS if the stars are extracted. With a platepar, the detections are recalibrated.
 
     Arguments:
-        file_path: [str] Input file.
+        file_path: [str] Input file, or a directory of FITS frames.
         config: [Config] Configuration object.
         output_dir: [str] Output directory.
 
@@ -2982,8 +2986,10 @@ def processFile(file_path, config, output_dir, platepar_path=None, dark_path=Non
     img_handle = detectInputType(file_path, config, detection=True, preload_video=True)
     if img_handle.input_type == 'ff':
         raise ValueError('FF files have no frames to search: {:s}'.format(file_path))
-    mask, dark, flat_struct = loadImageCalibration(os.path.dirname(os.path.abspath(file_path)), config,
-        dtype=img_handle.ff.dtype, byteswap=img_handle.byteswap)
+    # The calibration images are in the directory of the input (for a directory of FITS frames, in the directory
+    #   itself), as for the monitor
+    mask, dark, flat_struct = loadImageCalibration(img_handle.dir_path, config, dtype=img_handle.ff.dtype,
+        byteswap=img_handle.byteswap)
 
     # The stars of the chunks of frames, for the recalibration and the aperture correction
     star_list = []
@@ -3111,22 +3117,26 @@ def outputNames(files):
 
 
 def findInputFiles(paths):
-    """ Input files from a list of files and directories (searched recursively for video files).
+    """ Input files from a list of files and directories (searched recursively for video files and for
+        directories of FITS frames, which are one input each).
 
     Arguments:
         paths: [list] Files and directories.
 
     Return:
-        [list] Files, sorted, without duplicates.
+        [list] Files (and directories of FITS frames), sorted, without duplicates. The FF files of the normal
+            processing are FITS files too, but not frames: their directories are not inputs.
     """
 
     files = []
     for path in paths:
 
-        # The video files in a directory and all its subdirectories
+        # The video files in a directory and all its subdirectories, and the directories with FITS frames
         if os.path.isdir(path):
             for root, _, names in os.walk(path):
                 files += [os.path.join(root, name) for name in names if name.lower().endswith(INPUT_EXTENSIONS)]
+                if any(name.lower().endswith(FITS_EXTENSIONS) and not validFFName(name) for name in names):
+                    files.append(root)
         else:
             files.append(path)
 
@@ -3144,7 +3154,8 @@ if __name__ == "__main__":
         "run can be started again. The detections of all files are merged into one FTPdetectinfo in the output "
         "directory.")
 
-    arg_parser.add_argument('input', nargs='+', help='Input files or directories (searched for video files).')
+    arg_parser.add_argument('input', nargs='+', help='Input files or directories (searched for video files and '
+                            'for directories of FITS frames, which are one input each).')
     arg_parser.add_argument('-c', '--config', required=True, help='Config file.')
     arg_parser.add_argument('-o', '--output', required=True, help='Output directory.')
     arg_parser.add_argument('-p', '--platepar', help='Platepar, for the recalibration of the detections '
