@@ -50,6 +50,7 @@ import argparse
 import datetime
 import traceback
 import collections
+from concurrent.futures import ThreadPoolExecutor
 from time import time
 
 import numpy as np
@@ -637,12 +638,39 @@ class MatchedFilterDetector(object):
         mid = (first + last - 1)/2.0
         bg = self.backgrounds[k]
 
+        # The star template at its pixels, if there are enough of them for a stable fit of its scale (see
+        #   normalizeFrames)
+        use_template = (bg.star_idx is not None) and (len(bg.star_idx) >= MIN_STAR_TEMPLATE_PX)
+        template = bg.stars.ravel()[bg.star_idx] if use_template else None
+
+        # The frames are normalized in parallel threads, in slices of frames (numpy releases the GIL in the
+        #   operations on whole frames); every frame is normalized by the same operations as in one thread
+        n_threads = max(min(numba.get_num_threads(), len(frames)//8), 1)
+        bounds = np.linspace(0, len(frames), n_threads + 1).astype(int)
+        self.inThreads(lambda i: self.normalizeFrames(frames, k, first, mid, bg, template, bounds[i],
+                                                         bounds[i + 1]), list(range(n_threads)))
+
+        return frames
+
+
+    def normalizeFrames(self, z, k, first, mid, bg, template, i0, i1):
+        """ Normalize the frames i0 .. i1 - 1 of the block k in place (see normalize).
+
+        Arguments:
+            z: [ndarray] All frames of the block (float32).
+            k: [int] Index of the block.
+            first: [int] First frame of the block.
+            mid: [float] Middle frame of the block.
+            bg: [BlockBackground] Background of the block.
+            template: [ndarray] The star template at its pixels (bg.star_idx), None without enough of them.
+            i0, i1: [int] The range of the frames (in the block).
+        """
+
         # Subtract the background of every frame: the median of this block, plus the linear interpolation towards
         #   the median of the neighbouring block on the side of the frame. With the middle frames m_k and m_j of
         #   the two blocks, the background of the frame f is median_k + (f - m_k)/(m_j - m_k)*(median_j - median_k),
         #   so the background changes continuously from block to block
-        z = frames
-        for i in range(len(z)):
+        for i in range(i0, i1):
             f = first + i
             j = k - 1 if f < mid else k + 1
             z[i] -= bg.median
@@ -654,16 +682,13 @@ class MatchedFilterDetector(object):
         #   background, a frame whose stars are brighter or fainter by the factor (1 + s) has the residual s*T at
         #   the pixels of the template T. The least squares scale is s = sum(z*T)/sum(T^2) over the pixels of the
         #   template, and s*T is subtracted from the frame (only with enough template pixels for a stable fit)
-        if (bg.star_idx is not None) and (len(bg.star_idx) >= MIN_STAR_TEMPLATE_PX):
-            template = bg.stars.ravel()[bg.star_idx]
-            scale = z.reshape(len(z), -1)[:, bg.star_idx].dot(template)/np.dot(template, template)
-            for i in range(len(z)):
-                z[i] -= scale[i]*bg.stars
+        if template is not None:
+            scale = z[i0:i1].reshape(i1 - i0, -1)[:, bg.star_idx].dot(template)/np.dot(template, template)
+            for i in range(i0, i1):
+                z[i] -= scale[i - i0]*bg.stars
 
         # Divide by the noise of every pixel, so every pixel of the normalized frames has unit noise
-        z /= bg.noise
-
-        return z
+        z[i0:i1] /= bg.noise
 
 
     def blockMask(self, k, background):
@@ -2104,6 +2129,31 @@ class MatchedFilterDetector(object):
             self.static_masks[k] = self.blockMask(k, self.backgrounds[k])
 
 
+    def inThreads(self, function, items):
+        """ Call a function on every item (e.g. the measurement of a track in a block of frames, or a slice of the
+            frames of a block), in parallel threads. The compiled kernels of the fits and the sums release the GIL,
+            as numpy does in the operations on whole frames, so the threads run on several cores. The items have
+            to be independent (each changing only its own state or its own frames); the results are the same as
+            in a loop.
+
+        Arguments:
+            function: [callable] Function of an item.
+            items: [list] Items.
+        """
+
+        # As many threads as the compiled code may use (mf_threads), at most one per item
+        n_threads = min(numba.get_num_threads(), len(items))
+        if n_threads <= 1:
+            for item in items:
+                function(item)
+            return
+
+        # The exceptions of the threads are raised here
+        with ThreadPoolExecutor(max_workers=n_threads) as executor:
+            for _ in executor.map(function, items):
+                pass
+
+
     def measurePass(self, states):
         """ Measure the tracks in all blocks of frames they overlap. """
 
@@ -2121,9 +2171,10 @@ class MatchedFilterDetector(object):
             bg = self.backgrounds[k]
             z = self.normalize(frames, k)
 
-            # Every track continues its measurements in this block
-            for st in active:
-                st.measureBlock(z, first, last, bg, self.static_masks[k], saturated)
+            # Every track continues its measurements in this block. The tracks are independent (each changes only
+            #   its own state, the frames are only read), so they are measured in parallel threads
+            static = self.static_masks[k]
+            self.inThreads(lambda st: st.measureBlock(z, first, last, bg, static, saturated), active)
 
 
     def verify(self, measured):
@@ -2222,7 +2273,9 @@ class MatchedFilterDetector(object):
             if self.sky_map is not None:
                 clouded = self.sky_map.cloudMask(first, last - 1, self.height, self.width, bin_factor=self.det_bin)
 
-            for c in active:
+            # The tests of every track in this block. The tracks are independent (each adds to its own sums, the
+            #   frames are only read), so they are run in parallel threads
+            def verifyBlock(c):
 
                 # The PSF-weighted sums of the three tests at their positions in the frames of this block
                 for key in ('on', 'off', 'reord'):
@@ -2268,6 +2321,8 @@ class MatchedFilterDetector(object):
                                 continue
                             c['stack'] += cv2.getRectSubPix(z[f - first], (2*r + 1, 2*r + 1), (float(xf), float(yf)))
                             c['stack_n'] += 1
+
+            self.inThreads(verifyBlock, active)
 
         # Significance, shape and motion of every track
         results = []

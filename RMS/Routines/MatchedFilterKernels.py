@@ -224,7 +224,7 @@ class VelocityStacker(object):
 
 
 
-@numba.njit(cache=True)
+@numba.njit(cache=True, nogil=True)
 def _movingPSFModel(params, frames, skip, x_pred, y_pred, dt, vx, vy, sigma, n_sub, radius, jac, residuals,
                     compute):
     """ Residuals (data - model) and Jacobian of a moving Gaussian PSF over the patches of the frames.
@@ -319,7 +319,7 @@ def _movingPSFModel(params, frames, skip, x_pred, y_pred, dt, vx, vy, sigma, n_s
     return n
 
 
-@numba.njit(cache=True)
+@numba.njit(cache=True, nogil=True)
 def fitMovingPSF(frames, skip, x_pred, y_pred, dt, vx, vy, sigma, radius, max_iter=20):
     """ Fit a moving Gaussian PSF jointly to patches of a run of frames.
 
@@ -486,7 +486,7 @@ def fitMovingPSF(frames, skip, x_pred, y_pred, dt, vx, vy, sigma, radius, max_it
 
 
 
-@numba.njit(cache=True)
+@numba.njit(cache=True, nogil=True)
 def forcedTrackSignal(frames, frame_idx, xs, ys, sigma, radius, excluded):
     """ PSF-weighted sums along a fixed track, for the combined significance of a detection. For every frame,
         the sum of the PSF-weighted data and the sum of the squared weights at the given position.
@@ -541,7 +541,7 @@ def forcedTrackSignal(frames, frame_idx, xs, ys, sigma, radius, excluded):
 
 
 
-@numba.njit(cache=True)
+@numba.njit(cache=True, nogil=True)
 def streakAperture(frames, saturated, frame_idx, noise, xs, ys, vx, vy, radius):
     """ Photometry of a moving object: in every frame, the sum of the background-subtracted pixels within radius
         of the segment the object moved along during the frame, and the number of saturated pixels there.
