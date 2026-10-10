@@ -1446,61 +1446,115 @@ class MatchedFilterDetector(object):
     def _mergeOnce(self, tracks, tol_bins):
         """ One pass of mergeTracks. Every track is compared with the tracks kept so far (longest first) and
             merged into the first one it matches, or kept as a new track.
+
+        The pairs which can't match are skipped without the comparison: the tracks too far apart in time, and the
+        tracks overlapping in time whose bounding boxes are farther apart than the tolerance (their interpolated
+        positions are inside their boxes). The result is the same as with the comparison of all pairs.
         """
 
         tracks = sorted(tracks, key=lambda t: -len(t))
+        max_gap = 4*self.opts.slow_run_frames
 
-        merged = []
+        # The first and the last frame, the bounding box, the bin and the end velocity (computed when needed) of
+        #   the tracks kept so far
+        merged, info = [], []
         for tr in tracks:
 
+            tr_info = self._trackInfo(tr)
+            t0, t1 = tr_info[0], tr_info[1]
+
+            # The tracks kept so far which overlap in time or are within the largest gap, in the order of merged
+            if merged:
+                m_t0 = np.array([inf[0] for inf in info])
+                m_t1 = np.array([inf[1] for inf in info])
+                candidates = np.nonzero((m_t0 - t1 <= max_gap) & (t0 - m_t1 <= max_gap))[0]
+            else:
+                candidates = []
+
             joined = False
-            for k, m in enumerate(merged):
+            for k in candidates:
+
+                m, m_info = merged[k], info[k]
 
                 # The tolerance in binned pixels of the coarser of the two tracks (the bin is the last column of the
                 #   hits, the bin of the search for tracks without it)
-                tol = tol_bins*max(self.trackBin(tr), self.trackBin(m))
+                tol = tol_bins*max(tr_info[6], m_info[6])
 
                 # Overlap in time: compare the positions at the frames of both tracks within the overlap,
-                #   interpolated linearly between the hits; the same object if the median distance is within tol
-                lo, hi = max(tr[0, 0], m[0, 0]), min(tr[-1, 0], m[-1, 0])
+                #   interpolated linearly between the hits; the same object if the median distance is within tol.
+                #   The distance is at least the distance between the bounding boxes of the tracks
+                lo, hi = max(t0, m_info[0]), min(t1, m_info[1])
                 if hi >= lo:
-                    fr = np.concatenate([tr[:, 0], m[:, 0]])
-                    fr = fr[(fr >= lo) & (fr <= hi)]
-                    if len(fr):
-                        dx = np.interp(fr, m[:, 0], m[:, 1]) - np.interp(fr, tr[:, 0], tr[:, 1])
-                        dy = np.interp(fr, m[:, 0], m[:, 2]) - np.interp(fr, tr[:, 0], tr[:, 2])
-                        if np.median(np.hypot(dx, dy)) <= tol:
-                            merged[k] = self._union(m, tr)
-                            joined = True
-                            break
+                    box_dx = max(0.0, m_info[2] - tr_info[3], tr_info[2] - m_info[3])
+                    box_dy = max(0.0, m_info[4] - tr_info[5], tr_info[4] - m_info[5])
+                    if math.hypot(box_dx, box_dy) <= tol:
+                        fr = np.concatenate([tr[:, 0], m[:, 0]])
+                        fr = fr[(fr >= lo) & (fr <= hi)]
+                        if len(fr):
+                            dx = np.interp(fr, m[:, 0], m[:, 1]) - np.interp(fr, tr[:, 0], tr[:, 1])
+                            dy = np.interp(fr, m[:, 0], m[:, 2]) - np.interp(fr, tr[:, 0], tr[:, 2])
+                            if np.median(np.hypot(dx, dy)) <= tol:
+                                merged[k] = self._union(m, tr)
+                                info[k] = self._trackInfo(merged[k])
+                                joined = True
+                                break
 
                 # One continues the other: extrapolate the end of the earlier one over the gap. The gap can be
                 #   at most 4 runs of the slow search, so tracks lost for a while (e.g. behind a star) are joined
-                first, second = (m, tr) if m[-1, 0] < tr[0, 0] else (tr, m)
+                if m_info[1] < t0:
+                    first, second, first_info = m, tr, m_info
+                else:
+                    first, second, first_info = tr, m, tr_info
                 gap = second[0, 0] - first[-1, 0]
-                if 0 < gap <= 4*self.opts.slow_run_frames:
+                if 0 < gap <= max_gap:
 
-                    # The velocity at the end of the earlier track: a straight line fitted to its last 5 hits, or
-                    #   the velocity of the search of its last hit if they all are in the same frame
-                    end = first[-min(len(first), 5):]
-                    if np.ptp(end[:, 0]) > 0:
-                        vx = np.polyfit(end[:, 0], end[:, 1], 1)[0]
-                        vy = np.polyfit(end[:, 0], end[:, 2], 1)[0]
-                    else:
-                        vx, vy = end[-1, 4], end[-1, 5]
+                    # The velocity at the end of the earlier track (see _endVelocity), computed once per track
+                    if first_info[7] is None:
+                        first_info[7] = self._endVelocity(first)
+                    vx, vy = first_info[7]
 
                     # The second track has to begin at the extrapolated position. The error of the extrapolation
                     #   grows with the distance travelled over the gap (5% of it, a velocity error of 5%)
-                    pred = end[-1, 1:3] + np.array([vx, vy])*gap
+                    pred = first[-1, 1:3] + np.array([vx, vy])*gap
                     if np.hypot(*(second[0, 1:3] - pred)) <= tol + 0.05*gap*math.hypot(vx, vy):
                         merged[k] = self._union(m, tr)
+                        info[k] = self._trackInfo(merged[k])
                         joined = True
                         break
 
             if not joined:
                 merged.append(tr)
+                info.append(tr_info)
 
         return merged
+
+
+    def _trackInfo(self, track):
+        """ What _mergeOnce needs of a track: [first frame, last frame, x min, x max, y min, y max, bin, end
+            velocity]. The end velocity is None until it is computed.
+        """
+
+        return [float(track[0, 0]), float(track[-1, 0]), float(np.min(track[:, 1])), float(np.max(track[:, 1])),
+                float(np.min(track[:, 2])), float(np.max(track[:, 2])), self.trackBin(track), None]
+
+
+    @staticmethod
+    def _endVelocity(track):
+        """ The velocity at the end of a track: a straight line fitted to its last 5 hits, or the velocity of the
+            search of its last hit if they all are in the same frame.
+
+        Arguments:
+            track: [ndarray] Hits as rows [frame, x, y, z, vx, vy, ...], sorted by time.
+
+        Return:
+            (vx, vy) in pixels per frame.
+        """
+
+        end = track[-min(len(track), 5):]
+        if np.ptp(end[:, 0]) > 0:
+            return np.polyfit(end[:, 0], end[:, 1], 1)[0], np.polyfit(end[:, 0], end[:, 2], 1)[0]
+
+        return end[-1, 4], end[-1, 5]
 
 
     def trackBin(self, track):
