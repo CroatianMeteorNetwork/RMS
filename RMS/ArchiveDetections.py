@@ -87,17 +87,17 @@ def selectFiles(config, dir_path, ff_detected):
         # Take all FR bin files, and their parent FF bin files
         if upload_frs and ('FR' in file_name) and ('.bin' in file_name):
 
-            fr_split = file_name.split('_')
-
-            # FR file identifier which it shares with the FF bin file
-            fr_id = '_'.join(fr_split[1:3])
+            # The FR file is named after its parent FF file, e.g. FR_CA0001_20170626_020520_353_0005120.bin
+            # comes from FF_CA0001_20170626_020520_353_0005120.fits, so the parent shares everything
+            # between the two letter prefix and the extension
+            ff_prefix = 'FF' + os.path.splitext(file_name)[0][2:] + '.'
 
             ff_match = None
 
-            # Locate the parent FF bin file
+            # Locate the parent FF file
             for ff_file_name in ff_file_names:
 
-                if fr_id in ff_file_name:
+                if ff_file_name.startswith(ff_prefix):
 
                     ff_match = ff_file_name
                     break
