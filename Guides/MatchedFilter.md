@@ -155,7 +155,9 @@ The saturated pixels of the raw frames (above `mf_saturation_level`, or 98% of t
 
 ### 3. Masks
 
-The pixels which are left out of the search and the measurement:
+The pixels which are left out of the search. In the measurement, a position which falls on a masked pixel is not
+accepted (the fit itself uses all pixels of its patch except the saturated ones), and the trails are only removed
+in the search:
 
 - **Stars.** The sources of the median brighter than `mf_star_threshold` (3) times the noise of the sky in one
   frame, grown by a pixel. Fainter stars are taken out by the star template.
@@ -229,8 +231,8 @@ $A$ over $n$ frames is about $\sigma_\mathrm{PSF}/(A\sqrt{n})$.
   position in every frame, faint ones one per 8 frames.
 - **Acceptance of a measurement.** The amplitude has to be at least `mf_min_sample_snr` (3) times its error, and the
   position error (scaled by `mf_sigma_scale`, 1.3, to the errors measured on objects added to recorded frames) within
-  twice the limit. Measurements on masked stars are not used, and outliers from the motion model are removed. A track
-  needs `mf_min_centroids` (6) measurements.
+  twice the limit. Measurements whose position falls on a masked pixel (e.g. a star) are not used, and outliers from
+  the motion model are removed. A track needs `mf_min_centroids` (6) measurements.
 - **Combined positions.** The positions are combined over +-`mf_smooth_frames` (64) frames with a weighted local
   quadratic fit of the track, which reduces their errors 2 to 5 times (the positions of nearby measurements are then
   correlated; 0 disables it).
