@@ -11,7 +11,7 @@ import pytest
 
 import RMS.ConfigReader as cr
 from RMS.Formats.Platepar import Platepar
-from RMS.Routines.SkyQuality import CalibrationError, SkyQualityMap, filterClouded
+from RMS.Routines.SkyQuality import CalibrationError, SkyQualityMap, chunkFirstFrames, filterClouded
 
 
 # Size of the image, frames per second and frames per chunk of the synthetic inputs
@@ -77,8 +77,13 @@ def _skyMap(n_stars=500, cloud=None, opaque=None, few_stars_chunk=None, seed=0, 
         star_list.append([_chunkName(i), stars])
         matched.append(np.c_[x[keep], y[keep], res[keep]])
 
-    return SkyQualityMap(star_list, platepar, config, BEGIN, FPS, CHUNK_FRAMES, matched=matched,
-                         total_frames=total_frames)
+    sky_map = SkyQualityMap(star_list, platepar, config, BEGIN, FPS, CHUNK_FRAMES, matched=matched,
+                            total_frames=total_frames)
+
+    # For building other maps of the same stars
+    sky_map.platepar_for_test, sky_map.matched_for_test = platepar, matched
+
+    return sky_map
 
 
 def test_clear_sky_is_clear():
@@ -213,3 +218,43 @@ def test_no_catalog_is_unknown(tmp_path):
     stars = [(100.0, 100.0, 1000.0, 100.0, 2.0, 500.0, 20.0, 0)]*200
     with pytest.raises(CalibrationError):
         SkyQualityMap([[_chunkName(i), stars] for i in range(3)], platepar, config, BEGIN, FPS, CHUNK_FRAMES)
+
+
+
+class _GapInput(object):
+    """ An input with timestamped frames and a gap of 10 s in the recording before the chunk 6. """
+
+    def __init__(self):
+        self.chunk_frames = CHUNK_FRAMES
+        self.total_frames = N_CHUNKS*CHUNK_FRAMES
+        self.fps = FPS
+        self.beginning_datetime = BEGIN
+
+    def currentFrameTime(self, frame_no=None, dt_obj=False):
+        gap = 10.0 if frame_no >= 6*CHUNK_FRAMES else 0.0
+        return BEGIN + datetime.timedelta(seconds=frame_no/FPS + gap)
+
+
+def test_first_frames_after_a_recording_gap():
+    """ The chunks after a gap in the recording are at their frames, not where their times would put them, and
+        they are clear.
+    """
+
+    img_handle = _GapInput()
+    names = [_chunkName(i) for i in range(6)] + [_chunkName(i + 10.0*FPS/CHUNK_FRAMES) for i in range(6, N_CHUNKS)]
+    star_list = [[name, []] for name in names] + [['FF_XX0001_20251225_120000_000_0000000.fits', []]]
+
+    first_frames = chunkFirstFrames(star_list, img_handle)
+    assert first_frames[:N_CHUNKS] == [i*CHUNK_FRAMES for i in range(N_CHUNKS)]
+
+    # A chunk at a time which is not the time of a chunk of the input is not known
+    assert first_frames[-1] == -1
+
+    # The sky quality with these first frames: no missing chunks after the gap, and clear sky there
+    clear_map = _skyMap()
+    stars = [[name, [(0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0)]*500] for name in names]
+    sky_map = SkyQualityMap(stars, clear_map.platepar_for_test, clear_map.config, BEGIN, FPS, CHUNK_FRAMES,
+                            matched=clear_map.matched_for_test, total_frames=N_CHUNKS*CHUNK_FRAMES,
+                            first_frames=first_frames[:N_CHUNKS])
+    assert len(sky_map.chunk_first) == N_CHUNKS
+    assert sky_map.isClear(np.array([200.0]), np.array([200.0]), np.array([8*CHUNK_FRAMES + 10]))[0]

@@ -43,7 +43,7 @@ class CalibrationError(Exception):
 class SkyQualityMap(object):
     def __init__(self, star_list, platepar, config, begin_time, fps, chunk_frames, n_neighbours=10,
                  max_offset=0.15, max_radius_ratio=2.0, grid_cells=32, match_radius=1.0, matched=None,
-                 total_frames=None):
+                 total_frames=None, first_frames=None):
         """ Local sky quality of the chunks of frames of one input.
 
         Arguments:
@@ -66,6 +66,9 @@ class SkyQualityMap(object):
                 default.
             total_frames: [int] Number of frames of the input, for the chunks missing at its end. None by
                 default (the frames after the last chunk belong to it).
+            first_frames: [list] The first frame of every chunk of star_list (see chunkFirstFrames). None by
+                default, the first frames are computed from the times of the chunks and the frame rate (which
+                assumes no gaps in the recording).
         """
 
         self.config = config
@@ -85,10 +88,22 @@ class SkyQualityMap(object):
         grid_x, grid_y = np.meshgrid(gx, gy)
         self.grid = np.c_[grid_x.ravel(), grid_y.ravel()]
 
-        # The first frame of every chunk, from its time
-        star_list = [entry for entry in star_list if len(entry) > 1]
-        self.chunk_first = np.array([int(round((filenameToDatetime(entry[0]) - begin_time).total_seconds()*fps))
-                                     for entry in star_list])
+        # The first frame of every chunk, given or from its time
+        keep = [i for i, entry in enumerate(star_list) if len(entry) > 1]
+        star_list = [star_list[i] for i in keep]
+        if first_frames is not None:
+            self.chunk_first = np.array([first_frames[i] for i in keep], dtype=np.int64)
+        else:
+            self.chunk_first = np.array([int(round((filenameToDatetime(entry[0]) - begin_time).total_seconds()*fps))
+                                         for entry in star_list])
+
+        # Chunks whose first frame is not known are left out (they are then missing, i.e. clouded)
+        known = self.chunk_first >= 0
+        star_list = [entry for entry, k in zip(star_list, known) if k]
+        self.chunk_first = self.chunk_first[known]
+        if matched is not None:
+            matched = [matched[i] for i, k in zip(keep, known) if k]
+
         order = np.argsort(self.chunk_first)
         star_list = [star_list[i] for i in order]
         self.chunk_first = self.chunk_first[order]
@@ -182,7 +197,10 @@ class SkyQualityMap(object):
         # Recalibrate the platepar on the chunk with the most stars (or the next ones, if it fails). The pointing
         #   of a fixed camera doesn't change within a file, so this one fit is used for all chunks
         calstars = {entry[0]: entry[1] for entry in star_list}
+        # The chunk times of the recalibration are computed with the frame rate of the config, which is set to the
+        #   one of the input
         config = copy.deepcopy(self.config)
+        config.fps = self.fps
         pp = None
         for i in np.argsort(-self.n_stars)[:3]:
             ff_name = star_list[i][0]
@@ -388,3 +406,36 @@ def filterClouded(detections, sky_map, min_rows):
         kept.append([det[0], det[1], cent[ok]] + list(det[3:]))
 
     return kept, n_rows, n_dets
+
+
+
+def chunkFirstFrames(star_list, img_handle):
+    """ The first frame of every chunk of the stars: the frame of the input at the time of the chunk (the time in
+        its name), among the first frames of the chunks of the input. With timestamped frames, the frames after a
+        gap in the recording are not where the time and the frame rate would put them.
+
+    Arguments:
+        star_list: [list] Stars of the chunks, [ff_name, stars] per chunk.
+        img_handle: [FrameInterface] The input of the stars, with its chunk_frames.
+
+    Return:
+        [list] The first frame of every chunk, -1 for a chunk whose time is not the time of a chunk of the input.
+    """
+
+    chunk_frames = img_handle.chunk_frames
+    begin = img_handle.beginning_datetime.replace(tzinfo=None)
+
+    # The times of the first frames of all chunks of the input (s from the beginning)
+    firsts = np.arange(0, img_handle.total_frames, chunk_frames)
+    times = np.array([(img_handle.currentFrameTime(frame_no=int(f), dt_obj=True).replace(tzinfo=None)
+                       - begin).total_seconds() for f in firsts])
+
+    # Every chunk of the stars at the nearest chunk of the input, if within half a frame of it (the names have a
+    #   resolution of 1 ms)
+    result = []
+    for entry in star_list:
+        t = (filenameToDatetime(entry[0]) - begin).total_seconds()
+        k = int(np.argmin(np.abs(times - t)))
+        result.append(int(firsts[k]) if abs(times[k] - t) <= 0.5/img_handle.fps + 0.001 else -1)
+
+    return result

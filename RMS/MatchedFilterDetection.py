@@ -72,7 +72,7 @@ from RMS.Logger import getLogger, LoggingManager
 from RMS.Routines import Image
 from RMS.Routines import MaskImage
 from RMS.Routines.DynamicFTPCompressionCy import sampleMedianMAD
-from RMS.Routines.SkyQuality import CalibrationError, SkyQualityMap
+from RMS.Routines.SkyQuality import CalibrationError, SkyQualityMap, chunkFirstFrames
 from RMS.Routines.MatchedFilterKernels import (VelocityStacker, fitMovingPSF, forcedTrackSignal, streakAperture,
                                                CUDA_AVAILABLE)
 from RMS.Detection import getPolarLine, removeDuplicateDetections, joinContinuousDetections
@@ -3016,8 +3016,9 @@ def skyQuality(img_handle, config, star_list, platepar):
     try:
         sky_map = SkyQualityMap(star_list, platepar, config, img_handle.beginning_datetime.replace(tzinfo=None),
                                 img_handle.fps, getattr(img_handle, 'chunk_frames', None),
-                                max_offset=config.mf_cloud_max_offset,
-                                total_frames=img_handle.total_frames)
+                                max_offset=config.mf_cloud_max_offset, total_frames=img_handle.total_frames,
+                                first_frames=(chunkFirstFrames(star_list, img_handle)
+                                              if hasattr(img_handle, 'chunk_frames') else None))
     except CalibrationError as e:
         log.warning('Matched filter: no sky quality ({:s}), the clouded sky is not excluded'.format(str(e)))
         return None
