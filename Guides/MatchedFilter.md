@@ -287,9 +287,10 @@ background-subtracted pixels within 3 PSF sigmas of the segment the object moved
 ## Clear sky
 
 The positions and magnitudes of the measurements made through clouds can't be trusted, so the matched filter
-leaves out the clouded sky, region by region and chunk by chunk. Clouds are found from the photometry of the stars,
-not from their number: under a cloud lit from below the stars are about 1 mag fainter, but still extracted in nearly
-the same numbers.
+leaves out the clouded sky, region by region and chunk by chunk. Thin clouds are found from the photometry of the
+stars: under a cloud lit from below the stars are about 1 mag fainter, but still extracted in nearly the same
+numbers, so their number alone doesn't show it. Opaque clouds are found from the stars which should be seen and are
+missing (see Clouded regions).
 
 ![Sky quality](media/mf_sky_quality.png)
 
@@ -351,7 +352,8 @@ On a grid of 32 cells along the longer image side, for every chunk:
 - The clouded regions of every block are masked in the search, in the measurement and in the shape test.
 - The fitted measurements on clouded sky are removed, and a track left with fewer than `mf_min_centroids` of them is
   removed; then the frames of the light curve on clouded sky.
-- The done file has the clear fraction of the input and the numbers of the removed frames and detections.
+- The done file has the clear fraction of the input, and the numbers of the removed rows of detections (one per
+  frame of a detection) and of the removed detections.
 
 The sky quality is not known, and the input is processed without it (with a warning in the log), if there is no
 platepar, no star catalog, the platepar can't be fitted to the stars or matches too few of them, or no star has a
@@ -414,9 +416,9 @@ The detections are written as an FTPdetectinfo (the suffix `mf`) with a row for 
 
 `matched_filter_done.json` next to it lists every candidate track with its significance, the PSF sigma, the
 aperture correction of the intensities, the number of candidate tracks which were not measured
-(`tracks_dropped`, see `mf_max_tracks`), the clear fraction of the sky (`clear_sky_fraction`), the frames and
-detections removed on clouded sky (`cloud_frames_removed`, `cloud_detections_removed`), and the processing time of
-every step.
+(`tracks_dropped`, see `mf_max_tracks`), the clear fraction of the sky (`clear_sky_fraction`), the rows of the
+detections (one per frame of a detection) and the detections removed on clouded sky (`cloud_frames_removed`,
+`cloud_detections_removed`), and the processing time of every step.
 
 In the output directory of the camera (the monitor) or of the run (the command line):
 
