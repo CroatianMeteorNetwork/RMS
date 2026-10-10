@@ -1033,10 +1033,11 @@ class Config:
         self.mf_threads = 0
 
         # Clouded sky: the stars of every chunk of frames are matched to the catalog, and where the stars are
-        #   fainter than in the clearest chunks by more than mf_cloud_max_offset (mag), or missing, the sky is
-        #   clouded (see RMS.Routines.SkyQuality). The clouded regions are not searched, and the measurements on
-        #   clouded sky are removed, as their positions and magnitudes can't be trusted. It needs the stars and the
-        #   platepar
+        #   fainter than on clear sky by more than mf_cloud_max_offset (mag), or reliably seen stars are missing, the
+        #   sky is clouded (see RMS.Routines.SkyQuality). The clouded regions are not searched, and the measurements
+        #   on clouded sky are removed, as their positions and magnitudes can't be trusted. It needs the stars and
+        #   the platepar. The clear-sky brightness of every star is kept across the files of the camera, with a log
+        #   of the conditions of every chunk, in its output directory (sky_reference_*.npz, sky_conditions_*.csv)
         self.mf_cloud_filter = True
         self.mf_cloud_max_offset = 0.15
 

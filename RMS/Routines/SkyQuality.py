@@ -4,12 +4,12 @@ measurements of the detections to be trusted.
 The stars of every chunk are matched to the star catalog, and the difference between the instrumental magnitude of
 every matched star (with a fixed zero point) and its catalog magnitude is its photometric residual. On clear sky the
 residual of a star is nearly the same in every chunk, but it differs from star to star by about 0.1 mag (the errors
-of the catalog magnitudes and the colours of the stars). The residual of every star relative to the zero point of
-its input is its reference (SkyReference): the median over the inputs of the camera of the low quantile of its
-residuals on clear sky in an input, minus the zero point of the input (the median of these quantiles over its
-stars), so the transparency of the inputs doesn't enter the reference. Clouds dim the
-stars behind them, so a cloud shows up as a region of stars fainter than their references, and an opaque cloud as a
-region where stars which are reliably seen on clear sky are missing.
+of the catalog magnitudes and the colours of the stars). The reference of every star (SkyReference) is the median
+over the inputs of the camera of its residual on clear sky in an input (a low quantile of its residuals there),
+relative to the zero point of the input (the median of these residuals over its stars), so the transparency of the
+inputs doesn't enter the reference. Clouds dim the stars behind them, so a cloud shows up as a region of stars
+fainter than their references, and an opaque cloud as a region where stars which are reliably seen on clear sky are
+missing.
 
 The local photometric offset (the median excess over the references of the k nearest matched stars) and the local
 fraction of the reliable stars which are seen are computed on a grid. A point of the image at a given frame is clear
@@ -28,6 +28,7 @@ import os
 import copy
 import math
 import datetime
+import warnings
 
 import numpy as np
 from scipy import ndimage
@@ -46,7 +47,7 @@ log = getLogger("logger")
 
 
 # Smallest fraction of the stars of the chunk the platepar is fitted on which have to match the catalog for the
-#   calibration to be trusted (on clear sky, 30-55% of the extracted stars match unambiguously within 1 px)
+#   calibration to be trusted (on clear sky, most of the extracted stars match unambiguously within 1 px)
 MIN_MATCHED_FRACTION = 0.15
 
 # Smallest number of observations of a star in an input for its residual there to be kept (its clear-sky residual is
@@ -69,6 +70,7 @@ MIN_SEEN_FRACTION = 0.5
 MIN_RELIABLE = 100
 
 
+
 def starKeys(ra, dec):
     """ Keys of catalog stars: their positions rounded to 0.001 deg, as integers (unique for the stars which are
         matched, as there is no other catalog star within 3 match radii of them).
@@ -84,6 +86,7 @@ def starKeys(ra, dec):
     dec_key = np.round((np.asarray(dec) + 90)*1000).astype(np.int64)
 
     return ra_key*1000000 + dec_key
+
 
 
 class CalibrationError(Exception):
@@ -323,6 +326,7 @@ CONDITION_COLUMNS = ('chunk_utc', 'input', 'stars', 'matched', 'clear_fraction',
                      'reliable_seen')
 
 
+
 def _groupByDate(conditions):
     """ The rows of the conditions grouped by the UTC date of their chunks (YYYYMMDD). """
 
@@ -443,7 +447,7 @@ class SkyQualityMap(object):
         self.chunk_frames = max(int(chunk_frames), 1)
 
         # The matched stars of every chunk, as rows [x, y, residual, key], and the catalog stars in the image of
-        #   every chunk, as rows [x, y, key] (None if the matches are given)
+        #   every chunk, as rows [x, y, key, seen] (None if the matches are given)
         self.n_stars = np.array([len(entry[1]) for entry in star_list])
         self.chunk_times = [filenameToDatetime(entry[0]) for entry in star_list]
         self.in_image = None
@@ -660,8 +664,9 @@ class SkyQualityMap(object):
             in_keys = in_keys[~np.isin(in_keys, self.star_keys)]
             if len(in_keys):
                 _, ref_rates = self.reference.lookup(in_keys, exclude_time=unixTime(self.begin_time))
-                with np.errstate(all='ignore'):
-                    ref_seen = np.nanmedian(ref_rates, axis=1) if ref_rates.size else np.zeros(0)
+                with np.errstate(all='ignore'), warnings.catch_warnings():
+                    warnings.simplefilter('ignore', category=RuntimeWarning)
+                    ref_seen = np.nanmedian(ref_rates, axis=1)
                 more = np.isfinite(ref_seen) & (ref_seen >= RELIABLE_FRACTION)
                 reliable_keys = np.r_[reliable_keys, in_keys[more]]
                 reliable_seen = np.r_[reliable_seen, ref_seen[more]]
@@ -756,15 +761,11 @@ class SkyQualityMap(object):
         else:
             values, rates = values[:, None], rates[:, None]
 
-        with np.errstate(all='ignore'):
-            residuals = np.full(len(keys), np.nan)
-            seen = np.full(len(keys), np.nan)
-            for j in range(len(keys)):
-                v, r = values[j][np.isfinite(values[j])], rates[j][np.isfinite(rates[j])]
-                if len(v):
-                    residuals[j] = np.median(v)
-                if len(r):
-                    seen[j] = np.median(r)
+        # The medians over the visits (NaN for the stars without any)
+        with np.errstate(all='ignore'), warnings.catch_warnings():
+            warnings.simplefilter('ignore', category=RuntimeWarning)
+            residuals = np.nanmedian(values, axis=1) if len(keys) else np.zeros(0)
+            seen = np.nanmedian(rates, axis=1) if len(keys) else np.zeros(0)
 
         zero_points = np.asarray(zero_points)[np.isfinite(zero_points)]
         clear_zero_point = np.percentile(zero_points, STAR_QUANTILE) if len(zero_points) else np.nan

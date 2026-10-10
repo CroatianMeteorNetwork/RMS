@@ -1811,6 +1811,7 @@ class MatchedFilterDetector(object):
                 self.cloud_rows_removed += int((~clear).sum())
                 cent = cent[clear]
                 if len(cent) < 2:
+                    self.cloud_detections_removed += 1
                     continue
 
             # Unbinned coordinates, and the intensity of the unbinned image (averaged bins hold the mean of the
@@ -3064,13 +3065,16 @@ def skyQuality(img_handle, config, star_list, platepar, reference_dir=None, inpu
                     + traceback.format_exc())
         return None
 
+    # The medians of the chunks, NaN if none is known
+    def median(values):
+        values = np.asarray(values)[np.isfinite(values)]
+        return np.median(values) if len(values) else np.nan
+
     clear = sky_map.summary()
     log.info('Matched filter: sky quality in {:.1f} s, clear fraction of the chunks median {:.2f}, min {:.2f}, '
              'matched stars per chunk median {:.0f}, transparency median {:+.2f} mag, reliable stars seen median '
-             '{:.2f}'.format(time() - t0, np.median(clear), np.min(clear), np.median(sky_map.n_matched),
-                             np.nanmedian(sky_map.transparency) if np.isfinite(sky_map.transparency).any() else np.nan,
-                             np.nanmedian(sky_map.reliable_seen) if np.isfinite(sky_map.reliable_seen).any()
-                             else np.nan))
+             '{:.2f}'.format(time() - t0, median(clear), np.min(clear), median(sky_map.n_matched),
+                             median(sky_map.transparency), median(sky_map.reliable_seen)))
 
     return sky_map
 
