@@ -190,6 +190,11 @@ def test_missing_chunks_are_clouded():
         assert not sky_map.isClear(x, y, np.array([chunk*CHUNK_FRAMES + 60]))[0]
     assert sky_map.isClear(x, y, np.array([8*CHUNK_FRAMES + 60]))[0]
 
+    # Every other chunk missing: with the chunk size given, the missing ones are clouded
+    sky_map = _skyMap(skipped=(1, 3, 5, 7, 9, 11), total_frames=N_CHUNKS*CHUNK_FRAMES)
+    assert len(sky_map.chunk_first) == N_CHUNKS
+    assert not sky_map.isClear(x, y, np.array([3*CHUNK_FRAMES + 60]))[0]
+
     # Without the number of frames, the frames after the last chunk belong to it
     sky_map = _skyMap(skipped=(11,))
     assert len(sky_map.chunk_first) == N_CHUNKS - 1

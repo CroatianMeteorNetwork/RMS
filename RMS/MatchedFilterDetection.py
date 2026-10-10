@@ -3015,7 +3015,8 @@ def skyQuality(img_handle, config, star_list, platepar):
     t0 = time()
     try:
         sky_map = SkyQualityMap(star_list, platepar, config, img_handle.beginning_datetime.replace(tzinfo=None),
-                                img_handle.fps, None, max_offset=config.mf_cloud_max_offset,
+                                img_handle.fps, getattr(img_handle, 'chunk_frames', None),
+                                max_offset=config.mf_cloud_max_offset,
                                 total_frames=img_handle.total_frames)
     except CalibrationError as e:
         log.warning('Matched filter: no sky quality ({:s}), the clouded sky is not excluded'.format(str(e)))
