@@ -4,12 +4,16 @@ everywhere, a region of dimmed stars or of missing stars is clouded in its chunk
 clouded everywhere, and the measurements of detections on clouded sky are removed.
 """
 
+import os
 import datetime
 
 import numpy as np
 import pytest
 
 import RMS.ConfigReader as cr
+import RMS.Routines.SkyQuality as sq
+from RMS.Astrometry.ApplyAstrometry import raDecToXYPP
+from RMS.Astrometry.Conversions import datetime2JD
 from RMS.Formats.Platepar import Platepar
 from RMS.Routines.SkyQuality import (CalibrationError, SkyQualityMap, SkyReference, chunkFirstFrames,
                                      filterClouded)
@@ -49,9 +53,11 @@ def _skyMap(n_stars=500, cloud=None, opaque=None, few_stars_chunk=None, seed=0, 
 
     rng = np.random.default_rng(seed)
 
+    # The chunks need ff_min_stars stars to be usable
     config = cr.Config()
     config.ff_min_stars = 100
 
+    # Only the size of the image is used, as the matches are given
     platepar = Platepar()
     platepar.X_res, platepar.Y_res = WIDTH, HEIGHT
 
@@ -63,22 +69,27 @@ def _skyMap(n_stars=500, cloud=None, opaque=None, few_stars_chunk=None, seed=0, 
     star_list, matched = [], []
     for i in range(n_chunks):
 
+        # The stars found in this chunk (only 20 in the chunk with few stars), with their index as the key
         found = rng.random(n_stars) > 0.1
         if i == few_stars_chunk:
             found[np.nonzero(found)[0][20:]] = False
         x, y, keys = field_x[found], field_y[found], np.nonzero(found)[0].astype(np.float64)
         n = len(x)
-        res = rng.normal(0, 0.05, n)
 
+        # Their residuals: the scatter of a star from chunk to chunk on clear sky, plus the dimming of the cloud
+        res = rng.normal(0, 0.05, n)
         if (cloud is not None) and (i in cloud[3]):
             res[np.hypot(x - cloud[0], y - cloud[1]) < cloud[2]] += cloud[4]
 
+        # The stars behind an opaque cloud are not found
         keep = np.ones(n, dtype=bool)
         if (opaque is not None) and (i in opaque[3]):
             keep = np.hypot(x - opaque[0], y - opaque[1]) >= opaque[2]
 
         # The stars as from the star extraction, (y, x, intensity, amplitude, fwhm, background, snr, saturated)
         stars = [(yy, xx, 1000.0, 100.0, 2.0, 500.0, 20.0, 0) for xx, yy in zip(x[keep], y[keep])]
+
+        # The skipped chunks are not in the star list
         if i in skipped:
             continue
         star_list.append([_chunkName(i, begin), stars])
@@ -109,6 +120,7 @@ def test_dimmed_stars_are_clouded():
 
     sky_map = _skyMap(cloud=(150, 300, 80, (5, 6), 0.5))
 
+    # In the cloud, during its chunks
     frame_in = 5*CHUNK_FRAMES + 10
     assert not sky_map.isClear(np.array([150.0]), np.array([300.0]), np.array([frame_in]))[0]
 
@@ -194,6 +206,7 @@ def test_missing_chunks_are_clouded():
         clouded, and the frames of the chunks present are clear.
     """
 
+    # The first, a middle and the last chunk missing: they are added back as clouded chunks
     sky_map = _skyMap(skipped=(0, 5, 11), total_frames=N_CHUNKS*CHUNK_FRAMES)
     assert len(sky_map.chunk_first) == N_CHUNKS
 
@@ -220,6 +233,7 @@ def test_missing_chunks_are_clouded():
 def test_no_catalog_is_unknown(tmp_path):
     """ Without the star catalog the sky quality is not known (CalibrationError), rather than clouded. """
 
+    # A catalog which doesn't exist
     config = cr.Config()
     config.star_catalog_path = str(tmp_path)
     config.star_catalog_file = 'missing_catalog.bin'
@@ -227,10 +241,10 @@ def test_no_catalog_is_unknown(tmp_path):
     platepar = Platepar()
     platepar.X_res, platepar.Y_res = WIDTH, HEIGHT
 
+    # Any stars: the catalog is read before they are matched
     stars = [(100.0, 100.0, 1000.0, 100.0, 2.0, 500.0, 20.0, 0)]*200
     with pytest.raises(CalibrationError):
         SkyQualityMap([[_chunkName(i), stars] for i in range(3)], platepar, config, BEGIN, FPS, CHUNK_FRAMES)
-
 
 
 class _GapInput(object):
@@ -243,6 +257,8 @@ class _GapInput(object):
         self.beginning_datetime = BEGIN
 
     def currentFrameTime(self, frame_no=None, dt_obj=False):
+
+        # The frames from the chunk 6 on are 10 s later than the frame rate would put them
         gap = 10.0 if frame_no >= 6*CHUNK_FRAMES else 0.0
         return BEGIN + datetime.timedelta(seconds=frame_no/FPS + gap)
 
@@ -252,10 +268,13 @@ def test_first_frames_after_a_recording_gap():
         they are clear.
     """
 
+    # The chunks named by their times (10 s later from the chunk 6 on), and a chunk at a time of no chunk of the
+    #   input
     img_handle = _GapInput()
     names = [_chunkName(i) for i in range(6)] + [_chunkName(i + 10.0*FPS/CHUNK_FRAMES) for i in range(6, N_CHUNKS)]
     star_list = [[name, []] for name in names] + [['FF_XX0001_20251225_120000_000_0000000.fits', []]]
 
+    # The chunks are at their sequential frames, also after the gap
     first_frames = chunkFirstFrames(star_list, img_handle)
     assert first_frames[:N_CHUNKS] == [i*CHUNK_FRAMES for i in range(N_CHUNKS)]
 
@@ -277,14 +296,14 @@ def _patchCalibration(monkeypatch, catalog, offset):
         (ra, dec) as (x, y), shifted by offset px (a platepar off by that much).
     """
 
-    import RMS.Routines.SkyQuality as sq
-
+    # The recalibration always succeeds, with a platepar of the size of the image
     def recalibrate(platepar, ff_names, calstars, catalog_stars, config, **kwargs):
         pp = Platepar()
         pp.X_res, pp.Y_res = WIDTH, HEIGHT
         pp.auto_recalibrated = True
         return {ff_names[0]: pp}
 
+    # The given catalog, the projection to (ra + offset, dec), all catalog stars near the field, and no extinction
     monkeypatch.setattr(sq.StarCatalog, 'readStarCatalog', lambda *args, **kwargs: (catalog, None, None))
     monkeypatch.setattr(sq, 'recalibratePlateparsForFF', recalibrate)
     monkeypatch.setattr(sq, 'raDecToXYPP', lambda ra, dec, jd, pp: (ra + offset, dec))
@@ -299,6 +318,7 @@ def test_calibration_matching_few_stars_is_not_trusted(monkeypatch, offset, trus
         instead of making every chunk clouded.
     """
 
+    # 300 stars at their catalog positions
     rng = np.random.default_rng(1)
     x, y = rng.uniform(20, WIDTH - 20, 300), rng.uniform(20, HEIGHT - 20, 300)
     catalog = np.c_[x, y, np.full(300, 8.0)]
@@ -314,16 +334,17 @@ def test_calibration_matching_few_stars_is_not_trusted(monkeypatch, offset, trus
     platepar = Platepar()
     platepar.X_res, platepar.Y_res = WIDTH, HEIGHT
 
+    # The same stars in 6 chunks
     stars = [(yy, xx, 1000.0, 100.0, 2.0, 500.0, 20.0, 0) for xx, yy in zip(x, y)]
     star_list = [[_chunkName(i), stars] for i in range(6)]
 
+    # Without the offset nearly all stars match; with it, only the 10 extra ones
     if trusted:
         sky_map = SkyQualityMap(star_list, platepar, config, BEGIN, FPS, CHUNK_FRAMES)
         assert np.all(sky_map.n_matched > 250)
     else:
         with pytest.raises(CalibrationError, match='only 1[0-9] of the 300'):
             SkyQualityMap(star_list, platepar, config, BEGIN, FPS, CHUNK_FRAMES)
-
 
 
 def _residuals(keys, value):
@@ -337,6 +358,7 @@ def test_reference_order_and_reprocessing(tmp_path):
         processed again replaces its visit, and only the latest MAX_VISITS visits are kept.
     """
 
+    # Three stars, and the inputs of every 10 minutes (more than the visits which are kept)
     keys = np.array([11, 22, 33])
     times = [BEGIN + datetime.timedelta(minutes=10*i) for i in range(SkyReference.MAX_VISITS + 2)]
 
@@ -382,11 +404,14 @@ def test_conditions_log(tmp_path):
     sky_map = _skyMap(cloud=(150, 300, 80, (5, 6), 0.5), reference=reference)
     sky_map.updateReference()
 
+    # The log of the date of the input: the description, the header and a row per chunk
     path = tmp_path/'sky_conditions_XX0001_20251225.csv'
     lines = [line for line in path.read_text().splitlines() if not line.startswith('#')]
     header = lines[0].split(',')
     rows = [dict(zip(header, line.split(','))) for line in lines[1:]]
     assert len(rows) == N_CHUNKS
+
+    # The time of the first chunk, the cloud in the chunk 5, and the transparency of clear sky
     assert rows[0]['chunk_utc'] == '2025-12-25T10:00:00.000'
     assert float(rows[5]['clear_fraction']) < 1.0 and float(rows[0]['clear_fraction']) == 1.0
     assert abs(float(rows[0]['transparency_mag'])) < 0.05
@@ -421,6 +446,7 @@ def test_stationary_cloud_found_with_reference(tmp_path):
 def test_missing_reliable_stars_are_clouded(monkeypatch, tmp_path):
     """ Where the stars which are reliably seen on clear sky are missing (an opaque cloud), the sky is clouded. """
 
+    # 400 stars at their catalog positions, matched through the patched calibration
     rng = np.random.default_rng(3)
     x, y = rng.uniform(20, WIDTH - 20, 400), rng.uniform(20, HEIGHT - 20, 400)
     catalog = np.c_[x, y, np.full(400, 8.0)]
@@ -431,6 +457,7 @@ def test_missing_reliable_stars_are_clouded(monkeypatch, tmp_path):
     platepar = Platepar()
     platepar.X_res, platepar.Y_res = WIDTH, HEIGHT
 
+    # The stars of every chunk, without the ones within 90 px of (300, 200) in the hidden chunk (or in all chunks)
     def starList(begin, hidden_chunk=None, hidden_always=False):
         out = []
         for i in range(N_CHUNKS):
@@ -466,6 +493,7 @@ def test_saturated_reliable_stars_are_seen(monkeypatch, tmp_path):
         seen: the region around them is not clouded.
     """
 
+    # 400 stars at their catalog positions, matched through the patched calibration
     rng = np.random.default_rng(4)
     x, y = rng.uniform(20, WIDTH - 20, 400), rng.uniform(20, HEIGHT - 20, 400)
     catalog = np.c_[x, y, np.full(400, 8.0)]
@@ -476,6 +504,7 @@ def test_saturated_reliable_stars_are_seen(monkeypatch, tmp_path):
     platepar = Platepar()
     platepar.X_res, platepar.Y_res = WIDTH, HEIGHT
 
+    # The stars of every chunk, the ones within 90 px of (300, 200) with saturated pixels in the saturated chunk
     def starList(begin, saturated_chunk=None):
         out = []
         for i in range(N_CHUNKS):
@@ -484,6 +513,7 @@ def test_saturated_reliable_stars_are_seen(monkeypatch, tmp_path):
                                                for xx, yy, sat in zip(x, y, saturated)]])
         return out
 
+    # A clear input makes the stars reliable, then an input with the saturated stars in the chunk 7
     reference = SkyReference(str(tmp_path), 'XX0001')
     SkyQualityMap(starList(BEGIN), platepar, config, BEGIN, FPS, CHUNK_FRAMES, reference=reference).updateReference()
 
@@ -494,15 +524,16 @@ def test_saturated_reliable_stars_are_seen(monkeypatch, tmp_path):
     assert sky_map.isClear(np.array([300.0]), np.array([200.0]), np.array([7*CHUNK_FRAMES + 10]))[0]
 
 
-
 def test_short_input(tmp_path):
     """ An input with fewer chunks than needed for the reference of its stars: without a reference of the camera the
         sky quality is not known (not clouded everywhere), with one it is.
     """
 
+    # Three chunks: fewer than MIN_STAR_OBS observations of every star
     with pytest.raises(CalibrationError):
         _skyMap(n_chunks=3)
 
+    # With the reference of an earlier input, a cloud in the short input is found
     reference = SkyReference(str(tmp_path), 'XX0001')
     _skyMap(reference=reference).updateReference()
     later = BEGIN + datetime.timedelta(minutes=10)
@@ -517,8 +548,7 @@ def test_stars_entering_during_the_input(monkeypatch):
         image only at its beginning or its end are matched too.
     """
 
-    import RMS.Routines.SkyQuality as sq
-
+    # Stars over three image widths in x
     rng = np.random.default_rng(4)
     n = 1500
     ra, dec = rng.uniform(-WIDTH, 2*WIDTH, n), rng.uniform(20, HEIGHT - 20, n)
@@ -527,7 +557,7 @@ def test_stars_entering_during_the_input(monkeypatch):
 
     # The sky moves by 2*WIDTH px over the input, so a star at ra is at x = ra - shift(t)
     duration = N_CHUNKS*CHUNK_FRAMES/FPS
-    jd0 = sq.datetime2JD(BEGIN)
+    jd0 = datetime2JD(BEGIN)
 
     def project(r, d, jd, pp):
         return r - 2*WIDTH*(jd - jd0)*86400/duration + WIDTH/2, d
@@ -539,14 +569,16 @@ def test_stars_entering_during_the_input(monkeypatch):
     platepar = Platepar()
     platepar.X_res, platepar.Y_res = WIDTH, HEIGHT
 
+    # The stars in the image in every chunk, at their positions at the middle of the chunk
     star_list = []
     for i in range(N_CHUNKS):
         t = BEGIN + datetime.timedelta(seconds=i*CHUNK_FRAMES/FPS)
-        x, y = project(ra, dec, sq.datetime2JD(t) + CHUNK_FRAMES/(2*FPS)/86400, None)
+        x, y = project(ra, dec, datetime2JD(t) + CHUNK_FRAMES/(2*FPS)/86400, None)
         inside = (x > 15) & (x < WIDTH - 15)
         star_list.append([_chunkName(i), [(yy, xx, 1000.0, 100.0, 2.0, 500.0, 20.0, 0)
                                           for xx, yy in zip(x[inside], y[inside])]])
 
+    # The first and the last chunk see stars which are far from the field in the middle of the input
     sky_map = SkyQualityMap(star_list, platepar, config, BEGIN, FPS, CHUNK_FRAMES)
     assert sky_map.n_matched[0] > 0.8*len(star_list[0][1])
     assert sky_map.n_matched[-1] > 0.8*len(star_list[-1][1])
@@ -557,11 +589,7 @@ def test_catalog_near_field():
         the sky is not.
     """
 
-    import os
-    import RMS.Routines.SkyQuality as sq
-    from RMS.Astrometry.ApplyAstrometry import raDecToXYPP
-    from RMS.Astrometry.Conversions import datetime2JD
-
+    # A template platepar of the repository
     platepar = Platepar()
     platepar.read(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'share',
                                'platepar_templates', 'template_generic_720p_6mm.cal'))
@@ -582,6 +610,7 @@ def test_catalog_near_field():
         x, y = raDecToXYPP(catalog[:, 0], catalog[:, 1], jd, platepar)
         inside |= (x >= 0) & (x < platepar.X_res) & (y >= 0) & (y < platepar.Y_res)
 
+    # All stars in the image are near the field, and most of the sky is not
     assert inside.sum() > 100
     assert np.all(near[inside])
     assert near.mean() < 0.5

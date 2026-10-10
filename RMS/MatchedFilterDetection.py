@@ -3041,11 +3041,15 @@ def skyQuality(img_handle, config, star_list, platepar, reference_dir=None, inpu
         [SkyQualityMap] The sky quality, or None without the stars or the platepar, or if it failed.
     """
 
+    # The sky quality needs the stars and the platepar
     if not (config.mf_cloud_filter and star_list and (platepar is not None)):
         return None
 
     t0 = time()
     try:
+
+        # The clear-sky reference of the camera, and the sky quality of this input with the chunks at their frames
+        #   (by the frame times of the input)
         reference = SkyReference(reference_dir, config.stationID) if reference_dir else None
         sky_map = SkyQualityMap(star_list, platepar, config, img_handle.beginning_datetime.replace(tzinfo=None),
                                 img_handle.fps, getattr(img_handle, 'chunk_frames', None),
@@ -3054,8 +3058,12 @@ def skyQuality(img_handle, config, star_list, platepar, reference_dir=None, inpu
                                 first_frames=(chunkFirstFrames(star_list, img_handle)
                                               if hasattr(img_handle, 'chunk_frames') else None),
                                 reference=reference, input_name=input_name)
+
+        # The stars of this input on clear sky are added to the reference, and its conditions to the log
         sky_map.updateReference()
 
+    # Without a calibration, a star catalog or references of the stars, the sky quality is not known, and the input
+    #   is processed without it; other errors are logged, and don't fail the input either
     except CalibrationError as e:
         log.warning('Matched filter: no sky quality ({:s}), the clouded sky is not excluded'.format(str(e)))
         return None
@@ -3070,6 +3078,7 @@ def skyQuality(img_handle, config, star_list, platepar, reference_dir=None, inpu
         values = np.asarray(values)[np.isfinite(values)]
         return np.median(values) if len(values) else np.nan
 
+    # A summary of the sky quality of the input for the log
     clear = sky_map.summary()
     log.info('Matched filter: sky quality in {:.1f} s, clear fraction of the chunks median {:.2f}, min {:.2f}, '
              'matched stars per chunk median {:.0f}, transparency median {:+.2f} mag, reliable stars seen median '

@@ -595,6 +595,7 @@ def readPlatepar(platepar_path):
         [Platepar] The platepar, or None if it can't be read.
     """
 
+    # Platepar.read returns False for a missing file, and a damaged file raises an exception
     try:
         platepar = Platepar()
         if platepar.read(platepar_path) is not False:

@@ -8,9 +8,9 @@ of the catalog magnitudes and the colours of the stars). The reference of every 
 over the other inputs of the camera of its residual on clear sky in an input (a low quantile of its residuals
 there), relative to the zero point of the input (the median of these residuals over its stars), so the transparency
 of the inputs doesn't enter the reference. The input itself is used only for the stars without other inputs, so a
-cloud during the whole input doesn't enter the references of the stars behind it. Clouds dim the stars behind them, so a cloud shows up as a region of stars
-fainter than their references, and an opaque cloud as a region where stars which are reliably seen on clear sky are
-missing.
+cloud during the whole input doesn't enter the references of the stars behind it. Clouds dim the stars behind them,
+so a cloud shows up as a region of stars fainter than their references, and an opaque cloud as a region where stars
+which are reliably seen on clear sky are missing.
 
 The local photometric offset (the median excess over the references of the k nearest matched stars) and the local
 fraction of the reliable stars which are seen are computed on a grid. A point of the image at a given frame is clear
@@ -83,6 +83,8 @@ def starKeys(ra, dec):
         [ndarray] int64 keys.
     """
 
+    # The right ascension (0-360 deg) and the declination shifted to 0-180 deg, in units of 0.001 deg; the
+    #   declination takes the lower 6 digits of the key, which it never exceeds (180,000)
     ra_key = np.round(np.asarray(ra)*1000).astype(np.int64)
     dec_key = np.round((np.asarray(dec) + 90)*1000).astype(np.int64)
 
@@ -117,9 +119,12 @@ def catalogNearField(catalog, platepar, jds):
     _, ra_c, dec_c, _ = xyToRaDecPP(np.array(jds), np.full(n, platepar.X_res/2.0), np.full(n, platepar.Y_res/2.0),
                                     np.ones(n), platepar, extinction_correction=False, jd_time=True)
 
+    # The largest distance from the centre: half the diagonal of the field (to its corners), plus 30% of it for
+    #   the uncertainty of the size of the field and the motion of the sky between the times
     fov_h, fov_v = computeFOVSize(platepar)
     radius = 0.65*math.hypot(fov_h, fov_v)
 
+    # A star is near the field if it is within the radius of the centre at any of the times
     near = np.zeros(len(catalog), dtype=bool)
     for ra, dec in zip(ra_c, dec_c):
         near |= angularSeparationDeg(catalog[:, 0], catalog[:, 1], ra, dec) < radius
@@ -162,6 +167,8 @@ class SkyReference(object):
 
         self.dir_path = dir_path
         self.station_id = station_id
+
+        # The file of the reference of the stars, and the lock file of the updates (see update)
         self.stars_path = os.path.join(dir_path, 'sky_reference_{:s}.npz'.format(station_id))
         self.lock_path = os.path.join(dir_path, '.sky_reference_{:s}.lock'.format(station_id))
 
@@ -171,6 +178,9 @@ class SkyReference(object):
     def load(self):
         """ Read the reference of the stars (empty if there is none yet). """
 
+        # The visits of the stars: a row per star (its key), and a column per visit with its time (unix s, NaN
+        #   for an empty slot), clear-sky residual and seen fraction. The zero points of the inputs, with their
+        #   times
         self.keys = np.zeros(0, dtype=np.int64)
         self.times = np.zeros((0, self.MAX_VISITS))
         self.values = np.zeros((0, self.MAX_VISITS), dtype=np.float32)
@@ -178,6 +188,8 @@ class SkyReference(object):
         self.zp_times = np.zeros(0)
         self.zp_values = np.zeros(0)
 
+        # A reference which can't be read (e.g. damaged by a full disk) is started again: it is rebuilt from the
+        #   following inputs
         if os.path.isfile(self.stars_path):
             try:
                 with np.load(self.stars_path) as data:
@@ -188,6 +200,7 @@ class SkyReference(object):
                 log.warning('Sky quality: the reference {:s} can\'t be read ({:s}), it is started again'.format(
                     self.stars_path, str(e)))
 
+        # The row of every star by its key
         self.index = {int(k): i for i, k in enumerate(self.keys)}
 
 
@@ -201,6 +214,8 @@ class SkyReference(object):
             [ndarray] Zero points (mag).
         """
 
+        # The times are those of the beginnings of the inputs, the same for every processing of an input (within a
+        #   second, the resolution of the times kept)
         use = np.ones(len(self.zp_times), dtype=bool)
         if exclude_time is not None:
             use &= np.abs(self.zp_times - exclude_time) > 1.0
@@ -226,9 +241,13 @@ class SkyReference(object):
         values = np.full((len(keys), self.MAX_VISITS), np.nan)
         rates = np.full((len(keys), self.MAX_VISITS), np.nan)
         for i, key in enumerate(keys):
+
+            # A star which is not in the reference has no visits
             row = self.index.get(int(key))
             if row is None:
                 continue
+
+            # The filled slots of the star, without the visit at the excluded time
             use = np.isfinite(self.times[row])
             if exclude_time is not None:
                 use &= np.abs(self.times[row] - exclude_time) > 1.0
@@ -256,6 +275,7 @@ class SkyReference(object):
             # The reference may have been updated by another process since it was read
             self.load()
 
+            # The stars which are not in the reference yet get new rows, with empty slots
             keys_all, times, vals, rts = list(self.keys), [self.times], [self.values], [self.rates]
             new_rows = [k for k in keys if int(k) not in self.index]
             if new_rows:
@@ -263,6 +283,7 @@ class SkyReference(object):
                 times.append(np.full((len(new_rows), self.MAX_VISITS), np.nan))
                 vals.append(np.full((len(new_rows), self.MAX_VISITS), np.nan, dtype=np.float32))
                 rts.append(np.full((len(new_rows), self.MAX_VISITS), np.nan, dtype=np.float32))
+            # All rows as arrays, and the row of every star by its key
             keys_all = np.array(keys_all, dtype=np.int64)
             times, vals, rts = np.vstack(times), np.vstack(vals), np.vstack(rts)
             index = {int(k): i for i, k in enumerate(keys_all)}
@@ -284,6 +305,7 @@ class SkyReference(object):
                     if times[row, slot] > t:
                         continue
 
+                # The visit of this input
                 times[row, slot], vals[row, slot], rts[row, slot] = t, value, rate
 
             # The zero point of this input (replacing an earlier processing of it, also if it is not known now), the
@@ -295,21 +317,26 @@ class SkyReference(object):
                 order = np.argsort(zp_times)[-self.MAX_ZERO_POINTS:]
                 zp_times, zp_values = zp_times[order], zp_values[order]
 
-            # Write the reference to a temporary file and replace the old one with it
+            # Write the reference to a temporary file and replace the old one with it, so a process reading it never
+            #   sees a partly written file
             tmp_path = self.stars_path + '.tmp.npz'
             np.savez_compressed(tmp_path, keys=keys_all, times=times, values=vals, rates=rts, zp_times=zp_times,
                                 zp_values=zp_values)
             os.replace(tmp_path, self.stars_path)
 
+            # The reference in memory is the one written
             self.keys, self.times, self.values, self.rates, self.index = keys_all, times, vals, rts, index
             self.zp_times, self.zp_values = zp_times, zp_values
 
-            # Append the conditions to the file of the date of every chunk
+            # Append the conditions to the file of the date of every chunk, with the time of the processing (UTC),
+            #   which tells the rows of a chunk processed again apart
             processed = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%S')
             for date, rows in _groupByDate(conditions):
                 path = os.path.join(self.dir_path, 'sky_conditions_{:s}_{:s}.csv'.format(self.station_id, date))
                 new_file = not os.path.isfile(path)
                 with open(path, 'a') as f:
+
+                    # A new file starts with a description and the header of the columns
                     if new_file:
                         f.write('# Sky conditions of the chunks of frames (RMS.Routines.SkyQuality). A chunk processed '
                                 'again has a newer row (processed_utc), which is the valid one\n')
@@ -331,6 +358,7 @@ CONDITION_COLUMNS = ('chunk_utc', 'input', 'stars', 'matched', 'clear_fraction',
 def _groupByDate(conditions):
     """ The rows of the conditions grouped by the UTC date of their chunks (YYYYMMDD). """
 
+    # The date is the beginning of the time of the chunk (YYYY-MM-DD), without the dashes
     groups = {}
     for row in conditions:
         groups.setdefault(row['chunk_utc'][:10].replace('-', ''), []).append(row)
@@ -349,6 +377,9 @@ class _FileLock(object):
         self.f = None
 
     def __enter__(self):
+
+        # The lock file is created if it doesn't exist (and never written to), and the call waits until the lock
+        #   is free. fcntl is not available on Windows, where the updates are not locked
         self.f = open(self.path, 'a')
         try:
             import fcntl
@@ -358,6 +389,8 @@ class _FileLock(object):
         return self
 
     def __exit__(self, *args):
+
+        # The lock is released, also if the update failed
         try:
             import fcntl
             fcntl.flock(self.f, fcntl.LOCK_UN)
@@ -403,6 +436,7 @@ class SkyQualityMap(object):
             input_name: [str] Name of the input, for the log of the conditions. Empty by default.
         """
 
+        # The options
         self.config = config
         self.fps = fps
         self.k = n_neighbours
@@ -414,6 +448,7 @@ class SkyQualityMap(object):
         self.input_name = input_name
         self.begin_time = begin_time
 
+        # The size of the image (unbinned)
         self.width, self.height = platepar.X_res, platepar.Y_res
 
         # The grid points are the centres of square cells
@@ -424,7 +459,8 @@ class SkyQualityMap(object):
         grid_x, grid_y = np.meshgrid(gx, gy)
         self.grid = np.c_[grid_x.ravel(), grid_y.ravel()]
 
-        # The first frame of every chunk, given or from its time
+        # The first frame of every chunk, given or from its time (the entries of the star list without stars are
+        #   left out)
         keep = [i for i, entry in enumerate(star_list) if len(entry) > 1]
         star_list = [star_list[i] for i in keep]
         if first_frames is not None:
@@ -440,9 +476,12 @@ class SkyQualityMap(object):
         if matched is not None:
             matched = [matched[i] for i, k in zip(keep, known) if k]
 
+        # The chunks in the order of their frames
         order = np.argsort(self.chunk_first)
         star_list = [star_list[i] for i in order]
         self.chunk_first = self.chunk_first[order]
+
+        # The number of frames of a chunk: given (the chunks of the star extraction), or the spacing of the chunks
         if chunk_frames is None:
             chunk_frames = int(np.median(np.diff(self.chunk_first))) if len(self.chunk_first) > 1 else 128
         self.chunk_frames = max(int(chunk_frames), 1)
@@ -479,9 +518,12 @@ class SkyQualityMap(object):
             return
 
         # The first frames of the chunks, with the missing ones (a chunk is missing where the next one begins
-        #   more than half a chunk after the expected frame)
+        #   more than half a chunk after the expected frame). Before the first chunk: the chunks back to the
+        #   beginning of the input
         firsts = list(np.arange(self.chunk_first[0] - cf, -cf/2.0, -cf)[::-1].astype(int))
         for k, f0 in enumerate(self.chunk_first):
+
+            # In the gap between this chunk and the previous one, every chunk which fits in it
             if k > 0:
                 expected = self.chunk_first[k - 1] + cf
                 while expected <= f0 - cf/2.0:
@@ -496,10 +538,12 @@ class SkyQualityMap(object):
                 firsts.append(int(expected))
                 expected += cf
 
+        # Nothing is missing
         if len(firsts) == len(self.chunk_first):
             return
 
-        # The stars of the existing chunks, none for the added ones
+        # The stars of the existing chunks, none for the added ones (and the times of the added ones from the
+        #   frame rate)
         existing = dict(zip(self.chunk_first.tolist(), range(len(self.chunk_first))))
         self.matched = [self.matched[existing[f]] if f in existing else np.zeros((0, 4)) for f in firsts]
         self.n_stars = np.array([self.n_stars[existing[f]] if f in existing else 0 for f in firsts])
@@ -628,6 +672,8 @@ class SkyQualityMap(object):
             [ndarray] Boolean array (chunks, grid points), True for clear sky.
         """
 
+        # Nothing is clear until shown to be, and the transparency, the seen fraction of the reliable stars and the
+        #   local offsets of every chunk are kept for the log of the conditions (NaN where not known)
         n_chunks = len(self.matched)
         clear = np.zeros((n_chunks, len(self.grid)), dtype=bool)
         self.transparency = np.full(n_chunks, np.nan)
@@ -649,6 +695,9 @@ class SkyQualityMap(object):
         #   of the camera yet) the sky quality is not known, rather than clouded everywhere
         if not np.isfinite(star_ref).any():
             raise CalibrationError('no star has a reference (too few chunks and no reference of the camera)')
+
+        # The excess of every matched star over its reference (NaN for the stars without one), found by a binary
+        #   search in the sorted keys
         excess = []
         for m in self.matched:
             ref = np.full(len(m), np.nan)
@@ -663,9 +712,12 @@ class SkyQualityMap(object):
         #   (behind a cloud which stays during the whole input)
         reliable_keys, reliable_seen = self.star_keys[reliable], star_seen[reliable]
         if (self.reference is not None) and (self.in_image is not None):
+            # The catalog stars in the image of the usable chunks which are not matched in this input
             in_keys = np.unique(np.concatenate([self.in_image[i][:, 2] for i in np.nonzero(usable)[0]]))
             in_keys = in_keys[~np.isin(in_keys, self.star_keys)]
             if len(in_keys):
+
+                # Their seen fractions in the other inputs; the reliable ones are added (sorted by key)
                 _, ref_rates = self.reference.lookup(in_keys, exclude_time=unixTime(self.begin_time))
                 with np.errstate(all='ignore'), warnings.catch_warnings():
                     warnings.simplefilter('ignore', category=RuntimeWarning)
@@ -683,6 +735,7 @@ class SkyQualityMap(object):
             radius[i] = cKDTree(self.matched[i][:, :2]).query(self.grid, k=self.k)[0][:, -1]
         radius_ref = np.nanpercentile(radius, 20, axis=0)
 
+        # Every usable chunk (the others stay clouded everywhere)
         for i in np.nonzero(usable)[0]:
 
             # The local offset: the median excess of the k nearest matched stars with a clear-sky residual
@@ -725,6 +778,7 @@ class SkyQualityMap(object):
 
             clear[i] = ~flagged.ravel()
 
+        # Kept for the diagnostics
         self.radius, self.radius_ref, self.excess = radius, radius_ref, excess
 
         return clear
@@ -750,7 +804,9 @@ class SkyQualityMap(object):
                 if not known), their seen fractions (NaN if not known), and the zero point of clear sky.
         """
 
-        # The visits of this input
+        # The visits of this input: the residuals of its stars relative to its zero point (the median of the
+        #   residuals of its stars), so they can be compared with the visits of other inputs, whatever the
+        #   transparency of the sky was
         keys, residuals, seen = self.inputVisits(usable)
         zero_point = np.nanmedian(residuals) if np.isfinite(residuals).any() else np.nan
         residuals = residuals - zero_point
@@ -765,13 +821,18 @@ class SkyQualityMap(object):
                 warnings.simplefilter('ignore', category=RuntimeWarning)
                 ref_residuals = np.nanmedian(ref_values, axis=1)
                 ref_seen = np.nanmedian(ref_rates, axis=1)
+            # The visits of the other inputs replace the one of this input (which a cloud during the whole input
+            #   would bias), for the stars which have them
             residuals = np.where(np.isfinite(ref_residuals), ref_residuals, residuals)
             seen = np.where(np.isfinite(ref_seen), ref_seen, seen)
 
+            # The zero points of the other inputs, if there are any
             ref_zero_points = self.reference.zeroPoints(exclude_time=t)
             if np.isfinite(ref_zero_points).any():
                 zero_points = ref_zero_points
 
+        # The zero point of clear sky: a low quantile of the zero points, as clouds only make the stars fainter
+        #   (the zero point larger)
         zero_points = zero_points[np.isfinite(zero_points)]
         clear_zero_point = np.percentile(zero_points, STAR_QUANTILE) if len(zero_points) else np.nan
 
@@ -794,6 +855,7 @@ class SkyQualityMap(object):
                 fractions (NaN without the catalog stars in the image).
         """
 
+        # The observations of the stars in the used chunks (on clear sky), as rows [residual, key]
         obs = []
         for i in np.nonzero(use)[0]:
             m = self.matched[i]
@@ -804,7 +866,8 @@ class SkyQualityMap(object):
         if len(obs) == 0:
             return np.zeros(0), np.zeros(0), np.zeros(0)
 
-        # The residuals of every star
+        # The residuals of every star: the observations sorted by star (the stable sort keeps their order in time),
+        #   so the observations of the star j are order[bounds[j]:bounds[j + 1]]
         keys, inverse, counts = np.unique(obs[:, 1], return_inverse=True, return_counts=True)
         order = np.argsort(inverse, kind='stable')
         bounds = np.r_[0, np.cumsum(counts)]
@@ -817,13 +880,18 @@ class SkyQualityMap(object):
         if self.in_image is not None:
             n_in, n_seen = np.zeros(len(keys)), np.zeros(len(keys))
             for i in np.nonzero(use)[0]:
+                # The catalog stars in the image of the chunk (on clear sky)
                 inside = self.in_image[i]
                 if clear is not None:
                     inside = inside[clear[i, self.gridIndex(inside[:, 0], inside[:, 1])]]
+
+                # Counted for the matched stars of this input (the keys are sorted, so the row of a star is found by
+                #   a binary search)
                 pos = np.clip(np.searchsorted(keys, inside[:, 2]), 0, len(keys) - 1)
                 hit = keys[pos] == inside[:, 2]
                 np.add.at(n_in, pos[hit], 1)
                 np.add.at(n_seen, pos[hit], inside[hit, 3])
+
             with np.errstate(all='ignore'):
                 rates = np.where(n_in > 0, n_seen/n_in, np.nan)
 
@@ -833,6 +901,8 @@ class SkyQualityMap(object):
     def conditions(self):
         """ Rows of the log of the conditions of the chunks (see CONDITION_COLUMNS). """
 
+        # One row per chunk (also the missing ones, which are clouded), the values rounded to 0.001 (NaN where they
+        #   are not known, e.g. without the reliable stars)
         clear = self.summary()
         rows = []
         for i, t in enumerate(self.chunk_times):
@@ -853,9 +923,13 @@ class SkyQualityMap(object):
         if self.reference is None:
             return
 
+        # The visits of the stars of this input from their observations on clear sky only, so the clouds of this
+        #   input don't enter the reference
         use = self.clear.any(axis=1)
         keys, values, rates = self.inputVisits(use, clear=self.clear)
         keep = np.isfinite(values)
+
+        # The residuals relative to the zero point of this input (the median of its stars), see starReferences
         zero_point = np.median(values[keep]) if keep.any() else np.nan
         self.reference.update(self.begin_time, keys[keep], values[keep] - zero_point, rates[keep], zero_point,
                               self.conditions())
@@ -864,6 +938,7 @@ class SkyQualityMap(object):
     def chunkIndex(self, frames):
         """ The chunk of every frame (the nearest one for frames before the first and after the last chunk). """
 
+        # The last chunk which begins at or before the frame
         idx = np.searchsorted(self.chunk_first, np.asarray(frames), side='right') - 1
         return np.clip(idx, 0, len(self.chunk_first) - 1)
 
@@ -871,6 +946,8 @@ class SkyQualityMap(object):
     def gridIndex(self, x, y):
         """ The grid cell of every image point. """
 
+        # The cells are square, the points outside the image are in the nearest cell, and the index runs along the
+        #   rows of the grid (as the grid points)
         ix = np.clip((np.asarray(x)/self.cell).astype(int), 0, self.grid_shape[1] - 1)
         iy = np.clip((np.asarray(y)/self.cell).astype(int), 0, self.grid_shape[0] - 1)
         return iy*self.grid_shape[1] + ix
@@ -888,9 +965,12 @@ class SkyQualityMap(object):
             [ndarray] Boolean, True for clear sky.
         """
 
+        # Without chunks there is no clear sky
         if len(self.chunk_first) == 0:
             return np.zeros(np.shape(x), dtype=bool)
 
+        # The cell of every point in its chunk and in the chunks before and after it (the first and the last chunk
+        #   are their own neighbours)
         chunk = self.chunkIndex(frames)
         cell = self.gridIndex(x, y)
         ok = np.ones(np.shape(x), dtype=bool)
@@ -918,6 +998,8 @@ class SkyQualityMap(object):
         if len(self.chunk_first) == 0:
             return np.ones((height, width), dtype=bool)
 
+        # The chunks overlapping the frames and their neighbours (as in isClear), sampled every half chunk so no
+        #   chunk is skipped; a cell is cloudy if it is not clear in any of them
         chunks = np.unique(self.chunkIndex(np.arange(first_frame - self.chunk_frames,
                                                      last_frame + self.chunk_frames + 1,
                                                      max(self.chunk_frames//2, 1))))
@@ -933,6 +1015,7 @@ class SkyQualityMap(object):
     def summary(self):
         """ Fraction of the clear sky per chunk, for the log. """
 
+        # The fraction of the clear grid cells of every chunk
         return self.clear.mean(axis=1) if len(self.clear) else np.zeros(0)
 
 
@@ -952,9 +1035,13 @@ def filterClouded(detections, sky_map, min_rows):
 
     kept, n_rows, n_dets = [], 0, 0
     for det in detections:
+
+        # The measurements on clear sky, at their positions and frames
         cent = det[2]
         ok = sky_map.isClear(cent[:, 1], cent[:, 2], cent[:, 0])
         n_rows += int((~ok).sum())
+
+        # A detection with too few measurements left is removed, the others keep their measurements on clear sky
         if ok.sum() < min_rows:
             n_dets += 1
             continue
@@ -977,6 +1064,8 @@ def chunkFirstFrames(star_list, img_handle):
         [list] The first frame of every chunk, -1 for a chunk whose time is not the time of a chunk of the input.
     """
 
+    # The chunks of the star extraction begin at the multiples of chunk_frames, and the times are relative to the
+    #   beginning of the input
     chunk_frames = img_handle.chunk_frames
     begin = img_handle.beginning_datetime.replace(tzinfo=None)
 
