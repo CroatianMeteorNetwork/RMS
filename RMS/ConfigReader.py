@@ -605,6 +605,15 @@ class Config:
         # that sum), a statistical acceptance test independent of the per-pixel threshold. 0 = disabled
         self.track_snr_min = 0.0
 
+        # FF meteor photometry (RMS/Routines/FFMeteorPhotometry.py): report an unthresholded aperture
+        # sum around each frame's segment instead of the threshold-passer sum, corrected for the light
+        # the FF drops at frame boundaries. Photometry only - detection decisions are unchanged
+        self.ff_aperture_photometry = True
+        self.ff_aperture_halfwidth = 4.5
+        self.ff_aperture_margin = 6.0
+        self.ff_split_correction = True
+        self.ff_split_correction_max_loss = 0.25
+
         # Filtering by machine learning
         self.ml_filter = 0.5
 
@@ -1805,6 +1814,21 @@ def parseMeteorDetection(config, parser):
 
     if parser.has_option(section, "track_snr_min"):
         config.track_snr_min = parser.getfloat(section, "track_snr_min")
+
+    if parser.has_option(section, "ff_aperture_photometry"):
+        config.ff_aperture_photometry = parser.getboolean(section, "ff_aperture_photometry")
+
+    if parser.has_option(section, "ff_aperture_halfwidth"):
+        config.ff_aperture_halfwidth = parser.getfloat(section, "ff_aperture_halfwidth")
+
+    if parser.has_option(section, "ff_aperture_margin"):
+        config.ff_aperture_margin = parser.getfloat(section, "ff_aperture_margin")
+
+    if parser.has_option(section, "ff_split_correction"):
+        config.ff_split_correction = parser.getboolean(section, "ff_split_correction")
+
+    if parser.has_option(section, "ff_split_correction_max_loss"):
+        config.ff_split_correction_max_loss = parser.getfloat(section, "ff_split_correction_max_loss")
 
     if parser.has_option(section, "ml_model_file"):
         config.ml_model_file = parser.get(section, "ml_model_file")

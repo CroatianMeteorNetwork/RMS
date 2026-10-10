@@ -47,6 +47,7 @@ from RMS.Misc import mkdirP
 from RMS.Routines import Kht
 from RMS.Routines.Grouping3D import find3DLines, getAllPoints
 from RMS.Routines.CompareLines import compareLines
+from RMS.Routines.FFMeteorPhotometry import FFAperturePhotometry
 from RMS.Routines import MaskImage
 from RMS.Routines import Image
 from RMS.Routines.Response import responseOf
@@ -1533,6 +1534,18 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                 avepixel_img = Image.gammaCorrectionImage(avepixel_img, responseOf(config),
                     wp=(2**config.bit_depth - 1), out_type=np.float32)
 
+            # FF photometry: the reported per-frame intensity is an unthresholded aperture sum around
+            # the frame's segment, corrected for the light the FF drops at frame boundaries (see
+            # RMS/Routines/FFMeteorPhotometry.py for the mechanism and the validation against raw
+            # video). The threshold-passer intensity is still computed and still drives the acceptance
+            # gates below (min patch intensity, track SNR) and the SNR column, so this changes the
+            # photometry only, never which meteors are detected
+            ff_phot = None
+            if (img_handle.input_type == 'ff') and getattr(config, 'ff_aperture_photometry', False):
+                ff_phot = FFAperturePhotometry(img_handle.ff.maxframe, max_avg_corrected, line_points,
+                    halfwidth=config.ff_aperture_halfwidth, margin=config.ff_aperture_margin,
+                    deinterlace_order=config.deinterlace_order)
+
             # Calculate centroids
             centroids = []
             for i in range(frame_min, frame_max + 1):
@@ -1725,11 +1738,24 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                     logDebug("centroid: fr {:>12.3f}, x {:>7.2f}, y {:>7.2f}, intens {:d}, runtime: {:.6f} s".format(frame_no, \
                         x_centroid, y_centroid, intensity, time() - t_centroid))
 
-                    # Add computed centroid to the centroid list
+                    # Photometric intensity: on FF input the aperture sum around this frame's centroid,
+                    # floored at the threshold-passer sum (the aperture contains the passers, so it
+                    # can only fall below it if the geometry failed - then keep the old value);
+                    # else the intensity above
+                    if ff_phot is not None:
+                        phot_intensity = max(intensity, ff_phot.intensity(i,
+                            half_frame=(half_frame if config.deinterlace_order >= 0 else None),
+                            center=(x_centroid, y_centroid)))
+                    else:
+                        phot_intensity = intensity
+
+                    # Add computed centroid to the centroid list. The trailing photometric intensity
+                    # replaces column 4 once the detection is accepted, and is then dropped
                     centroids.append([
                         frame_no, seq_num, 
                         x_centroid, y_centroid, 
-                        intensity, background_intensity, snr, saturated_count
+                        intensity, background_intensity, snr, saturated_count,
+                        phot_intensity
                         ])
 
 
@@ -1783,6 +1809,19 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
             if not ang_vel_status:
                 logDebug('Rejected due to the angular velocity: {:.2f} deg/s'.format(ang_vel))
                 continue
+
+
+            # Report the photometric intensity in place of the threshold-passer sum. On FF input, scale
+            # it for the light lost at the frame boundaries (one factor per meteor, from its speed and
+            # cross-track sigma; 1.0 outside the validated range)
+            if ff_phot is not None:
+                split_factor, split_loss = ff_phot.splitCorrection(
+                    max_loss=getattr(config, 'ff_split_correction_max_loss', 0.25)) \
+                    if getattr(config, 'ff_split_correction', False) else (1.0, float('nan'))
+                logDebug('FF aperture photometry: v {:.1f} px/frame, sigma {}, split loss {:.3f}, '
+                    'factor {:.3f}'.format(ff_phot.v, ff_phot.sigma(), split_loss, split_factor))
+                centroids[:, 4] = np.round(centroids[:, 8]*split_factor)
+            centroids = centroids[:, :8]
 
 
             # If the FTPdetectinfo format is requested, exclude the sequence number column from centroids
