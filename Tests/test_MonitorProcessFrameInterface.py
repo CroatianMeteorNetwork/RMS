@@ -580,6 +580,23 @@ def test_input_file_is_staged_locally(tmp_path, monkeypatch):
     assert os.listdir(staging_dir) == []
 
 
+def test_staged_input_is_dropped_from_page_cache(tmp_path, monkeypatch):
+
+    file_path = str(tmp_path/'dump_6AC5999C_02F.vid')
+    with open(file_path, 'wb') as f:
+        f.write(b'0'*1000)
+
+    # Only the input is dropped after the copy, the local copy stays cached for the processing
+    dropped = []
+    monkeypatch.setattr(mon, 'dropFromPageCache', dropped.append)
+    staged = mon.stageInputFile(file_path, str(tmp_path/'staging'))
+    assert dropped == [file_path]
+    assert open(staged, 'rb').read() == b'0'*1000
+
+    # The hint itself doesn't fail on a missing file
+    mon.dropFromPageCache(str(tmp_path/'missing.vid'))
+
+
 def test_input_file_is_not_staged_without_space(tmp_path, monkeypatch):
 
     file_path = str(tmp_path/'dump_6AC5999C_02F.vid')

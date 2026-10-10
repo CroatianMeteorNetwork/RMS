@@ -511,7 +511,34 @@ def stageInputFile(file_path, staging_dir):
         shutil.rmtree(worker_dir, ignore_errors=True)
         return file_path
 
+    # The copy left the input file in the page cache too, which takes as much memory as the local copy. Only
+    #   the local copy is read again, so the input is dropped from the cache, which leaves the memory to the
+    #   local copies of the files processed at the same time
+    dropFromPageCache(file_path)
+
     return staged_path
+
+
+def dropFromPageCache(file_path):
+    """ Tell the kernel that the cached pages of a file are not needed anymore, so they are freed. Only a
+        hint, which does nothing where it is not supported.
+
+    Arguments:
+        file_path: [str] Path to the file.
+    """
+
+    if not hasattr(os, 'posix_fadvise'):
+        return
+
+    try:
+        fd = os.open(file_path, os.O_RDONLY)
+        try:
+            os.posix_fadvise(fd, 0, 0, os.POSIX_FADV_DONTNEED)
+        finally:
+            os.close(fd)
+
+    except OSError as e:
+        log.debug("Could not drop {} from the page cache: {}".format(file_path, repr(e)))
 
 
 def removeStagedFiles(staging_dir, pid=None):
