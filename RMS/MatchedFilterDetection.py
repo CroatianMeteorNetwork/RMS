@@ -215,6 +215,9 @@ class MatchedFilterOptions(object):
         self.smooth_frames = config.mf_smooth_frames
         self.max_tracks = config.mf_max_tracks
         self.link_max_gap = config.mf_link_max_gap
+
+        # Tiers of the velocity search: the largest speed of a tier in binned px per frame, and the coarsest bin
+        #   (see MatchedFilterDetector.searchTiers)
         self.tier_speed = config.mf_tier_speed
         self.max_bin = config.mf_max_bin
 
@@ -282,6 +285,9 @@ def velocityGrid(speed_max, run_frames, bin_factor, speed_min=0.0):
     grid = np.arange(-np.ceil(v_max/step), np.ceil(v_max/step) + 1)*step
     vx, vy = np.meshgrid(grid, grid)
     keep = vx**2 + vy**2 <= v_max**2
+
+    # For a faster tier, only the ring of velocities from one step below its smallest speed (the largest speed of
+    #   the previous tier), so no velocity between the tiers is left out
     if speed_min > 0:
         keep &= vx**2 + vy**2 >= max(speed_min/bin_factor - step, 0)**2
     vel = np.column_stack([vx[keep], vy[keep]])
@@ -795,6 +801,10 @@ class MatchedFilterDetector(object):
 
             # The masked pixels don't take part in the stacks of their neighbours either
             z[i][static] = 0
+
+            # The outliers are clipped once, and the clipped frame binned and smoothed for every bin. The smoothing
+            #   is the PSF in binned pixels, which is smaller than a pixel for the coarse bins (the binning itself
+            #   is then most of the matched filter of the PSF)
             clipped = np.clip(z[i:i + 1], -self.opts.clip, self.opts.clip)
             for b in bins:
                 binned = binFrames(clipped, b)[0]
@@ -810,6 +820,8 @@ class MatchedFilterDetector(object):
 
         hits = []
         for run_frames, b, stacker in stackers:
+
+            # The binned frames and the static mask of the bin of this stacker
             zb = zbs[b]
             static_b = statics_b[b]
 
@@ -853,11 +865,14 @@ class MatchedFilterDetector(object):
                 self.persistence_counts[key] += above
                 self.persistence_runs[key] += 1
 
-                # The hits are the local maxima (the largest value within 5x5 binned pixels) above the threshold.
+                # The hits are the local maxima (the largest value in their neighbourhood) above the threshold.
                 #   A hit is at the middle time of the run, at the centre of its binned pixel in unbinned
                 #   coordinates (the binned pixel i covers the unbinned pixels b*i to b*i + b - 1, whose centre is
                 #   (i + 0.5)*b - 0.5), with the velocity of the best stack converted to unbinned px per frame
-                peaks = (zmax == cv2.dilate(zmax, np.ones((5, 5), np.uint8))) & above
+                #   The neighbourhood of the local maxima is +-4 unbinned px (5x5 pixels of 2x2 bins), at least the 3x3
+                #   neighbours on coarser bins, so the peaks of nearby objects are not suppressed by a coarser tier
+                half = max(1, int(round(4.0/b)))
+                peaks = (zmax == cv2.dilate(zmax, np.ones((2*half + 1, 2*half + 1), np.uint8))) & above
                 for yb, xb in zip(*np.nonzero(peaks)):
                     vxb, vyb = stacker.velocities[vel_idx[yb, xb]]
                     hits.append(Hit(block_first + r0 + (run_frames - 1)/2.0, (xb + 0.5)*b - 0.5,
@@ -883,12 +898,17 @@ class MatchedFilterDetector(object):
             [list] Tiers (bin, smallest speed, largest speed), the speeds in unbinned px per frame.
         """
 
+        # Without the velocity search only the static stacks are searched; without tiers all speeds are searched on
+        #   the bins of the search
         b = self.search_bin
         if not self.opts.velocity_search:
             return [(b, 0.0, 0.0)]
         if self.opts.tier_speed <= 0:
             return [(b, 0.0, self.opts.speed_max)]
 
+        # The tiers from the finest bin up: every tier covers the speeds from the largest speed of the previous one
+        #   up to tier_speed binned px per frame of its bin. The last tier (the largest speed is within it, or the
+        #   next bin would be coarser than max_bin) covers the speeds up to the largest one
         tiers = []
         speed_lo = 0.0
         tier_bin = b
@@ -898,6 +918,8 @@ class MatchedFilterDetector(object):
                 tiers.append((tier_bin, speed_lo, self.opts.speed_max))
                 return tiers
             tiers.append((tier_bin, speed_lo, speed_hi))
+
+            # The next tier starts where this one ends, on bins twice as large
             speed_lo = speed_hi
             tier_bin *= 2
 
@@ -1482,7 +1504,15 @@ class MatchedFilterDetector(object):
 
 
     def trackBin(self, track):
-        """ The bin of the search of the hits of a track (the coarsest one, after merging). """
+        """ The bin of the search of the hits of a track: the coarsest one, as a merged track can have hits of
+            several tiers, and its positions are only as precise as its coarsest hits.
+
+        Arguments:
+            track: [ndarray] Hits as rows [frame, x, y, z, vx, vy, run, bin] (or without the bin column).
+
+        Return:
+            [float] The bin, the bin of the search for a track without the bin column.
+        """
 
         return float(np.max(track[:, 7])) if track.shape[1] > 7 else float(self.search_bin)
 

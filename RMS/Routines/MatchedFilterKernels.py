@@ -516,6 +516,8 @@ def forcedTrackSignal(frames, frame_idx, xs, ys, sigma, radius, excluded):
     sum_gg = 0.0
 
     for k in range(n_frames):
+
+        # The frame of the k-th position in the frames (e.g. a frame of the block)
         f = frame_idx[k]
 
         # The patch of (2*radius + 1) px around the position in this frame
@@ -573,6 +575,8 @@ def streakAperture(frames, saturated, frame_idx, noise, xs, ys, vx, vy, radius):
     reach = radius + 0.5*math.sqrt(seg2)
 
     for k in range(n_frames):
+
+        # The frame of the k-th position in the frames (e.g. a frame of the block)
         f = frame_idx[k]
 
         # The beginning of the segment: the position half a frame before the middle of the frame

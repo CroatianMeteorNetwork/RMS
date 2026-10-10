@@ -1126,3 +1126,28 @@ def test_fast_object_found_on_coarse_tier(config):
     config.mf_ang_vel_max = 2.0
     _, detections = runDetector(_SynthHandle([obj], total_frames=256), config)
     assert len(detections) == 0
+
+
+def test_coarse_tier_keeps_nearby_peaks(config):
+    """ The local maxima of the hits are found within +-4 unbinned px on every tier: 5x5 pixels of 2x2 bins, the
+        3x3 neighbours on 4x4 bins, so two objects 8 px apart give two hits on 4x4 bins (a 5x5 neighbourhood of
+        4x4 bins, +-8 px, would keep only the brighter one).
+    """
+
+    # Two static point sources 8 px (two 4x4 bins) apart, at the centres of their bins, in frames of unit noise,
+    #   searched as one run on 4x4 bins
+    config.mf_ang_vel_max = 0.0
+    det = MatchedFilterDetector(_SynthHandle([], total_frames=64), config)
+    det.psf_sigma = PSF_SIGMA
+    det.persistence_counts, det.persistence_runs = {}, {}
+    rng = np.random.default_rng(5)
+    z = rng.normal(0, 1, (8, SIZE, SIZE)).astype(np.float32)
+    for x, amp in ((49.5, 6.0), (57.5, 4.0)):
+        for k in range(8):
+            renderObject(z[k], x, 65.5, amp)
+    stackers = [(8, 4, VelocityStacker(velocityGrid(0.0, 8, 4), 8, use_gpu=False))]
+    hits = det.searchBlock(z, np.zeros((SIZE, SIZE), dtype=bool), 0, stackers)
+
+    # Both sources have a hit on the 4x4 bins
+    xs = sorted(h.x for h in hits if abs(h.y - 65.5) < 6)
+    assert any(abs(x - 49.5) < 2 for x in xs) and any(abs(x - 57.5) < 2 for x in xs)

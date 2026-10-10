@@ -51,11 +51,23 @@ ctypedef fused sample_t:
 cdef double selectKth(double *a, Py_ssize_t n, Py_ssize_t k) nogil:
     """ The k-th smallest of the n values (0-based), by quickselect (Hoare partitioning), in place. On return,
         the values before position k are not larger than it.
+
+    Quickselect partitions the values around a pivot like quicksort, but continues only in the part which contains
+    position k, so it takes on average about 2n comparisons instead of n*log(n) for sorting.
+
+    Arguments:
+        a: [double*] The values, reordered in place.
+        n: [int] Number of values.
+        k: [int] Position of the value in the sorted order.
+
+    Return:
+        [double] The k-th smallest value.
     """
 
     cdef Py_ssize_t lo = 0, hi = n - 1, i, j
     cdef double pivot, tmp
 
+    # The range [lo, hi] which contains position k shrinks until it holds only values equal to the k-th one
     while hi > lo:
 
         # Partition the range around the middle value: the values up to j are not larger than the pivot, the
@@ -64,10 +76,14 @@ cdef double selectKth(double *a, Py_ssize_t n, Py_ssize_t k) nogil:
         i = lo
         j = hi
         while i <= j:
+
+            # Skip the values on the right side of the pivot from both ends
             while a[i] < pivot:
                 i += 1
             while a[j] > pivot:
                 j -= 1
+
+            # Swap the two values which are on the wrong side
             if i <= j:
                 tmp = a[i]
                 a[i] = a[j]
@@ -92,8 +108,16 @@ cdef double selectKth(double *a, Py_ssize_t n, Py_ssize_t k) nogil:
 cdef double medianInPlace(double *a, Py_ssize_t n) nogil:
     """ The median of the n values, as np.median computes it: the middle value, or the mean of the two middle
         values for an even n. The values are reordered.
+
+    Arguments:
+        a: [double*] The values, reordered in place.
+        n: [int] Number of values.
+
+    Return:
+        [double] The median.
     """
 
+    # The upper middle value (the middle one for an odd n)
     cdef Py_ssize_t k = n//2, i
     cdef double upper = selectKth(a, n, k), lower
 
@@ -123,11 +147,13 @@ def blockMedianMAD(sample_t[:, ::1] block, float[::1] median, float[::1] mad):
         mad: [ndarray] float32 output, the MAD of every pixel.
     """
 
+    # A buffer of the samples of one pixel, reordered by the median (the block itself is not changed)
     cdef Py_ssize_t n_pix = block.shape[0], n = block.shape[1], p, s
     cdef double[::1] buf = np.empty(max(n, 1), dtype=np.float64)
     cdef double *b = &buf[0]
     cdef float med
 
+    # Without the GIL, so the threads of sampleMedianMAD run in parallel
     with nogil:
         for p in range(n_pix):
 
@@ -145,7 +171,16 @@ def blockMedianMAD(sample_t[:, ::1] block, float[::1] median, float[::1] mad):
 
 def medianMADRows(samples, row_first, row_last, block_rows, median, mad):
     """ The median and the MAD of every pixel of the image rows row_first to row_last - 1 (see sampleMedianMAD),
-        written to the given output images.
+        written to the given output images. Every thread of sampleMedianMAD runs this on its own range of rows,
+        with its own buffer.
+
+    Arguments:
+        samples: [ndarray] Sampled frames, shape (n_samples, height, width).
+        row_first: [int] First image row.
+        row_last: [int] Image row after the last one.
+        block_rows: [int] Image rows per block.
+        median: [ndarray] float32 output image of the median, (height, width).
+        mad: [ndarray] float32 output image of the MAD, (height, width).
     """
 
     n_samples, height, width = samples.shape
@@ -219,9 +254,12 @@ def sampleMedianMAD(samples, block_rows=MEDIAN_BLOCK_ROWS, threads=1):
         medianMADRows(samples, 0, height, block_rows, median, mad)
         return median, mad
 
-    # Split the rows into one range per thread, at the boundaries of the blocks of rows
+    # Split the rows into one range per thread, at the boundaries of the blocks of rows (thread i takes the blocks
+    #   n_blocks*i//threads to n_blocks*(i + 1)//threads - 1, the last range ends at the last row)
     bounds = [block_rows*((n_blocks*i)//threads) for i in range(threads + 1)]
     bounds[-1] = height
+
+    # Every thread writes its own rows of the output images; the results are collected to raise any error
     with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as pool:
         jobs = [pool.submit(medianMADRows, samples, bounds[i], bounds[i + 1], block_rows, median, mad)
                 for i in range(threads) if bounds[i + 1] > bounds[i]]
