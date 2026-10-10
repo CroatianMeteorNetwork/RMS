@@ -43,6 +43,7 @@ import RMS.ConfigReader as cr
 from RMS.Formats.FrameInterface import detectInputType, getCacheID
 from RMS.Formats.FFfile import validFFName, constructFFName
 from RMS.Formats import FFpng
+from RMS.Formats.Platepar import Platepar
 from RMS.Routines import Image
 from RMS.MonitorNightReport import exitWithMonitor, latestPlateparPath, lockOutputDir, lockOwner, \
     MONITOR_LOCK_FILE_NAME, nightDirPath, nightInfo, NightReporter, readDoneFlag, readStateFile, ReportLock, \
@@ -584,6 +585,29 @@ def hasResults(results_dir):
     return not readDoneFlag(results_dir).get('skipped')
 
 
+def readPlatepar(platepar_path):
+    """ Read a platepar.
+
+    Arguments:
+        platepar_path: [str] Path to the platepar file.
+
+    Return:
+        [Platepar] The platepar, or None if it can't be read.
+    """
+
+    try:
+        platepar = Platepar()
+        if platepar.read(platepar_path) is not False:
+            return platepar
+
+    except Exception:
+        pass
+
+    log.warning("The platepar can't be read: {}".format(platepar_path))
+    return None
+
+
+
 def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
                 flat_path=None, dark_path=None, unique_id=None, start_time=None, mask_path=None):
     """ Process a single file through the detection and recalibration pipeline.
@@ -785,7 +809,8 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
             if max_stars >= config.ff_min_stars:
                 meteor_list, mf_detector = detectMatchedFilter(img_handle, config, mask=mask, dark=dark,
                                                                flat_struct=flat_struct, star_list=star_list,
-                                                               return_detector=True)
+                                                               return_detector=True,
+                                                               platepar=readPlatepar(results_platepar_path))
             else:
                 proc_log.info("Not enough stars for the matched filter: {:d} < {:d}".format(max_stars,
                                                                                           config.ff_min_stars))
@@ -852,7 +877,8 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
                 mf_dir = os.path.join(results_dir, MATCHED_FILTER_DIR)
                 mf_detections, mf_detector = detectMatchedFilter(img_handle, config, mask=mask, dark=dark,
                                                                  flat_struct=flat_struct, star_list=star_list,
-                                                                 return_detector=True)
+                                                                 return_detector=True,
+                                                                 platepar=readPlatepar(results_platepar_path))
                 # Save the FTPdetectinfo and CALSTARS of the matched filter in its subdirectory, assigned to the
                 #   same chunk images as the normal detections, and recalibrate them with the platepar of the
                 #   results

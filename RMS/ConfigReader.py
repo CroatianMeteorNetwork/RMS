@@ -1032,6 +1032,14 @@ class Config:
         #   divided by the number of workers avoids oversubscribing the CPU
         self.mf_threads = 0
 
+        # Clouded sky: the stars of every chunk of frames are matched to the catalog, and where the stars are
+        #   fainter than in the clearest chunks by more than mf_cloud_max_offset (mag), or missing, the sky is
+        #   clouded (see RMS.Routines.SkyQuality). The clouded regions are not searched, and the measurements on
+        #   clouded sky are removed, as their positions and magnitudes can't be trusted. It needs the stars and the
+        #   platepar
+        self.mf_cloud_filter = True
+        self.mf_cloud_max_offset = 0.15
+
 
         #### Shower association
 
@@ -2359,7 +2367,7 @@ def parseMatchedFilter(config, parser):
     if not parser.has_section(section):
         return
 
-    for name in ("mf_enable", "mf_velocity_search", "mf_replace_detection"):
+    for name in ("mf_enable", "mf_velocity_search", "mf_replace_detection", "mf_cloud_filter"):
         if parser.has_option(section, name):
             setattr(config, name, parser.getboolean(section, name))
 
@@ -2378,7 +2386,7 @@ def parseMatchedFilter(config, parser):
 
     for name in ("mf_threshold", "mf_ang_vel_min", "mf_ang_vel_max", "mf_psf_sigma", "mf_max_pos_error",
                  "mf_min_sample_snr", "mf_star_threshold", "mf_persistence", "mf_clip", "mf_trail_level", "mf_min_displacement",
-                 "mf_sigma_scale", "mf_track_significance", "mf_tier_speed"):
+                 "mf_sigma_scale", "mf_track_significance", "mf_tier_speed", "mf_cloud_max_offset"):
         if parser.has_option(section, name):
             setattr(config, name, parser.getfloat(section, name))
 
