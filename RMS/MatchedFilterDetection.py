@@ -2215,6 +2215,12 @@ class MatchedFilterDetector(object):
             #   (scintillation), and a slow track over a few of them would collect their residuals
             excluded = (self.static_masks[k] | (self.backgrounds[k].stars > 0)).astype(np.uint8)
 
+            # The clouded regions of the block, left out of the shape of the objects (cloud structure would make
+            #   an object look extended)
+            clouded = None
+            if self.sky_map is not None:
+                clouded = self.sky_map.cloudMask(first, last - 1, self.height, self.width, bin_factor=self.det_bin)
+
             for c in active:
 
                 # The PSF-weighted sums of the three tests at their positions in the frames of this block
@@ -2257,6 +2263,8 @@ class MatchedFilterDetector(object):
                     for f, xf, yf in zip(fr[::EXTENT_STEP], x[::EXTENT_STEP], y[::EXTENT_STEP]):
                         r = EXTENT_RADIUS
                         if (r <= xf < z.shape[2] - r - 1) and (r <= yf < z.shape[1] - r - 1):
+                            if (clouded is not None) and clouded[int(round(yf)), int(round(xf))]:
+                                continue
                             c['stack'] += cv2.getRectSubPix(z[f - first], (2*r + 1, 2*r + 1), (float(xf), float(yf)))
                             c['stack_n'] += 1
 
