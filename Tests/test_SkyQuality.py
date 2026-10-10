@@ -11,7 +11,8 @@ import pytest
 
 import RMS.ConfigReader as cr
 from RMS.Formats.Platepar import Platepar
-from RMS.Routines.SkyQuality import CalibrationError, SkyQualityMap, chunkFirstFrames, filterClouded
+from RMS.Routines.SkyQuality import (CalibrationError, SkyQualityMap, SkyReference, chunkFirstFrames,
+                                     filterClouded)
 
 
 # Size of the image, frames per second and frames per chunk of the synthetic inputs
@@ -22,14 +23,15 @@ N_CHUNKS = 12
 BEGIN = datetime.datetime(2025, 12, 25, 10, 0, 0)
 
 
-def _chunkName(i):
-    """ FF name of the chunk i (its first frame). """
+def _chunkName(i, begin=BEGIN):
+    """ FF name of the chunk i (its first frame) of an input beginning at begin. """
 
-    t = BEGIN + datetime.timedelta(seconds=i*CHUNK_FRAMES/FPS)
+    t = begin + datetime.timedelta(seconds=i*CHUNK_FRAMES/FPS)
     return 'FF_XX0001_{:s}_{:03d}_0000000.fits'.format(t.strftime('%Y%m%d_%H%M%S'), t.microsecond//1000)
 
 
-def _skyMap(n_stars=500, cloud=None, opaque=None, few_stars_chunk=None, seed=0, skipped=(), total_frames=None):
+def _skyMap(n_stars=500, cloud=None, opaque=None, few_stars_chunk=None, seed=0, skipped=(), total_frames=None,
+            begin=BEGIN, reference=None):
     """ Sky quality of synthetic chunks with uniformly distributed matched stars with residuals of 0.05 mag.
 
     Keyword arguments:
@@ -40,6 +42,8 @@ def _skyMap(n_stars=500, cloud=None, opaque=None, few_stars_chunk=None, seed=0, 
         few_stars_chunk: [int] A chunk with only 20 stars.
         skipped: [tuple] Chunks left out of the star list (e.g. skipped by the star extraction).
         total_frames: [int] Number of frames of the input.
+        begin: [datetime] Beginning of the input.
+        reference: [SkyReference] Clear-sky reference of the camera.
     """
 
     rng = np.random.default_rng(seed)
@@ -50,8 +54,10 @@ def _skyMap(n_stars=500, cloud=None, opaque=None, few_stars_chunk=None, seed=0, 
     platepar = Platepar()
     platepar.X_res, platepar.Y_res = WIDTH, HEIGHT
 
-    # The same stars in every chunk (a fixed field), of which 10% are randomly missed in a chunk
-    field_x, field_y = rng.uniform(0, WIDTH, n_stars), rng.uniform(0, HEIGHT, n_stars)
+    # The same stars in every chunk (a fixed field, the same in every input), of which 10% are randomly missed in a
+    #   chunk
+    field = np.random.default_rng(100)
+    field_x, field_y = field.uniform(0, WIDTH, n_stars), field.uniform(0, HEIGHT, n_stars)
 
     star_list, matched = [], []
     for i in range(N_CHUNKS):
@@ -59,7 +65,7 @@ def _skyMap(n_stars=500, cloud=None, opaque=None, few_stars_chunk=None, seed=0, 
         found = rng.random(n_stars) > 0.1
         if i == few_stars_chunk:
             found[np.nonzero(found)[0][20:]] = False
-        x, y = field_x[found], field_y[found]
+        x, y, keys = field_x[found], field_y[found], np.nonzero(found)[0].astype(np.float64)
         n = len(x)
         res = rng.normal(0, 0.05, n)
 
@@ -74,11 +80,11 @@ def _skyMap(n_stars=500, cloud=None, opaque=None, few_stars_chunk=None, seed=0, 
         stars = [(yy, xx, 1000.0, 100.0, 2.0, 500.0, 20.0, 0) for xx, yy in zip(x[keep], y[keep])]
         if i in skipped:
             continue
-        star_list.append([_chunkName(i), stars])
-        matched.append(np.c_[x[keep], y[keep], res[keep]])
+        star_list.append([_chunkName(i, begin), stars])
+        matched.append(np.c_[x[keep], y[keep], res[keep], keys[keep]])
 
-    sky_map = SkyQualityMap(star_list, platepar, config, BEGIN, FPS, CHUNK_FRAMES, matched=matched,
-                            total_frames=total_frames)
+    sky_map = SkyQualityMap(star_list, platepar, config, begin, FPS, CHUNK_FRAMES, matched=matched,
+                            total_frames=total_frames, reference=reference)
 
     # For building other maps of the same stars
     sky_map.platepar_for_test, sky_map.matched_for_test = platepar, matched
@@ -310,3 +316,150 @@ def test_calibration_matching_few_stars_is_not_trusted(monkeypatch, offset, trus
     else:
         with pytest.raises(CalibrationError, match='only 1[0-9] of the 300'):
             SkyQualityMap(star_list, platepar, config, BEGIN, FPS, CHUNK_FRAMES)
+
+
+
+def _residuals(keys, value):
+    """ The same visit value for all stars. """
+
+    return np.full(len(keys), value), np.full(len(keys), 1.0)
+
+
+def test_reference_order_and_reprocessing(tmp_path):
+    """ The visits of the inputs are kept by the time of the observation: in any order of the processing, an input
+        processed again replaces its visit, and only the latest MAX_VISITS visits are kept.
+    """
+
+    keys = np.array([11, 22, 33])
+    times = [BEGIN + datetime.timedelta(minutes=10*i) for i in range(SkyReference.MAX_VISITS + 2)]
+
+    reference = SkyReference(str(tmp_path), 'XX0001')
+
+    # Out of order: the second input first
+    reference.update(times[1], keys, *_residuals(keys, 0.2), 0.0, [])
+    reference.update(times[0], keys, *_residuals(keys, 0.1), 0.0, [])
+    values, _ = SkyReference(str(tmp_path), 'XX0001').lookup(keys)
+    assert sorted(values[0][np.isfinite(values[0])]) == pytest.approx([0.1, 0.2])
+
+    # Processed again: replaced, not added
+    reference.update(times[1], keys, *_residuals(keys, 0.3), 0.0, [])
+    values, _ = reference.lookup(keys)
+    assert sorted(values[0][np.isfinite(values[0])]) == pytest.approx([0.1, 0.3])
+
+    # The earlier processing of an input can be left out
+    values, _ = reference.lookup(keys, exclude_time=(times[1] - datetime.datetime(1970, 1, 1)).total_seconds())
+    assert values[0][np.isfinite(values[0])] == pytest.approx([0.1])
+
+    # Only the latest visits are kept
+    for i, t in enumerate(times):
+        reference.update(t, keys, *_residuals(keys, float(i)), 0.0, [])
+    values, _ = reference.lookup(keys)
+    assert sorted(values[0][np.isfinite(values[0])]) == pytest.approx(list(range(2, SkyReference.MAX_VISITS + 2)))
+
+
+def test_conditions_log(tmp_path):
+    """ The conditions of every chunk are appended to the log of the date of the chunk, with the time of the
+        processing.
+    """
+
+    reference = SkyReference(str(tmp_path), 'XX0001')
+    sky_map = _skyMap(cloud=(150, 300, 80, (5, 6), 0.5), reference=reference)
+    sky_map.updateReference()
+
+    path = tmp_path/'sky_conditions_XX0001_20251225.csv'
+    lines = [line for line in path.read_text().splitlines() if not line.startswith('#')]
+    header = lines[0].split(',')
+    rows = [dict(zip(header, line.split(','))) for line in lines[1:]]
+    assert len(rows) == N_CHUNKS
+    assert rows[0]['chunk_utc'] == '2025-12-25T10:00:00.000'
+    assert float(rows[5]['clear_fraction']) < 1.0 and float(rows[0]['clear_fraction']) == 1.0
+    assert abs(float(rows[0]['transparency_mag'])) < 0.05
+
+
+def test_stationary_cloud_found_with_reference(tmp_path):
+    """ A cloud over the same region during a whole input: with the stars of that input alone it is the
+        reference (not found), with the clear-sky reference of an earlier input it is found.
+    """
+
+    cloud = (150, 300, 80, tuple(range(N_CHUNKS)), 0.5)
+    later = BEGIN + datetime.timedelta(minutes=10)
+
+    # Alone
+    sky_map = _skyMap(cloud=cloud, begin=later)
+    assert sky_map.clear.all()
+
+    # With the reference of an earlier, clear input
+    reference = SkyReference(str(tmp_path), 'XX0001')
+    _skyMap(reference=reference).updateReference()
+    sky_map = _skyMap(cloud=cloud, begin=later, reference=SkyReference(str(tmp_path), 'XX0001'))
+    assert not sky_map.isClear(np.array([150.0]), np.array([300.0]), np.array([5*CHUNK_FRAMES]))[0]
+    assert sky_map.isClear(np.array([450.0]), np.array([60.0]), np.array([5*CHUNK_FRAMES]))[0]
+
+
+def test_missing_reliable_stars_are_clouded(monkeypatch, tmp_path):
+    """ Where the stars which are reliably seen on clear sky are missing (an opaque cloud), the sky is clouded. """
+
+    rng = np.random.default_rng(3)
+    x, y = rng.uniform(20, WIDTH - 20, 400), rng.uniform(20, HEIGHT - 20, 400)
+    catalog = np.c_[x, y, np.full(400, 8.0)]
+    _patchCalibration(monkeypatch, catalog, 0.0)
+
+    config = cr.Config()
+    config.ff_min_stars = 100
+    platepar = Platepar()
+    platepar.X_res, platepar.Y_res = WIDTH, HEIGHT
+
+    def starList(begin, hidden_chunk=None):
+        out = []
+        for i in range(N_CHUNKS):
+            keep = np.ones(len(x), dtype=bool)
+            if i == hidden_chunk:
+                keep = np.hypot(x - 300, y - 200) > 90
+            out.append([_chunkName(i, begin), [(yy, xx, 1000.0, 100.0, 2.0, 500.0, 20.0, 0)
+                                               for xx, yy in zip(x[keep], y[keep])]])
+        return out
+
+    # A clear input makes the stars reliable, then an input with an opaque cloud in the chunk 7
+    reference = SkyReference(str(tmp_path), 'XX0001')
+    SkyQualityMap(starList(BEGIN), platepar, config, BEGIN, FPS, CHUNK_FRAMES, reference=reference).updateReference()
+
+    later = BEGIN + datetime.timedelta(minutes=10)
+    sky_map = SkyQualityMap(starList(later, hidden_chunk=7), platepar, config, later, FPS, CHUNK_FRAMES,
+                            reference=SkyReference(str(tmp_path), 'XX0001'))
+    assert sky_map.reliable_seen[0] == pytest.approx(1.0, abs=0.05)
+    assert sky_map.reliable_seen[7] < 0.9
+    assert not sky_map.isClear(np.array([300.0]), np.array([200.0]), np.array([7*CHUNK_FRAMES + 10]))[0]
+    assert sky_map.isClear(np.array([60.0]), np.array([460.0]), np.array([7*CHUNK_FRAMES + 10]))[0]
+
+
+def test_saturated_reliable_stars_are_seen(monkeypatch, tmp_path):
+    """ Reliable stars which are extracted but not matched (saturated pixels, left out of the photometry) are
+        seen: the region around them is not clouded.
+    """
+
+    rng = np.random.default_rng(4)
+    x, y = rng.uniform(20, WIDTH - 20, 400), rng.uniform(20, HEIGHT - 20, 400)
+    catalog = np.c_[x, y, np.full(400, 8.0)]
+    _patchCalibration(monkeypatch, catalog, 0.0)
+
+    config = cr.Config()
+    config.ff_min_stars = 100
+    platepar = Platepar()
+    platepar.X_res, platepar.Y_res = WIDTH, HEIGHT
+
+    def starList(begin, saturated_chunk=None):
+        out = []
+        for i in range(N_CHUNKS):
+            saturated = (np.hypot(x - 300, y - 200) < 90) & (i == saturated_chunk)
+            out.append([_chunkName(i, begin), [(yy, xx, 1000.0, 100.0, 2.0, 500.0, 20.0, int(sat))
+                                               for xx, yy, sat in zip(x, y, saturated)]])
+        return out
+
+    reference = SkyReference(str(tmp_path), 'XX0001')
+    SkyQualityMap(starList(BEGIN), platepar, config, BEGIN, FPS, CHUNK_FRAMES, reference=reference).updateReference()
+
+    later = BEGIN + datetime.timedelta(minutes=10)
+    sky_map = SkyQualityMap(starList(later, saturated_chunk=7), platepar, config, later, FPS, CHUNK_FRAMES,
+                            reference=SkyReference(str(tmp_path), 'XX0001'))
+    assert sky_map.reliable_seen[7] == pytest.approx(1.0, abs=0.05)
+    assert sky_map.isClear(np.array([300.0]), np.array([200.0]), np.array([7*CHUNK_FRAMES + 10]))[0]

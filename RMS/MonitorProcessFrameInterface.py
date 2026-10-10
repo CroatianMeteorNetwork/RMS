@@ -810,7 +810,9 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
                 meteor_list, mf_detector = detectMatchedFilter(img_handle, config, mask=mask, dark=dark,
                                                                flat_struct=flat_struct, star_list=star_list,
                                                                return_detector=True,
-                                                               platepar=readPlatepar(results_platepar_path))
+                                                               platepar=readPlatepar(results_platepar_path),
+                                                               reference_dir=output_dir,
+                                                               input_name=os.path.basename(file_path))
             else:
                 proc_log.info("Not enough stars for the matched filter: {:d} < {:d}".format(max_stars,
                                                                                           config.ff_min_stars))
@@ -878,7 +880,9 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
                 mf_detections, mf_detector = detectMatchedFilter(img_handle, config, mask=mask, dark=dark,
                                                                  flat_struct=flat_struct, star_list=star_list,
                                                                  return_detector=True,
-                                                                 platepar=readPlatepar(results_platepar_path))
+                                                                 platepar=readPlatepar(results_platepar_path),
+                                                                 reference_dir=output_dir,
+                                                               input_name=os.path.basename(file_path))
                 # Save the FTPdetectinfo and CALSTARS of the matched filter in its subdirectory, assigned to the
                 #   same chunk images as the normal detections, and recalibrate them with the platepar of the
                 #   results

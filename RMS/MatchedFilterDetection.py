@@ -72,7 +72,7 @@ from RMS.Logger import getLogger, LoggingManager
 from RMS.Routines import Image
 from RMS.Routines import MaskImage
 from RMS.Routines.DynamicFTPCompressionCy import sampleMedianMAD
-from RMS.Routines.SkyQuality import CalibrationError, SkyQualityMap, chunkFirstFrames
+from RMS.Routines.SkyQuality import CalibrationError, SkyQualityMap, SkyReference, chunkFirstFrames
 from RMS.Routines.MatchedFilterKernels import (VelocityStacker, fitMovingPSF, forcedTrackSignal, streakAperture,
                                                CUDA_AVAILABLE)
 from RMS.Detection import getPolarLine, removeDuplicateDetections, joinContinuousDetections
@@ -3020,14 +3020,21 @@ class TrackMeasurement(object):
 
 
 
-def skyQuality(img_handle, config, star_list, platepar):
-    """ The sky quality of an input from its stars (see RMS.Routines.SkyQuality), with mf_cloud_filter.
+def skyQuality(img_handle, config, star_list, platepar, reference_dir=None, input_name=''):
+    """ The sky quality of an input from its stars (see RMS.Routines.SkyQuality), with mf_cloud_filter. With a
+        reference directory, the clear-sky reference of the camera there is used and updated with this input, and
+        its conditions are added to the log there.
 
     Arguments:
         img_handle: [FrameInterface] Frame-based input.
         config: [Config] Configuration object.
         star_list: [list] Stars of the chunks of frames (see extractStarsFrameInterface).
         platepar: [Platepar] Platepar of the camera, or None.
+
+    Keyword arguments:
+        reference_dir: [str] Directory of the clear-sky reference of the camera (see SkyReference). None by
+            default.
+        input_name: [str] Name of the input, for the log of the conditions. Empty by default.
 
     Return:
         [SkyQualityMap] The sky quality, or None without the stars or the platepar, or if it failed.
@@ -3038,12 +3045,16 @@ def skyQuality(img_handle, config, star_list, platepar):
 
     t0 = time()
     try:
+        reference = SkyReference(reference_dir, config.stationID) if reference_dir else None
         sky_map = SkyQualityMap(star_list, platepar, config, img_handle.beginning_datetime.replace(tzinfo=None),
                                 img_handle.fps, getattr(img_handle, 'chunk_frames', None),
                                 max_offset=config.mf_cloud_max_offset, total_frames=img_handle.total_frames,
                                 min_matched=config.mf_cloud_min_matched,
                                 first_frames=(chunkFirstFrames(star_list, img_handle)
-                                              if hasattr(img_handle, 'chunk_frames') else None))
+                                              if hasattr(img_handle, 'chunk_frames') else None),
+                                reference=reference, input_name=input_name)
+        sky_map.updateReference()
+
     except CalibrationError as e:
         log.warning('Matched filter: no sky quality ({:s}), the clouded sky is not excluded'.format(str(e)))
         return None
@@ -3055,15 +3066,18 @@ def skyQuality(img_handle, config, star_list, platepar):
 
     clear = sky_map.summary()
     log.info('Matched filter: sky quality in {:.1f} s, clear fraction of the chunks median {:.2f}, min {:.2f}, '
-             'matched stars per chunk median {:.0f}'.format(time() - t0, np.median(clear), np.min(clear),
-                                                           np.median(sky_map.n_matched)))
+             'matched stars per chunk median {:.0f}, transparency median {:+.2f} mag, reliable stars seen median '
+             '{:.2f}'.format(time() - t0, np.median(clear), np.min(clear), np.median(sky_map.n_matched),
+                             np.nanmedian(sky_map.transparency) if np.isfinite(sky_map.transparency).any() else np.nan,
+                             np.nanmedian(sky_map.reliable_seen) if np.isfinite(sky_map.reliable_seen).any()
+                             else np.nan))
 
     return sky_map
 
 
 
 def detectMatchedFilter(img_handle, config, mask=None, dark=None, flat_struct=None, star_list=None,
-                        return_detector=False, platepar=None):
+                        return_detector=False, platepar=None, reference_dir=None, input_name=''):
     """ Run the matched-filter detection on an image handle.
 
     Arguments:
@@ -3080,6 +3094,9 @@ def detectMatchedFilter(img_handle, config, mask=None, dark=None, flat_struct=No
         return_detector: [bool] Also return the detector (for its summary). False by default.
         platepar: [Platepar] Platepar of the camera. With the stars and mf_cloud_filter, the clouded sky is not
             searched and the measurements on it are removed (see RMS.Routines.SkyQuality). None by default.
+        reference_dir: [str] Directory of the clear-sky reference of the camera, which is used and updated (see
+            skyQuality). None by default (only this input is used).
+        input_name: [str] Name of the input, for the log of the conditions. Empty by default.
 
     Return:
         [list] Detections as [rho, theta, centroids], or (detections, detector) with return_detector. The
@@ -3103,7 +3120,8 @@ def detectMatchedFilter(img_handle, config, mask=None, dark=None, flat_struct=No
 
     # Detect and measure the objects
     detector = MatchedFilterDetector(img_handle, config, mask=mask, dark=dark, flat_struct=flat_struct)
-    detector.sky_map = skyQuality(img_handle, config, star_list, platepar)
+    detector.sky_map = skyQuality(img_handle, config, star_list, platepar, reference_dir=reference_dir,
+                                  input_name=input_name)
     detections = detector.run()
 
     # The measurements on clouded sky were removed in the run
@@ -3247,7 +3265,7 @@ def mergeFTPdetectinfo(dirs, out_dir, ftp_name, config):
 
 
 def processFile(file_path, config, output_dir, platepar_path=None, dark_path=None, flat_path=None,
-    mask_path=None, extract_stars=True):
+    mask_path=None, extract_stars=True, reference_dir=None):
     """ Run the matched-filter detection on one file and save the FTPdetectinfo (with the suffix "mf"), and
         the CALSTARS if the stars are extracted. With a platepar, the detections are recalibrated.
 
@@ -3261,6 +3279,8 @@ def processFile(file_path, config, output_dir, platepar_path=None, dark_path=Non
             clouded sky (mf_cloud_filter). None by default.
         dark_path, flat_path, mask_path: [str] Calibration images. None by default.
         extract_stars: [bool] Extract the stars (needed for the recalibration). True by default.
+        reference_dir: [str] Directory of the clear-sky reference of the camera, used and updated with this file
+            (see skyQuality). None by default (only this file is used).
 
     Return:
         [dict] Summary of the processing (also saved as the done file in the output directory), with the path
@@ -3304,7 +3324,8 @@ def processFile(file_path, config, output_dir, platepar_path=None, dark_path=Non
 
     # Detect, save the detections and recalibrate them
     detections, detector = detectMatchedFilter(img_handle, config, mask=mask, dark=dark, flat_struct=flat_struct,
-                                               star_list=star_list, return_detector=True, platepar=platepar)
+                                               star_list=star_list, return_detector=True, platepar=platepar,
+                                               reference_dir=reference_dir, input_name=os.path.basename(file_path))
 
     ftp_path = saveMatchedFilterResults(detections, star_list, img_handle, config, output_dir,
                                         platepar_path=platepar_path,
@@ -3380,7 +3401,7 @@ def processFiles(files, config, output_dir, force=False, **kwargs):
         # Partial results of an interrupted run are not kept
         shutil.rmtree(out, ignore_errors=True)
         try:
-            summary = processFile(path, config, out, **kwargs)
+            summary = processFile(path, config, out, reference_dir=output_dir, **kwargs)
             log.info('Matched filter: {:d} detections in {:s} ({:.0f} s)'.format(summary['detections'], path,
                                                                                summary['processing_time_s']))
         except Exception:
