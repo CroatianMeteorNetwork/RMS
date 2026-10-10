@@ -595,6 +595,10 @@ class Config:
         # Background estimation parameters
         self.background_reservoir_size = 64
 
+        # Number of threads of the median and the noise of the background of every frame chunk (0 for all CPU
+        #   cores), e.g. when there are more CPU cores than cameras
+        self.median_threads = 1
+
         # KHT Line finding parameters
         # Minimum number of pixels required to form a valid cluster
         self.kht_cluster_min_size = 9
@@ -1012,6 +1016,12 @@ class Config:
 
         # Largest gap (frames) between the hits of a track, e.g. between the flashes of a flashing object
         self.mf_link_max_gap = 96
+
+        # Tiers of the velocity search: a tier with the bin B searches the speeds up to mf_tier_speed*B px per frame,
+        #   and the faster speeds are searched on frames binned twice as much, up to mf_max_bin (see
+        #   MatchedFilterDetector.searchTiers). 0 searches all speeds on 2x2 bins
+        self.mf_tier_speed = 2.0
+        self.mf_max_bin = 8
 
         # Saturation level of the raw frames (ADU): the saturated pixels are left out of the position fits and
         #   counted in the saturation column of the detections. 0 uses 98% of the range of the bit depth (some
@@ -1930,6 +1940,10 @@ def parseMeteorDetection(config, parser):
     if parser.has_option(section, "background_reservoir_size"):
         config.background_reservoir_size = parser.getint(section, "background_reservoir_size")
 
+    # Number of threads of the background of the frame chunks
+    if parser.has_option(section, "median_threads"):
+        config.median_threads = parser.getint(section, "median_threads")
+
     if parser.has_option(section, "kht_n_sigmas"):
         config.kht_n_sigmas = parser.getfloat(section, "kht_n_sigmas")
 
@@ -2358,13 +2372,13 @@ def parseMatchedFilter(config, parser):
 
     for name in ("mf_block_frames", "mf_slow_run_frames", "mf_min_hits",
                  "mf_max_measure_frames", "mf_min_centroids", "mf_edge_margin", "mf_min_frames", "mf_threads",
-                 "mf_smooth_frames", "mf_saturation_level", "mf_max_tracks", "mf_link_max_gap"):
+                 "mf_smooth_frames", "mf_saturation_level", "mf_max_tracks", "mf_link_max_gap", "mf_max_bin"):
         if parser.has_option(section, name):
             setattr(config, name, parser.getint(section, name))
 
     for name in ("mf_threshold", "mf_ang_vel_min", "mf_ang_vel_max", "mf_psf_sigma", "mf_max_pos_error",
                  "mf_min_sample_snr", "mf_star_threshold", "mf_persistence", "mf_clip", "mf_trail_level", "mf_min_displacement",
-                 "mf_sigma_scale", "mf_track_significance"):
+                 "mf_sigma_scale", "mf_track_significance", "mf_tier_speed"):
         if parser.has_option(section, name):
             setattr(config, name, parser.getfloat(section, name))
 

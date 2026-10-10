@@ -507,7 +507,8 @@ class InputTypeFRFF(InputType):
                 ref_ff = readFF(self.dir_path, ffs_to_read[0])
                 target_dtype = self.getTargetDtype(ref_ff.maxpixel)
                 
-                ff = FFMimickInterface(self.nrows, self.ncols, target_dtype, res_size=self.config.background_reservoir_size)
+                ff = FFMimickInterface(self.nrows, self.ncols, target_dtype, res_size=self.config.background_reservoir_size,
+            median_threads=self.config.median_threads)
 
                 # Store maxpixel selections, avepixels, stdpixels
                 maxpixel_list = []
@@ -1078,7 +1079,8 @@ class InputTypeVideo(InputType):
         target_dtype = self.getTargetDtype()
 
         # Init making the FF structure
-        ff_struct_fake = FFMimickInterface(self.nrows, self.ncols, target_dtype, res_size=self.config.background_reservoir_size)
+        ff_struct_fake = FFMimickInterface(self.nrows, self.ncols, target_dtype, res_size=self.config.background_reservoir_size,
+            median_threads=self.config.median_threads)
 
         # If there are no frames to read, return an empty array
         if frames_to_read == 0 or frames_to_read == -1:
@@ -1408,7 +1410,8 @@ class InputTypeUWOVid(InputType):
         target_dtype = self.getTargetDtype()
 
         # Init making the FF structure
-        ff_struct_fake = FFMimickInterface(self.nrows, self.ncols, target_dtype, res_size=self.config.background_reservoir_size)
+        ff_struct_fake = FFMimickInterface(self.nrows, self.ncols, target_dtype, res_size=self.config.background_reservoir_size,
+            median_threads=self.config.median_threads)
 
         self.frame_chunk_unix_times = []
 
@@ -2024,7 +2027,8 @@ class InputTypeImages(InputType):
         # Init making the FF structure
         # Update the FF struct's target dtype based on the first frame's bit depth
         target_dtype = self.getTargetDtype()
-        ff_struct_fake = FFMimickInterface(self.nrows, self.ncols, target_dtype, res_size=self.config.background_reservoir_size)
+        ff_struct_fake = FFMimickInterface(self.nrows, self.ncols, target_dtype, res_size=self.config.background_reservoir_size,
+            median_threads=self.config.median_threads)
 
         self.frame_dt_list = []
 
@@ -2573,7 +2577,8 @@ class InputTypeDFN(InputType):
             img = np.rot90(img)
 
         target_dtype = self.getTargetDtype(img)
-        self.ff = FFMimickInterface(self.nrows, self.ncols, target_dtype, res_size=self.config.background_reservoir_size)
+        self.ff = FFMimickInterface(self.nrows, self.ncols, target_dtype, res_size=self.config.background_reservoir_size,
+            median_threads=self.config.median_threads)
         self.ff.addFrame(img.astype(np.uint16))
         self.ff.finish()
 
@@ -2885,7 +2890,8 @@ if __name__ == "__main__":
 
     # Use determine target dtype based on the generated frames
     target_dtype = np.uint8 if getattr(config, 'bit_depth', 8) <= 8 else np.uint16
-    ff = FFMimickInterface(img_h, img_w, target_dtype, res_size=config.background_reservoir_size)
+    ff = FFMimickInterface(img_h, img_w, target_dtype, res_size=config.background_reservoir_size,
+        median_threads=config.median_threads)
 
     frames = np.random.normal(10000, 500, size=(nframes, img_h, img_w)).astype(np.uint16)
 

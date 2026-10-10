@@ -1,6 +1,9 @@
 
-import numpy as np
+import os
 import time
+import concurrent.futures
+
+import numpy as np
 
 # Cython import
 cimport numpy as np
@@ -36,8 +39,183 @@ cdef void updateMaxFrame(INT16_TYPE_t[:, ::1] maxpixel, np.uint32_t[:, ::1] maxf
 # Image rows per block in sampleMedianMAD
 MEDIAN_BLOCK_ROWS = 8
 
+# Sample types of sampleMedianMAD: the raw frames of the FF files, and the calibrated frames of the matched filter
+ctypedef fused sample_t:
+    np.uint16_t
+    np.float32_t
 
-def sampleMedianMAD(samples, block_rows=MEDIAN_BLOCK_ROWS):
+
+@cython.boundscheck(False)
+@cython.wraparound(False)
+@cython.cdivision(True)
+cdef double selectKth(double *a, Py_ssize_t n, Py_ssize_t k) nogil:
+    """ The k-th smallest of the n values (0-based), by quickselect (Hoare partitioning), in place. On return,
+        the values before position k are not larger than it.
+
+    Quickselect partitions the values around a pivot like quicksort, but continues only in the part which contains
+    position k, so it takes on average about 2n comparisons instead of n*log(n) for sorting.
+
+    Arguments:
+        a: [double*] The values, reordered in place.
+        n: [int] Number of values.
+        k: [int] Position of the value in the sorted order.
+
+    Return:
+        [double] The k-th smallest value.
+    """
+
+    cdef Py_ssize_t lo = 0, hi = n - 1, i, j
+    cdef double pivot, tmp
+
+    # The range [lo, hi] which contains position k shrinks until it holds only values equal to the k-th one
+    while hi > lo:
+
+        # Partition the range around the middle value: the values up to j are not larger than the pivot, the
+        #   values from i on are not smaller, and the ones between are equal to it
+        pivot = a[(lo + hi)//2]
+        i = lo
+        j = hi
+        while i <= j:
+
+            # Skip the values on the right side of the pivot from both ends
+            while a[i] < pivot:
+                i += 1
+            while a[j] > pivot:
+                j -= 1
+
+            # Swap the two values which are on the wrong side
+            if i <= j:
+                tmp = a[i]
+                a[i] = a[j]
+                a[j] = tmp
+                i += 1
+                j -= 1
+
+        # Continue in the part which contains position k, or stop if it is equal to the pivot
+        if k <= j:
+            hi = j
+        elif k >= i:
+            lo = i
+        else:
+            break
+
+    return a[k]
+
+
+@cython.boundscheck(False)
+@cython.wraparound(False)
+@cython.cdivision(True)
+cdef double medianInPlace(double *a, Py_ssize_t n) nogil:
+    """ The median of the n values, as np.median computes it: the middle value, or the mean of the two middle
+        values for an even n. The values are reordered.
+
+    Arguments:
+        a: [double*] The values, reordered in place.
+        n: [int] Number of values.
+
+    Return:
+        [double] The median.
+    """
+
+    # The upper middle value (the middle one for an odd n)
+    cdef Py_ssize_t k = n//2, i
+    cdef double upper = selectKth(a, n, k), lower
+
+    if n % 2 == 1:
+        return upper
+
+    # For an even n, the other middle value is the largest of the values before position k
+    lower = a[0]
+    for i in range(1, k):
+        if a[i] > lower:
+            lower = a[i]
+
+    return 0.5*(lower + upper)
+
+
+@cython.boundscheck(False)
+@cython.wraparound(False)
+def blockMedianMAD(sample_t[:, ::1] block, float[::1] median, float[::1] mad):
+    """ The median and the median absolute deviation of every pixel of a block, the samples of every pixel
+        contiguous (a row of the block). The results are identical to np.median: the median is computed from the
+        values (as float64), and the MAD from the absolute deviations of the samples (as float32) from the median
+        (as float32), as np.median(np.abs(samples.astype(np.float32) - median), axis=1) computes it.
+
+    Arguments:
+        block: [ndarray] Samples, shape (n_pixels, n_samples).
+        median: [ndarray] float32 output, the median of every pixel.
+        mad: [ndarray] float32 output, the MAD of every pixel.
+    """
+
+    # A buffer of the samples of one pixel, reordered by the median (the block itself is not changed)
+    cdef Py_ssize_t n_pix = block.shape[0], n = block.shape[1], p, s
+    cdef double[::1] buf = np.empty(max(n, 1), dtype=np.float64)
+    cdef double *b = &buf[0]
+    cdef float med
+
+    # Without the GIL, so the threads of sampleMedianMAD run in parallel
+    with nogil:
+        for p in range(n_pix):
+
+            # The median of the samples of the pixel
+            for s in range(n):
+                b[s] = <double>block[p, s]
+            med = <float>medianInPlace(b, n)
+            median[p] = med
+
+            # The median of the absolute deviations from the median, in float32
+            for s in range(n):
+                b[s] = <double>fabsf(<float>block[p, s] - med)
+            mad[p] = <float>medianInPlace(b, n)
+
+
+def medianMADRows(samples, row_first, row_last, block_rows, median, mad):
+    """ The median and the MAD of every pixel of the image rows row_first to row_last - 1 (see sampleMedianMAD),
+        written to the given output images. Every thread of sampleMedianMAD runs this on its own range of rows,
+        with its own buffer.
+
+    Arguments:
+        samples: [ndarray] Sampled frames, shape (n_samples, height, width).
+        row_first: [int] First image row.
+        row_last: [int] Image row after the last one.
+        block_rows: [int] Image rows per block.
+        median: [ndarray] float32 output image of the median, (height, width).
+        mad: [ndarray] float32 output image of the MAD, (height, width).
+    """
+
+    n_samples, height, width = samples.shape
+
+    # Pad the buffer rows, so their length is not a power of two
+    row_len = block_rows*width + 16
+    if (row_len & (row_len - 1)) == 0:
+        row_len += 16
+
+    buf = np.empty((n_samples, row_len), dtype=samples.dtype)
+
+    for row in range(row_first, row_last, block_rows):
+
+        rows = min(block_rows, row_last - row)
+        n_pix = rows*width
+
+        # Samples of every pixel of the block in a contiguous row
+        buf[:, :n_pix] = samples[:, row:row + rows, :].reshape(n_samples, n_pix)
+        block = np.ascontiguousarray(buf[:, :n_pix].T)
+
+        # The median and the MAD of every pixel of the block (compiled, for the raw and the calibrated frames;
+        #   np.median for other types)
+        if block.dtype in (np.uint16, np.float32):
+            block_median = np.empty(n_pix, dtype=np.float32)
+            block_mad = np.empty(n_pix, dtype=np.float32)
+            blockMedianMAD(block, block_median, block_mad)
+        else:
+            block_median = np.median(block, axis=1).astype(np.float32)
+            block_mad = np.median(np.abs(block.astype(np.float32) - block_median[:, None]), axis=1)
+
+        median[row:row + rows] = block_median.reshape(rows, width)
+        mad[row:row + rows] = block_mad.reshape(rows, width)
+
+
+def sampleMedianMAD(samples, block_rows=MEDIAN_BLOCK_ROWS, threads=1):
     """ Compute the median and the median absolute deviation (MAD) of every pixel over the sampled frames.
 
     The samples of a pixel are one frame apart in memory, so taking the median along the first axis reads
@@ -47,11 +225,15 @@ def sampleMedianMAD(samples, block_rows=MEDIAN_BLOCK_ROWS):
     length is not a power of two, and the buffer is transposed so that the samples of every pixel are
     contiguous. The results are identical to np.median along the first axis.
 
+    With several threads, every thread computes a range of image rows. The compiled part releases the GIL, so
+    the threads run in parallel, and the results are the same as with one thread.
+
     Arguments:
         samples: [ndarray] Sampled frames, shape (n_samples, height, width).
 
     Keyword arguments:
         block_rows: [int] Image rows per block. MEDIAN_BLOCK_ROWS by default.
+        threads: [int] Number of threads, 0 for all CPU cores. 1 by default.
 
     Return:
         (median, mad): [tuple of ndarrays] float32 images of the median and of the median absolute deviation.
@@ -62,28 +244,27 @@ def sampleMedianMAD(samples, block_rows=MEDIAN_BLOCK_ROWS):
     median = np.empty((height, width), dtype=np.float32)
     mad = np.empty((height, width), dtype=np.float32)
 
-    # Pad the buffer rows, so their length is not a power of two
-    row_len = block_rows*width + 16
-    if (row_len & (row_len - 1)) == 0:
-        row_len += 16
+    # At most one thread per block of rows
+    if threads <= 0:
+        threads = os.cpu_count() or 1
+    n_blocks = (height + block_rows - 1)//block_rows
+    threads = max(1, min(threads, n_blocks))
 
-    buf = np.empty((n_samples, row_len), dtype=samples.dtype)
+    if threads == 1:
+        medianMADRows(samples, 0, height, block_rows, median, mad)
+        return median, mad
 
-    for row in range(0, height, block_rows):
+    # Split the rows into one range per thread, at the boundaries of the blocks of rows (thread i takes the blocks
+    #   n_blocks*i//threads to n_blocks*(i + 1)//threads - 1, the last range ends at the last row)
+    bounds = [block_rows*((n_blocks*i)//threads) for i in range(threads + 1)]
+    bounds[-1] = height
 
-        rows = min(block_rows, height - row)
-        n_pix = rows*width
-
-        # Samples of every pixel of the block in a contiguous row
-        buf[:, :n_pix] = samples[:, row:row + rows, :].reshape(n_samples, n_pix)
-        block = np.ascontiguousarray(buf[:, :n_pix].T)
-
-        # Compute the median in float32 for the precision of the MAD
-        block_median = np.median(block, axis=1).astype(np.float32)
-        block_mad = np.median(np.abs(block.astype(np.float32) - block_median[:, None]), axis=1)
-
-        median[row:row + rows] = block_median.reshape(rows, width)
-        mad[row:row + rows] = block_mad.reshape(rows, width)
+    # Every thread writes its own rows of the output images; the results are collected to raise any error
+    with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as pool:
+        jobs = [pool.submit(medianMADRows, samples, bounds[i], bounds[i + 1], block_rows, median, mad)
+                for i in range(threads) if bounds[i + 1] > bounds[i]]
+        for job in jobs:
+            job.result()
 
     return median, mad
 
@@ -103,6 +284,9 @@ cdef class FFMimickInterface:
     # how many frames actually contribute to the avepixel median.
     cdef public int res_size
 
+    # Number of threads of the median and the MAD of the samples (0 for all CPU cores)
+    cdef public int median_threads
+
     # State of the random number generator of the reservoir sampling
     cdef unsigned long long rng_state
     
@@ -112,7 +296,7 @@ cdef class FFMimickInterface:
     # Index of the frame in which every pixel was at its maximum (counted from the first added frame)
     cdef public np.ndarray maxframe
 
-    def __init__(self, nrows, ncols, dtype, res_size=64):
+    def __init__(self, nrows, ncols, dtype, res_size=64, median_threads=1):
         """ Structure which is used to make FF file format data. It mimicks the interface of an FF structure. 
     
         Arguments:
@@ -122,6 +306,8 @@ cdef class FFMimickInterface:
             res_size: [int] Number of frames in the reservoir sampling buffer used for background estimation.
                 Default is 64. Higher values (e.g. 256) provide better precision but significantly increase
                 memory and CPU time.
+            median_threads: [int] Number of threads of the median and the MAD of the samples (see
+                sampleMedianMAD), 0 for all CPU cores. 1 by default.
         """
         self.nrows = nrows
         self.ncols = ncols
@@ -140,6 +326,7 @@ cdef class FFMimickInterface:
         # e.g. 256, but comes with a significant performance hit - approx 4x)
         self.res_size = res_size
         self.sample_buf = np.zeros((self.res_size, nrows, ncols), dtype=np.uint16)
+        self.median_threads = median_threads
 
         # The reservoir sampling uses its own generator with a fixed seed, so the same frames always give the
         #   same background. The libc rand() state is shared by the whole process, including other libraries
@@ -195,7 +382,7 @@ cdef class FFMimickInterface:
         cdef int n_samples = min(self.nframes, self.res_size)
         
         # Median (avepixel) and median absolute deviation of every pixel over the valid samples
-        median_float, mad = sampleMedianMAD(self.sample_buf[:n_samples])
+        median_float, mad = sampleMedianMAD(self.sample_buf[:n_samples], threads=self.median_threads)
 
         # The factor 1.4826 converts MAD to an unbiased estimate of Standard Deviation for normal distribution
         cdef np.ndarray std_float = mad * 1.4826
