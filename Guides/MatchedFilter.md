@@ -200,8 +200,9 @@ the motion of the best stack.
   same object if they overlap in time and their interpolated positions are within 2 binned pixels (median), or if
   one begins where the other one, extrapolated over the gap, ends (gaps of up to 4 runs of 32 frames).
 - **Shadows.** The hits around a very bright object (its wings, its trails, the noise it adds) link into tracks of
-  their own. A track which stays within 20 px of a track at least 3 times stronger for at least 80% of its hits,
-  moving the same way, is dropped.
+  their own. A track is dropped if a track at least 3 times stronger covers at least 80% of its hits in time, the
+  median distance of these hits from the stronger track is at most 20 px, and it moves the same way (within 20% of
+  the motion of the stronger track, plus twice the smallest motion of the search).
 - **Acceptance.** A track needs `mf_min_hits` (3) hits, a motion within the range, and a displacement of at least
   `mf_min_displacement` (3) FWHMs (the residuals of variable stars don't move). At most `mf_max_tracks` (300) tracks
   are measured, the strongest ones, so an input in bad conditions can't take much longer than usual.
