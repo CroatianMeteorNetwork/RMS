@@ -27,7 +27,7 @@ def selectFiles(config, dir_path, ff_detected):
     
         In the list are included:
             - all TXT files
-            - all FR bin files and their parent FF bin files
+            - all FR bin files
             - all FF bin files with detections
 
     Arguments:
@@ -63,9 +63,6 @@ def selectFiles(config, dir_path, ff_detected):
 
     dir_file_list = os.listdir(dir_path)
 
-    # FF file names, listed once for the FR parent lookup below
-    ff_file_names = [file_name for file_name in dir_file_list if validFFName(file_name)]
-
     # Go through all files in the night directory
     for file_name in dir_file_list:
 
@@ -84,30 +81,10 @@ def selectFiles(config, dir_path, ff_detected):
             selected_list.append(file_name)
 
 
-        # Take all FR bin files, and their parent FF bin files
+        # Take all FR bin files. Their parent FF files are not added: the FF files uploaded are decided by
+        #   the upload mode alone (the detected ones here, the calibration ones in Reprocess)
         if upload_frs and ('FR' in file_name) and ('.bin' in file_name):
-
-            # The FR file is named after its parent FF file, e.g. FR_CA0001_20170626_020520_353_0005120.bin
-            # comes from FF_CA0001_20170626_020520_353_0005120.fits, so the parent shares everything
-            # between the two letter prefix and the extension
-            ff_prefix = 'FF' + os.path.splitext(file_name)[0][2:] + '.'
-
-            ff_match = None
-
-            # Locate the parent FF file
-            for ff_file_name in ff_file_names:
-
-                if ff_file_name.startswith(ff_prefix):
-
-                    ff_match = ff_file_name
-                    break
-
-
-            # Add the FR bin file and it's parent FF file to the list
             selected_list.append(file_name)
-
-            if ff_match is not None:
-                selected_list.append(ff_match)
 
 
         # Add FF file which contain detections to the list
