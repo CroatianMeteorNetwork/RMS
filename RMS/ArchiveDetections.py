@@ -7,7 +7,6 @@ import traceback
 
 
 
-from RMS.Formats.FFfile import validFFName
 from RMS.Logger import getLogger
 from RMS.Misc import archiveDir, tarWithProgress
 from RMS.Routines import MaskImage
@@ -25,7 +24,7 @@ def selectFiles(config, dir_path, ff_detected):
     
         In the list are included:
             - all TXT files
-            - all FR bin files and their parent FF bin files
+            - all FR bin files
             - all FF bin files with detections
 
     Arguments:
@@ -77,30 +76,10 @@ def selectFiles(config, dir_path, ff_detected):
             selected_list.append(file_name)
 
 
-        # Take all FR bin files, and their parent FF bin files
+        # Take all FR bin files. Their parent FF files are not added: the FF files uploaded are decided by
+        #   the upload mode alone (the detected ones here, the calibration ones in Reprocess)
         if upload_frs and ('FR' in file_name) and ('.bin' in file_name):
-
-            fr_split = file_name.split('_')
-
-            # FR file identifier which it shares with the FF bin file
-            fr_id = '_'.join(fr_split[1:3])
-
-            ff_match = None
-
-            # Locate the parent FF bin file
-            for ff_file_name in os.listdir(dir_path):
-
-                if validFFName(ff_file_name) and (fr_id in ff_file_name):
-                    
-                    ff_match = ff_file_name
-                    break
-
-
-            # Add the FR bin file and it's parent FF file to the list
             selected_list.append(file_name)
-
-            if ff_match is not None:
-                selected_list.append(ff_match)
 
 
         # Add FF file which contain detections to the list
