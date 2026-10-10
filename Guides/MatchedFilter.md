@@ -135,7 +135,9 @@ noise of the maximum, for any number of motions.
 ### 1. Frames
 
 The frames are read with the dark and the flat applied and the mask, in blocks of `mf_block_frames` (256)
-frames. Inputs with per-frame timestamps (e.g. `.vid`) use them for the frame times and the measured frame rate.
+frames. UWO `.vid` files have a timestamp in every frame, which gives the frame times and the measured frame rate.
+Directories of FITS frames have the time of every frame in `DATE-OBS`, but their frame rate is the one of the
+config (`fps`): it converts the range of motions (`mf_ang_vel_max`) to px per frame, so it has to be set right.
 The saturated pixels of the raw frames (above `mf_saturation_level`, or 98% of the bit range) are kept as a mask.
 
 ### 2. Background and normalization
