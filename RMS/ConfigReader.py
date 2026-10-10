@@ -1032,6 +1032,20 @@ class Config:
         #   divided by the number of workers avoids oversubscribing the CPU
         self.mf_threads = 0
 
+        # Clouded sky: the stars of every chunk of frames are matched to the catalog, and where the stars are
+        #   fainter than on clear sky by more than mf_cloud_max_offset (mag), or reliably seen stars are missing, the
+        #   sky is clouded (see RMS.Routines.SkyQuality). The clouded regions are not searched, and the measurements
+        #   on clouded sky are removed, as their positions and magnitudes can't be trusted. It needs the stars and
+        #   the platepar. The clear-sky brightness of every star is kept across the files of the camera, with a log
+        #   of the conditions of every chunk, in its output directory (sky_reference_*.npz, sky_conditions_*.csv)
+        self.mf_cloud_filter = True
+        self.mf_cloud_max_offset = 0.15
+
+        # Smallest number of stars of the clearest chunk which have to match the catalog for the sky quality: with a
+        #   calibration matching fewer, the sky quality is not known (every chunk would look clouded) and the
+        #   clouded sky is not excluded
+        self.mf_cloud_min_matched = 30
+
 
         #### Shower association
 
@@ -2359,7 +2373,7 @@ def parseMatchedFilter(config, parser):
     if not parser.has_section(section):
         return
 
-    for name in ("mf_enable", "mf_velocity_search", "mf_replace_detection"):
+    for name in ("mf_enable", "mf_velocity_search", "mf_replace_detection", "mf_cloud_filter"):
         if parser.has_option(section, name):
             setattr(config, name, parser.getboolean(section, name))
 
@@ -2372,13 +2386,14 @@ def parseMatchedFilter(config, parser):
 
     for name in ("mf_block_frames", "mf_slow_run_frames", "mf_min_hits",
                  "mf_max_measure_frames", "mf_min_centroids", "mf_edge_margin", "mf_min_frames", "mf_threads",
-                 "mf_smooth_frames", "mf_saturation_level", "mf_max_tracks", "mf_link_max_gap", "mf_max_bin"):
+                 "mf_smooth_frames", "mf_saturation_level", "mf_max_tracks", "mf_link_max_gap", "mf_max_bin",
+                 "mf_cloud_min_matched"):
         if parser.has_option(section, name):
             setattr(config, name, parser.getint(section, name))
 
     for name in ("mf_threshold", "mf_ang_vel_min", "mf_ang_vel_max", "mf_psf_sigma", "mf_max_pos_error",
                  "mf_min_sample_snr", "mf_star_threshold", "mf_persistence", "mf_clip", "mf_trail_level", "mf_min_displacement",
-                 "mf_sigma_scale", "mf_track_significance", "mf_tier_speed"):
+                 "mf_sigma_scale", "mf_track_significance", "mf_tier_speed", "mf_cloud_max_offset"):
         if parser.has_option(section, name):
             setattr(config, name, parser.getfloat(section, name))
 

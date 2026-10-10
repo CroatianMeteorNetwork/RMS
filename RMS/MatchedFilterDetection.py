@@ -67,10 +67,12 @@ from RMS.ExtractStarsFrameInterface import extractStarsFrameInterface
 from RMS.Formats import FTPdetectinfo
 from RMS.Formats.FFfile import filenameToDatetime, validFFName
 from RMS.Formats.FrameInterface import detectInputType
+from RMS.Formats.Platepar import Platepar
 from RMS.Logger import getLogger, LoggingManager
 from RMS.Routines import Image
 from RMS.Routines import MaskImage
 from RMS.Routines.DynamicFTPCompressionCy import sampleMedianMAD
+from RMS.Routines.SkyQuality import CalibrationError, SkyQualityMap, SkyReference, chunkFirstFrames
 from RMS.Routines.MatchedFilterKernels import (VelocityStacker, fitMovingPSF, forcedTrackSignal, streakAperture,
                                                CUDA_AVAILABLE)
 from RMS.Detection import getPolarLine, removeDuplicateDetections, joinContinuousDetections
@@ -464,6 +466,14 @@ class MatchedFilterDetector(object):
         # Factor of the intensities from the stars (see apertureCorrection), None if not applied
         self.aperture_correction = None
 
+        # The sky quality from the stars (SkyQualityMap): the clouded regions are not searched. None searches
+        #   everywhere
+        self.sky_map = None
+
+        # Frames of the detections and detections removed on clouded sky (see run)
+        self.cloud_rows_removed = 0
+        self.cloud_detections_removed = 0
+
         # Number of the weakest candidate tracks which were not measured (see mf_max_tracks)
         self.tracks_dropped = 0
 
@@ -654,6 +664,27 @@ class MatchedFilterDetector(object):
         z /= bg.noise
 
         return z
+
+
+    def blockMask(self, k, background):
+        """ The mask of a block of frames: its static sources (see staticMask) and its clouded regions (in any
+            chunk of frames overlapping the block, see RMS.Routines.SkyQuality), which are not searched or
+            measured.
+
+        Arguments:
+            k: [int] Index of the block.
+            background: [BlockBackground] Background of the block.
+
+        Return:
+            [ndarray] Boolean mask of the binned image, True for the masked pixels.
+        """
+
+        mask = self.staticMask(background)
+        if self.sky_map is not None:
+            mask |= self.sky_map.cloudMask(self.block_starts[k], self.block_ends[k] - 1, self.height, self.width,
+                                           bin_factor=self.det_bin)
+
+        return mask
 
 
     def staticMask(self, background):
@@ -997,7 +1028,7 @@ class MatchedFilterDetector(object):
             #   unit noise (in place, the raw frames are not needed any more)
             t1 = time()
             bg.mean = frames.mean(axis=0)
-            static = self.staticMask(bg)
+            static = self.blockMask(k, bg)
             self.static_masks[k] = static
             z = self.normalize(frames, k)
             del frames
@@ -1755,6 +1786,16 @@ class MatchedFilterDetector(object):
                 cent = cent[keep]
                 cent[:, 1:3] = xy
 
+            # Only the measurements on clear sky are kept, as on clouded sky neither their positions nor their
+            #   magnitudes can be trusted, and the track needs enough of them (in unbinned coordinates)
+            if self.sky_map is not None:
+                xy = cent[:, 1:3]*self.det_bin + (self.det_bin - 1)/2.0
+                clear = self.sky_map.isClear(xy[:, 0], xy[:, 1], cent[:, 0])
+                if clear.sum() < self.opts.min_centroids:
+                    self.cloud_detections_removed += 1
+                    continue
+                cent = cent[clear]
+
             # Only tracks which last and move long enough are kept
             if (cent[-1, 0] - cent[0, 0] < self.opts.min_frames) \
                     or (np.hypot(*(cent[-1, 1:3] - cent[0, 1:3])) < self.minDisplacement()):
@@ -1762,6 +1803,16 @@ class MatchedFilterDetector(object):
 
             # One row per frame: the intensity of every frame, at the position on the track
             cent = perFrameRows(cent, self.opts.max_measure_frames, phot)
+
+            # The frames on clouded sky (between and beyond the measurements) are left out too
+            if self.sky_map is not None:
+                xy = cent[:, 1:3]*self.det_bin + (self.det_bin - 1)/2.0
+                clear = self.sky_map.isClear(xy[:, 0], xy[:, 1], cent[:, 0])
+                self.cloud_rows_removed += int((~clear).sum())
+                cent = cent[clear]
+                if len(cent) < 2:
+                    self.cloud_detections_removed += 1
+                    continue
 
             # Unbinned coordinates, and the intensity of the unbinned image (averaged bins hold the mean of the
             #   pixels, summed bins already their sum)
@@ -1884,6 +1935,10 @@ class MatchedFilterDetector(object):
 
         return {
             'aperture_correction': self.aperture_correction,
+            'clear_sky_fraction': (round(float(np.mean(self.sky_map.clear)), 3) if self.sky_map is not None
+                                   else None),
+            'cloud_frames_removed': int(self.cloud_rows_removed),
+            'cloud_detections_removed': int(self.cloud_detections_removed),
             'tracks_dropped': int(self.tracks_dropped),
             'total_frames': int(self.total_frames),
             'psf_sigma': self.psf_sigma,
@@ -2046,7 +2101,7 @@ class MatchedFilterDetector(object):
         #   in the verification
         for k in touched:
             self.starTemplate(self.backgrounds[k])
-            self.static_masks[k] = self.staticMask(self.backgrounds[k])
+            self.static_masks[k] = self.blockMask(k, self.backgrounds[k])
 
 
     def measurePass(self, states):
@@ -2161,6 +2216,12 @@ class MatchedFilterDetector(object):
             #   (scintillation), and a slow track over a few of them would collect their residuals
             excluded = (self.static_masks[k] | (self.backgrounds[k].stars > 0)).astype(np.uint8)
 
+            # The clouded regions of the block, left out of the shape of the objects (cloud structure would make
+            #   an object look extended)
+            clouded = None
+            if self.sky_map is not None:
+                clouded = self.sky_map.cloudMask(first, last - 1, self.height, self.width, bin_factor=self.det_bin)
+
             for c in active:
 
                 # The PSF-weighted sums of the three tests at their positions in the frames of this block
@@ -2203,6 +2264,8 @@ class MatchedFilterDetector(object):
                     for f, xf, yf in zip(fr[::EXTENT_STEP], x[::EXTENT_STEP], y[::EXTENT_STEP]):
                         r = EXTENT_RADIUS
                         if (r <= xf < z.shape[2] - r - 1) and (r <= yf < z.shape[1] - r - 1):
+                            if (clouded is not None) and clouded[int(round(yf)), int(round(xf))]:
+                                continue
                             c['stack'] += cv2.getRectSubPix(z[f - first], (2*r + 1, 2*r + 1), (float(xf), float(yf)))
                             c['stack_n'] += 1
 
@@ -2958,8 +3021,76 @@ class TrackMeasurement(object):
 
 
 
+def skyQuality(img_handle, config, star_list, platepar, reference_dir=None, input_name=''):
+    """ The sky quality of an input from its stars (see RMS.Routines.SkyQuality), with mf_cloud_filter. With a
+        reference directory, the clear-sky reference of the camera there is used and updated with this input, and
+        its conditions are added to the log there.
+
+    Arguments:
+        img_handle: [FrameInterface] Frame-based input.
+        config: [Config] Configuration object.
+        star_list: [list] Stars of the chunks of frames (see extractStarsFrameInterface).
+        platepar: [Platepar] Platepar of the camera, or None.
+
+    Keyword arguments:
+        reference_dir: [str] Directory of the clear-sky reference of the camera (see SkyReference). None by
+            default.
+        input_name: [str] Name of the input, for the log of the conditions. Empty by default.
+
+    Return:
+        [SkyQualityMap] The sky quality, or None without the stars or the platepar, or if it failed.
+    """
+
+    # The sky quality needs the stars and the platepar
+    if not (config.mf_cloud_filter and star_list and (platepar is not None)):
+        return None
+
+    t0 = time()
+    try:
+
+        # The clear-sky reference of the camera, and the sky quality of this input with the chunks at their frames
+        #   (by the frame times of the input)
+        reference = SkyReference(reference_dir, config.stationID) if reference_dir else None
+        sky_map = SkyQualityMap(star_list, platepar, config, img_handle.beginning_datetime.replace(tzinfo=None),
+                                img_handle.fps, getattr(img_handle, 'chunk_frames', None),
+                                max_offset=config.mf_cloud_max_offset, total_frames=img_handle.total_frames,
+                                min_matched=config.mf_cloud_min_matched,
+                                first_frames=(chunkFirstFrames(star_list, img_handle)
+                                              if hasattr(img_handle, 'chunk_frames') else None),
+                                reference=reference, input_name=input_name)
+
+        # The stars of this input on clear sky are added to the reference, and its conditions to the log
+        sky_map.updateReference()
+
+    # Without a calibration, a star catalog or references of the stars, the sky quality is not known, and the input
+    #   is processed without it; other errors are logged, and don't fail the input either
+    except CalibrationError as e:
+        log.warning('Matched filter: no sky quality ({:s}), the clouded sky is not excluded'.format(str(e)))
+        return None
+
+    except Exception:
+        log.warning('Matched filter: the sky quality failed, the clouded sky is not excluded:\n'
+                    + traceback.format_exc())
+        return None
+
+    # The medians of the chunks, NaN if none is known
+    def median(values):
+        values = np.asarray(values)[np.isfinite(values)]
+        return np.median(values) if len(values) else np.nan
+
+    # A summary of the sky quality of the input for the log
+    clear = sky_map.summary()
+    log.info('Matched filter: sky quality in {:.1f} s, clear fraction of the chunks median {:.2f}, min {:.2f}, '
+             'matched stars per chunk median {:.0f}, transparency median {:+.2f} mag, reliable stars seen median '
+             '{:.2f}'.format(time() - t0, median(clear), np.min(clear), median(sky_map.n_matched),
+                             median(sky_map.transparency), median(sky_map.reliable_seen)))
+
+    return sky_map
+
+
+
 def detectMatchedFilter(img_handle, config, mask=None, dark=None, flat_struct=None, star_list=None,
-                        return_detector=False):
+                        return_detector=False, platepar=None, reference_dir=None, input_name=''):
     """ Run the matched-filter detection on an image handle.
 
     Arguments:
@@ -2974,6 +3105,11 @@ def detectMatchedFilter(img_handle, config, mask=None, dark=None, flat_struct=No
             the intensities are put on the scale of the star intensities (see apertureCorrection). None by
             default.
         return_detector: [bool] Also return the detector (for its summary). False by default.
+        platepar: [Platepar] Platepar of the camera. With the stars and mf_cloud_filter, the clouded sky is not
+            searched and the measurements on it are removed (see RMS.Routines.SkyQuality). None by default.
+        reference_dir: [str] Directory of the clear-sky reference of the camera, which is used and updated (see
+            skyQuality). None by default (only this input is used).
+        input_name: [str] Name of the input, for the log of the conditions. Empty by default.
 
     Return:
         [list] Detections as [rho, theta, centroids], or (detections, detector) with return_detector. The
@@ -2997,7 +3133,14 @@ def detectMatchedFilter(img_handle, config, mask=None, dark=None, flat_struct=No
 
     # Detect and measure the objects
     detector = MatchedFilterDetector(img_handle, config, mask=mask, dark=dark, flat_struct=flat_struct)
+    detector.sky_map = skyQuality(img_handle, config, star_list, platepar, reference_dir=reference_dir,
+                                  input_name=input_name)
     detections = detector.run()
+
+    # The measurements on clouded sky were removed in the run
+    if detector.sky_map is not None:
+        log.info('Matched filter: {:d} detections and {:d} frames of detections on clouded sky removed'.format(
+            detector.cloud_detections_removed, detector.cloud_rows_removed))
 
     # The intensities on the scale of the stars of the photometric calibration. A factor far from 1 means the
     #   stars were not measured properly (e.g. clouds), and the intensities are then left as they are
@@ -3135,7 +3278,7 @@ def mergeFTPdetectinfo(dirs, out_dir, ftp_name, config):
 
 
 def processFile(file_path, config, output_dir, platepar_path=None, dark_path=None, flat_path=None,
-    mask_path=None, extract_stars=True):
+    mask_path=None, extract_stars=True, reference_dir=None):
     """ Run the matched-filter detection on one file and save the FTPdetectinfo (with the suffix "mf"), and
         the CALSTARS if the stars are extracted. With a platepar, the detections are recalibrated.
 
@@ -3145,9 +3288,12 @@ def processFile(file_path, config, output_dir, platepar_path=None, dark_path=Non
         output_dir: [str] Output directory.
 
     Keyword arguments:
-        platepar_path: [str] Platepar, copied to the output directory for the recalibration. None by default.
+        platepar_path: [str] Platepar, copied to the output directory for the recalibration, and used for the
+            clouded sky (mf_cloud_filter). None by default.
         dark_path, flat_path, mask_path: [str] Calibration images. None by default.
         extract_stars: [bool] Extract the stars (needed for the recalibration). True by default.
+        reference_dir: [str] Directory of the clear-sky reference of the camera, used and updated with this file
+            (see skyQuality). None by default (only this file is used).
 
     Return:
         [dict] Summary of the processing (also saved as the done file in the output directory), with the path
@@ -3181,9 +3327,18 @@ def processFile(file_path, config, output_dir, platepar_path=None, dark_path=Non
         star_list = extractStarsFrameInterface(img_handle, config, flat_struct=flat_struct, dark=dark, mask=mask,
                                                save_calstars=False)
 
+    # The platepar, for the clouded sky
+    platepar = None
+    if platepar_path:
+        platepar = Platepar()
+        if platepar.read(platepar_path) is False:
+            log.warning('Matched filter: the platepar can\'t be read: {:s}'.format(platepar_path))
+            platepar = None
+
     # Detect, save the detections and recalibrate them
     detections, detector = detectMatchedFilter(img_handle, config, mask=mask, dark=dark, flat_struct=flat_struct,
-                                               star_list=star_list, return_detector=True)
+                                               star_list=star_list, return_detector=True, platepar=platepar,
+                                               reference_dir=reference_dir, input_name=os.path.basename(file_path))
 
     ftp_path = saveMatchedFilterResults(detections, star_list, img_handle, config, output_dir,
                                         platepar_path=platepar_path,
@@ -3259,7 +3414,7 @@ def processFiles(files, config, output_dir, force=False, **kwargs):
         # Partial results of an interrupted run are not kept
         shutil.rmtree(out, ignore_errors=True)
         try:
-            summary = processFile(path, config, out, **kwargs)
+            summary = processFile(path, config, out, reference_dir=output_dir, **kwargs)
             log.info('Matched filter: {:d} detections in {:s} ({:.0f} s)'.format(summary['detections'], path,
                                                                                summary['processing_time_s']))
         except Exception:
