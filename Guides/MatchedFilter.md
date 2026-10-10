@@ -36,7 +36,7 @@ An input (a video file or a directory of FITS frames) is processed in two passes
    motions; the peaks above the threshold are the *hits*.
 2. **Linking.** The hits of consecutive runs are linked into candidate tracks.
 3. **Measurement.** Every candidate track is measured on the full-resolution frames: a moving PSF is fitted to as
-   few frames as needed for a position error below 0.5 px. The track is then verified (its signal must belong to a
+   few frames as needed for a position error of about 0.5 px. The track is then verified (its signal must belong to a
    moving point source), the measurements on clouded sky are removed, and the photometry of every frame is
    measured.
 
@@ -471,8 +471,9 @@ file failed. At the end, the detections of all files are merged into
 `FTPdetectinfo_<output directory name>_mf.txt` in the output directory, which also holds the clear-sky reference
 and the log of the conditions. Without `-p` (or with `--no-stars`) there is no recalibration and no sky quality.
 
-Options: `--gpu auto|on|off`, `--threads N`, `--no-velocity-search` (only the runs of 32 frames), `--no-stars`
-(no star extraction, no recalibration and no sky quality, faster).
+Options: `--gpu auto|on|off`, `--threads N`, `--no-velocity-search` (the runs of 8 and 16 frames search only the
+motions within one grid step of zero, the runs of 32 frames as usual: small motions only), `--no-stars` (no star
+extraction, no recalibration and no sky quality, faster).
 
 ### Processing time and the GPU
 
@@ -539,7 +540,7 @@ All settings are in the `[MatchedFilter]` section, see the comments in `.config`
 | `mf_track_significance` | 12.0 | Minimum significance of a detection |
 | `mf_min_frames` | 20 | Minimum duration of a detection (frames) |
 | `mf_min_centroids` | 6 | Minimum number of measurements of a detection (on clear sky) |
-| `mf_max_pos_error` | 0.5 | Largest position error of a measurement (px) |
+| `mf_max_pos_error` | 0.5 | Target position error of a measurement (px): sets the frames per position; measurements up to twice this are accepted |
 | `mf_max_measure_frames` | 8 | Most frames combined into one position |
 | `mf_smooth_frames` | 64 | Positions combined along the track over +- this many frames, 0 disables it |
 | `mf_clip` | 10 | The normalized frames are clipped to +- this before the search |
