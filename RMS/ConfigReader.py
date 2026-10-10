@@ -1040,6 +1040,11 @@ class Config:
         self.mf_cloud_filter = True
         self.mf_cloud_max_offset = 0.15
 
+        # Smallest number of stars of the clearest chunk which have to match the catalog for the sky quality: with a
+        #   calibration matching fewer, the sky quality is not known (every chunk would look clouded) and the
+        #   clouded sky is not excluded
+        self.mf_cloud_min_matched = 30
+
 
         #### Shower association
 
@@ -2380,7 +2385,8 @@ def parseMatchedFilter(config, parser):
 
     for name in ("mf_block_frames", "mf_slow_run_frames", "mf_min_hits",
                  "mf_max_measure_frames", "mf_min_centroids", "mf_edge_margin", "mf_min_frames", "mf_threads",
-                 "mf_smooth_frames", "mf_saturation_level", "mf_max_tracks", "mf_link_max_gap", "mf_max_bin"):
+                 "mf_smooth_frames", "mf_saturation_level", "mf_max_tracks", "mf_link_max_gap", "mf_max_bin",
+                 "mf_cloud_min_matched"):
         if parser.has_option(section, name):
             setattr(config, name, parser.getint(section, name))
 

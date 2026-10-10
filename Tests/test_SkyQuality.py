@@ -258,3 +258,55 @@ def test_first_frames_after_a_recording_gap():
                             first_frames=first_frames[:N_CHUNKS])
     assert len(sky_map.chunk_first) == N_CHUNKS
     assert sky_map.isClear(np.array([200.0]), np.array([200.0]), np.array([8*CHUNK_FRAMES + 10]))[0]
+
+
+def _patchCalibration(monkeypatch, catalog, offset):
+    """ Replace the catalog, the recalibration and the projection: the catalog stars are projected to their
+        (ra, dec) as (x, y), shifted by offset px (a platepar off by that much).
+    """
+
+    import RMS.Routines.SkyQuality as sq
+
+    def recalibrate(platepar, ff_names, calstars, catalog_stars, config, **kwargs):
+        pp = Platepar()
+        pp.X_res, pp.Y_res = WIDTH, HEIGHT
+        pp.auto_recalibrated = True
+        return {ff_names[0]: pp}
+
+    monkeypatch.setattr(sq.StarCatalog, 'readStarCatalog', lambda *args, **kwargs: (catalog, None, None))
+    monkeypatch.setattr(sq, 'recalibratePlateparsForFF', recalibrate)
+    monkeypatch.setattr(sq, 'raDecToXYPP', lambda ra, dec, jd, pp: (ra + offset, dec))
+    monkeypatch.setattr(sq, 'extinctionCorrectionTrueToApparent', lambda mags, ra, dec, jd, pp: mags)
+
+
+@pytest.mark.parametrize('offset, trusted', [(0.0, True), (5.0, False)])
+def test_calibration_matching_few_stars_is_not_trusted(monkeypatch, offset, trusted):
+    """ A calibration which matches dozens of the stars of the clearest chunk is used; one which matches only a
+        few (e.g. a platepar off by a few pixels, accepted by the recalibration) leaves the sky quality unknown
+        instead of making every chunk clouded.
+    """
+
+    rng = np.random.default_rng(1)
+    x, y = rng.uniform(20, WIDTH - 20, 300), rng.uniform(20, HEIGHT - 20, 300)
+    catalog = np.c_[x, y, np.full(300, 8.0)]
+
+    # 10 stars which the offset platepar still matches (catalog entries 5 px to their left, projected onto them)
+    extra = np.c_[x[:10] - offset, y[:10]]
+    catalog = np.vstack([catalog, np.c_[extra, np.full(10, 8.0)]]) if offset else catalog
+
+    _patchCalibration(monkeypatch, catalog, offset)
+
+    config = cr.Config()
+    config.ff_min_stars = 100
+    platepar = Platepar()
+    platepar.X_res, platepar.Y_res = WIDTH, HEIGHT
+
+    stars = [(yy, xx, 1000.0, 100.0, 2.0, 500.0, 20.0, 0) for xx, yy in zip(x, y)]
+    star_list = [[_chunkName(i), stars] for i in range(4)]
+
+    if trusted:
+        sky_map = SkyQualityMap(star_list, platepar, config, BEGIN, FPS, CHUNK_FRAMES)
+        assert np.all(sky_map.n_matched > 250)
+    else:
+        with pytest.raises(CalibrationError, match='only 1[0-9] of the 300'):
+            SkyQualityMap(star_list, platepar, config, BEGIN, FPS, CHUNK_FRAMES)

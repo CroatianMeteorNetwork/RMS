@@ -3041,6 +3041,7 @@ def skyQuality(img_handle, config, star_list, platepar):
         sky_map = SkyQualityMap(star_list, platepar, config, img_handle.beginning_datetime.replace(tzinfo=None),
                                 img_handle.fps, getattr(img_handle, 'chunk_frames', None),
                                 max_offset=config.mf_cloud_max_offset, total_frames=img_handle.total_frames,
+                                min_matched=config.mf_cloud_min_matched,
                                 first_frames=(chunkFirstFrames(star_list, img_handle)
                                               if hasattr(img_handle, 'chunk_frames') else None))
     except CalibrationError as e:

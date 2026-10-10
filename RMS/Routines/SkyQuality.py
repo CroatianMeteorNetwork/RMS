@@ -34,6 +34,11 @@ from RMS.Logger import getLogger
 log = getLogger("logger")
 
 
+# Smallest fraction of the stars of the chunk the platepar is fitted on which have to match the catalog for the
+#   calibration to be trusted (on clear sky, 30-55% of the extracted stars match unambiguously within 1 px)
+MIN_MATCHED_FRACTION = 0.15
+
+
 class CalibrationError(Exception):
     """ The platepar could not be fitted to the stars, so the sky quality is not known. """
     pass
@@ -43,7 +48,7 @@ class CalibrationError(Exception):
 class SkyQualityMap(object):
     def __init__(self, star_list, platepar, config, begin_time, fps, chunk_frames, n_neighbours=10,
                  max_offset=0.15, max_radius_ratio=2.0, grid_cells=32, match_radius=1.0, matched=None,
-                 total_frames=None, first_frames=None):
+                 total_frames=None, first_frames=None, min_matched=30):
         """ Local sky quality of the chunks of frames of one input.
 
         Arguments:
@@ -66,6 +71,8 @@ class SkyQualityMap(object):
                 default.
             total_frames: [int] Number of frames of the input, for the chunks missing at its end. None by
                 default (the frames after the last chunk belong to it).
+            min_matched: [int] Smallest number of matched stars of the chunk the platepar is fitted on, for the
+                calibration to be trusted. 30 by default.
             first_frames: [list] The first frame of every chunk of star_list (see chunkFirstFrames). None by
                 default, the first frames are computed from the times of the chunks and the frame rate (which
                 assumes no gaps in the recording).
@@ -77,6 +84,7 @@ class SkyQualityMap(object):
         self.max_offset = max_offset
         self.max_radius_ratio = max_radius_ratio
         self.match_radius = match_radius
+        self.min_matched = min_matched
 
         self.width, self.height = platepar.X_res, platepar.Y_res
 
@@ -202,8 +210,8 @@ class SkyQualityMap(object):
         config = copy.deepcopy(self.config)
         config.fps = self.fps
         pp = None
-        for i in np.argsort(-self.n_stars)[:3]:
-            ff_name = star_list[i][0]
+        for i_fit in np.argsort(-self.n_stars)[:3]:
+            ff_name = star_list[i_fit][0]
             recalibrated = recalibratePlateparsForFF(platepar, [ff_name], calstars, catalog, config,
                                                      ff_frames=self.chunk_frames)
             if (ff_name in recalibrated) and recalibrated[ff_name].auto_recalibrated:
@@ -250,6 +258,14 @@ class SkyQualityMap(object):
             radius = np.hypot(stars[ok, 0] - self.height/2, stars[ok, 1] - self.width/2)
             inst_mags = photomLine((stars[ok, 2], radius), platepar.mag_lev, pp.vignetting_coeff)
             matched[i] = np.c_[stars[ok, 1], stars[ok, 0], inst_mags - app_mags]
+
+        # A calibration which matches only a few of the stars of the clearest chunk (the one it was fitted on) is
+        #   not trusted: with it, every chunk would look clouded. The clearest chunk has to match at least
+        #   min_matched stars and MIN_MATCHED_FRACTION of its stars
+        n_fit = len(matched[i_fit])
+        if (n_fit < self.min_matched) or (n_fit < MIN_MATCHED_FRACTION*self.n_stars[i_fit]):
+            raise CalibrationError('only {:d} of the {:d} stars of the clearest chunk match the catalog'.format(
+                n_fit, int(self.n_stars[i_fit])))
 
         return matched
 
