@@ -135,9 +135,10 @@ noise of the maximum, for any number of motions.
 ### 1. Frames
 
 The frames are read with the dark and the flat applied and the mask, in blocks of `mf_block_frames` (256)
-frames. UWO `.vid` files have a timestamp in every frame, which gives the frame times and the measured frame rate.
-Directories of FITS frames have the time of every frame in `DATE-OBS`, but their frame rate is the one of the
-config (`fps`): it converts the range of motions (`mf_ang_vel_max`) to px per frame, so it has to be set right.
+frames. The frame times and the frame rate come from the data: UWO `.vid` files have a timestamp in every frame,
+and directories of FITS frames the time of every frame in `DATE-OBS`; the frame rate is measured from them (the
+config `fps` is used only for inputs without frame times). It converts the range of motions (`mf_ang_vel_max`) to
+px per frame.
 The saturated pixels of the raw frames (above `mf_saturation_level`, or 98% of the bit range) are kept as a mask.
 
 ### 2. Background and normalization
@@ -468,7 +469,7 @@ python -m RMS.MatchedFilterDetection /path/to/night/ -c .config -p platepar_cmn2
 ```
 
 The inputs are video files (e.g. `.vid`, `.mkv`) and directories of FITS frames (one frame per file, with the
-time of the frame in `DATE-OBS`; the frame rate is taken from the config), each directory being one input.
+time of the frame in `DATE-OBS`, from which the frame rate is measured), each directory being one input.
 Every input file gets a directory in the output directory with the same files as above. Files which already
 have a `matched_filter_done.json` are skipped, so an interrupted run can simply be started again (`--force`
 processes them again). A file which fails is logged and the others are processed; the exit code is 1 if any
