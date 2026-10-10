@@ -468,7 +468,7 @@ class SkyQualityMap(object):
 
     def addMissingChunks(self, total_frames):
         """ Add empty chunks (no stars, so clouded) where chunks are missing: in the gaps between the chunks,
-            before the first chunk, and after the last one up to total_frames.
+            before the first chunk, and after the last one up to total_frames (also for a part of a chunk).
 
         Arguments:
             total_frames: [int] Number of frames of the input, or None.
@@ -488,9 +488,11 @@ class SkyQualityMap(object):
                     firsts.append(int(expected))
                     expected += cf
             firsts.append(int(f0))
+        # After the last chunk, every remaining frame is in a missing chunk (the star extraction uses only full
+        #   chunks, so the frames at the end of the input have no stars)
         if total_frames is not None:
             expected = self.chunk_first[-1] + cf
-            while expected <= total_frames - cf/2.0:
+            while expected < total_frames:
                 firsts.append(int(expected))
                 expected += cf
 

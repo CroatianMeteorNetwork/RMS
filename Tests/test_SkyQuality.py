@@ -207,6 +207,11 @@ def test_missing_chunks_are_clouded():
     assert len(sky_map.chunk_first) == N_CHUNKS
     assert not sky_map.isClear(x, y, np.array([3*CHUNK_FRAMES + 60]))[0]
 
+    # A few frames after the last full chunk (which the star extraction doesn't use) are in a missing chunk
+    sky_map = _skyMap(total_frames=N_CHUNKS*CHUNK_FRAMES + 20)
+    assert len(sky_map.chunk_first) == N_CHUNKS + 1
+    assert not sky_map.isClear(x, y, np.array([N_CHUNKS*CHUNK_FRAMES + 10]))[0]
+
     # Without the number of frames, the frames after the last chunk belong to it
     sky_map = _skyMap(skipped=(11,))
     assert len(sky_map.chunk_first) == N_CHUNKS - 1
