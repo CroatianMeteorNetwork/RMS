@@ -26,18 +26,21 @@ from __future__ import print_function, division, absolute_import
 
 import os
 import copy
+import math
 import datetime
 
 import numpy as np
 from scipy import ndimage
 from scipy.spatial import cKDTree
 
-from RMS.Astrometry.ApplyAstrometry import extinctionCorrectionTrueToApparent, photomLine, raDecToXYPP
+from RMS.Astrometry.ApplyAstrometry import (computeFOVSize, extinctionCorrectionTrueToApparent, photomLine,
+                                            raDecToXYPP, xyToRaDecPP)
 from RMS.Astrometry.ApplyRecalibrate import recalibratePlateparsForFF
 from RMS.Astrometry.Conversions import datetime2JD
 from RMS.Formats import StarCatalog
 from RMS.Formats.FFfile import filenameToDatetime
 from RMS.Logger import getLogger
+from RMS.Math import angularSeparationDeg
 
 log = getLogger("logger")
 
@@ -88,6 +91,36 @@ class CalibrationError(Exception):
         no star has a reference.
     """
     pass
+
+
+
+def catalogNearField(catalog, platepar, jds):
+    """ The catalog stars near the field of view at any of the given times: within 0.65 of the diagonal of the
+        field (its half plus a margin of 30% of it) of the centre of the field at one of the times. An angular cut is
+        much faster than projecting the whole catalog into the image.
+
+    Arguments:
+        catalog: [ndarray] Catalog stars, rows (ra, dec, mag) in degrees.
+        platepar: [Platepar] Platepar of the camera.
+        jds: [list] Julian dates.
+
+    Return:
+        [ndarray] Boolean, True for the stars near the field.
+    """
+
+    # The centre of the field at every time
+    n = len(jds)
+    _, ra_c, dec_c, _ = xyToRaDecPP(np.array(jds), np.full(n, platepar.X_res/2.0), np.full(n, platepar.Y_res/2.0),
+                                    np.ones(n), platepar, extinction_correction=False, jd_time=True)
+
+    fov_h, fov_v = computeFOVSize(platepar)
+    radius = 0.65*math.hypot(fov_h, fov_v)
+
+    near = np.zeros(len(catalog), dtype=bool)
+    for ra, dec in zip(ra_c, dec_c):
+        near |= angularSeparationDeg(catalog[:, 0], catalog[:, 1], ra, dec) < radius
+
+    return near
 
 
 
@@ -230,16 +263,17 @@ class SkyReference(object):
             times, vals, rts = np.vstack(times), np.vstack(vals), np.vstack(rts)
             index = {int(k): i for i, k in enumerate(keys_all)}
 
+            # An earlier processing of this input is removed completely (also the visits of the stars which are not
+            #   in this processing)
+            earlier = np.abs(times - t) <= 1.0
+            times[earlier], vals[earlier], rts[earlier] = np.nan, np.nan, np.nan
+
             for key, value, rate in zip(keys, values, rates):
                 row = index[int(key)]
 
-                # The slot of this input: its earlier visit, an empty slot, or the oldest visit if it is older than
-                #   this input
-                same = np.nonzero(np.abs(times[row] - t) <= 1.0)[0]
+                # The slot of this input: an empty slot, or the oldest visit if it is older than this input
                 empty = np.nonzero(~np.isfinite(times[row]))[0]
-                if len(same):
-                    slot = same[0]
-                elif len(empty):
+                if len(empty):
                     slot = empty[0]
                 else:
                     slot = int(np.argmin(times[row]))
@@ -248,11 +282,12 @@ class SkyReference(object):
 
                 times[row, slot], vals[row, slot], rts[row, slot] = t, value, rate
 
-            # The zero point of this input (replacing an earlier processing of it), the latest ones kept
-            zp_times, zp_values = self.zp_times, self.zp_values
+            # The zero point of this input (replacing an earlier processing of it, also if it is not known now), the
+            #   latest ones kept
+            keep = np.abs(self.zp_times - t) > 1.0
+            zp_times, zp_values = self.zp_times[keep], self.zp_values[keep]
             if np.isfinite(zero_point):
-                keep = np.abs(zp_times - t) > 1.0
-                zp_times, zp_values = np.r_[zp_times[keep], t], np.r_[zp_values[keep], zero_point]
+                zp_times, zp_values = np.r_[zp_times, t], np.r_[zp_values, zero_point]
                 order = np.argsort(zp_times)[-self.MAX_ZERO_POINTS:]
                 zp_times, zp_values = zp_times[order], zp_values[order]
 
@@ -526,14 +561,10 @@ class SkyQualityMap(object):
             raise CalibrationError('the platepar could not be recalibrated on the stars of the input')
 
         # Only the catalog stars near the field are projected for every chunk: the stars near the image at any
-        #   of up to 21 times spread over the input, with a margin which covers the motion of the sky between them
-        margin = 0.3*max(self.width, self.height)
-        near = np.zeros(len(catalog), dtype=bool)
+        #   of up to 21 times spread over the input
         step = max(len(star_list)//20, 1)
-        for entry in star_list[::step] + [star_list[-1]]:
-            x, y = raDecToXYPP(catalog[:, 0], catalog[:, 1], datetime2JD(filenameToDatetime(entry[0])), pp)
-            near |= (x > -margin) & (x < self.width + margin) & (y > -margin) & (y < self.height + margin)
-        catalog = catalog[near]
+        jds = [datetime2JD(filenameToDatetime(entry[0])) for entry in star_list[::step] + [star_list[-1]]]
+        catalog = catalog[catalogNearField(catalog, pp, jds)]
         if len(catalog) < 2:
             raise CalibrationError('no catalog stars in the field')
         catalog_keys = starKeys(catalog[:, 0], catalog[:, 1])
@@ -620,8 +651,22 @@ class SkyQualityMap(object):
                 ref[found] = star_ref[pos[found]]
             excess.append(m[:, 2] - ref)
 
-        # The reliable stars and their seen fractions, to tell where stars are missing
+        # The reliable stars and their seen fractions, to tell where stars are missing: the matched stars of this
+        #   input, and the catalog stars in the image which are not matched in it but are reliable in the reference
+        #   (behind a cloud which stays during the whole input)
         reliable_keys, reliable_seen = self.star_keys[reliable], star_seen[reliable]
+        if (self.reference is not None) and (self.in_image is not None):
+            in_keys = np.unique(np.concatenate([self.in_image[i][:, 2] for i in np.nonzero(usable)[0]]))
+            in_keys = in_keys[~np.isin(in_keys, self.star_keys)]
+            if len(in_keys):
+                _, ref_rates = self.reference.lookup(in_keys, exclude_time=unixTime(self.begin_time))
+                with np.errstate(all='ignore'):
+                    ref_seen = np.nanmedian(ref_rates, axis=1) if ref_rates.size else np.zeros(0)
+                more = np.isfinite(ref_seen) & (ref_seen >= RELIABLE_FRACTION)
+                reliable_keys = np.r_[reliable_keys, in_keys[more]]
+                reliable_seen = np.r_[reliable_seen, ref_seen[more]]
+                order = np.argsort(reliable_keys)
+                reliable_keys, reliable_seen = reliable_keys[order], reliable_seen[order]
 
         # The distance to the k-th nearest matched star of every grid point, with its reference (the densest
         #   chunks), for the chunks without enough reliable stars

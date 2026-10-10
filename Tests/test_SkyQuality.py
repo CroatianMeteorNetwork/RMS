@@ -283,6 +283,7 @@ def _patchCalibration(monkeypatch, catalog, offset):
     monkeypatch.setattr(sq.StarCatalog, 'readStarCatalog', lambda *args, **kwargs: (catalog, None, None))
     monkeypatch.setattr(sq, 'recalibratePlateparsForFF', recalibrate)
     monkeypatch.setattr(sq, 'raDecToXYPP', lambda ra, dec, jd, pp: (ra + offset, dec))
+    monkeypatch.setattr(sq, 'catalogNearField', lambda catalog, pp, jds: np.ones(len(catalog), dtype=bool))
     monkeypatch.setattr(sq, 'extinctionCorrectionTrueToApparent', lambda mags, ra, dec, jd, pp: mags)
 
 
@@ -347,6 +348,15 @@ def test_reference_order_and_reprocessing(tmp_path):
     values, _ = reference.lookup(keys)
     assert sorted(values[0][np.isfinite(values[0])]) == pytest.approx([0.1, 0.3])
 
+    # Processed again with fewer stars and an unknown zero point: the stars and the zero point which are not in
+    #   the new processing are removed too
+    reference.update(times[1], keys[:1], *_residuals(keys[:1], 0.4), np.nan, [])
+    values, _ = reference.lookup(keys)
+    assert sorted(values[0][np.isfinite(values[0])]) == pytest.approx([0.1, 0.4])
+    assert values[1][np.isfinite(values[1])] == pytest.approx([0.1])
+    assert len(reference.zeroPoints()) == 1
+    reference.update(times[1], keys, *_residuals(keys, 0.3), 0.0, [])
+
     # The earlier processing of an input can be left out
     values, _ = reference.lookup(keys, exclude_time=(times[1] - datetime.datetime(1970, 1, 1)).total_seconds())
     assert values[0][np.isfinite(values[0])] == pytest.approx([0.1])
@@ -410,11 +420,11 @@ def test_missing_reliable_stars_are_clouded(monkeypatch, tmp_path):
     platepar = Platepar()
     platepar.X_res, platepar.Y_res = WIDTH, HEIGHT
 
-    def starList(begin, hidden_chunk=None):
+    def starList(begin, hidden_chunk=None, hidden_always=False):
         out = []
         for i in range(N_CHUNKS):
             keep = np.ones(len(x), dtype=bool)
-            if i == hidden_chunk:
+            if (i == hidden_chunk) or hidden_always:
                 keep = np.hypot(x - 300, y - 200) > 90
             out.append([_chunkName(i, begin), [(yy, xx, 1000.0, 100.0, 2.0, 500.0, 20.0, 0)
                                                for xx, yy in zip(x[keep], y[keep])]])
@@ -429,6 +439,13 @@ def test_missing_reliable_stars_are_clouded(monkeypatch, tmp_path):
                             reference=SkyReference(str(tmp_path), 'XX0001'))
     assert sky_map.reliable_seen[0] == pytest.approx(1.0, abs=0.05)
     assert sky_map.reliable_seen[7] < 0.9
+    assert not sky_map.isClear(np.array([300.0]), np.array([200.0]), np.array([7*CHUNK_FRAMES + 10]))[0]
+    assert sky_map.isClear(np.array([60.0]), np.array([460.0]), np.array([7*CHUNK_FRAMES + 10]))[0]
+
+    # An opaque cloud during the whole input: the stars behind it are not matched in it at all, but they are
+    #   expected from the reference
+    sky_map = SkyQualityMap(starList(later, hidden_always=True), platepar, config, later, FPS, CHUNK_FRAMES,
+                            reference=SkyReference(str(tmp_path), 'XX0001'))
     assert not sky_map.isClear(np.array([300.0]), np.array([200.0]), np.array([7*CHUNK_FRAMES + 10]))[0]
     assert sky_map.isClear(np.array([60.0]), np.array([460.0]), np.array([7*CHUNK_FRAMES + 10]))[0]
 
@@ -522,3 +539,38 @@ def test_stars_entering_during_the_input(monkeypatch):
     sky_map = SkyQualityMap(star_list, platepar, config, BEGIN, FPS, CHUNK_FRAMES)
     assert sky_map.n_matched[0] > 0.8*len(star_list[0][1])
     assert sky_map.n_matched[-1] > 0.8*len(star_list[-1][1])
+
+
+def test_catalog_near_field():
+    """ Every catalog star which is in the image at some time of an input is selected near the field, and most of
+        the sky is not.
+    """
+
+    import os
+    import RMS.Routines.SkyQuality as sq
+    from RMS.Astrometry.ApplyAstrometry import raDecToXYPP
+    from RMS.Astrometry.Conversions import datetime2JD
+
+    platepar = Platepar()
+    platepar.read(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'share',
+                               'platepar_templates', 'template_generic_720p_6mm.cal'))
+
+    # Stars over the whole sky
+    rng = np.random.default_rng(5)
+    n = 20000
+    catalog = np.c_[rng.uniform(0, 360, n), np.degrees(np.arcsin(rng.uniform(-1, 1, n))), np.full(n, 5.0)]
+
+    # An input of two hours (the sky moves by 30 deg), the epochs of the selection over it
+    jd0 = datetime2JD(BEGIN)
+    jds = list(jd0 + np.linspace(0, 2/24, 21))
+    near = sq.catalogNearField(catalog, platepar, jds)
+
+    # The stars in the image at any of many times of the input
+    inside = np.zeros(n, dtype=bool)
+    for jd in jd0 + np.linspace(0, 2/24, 61):
+        x, y = raDecToXYPP(catalog[:, 0], catalog[:, 1], jd, platepar)
+        inside |= (x >= 0) & (x < platepar.X_res) & (y >= 0) & (y < platepar.Y_res)
+
+    assert inside.sum() > 100
+    assert np.all(near[inside])
+    assert near.mean() < 0.5
