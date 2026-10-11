@@ -1151,3 +1151,23 @@ def test_coarse_tier_keeps_nearby_peaks(config):
     # Both sources have a hit on the 4x4 bins
     xs = sorted(h.x for h in hits if abs(h.y - 65.5) < 6)
     assert any(abs(x - 49.5) < 2 for x in xs) and any(abs(x - 57.5) < 2 for x in xs)
+
+
+def test_end_of_the_input_in_the_summary():
+    """ The summary gives the end of the input: the time of its last frame and the length of a frame. """
+
+    import types
+    from RMS.MatchedFilterDetection import MatchedFilterDetector
+
+    begin = datetime.datetime(2025, 12, 25, 3, 0, 0)
+
+    class _Handle(object):
+        fps = 25.0
+
+        def currentFrameTime(self, frame_no=None, dt_obj=False):
+            return begin + datetime.timedelta(seconds=frame_no/25.0)
+
+    detector = types.SimpleNamespace(img_handle=_Handle(), total_frames=1000)
+    detector.frameTimes = lambda frames: MatchedFilterDetector.frameTimes(detector, frames)
+    end = MatchedFilterDetector.inputEnd(detector)
+    assert end == (begin + datetime.timedelta(seconds=1000/25.0)).strftime('%Y-%m-%dT%H:%M:%S.%f')

@@ -1972,6 +1972,7 @@ class MatchedFilterDetector(object):
             'cloud_removed_utc': self.frameTimes(self.cloud_removed_frames),
             'tracks_dropped': int(self.tracks_dropped),
             'total_frames': int(self.total_frames),
+            'input_end_utc': self.inputEnd(),
             'psf_sigma': self.psf_sigma,
             'gpu': bool(self.opts.use_gpu),
             'timing_s': {k: round(v, 2) for k, v in self.timing.items()},
@@ -1979,6 +1980,20 @@ class MatchedFilterDetector(object):
                         'detected': bool(sig >= self.opts.track_significance)}
                        for f0, f1, sig in (s[:3] for s in self.significances)],
         }
+
+
+    def inputEnd(self):
+        """ The end of the input: the time of its last frame and the length of a frame (UTC, ISO format), None if
+            it can't be read. """
+
+        last = self.frameTimes([self.total_frames - 1])[0]
+        if (last is None) or not self.img_handle.fps:
+            return None
+
+        end = datetime.datetime.strptime(last, '%Y-%m-%dT%H:%M:%S.%f') \
+            + datetime.timedelta(seconds=1.0/self.img_handle.fps)
+
+        return end.strftime('%Y-%m-%dT%H:%M:%S.%f')
 
 
     def frameTimes(self, frames):

@@ -548,14 +548,16 @@ class SkyQualityMap(object):
             return
 
         # The stars of the existing chunks, none for the added ones. The time of an added chunk is taken at the
-        #   frame rate from the nearest chunk present before it (or after it, before the first one), so a gap in the
-        #   recording before it is kept
+        #   frame rate from the nearest chunk present before it, so a gap in the recording before it is kept (from
+        #   the beginning of the input before the first chunk)
         existing = dict(zip(self.chunk_first.tolist(), range(len(self.chunk_first))))
         self.matched = [self.matched[existing[f]] if f in existing else np.zeros((0, 4)) for f in firsts]
         self.n_stars = np.array([self.n_stars[existing[f]] if f in existing else 0 for f in firsts])
 
         def _addedTime(f):
-            k = max(int(np.searchsorted(self.chunk_first, f, side='right')) - 1, 0)
+            k = int(np.searchsorted(self.chunk_first, f, side='right')) - 1
+            if k < 0:
+                return self.begin_time + datetime.timedelta(seconds=f/self.fps)
             return self.chunk_times[k] + datetime.timedelta(seconds=(f - self.chunk_first[k])/self.fps)
 
         self.chunk_times = [self.chunk_times[existing[f]] if f in existing else _addedTime(f) for f in firsts]

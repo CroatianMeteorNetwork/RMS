@@ -1697,3 +1697,32 @@ def test_latest_sky_values_until_the_end_of_the_input(tmp_path, now, monkeypatch
     _, sky = status._sky(NOW, 'night', NOW - datetime.timedelta(hours=5), NOW + datetime.timedelta(hours=5),
                          [clear_file, clouded_file])
     assert (sky['state'], sky['clear_percent']) == ('clear', 100.0)
+
+
+def test_end_of_the_input_from_the_summary(tmp_path, now):
+    """ The end of the input is taken from the summary of the matched filter. Without it, it comes from the frame
+        of the last chunk in its name, which is not known if the chunks are not named by their frames (e.g. when
+        the chunk images are not saved).
+    """
+
+    config = _matchedFilterConfig()
+    output_dir = str(tmp_path)
+    results_path = os.path.join(output_dir, _searchedFile(output_dir, config, 'file1', n_chunks=12))
+    summary_path = os.path.join(results_path, mnr.MF_DONE_NAME)
+    with open(summary_path) as f:
+        summary = json.load(f)
+
+    # The chunks named without their frames
+    star_list, _ = CALSTARS.readCALSTARS(results_path, 'CALSTARS_file1.txt')
+    star_list = [[FFfile.constructFFName('XX0001', FFfile.filenameToDatetime(name), ext='fits'), stars]
+                 for name, stars in star_list]
+    CALSTARS.writeCALSTARS(star_list, results_path, 'CALSTARS_file1.txt', 'XX0001', 48, 64, chunk_frames=128,
+                           fps=25.0)
+    assert mnr.readFileSkyResults(results_path, config)['end_time'] is None
+
+    # The end in the summary
+    end = BEG_TIME + datetime.timedelta(seconds=63.0)
+    summary['input_end_utc'] = end.strftime('%Y-%m-%dT%H:%M:%S.%f')
+    with open(summary_path, 'w') as f:
+        json.dump(summary, f)
+    assert mnr.readFileSkyResults(results_path, config)['end_time'] == end

@@ -969,13 +969,18 @@ def readFileSkyResults(results_path, config):
         else:
             file_result['removed_count'] = int(summary.get('cloud_detections_removed') or 0)
 
-        # The end of the input: its last chunk (named by its first frame) lasts until its last frame, as the frames
-        #   after it (fewer than a chunk) belong to it
-        frame_no = re.findall(r'_(\d{7})(?=[_.])', last_name or '')
-        total_frames = summary.get('total_frames')
-        if fps and frame_no and isinstance(total_frames, int) and (total_frames > int(frame_no[-1])):
-            file_result['end_time'] = star_list[-1][0] \
-                + datetime.timedelta(seconds=(total_frames - int(frame_no[-1]))/fps)
+        # The end of the input, as the matched filter read it. Older summaries don't have it: then the last chunk
+        #   (named by its first frame) lasts until the last frame, as the frames after it (fewer than a chunk)
+        #   belong to it. Chunks which are not named by their frames (e.g. without the chunk images) all have 0
+        try:
+            file_result['end_time'] = datetime.datetime.strptime(summary['input_end_utc'], '%Y-%m-%dT%H:%M:%S.%f')
+        except (KeyError, TypeError, ValueError):
+            frame_no = re.findall(r'_(\d{7})(?=[_.])', last_name or '')
+            total_frames = summary.get('total_frames')
+            if fps and frame_no and isinstance(total_frames, int) and (total_frames > int(frame_no[-1])) \
+                    and ((int(frame_no[-1]) > 0) or (len(star_list) == 1)):
+                file_result['end_time'] = star_list[-1][0] \
+                    + datetime.timedelta(seconds=(total_frames - int(frame_no[-1]))/fps)
 
     except (OSError, ValueError, TypeError, AttributeError) as e:
         log.warning("The summary {:s} could not be read: {:s}".format(summary_path, repr(e)))
