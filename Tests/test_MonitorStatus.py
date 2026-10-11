@@ -1626,3 +1626,103 @@ def test_sky_with_a_newer_file_which_was_not_measured(tmp_path, now):
 
     sky = status.build(_state())['sky']
     assert (sky['state'], sky['observable']) == ('no_data', None)
+
+
+def test_sky_until_the_end_of_the_input(tmp_path, now):
+    """ The time of the sky includes the frames after the last chunk of the input (fewer than a chunk), from the
+        number of frames in the summary of the matched filter.
+    """
+
+    status, config = _status(tmp_path)
+    results_dir = _searchedFile(str(tmp_path/'output'), config, 'file1', n_chunks=12)
+
+    # 20 frames after the last chunk
+    summary_path = os.path.join(str(tmp_path/'output'), results_dir, mnr.MF_DONE_NAME)
+    with open(summary_path) as f:
+        summary = json.load(f)
+    summary['total_frames'] += 20
+    with open(summary_path, 'w') as f:
+        json.dump(summary, f)
+
+    end = BEG_TIME + datetime.timedelta(seconds=(12*128 + 20)/25.0)
+    assert mnr.readFileSkyResults(os.path.join(str(tmp_path/'output'), results_dir), config)['end_time'] == end
+    assert status.build(_state())['sky']['observed_utc'] == mst._timeString(end)
+
+
+def test_sky_with_a_newer_file_which_was_not_measured_until_its_end(tmp_path, now):
+    """ A file which was searched but whose sky was not measured, which ends after the measured data only with
+        the frames after its last chunk, makes the sky now unknown.
+    """
+
+    status, config = _status(tmp_path)
+    output_dir = str(tmp_path/'output')
+
+    def _summary(results_dir, **changes):
+        path = os.path.join(output_dir, results_dir, mnr.MF_DONE_NAME)
+        with open(path) as f:
+            summary = json.load(f)
+        summary.update(changes)
+        with open(path, 'w') as f:
+            json.dump(summary, f)
+
+    # Both files have 20 frames after their last chunks, the second one begins 0.5 s later and was not measured
+    measured = _searchedFile(output_dir, config, 'file1', n_chunks=12)
+    _summary(measured, total_frames=12*128 + 20)
+    unmeasured = _searchedFile(output_dir, config, 'file2', n_chunks=12, start_s=0.5)
+    _summary(unmeasured, total_frames=12*128 + 20, clear_sky_fraction=None)
+
+    assert status.build(_state())['sky']['state'] == 'no_data'
+
+
+def test_latest_sky_values_until_the_end_of_the_input(tmp_path, now, monkeypatch):
+    """ The values of the latest sky come from the chunk which gave its state also when that state is in the
+        frames after the last chunk of its input (here a clear input until 7 s, and a clouded one from 1 to 5 s).
+    """
+
+    status, config = _status(tmp_path)
+    t0 = NOW - datetime.timedelta(minutes=10)
+
+    def _file(name, start, end_time, clear):
+        result = {'star_chunks': [(start, 500)], 'chunk_s': 4.0, 'summary': {'total_frames': 1},
+                  'searched': True, 'measured': True, 'removed_times': [], 'removed_count': 0, 'detections': 0,
+                  'ftp_detections': 0, 'end_time': end_time}
+        row = {'time': start, 'input': name, 'clear_fraction': clear, 'transparency_mag': 0.02 if clear else np.nan,
+               'reliable_seen': 1.0, 'stars': 500, 'matched': 300}
+        return (name, {'input_file': name}, result, 1.0), row
+
+    clear_file, clear_row = _file('a.vid', t0, t0 + datetime.timedelta(seconds=7), 1.0)
+    clouded_file, clouded_row = _file('b.vid', t0 + datetime.timedelta(seconds=1), None, 0.0)
+    monkeypatch.setattr(status, '_conditionRows', lambda *args: [clear_row, clouded_row])
+
+    _, sky = status._sky(NOW, 'night', NOW - datetime.timedelta(hours=5), NOW + datetime.timedelta(hours=5),
+                         [clear_file, clouded_file])
+    assert (sky['state'], sky['clear_percent']) == ('clear', 100.0)
+
+
+def test_end_of_the_input_from_the_summary(tmp_path, now):
+    """ The end of the input is taken from the summary of the matched filter. Without it, it comes from the frame
+        of the last chunk in its name, which is not known if the chunks are not named by their frames (e.g. when
+        the chunk images are not saved).
+    """
+
+    config = _matchedFilterConfig()
+    output_dir = str(tmp_path)
+    results_path = os.path.join(output_dir, _searchedFile(output_dir, config, 'file1', n_chunks=12))
+    summary_path = os.path.join(results_path, mnr.MF_DONE_NAME)
+    with open(summary_path) as f:
+        summary = json.load(f)
+
+    # The chunks named without their frames
+    star_list, _ = CALSTARS.readCALSTARS(results_path, 'CALSTARS_file1.txt')
+    star_list = [[FFfile.constructFFName('XX0001', FFfile.filenameToDatetime(name), ext='fits'), stars]
+                 for name, stars in star_list]
+    CALSTARS.writeCALSTARS(star_list, results_path, 'CALSTARS_file1.txt', 'XX0001', 48, 64, chunk_frames=128,
+                           fps=25.0)
+    assert mnr.readFileSkyResults(results_path, config)['end_time'] is None
+
+    # The end in the summary
+    end = BEG_TIME + datetime.timedelta(seconds=63.0)
+    summary['input_end_utc'] = end.strftime('%Y-%m-%dT%H:%M:%S.%f')
+    with open(summary_path, 'w') as f:
+        json.dump(summary, f)
+    assert mnr.readFileSkyResults(results_path, config)['end_time'] == end

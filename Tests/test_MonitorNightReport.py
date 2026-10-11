@@ -1654,3 +1654,70 @@ def test_night_sky_conditions_counts_the_removed_detections_within_the_night(tmp
 
     # The time of the chunks of the files is from their stars
     assert plotted['chunk_seconds']['/data/file1.vid'] == pytest.approx(128/25.0)
+
+
+def test_median_magnitude():
+    """ The median magnitude is taken on the intensities: the two middle values of an even number are averaged as
+        intensities, not as magnitudes, and the magnitudes which are not known are left out.
+    """
+
+    assert mnr.medianMagnitude([3.0, 1.0, 2.0]) == pytest.approx(2.0)
+    assert mnr.medianMagnitude([1.0, 2.0, 3.0, 4.0]) \
+        == pytest.approx(-2.5*np.log10((10**(-0.4*2.0) + 10**(-0.4*3.0))/2))
+    assert mnr.medianMagnitude([1.0, 2.0, 3.0, 4.0]) < 2.5
+    assert mnr.medianMagnitude([None, float('nan'), 5.0]) == pytest.approx(5.0)
+    assert mnr.medianMagnitude([None, float('nan')]) is None
+
+
+def test_magnitude_of_a_detection():
+    """ The magnitude of a detection is the median magnitude of its calibrated measurements: the measurements of
+        an uncalibrated detection have a placeholder magnitude, which is not taken.
+    """
+
+    def _meas(calibrated, mag):
+        return [int(calibrated), 10.0, 100.0, 100.0, 170.0, 50.0, 60.0, 70.0, 1000, mag, 50, 8.0, 0]
+
+    assert mnr.detectionMagnitude([_meas(True, 3.0), _meas(True, 5.0), _meas(True, 4.0)]) == pytest.approx(4.0)
+    assert mnr.detectionMagnitude([_meas(False, 0.0), _meas(False, 0.0)]) is None
+    assert mnr.detectionMagnitude([_meas(True, float('nan'))]) is None
+
+
+@pytest.mark.parametrize('calibration, status', [(None, 0), ('Recalibrated with RMS on: 2025-12-25', 1)])
+def test_calibration_status_of_the_detections(tmp_path, calibration, status):
+    """ The calibration status of the measurements read from an FTPdetectinfo follows the calibration line of
+        every detection: 0 for an uncalibrated one, 1 for a calibrated one.
+    """
+
+    picks = [[f, 10.0 + f, 20.0, 170.0, 50.0, 60.0, 70.0, 1000, 2.5, 50, 8.0, 0] for f in (3.0, 4.0)]
+    FTPdetectinfo.writeFTPdetectinfo([['FF_XX0001_20251225_030000_000_0000000.fits', 1, 10.0, 45.0, picks, 25.0]],
+        str(tmp_path), 'FTPdetectinfo_test.txt', str(tmp_path), 'XX0001', 25.0, calibration=calibration,
+        celestial_coords_given=True)
+
+    entries = FTPdetectinfo.readFTPdetectinfo(str(tmp_path), 'FTPdetectinfo_test.txt')
+    assert [meas[0] for meas in entries[0][11]] == [status, status]
+
+
+def test_conditions_until_the_end_of_the_input_at_the_beginning_of_the_night(tmp_path):
+    """ The last chunk of an input which began before the night is read if the end of the input is in the night,
+        also when the chunk itself ended before it.
+    """
+
+    from RMS.Routines.SkyQuality import CONDITION_COLUMNS
+
+    config = _config()
+    night_start = datetime.datetime(2025, 12, 25, 1, 0, 0)
+    log_path = tmp_path/'sky_conditions_{:s}_20251225.csv'.format(config.stationID)
+    with open(str(log_path), 'w') as f:
+        f.write(','.join(CONDITION_COLUMNS) + ',processed_utc\n')
+        for seconds in (-14, -10, -6):
+            t = night_start + datetime.timedelta(seconds=seconds)
+            f.write('{:s},/data/a.vid,500,300,1.000,0.020,0.950,2025-12-25T04:00:00\n'.format(
+                t.strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3]))
+
+    night_end = night_start + datetime.timedelta(hours=10)
+    ends = {'/data/a.vid': night_start + datetime.timedelta(seconds=0.5)}
+    rows = mnr.nightConditionRows(str(tmp_path), config, ['/data/a.vid'], {'/data/a.vid': 4.0}, night_start,
+                                  night_end, input_ends=ends)
+    assert [row['time'] for row in rows] == [night_start - datetime.timedelta(seconds=6)]
+    assert mnr.nightConditionRows(str(tmp_path), config, ['/data/a.vid'], {'/data/a.vid': 4.0}, night_start,
+                                  night_end) == []

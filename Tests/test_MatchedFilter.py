@@ -1151,3 +1151,50 @@ def test_coarse_tier_keeps_nearby_peaks(config):
     # Both sources have a hit on the 4x4 bins
     xs = sorted(h.x for h in hits if abs(h.y - 65.5) < 6)
     assert any(abs(x - 49.5) < 2 for x in xs) and any(abs(x - 57.5) < 2 for x in xs)
+
+
+def test_end_of_the_input_in_the_summary():
+    """ The summary gives the end of the input: the time of its last frame and the length of a frame. """
+
+    import types
+    from RMS.MatchedFilterDetection import MatchedFilterDetector
+
+    begin = datetime.datetime(2025, 12, 25, 3, 0, 0)
+
+    class _Handle(object):
+        fps = 25.0
+
+        def currentFrameTime(self, frame_no=None, dt_obj=False):
+            return begin + datetime.timedelta(seconds=frame_no/25.0)
+
+    detector = types.SimpleNamespace(img_handle=_Handle(), total_frames=1000)
+    detector.frameTimes = lambda frames: MatchedFilterDetector.frameTimes(detector, frames)
+    end = MatchedFilterDetector.inputEnd(detector)
+    assert end == (begin + datetime.timedelta(seconds=1000/25.0)).strftime('%Y-%m-%dT%H:%M:%S.%f')
+
+
+@pytest.mark.parametrize('calibrated', [(True, True), (True, False)])
+def test_merged_detections_keep_their_calibration(tmp_path, calibrated):
+    """ The merged FTPdetectinfo of the matched filter is calibrated if all the merged files are, so the
+        magnitudes of the detections stay usable (an uncalibrated file has placeholder magnitudes).
+    """
+
+    config = cr.Config()
+    config.stationID = 'XX0001'
+    dirs = []
+    for i, cal in enumerate(calibrated):
+        mf_dir = tmp_path/'file{:d}'.format(i)/mfd.MATCHED_FILTER_DIR
+        mf_dir.mkdir(parents=True)
+        (mf_dir/mfd.DONE_NAME).write_text('{}')
+        picks = [[f, 10.0 + f, 20.0, 170.0, 50.0, 60.0, 70.0, 1000, 5.5 if cal else 0.0, 50, 8.0, 0]
+                 for f in (3.0, 4.0, 5.0)]
+        ff_name = 'FF_XX0001_20251225_0300{:02d}_000_0000000.fits'.format(10*i)
+        FTPdetectinfo.writeFTPdetectinfo([[ff_name, 1, 10.0, 45.0, picks, 25.0]], str(mf_dir),
+            'FTPdetectinfo_file{:d}_mf.txt'.format(i), str(mf_dir), 'XX0001', 25.0,
+            calibration=('Recalibrated with RMS' if cal else None), celestial_coords_given=True)
+        dirs.append(str(mf_dir.parent))
+
+    merged = mfd.mergeNightMatchedFilter(str(tmp_path/'night'), dirs, config)
+    entries = FTPdetectinfo.readFTPdetectinfo(os.path.dirname(merged), os.path.basename(merged))
+    assert len(entries) == 2
+    assert all(meas[0] == int(all(calibrated)) for entry in entries for meas in entry[11])

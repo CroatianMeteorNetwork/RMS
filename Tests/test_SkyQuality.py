@@ -220,10 +220,18 @@ def test_missing_chunks_are_clouded():
     assert len(sky_map.chunk_first) == N_CHUNKS
     assert not sky_map.isClear(x, y, np.array([3*CHUNK_FRAMES + 60]))[0]
 
-    # A few frames after the last full chunk (which the star extraction doesn't use) are in a missing chunk
+    # The frames after the last full chunk, fewer than a chunk (which the star extraction doesn't use), belong to
+    #   the last chunk, they are not a missing chunk
     sky_map = _skyMap(total_frames=N_CHUNKS*CHUNK_FRAMES + 20)
+    assert len(sky_map.chunk_first) == N_CHUNKS
+    assert sky_map.isClear(x, y, np.array([N_CHUNKS*CHUNK_FRAMES + 10]))[0]
+    assert [row['stars'] for row in sky_map.conditions()].count(0) == 0
+
+    # A whole chunk missing at the end is clouded, and the frames after it belong to it
+    sky_map = _skyMap(total_frames=(N_CHUNKS + 1)*CHUNK_FRAMES + 20)
     assert len(sky_map.chunk_first) == N_CHUNKS + 1
-    assert not sky_map.isClear(x, y, np.array([N_CHUNKS*CHUNK_FRAMES + 10]))[0]
+    for frame in (N_CHUNKS*CHUNK_FRAMES + 10, (N_CHUNKS + 1)*CHUNK_FRAMES + 10):
+        assert not sky_map.isClear(x, y, np.array([frame]))[0]
 
     # Without the number of frames, the frames after the last chunk belong to it
     sky_map = _skyMap(skipped=(11,))
@@ -289,6 +297,20 @@ def test_first_frames_after_a_recording_gap():
                             first_frames=first_frames[:N_CHUNKS])
     assert len(sky_map.chunk_first) == N_CHUNKS
     assert sky_map.isClear(np.array([200.0]), np.array([200.0]), np.array([8*CHUNK_FRAMES + 10]))[0]
+
+    # The last chunk missing: it is added after the last chunk present, by its time (after the gap)
+    sky_map = SkyQualityMap(stars[:-1], clear_map.platepar_for_test, clear_map.config, BEGIN, FPS, CHUNK_FRAMES,
+                            matched=clear_map.matched_for_test[:-1], total_frames=N_CHUNKS*CHUNK_FRAMES,
+                            first_frames=first_frames[:N_CHUNKS - 1])
+    assert len(sky_map.chunk_first) == N_CHUNKS
+    assert sky_map.chunk_times[-1] == sky_map.chunk_times[-2] + datetime.timedelta(seconds=CHUNK_FRAMES/FPS)
+
+    # The chunks before the gap missing: they are added from the beginning of the input
+    sky_map = SkyQualityMap(stars[6:N_CHUNKS], clear_map.platepar_for_test, clear_map.config, BEGIN, FPS, CHUNK_FRAMES,
+                            matched=clear_map.matched_for_test[6:], total_frames=N_CHUNKS*CHUNK_FRAMES,
+                            first_frames=first_frames[6:N_CHUNKS])
+    assert len(sky_map.chunk_first) == N_CHUNKS
+    assert sky_map.chunk_times[0] == BEGIN
 
 
 def _patchCalibration(monkeypatch, catalog, offset):
@@ -890,3 +912,114 @@ def test_night_timeline_within_the_night():
 
     summary = sq.nightTimeline(rows, chunk_seconds={'a.vid': 4.0}, bounds=bounds)['summary']
     assert summary['observed_h']*3600 == pytest.approx(36.0)
+
+
+def test_night_timeline_until_the_end_of_the_input():
+    """ The last chunk of an input lasts until the end of the input, which includes the frames after it (fewer
+        than a chunk, which the star extraction doesn't use), so consecutive inputs join without a gap. An end
+        which is not just after the last chunk is not taken.
+    """
+
+    begin = datetime.datetime(2025, 12, 25, 22, 0, 0)
+
+    def _input(name, start, n):
+        return [{'time': start + datetime.timedelta(seconds=4*i), 'input': name, 'clear_fraction': 1.0,
+                 'transparency_mag': 0.0, 'reliable_seen': 1.0, 'stars': 500, 'matched': 300} for i in range(n)]
+
+    # Two inputs of 10 chunks of 4 s and 2.5 s more, the second one beginning at the end of the first
+    second = begin + datetime.timedelta(seconds=42.5)
+    rows = _input('a.vid', begin, 10) + _input('b.vid', second, 10)
+    ends = {'a.vid': second, 'b.vid': second + datetime.timedelta(seconds=42.5)}
+
+    timeline = sq.nightTimeline(rows, chunk_seconds={'a.vid': 4.0, 'b.vid': 4.0}, input_ends=ends)
+    assert timeline['gaps'] == []
+    assert timeline['summary']['observed_h']*3600 == pytest.approx(85.0)
+    assert timeline['segments'][-1][2] == ends['b.vid']
+
+    # Without the ends, the frames after the last chunks are not covered
+    timeline = sq.nightTimeline(rows, chunk_seconds={'a.vid': 4.0, 'b.vid': 4.0})
+    assert timeline['summary']['observed_h']*3600 == pytest.approx(80.0)
+
+    # An end far after the last chunk (e.g. a wrong number of frames) is not taken
+    timeline = sq.nightTimeline(_input('a.vid', begin, 10), chunk_seconds={'a.vid': 4.0},
+                                input_ends={'a.vid': begin + datetime.timedelta(seconds=100)})
+    assert timeline['summary']['observed_h']*3600 == pytest.approx(40.0)
+
+
+@pytest.mark.parametrize('mags, removed', [((4.5, 7.2, None), 2), ((None, None, None), 1), ((4.5, 7.2, 9.0), 0),
+                                           ((), 2)])
+def test_plot_of_the_detections(tmp_path, mags, removed):
+    """ The detections are plotted by their median magnitudes, also when some or all of them have none, with the
+        detections removed by clouds.
+    """
+
+    begin = datetime.datetime(2025, 12, 25, 22, 0, 0)
+    rows = [{'time': begin + datetime.timedelta(seconds=4*i), 'input': 'a.vid', 'clear_fraction': 1.0,
+             'transparency_mag': 0.0, 'reliable_seen': 1.0, 'stars': 500, 'matched': 300} for i in range(100)]
+    detection_times = [begin + datetime.timedelta(seconds=60*(i + 1)) for i in range(len(mags))]
+    removed_times = [begin + datetime.timedelta(seconds=30 + 60*i) for i in range(removed)]
+
+    plot_path = str(tmp_path/'conditions.png')
+    sq.plotSkyConditions(rows, plot_path, 'Test', detection_times=detection_times, detection_mags=list(mags),
+                         removed_detections=removed, removed_times=removed_times, chunk_seconds={'a.vid': 4.0})
+    assert os.path.getsize(plot_path) > 0
+
+
+def test_plot_until_the_end_of_the_last_input(tmp_path, monkeypatch):
+    """ The time axis of the plot reaches the end of the last input (its frames after the last chunk). """
+
+    import matplotlib.dates as mdates
+    import matplotlib.figure
+
+    begin = datetime.datetime(2025, 12, 25, 22, 0, 0)
+    rows = [{'time': begin + datetime.timedelta(seconds=4*i), 'input': 'a.vid', 'clear_fraction': 1.0,
+             'transparency_mag': 0.0, 'reliable_seen': 1.0, 'stars': 500, 'matched': 300} for i in range(10)]
+    end = begin + datetime.timedelta(seconds=42.5)
+
+    # Keep the figure which is saved
+    saved = {}
+    real_save = matplotlib.figure.Figure.savefig
+    def _save(self, *args, **kwargs):
+        saved['fig'] = self
+        return real_save(self, *args, **kwargs)
+    monkeypatch.setattr(matplotlib.figure.Figure, 'savefig', _save)
+
+    summary = sq.plotSkyConditions(rows, str(tmp_path/'conditions.png'), 'Test', chunk_seconds={'a.vid': 4.0},
+                                   input_ends={'a.vid': end})
+    assert summary['observed_h']*3600 == pytest.approx(42.5)
+    x_end = saved['fig'].axes[3].get_xlim()[1]
+    assert x_end >= mdates.date2num(end) - 1e-9
+
+
+def test_night_timeline_of_an_input_shorter_than_a_chunk():
+    """ An input shorter than a chunk (its one chunk has fewer frames) lasts until its end. """
+
+    begin = datetime.datetime(2025, 12, 25, 22, 0, 0)
+    rows = [{'time': begin, 'input': 'a.vid', 'clear_fraction': 1.0, 'transparency_mag': 0.0, 'reliable_seen': 1.0,
+             'stars': 500, 'matched': 300}]
+    timeline = sq.nightTimeline(rows, chunk_seconds={'a.vid': 4.0},
+                                input_ends={'a.vid': begin + datetime.timedelta(seconds=2.0)})
+    assert timeline['summary']['observed_h']*3600 == pytest.approx(2.0)
+
+
+def test_plot_until_the_last_removed_detection(tmp_path, monkeypatch):
+    """ The time axis of the plot reaches the detections removed by clouds after the last chunk. """
+
+    import matplotlib.dates as mdates
+    import matplotlib.figure
+
+    begin = datetime.datetime(2025, 12, 25, 22, 0, 0)
+    rows = [{'time': begin + datetime.timedelta(seconds=4*i), 'input': 'a.vid', 'clear_fraction': 0.0,
+             'transparency_mag': 1.0, 'reliable_seen': 0.2, 'stars': 50, 'matched': 30} for i in range(10)]
+    removed = begin + datetime.timedelta(seconds=42.0)
+
+    saved = {}
+    real_save = matplotlib.figure.Figure.savefig
+    def _save(self, *args, **kwargs):
+        saved['fig'] = self
+        return real_save(self, *args, **kwargs)
+    monkeypatch.setattr(matplotlib.figure.Figure, 'savefig', _save)
+
+    sq.plotSkyConditions(rows, str(tmp_path/'conditions.png'), 'Test', chunk_seconds={'a.vid': 4.0},
+                         removed_detections=1, removed_times=[removed])
+    assert saved['fig'].axes[3].get_xlim()[1] >= mdates.date2num(removed) - 1e-9

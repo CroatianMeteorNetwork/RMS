@@ -344,19 +344,18 @@ def readFTPdetectinfo(ff_directory, file_name, ret_input_format=False):
                 meteor_meas = []
 
 
-            # Read the calibration status
-            if entry_counter == 0:
+            # Read the name of the FF file
+            if entry_counter == 1:
+                ff_name = line
+
+            # Read the calibration status, from the line after the name of the FF file
+            if entry_counter == 2:
 
                 if 'Uncalibrated' in line:
                     calib_status = 0
 
                 else:
                     calib_status = 1
-
-
-            # Read the name of the FF file
-            if entry_counter == 1:
-                ff_name = line
 
             # Read the meteor parameters
             if entry_counter == 3:

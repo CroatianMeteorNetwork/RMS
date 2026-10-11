@@ -1048,11 +1048,11 @@ class MonitorStatus(object):
 
         # The files whose sky was measured, the files which were not searched, and the detections
         file_results = [(info.get('input_file'), file_result) for _, info, file_result, _ in files]
-        not_searched, removed, measured, chunk_seconds = nightSkyResults(file_results, self.config, night_start,
-                                                                        night_end)
+        not_searched, removed, measured, chunk_seconds, input_ends = nightSkyResults(file_results, self.config,
+                                                                                    night_start, night_end)
         # The conditions of the chunks of the measured files, and the time line of the states of the sky
-        rows = self._conditionRows(measured, chunk_seconds, night_start, night_end)
-        timeline = nightTimeline(rows, not_searched=not_searched, chunk_seconds=chunk_seconds,
+        rows = self._conditionRows(measured, chunk_seconds, night_start, night_end, input_ends)
+        timeline = nightTimeline(rows, not_searched=not_searched, chunk_seconds=chunk_seconds, input_ends=input_ends,
                                  bounds=(night_start, night_end))
 
         # The night so far, the same numbers as on the plot of the sky conditions of the night report
@@ -1097,9 +1097,10 @@ class MonitorStatus(object):
         latest_state, _, latest_end = segments[-1]
 
         # The sky now is not known if data which was not measured (e.g. with the normal detection) ends after the
-        #   time line (the measured files and the ones with too few stars are on it)
-        unmeasured_ends = [file_result['star_chunks'][-1][0]
-                           + datetime.timedelta(seconds=file_result['chunk_s'] or 0)
+        #   time line (the measured files and the ones with too few stars are on it), at the end of the input where
+        #   it is known
+        unmeasured_ends = [file_result.get('end_time') or (file_result['star_chunks'][-1][0]
+                           + datetime.timedelta(seconds=file_result['chunk_s'] or 0))
                            for _, _, file_result, _ in files
                            if file_result['star_chunks'] and not file_result['measured']
                            and not _tooFewStars(file_result, self.config)]
@@ -1115,9 +1116,13 @@ class MonitorStatus(object):
         #   searched, only the stars are known
         latest_start = segments[-1][1]
         steps, labels = timeline['steps'], timeline['labels']
+
+        # A chunk lasts for its time, the last chunk of an input until the end of the input
+        last_rows = {idx[-1]: name for name, idx in timeline['input_rows'].items()}
+        row_ends = [timeline['ends'][last_rows[i]] if i in last_rows else r['time'] + steps[r.get('input')]
+                    for i, r in enumerate(rows)]
         candidates = [i for i, r in enumerate(rows)
-                      if (r['time'] < latest_end) and (r['time'] + steps[r.get('input')] > latest_start)
-                      and (labels[i] == latest_state)]
+                      if (r['time'] < latest_end) and (row_ends[i] > latest_start) and (labels[i] == latest_state)]
         if candidates:
             row = rows[max(candidates, key=lambda i: (rows[i]['time'], -rows[i]['clear_fraction']))]
             sky.update({'clear_percent': _round(100*row['clear_fraction'], 1),
@@ -1127,7 +1132,7 @@ class MonitorStatus(object):
                         'reliable_seen_percent': _round(100*row['reliable_seen'], 1)})
 
         # The last hour of the data
-        hour = nightTimeline(rows, not_searched=not_searched, chunk_seconds=chunk_seconds,
+        hour = nightTimeline(rows, not_searched=not_searched, chunk_seconds=chunk_seconds, input_ends=input_ends,
                              bounds=(latest_end - datetime.timedelta(hours=1), latest_end))['summary']
         hour_rows = [r for r in rows if r['time'] >= latest_end - datetime.timedelta(hours=1)]
         dimming = [r['transparency_mag'] for r in hour_rows
@@ -1142,7 +1147,7 @@ class MonitorStatus(object):
         # Observable: most of the time in the last minutes of the data had most of the image clear. The time is
         #   taken from the time line, so overlapping files count once, with the worse state (the files which were
         #   not searched count as not observable)
-        window = nightTimeline(rows, not_searched=not_searched, chunk_seconds=chunk_seconds,
+        window = nightTimeline(rows, not_searched=not_searched, chunk_seconds=chunk_seconds, input_ends=input_ends,
                                bounds=(latest_end - datetime.timedelta(minutes=OBSERVABLE_WINDOW_MIN), latest_end),
                                clear_level=OBSERVABLE_CLEAR_FRACTION)['summary']
         if window['observed_h']*60 >= OBSERVABLE_WINDOW_MIN/3:
@@ -1151,7 +1156,7 @@ class MonitorStatus(object):
         return night, sky
 
 
-    def _conditionRows(self, measured, chunk_seconds, night_start, night_end):
+    def _conditionRows(self, measured, chunk_seconds, night_start, night_end, input_ends=None):
         """ The conditions of the chunks of the night, read again only when the log changed. """
 
         # The log changes when a file was processed, its files are named by the UTC date
@@ -1163,11 +1168,12 @@ class MonitorStatus(object):
                     stamps.append((name, st.st_mtime, st.st_size))
                 except OSError:
                     pass
-        key = (tuple(stamps), tuple(sorted(measured)), night_start)
+        key = (tuple(stamps), tuple(sorted(measured)), night_start, tuple(sorted((input_ends or {}).items())))
 
-        # Read the conditions again only when the log or the measured files changed
+        # Read the conditions again only when the log, the measured files or their ends changed
         if self.conditions_cache[0] != key:
-            rows = nightConditionRows(self.output_dir, self.config, measured, chunk_seconds, night_start, night_end)
+            rows = nightConditionRows(self.output_dir, self.config, measured, chunk_seconds, night_start, night_end,
+                                      input_ends=input_ends)
             self.conditions_cache = (key, rows)
 
         # The conditions are up to date for this status

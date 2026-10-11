@@ -33,6 +33,7 @@ import json
 import multiprocessing
 import os
 import platform
+import re
 import shutil
 import signal
 import sys
@@ -910,27 +911,31 @@ def readFileSkyResults(results_path, config):
         file_result: [dict] star_chunks (time and number of stars of every chunk, sorted), chunk_s (length of a
             chunk, s, None if not known), summary (of the matched filter, None if there is none), searched,
             measured (the sky quality was measured), removed_times (times of the detections removed by clouds,
-            None for older summaries which only have their number in removed_count) and detections. None if the
-            results can't be read.
+            None for older summaries which only have their number in removed_count), detections, and end_time
+            (the end of the input: its last chunk and the frames after it, from the number of frames of the
+            matched filter, None if not known). None if the results can't be read.
     """
 
     # Read the number of stars and the time of every chunk of the file, and the length of a chunk (s)
-    star_list, chunk_s = [], None
+    star_list, chunk_s, fps = [], None, None
     try:
         for calstars_path in glob.glob(os.path.join(results_path, 'CALSTARS_*.txt')):
             stars, chunk_frames, calstars_fps = CALSTARS.readCALSTARS(results_path,
                 os.path.basename(calstars_path), return_fps=True)
             star_list += stars
             if chunk_frames and calstars_fps:
-                chunk_s = chunk_frames/calstars_fps
-        star_list = sorted(((filenameToDatetime(entry[0]), len(entry[1])) for entry in star_list),
+                chunk_s, fps = chunk_frames/calstars_fps, calstars_fps
+        star_list = sorted(((filenameToDatetime(entry[0]), len(entry[1]), entry[0]) for entry in star_list),
                            key=lambda entry: entry[0])
+        last_name = star_list[-1][2] if star_list else None
+        star_list = [(t, n) for t, n, _ in star_list]
     except Exception as e:
         log.warning("The stars of {:s} could not be read: {:s}".format(results_path, repr(e)))
         return None
 
     file_result = {'star_chunks': star_list, 'chunk_s': chunk_s, 'summary': None, 'searched': False,
-                   'measured': False, 'removed_times': None, 'removed_count': 0, 'detections': 0}
+                   'measured': False, 'removed_times': None, 'removed_count': 0, 'detections': 0,
+                   'end_time': None}
 
     # Without the matched filter only the stars are known (a summary of an earlier run is not used)
     if not config.mf_enable:
@@ -964,11 +969,56 @@ def readFileSkyResults(results_path, config):
         else:
             file_result['removed_count'] = int(summary.get('cloud_detections_removed') or 0)
 
+        # The end of the input, as the matched filter read it. Older summaries don't have it: then the last chunk
+        #   (named by its first frame) lasts until the last frame, as the frames after it (fewer than a chunk)
+        #   belong to it. Chunks which are not named by their frames (e.g. without the chunk images) all have 0
+        try:
+            file_result['end_time'] = datetime.datetime.strptime(summary['input_end_utc'], '%Y-%m-%dT%H:%M:%S.%f')
+        except (KeyError, TypeError, ValueError):
+            frame_no = re.findall(r'_(\d{7})(?=[_.])', last_name or '')
+            total_frames = summary.get('total_frames')
+            if fps and frame_no and isinstance(total_frames, int) and (total_frames > int(frame_no[-1])) \
+                    and ((int(frame_no[-1]) > 0) or (len(star_list) == 1)):
+                file_result['end_time'] = star_list[-1][0] \
+                    + datetime.timedelta(seconds=(total_frames - int(frame_no[-1]))/fps)
+
     except (OSError, ValueError, TypeError, AttributeError) as e:
         log.warning("The summary {:s} could not be read: {:s}".format(summary_path, repr(e)))
         return None
 
     return file_result
+
+
+def medianMagnitude(mags):
+    """ The median of magnitudes, taken on the intensities (magnitudes are logarithmic, so the two middle values
+        of an even number are averaged as intensities).
+
+    Arguments:
+        mags: [list] Magnitudes (None or NaN where not known).
+
+    Return:
+        [float] Median magnitude, None if no magnitude is known.
+    """
+
+    mags = np.array([m for m in mags if (m is not None) and np.isfinite(m)], dtype=np.float64)
+    if not len(mags):
+        return None
+
+    return float(-2.5*np.log10(np.median(10**(-0.4*mags))))
+
+
+def detectionMagnitude(meteor_meas):
+    """ The magnitude of a detection: the median magnitude of its calibrated measurements (the measurements of an
+        uncalibrated detection only have a placeholder magnitude).
+
+    Arguments:
+        meteor_meas: [list] Measurements of the detection, see FTPdetectinfo.readFTPdetectinfo.
+
+    Return:
+        [float] Median magnitude, None if it is not known.
+    """
+
+    return medianMagnitude([m[9] for m in meteor_meas if (len(m) > 9) and (m[0] == 1)])
 
 
 def nightSkyResults(file_results, config, night_start, night_end):
@@ -981,18 +1031,21 @@ def nightSkyResults(file_results, config, night_start, night_end):
         night_end: [datetime] End of the night (UTC).
 
     Return:
-        (not_searched, removed, measured, chunk_seconds):
+        (not_searched, removed, measured, chunk_seconds, input_ends):
             - not_searched: [list] Spans of the files which were not searched as they had too few stars, as
                 (start, end, times of the chunks, stars of the chunks), split where the recording paused.
             - removed: [int] Number of the detections removed by clouds in the night.
             - measured: [list] Input files whose sky was measured (their conditions are in the log).
             - chunk_seconds: [dict] Length of the chunks (s) of the measured files, by their path and name.
+            - input_ends: [dict] End of the measured files (datetime, UTC) where it is known, by their path and
+                name (see SkyQuality.nightTimeline).
     """
 
     not_searched = []
     removed = 0
     measured = []
     chunk_seconds = {}
+    input_ends = {}
     for input_file, file_result in file_results:
 
         # Count the detections removed by clouds within the night (counted if their time is not known)
@@ -1008,6 +1061,8 @@ def nightSkyResults(file_results, config, night_start, night_end):
             measured.append(input_file)
             if chunk_s:
                 chunk_seconds[input_file] = chunk_seconds[os.path.basename(input_file)] = chunk_s
+            if file_result.get('end_time') is not None:
+                input_ends[input_file] = input_ends[os.path.basename(input_file)] = file_result['end_time']
 
         if file_result['searched']:
             continue
@@ -1036,10 +1091,10 @@ def nightSkyResults(file_results, config, night_start, night_end):
             for span_times, span_counts in spans:
                 not_searched.append((span_times[0], span_times[-1] + chunk, span_times, span_counts))
 
-    return not_searched, removed, measured, chunk_seconds
+    return not_searched, removed, measured, chunk_seconds, input_ends
 
 
-def nightConditionRows(output_dir, config, measured, chunk_seconds, night_start, night_end):
+def nightConditionRows(output_dir, config, measured, chunk_seconds, night_start, night_end, input_ends=None):
     """ Read the conditions of the chunks of the night of the files whose sky was measured, from the chunk which
         overlaps the beginning of the night to its end.
 
@@ -1051,13 +1106,18 @@ def nightConditionRows(output_dir, config, measured, chunk_seconds, night_start,
         night_start: [datetime] Beginning of the night (UTC).
         night_end: [datetime] End of the night (UTC).
 
+    Keyword arguments:
+        input_ends: [dict] End of the files (datetime, UTC), see nightSkyResults: the last chunk of a file lasts
+            until it (as in SkyQuality.nightTimeline). None by default.
+
     Return:
         rows: [list] Conditions of the chunks, see SkyQuality.readConditions.
     """
 
     from RMS.Routines.SkyQuality import readConditions
 
-    margin = datetime.timedelta(seconds=max(list(chunk_seconds.values()) + [0]))
+    # The chunks are read from two chunks before the night, as the last chunk of a file can last almost that long
+    margin = 2*datetime.timedelta(seconds=max(list(chunk_seconds.values()) + [0]))
     rows = readConditions(output_dir, config.stationID, inputs=set(measured), start=night_start - margin,
                           end=night_end)
 
@@ -1069,9 +1129,19 @@ def nightConditionRows(output_dir, config, measured, chunk_seconds, night_start,
                                             start=night_start - margin, end=night_end),
                       key=lambda row: (row['time'], row['input']))
 
-    # Drop the chunks which ended before the night
-    return [row for row in rows if row['time'] + datetime.timedelta(seconds=chunk_seconds.get(row['input'], 0))
-            > night_start]
+    # Drop the chunks which ended before the night. The last chunk of a file lasts until the end of the file, if
+    #   that is after its beginning and less than a chunk after its own end (see SkyQuality.nightTimeline)
+    input_ends = input_ends or {}
+    last_rows = {row['input']: i for i, row in enumerate(rows)}
+
+    def _rowEnd(i, row):
+        step = datetime.timedelta(seconds=chunk_seconds.get(row['input'], 0))
+        end = input_ends.get(row['input'])
+        if (last_rows[row['input']] == i) and (end is not None) and (row['time'] < end <= row['time'] + 2*step):
+            return end
+        return row['time'] + step
+
+    return [row for i, row in enumerate(rows) if _rowEnd(i, row) > night_start]
 
 
 def plotNightSkyConditions(night_dir, night_name, output_dir, results, config, ftpdetectinfo_path):
@@ -1109,17 +1179,20 @@ def plotNightSkyConditions(night_dir, night_name, output_dir, results, config, f
 
     # Combine them over the night: the files which were not searched, the detections removed by clouds, and the
     #   files whose sky was measured, with the time of their chunks
-    not_searched, removed, measured, chunk_seconds = nightSkyResults(file_results, config, night_start, night_end)
+    not_searched, removed, measured, chunk_seconds, input_ends = nightSkyResults(file_results, config, night_start,
+                                                                                 night_end)
 
     # Read the conditions of the files whose sky was measured
-    rows = nightConditionRows(output_dir, config, measured, chunk_seconds, night_start, night_end)
+    rows = nightConditionRows(output_dir, config, measured, chunk_seconds, night_start, night_end,
+                              input_ends=input_ends)
 
     if (not rows) and (not not_searched):
         log.info("No sky conditions for night {:s}".format(night_name))
         return False
 
-    # Read the time of every detection in the night (the time of its image plus its first frame)
-    detection_times = []
+    # Read the time of every detection in the night (the time of its image plus its first frame), and its median
+    #   magnitude (None if it has none, e.g. not calibrated)
+    detection_times, detection_mags = [], []
     entries = []
     if os.path.isfile(ftpdetectinfo_path):
         try:
@@ -1135,6 +1208,11 @@ def plotNightSkyConditions(night_dir, night_name, output_dir, results, config, f
             continue
         if night_start <= t <= night_end:
             detection_times.append(t)
+            detection_mags.append(detectionMagnitude(meteor_meas))
+
+    # The time of every detection removed by clouds in the night, where it is known
+    removed_times = [t for _, file_result in file_results for t in (file_result['removed_times'] or [])
+                     if (t is not None) and (night_start <= t <= night_end)]
 
     # Save the conditions of the night as a CSV file, in the format of the log
     with open(csv_path, 'w') as f:
@@ -1154,7 +1232,8 @@ def plotNightSkyConditions(night_dir, night_name, output_dir, results, config, f
     summary = plotSkyConditions(rows, plot_path, '{:s} sky conditions, night of {:s}'.format(config.stationID,
         night_date), not_searched=not_searched, detection_times=detection_times, removed_detections=removed,
         cloud_max_offset=(config.mf_cloud_max_offset if config.mf_cloud_filter else None),
-        min_matched=config.mf_cloud_min_matched, chunk_seconds=chunk_seconds, bounds=(night_start, night_end))
+        min_matched=config.mf_cloud_min_matched, chunk_seconds=chunk_seconds, bounds=(night_start, night_end),
+        input_ends=input_ends, removed_times=removed_times, detection_mags=detection_mags)
 
     log.info("Sky conditions of night {:s}: {:.1f} h observed, clear {:.0f}%, partly clouded {:.0f}%, clouded "
              "{:.0f}%, {:d} file(s) not searched".format(night_name, summary['observed_h'],

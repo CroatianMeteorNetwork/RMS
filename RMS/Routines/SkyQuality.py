@@ -428,7 +428,7 @@ class SkyQualityMap(object):
             match_radius: [float] Largest distance between a star and its catalog star (px). 1.0 by default.
             matched: [list] The matched stars of the chunks (see matchStars), instead of matching them. None by
                 default.
-            total_frames: [int] Number of frames of the input, for the chunks missing at its end. None by
+            total_frames: [int] Number of frames of the input, for the whole chunks missing at its end. None by
                 default (the frames after the last chunk belong to it).
             min_matched: [int] Smallest number of matched stars of the chunk the platepar is fitted on, for the
                 calibration to be trusted. 30 by default.
@@ -534,11 +534,12 @@ class SkyQualityMap(object):
                     firsts.append(int(expected))
                     expected += cf
             firsts.append(int(f0))
-        # After the last chunk, every remaining frame is in a missing chunk (the star extraction uses only full
-        #   chunks, so the frames at the end of the input have no stars)
+        # After the last chunk, every whole chunk which fits in the remaining frames is missing. The frames at the
+        #   end of the input, fewer than a chunk, belong to the chunk before them (the star extraction uses only
+        #   whole chunks, so they never have stars of their own)
         if total_frames is not None:
             expected = self.chunk_first[-1] + cf
-            while expected < total_frames:
+            while expected + cf <= total_frames:
                 firsts.append(int(expected))
                 expected += cf
 
@@ -546,13 +547,20 @@ class SkyQualityMap(object):
         if len(firsts) == len(self.chunk_first):
             return
 
-        # The stars of the existing chunks, none for the added ones (and the times of the added ones from the
-        #   frame rate)
+        # The stars of the existing chunks, none for the added ones. The time of an added chunk is taken at the
+        #   frame rate from the nearest chunk present before it, so a gap in the recording before it is kept (from
+        #   the beginning of the input before the first chunk)
         existing = dict(zip(self.chunk_first.tolist(), range(len(self.chunk_first))))
         self.matched = [self.matched[existing[f]] if f in existing else np.zeros((0, 4)) for f in firsts]
         self.n_stars = np.array([self.n_stars[existing[f]] if f in existing else 0 for f in firsts])
-        self.chunk_times = [self.chunk_times[existing[f]] if f in existing
-                            else self.begin_time + datetime.timedelta(seconds=f/self.fps) for f in firsts]
+
+        def _addedTime(f):
+            k = int(np.searchsorted(self.chunk_first, f, side='right')) - 1
+            if k < 0:
+                return self.begin_time + datetime.timedelta(seconds=f/self.fps)
+            return self.chunk_times[k] + datetime.timedelta(seconds=(f - self.chunk_first[k])/self.fps)
+
+        self.chunk_times = [self.chunk_times[existing[f]] if f in existing else _addedTime(f) for f in firsts]
         if self.in_image is not None:
             self.in_image = [self.in_image[existing[f]] if f in existing else np.zeros((0, 4)) for f in firsts]
         self.chunk_first = np.array(firsts)
@@ -1350,7 +1358,8 @@ def _legendPlace(fig, ax, handles):
         return 'upper right'
 
 
-def nightTimeline(rows, not_searched=(), chunk_seconds=None, bounds=None, clear_level=CLEAR_FRACTION_CLEAR):
+def nightTimeline(rows, not_searched=(), chunk_seconds=None, bounds=None, clear_level=CLEAR_FRACTION_CLEAR,
+                  input_ends=None):
     """ Build the time line of the state of the sky through a night. Every chunk is clear, partly clouded or
         clouded (see CLEAR_FRACTION_CLEAR) until the next chunk of its input, the inputs which were not searched
         (too few stars) fill their time, and where inputs overlap the worse state is taken (clouded, not
@@ -1367,12 +1376,16 @@ def nightTimeline(rows, not_searched=(), chunk_seconds=None, bounds=None, clear_
             None by default.
         clear_level: [float] Clear fraction of a chunk at and above which it is clear. CLEAR_FRACTION_CLEAR by
             default.
+        input_ends: [dict] End of the inputs (datetime, UTC) by their names: the last chunk lasts until it, as the
+            frames after the last chunk (fewer than a chunk, which the star extraction doesn't use) belong to it.
+            None by default (the last chunk lasts for the time of a chunk).
 
     Return:
         timeline: [dict] input_rows (the indices of the rows of every input), steps (the time of the chunks of
             every input), chunk (the time of a chunk of all inputs), max_gap (the longest time between chunks
             which is not a gap), labels (the state of every chunk), segments (state, start, end), gaps (start,
-            end), and summary (the observed time in hours, and its fractions in every state).
+            end), summary (the observed time in hours, and its fractions in every state), and ends (the end of
+            the last chunk of every input).
     """
 
     times = [row['time'] for row in rows]
@@ -1425,9 +1438,19 @@ def nightTimeline(rows, not_searched=(), chunk_seconds=None, bounds=None, clear_
     labels = np.where(clear >= clear_level, 'clear', np.where(clear > 0, 'partly', 'clouded'))
 
     # Turn the chunks of every input into spans of time, and add the inputs which were not searched
-    intervals = []
+    input_ends = input_ends or {}
+    intervals, ends = [], {}
     for name, idx in input_rows.items():
-        intervals += _spans([times[i] for i in idx], [labels[i] for i in idx], 3*steps[name], steps[name])
+        spans = _spans([times[i] for i in idx], [labels[i] for i in idx], 3*steps[name], steps[name])
+
+        # The last chunk lasts until the end of the input, if that is after its beginning and less than a chunk
+        #   after its own end (it is shorter in an input shorter than a chunk)
+        end, last = input_ends.get(name), times[idx[-1]]
+        ends[name] = last + steps[name]
+        if spans and (end is not None) and (last < end <= last + 2*steps[name]):
+            spans[-1] = spans[-1][:2] + (end,)
+            ends[name] = end
+        intervals += spans
     intervals += [('not_searched', start, end) for start, end, _, _ in not_searched]
 
     # Only take the time within the night (a chunk can begin before it or end after it)
@@ -1450,11 +1473,12 @@ def nightTimeline(rows, not_searched=(), chunk_seconds=None, bounds=None, clear_
     gaps = [(a[2], b[1]) for a, b in zip(segments[:-1], segments[1:]) if b[1] - a[2] > max_gap]
 
     return {'input_rows': input_rows, 'steps': steps, 'chunk': chunk, 'max_gap': max_gap, 'labels': labels,
-            'segments': segments, 'gaps': gaps, 'summary': summary}
+            'segments': segments, 'gaps': gaps, 'summary': summary, 'ends': ends}
 
 
 def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(), removed_detections=0,
-                      cloud_max_offset=None, min_matched=None, chunk_seconds=None, bounds=None):
+                      cloud_max_offset=None, min_matched=None, chunk_seconds=None, bounds=None, input_ends=None,
+                      removed_times=(), detection_mags=None):
     """ Plot the sky conditions of a night: the dimming of the stars, the clear fraction of the image and the stars
         through the night, with the time when the sky was clouded and partly clouded shaded, and the times of
         the detections.
@@ -1475,6 +1499,11 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
             for the inputs which are not in it. None by default.
         bounds: [tuple] Beginning and end of the night (datetime, UTC), the plot and the summary are within them.
             None by default.
+        input_ends: [dict] End of the inputs (datetime, UTC) by their names, see nightTimeline. None by default.
+        removed_times: [list] Times of the detections removed on clouded sky (datetime, UTC), where they are
+            known. Empty by default.
+        detection_mags: [list] Median magnitude of every detection (None where it is not known). None by default
+            (no magnitudes).
 
     Return:
         [dict] Summary: the observed time (h, overlapping inputs counted once), and the fractions of it which
@@ -1500,8 +1529,10 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
     matched = np.array([row['matched'] for row in rows])
 
     # Build the time line of the state of the sky, which is shaded on the panels and summarized at the top
-    timeline = nightTimeline(rows, not_searched=not_searched, chunk_seconds=chunk_seconds, bounds=bounds)
-    input_rows, steps, chunk, max_gap = (timeline[k] for k in ('input_rows', 'steps', 'chunk', 'max_gap'))
+    timeline = nightTimeline(rows, not_searched=not_searched, chunk_seconds=chunk_seconds, bounds=bounds,
+                             input_ends=input_ends)
+    input_rows, steps, chunk, max_gap, ends = (timeline[k] for k in ('input_rows', 'steps', 'chunk', 'max_gap',
+                                                                     'ends'))
     labels, segments, gaps, summary = (timeline[k] for k in ('labels', 'segments', 'gaps', 'summary'))
     step = chunk.total_seconds()
     n = len(rows)
@@ -1511,17 +1542,17 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
     summary['median_dimming'] = float(np.median(dimming[usable])) if usable.any() else float('nan')
 
     # Colours which can be told apart also with colour vision deficiencies (from the palette of Okabe and Ito):
-    #   the clouded sky is a darker orange than the partly clouded sky, the time without stars or data is grey,
-    #   and the values are blue, green and black
-    shade = {'partly': ('#E69F00', 0.25), 'clouded': ('#D55E00', 0.45), 'not_searched': ('#000000', 0.4),
-             'no_data': ('#000000', 0.07)}
+    #   the clear sky is light green (as its summary card), the clouded sky is a darker orange than the partly
+    #   clouded sky, the time without stars or data is grey, and the values are blue, green and black
+    shade = {'clear': ('#009E73', 0.12), 'partly': ('#E69F00', 0.25), 'clouded': ('#D55E00', 0.45),
+             'not_searched': ('#000000', 0.4), 'no_data': ('#000000', 0.07)}
     cards_bg = {'partly': '#f9e7bf', 'clouded': '#ecb48c', 'not_searched': '#999999'}
     blue, green, grey, dark = '#0072B2', '#009E73', '#4b5563', '#111827'
 
 
     # Four panels over the same time: the dimming, the clear part of the image, the stars and the detections
-    fig = Figure(figsize=(14, 10.4), dpi=110)
-    axes = fig.subplots(4, 1, sharex=True, gridspec_kw={'height_ratios': [3, 2, 2, 0.7], 'hspace': 0.3})
+    fig = Figure(figsize=(14, 11.6), dpi=110)
+    axes = fig.subplots(4, 1, sharex=True, gridspec_kw={'height_ratios': [3, 2, 2, 1.8], 'hspace': 0.3})
     ax_dim, ax_clear, ax_stars, ax_det = axes
 
     # Shade the state of the sky on all panels, so every value can be read against it
@@ -1586,11 +1617,11 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
 
     ### Clear part of the image ###
 
-    # Fill the clear part of the image of every chunk
+    # Fill the clear part of the image of every chunk, the last chunk of every input until its end
     for name, idx in input_rows.items():
-        t_cl, v_cl = _withGaps([times[i] for i in idx], 100*clear[idx], 3*steps[name])
+        t_cl, v_cl = _withGaps([times[i] for i in idx] + [ends[name]], 100*clear[idx + idx[-1:]], 3*steps[name])
         ax_clear.fill_between(t_cl, 0, v_cl, step='post', color=green, alpha=0.12, lw=0, zorder=2)
-    _plotInputs(ax_clear, 100*clear, '-', drawstyle='steps-post', color=green, lw=1.4, zorder=3)
+        ax_clear.plot(t_cl, v_cl, '-', drawstyle='steps-post', color=green, lw=1.4, zorder=3)
 
     # Plot the share of the stars which are reliably seen on clear sky that are seen
     _plotInputs(ax_clear, 100*seen, '--', color='#111827', lw=1.0, zorder=3)
@@ -1629,19 +1660,54 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
     ### ###
 
 
-    # Mark the time of every detection
-    if len(detection_times):
-        ax_det.eventplot([list(detection_times)], colors=dark, lineoffsets=0.5, linelengths=0.8, linewidths=0.8)
-    ax_det.set_ylim(0, 1)
-    ax_det.set_yticks([])
-    ax_det.grid(False)
+    # Every detection is a dot at its median magnitude (brighter up). The detections removed on clouded sky, whose
+    #   magnitudes were not measured, are crosses of another colour in the middle of the panel, as are the
+    #   detections without a magnitude (hollow dots), so none of them can be taken for the shading
+    det_times = list(detection_times)
+    mags = np.array([np.nan if m is None else m for m in (list(detection_mags) if detection_mags is not None
+                                                          else [None]*len(det_times))], dtype=np.float64)
+    known = np.isfinite(mags)
+    removed_times = list(removed_times)
+    det_legend = []
+    if known.any():
+
+        # The range of the magnitudes, the markers without a magnitude in its middle
+        bright, faint = float(np.min(mags[known])), float(np.max(mags[known]))
+        pad = max(0.1*(faint - bright), 0.3)
+        y_mid = (bright + faint)/2
+        ax_det.set_ylim(faint + pad, bright - pad)
+        ax_det.set_ylabel('mag', fontsize=10)
+        ax_det.plot([t for t, k in zip(det_times, known) if k], mags[known], 'o', ms=5.5, color=dark, mec='white',
+                    mew=0.6, alpha=0.85, zorder=3)
+        det_legend.append(Line2D([], [], marker='o', ms=5.5, color=dark, mec='white', ls='none',
+                                 label='Median mag'))
+    else:
+        y_mid = 0.5
+        ax_det.set_ylim(0, 1)
+        ax_det.set_yticks([])
+
+    # The detections without a magnitude (e.g. not calibrated)
+    if (~known).any():
+        ax_det.plot([t for t, k in zip(det_times, known) if not k], np.full(int((~known).sum()), y_mid), 'o',
+                    ms=5.5, mfc='white', mec=dark, mew=1.0, zorder=3)
+        det_legend.append(Line2D([], [], marker='o', ms=5.5, mfc='white', mec=dark, ls='none',
+                                 label='No mag'))
+
+    # The detections removed on clouded sky
+    if removed_times:
+        ax_det.plot(removed_times, np.full(len(removed_times), y_mid), 'X', ms=7, color='#CC79A7', mec=dark,
+                    mew=0.5, zorder=3)
+        det_legend.append(Line2D([], [], marker='X', ms=7, color='#CC79A7', mec=dark, mew=0.5, ls='none',
+                                 label='Removed by clouds (no mag)'))
+    ax_det.grid(True, axis='y', color='#e5e7eb', lw=0.8, zorder=1)
+    ax_det.grid(False, axis='x')
 
     # Set the time axis (UTC) to the data within the night, with the seconds shown for a short time
     ax_det.set_xlabel('Time (UTC)', fontsize=10)
-    all_times = times + [t for span in not_searched for t in span[:2]] + list(detection_times)
+    all_times = times + [t for span in not_searched for t in span[:2]] + list(detection_times) + removed_times
     time_format = '%H:%M'
     if all_times:
-        x_start, x_end = min(all_times), max(all_times) + chunk
+        x_start, x_end = min(all_times), max([max(all_times) + chunk] + list(ends.values()))
         if bounds is not None:
             x_start, x_end = max(x_start, bounds[0]), min(x_end, bounds[1])
         ax_det.set_xlim(x_start, x_end)
@@ -1684,17 +1750,18 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
                    + ([Line2D([], [], color=dark, lw=1, ls='--',
                               label='Fewest matched ({:d})'.format(int(min_matched)))]
                       if min_matched is not None else [])),
-    ]
+    ] + ([(ax_det, det_legend)] if det_legend else [])
 
     # The legend of the shading, above the panels as it applies to all of them
-    shading = [Patch(facecolor=shade['partly'][0], alpha=shade['partly'][1],
+    shading = [Patch(facecolor=shade['clear'][0], alpha=shade['clear'][1], label='Clear'),
+               Patch(facecolor=shade['partly'][0], alpha=shade['partly'][1],
                      label='Partly clouded: detections removed where clouded'),
                Patch(facecolor=shade['clouded'][0], alpha=shade['clouded'][1],
                      label='Clouded: detections removed'),
                Patch(facecolor=shade['not_searched'][0], alpha=shade['not_searched'][1],
                      label='Too few stars: not searched'),
                Patch(facecolor=shade['no_data'][0], alpha=shade['no_data'][1], label='No data')]
-    fig.legend(handles=shading, loc='upper center', ncol=4, frameon=False, fontsize=9.5,
+    fig.legend(handles=shading, loc='upper center', ncol=5, frameon=False, fontsize=9.5,
                bbox_to_anchor=(0.53, 0.862), title='Shading of all panels', title_fontsize=9.5)
 
     ### Summary cards ###

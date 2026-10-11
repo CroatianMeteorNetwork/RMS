@@ -1972,6 +1972,7 @@ class MatchedFilterDetector(object):
             'cloud_removed_utc': self.frameTimes(self.cloud_removed_frames),
             'tracks_dropped': int(self.tracks_dropped),
             'total_frames': int(self.total_frames),
+            'input_end_utc': self.inputEnd(),
             'psf_sigma': self.psf_sigma,
             'gpu': bool(self.opts.use_gpu),
             'timing_s': {k: round(v, 2) for k, v in self.timing.items()},
@@ -1979,6 +1980,20 @@ class MatchedFilterDetector(object):
                         'detected': bool(sig >= self.opts.track_significance)}
                        for f0, f1, sig in (s[:3] for s in self.significances)],
         }
+
+
+    def inputEnd(self):
+        """ The end of the input: the time of its last frame and the length of a frame (UTC, ISO format), None if
+            it can't be read. """
+
+        last = self.frameTimes([self.total_frames - 1])[0]
+        if (last is None) or not self.img_handle.fps:
+            return None
+
+        end = datetime.datetime.strptime(last, '%Y-%m-%dT%H:%M:%S.%f') \
+            + datetime.timedelta(seconds=1.0/self.img_handle.fps)
+
+        return end.strftime('%Y-%m-%dT%H:%M:%S.%f')
 
 
     def frameTimes(self, frames):
@@ -3332,6 +3347,7 @@ def mergeFTPdetectinfo(dirs, out_dir, ftp_name, config):
     meteor_list = []
     fps = None
     found = False
+    calibrated = True
     for mf_dir in dirs:
 
         # Only finished results (a failed or interrupted file has no done file)
@@ -3351,14 +3367,18 @@ def mergeFTPdetectinfo(dirs, out_dir, ftp_name, config):
                 meteor_list.append([ff_name, meteor_No, rho, phi, [line[1:] for line in meteor_meas],
                                     meteor_fps])
                 fps = meteor_fps
+                calibrated = calibrated and all(line[0] == 1 for line in meteor_meas)
 
     if not found:
         return None
 
-    # The detections are sorted by file name (i.e. time) and detection number
+    # The detections are sorted by file name (i.e. time) and detection number. The merged file is calibrated if
+    #   all the merged detections are (the magnitudes of an uncalibrated one are placeholders)
     os.makedirs(out_dir, exist_ok=True)
     FTPdetectinfo.writeFTPdetectinfo(sorted(meteor_list, key=lambda entry: (entry[0], entry[1])), out_dir,
-        ftp_name, out_dir, config.stationID, fps if fps else config.fps, celestial_coords_given=True)
+        ftp_name, out_dir, config.stationID, fps if fps else config.fps,
+        calibration=('Merged from calibrated files' if (calibrated and meteor_list) else None),
+        celestial_coords_given=True)
 
     return os.path.join(out_dir, ftp_name)
 
