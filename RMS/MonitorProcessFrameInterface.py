@@ -2098,19 +2098,19 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None,
         space_guards = {cam['id']: FreeSpaceGuard(cam['output_dir'], reporters[cam['id']],
                                                   log_prefix="[{}] ".format(cam['id'])) for cam in cameras}
 
-        # Keep the live status of every camera in its output directory, for external monitoring
+        # Keep the live status of every camera in its output directory, for external monitoring. A camera without
+        #   the status is followed in memory, as its files share the workers with the other cameras
         for cam in cameras:
             cam_config = reporters[cam['id']].config
-            if cam_config.monitor_status:
 
-                # The inputs of the camera as the monitor finds them (bound to this camera)
-                def _scanner(cam=cam, cam_config=cam_config):
-                    return scanInputs(cam['input_dir'], cam['output_dir'], cam_config, file_type, recursive)
+            # The inputs of the camera as the monitor finds them (bound to this camera)
+            def _scanner(cam=cam, cam_config=cam_config):
+                return scanInputs(cam['input_dir'], cam['output_dir'], cam_config, file_type, recursive)
 
-                statuses[cam['id']] = MonitorStatus(cam['id'], cam['output_dir'], cam['input_dir'], cam_config,
-                                                    _scanner, nproc,
-                                                    input_sizer=lambda path: inputSize(path, file_type),
-                                                    platepar_path=cam['platepar_path'])
+            statuses[cam['id']] = MonitorStatus(cam['id'], cam['output_dir'], cam['input_dir'], cam_config,
+                                                _scanner, nproc, input_sizer=lambda path: inputSize(path, file_type),
+                                                platepar_path=cam['platepar_path'],
+                                                enabled=cam_config.monitor_status)
         input_readable = {cam['id']: None for cam in cameras}
 
         # Initialize state tracking dictionaries. Since files from different cameras might have the same name,
@@ -2176,19 +2176,20 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None,
                                failed_files[cam_id], space_guards[cam_id], reporters[cam_id], input_readable[cam_id],
                                len(active_workers), stopped=stopped)
 
-        def updateStatuses():
-            """ Write the status of the cameras which are due. The queue is predicted for all cameras together, as
-                they share the workers. """
+        def updateStatuses(stopped=False):
+            """ Write the status of the cameras which are due (all of them when the monitor stops). The queue is
+                predicted for all cameras together, as they share the workers. """
 
-            if not any(status.due() for status in statuses.values()):
+            if not (stopped or any(status.enabled and status.due() for status in statuses.values())):
                 return
 
-            states = {cam_id: cameraState(cam_id) for cam_id in statuses}
-            queue_empty = simulateQueues(nproc, [(cam_id,) + statuses[cam_id].openWork(states[cam_id])
-                                                 for cam_id in (cam['id'] for cam in cameras) if cam_id in statuses])
+            # The prediction continues the turn of the cameras where the monitor is
+            states = {cam_id: cameraState(cam_id, stopped=stopped) for cam_id in statuses}
+            queue_empty = simulateQueues(nproc, [(cam['id'],) + statuses[cam['id']].openWork(states[cam['id']])
+                                                 for cam in cameras], last_idx=last_assigned_idx)
             for cam_id, status in statuses.items():
                 states[cam_id]['queue_empty_min'] = queue_empty[cam_id]
-                status.update(states[cam_id])
+                status.update(states[cam_id], force=stopped)
 
         # Main monitoring loop
         while True:
@@ -2474,11 +2475,10 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None,
             reporter.stop(timeout=SHUTDOWN_TIMEOUT)
 
         # The status of every camera says the monitor has stopped
-        for cam_id, status in statuses.items():
-            try:
-                status.update(cameraState(cam_id, stopped=True), force=True)
-            except Exception as e:
-                log.warning("[{}] The final status could not be written: {}".format(cam_id, repr(e)))
+        try:
+            updateStatuses(stopped=True)
+        except Exception as e:
+            log.warning("The final status could not be written: {}".format(repr(e)))
 
         log.info("All workers stopped.")
 

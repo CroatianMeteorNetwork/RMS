@@ -614,7 +614,8 @@ the monitor is then run forward: a free worker takes the next waiting file of th
 files (the next camera in turn when they have as many), so in multi-camera mode the prediction of every camera
 accounts for the workers busy with the other cameras. The waiting files of a camera which is paused for disk
 space can't get a worker and are left out; a camera without processed files yet is not predicted, its files are
-given the median time for the other cameras. The prediction is for
+given the median time for the other cameras. Cameras with `monitor_status: false` write no status, but their files
+are part of the prediction of the other cameras. The prediction is for
 the files known now: while the input is being recorded, new files keep coming. The start of a file comes from
 the monotonic clock of the monitor, so the times don't jump when the clock of the system is set.
 

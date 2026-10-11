@@ -131,7 +131,7 @@ def _codeVersion():
 
 
 
-def simulateQueues(nproc, cameras):
+def simulateQueues(nproc, cameras, last_idx=None):
     """ Predict when the waiting files of every camera will be done, by running the scheduling of the monitor
         forward in time: every running file is done after its remaining time, and a free worker takes the next
         waiting file of the camera with the fewest running files (the next camera in turn when they have as many),
@@ -142,6 +142,10 @@ def simulateQueues(nproc, cameras):
         cameras: [list] (camera_id, remaining times of its running files, expected times of its waiting files in
             their order) of every camera in the order of the monitor, all in minutes. A time which is not known
             is None.
+
+    Keyword arguments:
+        last_idx: [int] Index of the camera which the monitor gave a worker last, where the turn continues. The
+            last camera if None (as at the start of the monitor). None by default.
 
     Return:
         [dict] Minutes from now until every camera has no waiting or running files, by camera. None for a camera
@@ -163,7 +167,8 @@ def simulateQueues(nproc, cameras):
     done = {cam_id: max([end for end, c in active if c == cam_id] + [0.0]) for cam_id in order}
 
     t = 0.0
-    last_idx = len(order) - 1
+    if last_idx is None:
+        last_idx = len(order) - 1
     while any(pending.values()):
 
         # The next free worker: now if one is free, otherwise when the first running file is done
@@ -312,7 +317,7 @@ def fileCalibration(results_path, config, clear_times=None):
 
 class MonitorStatus(object):
     def __init__(self, camera_id, output_dir, input_dir, config, input_scanner, nproc, input_sizer=None,
-                 platepar_path=None):
+                 platepar_path=None, enabled=True):
         """ Keeps the status file of a camera of the monitor up to date.
 
         Arguments:
@@ -329,6 +334,9 @@ class MonitorStatus(object):
             input_sizer: [callable] Function which returns the size of an input (bytes), None if it can't be read
                 (see MonitorProcessFrameInterface.inputState). The size of the file by default.
             platepar_path: [str] Path of the platepar given to the monitor, None if not known. None by default.
+            enabled: [bool] Write the status and the history of the camera. A camera without them is still
+                followed in memory, as its files share the workers with the other cameras (see simulateQueues).
+                True by default.
         """
 
         # The camera, its directories, how to find its inputs, and its platepar
@@ -340,6 +348,7 @@ class MonitorStatus(object):
         self.nproc = nproc
         self.input_sizer = input_sizer if input_sizer is not None else os.path.getsize
         self.platepar_path = platepar_path
+        self.enabled = enabled
 
         # The status file, the history of the processed files, and how often the status is written
         self.path = os.path.join(output_dir, STATUS_FILE_NAME)
@@ -431,6 +440,9 @@ class MonitorStatus(object):
         self._pruneRecords(now)
 
         # Append it to the history file, so the statistics continue after a restart
+        if not self.enabled:
+            self.dirty = True
+            return
         try:
             with open(self.history_path, 'a') as f:
                 f.write(json.dumps(record) + '\n')
@@ -443,6 +455,9 @@ class MonitorStatus(object):
     def _writeHistory(self):
         """ Write the history of the processed files of the last day again (e.g. to keep only the last day, or
             with the lengths of the files). It replaces the old file, so it is never partly written. """
+
+        if not self.enabled:
+            return
 
         try:
             with open(self.history_path + '.tmp', 'w') as f:
@@ -481,8 +496,8 @@ class MonitorStatus(object):
             [bool] True if the status was written.
         """
 
-        # Write only when it is due
-        if not (force or self.due()):
+        # Write only when it is due (and never for a camera without the status)
+        if not (self.enabled and (force or self.due())):
             return False
 
         try:

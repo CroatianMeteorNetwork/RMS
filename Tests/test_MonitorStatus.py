@@ -1144,3 +1144,66 @@ def test_progress_with_a_backlog_of_other_nights(tmp_path, now):
 
     progress = status.build(_state(queued=[(old, t2), (tonight, t1)]))['processing']['progress']
     assert (progress['queued'], progress['other_nights_open']) == (1, 1)
+
+
+def test_simulate_queues_continues_the_turn():
+    """ The prediction continues the turn of the cameras where the monitor is: with camera A given a worker last,
+        camera B gets the next free worker when they have as many running files.
+    """
+
+    cameras = [('A', [], [10.0]), ('B', [], [10.0])]
+    assert mst.simulateQueues(1, cameras, last_idx=0) == {'A': 20.0, 'B': 10.0}
+    assert mst.simulateQueues(1, cameras, last_idx=1) == {'A': 10.0, 'B': 20.0}
+
+
+def test_camera_without_the_status_shares_the_workers(tmp_path, monkeypatch):
+    """ A camera without the status writes no status, but its files still take workers in the prediction of the
+        other cameras.
+    """
+
+    cameras = []
+    for cam_id, enabled in (('CAM1', True), ('CAM2', False)):
+        input_dir = tmp_path/cam_id/'input'
+        output_dir = tmp_path/cam_id/'output'
+        input_dir.mkdir(parents=True)
+        output_dir.mkdir(parents=True)
+        _makeInput(input_dir, 'dump_{:s}_02F.vid'.format(cam_id), False, minutes_ago=30)
+        config_path = tmp_path/'{:s}.config'.format(cam_id)
+        with open(REPO_CONFIG) as f:
+            config_text = f.read()
+        config_path.write_text(config_text.replace('monitor_status: true', 'monitor_status: {}'.format(
+            'true' if enabled else 'false')))
+        cameras.append((cam_id, input_dir, output_dir, config_path))
+
+        # The history of processed files of both cameras (5 min per file)
+        with open(str(output_dir/mst.HISTORY_FILE_NAME), 'w') as f:
+            for i in range(3):
+                f.write(json.dumps({'file': 'old{:d}'.format(i), 'outcome': 'ok', 'processing_min': 5.0,
+                                    'finished_utc': mst.RmsDateTime.utcnow().strftime(mnr.JSON_TIME_FORMAT)}) + '\n')
+
+    ini_path = tmp_path/'multicam.ini'
+    ini_path.write_text('[Global]\nnproc = 1\nfile_type = vid\npoll_interval = 0.01\n\n' + '\n'.join(
+        '[{:s}]\ninput_dir = {:s}\noutput_dir = {:s}\nconfig = {:s}\nplatepar = {:s}\n'.format(
+            cam_id, str(input_dir), str(output_dir), str(config_path), TEMPLATE_PLATEPAR)
+        for cam_id, input_dir, output_dir, config_path in cameras))
+
+    # The disk is full (nothing is processed, the files wait), and the monitor stops after a few polls
+    monkeypatch.setattr(mon.FreeSpaceGuard, 'ok', lambda self: False)
+    polls = {'n': 0}
+    real_sleep = time.sleep
+    def _sleep(seconds):
+        polls['n'] += 1
+        if polls['n'] > 5:
+            raise KeyboardInterrupt
+        real_sleep(0.01)
+    monkeypatch.setattr(mon.time, 'sleep', _sleep)
+    monkeypatch.setattr(mst.MonitorStatus, 'due', lambda self: True)
+
+    mon.monitorMultipleCameras(str(ini_path), report_mode='none')
+
+    # The one worker takes the file of CAM2 first (the monitor starts its turn after the first camera), then of
+    #   CAM1
+    with open(str(cameras[0][2]/mst.STATUS_FILE_NAME)) as f:
+        status = json.load(f)
+    assert status['processing']['queue_empty_in_min'] == 10.0
+    assert not os.path.isfile(str(cameras[1][2]/mst.STATUS_FILE_NAME))
