@@ -1469,7 +1469,8 @@ def nightTimeline(rows, not_searched=(), chunk_seconds=None, bounds=None, clear_
 
 
 def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(), removed_detections=0,
-                      cloud_max_offset=None, min_matched=None, chunk_seconds=None, bounds=None, input_ends=None):
+                      cloud_max_offset=None, min_matched=None, chunk_seconds=None, bounds=None, input_ends=None,
+                      removed_times=(), detection_mags=None):
     """ Plot the sky conditions of a night: the dimming of the stars, the clear fraction of the image and the stars
         through the night, with the time when the sky was clouded and partly clouded shaded, and the times of
         the detections.
@@ -1491,6 +1492,10 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
         bounds: [tuple] Beginning and end of the night (datetime, UTC), the plot and the summary are within them.
             None by default.
         input_ends: [dict] End of the inputs (datetime, UTC) by their names, see nightTimeline. None by default.
+        removed_times: [list] Times of the detections removed on clouded sky (datetime, UTC), where they are
+            known. Empty by default.
+        detection_mags: [list] Peak magnitude of every detection (None where it is not known). None by default
+            (no magnitudes).
 
     Return:
         [dict] Summary: the observed time (h, overlapping inputs counted once), and the fractions of it which
@@ -1538,8 +1543,8 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
 
 
     # Four panels over the same time: the dimming, the clear part of the image, the stars and the detections
-    fig = Figure(figsize=(14, 10.4), dpi=110)
-    axes = fig.subplots(4, 1, sharex=True, gridspec_kw={'height_ratios': [3, 2, 2, 0.7], 'hspace': 0.3})
+    fig = Figure(figsize=(14, 11.6), dpi=110)
+    axes = fig.subplots(4, 1, sharex=True, gridspec_kw={'height_ratios': [3, 2, 2, 1.8], 'hspace': 0.3})
     ax_dim, ax_clear, ax_stars, ax_det = axes
 
     # Shade the state of the sky on all panels, so every value can be read against it
@@ -1647,12 +1652,50 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
     ### ###
 
 
-    # Mark the time of every detection
-    if len(detection_times):
-        ax_det.eventplot([list(detection_times)], colors=dark, lineoffsets=0.5, linelengths=0.8, linewidths=0.8)
-    ax_det.set_ylim(0, 1)
-    ax_det.set_yticks([])
-    ax_det.grid(False)
+    # Every detection is a dot at its peak magnitude (brighter up). The detections removed on clouded sky, whose
+    #   magnitudes are not known, are crosses of another colour in a strip at the bottom of the panel, as are the
+    #   detections without a magnitude (hollow dots), so none of them can be taken for the shading
+    det_times = list(detection_times)
+    mags = np.array([np.nan if m is None else m for m in (list(detection_mags) if detection_mags is not None
+                                                          else [None]*len(det_times))], dtype=np.float64)
+    known = np.isfinite(mags)
+    removed_times = list(removed_times)
+    det_legend = []
+    if known.any():
+
+        # The range of the magnitudes, with a strip below them for the markers without a magnitude (if any)
+        bright, faint = float(np.min(mags[known])), float(np.max(mags[known]))
+        pad = max(0.1*(faint - bright), 0.3)
+        strip = 0.3*(faint - bright + 2*pad) if (removed_times or (~known).any()) else 0.0
+        y_strip = faint + pad + strip/2
+        ax_det.set_ylim(faint + pad + strip, bright - pad)
+        if strip:
+            ax_det.axhline(faint + pad, color='#d1d5db', lw=0.8, zorder=2)
+        ax_det.set_ylabel('mag', fontsize=10)
+        ax_det.plot([t for t, k in zip(det_times, known) if k], mags[known], 'o', ms=5.5, color=dark, mec='white',
+                    mew=0.6, alpha=0.85, zorder=3)
+        det_legend.append(Line2D([], [], marker='o', ms=5.5, color=dark, mec='white', ls='none',
+                                 label='Detection (peak magnitude)'))
+    else:
+        y_strip = 0.5
+        ax_det.set_ylim(0, 1)
+        ax_det.set_yticks([])
+
+    # The detections without a magnitude (e.g. not calibrated)
+    if (~known).any():
+        ax_det.plot([t for t, k in zip(det_times, known) if not k], np.full(int((~known).sum()), y_strip), 'o',
+                    ms=5.5, mfc='white', mec=dark, mew=1.0, zorder=3)
+        det_legend.append(Line2D([], [], marker='o', ms=5.5, mfc='white', mec=dark, ls='none',
+                                 label='Detection, magnitude not known'))
+
+    # The detections removed on clouded sky
+    if removed_times:
+        ax_det.plot(removed_times, np.full(len(removed_times), y_strip), 'X', ms=7, color='#CC79A7', mec=dark,
+                    mew=0.5, zorder=3)
+        det_legend.append(Line2D([], [], marker='X', ms=7, color='#CC79A7', mec=dark, mew=0.5, ls='none',
+                                 label='Removed by clouds'))
+    ax_det.grid(True, axis='y', color='#e5e7eb', lw=0.8, zorder=1)
+    ax_det.grid(False, axis='x')
 
     # Set the time axis (UTC) to the data within the night, with the seconds shown for a short time
     ax_det.set_xlabel('Time (UTC)', fontsize=10)
@@ -1702,7 +1745,7 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
                    + ([Line2D([], [], color=dark, lw=1, ls='--',
                               label='Fewest matched ({:d})'.format(int(min_matched)))]
                       if min_matched is not None else [])),
-    ]
+    ] + ([(ax_det, det_legend)] if det_legend else [])
 
     # The legend of the shading, above the panels as it applies to all of them
     shading = [Patch(facecolor=shade['clear'][0], alpha=shade['clear'][1], label='Clear'),

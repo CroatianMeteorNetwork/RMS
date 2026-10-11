@@ -1137,8 +1137,9 @@ def plotNightSkyConditions(night_dir, night_name, output_dir, results, config, f
         log.info("No sky conditions for night {:s}".format(night_name))
         return False
 
-    # Read the time of every detection in the night (the time of its image plus its first frame)
-    detection_times = []
+    # Read the time of every detection in the night (the time of its image plus its first frame), and its peak
+    #   magnitude (None if it has none, e.g. not calibrated)
+    detection_times, detection_mags = [], []
     entries = []
     if os.path.isfile(ftpdetectinfo_path):
         try:
@@ -1153,7 +1154,13 @@ def plotNightSkyConditions(night_dir, night_name, output_dir, results, config, f
         except (ValueError, TypeError, IndexError, ZeroDivisionError):
             continue
         if night_start <= t <= night_end:
+            mags = [m[9] for m in meteor_meas if (len(m) > 9) and (m[9] is not None) and np.isfinite(m[9])]
             detection_times.append(t)
+            detection_mags.append(min(mags) if mags else None)
+
+    # The time of every detection removed by clouds in the night, where it is known
+    removed_times = [t for _, file_result in file_results for t in (file_result['removed_times'] or [])
+                     if (t is not None) and (night_start <= t <= night_end)]
 
     # Save the conditions of the night as a CSV file, in the format of the log
     with open(csv_path, 'w') as f:
@@ -1174,7 +1181,7 @@ def plotNightSkyConditions(night_dir, night_name, output_dir, results, config, f
         night_date), not_searched=not_searched, detection_times=detection_times, removed_detections=removed,
         cloud_max_offset=(config.mf_cloud_max_offset if config.mf_cloud_filter else None),
         min_matched=config.mf_cloud_min_matched, chunk_seconds=chunk_seconds, bounds=(night_start, night_end),
-        input_ends=input_ends)
+        input_ends=input_ends, removed_times=removed_times, detection_mags=detection_mags)
 
     log.info("Sky conditions of night {:s}: {:.1f} h observed, clear {:.0f}%, partly clouded {:.0f}%, clouded "
              "{:.0f}%, {:d} file(s) not searched".format(night_name, summary['observed_h'],
