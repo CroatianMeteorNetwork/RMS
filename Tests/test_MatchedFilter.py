@@ -806,25 +806,148 @@ def test_slow_object_photometry_uses_background_without_it(config, monkeypatch, 
         assert ratio < 0.85
 
 
-@pytest.mark.parametrize('trail_level', [25.0, 0.0])
-def test_trails_of_bright_object_removed(config, trail_level):
+@pytest.mark.parametrize('trail_level, line_concentration', [(25.0, 0.0), (0.0, 0.5), (0.0, 0.0)])
+def test_trails_of_bright_object_removed(config, trail_level, line_concentration):
     """ A very bright object which leaves faint trails along its column and its row: the trails move with it
-        and make tracks along them, unless they are removed from the search.
+        and make tracks along them, unless they are removed from the search, or the tracks rejected as lying on
+        a linear structure.
     """
 
     # Trails of 1 sigma along the column and 2 sigma along the row, moving with the object
     obj = linearObject(400.0, 110, 50, -0.6, 0.1, 100, 260)
     obj['trail'] = 1.0
     config.mf_trail_level = trail_level
-    _, detections = runDetector(_SynthHandle([obj], n_stars=4), config)
+    config.mf_line_concentration = line_concentration
+    det, detections = runDetector(_SynthHandle([obj], n_stars=4), config)
 
-    # With the trails removed only the object is detected (at its position), without it the trails are
-    #   detected too
-    if trail_level > 0:
+    # With the trails removed, or their tracks rejected, only the object is detected (at its position); with
+    #   neither the trails are detected too
+    if (trail_level > 0) or (line_concentration > 0):
         assert len(detections) == 1
         assert np.median(truthError(detections[0][2], obj)) < 0.3
+        assert (det.summary()['linear_structure_rejected'] > 0) == (trail_level == 0)
     else:
         assert len(detections) > 1
+
+
+def test_extent_line_tells_points_from_lines():
+    """ The concentration along the brightest axis through an object: about 1 for a point source (also one smeared
+        by its motion during a frame), low for an object on a thin line through it, and the axis of noise alone is
+        not significant.
+    """
+
+    r = mfd.EXTENT_RADIUS
+    yy, xx = np.mgrid[-r:r + 1, -r:r + 1].astype(float)
+    rng = np.random.default_rng(3)
+    n = 200
+    noise = rng.normal(0, 1/np.sqrt(n), xx.shape)
+
+    # A point source, and the same smeared by 3.6 px/frame along a diagonal (the fastest searched motions)
+    point = 2.0*np.exp(-0.5*(xx**2 + yy**2)/PSF_SIGMA**2)
+    smeared = sum(0.4*np.exp(-0.5*((xx - 2.5*d)**2 + (yy - 2.5*d)**2)/PSF_SIGMA**2)
+                  for d in np.linspace(-0.5, 0.5, 5))
+    for stack in (point, smeared):
+        concentration, _ = mfd.extentLine(stack + noise, PSF_SIGMA, n)
+        assert concentration > 0.8
+
+    # A point on a line through it as bright as its peak, along any direction (also between the axes): the
+    #   concentration along the line is low and the line significant, while the concentration of the whole ring
+    #   is still high
+    point_line = point/2.0
+    for angle in (0.0, 0.2, 0.4, 1.2, 2.0, 2.9):
+        across = -xx*np.sin(angle) + yy*np.cos(angle)
+        stack = point_line + np.exp(-0.5*across**2/1.5**2) + noise
+        concentration, significance = mfd.extentLine(stack, PSF_SIGMA, n)
+        assert (concentration < 0.5) and (significance > mfd.LINE_MIN_SIGNIFICANCE)
+        assert mfd.extentConcentration(stack, PSF_SIGMA) > 0.6
+
+    # Noise alone: the brightest axis is not significant
+    significances = [mfd.extentLine(rng.normal(0, 1/np.sqrt(n), xx.shape), PSF_SIGMA, n)[1] for _ in range(50)]
+    assert max(significances) < mfd.LINE_MIN_SIGNIFICANCE
+
+
+def test_extent_line_fast_object_not_a_line():
+    """ An object moving fast enough to be a streak in every frame lights the ring along its motion: that axis is
+        left out when the motion is given, so it is not taken for a linear structure, while a line across the
+        motion still is.
+    """
+
+    r = mfd.EXTENT_RADIUS
+    yy, xx = np.mgrid[-r:r + 1, -r:r + 1].astype(float)
+    n = 200
+
+    # A streak of 12 px per frame along the direction 0.5 rad
+    angle = 0.5
+    vx, vy = 12*math.cos(angle), 12*math.sin(angle)
+    streak = sum(0.1*np.exp(-0.5*((xx - vx*d)**2 + (yy - vy*d)**2)/PSF_SIGMA**2) for d in np.linspace(-0.5, 0.5, 41))
+
+    # Without the motion it looks like a line, with it it doesn't
+    assert mfd.extentLine(streak, PSF_SIGMA, n)[0] < 0.5
+    assert mfd.extentLine(streak, PSF_SIGMA, n, motion=(vx, vy))[0] > 0.5
+
+    # A line across the motion (as bright as the streak) is still found
+    across = -xx*math.sin(angle + np.pi/2) + yy*math.cos(angle + np.pi/2)
+    stack = streak + 1.5*streak.max()*np.exp(-0.5*across**2/1.5**2)
+    assert mfd.extentLine(stack, PSF_SIGMA, n, motion=(vx, vy))[0] < 0.5
+
+    # A slow object: the axis along the motion is kept, a line along it is found
+    along = -xx*math.sin(angle) + yy*math.cos(angle)
+    stack = np.exp(-0.5*(xx**2 + yy**2)/PSF_SIGMA**2) + np.exp(-0.5*along**2/1.5**2)
+    assert mfd.extentLine(stack, PSF_SIGMA, n, motion=(0.1*math.cos(angle), 0.1*math.sin(angle)))[0] < 0.5
+
+
+def test_linear_structure_flags_per_track(config):
+    """ The flag of a track rejected on a linear structure belongs to that track, also when another track has the
+        same first and last frame. """
+
+    det = MatchedFilterDetector(_SynthHandle([], total_frames=64), config)
+    det.significances = [(0.0, 100.0, 20.0, 20.0, 21.0, 0.95, True), (0.0, 100.0, 20.0, 20.0, 21.0, 0.95, False)]
+    summary = det.summary()
+    assert [t['linear_structure'] for t in summary['tracks']] == [True, False]
+    assert summary['linear_structure_rejected'] == 1
+
+
+class _LineHandle(_SynthHandle):
+    """ Synthetic frames with a faint line across the field which drifts slowly sideways, its brightness changing
+        gently along it: the light left for a while along the path of a bright source. """
+
+    def __init__(self, objects, amp=0.5, drift=0.06, angle=1.2, x0=40.0, y0=64.0, width=1.5, period=30.0,
+                 modulation=0.3, **kwargs):
+
+        super(_LineHandle, self).__init__(objects, **kwargs)
+        self.line = (amp, drift, angle, x0, y0, width, period, modulation)
+
+    def loadFrame(self, avepixel=False):
+
+        # The distances of the pixels along the line and across it, which drifts by the given px per frame
+        amp, drift, angle, x0, y0, width, period, modulation = self.line
+        yy, xx = np.mgrid[0:SIZE, 0:SIZE].astype(float)
+        along = (xx - x0)*math.cos(angle) + (yy - y0)*math.sin(angle)
+        across = -(xx - x0 - drift*self.current_frame)*math.sin(angle) + (yy - y0)*math.cos(angle)
+        line = amp*NOISE*(1.0 + modulation*np.cos(2*np.pi*along/period))*np.exp(-0.5*(across/width)**2)
+
+        return super(_LineHandle, self).loadFrame(avepixel) + line.astype(np.float32)
+
+
+@pytest.mark.parametrize('line_concentration', [0.5, 0.0])
+def test_tracks_on_a_drifting_line_rejected(config, line_concentration):
+    """ The matched filter makes tracks along a faint line which drifts slowly across the field. They are
+        rejected by their concentration along the line, while a faint object elsewhere is kept.
+    """
+
+    obj = linearObject(1.5, 95, 20, 0.02, 0.18, 40, 470)
+    config.mf_line_concentration = line_concentration
+    det, detections = runDetector(_LineHandle([obj], n_stars=6), config)
+
+    # The object is detected in both cases; with the test only the object, without it tracks along the line too
+    real = [d for d in detections if np.median(truthError(d[2], obj)) < 1.5]
+    assert len(real) == 1
+    if line_concentration > 0:
+        assert len(detections) == 1
+        assert det.summary()['linear_structure_rejected'] > 0
+    else:
+        assert len(detections) > 1
+        assert det.summary()['linear_structure_rejected'] == 0
 
 
 ### Light curves, bright objects, photometric scale ###

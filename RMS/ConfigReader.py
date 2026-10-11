@@ -991,6 +991,11 @@ class Config:
         #   frames, minus the same at times when the object is elsewhere (sigma)
         self.mf_track_significance = 12.0
 
+        # A detection whose light is less concentrated at its centre than this, compared with the brightest axis
+        #   through it (a thin linear structure, e.g. a trail, or light left along the path of a bright source which
+        #   crossed the field), is rejected. 0 turns the test off
+        self.mf_line_concentration = 0.5
+
         # Stars brighter than this in the median of the frames (in the noise of the sky in one frame) are masked
         self.mf_star_threshold = 3.0
 
@@ -2406,7 +2411,7 @@ def parseMatchedFilter(config, parser):
     for name in ("mf_threshold", "mf_ang_vel_min", "mf_ang_vel_max", "mf_psf_sigma", "mf_max_pos_error",
                  "mf_min_sample_snr", "mf_star_threshold", "mf_persistence", "mf_clip", "mf_trail_level", "mf_min_displacement",
                  "mf_sigma_scale", "mf_track_significance", "mf_tier_speed", "mf_cloud_max_offset",
-                 "mf_buffer_memory"):
+                 "mf_buffer_memory", "mf_line_concentration"):
         if parser.has_option(section, name):
             setattr(config, name, parser.getfloat(section, name))
 
