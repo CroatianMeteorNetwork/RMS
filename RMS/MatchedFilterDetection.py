@@ -133,6 +133,17 @@ EXTENT_STEP = 2
 MIN_CONCENTRATION = 0.8
 EXTENT_MAX_SIGNIFICANCE = 200.0
 
+# A detection along a thin linear structure (e.g. the light left for a while along the path of a bright source
+#   which crossed the field faster than the searched motions, or a trail) is concentrated at the centre of the
+#   ring but not along the structure: the light of the ring is also taken along axes through the centre in
+#   LINE_ANGLES directions (the pixels of the ring within LINE_HALF_WIDTH px of the axis), see extentLine. Below mf_line_concentration along the brightest axis, with that axis at least
+#   LINE_MIN_SIGNIFICANCE (sigma) above the background, the detection is rejected. On recorded data, tracks on
+#   such light are at 0.08-0.38, objects at 0.5-1 (lower only for tracks which run beside a bright object or
+#   pick up its trails)
+LINE_ANGLES = 16
+LINE_HALF_WIDTH = 1.5
+LINE_MIN_SIGNIFICANCE = 5.0
+
 # Below MIN_CONCENTRATION_ALONE a detection is extended in any case; between it and MIN_CONCENTRATION, only if at
 #   least COMOVING_MIN other candidate tracks at the same time move with it (within COMOVING_TOLERANCE of its
 #   speed), as the structures of a drifting cloud do
@@ -236,6 +247,7 @@ class MatchedFilterOptions(object):
         self.min_frames = config.mf_min_frames
         self.sigma_scale = config.mf_sigma_scale
         self.track_significance = config.mf_track_significance
+        self.line_concentration = config.mf_line_concentration
         self.edge_margin = max(config.detection_border, config.mf_edge_margin)
         self.gpu = config.mf_gpu
         self.smooth_frames = config.mf_smooth_frames
@@ -518,6 +530,9 @@ class MatchedFilterDetector(object):
 
         # Significances of the measured tracks: (first frame, last frame, significance, off time, reordered)
         self.significances = []
+
+        # The candidate tracks rejected as lying on a thin linear structure (first and last frame, see verify)
+        self.line_rejected = set()
 
         # The persistence counts of the segments of the input before this one, {(run, bin): (counts, runs)} (see
         #   removePersistent), and the counts to carry to the next segment: those before the frame where it begins
@@ -2087,8 +2102,10 @@ class MatchedFilterDetector(object):
             'gpu': bool(self.opts.use_gpu),
             'timing_s': {k: round(v, 2) for k, v in self.timing.items()},
             'tracks': [{'first_frame': float(f0), 'last_frame': float(f1), 'significance': round(float(sig), 2),
-                        'detected': bool(sig >= self.opts.track_significance)}
+                        'detected': bool(sig >= self.opts.track_significance),
+                        'linear_structure': (f0, f1) in self.line_rejected}
                        for f0, f1, sig in (s[:3] for s in self.significances)],
+            'linear_structure_rejected': len(self.line_rejected),
         }
 
 
@@ -2508,10 +2525,11 @@ class MatchedFilterDetector(object):
             span = max(fr[-1] - fr[0], 1)
             velocity = np.array([(xs[-1] - xs[0])/span, (ys[-1] - ys[0])/span])
             concentration = extentConcentration(c['stack']/max(c['stack_n'], 1), self.psf_sigma)
-            results.append((cent, c, min(tests), tests, concentration, velocity))
+            line = extentLine(c['stack']/max(c['stack_n'], 1), self.psf_sigma, c['stack_n'])
+            results.append((cent, c, min(tests), tests, concentration, velocity, line))
 
         kept = []
-        for i, (cent, c, significance, tests, concentration, velocity) in enumerate(results):
+        for i, (cent, c, significance, tests, concentration, velocity, line) in enumerate(results):
 
             # A point source: the light of the frames stacked along the track is concentrated at the centre.
             #   Structures of thin clouds drifting across the field are extended, and several of them move
@@ -2538,6 +2556,18 @@ class MatchedFilterDetector(object):
                                                                                    significance, concentration,
                                                                                    together))
                     significance = min(significance, 0.0)
+
+                # A thin linear structure: the light is much less concentrated at the centre than along one
+                #   axis through it, and that axis is clearly above the background
+                elif (self.opts.line_concentration > 0) and (line[0] < self.opts.line_concentration) and \
+                        (line[1] >= LINE_MIN_SIGNIFICANCE):
+                    log.info('Matched filter: track {:.0f}-{:.0f} (significance {:.1f}) is on a linear structure '
+                             '(concentration {:.2f} along it, {:.1f} sigma), rejected'.format(cent[0, 0],
+                                                                                            cent[-1, 0],
+                                                                                            significance,
+                                                                                            *line))
+                    significance = min(significance, 0.0)
+                    self.line_rejected.add((cent[0, 0], cent[-1, 0]))
 
             # The significance of every candidate is kept for the done file, and the photometry of the kept ones
             #   for the conversion to detections (see run)
@@ -2637,6 +2667,51 @@ def extentConcentration(stack, psf_sigma):
         return 1.0
 
     return float((core - ring)/core)
+
+
+def extentLine(stack, psf_sigma, n_frames):
+    """ How much of the light of an object is at its centre compared with the brightest axis through it: the
+        mean of the stack along its track within 1.5 PSF sigmas of the centre, minus the mean of the ring
+        EXTENT_RING px from it along the brightest of LINE_ANGLES axes (within LINE_HALF_WIDTH px of the axis),
+        over the mean at the centre. About 1 for a point source, low for an object on a thin linear structure,
+        which lights the ring only along its own direction (and barely changes the mean of the whole ring, see
+        extentConcentration).
+
+    Arguments:
+        stack: [ndarray] Mean of the normalized frames along the track, centred on the object.
+        psf_sigma: [float] PSF sigma (px).
+        n_frames: [int] Number of frames in the stack.
+
+    Return:
+        (concentration, significance): [tuple of floats] The concentration (1 if the centre is not above the
+            axis, as the shape is then not measurable) and the significance of the brightest axis above the
+            background (sigma).
+    """
+
+    # The distance of every pixel of the stack from its centre, and the pixels of the ring
+    r = (stack.shape[0] - 1)//2
+    yy, xx = np.mgrid[-r:r + 1, -r:r + 1]
+    d = np.hypot(xx, yy)
+    ring = (d >= EXTENT_RING[0]) & (d <= EXTENT_RING[1])
+
+    # The mean of the ring along every axis: the pixels of the ring close to the line through the centre in
+    #   that direction (on both sides of the centre)
+    axes = []
+    for angle in np.arange(LINE_ANGLES)*np.pi/LINE_ANGLES:
+        axis = ring & (np.abs(yy*math.cos(angle) - xx*math.sin(angle)) <= LINE_HALF_WIDTH)
+        axes.append((float(np.mean(stack[axis])), int(np.sum(axis))))
+    axis_mean, axis_n = max(axes, key=lambda v: v[0])
+
+    # The significance of the brightest axis. The normalized frames have unit noise, so the noise of a pixel of
+    #   the stack is 1/sqrt(n_frames), and of the mean of an axis that over the square root of its pixels
+    significance = axis_mean*math.sqrt(max(n_frames, 1)*axis_n)
+
+    # The mean of the core (within 1.5 PSF sigmas, at least 1 px), compared with the brightest axis
+    core = np.mean(stack[d <= max(1.5*psf_sigma, 1.0)])
+    if core <= 0:
+        return 1.0, float(significance)
+
+    return float((core - axis_mean)/core), float(significance)
 
 
 def framePhotometry(frames, saturated, frame_idx, noise, xs, ys, vx, vy, radius):
@@ -3758,6 +3833,10 @@ class SegmentedRun(object):
         first = run[0][1] if run else None
         corrections = [det.aperture_correction for _, det in run if det.aperture_correction is not None]
 
+        # The candidate tracks of the frames which belong to every segment
+        tracks = [track for k, det in run for track in det.summary()['tracks']
+                  if bounds[k][0] <= (track['first_frame'] + track['last_frame'])/2.0 < bounds[k][1]]
+
         return {
             'aperture_correction': float(np.median(corrections)) if corrections else None,
             'clear_sky_fraction': (round(float(np.mean(self.sky_map.clear)), 3) if self.sky_map is not None
@@ -3773,8 +3852,8 @@ class SegmentedRun(object):
             'psf_sigma': next((det.psf_sigma for _, det in run if det.psf_sigma is not None), None),
             'gpu': any(bool(det.opts.use_gpu) for _, det in run),
             'timing_s': {k: round(v, 2) for k, v in timing.items()},
-            'tracks': [track for k, det in run for track in det.summary()['tracks']
-                       if bounds[k][0] <= (track['first_frame'] + track['last_frame'])/2.0 < bounds[k][1]],
+            'tracks': tracks,
+            'linear_structure_rejected': sum(int(track.get('linear_structure', False)) for track in tracks),
             'segments': [{'first_frame': int(f), 'end_frame': int(e), 'searched': det is not None}
                          for (f, e), det in zip(self.ranges, self.detectors)],
             'frames_read': int(self.buffer.frames_read),
