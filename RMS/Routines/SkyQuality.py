@@ -1511,10 +1511,10 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
     summary['median_dimming'] = float(np.median(dimming[usable])) if usable.any() else float('nan')
 
     # Colours which can be told apart also with colour vision deficiencies (from the palette of Okabe and Ito):
-    #   the clouded sky is a darker orange than the partly clouded sky, the time without stars or data is grey,
-    #   and the values are blue, green and black
-    shade = {'partly': ('#E69F00', 0.25), 'clouded': ('#D55E00', 0.45), 'not_searched': ('#000000', 0.4),
-             'no_data': ('#000000', 0.07)}
+    #   the clear sky is light green (as its summary card), the clouded sky is a darker orange than the partly
+    #   clouded sky, the time without stars or data is grey, and the values are blue, green and black
+    shade = {'clear': ('#009E73', 0.12), 'partly': ('#E69F00', 0.25), 'clouded': ('#D55E00', 0.45),
+             'not_searched': ('#000000', 0.4), 'no_data': ('#000000', 0.07)}
     cards_bg = {'partly': '#f9e7bf', 'clouded': '#ecb48c', 'not_searched': '#999999'}
     blue, green, grey, dark = '#0072B2', '#009E73', '#4b5563', '#111827'
 
@@ -1687,14 +1687,15 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
     ]
 
     # The legend of the shading, above the panels as it applies to all of them
-    shading = [Patch(facecolor=shade['partly'][0], alpha=shade['partly'][1],
+    shading = [Patch(facecolor=shade['clear'][0], alpha=shade['clear'][1], label='Clear'),
+               Patch(facecolor=shade['partly'][0], alpha=shade['partly'][1],
                      label='Partly clouded: detections removed where clouded'),
                Patch(facecolor=shade['clouded'][0], alpha=shade['clouded'][1],
                      label='Clouded: detections removed'),
                Patch(facecolor=shade['not_searched'][0], alpha=shade['not_searched'][1],
                      label='Too few stars: not searched'),
                Patch(facecolor=shade['no_data'][0], alpha=shade['no_data'][1], label='No data')]
-    fig.legend(handles=shading, loc='upper center', ncol=4, frameon=False, fontsize=9.5,
+    fig.legend(handles=shading, loc='upper center', ncol=5, frameon=False, fontsize=9.5,
                bbox_to_anchor=(0.53, 0.862), title='Shading of all panels', title_fontsize=9.5)
 
     ### Summary cards ###
