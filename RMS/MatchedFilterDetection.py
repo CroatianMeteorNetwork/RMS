@@ -67,6 +67,7 @@ from RMS.DetectStarsAndMeteors import saveResultsFrameInterface
 from RMS.ExtractStarsFrameInterface import extractStarsFrameInterface
 from RMS.Formats import FTPdetectinfo
 from RMS.Formats.FFfile import filenameToDatetime, validFFName
+from RMS.Formats.FrameBuffer import SegmentBuffer, segmentRanges, segmentUnit
 from RMS.Formats.FrameInterface import detectInputType
 from RMS.Formats.Platepar import Platepar
 from RMS.Logger import getLogger, LoggingManager
@@ -421,7 +422,7 @@ class BlockBackground(object):
 
 
 class MatchedFilterDetector(object):
-    def __init__(self, img_handle, config, mask=None, dark=None, flat_struct=None):
+    def __init__(self, img_handle, config, mask=None, dark=None, flat_struct=None, frame_range=None):
         """ Matched-filter detection of moving objects in the frames of an image handle.
 
         Arguments:
@@ -432,6 +433,8 @@ class MatchedFilterDetector(object):
             mask: [MaskStruct] Mask, binned like the frames. None by default.
             dark: [ndarray] Dark frame, binned like the frames. None by default.
             flat_struct: [FlatStruct] Flat field, binned like the frames. None by default.
+            frame_range: [tuple] (first frame, end frame) of the frames to search, e.g. a segment of the input (see
+                RMS.Formats.FrameBuffer), numbered as in the whole input. None by default (all frames).
         """
 
         self.img_handle = img_handle
@@ -443,6 +446,9 @@ class MatchedFilterDetector(object):
         # Size of the (binned) frames and their number
         self.height, self.width = img_handle.nrows, img_handle.ncols
         self.total_frames = img_handle.total_frames
+
+        # The frames which are searched
+        self.frame_first, self.frame_end = frame_range if (frame_range is not None) else (0, self.total_frames)
 
         # Detection binning of the frame handle, the results are scaled to the unbinned image. The options use
         #   the frame rate measured from the frame times of the input when it has one
@@ -1011,12 +1017,12 @@ class MatchedFilterDetector(object):
             log.info('Matched filter: {:d} velocities for runs of {:d} frames, {:d}x{:d} binned{:s}'.format(
                 len(st.velocities), run_frames, tier_bin, tier_bin, ' (GPU)' if st.use_gpu else ''))
 
-        # Blocks of frames, the last one may be shorter
-        starts = list(range(0, self.total_frames, n_block))
-        if (len(starts) > 1) and (self.total_frames - starts[-1] < n_block//2):
+        # Blocks of the frames which are searched, the last one may be shorter
+        starts = list(range(self.frame_first, self.frame_end, n_block))
+        if (len(starts) > 1) and (self.frame_end - starts[-1] < n_block//2):
             starts = starts[:-1]
         self.block_starts = starts
-        self.block_ends = starts[1:] + [self.total_frames]
+        self.block_ends = starts[1:] + [self.frame_end]
 
         # The background follows changes of the sky (e.g. thin clouds) on the time scale of the blocks. An
         #   object slower than about a PSF width per 100 frames is too slow to be detected anyway
@@ -1742,6 +1748,46 @@ class MatchedFilterDetector(object):
 
     ### Measurement ###
 
+    def polarLine(self, cent):
+        """ The polar line (rho, theta) of a detection in the binned image, as for the normal detections. The
+            coordinates of a pixel center of the unbinned image in the binned image are (x - (b - 1)/2)/b, and the
+            y axis of the polar line points up.
+
+        Arguments:
+            cent: [ndarray] Centroids of the detection (unbinned), rows [frame, x, y, ...].
+
+        Return:
+            (rho, theta): [tuple] The polar line.
+        """
+
+        (xa, ya), (xb, yb) = (cent[[0, -1], 1:3] - (self.det_bin - 1)/2.0)/self.det_bin
+
+        return getPolarLine(xa, self.height - ya, xb, self.height - yb, self.height, self.width)
+
+
+    def joinDetections(self, detections):
+        """ Join the pieces of tracks (a faint object can be lost for a while, e.g. behind stars) and remove the
+            duplicates. An object can be lost for many seconds while moving only a few PSF widths, so pieces
+            are joined across any gap in which the object moved less than 15 PSF widths, if the second piece
+            begins within 2 PSF widths of the extrapolated end of the first one.
+
+        Arguments:
+            detections: [list] Detections as [rho, theta, centroids].
+
+        Return:
+            [list] The joined detections.
+        """
+
+        # The distances of the joining are in the binned image (as is the image size), the ones of the duplicates
+        #   in the unbinned image of the centroids
+        fwhm = 2.355*self.psf_sigma
+        max_gap = 4*max(self.opts.run_frames + [self.opts.slow_run_frames])
+        detections = joinContinuousDetections(detections, max_gap, 15*fwhm, 2*fwhm, self.height, self.width,
+                                              bin_factor=self.det_bin)
+
+        return removeDuplicateDetections(detections, fwhm*self.det_bin, 3*fwhm*self.det_bin)
+
+
     def run(self):
         """ Detect and measure the objects of the whole input.
 
@@ -1753,8 +1799,9 @@ class MatchedFilterDetector(object):
         t0 = time()
 
         # The search needs at least one run of the longest length
-        if self.total_frames < max(self.opts.run_frames):
-            log.warning('Matched filter: only {:d} frames, nothing to search'.format(self.total_frames))
+        if self.frame_end - self.frame_first < max(self.opts.run_frames):
+            log.warning('Matched filter: only {:d} frames, nothing to search'.format(self.frame_end
+                                                                                    - self.frame_first))
             self.timing['total'] = time() - t0
             return []
 
@@ -1851,24 +1898,10 @@ class MatchedFilterDetector(object):
                 if self.config.detection_binning_method == 'avg':
                     cent[:, 3] *= self.det_bin**2
 
-            # The polar line in the binned image, as for the normal detections. The coordinates of a pixel center
-            #   of the unbinned image in the binned image are (x - (b - 1)/2)/b, and the y axis of the polar
-            #   line points up
-            (xa, ya), (xb, yb) = (cent[[0, -1], 1:3] - (self.det_bin - 1)/2.0)/self.det_bin
-            rho, theta = getPolarLine(xa, self.height - ya, xb, self.height - yb, self.height, self.width)
-            detections.append([rho, theta, cent])
+            detections.append([*self.polarLine(cent), cent])
 
-        # Join the pieces of tracks (a faint object can be lost for a while, e.g. behind stars) and remove the
-        #   duplicates. A slow object can be lost for many seconds while moving only a few PSF widths, so pieces
-        #   are joined across any gap in which the object moved less than 15 PSF widths, if the second piece
-        #   begins within 2 PSF widths of the extrapolated end of the first one
-        # The distances of the joining are in the binned image (as is the image size), the ones of the duplicates
-        #   in the unbinned image of the centroids
-        fwhm = 2.355*self.psf_sigma
-        max_gap = 4*max(self.opts.run_frames + [self.opts.slow_run_frames])
-        detections = joinContinuousDetections(detections, max_gap, 15*fwhm, 2*fwhm, self.height, self.width,
-                                              bin_factor=self.det_bin)
-        detections = removeDuplicateDetections(detections, fwhm*self.det_bin, 3*fwhm*self.det_bin)
+        # Join the pieces of tracks and remove the duplicates
+        detections = self.joinDetections(detections)
 
         self.timing['total'] = time() - t0
         log.info('Matched filter: {:d} detections in {:.1f} s ({:s})'.format(len(detections),
@@ -1916,12 +1949,15 @@ class MatchedFilterDetector(object):
             ff_name, stars = entry[0], entry[1]
 
             # The time of the chunk of the stars from the beginning of the input, and the block of frames which
-            #   contains it
+            #   contains it (only the frames which were searched)
             try:
                 dt = (filenameToDatetime(ff_name) - t_begin.replace(tzinfo=None)).total_seconds()
             except Exception:
                 continue
-            k = int(np.clip(np.searchsorted(starts, dt*self.img_handle.fps, side='right') - 1, 0, len(starts) - 1))
+            frame = dt*self.img_handle.fps
+            if not (self.frame_first <= frame < self.frame_end):
+                continue
+            k = int(np.clip(np.searchsorted(starts, frame, side='right') - 1, 0, len(starts) - 1))
             bg = self.backgrounds.get(k)
             if bg is None:
                 continue
@@ -2292,7 +2328,7 @@ class MatchedFilterDetector(object):
         starts = np.array(self.block_starts)
         for c in checks:
             for key in ('on', 'off', 'reord'):
-                c[key + '_idx'] = blockIndices(c[key][0], starts)
+                c[key + '_idx'] = blockIndices(c[key][0], starts, end=self.block_ends[-1])
 
         # The half size of the patch of the PSF-weighted sums: the weights are negligible beyond 2.5 sigmas
         radius = int(math.ceil(2.5*self.psf_sigma))
@@ -2465,19 +2501,26 @@ def nanMedian(stack):
     return np.where(n > 0, med, np.nan)
 
 
-def blockIndices(frames, starts):
+def blockIndices(frames, starts, end=None):
     """ Indices of the frames in every block of frames.
 
     Arguments:
         frames: [ndarray] Frame numbers.
         starts: [ndarray] First frames of the blocks, sorted.
 
+    Keyword arguments:
+        end: [int] End of the last block (the frame after it). The frames from it on are in no block. None by
+            default (the last block has all the frames after its beginning).
+
     Return:
         [dict] Block index -> indices of its frames, in their order in frames.
     """
 
-    # The block of every frame is the last block which begins at or before it (-1 before the first block)
+    # The block of every frame is the last block which begins at or before it (-1 before the first block and
+    #   after the end of the last one)
     blocks = np.searchsorted(starts, frames, side='right') - 1
+    if end is not None:
+        blocks[np.asarray(frames) >= end] = -1
 
     # The frames sorted by block (a stable sort keeps their order within a block), and the range of every block
     #   in the sorted order
@@ -3123,7 +3166,8 @@ class TrackMeasurement(object):
 
 
 
-def skyQuality(img_handle, config, star_list, platepar, reference_dir=None, input_name=''):
+def skyQuality(img_handle, config, star_list, platepar, reference_dir=None, input_name='', frame_range=None,
+               update=True):
     """ The sky quality of an input from its stars (see RMS.Routines.SkyQuality), with mf_cloud_filter. With a
         reference directory, the clear-sky reference of the camera there is used and updated with this input, and
         its conditions are added to the log there.
@@ -3138,6 +3182,10 @@ def skyQuality(img_handle, config, star_list, platepar, reference_dir=None, inpu
         reference_dir: [str] Directory of the clear-sky reference of the camera (see SkyReference). None by
             default.
         input_name: [str] Name of the input (its path), for the log of the conditions. Empty by default.
+        frame_range: [tuple] (first frame, end frame) of the part of the input which the stars are from (e.g. a
+            segment, see RMS.Formats.FrameBuffer). None by default (the whole input).
+        update: [bool] Update the reference and the log with this input. False for a part of an input, as they
+            are updated once for the whole input. True by default.
 
     Return:
         [SkyQualityMap] The sky quality, or None without the stars or the platepar, or if it failed.
@@ -3153,16 +3201,18 @@ def skyQuality(img_handle, config, star_list, platepar, reference_dir=None, inpu
         # The clear-sky reference of the camera, and the sky quality of this input with the chunks at their frames
         #   (by the frame times of the input)
         reference = SkyReference(reference_dir, config.stationID) if reference_dir else None
+        first_frame, end_frame = frame_range if (frame_range is not None) else (0, img_handle.total_frames)
         sky_map = SkyQualityMap(star_list, platepar, config, img_handle.beginning_datetime.replace(tzinfo=None),
                                 img_handle.fps, getattr(img_handle, 'chunk_frames', None),
-                                max_offset=config.mf_cloud_max_offset, total_frames=img_handle.total_frames,
+                                max_offset=config.mf_cloud_max_offset, total_frames=end_frame,
                                 min_matched=config.mf_cloud_min_matched,
-                                first_frames=(chunkFirstFrames(star_list, img_handle)
+                                first_frames=(chunkFirstFrames(star_list, img_handle, frame_range=frame_range)
                                               if hasattr(img_handle, 'chunk_frames') else None),
-                                reference=reference, input_name=input_name)
+                                reference=reference, input_name=input_name, first_frame=first_frame)
 
         # The stars of this input on clear sky are added to the reference, and its conditions to the log
-        sky_map.updateReference()
+        if update:
+            sky_map.updateReference()
 
     # Without a calibration, a star catalog or references of the stars, the sky quality is not known, and the input
     #   is processed without it; other errors are logged, and don't fail the input either
@@ -3192,7 +3242,7 @@ def skyQuality(img_handle, config, star_list, platepar, reference_dir=None, inpu
 
 
 def detectMatchedFilter(img_handle, config, mask=None, dark=None, flat_struct=None, star_list=None,
-                        return_detector=False, platepar=None, reference_dir=None, input_name=''):
+                        return_detector=False, platepar=None, reference_dir=None, input_name='', frame_range=None):
     """ Run the matched-filter detection on an image handle.
 
     Arguments:
@@ -3212,6 +3262,9 @@ def detectMatchedFilter(img_handle, config, mask=None, dark=None, flat_struct=No
         reference_dir: [str] Directory of the clear-sky reference of the camera, which is used and updated (see
             skyQuality). None by default (only this input is used).
         input_name: [str] Name of the input (its path), for the log of the conditions. Empty by default.
+        frame_range: [tuple] (first frame, end frame) of a segment of the input to search (see
+            detectMatchedFilterSegments), with the stars of its chunks. The sky reference and the log are then not
+            updated. None by default (the whole input).
 
     Return:
         [list] Detections as [rho, theta, centroids], or (detections, detector) with return_detector. The
@@ -3234,9 +3287,10 @@ def detectMatchedFilter(img_handle, config, mask=None, dark=None, flat_struct=No
         numba.set_num_threads(min(config.mf_threads, numba.config.NUMBA_NUM_THREADS))
 
     # Detect and measure the objects
-    detector = MatchedFilterDetector(img_handle, config, mask=mask, dark=dark, flat_struct=flat_struct)
+    detector = MatchedFilterDetector(img_handle, config, mask=mask, dark=dark, flat_struct=flat_struct,
+                                     frame_range=frame_range)
     detector.sky_map = skyQuality(img_handle, config, star_list, platepar, reference_dir=reference_dir,
-                                  input_name=input_name)
+                                  input_name=input_name, frame_range=frame_range, update=(frame_range is None))
     detections = detector.run()
 
     # The measurements on clouded sky were removed in the run
@@ -3259,6 +3313,256 @@ def detectMatchedFilter(img_handle, config, mask=None, dark=None, flat_struct=No
                 n_stars, factor))
 
     return (detections, detector) if return_detector else detections
+
+
+
+def stitchSegments(segment_detections, cuts, overlaps, detector, tolerance):
+    """ Join the detections of neighbouring segments of an input. Every overlap of two segments is split at its
+        middle: the frames before it belong to the first segment, the ones after it to the second one, and the
+        detections of a segment which lie entirely in the half of the other one are left to the other one (which has
+        the same frames). An object which crosses the middle is found in both segments: its detections are joined
+        there (the part before it from the first segment, the part after it from the second one). The detections
+        which cross it and are found in only one segment are kept whole.
+
+    Arguments:
+        segment_detections: [list] Detections of every segment, as [rho, theta, centroids].
+        cuts: [list] Frame at the middle of the overlap of every pair of neighbouring segments.
+        overlaps: [list] (first frame, end frame) of the overlap of every pair of neighbouring segments.
+        detector: [MatchedFilterDetector] A detector of the input, for the polar lines of the joined detections.
+        tolerance: [float] Largest median distance (unbinned px) between the two detections of an object in the
+            overlap.
+
+    Return:
+        [list] Detections of the whole input.
+    """
+
+    def _positionsAt(cent, frames):
+        """ The positions of a detection at the given frames, interpolated between its centroids. """
+
+        order = np.argsort(cent[:, 0])
+        f, x, y = cent[order, 0], cent[order, 1], cent[order, 2]
+        return np.interp(frames, f, x), np.interp(frames, f, y)
+
+    detections = list(segment_detections[0]) if segment_detections else []
+    for k in range(1, len(segment_detections)):
+        cut, (ov_first, ov_end) = cuts[k - 1], overlaps[k - 1]
+
+        # The detections of the previous segment entirely after the middle of the overlap, and the ones of this
+        #   segment entirely before it, belong to the other segment
+        detections = [det for det in detections if det[2][:, 0].min() < cut]
+        segment = [det for det in segment_detections[k] if det[2][:, 0].max() >= cut]
+
+        # The detections of the previous segment which reach into the overlap can be joined
+        candidates = [i for i, det in enumerate(detections) if det[2][:, 0].max() >= ov_first]
+        used = set()
+        for det in segment:
+            cent = det[2]
+
+            # The centroids of this detection in the overlap, compared with the positions of every candidate at
+            #   their frames (within the frames of the candidate)
+            best, best_dist = None, tolerance
+            in_overlap = cent[(cent[:, 0] >= ov_first) & (cent[:, 0] < ov_end)]
+            for i in candidates:
+                if i in used:
+                    continue
+                other = detections[i][2]
+                common = in_overlap[(in_overlap[:, 0] >= other[:, 0].min()) & (in_overlap[:, 0] <= other[:, 0].max())]
+                if len(common) < 3:
+                    continue
+                x, y = _positionsAt(other, common[:, 0])
+                dist = float(np.median(np.hypot(common[:, 1] - x, common[:, 2] - y)))
+                if dist <= best_dist:
+                    best, best_dist = i, dist
+
+            # Not found in the previous segment: kept whole
+            if best is None:
+                detections.append(det)
+                continue
+
+            # The same object: the centroids before the cut from the previous segment, the others from this one
+            other = detections[best][2]
+            joined = np.vstack([other[other[:, 0] < cut], cent[cent[:, 0] >= cut]])
+            if len(joined) < 2:
+                joined = other if len(other) >= len(cent) else cent
+            detections[best] = [*detector.polarLine(joined), joined]
+            used.add(best)
+
+    detections.sort(key=lambda det: det[2][0, 0])
+
+    return detections
+
+
+
+class SegmentedRun(object):
+    def __init__(self, img_handle, ranges, detectors, cuts, sky_map, buffer, timing):
+        """ The matched filter of an input in segments (see detectMatchedFilterSegments), with the summary of the
+            whole input in the form of MatchedFilterDetector.summary.
+
+        Arguments:
+            img_handle: [FrameInterface] The input.
+            ranges: [list] (first frame, end frame) of every segment.
+            detectors: [list] The detector of every segment, None where it was not searched.
+            cuts: [list] Frames where the detections of neighbouring segments were joined.
+            sky_map: [SkyQualityMap] Sky quality of the whole input, or None.
+            buffer: [SegmentBuffer] The frames in memory.
+            timing: [dict] Time of the steps outside the detectors (s).
+        """
+
+        self.img_handle = img_handle
+        self.ranges = ranges
+        self.detectors = detectors
+        self.cuts = cuts
+        self.sky_map = sky_map
+        self.buffer = buffer
+        self.timing = timing
+
+
+    def summary(self):
+        """ Summary of the input, from the summaries of its segments. Counts of the detections removed by
+            clouds are taken from the segment which the time belongs to (each overlap is split at its middle). """
+
+        bounds = [0] + list(self.cuts) + [self.img_handle.total_frames]
+        run = [(k, det) for k, det in enumerate(self.detectors) if det is not None]
+
+        # The detections removed by clouds in the frames which belong to every segment
+        removed = []
+        for k, det in run:
+            removed += [f for f in det.cloud_removed_frames if bounds[k] <= f < bounds[k + 1]]
+
+        # The time of every step summed over the segments, with the steps outside them
+        timing = collections.defaultdict(float)
+        for _, det in run:
+            for key, value in det.timing.items():
+                timing[key] += value
+        for key, value in self.timing.items():
+            timing[key] += value
+
+        first = run[0][1] if run else None
+        corrections = [det.aperture_correction for _, det in run if det.aperture_correction is not None]
+
+        return {
+            'aperture_correction': float(np.median(corrections)) if corrections else None,
+            'clear_sky_fraction': (round(float(np.mean(self.sky_map.clear)), 3) if self.sky_map is not None
+                                   else None),
+            'cloud_frames_removed': int(sum(det.cloud_rows_removed for _, det in run)),
+            'cloud_detections_removed': len(removed),
+            'cloud_removed_utc': first.frameTimes(sorted(removed)) if first is not None else [],
+            'tracks_dropped': int(sum(det.tracks_dropped for _, det in run)),
+            'total_frames': int(self.img_handle.total_frames),
+            'input_end_utc': first.inputEnd() if first is not None else None,
+            'psf_sigma': next((det.psf_sigma for _, det in run if det.psf_sigma is not None), None),
+            'gpu': any(bool(det.opts.use_gpu) for _, det in run),
+            'timing_s': {k: round(v, 2) for k, v in timing.items()},
+            'tracks': [track for _, det in run for track in det.summary()['tracks']],
+            'segments': [{'first_frame': int(f), 'end_frame': int(e), 'searched': det is not None}
+                         for (f, e), det in zip(self.ranges, self.detectors)],
+            'frames_read': int(self.buffer.frames_read),
+            'frames_read_outside': int(self.buffer.frames_outside),
+        }
+
+
+
+def detectMatchedFilterSegments(img_handle, config, segment_frames, mask=None, dark=None, flat_struct=None,
+                                platepar=None, reference_dir=None, input_name='', chunk_callback=None):
+    """ Extract the stars and run the matched filter on an input which is read only once, in segments held in
+        memory (see RMS.Formats.FrameBuffer). Every segment is searched as an input of its own; neighbouring
+        segments share mf_segment_overlap frames, and the detections of an object found in both are joined (see
+        stitchSegments). The sky reference and the log of the conditions are updated once, for the whole input.
+
+    Arguments:
+        img_handle: [FrameInterface] Frame-based input opened with detection=True.
+        config: [Config] Configuration object.
+        segment_frames: [int] Number of frames of a segment (see FrameBuffer.segmentFrames).
+
+    Keyword arguments:
+        mask, dark, flat_struct: Calibration, not binned (see detectMatchedFilter). None by default.
+        platepar: [Platepar] Platepar of the camera (see detectMatchedFilter). None by default.
+        reference_dir: [str] Directory of the clear-sky reference of the camera. None by default.
+        input_name: [str] Name of the input (its path), for the log of the conditions. Empty by default.
+        chunk_callback: [callable] Called for every chunk of the star extraction (e.g. to save its images), see
+            extractStarsImgHandle. None by default.
+
+    Return:
+        (star_list, detections, run, buffer): [tuple] The stars of all chunks, the detections, the run of the
+            segments (SegmentedRun, with the summary) and the buffer with the frames of the last segment.
+    """
+
+    t0 = time()
+    chunk_frames = img_handle.chunk_frames
+    unit = segmentUnit(config, img_handle)
+
+    # The segments, which share the overlap (in whole blocks)
+    overlap = -(-int(config.mf_segment_overlap)//unit)*unit
+    ranges = segmentRanges(img_handle.total_frames, segment_frames, overlap, unit)
+    buffer = SegmentBuffer(img_handle, max(end - first for first, end in ranges))
+    log.info('Matched filter: {:d} segments of up to {:d} frames ({:.1f} min), overlap {:d} frames'.format(
+        len(ranges), segment_frames, segment_frames/img_handle.fps/60.0, overlap))
+
+    timing = collections.defaultdict(float)
+    star_list, detectors, segment_detections = [], [], []
+    done_chunks = 0
+    for k, (first, end) in enumerate(ranges):
+
+        # Read the new frames of the segment
+        t1 = time()
+        buffer.load(first, end)
+        timing['read_segments'] += time() - t1
+
+        # The stars of the whole chunks which were not extracted yet (the overlap was in the previous segment;
+        #   the last segment goes to the last chunk of the input)
+        t1 = time()
+        end_chunk = img_handle.total_fr_chunks if (k == len(ranges) - 1) else end//chunk_frames
+        if end_chunk > done_chunks:
+            star_list += extractStarsFrameInterface(buffer, config, chunk_frames=chunk_frames,
+                flat_struct=flat_struct, dark=dark, mask=mask, save_calstars=False, chunk_callback=chunk_callback,
+                chunk_range=(done_chunks, end_chunk))
+            done_chunks = end_chunk
+        timing['stars'] += time() - t1
+
+        # The stars of the chunks of this segment
+        firsts = chunkFirstFrames(star_list, buffer, frame_range=(first, end)) if star_list else []
+        segment_stars = [entry for entry, f in zip(star_list, firsts) if f >= 0]
+
+        # Like the whole input, a segment without enough stars (clouds, twilight) is not searched
+        max_stars = max([len(entry[1]) for entry in segment_stars] + [0])
+        if max_stars < config.ff_min_stars:
+            log.info('Matched filter: segment {:d} ({:d}-{:d}) not searched, {:d} < {:d} stars'.format(
+                k + 1, first, end, max_stars, config.ff_min_stars))
+            detectors.append(None)
+            segment_detections.append([])
+            continue
+
+        detections, detector = detectMatchedFilter(buffer, config, mask=mask, dark=dark, flat_struct=flat_struct,
+                                                   star_list=segment_stars, return_detector=True,
+                                                   platepar=platepar, reference_dir=reference_dir,
+                                                   input_name=input_name, frame_range=(first, end))
+        detectors.append(detector)
+        segment_detections.append(detections)
+        log.info('Matched filter: segment {:d}/{:d} ({:d}-{:d}): {:d} detections'.format(k + 1, len(ranges), first,
+                                                                                       end, len(detections)))
+
+    # Join the detections at the middle of every overlap
+    cuts = [(ranges[k + 1][0] + ranges[k][1])//2 for k in range(len(ranges) - 1)]
+    overlaps = [(ranges[k + 1][0], ranges[k][1]) for k in range(len(ranges) - 1)]
+    searched = [det for det in detectors if (det is not None) and (det.psf_sigma is not None)]
+    detections = []
+    if searched:
+        tolerance = 3*2.355*searched[0].psf_sigma*searched[0].det_bin
+        detections = stitchSegments(segment_detections, cuts, overlaps, searched[0], tolerance)
+        detections = searched[0].joinDetections(detections)
+
+    # The sky reference and the log of the conditions are updated once, with the stars of the whole input
+    t1 = time()
+    sky_map = skyQuality(img_handle, config, star_list, platepar, reference_dir=reference_dir,
+                         input_name=input_name) if searched else None
+    timing['sky_input'] += time() - t1
+
+    timing['segments_total'] = time() - t0
+    log.info('Matched filter: {:d} detections in {:d} segments, {:d} frames read once ({:d} outside the '
+             'segments), {:.1f} min'.format(len(detections), len(ranges), buffer.frames_read, buffer.frames_outside,
+                                            timing['segments_total']/60.0))
+
+    return star_list, detections, SegmentedRun(img_handle, ranges, detectors, cuts, sky_map, buffer, timing), buffer
 
 
 
