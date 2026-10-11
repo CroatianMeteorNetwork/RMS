@@ -1695,3 +1695,29 @@ def test_calibration_status_of_the_detections(tmp_path, calibration, status):
 
     entries = FTPdetectinfo.readFTPdetectinfo(str(tmp_path), 'FTPdetectinfo_test.txt')
     assert [meas[0] for meas in entries[0][11]] == [status, status]
+
+
+def test_conditions_until_the_end_of_the_input_at_the_beginning_of_the_night(tmp_path):
+    """ The last chunk of an input which began before the night is read if the end of the input is in the night,
+        also when the chunk itself ended before it.
+    """
+
+    from RMS.Routines.SkyQuality import CONDITION_COLUMNS
+
+    config = _config()
+    night_start = datetime.datetime(2025, 12, 25, 1, 0, 0)
+    log_path = tmp_path/'sky_conditions_{:s}_20251225.csv'.format(config.stationID)
+    with open(str(log_path), 'w') as f:
+        f.write(','.join(CONDITION_COLUMNS) + ',processed_utc\n')
+        for seconds in (-14, -10, -6):
+            t = night_start + datetime.timedelta(seconds=seconds)
+            f.write('{:s},/data/a.vid,500,300,1.000,0.020,0.950,2025-12-25T04:00:00\n'.format(
+                t.strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3]))
+
+    night_end = night_start + datetime.timedelta(hours=10)
+    ends = {'/data/a.vid': night_start + datetime.timedelta(seconds=0.5)}
+    rows = mnr.nightConditionRows(str(tmp_path), config, ['/data/a.vid'], {'/data/a.vid': 4.0}, night_start,
+                                  night_end, input_ends=ends)
+    assert [row['time'] for row in rows] == [night_start - datetime.timedelta(seconds=6)]
+    assert mnr.nightConditionRows(str(tmp_path), config, ['/data/a.vid'], {'/data/a.vid': 4.0}, night_start,
+                                  night_end) == []

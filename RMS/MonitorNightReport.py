@@ -1094,7 +1094,7 @@ def nightSkyResults(file_results, config, night_start, night_end):
     return not_searched, removed, measured, chunk_seconds, input_ends
 
 
-def nightConditionRows(output_dir, config, measured, chunk_seconds, night_start, night_end):
+def nightConditionRows(output_dir, config, measured, chunk_seconds, night_start, night_end, input_ends=None):
     """ Read the conditions of the chunks of the night of the files whose sky was measured, from the chunk which
         overlaps the beginning of the night to its end.
 
@@ -1106,13 +1106,18 @@ def nightConditionRows(output_dir, config, measured, chunk_seconds, night_start,
         night_start: [datetime] Beginning of the night (UTC).
         night_end: [datetime] End of the night (UTC).
 
+    Keyword arguments:
+        input_ends: [dict] End of the files (datetime, UTC), see nightSkyResults: the last chunk of a file lasts
+            until it (as in SkyQuality.nightTimeline). None by default.
+
     Return:
         rows: [list] Conditions of the chunks, see SkyQuality.readConditions.
     """
 
     from RMS.Routines.SkyQuality import readConditions
 
-    margin = datetime.timedelta(seconds=max(list(chunk_seconds.values()) + [0]))
+    # The chunks are read from two chunks before the night, as the last chunk of a file can last almost that long
+    margin = 2*datetime.timedelta(seconds=max(list(chunk_seconds.values()) + [0]))
     rows = readConditions(output_dir, config.stationID, inputs=set(measured), start=night_start - margin,
                           end=night_end)
 
@@ -1124,9 +1129,19 @@ def nightConditionRows(output_dir, config, measured, chunk_seconds, night_start,
                                             start=night_start - margin, end=night_end),
                       key=lambda row: (row['time'], row['input']))
 
-    # Drop the chunks which ended before the night
-    return [row for row in rows if row['time'] + datetime.timedelta(seconds=chunk_seconds.get(row['input'], 0))
-            > night_start]
+    # Drop the chunks which ended before the night. The last chunk of a file lasts until the end of the file, if
+    #   that is after its beginning and less than a chunk after its own end (see SkyQuality.nightTimeline)
+    input_ends = input_ends or {}
+    last_rows = {row['input']: i for i, row in enumerate(rows)}
+
+    def _rowEnd(i, row):
+        step = datetime.timedelta(seconds=chunk_seconds.get(row['input'], 0))
+        end = input_ends.get(row['input'])
+        if (last_rows[row['input']] == i) and (end is not None) and (row['time'] < end <= row['time'] + 2*step):
+            return end
+        return row['time'] + step
+
+    return [row for i, row in enumerate(rows) if _rowEnd(i, row) > night_start]
 
 
 def plotNightSkyConditions(night_dir, night_name, output_dir, results, config, ftpdetectinfo_path):
@@ -1168,7 +1183,8 @@ def plotNightSkyConditions(night_dir, night_name, output_dir, results, config, f
                                                                                  night_end)
 
     # Read the conditions of the files whose sky was measured
-    rows = nightConditionRows(output_dir, config, measured, chunk_seconds, night_start, night_end)
+    rows = nightConditionRows(output_dir, config, measured, chunk_seconds, night_start, night_end,
+                              input_ends=input_ends)
 
     if (not rows) and (not not_searched):
         log.info("No sky conditions for night {:s}".format(night_name))

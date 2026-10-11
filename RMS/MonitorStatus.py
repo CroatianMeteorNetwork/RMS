@@ -1051,7 +1051,7 @@ class MonitorStatus(object):
         not_searched, removed, measured, chunk_seconds, input_ends = nightSkyResults(file_results, self.config,
                                                                                     night_start, night_end)
         # The conditions of the chunks of the measured files, and the time line of the states of the sky
-        rows = self._conditionRows(measured, chunk_seconds, night_start, night_end)
+        rows = self._conditionRows(measured, chunk_seconds, night_start, night_end, input_ends)
         timeline = nightTimeline(rows, not_searched=not_searched, chunk_seconds=chunk_seconds, input_ends=input_ends,
                                  bounds=(night_start, night_end))
 
@@ -1156,7 +1156,7 @@ class MonitorStatus(object):
         return night, sky
 
 
-    def _conditionRows(self, measured, chunk_seconds, night_start, night_end):
+    def _conditionRows(self, measured, chunk_seconds, night_start, night_end, input_ends=None):
         """ The conditions of the chunks of the night, read again only when the log changed. """
 
         # The log changes when a file was processed, its files are named by the UTC date
@@ -1168,11 +1168,12 @@ class MonitorStatus(object):
                     stamps.append((name, st.st_mtime, st.st_size))
                 except OSError:
                     pass
-        key = (tuple(stamps), tuple(sorted(measured)), night_start)
+        key = (tuple(stamps), tuple(sorted(measured)), night_start, tuple(sorted((input_ends or {}).items())))
 
-        # Read the conditions again only when the log or the measured files changed
+        # Read the conditions again only when the log, the measured files or their ends changed
         if self.conditions_cache[0] != key:
-            rows = nightConditionRows(self.output_dir, self.config, measured, chunk_seconds, night_start, night_end)
+            rows = nightConditionRows(self.output_dir, self.config, measured, chunk_seconds, night_start, night_end,
+                                      input_ends=input_ends)
             self.conditions_cache = (key, rows)
 
         # The conditions are up to date for this status
