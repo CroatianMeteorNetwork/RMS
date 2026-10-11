@@ -1453,3 +1453,35 @@ def test_calibration_of_a_file_processed_again_after_a_failed_sky_scan(tmp_path,
 
     status.build(_state())
     assert status.build(_state())['calibration']['status'] == 'unknown'
+
+
+@pytest.mark.parametrize('replace', [True, False])
+def test_summary_of_the_matched_filter_when_it_is_off(tmp_path, replace):
+    """ The summary of an earlier run of the matched filter is not used when the matched filter is off (e.g. the
+        file was processed again with the normal detection only).
+    """
+
+    config = _matchedFilterConfig()
+    config.mf_replace_detection = replace
+    results_path = os.path.join(str(tmp_path), _searchedFile(str(tmp_path), config, 'file1'))
+    if not replace:
+        os.makedirs(os.path.join(results_path, mnr.MF_DIR_NAME))
+        shutil.copy(os.path.join(results_path, mnr.MF_DONE_NAME), os.path.join(results_path, mnr.MF_DIR_NAME))
+    assert mnr.readFileSkyResults(results_path, config)['searched']
+
+    config.mf_enable = False
+    file_result = mnr.readFileSkyResults(results_path, config)
+    assert (file_result['searched'], file_result['measured'], file_result['detections']) == (False, False, 0)
+    assert file_result['star_chunks']
+
+
+def test_progress_of_files_processed_again(tmp_path, now):
+    """ A done file which is processed again (e.g. with --force) counts as open, not also as done. """
+
+    status, config = _status(tmp_path)
+    _searchedFile(str(tmp_path/'output'), config, 'file1')
+    _searchedFile(str(tmp_path/'output'), config, 'file2', start_s=62)
+    _, mtime = _inputFile(tmp_path, 'file1.vid', 3)
+
+    progress = status.build(_state(queued=[('/data/file1.vid', mtime)]))['processing']['progress']
+    assert (progress['done_tonight'], progress['queued'], progress['percent_done']) == (1, 1, 50.0)

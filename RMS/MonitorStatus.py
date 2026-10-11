@@ -945,7 +945,11 @@ class MonitorStatus(object):
                 open_nights.append(('in_progress', None))
         open_nights += [('queued', self._nightOf(path, mtime)) for path, mtime in queued]
         open_nights += [('settling', self._nightOf(path, mtime)) for path, mtime in state.get('settling', [])]
-        n_done = len(files)
+
+        # A done file which is processed again (e.g. with --force) counts as open only
+        open_inputs = {os.path.abspath(file_path) for _, file_path, _ in state.get('in_progress', [])}
+        open_inputs |= {os.path.abspath(path) for path, _ in queued}
+        n_done = sum(1 for _, info, _, _ in files if info.get('input_file') not in open_inputs)
         n_running, n_waiting, n_writing = [sum(1 for kind, night in open_nights
                                                if (kind == wanted) and (night == night_name))
                                            for wanted in ('in_progress', 'queued', 'settling')]

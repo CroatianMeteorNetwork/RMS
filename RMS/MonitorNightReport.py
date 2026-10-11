@@ -932,6 +932,10 @@ def readFileSkyResults(results_path, config):
     file_result = {'star_chunks': star_list, 'chunk_s': chunk_s, 'summary': None, 'searched': False,
                    'measured': False, 'removed_times': None, 'removed_count': 0, 'detections': 0}
 
+    # Without the matched filter only the stars are known (a summary of an earlier run is not used)
+    if not config.mf_enable:
+        return file_result
+
     # Read the summary of the matched filter of the current mode (it is next to the results when it replaces the
     #   normal detection, otherwise in its subdirectory). A searched file has the number of its frames
     summary_path = os.path.join(results_path, MF_DONE_NAME) if config.mf_replace_detection \
