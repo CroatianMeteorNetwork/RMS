@@ -1096,8 +1096,14 @@ class MonitorStatus(object):
         # The state at the end of the latest data, from the time line (the worst of overlapping files)
         latest_state, _, latest_end = segments[-1]
 
-        # The sky now is not known if newer files were not measured (e.g. with the normal detection)
-        if latest_chunks and (latest_time >= latest_end):
+        # The sky now is not known if data which was not measured (e.g. with the normal detection) ends after the
+        #   time line (the measured files and the ones with too few stars are on it)
+        unmeasured_ends = [file_result['star_chunks'][-1][0]
+                           + datetime.timedelta(seconds=file_result['chunk_s'] or 0)
+                           for _, _, file_result, _ in files
+                           if file_result['star_chunks'] and not file_result['measured']
+                           and not _tooFewStars(file_result, self.config)]
+        if unmeasured_ends and (max(unmeasured_ends) > latest_end):
             return night, sky
 
         sky['state'] = {'partly': 'partly_clouded', 'not_searched': 'too_few_stars'}.get(latest_state, latest_state)

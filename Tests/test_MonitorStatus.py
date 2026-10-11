@@ -1606,3 +1606,23 @@ def test_summary_of_the_matched_filter_which_cant_be_opened(tmp_path, now):
         assert 'STATUS_INCOMPLETE' not in [fault['code'] for fault in built['faults']]
     finally:
         os.chmod(summary_path, 0o644)
+
+
+def test_sky_with_a_newer_file_which_was_not_measured(tmp_path, now):
+    """ A file which was not measured but had enough stars, which ends after the measured data (here it begins
+        1 s later), makes the sky now unknown.
+    """
+
+    status, config = _status(tmp_path)
+    output_dir = str(tmp_path/'output')
+    _searchedFile(output_dir, config, 'file1', clear=1.0)
+
+    # The newer file has enough stars, but its sky was not measured (e.g. the matched filter failed)
+    results_path = os.path.join(output_dir, _makeResults(output_dir, config, 'file2', n_chunks=12, start_s=1))
+    star_list, _ = CALSTARS.readCALSTARS(results_path, 'CALSTARS_file2.txt')
+    star_list = [[ff_name, stars*(config.ff_min_stars + 5)] for ff_name, stars in star_list]
+    CALSTARS.writeCALSTARS(star_list, results_path, 'CALSTARS_file2.txt', 'XX0001', 48, 64, chunk_frames=128,
+                           fps=25.0)
+
+    sky = status.build(_state())['sky']
+    assert (sky['state'], sky['observable']) == ('no_data', None)
