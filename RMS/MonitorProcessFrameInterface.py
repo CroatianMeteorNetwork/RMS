@@ -821,10 +821,13 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
             #   kernels checks for a CUDA GPU, which initializes CUDA. Imported at the top, CUDA would be
             #   initialized in the main monitor process, and a CUDA context can't be used in the processes forked
             #   from it (the workers)
-            from RMS.MatchedFilterDetection import MATCHED_FILTER_DIR, detectMatchedFilter, saveSummary
+            from RMS.MatchedFilterDetection import DONE_NAME, MATCHED_FILTER_DIR, detectMatchedFilter, saveSummary
 
-            # Results of an earlier processing with the separate matched-filter pass would be merged again
+            # Results of an earlier processing with the separate matched-filter pass would be merged again, and the
+            #   summary of an earlier processing is removed, so a processing which doesn't finish leaves none
             shutil.rmtree(os.path.join(results_dir, MATCHED_FILTER_DIR), ignore_errors=True)
+            if os.path.isfile(os.path.join(results_dir, DONE_NAME)):
+                os.remove(os.path.join(results_dir, DONE_NAME))
 
             # Star extraction (and the image pairs), then the matched filter instead of the normal detection
             star_list = extractStarsFrameInterface(img_handle, config, chunk_frames=chunk_frames,
@@ -840,7 +843,7 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
                                                                return_detector=True,
                                                                platepar=readPlatepar(results_platepar_path),
                                                                reference_dir=output_dir,
-                                                               input_name=os.path.basename(file_path))
+                                                               input_name=os.path.abspath(file_path))
             else:
                 proc_log.info("Not enough stars for the matched filter: {:d} < {:d}".format(max_stars,
                                                                                           config.ff_min_stars))
@@ -910,7 +913,7 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
                                                                  return_detector=True,
                                                                  platepar=readPlatepar(results_platepar_path),
                                                                  reference_dir=output_dir,
-                                                                 input_name=os.path.basename(file_path))
+                                                                 input_name=os.path.abspath(file_path))
                 # Save the FTPdetectinfo and CALSTARS of the matched filter in its subdirectory, assigned to the
                 #   same chunk images as the normal detections, and recalibrate them with the platepar of the
                 #   results

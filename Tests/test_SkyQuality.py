@@ -614,3 +614,279 @@ def test_catalog_near_field():
     assert inside.sum() > 100
     assert np.all(near[inside])
     assert near.mean() < 0.5
+
+
+def _writeConditions(path, rows):
+    """ Write a log of the conditions with the given rows (chunk_utc, input, clear_fraction, processed_utc). """
+
+    with open(path, 'w') as f:
+        f.write('# Sky conditions\n')
+        f.write(','.join(sq.CONDITION_COLUMNS) + ',processed_utc\n')
+        for chunk_utc, input_name, clear, processed in rows:
+            f.write('{:s},{:s},500,300,{:.3f},0.010,0.950,{:s}\n'.format(chunk_utc, input_name, clear, processed))
+
+
+def test_read_conditions(tmp_path):
+    """ The conditions of the given inputs are read from the logs of the dates of the given time: the rows of the
+        newest processing of every input (an input processed again has newer rows, and the rows of its earlier
+        processing are not taken even for chunks the newer one doesn't have), sorted by time.
+    """
+
+    _writeConditions(tmp_path/'sky_conditions_XX0001_20251225.csv', [
+        ('2025-12-25T23:59:54.000', '/data/a.vid', 1.0, '2025-12-26T01:00:00'),
+        ('2025-12-25T23:59:58.000', '/data/a.vid', 1.0, '2025-12-26T01:00:00'),
+        ('2025-12-25T23:59:58.000', '/data/a.vid', 0.5, '2025-12-26T02:00:00'),
+        ('2025-12-25T23:59:54.000', '/data/b.vid', 0.0, '2025-12-26T01:00:00')])
+    _writeConditions(tmp_path/'sky_conditions_XX0001_20251226.csv', [
+        ('2025-12-26T00:00:02.000', '/data/a.vid', 1.0, '2025-12-26T02:00:00')])
+    _writeConditions(tmp_path/'sky_conditions_XX0001_20251227.csv', [
+        ('2025-12-27T00:00:02.000', '/data/a.vid', 1.0, '2025-12-28T02:00:00')])
+    _writeConditions(tmp_path/'sky_conditions_XX0002_20251226.csv', [
+        ('2025-12-26T00:00:06.000', '/data/a.vid', 1.0, '2025-12-26T01:00:00')])
+
+    start, end = datetime.datetime(2025, 12, 25, 12, 0, 0), datetime.datetime(2025, 12, 26, 12, 0, 0)
+    rows = sq.readConditions(str(tmp_path), 'XX0001', inputs={'/data/a.vid'}, start=start, end=end)
+    assert [row['chunk_utc'] for row in rows] == ['2025-12-25T23:59:58.000', '2025-12-26T00:00:02.000']
+    assert rows[0]['clear_fraction'] == 0.5
+    assert rows[0]['time'] == datetime.datetime(2025, 12, 25, 23, 59, 58)
+
+    # All inputs of the camera in the time
+    assert len(sq.readConditions(str(tmp_path), 'XX0001', start=start, end=end)) == 3
+
+
+def test_conditions_log_quotes_the_input(tmp_path):
+    """ The input is logged by its path, which is quoted if it has a comma. """
+
+    reference = SkyReference(str(tmp_path), 'XX0001')
+    sky_map = _skyMap(reference=reference)
+    sky_map.input_name = '/data/night, 1/a.vid'
+    sky_map.updateReference()
+
+    rows = sq.readConditions(str(tmp_path), 'XX0001')
+    assert len(rows) == N_CHUNKS and all(row['input'] == '/data/night, 1/a.vid' for row in rows)
+
+
+def test_plot_sky_conditions(tmp_path):
+    """ The plot of the conditions is saved, and the time is split into clear, partly clouded, clouded and not
+        searched.
+    """
+
+    begin = datetime.datetime(2025, 12, 25, 22, 0, 0)
+    rows = []
+    for i in range(100):
+        clear = 1.0 if i < 60 else (0.4 if i < 80 else 0.0)
+        rows.append({'time': begin + datetime.timedelta(seconds=4*i), 'clear_fraction': clear,
+                     'transparency_mag': 0.02 if clear == 1.0 else 0.3, 'reliable_seen': clear,
+                     'stars': 500*clear + 10, 'matched': 300*clear + 5})
+
+    # An input which was not searched for 100 s after a gap
+    ns_times = [begin + datetime.timedelta(seconds=500 + 5*k) for k in range(20)]
+    not_searched = [(ns_times[0], ns_times[-1] + datetime.timedelta(seconds=5), ns_times, [20]*20)]
+
+    plot_path = str(tmp_path/'conditions.png')
+    summary = sq.plotSkyConditions(rows, plot_path, 'Test', not_searched=not_searched,
+                                   detection_times=[begin + datetime.timedelta(seconds=30)], removed_detections=2,
+                                   cloud_max_offset=0.15, min_matched=30)
+
+    assert os.path.getsize(plot_path) > 10000
+    assert summary['observed_h'] == pytest.approx(500/3600.0)
+    assert summary['clear'] == pytest.approx(240/500.0)
+    assert summary['partly'] == pytest.approx(80/500.0)
+    assert summary['clouded'] == pytest.approx(80/500.0)
+    assert summary['not_searched'] == pytest.approx(100/500.0)
+    assert summary['median_dimming'] == pytest.approx(0.02)
+
+
+def test_plot_sky_conditions_inputs_at_the_same_times(tmp_path):
+    """ The chunks of two inputs at the same times (e.g. a recording which was copied) don't break the plot. """
+
+    begin = datetime.datetime(2025, 12, 25, 22, 0, 0)
+    rows = [{'time': begin + datetime.timedelta(seconds=4*i), 'input': name, 'clear_fraction': 1.0,
+             'transparency_mag': 0.0, 'reliable_seen': 1.0, 'stars': 500, 'matched': 300}
+            for i in range(50) for name in ('a.vid', 'b.vid')]
+    rows.sort(key=lambda row: row['time'])
+
+    summary = sq.plotSkyConditions(rows, str(tmp_path/'conditions.png'), 'Test')
+    assert summary['clear'] == pytest.approx(1.0)
+    assert summary['observed_h'] == pytest.approx(200/3600.0)
+
+
+def test_plot_sky_conditions_overlapping_inputs(tmp_path):
+    """ The time of overlapping inputs is counted once, and the worse state of the sky holds where they
+        overlap. The running median of the dimming is over a minute of every input.
+    """
+
+    begin = datetime.datetime(2025, 12, 25, 22, 0, 0)
+    rows = []
+    for name, offset, clear in [('a.vid', 0, 1.0), ('b.vid', 200, 0.0)]:
+        rows += [{'time': begin + datetime.timedelta(seconds=offset + 4*i), 'input': name, 'clear_fraction': clear,
+                  'transparency_mag': 0.0, 'reliable_seen': 1.0, 'stars': 500, 'matched': 300} for i in range(100)]
+    rows.sort(key=lambda row: row['time'])
+
+    # a.vid from 0 to 400 s, b.vid (clouded) from 200 to 600 s
+    summary = sq.plotSkyConditions(rows, str(tmp_path/'conditions.png'), 'Test')
+    assert summary['observed_h'] == pytest.approx(600/3600.0)
+    assert summary['clear'] == pytest.approx(200/600.0)
+    assert summary['clouded'] == pytest.approx(400/600.0)
+
+
+def test_running_median():
+    """ The running median is over the time window, of the finite values only. """
+
+    times = [0, 10, 20, 30, 100]
+    values = [1.0, 2.0, np.nan, 4.0, 5.0]
+    assert np.allclose(sq._runningMedian(times, values, 15.0), [1.5, 1.5, 3.0, 4.0, 5.0])
+    assert np.isnan(sq._runningMedian([0], [np.nan], 30.0)[0])
+
+
+def test_plot_sky_conditions_without_conditions(tmp_path):
+    """ A night of inputs which were all not searched (e.g. clouded all night) has a plot of their stars. """
+
+    begin = datetime.datetime(2025, 12, 25, 22, 0, 0)
+    ns_times = [begin + datetime.timedelta(seconds=5*k) for k in range(20)]
+    not_searched = [(ns_times[0], ns_times[-1] + datetime.timedelta(seconds=5), ns_times, [10]*20)]
+
+    summary = sq.plotSkyConditions([], str(tmp_path/'conditions.png'), 'Test', not_searched=not_searched,
+                                   cloud_max_offset=0.15, min_matched=30)
+    assert os.path.isfile(str(tmp_path/'conditions.png'))
+    assert summary['not_searched'] == pytest.approx(1.0)
+
+
+def test_read_conditions_skips_rows_which_cant_be_read(tmp_path):
+    """ A row which was not written completely or has values which can't be read is skipped, and a log with bytes
+        which are not UTF-8 is read.
+    """
+
+    _writeConditions(tmp_path/'sky_conditions_XX0001_20251225.csv', [
+        ('2025-12-25T23:59:50.000', 'a.vid', 1.0, '2025-12-26T01:00:00')])
+    with open(str(tmp_path/'sky_conditions_XX0001_20251225.csv'), 'a') as f:
+        f.write('2025-12-25T23:59:54.000,a.vid,500,300,1.000,0.0\n')
+        f.write('2025-12-25T23:59:58.000,a.vid,500,300,x,0.010,0.950,2025-12-26T01:00:00\n')
+        f.write('not a time,a.vid,500,300,1.000,0.010,0.950,2025-12-26T01:00:00\n')
+        f.write(','.join(sq.CONDITION_COLUMNS) + ',processed_utc\n')
+    with open(str(tmp_path/'sky_conditions_XX0001_20251225.csv'), 'ab') as f:
+        f.write(b'2025-12-25T23:59:59.000,a\xff.vid,500,300,1.000,0.010,0.950,2025-12-26T01:00:00\n')
+
+    rows = sq.readConditions(str(tmp_path), 'XX0001', inputs={'a.vid'})
+    assert [row['chunk_utc'] for row in rows] == ['2025-12-25T23:59:50.000']
+
+
+def test_plot_sky_conditions_inputs_of_different_cadence(tmp_path):
+    """ The time of the chunks of every input is the spacing of its own chunks. """
+
+    begin = datetime.datetime(2025, 12, 25, 22, 0, 0)
+    rows = [{'time': begin + datetime.timedelta(seconds=4*i), 'input': 'a.vid', 'clear_fraction': 1.0,
+             'transparency_mag': 0.0, 'reliable_seen': 1.0, 'stars': 500, 'matched': 300} for i in range(100)]
+    rows += [{'time': begin + datetime.timedelta(seconds=1000 + 20*i), 'input': 'b.vid', 'clear_fraction': 0.0,
+              'transparency_mag': 0.0, 'reliable_seen': 1.0, 'stars': 500, 'matched': 300} for i in range(10)]
+    rows.sort(key=lambda row: row['time'])
+
+    # a.vid 400 s, b.vid 200 s (not 10 gaps of 20 s with chunks of 4 s)
+    summary = sq.plotSkyConditions(rows, str(tmp_path/'conditions.png'), 'Test')
+    assert summary['observed_h'] == pytest.approx(600/3600.0)
+    assert summary['clouded'] == pytest.approx(200/600.0)
+
+
+def test_plot_sky_conditions_input_of_a_few_chunks_with_a_pause(tmp_path):
+    """ The time of the chunks of an input of a few chunks with a pause between them is not the pause. """
+
+    begin = datetime.datetime(2025, 12, 25, 22, 0, 0)
+    rows = [{'time': begin + datetime.timedelta(seconds=t), 'input': 'a.vid', 'clear_fraction': 1.0,
+             'transparency_mag': 0.0, 'reliable_seen': 1.0, 'stars': 500, 'matched': 300} for t in (0, 4, 600)]
+
+    summary = sq.plotSkyConditions(rows, str(tmp_path/'conditions.png'), 'Test')
+    assert summary['observed_h'] == pytest.approx(12/3600.0)
+
+
+def test_plot_sky_conditions_input_of_two_chunks_with_a_pause(tmp_path):
+    """ The time of the chunks of an input of two chunks with a pause between them is the given one, or at most
+        the one of the other inputs.
+    """
+
+    begin = datetime.datetime(2025, 12, 25, 22, 0, 0)
+    def _rows(name, offsets):
+        return [{'time': begin + datetime.timedelta(seconds=t), 'input': name, 'clear_fraction': 1.0,
+                 'transparency_mag': 0.0, 'reliable_seen': 1.0, 'stars': 500, 'matched': 300} for t in offsets]
+
+    summary = sq.plotSkyConditions(_rows('a.vid', (0, 600)), str(tmp_path/'conditions.png'), 'Test',
+                                   chunk_seconds={'a.vid': 4.0})
+    assert summary['observed_h'] == pytest.approx(8/3600.0)
+
+    rows = sorted(_rows('a.vid', (0, 600)) + _rows('b.vid', (1000, 1004, 1008)), key=lambda row: row['time'])
+    summary = sq.plotSkyConditions(rows, str(tmp_path/'conditions.png'), 'Test')
+    assert summary['observed_h'] == pytest.approx(20/3600.0)
+
+
+@pytest.mark.parametrize('given_chunks, clipped', [(True, False), (False, False), (True, True)])
+def test_night_timeline_random(given_chunks, clipped):
+    """ The time line of random nights (inputs of different times of their chunks, pauses, overlapping inputs and
+        inputs which were not searched) agrees with the state of every moment counted on a fine grid: a chunk
+        lasts until the next chunk of its input (for the time of a chunk before a pause of more than three
+        chunks), and the worse state holds where they overlap.
+    """
+
+    rng = np.random.default_rng(1)
+    order = ['clouded', 'not_searched', 'partly', 'clear']
+    begin = datetime.datetime(2025, 12, 25, 22, 0, 0)
+    q = 0.25
+
+    for _ in range(60):
+        rows, chunk_seconds, intervals = [], {}, []
+        for k in range(int(rng.integers(1, 4))):
+            name = 'in{:d}.vid'.format(k)
+            chunk = q*int(rng.integers(8, 33))
+            t = q*int(rng.integers(0, 2000))
+            n = int(rng.integers(3, 40))
+            offsets = []
+            for i in range(n):
+                offsets.append(t)
+                t += chunk*(int(rng.integers(5, 50)) if (i >= 2) and (rng.random() < 0.1) else 1)
+            chunk_seconds[name] = chunk
+            for i, t in enumerate(offsets):
+                clear = float(rng.choice([1.0, 0.5, 0.0]))
+                rows.append({'time': begin + datetime.timedelta(seconds=t), 'input': name, 'clear_fraction': clear,
+                             'transparency_mag': 0.0, 'reliable_seen': 1.0, 'stars': 500, 'matched': 300})
+                nxt = offsets[i + 1] if i + 1 < len(offsets) else None
+                end = nxt if (nxt is not None) and (nxt - t <= 3*chunk) else t + chunk
+                intervals.append(('clear' if clear == 1.0 else ('partly' if clear > 0 else 'clouded'), t, end))
+        not_searched = []
+        for _ in range(int(rng.integers(0, 3))):
+            a = q*int(rng.integers(0, 3000))
+            b = a + q*int(rng.integers(4, 400))
+            not_searched.append((begin + datetime.timedelta(seconds=a), begin + datetime.timedelta(seconds=b), [], []))
+            intervals.append(('not_searched', a, b))
+        rows.sort(key=lambda row: (row['time'], row['input']))
+
+        # The state of every moment on a grid of q s, the worst of the intervals which cover it, within the night
+        top = int(max(end for _, _, end in intervals)/q) + 1
+        grid = np.full(top, len(order))
+        for state, a, b in intervals:
+            sl = slice(int(round(a/q)), int(round(b/q)))
+            grid[sl] = np.minimum(grid[sl], order.index(state))
+        bounds = None
+        if clipped:
+            lo, hi = sorted(int(v) for v in rng.integers(0, top, 2))
+            grid[:lo] = len(order)
+            grid[hi:] = len(order)
+            bounds = (begin + datetime.timedelta(seconds=lo*q), begin + datetime.timedelta(seconds=hi*q))
+        observed = np.sum(grid < len(order))*q
+
+        summary = sq.nightTimeline(rows, not_searched=not_searched,
+                                   chunk_seconds=chunk_seconds if given_chunks else None, bounds=bounds)['summary']
+        assert summary['observed_h']*3600 == pytest.approx(observed, abs=1e-6)
+        for i, state in enumerate(order):
+            assert summary[state]*summary['observed_h']*3600 == pytest.approx(np.sum(grid == i)*q, abs=1e-6)
+
+
+def test_night_timeline_within_the_night():
+    """ The time of the chunks is taken within the night: a chunk which begins before it counts from its
+        beginning, and the last chunk only until its end.
+    """
+
+    begin = datetime.datetime(2025, 12, 25, 22, 0, 0)
+    rows = [{'time': begin + datetime.timedelta(seconds=4*i), 'input': 'a.vid', 'clear_fraction': 1.0,
+             'transparency_mag': 0.0, 'reliable_seen': 1.0, 'stars': 500, 'matched': 300} for i in range(10)]
+    bounds = (begin + datetime.timedelta(seconds=2), begin + datetime.timedelta(seconds=38))
+
+    summary = sq.nightTimeline(rows, chunk_seconds={'a.vid': 4.0}, bounds=bounds)['summary']
+    assert summary['observed_h']*3600 == pytest.approx(36.0)

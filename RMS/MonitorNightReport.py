@@ -26,6 +26,7 @@ import bisect
 import collections
 import contextlib
 import copy
+import csv
 import datetime
 import glob
 import json
@@ -847,6 +848,209 @@ def plotNightCalibrationVariation(night_dir, night_name, recalibrated, config, f
                                     ff_frames=ff_frames)
 
 
+def removeNightSkyConditions(night_dir, night_name):
+    """ Remove the sky conditions of a night (see plotNightSkyConditions), so an old plot is never mistaken for
+        a new one.
+
+    Arguments:
+        night_dir: [str] Night directory.
+        night_name: [str] Name of the night.
+
+    Return:
+        (csv_path, plot_path): [tuple of str] Paths of the CSV file and of the plot.
+    """
+
+    csv_path = os.path.join(night_dir, night_name + '_sky_conditions.csv')
+    plot_path = os.path.join(night_dir, night_name + '_sky_conditions.png')
+    for path in (csv_path, plot_path):
+        if os.path.isfile(path):
+            os.remove(path)
+
+    return csv_path, plot_path
+
+
+def plotNightSkyConditions(night_dir, night_name, output_dir, results, config, ftpdetectinfo_path):
+    """ Plot how the sky was through the night: the conditions measured from the stars by the matched filter
+        (see SkyQuality.SkyReference), the files which were not searched as they had too few stars, and the
+        times of the detections. The conditions of the night are also saved as a CSV file next to the plot.
+        Results which can't be read are left out, so a damaged file doesn't stop the plot.
+
+    Arguments:
+        night_dir: [str] Night directory.
+        night_name: [str] Name of the night, used as the prefix of the file names.
+        output_dir: [str] Output directory of the monitor, where the log of the conditions is.
+        results: [dict] {results_dir: info} of the night, see scanNights.
+        config: [Config] Configuration.
+        ftpdetectinfo_path: [str] Merged FTPdetectinfo of the detections which are shown.
+
+    Return:
+        [bool] True if the plot was saved, False if there are no conditions for the night.
+    """
+
+    from RMS.MatchedFilterDetection import DONE_NAME, MATCHED_FILTER_DIR
+    from RMS.Routines.SkyQuality import CONDITION_COLUMNS, plotSkyConditions, readConditions
+
+    # Remove the products of a previous report first, so a report without conditions doesn't keep them
+    csv_path, plot_path = removeNightSkyConditions(night_dir, night_name)
+
+
+    ### Go through the files of the night ###
+
+    # From every file, collect: whether its sky was measured (its conditions are in the log), the time of its
+    #   chunks, the detections removed by clouds, and, if it had too few stars to be searched, the time it covers
+    night_start, night_end = nightBoundsFromName(config, night_name)
+    not_searched = []
+    removed = 0
+    measured = []
+    chunk_seconds = {}
+    for results_dir in sorted(results):
+        results_path = os.path.join(output_dir, results_dir)
+
+        # Read the number of stars and the time of every chunk of the file, and the length of a chunk (s)
+        star_list, chunk_s = [], None
+        try:
+            for calstars_path in glob.glob(os.path.join(results_path, 'CALSTARS_*.txt')):
+                stars, chunk_frames, calstars_fps = CALSTARS.readCALSTARS(results_path,
+                    os.path.basename(calstars_path), return_fps=True)
+                star_list += stars
+                if chunk_frames and calstars_fps:
+                    chunk_s = chunk_frames/calstars_fps
+            star_list = sorted(((filenameToDatetime(entry[0]), len(entry[1])) for entry in star_list),
+                               key=lambda entry: entry[0])
+        except Exception as e:
+            log.warning("The stars of {:s} could not be read: {:s}".format(results_path, repr(e)))
+            continue
+
+        # Read the summary of the matched filter of the current mode (it is next to the results when it replaces
+        #   the normal detection, otherwise in its subdirectory). A searched file has the number of its frames
+        summary_path = os.path.join(results_path, DONE_NAME) if config.mf_replace_detection \
+            else os.path.join(results_path, MATCHED_FILTER_DIR, DONE_NAME)
+        searched = False
+        if os.path.isfile(summary_path):
+            try:
+                with open(summary_path) as f:
+                    summary = json.load(f)
+                searched = 'total_frames' in summary
+
+                # Count the detections removed by clouds within the night (older summaries only have their number)
+                removed_times = summary.get('cloud_removed_utc')
+                if isinstance(removed_times, list):
+                    for t in removed_times:
+                        try:
+                            t = datetime.datetime.strptime(t, '%Y-%m-%dT%H:%M:%S.%f')
+                        except (ValueError, TypeError):
+                            t = None
+                        removed += int((t is None) or (night_start <= t <= night_end))
+                else:
+                    removed += int(summary.get('cloud_detections_removed') or 0)
+
+            except (ValueError, TypeError, AttributeError) as e:
+                log.warning("The summary {:s} could not be read: {:s}".format(summary_path, repr(e)))
+                continue
+
+            # Keep the files whose sky was measured, by their path as they are named in the log
+            input_file = results[results_dir].get('input_file')
+            if searched and (summary.get('clear_sky_fraction') is not None) and input_file:
+                measured.append(input_file)
+                if chunk_s:
+                    chunk_seconds[input_file] = chunk_seconds[os.path.basename(input_file)] = chunk_s
+
+        if searched:
+            continue
+
+        # A file which was not searched had too few stars in all its chunks (a file with enough stars but without
+        #   a summary failed for another reason, and is not shown)
+        if star_list and (max(n for _, n in star_list) < config.ff_min_stars):
+            times = [t for t, _ in star_list]
+            if not chunk_s:
+                chunk_s = (times[-1] - times[0]).total_seconds()/(len(times) - 1) if len(times) > 1 else 0
+            if chunk_s <= 0:
+                chunk_s = 256/max(config.fps, 1)
+
+            # Take its chunks in the night, split into spans where the recording paused
+            chunk = datetime.timedelta(seconds=chunk_s)
+            spans = []
+            for t, n in star_list:
+                if not ((night_start < t + chunk) and (t < night_end)):
+                    continue
+                if spans and (t - spans[-1][0][-1] <= 3*chunk):
+                    spans[-1][0].append(t)
+                    spans[-1][1].append(n)
+                else:
+                    spans.append(([t], [n]))
+            for span_times, span_counts in spans:
+                not_searched.append((span_times[0], span_times[-1] + chunk, span_times, span_counts))
+
+    ### ###
+
+
+    # Read the conditions of the files whose sky was measured, from the chunk which overlaps the beginning of the
+    #   night to its end
+    margin = datetime.timedelta(seconds=max(list(chunk_seconds.values()) + [0]))
+    rows = readConditions(output_dir, config.stationID, inputs=set(measured), start=night_start - margin,
+                          end=night_end)
+
+    # Older logs named the files only by their name, read them for the files without rows by their path
+    by_path = set(row['input'] for row in rows)
+    legacy = set(os.path.basename(path) for path in measured if path not in by_path)
+    if legacy:
+        rows = sorted(rows + readConditions(output_dir, config.stationID, inputs=legacy,
+                                            start=night_start - margin, end=night_end),
+                      key=lambda row: (row['time'], row['input']))
+
+    # Drop the chunks which ended before the night
+    rows = [row for row in rows if row['time'] + datetime.timedelta(seconds=chunk_seconds.get(row['input'], 0))
+            > night_start]
+
+    if (not rows) and (not not_searched):
+        log.info("No sky conditions for night {:s}".format(night_name))
+        return False
+
+    # Read the time of every detection in the night (the time of its image plus its first frame)
+    detection_times = []
+    entries = []
+    if os.path.isfile(ftpdetectinfo_path):
+        try:
+            entries = FTPdetectinfo.readFTPdetectinfo(os.path.dirname(ftpdetectinfo_path),
+                                                      os.path.basename(ftpdetectinfo_path))
+        except Exception as e:
+            log.warning("The detections {:s} could not be read: {:s}".format(ftpdetectinfo_path, repr(e)))
+    for entry in entries:
+        ff_name, meteor_fps, meteor_meas = entry[0], entry[4], entry[11]
+        try:
+            t = filenameToDatetime(ff_name) + datetime.timedelta(seconds=meteor_meas[0][1]/meteor_fps)
+        except (ValueError, TypeError, IndexError, ZeroDivisionError):
+            continue
+        if night_start <= t <= night_end:
+            detection_times.append(t)
+
+    # Save the conditions of the night as a CSV file, in the format of the log
+    with open(csv_path, 'w') as f:
+        writer = csv.writer(f, lineterminator='\n')
+        writer.writerow(CONDITION_COLUMNS)
+        for row in rows:
+            writer.writerow([row[c] if c in ('chunk_utc', 'input') else '{:g}'.format(row[c])
+                             for c in CONDITION_COLUMNS])
+
+    # Get the date of the night from its name (station_YYYYMMDD_HHMMSS_ffffff) for the title
+    try:
+        night_date = datetime.datetime.strptime(night_name.split('_')[-3], '%Y%m%d').strftime('%Y-%m-%d')
+    except (ValueError, IndexError):
+        night_date = night_name
+
+    # Plot the night
+    summary = plotSkyConditions(rows, plot_path, '{:s} sky conditions, night of {:s}'.format(config.stationID,
+        night_date), not_searched=not_searched, detection_times=detection_times, removed_detections=removed,
+        cloud_max_offset=(config.mf_cloud_max_offset if config.mf_cloud_filter else None),
+        min_matched=config.mf_cloud_min_matched, chunk_seconds=chunk_seconds, bounds=(night_start, night_end))
+
+    log.info("Sky conditions of night {:s}: {:.1f} h observed, clear {:.0f}%, partly clouded {:.0f}%, clouded "
+             "{:.0f}%, {:d} file(s) not searched".format(night_name, summary['observed_h'],
+                100*summary['clear'], 100*summary['partly'], 100*summary['clouded'], len(not_searched)))
+
+    return True
+
+
 def writeObservationSummary(night_dir, night_name, config, frames_per_file, n_detections, photometry_good):
     """ Write the observation summary of the night (observation_summary.txt and .json), as at the end of a
         normal RMS night. The parameters which RMS records at the start of the capture are filled in from the
@@ -970,6 +1174,9 @@ def generateNightReport(output_dir, night_name, config, results=None, archive=Tr
 
     merged = _runStep('merge', lambda: mergeNightResults(night_dir, output_dir, results, config))
 
+    # Remove the sky conditions of a previous report, they are plotted again below if they can be
+    removeNightSkyConditions(night_dir, night_name)
+
     # The detections of the matched filter are merged into their own file in a subdirectory of the night, so
     #   they are kept apart from the normal detections in the rest of the report
     if config.mf_enable:
@@ -1042,6 +1249,17 @@ def generateNightReport(output_dir, night_name, config, results=None, archive=Tr
         if merged.recalibrated:
             _runStep('calibration_variation', lambda: plotNightCalibrationVariation(night_dir, night_name,
                 merged.recalibrated, config, chunk_frames))
+
+        # Plot the sky conditions through the night, with the detections of the matched filter (the merged ones
+        #   when it replaces the normal detection, otherwise those in its subdirectory)
+        if config.mf_enable:
+            mf_ftpdetectinfo_path = ftpdetectinfo_path
+            if not config.mf_replace_detection:
+                from RMS.MatchedFilterDetection import MATCHED_FILTER_DIR
+                mf_ftpdetectinfo_path = (sorted(glob.glob(os.path.join(night_dir, MATCHED_FILTER_DIR,
+                                                                       'FTPdetectinfo_*.txt'))) + [''])[0]
+            _runStep('sky_conditions', lambda: plotNightSkyConditions(night_dir, night_name, output_dir,
+                results, config, mf_ftpdetectinfo_path))
 
 
         ### Optional products (off by default) ###

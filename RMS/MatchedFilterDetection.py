@@ -471,9 +471,11 @@ class MatchedFilterDetector(object):
         #   everywhere
         self.sky_map = None
 
-        # Frames of the detections and detections removed on clouded sky (see run)
+        # Frames of the detections and detections removed on clouded sky (see run), and the first frames of the
+        #   removed detections
         self.cloud_rows_removed = 0
         self.cloud_detections_removed = 0
+        self.cloud_removed_frames = []
 
         # Number of the weakest candidate tracks which were not measured (see mf_max_tracks)
         self.tracks_dropped = 0
@@ -1818,6 +1820,7 @@ class MatchedFilterDetector(object):
                 clear = self.sky_map.isClear(xy[:, 0], xy[:, 1], cent[:, 0])
                 if clear.sum() < self.opts.min_centroids:
                     self.cloud_detections_removed += 1
+                    self.cloud_removed_frames.append(int(round(cent[0, 0])))
                     continue
                 cent = cent[clear]
 
@@ -1834,9 +1837,11 @@ class MatchedFilterDetector(object):
                 xy = cent[:, 1:3]*self.det_bin + (self.det_bin - 1)/2.0
                 clear = self.sky_map.isClear(xy[:, 0], xy[:, 1], cent[:, 0])
                 self.cloud_rows_removed += int((~clear).sum())
+                first = cent[0, 0]
                 cent = cent[clear]
                 if len(cent) < 2:
                     self.cloud_detections_removed += 1
+                    self.cloud_removed_frames.append(int(round(first)))
                     continue
 
             # Unbinned coordinates, and the intensity of the unbinned image (averaged bins hold the mean of the
@@ -1964,6 +1969,7 @@ class MatchedFilterDetector(object):
                                    else None),
             'cloud_frames_removed': int(self.cloud_rows_removed),
             'cloud_detections_removed': int(self.cloud_detections_removed),
+            'cloud_removed_utc': self.frameTimes(self.cloud_removed_frames),
             'tracks_dropped': int(self.tracks_dropped),
             'total_frames': int(self.total_frames),
             'psf_sigma': self.psf_sigma,
@@ -1973,6 +1979,32 @@ class MatchedFilterDetector(object):
                         'detected': bool(sig >= self.opts.track_significance)}
                        for f0, f1, sig in (s[:3] for s in self.significances)],
         }
+
+
+    def frameTimes(self, frames):
+        """ Look up the times of the given frames in the input, e.g. so the detections removed by clouds can be
+            placed in the night.
+
+        Arguments:
+            frames: [list] Frame numbers.
+
+        Return:
+            times: [list] Times of the frames (UTC, ISO format), None for a frame whose time can't be read.
+        """
+
+        times = []
+        for frame in frames:
+
+            # Take the time of the frame from the input (as UTC without the time zone)
+            try:
+                t = self.img_handle.currentFrameTime(frame_no=int(frame), dt_obj=True)
+                if t.tzinfo is not None:
+                    t = t.astimezone(datetime.timezone.utc).replace(tzinfo=None)
+                times.append(t.strftime('%Y-%m-%dT%H:%M:%S.%f'))
+            except Exception:
+                times.append(None)
+
+        return times
 
 
     def measure(self, tracks):
@@ -3090,7 +3122,7 @@ def skyQuality(img_handle, config, star_list, platepar, reference_dir=None, inpu
     Keyword arguments:
         reference_dir: [str] Directory of the clear-sky reference of the camera (see SkyReference). None by
             default.
-        input_name: [str] Name of the input, for the log of the conditions. Empty by default.
+        input_name: [str] Name of the input (its path), for the log of the conditions. Empty by default.
 
     Return:
         [SkyQualityMap] The sky quality, or None without the stars or the platepar, or if it failed.
@@ -3164,7 +3196,7 @@ def detectMatchedFilter(img_handle, config, mask=None, dark=None, flat_struct=No
             searched and the measurements on it are removed (see RMS.Routines.SkyQuality). None by default.
         reference_dir: [str] Directory of the clear-sky reference of the camera, which is used and updated (see
             skyQuality). None by default (only this input is used).
-        input_name: [str] Name of the input, for the log of the conditions. Empty by default.
+        input_name: [str] Name of the input (its path), for the log of the conditions. Empty by default.
 
     Return:
         [list] Detections as [rho, theta, centroids], or (detections, detector) with return_detector. The
@@ -3393,7 +3425,7 @@ def processFile(file_path, config, output_dir, platepar_path=None, dark_path=Non
     # Detect, save the detections and recalibrate them
     detections, detector = detectMatchedFilter(img_handle, config, mask=mask, dark=dark, flat_struct=flat_struct,
                                                star_list=star_list, return_detector=True, platepar=platepar,
-                                               reference_dir=reference_dir, input_name=os.path.basename(file_path))
+                                               reference_dir=reference_dir, input_name=os.path.abspath(file_path))
 
     ftp_path = saveMatchedFilterResults(detections, star_list, img_handle, config, output_dir,
                                         platepar_path=platepar_path,
