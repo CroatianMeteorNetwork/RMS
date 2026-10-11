@@ -937,11 +937,20 @@ def plotNightSkyConditions(night_dir, night_name, output_dir, results, config, f
                 chunk_s = 256/max(config.fps, 1)
 
             # Only the chunks within the night, as the conditions (the files of a night can begin before it or
-            #   end after it)
-            chunks = [(t, n) for t, n in zip(times, counts) if night_start <= t <= night_end]
-            if chunks:
-                end = min(chunks[-1][0] + datetime.timedelta(seconds=chunk_s), night_end)
-                not_searched.append((chunks[0][0], end, [t for t, _ in chunks], [n for _, n in chunks]))
+            #   end after it), split where the recording paused (a gap of more than a few chunks)
+            chunk = datetime.timedelta(seconds=chunk_s)
+            spans = []
+            for t, n in zip(times, counts):
+                if not (night_start <= t <= night_end):
+                    continue
+                if spans and (t - spans[-1][0][-1] <= 3*chunk):
+                    spans[-1][0].append(t)
+                    spans[-1][1].append(n)
+                else:
+                    spans.append(([t], [n]))
+            for span_times, span_counts in spans:
+                not_searched.append((span_times[0], min(span_times[-1] + chunk, night_end), span_times,
+                                     span_counts))
 
     # The conditions of the chunks of the night of the files which measured the sky (only the logs of the dates of
     #   the night are read, and only the chunks within it are taken, as the names of the inputs can repeat on other

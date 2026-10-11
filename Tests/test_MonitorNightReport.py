@@ -1547,3 +1547,40 @@ def test_night_sky_conditions_with_results_which_cant_be_read(tmp_path, monkeypa
                                       os.path.join(night_dir, 'FTPdetectinfo_test.txt'))
     assert len(plotted['not_searched']) == 1
     assert len(plotted['detection_times']) == 1
+
+
+def test_night_sky_conditions_file_not_searched_with_a_pause(tmp_path, monkeypatch):
+    """ A file which was not searched and whose recording paused is not searched only for the time of its
+        chunks, not during the pause.
+    """
+
+    import RMS.Routines.SkyQuality as sq
+
+    config = _config()
+    config.mf_enable = True
+    config.mf_replace_detection = True
+    output_dir = str(tmp_path)
+    night_dir = mnr.nightDirPath(output_dir, NIGHT, config)
+
+    # Two chunks, then one more after a pause of 10 minutes
+    results_dir = _makeResults(output_dir, config, 'file1', n_chunks=2)
+    results_path = os.path.join(output_dir, results_dir)
+    star_list = CALSTARS.readCALSTARS(results_path, 'CALSTARS_file1.txt')[0]
+    late = FFfile.constructFFName('XX0001', BEG_TIME + datetime.timedelta(minutes=10), frame=0, ext='fits')
+    star_list.append([late, star_list[0][1]])
+    CALSTARS.writeCALSTARS(star_list, results_path, 'CALSTARS_file1.txt', 'XX0001', 48, 64, chunk_frames=128,
+                           fps=25.0)
+    with open(os.path.join(results_path, DONE_NAME), 'w') as f:
+        json.dump({'max_stars': 1}, f)
+
+    plotted = {}
+    plot = sq.plotSkyConditions
+    def _plot(rows, plot_path, title, **kwargs):
+        plotted.update(kwargs)
+        return plot(rows, plot_path, title, **kwargs)
+    monkeypatch.setattr(sq, 'plotSkyConditions', _plot)
+
+    results = {results_dir: mnr.readDoneFlag(results_path)}
+    assert mnr.plotNightSkyConditions(night_dir, NIGHT, output_dir, results, config, '')
+    assert [len(span[2]) for span in plotted['not_searched']] == [2, 1]
+    assert all((end - start).total_seconds() <= 2*128/25.0 + 0.01 for start, end, _, _ in plotted['not_searched'])
