@@ -1585,3 +1585,24 @@ def test_camera_without_the_status_keeps_no_sizes(tmp_path, now):
     status.openWork(_state(queued=[(a, ta)]))
     status.openWork(_state(queued=[(b, tb)]))
     assert {key[0] for key in status.size_cache} == {b}
+
+
+@pytest.mark.skipif(hasattr(os, 'geteuid') and os.geteuid() == 0, reason="root can read any file")
+def test_summary_of_the_matched_filter_which_cant_be_opened(tmp_path, now):
+    """ A summary of the matched filter which can't be opened makes only its file unreadable, the other files of
+        the night are still reported.
+    """
+
+    status, config = _status(tmp_path)
+    output_dir = str(tmp_path/'output')
+    results_dir = _searchedFile(output_dir, config, 'file1')
+    _searchedFile(output_dir, config, 'file2', start_s=62)
+    summary_path = os.path.join(output_dir, results_dir, mnr.MF_DONE_NAME)
+    os.chmod(summary_path, 0)
+    try:
+        assert mnr.readFileSkyResults(os.path.join(output_dir, results_dir), config) is None
+        built = status.build(_state())
+        assert built['night']['files_processed'] == 2 and built['night']['files_unreadable'] == 1
+        assert 'STATUS_INCOMPLETE' not in [fault['code'] for fault in built['faults']]
+    finally:
+        os.chmod(summary_path, 0o644)

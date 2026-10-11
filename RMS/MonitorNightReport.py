@@ -964,7 +964,7 @@ def readFileSkyResults(results_path, config):
         else:
             file_result['removed_count'] = int(summary.get('cloud_detections_removed') or 0)
 
-    except (ValueError, TypeError, AttributeError) as e:
+    except (OSError, ValueError, TypeError, AttributeError) as e:
         log.warning("The summary {:s} could not be read: {:s}".format(summary_path, repr(e)))
         return None
 
