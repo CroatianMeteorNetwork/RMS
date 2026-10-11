@@ -87,12 +87,20 @@ def _inputFile(tmp_path, name, minutes_ago):
 
 
 def _searchedFile(output_dir, config, name, n_chunks=12, start_s=0, clear=1.0, detections=3, removed_utc=(),
-                  recalibrated=True, shift_deg=0.0):
+                  recalibrated=True, shift_deg=0.0, fps=25.0):
     """ Results of a file which the matched filter searched, with its conditions in the log and its recalibrated
         platepars (fitted exactly on the stars, the pointing shifted by shift_deg in altitude).
     """
 
     results_dir = _makeResults(output_dir, config, name, n_chunks=n_chunks, start_s=start_s)
+    results_path = os.path.join(output_dir, results_dir)
+
+    # A different length of the chunks (the chunks still start every 128 frames at 25 fps)
+    if fps != 25.0:
+        star_list, _ = CALSTARS.readCALSTARS(results_path, 'CALSTARS_{:s}.txt'.format(name))
+        CALSTARS.writeCALSTARS(star_list, results_path, 'CALSTARS_{:s}.txt'.format(name), 'XX0001', 48, 64,
+                               chunk_frames=128, fps=fps)
+
     results_path = os.path.join(output_dir, results_dir)
     input_file = '/data/{:s}.vid'.format(name)
 
@@ -1306,3 +1314,29 @@ def test_damaged_history_doesnt_stop_the_monitor(tmp_path, monkeypatch):
     assert polls['n'] > 5
     with open(str(output_dir/mst.STATUS_FILE_NAME)) as f:
         assert json.load(f)['monitor']['state'] == 'stopped'
+
+
+def test_progress_of_files_being_written(tmp_path, now):
+    """ The files still being written are counted in the night they are written in. """
+
+    status, config = _status(tmp_path)
+    tonight, t1 = _inputFile(tmp_path, 'tonight.vid', 1)
+    old, t2 = _inputFile(tmp_path, 'old.vid', 60*24)
+
+    progress = status.build(_state(settling=[(tonight, t1), (old, t2)]))['processing']['progress']
+    assert (progress['being_written'], progress['other_nights_open']) == (1, 1)
+
+
+def test_latest_stars_with_their_time(tmp_path, now):
+    """ When the latest state of the sky comes from a chunk which is not the latest one (files with different
+        lengths of the chunks), the stars are given with the time of that chunk.
+    """
+
+    status, config = _status(tmp_path)
+    output_dir = str(tmp_path/'output')
+    _searchedFile(output_dir, config, 'file1', n_chunks=12, clear=0.0, fps=12.5)
+    _searchedFile(output_dir, config, 'file2', n_chunks=12, start_s=1, clear=1.0)
+
+    sky = status.build(_state())['sky']
+    assert sky['state'] == 'clouded'
+    assert sky['stars_utc'] == mst._timeString(BEG_TIME + datetime.timedelta(seconds=11*128/25.0))

@@ -1486,7 +1486,8 @@ def statusState(workers, queued, settling, failed_files, space_guard, reporter, 
     Arguments:
         workers: [dict] {unique_id: (file_path, process)} of the workers of the camera.
         queued: [list] Files waiting to be processed, as (file_path, mtime, ...).
-        settling: [list] Files which are still being written.
+        settling: [dict] Files which are still being written, with their last size and change (the stability
+            tracker of the monitor).
         failed_files: [dict] The failed files of the camera.
         space_guard: [FreeSpaceGuard] Guard of the free space of the camera.
         reporter: [NightReporter] Night reporter of the camera.
@@ -1508,7 +1509,7 @@ def statusState(workers, queued, settling, failed_files, space_guard, reporter, 
     # The state, with the waiting files as (path, time of the last change)
     return {'stopped': stopped, 'input_readable': input_readable, 'paused_for_space': space_guard.paused,
             'workers_busy': workers_busy, 'in_progress': in_progress,
-            'queued': [(entry[0], entry[1]) for entry in queued], 'settling': list(settling),
+            'queued': [(entry[0], entry[1]) for entry in queued], 'settling': [(path, trk['mtime']) for path, trk in settling.items()],
             'failed_files': failed_files, 'max_failures': MAX_FAILURES, 'max_kills': MAX_KILLS,
             'reporter': reporter}
 

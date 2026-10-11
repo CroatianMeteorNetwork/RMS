@@ -565,7 +565,7 @@ class MonitorStatus(object):
                 - workers_busy: [int] Busy worker processes of the whole monitor.
                 - in_progress: [list] Files being processed, as (unique_id, file_path, start time (datetime)).
                 - queued: [list] Files waiting to be processed, as (file_path, mtime).
-                - settling: [list] Files which are still being written.
+                - settling: [list] Files which are still being written, as (path, time of the last change).
                 - failed_files: [dict] The failed files of the camera (see loadFailedFiles).
                 - max_failures, max_kills: [int] Failures and kills after which a file is given up.
                 - reporter: [NightReporter] Night reporter of the camera, None if there is none.
@@ -924,14 +924,16 @@ class MonitorStatus(object):
             except (OSError, TypeError):
                 open_nights.append(('in_progress', None))
         open_nights += [('queued', self._nightOf(path, mtime)) for path, mtime in queued]
+        open_nights += [('settling', self._nightOf(path, mtime)) for path, mtime in state.get('settling', [])]
         n_done = len(files)
-        n_running = sum(1 for kind, night in open_nights if (kind == 'in_progress') and (night == night_name))
-        n_waiting = sum(1 for kind, night in open_nights if (kind == 'queued') and (night == night_name))
+        n_running, n_waiting, n_writing = [sum(1 for kind, night in open_nights
+                                               if (kind == wanted) and (night == night_name))
+                                           for wanted in ('in_progress', 'queued', 'settling')]
         n_open = n_running + n_waiting
         progress = {'done_tonight': n_done, 'in_progress': n_running, 'queued': n_waiting,
-                    'being_written': len(state.get('settling', [])),
+                    'being_written': n_writing,
                     'percent_done': _round(100.0*n_done/(n_done + n_open), 1) if (n_done + n_open) else None,
-                    'other_nights_open': len(open_nights) - n_open}
+                    'other_nights_open': len(open_nights) - n_open - n_writing}
 
         # The delay: how long ago the oldest waiting or processed file was recorded (its last write), zero when
         #   nothing waits
@@ -1067,7 +1069,8 @@ class MonitorStatus(object):
             row = rows[max(candidates, key=lambda i: (rows[i]['time'], -rows[i]['clear_fraction']))]
             sky.update({'clear_percent': _round(100*row['clear_fraction'], 1),
                         'dimming_mag': _round(row['transparency_mag']),
-                        'stars': int(row['stars']), 'matched_stars': int(row['matched']),
+                        'stars': int(row['stars']), 'stars_utc': _timeString(row['time']),
+                        'matched_stars': int(row['matched']),
                         'reliable_seen_percent': _round(100*row['reliable_seen'], 1)})
 
         # The last hour of the data
