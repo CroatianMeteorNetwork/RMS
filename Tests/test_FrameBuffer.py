@@ -281,3 +281,39 @@ def test_stitch_segments_keeps_one_sided_detections():
                                 overlaps, _Detector(), tolerance=5.0)
     spans = sorted((det[2][0, 0], det[2][-1, 0]) for det in detections)
     assert spans == [(1600, 1696), (1700, 1996), (1850, 1946)]
+
+
+class _SegmentDetector(object):
+    """ The parts of a MatchedFilterDetector which the summary of the segments uses. """
+
+    class opts(object):
+        use_gpu = False
+
+    def __init__(self, tracks):
+        self.tracks = tracks
+        self.cloud_removed_frames, self.timing, self.aperture_correction = [], {}, None
+        self.cloud_rows_removed, self.tracks_dropped, self.psf_sigma = 0, 0, 0.7
+
+    def frameTimes(self, frames):
+        return []
+
+    def inputEnd(self):
+        return None
+
+    def summary(self):
+        return {'tracks': [{'first_frame': f0, 'last_frame': f1, 'significance': 10.0, 'detected': True}
+                           for f0, f1 in self.tracks]}
+
+
+def test_summary_tracks_of_the_segments():
+    """ The tracks of the summary of the segments are those of the frames which belong to every segment (an object
+        in an overlap is in the tracks of both segments, and is counted once). """
+
+    from RMS.MatchedFilterDetection import SegmentedRun
+
+    first = _SegmentDetector([(100, 400), (1700, 1900)])
+    second = _SegmentDetector([(1700, 1900), (2500, 2800)])
+    run = SegmentedRun(_Input(), [(0, 2048), (1536, 3584)], [first, second], [1792], None, SegmentBuffer(_Input(), 1),
+                       {})
+    tracks = sorted((t['first_frame'], t['last_frame']) for t in run.summary()['tracks'])
+    assert tracks == [(100, 400), (1700, 1900), (2500, 2800)]

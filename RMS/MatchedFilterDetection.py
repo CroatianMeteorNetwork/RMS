@@ -3483,8 +3483,9 @@ class SegmentedRun(object):
 
 
     def summary(self):
-        """ Summary of the input, from the summaries of its segments. Counts of the detections removed by
-            clouds are taken from the segment which the time belongs to (each overlap is split at its middle). """
+        """ Summary of the input, from the summaries of its segments. The detections removed by clouds and the
+            measured tracks are taken from the segment which their time belongs to (each overlap is split at its
+            middle), so those in an overlap are counted once. """
 
         run = [(k, det) for k, det in enumerate(self.detectors) if det is not None]
 
@@ -3530,7 +3531,8 @@ class SegmentedRun(object):
             'psf_sigma': next((det.psf_sigma for _, det in run if det.psf_sigma is not None), None),
             'gpu': any(bool(det.opts.use_gpu) for _, det in run),
             'timing_s': {k: round(v, 2) for k, v in timing.items()},
-            'tracks': [track for _, det in run for track in det.summary()['tracks']],
+            'tracks': [track for k, det in run for track in det.summary()['tracks']
+                       if bounds[k][0] <= (track['first_frame'] + track['last_frame'])/2.0 < bounds[k][1]],
             'segments': [{'first_frame': int(f), 'end_frame': int(e), 'searched': det is not None}
                          for (f, e), det in zip(self.ranges, self.detectors)],
             'frames_read': int(self.buffer.frames_read),
