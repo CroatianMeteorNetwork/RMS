@@ -1098,8 +1098,8 @@ CLEAR_FRACTION_CLEAR = 0.999
 
 
 def readConditions(dir_path, station_id, inputs=None, start=None, end=None):
-    """ Read the log of the conditions of the chunks (see SkyReference): the rows of the newest processing of every
-        input, so the rows of an earlier processing of an input processed again are not taken.
+    """ Read the log of the conditions of the chunks (see SkyReference). Only the rows of the newest processing of
+        every input are taken, so an input which was processed again isn't counted twice.
 
     Arguments:
         dir_path: [str] Directory of the log (the output directory of the camera).
@@ -1113,40 +1113,53 @@ def readConditions(dir_path, station_id, inputs=None, start=None, end=None):
             it are read. None by default.
 
     Return:
-        [list] Rows sorted by time, dicts with the columns of the log (numbers as floats) and the time of the
-            chunk as a datetime (UTC, naive) in 'time'.
+        rows: [list] Rows sorted by time, dicts with the columns of the log (numbers as floats) and the time of
+            the chunk as a datetime (UTC, naive) in 'time'.
     """
 
-    # The logs of the dates of the time which is read (one log per UTC date)
+    # Find the logs, one per UTC date
     log_paths = sorted(glob.glob(os.path.join(dir_path, 'sky_conditions_{:s}_*.csv'.format(station_id))))
+
+    # Only read the logs of the dates which are requested
     if (start is not None) or (end is not None):
         first = start.strftime('%Y%m%d') if start is not None else ''
         last = end.strftime('%Y%m%d') if end is not None else '99999999'
         log_paths = [path for path in log_paths if first <= path[-12:-4] <= last]
 
-    # The rows of every input by the time of their processing. A row which can't be read (e.g. a line which was
-    #   not written completely) is skipped
+
     columns = list(CONDITION_COLUMNS) + ['processed_utc']
+
+    # Group the rows of every input by the time they were processed
     processings = {}
     for log_path in log_paths:
+
+        # Read the lines of the log without the comments (bytes which are not text don't stop the reading)
         with open(log_path, newline='', encoding='utf-8', errors='replace') as f:
             lines = [line for line in f if line.strip() and not line.startswith('#')]
 
         for values in csv.reader(lines):
+
+            # Skip the header and the lines which were not written completely
             if (len(values) != len(columns)) or (values[0] == columns[0]):
                 continue
+
+            # Skip the inputs which were not requested
             row = dict(zip(columns, values))
             if (inputs is not None) and (row['input'] not in inputs):
                 continue
+
+            # Convert the values, skip the row if they can't be read
             try:
                 for name in ('stars', 'matched', 'clear_fraction', 'transparency_mag', 'reliable_seen'):
                     row[name] = float(row[name])
                 row['time'] = datetime.datetime.strptime(row['chunk_utc'], '%Y-%m-%dT%H:%M:%S.%f')
             except ValueError:
                 continue
+
             processings.setdefault(row['input'], {}).setdefault(row['processed_utc'], []).append(row)
 
-    # The rows of the newest processing of every input, within the time which is read
+
+    # Take the rows of the newest processing of every input, within the requested time
     rows = []
     for by_time in processings.values():
         for row in by_time[max(by_time)]:
@@ -1157,12 +1170,25 @@ def readConditions(dir_path, station_id, inputs=None, start=None, end=None):
 
 
 def _runningMedian(times, values, half_window):
-    """ The median of the finite values within half_window (s) of every value (NaN where there are none). """
+    """ Running median of a time series, ignoring the values which are not finite.
+
+    Arguments:
+        times: [array] Times of the values (s), sorted.
+        values: [array] Values.
+        half_window: [float] Half of the length of the window (s).
+
+    Return:
+        out: [ndarray] Median within the window around every value, NaN where there are no finite values.
+    """
 
     times = np.asarray(times, dtype=np.float64)
     values = np.asarray(values, dtype=np.float64)
+
+    # Find the first and the last value within the window of every value
     lo = np.searchsorted(times, times - half_window, side='left')
     hi = np.searchsorted(times, times + half_window, side='right')
+
+    # Compute the median of the finite values in every window
     out = np.full(len(values), np.nan)
     for i, (a, b) in enumerate(zip(lo, hi)):
         window = values[a:b]
@@ -1174,13 +1200,27 @@ def _runningMedian(times, values, half_window):
 
 
 def _spans(times, labels, max_gap, chunk):
-    """ The spans of consecutive chunks with the same label: (label, start, end), where a chunk lasts until the
-        next one, or for the time of a chunk before a gap longer than max_gap (which ends a span) and at the end.
+    """ Join consecutive chunks with the same label into spans of time. A chunk lasts until the next one, but a
+        gap longer than max_gap is a pause in the data, so the chunk before it (and the last chunk) only lasts
+        for the time of one chunk.
+
+    Arguments:
+        times: [list] Times of the chunks (datetime), sorted.
+        labels: [list] Label of every chunk.
+        max_gap: [timedelta] Longest time between chunks which is not a pause.
+        chunk: [timedelta] Time of one chunk.
+
+    Return:
+        spans: [list] Spans as (label, start, end).
     """
 
     spans = []
     for i, (t, label) in enumerate(zip(times, labels)):
+
+        # The chunk lasts until the next one, unless there is a pause after it
         end = times[i + 1] if (i + 1 < len(times)) and (times[i + 1] - t <= max_gap) else t + chunk
+
+        # Extend the current span if the label is the same and there was no pause, otherwise start a new one
         if spans and (spans[-1][0] == label) and (spans[-1][2] >= t):
             spans[-1][2] = end
         else:
@@ -1190,19 +1230,20 @@ def _spans(times, labels, max_gap, chunk):
 
 
 def _stateSegments(intervals, order):
-    """ The time line of the states from intervals which can overlap (e.g. recordings which overlap): where
-        intervals overlap, the first state in the order holds.
+    """ Combine the intervals of several states into one time line. Intervals can overlap (e.g. two recordings
+        of the same time), and where they do, the state which is first in the order is taken.
 
     Arguments:
-        intervals: [list] Intervals (state, start, end).
-        order: [list] States, the one which holds first.
+        intervals: [list] Intervals as (state, start, end).
+        order: [list] States, ordered from the one which is taken first.
 
     Return:
-        [list] Disjoint segments (state, start, end) in time order, neighbouring segments of the same state
-            joined.
+        segments: [list] Segments as (state, start, end) which don't overlap, in time order, with neighbouring
+            segments of the same state joined.
     """
 
-    # The beginnings and the ends of the intervals, an end before a beginning at the same time
+    # List the beginnings and the ends of the intervals in time order. At the same time an end comes first, so
+    #   touching intervals are not counted as overlapping
     events = sorted([(start, 1, state) for state, start, end in intervals if end > start]
                     + [(end, -1, state) for state, start, end in intervals if end > start],
                     key=lambda event: (event[0], event[1]))
@@ -1210,13 +1251,19 @@ def _stateSegments(intervals, order):
     segments = []
     active = collections.Counter()
     for i, (t, change, state) in enumerate(events):
+
+        # Count the open intervals of every state
         active[state] += change
 
-        # The state from this event to the next one, if any interval is open
+        # Add the time until the next event (if it is later), with the first state in the order which is open
         if (i + 1 < len(events)) and (events[i + 1][0] > t):
             current = next((st for st in order if active[st] > 0), None)
+
+            # Skip the time when no interval is open
             if current is None:
                 continue
+
+            # Extend the last segment if it has the same state and ends here, otherwise start a new one
             if segments and (segments[-1][0] == current) and (segments[-1][2] == t):
                 segments[-1][2] = events[i + 1][0]
             else:
@@ -1226,14 +1273,26 @@ def _stateSegments(intervals, order):
 
 
 def _withGaps(times, values, max_gap):
-    """ The times and the values with a NaN inserted into every gap longer than max_gap, so the lines of a plot
-        are broken there. """
+    """ Insert a NaN into every gap of a time series which is longer than max_gap, so the line of the plot is
+        broken there instead of joining the data across the gap.
+
+    Arguments:
+        times: [list] Times of the values (datetime), sorted.
+        values: [array] Values.
+        max_gap: [timedelta] Longest gap which is not broken.
+
+    Return:
+        (out_t, out_v): [tuple] Times and values with the NaNs inserted.
+    """
 
     out_t, out_v = [], []
     for i, (t, v) in enumerate(zip(times, values)):
+
+        # Insert a NaN just after the previous value if there is a gap before this one
         if i and (t - times[i - 1] > max_gap):
             out_t.append(times[i - 1] + max_gap)
             out_v.append(np.nan)
+
         out_t.append(t)
         out_v.append(v)
 
@@ -1241,9 +1300,17 @@ def _withGaps(times, values, max_gap):
 
 
 def _legendPlace(fig, ax, handles):
-    """ The place of the legend of a panel on its right (upper, center or lower) where it covers the fewest points
-        of the lines of the panel. The upper right if they can't be measured (the place doesn't change the plot
-        otherwise).
+    """ Find where to put the legend on the right side of a panel (upper, center or lower), so it covers as few
+        of the plotted points as possible.
+
+    Arguments:
+        fig: [Figure] The figure.
+        ax: [Axes] The panel.
+        handles: [list] Handles of the legend.
+
+    Return:
+        loc: [str] Location of the legend. The upper right if it can't be found, as the place of the legend is
+            only cosmetic.
     """
 
     from matplotlib.backends.backend_agg import FigureCanvasAgg
@@ -1251,8 +1318,8 @@ def _legendPlace(fig, ax, handles):
     try:
         renderer = FigureCanvasAgg(fig).get_renderer()
 
-        # The points of the lines in display coordinates, the lines of few points (e.g. a horizontal line)
-        #   resampled along their length
+        # Collect the plotted points in display coordinates. Lines of only a few points (e.g. a horizontal line)
+        #   are resampled along their length, so they count where they go and not only at their ends
         points = []
         for line in ax.get_lines():
             xy = np.asarray(line.get_xydata(), dtype=np.float64)
@@ -1265,6 +1332,7 @@ def _legendPlace(fig, ax, handles):
             points.append(xy[np.all(np.isfinite(xy), axis=1)])
         points = np.concatenate(points) if points else np.zeros((0, 2))
 
+        # Try every place and count the points the legend would cover
         best = None
         for loc in ('upper right', 'center right', 'lower right'):
             legend = ax.legend(handles=handles, loc=loc, fontsize=9, handlelength=2.2)
@@ -1283,10 +1351,10 @@ def _legendPlace(fig, ax, handles):
 
 
 def nightTimeline(rows, not_searched=(), chunk_seconds=None, bounds=None):
-    """ The time line of the states of the sky through a night: the time of every chunk is clear, partly clouded
-        or clouded (see CLEAR_FRACTION_CLEAR) until the next chunk of its input, the inputs which were not searched
-        are not searched, the worse state holds where they overlap (clouded, not searched, partly clouded, clear),
-        and the time between them without data is a gap.
+    """ Build the time line of the state of the sky through a night. Every chunk is clear, partly clouded or
+        clouded (see CLEAR_FRACTION_CLEAR) until the next chunk of its input, the inputs which were not searched
+        (too few stars) fill their time, and where inputs overlap the worse state is taken (clouded, not
+        searched, partly clouded, clear). The time between them without any data is a gap.
 
     Arguments:
         rows: [list] Conditions of the chunks in time order, see readConditions.
@@ -1299,24 +1367,26 @@ def nightTimeline(rows, not_searched=(), chunk_seconds=None, bounds=None):
             None by default.
 
     Return:
-        [dict] input_rows (the indices of the rows of every input), steps (the time of the chunks of every
-            input), chunk (the time of a chunk of all inputs), max_gap (the longest time between chunks which is
-            not a gap), labels (the state of every chunk), segments (state, start, end), gaps (start, end), and
-            summary (the observed time in hours, and its fractions in every state).
+        timeline: [dict] input_rows (the indices of the rows of every input), steps (the time of the chunks of
+            every input), chunk (the time of a chunk of all inputs), max_gap (the longest time between chunks
+            which is not a gap), labels (the state of every chunk), segments (state, start, end), gaps (start,
+            end), and summary (the observed time in hours, and its fractions in every state).
     """
 
     times = [row['time'] for row in rows]
     clear = np.array([row['clear_fraction'] for row in rows], dtype=np.float64)
 
-    # The rows of every input (in time order, as the rows)
+    # Group the rows by input (in time order, as the rows)
     input_rows = collections.defaultdict(list)
     for i, row in enumerate(rows):
         input_rows[row.get('input')].append(i)
 
-    # The time of the chunks of every input (the inputs can have different frame rates): the given one, or the
-    #   shortest spacing of its chunks (they are regular, but an input of a few chunks can have a pause between
-    #   them), at most the one of the other inputs for an input of two chunks (one spacing), and the one of the
-    #   other inputs for an input of one chunk. A gap of more than a few chunks is a gap in the data
+
+    ### Time of the chunks of every input ###
+
+    # The time of a chunk is given for every input (from its frame rate) when it is known. Otherwise it is the
+    #   shortest time between its chunks, as the chunks are regular but an input of a few chunks can have a
+    #   pause between them
     chunk_seconds = chunk_seconds or {}
 
     def _spacing(idx):
@@ -1327,9 +1397,14 @@ def nightTimeline(rows, not_searched=(), chunk_seconds=None, bounds=None):
     spacings = {name: _spacing(idx) for name, idx in input_rows.items()}
     steps = {name: (chunk_seconds[name] if (chunk_seconds.get(name) or 0) > 0 else spacings[name][0])
              for name in input_rows}
+
+    # The typical time of a chunk, from the inputs where it is reliable
     known = [st for name, st in steps.items()
              if (st is not None) and ((chunk_seconds.get(name) or 0) > 0 or (spacings[name][1] > 1))]
     step = float(np.median(known)) if known else 4.0
+
+    # An input of one chunk takes the typical time, and an input of two chunks at most the typical time (its one
+    #   spacing could be a pause)
     for name, st in steps.items():
         if st is None:
             steps[name] = step
@@ -1337,24 +1412,30 @@ def nightTimeline(rows, not_searched=(), chunk_seconds=None, bounds=None):
             steps[name] = min(st, step)
     steps = {name: datetime.timedelta(seconds=st) for name, st in steps.items()}
     chunk = datetime.timedelta(seconds=step)
+
+    # A gap of more than a few chunks is a pause in the data
     max_gap = 3*max(list(steps.values()) + [chunk])
 
-    # The state of every chunk
+    ### ###
+
+
+    # Classify every chunk by how much of the image is clear
     labels = np.where(clear >= CLEAR_FRACTION_CLEAR, 'clear', np.where(clear > 0, 'partly', 'clouded'))
 
-    # The time line of the states: a chunk lasts until the next chunk of its input, and where inputs overlap (e.g.
-    #   two recordings of the same time), the worse state holds
+    # Turn the chunks of every input into spans of time, and add the inputs which were not searched
     intervals = []
     for name, idx in input_rows.items():
         intervals += _spans([times[i] for i in idx], [labels[i] for i in idx], 3*steps[name], steps[name])
     intervals += [('not_searched', start, end) for start, end, _, _ in not_searched]
 
-    # Only the time within the night (a chunk can begin before it or end after it)
+    # Only take the time within the night (a chunk can begin before it or end after it)
     if bounds is not None:
         intervals = [(state, max(start, bounds[0]), min(end, bounds[1])) for state, start, end in intervals]
+
+    # Combine the overlapping inputs into one time line, the worse state is taken
     segments = _stateSegments(intervals, ['clouded', 'not_searched', 'partly', 'clear'])
 
-    # The summary: the observed time (the union of the intervals) and its fractions in every state
+    # Sum up the observed time and the fraction of it in every state
     durations = collections.defaultdict(float)
     for state, start, end in segments:
         durations[state] += (end - start).total_seconds()
@@ -1363,8 +1444,7 @@ def nightTimeline(rows, not_searched=(), chunk_seconds=None, bounds=None):
     for state in ('clear', 'partly', 'clouded', 'not_searched'):
         summary[state] = durations[state]/observed_s if observed_s else 0.0
 
-    # The time without data: the gaps in the time line longer than a few chunks (e.g. no recording, or the files
-    #   were not processed)
+    # Find the time without data (e.g. no recording, or the files were not processed)
     gaps = [(a[2], b[1]) for a, b in zip(segments[:-1], segments[1:]) if b[1] - a[2] > max_gap]
 
     return {'input_rows': input_rows, 'steps': steps, 'chunk': chunk, 'max_gap': max_gap, 'labels': labels,
@@ -1409,6 +1489,7 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
     import matplotlib.ticker as mticker
     import matplotlib.transforms as mtransforms
 
+    # Unpack the conditions of the chunks
     times = [row['time'] for row in rows]
     clear = np.array([row['clear_fraction'] for row in rows])
     dimming = np.array([row['transparency_mag'] for row in rows])
@@ -1416,65 +1497,74 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
     stars = np.array([row['stars'] for row in rows])
     matched = np.array([row['matched'] for row in rows])
 
-    # The time line of the states of the sky
+    # Build the time line of the state of the sky, which is shaded on the panels and summarized at the top
     timeline = nightTimeline(rows, not_searched=not_searched, chunk_seconds=chunk_seconds, bounds=bounds)
     input_rows, steps, chunk, max_gap = (timeline[k] for k in ('input_rows', 'steps', 'chunk', 'max_gap'))
     labels, segments, gaps, summary = (timeline[k] for k in ('labels', 'segments', 'gaps', 'summary'))
     step = chunk.total_seconds()
     n = len(rows)
 
-    # The median dimming of the chunks which were not clouded
+    # Add the median dimming of the chunks which were not clouded to the summary
     usable = (labels != 'clouded') & np.isfinite(dimming)
     summary['median_dimming'] = float(np.median(dimming[usable])) if usable.any() else float('nan')
 
-    # Colours of the states and of the values, distinguishable with colour vision deficiencies: the clouded sky
-    #   is a darker and more saturated orange than the partly clouded one, the time without stars or data is grey
-    #   of two brightnesses (and named in the plot), and the values are in blue, green and black (from the palette
-    #   of Okabe and Ito)
+    # Colours which can be told apart also with colour vision deficiencies (from the palette of Okabe and Ito):
+    #   the clouded sky is a darker orange than the partly clouded sky, the time without stars or data is grey,
+    #   and the values are blue, green and black
     shade = {'partly': ('#E69F00', 0.25), 'clouded': ('#D55E00', 0.45), 'not_searched': ('#000000', 0.4),
              'no_data': ('#000000', 0.07)}
     cards_bg = {'partly': '#f9e7bf', 'clouded': '#ecb48c', 'not_searched': '#999999'}
     blue, green, grey, dark = '#0072B2', '#009E73', '#4b5563', '#111827'
 
 
+    # Four panels over the same time: the dimming, the clear part of the image, the stars and the detections
     fig = Figure(figsize=(14, 10.4), dpi=110)
     axes = fig.subplots(4, 1, sharex=True, gridspec_kw={'height_ratios': [3, 2, 2, 0.7], 'hspace': 0.3})
     ax_dim, ax_clear, ax_stars, ax_det = axes
 
-    # Shade the time when the sky was partly clouded and clouded, when the inputs were not searched, and without
-    #   data, on all panels
+    # Shade the state of the sky on all panels, so every value can be read against it
     for ax in axes:
         for state, start, end in segments:
             if state in shade:
                 ax.axvspan(start, end, color=shade[state][0], alpha=shade[state][1], lw=0, zorder=0)
         for start, end in gaps:
             ax.axvspan(start, end, color=shade['no_data'][0], alpha=shade['no_data'][1], lw=0, zorder=0)
+
+        # Light grid, no frame on the top and on the right
         ax.grid(True, color='#e5e7eb', lw=0.8, zorder=1)
         ax.tick_params(labelsize=10)
         for side in ('top', 'right'):
             ax.spines[side].set_visible(False)
 
     def _plotInputs(ax, values, *args, **kwargs):
-        """ Plot the values of every input as its own line (the lines of inputs which overlap are not joined),
-            broken at the gaps. """
+        """ Plot the values of every input as its own line, broken at the pauses, so inputs which overlap are
+            not joined into one zigzag line. """
+
         for name, idx in input_rows.items():
             ax.plot(*_withGaps([times[i] for i in idx], np.asarray(values)[idx], 3*steps[name]), *args, **kwargs)
 
-    # Dimming of the stars relative to clear sky: every chunk, and its running median over about a minute
+    ### Dimming of the stars ###
+
+    # Plot the dimming of the stars vs clear sky in every chunk (smaller and lighter points for a full night)
     dense = n > 2000
     ax_dim.plot(times, dimming, '.', color=blue, ms=2 if dense else 3.5, alpha=0.25 if dense else 0.5, zorder=2)
-    # The running median over a minute of every input (inputs which overlap are not mixed)
+
+    # Smooth it with a running median over a minute, separately for every input
     smooth = np.full(n, np.nan)
     for idx in input_rows.values():
         seconds = [(times[i] - times[idx[0]]).total_seconds() for i in idx]
         smooth[idx] = _runningMedian(seconds, dimming[idx], 30.0)
 
-    # No dimming is shown where it was not measured (e.g. no stars behind a thick cloud)
+    # Don't draw the median where the dimming was not measured (e.g. no stars behind a thick cloud)
     smooth[~np.isfinite(dimming)] = np.nan
     _plotInputs(ax_dim, smooth, '-', color=blue, lw=1.6, zorder=3)
+
+    # Mark the dimming of clear sky and the limit above which the sky is clouded
     if cloud_max_offset is not None:
         ax_dim.axhline(cloud_max_offset, color=dark, lw=1, ls='--', zorder=2)
     ax_dim.axhline(0, color=grey, lw=0.8, zorder=2)
+
+    # Fit the range to the bulk of the values and the cloud limit, so a few extreme values don't flatten the plot
     finite = dimming[np.isfinite(dimming)]
     if len(finite):
         lo, hi = np.percentile(finite, [0.5, 99.5])
@@ -1482,33 +1572,51 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
         bottom, top = min(lo, -0.1), top + 0.05*(top - min(lo, -0.1))
         ax_dim.set_ylim(bottom, top)
 
-        # The chunks dimmed beyond the top of the plot (thick clouds) are marked at its top
+        # Mark the chunks dimmed beyond the top of the plot (thick clouds) at its top
         above = np.isfinite(dimming) & (dimming > top)
         if above.any():
             ax_dim.plot([t for t, a in zip(times, above) if a], np.full(int(above.sum()), top), '^', color=blue,
                         ms=4, alpha=0.6, clip_on=False, zorder=3)
     ax_dim.set_ylabel('mag', fontsize=10)
 
-    # The clear fraction of the image, and the fraction of the reliably seen stars which are seen
+    ### ###
+
+
+    ### Clear part of the image ###
+
+    # Fill the clear part of the image of every chunk
     for name, idx in input_rows.items():
         t_cl, v_cl = _withGaps([times[i] for i in idx], 100*clear[idx], 3*steps[name])
         ax_clear.fill_between(t_cl, 0, v_cl, step='post', color=green, alpha=0.12, lw=0, zorder=2)
     _plotInputs(ax_clear, 100*clear, '-', drawstyle='steps-post', color=green, lw=1.4, zorder=3)
+
+    # Plot the share of the stars which are reliably seen on clear sky that are seen
     _plotInputs(ax_clear, 100*seen, '--', color='#111827', lw=1.0, zorder=3)
     ax_clear.set_ylim(0, 105)
     ax_clear.set_ylabel('%', fontsize=10)
 
-    # The extracted and the matched stars, also of the inputs which were not searched
+    ### ###
+
+
+    ### Stars ###
+
+    # Plot the extracted and the matched stars, also of the inputs which were not searched
     _plotInputs(ax_stars, stars, '-', color=blue, lw=1.0, zorder=3)
     _plotInputs(ax_stars, matched, '-', color=dark, lw=1.0, zorder=3)
     for _, _, ns_times, ns_stars in not_searched:
         ax_stars.plot(ns_times, ns_stars, '-', color=blue, lw=1.0, zorder=3)
+
+    # Mark the fewest matched stars with which the sky is judged
     if min_matched is not None:
         ax_stars.axhline(min_matched, color=dark, lw=1, ls='--', zorder=2)
+
+    # Use a log scale with plain numbers, as the stars drop by orders of magnitude under clouds
     ax_stars.set_yscale('log')
     ax_stars.yaxis.set_major_locator(mticker.LogLocator(subs=(1.0, 2.0, 5.0)))
     ax_stars.yaxis.set_major_formatter(mticker.FuncFormatter(lambda v, _: '{:g}'.format(v)))
     ax_stars.yaxis.set_minor_formatter(mticker.NullFormatter())
+
+    # Fit the range to the star counts and the limit of the matched stars
     star_counts = np.r_[stars, matched, [c for span in not_searched for c in span[3]]]
     star_counts = star_counts[np.isfinite(star_counts) & (star_counts > 0)]
     if len(star_counts):
@@ -1516,14 +1624,17 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
                           max(star_counts.max(), min_matched or 0)*1.5)
     ax_stars.set_ylabel('stars', fontsize=10)
 
-    # The times of the detections
+    ### ###
+
+
+    # Mark the time of every detection
     if len(detection_times):
         ax_det.eventplot([list(detection_times)], colors=dark, lineoffsets=0.5, linelengths=0.8, linewidths=0.8)
     ax_det.set_ylim(0, 1)
     ax_det.set_yticks([])
     ax_det.grid(False)
 
-    # The time axis (UTC), with the seconds for a short time
+    # Set the time axis (UTC) to the data within the night, with the seconds shown for a short time
     ax_det.set_xlabel('Time (UTC)', fontsize=10)
     all_times = times + [t for span in not_searched for t in span[:2]] + list(detection_times)
     time_format = '%H:%M'
@@ -1536,8 +1647,8 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
             time_format = '%H:%M:%S'
     ax_det.xaxis.set_major_formatter(mdates.DateFormatter(time_format))
 
-    # The time without stars or data is named in the dimming panel where it is wide enough, so it doesn't depend
-    #   on the colour
+    # Write the name of the time without stars or without data in the dimming panel where there is room, so it
+    #   can be read without telling the colours apart
     x0, x1 = ax_det.get_xlim()
     label_transform = mtransforms.blended_transform_factory(ax_dim.transData, ax_dim.transAxes)
     named = [(start, end, 'too few stars') for state, start, end in segments if state == 'not_searched'] \
@@ -1549,13 +1660,12 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
                         va='center', rotation=90, fontsize=9.5,
                         color='#111827', alpha=0.8, zorder=4)
 
-    # The name of every panel above it
+    # Name every panel above it
     for ax, name in [(ax_dim, 'Dimming of the stars vs clear sky'), (ax_clear, 'Clear part of the image'),
                      (ax_stars, 'Stars per chunk'), (ax_det, 'Detections')]:
         ax.set_title(name, loc='left', fontsize=10.5, fontweight='bold', color='#111827', pad=4)
 
-    # Every panel has the legend of its values on its right, and the shading of all panels has its legend above
-    #   them
+    # The legend of the values of every panel (placed when the layout is final, see below)
     legends = [
         (ax_dim, [Line2D([], [], color=blue, marker='.', ls='none', ms=6, alpha=0.6,
                          label='Every chunk (~{:.0f} s)'.format(step)),
@@ -1574,6 +1684,7 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
                       if min_matched is not None else [])),
     ]
 
+    # The legend of the shading, above the panels as it applies to all of them
     shading = [Patch(facecolor=shade['partly'][0], alpha=shade['partly'][1],
                      label='Partly clouded: detections removed where clouded'),
                Patch(facecolor=shade['clouded'][0], alpha=shade['clouded'][1],
@@ -1584,9 +1695,11 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
     fig.legend(handles=shading, loc='upper center', ncol=4, frameon=False, fontsize=9.5,
                bbox_to_anchor=(0.53, 0.862), title='Shading of all panels', title_fontsize=9.5)
 
-    # The title, and the summary of the night as a row of cards: the value large and its name below it, coloured
-    #   as the shading of the state. The cards of the shares of the states are joined into one, as are the
-    #   detections and the ones removed on clouded sky (coloured as the partly clouded sky they were removed on)
+    ### Summary cards ###
+
+    # Summarize the night at the top as a row of cards, every card a large value with its name below it. The
+    #   shares of the states are joined into one card coloured as the shading, and so are the detections and the
+    #   ones removed by clouds
     fig.suptitle(title, fontsize=15, fontweight='bold', y=0.985, x=0.53)
     states = [('{:.0f}%'.format(100*summary['clear']), 'clear', '#007a5a', '#e0f2ec'),
               ('{:.0f}%'.format(100*summary['partly']), 'partly clouded', '#a36f00', cards_bg['partly']),
@@ -1600,7 +1713,7 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
                            cards_bg['partly']))
     groups = [[('{:.1f} h'.format(summary['observed_h']), 'observed', '#111827', '#f9fafb')], states, detections]
 
-    # The cards span the width of the panels, with a space between the groups
+    # Draw the groups of cards across the width of the panels, the cards of a group in one rounded box
     left, right, bottom, height, space = 0.08, 0.98, 0.875, 0.068, 0.01
     width = (right - left - space*(len(groups) - 1))/sum(len(group) for group in groups)
     x = left
@@ -1622,10 +1735,12 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
                      color='#374151')
         x += width*len(group) + space
 
+    ### ###
+
+
     fig.subplots_adjust(left=0.08, right=0.98, top=0.785, bottom=0.055)
 
-    # The legend of every panel is on its right, at the height (upper, middle or lower) where it covers the fewest
-    #   points of the lines of the panel
+    # Put the legend of every panel on its right, where it covers the fewest points
     for ax, handles in legends:
         loc = _legendPlace(fig, ax, handles)
         ax.legend(handles=handles, loc=loc, fontsize=9, handlelength=2.2, frameon=True, framealpha=0.92,

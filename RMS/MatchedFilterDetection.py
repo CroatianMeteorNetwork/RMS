@@ -1982,12 +1982,20 @@ class MatchedFilterDetector(object):
 
 
     def frameTimes(self, frames):
-        """ The times of the given frames (UTC, ISO format), from the times of the frames of the input. None for
-            a frame whose time can't be read.
+        """ Look up the times of the given frames in the input, e.g. so the detections removed by clouds can be
+            placed in the night.
+
+        Arguments:
+            frames: [list] Frame numbers.
+
+        Return:
+            times: [list] Times of the frames (UTC, ISO format), None for a frame whose time can't be read.
         """
 
         times = []
         for frame in frames:
+
+            # Take the time of the frame from the input (as UTC without the time zone)
             try:
                 t = self.img_handle.currentFrameTime(frame_no=int(frame), dt_obj=True)
                 if t.tzinfo is not None:
