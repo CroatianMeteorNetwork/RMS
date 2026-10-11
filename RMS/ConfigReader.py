@@ -307,10 +307,14 @@ class Config:
         
         self.fov_w = 64.0
         self.fov_h = 35.0
-        self.deinterlace_order = -2
+        # Defaults for the stock IMX291 camera at 25 fps and 720p, which has a rolling shutter
+        self.deinterlace_order = -1
 
-        # Rolling shutter scan rate: Time to scan the entire sensor, in seconds.
-        self.scan_rate = 1/30.0
+        # Rolling shutter scan rate: time to scan the image's rows, in seconds. The stock IMX291
+        # firmware keeps the 30 fps line period at 25 fps (HMAX 4400 at 148.5 MHz = 29.63 us) and
+        # makes 720p by downscaling all 1080 sensor rows: 1080 x 29.63 us = 32.0 ms at 720p and
+        # 1080p alike. Cameras that report their line period (RMSP SEI) override it exactly
+        self.scan_rate = 0.032
 
         self.mask_file = "mask.bmp"
 

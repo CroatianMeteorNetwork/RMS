@@ -856,9 +856,14 @@ class InputTypeVideo(InputType):
         # as capture timed it, used instead of beginning + frame/fps. A given beginning time keeps
         # the nominal timing
         self.frame_times_rel = None
+
+        # Sensor line period [ns] from the same SEI, for the rolling shutter correction
+        self.t_row_ns = None
+
         if beginning_time is None:
             sei = readVideoFrameTimes(self.file_path)
             if sei is not None:
+                self.t_row_ns = sei['t_row_ns']
                 int_start = sei['int_start']
                 self.beginning_datetime = datetime.datetime(1970, 1, 1) \
                     + datetime.timedelta(seconds=int_start[0])

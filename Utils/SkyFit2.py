@@ -18730,13 +18730,9 @@ class PlateTool(QtWidgets.QMainWindow):
             frame_no = (frame_dt - self.img_handle.beginning_datetime).total_seconds()*self.img_handle.fps
 
 
-            # Get the rolling shutter corrected (or not, depending on the config) frame number
-            if self.config.deinterlace_order == -1:
-                frame_no = self.getRollingShutterCorrectedFrameNo(frame_no, pick, fps=self.config.fps, scan_rate=self.config.scan_rate)
-
-            # If the global shutter is used, the frame number can only be an integer
-            if self.config.deinterlace_order == -2:
-                frame_no = round(frame_no, 0)
+            # Get the rolling shutter corrected frame number (an integer one for a global shutter), in
+            #   the same frame rate it is converted to time with, so a row offset stays exact
+            frame_no = self.getRollingShutterCorrectedFrameNo(frame_no, pick, fps=self.img_handle.fps)
 
             # If the intensity sum is masked, assume it's 1
             if np.ma.is_masked(pick['intensity_sum']):
@@ -19476,13 +19472,9 @@ class PlateTool(QtWidgets.QMainWindow):
             frame_dt = self.img_handle.currentFrameTime(frame_no=frame, dt_obj=True)
             frame_no = (frame_dt - dt_ref).total_seconds()*self.img_handle.fps
 
-            # Get the rolling shutter corrected (or not, depending on the config) frame number
-            if self.config.deinterlace_order == -1:
-                frame_no = self.getRollingShutterCorrectedFrameNo(frame_no, pick, fps=self.config.fps, scan_rate=self.config.scan_rate)
-
-            # If the global shutter is used, the frame number can only be an integer
-            if self.config.deinterlace_order == -2:
-                frame_no = round(frame_no, 0)
+            # Get the rolling shutter corrected frame number (an integer one for a global shutter), in
+            #   the same frame rate it is converted to time with, so a row offset stays exact
+            frame_no = self.getRollingShutterCorrectedFrameNo(frame_no, pick, fps=self.img_handle.fps)
 
             # Compute the time relative to the reference JD
             t_rel = frame_no/self.img_handle.fps
@@ -19536,26 +19528,34 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
 
-    def getRollingShutterCorrectedFrameNo(self, frame, pick, fps=25.0, scan_rate=1/30.0):
-        """ Given a pick object, return rolling shutter corrected (or not, depending on the config) frame
-            number.
+    def getRollingShutterCorrectedFrameNo(self, frame, pick, fps=25.0):
+        """ Given a pick object, return the rolling shutter corrected frame number: exactly row x line
+            period on cameras that report their line period (FF TROWNS card or video SEI), otherwise as
+            the config says (deinterlace_order -1: scan_rate; -2: global shutter, integer frame number).
         """
 
+        # Get image height
+        if self.img_handle is None:
+            img_h = self.config.height
+
+        else:
+            img_h = self.img.data.shape[1]
+
+        scan_time = RollingShutterCorrection.scanTime(self.config, img_h,
+            RollingShutterCorrection.lineTime(self.img_handle))
+
         # Correct the rolling shutter effect
-        if self.config.deinterlace_order == -1:
-
-            # Get image height
-            if self.img_handle is None:
-                img_h = self.config.height
-
-            else:
-                img_h = self.img.data.shape[1]
+        if scan_time is not None:
 
             # Compute the corrected frame time. The centroid is float32, which NumPy 2 keeps through the
             #   sum: cast it so the frame time stays a float64 that timedelta accepts
-            frame_no = RollingShutterCorrection.correctRollingShutterTemporal(frame, float(pick['y_centroid']), img_h, fps=fps, scan_rate=scan_rate)
+            frame_no = RollingShutterCorrection.correctRollingShutterTemporal(frame, float(pick['y_centroid']), img_h, fps=fps, scan_rate=scan_time)
 
-        # If global shutter, do no correction
+        # If the global shutter is used, the frame number can only be an integer
+        elif self.config.deinterlace_order == -2:
+            frame_no = round(frame, 0)
+
+        # Interlaced: no correction
         else:
             frame_no = frame
 

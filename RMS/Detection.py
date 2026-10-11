@@ -1626,13 +1626,16 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                     y_centroid = np.sum(y_weighted.astype(np.float64))/float(max_weights_sum)
 
 
-                    # Correct the rolling shutter effect
-                    if config.deinterlace_order == -1:
+                    # Correct the rolling shutter effect: exactly row x line period on cameras that
+                    # report their line period (FF TROWNS card), else as the config says
+                    n_rows = img_handle.ff.maxpixel.shape[0]
+                    scan_time = RollingShutterCorrection.scanTime(config, n_rows,
+                        RollingShutterCorrection.lineTime(img_handle))
+                    if scan_time is not None:
 
                         # Compute the corrected frame time
                         frame_no = RollingShutterCorrection.correctRollingShutterTemporal(frame_no, \
-                            y_centroid, img_handle.ff.maxpixel.shape[0], fps=config.fps, \
-                            scan_rate=config.scan_rate)
+                            y_centroid, n_rows, fps=config.fps, scan_rate=scan_time)
 
 
                     # Get current frame if video or images are used as input

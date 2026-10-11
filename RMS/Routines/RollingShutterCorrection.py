@@ -3,6 +3,49 @@
 from __future__ import print_function, division, absolute_import
 
 
+def lineTime(img_handle):
+    """ The sensor line period [ns] the camera reported for this input, or None.
+
+    OpenIPC science cameras send it per frame in the RMSP SEI: capture writes it into the FF as
+    the TROWNS card, and a video file still carries it in its SEI. Other cameras do not report it.
+    """
+
+    if img_handle is None:
+        return None
+
+    t_row_ns = getattr(getattr(img_handle, 'ff', None), 'trowns', None)
+    if not t_row_ns:
+        t_row_ns = getattr(img_handle, 't_row_ns', None)
+
+    return t_row_ns if t_row_ns else None
+
+
+def scanTime(config, n_rows, t_row_ns=None):
+    """ The scan_rate for correctRollingShutterTemporal: the time from the start of the image's
+        first row to the start of the row below its last [s], or None for no correction.
+
+    A camera that reports its sensor line period streams its sensor rows 1:1, so this is exactly
+    n_rows line periods and the correction becomes row x line period, whatever the config says.
+    Otherwise the config decides: deinterlace_order -1 = rolling shutter with config.scan_rate,
+    anything else (global shutter, interlaced) = no correction.
+
+    Arguments:
+        config: [Config] Configuration.
+        n_rows: [int] Vertical size of the image in pixels.
+
+    Keyword arguments:
+        t_row_ns: [float] Sensor line period the camera reported [ns] (lineTime), or None.
+    """
+
+    if t_row_ns:
+        return n_rows*t_row_ns*1e-9
+
+    if config.deinterlace_order == -1:
+        return config.scan_rate
+
+    return None
+
+
 def correctRollingShutterTemporal(frame, y_centr, n_rows, fps=25.0, scan_rate=1/30.0):
     """ Given the frame index, height of the meteor on the image, total height of the image, correct
         frame timestamps to compensate for the rolling shutter effect.
@@ -14,7 +57,9 @@ def correctRollingShutterTemporal(frame, y_centr, n_rows, fps=25.0, scan_rate=1/
         y_centr: [list] Y coordinate of the meteor centroid.
         n_rows: [float] Vertical size of the image in pixels.
         fps: [float] Frame per second
-        scan_rate: [float] The time taken to scan the entire sensor, in seconds.
+        scan_rate: [float] The time taken to scan the image's n_rows rows, in seconds (scanTime).
+            With y_centr in pixel-index coordinates (row r's centre at r), row r is offset by
+            r*scan_rate/n_rows.
     """
 
     # Compute the time offset in fractional frames

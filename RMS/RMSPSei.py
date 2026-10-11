@@ -207,6 +207,7 @@ def readVideoFrameTimes(file_path):
             exp_s: [ndarray] Exposure of each frame [s] (nan where unknown).
             frame_seq: [ndarray] Camera frame sequence number (-1 where no record).
             n_interp: [int] Number of frames whose time was interpolated.
+            t_row_ns: [int] Sensor line period [ns] (rolling shutter), None if not reported.
     """
 
     if (shutil.which("ffmpeg") is None) or (shutil.which("ffprobe") is None):
@@ -284,5 +285,8 @@ def readVideoFrameTimes(file_path):
     frame_seq = np.full(len(frame_recs), -1, dtype=np.int64)
     frame_seq[good] = [r[4] for r in recs]
 
+    t_rows = [r[3]['t_row_ns'] for r in recs if r[3].get('t_row_ns')]
+    t_row_ns = int(np.median(t_rows)) if t_rows else None
+
     return {"int_start": int_start, "exp_s": exp_s, "frame_seq": frame_seq,
-            "n_interp": int(np.count_nonzero(~good))}
+            "n_interp": int(np.count_nonzero(~good)), "t_row_ns": t_row_ns}
