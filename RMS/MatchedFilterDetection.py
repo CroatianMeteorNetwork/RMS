@@ -1969,7 +1969,7 @@ class MatchedFilterDetector(object):
                                    else None),
             'cloud_frames_removed': int(self.cloud_rows_removed),
             'cloud_detections_removed': int(self.cloud_detections_removed),
-            'cloud_removed_frames': [int(f) for f in self.cloud_removed_frames],
+            'cloud_removed_utc': self.frameTimes(self.cloud_removed_frames),
             'tracks_dropped': int(self.tracks_dropped),
             'total_frames': int(self.total_frames),
             'psf_sigma': self.psf_sigma,
@@ -1979,6 +1979,24 @@ class MatchedFilterDetector(object):
                         'detected': bool(sig >= self.opts.track_significance)}
                        for f0, f1, sig in (s[:3] for s in self.significances)],
         }
+
+
+    def frameTimes(self, frames):
+        """ The times of the given frames (UTC, ISO format), from the times of the frames of the input. None for
+            a frame whose time can't be read.
+        """
+
+        times = []
+        for frame in frames:
+            try:
+                t = self.img_handle.currentFrameTime(frame_no=int(frame), dt_obj=True)
+                if t.tzinfo is not None:
+                    t = t.astimezone(datetime.timezone.utc).replace(tzinfo=None)
+                times.append(t.strftime('%Y-%m-%dT%H:%M:%S.%f'))
+            except Exception:
+                times.append(None)
+
+        return times
 
 
     def measure(self, tracks):

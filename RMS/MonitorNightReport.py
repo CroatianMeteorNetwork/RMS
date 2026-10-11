@@ -896,19 +896,20 @@ def plotNightSkyConditions(night_dir, night_name, output_dir, results, config, f
     not_searched = []
     removed = 0
     measured = []
+    chunk_seconds = {}
     for results_dir in sorted(results):
         results_path = os.path.join(output_dir, results_dir)
 
-        # The stars of the chunks of the file, the times of the chunks (sorted), the time of a chunk (s) and the
-        #   frame rate. A file whose stars can't be read is left out
-        star_list, chunk_s, fps = [], None, None
+        # The stars of the chunks of the file, the times of the chunks (sorted) and the time of a chunk (s). A file
+        #   whose stars can't be read is left out
+        star_list, chunk_s = [], None
         try:
             for calstars_path in glob.glob(os.path.join(results_path, 'CALSTARS_*.txt')):
                 stars, chunk_frames, calstars_fps = CALSTARS.readCALSTARS(results_path,
                     os.path.basename(calstars_path), return_fps=True)
                 star_list += stars
                 if chunk_frames and calstars_fps:
-                    chunk_s, fps = chunk_frames/calstars_fps, calstars_fps
+                    chunk_s = chunk_frames/calstars_fps
             star_list = sorted(((filenameToDatetime(entry[0]), len(entry[1])) for entry in star_list),
                                key=lambda entry: entry[0])
         except Exception as e:
@@ -926,14 +927,16 @@ def plotNightSkyConditions(night_dir, night_name, output_dir, results, config, f
                     summary = json.load(f)
                 searched = 'total_frames' in summary
 
-                # The detections removed on clouded sky within the night, from the time of their first frames
-                #   (the frames from the beginning of the file, the time of its first chunk). Only their number
-                #   is in the summaries of older processings
-                frames = summary.get('cloud_removed_frames')
-                if isinstance(frames, list) and star_list and fps:
-                    begin = star_list[0][0]
-                    removed += sum(1 for f in frames
-                                   if night_start <= begin + datetime.timedelta(seconds=f/fps) <= night_end)
+                # The detections removed on clouded sky within the night, from the times of their first frames
+                #   (counted if the time is not known). Only their number is in the summaries of older processings
+                removed_times = summary.get('cloud_removed_utc')
+                if isinstance(removed_times, list):
+                    for t in removed_times:
+                        try:
+                            t = datetime.datetime.strptime(t, '%Y-%m-%dT%H:%M:%S.%f')
+                        except (ValueError, TypeError):
+                            t = None
+                        removed += int((t is None) or (night_start <= t <= night_end))
                 else:
                     removed += int(summary.get('cloud_detections_removed') or 0)
 
@@ -941,10 +944,13 @@ def plotNightSkyConditions(night_dir, night_name, output_dir, results, config, f
                 log.warning("The summary {:s} could not be read: {:s}".format(summary_path, repr(e)))
                 continue
 
-            # The conditions of the file are named by its path in the log (by its name in older logs)
+            # The conditions of the file are named by its path in the log (by its name in older logs), with the
+            #   time of its chunks
             input_file = results[results_dir].get('input_file')
             if searched and (summary.get('clear_sky_fraction') is not None) and input_file:
                 measured.append(input_file)
+                if chunk_s:
+                    chunk_seconds[input_file] = chunk_seconds[os.path.basename(input_file)] = chunk_s
 
         if searched:
             continue
@@ -1027,7 +1033,7 @@ def plotNightSkyConditions(night_dir, night_name, output_dir, results, config, f
     summary = plotSkyConditions(rows, plot_path, '{:s} sky conditions, night of {:s}'.format(config.stationID,
         night_date), not_searched=not_searched, detection_times=detection_times, removed_detections=removed,
         cloud_max_offset=(config.mf_cloud_max_offset if config.mf_cloud_filter else None),
-        min_matched=config.mf_cloud_min_matched)
+        min_matched=config.mf_cloud_min_matched, chunk_seconds=chunk_seconds)
 
     log.info("Sky conditions of night {:s}: {:.1f} h observed, clear {:.0f}%, partly clouded {:.0f}%, clouded "
              "{:.0f}%, {:d} file(s) not searched".format(night_name, summary['observed_h'],

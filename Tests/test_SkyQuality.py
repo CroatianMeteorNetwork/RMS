@@ -796,3 +796,77 @@ def test_plot_sky_conditions_input_of_a_few_chunks_with_a_pause(tmp_path):
 
     summary = sq.plotSkyConditions(rows, str(tmp_path/'conditions.png'), 'Test')
     assert summary['observed_h'] == pytest.approx(12/3600.0)
+
+
+def test_plot_sky_conditions_input_of_two_chunks_with_a_pause(tmp_path):
+    """ The time of the chunks of an input of two chunks with a pause between them is the given one, or at most
+        the one of the other inputs.
+    """
+
+    begin = datetime.datetime(2025, 12, 25, 22, 0, 0)
+    def _rows(name, offsets):
+        return [{'time': begin + datetime.timedelta(seconds=t), 'input': name, 'clear_fraction': 1.0,
+                 'transparency_mag': 0.0, 'reliable_seen': 1.0, 'stars': 500, 'matched': 300} for t in offsets]
+
+    summary = sq.plotSkyConditions(_rows('a.vid', (0, 600)), str(tmp_path/'conditions.png'), 'Test',
+                                   chunk_seconds={'a.vid': 4.0})
+    assert summary['observed_h'] == pytest.approx(8/3600.0)
+
+    rows = sorted(_rows('a.vid', (0, 600)) + _rows('b.vid', (1000, 1004, 1008)), key=lambda row: row['time'])
+    summary = sq.plotSkyConditions(rows, str(tmp_path/'conditions.png'), 'Test')
+    assert summary['observed_h'] == pytest.approx(20/3600.0)
+
+
+@pytest.mark.parametrize('given_chunks', [True, False])
+def test_night_timeline_random(given_chunks):
+    """ The time line of random nights (inputs of different times of their chunks, pauses, overlapping inputs and
+        inputs which were not searched) agrees with the state of every moment counted on a fine grid: a chunk
+        lasts until the next chunk of its input (for the time of a chunk before a pause of more than three
+        chunks), and the worse state holds where they overlap.
+    """
+
+    rng = np.random.default_rng(1)
+    order = ['clouded', 'not_searched', 'partly', 'clear']
+    begin = datetime.datetime(2025, 12, 25, 22, 0, 0)
+    q = 0.25
+
+    for _ in range(60):
+        rows, chunk_seconds, intervals = [], {}, []
+        for k in range(int(rng.integers(1, 4))):
+            name = 'in{:d}.vid'.format(k)
+            chunk = q*int(rng.integers(8, 33))
+            t = q*int(rng.integers(0, 2000))
+            n = int(rng.integers(3, 40))
+            offsets = []
+            for i in range(n):
+                offsets.append(t)
+                t += chunk*(int(rng.integers(5, 50)) if (i >= 2) and (rng.random() < 0.1) else 1)
+            chunk_seconds[name] = chunk
+            for i, t in enumerate(offsets):
+                clear = float(rng.choice([1.0, 0.5, 0.0]))
+                rows.append({'time': begin + datetime.timedelta(seconds=t), 'input': name, 'clear_fraction': clear,
+                             'transparency_mag': 0.0, 'reliable_seen': 1.0, 'stars': 500, 'matched': 300})
+                nxt = offsets[i + 1] if i + 1 < len(offsets) else None
+                end = nxt if (nxt is not None) and (nxt - t <= 3*chunk) else t + chunk
+                intervals.append(('clear' if clear == 1.0 else ('partly' if clear > 0 else 'clouded'), t, end))
+        not_searched = []
+        for _ in range(int(rng.integers(0, 3))):
+            a = q*int(rng.integers(0, 3000))
+            b = a + q*int(rng.integers(4, 400))
+            not_searched.append((begin + datetime.timedelta(seconds=a), begin + datetime.timedelta(seconds=b), [], []))
+            intervals.append(('not_searched', a, b))
+        rows.sort(key=lambda row: (row['time'], row['input']))
+
+        # The state of every moment on a grid of q s, the worst of the intervals which cover it
+        top = int(max(end for _, _, end in intervals)/q) + 1
+        grid = np.full(top, len(order))
+        for state, a, b in intervals:
+            sl = slice(int(round(a/q)), int(round(b/q)))
+            grid[sl] = np.minimum(grid[sl], order.index(state))
+        observed = np.sum(grid < len(order))*q
+
+        summary = sq.nightTimeline(rows, not_searched=not_searched,
+                                   chunk_seconds=chunk_seconds if given_chunks else None)['summary']
+        assert summary['observed_h']*3600 == pytest.approx(observed, abs=1e-6)
+        for i, state in enumerate(order):
+            assert summary[state]*summary['observed_h']*3600 == pytest.approx(np.sum(grid == i)*q, abs=1e-6)

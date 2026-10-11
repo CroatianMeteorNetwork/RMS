@@ -1603,7 +1603,8 @@ def test_night_report_removes_sky_conditions_without_the_matched_filter(tmp_path
 
 def test_night_sky_conditions_counts_the_removed_detections_within_the_night(tmp_path, monkeypatch):
     """ Only the detections removed on clouded sky within the night are counted, from the times of their first
-        frames, and all of them for a summary which has only their number.
+        frames, and all of them for a summary which has only their number. The time of the chunks of the files is
+        from their stars.
     """
 
     import RMS.Routines.SkyQuality as sq
@@ -1615,13 +1616,16 @@ def test_night_sky_conditions_counts_the_removed_detections_within_the_night(tmp
     night_dir = mnr.nightDirPath(output_dir, NIGHT, config)
     night_start, _ = mnr.nightBoundsFromName(config, NIGHT)
 
-    # A file which begins 10 s before the night, with a detection removed in its first second and one 20 s later,
-    #   and a file of an older processing with the number of the removed detections only
+    # A file which begins 10 s before the night, with a detection removed before the night, one in it and one whose
+    #   time is not known (counted), and a file of an older processing with the number of the removed detections
+    #   only
     early = _makeResults(output_dir, config, 'file1', n_chunks=8,
                          start_s=(night_start - BEG_TIME).total_seconds() - 10)
     older = _makeResults(output_dir, config, 'file2', n_chunks=2)
+    removed_utc = [(night_start + datetime.timedelta(seconds=dt)).strftime('%Y-%m-%dT%H:%M:%S.%f')
+                   for dt in (-9, 10)] + [None]
     for results_dir, summary in [(early, {'total_frames': 1024, 'clear_sky_fraction': 0.5,
-                                          'cloud_detections_removed': 2, 'cloud_removed_frames': [10, 500]}),
+                                          'cloud_detections_removed': 3, 'cloud_removed_utc': removed_utc}),
                                  (older, {'total_frames': 256, 'clear_sky_fraction': 0.5,
                                           'cloud_detections_removed': 3})]:
         with open(os.path.join(output_dir, results_dir, DONE_NAME), 'w') as f:
@@ -1639,6 +1643,12 @@ def test_night_sky_conditions_counts_the_removed_detections_within_the_night(tmp
     with open(os.path.join(output_dir, skipped, DONE_NAME), 'w') as f:
         json.dump({'max_stars': 1}, f)
 
-    results = {d: mnr.readDoneFlag(os.path.join(output_dir, d)) for d in (early, older, skipped)}
+    results = {}
+    for results_dir in (early, older, skipped):
+        results[results_dir] = mnr.readDoneFlag(os.path.join(output_dir, results_dir))
+        results[results_dir]['input_file'] = '/data/{:s}.vid'.format(os.path.basename(results_dir))
     assert mnr.plotNightSkyConditions(night_dir, NIGHT, output_dir, results, config, '')
-    assert plotted['removed_detections'] == 1 + 3
+    assert plotted['removed_detections'] == 2 + 3
+
+    # The time of the chunks of the files is from their stars
+    assert plotted['chunk_seconds']['/data/file1.vid'] == pytest.approx(128/25.0)

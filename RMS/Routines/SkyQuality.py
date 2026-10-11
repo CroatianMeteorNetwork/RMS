@@ -1282,8 +1282,91 @@ def _legendPlace(fig, ax, handles):
         return 'upper right'
 
 
+def nightTimeline(rows, not_searched=(), chunk_seconds=None):
+    """ The time line of the states of the sky through a night: the time of every chunk is clear, partly clouded
+        or clouded (see CLEAR_FRACTION_CLEAR) until the next chunk of its input, the inputs which were not searched
+        are not searched, the worse state holds where they overlap (clouded, not searched, partly clouded, clear),
+        and the time between them without data is a gap.
+
+    Arguments:
+        rows: [list] Conditions of the chunks in time order, see readConditions.
+
+    Keyword arguments:
+        not_searched: [list] Spans of the inputs which were not searched (start, end, times, stars).
+        chunk_seconds: [dict] Time of the chunks of the inputs (s) by their names, from the spacing of their chunks
+            for the inputs which are not in it. None by default.
+
+    Return:
+        [dict] input_rows (the indices of the rows of every input), steps (the time of the chunks of every
+            input), chunk (the time of a chunk of all inputs), max_gap (the longest time between chunks which is
+            not a gap), labels (the state of every chunk), segments (state, start, end), gaps (start, end), and
+            summary (the observed time in hours, and its fractions in every state).
+    """
+
+    times = [row['time'] for row in rows]
+    clear = np.array([row['clear_fraction'] for row in rows], dtype=np.float64)
+
+    # The rows of every input (in time order, as the rows)
+    input_rows = collections.defaultdict(list)
+    for i, row in enumerate(rows):
+        input_rows[row.get('input')].append(i)
+
+    # The time of the chunks of every input (the inputs can have different frame rates): the given one, or the
+    #   shortest spacing of its chunks (they are regular, but an input of a few chunks can have a pause between
+    #   them), at most the one of the other inputs for an input of two chunks (one spacing), and the one of the
+    #   other inputs for an input of one chunk. A gap of more than a few chunks is a gap in the data
+    chunk_seconds = chunk_seconds or {}
+
+    def _spacing(idx):
+        dt = [(times[j] - times[i]).total_seconds() for i, j in zip(idx[:-1], idx[1:])]
+        dt = [d for d in dt if d > 0]
+        return (float(min(dt)), len(dt)) if dt else (None, 0)
+
+    spacings = {name: _spacing(idx) for name, idx in input_rows.items()}
+    steps = {name: (chunk_seconds[name] if (chunk_seconds.get(name) or 0) > 0 else spacings[name][0])
+             for name in input_rows}
+    known = [st for name, st in steps.items()
+             if (st is not None) and ((chunk_seconds.get(name) or 0) > 0 or (spacings[name][1] > 1))]
+    step = float(np.median(known)) if known else 4.0
+    for name, st in steps.items():
+        if st is None:
+            steps[name] = step
+        elif not (chunk_seconds.get(name) or 0) > 0 and (spacings[name][1] == 1) and known:
+            steps[name] = min(st, step)
+    steps = {name: datetime.timedelta(seconds=st) for name, st in steps.items()}
+    chunk = datetime.timedelta(seconds=step)
+    max_gap = 3*max(list(steps.values()) + [chunk])
+
+    # The state of every chunk
+    labels = np.where(clear >= CLEAR_FRACTION_CLEAR, 'clear', np.where(clear > 0, 'partly', 'clouded'))
+
+    # The time line of the states: a chunk lasts until the next chunk of its input, and where inputs overlap (e.g.
+    #   two recordings of the same time), the worse state holds
+    intervals = []
+    for name, idx in input_rows.items():
+        intervals += _spans([times[i] for i in idx], [labels[i] for i in idx], 3*steps[name], steps[name])
+    intervals += [('not_searched', start, end) for start, end, _, _ in not_searched]
+    segments = _stateSegments(intervals, ['clouded', 'not_searched', 'partly', 'clear'])
+
+    # The summary: the observed time (the union of the intervals) and its fractions in every state
+    durations = collections.defaultdict(float)
+    for state, start, end in segments:
+        durations[state] += (end - start).total_seconds()
+    observed_s = sum(durations.values())
+    summary = {'observed_h': observed_s/3600.0}
+    for state in ('clear', 'partly', 'clouded', 'not_searched'):
+        summary[state] = durations[state]/observed_s if observed_s else 0.0
+
+    # The time without data: the gaps in the time line longer than a few chunks (e.g. no recording, or the files
+    #   were not processed)
+    gaps = [(a[2], b[1]) for a, b in zip(segments[:-1], segments[1:]) if b[1] - a[2] > max_gap]
+
+    return {'input_rows': input_rows, 'steps': steps, 'chunk': chunk, 'max_gap': max_gap, 'labels': labels,
+            'segments': segments, 'gaps': gaps, 'summary': summary}
+
+
 def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(), removed_detections=0,
-                      cloud_max_offset=None, min_matched=None):
+                      cloud_max_offset=None, min_matched=None, chunk_seconds=None):
     """ Plot the sky conditions of a night: the dimming of the stars, the clear fraction of the image and the stars
         through the night, with the time when the sky was clouded and partly clouded shaded, and the times of
         the detections.
@@ -1300,6 +1383,8 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
         removed_detections: [int] Number of the detections removed on clouded sky.
         cloud_max_offset: [float] Dimming above which the sky is clouded (mag), drawn if given.
         min_matched: [int] Smallest number of matched stars, drawn if given.
+        chunk_seconds: [dict] Time of the chunks of the inputs (s) by their names, from the spacing of their chunks
+            for the inputs which are not in it. None by default.
 
     Return:
         [dict] Summary: the observed time (h, overlapping inputs counted once), and the fractions of it which
@@ -1323,46 +1408,14 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
     stars = np.array([row['stars'] for row in rows])
     matched = np.array([row['matched'] for row in rows])
 
-    # The rows of every input (in time order, as the rows)
-    input_rows = collections.defaultdict(list)
-    for i, row in enumerate(rows):
-        input_rows[row.get('input')].append(i)
-
-    # The time between the chunks of every input (the shortest spacing of its chunks, as the chunks are regular and
-    #   an input of a few chunks can have a pause between them; the inputs can have different frame rates), and of
-    #   all inputs for those of one chunk. A gap of more than a few chunks is a gap in the data
-    def _spacing(idx):
-        dt = [(times[j] - times[i]).total_seconds() for i, j in zip(idx[:-1], idx[1:])]
-        dt = [d for d in dt if d > 0]
-        return float(min(dt)) if dt else None
-
-    steps = {name: _spacing(idx) for name, idx in input_rows.items()}
-    known = [st for st in steps.values() if st is not None]
-    step = float(np.median(known)) if known else 4.0
-    steps = {name: datetime.timedelta(seconds=st if st is not None else step) for name, st in steps.items()}
-    chunk = datetime.timedelta(seconds=step)
-    max_gap = 3*max(list(steps.values()) + [chunk])
-
-    # The state of every chunk
-    labels = np.where(clear >= CLEAR_FRACTION_CLEAR, 'clear', np.where(clear > 0, 'partly', 'clouded'))
-
-    # The time line of the states: a chunk lasts until the next chunk of its input, and where inputs overlap (e.g.
-    #   two recordings of the same time), the worse state holds
-    intervals = []
-    for name, idx in input_rows.items():
-        intervals += _spans([times[i] for i in idx], [labels[i] for i in idx], 3*steps[name], steps[name])
-    intervals += [('not_searched', start, end) for start, end, _, _ in not_searched]
-    segments = _stateSegments(intervals, ['clouded', 'not_searched', 'partly', 'clear'])
-
-    # The summary: the observed time (the union of the intervals) and its fractions in every state
+    # The time line of the states of the sky
+    timeline = nightTimeline(rows, not_searched=not_searched, chunk_seconds=chunk_seconds)
+    input_rows, steps, chunk, max_gap = (timeline[k] for k in ('input_rows', 'steps', 'chunk', 'max_gap'))
+    labels, segments, gaps, summary = (timeline[k] for k in ('labels', 'segments', 'gaps', 'summary'))
+    step = chunk.total_seconds()
     n = len(rows)
-    durations = collections.defaultdict(float)
-    for state, start, end in segments:
-        durations[state] += (end - start).total_seconds()
-    observed_s = sum(durations.values())
-    summary = {'observed_h': observed_s/3600.0}
-    for state in ('clear', 'partly', 'clouded', 'not_searched'):
-        summary[state] = durations[state]/observed_s if observed_s else 0.0
+
+    # The median dimming of the chunks which were not clouded
     usable = (labels != 'clouded') & np.isfinite(dimming)
     summary['median_dimming'] = float(np.median(dimming[usable])) if usable.any() else float('nan')
 
@@ -1375,10 +1428,6 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
     cards_bg = {'partly': '#f9e7bf', 'clouded': '#ecb48c', 'not_searched': '#999999'}
     blue, green, grey, dark = '#0072B2', '#009E73', '#4b5563', '#111827'
 
-
-    # The time without data: the gaps in the time line longer than a few chunks (e.g. no recording, or the files
-    #   were not processed)
-    gaps = [(a[2], b[1]) for a, b in zip(segments[:-1], segments[1:]) if b[1] - a[2] > max_gap]
 
     fig = Figure(figsize=(14, 10.4), dpi=110)
     axes = fig.subplots(4, 1, sharex=True, gridspec_kw={'height_ratios': [3, 2, 2, 0.7], 'hspace': 0.3})
