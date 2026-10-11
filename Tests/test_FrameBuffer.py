@@ -389,9 +389,10 @@ def test_persistence_carried_without_the_overlap():
 
 
 def test_segments_share_the_track_cap_and_carry_persistence(monkeypatch):
-    """ The segments share mf_max_tracks: every segment measures at most what the segments before it left, so a file
-        measures at most mf_max_tracks candidate tracks, and all of them while it has fewer (also if they are all in
-        one segment). The persistence is carried from before the next segment. """
+    """ The segments share mf_max_tracks: every segment has a share by the frames which belong to it, which is kept
+        for it, and measures at most what the segments before it left minus the shares of the segments after it. A
+        file measures at most mf_max_tracks candidate tracks, all of them while it has fewer, and a later segment
+        always has its share. The persistence is carried from before the next segment. """
 
     import RMS.MatchedFilterDetection as mfd
 
@@ -426,7 +427,7 @@ def test_segments_share_the_track_cap_and_carry_persistence(monkeypatch):
     monkeypatch.setattr(mfd, 'SegmentedRun', lambda *args, **kwargs: None)
 
     mfd.detectMatchedFilterSegments(handle, config, 768)
-    assert [c[0] for c in calls] == [300, 300, 100, 20]
+    assert [c[0] for c in calls] == [93, 168, 75, 57]
     assert [c[1] for c in calls] == [512, 1024, 1536, None]
 
 
@@ -465,3 +466,21 @@ def test_detections_on_persistent_pixels_of_the_whole_input():
 
     kept = removePersistentDetections([[0, 0, on], [0, 0, off]], persistence, 0.2, 1)
     assert len(kept) == 1 and kept[0][2][0, 2] == 40.5
+
+
+def test_clouded_rows_removed_with_the_sky_of_the_whole_input():
+    """ After the segments, the rows of the detections on sky which is clouded in the sky quality of the whole input
+        are removed, and the detections left with fewer than 2 rows. """
+
+    from RMS.MatchedFilterDetection import removeCloudedRows
+
+    class _Sky(object):
+        def isClear(self, x, y, frames):
+            return np.asarray(frames) < 150
+
+    partly = _track(np.arange(100, 200, 1))
+    clouded = _track(np.arange(300, 400, 1))
+    detections, rows, removed = removeCloudedRows([[0, 0, partly], [0, 0, clouded]], _Sky(), _Detector())
+    assert len(detections) == 1 and detections[0][2][-1, 0] == 149
+    assert rows == [float(f) for f in range(150, 200)] + [float(f) for f in range(300, 400)]
+    assert removed == [300]

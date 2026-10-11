@@ -3380,6 +3380,41 @@ def detectMatchedFilter(img_handle, config, mask=None, dark=None, flat_struct=No
 
 
 
+def removeCloudedRows(detections, sky_map, detector):
+    """ Remove the rows of the detections on clouded sky (see SkyQualityMap.isClear), and the detections left with
+        fewer than 2 rows, as the cloud filter of MatchedFilterDetector.run does with the rows of every frame.
+
+    Arguments:
+        detections: [list] Detections as [rho, theta, centroids] (unbinned).
+        sky_map: [SkyQualityMap] Sky quality of the input.
+        detector: [MatchedFilterDetector] A detector of the input, for the polar lines of the detections.
+
+    Return:
+        (detections, removed_rows, removed_first): [tuple] The detections which are kept, the frames of the rows
+            which were removed, and the first frames of the detections which were removed.
+    """
+
+    kept, removed_rows, removed_first = [], [], []
+    for det in detections:
+        cent = det[2]
+        clear = np.asarray(sky_map.isClear(cent[:, 1], cent[:, 2], cent[:, 0]), dtype=bool)
+
+        # Nothing clouded: kept as it is
+        if clear.all():
+            kept.append(det)
+            continue
+
+        # The rows on clear sky, if there are enough of them
+        removed_rows += cent[~clear, 0].tolist()
+        if clear.sum() < 2:
+            removed_first.append(int(round(cent[0, 0])))
+            continue
+        cent = cent[clear]
+        kept.append([*detector.polarLine(cent), cent])
+
+    return kept, removed_rows, removed_first
+
+
 def persistentMasks(persistence, fraction):
     """ The persistent pixels of every run length and bin of the search: above the threshold in more than the
         given fraction of the runs (and in at least 2 runs), grown by a binned pixel.
@@ -3578,7 +3613,8 @@ def stitchSegments(segment_detections, cuts, overlaps, detector, tolerance, sear
 
 
 class SegmentedRun(object):
-    def __init__(self, img_handle, ranges, detectors, cuts, sky_map, buffer, timing):
+    def __init__(self, img_handle, ranges, detectors, cuts, sky_map, buffer, timing, removed_rows=(),
+                 removed_first=()):
         """ The matched filter of an input in segments (see detectMatchedFilterSegments), with the summary of the
             whole input in the form of MatchedFilterDetector.summary.
 
@@ -3590,6 +3626,11 @@ class SegmentedRun(object):
             sky_map: [SkyQualityMap] Sky quality of the whole input, or None.
             buffer: [SegmentBuffer] The frames in memory.
             timing: [dict] Time of the steps outside the detectors (s).
+
+        Keyword arguments:
+            removed_rows: [list] Frames of the measurements removed on sky clouded in the sky quality of the whole
+                input, after the segments (see detectMatchedFilterSegments). Empty by default.
+            removed_first: [list] First frames of the detections removed then. Empty by default.
         """
 
         self.img_handle = img_handle
@@ -3599,6 +3640,10 @@ class SegmentedRun(object):
         self.sky_map = sky_map
         self.buffer = buffer
         self.timing = timing
+
+        # The measurements and the detections removed on sky clouded in the sky quality of the whole input
+        self.removed_rows = list(removed_rows)
+        self.removed_first = list(removed_first)
 
 
     def summary(self):
@@ -3622,7 +3667,7 @@ class SegmentedRun(object):
             bounds.append((lo, hi))
 
         # The detections removed by clouds in the frames which belong to every segment
-        removed = []
+        removed = list(self.removed_first)
         for k, det in run:
             removed += [f for f in det.cloud_removed_frames if bounds[k][0] <= f < bounds[k][1]]
 
@@ -3641,8 +3686,9 @@ class SegmentedRun(object):
             'aperture_correction': float(np.median(corrections)) if corrections else None,
             'clear_sky_fraction': (round(float(np.mean(self.sky_map.clear)), 3) if self.sky_map is not None
                                    else None),
-            'cloud_frames_removed': sum(int(bounds[k][0] <= f < bounds[k][1]) for k, det in run
-                                        for f in det.cloud_removed_row_frames),
+            'cloud_frames_removed': len(self.removed_rows) + sum(int(bounds[k][0] <= f < bounds[k][1])
+                                                                 for k, det in run
+                                                                 for f in det.cloud_removed_row_frames),
             'cloud_detections_removed': len(removed),
             'cloud_removed_utc': first.frameTimes(sorted(removed)) if first is not None else [],
             'tracks_dropped': int(sum(det.tracks_dropped for _, det in run)),
@@ -3705,9 +3751,14 @@ def detectMatchedFilterSegments(img_handle, config, segment_frames, mask=None, d
     cuts = [(ranges[k + 1][0] + ranges[k][1])//2 for k in range(len(ranges) - 1)]
     overlaps = [(ranges[k + 1][0], ranges[k][1]) for k in range(len(ranges) - 1)]
 
-    # The segments share mf_max_tracks: every segment measures at most what the segments before it left, so the
-    #   input measures at most mf_max_tracks candidate tracks, and all of them while it has fewer
-    max_tracks = int(config.mf_max_tracks)
+    # The segments share mf_max_tracks: every segment has a share by the frames which belong to it, which is kept
+    #   for it, and measures at most what the segments before it left minus the shares of the segments after it.
+    #   The input measures at most mf_max_tracks candidate tracks, all of them while it has fewer, and a busy
+    #   early part of it can't leave nothing for a later one
+    bounds = [0] + cuts + [img_handle.total_frames]
+    shares = [int(math.ceil(config.mf_max_tracks*(bounds[k + 1] - bounds[k])/img_handle.total_frames))
+              for k in range(len(ranges))]
+    remaining = int(config.mf_max_tracks)
 
     timing = collections.defaultdict(float)
     star_list, detectors, segment_detections = [], [], []
@@ -3746,6 +3797,7 @@ def detectMatchedFilterSegments(img_handle, config, segment_frames, mask=None, d
 
         # The segment is searched, with the sky quality from the stars of all chunks read so far (the intensities
         #   are scaled to the stars of the segment itself, see apertureCorrection)
+        max_tracks = max(remaining - sum(shares[k + 1:]), 0)
         detections, detector = detectMatchedFilter(buffer, config, mask=mask, dark=dark, flat_struct=flat_struct,
                                                    star_list=list(star_list), return_detector=True,
                                                    platepar=platepar, reference_dir=reference_dir,
@@ -3757,7 +3809,7 @@ def detectMatchedFilterSegments(img_handle, config, segment_frames, mask=None, d
                                                    max_tracks=max_tracks)
         detectors.append(detector)
         if detector is not None:
-            max_tracks = max(max_tracks - detector.tracks_measured, 0)
+            remaining = max(remaining - detector.tracks_measured, 0)
 
         # The persistent pixels are judged over all segments so far (the runs of every overlap once), as over the
         #   whole input
@@ -3790,12 +3842,24 @@ def detectMatchedFilterSegments(img_handle, config, segment_frames, mask=None, d
                          input_name=input_name) if searched else None
     timing['sky_input'] += time() - t1
 
+    # The measurements on sky which is clouded in the sky quality of the whole input are removed (the sky quality
+    #   of a segment, from the stars so far, can take as clear what the whole input shows as clouded)
+    removed_rows, removed_first = [], []
+    if (sky_map is not None) and detections:
+        detections, removed_rows, removed_first = removeCloudedRows(detections, sky_map, searched[0])
+        if removed_rows:
+            log.info('Matched filter: {:d} frames of detections and {:d} detections on sky clouded in the whole '
+                     'input removed'.format(len(removed_rows), len(removed_first)))
+
     timing['segments_total'] = time() - t0
     log.info('Matched filter: {:d} detections in {:d} segments, {:d} frames read once ({:d} outside the '
              'segments), {:.1f} min'.format(len(detections), len(ranges), buffer.frames_read, buffer.frames_outside,
                                             timing['segments_total']/60.0))
 
-    return star_list, detections, SegmentedRun(img_handle, ranges, detectors, cuts, sky_map, buffer, timing), buffer
+    run = SegmentedRun(img_handle, ranges, detectors, cuts, sky_map, buffer, timing, removed_rows=removed_rows,
+                       removed_first=removed_first)
+
+    return star_list, detections, run, buffer
 
 
 

@@ -434,6 +434,12 @@ all steps of the matched filter take the frames from memory:
 - The memory is that of the frames as they are read (512x512 16-bit frames are 0.5 MB each, so 4 GB is about
   8000 frames, 4 minutes at 32 fps); a worker needs about that much more memory. Size it for `--nproc` workers.
 - A segment without enough stars (`ff_min_stars`) is not searched, as a whole file without them isn't.
+- The decisions which depend on the whole file are taken at its end: the pixels which are persistent over the whole
+  file, and the clouded sky of the whole file, remove the detections and measurements on them as without segments.
+  A segment only knows the file so far, so it may take sky as clouded which the whole file shows as clear; its
+  measurements there are then not kept, unlike without segments.
+- The candidate tracks measured per file are at most `mf_max_tracks`, shared by the segments: every segment has a
+  share by its length, and what a segment doesn't use is left to the next ones.
 - 0 (the default) reads the file for every step. Only `.vid` files are read in segments.
 
 
