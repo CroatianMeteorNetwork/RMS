@@ -29,7 +29,7 @@ from RMS.Logger import getLogger
 from RMS.Misc import RmsDateTime, UTCFromTimestamp
 from RMS.MonitorNightReport import (ESSENTIAL_STEPS, JSON_TIME_FORMAT, _writeJSON, latestPlateparPath, nightInfo,
                                     nightConditionRows, nightSkyResults, plateparResidual, readFileSkyResults,
-                                    readReportStates, scanNights)
+                                    readReportStates, scanNights, selectPlatepar)
 
 
 log = getLogger("logger")
@@ -250,7 +250,8 @@ def fileCalibration(results_path, config, clear_times=None):
 
 
 class MonitorStatus(object):
-    def __init__(self, camera_id, output_dir, input_dir, config, input_scanner, nproc, input_sizer=None):
+    def __init__(self, camera_id, output_dir, input_dir, config, input_scanner, nproc, input_sizer=None,
+                 platepar_path=None):
         """ Keeps the status file of a camera of the monitor up to date.
 
         Arguments:
@@ -266,6 +267,7 @@ class MonitorStatus(object):
         Keyword arguments:
             input_sizer: [callable] Function which returns the size of an input (bytes), None if it can't be read
                 (see MonitorProcessFrameInterface.inputState). The size of the file by default.
+            platepar_path: [str] Path of the platepar given to the monitor, None if not known. None by default.
         """
 
         self.camera_id = camera_id
@@ -275,6 +277,7 @@ class MonitorStatus(object):
         self.input_scanner = input_scanner
         self.nproc = nproc
         self.input_sizer = input_sizer if input_sizer is not None else os.path.getsize
+        self.platepar_path = platepar_path
 
         self.path = os.path.join(output_dir, STATUS_FILE_NAME)
         self.history_path = os.path.join(output_dir, HISTORY_FILE_NAME)
@@ -850,8 +853,9 @@ class MonitorStatus(object):
         sky['observed_utc'] = _timeString(latest_end)
         sky['age_min'] = _round((now - latest_end).total_seconds()/60.0, 1)
 
-        # The values of the latest chunk with conditions
-        if rows:
+        # The values of the latest chunk with conditions, if it is in the latest data (the latest file may not have
+        #   been searched, then only its stars are known)
+        if rows and (rows[-1]['time'] + timeline['steps'][rows[-1].get('input')] > segments[-1][1]):
             row = rows[-1]
             sky.update({'clear_percent': _round(100*row['clear_fraction'], 1),
                         'dimming_mag': _round(row['transparency_mag']),
@@ -917,12 +921,18 @@ class MonitorStatus(object):
         calibration = {'dist_check_threshold_px': self.config.dist_check_threshold,
                        'camera_moved_threshold_px': CAMERA_MOVED_PX}
 
-        # The reference platepar which the following data is processed with
-        latest_path = latestPlateparPath(self.output_dir, self.config)
-        if os.path.isfile(latest_path):
-            calibration['latest_platepar'] = latest_path
-            calibration['latest_platepar_utc'] = _timeString(
-                UTCFromTimestamp.utcfromtimestamp(os.path.getmtime(latest_path)))
+        # The platepar which the following files are processed with, selected as by the workers: the best platepar
+        #   of the latest reported night if it is carried forward and newer than the given one
+        if self.platepar_path is not None:
+            platepar_path = selectPlatepar(self.output_dir, self.config, self.platepar_path)
+        else:
+            platepar_path = latestPlateparPath(self.output_dir, self.config)
+        if os.path.isfile(platepar_path):
+            calibration['platepar'] = platepar_path
+            calibration['platepar_utc'] = _timeString(
+                UTCFromTimestamp.utcfromtimestamp(os.path.getmtime(platepar_path)))
+            calibration['platepar_from_previous_night'] = (platepar_path == latestPlateparPath(self.output_dir,
+                                                                                               self.config))
 
         # The calibration of every file (read once per file), with its clear chunks from its conditions
         per_file = []

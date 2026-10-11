@@ -45,9 +45,9 @@ from RMS.Formats.FFfile import validFFName, constructFFName
 from RMS.Formats import FFpng
 from RMS.Formats.Platepar import Platepar
 from RMS.Routines import Image
-from RMS.MonitorNightReport import exitWithMonitor, latestPlateparPath, lockOutputDir, lockOwner, \
+from RMS.MonitorNightReport import exitWithMonitor, lockOutputDir, lockOwner, \
     MONITOR_LOCK_FILE_NAME, nightDirPath, nightInfo, NightReporter, readDoneFlag, readStateFile, ReportLock, \
-    stopProcess, writeDoneFlag
+    selectPlatepar, stopProcess, writeDoneFlag
 from RMS.MonitorStatus import MonitorStatus
 from RMS.ExtractStarsFrameInterface import extractStarsFrameInterface
 from RMS.DetectStarsAndMeteors import (
@@ -862,10 +862,9 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
 
         # Use the best platepar of the latest reported night, unless the given platepar is newer (e.g. it was
         #   fitted again manually)
-        latest_platepar_path = latestPlateparPath(output_dir, config)
-        if config.monitor_update_platepar and os.path.isfile(latest_platepar_path) \
-                and (os.path.getmtime(latest_platepar_path) > os.path.getmtime(platepar_path)):
-            platepar_path = latest_platepar_path
+        selected_platepar_path = selectPlatepar(output_dir, config, platepar_path)
+        if selected_platepar_path != platepar_path:
+            platepar_path = selected_platepar_path
             proc_log.info("Using the best platepar of a previous night: {}".format(platepar_path))
 
         # Copy the platepar into the results directory so ApplyRecalibrate can find it
@@ -1617,7 +1616,8 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
         if reporter.config.monitor_status:
             status = MonitorStatus(reporter.config.stationID, output_dir, input_dir, reporter.config,
                                    lambda: scanInputs(input_dir, output_dir, reporter.config, file_type, recursive),
-                                   nproc, input_sizer=lambda path: inputSize(path, file_type))
+                                   nproc, input_sizer=lambda path: inputSize(path, file_type),
+                                   platepar_path=platepar_path)
 
         # Delete the local copies of input files left behind by workers which were killed
         removeStagedFiles(reporter.config.monitor_staging_dir)
@@ -2104,7 +2104,8 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None,
 
                 statuses[cam['id']] = MonitorStatus(cam['id'], cam['output_dir'], cam['input_dir'], cam_config,
                                                     _scanner, nproc,
-                                                    input_sizer=lambda path: inputSize(path, file_type))
+                                                    input_sizer=lambda path: inputSize(path, file_type),
+                                                    platepar_path=cam['platepar_path'])
         input_readable = {cam['id']: None for cam in cameras}
 
         # Initialize state tracking dictionaries. Since files from different cameras might have the same name,

@@ -283,6 +283,28 @@ def latestPlateparPath(output_dir, config):
 
 ### Done flags and report state ###
 
+def selectPlatepar(output_dir, config, platepar_path):
+    """ The platepar which the files are processed with: the best platepar of the latest reported night (see
+        latestPlateparPath), unless it is not carried forward (monitor_update_platepar) or the given platepar is
+        newer (e.g. it was fitted again manually).
+
+    Arguments:
+        output_dir: [str] Output directory of the monitor.
+        config: [Config] Configuration.
+        platepar_path: [str] Path of the platepar given to the monitor.
+
+    Return:
+        [str] Path of the platepar.
+    """
+
+    latest_platepar_path = latestPlateparPath(output_dir, config)
+    if config.monitor_update_platepar and os.path.isfile(latest_platepar_path) \
+            and (os.path.getmtime(latest_platepar_path) > os.path.getmtime(platepar_path)):
+        return latest_platepar_path
+
+    return platepar_path
+
+
 def _writeJSON(file_path, data):
     """ Write JSON to a temporary file and rename it, so a reader never sees a partially written file. """
 

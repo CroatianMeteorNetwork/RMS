@@ -867,3 +867,49 @@ def _alwaysUpdate(update):
         return update(self, state, force=True)
 
     return _update
+
+
+def test_latest_sky_of_a_file_which_was_not_searched(tmp_path, now):
+    """ When the latest file was not searched (too few stars), the sky has its state and stars, and not the
+        values of the older measured file.
+    """
+
+    status, config = _status(tmp_path)
+    output_dir = str(tmp_path/'output')
+    _searchedFile(output_dir, config, 'file1', n_chunks=12, clear=1.0)
+
+    # A later file with one star per chunk, which was not searched
+    skipped = _makeResults(output_dir, config, 'file2', n_chunks=3, start_s=120)
+    with open(os.path.join(output_dir, skipped, mnr.MF_DONE_NAME), 'w') as f:
+        json.dump({'max_stars': 1}, f)
+
+    sky = status.build(_state())['sky']
+    assert sky['state'] == 'too_few_stars' and sky['stars'] == 1
+    assert 'clear_percent' not in sky and 'matched_stars' not in sky
+
+
+@pytest.mark.parametrize('update, latest_newer, expected', [(True, True, 'latest'), (True, False, 'given'),
+                                                           (False, True, 'given')])
+def test_platepar_in_use(tmp_path, now, update, latest_newer, expected):
+    """ The platepar in use is selected as by the workers: the best platepar of the latest night if it is carried
+        forward and newer than the given one.
+    """
+
+    config = _matchedFilterConfig()
+    config.monitor_update_platepar = update
+    (tmp_path/'input').mkdir()
+    (tmp_path/'output').mkdir()
+    given = str(tmp_path/'platepar.cal')
+    latest = mnr.latestPlateparPath(str(tmp_path/'output'), config)
+    for path, age in [(given, 100 if latest_newer else 10), (latest, 10 if latest_newer else 100)]:
+        with open(TEMPLATE_PLATEPAR) as src, open(path, 'w') as dst:
+            dst.write(src.read())
+        t = time.time() - age
+        os.utime(path, (t, t))
+
+    scanner = lambda: mon.scanInputs(str(tmp_path/'input'), str(tmp_path/'output'), config, 'vid', False)
+    status = mst.MonitorStatus('XX0001', str(tmp_path/'output'), str(tmp_path/'input'), config, scanner, 2,
+                               platepar_path=given)
+    calibration = status.build(_state())['calibration']
+    assert calibration['platepar'] == (latest if expected == 'latest' else given)
+    assert calibration['platepar_from_previous_night'] == (expected == 'latest')

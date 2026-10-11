@@ -572,7 +572,7 @@ An example (shortened; the processing statistics and the calibration of the nigh
 | `sky` | `state` | The sky at the end of the latest processed data: `clear`, `partly_clouded`, `clouded`, `too_few_stars` (not searched), or `no_data`. |
 | | `observed_utc`, `age_min` | When the sky was observed, and how long ago. |
 | | `observable` | At least 80% of the observed time in the last 10 minutes of the data had at least 80% of the image clear. `null` with less than about 3 minutes of data. |
-| | `clear_percent`, `dimming_mag`, `stars`, `matched_stars`, `reliable_seen_percent` | The latest chunk: the clear part of the image, how much the stars are dimmed vs clear sky, the stars, and the share of the stars which are reliably seen on clear sky that are seen. |
+| | `clear_percent`, `dimming_mag`, `stars`, `matched_stars`, `reliable_seen_percent` | The latest chunk: the clear part of the image, how much the stars are dimmed vs clear sky, the stars, and the share of the stars which are reliably seen on clear sky that are seen. Only given when the latest data was searched (otherwise only its stars are known). |
 | | `stars`, `stars_utc` | Without the cloud filter of the matched filter (e.g. with the normal detection or FF input) the state of the sky is not measured, but the stars of the latest chunk are given. |
 | | `last_hour` | The shares of the states and the median dimming in the last hour of the data. |
 | `night` | `name`, `start_utc`, `end_utc` | The night (sunset to sunrise). |
@@ -582,7 +582,7 @@ An example (shortened; the processing statistics and the calibration of the nigh
 | `calibration` | `status`, `reason` | `ok`, `failing`, `degraded` (the camera may have moved) or `unknown` (too few chunks on clear sky to judge), with the reason. |
 | | `last_file`, `recent`, `tonight` | For the last file, the latest files with at least 10 chunks on clear sky, and the night: the chunks, how many were recalibrated, the share of the chunks on clear sky which were recalibrated, the median residual of the fit (px), the median number of matched stars, the photometric zero point (mag) and the median difference of the pointing from the reference platepar (px). |
 | | `dist_check_threshold_px`, `camera_moved_threshold_px` | The limits of the judgement. |
-| | `latest_platepar`, `latest_platepar_utc` | The platepar which the following data is processed with. |
+| | `platepar`, `platepar_utc`, `platepar_from_previous_night` | The platepar which the following files are processed with, selected as by the workers (see [Platepar](#platepar)), and whether it is the best platepar of a previous night. |
 | `detector` | `name` | `matched_filter`, `normal_and_matched_filter` or `normal`. |
 | | `gpu_configured`, `gpu_used_last_file`, `cloud_filter`, `candidates_dropped_last_file` | The matched filter: GPU setting and use, the cloud filter, and the candidates which were not measured. |
 | `reports` | `mode`, `report_running`, `last_night`, `last_report_utc`, `last_report_ok`, `failed_steps`, `recalibration` | The night reports. |
