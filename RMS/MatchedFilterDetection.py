@@ -501,8 +501,11 @@ class MatchedFilterDetector(object):
         self.significances = []
 
         # The persistence counts of the segments of the input before this one, {(run, bin): (counts, runs)} (see
-        #   removePersistent)
+        #   removePersistent), and the counts to carry to the next segment: those before the frame where it begins
+        #   (persistence_until), so the runs of the overlap are counted once
         self.persistence_prior = {}
+        self.persistence_until = None
+        self.persistence_carry = None
 
 
     ### Frames ###
@@ -1050,6 +1053,9 @@ class MatchedFilterDetector(object):
         hits = []
         for k, (first, last) in enumerate(zip(self.block_starts, self.block_ends)):
 
+            # The persistence counts to carry to the next segment, before its frames
+            self.persistenceCheckpoint(first)
+
             t1 = time()
             frames = self.readFrames(first, last - first)
             self.timing['read'] += time() - t1
@@ -1081,7 +1087,27 @@ class MatchedFilterDetector(object):
             log.warning('Matched filter: the PSF sigma could not be measured on the stars, 1.0 px assumed (set '
                         'mf_psf_sigma)')
 
+        # Without a next segment (or before its frames were reached), all counts are carried
+        self.persistenceCheckpoint(None)
+
         return self.removePersistent(hits)
+
+
+    def persistenceCheckpoint(self, first):
+        """ Keep the persistence counts to carry to the next segment of the input (see persistence_until), once:
+            when the search reaches the block which begins at or after the first frame of the next segment, or at
+            the end of the search (first is None).
+
+        Arguments:
+            first: [int] First frame of the block which is searched next, None at the end of the search.
+        """
+
+        if self.persistence_carry is not None:
+            return
+
+        if (first is None) or ((self.persistence_until is not None) and (first >= self.persistence_until)):
+            self.persistence_carry = {key: (counts.copy(), self.persistence_runs[key])
+                                      for key, counts in self.persistence_counts.items()}
 
 
     def removePersistent(self, hits):
@@ -3250,7 +3276,7 @@ def skyQuality(img_handle, config, star_list, platepar, reference_dir=None, inpu
 
 def detectMatchedFilter(img_handle, config, mask=None, dark=None, flat_struct=None, star_list=None,
                         return_detector=False, platepar=None, reference_dir=None, input_name='', frame_range=None,
-                        persistence_prior=None, sky_range=None):
+                        persistence_prior=None, sky_range=None, persistence_until=None, max_tracks=None):
     """ Run the matched-filter detection on an image handle.
 
     Arguments:
@@ -3278,6 +3304,10 @@ def detectMatchedFilter(img_handle, config, mask=None, dark=None, flat_struct=No
         sky_range: [tuple] (first frame, end frame) of the stars of the sky quality, e.g. all the frames of the
             input read so far, as a short segment alone may have too few chunks for the references of the stars.
             None by default (frame_range).
+        persistence_until: [int] First frame of the next segment, before which the persistence counts are kept to
+            carry to it (see MatchedFilterDetector.persistenceCheckpoint). None by default.
+        max_tracks: [int] Largest number of candidate tracks which are measured, e.g. the share of a segment of
+            mf_max_tracks. None by default (mf_max_tracks).
 
     Return:
         [list] Detections as [rho, theta, centroids], or (detections, detector) with return_detector. The
@@ -3303,6 +3333,9 @@ def detectMatchedFilter(img_handle, config, mask=None, dark=None, flat_struct=No
     detector = MatchedFilterDetector(img_handle, config, mask=mask, dark=dark, flat_struct=flat_struct,
                                      frame_range=frame_range)
     detector.persistence_prior = persistence_prior or {}
+    detector.persistence_until = persistence_until
+    if max_tracks is not None:
+        detector.opts.max_tracks = max_tracks
     detector.sky_map = skyQuality(img_handle, config, star_list, platepar, reference_dir=reference_dir,
                                   input_name=input_name, frame_range=(sky_range or frame_range),
                                   update=(frame_range is None))
@@ -3588,6 +3621,16 @@ def detectMatchedFilterSegments(img_handle, config, segment_frames, mask=None, d
     log.info('Matched filter: {:d} segments of up to {:d} frames ({:.1f} min), overlap {:d} frames'.format(
         len(ranges), segment_frames, segment_frames/img_handle.fps/60.0, overlap))
 
+    # The middle of every overlap, where the frames of the neighbouring segments meet (see stitchSegments)
+    cuts = [(ranges[k + 1][0] + ranges[k][1])//2 for k in range(len(ranges) - 1)]
+    overlaps = [(ranges[k + 1][0], ranges[k][1]) for k in range(len(ranges) - 1)]
+
+    # Every segment measures at most its share of mf_max_tracks, by the frames which belong to it, so the input
+    #   measures about mf_max_tracks as without segments
+    bounds = [0] + cuts + [img_handle.total_frames]
+    max_tracks = [max(1, int(math.ceil(config.mf_max_tracks*(bounds[k + 1] - bounds[k])/img_handle.total_frames)))
+                  for k in range(len(ranges))]
+
     timing = collections.defaultdict(float)
     star_list, detectors, segment_detections = [], [], []
     done_chunks = 0
@@ -3629,20 +3672,21 @@ def detectMatchedFilterSegments(img_handle, config, segment_frames, mask=None, d
                                                    star_list=list(star_list), return_detector=True,
                                                    platepar=platepar, reference_dir=reference_dir,
                                                    input_name=input_name, frame_range=(first, end),
-                                                   persistence_prior=persistence, sky_range=(0, end))
+                                                   persistence_prior=persistence, sky_range=(0, end),
+                                                   persistence_until=(ranges[k + 1][0] if k + 1 < len(ranges)
+                                                                      else None),
+                                                   max_tracks=max_tracks[k])
         detectors.append(detector)
 
-        # The persistent pixels are judged over all segments so far, as over the whole input
+        # The persistent pixels are judged over all segments so far (the runs of every overlap once), as over the
+        #   whole input
         if detector is not None:
-            persistence = {key: (detector.persistence_counts[key], detector.persistence_runs[key])
-                           for key in detector.persistence_counts}
+            persistence = detector.persistence_carry
         segment_detections.append(detections)
         log.info('Matched filter: segment {:d}/{:d} ({:d}-{:d}): {:d} detections'.format(k + 1, len(ranges), first,
                                                                                        end, len(detections)))
 
     # Join the detections at the middle of every overlap
-    cuts = [(ranges[k + 1][0] + ranges[k][1])//2 for k in range(len(ranges) - 1)]
-    overlaps = [(ranges[k + 1][0], ranges[k][1]) for k in range(len(ranges) - 1)]
     searched = [det for det in detectors if (det is not None) and (det.psf_sigma is not None)]
     detections = []
     if searched:

@@ -366,3 +366,60 @@ def test_segments_sky_from_the_stars_so_far(monkeypatch):
     assert [c[0] for c in calls] == [(0, 768), (512, 1280), (1024, 1792), (1536, 2048)]
     assert [c[1] for c in calls] == [(0, 768), (0, 1280), (0, 1792), (0, 2048)]
     assert [c[2] for c in calls] == [6, 10, 14, 16]
+
+
+def test_persistence_carried_without_the_overlap():
+    """ The persistence counts carried to the next segment are those before its first frame, so the runs of the
+        overlap (searched again in the next segment) are counted once. """
+
+    from RMS.MatchedFilterDetection import MatchedFilterDetector
+
+    detector = MatchedFilterDetector(_Input(), cr.Config())
+    detector.persistence_until = 512
+    detector.persistence_counts = {(8, 2): np.ones((4, 4), dtype=np.int32)}
+    detector.persistence_runs = {(8, 2): 10}
+
+    detector.persistenceCheckpoint(256)
+    assert detector.persistence_carry is None
+    detector.persistenceCheckpoint(512)
+    detector.persistence_counts[(8, 2)] += 5
+    detector.persistence_runs[(8, 2)] += 7
+    counts, runs = detector.persistence_carry[(8, 2)]
+    assert runs == 10 and counts.max() == 1
+
+
+def test_segments_share_the_track_cap_and_carry_persistence(monkeypatch):
+    """ Every segment measures at most its share of mf_max_tracks (by the frames which belong to it), so the file
+        measures about mf_max_tracks as without segments, and the persistence is carried from before the next
+        segment. """
+
+    import RMS.MatchedFilterDetection as mfd
+
+    config = cr.Config()
+    config.mf_block_frames = 256
+    config.mf_segment_overlap = 256
+    config.mf_max_tracks = 300
+    config.ff_min_stars = 1
+    handle = _Input(total_frames=2048)
+
+    def stars(img_handle, config, chunk_range=None, **kwargs):
+        from RMS.Formats.FFfile import constructFFName
+        return [[constructFFName('XX0001', handle.currentFrameTime(frame_no=c*128, dt_obj=True)), [(1.0,)*8]*5]
+                for c in range(*chunk_range)]
+
+    calls = []
+    class _Carry(object):
+        persistence_carry = {}
+        psf_sigma = None
+    def detect(img_handle, config, max_tracks=None, persistence_until=None, **kwargs):
+        calls.append((max_tracks, persistence_until))
+        return [], _Carry()
+
+    monkeypatch.setattr(mfd, 'extractStarsFrameInterface', stars)
+    monkeypatch.setattr(mfd, 'detectMatchedFilter', detect)
+    monkeypatch.setattr(mfd, 'skyQuality', lambda *args, **kwargs: None)
+    monkeypatch.setattr(mfd, 'SegmentedRun', lambda *args, **kwargs: None)
+
+    mfd.detectMatchedFilterSegments(handle, config, 768)
+    assert [c[0] for c in calls] == [94, 75, 75, 57]
+    assert [c[1] for c in calls] == [512, 1024, 1536, None]
