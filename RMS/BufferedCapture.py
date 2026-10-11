@@ -706,10 +706,10 @@ class BufferedCapture(Process):
             if len(self._arr_by_pts) > 600:
                 for k in list(self._arr_by_pts)[:200]:
                     self._arr_by_pts.pop(k, None)
-            # RMSP SEI: every frame on a camera that emits it (the per-block QP mean/max need
-            # every frame; ~14 us per access unit). A camera that showed no SEI in its first
-            # 512 frames is probed every 64th frame only, so the per-frame cost on a Pi driving
-            # an XM camera stays negligible
+            # RMSP SEI: every frame on a camera that emits it (each frame's record feeds its
+            # timing and the per-block statistics; ~14 us per access unit). A camera that showed
+            # no SEI in its first 512 frames is probed every 64th frame only, so the per-frame
+            # cost on a Pi driving an XM camera stays negligible
             self._probe_n += 1
             if (self._sei_seen or self._sei_by_pts is not None or self._probe_n <= 512
                     or (self._probe_n % 64 == 0)):
@@ -721,7 +721,6 @@ class BufferedCapture(Process):
                         self._sei_seen = True
                         if cu[2] is not None:
                             self._soc_temp = cu[2]
-                        self._sei_blk.add(cu[3])
                         self._sei_meta_by_pts[pts] = cu
                         if len(self._sei_meta_by_pts) > 600:
                             for _k in list(self._sei_meta_by_pts)[:200]:
@@ -2653,6 +2652,11 @@ class BufferedCapture(Process):
                     wait_for_reconnect = True
                     break
 
+                # Per-block SEI provenance from this very frame's record (read() looked it up by
+                # the frame's PTS), so the block statistics describe exactly this block's frames
+                if ret and (self._last_frame_meta is not None):
+                    self._sei_blk.add(self._last_frame_meta[3])
+
                 # Set flag to save a raw frame
                 save_this_frame = (self.config.save_frames and
                                    self.video_file is None and
@@ -2987,8 +2991,7 @@ class BufferedCapture(Process):
 
             # Per-block SEI photometric provenance: snapshot and reset at EVERY block boundary
             # (daytime included), so the first night block never inherits the day's exposure and
-            # gain extremes. The probe taps the stream pre-decode, so attribution to a block is
-            # offset by the decode queue depth (a few frames) -- fine for 256-frame statistics
+            # gain extremes
             self._sei_blk_seq += 1
             sei_meta_vals = self._sei_blk.snapshotAndReset(self._sei_blk_seq)
             # Fold this block's timing provenance (source, SEI-minus-legacy median, interpolated

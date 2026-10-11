@@ -1,8 +1,10 @@
 """ Per-frame exposure metadata embedded in saved raw frames.
 
 On cameras that send the RMSP v5 provenance SEI (OpenIPC science cameras), every frame's
-record carries its capture time, exposure, analog/sensor-digital/ISP-digital gains, WB
-gains, SoC temperature and frame sequence number. BufferedCapture copies the record of each
+record carries its capture time, exposure, analog/sensor-digital/ISP-digital gains (and
+whether they are frame-exact), WB gains and AWB colour temperature, SoC temperature, frame
+sequence number, coded/start QP and the sensor line period and lines per frame (rolling
+shutter: row r starts r*t_row_ns later than row 0). BufferedCapture copies the record of each
 frame that goes into the raw-frame buffer into a shared per-frame row (fillRow), and
 RawFrameSaver embeds it -- plus the highlight-rebuild info when a frame was rebuilt -- as
 one JSON line in the saved image (config.save_frame_metadata):
@@ -32,7 +34,12 @@ import numpy as np
 
 
 # Layout of one shared-memory row (float64). "valid" is 1.0 when the row holds a record.
-FIELDS = ("valid", "capture_utc", "exp_us", "again", "dgain", "ispdgain", "wb_r", "wb_b", "temp_c", "frame_seq", "wb_g")
+FIELDS = ("valid", "capture_utc", "exp_us", "again", "dgain", "ispdgain", "wb_r", "wb_b", "temp_c", "frame_seq", "wb_g",
+          "qp", "start_qp", "gains_exact", "colortemp", "t_row_ns", "vmax")
+# Fields from FIRST_META onwards are copied from the meta dict under the same key
+FIRST_META = FIELDS.index("qp")
+# Written as integers / booleans in the embedded JSON
+_INT_FIELDS = ("exp_us", "frame_seq", "qp", "start_qp", "colortemp", "t_row_ns", "vmax")
 NFIELDS = len(FIELDS)
 
 
@@ -57,6 +64,9 @@ def fillRow(row, cu):
         row[9] = cu[4] if len(cu) > 4 and cu[4] is not None else np.nan
         v = meta.get("wb_g")
         row[10] = v if v is not None else np.nan
+        for i, k in enumerate(FIELDS[FIRST_META:], FIRST_META):
+            v = meta.get(k)
+            row[i] = float(v) if v is not None else np.nan
     except Exception:
         row[0] = 0.0
 
@@ -69,8 +79,10 @@ def rowToDict(row):
     for i, k in enumerate(FIELDS[1:], 1):
         v = float(row[i])
         if v == v:                      # skip NaN
-            if k in ("exp_us", "frame_seq"):
+            if k in _INT_FIELDS:
                 d[k] = int(round(v))
+            elif k == "gains_exact":
+                d[k] = v > 0.5
             elif k == "capture_utc":
                 d[k] = round(v, 6)
             else:

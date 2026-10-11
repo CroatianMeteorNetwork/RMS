@@ -170,7 +170,8 @@ class Compressor(multiprocessing.Process):
             soc_temp: [float] camera SoC die temperature [degC] for this block, or None. Written as
                 the optional SOCTEMP header card when known.
             sei_meta: [dict] per-block photometric provenance from the camera SEI (see
-                RMS.SEIBlockMeta), or None. Written as the optional EXPTIME/gain/QP/WB cards.
+                RMS.SEIBlockMeta), or None. Written as the optional exposure/gain/QP/WB/sensor
+                timing/frame-sequence cards.
             std16: [2D ndarray] standard deviation in 8.8 fixed point (uint16). Its fractional byte
                 is written to the FF file as an extra plane if ff_stdpixel16 is enabled in the config.
         """
@@ -232,6 +233,13 @@ class Compressor(multiprocessing.Process):
                 ff.again = float(sei_meta['again'])
                 ff.dgain = float(sei_meta['dgain'])
                 ff.ispdgain = float(sei_meta['ispdgain'])
+                ff.againmin = float(sei_meta['again_min'])
+                ff.againmax = float(sei_meta['again_max'])
+                ff.dgainmin = float(sei_meta['dgain_min'])
+                ff.dgainmax = float(sei_meta['dgain_max'])
+                ff.ispdgmin = float(sei_meta['ispdgain_min'])
+                ff.ispdgmax = float(sei_meta['ispdgain_max'])
+                ff.gainexct = int(sei_meta['gains_exact_n'])
             ff.seistabl = bool(sei_meta['stable'])
             if sei_meta['qp_max'] > 0:
                 ff.qpmean = float(sei_meta['qp_mean'])
@@ -239,6 +247,16 @@ class Compressor(multiprocessing.Process):
             if sei_meta['wb_r'] > 0:
                 ff.wbr = float(sei_meta['wb_r'])
                 ff.wbb = float(sei_meta['wb_b'])
+            if sei_meta['wb_g'] > 0:
+                ff.wbg = float(sei_meta['wb_g'])
+            if sei_meta['t_row_ns'] > 0:
+                ff.trowns = int(sei_meta['t_row_ns'])
+            if sei_meta['vmax'] > 0:
+                ff.vmax = int(sei_meta['vmax'])
+            if sei_meta['seq_first'] >= 0:
+                ff.seqfirst = int(sei_meta['seq_first'])
+                ff.seqlast = int(sei_meta['seq_last'])
+                ff.seqlost = int(sei_meta['seq_lost'])
             # Timing provenance: which clock this block's frame times came from
             ff.timesrc = 'sei' if sei_meta['time_src'] >= 0.5 else 'legacy'
             ff.timeoffs = float(sei_meta['time_off_ms'])

@@ -118,6 +118,25 @@ class FFStruct:
         self.wbb = None
         self.seinfrm = None
 
+        # Further per-block SEI provenance (None when unknown): min/max of each gain in the block;
+        # frames whose gains were frame-exact (the rest were read from the ISP at encode time and
+        # can lag an exposure change); white balance G gain; sensor line period [ns] and lines per
+        # frame (rolling shutter: row r starts r*trowns later than row 0); camera frame_seq of the
+        # block's first/last frame and camera frames missing up to the last (frame_seq gaps)
+        self.againmin = None
+        self.againmax = None
+        self.dgainmin = None
+        self.dgainmax = None
+        self.ispdgmin = None
+        self.ispdgmax = None
+        self.gainexct = None
+        self.wbg = None
+        self.trowns = None
+        self.vmax = None
+        self.seqfirst = None
+        self.seqlast = None
+        self.seqlost = None
+
         # Timing provenance: 'sei' (camera integration-start, us-class) or 'legacy' (GStreamer
         # origin, ~30 ms-class); SEI-minus-legacy block-median offset [ms]; interpolated frames
         self.timesrc = None

@@ -16,7 +16,11 @@ import datetime
 _SEI_CARDS = (('exptime', 'EXPTIME'), ('expmin', 'EXPMIN'), ('expmax', 'EXPMAX'),
               ('again', 'AGAIN'), ('dgain', 'DGAIN'), ('ispdgain', 'ISPDGAIN'),
               ('seistabl', 'SEISTABL'), ('qpmean', 'QPMEAN'), ('qpmax', 'QPMAX'),
-              ('wbr', 'WBR'), ('wbb', 'WBB'), ('seinfrm', 'SEINFRM'))
+              ('wbr', 'WBR'), ('wbb', 'WBB'), ('seinfrm', 'SEINFRM'),
+              ('againmin', 'AGAINMIN'), ('againmax', 'AGAINMAX'), ('dgainmin', 'DGAINMIN'),
+              ('dgainmax', 'DGAINMAX'), ('ispdgmin', 'ISPDGMIN'), ('ispdgmax', 'ISPDGMAX'),
+              ('gainexct', 'GAINEXCT'), ('wbg', 'WBG'), ('trowns', 'TROWNS'), ('vmax', 'VMAX'),
+              ('seqfirst', 'SEQFIRST'), ('seqlast', 'SEQLAST'), ('seqlost', 'SEQLOST'))
 
 
 def filenameToDatetimeStr(file_name, iso8601=False):
@@ -378,6 +382,17 @@ def write(ff, directory, filename, compress=False):
         head['AGAIN'] = (round(float(ff.again), 4), 'sensor analog gain, x (block mean)')
         head['DGAIN'] = (round(float(ff.dgain), 4), 'sensor digital gain, x (block mean)')
         head['ISPDGAIN'] = (round(float(ff.ispdgain), 4), 'ISP digital gain, x (block mean)')
+    if getattr(ff, 'againmin', None) is not None:
+        head['AGAINMIN'] = (round(float(ff.againmin), 4), 'min sensor analog gain in block, x')
+        head['AGAINMAX'] = (round(float(ff.againmax), 4), 'max sensor analog gain in block, x')
+        head['DGAINMIN'] = (round(float(ff.dgainmin), 4), 'min sensor digital gain in block, x')
+        head['DGAINMAX'] = (round(float(ff.dgainmax), 4), 'max sensor digital gain in block, x')
+        head['ISPDGMIN'] = (round(float(ff.ispdgmin), 4), 'min ISP digital gain in block, x')
+        head['ISPDGMAX'] = (round(float(ff.ispdgmax), 4), 'max ISP digital gain in block, x')
+    # Frames whose gains are their own (looked up by the frame's PTS on the camera); the rest were
+    # read from the ISP at encode time, which can lag an exposure change by a frame or two
+    if getattr(ff, 'gainexct', None) is not None:
+        head['GAINEXCT'] = (int(ff.gainexct), 'frames with frame-exact gains (rest polled)')
     if getattr(ff, 'seistabl', None) is not None:
         head['SEISTABL'] = (bool(ff.seistabl), 'exposure and gains constant within block')
     if getattr(ff, 'qpmean', None) is not None:
@@ -386,6 +401,19 @@ def write(ff, directory, filename, compress=False):
     if getattr(ff, 'wbr', None) is not None:
         head['WBR'] = (round(float(ff.wbr), 4), 'white balance R gain, x (colour term)')
         head['WBB'] = (round(float(ff.wbb), 4), 'white balance B gain, x (colour term)')
+    if getattr(ff, 'wbg', None) is not None:
+        head['WBG'] = (round(float(ff.wbg), 4), 'white balance G gain, x (colour term)')
+    # Rolling shutter: row r of a frame starts integrating r*TROWNS ns after row 0
+    if getattr(ff, 'trowns', None) is not None:
+        head['TROWNS'] = (int(ff.trowns), 'sensor line period [ns] (rolling shutter)')
+    if getattr(ff, 'vmax', None) is not None:
+        head['VMAX'] = (int(ff.vmax), 'sensor lines per frame incl. blanking')
+    # Camera frame sequence range of the block and the camera frames missing up to its last frame
+    # (frame_seq gaps: lost between the camera encoder and RMS)
+    if getattr(ff, 'seqfirst', None) is not None:
+        head['SEQFIRST'] = (int(ff.seqfirst), 'camera frame_seq of first frame in block')
+        head['SEQLAST'] = (int(ff.seqlast), 'camera frame_seq of last frame in block')
+        head['SEQLOST'] = (int(ff.seqlost), 'camera frames not received (frame_seq gaps)')
     if getattr(ff, 'seinfrm', None) is not None:
         head['SEINFRM'] = (int(ff.seinfrm), 'frames with SEI provenance in block')
 

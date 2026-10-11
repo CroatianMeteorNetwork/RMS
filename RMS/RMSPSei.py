@@ -73,19 +73,34 @@ def rmspCapUtc(data):
         fl = u[5]
         temp = struct.unpack('<h', u[42:44])[0]/10.0 if (fl & 0x01) else None   # flags b0 = temp valid
         delay = (mono - raw_pts) & 0xffffffff
-        # Per-block photometric provenance (RMS.SEIBlockMeta): gains are HI_MPI_ISP_QueryExposureInfo
-        # units, x1024 = 1x; WB gains x256 = 1x; mean_qp = this frame's actual coded QP.
-        # Flags: b1 wb valid, b3 exposure/gains valid, b6 qp valid
+        # Per-frame and per-block provenance (RMS.FrameMetadata, RMS.SEIBlockMeta): gains are
+        # HI_MPI_ISP_QueryExposureInfo units, x1024 = 1x; WB gains x256 = 1x; colortemp = the ISP's
+        # AWB colour temperature estimate [K]; t_row_ns/vmax = sensor line period and lines per
+        # frame (rolling shutter: row r starts r*t_row later); qp = this frame's actual coded QP,
+        # start_qp = the rate control's starting QP for it.
+        # Flags: b1 wb valid, b3 exposure/gains valid, b5 t_row/vmax valid, b6 qp valid,
+        # b7 gains frame-exact (looked up by this frame's PTS; clear = read from the ISP when the
+        # frame was encoded, which can lag an exposure change by a frame or two)
         exp_ok = bool(fl & 0x08)
+        wb_ok = bool(fl & 0x02)
+        row_ok = bool(fl & 0x20)
+        qp_ok = bool(fl & 0x40)
         meta = {
             'exp_s': exp_us/1e6 if exp_ok else None,
             'again': struct.unpack('<I', u[22:26])[0]/1024.0 if exp_ok else None,
             'dgain': struct.unpack('<I', u[26:30])[0]/1024.0 if exp_ok else None,
             'ispdgain': struct.unpack('<I', u[30:34])[0]/1024.0 if exp_ok else None,
-            'wb_r': struct.unpack('<H', u[34:36])[0]/256.0 if (fl & 0x02) else None,
-            'wb_b': struct.unpack('<H', u[36:38])[0]/256.0 if (fl & 0x02) else None,
-            'wb_g': struct.unpack('<H', u[38:40])[0]/256.0 if (fl & 0x02) else None,
-            'qp': u[58] if (fl & 0x40) else None,
+            'gains_exact': bool(fl & 0x80) if exp_ok else None,
+            'wb_r': struct.unpack('<H', u[34:36])[0]/256.0 if wb_ok else None,
+            'wb_b': struct.unpack('<H', u[36:38])[0]/256.0 if wb_ok else None,
+            'wb_g': struct.unpack('<H', u[38:40])[0]/256.0 if wb_ok else None,
+            'colortemp': (struct.unpack('<H', u[40:42])[0] or None) if wb_ok else None,
+            't_row_ns': struct.unpack('<I', u[52:56])[0] if row_ok else None,
+            'vmax': (struct.unpack('<H', u[56:58])[0] or None) if row_ok else None,
+            'qp': u[58] if qp_ok else None,
+            'start_qp': (u[59] or None) if qp_ok else None,
+            'temp_c': temp,
+            'frame_seq': frame_seq,
         }
         return ((sec + usec/1e6) - delay/1e6, exp_us/1e6, temp, meta, frame_seq,
                 (sec + usec/1e6, mono, raw_pts))

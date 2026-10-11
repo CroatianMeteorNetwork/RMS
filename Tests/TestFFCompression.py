@@ -109,7 +109,10 @@ def testHeaderFitsWithoutTruncation():
         for attr, value in [('soctemp', 40.0), ('exptime', 0.04), ('expmin', 0.04), ('expmax', 0.04),
                 ('again', 1.0), ('dgain', 1.0), ('ispdgain', 1.0), ('seistabl', True), ('qpmean', 20.0),
                 ('qpmax', 30), ('wbr', 1.0), ('wbb', 1.0), ('seinfrm', 256), ('timesrc', 'sei'),
-                ('timeoffs', 1.0), ('timeinterp', 0)]:
+                ('timeoffs', 1.0), ('timeinterp', 0), ('againmin', 1.0), ('againmax', 64.0),
+                ('dgainmin', 1.0), ('dgainmax', 1.0), ('ispdgmin', 1.0625), ('ispdgmax', 2.0),
+                ('gainexct', 256), ('wbg', 1.0), ('trowns', 29629), ('vmax', 1350),
+                ('seqfirst', 4294967040), ('seqlast', 4294967295), ('seqlost', 0)]:
             setattr(ff, attr, value)
 
         for compress in (False, True):
