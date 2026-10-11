@@ -45,9 +45,13 @@ def segmentFrames(img_handle, config, memory_gb):
 
 
 def segmentUnit(config, img_handle):
-    """ Segments begin and end on whole blocks of the matched filter and whole chunks of the star extraction. """
+    """ Segments begin and end on whole blocks of the matched filter (as it uses them, see
+        matchedFilterBlockFrames) and whole chunks of the star extraction. """
 
-    return int(np.lcm(int(config.mf_block_frames), int(getattr(img_handle, 'chunk_frames', 1) or 1)))
+    # Imported here, as the matched filter uses this module
+    from RMS.MatchedFilterDetection import matchedFilterBlockFrames
+
+    return int(np.lcm(matchedFilterBlockFrames(config), int(getattr(img_handle, 'chunk_frames', 1) or 1)))
 
 
 def segmentOverlap(segment_frames, overlap, unit):

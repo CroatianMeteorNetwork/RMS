@@ -180,6 +180,28 @@ TRAIL_KEEP = 6
 Hit = collections.namedtuple('Hit', ['frame', 'x', 'y', 'vx', 'vy', 'z', 'run', 'bin'], defaults=(2,))
 
 
+def matchedFilterBlockFrames(config):
+    """ The length of the blocks of frames of the matched filter. The runs of frames don't straddle the blocks, so
+        a block holds a whole number of the longest runs and of the measurements: the block length is
+        mf_block_frames, made a multiple of the least common multiple of all run lengths and of the largest number
+        of frames of a measurement (a power of two) if it isn't.
+
+    Arguments:
+        config: [Config] Configuration object.
+
+    Return:
+        [int] Number of frames of a block.
+    """
+
+    block_frames = int(config.mf_block_frames)
+    unit = int(np.lcm.reduce([int(v) for v in list(config.mf_run_frames) + [config.mf_slow_run_frames, 1]]))
+    unit = int(np.lcm(unit, 2**int(math.floor(math.log2(max(config.mf_max_measure_frames, 1))))))
+    if block_frames % unit:
+        block_frames = max(unit, int(round(block_frames/float(unit)))*unit)
+
+    return block_frames
+
+
 class MatchedFilterOptions(object):
     def __init__(self, config, det_bin=1, fps=None, size=None):
         """ Options of the matched-filter detection, from the config.
@@ -239,15 +261,11 @@ class MatchedFilterOptions(object):
         self.speed_min = config.mf_ang_vel_min/scale/fps
         self.speed_max = config.mf_ang_vel_max/scale/fps
 
-        # The runs of frames don't straddle the blocks, so a block holds a whole number of the longest runs and
-        #   of the measurements: the block length has to be a multiple of the least common multiple of all run
-        #   lengths and of the largest number of frames of a measurement (a power of two)
-        unit = int(np.lcm.reduce([int(v) for v in self.run_frames + [self.slow_run_frames, 1]]))
-        unit = int(np.lcm(unit, 2**int(math.floor(math.log2(max(self.max_measure_frames, 1))))))
-        if self.block_frames % unit:
-            fixed = max(unit, int(round(self.block_frames/float(unit)))*unit)
-            log.warning('Matched filter: mf_block_frames {:d} is not a multiple of {:d}, {:d} used'.format(
-                self.block_frames, unit, fixed))
+        # The block length, corrected to a whole number of runs and measurements (see matchedFilterBlockFrames)
+        fixed = matchedFilterBlockFrames(config)
+        if fixed != self.block_frames:
+            log.warning('Matched filter: mf_block_frames {:d} is not a multiple of the runs and the measurements, '
+                        '{:d} used'.format(self.block_frames, fixed))
             self.block_frames = fixed
 
         # The GPU is used when requested (or automatically) and numba can reach it
@@ -3415,8 +3433,9 @@ def apportion(total, weights):
 
 
 def removeCloudedRows(detections, sky_map, detector):
-    """ Remove the rows of the detections on clouded sky (see SkyQualityMap.isClear), and the detections left with
-        fewer than 2 rows, as the cloud filter of MatchedFilterDetector.run does with the rows of every frame.
+    """ Remove the rows of the detections on clouded sky (see SkyQualityMap.isClear), and the detections which
+        are then no detections any more (too few rows, too short in time or in motion, see
+        MatchedFilterDetector.run), as the cloud filter of MatchedFilterDetector.run does.
 
     Arguments:
         detections: [list] Detections as [rho, theta, centroids] (unbinned).
@@ -3438,13 +3457,16 @@ def removeCloudedRows(detections, sky_map, detector):
             kept.append(det)
             continue
 
-        # The rows on clear sky, if there are enough of them
+        # The rows on clear sky, if they still make a detection as the checks of MatchedFilterDetector.run: enough
+        #   of them, lasting and moving long enough (the motion in the binned frames of the detection)
         removed_rows += cent[~clear, 0].tolist()
-        if clear.sum() < 2:
+        rows = cent[clear]
+        if (len(rows) < max(2, detector.opts.min_centroids)) \
+                or (rows[-1, 0] - rows[0, 0] < detector.opts.min_frames) \
+                or (np.hypot(*(rows[-1, 1:3] - rows[0, 1:3]))/detector.det_bin < detector.minDisplacement()):
             removed_first.append(int(round(cent[0, 0])))
             continue
-        cent = cent[clear]
-        kept.append([*detector.polarLine(cent), cent])
+        kept.append([*detector.polarLine(rows), rows])
 
     return kept, removed_rows, removed_first
 

@@ -132,10 +132,20 @@ def test_segment_buffer():
 
 
 class _Detector(object):
-    """ The polar line of the joined detections, as MatchedFilterDetector.polarLine. """
+    """ The polar line of the joined detections, as MatchedFilterDetector.polarLine, and the checks of a
+        detection. """
+
+    det_bin = 1
+
+    class opts(object):
+        min_frames = 20
+        min_centroids = 6
 
     def polarLine(self, cent):
         return 0.0, 0.0
+
+    def minDisplacement(self):
+        return 4.0
 
 
 def _track(frames, x0=100.0, y0=200.0, vx=0.5, vy=-0.2):
@@ -478,8 +488,8 @@ def test_clouded_rows_removed_with_the_sky_of_the_whole_input():
         def isClear(self, x, y, frames):
             return np.asarray(frames) < 150
 
-    partly = _track(np.arange(100, 200, 1))
-    clouded = _track(np.arange(300, 400, 1))
+    partly = _track(np.arange(100, 200, 1), vx=5.0)
+    clouded = _track(np.arange(300, 400, 1), vx=5.0)
     detections, rows, removed = removeCloudedRows([[0, 0, partly], [0, 0, clouded]], _Sky(), _Detector())
     assert len(detections) == 1 and detections[0][2][-1, 0] == 149
     assert rows == [float(f) for f in range(150, 200)] + [float(f) for f in range(300, 400)]
@@ -549,3 +559,31 @@ def test_only_neighbouring_segments_overlap(segment_frames, overlap):
     ranges = segmentRanges(20000, segment_frames, overlap, 256)
     assert all(ranges[k + 2][0] >= ranges[k][1] for k in range(len(ranges) - 2))
     assert ranges[0][0] == 0 and ranges[-1][1] == 20000
+
+
+def test_clouded_rows_removed_with_the_checks_of_a_detection():
+    """ A detection which is left too short (in frames or in motion) after its clouded rows are removed is removed. """
+
+    from RMS.MatchedFilterDetection import removeCloudedRows
+
+    class _Sky(object):
+        def isClear(self, x, y, frames):
+            return np.asarray(frames) < 110
+
+    # 10 clear frames left (fewer than 20), moving 0.5 px
+    short = _track(np.arange(100, 200, 1))
+    detections, rows, removed = removeCloudedRows([[0, 0, short]], _Sky(), _Detector())
+    assert detections == [] and removed == [100]
+
+
+def test_segments_on_the_blocks_of_the_detector():
+    """ The segments begin and end on the blocks which the matched filter uses, also when it corrects the block
+        length of the config. """
+
+    from RMS.MatchedFilterDetection import matchedFilterBlockFrames
+
+    config = cr.Config()
+    config.mf_block_frames = 300
+    block = matchedFilterBlockFrames(config)
+    assert block != 300
+    assert segmentUnit(config, _Input()) % block == 0
