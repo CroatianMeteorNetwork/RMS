@@ -616,7 +616,9 @@ the files known now: while the input is being recorded, new files keep coming. T
 the monotonic clock of the monitor, so the times don't jump when the clock of the system is set.
 
 The processed files of the last day are also kept in `.monitor_status_files.jsonl` in the output directory (one
-line per file), so the statistics continue after a restart.
+line per file, with the length of the file once it is known), so the statistics cover the whole last day, also
+after a restart. Files being processed when the monitor stops are not processing in its final status; they are
+processed again after a restart.
 
 The recording is only reported, never as a fault: it is done by other software, which the monitor doesn't
 communicate with, and which may not record on purpose (e.g. on cloudy nights). The calibration is only judged

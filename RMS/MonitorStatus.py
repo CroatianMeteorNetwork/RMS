@@ -322,13 +322,7 @@ class MonitorStatus(object):
 
             # Keep only the last day in the history file
             self._pruneRecords(RmsDateTime.utcnow())
-            try:
-                with open(self.history_path + '.tmp', 'w') as f:
-                    for record in self.file_records:
-                        f.write(json.dumps(record) + '\n')
-                os.replace(self.history_path + '.tmp', self.history_path)
-            except OSError as e:
-                log.debug("The history {:s} could not be pruned: {:s}".format(self.history_path, repr(e)))
+            self._writeHistory()
 
         if not os.path.isfile(self.path):
             return
@@ -374,6 +368,19 @@ class MonitorStatus(object):
             log.debug("The history {:s} could not be written: {:s}".format(self.history_path, repr(e)))
 
         self.dirty = True
+
+
+    def _writeHistory(self):
+        """ Write the history of the processed files of the last day again (e.g. to keep only the last day, or
+            with the lengths of the files). It replaces the old file, so it is never partly written. """
+
+        try:
+            with open(self.history_path + '.tmp', 'w') as f:
+                for record in self.file_records:
+                    f.write(json.dumps(record) + '\n')
+            os.replace(self.history_path + '.tmp', self.history_path)
+        except OSError as e:
+            log.debug("The history {:s} could not be written: {:s}".format(self.history_path, repr(e)))
 
 
     def _pruneRecords(self, now):
@@ -660,11 +667,19 @@ class MonitorStatus(object):
         """ Whether the processing keeps up: the files being processed and waiting, the progress of the night, when
             the waiting files will be done, the delay, and the processing times. """
 
-        # The length of the input files (median of the processed files of the night, min)
+        # Only the processed files of the last day count, also if no file was processed for a while
+        self._pruneRecords(now)
+
+        # The length of the input files (median of the processed files of the night, min). The lengths of the
+        #   processed files are kept in the history, so they are known after a restart too
         lengths = {os.path.basename(results_dir): length for results_dir, _, _, length in files if length}
+        new_lengths = False
         for record in self.file_records:
-            if record.get('length_min') is None:
-                record['length_min'] = _round(lengths.get(record['file']))
+            if (record.get('length_min') is None) and lengths.get(record['file']):
+                record['length_min'] = _round(lengths[record['file']])
+                new_lengths = True
+        if new_lengths:
+            self._writeHistory()
         known_lengths = [length for length in lengths.values()]
         file_length_min = float(np.median(known_lengths)) if known_lengths else None
 

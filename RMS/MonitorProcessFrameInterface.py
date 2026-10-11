@@ -223,8 +223,12 @@ def walkInput(top_dir, output_dir, config):
         config: [Config] Configuration of the camera, which names the night and archive directories.
 
     Return:
-        Yields (root, dirs, files) like os.walk.
+        Yields (root, dirs, files) like os.walk. Raises OSError if the directory can't be read (os.walk alone
+            yields nothing then, e.g. when the network share of the input is gone).
     """
+
+    # Fail if the directory can't be read
+    os.listdir(top_dir)
 
     output_dirs = {os.path.realpath(os.path.join(output_dir, dir_name))
                    for dir_name in (config.captured_dir, config.archived_dir, 'logs')}
@@ -1831,6 +1835,9 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
             for proc in active_workers.values():
                 stopWorker(proc)
 
+            # The stopped workers are not processing any more (their files are processed again after a restart)
+            active_workers.clear()
+
         if reporter is not None:
 
             # The stopped workers don't delete their local copies
@@ -2437,6 +2444,9 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None,
                                                                 for key in sorted(active_workers))))
             for proc in active_workers.values():
                 stopWorker(proc)
+
+            # The stopped workers are not processing any more (their files are processed again after a restart)
+            active_workers.clear()
 
         for reporter in reporters.values():
 

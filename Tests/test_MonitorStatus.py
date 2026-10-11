@@ -767,3 +767,103 @@ def test_a_failing_results_scan_doesnt_stop_the_status(tmp_path, now, monkeypatc
         written = json.load(f)
     assert [fault['code'] for fault in written['faults']] == ['STATUS_INCOMPLETE']
     assert 'results' in written['faults'][0]['message']
+
+
+### Edge cases ###
+
+def test_missing_recursive_input(tmp_path, now):
+    """ A recursive input which can't be read (e.g. the network share is gone) is unreadable, not empty. """
+
+    config = _matchedFilterConfig()
+    with pytest.raises(OSError):
+        mon.scanInputs(str(tmp_path/'gone'), str(tmp_path/'output'), config, 'vid', True)
+    with pytest.raises(OSError):
+        list(mon.walkInput(str(tmp_path/'gone'), str(tmp_path/'output'), config))
+
+    (tmp_path/'output').mkdir()
+    scanner = lambda: mon.scanInputs(str(tmp_path/'gone'), str(tmp_path/'output'), config, 'vid', True)
+    status = mst.MonitorStatus('XX0001', str(tmp_path/'output'), str(tmp_path/'gone'), config, scanner, 2)
+    built = status.build(_state(input_readable=None))
+    assert built['recording']['state'] == 'unknown'
+    assert [fault['code'] for fault in built['faults']] == ['INPUT_UNREADABLE']
+
+
+def test_old_files_drop_out_without_new_ones(tmp_path, monkeypatch):
+    """ The files processed more than a day ago drop out of the statistics also when no file was processed
+        since.
+    """
+
+    times = {'now': NOW}
+    monkeypatch.setattr(mst.RmsDateTime, 'utcnow', staticmethod(lambda: times['now']))
+    status, config = _status(tmp_path)
+    status.fileFinished('f1', 'ok', 60)
+    assert status.build(_state())['processing']['files_done_last_24h'] == 1
+
+    times['now'] = NOW + datetime.timedelta(hours=25)
+    processing = status.build(_state())['processing']
+    assert processing['files_done_last_24h'] == 0 and processing['last_done'] is None
+
+
+def test_lengths_of_the_files_are_kept(tmp_path, now):
+    """ The lengths of the processed files are kept in the history, so they are known after a restart. """
+
+    status, config = _status(tmp_path)
+    _searchedFile(str(tmp_path/'output'), config, 'file1', n_chunks=12)
+    status.fileFinished('file1', 'ok', 60)
+    status.build(_state())
+
+    restarted, _ = _status(tmp_path, config)
+    assert restarted.file_records[0]['length_min'] == pytest.approx(12*5.12/60, abs=0.01)
+
+
+def _hangingWorker(*args, **kwargs):
+    """ A worker which takes long. """
+
+    time.sleep(60)
+
+
+def test_stopped_workers_are_not_in_the_final_status(tmp_path, monkeypatch):
+    """ The workers which are stopped with the monitor are not processing in its final status. """
+
+    input_dir = tmp_path/'input'
+    output_dir = tmp_path/'output'
+    input_dir.mkdir()
+    output_dir.mkdir()
+    _makeInput(input_dir, 'dump_6AC5999C_02F.vid', False)
+
+    # The worker takes long, and the monitor stops once the status shows it processing
+    monkeypatch.setattr(mon, 'processFileWorker', _hangingWorker)
+    status_path = str(output_dir/mst.STATUS_FILE_NAME)
+    real_sleep = time.sleep
+    started = time.time()
+    def _sleep(seconds):
+        if time.time() - started > 30:
+            raise KeyboardInterrupt
+        try:
+            with open(status_path) as f:
+                if json.load(f)['processing']['in_progress']:
+                    raise KeyboardInterrupt
+        except (OSError, ValueError):
+            pass
+        real_sleep(0.05)
+    monkeypatch.setattr(mon.time, 'sleep', _sleep)
+
+    # The status is written at every poll
+    monkeypatch.setattr(mst.MonitorStatus, 'update', _alwaysUpdate(mst.MonitorStatus.update))
+
+    mon.monitorDirectory(str(input_dir), 'vid', REPO_CONFIG, TEMPLATE_PLATEPAR, str(output_dir), nproc=1,
+                         poll_interval=0.01, report_mode='none')
+
+    with open(status_path) as f:
+        status = json.load(f)
+    assert status['monitor']['state'] == 'stopped'
+    assert status['processing']['in_progress'] == [] and status['monitor']['workers_this_camera'] == 0
+
+
+def _alwaysUpdate(update):
+    """ Write the status at every update. """
+
+    def _update(self, state, force=False):
+        return update(self, state, force=True)
+
+    return _update
