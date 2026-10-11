@@ -16,7 +16,7 @@ import RMS.MonitorNightReport as mnr
 import RMS.MonitorProcessFrameInterface as mon
 import RMS.MonitorStatus as mst
 from RMS.Astrometry.ApplyAstrometry import raDecToXYPP, xyToRaDecPP
-from RMS.Formats import FFfile
+from RMS.Formats import CALSTARS, FFfile
 from RMS.Formats.Platepar import Platepar
 from RMS.Routines.SkyQuality import CONDITION_COLUMNS
 from Tests.test_MonitorNightReport import BEG_TIME, NIGHT, REPO_CONFIG, TEMPLATE_PLATEPAR, _config, _makeResults
@@ -1207,3 +1207,25 @@ def test_camera_without_the_status_shares_the_workers(tmp_path, monkeypatch):
         status = json.load(f)
     assert status['processing']['queue_empty_in_min'] == 10.0
     assert not os.path.isfile(str(cameras[1][2]/mst.STATUS_FILE_NAME))
+
+
+def test_files_searched_by_the_normal_detection(tmp_path, now):
+    """ With the normal detection, the files with enough stars were searched (they have no summary of the matched
+        filter), only the ones with too few stars were not.
+    """
+
+    config = _config()
+    status, _ = _status(tmp_path, config)
+    output_dir = str(tmp_path/'output')
+
+    # A file with enough stars and one with too few (one star per chunk)
+    searched = _makeResults(output_dir, config, 'file1', n_chunks=3)
+    calstars = os.path.join(output_dir, searched, 'CALSTARS_file1.txt')
+    star_list = CALSTARS.readCALSTARS(os.path.dirname(calstars), os.path.basename(calstars))[0]
+    star_list = [[name, [stars[0]]*(config.ff_min_stars + 5)] for name, stars in star_list]
+    CALSTARS.writeCALSTARS(star_list, os.path.dirname(calstars), os.path.basename(calstars), 'XX0001', 48, 64,
+                           chunk_frames=128, fps=25.0)
+    _makeResults(output_dir, config, 'file2', n_chunks=3, start_s=60)
+
+    night = status.build(_state())['night']
+    assert (night['files_processed'], night['files_not_searched']) == (2, 1)

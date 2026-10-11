@@ -60,6 +60,12 @@ OBSERVABLE_CLEAR_FRACTION = 0.8
 CALIBRATION_MIN_SHARE = 0.5
 CALIBRATION_MIN_CHUNKS = 10
 
+# A chunk is on clear sky for the calibration when at least this share of the image is clear. The fit uses the
+#   stars of the whole image, so a little cloud doesn't spoil it, while requiring all of the image to be clear (as
+#   for the clear state of the sky, CLEAR_FRACTION_CLEAR) would leave the calibration unjudged on most partly
+#   clouded nights
+CALIBRATION_CLEAR_FRACTION = 0.8
+
 # The camera has moved when its pointing differs from the reference platepar by more than this (px). The pointing
 #   normally changes by a fraction of a pixel through the night (refraction, temperature)
 CAMERA_MOVED_PX = 2.0
@@ -129,6 +135,17 @@ def _codeVersion():
     except Exception:
         return None
 
+
+
+def _tooFewStars(file_result, config):
+    """ Check if a processed file was not searched as it had too few stars in all its chunks (as for the time
+        which is shaded as not searched, see MonitorNightReport.nightSkyResults). A file of the normal detection
+        has no summary of the matched filter, but it was searched if it had enough stars.
+    """
+
+    chunks = file_result['star_chunks']
+
+    return (not file_result['searched']) and bool(chunks) and (max(n for _, n in chunks) < config.ff_min_stars)
 
 
 def simulateQueues(nproc, cameras, last_idx=None):
@@ -977,8 +994,7 @@ class MonitorStatus(object):
             'start_utc': _timeString(night_start),
             'end_utc': _timeString(night_end),
             'files_processed': len(files),
-            'files_not_searched': sum(1 for _, _, file_result, _ in files
-                                      if not (file_result['searched'] or file_result.get('unreadable'))),
+            'files_not_searched': sum(1 for _, _, file_result, _ in files if _tooFewStars(file_result, self.config)),
             'files_unreadable': sum(1 for _, _, file_result, _ in files if file_result.get('unreadable')),
             'observed_h': _round(summary['observed_h']),
             'clear_percent': _round(100*summary['clear'], 1),
@@ -1113,7 +1129,7 @@ class MonitorStatus(object):
                     input_file = info.get('input_file')
                     clear_times = [r['time'] for r in self.conditions_cache[1]
                                    if (r['input'] in (input_file, os.path.basename(input_file or '')))
-                                   and (r['clear_fraction'] >= OBSERVABLE_CLEAR_FRACTION)]
+                                   and (r['clear_fraction'] >= CALIBRATION_CLEAR_FRACTION)]
                 cache['calibration'] = fileCalibration(os.path.join(self.output_dir, results_dir), self.config,
                                                        clear_times=clear_times)
             if cache['calibration'] is not None:

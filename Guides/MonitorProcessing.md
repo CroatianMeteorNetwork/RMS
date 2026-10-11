@@ -626,7 +626,8 @@ processed again after a restart.
 
 The recording is only reported, never as a fault: it is done by other software, which the monitor doesn't
 communicate with, and which may not record on purpose (e.g. on cloudy nights). The calibration is only judged
-on the chunks on clear sky, as under clouds there are too few stars for any calibration.
+on the chunks on clear sky (at least 80% of the image clear: the fit uses the stars of the whole image, so a little
+cloud doesn't spoil it), as under clouds there are too few stars for any calibration.
 
 
 ## Faint objects: the matched filter
