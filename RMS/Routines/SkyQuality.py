@@ -1494,7 +1494,7 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
         input_ends: [dict] End of the inputs (datetime, UTC) by their names, see nightTimeline. None by default.
         removed_times: [list] Times of the detections removed on clouded sky (datetime, UTC), where they are
             known. Empty by default.
-        detection_mags: [list] Peak magnitude of every detection (None where it is not known). None by default
+        detection_mags: [list] Median magnitude of every detection (None where it is not known). None by default
             (no magnitudes).
 
     Return:
@@ -1652,7 +1652,7 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
     ### ###
 
 
-    # Every detection is a dot at its peak magnitude (brighter up). The detections removed on clouded sky, whose
+    # Every detection is a dot at its median magnitude (brighter up). The detections removed on clouded sky, whose
     #   magnitudes are not known, are crosses of another colour in a strip at the bottom of the panel, as are the
     #   detections without a magnitude (hollow dots), so none of them can be taken for the shading
     det_times = list(detection_times)
@@ -1675,7 +1675,7 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
         ax_det.plot([t for t, k in zip(det_times, known) if k], mags[known], 'o', ms=5.5, color=dark, mec='white',
                     mew=0.6, alpha=0.85, zorder=3)
         det_legend.append(Line2D([], [], marker='o', ms=5.5, color=dark, mec='white', ls='none',
-                                 label='Detection (peak magnitude)'))
+                                 label='Detection (median magnitude)'))
     else:
         y_strip = 0.5
         ax_det.set_ylim(0, 1)

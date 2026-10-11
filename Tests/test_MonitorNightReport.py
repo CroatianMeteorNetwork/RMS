@@ -1654,3 +1654,16 @@ def test_night_sky_conditions_counts_the_removed_detections_within_the_night(tmp
 
     # The time of the chunks of the files is from their stars
     assert plotted['chunk_seconds']['/data/file1.vid'] == pytest.approx(128/25.0)
+
+
+def test_median_magnitude():
+    """ The median magnitude is taken on the intensities: the two middle values of an even number are averaged as
+        intensities, not as magnitudes, and the magnitudes which are not known are left out.
+    """
+
+    assert mnr.medianMagnitude([3.0, 1.0, 2.0]) == pytest.approx(2.0)
+    assert mnr.medianMagnitude([1.0, 2.0, 3.0, 4.0]) \
+        == pytest.approx(-2.5*np.log10((10**(-0.4*2.0) + 10**(-0.4*3.0))/2))
+    assert mnr.medianMagnitude([1.0, 2.0, 3.0, 4.0]) < 2.5
+    assert mnr.medianMagnitude([None, float('nan'), 5.0]) == pytest.approx(5.0)
+    assert mnr.medianMagnitude([None, float('nan')]) is None

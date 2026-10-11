@@ -935,7 +935,7 @@ def test_night_timeline_until_the_end_of_the_input():
 @pytest.mark.parametrize('mags, removed', [((4.5, 7.2, None), 2), ((None, None, None), 1), ((4.5, 7.2, 9.0), 0),
                                            ((), 2)])
 def test_plot_of_the_detections(tmp_path, mags, removed):
-    """ The detections are plotted by their peak magnitudes, also when some or all of them have none, with the
+    """ The detections are plotted by their median magnitudes, also when some or all of them have none, with the
         detections removed by clouds.
     """
 

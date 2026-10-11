@@ -984,6 +984,24 @@ def readFileSkyResults(results_path, config):
     return file_result
 
 
+def medianMagnitude(mags):
+    """ The median of magnitudes, taken on the intensities (magnitudes are logarithmic, so the two middle values
+        of an even number are averaged as intensities).
+
+    Arguments:
+        mags: [list] Magnitudes (None or NaN where not known).
+
+    Return:
+        [float] Median magnitude, None if no magnitude is known.
+    """
+
+    mags = np.array([m for m in mags if (m is not None) and np.isfinite(m)], dtype=np.float64)
+    if not len(mags):
+        return None
+
+    return float(-2.5*np.log10(np.median(10**(-0.4*mags))))
+
+
 def nightSkyResults(file_results, config, night_start, night_end):
     """ Combine the sky results of the files of a night (see readFileSkyResults).
 
@@ -1137,7 +1155,7 @@ def plotNightSkyConditions(night_dir, night_name, output_dir, results, config, f
         log.info("No sky conditions for night {:s}".format(night_name))
         return False
 
-    # Read the time of every detection in the night (the time of its image plus its first frame), and its peak
+    # Read the time of every detection in the night (the time of its image plus its first frame), and its median
     #   magnitude (None if it has none, e.g. not calibrated)
     detection_times, detection_mags = [], []
     entries = []
@@ -1154,9 +1172,8 @@ def plotNightSkyConditions(night_dir, night_name, output_dir, results, config, f
         except (ValueError, TypeError, IndexError, ZeroDivisionError):
             continue
         if night_start <= t <= night_end:
-            mags = [m[9] for m in meteor_meas if (len(m) > 9) and (m[9] is not None) and np.isfinite(m[9])]
             detection_times.append(t)
-            detection_mags.append(min(mags) if mags else None)
+            detection_mags.append(medianMagnitude([m[9] for m in meteor_meas if len(m) > 9]))
 
     # The time of every detection removed by clouds in the night, where it is known
     removed_times = [t for _, file_result in file_results for t in (file_result['removed_times'] or [])
