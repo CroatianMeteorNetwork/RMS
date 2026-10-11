@@ -1653,7 +1653,7 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
 
 
     # Every detection is a dot at its median magnitude (brighter up). The detections removed on clouded sky, whose
-    #   magnitudes are not known, are crosses of another colour in a strip at the bottom of the panel, as are the
+    #   magnitudes were not measured, are crosses of another colour in the middle of the panel, as are the
     #   detections without a magnitude (hollow dots), so none of them can be taken for the shading
     det_times = list(detection_times)
     mags = np.array([np.nan if m is None else m for m in (list(detection_mags) if detection_mags is not None
@@ -1663,37 +1663,34 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
     det_legend = []
     if known.any():
 
-        # The range of the magnitudes, with a strip below them for the markers without a magnitude (if any)
+        # The range of the magnitudes, the markers without a magnitude in its middle
         bright, faint = float(np.min(mags[known])), float(np.max(mags[known]))
         pad = max(0.1*(faint - bright), 0.3)
-        strip = 0.3*(faint - bright + 2*pad) if (removed_times or (~known).any()) else 0.0
-        y_strip = faint + pad + strip/2
-        ax_det.set_ylim(faint + pad + strip, bright - pad)
-        if strip:
-            ax_det.axhline(faint + pad, color='#d1d5db', lw=0.8, zorder=2)
+        y_mid = (bright + faint)/2
+        ax_det.set_ylim(faint + pad, bright - pad)
         ax_det.set_ylabel('mag', fontsize=10)
         ax_det.plot([t for t, k in zip(det_times, known) if k], mags[known], 'o', ms=5.5, color=dark, mec='white',
                     mew=0.6, alpha=0.85, zorder=3)
         det_legend.append(Line2D([], [], marker='o', ms=5.5, color=dark, mec='white', ls='none',
                                  label='Detection (median magnitude)'))
     else:
-        y_strip = 0.5
+        y_mid = 0.5
         ax_det.set_ylim(0, 1)
         ax_det.set_yticks([])
 
     # The detections without a magnitude (e.g. not calibrated)
     if (~known).any():
-        ax_det.plot([t for t, k in zip(det_times, known) if not k], np.full(int((~known).sum()), y_strip), 'o',
+        ax_det.plot([t for t, k in zip(det_times, known) if not k], np.full(int((~known).sum()), y_mid), 'o',
                     ms=5.5, mfc='white', mec=dark, mew=1.0, zorder=3)
         det_legend.append(Line2D([], [], marker='o', ms=5.5, mfc='white', mec=dark, ls='none',
-                                 label='Detection, magnitude not known'))
+                                 label='Detection (magnitude not measured)'))
 
     # The detections removed on clouded sky
     if removed_times:
-        ax_det.plot(removed_times, np.full(len(removed_times), y_strip), 'X', ms=7, color='#CC79A7', mec=dark,
+        ax_det.plot(removed_times, np.full(len(removed_times), y_mid), 'X', ms=7, color='#CC79A7', mec=dark,
                     mew=0.5, zorder=3)
         det_legend.append(Line2D([], [], marker='X', ms=7, color='#CC79A7', mec=dark, mew=0.5, ls='none',
-                                 label='Removed by clouds'))
+                                 label='Removed by clouds (magnitude not measured)'))
     ax_det.grid(True, axis='y', color='#e5e7eb', lw=0.8, zorder=1)
     ax_det.grid(False, axis='x')
 
