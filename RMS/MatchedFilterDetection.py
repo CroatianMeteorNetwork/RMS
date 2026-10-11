@@ -3380,6 +3380,30 @@ def detectMatchedFilter(img_handle, config, mask=None, dark=None, flat_struct=No
 
 
 
+def apportion(total, weights):
+    """ Split a whole number into whole shares proportional to the weights which add up to it exactly (the largest
+        remainders get the units which the rounding down leaves).
+
+    Arguments:
+        total: [int] Number to split.
+        weights: [list] Weights of the shares.
+
+    Return:
+        [list] The shares.
+    """
+
+    weights = np.asarray(weights, dtype=np.float64)
+    if weights.sum() <= 0:
+        return [0]*len(weights)
+
+    exact = total*weights/weights.sum()
+    shares = np.floor(exact).astype(int)
+    for i in np.argsort(-(exact - shares), kind='stable')[:total - shares.sum()]:
+        shares[i] += 1
+
+    return shares.tolist()
+
+
 def removeCloudedRows(detections, sky_map, detector):
     """ Remove the rows of the detections on clouded sky (see SkyQualityMap.isClear), and the detections left with
         fewer than 2 rows, as the cloud filter of MatchedFilterDetector.run does with the rows of every frame.
@@ -3756,8 +3780,7 @@ def detectMatchedFilterSegments(img_handle, config, segment_frames, mask=None, d
     #   The input measures at most mf_max_tracks candidate tracks, all of them while it has fewer, and a busy
     #   early part of it can't leave nothing for a later one
     bounds = [0] + cuts + [img_handle.total_frames]
-    shares = [int(math.ceil(config.mf_max_tracks*(bounds[k + 1] - bounds[k])/img_handle.total_frames))
-              for k in range(len(ranges))]
+    shares = apportion(int(config.mf_max_tracks), [bounds[k + 1] - bounds[k] for k in range(len(ranges))])
     remaining = int(config.mf_max_tracks)
 
     timing = collections.defaultdict(float)

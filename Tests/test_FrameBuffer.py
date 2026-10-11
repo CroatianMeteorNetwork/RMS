@@ -427,7 +427,7 @@ def test_segments_share_the_track_cap_and_carry_persistence(monkeypatch):
     monkeypatch.setattr(mfd, 'SegmentedRun', lambda *args, **kwargs: None)
 
     mfd.detectMatchedFilterSegments(handle, config, 768)
-    assert [c[0] for c in calls] == [93, 168, 75, 57]
+    assert [c[0] for c in calls] == [94, 169, 75, 56]
     assert [c[1] for c in calls] == [512, 1024, 1536, None]
 
 
@@ -484,3 +484,14 @@ def test_clouded_rows_removed_with_the_sky_of_the_whole_input():
     assert len(detections) == 1 and detections[0][2][-1, 0] == 149
     assert rows == [float(f) for f in range(150, 200)] + [float(f) for f in range(300, 400)]
     assert removed == [300]
+
+
+def test_track_shares_sum_to_the_cap():
+    """ The shares of the track cap add up to the cap exactly, so no segment is left without one by the rounding
+        (e.g. a cap of 3 for 4 equal segments). """
+
+    from RMS.MatchedFilterDetection import apportion
+
+    assert sum(apportion(3, [1, 1, 1, 1])) == 3
+    assert apportion(300, [640, 512, 512, 384]) == [94, 75, 75, 56]
+    assert apportion(10, [0, 5]) == [0, 10]
